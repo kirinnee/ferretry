@@ -1,6 +1,6 @@
 import type { BlockDef, HostBlock } from 'durian-hypermedia';
 import type { ComponentType } from 'react';
-import { DURIAN_FENCE, durianFences, linesOf } from './fence-boundaries.ts';
+import { DURIAN_FENCE, durianCloser, durianFences, linesOf } from './fence-boundaries.ts';
 import { durianAsIs } from './fy-render-host.tsx';
 import { authorTextBeside, LlmOnlyText } from './llm-text.tsx';
 import { HypermediaCode } from './slots.tsx';
@@ -41,6 +41,82 @@ const HELD: Readonly<Record<string, string>> = { chart: 'fy-chart-held', codewal
  */
 const AWAITING: Readonly<Record<string, string>> = { animation: 'fy-animation-awaiting' };
 
+/**
+ * INTERIM (r12 H11a): whether an animation is drawn at all. It is not: an `animation` fence is shown as the code it is, the
+ * same as a chart, until the parser runs off the main thread (r12 H11). The engine's door (`animation-engine.ts`) stays as
+ * it is, so the change that turns drawing back on flips this one value; until then nothing fetches the engine's chunk.
+ */
+export const ANIMATION_DRAWS = false;
+
+/**
+ * A `:::tabs` OR `:::accordion` CONTAINER IS HELD AS CODE TOO (r12 H11a), and is not a fence word: Durian reads it from its
+ * own line scan (`:::` then the name, spaces allowed between, at column 0 to the next `:::`, a fence inside it skipped), so
+ * {@link holdFences} finds it the same way and turns it into ONE fence of the host block for its name, which stays a part
+ * to Durian (an author's `:::llm` after it still attaches). Its source, the opening and `:::` lines included, is what the
+ * reader sees.
+ */
+const CONTAINERS_HELD: Readonly<Record<string, string>> = { tabs: 'fy-tabs-held', accordion: 'fy-accordion-held' };
+
+const CONTAINER_OPEN = /^:::\s*([a-z][a-z0-9-]*)(.*)$/u;
+const CONTAINER_CLOSE = /^:::\s*$/u;
+
+/** The line that closes the container opened at `open`, read as Durian does (a fence inside is skipped); -1 when Durian refuses it. */
+function containerClose(lines: readonly string[], open: number): number {
+  for (let at = open + 1; at < lines.length; at++) {
+    const line = lines[at] ?? '';
+    const fence = DURIAN_FENCE.exec(line)?.[2];
+    if (fence !== undefined) {
+      const close = durianCloser(lines, at, fence);
+      if (close > 0) {
+        at = close;
+        continue;
+      }
+    }
+    if (CONTAINER_CLOSE.test(line)) return at;
+    if (CONTAINER_OPEN.test(line)) return -1;
+  }
+  return -1;
+}
+
+/** The held containers (`:::tabs`, `:::accordion`) of a message as Durian's own line scan finds them: top level only (containers do not nest). */
+function heldContainers(
+  lines: readonly string[],
+): readonly { readonly open: number; readonly close: number; readonly name: string }[] {
+  const found: { open: number; close: number; name: string }[] = [];
+  for (let at = 0; at < lines.length; at++) {
+    const line = lines[at] ?? '';
+    const fence = DURIAN_FENCE.exec(line)?.[2];
+    if (fence !== undefined) {
+      const close = durianCloser(lines, at, fence);
+      if (close < 0) break;
+      at = close;
+      continue;
+    }
+    const open = CONTAINER_OPEN.exec(line);
+    if (open === null) continue;
+    const close = containerClose(lines, at);
+    if (close < 0) break;
+    const name = open[1] ?? '';
+    if (Object.hasOwn(CONTAINERS_HELD, name)) found.push({ open: at, close, name });
+    at = close;
+  }
+  return found;
+}
+
+/** Every held container of `lines` as one fence of its host block in {@link CONTAINERS_HELD}, longer than any run of backticks inside it. Line numbers do not move. */
+function holdContainers(lines: string[]): boolean {
+  const containers = heldContainers(lines);
+  for (const { open, close, name } of containers) {
+    let longest = 2;
+    for (let at = open + 1; at < close; at++)
+      for (const run of (lines[at] ?? '').matchAll(/`+/gu)) longest = Math.max(longest, run[0].length);
+    const ticks = '`'.repeat(longest + 1);
+    lines[open] = `${ticks}${CONTAINERS_HELD[name]}${CONTAINER_OPEN.exec(lines[open] ?? '')?.[2] ?? ''}`;
+    lines[close] = ticks;
+  }
+  return containers.length > 0;
+}
+
 /** The host block a fence word is renamed to, when it is one held. */
 const heldNameOf = (word: string | undefined, awaiting: boolean): string | undefined => {
   if (word === undefined) return undefined;
@@ -62,10 +138,18 @@ export function holdsAnimation(text: string): boolean {
  * arrived, so an animation fence is held too.
  */
 export function holdFences(text: string, awaitingAnimation = false): string {
-  if (!text.includes('chart') && !text.includes('codewalk') && !(awaitingAnimation && text.includes('animation')))
+  // `:::` alone is the container test: Durian allows spaces between it and the name, so the name is not part of the test.
+  if (
+    !text.includes('chart') &&
+    !text.includes('codewalk') &&
+    !text.includes(':::') &&
+    !(awaitingAnimation && text.includes('animation'))
+  )
     return text;
   const lines = [...linesOf(text)];
-  let held = false;
+  // Containers first: what one holds is then inside one longer fence, which the scan below reads past, so a chart inside
+  // it is shown exactly as written and is no second block.
+  let held = holdContainers(lines);
   for (const { open } of durianFences(lines)) {
     const parts = DURIAN_FENCE.exec(lines[open] ?? '');
     const name = heldNameOf(parts?.[3], awaitingAnimation);
@@ -89,10 +173,27 @@ interface HeldFenceData {
  */
 export function heldFenceParseBlocks(heldText: string): readonly BlockDef<HeldFenceData>[] {
   const lines = linesOf(heldText);
-  return [...Object.values(HELD), ...Object.values(AWAITING)].map(name => ({
-    name,
-    parse: input => ({ body: input.body, generated: durianAsIs(lines[input.line - 1], input.body, input.attrs) }),
-  }));
+  const asHeld = [...Object.values(HELD), ...Object.values(AWAITING)].map(
+    (name): BlockDef<HeldFenceData> => ({
+      name,
+      parse: input => ({ body: input.body, generated: durianAsIs(lines[input.line - 1], input.body, input.attrs) }),
+    }),
+  );
+  // A held container shows its own lines: what followed its name is read back from the fence it became.
+  const containers = Object.entries(CONTAINERS_HELD).map(
+    ([word, name]): BlockDef<HeldFenceData> => ({
+      name,
+      parse: input => {
+        const opener = lines[input.line - 1];
+        const rest = DURIAN_FENCE.exec(opener ?? '')?.[4] ?? '';
+        return {
+          body: `:::${word}${rest}\n${input.body}\n:::`,
+          generated: durianAsIs(opener, input.body, input.attrs),
+        };
+      },
+    }),
+  );
+  return [...asHeld, ...containers];
 }
 
 /** The fence as the code it is, then the author's `:::llm` text as the usual disclosure. */
@@ -112,7 +213,11 @@ const heldPart =
 export const HELD_COMPONENT_BLOCKS: readonly BlockDef<
   HeldFenceData,
   ComponentType<{ block: HostBlock; data: HeldFenceData }>
->[] = [...Object.entries(HELD), ...Object.entries(AWAITING)].map(([lang, name]) => ({
-  name,
-  Component: heldPart(lang),
+>[] = [
+  ...Object.entries(HELD),
+  ...Object.entries(AWAITING),
+  ...Object.values(CONTAINERS_HELD).map(name => ['md', name] as const),
+].map(([lang, name]) => ({
+  name: name as string,
+  Component: heldPart(lang as string),
 }));

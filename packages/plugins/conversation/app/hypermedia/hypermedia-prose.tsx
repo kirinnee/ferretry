@@ -2,12 +2,13 @@ import type { ProseProps } from '@ferretry/app';
 import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
 import { memo, useEffect, useId, useMemo, useSyncExternalStore } from 'react';
 import { animationEngineReady, loadAnimationEngine, onAnimationEngine } from './animation-engine.ts';
-import { holdsAnimation } from './held-fences.tsx';
+import { ANIMATION_DRAWS, holdsAnimation } from './held-fences.tsx';
 import { DrawableFyRenderBodies } from './fy-render-host.tsx';
-import { exceedsMessageCap } from './limits.ts';
+import { exceedsMessageCap, exceedsPreParseLimits } from './limits.ts';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
 import { readLook, serverLook, subscribeToLook, variantOf } from './look.ts';
 import { readMessage } from './parse-message.ts';
+import { PlainFallback } from './plain-fallback.tsx';
 import { HYPERMEDIA_COMPONENT_BLOCKS, HYPERMEDIA_PART_SLOTS, HYPERMEDIA_PARTS } from './parts.tsx';
 import { ReferenceChip } from './reference-chip.tsx';
 import { ReferenceProofProvider } from './reference-proof.tsx';
@@ -80,7 +81,7 @@ export const HypermediaProse = memo(function HypermediaProse({
   // The 2D animation engine is a lazy chunk: asked for only by a message that holds an animation, and the message is read again
   // (animation drawn, not shown as code) when it arrives.
   const engine = useSyncExternalStore(onAnimationEngine, animationEngineReady, () => false);
-  const wantsEngine = !engine && holdsAnimation(text);
+  const wantsEngine = ANIMATION_DRAWS && !engine && holdsAnimation(text);
   useEffect(() => {
     if (wantsEngine) loadAnimationEngine().catch(() => undefined);
   }, [wantsEngine]);
@@ -92,9 +93,7 @@ export const HypermediaProse = memo(function HypermediaProse({
     <ReferenceProofProvider text={text}>
       <div className={`fy-hm min-w-0 max-w-full ${className ?? ''}`} data-fy-hypermedia="" data-hm-header={header}>
         {read === null ? (
-          <pre className="fy-hm-plain" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
-            {text}
-          </pre>
+          <PlainFallback noted={!exceedsMessageCap(text) && exceedsPreParseLimits(text)} text={text} />
         ) : (
           <DrawableFyRenderBodies value={read.drawable}>
             <DocumentView

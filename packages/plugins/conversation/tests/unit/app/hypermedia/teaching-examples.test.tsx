@@ -52,7 +52,6 @@ const DRAWN_FENCES: Readonly<Record<string, string>> = {
   terminal: 'terminal',
   filetree: 'filetree',
   editor: 'editor',
-  animation: 'animation',
   tierlist: 'tierlist',
   alignment: 'alignment',
   mermaid: 'mermaid',
@@ -61,10 +60,19 @@ const DRAWN_FENCES: Readonly<Record<string, string>> = {
 /** The words of a fence Durian reads as a part but the app holds as code: never taught. */
 const HELD_FENCES = ['chart', 'codewalk'] as const;
 
+/** The parts the guide teaches but the app SHOWS AS CODE for now (r12 H11a): an animation fence and the two containers. */
+const TAUGHT_AS_HELD = ['animation', 'tabs', 'accordion'] as const;
+
 const FENCES = fencesOf(RENDER_GUIDE_SECTION);
 const firstWord = (info: string): string => info.split(/\s+/u)[0] ?? '';
 /** Examples of a Durian part are the fences named for it; an `md` fence is a whole message (the containers). */
-const EXAMPLES = FENCES.filter(each => firstWord(each.info) in DRAWN_FENCES || firstWord(each.info) === 'md');
+const EXAMPLES = FENCES.filter(
+  each => firstWord(each.info) in DRAWN_FENCES || firstWord(each.info) === 'md' || firstWord(each.info) === 'animation',
+);
+/** An example the app shows as code: an animation fence, or a message holding a `:::tabs` or `:::accordion` container. */
+const isHeld = (example: Example): boolean =>
+  firstWord(example.info) === 'animation' ||
+  (firstWord(example.info) === 'md' && (example.body.includes(':::tabs') || example.body.includes(':::accordion')));
 /** The message an example stands for. */
 const messageOf = (example: Example): string => (firstWord(example.info) === 'md' ? example.body : example.text);
 
@@ -88,7 +96,8 @@ const draw = async (text: string) => {
 describe('the guide teaches the parts the app draws', () => {
   it('has an example for every part and container it teaches, the 3D animation and the steps among them', () => {
     const words = new Set(EXAMPLES.map(each => firstWord(each.info)));
-    for (const part of Object.keys(DRAWN_FENCES)) expect(words).toContain(part);
+    for (const part of [...Object.keys(DRAWN_FENCES), ...TAUGHT_AS_HELD.filter(word => word === 'animation')])
+      expect(words).toContain(part);
     expect(words).toContain('md');
     const bodies = EXAMPLES.map(each => each.text).join('\n');
     expect(bodies).toContain(':::tabs');
@@ -105,6 +114,15 @@ describe('the guide teaches the parts the app draws', () => {
     expect(RENDER_GUIDE_SECTION).not.toContain('### codewalk');
     // The chart that draws is the fy-render chart, named as one.
     expect(RENDER_GUIDE_SECTION).toContain('An `fy-render` block of `type: chart`');
+  });
+
+  it('says, for the parts it teaches that the app shows as code, that it does (r12 H11a)', () => {
+    expect(RENDER_GUIDE_SECTION).toContain(
+      'an `animation` fence and a `:::tabs` or `:::accordion` container are shown as code too',
+    );
+    expect(RENDER_GUIDE_SECTION).toContain('For now the app shows an `animation` fence as code');
+    expect(RENDER_GUIDE_SECTION).toContain('For now the app shows a `:::tabs` or `:::accordion` container as code');
+    expect(RENDER_GUIDE_SECTION).not.toContain('prefer `:::accordion`');
   });
 });
 
@@ -130,7 +148,8 @@ describe('every example of the guide passes `fy render check` and draws', () => 
       const types = doc.blocks.map(block => block.type);
       expect(types).not.toContain('error');
       const word = firstWord(example.info);
-      if (word === 'md') expect(types.some(type => type === 'tabs' || type === 'accordion')).toBe(true);
+      // A held example is a host block that keeps its source: no container part, no animation part.
+      if (isHeld(example)) expect(types).toEqual(['host']);
       else expect(types).toContain(DRAWN_FENCES[word] as never);
     });
 
@@ -140,10 +159,12 @@ describe('every example of the guide passes `fy render check` and draws', () => 
       expect(container.querySelector('.dh-doc')).not.toBeNull();
       expect(container.querySelector('.dh-error, [data-dh-missing]')).toBeNull();
       const word = firstWord(example.info);
-      if (word === 'animation') expect(container.querySelector('[data-fy-animation] .scn')).not.toBeNull();
-      else if (word === 'mermaid')
+      if (isHeld(example)) {
+        // Shown as the code it is: the source is on the page, and no tab strip or stage is drawn.
+        expect(container.querySelector('.dh-doc .code-block pre')?.textContent).not.toBe('');
+        expect(container.querySelector('.dh-doc .tabs, .dh-doc .accordion, [data-fy-animation], .scn')).toBeNull();
+      } else if (word === 'mermaid')
         expect(container.querySelector('.dh-doc [data-fy-render-type="mermaid"]')).not.toBeNull();
-      else if (word === 'md') expect(container.querySelector('.dh-doc .tabs, .dh-doc .accordion')).not.toBeNull();
       else expect(container.querySelector(`.dh-doc [data-dh-part="${DRAWN_FENCES[word]}"]`)).not.toBeNull();
       await unmount();
     });

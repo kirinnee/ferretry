@@ -56,14 +56,20 @@ describe('the animation engine', () => {
     expect(read.doc.problems).toEqual([]);
   });
 
-  it('arrives when a message that holds an animation is on the page, and that message is then drawn as the animation', async () => {
+  it('is NOT fetched for a message that holds an animation while animations are held as code (r12 H11a)', async () => {
     const { container, unmount } = await draw(ANIMATION);
-    // `draw` lets the load settle: the chunk was asked for by the message itself, with nobody calling for it.
-    await loadAnimationEngine();
     await interact(() => Promise.resolve());
-    expect(animationEngineReady()).toBe(true);
-    expect(container.querySelector('[data-fy-animation] .scn')).not.toBeNull();
-    expect(types(ANIMATION)).toEqual(['animation']);
+    expect(animationEngineReady()).toBe(false);
+    expect(container.querySelector('[data-fy-animation] .scn')).toBeNull();
     await unmount();
+  });
+
+  it('once loaded, still does not draw an animation: the hold is the one value `ANIMATION_DRAWS`', async () => {
+    await loadAnimationEngine();
+    expect(animationEngineReady()).toBe(true);
+    expect(types(ANIMATION)).toEqual(['host']);
+    // The engine's own compile path is exercised directly: a read that is told the engine is here, with drawing on, is the
+    // path r12 H11 turns back on; here the value is off, so it is a host block whatever the engine says.
+    expect(mustRead(ANIMATION, 'x-', false, true).doc.blocks.map(block => block.type)).toEqual(['host']);
   });
 });
