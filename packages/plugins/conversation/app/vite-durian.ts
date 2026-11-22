@@ -80,6 +80,34 @@ function installedPackage(): Installed {
   return installed;
 }
 
+/** Our stand-ins for two of Durian's own modules (`hypermedia/durian-shims/`, header there). */
+const CHART_HELD = fileURLToPath(new URL('./hypermedia/durian-shims/chart-held.ts', import.meta.url));
+const SCENE_LATE = fileURLToPath(new URL('./hypermedia/durian-shims/scene-late.ts', import.meta.url));
+
+/**
+ * WHICH DURIAN IMPORTS ARE REDIRECTED (r12 H8 fix): the PARSER's, and only the parser's (`core/dh-lib.ts`, `document.ts`).
+ *  - its chart reader and the expression engine under it (`./chart`, `./chart-llm`): H4 holds every chart fence as code, so the
+ *    evaluator is never reached and is not shipped either (`chart-held.ts`);
+ *  - its scene compiler (`./scene`, `./core/scene`): the real one stays in the 2D animation's lazy chunk, and the parser reaches
+ *    it through `scene-late.ts`, which that chunk fills in when it loads. The renderer's own import of the compiler
+ *    (`ui/anim.tsx`) is NOT redirected, so the compiler lives in the animation chunk, not in a first load.
+ * Matched on the importer's path under Durian's `src/` and on the exact relative specifier, so a Durian release that moves them
+ * fails the build test (`tests/perf/hypermedia-size.test.ts`) rather than silently shipping them again.
+ */
+export function redirectedImport(source: string, importer: string | undefined, root: string): string | null {
+  if (importer === undefined) return null;
+  const src = join(root, 'src');
+  if (importer === join(src, 'core/dh-lib.ts')) {
+    if (source === './chart' || source === './chart-llm') return CHART_HELD;
+    if (source === './scene') return SCENE_LATE;
+  }
+  if (importer === join(src, 'document.ts') && source === './core/scene') return SCENE_LATE;
+  return null;
+}
+
+/** The file of Durian's scene compiler, which registers itself with {@link SCENE_LATE} when it evaluates. */
+const sceneCompilerId = (root: string): string => join(root, 'src/core/scene.ts');
+
 /** `true` for a source file inside the Durian package (an importer Vite resolved to its real path). */
 function insideDurian(importer: string | undefined, root: string): boolean {
   return importer !== undefined && importer.startsWith(root + sep);
@@ -129,6 +157,8 @@ const plugin = {
   async resolveId(this: ResolveContext, source: string, importer?: string): Promise<string | { id: string } | null> {
     if (source === STYLES) return STYLES_ID;
     const { root, exports } = installedPackage();
+    const redirected = redirectedImport(source, importer, root);
+    if (redirected !== null) return redirected;
     if (source === PACKAGE || source.startsWith(`${PACKAGE}/`)) {
       const entry = exports[source === PACKAGE ? '.' : `.${source.slice(PACKAGE.length)}`];
       if (typeof entry !== 'object' || entry.bun === undefined) return null;
@@ -140,6 +170,12 @@ const plugin = {
   },
   load(id: string): string | null {
     return id === STYLES_ID ? buildStyles(installedPackage().root) : null;
+  },
+  // The real scene compiler tells the parser's door it has arrived (`scene-late.ts`): appended to the compiler's own module,
+  // so it runs exactly when the animation's chunk evaluates it, wherever the bundler puts it.
+  transform(code: string, id: string): string | null {
+    if (id !== sceneCompilerId(installedPackage().root)) return null;
+    return `${code}\nimport { bindScene as __fyBindScene } from ${JSON.stringify(SCENE_LATE)};\n__fyBindScene({ compileScene, sceneLlm, KINDS });\n`;
   },
 };
 

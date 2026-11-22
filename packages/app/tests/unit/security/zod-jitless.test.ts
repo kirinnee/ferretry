@@ -38,4 +38,11 @@ describe('zod jitless', () => {
     const firstImport = main.split('\n').find(line => line.startsWith('import '));
     expect(firstImport?.startsWith("import './security/zod-jitless.ts';")).toBe(true);
   });
+
+  it('is a chunk of its own in the build, so the entry imports it before any chunk that builds a schema', () => {
+    // A first import is not enough in a bundle: the module would sit in the entry's own chunk, after every chunk it imports
+    // (r12 H8 fix). The browser half is `tests/integration/zod-first-entry.visual.test.ts`, on the real build.
+    const config = readFileSync(join(import.meta.dir, '../../../vite.config.ts'), 'utf8');
+    expect(config).toContain("id.endsWith('/src/security/zod-jitless.ts') ? 'zod-jitless' : undefined");
+  });
 });

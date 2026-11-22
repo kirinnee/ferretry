@@ -119,6 +119,12 @@ export default defineConfig({
         landing: fileURLToPath(new URL('./index.html', import.meta.url)),
         app: fileURLToPath(new URL('./app/index.html', import.meta.url)),
       },
+      output: {
+        // zod's JIT setting is a chunk of its own, so the entry imports it BEFORE every chunk that builds a schema
+        // (`src/security/zod-jitless.ts`, r12 H8): left in the entry's own chunk it ran after them, and the policy
+        // reported zod's `new Function('')` probe. `tests/integration/zod-first-entry.visual.test.ts` holds it.
+        manualChunks: id => (id.endsWith('/src/security/zod-jitless.ts') ? 'zod-jitless' : undefined),
+      },
     },
   },
   server: {

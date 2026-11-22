@@ -39,7 +39,9 @@
     "react-dom": "^19.0.0",
     "yaml": "2.9.0"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "./app/hypermedia/dh-styles.ts"
+  ],
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.11.1",
     "@types/leaflet": "1.9.22",

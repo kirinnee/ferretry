@@ -1,6 +1,8 @@
 import type { ProseProps } from '@ferretry/app';
 import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
-import { memo, useId, useMemo, useSyncExternalStore } from 'react';
+import { memo, useEffect, useId, useMemo, useSyncExternalStore } from 'react';
+import { animationEngineReady, loadAnimationEngine, onAnimationEngine } from './animation-engine.ts';
+import { holdsAnimation } from './held-fences.tsx';
 import { DrawableFyRenderBodies } from './fy-render-host.tsx';
 import { exceedsMessageCap } from './limits.ts';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
@@ -81,9 +83,16 @@ export const HypermediaProse = memo(function HypermediaProse({
   const mode = useSyncExternalStore(subscribeToMode, readMode, SERVER_MODE);
   // `useId` is unique per mounted message and stable across its re-renders; keep only what an id may hold.
   const idPrefix = `dh-${useId().replace(/[^\w-]/gu, '')}-`;
+  // The 2D animation engine is a lazy chunk: asked for only by a message that holds an animation, and the message is read again
+  // (animation drawn, not shown as code) when it arrives.
+  const engine = useSyncExternalStore(onAnimationEngine, animationEngineReady, () => false);
+  const wantsEngine = !engine && holdsAnimation(text);
+  useEffect(() => {
+    if (wantsEngine) loadAnimationEngine().catch(() => undefined);
+  }, [wantsEngine]);
   const read = useMemo(
-    () => (exceedsMessageCap(text) ? null : readMessage(text, idPrefix, arriving)),
-    [text, idPrefix, arriving],
+    () => (exceedsMessageCap(text) ? null : readMessage(text, idPrefix, arriving, engine)),
+    [text, idPrefix, arriving, engine],
   );
   return (
     <ReferenceProofProvider text={text}>

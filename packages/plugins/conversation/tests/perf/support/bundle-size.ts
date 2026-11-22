@@ -19,6 +19,8 @@ interface Chunk {
   readonly isEntry: boolean;
   readonly imports: readonly string[];
   readonly viteMetadata?: { readonly importedCss: ReadonlySet<string> };
+  /** Every source module the chunk holds, by its path (rendered or not: Rollup's `modules` of the chunk). */
+  readonly modules: Readonly<Record<string, unknown>>;
 }
 interface Asset {
   readonly type: 'asset';
@@ -41,8 +43,14 @@ export interface BundleSize {
   /** Every lazy chunk together. */
   readonly lazyGz: number;
   /** Each lazy chunk by its size, biggest first (the line a failing run names). */
-  readonly lazy: readonly { readonly name: string; readonly gz: number }[];
+  readonly lazy: readonly { readonly name: string; readonly gz: number; readonly modules: readonly string[] }[];
+  /** The source modules of the first-load graph (JS chunks only), as paths. */
+  readonly firstModules: readonly string[];
+  /** The stylesheets of the first-load graph: file name and text. */
+  readonly firstStyles: readonly { readonly name: string; readonly text: string }[];
 }
+
+const sourceModules = (chunk: Chunk): string[] => Object.keys(chunk.modules);
 
 const gz = (content: string | Uint8Array): number => gzipSync(content, { level: 9 }).length;
 
@@ -84,19 +92,27 @@ export const measureBundle = async (options: {
   visit(entry.fileName);
   const styles = new Set<string>();
   let firstLoadGz = 0;
-  const lazy: { name: string; gz: number }[] = [];
+  const lazy: { name: string; gz: number; modules: readonly string[] }[] = [];
+  const firstModules: string[] = [];
   for (const chunk of chunks) {
     if (!first.has(chunk.fileName)) {
-      lazy.push({ name: chunk.fileName, gz: gz(chunk.code) });
+      lazy.push({ name: chunk.fileName, gz: gz(chunk.code), modules: sourceModules(chunk) });
       continue;
     }
     firstLoadGz += gz(chunk.code);
+    firstModules.push(...sourceModules(chunk));
     for (const css of chunk.viteMetadata?.importedCss ?? []) styles.add(css);
   }
+  const firstStyles: { name: string; text: string }[] = [];
   for (const name of styles) {
     const asset = assets.get(name);
-    if (asset !== undefined) firstLoadGz += gz(asset.source);
+    if (asset === undefined) continue;
+    firstLoadGz += gz(asset.source);
+    firstStyles.push({
+      name,
+      text: typeof asset.source === 'string' ? asset.source : new TextDecoder().decode(asset.source),
+    });
   }
   lazy.sort((a, b) => b.gz - a.gz);
-  return { firstLoadGz, lazyGz: lazy.reduce((sum, c) => sum + c.gz, 0), lazy };
+  return { firstLoadGz, lazyGz: lazy.reduce((sum, c) => sum + c.gz, 0), lazy, firstModules, firstStyles };
 };

@@ -34,22 +34,41 @@ import { HypermediaCode } from './slots.tsx';
 /** The fence words held, and the host block each is renamed to. */
 const HELD: Readonly<Record<string, string>> = { chart: 'fy-chart-held', codewalk: 'fy-codewalk-held' };
 
+/**
+ * A part held ONLY UNTIL ITS ENGINE HAS ARRIVED (r12 H8 fix): the 2D animation's scene compiler is a lazy chunk
+ * (`animation-engine.ts`), and the parser cannot compile a scene it does not have. Until then the fence is shown as the code
+ * it is; once the engine is here a message is read again and the animation draws.
+ */
+const AWAITING: Readonly<Record<string, string>> = { animation: 'fy-animation-awaiting' };
+
 /** The host block a fence word is renamed to, when it is one held. */
-const heldNameOf = (word: string | undefined): string | undefined =>
-  word !== undefined && Object.hasOwn(HELD, word) ? HELD[word] : undefined;
+const heldNameOf = (word: string | undefined, awaiting: boolean): string | undefined => {
+  if (word === undefined) return undefined;
+  if (Object.hasOwn(HELD, word)) return HELD[word];
+  return awaiting && Object.hasOwn(AWAITING, word) ? AWAITING[word] : undefined;
+};
+
+/** Whether `text` has a fence Durian reads as an animation (the same line scan as {@link holdFences}). */
+export function holdsAnimation(text: string): boolean {
+  if (!text.includes('animation')) return false;
+  const lines = linesOf(text);
+  return durianFences(lines).some(({ open }) => DURIAN_FENCE.exec(lines[open] ?? '')?.[3] === 'animation');
+}
 
 /**
  * `text` with every fence Durian reads as a held part renamed to its host block; `text` itself when it holds none. It reads
  * the fences the way Durian does (its own pattern and its own line scan), so it holds exactly the ones Durian would
- * evaluate, whatever CommonMark makes of them. Line numbers do not move.
+ * evaluate, whatever CommonMark makes of them. Line numbers do not move. `awaitingAnimation`: the animation engine has not
+ * arrived, so an animation fence is held too.
  */
-export function holdFences(text: string): string {
-  if (!text.includes('chart') && !text.includes('codewalk')) return text;
+export function holdFences(text: string, awaitingAnimation = false): string {
+  if (!text.includes('chart') && !text.includes('codewalk') && !(awaitingAnimation && text.includes('animation')))
+    return text;
   const lines = [...linesOf(text)];
   let held = false;
   for (const { open } of durianFences(lines)) {
     const parts = DURIAN_FENCE.exec(lines[open] ?? '');
-    const name = heldNameOf(parts?.[3]);
+    const name = heldNameOf(parts?.[3], awaitingAnimation);
     if (parts === null || name === undefined) continue;
     const before = parts[0].length - (parts[3]?.length ?? 0) - (parts[4]?.length ?? 0);
     lines[open] = `${parts[0].slice(0, before)}${name}${parts[4] ?? ''}`;
@@ -70,7 +89,7 @@ interface HeldFenceData {
  */
 export function heldFenceParseBlocks(heldText: string): readonly BlockDef<HeldFenceData>[] {
   const lines = linesOf(heldText);
-  return Object.values(HELD).map(name => ({
+  return [...Object.values(HELD), ...Object.values(AWAITING)].map(name => ({
     name,
     parse: input => ({ body: input.body, generated: durianAsIs(lines[input.line - 1], input.body, input.attrs) }),
   }));
@@ -93,4 +112,7 @@ const heldPart =
 export const HELD_COMPONENT_BLOCKS: readonly BlockDef<
   HeldFenceData,
   ComponentType<{ block: HostBlock; data: HeldFenceData }>
->[] = Object.entries(HELD).map(([lang, name]) => ({ name, Component: heldPart(lang) }));
+>[] = [...Object.entries(HELD), ...Object.entries(AWAITING)].map(([lang, name]) => ({
+  name,
+  Component: heldPart(lang),
+}));

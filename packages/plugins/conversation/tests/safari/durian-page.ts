@@ -17,11 +17,11 @@
  * Usage: `bun durian-page.ts [--self-check]`. Exit 0 = pass, 1 = the page is wrong, 2 = this gate could not run.
  */
 import { createRequire } from 'node:module';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fyRenderIntegrationFixture } from '../integration/app/support/fy-render-integration-fixture.ts';
+import { buildViteScene } from '../support/vite-scene.ts';
 import { type PageReport, REQUIRED_PARTS, verdict } from './verdict.ts';
 import { startSafariDriver, type WebDriver } from './webdriver.ts';
 
@@ -57,7 +57,7 @@ const TYPES: Readonly<Record<string, string>> = {
   '.woff2': 'font/woff2',
 };
 
-/** Builds the scene and serves it under the app's real policy. */
+/** Builds the scene the way the app is built (the shell's Vite) and serves it under the app's real policy. */
 const serve = async (): Promise<{ origin: string; stop: () => Promise<void> }> => {
   const headers = await readFile(resolve(here, '../../../../app/public/_headers'), 'utf8');
   const policy =
@@ -68,46 +68,27 @@ const serve = async (): Promise<{ origin: string; stop: () => Promise<void> }> =
       .slice('Content-Security-Policy:'.length)
       .trim() ?? '';
   if (!policy.includes("script-src 'self'")) throw new Error('the real policy was not found in _headers');
-  const directory = await mkdtemp(join(tmpdir(), 'ferretry-safari-durian-'));
-  const build = Bun.spawn(
-    [
-      process.execPath,
-      resolve(here, '../integration/app/fixtures/hypermedia-split-build.ts'),
-      '--out',
-      directory,
-      '--entry',
-      resolve(here, '../integration/app/fixtures/hypermedia-parts-scene.tsx'),
-      '--first',
-      resolve(here, '../../../../app/src/security/zod-jitless.ts'),
-    ],
-    { stderr: 'pipe', stdout: 'pipe' },
-  );
-  const [stderr, code] = await Promise.all([new Response(build.stderr).text(), build.exited]);
-  if (code !== 0) throw new Error(`the scene did not build (${code}):\n${stderr}`);
+  // The scene, its chunks and Durian's stylesheet are what the shell's Vite makes of the same imports the app makes: the CSS is
+  // the one a page is given, never a copy injected beside the bundle. The app's own stylesheet is the shared fixture's.
+  const scene = await buildViteScene();
   const fixture = await fyRenderIntegrationFixture();
-  const { buildCss } = (await import(join(durianRoot, 'scripts/build-css.ts'))) as { buildCss: () => string };
-  const css = `${fixture.appCss}\n${buildCss()}\n${SCENE_CSS}`;
+  const css = `${fixture.appCss}\n${SCENE_CSS}`;
   const collect = await readFile(join(here, 'collect.js'), 'utf8');
   const secured = (body: string | Blob, type: string): Response =>
     new Response(body, { headers: { 'content-security-policy': policy, 'content-type': type } });
+  const sheets = scene.styles.map(name => `<link rel="stylesheet" href="/${name}">`).join('');
+  const page = `<!doctype html><html lang="en" data-theme="studio-light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/app.css">${sheets}<script src="/collect.js"></script></head><body class="bg-bg text-fg"><div id="root"></div>${scene.scripts.map(name => `<script type="module" src="/${name}"></script>`).join('')}</body></html>`;
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
-    fetch: async request => {
+    fetch: request => {
       const path = new URL(request.url).pathname;
-      if (path === '/')
-        return secured(
-          '<!doctype html><html lang="en" data-theme="studio-light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/app.css"><script src="/collect.js"></script></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/first.js"></script><script type="module" src="/scene.js"></script></body></html>',
-          'text/html; charset=utf-8',
-        );
+      if (path === '/') return secured(page, 'text/html; charset=utf-8');
       if (path === '/app.css') return secured(css, TYPES['.css'] ?? '');
       if (path === '/collect.js') return secured(collect, TYPES['.js'] ?? '');
-      const name = path.slice(1);
-      if (/^[\w.-]+$/u.test(name)) {
-        const file = Bun.file(join(directory, name));
-        if (await file.exists())
-          return secured(file, TYPES[name.slice(name.lastIndexOf('.'))] ?? 'application/octet-stream');
-      }
+      const built = scene.files.get(path.slice(1));
+      if (built !== undefined)
+        return secured(built, TYPES[path.slice(path.lastIndexOf('.'))] ?? 'application/octet-stream');
       return new Response('not here', { status: 404 });
     },
   });
@@ -115,7 +96,6 @@ const serve = async (): Promise<{ origin: string; stop: () => Promise<void> }> =
     origin: server.url.origin,
     stop: async () => {
       await server.stop(true);
-      await rm(directory, { force: true, recursive: true });
     },
   };
 };
