@@ -9,7 +9,8 @@ export interface RawFolderEntry {
 
 /**
  * Why a folder was not opened: the machine refused it (or the fence did, or nothing verified is there), it is a file, or the
- * explorer's own judgment of where it REALLY is said no (`outside` the home, `private`).
+ * policy's own judgment of where it REALLY is said no (`outside`: a tree no project is read from, or outside the project a
+ * scan reads; `private`: keys, sign-ins, another user's home).
  */
 export type FolderOpenFailure = 'refused' | 'not_folder' | 'outside' | 'private';
 
@@ -51,6 +52,12 @@ export interface HeldFolder {
   /** Whether `<held>/<name>/.git` exists (a folder, or the file a work tree keeps). */
   hasGit(name: string): Promise<boolean>;
   /**
+   * The device (`st_dev`) of the folder `<held>/<rel>` (`''` is the held folder itself): the disk it is on, so a reader can
+   * stay on one disk the way `find -xdev` does. `undefined` when it is not a folder there now or cannot be looked at; a
+   * link is never followed.
+   */
+  device(rel: string): Promise<string | undefined>;
+  /**
    * Makes ONE new folder `name` (owner-only, not recursive, never over anything) inside the held folder, then proves it
    * is a real folder at `<real>/<name>` that `verdict` accepts; when it is not, only that just-made empty folder is
    * removed and the refusal answers.
@@ -72,11 +79,17 @@ export interface FolderBrowser {
    */
   open(path: string, verdict: FolderVerdict): Promise<FolderOpen>;
   /**
-   * Whether the real folder `path` directly holds a sign-in or key file: every name it holds (a link counts, not
-   * followed) is judged by the one fold in `fence.ts`, so a differently spelled marker is a marker. A folder whose names
-   * cannot be read answers `true`; a file or a missing name, `false`.
+   * Whether the real folder `path` directly holds a sign-in or key file: each known marker is asked for by name (a link
+   * counts, not followed), so the width of the folder never matters, and the names it holds are judged by the one fold in
+   * `fence.ts`, so a differently spelled marker is a marker. A folder whose names cannot be asked for answers `true`; a
+   * file or a missing name, `false`. A folder is never "private" for being wide.
+   *
+   * `'partial'` is the third answer: no marker was found, but the folder holds more names than were read for the
+   * spelling-fold look, so a differently spelled marker past the bound was NOT ruled out. A caller that only asks "is it a
+   * sign-in folder" reads that as `false` (width alone never makes a folder private); the repository scan reads it as "not
+   * proved safe": the folder is skipped and the scan is truncated.
    */
-  holdsSignIn(path: string): Promise<boolean>;
+  holdsSignIn(path: string): Promise<boolean | 'partial'>;
   /** What is AT the absolute `path`, the leaf never followed (a link anywhere above it is the machine's to resolve): nothing, a link, or something else. */
   leaf(path: string): Promise<'missing' | 'link' | 'present'>;
   /** The real path (links resolved) of each of `paths` that exists and resolves; the others are left out. */

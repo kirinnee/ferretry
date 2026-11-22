@@ -69,14 +69,15 @@ export default definePlugin({
         audit: { record: PROJECT_REMOVED_AUDIT },
         guard: { none: 'answers the removed record; no pane, page or vault text' },
       }),
-      // NEW in r9 (B6): the folder explorer behind the project picker. Names under the owner's home only, never a private
-      // folder (`daemon/features/folders/fence.ts`); a person's act, never a ferret's.
+      // NEW in r9 (B6): the folder explorer behind the project picker. Names anywhere the skip list allows, never a private
+      // folder (`daemon/features/folders/fence.ts`); a person's act, never a ferret's. The home is `filesystem.use`; a place
+      // outside it is `filesystem.configure` (passkey step-up for a remote device), asked by the handler.
       route('GET /v1/projects/folders', {
         minimum: 'operator',
         caller: 'person',
         capability: filesystemUse,
         noStore: true,
-        audit: { skip: 'a read of folder names under the home folder' },
+        audit: { skip: 'a read of folder names; outside the home folder it also needs filesystem.configure' },
         guard: { none: 'folder names, kinds and times only; no file content, no pane, page or vault text' },
       }),
       route('POST /v1/projects/folders', {

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   ABSOLUTE_PATH_REQUIRED,
+  BROAD_ROOT_WARNING,
+  isBroadRootSpelling,
   CLONE_ADDRESS_UNUSABLE,
   CLONE_PATIENCE,
   confirmDiscoveryRequest,
@@ -178,5 +180,30 @@ describe('the sentences the surface must not paraphrase', () => {
 
   it('promises that a discovery is not enrolled until somebody confirms it', () => {
     expect(DISCOVERY_PROMISE).toContain('registers none of them on its own');
+  });
+});
+
+describe('the broad-root warning (F6061 U4: registering your whole disk or home is allowed, and says what it means)', () => {
+  it('says the index is partial and that every device that can use files here sees names across it', () => {
+    expect(BROAD_ROOT_WARNING).toContain('whole disk or home');
+    expect(BROAD_ROOT_WARNING).toContain('partial');
+    expect(BROAD_ROOT_WARNING).toContain('Every device');
+  });
+
+  it('knows a typed path that is the disk, a home folder, or the folder every home sits in', () => {
+    for (const path of [
+      '/',
+      '/home',
+      '/home/',
+      '/Users',
+      '/home/sam',
+      '/Users/sam/',
+      '/root',
+      '/var/root',
+      ' /home/sam ',
+    ])
+      expect([path, isBroadRootSpelling(path)]).toEqual([path, true]);
+    for (const path of ['', '/srv', '/home/sam/code', '/Users/sam/code/app', '/homework', '/opt/home', 'home', '~'])
+      expect([path, isBroadRootSpelling(path)]).toEqual([path, false]);
   });
 });

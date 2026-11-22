@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must, RouterProvider, settleUntil, WithAppHooks } from '@ferretry/app/testing';
 import { PROJECTS_CONNECT_ACCOUNT_HOOK } from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../../app/lib/client.ts';
+import { BROAD_ROOT_WARNING } from '../../../app/lib/registration-model.ts';
 import { ProjectsPage } from '../../../app/views/projects-page.tsx';
 import { ANSWERED, type Call, clickEvent, refusal, scripted, typeInto } from './support/client.ts';
 
@@ -397,5 +398,33 @@ describe('Create a project', () => {
       path: '/home/k/child',
     });
     await mounted.unmount();
+  });
+});
+
+describe('the broad-root warning on the folder step (F6061 U4)', () => {
+  it('is shown, beside the Next that registers it, when the open folder is the disk or a home; an ordinary folder has none', async () => {
+    const broad = {
+      path: '/home',
+      crumbs: [
+        { name: '/', path: '/' },
+        { name: 'home', path: '/home' },
+      ],
+      entries: [],
+      truncated: false,
+      broad: true,
+    };
+    const mounted = await mount(page(base([], { [FOLDERS]: broad })));
+    await press(must(mounted.container.querySelector('[aria-controls="add-project-form"]'), 'the disclosure'));
+    await settled(mounted, c => c.querySelector('[data-explorer-state="ready"]') !== null, 'the explorer');
+    expect(must(mounted.container.querySelector('[data-explorer-broad]'), 'the warning').textContent).toContain(
+      BROAD_ROOT_WARNING,
+    );
+    expect((button(mounted, 'Next') as HTMLButtonElement).disabled).toBe(false);
+    await mounted.unmount();
+    const plain = await mount(page(base([])));
+    await press(must(plain.container.querySelector('[aria-controls="add-project-form"]'), 'the disclosure'));
+    await settled(plain, c => c.querySelector('[data-explorer-state="ready"]') !== null, 'the explorer');
+    expect(plain.container.querySelector('[data-explorer-broad]')).toBeNull();
+    await plain.unmount();
   });
 });
