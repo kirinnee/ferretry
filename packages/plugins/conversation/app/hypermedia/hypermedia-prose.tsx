@@ -1,12 +1,13 @@
+import type { ProseProps } from '@ferretry/app';
 import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
 import { memo, useId, useMemo, useSyncExternalStore } from 'react';
+import { DrawableFyRenderBodies, FY_RENDER_COMPONENT_BLOCKS, FY_RENDER_SLOTS } from './fy-render-host.tsx';
 import { exceedsMessageCap } from './limits.ts';
 import { HumanSegment, TerminalWithLlmText } from './llm-text.tsx';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
-import { parseMessage } from './parse-message.ts';
+import { readMessage } from './parse-message.ts';
 import { ReferenceChip } from './reference-chip.tsx';
 import { ReferenceProofProvider } from './reference-proof.tsx';
-import { HYPERMEDIA_SLOTS } from './slots.tsx';
 import { hypermediaUrlPolicy } from './url-policy.ts';
 import { REFERENCE_INLINE } from './with-references.ts';
 
@@ -58,32 +59,56 @@ const subscribeToMode = (notify: () => void): (() => void) => {
 const readMode = (): 'light' | 'dark' => (document.documentElement.dataset.mode === 'dark' ? 'dark' : 'light');
 const SERVER_MODE = (): 'light' | 'dark' => 'light';
 
+/**
+ * What Conversation hands the shell as `shell.prose`: this, for a surface that is not the chat's (the agenda). A plain
+ * function, because the shell calls it as a view; `copyable` and `demoteHeadings` are Markdown's and a part has its own
+ * copy, so they are not read. Headings are the surface's to restyle (`.dh-doc h1…h6`), as the agenda card does.
+ */
+export function ProvidedProse({ text, className }: ProseProps) {
+  return <HypermediaProse text={text} {...(className === undefined ? {} : { className })} />;
+}
+
 export interface HypermediaProseProps {
   readonly text: string;
   readonly className?: string;
+  /**
+   * The text is the tail of a message still streaming in (the live session's last row). A fence closed only by the
+   * text's last line is then still open, so a partial body never draws (`settleFences`). Absent or false: a final message.
+   */
+  readonly arriving?: boolean;
 }
 
-export const HypermediaProse = memo(function HypermediaProse({ text, className }: HypermediaProseProps) {
+export const HypermediaProse = memo(function HypermediaProse({
+  text,
+  className,
+  arriving = false,
+}: HypermediaProseProps) {
   const mode = useSyncExternalStore(subscribeToMode, readMode, SERVER_MODE);
   // `useId` is unique per mounted message and stable across its re-renders; keep only what an id may hold.
   const idPrefix = `dh-${useId().replace(/[^\w-]/gu, '')}-`;
-  const doc = useMemo(() => (exceedsMessageCap(text) ? null : parseMessage(text, idPrefix)), [text, idPrefix]);
+  const read = useMemo(
+    () => (exceedsMessageCap(text) ? null : readMessage(text, idPrefix, arriving)),
+    [text, idPrefix, arriving],
+  );
   return (
     <ReferenceProofProvider text={text}>
       <div className={`fy-hm min-w-0 max-w-full ${className ?? ''}`} data-fy-hypermedia="">
-        {doc === null ? (
+        {read === null ? (
           <pre className="fy-hm-plain" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
             {text}
           </pre>
         ) : (
-          <DocumentView
-            components={PARTS}
-            doc={doc}
-            inlines={INLINES}
-            slots={HYPERMEDIA_SLOTS}
-            theme={mode}
-            urlPolicy={hypermediaUrlPolicy}
-          />
+          <DrawableFyRenderBodies value={read.drawable}>
+            <DocumentView
+              blocks={FY_RENDER_COMPONENT_BLOCKS}
+              components={PARTS}
+              doc={read.doc}
+              inlines={INLINES}
+              slots={FY_RENDER_SLOTS}
+              theme={mode}
+              urlPolicy={hypermediaUrlPolicy}
+            />
+          </DrawableFyRenderBodies>
         )}
       </div>
     </ReferenceProofProvider>

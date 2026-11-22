@@ -5,8 +5,10 @@
 import type { ComponentType, ReactElement, ReactNode } from 'react';
 import type {
   Block,
+  BlockDef,
   BlockType,
   Document,
+  HostBlock,
   InlineDef as ParsedInlineDef,
   TerminalBlock,
   UrlPolicy,
@@ -67,6 +69,8 @@ export interface DocumentProps {
   readonly inlines?: readonly InlineDef[];
   /** Links are checked again with this policy at render time. */
   readonly urlPolicy?: UrlPolicy;
+  /** Host blocks: their `Component` draws them (the parser half is passed to `parse`). Keep the array stable. */
+  readonly blocks?: readonly BlockDef<any, ComponentType<{ readonly block: HostBlock; readonly data: any }>>[];
 }
 
 /** Every part, with mermaid drawn by the host's slot: imports neither mermaid nor DOMPurify. */
