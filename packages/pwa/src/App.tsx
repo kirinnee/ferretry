@@ -278,6 +278,7 @@ import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedger
 import { joinOutbox, joinQueue, queueActions, readSessionQueue, withdrawReplyVia } from './lib/send-queue.ts';
 import type { CachedTranscript } from './lib/session-cache.ts';
 import { RULE_LINKED_ELSEWHERE_WORDS } from './lib/sign-in-rules.ts';
+import { AGENDA_SAFETY_NET_MS, changesTheAgenda, SpacedRead } from './lib/spaced-read.ts';
 import {
   createAppStore,
   StoreProvider,
@@ -1430,6 +1431,8 @@ function SessionRoute({
   const measuredCarrier = useActiveCarrier(store.carrier, daemonId);
   const carrierKind = measuredCarrier?.ok === true ? measuredCarrier.method.kind : 'none';
   const refreshControl = useRef<SessionWorkspaceRefreshControl | null>(null);
+  /** When the workspace's transcript reads may also re-read the agenda board (`lib/spaced-read.ts`). */
+  const agendaRead = useRef(new SpacedRead(AGENDA_SAFETY_NET_MS));
   /**
    * Whether the poll may slow down: the live feed is up and the agent is idle at its prompt, so every
    * change arrives as an event first. Written each render below, read by the poll on each tick.
@@ -1450,6 +1453,8 @@ function SessionRoute({
   useEffect(
     () =>
       store.connectionHealth.onRecovered(daemonId, () => {
+        // Nothing announced while the daemon was unreachable reached this page: the board is read again too.
+        agendaRead.current.reset();
         void refreshControl.current?.refresh(true);
         if (refreshControl.current === null) setClientAttempt(attempt => attempt + 1);
       }),
@@ -1515,20 +1520,27 @@ function SessionRoute({
         if (!current) return;
         setClient(api);
         const agendaScope = daemonSessionScope(connection, sessionId);
+        // A newly opened session reads its board on the first transcript read, whatever the last session did.
+        agendaRead.current.reset();
+        const revalidateAgenda = (): void => {
+          if (agendaRead.current.take())
+            void store.attention.revalidate(connection, agendaScope).catch(() => undefined);
+        };
         const ledger = ledgerFeed(setSends);
         control = startSessionWorkspaceRefresh({
           api: {
             // Attention shares the workspace's one visibility-aware refresh
             // owner. Its own status reports a failed board read, so a failure
             // here must not relabel a successful transcript as unreadable.
+            // Spaced (`lib/spaced-read.ts`): a transcript read follows every transcript change, and the
+            // complete board riding on each one was the read storm that starved this session's carrier.
             logs: async id => {
-              void store.attention.revalidate(connection, agendaScope).catch(() => undefined);
+              revalidateAgenda();
               return await api.logs(id);
             },
             // The tail is read as a page, so the reader can scroll up past it (`lib/transcript-history.ts`).
             logPage: async (id, options) => {
-              if (options === undefined)
-                void store.attention.revalidate(connection, agendaScope).catch(() => undefined);
+              if (options === undefined) revalidateAgenda();
               return await api.logPage(id, options);
             },
             get: async id => await store.fleet.fetchSession(connection, { daemonId, sessionId: id }),
@@ -1629,6 +1641,8 @@ function SessionRoute({
         liveCursorRef.current = Math.max(liveCursorRef.current, event.sequence);
         setLiveCursor(current => Math.max(current, event.sequence));
         surfaceEvents.publish(event);
+        // The board said it moved: the read this nudge starts re-reads it, inside the spacing or not.
+        if (changesTheAgenda(event)) agendaRead.current.reset();
         refreshControl.current?.nudge();
       },
       onLive: live => liveActivity.publish(live),

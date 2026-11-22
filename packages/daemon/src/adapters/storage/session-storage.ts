@@ -683,6 +683,37 @@ export class DaemonStorage {
     return this.applySource(source);
   }
 
+  /**
+   * The index row brought up to date after this session's config or state was written.
+   *
+   * A document write leaves the journal exactly as it was, so when the indexed row still proves the journal it
+   * holds — same fingerprint, last pointer still naming its event ({@link inspectSession}'s own test) — only the
+   * metadata is refreshed. A full {@link syncSessionUnlocked} would read and parse the WHOLE journal and hand
+   * every one of its pointers to the index writer as a `replace-session`: on 2026-11-22 a 260,000-event journal
+   * written to every few seconds made that the daemon's commonest event-loop stall (structured-cloning its
+   * pointers to the writer thread measured ~0.35 s per 158,000). Anything the row cannot prove still rescans.
+   */
+  private async syncDocumentsUnlocked(id: SessionId): Promise<void> {
+    const current = this.index.findSession(id);
+    if (current !== undefined && current.journal !== null) {
+      const observation = await this.readObservation(id);
+      if (
+        observation?.journal !== undefined &&
+        decideSessionMarker(observation.marker.text) === 'proceed' &&
+        sameFingerprint(current.journal, observation.journal.fingerprint) &&
+        (await this.pointerMatches(id, current, observation))
+      ) {
+        this.assertExpectedJournal(id, observation.marker.text, current, true);
+        const session = planIndexRebuild([this.metadataSource(observation, current)]).sessions[0];
+        if (session !== undefined) {
+          this.index.refreshSession(session);
+          return;
+        }
+      }
+    }
+    await this.syncSessionUnlocked(id);
+  }
+
   async syncSession(id: SessionId): Promise<RebuildResult> {
     this.assertOpen();
     return await this.serial.run(id, async () => {
@@ -1075,7 +1106,7 @@ export class DaemonStorage {
           try {
             publishing();
             await this.writeDocument(createSessionPaths(this.paths, id).config, document);
-            await this.syncSessionUnlocked(id);
+            await this.syncDocumentsUnlocked(id);
           } finally {
             this.configChanges += 1;
           }
@@ -1173,7 +1204,7 @@ export class DaemonStorage {
       await this.reviveIfArchived(id);
       await this.ensureSessionDirectory(id);
       await this.writeDocument(createSessionPaths(this.paths, id).state, document);
-      await this.syncSessionUnlocked(id);
+      await this.syncDocumentsUnlocked(id);
       if (this.stateListeners.size > 0) this.publishState(id, canonicalJsonValue(value));
     });
   }
@@ -1461,7 +1492,7 @@ export class DaemonStorage {
           const document = serializeJsonDocument(next);
           publishing();
           await this.writeDocument(paths[kind], document);
-          await this.syncSessionUnlocked(id);
+          await this.syncDocumentsUnlocked(id);
         } finally {
           if (kind === 'config') this.configChanges += 1;
         }

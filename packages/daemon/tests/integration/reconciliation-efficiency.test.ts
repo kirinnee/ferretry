@@ -288,3 +288,55 @@ describe('incremental reconciliation', () => {
     await closeStorage(opened.storage);
   });
 });
+
+describe('document writes', () => {
+  it('should refresh the index row from a state or config write without reading the unchanged journal', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const fileSystems = new CountingFileSystemFactory();
+    const opened = await openStorage(home, fileSystems);
+    const fileSystem = fileSystems.instance;
+    should(fileSystem).not.be.undefined();
+    const id = parseSessionId('busy-session');
+    await opened.storage.writeState(id, { status: 'running' });
+    for (let index = 0; index < 5; index += 1) await opened.storage.append(id, 'tick', { index });
+    fileSystem?.resetJournalReads();
+
+    // Act
+    await opened.storage.writeState(id, { status: 'finished' });
+    await opened.storage.updateState(id, () => ({ status: 'stopped' }));
+    await opened.storage.writeConfig(id, { id, title: 'renamed' });
+    const chunkReads = fileSystem?.chunkReads.slice();
+
+    // Assert
+    should(chunkReads).deepEqual([]);
+    should(opened.storage.findSession(id)?.status).equal('stopped');
+    should(opened.storage.findSession(id)?.lastSequence).equal(5);
+    should((await opened.storage.replay(id)).events.map(event => event.type)).deepEqual(Array(5).fill('tick'));
+    await closeStorage(opened.storage);
+  });
+
+  it('should still rescan the journal on a document write when the journal changed behind the index', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const fileSystems = new CountingFileSystemFactory();
+    const opened = await openStorage(home, fileSystems);
+    const fileSystem = fileSystems.instance;
+    should(fileSystem).not.be.undefined();
+    const id = parseSessionId('changed-behind');
+    const first = await opened.storage.append(id, 'first', {});
+    const second = createSessionEvent(id, first.sequence + 1, '2026-07-30T12:00:02.000Z', 'second', {});
+    await appendFile(createSessionPaths(opened.paths, id).events, `${encodeSessionEvent(second)}\n`);
+    fileSystem?.resetJournalReads();
+
+    // Act
+    await opened.storage.writeState(id, { status: 'running' });
+    const chunkReads = fileSystem?.chunkReads.slice();
+
+    // Assert
+    should(chunkReads?.length).be.above(0);
+    should(opened.storage.findSession(id)?.lastSequence).equal(second.sequence);
+    should((await opened.storage.replay(id)).events.map(event => event.type)).deepEqual(['first', 'second']);
+    await closeStorage(opened.storage);
+  });
+});
