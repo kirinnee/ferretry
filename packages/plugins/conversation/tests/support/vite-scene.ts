@@ -112,6 +112,8 @@ export const buildViteScene = async (): Promise<ViteScene> => {
         },
       },
     ],
+    // The Durian worker the page starts (`durian-worker.ts?worker&url`) is a bundle of its own, with the plugins the shell's `worker` build has.
+    worker: { format: 'es', plugins: () => [durianBuild.plugin, durianBuild.workerPlugin] },
     build: {
       write: false,
       minify: true,

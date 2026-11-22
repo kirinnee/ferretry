@@ -135,15 +135,16 @@ const durianWorkerSource = (): Promise<string> => {
   return durianWorkerCode;
 };
 
-const durianWorkerForScenes: Bun.BunPlugin = {
+/** The plugin; the worker is built BEFORE the scene's build starts (a build inside a build's plugin hook never returns). */
+const durianWorkerForScenes = (workerCode: string): Bun.BunPlugin => ({
   name: 'durian-worker-for-scenes',
   setup(build) {
-    build.onResolve({ filter: /\/hypermedia\/durian-spawn\.ts$/u }, args => ({
+    build.onResolve({ filter: /(?:^|\/)durian-spawn\.ts$/u }, args => ({
       path: args.path,
       namespace: 'durian-spawn-for-scenes',
     }));
-    build.onLoad({ filter: /.*/u, namespace: 'durian-spawn-for-scenes' }, async () => ({
-      contents: `const code = ${JSON.stringify(await durianWorkerSource())};
+    build.onLoad({ filter: /.*/u, namespace: 'durian-spawn-for-scenes' }, () => ({
+      contents: `const code = ${JSON.stringify(workerCode)};
 let url;
 export async function spawnDurianWorker() {
   url ??= URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
@@ -152,15 +153,16 @@ export async function spawnDurianWorker() {
       loader: 'js',
     }));
   },
-};
+});
 
 /** What a Bun build made: the script and, when the entry's graph imports stylesheets, their CSS (in import order). */
 const bundleOf = async (entry: string, label: string): Promise<{ readonly js: string; readonly css: string }> => {
+  const workerCode = await durianWorkerSource();
   const result = await Bun.build({
     entrypoints: [entry],
     target: 'browser',
     throw: false,
-    plugins: [viteAssetUrls, viteDynamicImports, durianSource, durianWorkerForScenes],
+    plugins: [viteAssetUrls, viteDynamicImports, durianSource, durianWorkerForScenes(workerCode)],
     banner: legacyThemeBanner,
   });
   if (!result.success) throw new Error(`❌ ${label} did not build:\n${result.logs.join('\n')}`);
