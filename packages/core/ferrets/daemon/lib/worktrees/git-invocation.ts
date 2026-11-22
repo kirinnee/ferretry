@@ -7,26 +7,9 @@ export const DEFAULT_GIT_TIMEOUT_MS = 10_000;
 export const DEFAULT_GIT_STDOUT_LIMIT = 1024 * 1024;
 export const DEFAULT_GIT_STDERR_LIMIT = 64 * 1024;
 
-export const HARDENED_GIT_ARGUMENTS: readonly string[] = [
-  '--no-optional-locks',
-  '-c',
-  'core.pager=cat',
-  '-c',
-  'core.hooksPath=/dev/null',
-  '-c',
-  'core.fsmonitor=false',
-  '-c',
-  'core.quotepath=false',
-  '-c',
-  'diff.external=',
-  // Porcelain paths must stay repo-root-relative whatever a repo-local `status.relativePaths=true` says,
-  // because that is the shape the status parser filters by prefix. And `showUntrackedFiles=all` is pinned
-  // because a repo-local or global `no` would otherwise hide every untracked file from a Changes list.
-  '-c',
-  'status.relativePaths=false',
-  '-c',
-  'status.showUntrackedFiles=all',
-] as const;
+// The hardened arguments and the scrubbed environment are owned by the shared tree index (`contract/tree-git.ts`,
+// &F6061 U2): a ferret's file index and a project's must hold Git the same way, so there is one definition.
+export { gitEnvironment, HARDENED_GIT_ARGUMENTS } from '../../../contract/tree-git.ts';
 
 export class GitProcessError extends Error {
   constructor(
@@ -45,27 +28,4 @@ export function checkedLimit(value: number | undefined, fallback: number, label:
     throw new GitProcessError('invalid_limit', `${label} must be a non-negative safe integer`);
   }
   return limit;
-}
-
-export function gitEnvironment(
-  inherited: Readonly<Record<string, string | undefined>>,
-  literalPathspecs: boolean,
-): Record<string, string> {
-  const environment: Record<string, string> = {};
-  for (const [key, value] of Object.entries(inherited)) {
-    if (!key.startsWith('GIT_') && value !== undefined) environment[key] = value;
-  }
-  return {
-    ...environment,
-    LC_ALL: 'C',
-    LANG: 'C',
-    GIT_CONFIG_SYSTEM: '/dev/null',
-    GIT_CONFIG_GLOBAL: '/dev/null',
-    GIT_CONFIG_NOSYSTEM: '1',
-    GIT_TERMINAL_PROMPT: '0',
-    GIT_OPTIONAL_LOCKS: '0',
-    GIT_PAGER: 'cat',
-    GIT_ASKPASS: '',
-    ...(literalPathspecs ? { GIT_LITERAL_PATHSPECS: '1' } : {}),
-  };
 }

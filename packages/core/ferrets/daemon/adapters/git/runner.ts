@@ -54,7 +54,7 @@ export class KernelGitRunner implements GitRunner {
       return await this.spawn.runBytes('git', [...HARDENED_GIT_ARGUMENTS, ...invocation.args], {
         cwd: invocation.cwd,
         // The kernel's spawn starts from its own scrubbed base; nothing of the daemon's environment is inherited here.
-        env: gitEnvironment({}, invocation.literalPathspecs ?? true),
+        env: gitEnvironment({}, invocation.literalPathspecs ?? true, invocation.readsGlobalConfig === true),
         ...(invocation.stdin === undefined ? {} : { stdin: invocation.stdin }),
         timeout: milliseconds(timeoutMs),
         maxStdoutBytes,
