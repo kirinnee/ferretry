@@ -471,13 +471,33 @@ const stagePage = async (tab: Page, variant: Variant, key: string): Promise<void
     expect(height, `${key}: every choice and footer button is 44px tall`).toBeGreaterThanOrEqual(43.5);
 };
 
-/** Collects a button that is the row wide or under 44px tall (read by the gap below, not asserted here). */
+/**
+ * Collects a pairing button of the wrong shape (read by the gap below, not asserted here): on a phone it is FULL width,
+ * stacked, at least 0.9 of its container's content width (the owner's words, since #2296); on a desktop it is under half
+ * the page width. Either way it is at least 44px tall.
+ */
 const measureButton = async (tab: Page, variant: Variant, label: string, selector: string): Promise<void> => {
-  const box = await tab.locator(selector).first().boundingBox();
-  if (box === null) return;
-  const limit = (variant.width < 600 ? 0.7 : 0.5) * variant.width;
-  if (box.width >= limit || box.height < 43.5)
-    seen.badButtons.push(`${variant.name}:${label} (${Math.round(box.width)}x${Math.round(box.height)})`);
+  const measured = await tab
+    .locator(selector)
+    .first()
+    .evaluate(node => {
+      const box = node.getBoundingClientRect();
+      const parent = node.parentElement;
+      const style = parent === null ? null : getComputedStyle(parent);
+      const content =
+        parent === null || style === null
+          ? box.width
+          : parent.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+      return { width: box.width, height: box.height, content };
+    })
+    .catch(() => null);
+  if (measured === null) return;
+  const phone = variant.width < 600;
+  const wrongWidth = phone ? measured.width < 0.9 * measured.content : measured.width >= 0.5 * variant.width;
+  if (wrongWidth || measured.height < 43.5)
+    seen.badButtons.push(
+      `${variant.name}:${label} (${Math.round(measured.width)}x${Math.round(measured.height)} of ${Math.round(measured.content)} content)`,
+    );
 };
 
 /** Presses Next and waits for `to` (a page key, or `end`). */
@@ -1713,7 +1733,7 @@ describe('the gaps the gate found, now closed', () => {
       expect(seen.footerOffScreen).toEqual([]);
     },
   );
-  it('the pairing page buttons are auto width and 44px tall', () => {
+  it('the pairing page buttons are full width on a phone, under half the page on a desktop, and 44px tall', () => {
     expect(seen.badButtons).toEqual([]);
   });
   it('the pairing page reached from the first run has no sidebar or app chrome', () => {
