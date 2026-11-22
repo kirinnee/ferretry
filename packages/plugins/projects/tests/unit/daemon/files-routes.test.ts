@@ -8,14 +8,56 @@ import {
 } from '../../../contract/index.ts';
 import { type ProjectIndex, ProjectFolderRefused } from '../../../daemon/features/files/build.ts';
 import { IndexCacheBusy, ProjectIndexCache } from '../../../daemon/features/files/cache.ts';
-import { filesRescanRoute, filesRoute, filesStatusRoute } from '../../../daemon/features/files/routes.ts';
+import {
+  type FilePlace,
+  filesRescanRoute as rescanOver,
+  filesRoute as readOver,
+  filesStatusRoute as statusOver,
+} from '../../../daemon/features/files/routes.ts';
 import { fakeMachine, registryOver } from './support.ts';
 
-const callWith = (params: Record<string, string>, query: Record<string, string> = {}): CallContext =>
+/** The fake machine's home is `/work`, so its project `/work/alpha` is INSIDE it: the outside-home gate is never asked. */
+const IN_HOME: FilePlace = { home: async () => '/work', resolve: async path => path.replace(/(?<=.)\/+$/u, '') };
+const filesRoute = (...args: [Parameters<typeof readOver>[0], Parameters<typeof readOver>[1], FilePlace?]) =>
+  readOver(args[0], args[1], args[2] ?? IN_HOME);
+const filesStatusRoute = (...args: [Parameters<typeof readOver>[0], Parameters<typeof readOver>[1], FilePlace?]) =>
+  statusOver(args[0], args[1], args[2] ?? IN_HOME);
+const filesRescanRoute = (...args: [Parameters<typeof readOver>[0], Parameters<typeof readOver>[1], FilePlace?]) =>
+  rescanOver(args[0], args[1], args[2] ?? IN_HOME);
+
+type Decision = { allowed: boolean; refusal: string; steppedUp?: boolean };
+const callWith = (
+  params: Record<string, string>,
+  query: Record<string, string> = {},
+  standing: object = {},
+): CallContext =>
   ({
     request: { query: new Map(Object.entries(query).map(([name, value]) => [name, [value]])), text: async () => '' },
     params: new Map(Object.entries(params)),
+    ...standing,
   }) as unknown as CallContext;
+
+/** What Gate's standing answers for `filesystem.configure` (the routes' own `filesystem.use` is already admitted). */
+const governed = (configure: Decision) => {
+  const asked: string[] = [];
+  const spent = { count: 0 };
+  return {
+    asked,
+    spent,
+    standing: {
+      governance: {
+        governed: true,
+        decide: (demand: { axis: string }) => {
+          asked.push(demand.axis);
+          return configure;
+        },
+      },
+      spendStepUp: () => {
+        spent.count++;
+      },
+    },
+  };
+};
 
 const answer = (response: { readonly status: number; readonly body: unknown }) => ({
   status: response.status,
@@ -144,7 +186,7 @@ describe('a cached index is only answered while the registered path is still the
   test('all three routes forget the index and refuse when the path no longer resolves to itself', async () => {
     const { registry, cache, id } = await setup();
     let held = true;
-    const holds = async () => held;
+    const holds: FilePlace = { home: IN_HOME.home, resolve: async path => (held ? path : '/work/elsewhere') };
     await filesRoute(registry, cache, holds)(callWith({ id }));
     held = false;
 
@@ -190,5 +232,93 @@ describe('the summary schema', () => {
         skipped: [{ reason: 'unreadable', count: 1 }],
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('a project folder OUTSIDE the home needs filesystem.configure on all three routes (U4’s gate, D3)', () => {
+  /** The fake machine's `/work/alpha` is outside a home at `/home/owner`. */
+  const OUTSIDE: FilePlace = { home: async () => '/home/owner', resolve: IN_HOME.resolve };
+  const ALL = [
+    ['read', filesRoute],
+    ['status', filesStatusRoute],
+    ['rescan', filesRescanRoute],
+  ] as const;
+
+  test('a use-only device is refused (403, Gate’s grant code) before anything is built or answered from memory', async () => {
+    for (const [name, route] of ALL) {
+      const built: string[] = [];
+      const { registry, cache, id } = await setup(async path => {
+        built.push(path);
+        return READY;
+      });
+      await cache.read(id, '/work/alpha');
+      built.length = 0;
+      const { standing, asked } = governed({ allowed: false, refusal: 'device-not-granted' });
+
+      const refused = await failure(() => route(registry, cache, OUTSIDE)(callWith({ id }, {}, standing)));
+
+      expect([name, refused.status, refused.code]).toEqual([name, 403, 'grant_device_not_granted']);
+      expect(asked).toEqual(['configure']);
+      expect(built).toEqual([]);
+    }
+  });
+
+  test('a device that has not stepped up is told to, with the demand to satisfy', async () => {
+    const { registry, cache, id } = await setup();
+    const { standing } = governed({ allowed: false, refusal: 'step-up-required' });
+
+    const refused = (await failure(() => filesRoute(registry, cache, OUTSIDE)(callWith({ id }, {}, standing)))) as {
+      status: number;
+      code: string;
+    };
+
+    expect([refused.status, refused.code]).toEqual([403, 'grant_step_up_required']);
+  });
+
+  test('a device holding configure is answered on all three, and a per-act step-up is spent once per request', async () => {
+    for (const [, route] of ALL) {
+      const { registry, cache, id } = await setup();
+      const { standing, asked, spent } = governed({ allowed: true, refusal: 'granted', steppedUp: true });
+
+      const got = answer(await route(registry, cache, OUTSIDE)(callWith({ id }, {}, standing)));
+
+      expect(got.status).toBe(200);
+      expect(asked).toEqual(['configure']);
+      expect(spent.count).toBe(1);
+    }
+  });
+
+  test('the caller at the machine (ungoverned) passes', async () => {
+    const { registry, cache, id } = await setup();
+    const standing = { governance: { governed: false, decide: () => ({ allowed: true, refusal: 'granted' }) } };
+
+    expect(answer(await filesRoute(registry, cache, OUTSIDE)(callWith({ id }, {}, standing))).status).toBe(200);
+  });
+
+  test('a call with no standing is refused (503), never read on a guess', async () => {
+    const { registry, cache, id } = await setup();
+
+    const refused = await failure(() => filesRoute(registry, cache, OUTSIDE)(callWith({ id })));
+
+    expect([refused.status, refused.code]).toEqual([503, 'folder_gate_unavailable']);
+  });
+
+  test('a spelling INSIDE the home that resolves OUTSIDE it is decided on where it really is', async () => {
+    const { registry, cache, id } = await setup();
+    const through: FilePlace = { home: IN_HOME.home, resolve: async () => '/srv/elsewhere' };
+    const { standing, asked } = governed({ allowed: false, refusal: 'device-not-granted' });
+
+    const refused = await failure(() => filesRoute(registry, cache, through)(callWith({ id }, {}, standing)));
+
+    expect([refused.status, refused.code]).toEqual([403, 'grant_device_not_granted']);
+    expect(asked).toEqual(['configure']);
+  });
+
+  test('a project INSIDE the home needs only use: the configure decision is never asked', async () => {
+    const { registry, cache, id } = await setup();
+    const { standing, asked } = governed({ allowed: false, refusal: 'device-not-granted' });
+
+    expect(answer(await filesRoute(registry, cache)(callWith({ id }, {}, standing))).status).toBe(200);
+    expect(asked).toEqual([]);
   });
 });

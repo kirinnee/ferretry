@@ -30,7 +30,14 @@ const useOnly: CapabilityGrants = {
 } as CapabilityGrants;
 /** The machine asks a step-up for every act, so `configure` is refused until one is proved. */
 const perAct = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_GATE_SECURITY, stepUpOnActions: true } };
-const ROUTES = ['GET /v1/projects/folders', 'GET /v1/projects/:id/repos'] as const;
+/** The file finder's three routes (F6061 U5, PR 2305 item 5) ask the same demand for a project folder outside the home. */
+const ROUTES = [
+  'GET /v1/projects/folders',
+  'GET /v1/projects/:id/repos',
+  'GET /v1/projects/:id/files',
+  'GET /v1/projects/:id/files/status',
+  'POST /v1/projects/:id/files/rescan',
+] as const;
 
 /** The standing of an admitted call: what the handler is handed. */
 function standingOf(decision: ReturnType<typeof admit>['decision']) {

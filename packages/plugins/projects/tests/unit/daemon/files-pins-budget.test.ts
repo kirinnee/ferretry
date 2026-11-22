@@ -58,6 +58,24 @@ describe('the pins are spent from the build’s deadline', () => {
     expect(await pins.project('/h/p')).toEqual({ ok: false, reason: 'spent' });
   }, 2_000);
 
+  test('a descendant whose sign-in look saw only part of its names is "partial", not accepted (U4’s completeness-aware look)', async () => {
+    const wide = browser({ holdsSignIn: async path => (path === '/h/p/wide' ? 'partial' : false) });
+    const pins = await kernelPins(kernel(hang), wide)(budgetOf(5_000));
+
+    expect(await pins.descendant('/h/p/wide')).toBe('partial');
+    expect(await pins.descendant('/h/p/narrow')).toBeUndefined();
+  }, 2_000);
+
+  test('a descendant holding a sign-in file is "private", and a folder outside every home is not a descendant', async () => {
+    const pins = await kernelPins(
+      kernel(hang),
+      browser({ holdsSignIn: async path => path === '/h/p/vault' }),
+    )(budgetOf(5_000));
+
+    expect(await pins.descendant('/h/p/vault')).toBe('private');
+    expect(await pins.descendant('/proc/self')).toBe('unreadable');
+  }, 2_000);
+
   test('with time left, a descendant is judged as before', async () => {
     const pins = await kernelPins(kernel(hang), browser({}))(budgetOf(5_000));
 

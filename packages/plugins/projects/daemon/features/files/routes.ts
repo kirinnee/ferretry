@@ -1,5 +1,12 @@
 import { FerretSearchQuerySchema } from '@ferretry/core-ferrets/contract';
-import { ApiError, decodeParameter, jsonResponse, queryValue, type RouteHandler } from '@ferretry/kernel/contract';
+import {
+  ApiError,
+  type CallContext,
+  decodeParameter,
+  jsonResponse,
+  queryValue,
+  type RouteHandler,
+} from '@ferretry/kernel/contract';
 import {
   DEFAULT_PROJECT_FILE_MATCHES,
   MAX_PROJECT_FILE_MATCHES,
@@ -9,6 +16,8 @@ import {
   type ProjectInfo,
 } from '../../../contract/index.ts';
 import type { ProjectRegistry } from '../../lib/registry.ts';
+import { belowHome } from '../folders/fence.ts';
+import { outsideHomeGate } from '../folders/outside-gate.ts';
 import { ProjectFolderRefused } from './build.ts';
 import { type CachedStatus, IndexCacheBusy, type ProjectIndexCache } from './cache.ts';
 import { searchFiles } from './search.ts';
@@ -50,15 +59,38 @@ function refusal(error: unknown): never {
   throw error;
 }
 
-/** Whether a project's registered path is still the very place its index was built from (no link has appeared in it). */
-export type StillThatPlace = (path: string) => Promise<boolean>;
+/** Where a registered path really is: the owner's home, and what a path resolves to (`undefined`: nothing is there). */
+export interface FilePlace {
+  readonly home: () => Promise<string>;
+  readonly resolve: (path: string) => Promise<string | undefined>;
+}
 
 /**
- * Asked before ANY of the three routes touches the cache: a registered place that now resolves somewhere else is no longer
- * the project, so what was indexed there is forgotten and nothing is answered from memory (nor is a rebuild started on it).
+ * Asked before ANY of the three routes touches the cache or starts a build (owner decision D3, the gate U4 built for the
+ * folder explorer and the repository scan): a project folder OUTSIDE the home is read only by a caller that passes
+ * `filesystem.configure` (a passkey step-up for a remote device; the caller at the machine is ungoverned, and the gate says
+ * so from how the request ARRIVED). The decision is on the registered spelling AND on where it really resolves, before
+ * anything is read or answered from memory; it is made once per request, so a step-up is spent once.
+ *
+ * Then a registered place that resolves somewhere else is no longer the project: what was indexed there is forgotten and
+ * nothing is answered from memory (nor is a rebuild started on it).
  */
-async function guard(cache: ProjectIndexCache, project: ProjectInfo, still: StillThatPlace): Promise<void> {
-  if (await still(project.path)) return;
+async function admit(
+  call: CallContext,
+  cache: ProjectIndexCache,
+  project: ProjectInfo,
+  place: FilePlace,
+): Promise<void> {
+  const home = await place.home();
+  let decided: Promise<void> | undefined;
+  const gate = (): Promise<void> => {
+    decided ??= outsideHomeGate(call)();
+    return decided;
+  };
+  if (belowHome(project.path, home) === undefined) await gate();
+  const resolved = await place.resolve(project.path);
+  if (resolved !== undefined && belowHome(resolved, home) === undefined) await gate();
+  if (resolved === project.path.replace(/(?<=.)\/+$/u, '')) return;
   cache.evict(project.id);
   throw new ProjectFolderRefused('unavailable');
 }
@@ -74,7 +106,7 @@ const statusOf = (held: CachedStatus): ProjectFilesStatus => ({
  * Search runs here, so a phone over a relay is sent a few rows and never the list.
  */
 export const filesRoute =
-  (registry: ProjectRegistry, cache: ProjectIndexCache, still: StillThatPlace = async () => true): RouteHandler =>
+  (registry: ProjectRegistry, cache: ProjectIndexCache, place: FilePlace): RouteHandler =>
   async call => {
     for (const [name] of call.request.query) {
       if (name !== 'q' && name !== 'limit')
@@ -83,7 +115,7 @@ export const filesRoute =
     const project = await projectOf(registry, call.params.get('id'));
     const query = queryOf(queryValue(call.request, 'q'));
     const limit = limitOf(queryValue(call.request, 'limit'));
-    const held = await guard(cache, project, still)
+    const held = await admit(call, cache, project, place)
       .then(() => cache.read(project.id, project.path))
       .catch(refusal);
     const matches = searchFiles(held.index.files, query, limit);
@@ -98,10 +130,10 @@ export const filesRoute =
 
 /** `GET /v1/projects/:id/files/status`: the coverage block alone, never waiting for a build, for a badge. */
 export const filesStatusRoute =
-  (registry: ProjectRegistry, cache: ProjectIndexCache, still: StillThatPlace = async () => true): RouteHandler =>
+  (registry: ProjectRegistry, cache: ProjectIndexCache, place: FilePlace): RouteHandler =>
   async call => {
     const project = await projectOf(registry, call.params.get('id'));
-    const held = await guard(cache, project, still)
+    const held = await admit(call, cache, project, place)
       .then(() => cache.status(project.id, project.path))
       .catch(refusal);
     return jsonResponse(statusOf(held));
@@ -109,10 +141,10 @@ export const filesStatusRoute =
 
 /** `POST /v1/projects/:id/files/rescan`: starts a rebuild (or joins the one running) and answers at once. */
 export const filesRescanRoute =
-  (registry: ProjectRegistry, cache: ProjectIndexCache, still: StillThatPlace = async () => true): RouteHandler =>
+  (registry: ProjectRegistry, cache: ProjectIndexCache, place: FilePlace): RouteHandler =>
   async call => {
     const project = await projectOf(registry, call.params.get('id'));
-    const held = await guard(cache, project, still)
+    const held = await admit(call, cache, project, place)
       .then(() => cache.rescan(project.id, project.path))
       .catch(refusal);
     return jsonResponse(statusOf(held));

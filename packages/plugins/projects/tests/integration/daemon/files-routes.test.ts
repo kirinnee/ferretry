@@ -31,8 +31,8 @@ const start = async () => {
           built.push(path);
           return INDEX;
         },
-        // `/work/alpha` is a fake machine's folder, not one on this disk.
-        stillThatPlace: async () => true,
+        // `/work/alpha` is a fake machine's folder, not one on this disk: inside a home of `/work`, resolving to itself.
+        place: { home: async () => '/work', resolve: async path => path },
       }),
     ],
   });

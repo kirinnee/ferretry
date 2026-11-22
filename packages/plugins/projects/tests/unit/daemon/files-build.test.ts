@@ -175,6 +175,34 @@ describe('a descendant folder is judged by the shared folder policy', () => {
   });
 });
 
+describe('a partially screened folder is skipped and the result is truncated (U4’s completeness-aware look)', () => {
+  test('the plain walk skips a folder whose sign-in look saw only part of its names, and says it is not whole', async () => {
+    const world = disk({ wide: dir(), 'wide/a.txt': file(), open: dir(), 'open/b.txt': file() });
+    const descendant: FolderPins['descendant'] = async real => (real === '/p/wide' ? 'partial' : undefined);
+
+    const index = await build(world, { pins: { descendant } });
+
+    expect(paths(index)).toEqual(['open/b.txt']);
+    expect(skip(index, 'truncated')).toBeGreaterThanOrEqual(1);
+    expect(index.summary.coverage).toBe('partial');
+  });
+
+  test('a Git list drops the files below it and everything beneath, and says it is not whole', async () => {
+    const world = disk({ wide: dir(), 'wide/deep': dir(), 'wide/deep/x.ts': file(), 'ok.ts': file() });
+    const git: ProjectIndexDeps['git'] = {
+      isInsideWorkTree: async () => true,
+      listFiles: async () => ({ paths: ['wide/deep/x.ts', 'ok.ts'], truncated: false }),
+    };
+    const descendant: FolderPins['descendant'] = async real => (real === '/p/wide' ? 'partial' : undefined);
+
+    const index = await build(world, { git, pins: { descendant } });
+
+    expect(paths(index)).toEqual(['ok.ts']);
+    expect(index.summary.coverage).toBe('partial');
+    expect(skip(index, 'truncated')).toBeGreaterThanOrEqual(1);
+  });
+});
+
 describe('whether a nested folder is a repository is asked of the held folder, never of a capped listing', () => {
   test('a linked worktree whose `.git` the capped listing did not name is named, not walked', async () => {
     const world = disk({ wt: dir(), 'wt/.git': file(), 'wt/a.txt': file(), 'wt/ignored.log': file() });

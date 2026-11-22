@@ -9,6 +9,7 @@ import {
 import { milliseconds } from '@ferretry/std';
 import { folderPolicy } from '../folders/policy.ts';
 import type { FolderBrowser, FolderVerdict } from '../folders/port.ts';
+import type { FilePlace } from './routes.ts';
 
 /** Why a folder was not held: nothing verified is there, the privacy policy said no, or the build's time ran out first. */
 export type PinRefusal = 'unavailable' | 'private' | 'spent';
@@ -60,10 +61,11 @@ export interface FolderPins {
   /**
    * An ordinary folder below one already held (`real` is its place, held parent plus relative path): `undefined` to accept
    * it, `'private'` when the policy says so (a key store, a folder holding a sign-in file), `'unreadable'` when it could not
-   * be proved either way. A descendant is judged exactly like a nested repository, so a folder's privacy does not depend on
-   * whether Git happens to know it.
+   * be proved either way, `'partial'` when its sign-in look saw only part of its names (a differently spelled marker past
+   * the bound is not ruled out: the folder is skipped and the answer says it is not whole). A descendant is judged exactly
+   * like a nested repository, so a folder's privacy does not depend on whether Git happens to know it.
    */
-  descendant(real: string): Promise<'private' | 'unreadable' | 'spent' | undefined>;
+  descendant(real: string): Promise<'private' | 'unreadable' | 'partial' | 'spent' | undefined>;
 }
 
 type Kernel = Pick<KernelPorts, 'roots' | 'paths' | 'spawn' | 'clock'>;
@@ -151,9 +153,12 @@ export function kernelPins(kernel: Kernel, browser: FolderBrowser): (budget: Spa
       nested: holder(kernel, policy.child, false, budget),
       descendant: async real => {
         // One look at a folder (it lists every name for a sign-in file) is bounded by what is left of the build's time.
-        const timed = await within(kernel.clock, budget, () => policy.child(real));
+        const timed = await within(kernel.clock, budget, () => policy.childLook(real));
         if (!timed.done) return 'spent';
-        return timed.value === undefined ? undefined : timed.value === 'private' ? 'private' : 'unreadable';
+        const { verdict, complete } = timed.value;
+        if (verdict === 'private') return 'private';
+        if (verdict !== undefined) return 'unreadable';
+        return complete ? undefined : 'partial';
       },
     };
   };
@@ -168,11 +173,15 @@ export class GitTimedOut extends Error {
 }
 
 /**
- * Whether `path` still resolves to ITSELF (no link at any component, and a folder is there): the cheap check a cached index
- * must pass before it is answered, so a registered place that became a link is not served from memory.
+ * Where a registered path really is: the home it is judged against, and what the path resolves to (every link at any
+ * component followed). The routes decide the outside-home gate on it, and a cached index is answered only while the
+ * registered path still resolves to ITSELF, so a place that became a link is not served from memory.
  */
-export function stillThatPlace(browser: Pick<FolderBrowser, 'realPaths'>): (path: string) => Promise<boolean> {
-  return async path => (await browser.realPaths([path])).at(0) === path.replace(/(?<=.)\/+$/u, '');
+export function placeOf(browser: Pick<FolderBrowser, 'home' | 'realPaths'>): FilePlace {
+  return {
+    home: () => browser.home(),
+    resolve: async path => (await browser.realPaths([path])).at(0),
+  };
 }
 
 /** The default Git child's limits; the index asks for its own byte cap and gives the child what is left of its budget. */

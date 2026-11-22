@@ -4,14 +4,14 @@ import type { ProjectRegistry } from '../../lib/registry.ts';
 import { kernelBrowser } from '../folders/adapter.ts';
 import { buildProjectIndex, type ProjectIndex } from './build.ts';
 import { ProjectIndexCache } from './cache.ts';
-import { kernelGit, kernelPins, stillThatPlace } from './pins.ts';
-import { filesRescanRoute, filesRoute, filesStatusRoute } from './routes.ts';
+import { kernelGit, kernelPins, placeOf } from './pins.ts';
+import { type FilePlace, filesRescanRoute, filesRoute, filesStatusRoute } from './routes.ts';
 
 /** What a test replaces: how one project folder becomes an index. The real one reads through the kernel's `imports` root. */
 export interface FileIndexDeps {
   readonly build: (path: string) => Promise<ProjectIndex>;
-  /** Whether a registered path still resolves to itself; a test with no disk says yes. The real one asks the kernel. */
-  readonly stillThatPlace?: (path: string) => Promise<boolean>;
+  /** Where a registered path really is (its home, what it resolves to); a test with no disk names its own. The real one asks the kernel. */
+  readonly place?: FilePlace;
 }
 
 /**
@@ -37,10 +37,10 @@ export function filesRoutes(
         instant: () => new Date(kernel.clock.nowMs()).toISOString() as Instant,
       }));
   const cache = new ProjectIndexCache(build, () => kernel.clock.nowMs());
-  const still = deps?.stillThatPlace ?? stillThatPlace(kernelBrowser(kernel));
+  const place = deps?.place ?? placeOf(kernelBrowser(kernel));
   return {
-    'GET /v1/projects/:id/files': filesRoute(registry, cache, still),
-    'GET /v1/projects/:id/files/status': filesStatusRoute(registry, cache, still),
-    'POST /v1/projects/:id/files/rescan': filesRescanRoute(registry, cache, still),
+    'GET /v1/projects/:id/files': filesRoute(registry, cache, place),
+    'GET /v1/projects/:id/files/status': filesStatusRoute(registry, cache, place),
+    'POST /v1/projects/:id/files/rescan': filesRescanRoute(registry, cache, place),
   };
 }

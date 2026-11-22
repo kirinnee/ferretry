@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { DEFAULT_PROJECT_INDEX_LIMITS, ProjectFolderRefused } from '../../../daemon/features/files/build.ts';
 import { ProjectIndexSummarySchema } from '../../../contract/index.ts';
 import { kernelBrowser } from '../../../daemon/features/folders/adapter.ts';
-import { stillThatPlace } from '../../../daemon/features/files/pins.ts';
+import { placeOf } from '../../../daemon/features/files/pins.ts';
 import { cleanUp, git, put, world } from './files-support.ts';
 
 afterEach(cleanUp);
@@ -273,14 +273,16 @@ describe('the project folder is the registered place, not wherever its spelling 
 
   test('what a cached index is checked against: a registered path that became (or sits under) a link is no longer itself', async () => {
     const w = await world();
-    const still = stillThatPlace(kernelBrowser(w.kernel));
+    const place = placeOf(kernelBrowser(w.kernel));
+    const itself = async (path: string) => (await place.resolve(path)) === path.replace(/(?<=.)\/+$/u, '');
     await put(w.user, { 'other/work/a.txt': '' });
     await symlink(join(w.user, 'other'), join(w.user, 'link'));
 
-    expect(await still(w.project)).toBe(true);
-    expect(await still(`${w.project}/`)).toBe(true);
-    expect(await still(join(w.user, 'link', 'work'))).toBe(false);
-    expect(await still(join(w.user, 'missing'))).toBe(false);
+    expect(await itself(w.project)).toBe(true);
+    expect(await itself(`${w.project}/`)).toBe(true);
+    expect(await itself(join(w.user, 'link', 'work'))).toBe(false);
+    expect(await itself(join(w.user, 'missing'))).toBe(false);
+    expect(await place.home()).toBe(w.user);
   });
 });
 

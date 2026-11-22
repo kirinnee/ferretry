@@ -166,8 +166,11 @@ async function deviceOf(root: HeldRoot, rel: string): Promise<string | undefined
   }
 }
 
-/** Why a folder below the project was not entered: the policy said private, it is on another disk, or nothing was proved. */
-type Verdict = 'ok' | 'private' | 'device' | 'unreadable' | 'spent';
+/**
+ * Why a folder below the project was not entered: the policy said private, it is on another disk, nothing was proved, or
+ * its sign-in look saw only part of its names (`partial`: not proved safe, so skipped and the answer is not whole).
+ */
+type Verdict = 'ok' | 'private' | 'device' | 'unreadable' | 'partial' | 'spent';
 
 /** Counts what a refused folder (or each file below one) costs the answer, in the words the skip list already has. */
 function refuse(state: State, verdict: Exclude<Verdict, 'ok'>, count = 1): void {
@@ -177,7 +180,7 @@ function refuse(state: State, verdict: Exclude<Verdict, 'ok'>, count = 1): void 
       ? 'denied'
       : verdict === 'device'
         ? 'excluded'
-        : verdict === 'spent'
+        : verdict === 'spent' || verdict === 'partial'
           ? 'truncated'
           : 'unreadable',
     count,
