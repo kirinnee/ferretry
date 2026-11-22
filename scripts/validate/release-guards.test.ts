@@ -996,6 +996,118 @@ describe('the Cloudflare token never meets checkout code (both PWA deploy workfl
         refused(text => text.replace(/WRANGLER_VERSION: [^\n]+/u, `WRANGLER_VERSION: ${version}`), 'exact x.y.z');
       }
     });
+
+    // The Opus (miriah) security round: each gap in the guard has a mutation that was GREEN (wrongly accepted) before.
+    /** A new job in the workflow, inserted before the token job, with the given body lines (already indented 4). */
+    const addJob = (name: string, body: string) => (text: string) => {
+      const at = tokenJobStart(text);
+      const guard = file.includes('-v5')
+        ? "github.ref == 'refs/heads/rebuild/preview'"
+        : "github.ref == 'refs/heads/main'";
+      return `${text.slice(0, at)}  ${name}:\n    if: ${guard}\n${body}\n${text.slice(at)}`;
+    };
+    const checkoutSha = 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09';
+    const holderMessage = 'job evil holds the Cloudflare token';
+
+    describe(`${file}: the guard recognises a token holder however the secret is spelled`, () => {
+      for (const spelling of [
+        '${{ Secrets.cloudflare_api_token }}',
+        '${{ SECRETS.CLOUDFLARE_API_TOKEN }}',
+        "${{ secrets['CLOUDFLARE_API_TOKEN'] }}",
+        '${{ secrets["CLOUDFLARE_API_TOKEN"] }}',
+        '${{ toJSON(secrets) }}',
+        '${{ TOJSON(SECRETS) }}',
+        '${{ fromJson(toJson(secrets)).CLOUDFLARE_API_TOKEN }}',
+        '${{ FromJSON(ToJSON(Secrets)).x }}',
+      ]) {
+        test(`a checkout job that reads ${spelling} is a token holder and is refused`, () => {
+          refused(
+            addJob(
+              'evil',
+              `    runs-on: ubuntu-latest\n    steps:\n      - uses: ${checkoutSha}\n      - run: echo hi\n        env:\n          T: ${spelling}`,
+            ),
+            holderMessage,
+          );
+        });
+      }
+    });
+
+    test(`${file}: a job that calls a reusable workflow with secrets: inherit (or a token secret) is a holder and is refused`, () => {
+      refused(
+        addJob('evil', '    uses: ./.github/workflows/x.yaml\n    secrets: inherit'),
+        `${holderMessage} and calls a reusable workflow`,
+      );
+      refused(
+        addJob(
+          'evil',
+          '    uses: ./.github/workflows/x.yaml\n    secrets:\n      T: ${{ SECRETS.CLOUDFLARE_API_TOKEN }}',
+        ),
+        `${holderMessage} and calls a reusable workflow`,
+      );
+      refused(
+        addJob('evil', '    uses: someone/else/.github/workflows/x.yaml@main\n    secrets: INHERIT'),
+        `${holderMessage} and calls a reusable workflow`,
+      );
+    }, 60_000);
+
+    test(`${file}: a token job may use only the pinned download-artifact and upload-artifact actions`, () => {
+      for (const uses of [
+        'actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830',
+        'someone/else@0123456789abcdef0123456789abcdef01234567',
+        'someone/else/.github/actions/composite@0123456789abcdef0123456789abcdef01234567',
+        'actions/download-artifact@v4',
+        'actions/upload-artifact@main',
+        'docker://alpine:3',
+      ]) {
+        refused(addStepToTokenJob(`      - uses: ${uses}\n`), 'not on the allow-list');
+      }
+    }, 60_000);
+
+    test(`${file}: npm exec, npm x, git clone and gh repo clone in a token job's run step are refused`, () => {
+      for (const command of [
+        'npm exec wrangler -- --version',
+        'npm x wrangler --version',
+        'npm --yes exec wrangler',
+        'git clone https://example.com/x.git',
+        'gh repo clone someone/else',
+      ]) {
+        refused(addStepToTokenJob(`      - name: sneaky\n        run: ${command}\n`), message);
+      }
+    }, 60_000);
+
+    test(`${file}: a secret in the job-level env is refused however it is spelled (bracket form, toJSON)`, () => {
+      for (const spelling of ["${{ secrets['CLOUDFLARE_API_TOKEN'] }}", '${{ toJSON(secrets) }}', '${{ Secrets.X }}']) {
+        refused(text => {
+          const at = tokenJobStart(text);
+          const runsOn = text.indexOf('    runs-on:', at);
+          return `${text.slice(0, runsOn)}    env:\n      LEAK: ${spelling}\n${text.slice(runsOn)}`;
+        }, 'job-level env');
+      }
+    }, 60_000);
+
+    test(`${file}: a secret in the workflow-level env is refused however it is spelled (bracket form, toJSON)`, () => {
+      for (const spelling of ["${{ secrets['CLOUDFLARE_API_TOKEN'] }}", '${{ toJSON(secrets) }}']) {
+        refused(
+          text => text.replace(/(WRANGLER_VERSION: [^\n]+)/u, `$1\n  LEAK: ${spelling}`),
+          'a secret at workflow level',
+        );
+      }
+    }, 60_000);
+
+    test(`${file}: the install step holding a bracket-form secret is not a secret-free install`, () => {
+      refused(
+        text =>
+          text.replace(
+            '      - name: Install the pinned wrangler\n',
+            "      - name: Install the pinned wrangler\n        env:\n          LEAK: ${{ secrets['SOME_OTHER_SECRET'] }}\n",
+          ),
+        'without first installing',
+      );
+    });
+
+    test(`${file}: a wrangler pages deploy without --commit-hash="\${GITHUB_SHA}" is refused`, () => {
+      refused(text => text.replace(/ --commit-hash="\$\{GITHUB_SHA\}"/u, ''), 'commit-hash');
+    });
   }
 
   test('the two workflows must pin the same wrangler', () => {

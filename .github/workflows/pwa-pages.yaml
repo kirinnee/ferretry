@@ -11,7 +11,7 @@ concurrency:
 
 env:
   # The ONE wrangler version the token-holding job installs (exact, never a range or a tag).
-  # scripts/validate/token-jobs.sh holds that it is exact and equals pwa-pages-v5.yaml's.
+  # scripts/validate/release-guards.sh holds that it is exact and equals pwa-pages-v5.yaml's.
   WRANGLER_VERSION: 4.93.0
 
 # FOUR JOBS, BECAUSE THE SIGNING KEY MUST NEVER SHARE A RUNNER WITH THE BUILD, AND THE CLOUDFLARE TOKEN MUST NEVER SHARE
@@ -29,7 +29,7 @@ env:
 #           (scripts/ci/verify-pwa-release.sh) before anything is uploaded, and hands the verified bytes on as an
 #           artifact.
 #   deploy  holds only the Cloudflare token and has NO checkout, no nix, no bun: it downloads the verified artifact
-#           and runs the exactly-pinned wrangler (scripts/validate/token-jobs.sh holds that).
+#           and runs the exactly-pinned wrangler (scripts/validate/release-guards.sh holds that).
 #
 # Every action in this workflow is pinned to an exact SHA, because two of its jobs hold long-lived
 # secrets (docs/standards/ci-cd/index.md).
@@ -112,7 +112,7 @@ jobs:
           retention-days: 1
 
   # THE CLOUDFLARE TOKEN NEVER MEETS CHECKOUT CODE. `deploy` holds it and runs no `actions/checkout`, no local action, no
-  # `nix develop`, no `bun` or `bunx` (scripts/validate/token-jobs.sh holds that), so no flake shellHook, bun resolution or
+  # `nix develop`, no `bun` or `bunx` (scripts/validate/release-guards.sh holds that), so no flake shellHook, bun resolution or
   # script from the pushed commit ever runs with the token in its environment. `verify` has the checkout and holds no
   # secret: it proves the signed release and hands the verified bytes to `deploy` as an artifact. Wrangler is installed
   # from npm at ONE exact version, in a step that holds no token, and only then run in a step that does.
@@ -207,4 +207,4 @@ jobs:
           set -euo pipefail
           export PATH="${RUNNER_TEMP}/wrangler/node_modules/.bin:${PATH}"
           wrangler pages deploy "${RUNNER_TEMP}/dist" \
-            --project-name=ferretry --branch=main
+            --project-name=ferretry --branch=main --commit-hash="${GITHUB_SHA}"

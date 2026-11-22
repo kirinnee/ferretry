@@ -37,8 +37,10 @@ set -euo pipefail
 #      no other branch, every job's `if` OPENS with exactly that one-ref guard (only `&&` may follow it, never a
 #      top-level `||`), its signing and deploy jobs use environments of their own, and its deploy job refuses a stale
 #      commit (the run branch's head must equal GITHUB_SHA) in a step before `wrangler pages deploy`.
-#   5. The Cloudflare token never meets checkout code: a PWA deploy job that reads a CLOUDFLARE secret has no checkout,
-#      local action, nix, bun, bunx or npx, and runs wrangler only from an exact-version, secret-free npm install.
+#   5. The Cloudflare token never meets checkout code: a PWA deploy job that reads a CLOUDFLARE secret (spelled any way:
+#      any case, `secrets[...]`, `toJSON(secrets)`, `secrets: inherit`) has no checkout, no action but the SHA-pinned
+#      download/upload-artifact, no reusable workflow, no nix, bun, bunx, npx, npm exec, npm x or clone, and runs wrangler
+#      only from an exact-version, secret-free npm install, with the commit passed to `wrangler pages deploy`.
 #   6. Nothing but CD and the Release workflow's own steps names `Casks/` or semantic-release.
 
 root_dir="$(git rev-parse --show-toplevel)"
@@ -193,47 +195,62 @@ if [[ -f ${preview} ]]; then
 fi
 
 # 5. THE CLOUDFLARE TOKEN NEVER MEETS CHECKOUT CODE. A job of a PWA deploy workflow that can read a CLOUDFLARE secret
-# has no `actions/checkout`, no local action (`uses: ./...`), no reusable workflow and no run step that names `nix`, `bun`,
-# `bunx` or `npx`: the checkout's flake shellHook, bun resolution and scripts would otherwise run with the token in their
+# has no `actions/checkout`, no action but the SHA-pinned `actions/download-artifact` and `actions/upload-artifact` (an
+# allow-list: no local, remote-composite or third-party action), no reusable workflow (a job that passes `secrets: inherit`
+# is a holder too) and no run step that names `nix`, `bun`, `bunx`, `npx`, `npm exec`, `npm x`, `git clone` or
+# `gh repo clone`: the checkout's flake shellHook, bun resolution and scripts would otherwise run with the token in their
 # environment. Wrangler there is installed from npm at ONE exact version (`WRANGLER_VERSION`, the same in both
 # workflows), by a step that holds no secret, before any step that runs it.
+# GitHub contexts are case-insensitive, so every regex below is matched with the `i` flag.
+#   holder: a CLOUDFLARE secret by name or by bracket, the whole `secrets` context (toJSON / fromJson(toJson(...))), or a
+#           job that passes ALL of them on (`secrets: inherit`, the reusable-workflow form).
+#   any_secret: any secret at all (the job-level and workflow-level env, and the install step, must hold none).
+#   allowed_uses: the ONLY actions a token job may use, pinned by full SHA: no remote composite, no third party.
+#   forbidden_run: a package runner or a clone a token job's run step must not name.
+holder_re='secrets\.cloudflare|secrets\[|tojson\(\s*secrets|"secrets":"inherit"'
+any_secret_re='secrets\.|secrets\[|tojson\(\s*secrets'
+allowed_uses_re='^actions/(download|upload)-artifact@[0-9a-f]{40}$'
+forbidden_run_re='(^|[^A-Za-z0-9_./-])(nix|bun|bunx|npx|npm\s+(-\S+\s+)*(exec|x)|git\s+clone|gh\s+repo\s+clone)([^A-Za-z0-9_-]|$)'
 pages_workflows=(.github/workflows/pwa-pages.yaml "${preview}")
 wrangler_versions=()
 for workflow in "${pages_workflows[@]}"; do
   [[ -f ${workflow} ]] || continue
-  holders="$(json "${workflow}" | jq -r '
+  holders="$(json "${workflow}" | jq -r --arg holder "${holder_re}" '
     .jobs // {} | to_entries[]
-    | select(.value | tostring | test("secrets\\.CLOUDFLARE|secrets\\[|toJSON\\(secrets"))
+    | select(.value | tostring | test($holder; "i"))
     | .key')"
   [[ -n ${holders} ]] || fail "${workflow}: no job reads a CLOUDFLARE secret, so the deploy token check has nothing to prove (renamed secret?)"
   while IFS=$'\t' read -r job why; do
-    fail "${workflow}: job ${job} holds the Cloudflare token and ${why}; the token must never meet checkout code (no checkout, local action, nix, bun, bunx or npx in a token job)"
-  done < <(json "${workflow}" | jq -r '
+    fail "${workflow}: job ${job} holds the Cloudflare token and ${why}; the token must never meet checkout code (a token job has no checkout, local or third-party action, reusable workflow, nix, bun, bunx, npx, npm exec or clone)"
+  done < <(json "${workflow}" | jq -r --arg holder "${holder_re}" --arg anysecret "${any_secret_re}" --arg allowed "${allowed_uses_re}" --arg runner "${forbidden_run_re}" '
     .jobs // {} | to_entries[]
-    | select(.value | tostring | test("secrets\\.CLOUDFLARE|secrets\\[|toJSON\\(secrets"))
+    | select(.value | tostring | test($holder; "i"))
     | .key as $job
     | (if (.value.uses // null) != null then ["\($job)\tcalls a reusable workflow"] else [] end)
       + [(.value.steps // [])[]
-         | if ((.uses // "") | test("^(actions/checkout@|\\./)")) then "\($job)\tuses \(.uses)"
-           elif ((.run // "") | test("(^|[^A-Za-z0-9_./-])(nix|bun|bunx|npx)([^A-Za-z0-9_-]|$)")) then "\($job)\truns nix, bun, bunx or npx"
+         | if ((.uses // "") != "" and ((.uses // "") | test($allowed) | not)) then "\($job)\tuses \(.uses), which is not on the allow-list (actions/download-artifact and actions/upload-artifact pinned by a full commit SHA, nothing else)"
+           elif ((.run // "") | test($runner)) then "\($job)\truns nix, bun, bunx, npx, npm exec, npm x, git clone or gh repo clone"
            else empty end]
-      + (if ((.value.env // {}) | tostring | test("secrets\\.")) then ["\($job)\tputs a secret in the job-level env (every step, the install included, would hold it)"] else [] end)
+      + (if ((.value.env // {}) | tostring | test($anysecret; "i")) then ["\($job)\tputs a secret in the job-level env (every step, the install included, would hold it)"] else [] end)
     | .[]')
   # Wrangler: exact version, installed by a secret-free step BEFORE the first step that runs it.
   version="$(json "${workflow}" | jq -r '.env.WRANGLER_VERSION // ""')"
   [[ ${version} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
     fail "${workflow}: env.WRANGLER_VERSION must be an exact x.y.z version, got '${version}'"
   wrangler_versions+=("${version}")
-  json "${workflow}" | jq -e '(.env // {}) | tostring | test("secrets\\.") | not' >/dev/null ||
+  json "${workflow}" | jq -e --arg anysecret "${any_secret_re}" '(.env // {}) | tostring | test($anysecret; "i") | not' >/dev/null ||
     fail "${workflow}: a secret at workflow level reaches every job, the install steps included"
+  # Every deploy records the commit: wrangler outside a git checkout cannot read it, so the attribution is passed in.
+  json "${workflow}" | jq -e '[.jobs[].steps[]? | (.run // "") | select(test("wrangler pages deploy"))] | all(contains("--commit-hash=\"${GITHUB_SHA}\""))' >/dev/null ||
+    fail "${workflow}: a wrangler pages deploy step must pass --commit-hash=\"\${GITHUB_SHA}\" (there is no checkout in the token job, so wrangler cannot read the commit itself)"
   while IFS= read -r job; do
-    json "${workflow}" | jq -e --arg job "${job}" '
+    json "${workflow}" | jq -e --arg job "${job}" --arg anysecret "${any_secret_re}" '
       .jobs[$job].steps as $steps
       | ([$steps | to_entries[] | select((.value.run // "") | test("wrangler pages")) | .key] | first) as $use_at
       | ([$steps | to_entries[]
           | select((.value.run // "") as $r
               | ($r | contains("npm install")) and ($r | contains("wrangler@${WRANGLER_VERSION}")) and ($r | contains("--ignore-scripts"))
-                and (((.value.env // {}) | tostring | test("secrets\\.|CLOUDFLARE")) | not))
+                and (((.value.env // {}) | tostring | test($anysecret + "|CLOUDFLARE"; "i")) | not))
           | .key] | first) as $install_at
       | $use_at == null or ($install_at != null and $install_at < $use_at)' >/dev/null ||
       fail "${workflow}: job ${job} runs wrangler without first installing it at the exact WRANGLER_VERSION (npm install --ignore-scripts wrangler@\${WRANGLER_VERSION}) in a step with no secret"

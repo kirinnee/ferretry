@@ -60,7 +60,7 @@ concurrency:
 env:
   FY_HOSTED_APP_ORIGIN: https://ferretry-v5.pages.dev
   # The ONE wrangler version both token-holding jobs install (exact, never a range or a tag).
-  # scripts/validate/token-jobs.sh holds that it is exact and equals pwa-pages.yaml's.
+  # scripts/validate/release-guards.sh holds that it is exact and equals pwa-pages.yaml's.
   WRANGLER_VERSION: 4.93.0
 
 # SIX JOBS, BECAUSE THE SIGNING KEY MUST NEVER SHARE A RUNNER WITH THE BUILD, AND THE CLOUDFLARE TOKEN MUST NEVER SHARE
@@ -81,7 +81,7 @@ env:
 #           (scripts/ci/verify-pwa-release.sh) and the never-backwards decision before anything is uploaded, and hands
 #           the verified bytes on as an artifact.
 #   deploy  holds the Cloudflare token and has NO checkout, no nix, no bun: it downloads the verified artifact and
-#           runs the exactly-pinned wrangler (scripts/validate/token-jobs.sh holds that).
+#           runs the exactly-pinned wrangler (scripts/validate/release-guards.sh holds that).
 #
 # Every action in this workflow is pinned to an exact SHA, because two of its jobs hold long-lived
 # secrets (docs/standards/ci-cd/index.md).
@@ -270,7 +270,7 @@ jobs:
           retention-days: 1
 
   # THE CLOUDFLARE TOKEN NEVER MEETS CHECKOUT CODE. `project` and `deploy` hold it; neither runs `actions/checkout`, a
-  # local action, `nix develop`, `bun` or `bunx` (scripts/validate/token-jobs.sh holds that), so no flake shellHook, bun
+  # local action, `nix develop`, `bun` or `bunx` (scripts/validate/release-guards.sh holds that), so no flake shellHook, bun
   # resolution or script from the pushed commit ever runs with the token in its environment. Everything that needs the
   # repository runs in `verify`, which holds no secret: it proves the signed release and decides never-backwards, and
   # hands the verified bytes to `deploy` as an artifact. Wrangler is installed from npm at ONE exact version, in a step
