@@ -260,7 +260,7 @@ pre-commit-lib.run {
     # is not inert, it is wrong: a diagram in a document is an ordinary fenced block in that
     # document's own format. Runs on EVERY file and scans the whole tree, for the same reason the
     # conflict-markers gate does — the opener reaches `main` through the file nobody was looking at.
-    # The two files that must SHOW the syntax to teach it are exempt by exact path; see
+    # The three files that must SHOW the syntax to teach it are exempt by exact path; see
     # scripts/validate/no-fy-render-in-docs.sh and docs/fy-render.md.
     # The one-time v4 -> v5 converter stays outside the product: no workspace glob or root tsconfig include reaches
     # `migration/`, no file outside it, docs and this wiring names it, and it is private with no bin. Runs on every
@@ -377,6 +377,18 @@ pre-commit-lib.run {
       enable = true;
       name = "No fy-render fences in durable files";
       entry = validator "scripts/validate/no-fy-render-in-docs.sh";
+      files = ".*";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    # `docs/fy-render.md` and `docs/reference-standard.md` say where the code is; a path that was moved or deleted
+    # turns such a sentence into a trap. Every path they name must be a tracked path. Runs on EVERY file and reads the
+    # whole tree, because the file whose move breaks a document is never the document. See scripts/validate/doc-paths.sh.
+    a-doc-paths = {
+      enable = true;
+      name = "Contract documents name tracked paths";
+      entry = validator "scripts/validate/doc-paths.sh";
       files = ".*";
       pass_filenames = false;
       language = "system";

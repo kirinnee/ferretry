@@ -31,7 +31,8 @@ specs, source files, or exported artifacts.** Use the document's native format a
 assets instead — a Mermaid diagram in a document is an ordinary `mermaid` fenced block, rendered by
 whatever that document's own renderer supports or left as text, never an `fy-render` block. This is
 not a convention: `scripts/validate/no-fy-render-in-docs.sh` fails the commit that puts a fence
-opener anywhere outside the two files that teach the syntax — this one and
+opener anywhere outside the **three** files that teach the syntax — this one,
+[the hypermedia teaching page](hypermedia.md) (which quotes the instruction every ferret is given) and
 [the authoring skill](../.claude/skills/fy-render-authoring/SKILL.md).
 
 ---
@@ -44,10 +45,17 @@ highlight-or-escape path, untouched.
 
 The **delimiter** may be any form CommonMark accepts — three or more backticks, three or more tildes,
 and any of those nested inside a blockquote or list item — because remark produces the same node for
-all of them and the renderer therefore treats them alike.
-`scripts/validate/no-fy-render-in-docs.sh` matches that same set, and
-`packages/pwa/tests/unit/markdown.test.tsx` pins the agreement in both directions: a form that
-renders must be a form the gate finds.
+all of them and the renderer therefore treats them alike. **Spaces or a tab may sit between the delimiter and
+the token** (CommonMark leaves them out of the info string, and the reader's opener,
+`FY_RENDER_OPENER` in `packages/plugins/conversation/app/hypermedia/fence-boundaries.ts`, takes `[ \t]*` there), so
+a spaced opener is an opener.
+`scripts/validate/no-fy-render-in-docs.sh` matches that same set, spaced form included. The gate's half is
+pinned against planted openers in
+`packages/plugins/conversation/tests/integration/app/fy-render-docs-gate.test.ts`, each form red before the gate
+took it. The reader's half is pinned in
+`packages/plugins/conversation/tests/unit/app/hypermedia/fy-render-fence-decisions.test.tsx` for the delimiter
+forms, indents and list or quote leads it lists; **it does not test the spaced form**, which is read from the
+two sources above and not measured. A form that renders must be a form the gate finds.
 
 The body is a **header block**, a **boundary line**, then a **payload**:
 
@@ -103,8 +111,8 @@ also what it is.
 
 ### Caps
 
-Single-owned constants in `packages/protocol/src/lib/fy-render-caps.ts` (`@ferretry/protocol/fy-render-caps`);
-this table and the tests read the same numbers. The caps live in protocol — above every consumer —
+Single-owned constants in `packages/plugins/conversation/contract/fy-render-caps.ts` (Conversation's contract);
+this table and the tests read the same numbers. The caps live in the contract — above every consumer —
 because a daemon or CLI validating a saved picture reads the same numbers the reader enforces, and
 `packages/app/src/fy-render/bounds.ts` re-exports them unchanged beside the sandbox-frame limits
 that stay with the shells.
@@ -164,23 +172,42 @@ percentage on one axis cannot carry an oversized length on the other.
 
 ## Where a block renders, and where it cannot
 
-Rendering is gated by `MarkdownProps.enableFyRender`, which **defaults to `false`**. A `task` or `board` block needs one thing more: a board to read, which the surface lends as `MarkdownProps.cardEmbed`. A chat gets it from `sessionReferenceSurface` and the Inbox and a task's detail from `DaemonTaskReferences`, the same two providers that prove `&F12`; a surface that lends none leaves the block an ordinary fence. Exactly one
-production call site sets it: `ChatProse` in `packages/pwa/src/components/chat-prose.tsx`. Three
-surfaces draw through it, all of them text the owner's own ferrets (or the owner) wrote on the owner's
-daemon: an assistant's message, an agenda item, and a board task's detail (its summary, premise,
-context, brief and How to test, [board.md](board.md#how-a-task-reads)). Every other `<Markdown>`
-consumer — file previews, warden reports, and the composer's own preview once it lands — gets the
-inert escaped fence automatically by not passing it, with no new code on those surfaces.
+An assistant's message is read as **Durian hypermedia** — Markdown plus fenced parts (` ```terminal `, tabs, an
+animation…), with Ferretry's references on top — by **`HypermediaProse`**
+(`packages/plugins/conversation/app/hypermedia/hypermedia-prose.tsx`). A `fy-render` block is one of its
+fences, drawn by the host block in `packages/plugins/conversation/app/hypermedia/fy-render-host.tsx`: the reader decides by
+CommonMark's own boundaries which fences are exactly `fy-render` and really closed
+(`packages/plugins/conversation/app/hypermedia/fence-boundaries.ts`), and hands each body to **the fence door**
+(`packages/plugins/conversation/app/render/fences.tsx`), which answers the block or answers nothing, and then the fence
+stays the plain code it is. Whether a surface has a door at all is the surface's choice: it is
+`ReferenceSurface.fences`, lent by exactly one provider, the chat's
+(`packages/plugins/conversation/app/chat/reference-surface.ts`), which also lends the board a `task` or `board` block
+reads (`cardEmbed`). A surface that lends no door leaves every block an ordinary code fence.
 
-**This structural default is the whole answer to "how does it stay conversation-only".** It is not a
-rule somebody has to remember; it is a capability a surface must name deliberately.
-`packages/pwa/tests/unit/fy-render-opt-in.test.ts` holds the count at one and fails on the second.
+| Surface                                                                                   | How its text is read                                                                                                                                                                                                               | A `fy-render` block                                                                                                                                                                           |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chat** — an assistant's message in the transcript                                       | `HypermediaProse` (`packages/plugins/conversation/app/chat/transcript-row.tsx`), the whole message, with the chat's door                                                                                                           | **Draws**, once its fence is closed. While the message is still arriving, a fence closed only by the last line draws as code until the next line proves it                                    |
+| **Queue, one ferret's panel** — a message waiting to be sent                              | The shell's `Markdown`, so a location block keeps its chip and every other fence is the plain `<pre>` (`packages/plugins/conversation/app/queue/queue-prose.tsx`); the panel inherits the chat's door                              | **Draws** for each closed, exactly-`fy-render` fence at the top level, opened at column zero. One indented, or nested in a list item or a quote, stays code here (it draws in the transcript) |
+| **All queues** — the standalone screen                                                    | The same `queue-prose.tsx`, with no door                                                                                                                                                                                           | **Code**                                                                                                                                                                                      |
+| **Agenda** — an item's segments                                                           | The shell's `ProseView`, which draws Conversation's `HypermediaProse` once it is allowed on that machine (`ProvidedProse`), and the shell's `Markdown` until then (`packages/plugins/agenda/app/features/agenda/agenda-prose.tsx`) | **Code.** The agenda's surface lends no door, so a ` ```terminal `, tabs and a proved `&F12` draw there and a `fy-render` block stays a fence                                                 |
+| **Every other `<Markdown>`** — file previews, warden reports, skills, the composer, packs | The shell's `Markdown` (`packages/app/src/prose/markdown.tsx`)                                                                                                                                                                     | **Code.** `Markdown` has no way to draw an illustration: the capability, its opt-in and the fence plumbing are gone from it                                                                   |
+
+Two Durian parts are **held as code** on every surface, before Durian reads them
+(`packages/plugins/conversation/app/hypermedia/held-fences.tsx`): a ` ```chart ` fence, because Durian evaluates a
+chart's formulas at parse time and nothing bounds that work, and a ` ```codewalk ` fence, which is not drawn. They are
+a different language from the `chart` **type** of a `fy-render` block below, which is our own bounded reader and draws.
+
+**The count is the whole answer to "how does it stay conversation-only".** It is not a rule somebody has to remember:
+`<HypermediaProse` is mounted from exactly two places, the transcript row and `ProvidedProse` (the view the agenda is
+given), and a block draws only where a surface lends a door.
+`packages/plugins/conversation/tests/unit/app/render/fy-render-opt-in.test.ts` holds that count at two and fails on a
+third, and fails if the shell's `Markdown` ever names the capability again.
 
 Two properties this feature must never change, and does not:
 
-1. The Markdown pipeline has **no `rehype-raw`**, so literal HTML typed in prose renders as escaped
-   text, never DOM. Adding it would execute a `<script>` typed into any chat message.
-2. A fence whose info string is anything other than the exact token takes the pre-existing branch.
+1. Neither reader has **`rehype-raw`**, so literal HTML typed in prose renders as text, never DOM. Adding it
+   would execute a `<script>` typed into any chat message.
+2. A fence whose info string is anything other than the exact token takes the ordinary code path.
 
 ---
 
@@ -219,7 +246,7 @@ saved message is never rewritten. Everything written now says `task`.
   "N more on the board."; tasks that could not be shown (missing, unreadable) follow as notes, last.
 
 Each task is the real `BoardTask` the Board page draws, read-only: its title, lane, progress and the
-PRs it links. It reads as it does on the Board (the task's padding and the gap between tasks are the Board's own tokens, in chat and in the agenda alike), and the whole task opens it. The ferret is
+PRs it links. It reads as it does on the Board (the task's padding and the gap between tasks are the Board's own tokens, in the chat), and the whole task opens it. The ferret is
 named by its callsign (from the app's fleet, or the surface's own list), and every age ticks on a local
 clock every 30 seconds — a clock, not a daemon read. Clicking it opens the task exactly as a written `&F12` does (`onTaskOpen`), because
 the daemon's answer is the proof the reference standard asks for
@@ -237,8 +264,12 @@ the daemon's answer is the proof the reference standard asks for
   whole-board view that is re-read the same way. A task that moves lane or changes redraws in place.
   Unmounting releases the watch, and a store timer that no holder wants any more is cleared. The block
   never polls.
-- **One renderer.** It draws wherever `ChatProse` draws — chat messages, agenda bodies, a board task's
-  detail — and nowhere else. Spec: `packages/plugins/conversation/app/render/fy-render-embed.ts`; component:
+- **One renderer.** It draws only where a surface lends the fence door **and** a board to read
+  (`cardEmbed`) — today the chat's, so a chat message and a ferret's queue panel
+  ([Where a block renders](#where-a-block-renders-and-where-it-cannot)); on the agenda and All queues the block is a
+  code fence. The Board's own task detail has **no fence reading at all** (its small `taskProse` renderer reads
+  only paragraphs, lists, inline `code`, bold, links and a `&F12` link, so the lines of a fenced block come out as
+  ordinary text), which is not the same as a code fence ([board.md](board.md#how-a-task-reads)). Spec: `packages/plugins/conversation/app/render/fy-render-embed.ts`; component:
   `packages/plugins/conversation/app/render/fy-render-task-embed.tsx`.
 
 ### Maps
@@ -274,7 +305,7 @@ they reach a style.
 - **Trusted Types.** The page refuses a string at `innerHTML` (`require-trusted-types-for 'script'`, no default
   policy). Leaflet writes `div.innerHTML = '<svg/>'` once at load to test for inline SVG; a build-time Vite
   plugin (`leafletTrustedTypes` in `vite.config.ts`) removes that write and throws if Leaflet's source ever
-  stops matching, so a Leaflet upgrade must be re-audited. `tests/unit/build-contract.test.ts` pins it.
+  stops matching, so a Leaflet upgrade must be re-audited. `packages/app/tests/unit/build-trusted-types.test.ts` pins it.
 - **One remote origin.** `img-src` names `https://tile.openstreetmap.org` and nothing else remote
   (`public/_headers`; `scripts/validate/pages-config.sh` pins the line and still refuses a bare `https:`).
   Markdown `![](url)` images remain requests the policy refuses. No API key exists anywhere in the client.
@@ -335,15 +366,15 @@ frames:                      # optional step-through: Previous / Next, a slider,
   **Try rendering again**.
 
 **The theme, and only the theme, paints it.** The block reads the app's tokens from its own element and
-resolves each to a hex literal through a one-pixel canvas (`components/fy-render-theme.ts`) — the
+resolves each to a hex literal through a one-pixel canvas (`packages/plugins/conversation/app/render/fy-render-theme.ts`) — the
 browser's own colour parser, so a `color-mix()` or `oklch()` token works. Series colours come from
-`--viz-1` … `--viz-8` in `styles/themes.css`; each slot NAMES a hue every family already restates per
+`--viz-1` … `--viz-8` in `packages/app/src/styles/tokens/base-style.css`; each slot NAMES a hue every family already restates per
 mode (the per-tool hues, the keyword violet, the Claude orange, the error red), so a new family gets a
 palette without writing one. Their order is measured, not chosen: across all 22 themes the first five stay
 at least 70 apart in RGB (of 441) and all eight at least 40, and the browser suite re-checks that against
 the sheet. The accent is deliberately not a slot — in several families it _is_ one of those hues — so a
 chart that wants the brand colour says `tone: accent`. Grid, ticks, tooltip, font and corner radius
-(`--radius-xs`, so a Neo bar is square) come from tokens too. `lib/fy-render-chart-config.ts` is the one
+(`--radius-xs`, so a Neo bar is square) come from tokens too. `packages/plugins/conversation/app/render/fy-render-chart-config.ts` is the one
 place a spec meets Chart.js, and a unit test walks every kind's configuration and finds no colour the theme
 did not supply.
 
@@ -365,12 +396,12 @@ are large libraries interpreting rich author input, and Mermaid writes raw `inne
 Trusted Types policy refuses. A chart is neither:
 
 - **The input is not a language a library interprets.** It is parsed by a strict zod schema
-  (`lib/fy-render-chart.ts`) into numbers and short strings; Chart.js receives a configuration this
+  (`packages/plugins/conversation/app/render/fy-render-chart-model.ts`) into numbers and short strings; Chart.js receives a configuration this
   package builds, every function in it this package's own. Nothing an author writes becomes code,
   markup, a style or a URL: labels and names reach Chart.js's `fillText` and React text.
 - **The libraries hold no sink the page would refuse.** Chart.js 4.6.1, `chartjs-plugin-zoom` 2.2.0 and
   its Hammer.js 2.0.8 write no markup, compile no string and open no request —
-  `tests/unit/build-contract.test.ts` scans the exact files bundled for `innerHTML`, `outerHTML`,
+  `packages/app/tests/unit/build-trusted-types.test.ts` scans the exact files bundled for `innerHTML`, `outerHTML`,
   `insertAdjacentHTML`, `document.write`, `new Function`, `eval`, `fetch`, `XMLHttpRequest` and
   `importScripts`, and fails an upgrade that adds one. So no Trusted Types policy, CSP source or
   `_headers` line changes for it (and none is in this build).
@@ -389,8 +420,8 @@ near the viewport. The main bundle grows by the component and the palette, ≈ 1
 
 **A diagram is whole, then readable, then yours to move.** Mermaid compiles at 16px text and the compiled SVG
 declares `width="100%"`, so as an `<img>` it used to be sized from the column and left to clip. Every compiled
-diagram, and every authored `svg` with a declared size, now sits in a **viewport** (`components/fy-render-viewport.tsx`,
-its numbers in `lib/fy-render-viewport.ts`, pure and unit-proven).
+diagram, and every authored `svg` with a declared size, now sits in a **viewport** (`packages/plugins/conversation/app/render/fy-render-viewport.tsx`,
+its numbers in `packages/plugins/conversation/app/render/fy-render-viewport-model.ts`, pure and unit-proven).
 
 - **Fit by default.** The picture is scaled **down** to the column width and to a height ceiling of `min(60% of the
 window, 800px)`, never up inline, so it is wholly visible at rest and the page never scrolls sideways.
@@ -413,7 +444,7 @@ window, 800px)`, never up inline, so it is wholly visible at rest and the page n
   transform. No new element type enters the tree: the sink is still an `<img>`, with no `innerHTML`, iframe, object,
   embed, script or canvas, and nothing is loaded.
 
-One decision outlives the viewport, in `lib/fy-render-mermaid-layout.ts`:
+One decision outlives the viewport, in `packages/plugins/conversation/app/render/fy-render-mermaid-layout.ts`:
 
 - **Vertical on a narrow column.** When the block's content width is under 520px, the header of a `flowchart` or
   `graph` declared `LR`/`RL` is rewritten to `TB`/`BT` **in the source, before it is compiled**. Only the direction
@@ -451,11 +482,12 @@ between two dark themes repaints too, which a light/dark key would have missed.
 
 ### The `html` fragment
 
-**An `html` block is a STATIC FRAGMENT rendered directly in the message — nothing an author writes in
-it runs.** The owner's decision: "no need to render full HTML — just render HTML fragments that don't
-allow scripts, directly." There is no frame, no shell and no message port (the interactive-page frame
-that used to stand here is deleted, with its static shell, its `_headers` rules and its pins).
-`fy-render-fragment.tsx` sanitizes the markup with DOMPurify (pinned, bundled, its own instance) and
+**A script-free `html` block is a STATIC FRAGMENT rendered directly in the message — nothing an author
+writes in it runs.** The owner's decision: "no need to render full HTML — just render HTML fragments that don't
+allow scripts, directly." A fragment has no frame, no shell and no message port of its own. The
+interactive-page frame is **not** deleted: an `html` block that carries script is routed away from this path
+to its own frame and static shell (`/fy-render-html.html`, with its own `_headers` rules and policy), which
+[the next section](#the-interactive-html-frame) states. `fy-render-fragment.tsx` sanitizes the markup with DOMPurify (pinned, bundled, its own instance) and
 appends the result as DOM nodes into a **closed shadow root** in the message.
 
 **What is stripped**, by the sanitizer's configuration and hooks rather than by review:
@@ -465,14 +497,18 @@ appends the result as DOM nodes into a **closed shadow root** in the message.
   `link`, `template`, `noscript` — plus SVG's `foreignObject`, `use` and SMIL animation, and the
   page's own players (`audio`, `video`; a recording is a `src:` block);
 - every `on*` handler, and `action`, `formaction`, `srcset`, `ping`, `background`, `poster`, `srcdoc`
-  and every author `data-*` attribute;
-- every URL that is not one of exactly three shapes: an `https:` link on an `<a>`, which opens a new tab
-  `noopener noreferrer`; a `data:image/` picture; or `media:<file>` from the session's media folder,
+  and every author `data-*` attribute except `data-tone`, `data-label` and `data-value` (plain words the
+  kit's components read);
+- on `href`, `xlink:href` and `src`, every URL that is not one of exactly three shapes: an `https:` link
+  on an `<a>`, which carries `target="_blank"` and `rel="noopener noreferrer"`; a `data:image/` picture (png,
+  jpeg, gif, webp or svg) on an `<img>`; or `media:<file>` on an `<img>`, from the session's media folder,
   read through the reader's grant, admitted like any other picture and shown as a `blob:` this page
-  minted. `javascript:`, every other `data:`, and every relative or same-origin URL are dropped — a
-  fragment has no business addressing the app;
+  minted. `javascript:`, every other `data:`, and every relative URL are dropped. **The `https:` link is
+  not narrowed to an origin:** the rule is the scheme and nothing else, so a link may name any HTTPS
+  address, the app's own origin included (nothing here checks the destination);
 - in CSS, inline and in `<style>`: `@import`, and every `url(…)` or `image-set(…)` that is not a
-  `data:image/`, which become `none`.
+  `data:image/`, which become `none`. This is a **regular-expression rewrite, not a CSS parser**, which is why
+  the page's policy below stays the backstop for it.
 
 **What is kept**: structure and text, tables, `<details>`/`<summary>`, lists, code, inline SVG with
 its filters, `style` attributes and `<style>` elements.
@@ -482,15 +518,20 @@ app and the app's selectors from reaching the fragment; custom properties still 
 the theme tokens arrive (a small baseline stylesheet inside the root uses them). The host carries
 `contain: layout paint`, so a `position: fixed` overlay is fixed to the fragment and clipped by it
 rather than covering the app, and its height is bounded (`min(70dvh, 900px)`, then it scrolls). The
-page's own policy is the backstop under all of it: `img-src`, `font-src` and `connect-src` refuse a
-remote load the sanitizer missed, and `require-trusted-types-for 'script'` refuses any string at a
-script sink. DOMPurify's own parse runs under the one dedicated `fy-fragment` Trusted Types policy
-(`lib/trusted-types.ts`, added to the `_headers` allowlist), which `fy-render-opt-in.test.ts` holds to
-a single user, and the result never reaches a sink as a string.
+page's own policy (`/*` in `_headers`) is a backstop only for the loads it names, and **not for every load**:
+`img-src` is `'self' data: blob:` plus the one map-tile origin `https://tile.openstreetmap.org`, so it refuses a
+remote picture from any other host but **admits a same-origin one and the tile origin**; `font-src` is `'self'
+data:`, so it refuses a remote font; `media-src` admits `https:`, so it is no backstop for a remote
+audio or video (the fragment strips those elements instead). **`connect-src` is no backstop here**: it admits
+`'self'`, `https:`, `wss:` and the local development origins, so the fragment relies on its own strips (`ping`, every
+script and handler) and not on this directive. `require-trusted-types-for 'script'` refuses any
+string at a script sink. DOMPurify's own parse runs under the one dedicated `fy-fragment` Trusted Types policy
+(`packages/app/src/security/trusted-types.ts`, added to the `_headers` allowlist), which
+`packages/plugins/conversation/tests/unit/app/render/fy-render-opt-in.test.ts` holds to a single user, and the result never reaches a sink as a string.
 
-**Measured in real Chromium** (`tests/integration/fy-render-fragment.security.test.ts`, the shipped
+**Measured in real Chromium** (`packages/plugins/conversation/tests/integration/app/fy-render-fragment.security.test.ts`, the shipped
 block under the exact `/*` policy from `_headers`, Trusted Types included, and a server-side request
-ledger): a corpus — free of `<script>` and `on…` handlers, since either one now routes a block to the
+ledger **of the test server's own requests: a request to any other origin would not show in it**): a corpus — free of `<script>` and `on…` handlers, since either one now routes a block to the
 interactive frame — of a `javascript:` link, a relative link, an inline-style `url()`, a `<style>` with `@import` and `url()` and rules aimed at the
 HOST page's `body` and `#outside`, a form with an action, an `iframe srcdoc`, an `object`, an `embed`, a
 meta refresh, a `link` stylesheet, a `base`, an SVG `foreignObject`, a `use`, a remote image and a
@@ -546,7 +587,7 @@ every shell unframeable in production), both pinned by `pages-config.sh`.
 - **The theme contract** (`packages/app/src/fy-render/html-kit.ts` owns it). The parent reads a fixed list of
   app tokens (`FY_RENDER_HTML_TOKENS`: ink, surfaces, lines, accent, status tones, `--viz-1`…`--viz-8`,
   type, radii, spacing) plus the column's ink and font from the block's computed style and sends them in
-  `FyRenderHtmlPaint`; the shell admits each by one rule — a listed name and a bounded value that cannot
+  `FyRenderHtmlPaint` (the parent also sends the fullscreen state beside it, as `layout: { fullscreen }`); the shell admits each by one rule — a listed name and a bounded value that cannot
   name a resource (`url(`, `image-set(`, …), escape or leave its declaration — and sets it on its
   root under the **app's own name**, so `var(--accent)` means the same in a live page and in a static
   fragment (which inherits it). A token no longer sent is removed, so a repaint is one whole theme.
@@ -574,7 +615,7 @@ every shell unframeable in production), both pinned by `pages-config.sh`.
 - **A navigation tears it down**: the second `load` after `src` means the page sent its frame
   elsewhere, and the block falls back to the authored source.
 
-**Measured in real Chromium** (`tests/integration/fy-render-html.security.test.ts`, the real generated
+**Measured in real Chromium** (`packages/plugins/conversation/tests/integration/app/fy-render-html.security.test.ts`, the real generated
 shell and a server-side request ledger): author script runs, reports its height and answers a real
 click; `localStorage`, `sessionStorage`, `indexedDB`, `document.cookie`, `parent.document`, the parent's
 globals and every trace of the parent's token yield nothing; `top.location` assignment throws;
@@ -583,8 +624,8 @@ app's own element beside the frame on top; `fetch`, XHR, WebSocket, EventSource,
 image, a worker, a nested frame and a form submission produce **zero** requests; authored meta refresh,
 prerender link, `base` and speculation rules cause none either. And the residual, measured as one: a
 page that sets its own `location.href` **does** reach the server, and the parent sees the second
-`load` it tears the frame down on. The production build runs one under real Pages headers
-(`tests/e2e/fy-render-pages.e2e.test.ts`) and inline in a real session (`product-journeys`).
+`load` it tears the frame down on. Both are measured in real Chromium by
+`packages/plugins/conversation/tests/integration/app/fy-render-html.security.test.ts`.
 
 ### Media from `src:`
 
@@ -750,7 +791,7 @@ Read that claim exactly as scoped:
 - **Chrome 150 only. Firefox, WebKit and Safari are unmeasured** ([gap 4](#declared-gaps)).
 - It is behavioural evidence about ordinary engine operation, not a claim against engine bugs.
 
-`packages/pwa/tests/unit/fy-render-block.test.tsx` asserts that a static type mounts an `<img>` and
+`packages/plugins/conversation/tests/unit/app/render/fy-render-block.test.tsx` asserts that a static type mounts an `<img>` and
 no `iframe`, `object`, `embed`, `script` or `canvas` in the rendered tree, so a future refactor that moves these bytes to a
 consumer outside the measured one fails review even if the grammar is untouched.
 
@@ -795,7 +836,7 @@ all of them is gone. What replaced it bounds where and when work happens, and **
   long transcript decodes nothing, downloads no renderer, sanitizes nothing and reads no file until the
   reader scrolls toward it.
 - **No pop-in.** Until a block has drawn it holds an **invisible** plane, never a grey box. Its height is
-  the one that block last drew at in this session (`lib/fy-render-height-memory.ts`: keyed by type and a
+  the one that block last drew at in this session (`packages/plugins/conversation/app/render/fy-render-height-memory.ts`: keyed by type and a
   hash of the source, in memory, 256 entries), so a block seen before — a tab switch, a chat revisited,
   the same block in an agenda tab — reserves its real height and nothing under it jumps when it lands.
   A block never drawn before reserves the stylesheet's default.
@@ -824,8 +865,8 @@ work an agent asked their device to do. Without it:
 These are accepted because the author is the owner's own ferret, which already runs on a host with
 network access; nothing in the app is reachable to put in a request; and
 the per-ferret Hypermedia switch ([hypermedia.md](hypermedia.md)) is how an owner keeps a ferret from
-writing blocks at all. Anyone who considers this unacceptable can restore a gate by setting
-`enableFyRender` nowhere — every block is then an ordinary escaped fence.
+writing blocks at all. Anyone who considers this unacceptable can restore a gate by lending no
+fence door (`ReferenceSurface.fences`) — every block is then an ordinary code fence.
 
 ---
 
@@ -956,8 +997,8 @@ That residual is **explicitly accepted**, on these terms and no others:
 
 **This is not resource isolation.** It does not satisfy row #65's executable, resource-bounded
 clause, and **row #65 stays open**. Anyone who considers even this residual unacceptable should ship
-the source-only subset, which is a coherent product: set `enableFyRender` nowhere and every block
-renders as an ordinary escaped fence.
+the source-only subset, which is a coherent product: lend no fence door and every block
+renders as an ordinary code fence.
 
 ---
 
@@ -985,10 +1026,12 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
    differential, or a browser feature it does not know to strip, would put author markup in the page
    as live DOM. Mitigated by: DOMPurify's own allowlist plus this build's narrower one, the URL and CSS
    rules, the closed shadow root and paint containment, a pinned DOMPurify version, and the page's
-   policy underneath — `require-trusted-types-for 'script'` refuses a string at any script sink, and
-   `img-src`/`font-src`/`connect-src` refuse a remote load. **Not eliminated.** Same-origin `url()` loads
-   are refused by the CSS rewrite, not by the policy (`img-src 'self'` would allow them); the security
-   test fails if that rewrite is ever removed. Anyone who considers this unacceptable should map
+   policy underneath — `require-trusted-types-for 'script'` refuses a string at any script sink, `img-src`
+   refuses a picture from any host but the app's own origin and the map-tile origin, and `font-src` a remote
+   font (`connect-src` and `media-src` admit `https:` and are no backstop). **Not eliminated.** Same-origin
+   `url()` loads are refused by the CSS rewrite, not by the policy (`img-src 'self'` would allow them), and an
+   `https:` link is kept whatever origin it names; the security test fails if the rewrite is ever removed, and
+   its ledger sees only the test server's own requests. Anyone who considers this unacceptable should map
    `html` to source-only; nothing else depends on it.
 
 2. **`type: mermaid` and `type: lottie` carry a residual risk that is not eliminated.** No
@@ -1013,9 +1056,9 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
    **NEITHER WATCHDOG HAS A BROWSER CAPTURE, and both are unit-proven only.** The 15-second Mermaid
    deadline and the 120-second Lottie lifetime are wall-clock by design, so a browser test would have
    to wait that long to see one fire; the real-component Chromium journey therefore does not capture
-   either. What is proven, in `tests/unit/fy-render-sandbox.test.tsx` against shortened deadlines, is
+   either. What is proven, in `packages/plugins/conversation/tests/unit/app/render/fy-render-sandbox.test.tsx` against shortened deadlines, is
    that each timer fires with the right class (`deadline` for Mermaid, `lifetime` for Lottie), that no
-   message from the frame clears it; `tests/unit/fy-render-block.test.tsx` proves how the block
+   message from the frame clears it; `packages/plugins/conversation/tests/unit/app/render/fy-render-block.test.tsx` proves how the block
    presents each. Nothing anywhere may describe
    either bound as browser-measured. See
    [Accepted risk](#accepted-risk).
@@ -1087,7 +1130,7 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
     terms it is accepted on.
 14. **"Near" and "settled" are unit-proven, not browser-measured.** The proximity gate is
     `IntersectionObserver` with an 800px margin and the settle window is 400 ms; both are proven in
-    `tests/unit/fy-render-block.test.tsx` against a fake observer and a shortened window. No Chromium
+    `packages/plugins/conversation/tests/unit/app/render/fy-render-block.test.tsx` against a fake observer and a shortened window. No Chromium
     journey scrolls a long transcript to show a block far away doing nothing, so nothing may describe
     the gate as browser-measured.
 15. **The long press is unmeasured on a real phone.** It is a 450 ms touch held still, driven in
@@ -1105,14 +1148,22 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
     navigation tears the frame down; the page runs only near the viewport, stops when it stops
     responding, and lives at most ten minutes. **Accepted, and what it can cost:** author script can
     rebuild a prerender link, reach WebRTC through a path the deletion missed, or navigate the frame —
-    each of which carries a request from the reader's device. **The worst case leaks only what the page
-    itself holds — its own authored content and the reader's IP address — never anything of the app**,
-    plus a convincing page shown for the instant before a navigation is torn down (a phishing surface).
-    Accepted because the owner asked for interaction, the author is the owner's own ferret (which already
-    has network access on its host), nothing of the app is reachable to put in such a request, and the
-    agent is told to prefer static HTML and to use script only when interaction genuinely helps. No
+    each of which carries a request from the reader's device. **What such a request can carry** is what the
+    frame holds: the page's own authored content, the reader's IP address, and **the values the parent hands
+    the frame** — the colour scheme and the app's theme paint (`FY_RENDER_HTML_TOKENS`: colours, type sizes,
+    radii, spacing, and the font stacks, plus the column's ink and font read from its computed style) and
+    the fullscreen state (`layout: { fullscreen }`, a boolean), which the shell admits as bounded display
+    values and author script can read. Those are what the reader already
+    sees on screen, not credentials, but they are **not nothing**, and a page that reads them can send them out
+    through any of the channels above. No storage, cookie, document, daemon token or session id is among what
+    the frame is handed (measured for storage, cookies, the parent document and the token traces by
+    `fy-render-html.security.test.ts`; the rest read from `fy-render-html-frame.tsx`, whose props carry none).
+    The worst case also includes a convincing page shown for the instant before a navigation is torn down
+    (a phishing surface). Accepted because the owner asked for interaction, the author is the owner's own
+    ferret (which already has network access on its host), no credential or app state is reachable to put in
+    such a request beyond that theme paint, and the agent is told to prefer static HTML and to use script only when interaction genuinely helps. No
     browser offers a per-frame CPU or memory quota, so the stall guard and the lifetime are proven
-    against shortened windows in `tests/unit/fy-render-html-frame.test.tsx`, not by waiting in a browser.
+    against shortened windows in `packages/plugins/conversation/tests/unit/app/render/fy-render-html-frame.test.tsx`, not by waiting in a browser.
     Anyone who considers this unacceptable can route every `html` block to the fragment by making
     `fyRenderHtmlRunsScript` answer `false`; nothing else depends on it.
 
@@ -1137,22 +1188,22 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
 Every claim above is either a test in this repository or one of these probe records. They are session
 artifacts outside the repository; cite them, do not assume they will outlive the session.
 
-| Claim                                                                                                                                                                                                                                                                                       | Record                                                                                                                                                                                                                                                                            |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<img>`-loaded SVG: zero egress, no script/handler execution, Chrome 150                                                                                                                                                                                                                    | `svg-img-security-probe-report.md` with `svg-img-network-*`, `svg-img-same-origin-*` and `svg-img-script-*` ledgers                                                                                                                                                               |
-| Opaque-frame self-navigation, prerender and WebRTC egress; Navigation API inert                                                                                                                                                                                                             | `self-navigation-result.md` with `nav-*.json` and `egress-output.json`                                                                                                                                                                                                            |
-| Independent review concluding executable HTML is a release blocker                                                                                                                                                                                                                          | `sandbox-security-verdict.md`                                                                                                                                                                                                                                                     |
-| Slice plan, mechanism survey and cost sheet                                                                                                                                                                                                                                                 | `execution-boundary-plan.md`                                                                                                                                                                                                                                                      |
-| Static-slice security review that found the unbounded-decode blocker                                                                                                                                                                                                                        | `fy-render-static-security-review.md`                                                                                                                                                                                                                                             |
-| UI/accessibility review of the fullscreen presentation                                                                                                                                                                                                                                      | `fy-render-static-ui-review.md`                                                                                                                                                                                                                                                   |
-| Raster header reader agreeing with Chrome's decoder, 18 of 18                                                                                                                                                                                                                               | `prototype/verify.ts` beside its `raster-header.ts`                                                                                                                                                                                                                               |
-| Interactive `html`: storage, parent, token, top navigation, popups, ordinary requests refused; cover contained; self-navigation egresses and is seen                                                                                                                                        | `packages/pwa/tests/integration/fy-render-html.security.test.ts` (in this repository, real Chromium + request ledger)                                                                                                                                                             |
-| `html` fragment: an XSS corpus runs nothing, loads nothing and escapes nothing under the app policy                                                                                                                                                                                         | `packages/pwa/tests/integration/fy-render-fragment.security.test.ts` (in this repository, real Chromium + request ledger)                                                                                                                                                         |
-| The production build renders every form inline, from an agent's reply, with media from `FY_MEDIA_DIR`                                                                                                                                                                                       | `tests/e2e/product-journeys.e2e.test.ts` step `hypermedia-renders-inline` (in this repository)                                                                                                                                                                                    |
-| A map renders inline under the real Pages headers: tile requests go only to the tile origin, no Trusted Types or CSP violation, pins present                                                                                                                                                | `tests/e2e/fy-render-pages.e2e.test.ts` (production build under `wrangler pages dev`, tiles fulfilled by a fake)                                                                                                                                                                  |
-| Markers + route, light and dark, phone and desktop                                                                                                                                                                                                                                          | `packages/pwa/tests/integration/fy-render-component.visual.test.tsx` (real Chromium, tiles fulfilled by a fake)                                                                                                                                                                   |
-| Charts: theme colours as exact canvas pixels, legend, tooltip, frames by button and keyboard, box zoom and Reset, no touch gesture bound inline, doughnut slices, repaint on a same-mode theme switch, the source fence for a painted chart, all eight palette slots apart in all 22 themes | `packages/pwa/tests/integration/fy-render-component.visual.test.tsx` (real Chromium)                                                                                                                                                                                              |
-| Mermaid: painted from the theme tokens, light and dark, phone and desktop; redrawn on a same-mode palette switch; a `%%{init}%%` or front matter asking for `forest` and red reaches nothing                                                                                                | `packages/pwa/tests/integration/fy-render-component.visual.test.tsx` (real Chromium, the real shell and bundle)                                                                                                                                                                   |
-| A tall and a wide flowchart fitted whole or at the 10px floor, zoomed, dragged, reset and taken fullscreen; a left-to-right flowchart drawn top-down on a phone and redrawn across the breakpoint on rotation                                                                               | `packages/pwa/tests/integration/fy-render-component.visual.test.tsx` (real Chromium); the rewrite itself in `packages/pwa/tests/unit/fy-render-mermaid-layout.test.ts`; the fit/zoom/pan math in `fy-render-viewport.test.ts`, its controls in `fy-render-viewport.view.test.tsx` |
-| The chart libraries hold no markup, eval or network sink                                                                                                                                                                                                                                    | `packages/pwa/tests/unit/build-contract.test.ts`                                                                                                                                                                                                                                  |
-| The library shell is frameable under Pages pretty URLs; the `fy-fragment` policy and no other is allowed                                                                                                                                                                                    | `tests/e2e/fy-render-pages.e2e.test.ts` (production build under `wrangler pages dev`)                                                                                                                                                                                             |
+| Claim                                                                                                                                                                                                                                                                                       | Record                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `<img>`-loaded SVG: zero egress, no script/handler execution, Chrome 150                                                                                                                                                                                                                    | `svg-img-security-probe-report.md` with `svg-img-network-*`, `svg-img-same-origin-*` and `svg-img-script-*` ledgers                                                                                                                                                                                                                                                                                                                        |
+| Opaque-frame self-navigation, prerender and WebRTC egress; Navigation API inert                                                                                                                                                                                                             | `self-navigation-result.md` with `nav-*.json` and `egress-output.json`                                                                                                                                                                                                                                                                                                                                                                     |
+| Independent review concluding executable HTML is a release blocker                                                                                                                                                                                                                          | `sandbox-security-verdict.md`                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Slice plan, mechanism survey and cost sheet                                                                                                                                                                                                                                                 | `execution-boundary-plan.md`                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Static-slice security review that found the unbounded-decode blocker                                                                                                                                                                                                                        | `fy-render-static-security-review.md`                                                                                                                                                                                                                                                                                                                                                                                                      |
+| UI/accessibility review of the fullscreen presentation                                                                                                                                                                                                                                      | `fy-render-static-ui-review.md`                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Raster header reader agreeing with Chrome's decoder, 18 of 18                                                                                                                                                                                                                               | `prototype/verify.ts` beside its `raster-header.ts`                                                                                                                                                                                                                                                                                                                                                                                        |
+| Interactive `html`: storage, parent, token, top navigation, popups, ordinary requests refused; cover contained; self-navigation egresses and is seen                                                                                                                                        | `packages/plugins/conversation/tests/integration/app/fy-render-html.security.test.ts` (in this repository, real Chromium + request ledger)                                                                                                                                                                                                                                                                                                 |
+| `html` fragment: an XSS corpus runs nothing, loads nothing and escapes nothing under the app policy                                                                                                                                                                                         | `packages/plugins/conversation/tests/integration/app/fy-render-fragment.security.test.ts` (in this repository, real Chromium + request ledger)                                                                                                                                                                                                                                                                                             |
+| A block draws inside a real transcript message: an `svg` is one `<img>`, scripted `html` one sandboxed frame, and a fence opened as `fy-render notes` or a block with no boundary line stays code                                                                                           | `packages/plugins/conversation/tests/integration/app/hypermedia-fy-render.visual.test.ts` (in this repository, real Chromium, the real `Transcript`)                                                                                                                                                                                                                                                                                       |
+| A map under the real Pages headers (tile requests only to the tile origin, no Trusted Types or CSP violation) is **not measured in this tree**: the 4.x production-build journey did not move, and the component test below fulfils tiles with a fake                                       | `packages/plugins/conversation/tests/integration/app/fy-render-component.visual.test.tsx` (real Chromium, tiles fulfilled by a fake)                                                                                                                                                                                                                                                                                                       |
+| Markers + route, light and dark, phone and desktop                                                                                                                                                                                                                                          | `packages/plugins/conversation/tests/integration/app/fy-render-component.visual.test.tsx` (real Chromium, tiles fulfilled by a fake)                                                                                                                                                                                                                                                                                                       |
+| Charts: theme colours as exact canvas pixels, legend, tooltip, frames by button and keyboard, box zoom and Reset, no touch gesture bound inline, doughnut slices, repaint on a same-mode theme switch, the source fence for a painted chart, all eight palette slots apart in all 22 themes | `packages/plugins/conversation/tests/integration/app/fy-render-component.visual.test.tsx` (real Chromium)                                                                                                                                                                                                                                                                                                                                  |
+| Mermaid: painted from the theme tokens, light and dark, phone and desktop; redrawn on a same-mode palette switch; a `%%{init}%%` or front matter asking for `forest` and red reaches nothing                                                                                                | `packages/plugins/conversation/tests/integration/app/fy-render-component.visual.test.tsx` (real Chromium, the real shell and bundle)                                                                                                                                                                                                                                                                                                       |
+| A tall and a wide flowchart fitted whole or at the 10px floor, zoomed, dragged, reset and taken fullscreen; a left-to-right flowchart drawn top-down on a phone and redrawn across the breakpoint on rotation                                                                               | `packages/plugins/conversation/tests/integration/app/fy-render-component.visual.test.tsx` (real Chromium); the rewrite itself in `packages/plugins/conversation/tests/unit/app/render/fy-render-mermaid-layout.test.ts`; the fit/zoom/pan math in `packages/plugins/conversation/tests/unit/app/render/fy-render-viewport.test.ts`, its controls in `packages/plugins/conversation/tests/unit/app/render/fy-render-viewport.view.test.tsx` |
+| The chart libraries hold no markup, eval or network sink                                                                                                                                                                                                                                    | `packages/app/tests/unit/build-trusted-types.test.ts`                                                                                                                                                                                                                                                                                                                                                                                      |
+| The page makes exactly three Trusted Types policies; `fy-fragment`, the html fragment's sanitizer, is the only one this feature uses                                                                                                                                                        | `packages/app/tests/unit/security/trusted-types.test.ts`                                                                                                                                                                                                                                                                                                                                                                                   |
