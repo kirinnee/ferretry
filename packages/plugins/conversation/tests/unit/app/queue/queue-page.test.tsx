@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { clockOfInstant } from '@ferretry/app';
-import { render, run, runAsync } from '@ferretry/app/testing';
+import { ensureDom, render, run, runAsync } from '@ferretry/app/testing';
 import { QueuePageView, type QueueRowHandlers } from '../../../../app/queue/queue-page.tsx';
 import { outboxRowOf, type QueueGroup, queueRowOf } from '../../../../app/queue/queue-view.ts';
 import { QueueActionError } from '../../../../app/queue/send-queue.ts';
+
+// A message body is read by `HypermediaProse`, which reads the document's look when it mounts (r12 H7 fix).
+ensureDom();
 
 let mounted: ReactTestRenderer | undefined;
 afterEach(() => {

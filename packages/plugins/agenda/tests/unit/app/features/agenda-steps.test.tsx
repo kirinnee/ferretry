@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaItem } from '@ferretry/core-asks/contract';
 import type { ReactNode } from 'react';
-import { ChatProse } from '../../../../app/shell.ts';
+import { ProseView } from '../../../../app/shell.ts';
 import { ReferenceSurfaceProvider } from '../../../../app/shell.ts';
 import { agendaKindMeta } from '../../../../app/features/agenda/agenda-board.tsx';
 import { AgendaCard } from '../../../../app/features/agenda/agenda-card.tsx';
@@ -30,7 +30,7 @@ const settled = async (): Promise<void> => undefined;
 
 const chatProse =
   (write: ClipboardWriter = settled) =>
-  (text: string): ReactNode => <ChatProse copyable={write} text={text} />;
+  (text: string): ReactNode => <ProseView copyable={write} text={text} />;
 
 const tick = (root: ParentNode, step: number): HTMLElement =>
   must(root.querySelector<HTMLElement>(`[data-agenda-tick="${step}"]`), `tick ${step}`);

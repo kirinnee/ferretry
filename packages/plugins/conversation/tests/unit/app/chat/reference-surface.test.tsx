@@ -226,9 +226,21 @@ describe('chatReferenceSurface media read', () => {
     '---',
     FENCE,
   ].join('\n');
+  // The door the hypermedia reader opens with a fence's body: a node the reader marked, the surface's `fences` drawing it.
+  const mediaNode = {
+    children: [
+      {
+        type: 'element',
+        tagName: 'code',
+        properties: { 'data-fy-render-fence': 'true' },
+        children: [{ type: 'text', value: `${mediaFence.split('\n').slice(1, -1).join('\n')}\n` }],
+      },
+    ],
+  };
   const readerOf = (surface: ReturnType<typeof chatReferenceSurface>) =>
-    renderTree(<Markdown enableFyRender {...surface} text={mediaFence} />).root.findAllByType(FyRenderBlock)[0]?.props
-      .readWorkspaceMedia as ((path: string, signal: AbortSignal) => Promise<unknown>) | undefined;
+    renderTree(<>{surface.fences?.draw({ node: mediaNode, onTaskOpen: undefined })}</>).root.findAllByType(
+      FyRenderBlock,
+    )[0]?.props.readWorkspaceMedia as ((path: string, signal: AbortSignal) => Promise<unknown>) | undefined;
 
   test('should read a media block file through this ferret, relative to its folder', async () => {
     // Arrange
