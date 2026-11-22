@@ -27,10 +27,11 @@
  */
 import { daemonOfClient, useEveryDaemon } from '@ferretry/app';
 import { readPress } from '@ferretry/app/ui';
+import { forgetSetupScanAhead, readSetupScanAhead } from '@ferretry/plugin-runtimes/import-kit';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { StepSegmentMemory } from '@ferretry/kernel/contract';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { StepState } from '../../../contract/index.ts';
 import {
   flattenFlow,
@@ -79,6 +80,9 @@ export interface FlowDeps {
 
 /** How long the other paired machines get to answer after the machine being set up has: a silent one is left out. */
 const PEER_WAIT_MS = 1500;
+
+/** The plugins whose setup pages read this machine's own Claude Code and Codex setup (the runtimes setup scan). */
+const HOST_SETUP_PLUGINS: ReadonlySet<string> = new Set(['claude-code', 'codex']);
 
 /** One step's daemon answers: at most one in flight, and the newest intent waits as the only queued one. */
 interface AnswerLane {
@@ -269,6 +273,20 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   const ready = loading.kind === 'ready' ? loading : undefined;
   const pages = ready?.pages ?? [];
   const answered = ready?.answered ?? new Set<string>();
+
+  // C59 O8-4: the machine's own Claude Code and Codex setup (tools, logins, runtimes, versions) is read ONCE, as soon as the
+  // flow knows it has such pages to show, while the person is still on the first pages; those pages then open already
+  // answered, because the shared scan store takes this read for its first read on this machine instead of asking again.
+  // A LAYOUT effect, so it starts before any page's own first read (pages read in a passive effect), and the read is
+  // forgotten when this flow closes, so a later flow never shows it.
+  const readsHostSetup = pages.some(
+    page => page.phase === 'daemon' && HOST_SETUP_PLUGINS.has(page.plugin) && !answered.has(page.key),
+  );
+  useLayoutEffect(() => {
+    if (!readsHostSetup) return;
+    readSetupScanAhead(client);
+    return () => forgetSetupScanAhead(client);
+  }, [client, readsHostSetup]);
 
   /**
    * Sends one daemon answer for a step: one write in flight per step, and a newer intent replaces any queued one, so the

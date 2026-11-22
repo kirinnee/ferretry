@@ -82,10 +82,10 @@ export function fastModeFacts(view: FastView, catalog: RuntimeModelCatalog): Fas
 
 /**
  * What a fast start is told while no catalog is in hand (never loaded from disk, never read). The first read of a machine's
- * first boot waits for the kernel's worker lane, which opens about two minutes after the daemon serves, so that is what the
- * sentence promises — not seconds.
+ * first boot starts a few seconds after the daemon serves and takes about a second (O8-4), so that is what the sentence
+ * promises.
  */
-export const CATALOG_LOADING = "Codex's model list is still loading; try again in about two minutes";
+export const CATALOG_LOADING = "Codex's model list is still loading; try again in a few seconds";
 
 /** What a fast start is told when the read looked for Codex and it is not there: it will not load, so it does not say so. */
 export const CODEX_NOT_FOUND = 'Codex could not be found, so its fast mode cannot be checked';

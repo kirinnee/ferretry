@@ -129,8 +129,9 @@ describe('the setup flow', () => {
             }
             if (scene === 'silent') {
               expect(await tab.$$('[data-flow-skip]')).toHaveLength(1);
-              const skip = await (await tab.$('[data-flow-skip]'))?.boundingBox();
-              expect(skip?.height ?? 0, 'Skip this step is a 44px target').toBeGreaterThanOrEqual(43.5);
+              // C59 O8-4: Skip is a link on the hint's line; its 44px target is the invisible layer over the text.
+              const skipHit = await tab.$eval('[data-flow-skip]', skip => getComputedStyle(skip, '::after').height);
+              expect(skipHit, 'Skip this step is a 44px target').toBe('44px');
               expect(
                 await tab.$$('[data-flow-cover] [data-loading]'),
                 'the spinner is drawn with the note',
@@ -298,6 +299,76 @@ describe('the footer draws over a z-index 2 control scrolled beneath it', () => 
         await context.close();
       }
     });
+});
+
+// ─── C59 O8-4: the loading cover sits in the middle, the hint reads as a hint and Skip as a link ─────────────────────────
+// Owner: "loading screen is very top heavy -- try to center it vertically. the still checking and skip this step looks not
+// great -- buttons should look like buttons, hints should look like hints, 'silent' buttons should AT LEAST look like links".
+describe('C59 O8-4 the silent loading cover', () => {
+  for (const viewport of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`centres the cover between the title and the footer; the hint is a hint and Skip is a link (${viewport.name}, ${scheme})`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          colorScheme: scheme,
+          deviceScaleFactor: viewport.phone ? 2 : 1,
+          hasTouch: viewport.phone,
+          isMobile: viewport.phone,
+        });
+        const origin = server?.url.origin ?? '';
+        const tab = await context.newPage();
+        try {
+          await tab.goto(`${origin}/?theme=studio-${scheme}&case=silent`);
+          await tab.waitForSelector('[data-flow-silent]');
+          await tab.waitForTimeout(900);
+          const geometry = await tab.evaluate(() => {
+            const rect = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
+            const head = rect('.fy-spf__head');
+            const footer = rect('[data-step-footer]');
+            const orb = rect('[data-flow-cover] .fy-loading__orb');
+            const silent = rect('[data-flow-silent]');
+            const skip = document.querySelector('[data-flow-skip]') as HTMLElement;
+            const note = document.querySelector('.fy-sf-hint[data-flow-silent]') as HTMLElement | null;
+            const label = document.querySelector('[data-flow-cover] .fy-loading__label') as HTMLElement | null;
+            const skipStyle = getComputedStyle(skip);
+            const hitArea = getComputedStyle(skip, '::after');
+            return {
+              gapTop: head?.bottom ?? 0,
+              gapBottom: footer?.top ?? 0,
+              // The block that stands for the wait: from the orb's top to the Skip line's bottom.
+              blockTop: orb?.top ?? 0,
+              blockBottom: silent?.bottom ?? 0,
+              skipTag: skip.tagName,
+              skipUnderline: skipStyle.textDecorationLine,
+              skipBackground: skipStyle.backgroundColor,
+              skipBorder: skipStyle.borderTopWidth,
+              skipHitHeight: hitArea.height,
+              noteSize: note === null ? 0 : Number.parseFloat(getComputedStyle(note).fontSize),
+              labelSize: label === null ? 0 : Number.parseFloat(getComputedStyle(label).fontSize),
+            };
+          });
+          const gapMiddle = (geometry.gapTop + geometry.gapBottom) / 2;
+          const blockMiddle = (geometry.blockTop + geometry.blockBottom) / 2;
+          console.info(
+            `O8-4 cover ${viewport.name} ${scheme}: gap ${Math.round(geometry.gapTop)}-${Math.round(geometry.gapBottom)} (middle ${Math.round(gapMiddle)}), wait block ${Math.round(geometry.blockTop)}-${Math.round(geometry.blockBottom)} (middle ${Math.round(blockMiddle)}), off by ${Math.round(blockMiddle - gapMiddle)}px; hint ${geometry.noteSize}px vs label ${geometry.labelSize}px; skip ${geometry.skipTag} ${geometry.skipUnderline} bg ${geometry.skipBackground} hit ${geometry.skipHitHeight}`,
+          );
+          expect(
+            Math.abs(blockMiddle - gapMiddle),
+            'the wait sits in the middle of the space under the title',
+          ).toBeLessThanOrEqual(24);
+          expect(geometry.noteSize, '"Still checking" is a hint: smaller than the loader line').toBeGreaterThan(0);
+          expect(geometry.noteSize).toBeLessThan(geometry.labelSize);
+          expect(geometry.skipTag).toBe('BUTTON');
+          expect(geometry.skipUnderline, 'Skip this step reads as a link').toContain('underline');
+          expect(geometry.skipBackground, 'a link has no button fill').toBe('rgba(0, 0, 0, 0)');
+          expect(geometry.skipBorder, 'a link has no button border').toBe('0px');
+          expect(geometry.skipHitHeight, 'and still a 44px target').toBe('44px');
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `o8-4-${viewport.name}-${scheme}-silent.png`) });
+        } finally {
+          await context.close();
+        }
+      });
 });
 
 // ─── r11 O1: Next saves the choice, and the loading cover waits 300 ms (owner items 4 and 5) ────────────────────────────
