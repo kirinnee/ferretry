@@ -195,5 +195,27 @@ const plugin = {
   },
 };
 
-/** What the shell's `vite.config.ts` registers (`plugins`), and the pin record the build test reads. */
-export const durianBuild = { plugin, pin: DURIAN_PIN } as const;
+/**
+ * WHAT THE DURIAN WORKER ADDS (r12 H11): no DOM. micromark (which reads every message's fences) decodes character references
+ * through `decode-named-character-reference`, whose `browser` condition is a build that makes a `<i>` element and reads its text;
+ * a worker has no `document`, so that build throws the moment the worker loads. The worker is given the same package's table
+ * build (`index.js`), the one the page's own build is already redirected to for Trusted Types
+ * (`app/scripts/trusted-types-plugins.ts`, which a plugin may not import). Anything but `index.js` or `index.dom.js` fails the build.
+ */
+const ENTITY_DECODER = 'decode-named-character-reference';
+const workerPlugin = {
+  name: 'fy-durian-worker-no-dom',
+  enforce: 'pre' as const,
+  async resolveId(this: ResolveContext, source: string, importer?: string): Promise<{ id: string } | null> {
+    if (source !== ENTITY_DECODER) return null;
+    const resolved = await this.resolve(source, importer, { skipSelf: true });
+    if (resolved === null) return null;
+    const match = /^(.*[\\/]decode-named-character-reference[\\/])index(?:\.dom)?\.js(\?.*)?$/u.exec(resolved.id);
+    if (match === null)
+      throw new Error(`${ENTITY_DECODER} resolved to ${resolved.id}, not index.js or index.dom.js: re-audit it`);
+    return { ...resolved, id: `${match[1]}index.js${match[2] ?? ''}` };
+  },
+};
+
+/** What the shell's `vite.config.ts` registers (`plugins`, and `workerPlugin` for the Durian worker's own build), and the pin record the build test reads. */
+export const durianBuild = { plugin, workerPlugin, pin: DURIAN_PIN } as const;

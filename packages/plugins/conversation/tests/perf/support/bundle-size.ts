@@ -58,6 +58,8 @@ export const measureBundle = async (options: {
   readonly root: string;
   readonly entry: string;
   readonly plugins: readonly object[];
+  /** The plugins a worker the entry starts (`?worker&url`) is built with: a worker is bundled apart, with its own. */
+  readonly workerPlugins?: readonly object[];
 }): Promise<BundleSize> => {
   const { build } = await viteOfTheShell();
   // `bun test` runs with NODE_ENV=test, and Vite takes the environment from it whatever `mode` says: React's development bundle
@@ -72,6 +74,9 @@ export const measureBundle = async (options: {
       logLevel: 'silent',
       mode: 'production',
       plugins: [...options.plugins],
+      ...(options.workerPlugins === undefined
+        ? {}
+        : { worker: { format: 'es', plugins: () => [...(options.workerPlugins ?? [])] } }),
       build: { write: false, minify: true, target: 'es2022', rollupOptions: { input: options.entry } },
     });
   } finally {

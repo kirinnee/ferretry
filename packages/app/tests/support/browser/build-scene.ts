@@ -101,13 +101,68 @@ const durianSource: Bun.BunPlugin = {
   },
 };
 
+/**
+ * THE DURIAN WORKER, FOR A SCENE (r12 H11). A message is read by a worker (`plugins/conversation/app/hypermedia/durian-worker.ts`),
+ * which the real build emits as a hashed chunk and `durian-spawn.ts` starts under the page's Trusted Types policy. A scene has no
+ * Vite and no policy, so `durian-spawn.ts` is replaced by a module that starts the SAME worker module, bundled here, from a blob URL.
+ * Everything the worker does is the real thing; only where its script comes from is the scene's. (The scenes that prove the
+ * real policy and the real chunk build the app's way: `tests/integration/app/hypermedia-csp.visual.test.ts`.)
+ */
+let durianWorkerCode: Promise<string> | undefined;
+const durianWorkerSource = (): Promise<string> => {
+  durianWorkerCode ??= (async () => {
+    // A worker has no `document`: the entity decoder is its table build, not the `browser` condition's DOM one.
+    const noDom: Bun.BunPlugin = {
+      name: 'entity-decoder-without-dom',
+      setup(build) {
+        build.onResolve({ filter: /^decode-named-character-reference$/u }, args => ({
+          path: Bun.resolveSync(args.path, args.importer).replace(/index\.dom\.js$/u, 'index.js'),
+        }));
+      },
+    };
+    const result = await Bun.build({
+      entrypoints: [resolve(workspace, 'packages/plugins/conversation/app/hypermedia/durian-worker.ts')],
+      target: 'browser',
+      format: 'esm',
+      throw: false,
+      plugins: [durianSource, noDom],
+    });
+    const script = result.outputs.find(output => output.path.endsWith('.js'));
+    if (!result.success || script === undefined)
+      throw new Error(`❌ the Durian worker did not build:\n${result.logs.join('\n')}`);
+    return script.text();
+  })();
+  return durianWorkerCode;
+};
+
+/** The plugin; the worker is built BEFORE the scene's build starts (a build inside a build's plugin hook never returns). */
+const durianWorkerForScenes = (workerCode: string): Bun.BunPlugin => ({
+  name: 'durian-worker-for-scenes',
+  setup(build) {
+    build.onResolve({ filter: /(?:^|\/)durian-spawn\.ts$/u }, args => ({
+      path: args.path,
+      namespace: 'durian-spawn-for-scenes',
+    }));
+    build.onLoad({ filter: /.*/u, namespace: 'durian-spawn-for-scenes' }, () => ({
+      contents: `const code = ${JSON.stringify(workerCode)};
+let url;
+export async function spawnDurianWorker() {
+  url ??= URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+  return new Worker(url, { type: 'module', name: 'fy-durian' });
+}`,
+      loader: 'js',
+    }));
+  },
+});
+
 /** What a Bun build made: the script and, when the entry's graph imports stylesheets, their CSS (in import order). */
 const bundleOf = async (entry: string, label: string): Promise<{ readonly js: string; readonly css: string }> => {
+  const workerCode = await durianWorkerSource();
   const result = await Bun.build({
     entrypoints: [entry],
     target: 'browser',
     throw: false,
-    plugins: [viteAssetUrls, viteDynamicImports, durianSource],
+    plugins: [viteAssetUrls, viteDynamicImports, durianSource, durianWorkerForScenes(workerCode)],
     banner: legacyThemeBanner,
   });
   if (!result.success) throw new Error(`❌ ${label} did not build:\n${result.logs.join('\n')}`);

@@ -4,7 +4,7 @@
  * `fy-render` fence, and exits 1 on any error, 0 otherwise.
  */
 import { describe, expect, test } from 'bun:test';
-import { holdFences } from '../../../app/hypermedia/held-fences.tsx';
+import { holdFences } from '../../../app/hypermedia/held-fence-parse.ts';
 import { MESSAGE_LIMITS } from '../../../app/hypermedia/limits.ts';
 import { checkMessage, findingLine } from '../../../cli/reading/check.ts';
 import { readingVerbs } from '../../../cli/reading/verbs.ts';
