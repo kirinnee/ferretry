@@ -10,7 +10,8 @@ set -euo pipefail
 # path component, `**` the descendants), so `packages/plugins/<id>/tests/**` and its fixtures are never reached.
 #
 # MODE. `fail` (the default since r11 S3f, the last adoption PR) makes any hit exit 1. `report` lists every file that still
-# draws one and exits 0, for a local look. A line that is only a comment (`*`, `//`, `/*`) may name the element: it draws none.
+# draws one and exits 0, for a local look. A line that is only a comment (`*`, `//`, `/*`, or closed `/* … */` blocks and nothing else) may name the element: it draws none.
+# Code after a closed block comment (`/* x */ <select>`) still counts.
 # `FY_NO_NATIVE_SELECT=fail|report` overrides it for a local run.
 #
 # Exit codes follow the repo convention: 0 clean (or report mode), 1 a violation in fail mode, 2 a broken gate.
@@ -26,12 +27,27 @@ root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 
 hits="$(mktemp)"
-trap 'rm -f "${hits}"' EXIT
+trap 'rm -f "${hits}" "${hits}.raw"' EXIT
 
 status=0
 git grep -n -E '<select([[:space:]/>]|$)' -- \
-  ':(glob)packages/app/src/**/*.tsx' ':(glob)packages/core/*/app/**/*.tsx' ':(glob)packages/plugins/*/app/**/*.tsx' | grep -v -E ':[0-9]+:[[:space:]]*(\*|//|/\*)' >"${hits}" || status=$?
+  ':(glob)packages/app/src/**/*.tsx' ':(glob)packages/core/*/app/**/*.tsx' ':(glob)packages/plugins/*/app/**/*.tsx' >"${hits}.raw" || status=$?
 [ "${status}" -gt 1 ] && echo "❌ git grep failed (exit ${status}) while searching for native selects" >&2 && exit 2
+
+# Drop a hit whose line is only a comment: the closed `/* … */` blocks at its start are removed first, so `/* x */ <select>`
+# still counts (code follows the comment) while `/* <select/> */`, `// <select>` and ` * <select>` do not. What remains must
+# still hold the element: `/* use SelectBox, not <select> */ <SelectBox />` names it only in the comment, so it is dropped.
+awk '
+  {
+    text = $0
+    sub(/^[^:]*:[0-9]+:/, "", text)
+    while (match(text, /^[[:space:]]*\/\*([^*]|\*+[^*\/])*\*+\//)) text = substr(text, RLENGTH + 1)
+    if (text ~ /^[[:space:]]*(\*|\/\/|\/\*|$)/) next
+    if (text !~ /<select([[:space:]\/>]|$)/) next
+    print
+  }
+' "${hits}.raw" >"${hits}"
+rm -f "${hits}.raw"
 
 if [ ! -s "${hits}" ]; then
   echo "✅ no native <select> in product code (every list choice is a SelectBox)"

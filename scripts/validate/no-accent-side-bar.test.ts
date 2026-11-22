@@ -91,6 +91,18 @@ describe('the accent side-bar gate, Tailwind classes in JSX (r11-2b K4)', () => 
     'an arbitrary colour': '<div className="border-l-2 border-[var(--accent)]" />\n',
     'a variant-prefixed bar': '<div className="hover:border-l-4 hover:border-ok" />\n',
     'a colour that comes first': '<div className="border-warn border-l-2" />\n',
+    'a bar and its tone class split across two lines of one string':
+      '<div className="flex border-l-2\n  border-warn pl-3" />\n',
+    'a bar and its tone class in two entries of one class list':
+      "<div className={[\n  'border-l-2',\n  'border-accent',\n].join(' ')} />\n",
+    'a bar after a comment that closed earlier on the line': '<div className="border-l-2 border-warn" /> {/* ok */}\n',
+    'a bar after a string that holds a block-comment opener':
+      'export const help = "Start with /* for a block comment";\nexport const View = () => <div className="border-l-2 border-warn" />;\n',
+    'a bar after an apostrophe in JSX text': '<p>Don\'t</p>\n<div className="border-l-2 border-warn" />\n',
+    'a bar split around a less-than comparison in an opening tag':
+      '<div\n  className="border-l-2"\n  data-tone={count < 3 ? "border-warn" : "x"}\n/>\n',
+    'a bar split around a compact less-than comparison in an opening tag':
+      '<div\n  className="border-l-2"\n  data-tone={a <b ? "border-warn" : "x"}\n/>\n',
   };
   for (const [name, tsx] of Object.entries(TAILWIND_BARS))
     test(`refuses ${name}`, () => {
@@ -98,6 +110,70 @@ describe('the accent side-bar gate, Tailwind classes in JSX (r11-2b K4)', () => 
       expect(result.status).toBe(1);
       expect(result.stderr).toContain('packages/x/a.tsx');
     });
+
+  test('refuses a real bar above an inline // comment that holds a block-comment opener', () => {
+    const result = run({
+      'packages/x/a.tsx':
+        '<div\n  onClick={() => go() // Use /* to open a block comment.\n  }\n/>\n<div className="border-l-2 border-warn" />\n',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('packages/x/a.tsx');
+  });
+
+  test('refuses a bar after a // inside a string', () => {
+    const result = run({
+      'packages/x/a.tsx': '<a href="https://x.test/a" className="border-l-2 border-warn" />\n',
+    });
+    expect(result.status).toBe(1);
+  });
+
+  test('allows an inline // comment that names a tone class inside an opening tag', () => {
+    const result = run({
+      'packages/x/a.tsx':
+        '<div\n  className="border-l-2"\n  onClick={() => go() // border-warn is used for warnings.\n  }\n/>\n',
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
+  test('allows a bar named inside a multi-line comment', () => {
+    const result = run({
+      'packages/x/a.tsx': [
+        '<div>\n  {/*\n    was border-l-2 border-warn\n    border-s-4 border-accent\n  */}\n</div>\n',
+        '/**\n * border-l-2 border-err\n */\n',
+        '/*\nborder-l-4 border-accent\n*/\n',
+      ].join(''),
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
+  test('does not pair a bar with a tone class of the next element', () => {
+    const result = run({
+      'packages/x/a.tsx': [
+        '<li className="border-l-2 border-border-strong" />\n',
+        '<li className="border-warn" />\n',
+        '<li\n  className="border-l-2\n    border-border-strong"\n/>\n',
+        '<li className="border-accent" />\n',
+      ].join(''),
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
+  test('does not join the classes of a closed tag with the code after it', () => {
+    const result = run({
+      'packages/x/a.tsx': [
+        'export const View = () => <div className="border-l-2 border-border-strong" />;\n',
+        'export const tone = "border-warn";\n',
+        '<div className="border-l-2 border-border-strong">\n',
+        '</div>\n',
+        'export const other = "border-accent";\n',
+      ].join(''),
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
 
   test('allows a neutral divider, a 1px rule, an accent top border and a comment that names a bar', () => {
     const result = run({
