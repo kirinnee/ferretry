@@ -10,11 +10,14 @@ import {
 import manifest from '../manifest.ts';
 import { FetchGithubHttp } from './adapters/github-http.ts';
 import { gitAccountRoutes } from './routes.ts';
+import { psAgentProcesses } from './adapters/agent-processes.ts';
 import { rootRunFolder } from './adapters/run-folder.ts';
 import { accountLaunchParts } from './features/launch/parts.ts';
 import { AgentSupervisor, type RunFolder } from './features/ssh-keys/agents.ts';
+import type { AgentProcessTable } from './features/ssh-keys/sweep.ts';
 import { GhRunner } from './features/gh-run/gh-runner.ts';
 import { ghLocator } from './lib/gh-locator.ts';
+import { programLocator } from './lib/program-locator.ts';
 import { ghShimLaunchParts } from './features/gh-shim/parts.ts';
 import { type GhShimFolders, installGhShim } from './features/gh-shim/shim.ts';
 import { ghRunRoutes } from './features/gh-run/routes.ts';
@@ -32,6 +35,8 @@ import { GitAccountsService } from './lib/service.ts';
 export interface GitAccountsOverrides {
   /** A test's own folder for the agents (the kernel's test roots are an in-memory map, which a real ssh-agent cannot bind in). */
   readonly runFolder?: RunFolder;
+  /** A test's own process table for the boot sweep: it must never see (or signal) a real process of the machine it runs on. */
+  readonly agentProcesses?: AgentProcessTable;
 }
 
 export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
@@ -52,7 +57,30 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
       });
       // The agents live in this plugin's own `downloads` folder: the same path on every run (a ferret outlives a restart).
       const runFolder = overrides.runFolder ?? rootRunFolder(kernel.roots.root('downloads'));
-      const agents = new AgentSupervisor(kernel.spawn, runFolder, kernel.clock, kernel.log);
+      // `gh` (a token), `ssh-agent` and `ssh-add` (the PRIVATE KEY on stdin) are found the same way: outside the state home, absolute.
+      const locatorPorts = {
+        daemonPath: () => kernel.hostFacts.launchGuard().searchPath,
+        which: (name: string, options: { readonly directories: readonly string[] }) =>
+          kernel.paths.which(name, options),
+        stateHomeHolding: (path: string) => kernel.paths.stateHomeHolding(path),
+      };
+      const sshPrograms = {
+        'ssh-agent': programLocator({ name: 'ssh-agent', trustedWith: 'an account key' }, locatorPorts),
+        'ssh-add': programLocator({ name: 'ssh-add', trustedWith: 'an account key' }, locatorPorts),
+      };
+      // A daemon that died uncleanly left its agents running: the first start (and the warm below) ends this daemon's own.
+      const agents = new AgentSupervisor(
+        kernel.spawn,
+        runFolder,
+        kernel.clock,
+        kernel.log,
+        async name => (await sshPrograms[name]()).program,
+        {
+          table: overrides.agentProcesses ?? psAgentProcesses(kernel.spawn),
+          uid: process.getuid?.() ?? -1,
+          self: process.pid,
+        },
+      );
       kernel.lifecycle.onStop(() => agents.stopAll());
       // Ferretry's `gh` (B10): the shim is written at boot and again whenever a launch finds it was not (a failure is not kept).
       let shim: Promise<GhShimFolders | undefined> | undefined;
@@ -84,11 +112,7 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
           await keys.service?.forget(id);
         },
         // The `gh` that gets a token is the real one: never a file in the state home, even if the daemon's own PATH names the shim folder.
-        ghLocator({
-          daemonPath: () => kernel.hostFacts.launchGuard().searchPath,
-          which: (name, options) => kernel.paths.which(name, options),
-          stateHomeHolding: path => kernel.paths.stateHomeHolding(path),
-        }),
+        ghLocator(locatorPorts),
       );
       const keyService = new SshKeyService(
         service,
@@ -110,6 +134,8 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
           const own = accounts.filter(
             account => account.keys.ssh?.source === 'generated' || account.keys.signing?.source === 'generated',
           );
+          // Leftover agents first, so a warmed agent never meets (or is mistaken for) one an earlier run left behind.
+          if (own.length > 0) await agents.sweepLeftovers();
           await keyService.warm(
             own.map(account => account.id),
             account => kernel.log.warn('git-accounts: an account agent was not brought back at boot', { account }),

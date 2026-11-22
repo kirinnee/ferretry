@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
+  openSync,
+  symlinkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -200,7 +204,10 @@ function cli(
       throw new Error('stdin');
     },
   };
-  const verbs = ghVerbs(context as never);
+  // The made-up paths here are not on the disk: a path is a regular file when the test says it holds text.
+  const verbs = ghVerbs(context as never, {
+    isRegularFile: async path => options.exists?.includes(path) === true || options.texts?.[path] !== undefined,
+  });
   return { verbs, calls, out, err, read: () => read };
 }
 const typed = (words: string[], options: Record<string, string | boolean> = {}) => ({ args: words, words, options });
@@ -449,6 +456,107 @@ describe('gh pr create names the ferret’s branch (the daemon runs in an empty 
     );
     await list.verbs.gh(typed(['--', 'pr', 'list']));
     expect(bodyOf(list)).toEqual(['pr', 'list']);
+  });
+});
+
+/** A real FIFO named like the git file it stands in for: reading one blocks until a writer opens it, so nothing may. */
+describe('gh pr create never blocks on a .git file a ferret made into a FIFO (L52)', () => {
+  const create = ['--', 'pr', 'create', '--title', 't', '--body', 'b'];
+  const PLAIN = ['pr', 'create', '--title', 't', '--body', 'b'];
+
+  /** The real reads (`Bun.file`, the disk), as `fy` gives a verb, so only the verb's own caution can keep it from hanging. */
+  function realCli(cwd: string) {
+    const bodies: unknown[] = [];
+    const context = {
+      client: {
+        call: async (_route: string, request?: { body?: unknown }) => {
+          bodies.push(request?.body);
+          return { exitCode: 0, stdout: '', stderr: '' };
+        },
+      },
+      io: { out: () => undefined, err: () => undefined, isTty: false },
+      env: { PWD: cwd },
+      exists: async (path: string) => existsSync(path),
+      readText: async (path: string) => await Bun.file(path).text(),
+    };
+    return { verbs: ghVerbs(context as never), bodies };
+  }
+  const fifo = (path: string) => expect(Bun.spawnSync(['mkfifo', path]).exitCode).toBe(0);
+  /** Opens the write end of a FIFO and closes it, so a reader that DID block ends (a failing run must not leak). */
+  const release = (path: string) => closeSync(openSync(path, constants.O_RDWR));
+
+  // (The 100 ms bound is the perf tier's: tests/perf/cli/gh-head-fifo.test.ts.)
+  test('a .git/HEAD FIFO returns the argv unchanged, and the verb is not left waiting on it', async () => {
+    const root = scratch();
+    mkdirSync(join(root, '.git'));
+    const head = join(root, '.git', 'HEAD');
+    fifo(head);
+    const { verbs, bodies } = realCli(root);
+    const code = await Promise.race([
+      verbs.gh(typed(create)),
+      new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 2_000)),
+    ]);
+    release(head);
+    expect(code).toBe(0);
+    expect(bodies).toEqual([{ argv: PLAIN, cwd: root }]);
+  });
+
+  test('a worktree .git pointer that is a FIFO, or whose HEAD is one, adds nothing and never blocks', async () => {
+    const root = scratch();
+    // `.git` itself a FIFO (it would be read for its `gitdir:` line).
+    const pointerFifo = join(root, 'a');
+    mkdirSync(pointerFifo);
+    fifo(join(pointerFifo, '.git'));
+    // `.git` a real pointer, whose target's HEAD is a FIFO.
+    const linked = join(root, 'b');
+    const gitdir = join(root, 'b-gitdir');
+    mkdirSync(linked);
+    mkdirSync(gitdir);
+    writeFileSync(join(linked, '.git'), `gitdir: ${gitdir}\n`);
+    fifo(join(gitdir, 'HEAD'));
+    for (const cwd of [pointerFifo, linked]) {
+      const { verbs, bodies } = realCli(cwd);
+      const code = await Promise.race([
+        verbs.gh(typed(create)),
+        new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 2_000)),
+      ]);
+      if (code === 'hung') {
+        release(join(pointerFifo, '.git'));
+        release(join(gitdir, 'HEAD'));
+      }
+      expect(code).toBe(0);
+      expect(bodies).toEqual([{ argv: PLAIN, cwd }]);
+    }
+  });
+
+  test('a regular HEAD, and a symlink to one, still name the branch; a symlink to a FIFO does not', async () => {
+    const root = scratch();
+    mkdirSync(join(root, '.git'));
+    writeFileSync(join(root, '.git', 'HEAD'), 'ref: refs/heads/feat/real\n');
+    const direct = realCli(root);
+    await direct.verbs.gh(typed(create));
+    expect(direct.bodies).toEqual([{ argv: [...PLAIN, '--head', 'feat/real'], cwd: root }]);
+
+    const linked = join(root, 'link');
+    mkdirSync(join(linked, '.git'), { recursive: true });
+    symlinkSync(join(root, '.git', 'HEAD'), join(linked, '.git', 'HEAD'));
+    const viaLink = realCli(linked);
+    await viaLink.verbs.gh(typed(create));
+    expect(viaLink.bodies).toEqual([{ argv: [...PLAIN, '--head', 'feat/real'], cwd: linked }]);
+
+    const trap = join(root, 'trap');
+    mkdirSync(join(trap, '.git'), { recursive: true });
+    const target = join(root, 'the-fifo');
+    fifo(target);
+    symlinkSync(target, join(trap, '.git', 'HEAD'));
+    const viaFifo = realCli(trap);
+    const code = await Promise.race([
+      viaFifo.verbs.gh(typed(create)),
+      new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 2_000)),
+    ]);
+    release(target);
+    expect(code).toBe(0);
+    expect(viaFifo.bodies).toEqual([{ argv: PLAIN, cwd: trap }]);
   });
 });
 

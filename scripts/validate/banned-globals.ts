@@ -219,6 +219,18 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
         'fy at the person terminal writes the signed catalog file to the path the person named, outside every declared root: create-exclusive, or a temp file renamed over, a symbolic link refused; the file holds only what the daemon signed (v4 FileCatalogWriter; same owner-ruled gap as the Browsers screenshot: the CLI half has no file-write port)',
     },
     {
+      pkg: 'git-accounts',
+      folder: 'cli/adapters/regular-file.ts',
+      reason:
+        "fy at the ferret's terminal asks `lstat`/`stat` (never an open) whether a `.git` file or `HEAD` in the folder it runs in is a regular file before `fy gh` reads it, because opening a FIFO there blocks for good; it reads no content, and the CliContext has no stat or non-blocking read (E6 L52, end-list plan)",
+    },
+    {
+      pkg: 'git-accounts',
+      folder: 'daemon/adapters/agent-processes.ts',
+      reason:
+        "the boot sweep reads this user's process table WITHOUT running a program found on PATH (a planted `ps` could name any same-user pid): /proc/<pid>/cmdline and /proc/<pid>/status on Linux, and the host platform name to choose between that and the absolute system ps; it reads nothing but those two files and `stat`s the system ps candidates, and signals only a pid it matched and re-read (E6 security round; kernel.processes answers about a folder of its own roots only, not an ssh-agent socket path)",
+    },
+    {
       pkg: 'terminals',
       folder: 'cli/adapters/jobs/process-ports.ts',
       reason:
