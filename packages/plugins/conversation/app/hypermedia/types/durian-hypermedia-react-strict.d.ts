@@ -64,8 +64,22 @@ export interface MermaidSlotProps {
   readonly active: boolean;
 }
 
+/** One Markdown heading, for the host's `Heading` slot to draw (Durian's `HeadingSlotProps`). */
+export interface HeadingSlotProps {
+  /** The level written in the message (1 for `#`). */
+  readonly depth: number;
+  /** The level to draw, after `demoteHeadings` (at most 6). */
+  readonly level: number;
+  /** The heading's id (prefixed, unique in the message). */
+  readonly id: string;
+  /** The heading as plain text. */
+  readonly text: string;
+  readonly children: ReactNode;
+}
+
 /** The chrome and Markdown elements a host may draw itself (Durian's `Slots`, the ones we set). */
 export interface Slots {
+  readonly Heading?: ComponentType<HeadingSlotProps>;
   readonly Mermaid?: ComponentType<MermaidSlotProps>;
   readonly Code?: ComponentType<CodeSlotProps>;
   readonly InlineCode?: ComponentType<InlineCodeSlotProps>;
