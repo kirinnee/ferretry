@@ -120,6 +120,25 @@
   --step-seg: var(--border);
   /* A paler step of the accent — still >=3:1, but plainly not "done". */
   --step-seg-now: #8486e2;
+  /* ---- data-visualisation series (an fy-render `chart`, a Mermaid diagram) ----
+   Eight series colours, read by `fy-render/palette.ts` and never by a payload: an author asks for a slot
+   or a tone, never a colour. Each slot NAMES a hue the palette already restates per mode and tunes for
+   contrast against its own surface, so a new palette gets series that match it without writing any. The
+   ORDER is measured, not chosen: in every palette and mode the first five stay at least 60 apart in RGB
+   (of 441) and all eight at least 30 (`theme-viz-series.visual.test.ts` in this package re-checks it
+   against the real sheet). Where a palette's own hues collide under this default (Hacker, Vintage,
+   Vaporwave, Mesh, Aurora, Afterglow and Briefing give `--tool-patch` and `--err` ONE colour), that
+   palette's file restates the slots it needs, naming other hues it already has. The accent is NOT a slot:
+   in several palettes it IS one of these hues (Mission's cyan is its search teal), so a chart that wants
+   the brand colour asks for `tone: accent`. */
+  --viz-1: var(--tool-read);
+  --viz-2: var(--tool-edit);
+  --viz-3: var(--tool-bash);
+  --viz-4: var(--tool-patch);
+  --viz-5: var(--syn-keyword);
+  --viz-6: var(--tool-search);
+  --viz-7: var(--src-claude);
+  --viz-8: var(--err);
 }
 
 /* The mode answers the browser's own colour scheme (scrollbars, form controls). Not a palette's business. */

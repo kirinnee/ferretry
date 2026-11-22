@@ -68,10 +68,15 @@ const LINK_REFUSED = 'symbolic links are not readable setup paths';
 
 const DEFAULT_MAX_SKILL_FILES = 2_000;
 
+/** How many skill files are read at once while one skill is hashed (each read is a guarded kernel walk). */
+const DIGEST_READS_AT_ONCE = 16;
+
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 export class HostHarnessScanner {
   readonly #maxSkillFiles: number;
+  /** Each skill folder's last digest, held with the listing marks it was taken under (see {@link #digest}). */
+  readonly #digests = new Map<string, { readonly fingerprint: string; readonly digest: Promise<string> }>();
 
   constructor(private readonly deps: HostHarnessScanDeps) {
     this.#maxSkillFiles = deps.maxSkillFiles ?? DEFAULT_MAX_SKILL_FILES;
@@ -337,27 +342,113 @@ export class HostHarnessScanner {
     }
   }
 
-  /** A digest over every file's relative path and bytes, in a stable order; `undefined` when too many. */
+  /**
+   * A digest over every file's relative path and bytes, in a stable order; `undefined` when too many.
+   *
+   * ONE LOOK PER FOLDER, NOT PER ANCESTOR (O8-4). Every host look is a kernel-guarded walk of the whole path, and this used
+   * to re-check every ANCESTOR of every file, twice: ~23 guarded looks per file, so one 692-file skill held the setup scan
+   * (and every onboarding page waiting on it) for 46 s. The walk now descends only into what a folder's own listing calls
+   * a directory (never a link: the listing never follows one), which is the same "no link on the way" the ancestor walk
+   * proved, and the kernel still refuses a link escape on every call. Each file is looked at once more, by itself, right
+   * before it is read, so a file swapped for a link after the listing is hashed as a link, never followed — as before.
+   * Reads run a few at a time and are hashed in sorted order, so the digest is the same as the one-at-a-time one.
+   *
+   * HELD WHILE NOTHING CHANGED. A skill folder whose listing says the same name, kind, size and modified time for every
+   * file as when it was last hashed answers that digest without reading a byte (a repeat scan of an unchanged home: 2.3 s cold, 1.1 s held). It is the rule `make` and `rsync` use: a same-size rewrite that keeps the modified
+   * time to the millisecond is not seen until anything else in the folder changes. A host whose listing has no times
+   * holds nothing and hashes every time.
+   */
   async #digest(home: string, root: string): Promise<string | undefined> {
-    const all: string[] = [];
+    const all: { path: string; kind: HostEntry['kind']; mark: string | undefined }[] = [];
     const pending = [root];
     for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-      for (const name of (await this.deps.files.list(next)) ?? []) {
-        const path = join(next, name);
-        const info = await this.#inspect(home, path).catch(() => ({ kind: 'link' as const, size: 0 }));
-        if (info?.kind === 'directory') pending.push(path);
-        else all.push(path);
+      for (const entry of await this.#entries(home, next)) {
+        const path = join(next, entry.name);
+        if (entry.kind === 'directory') pending.push(path);
+        else all.push({ path, kind: entry.kind, mark: entry.mark });
         if (all.length > this.#maxSkillFiles) return undefined;
       }
     }
+    const sorted = all.toSorted((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    // What the listing says of every file: the same marks mean the same bytes were hashed last time (see the class note).
+    const marks = sorted.map(file =>
+      file.mark === undefined ? undefined : `${relative(root, file.path)}\0${file.mark}`,
+    );
+    const fingerprint = marks.includes(undefined) ? undefined : marks.join('\n');
+    const held = this.#digests.get(root);
+    if (fingerprint !== undefined && held?.fingerprint === fingerprint) return await held.digest;
+    const digest = this.#hash(root, sorted);
+    if (fingerprint === undefined) return await digest;
+    this.#digests.set(root, { fingerprint, digest });
+    // A read that failed is never held: the next scan reads again.
+    void digest.catch(() => {
+      if (this.#digests.get(root)?.digest === digest) this.#digests.delete(root);
+    });
+    return await digest;
+  }
+
+  /** The digest itself: each file's relative path and bytes in sorted order, a few reads at a time. */
+  async #hash(
+    root: string,
+    sorted: readonly { readonly path: string; readonly kind: HostEntry['kind'] }[],
+  ): Promise<string> {
     const hasher = new Bun.CryptoHasher('sha256');
-    for (const path of all.toSorted()) {
-      hasher.update(`${relative(root, path)}\0`);
-      const info = await this.#inspect(home, path).catch(() => ({ kind: 'link' as const, size: 0 }));
-      // A link (or anything the guard refuses, a sign-in file included) counts as a link, never read.
-      hasher.update(info?.kind === 'file' ? ((await this.deps.files.readBytes(path)) ?? new Uint8Array()) : 'link\0');
-      hasher.update('\0');
+    for (let start = 0; start < sorted.length; start += DIGEST_READS_AT_ONCE) {
+      const batch = sorted.slice(start, start + DIGEST_READS_AT_ONCE);
+      // Only what the listing called a plain file is looked at again and read: a link, a sign-in name or anything else is
+      // hashed as a link and never opened.
+      const contents = await Promise.all(
+        batch.map(async file => (file.kind === 'file' ? await this.#leafBytes(file.path) : undefined)),
+      );
+      batch.forEach(({ path }, index) => {
+        hasher.update(`${relative(root, path)}\0`);
+        hasher.update(contents[index] ?? 'link\0');
+        hasher.update('\0');
+      });
     }
     return hasher.digest('hex');
+  }
+
+  /**
+   * A folder's names with each one's own kind; a sign-in name is listed as a link, so it is never entered or read. `mark`
+   * is the leaf's kind, size and modified time when the host's listing says them (nothing otherwise, so nothing is held).
+   */
+  async #entries(
+    home: string,
+    folder: string,
+  ): Promise<readonly { name: string; kind: HostEntry['kind']; mark: string | undefined }[]> {
+    const { files } = this.deps;
+    const inside = relative(home, folder).split(sep);
+    const signInNamed = (name: string): boolean => [...inside, name].some(isSignInName);
+    const listed: readonly (HostEntry & { readonly name: string; readonly modified?: string })[] =
+      files.entries === undefined
+        ? await Promise.all(
+            ((await files.list(folder)) ?? []).map(async name => ({
+              name,
+              // A sign-in name is never looked at, not even its kind; a look the host refuses counts as a link.
+              ...((signInNamed(name) ? undefined : await files.lstat(join(folder, name)).catch(() => undefined)) ?? {
+                kind: 'link' as const,
+                size: 0,
+              }),
+            })),
+          )
+        : ((await files.entries(folder)) ?? []);
+    return listed.map(entry =>
+      // A sign-in name keeps no fact of its own, not even in the mark: it is a link by name, whatever is there.
+      signInNamed(entry.name)
+        ? { name: entry.name, kind: 'link' as const, mark: 'link' }
+        : {
+            name: entry.name,
+            kind: entry.kind,
+            mark: entry.modified === undefined ? undefined : `${entry.kind}\0${String(entry.size)}\0${entry.modified}`,
+          },
+    );
+  }
+
+  /** A file's bytes, looked at by itself first: anything that is no longer a plain file (or is refused) is `undefined`. */
+  async #leafBytes(path: string): Promise<Uint8Array | undefined> {
+    const info = await this.deps.files.lstat(path).catch(() => undefined);
+    if (info?.kind !== 'file') return undefined;
+    return (await this.deps.files.readBytes(path)) ?? new Uint8Array();
   }
 }

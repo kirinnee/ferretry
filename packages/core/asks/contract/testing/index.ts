@@ -152,6 +152,8 @@ export class FakeAsks implements AsksApi {
       ferret,
       state: 'open',
       raisedAt: AT as AskSummary['raisedAt'],
+      // The real port's summary carries a draft's flag (a buzzed notice, an ask blocking now), as `fy notify --buzz` sets it.
+      ...(draft.blocking === true ? { blocking: true as const } : {}),
     });
     return { ferret, id };
   }

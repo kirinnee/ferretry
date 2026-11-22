@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { ferret, owner, testHost } from '@ferretry/kernel/testing';
 import { PAIRING_MINT_PATH } from '@ferretry/std/pairing-screen';
@@ -14,7 +15,7 @@ import manifest from '../../../manifest.ts';
  */
 describe('minting a pairing code is a person’s alone', () => {
   test('a ferret asking the mint route is refused as owner-only, with no code in the answer', async () => {
-    const host = await testHost({ plugins: [daemon], fakes: { gate: new FakeGate() } });
+    const host = await testHost({ plugins: [daemon], fakes: { gate: new FakeGate(), asks: new FakeAsks() } });
     try {
       const refused = await host.request('POST', PAIRING_MINT_PATH, { body: {}, as: ferret('F1') });
 
@@ -28,7 +29,7 @@ describe('minting a pairing code is a person’s alone', () => {
   });
 
   test('the same holds for reading a minted code back and for revoking one', async () => {
-    const host = await testHost({ plugins: [daemon], fakes: { gate: new FakeGate() } });
+    const host = await testHost({ plugins: [daemon], fakes: { gate: new FakeGate(), asks: new FakeAsks() } });
     try {
       const read = await host.request('GET', `${PAIRING_MINT_PATH}/fy_pair_x`, { as: ferret('F1') });
       const revoked = await host.request('DELETE', `${PAIRING_MINT_PATH}/fy_pair_x`, { as: ferret('F1') });

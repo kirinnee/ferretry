@@ -81,7 +81,8 @@ describe('POST /v1/push/seen', () => {
 
   test('G167 skips the device that opened it, read from its credential and never the body, and answers only the tags', async () => {
     const { host, acc } = await buzzedCard();
-    expect(acc?.buzzed).toHaveLength(1);
+    // The card's ask buzz is Access's now, so Agenda sends none; the seen route still names that ask's line to take down.
+    expect(acc?.buzzed).toEqual([]);
     const response = await host.request('POST', '/v1/push/seen', { body: SEEN_BODY, ...as(fleetUse) });
     expect(response.status).toBe(200);
     expect(response.json()).toEqual({ cleared: true, tags: ['agenda-f1:A1'] });
@@ -141,15 +142,13 @@ describe('POST /v1/push/seen', () => {
 });
 
 describe('buzzes', () => {
-  test('a card’s ask buzzes once, however often it is announced', async () => {
+  test('Agenda sends no buzz for a card’s ask, however often it is announced: that buzz is Access’s, so the phone hears it once', async () => {
     const { host, asks, acc } = await world();
     const ref = await raiseAsk(asks, 'f1', 'e1', { source: 'card', subject: 'Badge colour' });
     for (let i = 0; i < 3; i++) host.emit(AsksChanged, { ferret: 'f1', askId: ref.id, state: 'open' });
     await host.settle();
-    expect(acc?.buzzed).toEqual([
-      { tag: 'agenda-f1:A1', title: 'Badge colour', body: 'Badge colour', url: '/ferrets/f1/chat?ask=A1' },
-    ]);
-    expect(host.published.filter(each => each.event === 'agenda.buzzed')).toHaveLength(1);
+    expect(acc?.buzzed).toEqual([]);
+    expect(host.published.filter(each => each.event === 'agenda.buzzed')).toHaveLength(0);
   });
 
   test('an ordinary ask does not buzz when raised; a closed one never does', async () => {

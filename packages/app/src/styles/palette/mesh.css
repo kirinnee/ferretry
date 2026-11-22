@@ -166,3 +166,10 @@
     radial-gradient(70% 60% at 80% 94%, rgba(14, 165, 233, 0.5), transparent 72%),
     radial-gradient(55% 50% at 14% 88%, rgba(99, 102, 241, 0.42), transparent 72%);
 }
+
+/* Chart series: `--tool-patch` and `--err` are one colour here, so the default series 4 repeats series 8 (E14b). */
+:root[data-palette='mesh'],
+[data-swatch][data-palette='mesh'] {
+  --viz-1: var(--src-computer);
+  --viz-4: var(--src-codex);
+}

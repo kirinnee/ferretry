@@ -156,3 +156,10 @@
   --step-seg: #5a3f94;
   --step-seg-now: #a1498e;
 }
+
+/* Chart series: `--tool-patch` and `--err` are one colour here, so the default series 4 repeats series 8 (E14b). */
+:root[data-palette='vaporwave'],
+[data-swatch][data-palette='vaporwave'] {
+  --viz-3: var(--src-computer);
+  --viz-4: var(--src-codex);
+}

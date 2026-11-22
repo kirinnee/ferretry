@@ -6,9 +6,9 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { CliHalf, PluginClient, TerminalIo, VerbInvocation } from '@ferretry/kernel/manifest';
-import cli from '../../../cli/index.ts';
-import manifest from '../../../manifest.ts';
-import { agentItem, snapshot } from '../cli/fixtures.ts';
+import cli from '../../cli/index.ts';
+import manifest from '../../manifest.ts';
+import { agentItem, snapshot } from './cli/fixtures.ts';
 
 const BOARD = 'GET /v1/ferrets/:ferretId/agenda';
 const ACT = 'POST /v1/ferrets/:ferretId/agenda';
@@ -29,7 +29,6 @@ function run(options: { readonly env?: Record<string, string>; readonly files?: 
     [BOARD]: empty,
     [ACT]: empty,
     [REPLIES]: empty,
-    'POST /v1/agenda/clear-agents': { cleared: 3, ferrets: 2 },
   };
   const client: PluginClient = {
     call: async (route, init) => {
@@ -97,13 +96,6 @@ describe('the verbs Agenda owns for the items on a board', () => {
     const t = run();
     expect(await t.verb('agenda answer <id> <text...>', ['A3', 'It', 'is', 'eu-west'])).toBe(0);
     expect(t.posted()[0]).toMatchObject({ action: 'edit', id: 'A3', questionAnswer: 'It is eu-west' });
-  });
-
-  test('V-0033 fy agenda clear --agents counts first, and a dry run changes nothing', async () => {
-    const t = run({ env: {} });
-    expect(await t.verb('agenda clear', [], { agents: true, 'dry-run': true })).toBe(0);
-    expect(t.out.join('')).toContain('would clear 3 open asks on 2 agent ferrets');
-    expect(t.calls.map(call => call.init?.body)).toEqual([{ dryRun: true }]);
   });
 
   test('V-0034 fy agenda discuss asks the ferret to talk it through', async () => {

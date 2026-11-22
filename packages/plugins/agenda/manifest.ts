@@ -56,6 +56,5 @@ export default definePlugin({
 
   hooks,
 
-  instructions: [{ id: 'notify', text: 'instructions/notify.md', when: { role: 'lead' } }],
   doctor: ['agenda-buzz'],
 });

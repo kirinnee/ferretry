@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Clock, FencedPath, RootHandle } from '@ferretry/kernel/contract';
@@ -125,6 +125,15 @@ describe('the held Codex catalog', () => {
     expect(started).toHaveLength(1);
     expect(started[0]?.cwd?.startsWith(base)).toBe(true);
     expect(await started[0]?.cwdExisted).toBe(true);
+  });
+
+  test("(no guarantees row) O8-4 the child's CODEX_HOME exists when it starts: a real codex app-server refuses to start without it", async () => {
+    const started: Started[] = [];
+    const { catalog, base } = await subject(started);
+    await catalog.refresh();
+    const codexHome = started[0]?.env?.CODEX_HOME;
+    expect(codexHome?.startsWith(base)).toBe(true);
+    expect((await stat(codexHome ?? '/nowhere')).isDirectory()).toBe(true);
   });
 
   test("(no guarantees row) the child's HOME is a throwaway inside the plugin's folder, never the daemon's HOME", async () => {
@@ -320,6 +329,10 @@ describe('the held Codex catalog', () => {
     await s.catalog.refresh();
     await s.catalog.refresh();
     expect(s.warnings).toHaveLength(1);
+    // The child's own reason is in the warning, so the log says what to fix.
+    expect(s.warnings[0]).toBe(
+      'the Codex model catalog could not be read (boom); fast starts on Codex are refused until it can be, or kept from the last good read',
+    );
     fail = false;
     await s.catalog.refresh();
     fail = true;

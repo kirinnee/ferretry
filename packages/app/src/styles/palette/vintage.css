@@ -156,3 +156,14 @@
   --step-seg: #5b4c33;
   --step-seg-now: #96613c;
 }
+
+/* Chart series: `--tool-patch` and `--err` are one colour here and the default series 1 is within 60 of series 2, 4
+   and 8, so the default order repeats a colour; its series 7 is also just under 3:1 on the light page. These slots name
+   hues Vintage keeps apart and readable (E14b). */
+:root[data-palette='vintage'],
+[data-swatch][data-palette='vintage'] {
+  --viz-1: var(--src-codex);
+  --viz-3: color-mix(in srgb, var(--tool-bash), var(--src-claude));
+  --viz-4: var(--src-computer);
+  --viz-7: color-mix(in srgb, var(--tool-bash), var(--tool-write));
+}

@@ -15,6 +15,7 @@ import { AgendaFormFieldSchema, type AgendaSnapshot } from './snapshot/agenda.ts
  * The agenda wire shapes the Agenda app and the daemon share: schemas, types and the pure helpers around them
  * (today's `protocol/src/lib/agenda*.ts`). One copy, here; the daemon's `lib/protocol` files re-export it.
  */
+export * from './buzz-words.ts';
 export * from './context.ts';
 export * from './ferret-notice.ts';
 export * from './snapshot/account-ids.ts';

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { buzzBody, buzzTitle, clipAtWord } from '../../../daemon/lib/words.ts';
+import { buzzBody, buzzTitle, clipAtWord } from '../../contract/index.ts';
+import { askBuzzKey, askBuzzKind, askBuzzPath, askBuzzWords, type BuzzableAsk } from '../../contract/index.ts';
 
 describe('clipAtWord', () => {
   test('keeps a short line whole and one-lines it', () => {
@@ -41,5 +42,45 @@ describe('buzzBody', () => {
   test('is one line of at most 120 characters', () => {
     expect(buzzBody(`${'word '.repeat(60)}`).length).toBeLessThanOrEqual(120);
     expect(buzzBody('a\nb')).toBe('a b');
+  });
+});
+
+describe('the buzz an ask makes', () => {
+  const ask = (overrides: Partial<BuzzableAsk>) =>
+    ({
+      id: 'A3',
+      subject: 'Renew the cert',
+      ferret: 'f1',
+      state: 'open',
+      kind: 'task',
+      source: 'question',
+      ...overrides,
+    }) as BuzzableAsk;
+
+  test('only a card’s ask or a notice that asked for the phone buzzes on its own', () => {
+    expect(askBuzzKind(ask({}))).toBeUndefined();
+    expect(askBuzzKind(ask({ kind: 'notice' }))).toBeUndefined();
+    expect(askBuzzKind(ask({ kind: 'notice', blocking: true }))).toBe('notice');
+    expect(askBuzzKind(ask({ source: 'card' as never }))).toBe('card-ask');
+    expect(askBuzzKind(ask({ source: 'card' as never, state: 'closed' }))).toBeUndefined();
+  });
+
+  test('words the buzz by the ask’s subject, under the ask’s own tag, and opens the ferret’s chat at the ask', () => {
+    const words = askBuzzWords(ask({}));
+    expect(words).toEqual({
+      tag: 'agenda-f1:A3',
+      title: 'Renew the cert',
+      body: 'Renew the cert',
+      url: '/ferrets/f1/chat?ask=A3',
+    });
+  });
+
+  test('a machine ask opens the Agenda page at the ask, never /ferrets//chat', () => {
+    expect(askBuzzPath('', 'A12' as never)).toBe('/agenda?ask=A12');
+    expect(askBuzzWords(ask({ ferret: undefined })).url).toBe('/agenda?ask=A3');
+  });
+
+  test('keys an ask by ferret and id', () => {
+    expect(askBuzzKey('f1', 'A3')).toBe('ask:f1:A3');
   });
 });
