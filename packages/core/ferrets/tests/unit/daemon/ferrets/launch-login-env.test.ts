@@ -103,6 +103,77 @@ describe('a ferret launch carries its login’s environment', () => {
     expect(f.harness.launched[0]?.parts).toEqual([]);
   });
 
+  test('a pane-env part (the Git account’s no-identity ssh) outranks a login that sets GIT_SSH_COMMAND / GIT_SSH', async () => {
+    const f = fixture({
+      loginEnv: env({
+        GIT_SSH_COMMAND: 'ssh -i /login/key',
+        GIT_SSH: '/login/ssh',
+        GIT_CONFIG_COUNT: '9',
+        FOO: 'login',
+      }),
+      parts: [
+        {
+          kind: 'pane-env',
+          plugin: 'git-accounts',
+          env: { GIT_SSH_COMMAND: 'ssh -F none -o IdentityAgent=none', GIT_CONFIG_COUNT: '0' },
+        },
+      ],
+    });
+
+    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' }, PERSON_ORIGIN);
+
+    expect(f.asked[0]?.GIT_SSH_COMMAND).toBe('ssh -F none -o IdentityAgent=none');
+    expect(f.asked[0]?.GIT_CONFIG_COUNT).toBe('0');
+    // What the part does not name is still the login's.
+    expect(f.asked[0]?.GIT_SSH).toBe('/login/ssh');
+    expect(f.asked[0]?.FOO).toBe('login');
+  });
+
+  test('a pane-env GIT_CONFIG_PARAMETERS is APPENDED to the login’s, so git (which applies it last, in order) reads the part’s entry over the login’s and keeps the login’s others', async () => {
+    const f = fixture({
+      loginEnv: env({
+        GIT_CONFIG_PARAMETERS: `'commit.gpgsign'='true' 'tag.gpgsign'='true' 'http.proxy'='http://login.example.test'`,
+      }),
+      parts: [
+        {
+          kind: 'pane-env',
+          plugin: 'git-accounts',
+          env: { GIT_CONFIG_PARAMETERS: `'commit.gpgsign'='false' 'tag.gpgsign'='false'` },
+        },
+      ],
+    });
+
+    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' }, PERSON_ORIGIN);
+
+    // Real git reads the FINAL environment the launch handed the Vault.
+    const final = f.asked[0] ?? {};
+    const git = (name: string): string => {
+      const run = Bun.spawnSync(['git', 'config', '--get', name], {
+        env: {
+          PATH: process.env.PATH ?? '',
+          HOME: '/nonexistent-fy-home',
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_CONFIG_PARAMETERS: final.GIT_CONFIG_PARAMETERS ?? '',
+        },
+      });
+      return new TextDecoder().decode(run.stdout).trim();
+    };
+    expect(git('commit.gpgsign')).toBe('false');
+    expect(git('tag.gpgsign')).toBe('false');
+    expect(git('http.proxy')).toBe('http://login.example.test');
+  });
+
+  test('a pane-env GIT_CONFIG_PARAMETERS with no login value is just the part’s', async () => {
+    const f = fixture({
+      parts: [{ kind: 'pane-env', plugin: 'git-accounts', env: { GIT_CONFIG_PARAMETERS: `'commit.gpgsign'='false'` } }],
+    });
+
+    await f.service.start({ folder: '/work', harness: 'claude-code', by: 'owner' }, PERSON_ORIGIN);
+
+    expect(f.asked[0]?.GIT_CONFIG_PARAMETERS).toBe(`'commit.gpgsign'='false'`);
+  });
+
   test('FY_*, an MCP env part and a shell part keep precedence over the login', async () => {
     const f = fixture({
       loginEnv: env({ FOO: 'login', PATH: 'login-path', GITHUB_TOKEN: 'login-token' }),

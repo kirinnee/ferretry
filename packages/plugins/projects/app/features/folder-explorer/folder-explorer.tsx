@@ -16,6 +16,7 @@ import { ArrowUp, ChevronRight, FolderPlus, LayoutGrid, List, TriangleAlert } fr
 import { useId, useRef, useState } from 'react';
 import { cn, Spinner } from '@ferretry/app/ui';
 import type { FolderEntry, FolderListing } from '../../../contract/index.ts';
+import { BROAD_ROOT_WARNING } from '../../lib/registration-model.ts';
 import { ExplorerEntries } from './explorer-entries.tsx';
 import {
   childPath,
@@ -46,6 +47,11 @@ export interface FolderExplorerProps {
   /** Makes a folder in the open one; `null` = made, else the daemon's sentence. */
   readonly onMakeFolder: (name: string) => Promise<string | null>;
   readonly chooseLabel?: string;
+  /**
+   * Whether the open folder being a broad root (`listing.broad`: the disk, a home, the folder every home sits in) is said out
+   * loud. On by default: the picker chooses a project folder. Off for a caller that only picks a place to put something.
+   */
+  readonly warnBroad?: boolean;
 }
 
 const NAV_KEYS: ReadonlySet<string> = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End']);
@@ -236,6 +242,17 @@ export function FolderExplorer(props: FolderExplorerProps) {
       {up === null && (
         <p className="m-0 text-meta text-faint" data-explorer-fence="">
           Ferretry can only open folders inside <span className="mono break-all text-muted">{home}</span>.
+        </p>
+      )}
+
+      {listing.broad === true && props.warnBroad !== false && (
+        <p
+          className="m-0 flex items-start gap-xs text-meta leading-base text-warn"
+          role="status"
+          data-explorer-broad=""
+        >
+          <TriangleAlert className="mt-0.5 shrink-0" size={14} aria-hidden="true" />
+          <span>{BROAD_ROOT_WARNING}</span>
         </p>
       )}
 

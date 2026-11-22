@@ -162,7 +162,27 @@ that is not there). Three rules, in order:
 
    Gate's judge spends a remote device's one step-up proof on the first loosening it lets through, so a set with
    **two** loosening documents is held for a remote device (the second ask finds the proof spent). It fails
-   closed; judging a set as one act is Gate's to add (declared GAP).
+   closed. **An import and a clone are ONE act** (Gate's `openLooseningAct`, opened by
+   `POST /v1/runtimes/proposals/:proposalId/apply` for `setup.import` and `clone.import`): they write several owners'
+   files (a login, Claude Code's settings, Runtimes' own set), so a remote device's passkey proof is claimed **before
+   anything is written** and covers every loosening of that one request until it ends. The proof is the one PROVED FOR
+   `loosen-config` (a passkey proved for another act, or for none, never confirms an import), and the route names
+   that act on its very first `403 grant_step_up_required`, so one ceremony completes it, a machine that asks a passkey
+   per act with a `0`-minute window included ([grants.md](grants.md#the-unlock-and-the-passkey-step-up-inside-it)). A device with no such proof
+   (an unlock is never one) is answered `403` with the `loosen-config` act and nothing written, the change still
+   pending, so the app asks for the passkey and sends the same apply again. The act opens **inside the service's
+   serialised apply**, once the change is resolved and before any work (an apply that raced another is judged on the
+   change as it really is, never on a read taken before its turn), and it is bound to the **request's own lifecycle**:
+   a request that ended while it waited its turn (a carried session that closed aborts its requests) consumes nothing,
+   takes no passkey and writes nothing (`499 request_aborted`), and one that ends mid-way closes the act, so a later
+   loosening of that request is held. Before this, a phone's import wrote the settings, then Runtimes' set (a new
+   instructions item loosens) was held and thrown: a `409` after a partial write. Every refused, held or unfinished
+   apply is one daemon log line (`runtimes: a change was not fully applied`: the change id only when this daemon minted
+   it, its kind, the status and a FIXED code — never a path segment, an error's name, a sentence or a value); what an
+   executor leaves held or refused behind a `200` is read from structured state it reports, never parsed from its words.
+   A login's or Vault's earlier write is not undone when a later owner refuses (accepted scope limit: the `409` lists
+   the settings and components that landed, not those). Any other request that writes two loosening documents still holds
+   the second (declared GAP).
 
 What is in effect is recorded in the state home (`state/config-accepted.json`), file by file with its text,
 so a last good version survives a restart and a confirmed loosening is not asked about again. A missing or

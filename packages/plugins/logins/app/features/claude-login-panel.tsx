@@ -36,8 +36,8 @@
 
 import type { ClaudeLoginFlow, HarnessLoginLastCode } from '../../contract/index.ts';
 import { CheckCircle2, KeyRound, Link2, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
-import { cn } from '../ui.ts';
+import { type FormEvent, useEffect, useId, useState } from 'react';
+import { cn, SecretInput, useSecretField } from '../ui.ts';
 import { Button } from '../ui.ts';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../ui.ts';
 import { SignInDemo } from './sign-in-demo.tsx';
@@ -94,6 +94,49 @@ const codeEnding = (
   return null;
 };
 
+/** A link at least this long is shown cut short, with a button for the rest (C59 O5: "the link is too long"). */
+export const LONG_LINK = 48;
+
+/** The sign-in link: one line cut with an ellipsis, and "Show full" / "Show less" to open it. The Copy button always has the whole link. */
+export function SignInLink({ url, copy }: { readonly url: string; readonly copy: ClipboardWriter }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const long = url.length >= LONG_LINK;
+  const shown = !long || open;
+  return (
+    <div className="mt-2 flex min-w-0 items-start gap-2">
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <code
+          id={id}
+          data-sign-in-link=""
+          data-expanded={shown}
+          className={cn(
+            'block min-w-0 rounded-control border border-border bg-surface px-2 py-2 font-mono text-meta leading-base text-fg',
+            shown ? 'break-all' : 'truncate',
+          )}
+        >
+          {url}
+        </code>
+        {long ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="self-start"
+            aria-expanded={open}
+            aria-controls={id}
+            data-sign-in-link-toggle=""
+            onClick={() => setOpen(value => !value)}
+          >
+            {open ? 'Show less' : 'Show full'}
+          </Button>
+        ) : null}
+      </div>
+      <CopyButton text={url} label="Copy the Claude sign-in link" write={copy} />
+    </div>
+  );
+}
+
 export function ClaudeLoginPanel({
   accountLabel,
   loginId,
@@ -109,19 +152,28 @@ export function ClaudeLoginPanel({
   wording,
   className,
 }: ClaudeLoginPanelProps) {
-  const [code, setCode] = useState('');
+  // One line, masked like a password, never in React state or in the DOM's attributes: the shared secret field.
+  const code = useSecretField(typed => typed.trim().length);
+  /** The code is on its way (not a start-over or a cancel, which also hold `busy`): only then does Finish show the spinner. */
+  const [sending, setSending] = useState(false);
+  useEffect(() => {
+    if (!busy) setSending(false);
+  }, [busy]);
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
-    if (code.trim() === '' || busy) return;
+    if (!code.filled || busy) return;
     // Captured only for this request. Clearing before the promise settles is what keeps an authorization
     // code out of the rendered tree, the retry affordance, and any screenshot taken mid-flow.
-    const submitted = code;
-    setCode('');
+    const submitted = code.read();
+    code.clear();
+    setSending(true);
     onSubmitCode(submitted);
   };
 
   const state = flow?.state ?? 'idle';
+  /** What went wrong, said under the buttons in a space that is always there, so the options never move when it appears. */
+  const waitingForCode = flow?.state === 'awaiting-code';
   return (
     <section
       aria-labelledby={`claude-login-${loginId}`}
@@ -149,10 +201,10 @@ export function ClaudeLoginPanel({
           <p className="m-0">{wording.coverage}</p>
         </div>
 
-        {refusal === null ? null : (
+        {refusal === null || waitingForCode ? null : (
           <p
             role="alert"
-            className="m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+            className="fy-shake m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
           >
             <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
             {refusal}
@@ -166,74 +218,95 @@ export function ClaudeLoginPanel({
             <p className="m-0 text-ui leading-base text-muted">
               Open the link, sign in, then bring the code Claude shows back here.
             </p>
-            <Button type="button" variant="primary" onClick={onStart} disabled={busy || state === 'starting'}>
-              <Link2 size={16} aria-hidden="true" />
-              {state === 'starting' ? 'Starting sign-in…' : 'Sign in to Claude Code'}
-            </Button>
-            {state === 'starting' ? <StartOverButton onStartOver={onStartOver} busy={busy} /> : null}
+            <div className="flex flex-wrap items-center gap-3" data-sign-in-actions="">
+              <Button
+                type="button"
+                variant="primary"
+                onClick={onStart}
+                disabled={busy}
+                icon={<Link2 size={16} />}
+                busy={state === 'starting'}
+                busyLabel="Starting sign-in…"
+              >
+                Sign in to Claude Code
+              </Button>
+              {state === 'starting' ? <StartOverButton onStartOver={onStartOver} busy={busy} /> : null}
+            </div>
           </div>
         ) : null}
 
         {flow?.state === 'awaiting-code' ? (
           <div className="fy-sd-host" data-claude-login-code="">
-            <div className="fy-sd-layout">
-              <div className="fy-sd-steps space-y-4" data-sign-in-steps="">
-                <div className="rounded-control border border-accent/40 bg-accent-soft p-3">
-                  <p className="m-0 text-meta font-semibold text-accent">1 · Open this link anywhere</p>
-                  <div className="mt-2 flex min-w-0 items-start gap-2">
-                    <code className="min-w-0 flex-1 break-all rounded-control border border-border bg-surface px-2 py-2 font-mono text-meta leading-base text-fg">
-                      {flow.verificationUrl}
-                    </code>
-                    <CopyButton text={flow.verificationUrl} label="Copy the Claude sign-in link" write={copy} />
+            <fieldset disabled={busy} className="m-0 min-w-0 border-0 p-0">
+              <div className="fy-sd-layout">
+                <div className="fy-sd-steps space-y-4" data-sign-in-steps="">
+                  <div className="rounded-control border border-accent/40 bg-accent-soft p-3">
+                    <p className="m-0 text-meta font-semibold text-accent">1 · Open this link anywhere</p>
+                    <SignInLink url={flow.verificationUrl} copy={copy} />
                   </div>
                 </div>
-                {flow.lastCode === 'rejected' ? (
-                  <p
-                    role="alert"
-                    data-claude-login-rejected=""
-                    className="m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
-                  >
-                    <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
-                    <span>
-                      <strong className="font-semibold">Claude didn’t accept that code.</strong> Copy the whole code
-                      from the Claude page — every character — and paste it again below.
-                    </span>
+                <SignInDemo kind="code" />
+                <form className="fy-sd-form space-y-2" onSubmit={submit}>
+                  <label htmlFor={`claude-login-code-${loginId}`} className="block text-ui font-semibold text-fg">
+                    2 · Paste the code Claude showed you
+                  </label>
+                  <SecretInput
+                    id={`claude-login-code-${loginId}`}
+                    field={code}
+                    className="kt-input w-full font-mono text-meta"
+                    required
+                  />
+                  <div className="flex flex-col gap-3" data-sign-in-actions="">
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={!code.filled}
+                      icon={<ShieldCheck size={16} />}
+                      busy={sending && busy}
+                      busyLabel="Sending…"
+                    >
+                      {wording.finishLabel ?? 'Finish sign-in'}
+                    </Button>
+                    <div
+                      className={cn('grid gap-3', onStartOver === undefined ? 'grid-cols-1' : 'grid-cols-2')}
+                      data-sign-in-secondary=""
+                    >
+                      <StartOverButton onStartOver={onStartOver} busy={busy} />
+                      <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="m-0 text-meta leading-base text-faint">
+                    Goes straight to Claude on this machine. Kept nowhere, never shown back.
                   </p>
-                ) : null}
+                  <div className="fy-sd-notes" data-sign-in-notes="" aria-live="polite">
+                    {refusal === null ? null : (
+                      <p
+                        role="alert"
+                        className="fy-shake m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+                      >
+                        <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
+                        {refusal}
+                      </p>
+                    )}
+                    {refusal === null && flow.lastCode === 'rejected' ? (
+                      <p
+                        role="alert"
+                        data-claude-login-rejected=""
+                        className="fy-shake m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+                      >
+                        <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
+                        <span>
+                          <strong className="font-semibold">Claude didn’t accept that code.</strong> Copy the whole code
+                          from the Claude page — every character — and paste it again above.
+                        </span>
+                      </p>
+                    ) : null}
+                  </div>
+                </form>
               </div>
-              <SignInDemo kind="code" />
-              <form className="fy-sd-form space-y-2" onSubmit={submit}>
-                <label htmlFor={`claude-login-code-${loginId}`} className="block text-ui font-semibold text-fg">
-                  2 · Paste the code Claude showed you
-                </label>
-                <textarea
-                  id={`claude-login-code-${loginId}`}
-                  name="claude-login-code"
-                  className="kt-input min-h-24 w-full resize-y font-mono text-meta"
-                  value={code}
-                  onChange={event => setCode(event.target.value)}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  disabled={busy}
-                  required
-                />
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button type="submit" variant="primary" disabled={busy || code.trim() === ''}>
-                    <ShieldCheck size={16} aria-hidden="true" />
-                    {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
-                  </Button>
-                  <StartOverButton onStartOver={onStartOver} busy={busy} />
-                  <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
-                    Cancel
-                  </Button>
-                </div>
-                <p className="m-0 text-meta leading-base text-faint">
-                  Goes straight to Claude on this machine. Kept nowhere, never shown back.
-                </p>
-              </form>
-            </div>
+            </fieldset>
           </div>
         ) : null}
 

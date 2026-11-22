@@ -49,6 +49,13 @@ export type ComponentPutResult =
        * the import record, so a later accepted update replaces only what an import made, never what a person made.
        */
       readonly created?: readonly string[];
+      /**
+       * The config etag of each file this write put down, by the item's name (the component's own item and every one in
+       * `created` that is a config file). Runtimes keeps them in the import record: a later accepted update replaces an
+       * item only while its file still has the etag the import left, so an item a person deleted and made again by hand
+       * under the same name is never overwritten.
+       */
+      readonly etags?: Readonly<Record<string, string>>;
     }
   | { readonly ok: false; readonly reason: string };
 
@@ -71,6 +78,11 @@ export interface ComponentPutOptions {
    * is left exactly as it is, in a sentence.
    */
   readonly owned?: readonly string[];
+  /**
+   * With `replace`: what an earlier import's `etags` answered, by item name. An item is replaced only while its file still
+   * carries the recorded etag; one that moved (or has none recorded) is left exactly as it is, in a sentence.
+   */
+  readonly etags?: Readonly<Record<string, string>>;
 }
 
 /** A view of one kind's component documents, read live from the owner's own configuration. */

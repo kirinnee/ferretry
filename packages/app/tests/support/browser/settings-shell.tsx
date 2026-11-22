@@ -25,11 +25,14 @@ import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import type { PasskeyHandler, PasskeyProvision } from '../../../src/passkey/passkey.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
+import { ShellContext } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
+import { WithViewPlace } from '../../../src/shell/view-place.tsx';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { PlacedPanel } from '../../../src/testing/slot-panels.tsx';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { AddressTaker } from '../../../src/router/address.ts';
+import { useDeviceControls } from '../../../src/compose/device-controls.ts';
 import { DeviceProvider, type DeviceContextValue, NO_INSTALL_PROMPT } from '../../../src/shell/device-context.tsx';
 import { HandOffs } from '../../../src/shell/hand-off.ts';
 import {
@@ -168,6 +171,38 @@ export function renderSettingsShellOf(
 export { noteClientDaemon } from '../../../src/connect/daemon-of.ts';
 export { type PlacedPanel, WithSlotPanels } from '../../../src/testing/slot-panels.tsx';
 
+/**
+ * FOR A SCENE THAT DRAWS A FERRET'S TEXT THE WAY THE SHELL DOES (`ProseView`, which asks the shell what Conversation
+ * provides as `shell.prose`): the shell's context over the registry's REAL halves, or over `none` (the shell's own Markdown,
+ * a baseline). No router, no connection: `ProseView` reads the surfaces and the standing the viewing machine `daemon` has
+ * for each, which here is `allowed` for every plugin unless `blocked` names it (a daemon whose inventory turned it off).
+ */
+export function WithRegisteredSurfaces({
+  children,
+  none = false,
+  daemon = 'scene-machine',
+  blocked = [],
+}: {
+  children: ReactNode;
+  none?: boolean;
+  daemon?: string;
+  blocked?: readonly string[];
+}) {
+  const runtime = {
+    surfaces: none ? [] : generated.surfaces,
+    standing: (_daemon: string, id: string) =>
+      blocked.includes(id) ? { state: 'blocked', reason: 'off' } : { state: 'allowed' },
+    // No plugin's app hook is provided here: a surface that reads one (Board's, for the agenda) is drawn without it.
+    appHook: (): unknown => undefined,
+    subscribe: () => () => undefined,
+  };
+  return (
+    <ShellContext.Provider value={{ runtime } as never}>
+      <WithViewPlace place={{ daemon, machine: 'Scene machine' } as never}>{children}</WithViewPlace>
+    </ShellContext.Provider>
+  );
+}
+
 /** One panel a plugin REGISTERS, as the shell builds it over `client`, placed under the plugin's own id. */
 export function registeredPanel(plugin: string, id: string, client: unknown): PlacedPanel {
   const half = generated.surfaces.find(entry => entry.id === plugin)?.app;
@@ -182,7 +217,8 @@ export function registeredPanel(plugin: string, id: string, client: unknown): Pl
 /**
  * A DEVICE CONTEXT FOR A SCENE THAT DRAWS ONE REAL PANEL OUTSIDE THE SHELL (r11 G2 review): the panel's own `useDeviceTheme` reads
  * a real `ThemePreferenceStore` (kept in memory, first look = `mode`), and a pick publishes the style, palette, mode and text
- * scale on `<html>` exactly as the shell root does (`applyThemeAxes`, `applyTextScale`), so the page restyles for real.
+ * scale on `<html>` exactly as the shell root does (`applyThemeAxes`, `applyTextScale`), so the page restyles for real; the
+ * device's motion pick is written as `<html data-motion="reduced">` the way the shell root does, so a motion pick takes effect.
  */
 export function WithDeviceTheme({
   mode,
@@ -209,5 +245,22 @@ export function WithDeviceTheme({
     applyThemeAxes(root, preference, resolveThemeMode(preference.mode, false));
     applyTextScale(root, preference.textScale);
   }, [preference]);
-  return <DeviceProvider value={device}>{children}</DeviceProvider>;
+  return (
+    <DeviceProvider value={device}>
+      <AppliedMotion />
+      {children}
+    </DeviceProvider>
+  );
+}
+
+/** The shell root's `useAppliedMotion`, for a scene: the device's motion pick on `<html data-motion>`. */
+function AppliedMotion(): null {
+  const { device } = useDeviceControls();
+  const motion = device.motion;
+  useEffect(() => {
+    const root = document.documentElement;
+    if (motion === 'reduced') root.dataset.motion = 'reduced';
+    else delete root.dataset.motion;
+  }, [motion]);
+  return null;
 }

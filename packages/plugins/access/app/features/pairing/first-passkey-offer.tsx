@@ -15,8 +15,9 @@ import { Fingerprint } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 
 import { type CredentialsPort, type DeadlineSchedule, MACHINE_READ_DEADLINE_MS, withDeadline } from '@ferretry/app';
+import { ActionRow } from '@ferretry/app/ui';
 import type { PasskeysView } from '../../../contract/index.ts';
-import { passkeyFailureSentence, registrationMinutesLeft, webAuthnSupported } from '../../lib/passkey-panel.ts';
+import { passkeyFailureSentence, registrationMinutes, webAuthnSupported } from '../../lib/passkey-panel.ts';
 import { holdInlinePasskeyOffer } from '../../lib/inline-passkey-offer.ts';
 import { addPasskeyCeremony, browserCredentials } from '../../lib/step-up-ceremony.ts';
 import { fetchPasskeys, type StepUpClient } from '../../lib/step-up-client.ts';
@@ -139,28 +140,35 @@ export function FirstPasskeyOffer({
         Passkey added. This device can confirm changes on this machine.
       </p>
     );
-  const left = registrationMinutesLeft(state.view.registrationClosesAt, now());
+  const minutes = registrationMinutes(state.view.registrationClosesAt, now());
   return (
-    <div data-first-passkey-offer="" className="flex w-full max-w-md min-w-0 flex-col items-center gap-4">
-      <p className="m-0 text-balance text-ui leading-base text-fg">
-        You can add a passkey for this device now{left === null ? '' : ` — ${left}`}.
+    <div data-first-passkey-offer="" className="flex w-full min-w-0 flex-col gap-3">
+      {/* WHY, in one plain line: what a passkey is for. Then WHEN: no bare countdown, what happens if it is skipped. */}
+      <p className="m-0 text-balance text-center text-ui leading-base text-fg" data-first-passkey-why="">
+        Add a passkey so this device can approve risky actions with your fingerprint or face.
       </p>
-      {/* One row of fixed-width buttons (`.fy-pair-answer`, the same 12 rem each), at least 44 px tall: never a full-width bar. */}
-      <div className="flex flex-wrap items-center justify-center gap-3">
-        <button
-          type="button"
-          disabled={busy}
-          data-first-passkey-add=""
-          onClick={() => void add()}
-          data-variant="primary"
-          className="kt-btn fy-pair-answer py-3 disabled:cursor-not-allowed disabled:opacity-60"
-          style={{ height: 'auto' }}
-        >
-          <Fingerprint size={16} aria-hidden="true" />
-          Add a passkey now
-        </button>
-        {actions}
-      </div>
+      <p className="m-0 text-balance text-center text-meta leading-base text-muted" data-first-passkey-when="">
+        {minutes === null
+          ? ''
+          : `This quick option stays open for about ${minutes <= 1 ? 'a minute' : `${minutes} minutes`}. `}
+        Skip it and you can add a passkey later in Settings.
+      </p>
+      <ActionRow
+        secondary={actions}
+        primary={
+          <button
+            type="button"
+            disabled={busy}
+            data-first-passkey-add=""
+            onClick={() => void add()}
+            data-variant="primary"
+            className="kt-btn disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Fingerprint size={16} aria-hidden="true" />
+            Add a passkey now
+          </button>
+        }
+      />
       {failure === null ? null : (
         <p role="alert" data-first-passkey-failure="" className="m-0 text-meta leading-base text-err">
           {failure}

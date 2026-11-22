@@ -1,9 +1,15 @@
 import type { HeldRoot, KernelPorts, RootHandle } from '@ferretry/kernel/contract';
-import type { Instant } from '@ferretry/std';
+import { type Instant, SIGN_IN_FILES } from '@ferretry/std';
 import { holdsSignIn } from './fence.ts';
 import type { FolderBrowser, FolderOpen, FolderVerdict, HeldFolder, LeafMade, RawFolderEntry } from './port.ts';
 
 type Kernel = Pick<KernelPorts, 'roots' | 'paths' | 'spawn'>;
+
+/**
+ * The most names read from one folder for the spelling-fold look at a sign-in file (the known markers are asked for by NAME
+ * first, which needs no listing). No folder, however wide, is read without a bound, and none is refused for its width.
+ */
+const SIGN_IN_READ_LIMIT = 5000;
 
 const EPOCH = '1970-01-01T00:00:00.000Z' as Instant;
 const instantOf = (text: string | undefined): Instant => {
@@ -107,7 +113,12 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
       return { ok: false, reason: same && (await isFile(reached)) ? 'not_folder' : 'refused' };
     }
     // The object actually held, not the name that was judged: a swap between the two lands here.
-    const second = await verdict(pinned.rootReal);
+    // A verdict that THROWS (the outside-home gate refusing a held object that turned out to be outside) must not leave the
+    // held descriptor open for the garbage collector to find.
+    const second = await verdict(pinned.rootReal).catch(async (error: unknown) => {
+      await pinned.close().catch(() => undefined);
+      throw error;
+    });
     if (second !== undefined) {
       await pinned.close().catch(() => undefined);
       return { ok: false, reason: second };
@@ -169,6 +180,10 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
           return false;
         }
       },
+      device: async rel => {
+        const identity = await identityAt(pinned, rel);
+        return identity === undefined ? undefined : identity.slice(0, identity.indexOf(':'));
+      },
       makeLeaf: async (name, verdict): Promise<LeafMade> => {
         let made: boolean;
         try {
@@ -224,8 +239,13 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
       const held = await hold(path, verdict);
       return held.ok ? { ok: true, folder: heldFolder(held.pinned) } : held;
     },
-    holdsSignIn: async path => {
+    holdsSignIn: async (path, budget) => {
       const root = handle(path);
+      // No new I/O once the caller's time is gone, asked immediately BEFORE each call (the stat, every marker lstat, the pin,
+      // the open and the list): a call already in flight when the time ran out may return late, but starts nothing after it,
+      // and a look cut short is "partial" (not proved free of a sign-in file), never "false".
+      const spent = (): boolean => budget?.expired() === true;
+      if (spent()) return 'partial';
       // Not a folder the root will answer for (a file, a refusal): nothing to hold a sign-in, and opening it is refused anyway.
       const self = root.resolve('');
       if (!self.ok) return false;
@@ -234,10 +254,34 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
       } catch {
         return false;
       }
+      // First, bounded BY CONSTRUCTION: each KNOWN marker is asked for by name (one lstat apiece, a link counts and is not
+      // followed), so how many names the folder holds decides nothing. A name the machine will not answer for is not proved free.
+      for (const marker of SIGN_IN_FILES) {
+        if (spent()) return 'partial';
+        if ((await leafAt(path, marker)) !== 'missing') return true;
+      }
+      if (spent()) return 'partial';
       try {
-        // Every name the folder holds, a link included, judged by the SAME fold as everywhere else (`fence.ts`): a marker
-        // spelled `ID_RSA`, `Auth.JSON` or in full-width letters is a marker.
-        return holdsSignIn(await root.list(self.value));
+        // Then every name the folder holds, a link included, judged by the SAME fold as everywhere else (`fence.ts`): a marker
+        // spelled `ID_RSA`, `Auth.JSON` or in full-width letters is a marker. Read through the held folder with a bound; a
+        // folder with more names than {@link SIGN_IN_READ_LIMIT} is not listed to the end and is NOT refused for it: the
+        // known markers above were already asked for by name, so width alone never makes a folder private.
+        const pinned = await root.pin(self.value, { fence: 'none' });
+        try {
+          if (spent()) return 'partial';
+          const target = await pinned.open('', { wantDirectory: true });
+          try {
+            if (spent()) return 'partial';
+            const listing = await target.list(SIGN_IN_READ_LIMIT, budget);
+            if (holdsSignIn(listing.entries.map(entry => entry.name))) return true;
+            // Not listed to the end: a marker spelled differently past the bound is not ruled out, and that is said, not hidden.
+            return listing.truncated ? 'partial' : false;
+          } finally {
+            await target.close();
+          }
+        } finally {
+          await pinned.close().catch(() => undefined);
+        }
       } catch {
         // What cannot be read is not proved free of one.
         return true;

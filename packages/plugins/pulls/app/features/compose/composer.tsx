@@ -1,4 +1,4 @@
-import { Button } from '@ferretry/app/ui';
+import { Button, ExternalLink } from '@ferretry/app/ui';
 import { TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { MAX_POST_BODY, SECRET_SHAPED_SENTENCE } from '../../../contract/index.ts';
@@ -200,11 +200,7 @@ export function Composer({
         {phase.status === 'posted' && (
           <p className="m-0 font-semibold text-ok" data-compose-posted={phase.answer.id}>
             Posted{phase.answer.replayed ? ' (this was already posted)' : ''}.{' '}
-            {posted !== undefined && (
-              <a href={posted} rel="noopener noreferrer" target="_blank">
-                Open on GitHub
-              </a>
-            )}
+            {posted !== undefined && <ExternalLink href={posted}>Open on GitHub</ExternalLink>}
           </p>
         )}
       </div>

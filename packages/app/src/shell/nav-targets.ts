@@ -48,12 +48,14 @@ export function useNavTargets(daemon: string | undefined): readonly NavTarget[] 
     if (screen.path.startsWith('/')) return routes.href(screen, {});
     return daemon === undefined ? undefined : routes.href(screen, {}, daemon);
   };
-  // The entry whose page is on screen: a plugin's entry for any screen of that plugin (the ferret page is Ferrets'), Settings for either settings page.
+  // The entry whose page is on screen: a plugin's entry for any screen of that plugin (the ferret page is Ferrets'), Settings for either settings page, Daemons for Home and a machine's home.
   const onScreen = (entry: NavEntry): boolean =>
     entry.kind === 'screen'
       ? route.kind === 'screen' &&
         (route.screen.plugin === entry.screen.plugin || sameSection(route.screen.path, entry.screen.path))
-      : entry.item === 'settings' && (route.kind === 'device-settings' || route.kind === 'daemon-settings');
+      : entry.item === 'settings'
+        ? route.kind === 'device-settings' || route.kind === 'daemon-settings'
+        : route.kind === 'home' || route.kind === 'daemon-home';
   return plan.nav.entries.map(entry => ({
     key: entry.kind === 'screen' ? `${entry.screen.plugin}.${entry.screen.id}` : entry.item,
     label: entry.kind === 'screen' ? entry.screen.label : entry.item === 'settings' ? 'Settings' : 'Daemons',

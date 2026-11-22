@@ -139,9 +139,12 @@ describe('the Sign-ins tab', () => {
     );
     await until(() => view.container.querySelector('[data-claude-login="awaiting-code"]') !== null, 'the code step');
     expect(view.container.textContent).toContain(CLAUDE_URL);
-    const field = must(view.container.querySelector('textarea') as HTMLTextAreaElement | null, 'the code field');
+    const field = must(
+      view.container.querySelector('input[type="password"]') as HTMLInputElement | null,
+      'the code field',
+    );
     await interact(() => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
       setter?.call(field, 'the-pasted-code');
       field.dispatchEvent(new Event('input', { bubbles: true }));
     });

@@ -1,28 +1,53 @@
 /**
- * The guide `fy render guide` prints: a byte-exact copy of the `## Guide for agents` section of
- * docs/fy-render.md (blank lines around the section aside), from its heading line to the `---`
- * that closes it. The doc owns the text — this constant only ships it in the compiled binary,
- * because a release has no repository beside it — and the `render-guide-doc` contract in
- * scripts/validate/cli-contracts.sh fails the commit that lets the two disagree: edit the doc,
- * then copy the section whole into this literal (backticks escaped), never the other way round.
+ * The guide `fy render guide` prints: the `## Guide for agents` section of docs/hypermedia.md, from its heading line to
+ * the `---` that closes it, GENERATED — never edited here. The doc owns the text; this constant only ships it in the
+ * compiled binary, because a release has no repository beside it. Edit the doc, then run
+ * `bun packages/plugins/conversation/tests/support/guide-text/generate.ts`; `tests/unit/cli/guide-drift.test.ts` fails
+ * the commit that lets the two disagree.
  *
- * The section carries no example fence on purpose: this file is source, where
- * scripts/validate/no-fy-render-in-docs.sh refuses an `fy-render` fence opener.
+ * The section carries no example fence of the `fy-render` kind on purpose: this file is source, where
+ * scripts/validate/no-fy-render-in-docs.sh refuses a fence opener.
  */
 export const RENDER_GUIDE_SECTION = `
 ## Guide for agents
 
-\`fy render guide [type]\` prints this section and nothing else: the \`### overview\` body when no type is named, or that type's \`###\` body when one is. \`image\`, \`video\`, \`audio\` and \`pdf\` share the \`### media\` section, because they name bytes the same way, and \`task\` and \`board\` share \`### task\`, because they name tasks the same way. The CLI ships a byte-exact copy of this whole section in the binary (\`RENDER_GUIDE_SECTION\` in \`packages/cli/src/lib/render/guide-text.ts\`), and the \`render-guide-doc\` contract in \`scripts/validate/cli-contracts.sh\` fails the commit that lets the copy disagree with this section — so this section is the one owner of the text: edit it here, then copy the section whole into that constant.
+\`fy render guide [topic]\` prints this section and nothing else: the \`### overview\` body when no topic is named, or that topic's \`###\` body when one is. \`image\`, \`video\`, \`audio\` and \`pdf\` share the \`### media\` section, \`task\` and \`board\` share \`### task\`, and \`human\` also answers \`llm\`. \`fy render check <file|->\` is the doccheck: run it on a message before you send it. The CLI ships a byte-exact copy of this whole section in the binary (\`RENDER_GUIDE_SECTION\` in \`packages/plugins/conversation/cli/reading/guide-text.ts\`), written from this section by \`tests/support/guide-text/generate.ts\`, and \`tests/unit/cli/guide-drift.test.ts\` fails the commit that lets the copy disagree with it — so this section is the one owner of the text: edit it here, then run the generator.
 
-Two shapes are deliberately absent from this section. An example fence, because the copy ships in the CLI's TypeScript source, where \`no-fy-render-in-docs.sh\` refuses a fence opener. And the per-type detail: the sections below distil the contract the rest of this document holds, and where the two disagree the contract wins and this section is wrong.
+Two shapes are deliberately absent from this section. An example fence of the \`fy-render\` kind, because the copy ships in the CLI's TypeScript source, where \`no-fy-render-in-docs.sh\` refuses a fence opener. And the per-type detail of \`fy-render\`: [fy-render.md](fy-render.md) holds the contract, and where the two disagree the contract wins and this section is wrong.
 
 ### overview
 
-Write a fenced block whose info string is exactly \`fy-render\`: line 1 \`type: <type>\`, line 2 \`alt: <one-line description>\`, then a line \`---\`, then the payload. \`type:\` is always the first line, \`alt:\` is required (≤ 200 characters) and is the picture's description for a reader who cannot see it. \`mime:\` appears only on an inline \`image\`; a \`src:\` block has an empty payload. Any broken rule — an unknown type, an unknown or repeated key, a cap exceeded — renders as an ordinary code fence with no warning, so check that it drew. Chat only: never write fy-render into files, docs, commits or PRs.
+A message is Markdown (GitHub flavour: headings, lists, tables, task lists, code, links) with one rich part: a \`terminal\` fence, a shell session. A line \`:::human\` closed by a line \`:::\` is text for people, and \`:::llm\` after a part is the text another agent reads. Any other fence (\`ts\`, \`diff\`, \`sh\`) is plain code. A part with a mistake in it is shown as its source with the problem named, so check that it drew.
+
+Diagrams, charts, pictures, media, maps, live tasks and static or interactive pages are a different fence: its info string is exactly \`fy-render\`, line 1 \`type: <type>\`, line 2 \`alt: <one-line description>\`, then a line \`---\`, then the payload. Types: \`mermaid\`, \`chart\`, \`svg\`, \`html\`, \`map\`, \`image\`, \`video\`, \`audio\`, \`pdf\`, \`lottie\`, \`task\`, \`board\`. A broken block renders as an ordinary code fence with no warning, so run \`fy render check\` on the message first.
+
+Raw HTML in Markdown is shown as text. A Markdown image is not drawn (use an \`image\` block); a link may go to \`https://\`, \`mailto:\` or a heading of the same message, and nothing else. A message has no front matter: a first line \`---\` is just a line. A message over 300,000 bytes is shown as text. Never write any of this into files, docs, commits or PRs: it is for chat messages and agenda items only.
+
+Reference things as plain text, never as links: see \`### references\`. For an explainer, show the idea: a \`mermaid\` flow, a \`chart\`, an interactive \`html\` page, a \`terminal\` session — and keep the words short.
+
+### terminal
+
+A shell session. A line starting \`$ \` (or \`% \`, or \`# \` for root) is a command; every other line is its output, shown as it is. Each command is one step. Info string: \` \`\`\`terminal title="two words" \`. \`console\` and \`shellsession\` mean the same part. A \` \`\`\`sh \` block is plain code and stays still.
+
+Write \`@step <title>\` lines to set the steps yourself (then every line sits under a step; at least two steps, or none).
+
+### chart
+
+An \`fy-render\` block of \`type: chart\`. The payload is JSON/YAML {kind: bar, x: [Mon, Tue], y: {format: money}, series: [{name: Cost, data: [2, 3]}]}; kind line|bar|area|pie|doughnut|scatter|radar; format number|percent|money|duration|bytes; stacked; frames: [{label, series}] steps. No colours: tone accent|good|warn|bad|muted|1-8.
+
+Say what the chart says; the reader's theme paints it. \`title:\` is optional; \`y\` (and a scatter's \`x\`) take \`{label, format, currency, min, max}\` — \`money\` takes an ISO 4217 \`currency\`, default USD, \`duration\` takes seconds, \`percent\` takes the number itself. \`stacked:\` on line, area and bar; \`horizontal:\` on bar; a series \`kind: line\` draws a line over bars; \`null\` in \`data\` is a gap; scatter data is \`[[x, y], …]\` on a numeric x axis. The reader gets tooltips, a legend they can toggle, zoom on line and area, and \`frames\` steps with Previous/Next and a slider; the numbers reach a screen reader as a table. Any key the language does not name — \`color:\` included — makes the block fall back to its source. Caps: 64 KiB, 12 series, 500 points a series, 500 labels, 30 frames.
 
 ### mermaid
 
-Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels. It is auto-themed: \`%%{init}%%\`, front matter and \`theme\`/\`themeVariables\`/\`themeCSS\` are ignored, and \`style\`/\`classDef\` colours still apply and fight the reader's theme — leave colours out. ≤ 20,000 characters. A wide left-to-right flowchart is redrawn top-down on a phone by itself, and the reader can scroll it sideways. A diagram that does not parse becomes a plain code fence.
+An \`fy-render\` block of \`type: mermaid\`. The payload is Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels. It is auto-themed: \`%%{init}%%\`, front matter and \`theme\`/\`themeVariables\`/\`themeCSS\` are ignored, and \`style\`/\`classDef\` colours still apply and fight the reader's theme — leave colours out. ≤ 20,000 characters. A wide left-to-right flowchart is redrawn top-down on a phone by itself, and the reader can scroll it sideways. A diagram that does not parse becomes a plain code fence.
+
+### human
+
+\`:::human\` text is shown to people, and \`:::llm\` after a part or \`:::human\` is the text another agent reads instead of it. The reader sees an \`:::llm\` text too, collapsed under "LLM-only text", so write nothing there you would not say to them. A part whose own text is over about 400 tokens should have one.
+
+### references
+
+A reference is a plain token in your text: \`:agent\` a fleet agent's session, \`@path\` a file (\`@src/api.ts\`, \`@src/api.ts:120\`, \`@src/api.ts:120-140\`), \`&F12\` a task, \`^A3\` an agenda item, \`/skill\` or \`$skill\` a skill, \`%terminal:dev\` and \`%browser:app\` a live terminal or page by its name. Write them as bare words in prose; the reader's app proves each one and turns it into a link, and one that does not exist stays plain text. A Markdown link that imitates a reference is plain text. Inside a code span a reference is shown as written.
 
 ### svg
 
@@ -72,12 +97,6 @@ A slider that redraws bars:
   draw();
 </script>
 \`\`\`
-
-### chart
-
-JSON/YAML {kind: bar, x: [Mon, Tue], y: {format: money}, series: [{name: Cost, data: [2, 3]}]}; kind line|bar|area|pie|doughnut|scatter|radar; format number|percent|money|duration|bytes; stacked; frames: [{label, series}] steps. No colours: tone accent|good|warn|bad|muted|1-8.
-
-Say what the chart says; the reader's theme paints it. \`title:\` is optional; \`y\` (and a scatter's \`x\`) take \`{label, format, currency, min, max}\` — \`money\` takes an ISO 4217 \`currency\`, default USD, \`duration\` takes seconds, \`percent\` takes the number itself. \`stacked:\` on line, area and bar; \`horizontal:\` on bar; a series \`kind: line\` draws a line over bars; \`null\` in \`data\` is a gap; scatter data is \`[[x, y], …]\` on a numeric x axis. The reader gets tooltips, a legend they can toggle, zoom on line and area, and \`frames\` steps with Previous/Next and a slider; the numbers reach a screen reader as a table. Any key the language does not name — \`color:\` included — makes the block fall back to its source. Caps: 64 KiB, 12 series, 500 points a series, 500 labels, 30 frames.
 
 ### map
 

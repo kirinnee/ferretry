@@ -29,11 +29,13 @@ export type FolderCrumb = z.infer<typeof FolderCrumbSchema>;
 export const FolderListingSchema = z.strictObject({
   /** The folder listed, absolute and fully resolved (no link on the way). */
   path: z.string().min(1),
-  /** From the home folder down to `path`; the first is the home (`~`). */
+  /** From the home folder (`~`), or from `/` for a folder outside it, down to `path`. */
   crumbs: z.array(FolderCrumbSchema),
   /** Folders first, then files, each by name. */
   entries: z.array(FolderEntrySchema).max(MAX_FOLDER_ENTRIES),
   truncated: z.boolean(),
+  /** Present (true) when `path` is a place so wide that a project there is "your whole disk or home": `/`, `/home`, `/Users`, the home. */
+  broad: z.literal(true).optional(),
 });
 export type FolderListing = z.infer<typeof FolderListingSchema>;
 

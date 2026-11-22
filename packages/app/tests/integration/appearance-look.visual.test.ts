@@ -8,8 +8,8 @@
  *      share one running `animation-name` (the bouncing-dots shape), in 4 styles.
  *   2. STYLE CARDS draw in their style's DEFAULT palette (what a pick gives), not the page's: the card's `data-palette` is the
  *      catalogue's `defaultPalette` and its computed `--accent` is that palette's own accent.
- *   3. THE FLAG: "Don't change my colours when I change style" is a switch under the style grid; off, picking Neo on Indigo
- *      gives Pop; on, it leaves Indigo. Exactly 8 palette chips, named by colour.
+ *   3. THE FLAG: "Don't change my colours when I change style" is a switch under the style grid; off, picking Neo on Inkwell
+ *      gives Pop Art; on, it leaves Inkwell. One chip per catalogue palette, named by the one map.
  *   4. THE SPECIMEN holds `.md`, `[data-hm]` drawn from the --hm-* tokens, `.fy-spinner` (live, with a moving phase), a
  *      background + grain swatch that wears the page's own tokens, and a disabled field whose computed look differs from the
  *      enabled one (opacity, colour, cursor).
@@ -28,7 +28,7 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
-import { STYLES as CATALOGUE_STYLES } from '../../src/theme/catalog.ts';
+import { PALETTES as CATALOGUE_PALETTES, STYLES as CATALOGUE_STYLES } from '../../src/theme/catalog.ts';
 import { COLOUR_TOOLS, type ColourTools, sceneBuilder, sharedChromium } from '../support/browser/index.ts';
 
 setDefaultTimeout(120_000);
@@ -298,12 +298,12 @@ describe('r11 T13 · the Appearance page', () => {
     }
   });
 
-  it('draws every style card in that style’s default palette, and offers exactly 8 palette chips', async () => {
+  it('draws every style card in that style’s default palette, and offers one chip per catalogue palette', async () => {
     const { tab, close } = await open(VIEWPORTS[0], { seed: INDIGO_STUDIO });
     try {
-      expect(await tab.locator('[data-palette-chip]').count()).toBe(8);
+      expect(await tab.locator('[data-palette-chip]').count()).toBe(CATALOGUE_PALETTES.length);
       const labels = await tab.locator('[data-palette-chip] .fy-ap-chip__name').allInnerTexts();
-      expect(labels.sort()).toEqual(['Blue', 'Green', 'High contrast', 'Indigo', 'Magenta', 'Pop', 'Rust', 'Teal']);
+      expect(labels.sort()).toEqual(CATALOGUE_PALETTES.map(palette => palette.label).sort());
       const pageAccent = await tab.evaluate(() =>
         getComputedStyle(document.documentElement).getPropertyValue('--accent'),
       );
@@ -346,7 +346,7 @@ describe('r11 T13 · the Appearance page', () => {
     }
   });
 
-  it('has the "Don’t change my colours when I change style" flag: off, Neo gives Pop; on, Indigo stays', async () => {
+  it('has the "Don’t change my colours when I change style" flag: off, Neo gives Pop Art; on, Inkwell stays', async () => {
     const { tab, close } = await open(VIEWPORTS[0], { seed: INDIGO_STUDIO });
     try {
       const flag = tab.getByRole('switch', { name: /Don.t change my colours when I change style/ });

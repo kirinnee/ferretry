@@ -1,7 +1,10 @@
 /**
- * THE APPEARANCE STEP (r11 G2): first run's client page about how this device looks. Five short STACKED lists on the left
- * (colour mode, palette, style, text size, motion: card titles only, nothing to read) and ONE live picture on the right (`StepDemo`: a small
- * app window drawn from the page's own tokens, so it IS the look in force), which pops once when a pick is made.
+ * THE APPEARANCE STEP (r11 G2, C59 O6): first run's client page about how this device looks, in THREE groups in the order a
+ * person decides them: STYLE, then COLOUR (the palette and light/dark together), then SIZE AND MOTION (text size and motion
+ * together). Each list is a GRID OF SMALL CARDS (a Style and a Palette card carry a tiny picture drawn in what it names; the
+ * rest are a title) and ONE live picture sits beside them on a wide page and above them on a phone
+ * (`StepDemo`: a small app window drawn from the page's own tokens, so it IS the look in force: colours, style, text size and
+ * motion), which pops once when a pick is made.
  *
  * A pick is applied and saved in this browser at once (the shell's `useDeviceTheme`, the same store Settings › Appearance
  * writes), so there is nothing for Next to save and no per-pick `done()`. The page draws no title, footer or loader: the setup
@@ -18,12 +21,13 @@ import {
 import type { StepHost } from '@ferretry/kernel/contract';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { AppearanceDemo } from './appearance-demo.tsx';
+import { PaletteMini, StyleMini } from './appearance-minis.tsx';
 import './appearance-page.css';
 
-const MODES: readonly { readonly id: 'system' | 'light' | 'dark'; readonly title: string; readonly line: string }[] = [
-  { id: 'system', title: 'Auto', line: 'Follows your device' },
-  { id: 'light', title: 'Light', line: 'Always light' },
-  { id: 'dark', title: 'Dark', line: 'Always dark' },
+const MODES: readonly { readonly id: 'system' | 'light' | 'dark'; readonly title: string }[] = [
+  { id: 'system', title: 'Auto' },
+  { id: 'light', title: 'Light' },
+  { id: 'dark', title: 'Dark' },
 ];
 
 const TEXT_SIZES: readonly { readonly id: DeviceTheme['preference']['textScale']; readonly title: string }[] = [
@@ -38,7 +42,7 @@ const MOTIONS: readonly { readonly id: DeviceControls['motion']; readonly title:
 ];
 
 /** The page itself over the theme and the motion choice it is handed (the real page hands the device's). */
-function AppearanceChoices({
+export function AppearanceChoices({
   theme,
   motion,
   setMotion,
@@ -64,65 +68,85 @@ function AppearanceChoices({
   const { preference } = theme;
   return (
     <div className="fy-astep" data-appearance-step="">
-      <section className="fy-astep__row" aria-labelledby="fy-astep-mode">
-        <h2 id="fy-astep-mode" className="fy-astep__name">
-          Colour mode
-        </h2>
-        <ChoiceCards
-          label="Colour mode"
-          layout="stack"
-          value={preference.mode}
-          onChange={picked(theme.setMode as (id: string) => void)}
-          options={MODES.map(mode => ({ id: mode.id, title: mode.title, line: mode.line }))}
-        />
-      </section>
-      <section className="fy-astep__row" aria-labelledby="fy-astep-palette">
-        <h2 id="fy-astep-palette" className="fy-astep__name">
-          Palette
-        </h2>
-        <ChoiceCards
-          label="Palette"
-          layout="stack"
-          value={preference.palette}
-          onChange={picked(theme.setPalette as (id: string) => void)}
-          options={theme.palettes.map(palette => ({ id: palette.id, title: palette.label }))}
-        />
-      </section>
-      <section className="fy-astep__row" aria-labelledby="fy-astep-style">
+      {/* 1. STYLE: how things are drawn. */}
+      <section className="fy-astep__group" data-appearance-group="style" aria-labelledby="fy-astep-style">
         <h2 id="fy-astep-style" className="fy-astep__name">
           Style
         </h2>
         <ChoiceCards
           label="Style"
-          layout="stack"
           value={preference.style}
           onChange={picked(theme.setStyle as (id: string) => void)}
-          options={theme.styles.map(style => ({ id: style.id, title: style.label }))}
+          options={theme.styles.map(style => ({
+            id: style.id,
+            title: style.label,
+            demo: <StyleMini style={style.id} palette={style.defaultPalette} mode={theme.resolved} />,
+          }))}
         />
       </section>
-      <section className="fy-astep__row" aria-labelledby="fy-astep-text">
-        <h2 id="fy-astep-text" className="fy-astep__name">
-          Text size
+      {/* 2. COLOUR: the palette and light or dark, together. */}
+      <section className="fy-astep__group" data-appearance-group="colour" aria-labelledby="fy-astep-colour">
+        <h2 id="fy-astep-colour" className="fy-astep__name">
+          Colour
         </h2>
-        <ChoiceCards
-          label="Text size"
-          layout="stack"
-          value={preference.textScale}
-          onChange={picked(theme.setTextScale as (id: string) => void)}
-          options={TEXT_SIZES.map(size => ({ id: size.id, title: size.title }))}
-        />
+        <div className="fy-astep__pair" data-stack="">
+          <div className="fy-astep__list">
+            <h3 id="fy-astep-palette" className="fy-astep__sub">
+              Palette
+            </h3>
+            <ChoiceCards
+              label="Palette"
+              value={preference.palette}
+              onChange={picked(theme.setPalette as (id: string) => void)}
+              options={theme.palettes.map(palette => ({
+                id: palette.id,
+                title: palette.label,
+                demo: <PaletteMini style={preference.style} palette={palette.id} />,
+              }))}
+            />
+          </div>
+          <div className="fy-astep__list">
+            <h3 id="fy-astep-mode" className="fy-astep__sub">
+              Light or dark
+            </h3>
+            <ChoiceCards
+              label="Light or dark"
+              value={preference.mode}
+              onChange={picked(theme.setMode as (id: string) => void)}
+              options={MODES.map(mode => ({ id: mode.id, title: mode.title }))}
+            />
+          </div>
+        </div>
       </section>
-      <section className="fy-astep__row" aria-labelledby="fy-astep-motion">
-        <h2 id="fy-astep-motion" className="fy-astep__name">
-          Motion
+      {/* 3. SIZE AND MOTION: text size and motion, together. */}
+      <section className="fy-astep__group" data-appearance-group="comfort" aria-labelledby="fy-astep-comfort">
+        <h2 id="fy-astep-comfort" className="fy-astep__name">
+          Size and motion
         </h2>
-        <ChoiceCards
-          label="Motion"
-          layout="stack"
-          value={motion}
-          onChange={picked(setMotion as (id: string) => void)}
-          options={MOTIONS.map(option => ({ id: option.id, title: option.title }))}
-        />
+        <div className="fy-astep__pair">
+          <div className="fy-astep__list">
+            <h3 id="fy-astep-text" className="fy-astep__sub">
+              Text size
+            </h3>
+            <ChoiceCards
+              label="Text size"
+              value={preference.textScale}
+              onChange={picked(theme.setTextScale as (id: string) => void)}
+              options={TEXT_SIZES.map(size => ({ id: size.id, title: size.title }))}
+            />
+          </div>
+          <div className="fy-astep__list">
+            <h3 id="fy-astep-motion" className="fy-astep__sub">
+              Motion
+            </h3>
+            <ChoiceCards
+              label="Motion"
+              value={motion}
+              onChange={picked(setMotion as (id: string) => void)}
+              options={MOTIONS.map(option => ({ id: option.id, title: option.title }))}
+            />
+          </div>
+        </div>
       </section>
       <p className="fy-astep__note">This device only.</p>
       <StepDemo>

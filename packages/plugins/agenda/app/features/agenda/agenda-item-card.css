@@ -360,6 +360,13 @@
 .fy-card__desc .md.fy-seg > * + * {
   margin-top: 6px;
 }
+/* The same for a segment drawn as hypermedia: its document is the block, and its own blocks keep the beat. */
+.fy-card__desc .fy-seg .dh-doc {
+  display: block;
+}
+.fy-card__desc .fy-seg .dh-doc > * + * {
+  margin-top: 6px;
+}
 /* The chips' line (part 1): the state and the stage. Everything else the head offers is behind the view's ⋯. */
 .fy-card__top {
   display: flex;
@@ -1325,6 +1332,61 @@
 .md.fy-seg [data-demoted-heading] {
   font-size: inherit;
   line-height: inherit;
+}
+/* The same segment when it is drawn as hypermedia (`ProseView`, Durian): its document keeps the card's own type, colour and
+   rhythm instead of Durian's reading scale (17px, light weight, 16px under every block), so a card is as tall and reads
+   the same either way. Parts (a terminal) keep Durian's own look; this only sets the text between them. */
+.fy-seg .dh-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: inherit;
+  font: inherit;
+}
+.fy-seg .dh-doc :is(p, ul, ol, h1, h2, h3, h4, h5, h6) {
+  margin: 0;
+}
+.fy-seg .dh-doc :is(ul, ol) {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-inline-start: 18px;
+}
+.fy-seg .dh-doc li {
+  margin: 0;
+  padding-left: 2px;
+}
+.fy-seg .dh-doc li > :is(ul, ol) {
+  margin-top: 3px;
+}
+.fy-seg .dh-doc :is(strong, b) {
+  color: inherit;
+  font-weight: var(--weight-strong);
+}
+/* A heading is a bold line at the segment's size, without Durian's `#` anchor. */
+.fy-seg .dh-doc :is(h1, h2, h3, h4, h5, h6) {
+  font: inherit;
+  font-weight: var(--weight-strong);
+  letter-spacing: normal;
+}
+.fy-seg .dh-doc .h-anchor {
+  display: none;
+}
+/* A quote is the card's quote (`.md blockquote`), not Durian's bar. */
+.fy-seg .dh-doc blockquote {
+  margin: 0.7em 0;
+  padding: 0.1em 0 0.1em var(--md-quote-pad);
+  border-left: var(--md-quote-bar);
+  border-radius: var(--md-quote-radius);
+  background: var(--md-quote-bg);
+  font-style: var(--md-quote-font-style);
+  color: var(--fg-soft);
+}
+.fy-seg .dh-doc > :first-child {
+  margin-top: 0;
+}
+.fy-seg .dh-doc > :last-child {
+  margin-bottom: 0;
 }
 
 /* "from chat": words the ferret copied from the owner's chat. A word in a hairline pill, so it never relies on colour. */

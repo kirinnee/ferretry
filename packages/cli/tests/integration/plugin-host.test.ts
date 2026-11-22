@@ -42,6 +42,27 @@ describe('the facilities a plugin half is handed, on the real disk', () => {
     should(outcome).be.a.String();
   });
 
+  it('should read no more than the asked bytes of a real file, and pull no more of standard input than that', async () => {
+    const dir = await temp();
+    await writeFile(join(dir, 'big.txt'), 'a'.repeat(1_000_000));
+    // An endless pipe of 100-byte chunks: a reader that waited for its end would never come back.
+    let pulled = 0;
+    const host = createPluginHost({
+      home: dir,
+      stdinStream: () =>
+        (async function* () {
+          for (;;) {
+            pulled += 1;
+            yield new TextEncoder().encode('b'.repeat(100));
+          }
+        })(),
+    });
+    should((await host.readText(join(dir, 'big.txt'), 1_001)).length).equal(1_001);
+    should((await host.readText(join(dir, 'big.txt'))).length).equal(1_000_000);
+    should((await host.readText('-', 250)).length).equal(250);
+    should(pulled).be.belowOrEqual(3);
+  });
+
   it('should read the raw bytes of a real file with no decoding, and refuse a missing one', async () => {
     const dir = await temp();
     // Not valid UTF-8 (0xff, 0xfe, a lone continuation byte): a text read would replace them, bytes keep every one.

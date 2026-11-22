@@ -245,7 +245,8 @@ describe('conversation titles, as the card draws them', () => {
 
           // (c) the secrets: not in the title, the page, either storage, or the console.
           const scrubbed = await card(C);
-          expect(scrubbed.title).toBe('Fix the Deploy Script');
+          // The message names a token, so no heuristic title is made from it: the plain fallback (fail closed).
+          expect(scrubbed.title).toBe('Conversation');
           const page = await tab.evaluate(() => ({
             html: document.documentElement.outerHTML,
             rows: [...document.querySelectorAll('[data-row]')].map(row => row.outerHTML).join('\n'),

@@ -41,6 +41,7 @@ export interface OnboardSummary {
 const OK = '✓';
 const AGENDA = '!';
 const DASH = '-';
+const NEUTRAL = '·';
 
 const SETTLED_WORD: Readonly<Record<StepState, string>> = {
   pending: 'not looked at yet',
@@ -50,12 +51,19 @@ const SETTLED_WORD: Readonly<Record<StepState, string>> = {
   skipped: 'skipped',
 };
 
-const mark = (state: StepState): string =>
-  state === 'pending' ? AGENDA : state === 'later' || state === 'skipped' ? DASH : OK;
+/** A pending step the check has nothing to say about, or has already found, is not asking anything of the person: no "!". */
+const mark = (state: StepState, check?: StepReport['check']): string =>
+  state === 'pending'
+    ? check === 'unchecked' || check === 'found'
+      ? NEUTRAL
+      : AGENDA
+    : state === 'later' || state === 'skipped'
+      ? DASH
+      : OK;
 
 /** One aligned status row. */
-export function row(step: StepView, line: string, width: number): string {
-  return `  ${mark(step.state)} ${step.title.padEnd(width)}  ${line}`;
+export function row(step: StepView, line: string, width: number, check?: StepReport['check']): string {
+  return `  ${mark(step.state, check)} ${step.title.padEnd(width)}  ${line}`;
 }
 
 export const titleWidth = (steps: readonly StepView[]): number => Math.max(0, ...steps.map(step => step.title.length));
@@ -113,7 +121,7 @@ export function renderClosing(summary: OnboardSummary): string {
   lines.push(
     summary.complete
       ? ALL_SET
-      : `${String(summary.steps.filter(step => step.state === 'pending').length)} of ${String(summary.steps.length)} steps still need you.`,
+      : `${String(summary.steps.filter(step => step.state === 'pending' && step.check !== 'found' && step.check !== 'unchecked').length)} of ${String(summary.steps.length)} steps still need you.`,
   );
   if (left.length > 0) lines.push(`Left for later: ${left.map(step => step.title).join(', ')}.`);
   if (summary.next.length > 0) {

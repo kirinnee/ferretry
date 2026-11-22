@@ -15,7 +15,7 @@
  *
  * Every answer is a statement about now: what is installed, and what the host's setup says.
  */
-import { ApiError, type ApiResponse, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
+import { ApiError, type ApiResponse, jsonResponse, queryValue, type RouteHandler } from '@ferretry/kernel/contract';
 import type { z } from 'zod';
 import {
   CloneBundleSchema,
@@ -63,7 +63,9 @@ async function answer<Schema extends z.ZodType>(schema: Schema, work: () => Prom
  */
 export function fleetSetupRoutes(subsystem: FleetSetupSubsystem) {
   return {
-    'GET /v1/runtimes/setup/scan': async () => await answer(SetupScanSchema, () => subsystem.scan()),
+    // `?fresh=1` is an explicit "Check again": the tools are looked up now, not answered from the last ten seconds.
+    'GET /v1/runtimes/setup/scan': async call =>
+      await answer(SetupScanSchema, () => subsystem.scan({ fresh: queryValue(call.request, 'fresh') === '1' })),
     'POST /v1/runtimes/machine/tools/install': async call => {
       const request = await parseBody(call.request, ToolInstallRequestSchema);
       return await answer(ToolInstallResultSchema, () => subsystem.installTools(request, call.governance));

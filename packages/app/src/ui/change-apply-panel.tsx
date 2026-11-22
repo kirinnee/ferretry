@@ -7,6 +7,7 @@
  * What the caller may do comes from {@link useChangeAuthority}.
  */
 import { type FormEvent, type ReactNode } from 'react';
+import { ActionRow } from './action-row.tsx';
 import { Button } from './primitives.tsx';
 import { InlineCode } from './inline-code.tsx';
 import { type ChangeAuthority, changeRefusalExplanation } from './change-authority.ts';
@@ -28,6 +29,11 @@ export interface ChangeApplyPanelProps {
   readonly children?: ReactNode;
   /** Extra classes for the submit button: a label long enough to need two lines on a phone wraps. */
   readonly submitClassName?: string;
+  /**
+   * Draw the submit and its sibling (`children`, "Cancel") as the shared answer row: both full width and stacked on a phone,
+   * the sibling at the left end and the submit at the right on a desktop (C59 audit). Off, they sit in a wrapping row.
+   */
+  readonly answerRow?: boolean;
 }
 
 export function ChangeApplyPanel({
@@ -42,6 +48,7 @@ export function ChangeApplyPanel({
   onSubmit,
   children,
   submitClassName,
+  answerRow = false,
 }: ChangeApplyPanelProps) {
   const ready = authority !== null && authority.kind !== 'refused' && !disabled && !busy;
 
@@ -67,12 +74,23 @@ export function ChangeApplyPanel({
           {refusal}
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
-        <Button type="submit" variant={variant} disabled={!ready} className={submitClassName} data-change-submit="">
-          {busy ? busyLabel : submitLabel}
-        </Button>
-        {children}
-      </div>
+      {answerRow ? (
+        <ActionRow
+          secondary={children}
+          primary={
+            <Button type="submit" variant={variant} disabled={!ready} data-change-submit="">
+              {busy ? busyLabel : submitLabel}
+            </Button>
+          }
+        />
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant={variant} disabled={!ready} className={submitClassName} data-change-submit="">
+            {busy ? busyLabel : submitLabel}
+          </Button>
+          {children}
+        </div>
+      )}
     </form>
   );
 }

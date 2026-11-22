@@ -718,6 +718,15 @@ step-up window, which origin a passkey belongs to); this section owns what the g
 When a per-act step-up is asked for, its window is the `stepUpWindowMinutes` security setting (0–60, default
 15); at `0` a step-up admits exactly one act and the boundary spends it. An unlock is never spent.
 
+**A spent step-up still confirms the act it admitted.** The spend ends the WINDOW (the next call needs another step-up);
+it does not take the passkey proof away from the call it was spent on. A call admitted on a step-up the machine then
+spent (`stepUpOnActions` with a window of `0`) still claims, once, the fresh proof that already existed when it was
+admitted (`claimFreshStepUp`, told by Gate that its own admission spent the step-up) — never one proved after the
+admission, one for another act, or one on a copy of the app with no live session. Without that, a `0`-minute machine
+could never complete an act that claims its own proof. A route that names the passkey's act (`CapabilityDemand.act`, the
+first refusal's `demand.act`: an import's `loosen-config`) gets the proof stamped for that act on the FIRST ask, and
+claims exactly that proof; a passkey proved for any other act, or for none, never confirms it.
+
 **What needs one** — which an unlock satisfies by default. A **governed** caller needs a current step-up for:
 
 - **every `configure` demand**, on every capability; and
@@ -1071,6 +1080,29 @@ command says so at the moment somebody might be tempted to do that instead.
   a project may create a directory, initialise Git or clone a repository at an arbitrary absolute host
   path. Like the real host-changing routes governed by `fleet.configure` and `warden.configure`, this
   remains permissive by default and does not govern the host's own command line.
+- **Project folders can be anywhere on the disk, and a place outside the owner's home is `filesystem.configure`.**
+  The home fence is gone (owner decision, &F6061): a project, the folder picker and the repository scan are judged by a
+  skip list on the REAL path instead (other users' homes, `/proc` `/sys` `/dev` `/run`, the nix store, private folders,
+  another disk), not by "is it under the home". Reading below the home stays `filesystem.use`. Reading ANY place
+  outside it — `GET /v1/projects/folders?path=/…`, `GET /v1/projects/:id/repos` and the three file-index routes
+  below, when the project folder (as registered, or where a link makes it really resolve) is outside the home — also
+  asks `filesystem.configure`, so a use-only or `--limited` device cannot map the disk, and a remote device needs
+  the passkey step-up that registering a project already needs. The decision is made once per request, and admission
+  comes before any listing, scan or file-index cache access (for a spelling inside the home the canonical path is
+  resolved first, to ask where the folder really is; that reads nothing of it). What a refused caller gets differs by
+  route: the folder picker and the three file-index routes answer the gate's `403`; the repository scan answers `200`
+  with the project's **saved** repositories and `truncated: true` and scans nothing (only the gate's own `403` becomes
+  that answer). The owner's `fy` with the admin token over loopback is ungoverned, as everywhere; a call the daemon
+  cannot decide is refused (`503 folder_gate_unavailable`), never read on a guess.
+- **The project file index (`GET /v1/projects/:id/files`, `…/files/status`, `POST …/files/rescan`) is
+  `filesystem.use`**, at the `operator` minimum, `caller: person`, `noStore`, audit skipped (a read of file NAMES;
+  the rescan rebuilds an in-memory list and writes nothing on the host). It returns names, never content, and drops
+  secret-looking names. What it means, what it caps and what it cannot promise is [project-index.md](project-index.md).
+  Declared here: **a use-only device reads file NAMES across a project registered at or below the home**, so registering
+  the home folder itself widens what every such device sees; the app warns before it is registered, and
+  `filesystem.configure` (which registering already needs) is the only gate on that choice. Registering `/` or `/home`
+  does **not** widen it: those are outside the home, so the three file routes refuse a use-only device with the
+  outside-home gate's `403` (the file routes never answer a partial index for a refused caller).
 - ~~The audit journal has no read surface.~~ **Closed.** `GET /v1/grants/audit` and
   `fy daemon config history` (alias `log`) read the tail of `state/grant-audit.jsonl`. The read is
   `admin` scope rather than the grant read’s `warden`, because it names DEVICES; it is bounded to a

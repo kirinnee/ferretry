@@ -291,6 +291,22 @@ describe('r11 S1: the nav sits at the foot of the sidebar (default layout)', () 
     }
   });
 
+  it('1280: on Home and on a machine’s home no place is marked current (the default nav does not list Daemons, so nothing is falsely underlined)', async () => {
+    for (const path of ['/', '/d/ws']) {
+      const { tab, close } = await open(WIDE, path, '');
+      try {
+        const seen = await measure(tab);
+        expect(
+          seen.items.filter(item => item.current).map(item => item.name),
+          path,
+        ).toEqual([]);
+        await shotOf(tab, `end-b5-nav-current-${path === '/' ? 'home' : 'machine'}-1280`);
+      } finally {
+        await close();
+      }
+    }
+  });
+
   it('1280: collapsed to the rail, the icons stack at the rail’s foot', async () => {
     const { tab, close } = await open(WIDE, '/d/ws/board', '');
     try {

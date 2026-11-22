@@ -140,7 +140,7 @@ describe('the Codex import pages', () => {
   for (const mode of ['light', 'dark'] as const)
     for (const viewport of VIEWPORTS) {
       const at = `at ${viewport.name}, ${mode}`;
-      it(`run: the count, what Next does, the kit's name field, and Import + Skip the import like Claude Code, ${at}`, async () => {
+      it(`run: the count, what Next does, the kit's name field, and the one Import action like Claude Code, ${at}`, async () => {
         const context = await newContext(viewport, mode);
         const tab = await open(context, 'run', mode);
         const facts = await factsOf(tab);

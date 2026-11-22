@@ -71,6 +71,13 @@ import {
 import { cap, type CallerGovernance } from '@ferretry/core-gate/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import {
+  type ApplyAct,
+  type ApplyBracket,
+  type ApplyLeft,
+  assertRequestLive,
+  assertRequestLiveBetweenWrites,
+} from './apply-bracket.ts';
+import {
   type CatalogFacts,
   componentCatalog,
   componentUsage,
@@ -211,6 +218,18 @@ export interface ExecutorCaller {
    * agent control. Asked once, before the widening is written; `false` for a caller with no proof to take.
    */
   claim(): boolean;
+  /**
+   * Told, by name, what an executor left unfinished or waiting while it still answered `200` (a file held for the
+   * owner, a file or a login's variables refused): structured state the boundary logs, so no sentence is ever parsed.
+   * Absent: nobody listens.
+   */
+  left?(state: ApplyLeft): void;
+  /**
+   * Called before EACH owner write (the Vault, a login, a component, a settings file, a login's variables): throws
+   * `499 request_aborted` once the request has ended, so an apply that already started stops before its next write.
+   * What landed before stays landed (the owners' files are not one transaction). Absent: nobody can end the apply.
+   */
+  live?(): void;
 }
 
 /** A first-run import or a clone, carried out by its own executor (U15). */
@@ -684,8 +703,9 @@ export class FleetCatalogService {
     id: string,
     governance: CallerGovernance | undefined,
     freshStepUp?: FreshStepUpContext,
+    bracket?: ApplyBracket,
   ): Promise<AccountChangeOutcome> {
-    return await this.#exclusively(async () => await this.#applyReviewed(id, governance, freshStepUp));
+    return await this.#exclusively(async () => await this.#applyReviewed(id, governance, freshStepUp, bracket));
   }
 
   /**
@@ -715,14 +735,25 @@ export class FleetCatalogService {
     id: string,
     governance: CallerGovernance | undefined,
     freshStepUp?: FreshStepUpContext,
+    bracket?: ApplyBracket,
   ): Promise<AccountChangeOutcome> {
     if (governance === undefined) {
       throw new ApiError(403, 'this daemon cannot say whether this caller may change the fleet', 'forbidden');
     }
+    // A request that ended while it waited its turn writes nothing and consumes nothing.
+    // Only an id this catalogue holds is ever named in the log (`apply-act.ts`); anything else is a fixed code there.
+    if (this.#changes.knows(id)) bracket?.known?.();
+    assertRequestLive(bracket);
     const record = this.#proposals(() => this.#changes.consume(id));
+    const kind = record.mutation.kind;
+    let act: ApplyAct | undefined;
     let widensAgentControl = false;
     try {
+      // The act opens HERE, in the serialised section, on the change as it is now: before any work, and before the
+      // current-model check, so no path runs an import outside it.
+      act = bracket?.open?.(kind);
       const model = await this.#assertCurrent(record);
+      assertRequestLive(bracket);
       if (record.mutation.kind === 'machine.settings') {
         widensAgentControl = agentControlWidened(model.machine.agentControl, record.mutation.agentControl);
         if (widensAgentControl && freshStepUp?.agent === true)
@@ -738,13 +769,17 @@ export class FleetCatalogService {
         }
       }
     } catch (error) {
+      act?.end();
       this.#changes.restore(record);
       throw error;
     }
     const caller: ExecutorCaller = {
       governance,
       agent: freshStepUp?.agent === true,
-      claim: () => freshStepUp?.claim() === true,
+      // `act.covered` is read LIVE each time: an act that ended (the request ended) never covers a later claim.
+      claim: () => act?.covered === true || freshStepUp?.claim() === true,
+      live: () => assertRequestLiveBetweenWrites(bracket),
+      ...(bracket?.left === undefined ? {} : { left: (state: ApplyLeft) => bracket.left?.(state, kind) }),
     };
     let outcome: AccountChangeOutcome;
     try {
@@ -769,6 +804,8 @@ export class FleetCatalogService {
       )
         this.#changes.restore(record);
       throw error;
+    } finally {
+      act?.end();
     }
     return outcome;
   }

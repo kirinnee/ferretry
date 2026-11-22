@@ -94,12 +94,28 @@ describe('the verbs Conversation owns', () => {
 
   test('V-0372 V-0373 fy render and fy render guide are declared, and the guide is said without the daemon', async () => {
     expect(manifest.actions.cli.map(declared => declared.verb)).toEqual(
-      expect.arrayContaining(['render', 'render guide']),
+      expect.arrayContaining(['render', 'render guide', 'render check']),
     );
     const t = run();
     expect(await t.verb('render guide')).toBe(0);
     expect(t.calls).toEqual([]);
     expect(t.out.join('').length).toBeGreaterThan(0);
+  });
+
+  test('fy render check reads the message through the shell’s own file reader and needs no daemon', async () => {
+    const out: string[] = [];
+    const client: PluginClient = {
+      call: async () => {
+        throw new Error('render check must not call the daemon');
+      },
+      subscribe: () => () => {},
+    };
+    const io: TerminalIo = { out: text => out.push(text), err: () => {}, isTty: false };
+    const readText = async (path: string) => (path === 'm.md' ? '```terminal\n$ ls\n' : '');
+    const half = cli.build?.({ manifest, client, io, readText }) as CliHalf<typeof manifest>;
+    const verbs = half.verbs as Record<string, (invocation: VerbInvocation) => Promise<number>>;
+    expect(await verbs['render check']?.({ args: ['m.md'], options: {} })).toBe(1);
+    expect(out.join('')).toContain('line 1: a code fence is never closed');
   });
 
   test('V-0396 fy search <text...> searches work by what it says', async () => {

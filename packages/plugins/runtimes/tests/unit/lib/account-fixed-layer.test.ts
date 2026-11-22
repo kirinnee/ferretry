@@ -634,9 +634,8 @@ describe('passive learning', () => {
 });
 
 describe('hypermedia teaching', () => {
-  it('should be a per-ferret system prompt section and teach every form with one fenced example', () => {
+  it('should be a per-ferret system prompt section of at most 20 lines naming every sigil, the part fences and the check', () => {
     // Arrange
-    const forms = ['mermaid', 'svg', 'html', 'chart', 'task, board (live tasks), map, image, video, audio, pdf'];
     const teaching = HYPERMEDIA_INSTRUCTION('zz');
 
     // Act
@@ -646,8 +645,33 @@ describe('hypermedia teaching', () => {
     should(FERRETRY_MCP_ENV_VARS).not.containEql(HYPERMEDIA_ENV);
     should(FERRET_SECTIONS('zz')[0]).deepEqual({ id: 'hypermedia', env: HYPERMEDIA_ENV, text: teaching });
     should(HYPERMEDIA_ENV).equal('FY_HYPERMEDIA');
-    for (const form of forms) should(lines.some(line => line.startsWith(`- ${form}:`))).be.true();
-    should(lines).containDeepOrdered(['```fy-render', 'type: mermaid', '---', '```']);
+    // r12 H6: the format is Durian's Markdown with rich parts, so the prompt is short and points at the guide.
+    should(lines.length).be.belowOrEqual(20);
+    // Every reference sigil (docs/reference-standard.md §2), written as plain text.
+    for (const sigil of [':agent', '@file', '&F12', '^A3', '/skill', '$skill', '%terminal:dev', '%browser:app'])
+      should(teaching).containEql(sigil);
+    // Only what the app draws today is taught (r12 H2 draws `terminal` and `:::human`; H3 draws the fy-render types). A part
+    // whose renderer has not landed would show as text, so it is not named: H4 adds each back with its renderer.
+    should(teaching).containEql('```terminal');
+    should(teaching).containEql(':::human');
+    for (const pending of [
+      'filetree',
+      'editor',
+      'animation',
+      'tierlist',
+      'alignment',
+      ':::tabs',
+      '```chart',
+      '```mermaid',
+    ])
+      should(teaching).not.containEql(pending);
+    // Diagrams, charts, pictures, media, maps and live tasks are one fence kind, every type named.
+    should(teaching).containEql('fy-render');
+    should(teaching).containEql('`type: mermaid|chart|svg|html|map|image|video|audio|pdf|lottie|task|board`');
+    // The spec is one command away, and so is the check; both are named with the binary.
+    should(teaching).containEql('`zz render guide <part>`');
+    should(teaching).containEql('`zz render check <file|->`');
+    should(teaching).not.containEql('`fy ');
     should(teaching).containEql('anything not simple');
     // The owner's three asks: reach for it when teaching, keep it inline, and tell it interactively.
     should(teaching).startWith('Hypermedia: to teach, explain or compare anything not simple');
@@ -666,20 +690,16 @@ describe('hypermedia teaching', () => {
     should(teaching).containEql('Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.');
     should(teaching).not.containEql('Chat only');
     // The theme is the reader's: a ferret never paints a chart or a diagram.
-    should(teaching).containEql('{kind: bar|line|area|pie|…, x: […], series: [{name, data}]}');
-    // Map, media and chart's full spec are one command away, named with the binary.
-    should(teaching).containEql('full spec: `zz render guide chart`');
-    should(teaching).containEql('- task, board (live tasks), map, image, video, audio, pdf: `zz render guide <type>`');
-    should(teaching).not.containEql('`fy ');
+    should(teaching).containEql('no colours');
     should(teaching).containEql('auto-themed: no %%{init}%% or colours');
     // A phone column is narrow: a ferret is taught to draw top-down with short labels.
     should(teaching).containEql('flowchart TB');
     should(teaching).containEql('top-down, short labels');
     should(teaching).not.containEql('flowchart LR');
-    // In every prompt, so it is capped: 1,970 with the top-down hint, then cut to ~1,500 by moving map, media and
-    // chart's full spec behind `render guide` to make room for the Board section. The explainer rule (&C48) was paid
-    // for by tightening the first lines and the mermaid, svg and html lines: 1,320 → 1,209; then the html line's theme-token rule (&B163).
-    should(teaching.length).be.below(1_550);
+    // A reference is a token the reader's proof gate turns into a chip, never a link an agent writes.
+    should(teaching).containEql('plain text, never links');
+    // In every prompt, so it is capped: 1,209 before r12 H6; the part fences, the sigils and the check took it to 1,330, and teaching only what renders (the fy-render type list) to 1,362.
+    should(teaching.length).be.below(1_400);
   });
 });
 

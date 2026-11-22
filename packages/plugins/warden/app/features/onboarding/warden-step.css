@@ -101,20 +101,21 @@
     opacity: 0;
   }
   15%,
-  55% {
+  45% {
     opacity: 1;
   }
-  75%,
+  /* The flag is fully gone before the result starts to appear: the two labels never share the row half-faded (C59 audit). */
+  58%,
   100% {
     opacity: 0;
   }
 }
 @keyframes wd-result {
   0%,
-  55% {
+  58% {
     opacity: 0;
   }
-  75%,
+  78%,
   100% {
     opacity: 1;
   }

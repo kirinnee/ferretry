@@ -124,7 +124,7 @@ class FakePairMode implements SessionMode {
     this.attempts.push(attempt);
     if (!(await attempt.prove())) return 'refused';
     return this.answer === 'paired'
-      ? { outcome: 'paired', fields: { response: { deviceId: 'fy_device_id_new' } } }
+      ? { outcome: 'paired', fields: { response: { deviceId: 'fy_device_id_new', daemonName: 'host-box' } } }
       : 'refused';
   }
 }
@@ -144,7 +144,9 @@ export interface Fixture {
   readonly logged: LogRecord[];
 }
 
-export async function fixture(options: { lease?: AccessLeasePolicy; crypto?: SessionCrypto } = {}): Promise<Fixture> {
+export async function fixture(
+  options: { lease?: AccessLeasePolicy; crypto?: SessionCrypto; nameMachine?: (name: string) => Promise<string> } = {},
+): Promise<Fixture> {
   const identity = await newDaemonIdentity();
   const clock = new FakeClock();
   const device = new FakeDeviceMode();
@@ -188,6 +190,7 @@ export async function fixture(options: { lease?: AccessLeasePolicy; crypto?: Ses
     },
     clock,
     ...(options.lease === undefined ? {} : { lease: options.lease }),
+    ...(options.nameMachine === undefined ? {} : { nameMachine: options.nameMachine }),
     log: scopedLog(record => logged.push(record), 'session'),
   });
   (state as { layer: SessionLayerHost }).layer = layer;

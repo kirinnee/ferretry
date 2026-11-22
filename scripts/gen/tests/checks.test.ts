@@ -410,6 +410,54 @@ describe('context-imports', () => {
     expect(found).toContain('other/tests/flow.test.ts:1: @ferretry/plugin-onboarding/app');
   });
 
+  test("only Gate's tests may load halves through the kernel's generated daemon registry: Gate's daemon and any other package's tests are still refused", async () => {
+    const f = ws([
+      KERNEL_PACKAGE,
+      {
+        id: 'gate',
+        core: true,
+        files: {
+          'tests/import.test.ts': `import '../../kernel/src/generated/plugins.ts';\n`,
+          'daemon/host.ts': `import '../../kernel/src/generated/plugins.ts';\n`,
+        },
+      },
+      { id: 'other', files: { 'tests/import.test.ts': `import '../../../core/kernel/src/generated/plugins.ts';\n` } },
+    ]);
+    f.write('packages/core/kernel/src/generated/plugins.ts', 'export const daemonImplementations = [];\n');
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('gate/tests/import.test.ts');
+    expect(found).toContain('gate/daemon/host.ts:1: ../../kernel/src/generated/plugins.ts');
+    expect(found).toContain('other/tests/import.test.ts:1: ../../../core/kernel/src/generated/plugins.ts');
+  });
+
+  test("only Gate's tests may reach Access's step-up witness adapter and fixture, and no other Access file", async () => {
+    const f = ws([
+      {
+        id: 'gate',
+        core: true,
+        files: {
+          'tests/witness.test.ts': `import '../../../plugins/access/daemon/step-up-provider.ts';\nimport '../../../plugins/access/tests/support/daemon/step-up-fixture.ts';\n`,
+          'tests/other.test.ts': `import '../../../plugins/access/daemon/runtime.ts';\n`,
+          'daemon/host.ts': `import '../../../plugins/access/daemon/step-up-provider.ts';\n`,
+        },
+      },
+      {
+        id: 'access',
+        files: {
+          'daemon/step-up-provider.ts': 'export {};\n',
+          'daemon/runtime.ts': 'export {};\n',
+          'tests/support/daemon/step-up-fixture.ts': 'export {};\n',
+        },
+      },
+      { id: 'other', files: { 'tests/witness.test.ts': `import '../../access/daemon/step-up-provider.ts';\n` } },
+    ]);
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('gate/tests/witness.test.ts');
+    expect(found).toContain('gate/tests/other.test.ts:1: ../../../plugins/access/daemon/runtime.ts');
+    expect(found).toContain('gate/daemon/host.ts:1: ../../../plugins/access/daemon/step-up-provider.ts');
+    expect(found).toContain('other/tests/witness.test.ts:1: ../../access/daemon/step-up-provider.ts');
+  });
+
   test('a cli half may import its own generated verb list and no other generated file', async () => {
     const f = ws([
       {
@@ -1787,6 +1835,15 @@ describe('shell-provides', () => {
   test('planted: a links provider outside the taker list is found', () => {
     expect(found(half('conversation', { links: true }))).toEqual([
       expect.stringContaining('provides `shell.links`, but only browsers may'),
+    ]);
+  });
+  test('planted: a prose view outside the taker list, or on a skeleton half, is found; Conversation may provide it', () => {
+    expect(found(half('conversation', { prose: true }))).toEqual([]);
+    expect(found(half('agenda', { prose: true }))).toEqual([
+      expect.stringContaining('provides `shell.prose`, but only conversation may'),
+    ]);
+    expect(found(half('conversation', { prose: true, skeleton: true }))).toEqual([
+      'is a skeleton half with a `shell.prose` view: nothing mounts it',
     ]);
   });
   test('planted: a navBadges key that is not an own screen with a nav entry is found', () => {

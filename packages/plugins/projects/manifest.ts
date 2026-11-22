@@ -1,4 +1,4 @@
-import { LaunchRoots, NEW_FERRET_PROJECT_SLOT } from '@ferretry/core-ferrets/contract';
+import { FerretsChanged, FerretsPort, LaunchRoots, NEW_FERRET_PROJECT_SLOT } from '@ferretry/core-ferrets/contract';
 import { appAction, definePlugin, panel, route, screen, verb } from '@ferretry/kernel/manifest';
 import {
   filesystemConfigure,
@@ -69,14 +69,15 @@ export default definePlugin({
         audit: { record: PROJECT_REMOVED_AUDIT },
         guard: { none: 'answers the removed record; no pane, page or vault text' },
       }),
-      // NEW in r9 (B6): the folder explorer behind the project picker. Names under the owner's home only, never a private
-      // folder (`daemon/features/folders/fence.ts`); a person's act, never a ferret's.
+      // NEW in r9 (B6): the folder explorer behind the project picker. Names anywhere the skip list allows, never a private
+      // folder (`daemon/features/folders/fence.ts`); a person's act, never a ferret's. The home is `filesystem.use`; a place
+      // outside it is `filesystem.configure` (passkey step-up for a remote device), asked by the handler.
       route('GET /v1/projects/folders', {
         minimum: 'operator',
         caller: 'person',
         capability: filesystemUse,
         noStore: true,
-        audit: { skip: 'a read of folder names under the home folder' },
+        audit: { skip: 'a read of folder names; outside the home folder it also needs filesystem.configure' },
         guard: { none: 'folder names, kinds and times only; no file content, no pane, page or vault text' },
       }),
       route('POST /v1/projects/folders', {
@@ -105,6 +106,32 @@ export default definePlugin({
         guard: {
           none: 'folder names and remote addresses (never with a password); no file content, no pane, page or vault text',
         },
+      }),
+      // NEW in &F6061 U5: the project's file finder, names only. A person's read of a registered folder, like the repos scan:
+      // `filesystem.use` (a rescan reads and changes nothing on the host, so it is `use` too).
+      route('GET /v1/projects/:id/files', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: filesystemUse,
+        noStore: true,
+        audit: { skip: 'a read of file names inside a registered project folder' },
+        guard: 'secrets',
+      }),
+      route('GET /v1/projects/:id/files/status', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: filesystemUse,
+        noStore: true,
+        audit: { skip: 'a read of counts and folder names about a project file index' },
+        guard: 'secrets',
+      }),
+      route('POST /v1/projects/:id/files/rescan', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: filesystemUse,
+        noStore: true,
+        audit: { skip: 'starts a rebuild of an in-memory index; reads the folder, writes nothing on the host' },
+        guard: 'secrets',
       }),
     ],
     cli: [
@@ -144,7 +171,12 @@ export default definePlugin({
     state: [PROJECTS_STATE],
     readModels: ['projects'],
     publishes: [ProjectRegistered, ProjectRemoved],
+    // The file finder's index is refreshed when a ferret stops working in a project, or a project is registered or removed.
+    subscribes: [FerretsChanged, ProjectRegistered, ProjectRemoved],
   },
+
+  // Which folder a ferret works in, to tell which project a turn end touched. Soft: with no Ferrets, nothing refreshes early.
+  uses: { ferrets: FerretsPort },
 
   // Registering touches only the folder the owner named, once (`imports` root, §7.7); `git` clones and initialises.
   permissions: { roots: ['imports'], spawn: ['git', 'mkdir', 'rmdir'] },

@@ -181,50 +181,60 @@
 
 /* Registration brackets: two accent corner marks on every panel, drawn as pseudo-elements (never clip-path, so a popover
    or a focus ring is never cut). */
-:root[data-style='hud'] .kt-panel {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+.kt-panel:where(:not([data-swatch]:not([data-style='hud']) *)) {
   position: relative;
 }
-:root[data-style='hud'] .kt-panel::before,
-:root[data-style='hud'] .kt-panel::after {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+  .kt-panel:where(:not([data-swatch]:not([data-style='hud']) *))::before,
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+  .kt-panel:where(:not([data-swatch]:not([data-style='hud']) *))::after {
   content: '';
   position: absolute;
   width: var(--bracket-size);
   height: var(--bracket-size);
   pointer-events: none;
 }
-:root[data-style='hud'] .kt-panel::before {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+  .kt-panel:where(:not([data-swatch]:not([data-style='hud']) *))::before {
   top: -1px;
   left: -1px;
   border-top: var(--border-width-heavy) solid var(--accent);
   border-left: var(--border-width-heavy) solid var(--accent);
 }
-:root[data-style='hud'] .kt-panel::after {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+  .kt-panel:where(:not([data-swatch]:not([data-style='hud']) *))::after {
   right: -1px;
   bottom: -1px;
   border-right: var(--border-width-heavy) solid var(--accent);
   border-bottom: var(--border-width-heavy) solid var(--accent);
 }
-:root[data-style='hud'] .kt-panel__header {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+  .kt-panel__header:where(:not([data-swatch]:not([data-style='hud']) *)) {
   border-bottom-color: var(--accent-border);
 }
 
 /* Controls light up on hover and lock on press. */
-:root[data-style='hud'] .kt-btn {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+.kt-btn:where(:not([data-swatch]:not([data-style='hud']) *)) {
   transition:
     box-shadow var(--motion-fast) var(--ease-standard),
     border-color var(--motion-fast) var(--ease-standard),
     translate var(--motion-fast) var(--ease-standard);
 }
-:root[data-style='hud'] .kt-btn:not(:disabled):hover {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+  .kt-btn:where(:not([data-swatch]:not([data-style='hud']) *)):not(:disabled):hover {
   border-color: var(--accent);
   box-shadow: 0 0 12px rgb(var(--accent-rgb) / var(--glow-alpha));
 }
-:root[data-style='hud'] .kt-btn:not(:disabled):active {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+  .kt-btn:where(:not([data-swatch]:not([data-style='hud']) *)):not(:disabled):active {
   translate: var(--press-translate) var(--press-translate);
 }
 /* The field's own `outline: none` (design-system.css) beats the shell's ring, so a field would show a border colour only: draw
    the ring here, with the HUD glow beside it. */
-:root[data-style='hud'] .kt-input:focus-visible {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+.kt-input:where(:not([data-swatch]:not([data-style='hud']) *)):focus-visible {
   border-color: var(--accent);
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: calc(-1 * var(--focus-width));
@@ -232,13 +242,15 @@
 }
 
 /* Choice cards: the chosen card is lit with a glow and a locked accent edge, and flashes once as it is chosen. */
-:root[data-style='hud'] .fy-cc__card[data-selected='true'] {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+.fy-cc__card:where(:not([data-swatch]:not([data-style='hud']) *))[data-selected='true'] {
   border-color: var(--accent);
   box-shadow:
     0 0 0 1px var(--accent),
     0 0 16px rgb(var(--accent-rgb) / var(--glow-alpha));
 }
-:root[data-style='hud'] .fy-cc__card:not([aria-disabled='true']):hover {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+  .fy-cc__card:where(:not([data-swatch]:not([data-style='hud']) *)):not([aria-disabled='true']):hover {
   border-color: var(--accent);
 }
 @keyframes fy-hud-lock {
@@ -253,22 +265,26 @@
   }
 }
 @media (prefers-reduced-motion: no-preference) {
-  :root[data-style='hud']:not([data-motion='reduced']) .fy-cc__card[data-pulse='true'] {
+  :is(:root[data-style='hud'], [data-swatch][data-style='hud']):not([data-motion='reduced'])
+    .fy-cc__card:where(:not([data-swatch]:not([data-style='hud']) *))[data-pulse='true'] {
     animation: fy-hud-lock var(--motion-slow) var(--ease-standard);
   }
 }
 
 /* Progress: thin lit segments; the current one glows. */
-:root[data-style='hud'] .fy-sp-progress__segment {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+.fy-sp-progress__segment:where(:not([data-swatch]:not([data-style='hud']) *)) {
   border-radius: 0;
   height: 4px;
 }
-:root[data-style='hud'] .fy-sp-progress__segment[data-state='current'] {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+  .fy-sp-progress__segment:where(:not([data-swatch]:not([data-style='hud']) *))[data-state='current'] {
   box-shadow: 0 0 10px rgb(var(--accent-rgb) / var(--glow-alpha));
 }
 
 /* Badges are wide-tracked tags. */
-:root[data-style='hud'] .kt-badge {
+:is(:root[data-style='hud'], [data-swatch][data-style='hud'])
+.kt-badge:where(:not([data-swatch]:not([data-style='hud']) *)) {
   letter-spacing: var(--tracking-label);
 }
 

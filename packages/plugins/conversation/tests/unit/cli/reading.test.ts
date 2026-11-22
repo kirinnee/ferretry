@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { RENDER_GUIDE_TOPICS } from '../../../cli/reading/guide.ts';
 import { readingVerbs } from '../../../cli/reading/verbs.ts';
 
 const harness = (answers: Record<string, unknown> = {}, clock?: { nowMs(): number }) => {
@@ -83,13 +84,43 @@ describe('the reading verbs', () => {
     expect(await run(verbs.search, [])).toBe(2);
   });
 
-  test('render guide prints the overview with one line per type, and refuses an unknown type', async () => {
+  test('render guide prints the overview with one line per topic, and refuses an unknown topic', async () => {
     const { verbs, out, err } = harness();
     expect(await run(verbs['render guide'], [])).toBe(0);
     expect(out.join('')).toContain('fy render guide mermaid');
+    expect(out.join('')).toContain('fy render guide terminal');
+    expect(out.join('')).toContain('fy render guide references');
     expect(await run(verbs['render guide'], ['hologram'])).toBe(2);
-    expect(err.join('')).toContain('no type hologram');
+    expect(err.join('')).toContain('no topic hologram');
     expect(await run(verbs.render, [])).toBe(0);
+  });
+
+  test('render guide answers every topic it lists, and `llm` answers with the human section', async () => {
+    const { verbs, out } = harness();
+    for (const topic of RENDER_GUIDE_TOPICS) {
+      out.length = 0;
+      expect(await run(verbs['render guide'], [topic])).toBe(0);
+      expect(out.join('').trim().length).toBeGreaterThan(40);
+    }
+    out.length = 0;
+    await run(verbs['render guide'], ['human']);
+    expect(out.join('')).toContain(':::human');
+    const human = out.join('');
+    out.length = 0;
+    expect(await run(verbs['render guide'], ['llm'])).toBe(0);
+    expect(out.join('')).toBe(human);
+  });
+
+  test('render guide teaches only what the app draws: a part whose renderer has not landed is not a topic', async () => {
+    const { verbs, out, err } = harness();
+    expect(await run(verbs['render guide'], [])).toBe(0);
+    const overview = out.join('');
+    for (const pending of ['filetree', 'editor', 'animation', 'tierlist', 'alignment', 'tabs', 'accordion']) {
+      expect(RENDER_GUIDE_TOPICS as readonly string[]).not.toContain(pending);
+      expect(overview).not.toContain(pending);
+      expect(await run(verbs['render guide'], [pending])).toBe(2);
+    }
+    expect(err.join('')).toContain('no topic tabs');
   });
 
   test('render guide answers for the task type, and still for the card name an older agent types', async () => {
