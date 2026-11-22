@@ -32,7 +32,7 @@ import {
   type PlainApiResponse,
 } from '@ferretry/kernel/contract';
 import type { AccountChangeOutcome } from '../../contract/index.ts';
-import type { ApplyAct, ApplyBracket, ApplyLeft } from '../lib/service/catalog-service.ts';
+import type { ApplyAct, ApplyBracket, ApplyLeft } from '../lib/service/apply-bracket.ts';
 
 /** The changes an EXECUTOR carries out across owners: one person act each, confirmed once. */
 const ACT_KINDS: ReadonlySet<string> = new Set(['setup.import', 'clone.import']);

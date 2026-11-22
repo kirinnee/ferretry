@@ -84,6 +84,8 @@ import { CloneRefusal } from '../account/clone-parts.ts';
 import { EMPTY_RUNTIME_IDS } from '../account/ids.ts';
 import type { FleetDocumentWrite, FleetModelApplyPlan } from '../provisioning.ts';
 import { configurationLanded, failedApplySentence } from './failed-apply.ts';
+import { writeConfigFiles } from './setup-config-files.ts';
+import { reportLeft, writeVaultAndLogins } from './setup-vault-logins.ts';
 import {
   freeName,
   type HostHarnessScan,
@@ -137,10 +139,10 @@ import {
   type FleetCatalogServiceDeps,
   harnessCommandsOf,
 } from './catalog-service.ts';
-import { assertMayFileSecrets, fileSecrets, reusableSecrets, secretSentences, uniqueByName } from './setup-secrets.ts';
+import { assertMayFileSecrets, reusableSecrets, secretSentences, uniqueByName } from './setup-secrets.ts';
 import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } from './tool-install.ts';
 import { toolOutcomeOnWire } from './tool-install-wire.ts';
-import { createLogins, importLoginEnvs, type LoginEnvPlan, loginEnvPlanOf, tickedEnvOf } from './setup-login-env.ts';
+import { importLoginEnvs, type LoginEnvPlan, loginEnvPlanOf, tickedEnvOf } from './setup-login-env.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -596,14 +598,11 @@ export class FleetSetupService {
         'what this would add changed on this machine after it was previewed; review it again',
       );
     }
-    // The Vault is written first: the caller's right to write it is settled before the first write.
-    assertMayFileSecrets(composed.secrets, caller, 'apply');
-    // A request that has ended stops the apply BEFORE its next owner write (each `live()` below): what landed stays.
-    caller?.live?.();
-    await fileSecrets((name, value) => this.deps.secrets.put(name, value), composed.secrets);
-    caller?.live?.();
-    await createLogins(this.deps.catalog, composed, () => caller?.live?.());
-    caller?.live?.();
+    await writeVaultAndLogins(
+      { put: (name, value) => this.deps.secrets.put(name, value), catalog: this.deps.catalog },
+      composed,
+      caller,
+    );
     // Settings files go first, each through the owner's door and against the version it was compared with. The
     // record rides the batch after them, so it can only claim less than landed, never more. A write that loosens
     // is held unless the caller is at this machine (`governed: false`); a remote caller confirms it as for any
@@ -623,22 +622,14 @@ export class FleetSetupService {
       inEffect: async () => (await this.#read()).model,
     });
     landed.push(...handed.landed);
-    if (handed.held > 0) caller?.left?.('held');
-    if (handed.refused > 0) caller?.left?.('refused');
+    reportLeft(caller, handed.held, handed.refused);
     const { model, documents } = handed.applied;
-    for (const write of composed.configWrites ?? []) {
-      caller?.live?.();
-      try {
-        const waiting = await this.#writeConfigFile(write, mayLoosen);
-        held += waiting;
-        if (waiting === 0) landed.push(write.path);
-      } catch (error) {
-        if (landed.length > 0 && error instanceof FleetCatalogRefusal) {
-          throw new FleetCatalogRefusal(error.code, `${error.message}; ${configurationLanded(landed)}`);
-        }
-        throw error;
-      }
-    }
+    held += await writeConfigFiles(
+      composed.configWrites ?? [],
+      write => this.#writeConfigFile(write, mayLoosen),
+      caller,
+      landed,
+    );
     caller?.live?.();
     await this.#applyModel(model, documents, landed);
     const envSentences = await importLoginEnvs(this.deps.loginEnvImport, composed, caller);
@@ -651,7 +642,7 @@ export class FleetSetupService {
       ...handed.sentences,
       ...envSentences,
     ];
-    if (held > 0) caller?.left?.('held');
+    reportLeft(caller, held, 0);
     if (held > 0)
       sentences.push(`${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`);
     return sentences.join(' ');
