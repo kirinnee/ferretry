@@ -86,8 +86,17 @@ const withTab = async (
     await tab.waitForTimeout(250);
   };
   const shot = async (name: string): Promise<void> => {
-    if (shotsDir !== '')
-      await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${name}.png`), fullPage: true });
+    if (shotsDir === '') return;
+    // The project page scrolls inside its own `main` (the document never does), so a full-page capture would stop at the
+    // fold. The viewport is made EXACTLY as tall as that scroller's content for the capture (a taller one would stretch
+    // the page's grid rows and move cards that do not move for a reader) and put back after.
+    const content = await tab.evaluate(() =>
+      Math.ceil(document.querySelector('main')?.scrollHeight ?? window.innerHeight),
+    );
+    await tab.setViewportSize({ width: viewport.width, height: content });
+    await tab.waitForTimeout(150);
+    await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${name}.png`) });
+    await tab.setViewportSize({ width: viewport.width, height: viewport.height });
   };
   try {
     await run(tab, open, shot);
@@ -101,10 +110,12 @@ interface Measured {
   viewportWidth: number;
   pageScrollWidth: number;
   finder: { left: number; right: number };
-  input: { height: number };
+  input: { height: number; width: number; textStart: number; iconRight: number };
+  /** The Files card's heading sits this far under the card's top, and the finder this far under the heading. */
+  card: { headingGap: number; finderGap: number };
   /** The page's own control height (`min-h-control`), as the browser resolves it for this viewport. */
   controlPx: number;
-  rescan: { height: number; text: string; disabled: boolean };
+  rescan: { height: number; width: number; text: string; disabled: boolean };
   rows: { count: number; minHeight: number; maxRight: number; overflowing: number };
   banner: { text: string; left: number; right: number; bottom: number; contrast: number; fontPx: number } | null;
   firstRowTop: number | null;
@@ -152,12 +163,30 @@ const measure = (tab: Page): Promise<Measured> =>
       viewportWidth: window.innerWidth,
       pageScrollWidth: document.documentElement.scrollWidth,
       finder: { left: box.left, right: box.right },
-      input: { height: input.getBoundingClientRect().height },
+      card: (() => {
+        const card = finder.closest('section');
+        const heading = card?.querySelector('h2');
+        return {
+          headingGap: (heading?.getBoundingClientRect().top ?? 0) - (card?.getBoundingClientRect().top ?? 0),
+          finderGap: box.top - (heading?.getBoundingClientRect().bottom ?? 0),
+        };
+      })(),
+      input: {
+        height: input.getBoundingClientRect().height,
+        width: input.getBoundingClientRect().width,
+        // Where the typed text starts, and where the magnifier ends: the text must start to the right of the icon.
+        textStart:
+          input.getBoundingClientRect().left +
+          Number.parseFloat(getComputedStyle(input).paddingLeft) +
+          Number.parseFloat(getComputedStyle(input).borderLeftWidth),
+        iconRight: finder.querySelector('label svg')?.getBoundingClientRect().right ?? 0,
+      },
       controlPx: Number.parseFloat(getComputedStyle(rescan).minHeight),
       rescan: {
         height: rescan.getBoundingClientRect().height,
+        width: rescan.getBoundingClientRect().width,
         text: rescan.innerText.trim(),
-        disabled: rescan.disabled,
+        disabled: rescan.getAttribute('aria-disabled') === 'true',
       },
       rows: {
         count: rowNodes.length,
@@ -193,9 +222,21 @@ const expectFits = (label: string, m: Measured, viewport: Viewport): void => {
   expect(m.finder.right, `${label}: ends inside the viewport`).toBeLessThanOrEqual(m.viewportWidth + 0.5);
   expect(m.pageScrollWidth, `${label}: nothing scrolls sideways`).toBeLessThanOrEqual(viewport.width);
   expect(m.rows.maxRight, `${label}: no row reaches past the viewport`).toBeLessThanOrEqual(m.viewportWidth + 0.5);
+  // The card keeps its natural height: a card stretched to its neighbour's height centres its content and moves the
+  // heading and the box between states (measured 41px / 42px in the search shot before the fix, 22px / 18px otherwise).
+  expect(m.card.headingGap, `${label}: the Files heading sits at the card's top`).toBeLessThan(30);
+  expect(m.card.finderGap, `${label}: the finder sits right under the heading`).toBeLessThan(26);
+  expect(
+    m.input.textStart,
+    `${label}: typed text starts to the right of the search icon, never under it`,
+  ).toBeGreaterThan(m.input.iconRight);
   // The page's own control height is the floor for a button or a row: 28px at a desktop, and larger where a thumb is the
   // pointer. The rule is "at least the page's control", measured as the browser resolved it for this viewport.
   expect(m.controlPx, `${label}: the page's control height resolved`).toBeGreaterThanOrEqual(viewport.phone ? 40 : 28);
+  expect(
+    Math.abs(m.rescan.height - m.input.height),
+    `${label}: Rescan and the search box are one height, so their edges line up`,
+  ).toBeLessThan(1);
   expect(m.rescan.height, `${label}: Rescan is at least a control tall`).toBeGreaterThanOrEqual(m.controlPx - 0.5);
   if (m.rows.count > 0)
     expect(m.rows.minHeight, `${label}: a row is at least a control tall`).toBeGreaterThanOrEqual(m.controlPx - 0.5);
@@ -297,6 +338,13 @@ describe('the project page file finder', () => {
           const after = await measure(tab);
           expect(after.rescan.disabled).toBe(false);
           expectFits(`rebuilt ${where}`, after, viewport);
+          console.info(
+            `[u7] widths ${where}: input ${during.input.width}→${after.input.width}, rescan ${during.rescan.width}→${after.rescan.width}`,
+          );
+          expect(
+            Math.abs(after.input.width - during.input.width),
+            `${where}: the search box keeps its width when Rescan says Updating…`,
+          ).toBeLessThan(1);
           // Updating… was on screen only while the fake build ran, so the shot reloads the page to catch it again.
           await open('view=building');
           await shot('building');

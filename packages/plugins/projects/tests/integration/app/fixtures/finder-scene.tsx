@@ -47,7 +47,7 @@ const PATHS = [
   'README.md',
   'package.json',
   'Taskfile.yaml',
-  ...Array.from({ length: 40 }, (_, row) => `packages/plugins/projects/daemon/features/files/module-${String(row)}.ts`),
+  ...Array.from({ length: 14 }, (_, row) => `packages/plugins/projects/daemon/features/files/module-${String(row)}.ts`),
   'packages/plugins/projects/app/features/file-finder/some-very-long-file-name-that-has-to-truncate-instead-of-scrolling-the-page-sideways.tsx',
 ];
 

@@ -82,7 +82,7 @@ export function FileFinder({ client, project, initialQuery = '', timings, now = 
 
   return (
     <div className="grid gap-sm" data-finder-state="ready" data-finder-coverage={answer.index.coverage}>
-      <div className="flex min-w-0 items-center gap-xs">
+      <div className="flex min-w-0 items-stretch gap-xs">
         <label className="relative min-w-0 flex-1">
           <span className="sr-only">Search files in this project</span>
           <Search
@@ -91,10 +91,12 @@ export function FileFinder({ client, project, initialQuery = '', timings, now = 
             aria-hidden="true"
           />
           <input
-            className="kt-input min-h-control w-full pl-7"
+            className="kt-input min-h-control w-full"
+            // Inline, because `.kt-input`'s own padding is not in a layer and would beat a utility class.
+            style={{ paddingInlineStart: '1.9rem' }}
             type="search"
             value={query}
-            placeholder="Find a file by name or path"
+            placeholder="Find a file"
             autoComplete="off"
             spellCheck={false}
             onChange={event => {
@@ -106,12 +108,16 @@ export function FileFinder({ client, project, initialQuery = '', timings, now = 
         </label>
         <button
           type="button"
-          className="kt-btn min-h-control shrink-0"
-          onClick={finder.rescan}
-          disabled={finder.rebuilding}
+          className="kt-btn min-h-control shrink-0 justify-center"
+          // Inline (see the input): the width of "Rescan" and "Updating…" must be one width, so the box beside it never moves.
+          // `height: auto` lets the row's stretch make it as tall as the box beside it (`.kt-btn` fixes its own height).
+          style={{ minWidth: '9rem', height: 'auto' }}
+          // Busy, not dimmed: `aria-disabled` keeps the button's own colours (and its spinner) readable, and the click is ignored.
+          onClick={finder.rebuilding ? undefined : finder.rescan}
+          aria-disabled={finder.rebuilding}
           data-finder-rescan=""
         >
-          {finder.rebuilding ? <Spinner size={13} /> : <RefreshCw size={13} aria-hidden="true" />}{' '}
+          {finder.rebuilding ? <Spinner size={15} /> : <RefreshCw size={15} aria-hidden="true" />}{' '}
           {finder.rebuilding ? 'Updating…' : 'Rescan'}
         </button>
       </div>

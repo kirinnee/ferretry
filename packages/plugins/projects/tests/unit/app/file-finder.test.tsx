@@ -168,7 +168,10 @@ describe('FileFinder', () => {
       c => c.querySelector('[data-finder-rescan]')?.textContent?.includes('Updating') === true,
       'updating',
     );
-    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    const callsBefore = calls.length;
+    await interact(() => button.dispatchEvent(clickEvent()));
+    expect(calls.slice(callsBefore).some(call => call.route === RESCAN)).toBe(false);
     // Rows stay while it builds, then a fresh read lands and the button is back.
     expect(rows(mounted)).toEqual(PATHS);
     await until(

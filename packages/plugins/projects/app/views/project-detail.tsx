@@ -155,7 +155,9 @@ function ProjectDetailView({
             </Section>
           )}
         </div>
-        <div className="grid gap-panel">
+        {/* `content-start`, as the column beside it: when the left column is the taller one, these cards keep their own
+            height instead of being stretched to fill it (a stretched card centres its content and the heading drifts). */}
+        <div className="grid content-start gap-panel">
           <Section icon={<Bot className="text-muted" size={16} aria-hidden="true" />} title="Active ferrets">
             {reading === 'unread' ? (
               <Loading kind="bar" label="Loading this daemon’s ferrets…" />
