@@ -1,4 +1,4 @@
-import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
+import { ASK_REFERENCE_SIGIL, buzzBody, buzzTitle } from '@ferretry/core-asks/contract';
 import type { ConfigFileDef, FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
@@ -17,15 +17,7 @@ import { StateModeStore, StateNudgeStore, StateRestNudgeStore, StateSeenStore } 
 import { AgendaModeService, adoptAgendaDefault } from './lib/agenda-mode.ts';
 import { agendaArchiveKeeps } from './lib/archive-keeps.ts';
 import { agendaLaunchPart } from './lib/launch-parts.ts';
-import {
-  askBuzzKey,
-  askBuzzKind,
-  askBuzzWords,
-  type BuzzableAsk,
-  stopBuzzKey,
-  stopBuzzWords,
-  waitingOnOwner,
-} from './lib/buzz-policy.ts';
+import { stopBuzzKey, stopBuzzWords, waitingOnOwner } from './lib/buzz-policy.ts';
 import { BuzzService } from './lib/buzz-service.ts';
 import { AgendaAgentClearer } from './lib/clear-agents.ts';
 import { MachineAgendaView } from './lib/machine-agenda.ts';
@@ -34,7 +26,6 @@ import { AGENDA_REST_NUDGE_ID_PREFIX, AgendaRestNudger, REST_NUDGE_SWEEP_MS } fr
 import { AGENDA_NUDGE_ID_PREFIX, AgendaTurnNudge, NudgeSendFailure } from './lib/turn-nudge.ts';
 import { AgendaRollup } from './lib/rollup.ts';
 import { markSeen } from './lib/seen.ts';
-import { buzzBody, buzzTitle } from './lib/words.ts';
 import { agendaRoutes } from './routes.ts';
 
 const REFERENCE_MENU_HOOK = `reference.catalog:${ASK_REFERENCE_SIGIL}` as const;
@@ -108,13 +99,6 @@ export default implementDaemon(manifest, {
       const outcome = await modes.set(ferret, enabled);
       kernel.events.publish(AgendaModeChanged, { ferret, enabled });
       return { enabled, ...outcome };
-    };
-
-    /** One ask's own buzz, when it is a moment that buzzes (a notice asked for the phone; a card's ask). */
-    const buzzAsk = async (ask: BuzzableAsk): Promise<void> => {
-      const kind = askBuzzKind(ask);
-      if (kind === undefined || ask.ferret === undefined) return;
-      await buzzes.buzz(askBuzzKey(ask.ferret, ask.id), kind, askBuzzWords(ask), { ferret: ask.ferret, ask: ask.id });
     };
 
     /** A ferret went idle with asks waiting: ONE buzz for the stop, named by the instant it began. */
@@ -273,12 +257,6 @@ export default implementDaemon(manifest, {
       }),
       provides: { agenda: api },
       subscribers: {
-        // A raise, a close or a change: an ask that is a buzzing moment makes its one buzz.
-        'asks.changed': async ({ ferret, askId, state: askState }) => {
-          if (askState !== 'open') return;
-          const ask = (await asks.get({ ferret, id: askId }).catch(() => undefined)) as BuzzableAsk | undefined;
-          if (ask !== undefined) await buzzAsk({ ...ask, ferret: ask.ferret ?? ferret });
-        },
         // The owner answered it, so they have seen it.
         'asks.answered': async ({ ferret, askId }) => {
           await markSeen(seen, ferret, askId, clock.now()).catch(error => warn(`seen mark failed: ${String(error)}`));

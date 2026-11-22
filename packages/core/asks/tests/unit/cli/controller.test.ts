@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { type AgendaItem, MAX_AGENDA_SUBJECT_LENGTH } from '@ferretry/core-asks/contract';
 import should from 'should';
-import { AgendaController } from '../../../cli/lib/controller.ts';
+import { AsksController } from '../../../cli/lib/controller.ts';
 import { DEFAULT_HOW_TO_RESOLVE } from '../../../cli/lib/how-to-resolve.ts';
 import {
   agentItem,
@@ -20,10 +20,10 @@ const board = snapshot([humanItem('A1', 'approve the deploy')], {
 function build(ownSessionId: string | undefined, result = board) {
   const gateway = new RecordingAgendaGateway(board, result);
   const out = new CapturingOutput();
-  return { gateway, out, controller: new AgendaController(gateway, out, ownSessionId) };
+  return { gateway, out, controller: new AsksController(gateway, out, ownSessionId) };
 }
 
-describe('agenda controller targeting', () => {
+describe('asks controller targeting', () => {
   it('should default to the session the command runs inside', async () => {
     // Arrange
     const { controller, gateway } = build(SESSION);
@@ -63,7 +63,7 @@ describe('agenda controller targeting', () => {
   });
 });
 
-describe('agenda controller reads', () => {
+describe('asks controller reads', () => {
   it('should render the unresolved listing', async () => {
     // Arrange
     const { controller, out } = build(SESSION);
@@ -103,7 +103,7 @@ describe('agenda controller reads', () => {
 /** The premise and context every new item a ferret raises must carry. */
 const BRIEF = { premise: ['A ferret needs the owner.'], context: ['The work waits on this answer.'] };
 
-describe('agenda controller add', () => {
+describe('asks controller add', () => {
   const after = snapshot([humanItem('A1', 'approve the deploy'), agentItem('A2', 'pick a cluster')]);
 
   it('should send the ask with sensible defaults for why and how to resolve', async () => {
@@ -139,7 +139,7 @@ describe('agenda controller add', () => {
     const twins = snapshot([agentItem('A1', 'same subject'), agentItem('A2', 'same subject')]);
     const gateway = new RecordingAgendaGateway(snapshot([agentItem('A1', 'same subject')]), twins);
     const out = new CapturingOutput();
-    const controller = new AgendaController(gateway, out, SESSION);
+    const controller = new AsksController(gateway, out, SESSION);
 
     // Act
     await controller.add(['same', 'subject'], {
@@ -168,7 +168,7 @@ describe('agenda controller add', () => {
     const crowded = snapshot([agentItem('A2', 'ours'), agentItem('A3', 'someone else')]);
     const gateway = new RecordingAgendaGateway(snapshot([]), crowded);
     const out = new CapturingOutput();
-    const controller = new AgendaController(gateway, out, SESSION);
+    const controller = new AsksController(gateway, out, SESSION);
 
     // Act
     await controller.add(['ours'], { ...BRIEF, title: 'Pick a cluster' });
@@ -192,7 +192,7 @@ describe('agenda controller add', () => {
         });
       },
     };
-    const controller = new AgendaController(gateway, new CapturingOutput(), SESSION, input);
+    const controller = new AsksController(gateway, new CapturingOutput(), SESSION, input);
 
     // Act
     await controller.add([], { jsonFile: '-', title: 'Plan approval' });
@@ -263,7 +263,7 @@ describe('agenda controller add', () => {
   });
 });
 
-describe('agenda controller resolve and dismiss', () => {
+describe('asks controller resolve and dismiss', () => {
   it('should resolve an item with the answer it carries', async () => {
     // Arrange
     const { controller, gateway, out } = build(SESSION, snapshot([]));
@@ -411,7 +411,7 @@ describe('agenda controller resolve and dismiss', () => {
   });
 });
 
-describe('agenda controller edit', () => {
+describe('asks controller edit', () => {
   it('should send only the given wording and say it was edited, with any advice', async () => {
     // Arrange
     const warned = { ...board, warnings: ['summary is long'] };
@@ -469,7 +469,7 @@ describe('agenda controller edit', () => {
       },
     ]);
     const gateway = new RecordingAgendaGateway(asked);
-    const controller = new AgendaController(gateway, new CapturingOutput(), SESSION);
+    const controller = new AsksController(gateway, new CapturingOutput(), SESSION);
 
     // Act
     await controller.edit('A1', { question: ['Ship it today?'] });
@@ -483,11 +483,11 @@ describe('agenda controller edit', () => {
   });
 });
 
-describe('agenda controller steps and body', () => {
+describe('asks controller steps and body', () => {
   const withInput = (files: Record<string, string>) => {
     const gateway = new RecordingAgendaGateway(board, board);
     const input = { read: async (path: string) => files[path] ?? '' };
-    return { gateway, controller: new AgendaController(gateway, new CapturingOutput(), SESSION, input) };
+    return { gateway, controller: new AsksController(gateway, new CapturingOutput(), SESSION, input) };
   };
 
   it('should raise steps and a body-file body, and replace them on edit', async () => {
@@ -519,7 +519,7 @@ describe('agenda controller steps and body', () => {
     // Arrange
     const { gateway, controller } = withInput({});
     const out = new CapturingOutput();
-    const loud = new AgendaController(gateway, out, SESSION);
+    const loud = new AsksController(gateway, out, SESSION);
 
     // Act
     await controller.step('^A1', '2', {});
@@ -534,13 +534,13 @@ describe('agenda controller steps and body', () => {
   });
 });
 
-describe('agenda controller send-now', () => {
+describe('asks controller send-now', () => {
   it('should deliver the held answers now and name the items that went', async () => {
     // Arrange
     const held = { ...board, replies: { pending: ['A2', 'A3'], dueAt: '2026-07-31T10:05:08.000Z' } };
     const gateway = new RecordingAgendaGateway(held, board);
     const out = new CapturingOutput();
-    const controller = new AgendaController(gateway, out, SESSION);
+    const controller = new AsksController(gateway, out, SESSION);
 
     // Act
     await controller.sendNow({});
@@ -563,7 +563,7 @@ describe('agenda controller send-now', () => {
   });
 });
 
-describe('agenda controller discuss', () => {
+describe('asks controller discuss', () => {
   it('should ask to discuss with the note, and say the item stays open', async () => {
     // Arrange
     const { controller, gateway, out } = build(SESSION, snapshot([humanItem('A1', 'log in')]));
@@ -590,7 +590,7 @@ describe('agenda controller discuss', () => {
   });
 });
 
-describe('agenda controller surface', () => {
+describe('asks controller surface', () => {
   it('should surface with a trimmed why, and say the item is on the owner queue', async () => {
     // Arrange
     const { controller, gateway, out } = build(SESSION, snapshot([humanItem('A1', 'log in')]));
@@ -617,7 +617,7 @@ describe('agenda controller surface', () => {
   });
 });
 
-describe('agenda controller needs-info', () => {
+describe('asks controller needs-info', () => {
   it('should ask for more information with the note, and say the item stays open', async () => {
     // Arrange
     const { controller, gateway, out } = build(SESSION, snapshot([humanItem('A1', 'log in')]));
@@ -644,7 +644,7 @@ describe('agenda controller needs-info', () => {
   });
 });
 
-describe('agenda controller add — related work', () => {
+describe('asks controller add — related work', () => {
   const raised = (id: AgendaItem['id'], subject: string, overrides: Parameters<typeof agentItem>[2] = {}) =>
     agentItem(id, subject, { howToResolve: DEFAULT_HOW_TO_RESOLVE, ask: { kind: 'open-question' }, ...overrides });
   const own = snapshot([raised('A3', 'pick a relay')]);
@@ -656,7 +656,7 @@ describe('agenda controller add — related work', () => {
     const gateway = new RecordingAgendaGateway(board);
     const out = new CapturingOutput();
     const asked: string[] = [];
-    const controller = new AgendaController(gateway, out, SESSION, undefined, () => Date.UTC(2026, 6, 31, 9), {
+    const controller = new AsksController(gateway, out, SESSION, undefined, () => Date.UTC(2026, 6, 31, 9), {
       interactive: () => extras.interactive === true,
       ask: message => {
         asked.push(message);
@@ -809,7 +809,7 @@ describe('agenda controller add — related work', () => {
   });
 });
 
-describe('agenda controller tabs (agenda.tabs.1)', () => {
+describe('asks controller tabs (agenda.tabs.1)', () => {
   const tabbed = snapshot([
     agentItem('A2', 'pick a cluster', {
       whereWeAre: '## Status\nBuilding.',
@@ -821,7 +821,7 @@ describe('agenda controller tabs (agenda.tabs.1)', () => {
     const out = new CapturingOutput();
     const files: Record<string, string> = { 'where.md': '## Status\nShipped.', 'risks.md': 'None left.' };
     const input = { read: async (path: string) => files[path] ?? '' };
-    return { gateway, out, controller: new AgendaController(gateway, out, SESSION, input) };
+    return { gateway, out, controller: new AsksController(gateway, out, SESSION, input) };
   };
 
   it('should raise an item with its main tab and tabs of its own', async () => {
@@ -888,12 +888,12 @@ describe('agenda controller tabs (agenda.tabs.1)', () => {
   });
 });
 
-describe('agenda controller add — what it refuses before anything is raised', () => {
+describe('asks controller add — what it refuses before anything is raised', () => {
   const mine = snapshot([agentItem('A3', 'pick a relay', { title: 'Pick a relay' })]);
   const withBoard = (board = mine) => {
     const gateway = new RecordingAgendaGateway(board);
     const out = new CapturingOutput();
-    return { gateway, out, controller: new AgendaController(gateway, out, SESSION) };
+    return { gateway, out, controller: new AsksController(gateway, out, SESSION) };
   };
 
   it('should say which of --premise and --context an add without a brief is missing, and send nothing', async () => {
@@ -996,13 +996,13 @@ describe('agenda controller add — what it refuses before anything is raised', 
   });
 });
 
-describe('agenda controller show --json', () => {
+describe('asks controller show --json', () => {
   it('should print the item as JSON, whole', async () => {
     // Arrange
     const item = humanItem('A1', 'approve the deploy');
     const gateway = new RecordingAgendaGateway(snapshot([item]));
     const out = new CapturingOutput();
-    const controller = new AgendaController(gateway, out, SESSION);
+    const controller = new AsksController(gateway, out, SESSION);
 
     // Act
     await controller.show('A1', { json: true });
@@ -1012,11 +1012,11 @@ describe('agenda controller show --json', () => {
   });
 });
 
-describe('agenda controller answer and rest', () => {
+describe('asks controller answer and rest', () => {
   const build2 = () => {
     const gateway = new RecordingAgendaGateway(snapshot([agentItem('A4', 'pick a relay')]));
     const out = new CapturingOutput();
-    return { gateway, out, controller: new AgendaController(gateway, out, SESSION) };
+    return { gateway, out, controller: new AsksController(gateway, out, SESSION) };
   };
 
   it('should send the words as the ferret’s answer on the item', async () => {
@@ -1067,12 +1067,12 @@ describe('agenda controller answer and rest', () => {
   });
 });
 
-describe('agenda controller snooze and unsnooze', () => {
+describe('asks controller snooze and unsnooze', () => {
   const NOW = Date.parse('2026-11-04T12:00:00.000Z');
   const build3 = () => {
     const gateway = new RecordingAgendaGateway(snapshot([humanItem('A1', 'approve the deploy')]));
     const out = new CapturingOutput();
-    const controller = new AgendaController(gateway, out, SESSION, undefined, () => NOW);
+    const controller = new AsksController(gateway, out, SESSION, undefined, () => NOW);
     return { gateway, out, controller };
   };
 

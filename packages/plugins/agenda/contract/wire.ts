@@ -1,11 +1,7 @@
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
 import {
-  type AgendaId,
   AgendaIdSchema,
-  agendaNotificationPath,
-  ASK_LINK_PARAMETER,
-  isMachineAgendaId,
   AskItemSchema,
   AskListSnapshotSchema,
   MAX_AGENDA_SUBJECT_LENGTH,
@@ -130,19 +126,10 @@ export const AgendaConfigSchema = z.strictObject({
 export type AgendaConfig = z.infer<typeof AgendaConfigSchema>;
 
 // ─── seen: the owner opened an ask ───────────────────────────────────────────────────────────────────────────────
-/** The tag an ask's buzz goes out under: its own, so opening the ask can take down exactly that line on every device. */
-export const agendaAskBuzzTag = (ferret: string, ask: string): string => `agenda-${ferret}:${ask}`;
+/** The tag an ask's buzz goes out under, and where a tap on it opens: Asks' (core), because Access sends that buzz. */
+export { agendaAskBuzzTag, askBuzzPath } from '@ferretry/core-asks/contract';
 /** The tag a stop's buzz goes out under: it is about the ferret, not one ask. */
 export const agendaStopBuzzTag = (ferret: string): string => `agenda-${ferret}`;
-/**
- * Where a buzz about an ask opens, RELATIVE TO THE MACHINE'S OWN PAGES. A ferret's ask opens that ferret's chat AT the ask
- * (`/ferrets/<ferret>/chat?ask=A3`); an ask with NO ferret (a machine notice: the machine's own ledger, or no ferret named)
- * has no chat, so it opens the machine's Agenda page AT the ask (`/agenda?ask=A3`). Never `/ferrets//chat`.
- */
-export const askBuzzPath = (ferret: string, ask: AgendaId): string =>
-  ferret.trim() === '' || isMachineAgendaId(ferret)
-    ? `/agenda?${ASK_LINK_PARAMETER}=${encodeURIComponent(ask)}`
-    : agendaNotificationPath(ferret, ask);
 
 /** The ask's own page in the Inbox (`/agenda/:ferret/:ask`). A buzz opens the ferret's chat instead (`agendaNotificationPath`). */
 export const agendaAskPath = (ferret: string, ask: string): string =>
@@ -214,9 +201,8 @@ export const RestNudgesFileSchema = z.strictObject({
 });
 export type RestNudgesFile = z.infer<typeof RestNudgesFileSchema>;
 
-/** The push text limits (a lock screen shows little): title and body are clipped at a word. */
-export const AGENDA_PUSH_TITLE_LENGTH = 40;
-export const AGENDA_PUSH_BODY_LENGTH = 120;
+/** The push text limits (a lock screen shows little): title and body are clipped at a word. Asks' (core), which sends the ask buzz. */
+export { AGENDA_PUSH_BODY_LENGTH, AGENDA_PUSH_TITLE_LENGTH } from '@ferretry/core-asks/contract';
 
 // ─── the open summary a ferret's row carries ──────────────────────────────────────────────────────────────────────
 /**
