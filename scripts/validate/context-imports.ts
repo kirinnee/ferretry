@@ -102,6 +102,10 @@ export function refusal(edge: ImportEdge): string | undefined {
     )
       return undefined;
     if (from === 'app' && ['', '/ui', '/worker'].includes(subpath)) return undefined;
+    // THE PURE SUBPATHS A WORKER CAN IMPORT (r12 H11): the `fy-render` numbers and palette, and the reference grammar. The root
+    // entry starts the whole shell, which a Web Worker must not carry (`tests/integration/app/durian-worker-bundle.test.ts`
+    // holds the Durian worker to it), so these two files of plain data and pure functions have entries of their own.
+    if (from === 'app' && ['/fy-render', '/references/grammar'].includes(subpath)) return undefined;
     if (from === 'tests')
       return `${edge.specifier} is not the app shell's public API: tests import @ferretry/app, /ui, /worker, /testing, /testing/browser, /testing/router and /testing/settings-shell only`;
     return `${edge.specifier} is imported only by app halves (and @ferretry/app/testing only by tests)`;

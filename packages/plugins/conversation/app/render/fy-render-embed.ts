@@ -12,7 +12,8 @@
  *           alone, which shows that task's children grouped by lane
  */
 
-import { FY_RENDER_LIMITS, parseReferenceToken } from '@ferretry/app';
+import { FY_RENDER_LIMITS } from '@ferretry/app/fy-render';
+import { parseReferenceToken } from '@ferretry/app/references/grammar';
 
 export type FyRenderEmbedSpec =
   | { readonly kind: 'card'; readonly id: string }

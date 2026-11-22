@@ -8,7 +8,7 @@
  *   ?theme=<family>-<mode>
  *   ?palette=<id>     the palette (default `studio`)
  *
- * It reports `window.fyPartsReady = true` once the message is on the page. Nothing here reads a network but its own origin.
+ * It reports `window.fyPartsReady = true` once the message is on the page (read by the worker, or shown as the text it is). Nothing here reads a network but its own origin.
  */
 
 import { ReferenceSurfaceProvider } from '@ferretry/app';
@@ -68,6 +68,14 @@ if (root !== null) {
         : fetch(`/fixture/${fixture}`).then(response => response.text());
   void text.then(body => {
     app.render(view(body));
-    Object.assign(window, { fyPartsReady: true });
+    // The message is read in the Durian worker (r12 H11), so it is on the page a moment after it is rendered: ready is when it
+    // is a document or says why it is not (a message over the author's cap is plain text with no note: the deadline covers it).
+    const deadline = performance.now() + 10_000;
+    const look = (): void => {
+      if (document.querySelector('.dh-doc, [data-fy-plain-note]') !== null || performance.now() > deadline)
+        Object.assign(window, { fyPartsReady: true });
+      else setTimeout(look, 20);
+    };
+    look();
   });
 }
