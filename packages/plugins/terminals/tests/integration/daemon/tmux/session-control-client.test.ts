@@ -23,6 +23,7 @@ import {
   SESSION_WORKER_ATTACH_FLAGS,
 } from '../../../../daemon/lib/tmux/control-protocol.ts';
 import { isTmuxServerAbsent } from '../../../../daemon/lib/tmux/server-absent.ts';
+import { stopTmuxServer } from '../support/stop-tmux-server.ts';
 import { waitFor } from '../support/wait-for.ts';
 
 const TMUX = Bun.which('tmux');
@@ -58,7 +59,7 @@ async function attached(target = 'agent') {
   );
   cleanups.push(async () => {
     subject.close();
-    await direct.execute(['kill-server']);
+    await stopTmuxServer(direct, socket);
     await rm(root, { recursive: true, force: true });
   });
   return { direct, spawned, subject };
@@ -221,7 +222,7 @@ describe('a session worker’s pane subscription', () => {
     );
     cleanups.push(async () => {
       subject.close();
-      await direct.execute(['kill-server']);
+      await stopTmuxServer(direct, socket);
       await rm(root, { recursive: true, force: true });
     });
 

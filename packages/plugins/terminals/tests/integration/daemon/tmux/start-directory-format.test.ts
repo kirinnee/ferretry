@@ -7,6 +7,7 @@ import { sessionTarget } from '../../../../daemon/lib/tmux/address.ts';
 import { newSessionArguments } from '../../../../daemon/lib/tmux/commands.ts';
 import { scriptLine } from '../../../../daemon/lib/tmux/script.ts';
 import { BunTmuxProcess } from '../support/host-spawn.ts';
+import { stopTmuxServer } from '../support/stop-tmux-server.ts';
 import { waitForValue } from '../support/wait-for.ts';
 
 /**
@@ -25,9 +26,10 @@ async function arrange(): Promise<{ tmux: BunTmuxProcess; root: string; hostile:
   const root = await realpath(await mkdtemp(join(tmpdir(), 'fy-cwdfmt-')));
   const hostile = join(root, '#(touch pwned)');
   await mkdir(hostile);
-  const tmux = new BunTmuxProcess(TMUX, join(root, 's'));
+  const socket = join(root, 's');
+  const tmux = new BunTmuxProcess(TMUX, socket);
   cleanups.push(async () => {
-    await tmux.execute(['kill-server']);
+    await stopTmuxServer(tmux, socket);
     await rm(root, { recursive: true, force: true });
   });
   return { tmux, root, hostile };
