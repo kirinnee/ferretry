@@ -1,3 +1,4 @@
+import type { WorkBudget } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 
 /** One name in a folder as the machine reports it: the leaf as it is, a link never followed. */
@@ -88,8 +89,11 @@ export interface FolderBrowser {
    * spelling-fold look, so a differently spelled marker past the bound was NOT ruled out. A caller that only asks "is it a
    * sign-in folder" reads that as `false` (width alone never makes a folder private); the repository scan reads it as "not
    * proved safe": the folder is skipped and the scan is truncated.
+   *
+   * A reader on a deadline passes its `budget`: a budget already spent starts no listing, and one that runs out part-way
+   * stops the listing where it stands. Either way the look is not whole, so the answer is `'partial'`.
    */
-  holdsSignIn(path: string): Promise<boolean | 'partial'>;
+  holdsSignIn(path: string, budget?: WorkBudget): Promise<boolean | 'partial'>;
   /** What is AT the absolute `path`, the leaf never followed (a link anywhere above it is the machine's to resolve): nothing, a link, or something else. */
   leaf(path: string): Promise<'missing' | 'link' | 'present'>;
   /** The real path (links resolved) of each of `paths` that exists and resolves; the others are left out. */

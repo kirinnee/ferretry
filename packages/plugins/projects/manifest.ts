@@ -107,6 +107,32 @@ export default definePlugin({
           none: 'folder names and remote addresses (never with a password); no file content, no pane, page or vault text',
         },
       }),
+      // NEW in &F6061 U5: the project's file finder, names only. A person's read of a registered folder, like the repos scan:
+      // `filesystem.use` (a rescan reads and changes nothing on the host, so it is `use` too).
+      route('GET /v1/projects/:id/files', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: filesystemUse,
+        noStore: true,
+        audit: { skip: 'a read of file names inside a registered project folder' },
+        guard: 'secrets',
+      }),
+      route('GET /v1/projects/:id/files/status', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: filesystemUse,
+        noStore: true,
+        audit: { skip: 'a read of counts and folder names about a project file index' },
+        guard: 'secrets',
+      }),
+      route('POST /v1/projects/:id/files/rescan', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: filesystemUse,
+        noStore: true,
+        audit: { skip: 'starts a rebuild of an in-memory index; reads the folder, writes nothing on the host' },
+        guard: 'secrets',
+      }),
     ],
     cli: [
       verb('project add', {

@@ -48,6 +48,17 @@ export const MAX_INDEX_CANDIDATES = 40_000;
 export const MAX_INDEX_DIRECTORIES = 4_000;
 export const MAX_INDEX_LIST_BYTES = 8 * 1024 * 1024;
 
+/**
+ * The same bounds at PROJECT scale (&F6061 U5): a project holds many repositories, so its finder keeps 2.5× the files a
+ * ferret's does (owner decision D2), with the candidate ratio the ferret index already uses (2:1). The ceilings are
+ * opted into with {@link TreeIndexBounds.scale}; a route that says nothing runs under the ferret ceilings above.
+ */
+export const MAX_PROJECT_INDEX_FILES = 50_000;
+export const MAX_PROJECT_INDEX_CANDIDATES = 100_000;
+
+/** Which ceilings a read runs under, and the order it keeps names in when a ceiling bites. */
+export type TreeIndexScale = 'session' | 'project';
+
 /** The most names one folder of a non-repository walk reports; one name past it makes the walk partial. */
 export const MAX_INDEX_FOLDER_ENTRIES = 2_000;
 
@@ -82,6 +93,12 @@ export interface TreeIndexBounds {
    * children, Git's names) is asked of the root's state-home verdict first. A root that cannot answer fences every name.
    */
   readonly fenced?: boolean;
+  /**
+   * The ceilings a bound may be raised to, and the order names survive a ceiling in. `'session'` (the default) is a
+   * ferret's: path order. `'project'` keeps SHALLOW FIRST — fewest folders, then path — so a bound that bites drops
+   * `a/very/deep/file` before `README.md`.
+   */
+  readonly scale?: TreeIndexScale;
 }
 
 /**
@@ -179,14 +196,29 @@ const INDEX_EXCLUDED_DIRECTORIES = new Set([
   'venv',
 ]);
 
-/** Is any component an explicitly noisy index root? */
-function isIndexExcludedPath(rel: string): boolean {
+/** Is any component an explicitly noisy index root? Exported so a project's own folder walk applies the SAME list. */
+export function isIndexExcludedPath(rel: string): boolean {
   return rel.split('/').some(segment => INDEX_EXCLUDED_DIRECTORIES.has(segment.toLowerCase()));
 }
 
 /** Locale-independent byte-order spelling for deterministic traversal and response order. */
 function comparePath(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** How many folders deep a root-relative file path sits (`README.md` is 0). */
+function folderDepth(rel: string): number {
+  let depth = 0;
+  for (const character of rel) if (character === '/') depth += 1;
+  return depth;
+}
+
+/**
+ * The project order: fewest folders first, then byte order. Exported so the merge of several reads keeps the same order
+ * each one kept its own names in.
+ */
+export function compareShallowFirst(left: string, right: string): number {
+  return folderDepth(left) - folderDepth(right) || comparePath(left, right);
 }
 
 /** Test-only narrowed bounds still have to be real bounds. */
@@ -198,18 +230,25 @@ function indexLimit(value: number | undefined, fallback: number, label: string):
   return limit;
 }
 
-/** The four limits of one read, each proved a real bound. */
+/** The four limits of one read, each proved a real bound, and the order its names are kept in. */
 function resolveBounds(bounds: TreeIndexBounds): {
   readonly maxFiles: number;
   readonly maxCandidates: number;
   readonly maxDirectories: number;
   readonly budgetMs: number;
+  readonly order: (left: string, right: string) => number;
 } {
+  const project = bounds.scale === 'project';
   return {
-    maxFiles: indexLimit(bounds.maxFiles, MAX_INDEX_FILES, 'index file limit'),
-    maxCandidates: indexLimit(bounds.maxCandidates, MAX_INDEX_CANDIDATES, 'index candidate limit'),
+    maxFiles: indexLimit(bounds.maxFiles, project ? MAX_PROJECT_INDEX_FILES : MAX_INDEX_FILES, 'index file limit'),
+    maxCandidates: indexLimit(
+      bounds.maxCandidates,
+      project ? MAX_PROJECT_INDEX_CANDIDATES : MAX_INDEX_CANDIDATES,
+      'index candidate limit',
+    ),
     maxDirectories: indexLimit(bounds.maxDirectories, MAX_INDEX_DIRECTORIES, 'index directory limit'),
     budgetMs: indexLimit(bounds.budgetMs, MAX_INDEX_WALL_MS, 'index time budget'),
+    order: project ? compareShallowFirst : comparePath,
   };
 }
 
@@ -222,16 +261,16 @@ export function checkTreeIndexBounds(bounds: TreeIndexBounds): void {
 }
 
 /** What one index read left out, counted while it happens and turned into rows only at the end. */
-type SkipTally = Map<SessionFileIndexSkipReason, number>;
+export type SkipTally = Map<SessionFileIndexSkipReason, number>;
 
 /** Records `amount` more omissions for one reason. A zero is not an omission and never becomes a row. */
-function tally(skips: SkipTally, reason: SessionFileIndexSkipReason, amount: number): void {
+export function tally(skips: SkipTally, reason: SessionFileIndexSkipReason, amount: number): void {
   if (amount <= 0) return;
   skips.set(reason, (skips.get(reason) ?? 0) + amount);
 }
 
 /** The tally as the total record the wire carries. */
-function skipRecord(skips: SkipTally): SessionFileIndexSkip[] {
+export function skipRecord(skips: SkipTally): SessionFileIndexSkip[] {
   return SessionFileIndexSkipReasonSchema.options.flatMap(reason => {
     const count = skips.get(reason);
     return count === undefined ? [] : [{ reason, count }];
@@ -239,7 +278,7 @@ function skipRecord(skips: SkipTally): SessionFileIndexSkip[] {
 }
 
 /** Only a bound biting or a subtree we could not read means the walk itself did not finish. */
-function coverageOf(skips: SkipTally): SessionFileIndexCoverage {
+export function coverageOf(skips: SkipTally): SessionFileIndexCoverage {
   return skips.has('unreadable') || skips.has('truncated') ? 'partial' : 'complete';
 }
 
@@ -248,8 +287,9 @@ function boundedIndexFiles(
   files: readonly SessionFileIndexEntry[],
   maxFiles: number,
   skips: SkipTally,
+  order: (left: string, right: string) => number,
 ): SessionFileIndexEntry[] {
-  const sorted = [...files].sort((left, right) => comparePath(left.path, right.path));
+  const sorted = [...files].sort((left, right) => order(left.path, right.path));
   tally(skips, 'truncated', sorted.length - maxFiles);
   return sorted.slice(0, maxFiles);
 }
@@ -336,7 +376,7 @@ export async function indexPinnedTree(
   deps: TreeIndexDeps,
   bounds: TreeIndexBounds = {},
 ): Promise<SessionFileIndex> {
-  const { maxFiles, maxCandidates, maxDirectories, budgetMs } = resolveBounds(bounds);
+  const { maxFiles, maxCandidates, maxDirectories, budgetMs, order } = resolveBounds(bounds);
   // First, before any budget answer: a root that is a key store is refused whatever the caller's policy or fence says.
   // The pinned REAL path is judged, so a symlink to a key store cannot launder it.
   if (isSharedSecretPath(pinned.rootReal.split('/').filter(Boolean).join('/'))) throw new TreeRootDeniedError();
@@ -360,8 +400,8 @@ export async function indexPinnedTree(
     return { root: pinned.rootReal, files: [], coverage: coverageOf(skips), skipped: skipRecord(skips) };
   }
   const files = inside
-    ? await indexTracked(pinned, deps, maxFiles, maxCandidates, skips, budget)
-    : await indexWalk(pinned, deps, maxFiles, maxCandidates, maxDirectories, skips, budget, bounds.fenced);
+    ? await indexTracked(pinned, deps, maxFiles, maxCandidates, skips, budget, order)
+    : await indexWalk(pinned, deps, maxFiles, maxCandidates, maxDirectories, skips, budget, bounds.fenced, order);
   return { root: pinned.rootReal, files, coverage: coverageOf(skips), skipped: skipRecord(skips) };
 }
 
@@ -379,6 +419,7 @@ async function indexTracked(
   maxCandidates: number,
   skips: SkipTally,
   budget: SpawnBudget,
+  order: (left: string, right: string) => number,
 ): Promise<SessionFileIndexEntry[]> {
   const { policy } = deps;
   let listed: Awaited<ReturnType<TreeIndexDeps['git']['listFiles']>>;
@@ -391,7 +432,7 @@ async function indexTracked(
     return [];
   }
 
-  const candidates = [...new Set(listed.paths)].sort(comparePath);
+  const candidates = [...new Set(listed.paths)].sort(order);
   const files: SessionFileIndexEntry[] = [];
   let denied = 0;
   let excluded = 0;
@@ -467,7 +508,7 @@ async function indexTracked(
   tally(skips, 'excluded', excluded);
   tally(skips, 'unsupported', unsupported);
   tally(skips, 'truncated', overflow);
-  return boundedIndexFiles(files, maxFiles, skips);
+  return boundedIndexFiles(files, maxFiles, skips, order);
 }
 
 /**
@@ -487,6 +528,7 @@ async function indexWalk(
   skips: SkipTally,
   budget: WorkBudget,
   fenced: boolean | undefined,
+  order: (left: string, right: string) => number,
 ): Promise<SessionFileIndexEntry[]> {
   const { policy } = deps;
   const files: SessionFileIndexEntry[] = [];
@@ -573,5 +615,5 @@ async function indexWalk(
   tally(skips, 'unsupported', unsupported);
   tally(skips, 'unreadable', unreadable);
   tally(skips, 'truncated', overflow);
-  return boundedIndexFiles(files, maxFiles, skips);
+  return boundedIndexFiles(files, maxFiles, skips, order);
 }

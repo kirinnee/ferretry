@@ -239,8 +239,13 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
       const held = await hold(path, verdict);
       return held.ok ? { ok: true, folder: heldFolder(held.pinned) } : held;
     },
-    holdsSignIn: async path => {
+    holdsSignIn: async (path, budget) => {
       const root = handle(path);
+      // No new I/O once the caller's time is gone, asked immediately BEFORE each call (the stat, every marker lstat, the pin,
+      // the open and the list): a call already in flight when the time ran out may return late, but starts nothing after it,
+      // and a look cut short is "partial" (not proved free of a sign-in file), never "false".
+      const spent = (): boolean => budget?.expired() === true;
+      if (spent()) return 'partial';
       // Not a folder the root will answer for (a file, a refusal): nothing to hold a sign-in, and opening it is refused anyway.
       const self = root.resolve('');
       if (!self.ok) return false;
@@ -251,7 +256,11 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
       }
       // First, bounded BY CONSTRUCTION: each KNOWN marker is asked for by name (one lstat apiece, a link counts and is not
       // followed), so how many names the folder holds decides nothing. A name the machine will not answer for is not proved free.
-      for (const marker of SIGN_IN_FILES) if ((await leafAt(path, marker)) !== 'missing') return true;
+      for (const marker of SIGN_IN_FILES) {
+        if (spent()) return 'partial';
+        if ((await leafAt(path, marker)) !== 'missing') return true;
+      }
+      if (spent()) return 'partial';
       try {
         // Then every name the folder holds, a link included, judged by the SAME fold as everywhere else (`fence.ts`): a marker
         // spelled `ID_RSA`, `Auth.JSON` or in full-width letters is a marker. Read through the held folder with a bound; a
@@ -259,9 +268,11 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
         // known markers above were already asked for by name, so width alone never makes a folder private.
         const pinned = await root.pin(self.value, { fence: 'none' });
         try {
+          if (spent()) return 'partial';
           const target = await pinned.open('', { wantDirectory: true });
           try {
-            const listing = await target.list(SIGN_IN_READ_LIMIT);
+            if (spent()) return 'partial';
+            const listing = await target.list(SIGN_IN_READ_LIMIT, budget);
             if (holdsSignIn(listing.entries.map(entry => entry.name))) return true;
             // Not listed to the end: a marker spelled differently past the bound is not ruled out, and that is said, not hidden.
             return listing.truncated ? 'partial' : false;
