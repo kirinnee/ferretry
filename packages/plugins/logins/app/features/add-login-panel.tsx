@@ -212,6 +212,7 @@ function PresetForm({
         refusal={changes.refusal}
         submitLabel={`Add ${preset.label}`}
         onSubmit={() => void add()}
+        answerRow
       >
         <Button type="button" onClick={onCancel}>
           Cancel
@@ -272,6 +273,7 @@ function SignInForm({ client, onAdded }: { readonly client: LoginsClient; readon
         refusal={changes.refusal}
         submitLabel={`Add a ${HARNESS_NAMES[harness]} login`}
         onSubmit={() => void add()}
+        answerRow
       />
     </div>
   );

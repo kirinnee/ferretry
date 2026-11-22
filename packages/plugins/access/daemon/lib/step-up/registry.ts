@@ -216,12 +216,15 @@ export class StepUpRegistry {
    * Whether this copy proved a passkey within a challenge's lifetime and has not spent that proof on an
    * act that adds access. Never true without a live step-up, so a page that closed holds none.
    */
-  freshlyHeld(subject: StepUpSubject, nowMs: number): boolean {
+  freshlyHeld(subject: StepUpSubject, nowMs: number, spentAtAdmission = false): boolean {
     const proof = this.#fresh.get(key(subject));
     return (
       proof !== undefined &&
       nowMs - proof.provedAtMs < PASSKEY_CHALLENGE_TTL_SECONDS * 1_000 &&
-      this.held(subject, nowMs)
+      // A call whose own admission spent the step-up it was admitted on (a window of `0`: one step-up, one act) still
+      // finds the passkey proved for that act: the spend ended the WINDOW, never the live copy of the app or the
+      // proof. Only that call's claim says so; every other question still needs a step-up held now.
+      (spentAtAdmission ? this.#liveSpan(key(subject), nowMs) !== undefined : this.held(subject, nowMs))
     );
   }
 
@@ -236,6 +239,10 @@ export class StepUpRegistry {
    * standing's claim names the instant its call was admitted (inside the request or in work the call spawns), so it
    * does not take a proof the owner gave afterwards. The comparison is of wall-clock milliseconds: a proof made in the
    * same millisecond as the admission, or after the clock stepped back, is not told apart from an earlier one.
+   *
+   * `spentAtAdmission` is said by a call whose OWN admission spent the step-up it rode on (window `0`, {@link spend}):
+   * the proof it was admitted with is still its to take, though no window is held any more. It is never a way to claim
+   * a proof proved after the admission (`notAfterMs`), and a proof is taken once whoever asks.
    */
   claimFresh(
     subject: StepUpSubject,
@@ -243,15 +250,23 @@ export class StepUpRegistry {
     act?: MachineSkippableStepUpAct,
     bound?: undefined,
     notAfterMs?: number,
+    spentAtAdmission?: boolean,
   ): boolean;
   /**
    * An act every caller must prove takes only a proof stamped with that act AND bound to exactly `bound`, within a
    * challenge's life, on a copy of the app with a live session. A proof bound to anything else stays where it is.
    */
   claimFresh(subject: StepUpSubject, nowMs: number, act: SpentProofStepUpAct, bound: string): boolean;
-  claimFresh(subject: StepUpSubject, nowMs: number, act?: StepUpAct, bound?: string, notAfterMs?: number): boolean {
+  claimFresh(
+    subject: StepUpSubject,
+    nowMs: number,
+    act?: StepUpAct,
+    bound?: string,
+    notAfterMs?: number,
+    spentAtAdmission = false,
+  ): boolean {
     if (act !== undefined && !stepUpSkippableAtMachine(act)) return this.#claimBound(subject, nowMs, act, bound);
-    if (!this.freshlyHeld(subject, nowMs)) return false;
+    if (!this.freshlyHeld(subject, nowMs, spentAtAdmission)) return false;
     const proof = this.#fresh.get(key(subject));
     if (notAfterMs !== undefined && (proof === undefined || proof.provedAtMs > notAfterMs)) return false;
     if (act !== undefined && proof?.act !== act) return false;

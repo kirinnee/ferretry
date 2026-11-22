@@ -17,6 +17,7 @@
 @import './loading.css';
 @import './dialog.css';
 @import './select-box.css';
+@import './action-row.css';
 
 /* ---- thin, unobtrusive scrollbars in scroll regions ---------------------- */
 .scroll-thin {
@@ -978,6 +979,16 @@ body {
   :root textarea,
   :root select {
     font-size: var(--text-input);
+  }
+}
+
+/* A RETRY IS A 44px TARGET ON A PHONE-WIDE WINDOW (end B5). Every "Try again" the app draws sits in a failure region
+   (`role="alert"`: the shared `ContextFailure`, a catalog failure, the board and lane read failures), and the small button
+   it draws was 23-30px tall at 390 wherever the pointer is not reported coarse (a narrow desktop window, a gate run), which
+   is where the coarse-pointer floor below does not reach. One rule here, not one per plugin. */
+@media (max-width: 640px) {
+  [role='alert'] :is(button, .kt-btn) {
+    min-height: 44px;
   }
 }
 
@@ -2072,13 +2083,19 @@ body {
 }
 /* Gen Z's ring is three bands (surface, accent, ink) so it reads on any fill; drawn outside it is a 5px shadow spread. The same
    three bands now sit inside the field: the outline is the ink band at the edge, then the surface, then the accent. */
-:root[data-style='genz'] :is(select, input, textarea, .fy-sb__trigger).kt-input:focus-visible {
+:is(:root[data-style='genz'], [data-swatch][data-style='genz'])
+:is(select, input, textarea, .fy-sb__trigger).kt-input:where(
+  :not([data-swatch]:not([data-style='genz']) *)
+):focus-visible {
   box-shadow:
     inset 0 0 0 calc(var(--focus-width) + 2px) var(--surface),
     inset 0 0 0 calc(var(--focus-width) + 5px) var(--focus-color);
 }
 /* Briefing's halo (`--focus-shadow`: a 4px `--ring` band) is a hard shadow outside the field; it sits inside now, under the outline. */
-:root[data-style='briefing'] :is(select, input, textarea, .fy-sb__trigger).kt-input:focus-visible {
+:is(:root[data-style='briefing'], [data-swatch][data-style='briefing'])
+:is(select, input, textarea, .fy-sb__trigger).kt-input:where(
+  :not([data-swatch]:not([data-style='briefing']) *)
+):focus-visible {
   box-shadow: inset 0 0 0 calc(var(--focus-width) + 4px) var(--ring);
 }
 .kt-composer :is(input, textarea):focus,

@@ -302,6 +302,7 @@ export type RelayTunnelClientMessage =
       readonly protocol: typeof SESSION_PROTOCOL_ID;
       readonly code: string;
       readonly deviceName: string;
+      readonly machineName?: string;
       readonly deviceKey: string;
       readonly proof: string;
     }
@@ -420,6 +421,8 @@ type RelaySessionMode =
       readonly kind: 'pair';
       readonly code: string;
       readonly deviceName: string;
+      /** What the person called the machine; the daemon keeps it only when the machine has no name yet. */
+      readonly machineName?: string;
       /** The SPKI being registered, and the private half that proves this browser holds it. */
       readonly publicKey: string;
       readonly key: PrivateKeyHandle;
@@ -669,6 +672,7 @@ const credentialRecord = async (
       protocol: SESSION_PROTOCOL_ID,
       code: mode.code,
       deviceName: mode.deviceName,
+      ...(mode.machineName === undefined ? {} : { machineName: mode.machineName }),
       deviceKey: mode.publicKey,
       proof: await signDeviceProof(crypto, mode.key, devicePairMessage(transcript, mode.publicKey)),
     };

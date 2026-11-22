@@ -27,20 +27,20 @@ const HREF = 'https://ferretry.example.invalid/app/sessions?tab=2#leftover';
 describe('the hand-off payload', () => {
   it('is legible rather than a base64 blob', () => {
     // It is read aloud, typed by hand and printed inside a QR whose size grows
-    // with every character. A reader can see it says `first-time`, `this`, `self`
+    // with every character. A reader can see it says `first-time`, `this`
     // and nothing else.
     expect(encodeSetupHandoff({ route: 'add-client', step: 'scan' })).toBe('f1;route=add-client;step=scan');
-    expect(encodeSetupHandoff({ route: 'first-time', target: 'this', doer: 'self', step: 'install' })).toBe(
-      'f1;route=first-time;target=this;doer=self;step=install',
+    expect(encodeSetupHandoff({ route: 'first-time', target: 'this', step: 'install' })).toBe(
+      'f1;route=first-time;target=this;step=install',
     );
   });
 
   it('round-trips exactly what it was given', () => {
     for (const handoff of [
       { route: 'add-client', step: 'scan' },
-      { route: 'add-daemon', target: 'this', doer: 'self', step: 'install' },
-      { route: 'first-time', target: 'other', doer: 'agent', step: 'brief' },
-      { route: 'first-time', target: 'this', doer: 'self', step: 'daemon' },
+      { route: 'add-daemon', target: 'this', step: 'install' },
+      { route: 'first-time', target: 'other', step: 'elsewhere' },
+      { route: 'first-time', target: 'this', step: 'daemon' },
     ] as const) {
       expect(parseSetupHandoff(encodeSetupHandoff(handoff))).toEqual(handoff);
     }
@@ -60,19 +60,21 @@ describe('the hand-off payload', () => {
       'f1;route=first-time;step=billing',
       'f1;step=install',
       'f1;route=first-time',
-      'f1;route=first-time;target=cloud;doer=self;step=install',
-      'f1;route=first-time;target=this;doer=nobody;step=install',
+      'f1;route=first-time;target=cloud;step=install',
       // Fields that could not matter on the journey they are attached to, which
       // means this payload was not produced by this page.
       'f1;route=add-client;target=this;step=pair',
-      'f1;route=add-client;doer=self;step=pair',
-      // Unknown keys, bare tokens and duplicates.
-      'f1;route=first-time;target=this;doer=self;step=install;theme=dark',
+      // Unknown keys, bare tokens and duplicates. `doer` is one: the answer it carried is gone (C59 O7).
+      'f1;route=first-time;target=this;doer=self;step=install',
+      'f1;route=first-time;target=this;step=install;theme=dark',
       'f1;route=first-time;install',
       'f1;route=first-time;route=add-client;step=pair',
       // The routes this replaced, which describe journeys that no longer exist.
       'f1;route=have-link;step=scan',
       'f1;route=agent;step=brief',
+      // The agent journey's steps, a link into which would land nowhere.
+      'f1;route=first-time;target=this;step=brief',
+      'f1;route=first-time;target=this;step=agent-pair',
     ]) {
       expect(parseSetupHandoff(raw)).toBeUndefined();
     }
@@ -124,44 +126,41 @@ describe('landing a hand-off', () => {
   });
 
   it('opens the recursion exactly as the sending device meant it', () => {
-    expect(landSetupHandoff({ route: 'first-time', target: 'this', doer: 'self', step: 'install' }, 'desktop')).toEqual(
-      {
-        kind: 'walk',
-        journey: { route: 'first-time', target: 'this', doer: 'self' },
-        step: 'install',
-      },
-    );
+    expect(landSetupHandoff({ route: 'first-time', target: 'this', step: 'install' }, 'desktop')).toEqual({
+      kind: 'walk',
+      journey: { route: 'first-time', target: 'this' },
+      step: 'install',
+    });
   });
 
   it('lets the hardware win over a payload proposing the impossible', () => {
     // A stale or hostile link telling a phone that it runs the daemon. Refusing
     // outright would drop somebody mid-setup back to the beginning over a field
     // they never typed, so the phone keeps its own forced answer instead.
-    expect(landSetupHandoff({ route: 'first-time', target: 'this', doer: 'self', step: 'install' }, 'mobile')).toEqual({
+    expect(landSetupHandoff({ route: 'first-time', target: 'this', step: 'install' }, 'mobile')).toEqual({
       kind: 'walk',
-      journey: { route: 'first-time', target: 'other', doer: 'self' },
+      journey: { route: 'first-time', target: 'other' },
       step: 'elsewhere',
     });
   });
 
-  it('asks which computer when the payload left it open, and lands on the commands when it left the doer open', () => {
+  it('asks which computer when the payload left it open', () => {
     expect(landSetupHandoff({ route: 'add-daemon', step: 'install' }, 'desktop')).toEqual({
       kind: 'ask',
       question: 'target',
       route: 'add-daemon',
     });
-    // Who installs it is no question any more (r10 O5): a link with no doer is "by hand".
     expect(landSetupHandoff({ route: 'first-time', target: 'other', step: 'elsewhere' }, 'desktop')).toEqual({
       kind: 'walk',
-      journey: { route: 'first-time', target: 'other', doer: 'self' },
+      journey: { route: 'first-time', target: 'other' },
       step: 'elsewhere',
     });
   });
 
   it('lands a same-machine journey on its daemon step with no carrier question after it', () => {
-    expect(landSetupHandoff({ route: 'first-time', target: 'this', doer: 'self', step: 'daemon' }, 'desktop')).toEqual({
+    expect(landSetupHandoff({ route: 'first-time', target: 'this', step: 'daemon' }, 'desktop')).toEqual({
       kind: 'walk',
-      journey: { route: 'first-time', target: 'this', doer: 'self' },
+      journey: { route: 'first-time', target: 'this' },
       step: 'daemon',
     });
   });

@@ -25,6 +25,12 @@ export interface CapabilityDemand {
    * ferret say so; it never takes the grant away.
    */
   readonly promptsAsUse?: true;
+  /**
+   * The act the passkey this route asks for is proved FOR (`STEP_UP_ACTS`): the first `403 grant_step_up_required` names it, so
+   * the carrier proves the passkey stamped with it and the route can claim exactly that proof (an import's `loosen-config`).
+   * Only names the act; whether the route asks for a step-up at all is still the demand's own rule.
+   */
+  readonly act?: PolicyRef<'step-up-act'>;
 }
 
 /** One of the two required additions (§7.1): what this route records in the audit log, or a reviewed reason not to. */

@@ -22,7 +22,7 @@ import {
 } from '../../../../contract/index.ts';
 import type { RuntimesClient } from '../../../lib/client.ts';
 import { readConfigFile } from '../../../lib/config-files.ts';
-import { Button } from '../../../ui.ts';
+import { ActionRow, Button } from '../../../ui.ts';
 import { ChangeApplyPanel, type AccountChanges } from '../shell/apply-change-panel.tsx';
 import { changeRefusalSentence, readMachine } from '../shell/apply-change.ts';
 import {
@@ -532,21 +532,26 @@ export function CopySettings({
             </Button>
           </div>
         ) : null}
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="primary"
-            className="disabled:!border-dashed disabled:!opacity-60"
-            data-copy-stage=""
-            disabled={changes.busy || nothing || undecided.length > 0}
-            onClick={stage}
-          >
-            {changes.busy ? 'Checking…' : 'Preview the copy'}
-          </Button>
-          <Button type="button" data-copy-back="" onClick={() => setPhase({ kind: 'source' })}>
-            Back
-          </Button>
-        </div>
+        {/* The shared answer row (C59 audit): Back at the left end and Preview at the right on a desktop, equal and full width on a phone. */}
+        <ActionRow
+          secondary={
+            <Button type="button" data-copy-back="" onClick={() => setPhase({ kind: 'source' })}>
+              Back
+            </Button>
+          }
+          primary={
+            <Button
+              type="button"
+              variant="primary"
+              className="disabled:!border-dashed disabled:!opacity-60"
+              data-copy-stage=""
+              disabled={changes.busy || nothing || undecided.length > 0}
+              onClick={stage}
+            >
+              {changes.busy ? 'Checking…' : 'Preview the copy'}
+            </Button>
+          }
+        />
         {undecided.length === 0 ? null : (
           <p className="m-0 text-meta leading-base text-warn [overflow-wrap:anywhere]" data-copy-undecided="">
             Decide first: {undecided.join(', ')}

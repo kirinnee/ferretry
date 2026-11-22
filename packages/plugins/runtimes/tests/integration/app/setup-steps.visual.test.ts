@@ -272,3 +272,43 @@ describe('the machine-setup steps', () => {
       }, 60_000);
     }
 });
+
+describe('C59 follow-up: the copy review reads as one column', () => {
+  for (const viewport of VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      for (const view of ['copy-first', 'copy-update'] as const)
+        it(`every choice card spans the review column, like the cards above it (${view}, ${viewport.name}, ${mode})`, async () => {
+          const context = await newContext(viewport, mode);
+          const tab = await open(context, view, mode);
+          await toCopyReview(tab);
+          const facts = await tab.evaluate(() => {
+            const box = (element: Element) => {
+              const r = element.getBoundingClientRect();
+              return { left: r.left, right: r.right, w: r.width };
+            };
+            const column = box(document.querySelector('[data-copy-review]') as Element);
+            const choices = [...document.querySelectorAll('[data-copy-review] [data-setup-choice]')].map(box);
+            // The review's own cards (notes and item rows) are the reference edge a choice card must match.
+            const notes = [...document.querySelectorAll('[data-copy-review] [data-setup-note]')].map(box);
+            return { column, choices, notes };
+          });
+          expect(facts.choices.length, 'the review offers choice cards').toBeGreaterThan(0);
+          if (viewport.phone) {
+            for (const choice of facts.choices) {
+              expect(Math.abs(choice.left - facts.column.left), 'starts at the column edge').toBeLessThanOrEqual(1);
+              expect(Math.abs(choice.right - facts.column.right), 'reaches the column edge').toBeLessThanOrEqual(1);
+            }
+            for (const note of facts.notes)
+              for (const choice of facts.choices)
+                expect(Math.abs(note.right - choice.right), 'same right edge as the review cards').toBeLessThanOrEqual(
+                  1,
+                );
+          } else {
+            for (const choice of facts.choices)
+              expect(choice.w, 'desktop keeps the compact card').toBeLessThanOrEqual(321);
+          }
+          if (shotsDir !== '')
+            await shootWhole(tab, join(shotsDir, `copy-choices-${view}-${viewport.name}-${mode}.png`), viewport.width);
+          await context.close();
+        }, 60_000);
+});

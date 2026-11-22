@@ -6,7 +6,6 @@ import '../support/dom.ts';
 // Boots the page's own script in a DOM; `../support/dom.ts` is happy-dom.
 const pluginDir = join(import.meta.dir, '../../..');
 const page = readFileSync(join(pluginDir, 'app/get-started/index.html'), 'utf8');
-const goldenPrompt = readFileSync(join(pluginDir, 'tests/fixtures/agent-setup-prompt.txt'), 'utf8').replace(/\n$/, '');
 
 describe('the page script', () => {
   const script = [...page.matchAll(/<script>([\s\S]*?)<\/script>/g)][0]?.[1] ?? '';
@@ -62,14 +61,22 @@ describe('the page script', () => {
     expect(visible()).toEqual(['brew']);
   });
 
-  it('copies exactly the prompt, and a command block line by line', async () => {
+  it('copies a command block line by line', async () => {
     boot();
-    (document.querySelector('.agent .copy') as HTMLElement).click();
     (document.querySelector('#panel-brew .copy') as HTMLElement).click();
     await Promise.resolve();
     expect(copied).toEqual([
-      goldenPrompt,
       'brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry\nbrew install --cask ferretry\nfy onboard',
     ]);
+  });
+
+  it('wires no copy button to anything but a command block', () => {
+    boot();
+    const buttons = [...document.querySelectorAll('.copy')];
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) {
+      expect(button.closest('.command')?.querySelector('[data-command]')).not.toBeNull();
+      expect(button.getAttribute('aria-label')).toMatch(/^Copy: /);
+    }
   });
 });

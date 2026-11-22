@@ -20,3 +20,8 @@
 :root[data-motion='reduced'] .cx-row {
   animation: none;
 }
+
+/* An action that stands alone under a command is as wide as the command (C59 audit: Install). */
+.cx-actions--stretch > button {
+  flex: 1 1 100%;
+}

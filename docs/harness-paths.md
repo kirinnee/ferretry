@@ -60,6 +60,13 @@ One rule, in the order an operator would expect it, applied per harness:
 2. **extra search path** — `<directory>/<kind>` for each declared directory, the environment's
    first, then the document's.
 3. **inherited environment** — the ordinary `PATH` lookup this daemon has always done.
+4. **install folders** — only when 1–3 found nothing: `~/.local/bin`, `~/.npm-global/bin`, `~/.bun/bin`,
+   `~/.nix-profile/bin`, `${XDG_STATE_HOME:-~/.local/state}/nix/profile/bin`, `/usr/local/bin`, and
+   `/opt/homebrew/bin` on macOS. A daemon's `PATH` is captured when its unit file is written, so a tool installed
+   afterwards into a folder `PATH` never listed would otherwise stay invisible until a restart. These two commands
+   only; the list has one owner (`packages/plugins/runtimes/contract/harness-fallback.ts`), shared by the setup
+   scan and the Claude Code and Codex lookups. The setup scan cannot read `XDG_STATE_HOME` (Runtimes may not start
+   `printenv`), so it searches `~/.local/state` there; the two Agent CLI lookups use the real value.
 
 **The environment outranks the document**, per harness. Somebody repairing a service-managed daemon
 edits the unit file, and a document that quietly outranked it would make that edit look ignored —

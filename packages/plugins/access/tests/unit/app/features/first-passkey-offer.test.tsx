@@ -105,7 +105,11 @@ describe('the first-passkey offer on the pairing-success screen', () => {
     try {
       expect(screen.container.textContent).toContain('Connected');
       const offer = must(screen.container.querySelector('[data-first-passkey-offer]'), 'the offer');
-      expect(offer.textContent).toContain('7 minutes left');
+      // WHY, and what happens after the quick window; no bare countdown.
+      expect(offer.textContent).toContain('approve risky actions with your fingerprint or face');
+      expect(offer.textContent).toContain('about 7 minutes');
+      expect(offer.textContent).toContain('later in Settings');
+      expect(offer.textContent).not.toContain('minutes left');
 
       await interact(() =>
         (must(screen.container.querySelector('[data-first-passkey-add]'), 'the button') as HTMLElement).click(),
@@ -213,10 +217,11 @@ describe('the passkey offer as a page (A565 shot 01 spacing)', () => {
       expect(notNow.getAttribute('data-variant')).toBeNull();
       expect(notNow.classList.contains('kt-btn')).toBe(true);
       for (const button of [add, notNow]) {
-        // One fixed size (`.fy-pair-answer`: 12 rem wide, 44 px or taller): the real-browser assert is mascot-offer.visual.test.ts.
-        expect(button.className).toContain('fy-pair-answer');
-        expect(button.className).toContain('py-3');
+        // One size, set by the shared answer row (`ActionRow`): the buttons carry no size of their own, and the real-browser
+        // asserts are mascot-offer.visual.test.ts and pair-confirm-balance.visual.test.ts.
+        expect(button.parentElement?.hasAttribute('data-action-row')).toBe(true);
         expect(button.className).not.toContain('w-full');
+        expect(button.className).not.toContain('fy-pair-answer');
       }
       // No inner card (r11 O10 fix): the offer carries no border, fill or padding of its own.
       for (const card of ['border', 'bg-surface-2', 'px-6', 'py-5', 'rounded-panel'])

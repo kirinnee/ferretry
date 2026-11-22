@@ -216,6 +216,9 @@ export const ClientRecordSchema = z.union([
       // code, never as a parse failure a guesser could tell apart.
       code: z.string().min(1).max(64),
       deviceName: z.string().min(1).max(256),
+      // What the person called this machine on the pair screen. Optional, and only bounded here: the host applies its own
+      // name rule and keeps it only when the machine has no name of the owner's yet.
+      machineName: z.string().min(1).max(256).optional(),
       deviceKey: z.string().min(1).max(128),
       proof: z.string().min(1).max(128),
     }),
@@ -536,9 +539,16 @@ export function sessionApiRequest(
   origin: CarriedOrigin,
   /** The carrying session's transcript hash, which a step-up or a key rotation is bound to. */
   transcriptHash?: Uint8Array,
+  /**
+   * Aborted when the session carrying this request ends (the peer left, the lease ended, the session was closed): the
+   * request's own lifecycle, which a handler that queues or runs long work reads (`ApiRequest.signal`). A session has no
+   * per-request cancel record, so the session's end is the only way a carried caller can leave.
+   */
+  signal?: AbortSignal,
 ): ApiRequest {
   const body = source.body ?? '';
   return {
+    ...(signal === undefined ? {} : { signal }),
     method: source.method,
     path: source.path,
     query: queryFrom(source.query ?? []),

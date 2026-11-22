@@ -139,12 +139,20 @@ describe('the access.passkey step, in a real browser', () => {
         console.log(
           `${variant.name} passkey step: add ${add.width}x${add.height} @${add.x},${add.y}; not-now ${later2.width}x${later2.height} @${later2.x},${later2.y}; row ${flow.display}/${flow.direction}`,
         );
-        expect(flow.direction, 'the two buttons sit in a column').toBe('column');
-        expect(later2.x, 'one left edge').toBeCloseTo(add.x, 0);
+        // C59 O3: the shared answer row: a phone stacks them full width (the way on above), a desktop puts Not now at the
+        // left end and Add a passkey at the right end of one row.
         expect(later2.width, 'one width').toBeCloseTo(add.width, 0);
-        expect(add.width, 'fixed width, 136 px or more').toBeGreaterThanOrEqual(136);
-        expect(later2.y, 'Not now is under Add').toBeGreaterThan(add.y + add.height - 1);
-        expect(later2.y - (add.y + add.height), 'the gap is 12 px').toBeCloseTo(12, 0);
+        expect(add.width, 'width of 136 px or more').toBeGreaterThanOrEqual(136);
+        if (variant.phone) {
+          expect(flow.direction, 'a phone stacks the two buttons').toBe('column-reverse');
+          expect(later2.x, 'one left edge').toBeCloseTo(add.x, 0);
+          expect(later2.y, 'Not now is under Add').toBeGreaterThan(add.y + add.height - 1);
+          expect(later2.y - (add.y + add.height), 'the gap is 12 px').toBeCloseTo(12, 0);
+        } else {
+          expect(flow.direction, 'a desktop puts them in a row').toBe('row');
+          expect(Math.abs(later2.y - add.y), 'one row').toBeLessThanOrEqual(1);
+          expect(later2.x, 'Not now is at the left').toBeLessThan(add.x);
+        }
 
         // Moving through the page by key starts nothing: no ceremony, no leaving.
         await tab.locator('[data-passkey-add]').focus();

@@ -3,7 +3,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type ComponentPutResult, type ProfileComponentSource } from '../../../contract/index.ts';
+import type { ComponentPutResult, ProfileComponentSource } from '../../../contract/index.ts';
 import { componentWriters } from '../../../daemon/adapters/component-writers.ts';
 import { TIMED_OUT, type Within } from '../../../daemon/adapters/profile-components.ts';
 
@@ -32,6 +32,26 @@ describe('componentWriters', () => {
     // Act / Assert
     should(await writers.put(WRITE)).eql({ outcome: 'written' });
     should(seen).eql(['github', '{}\n']);
+  });
+
+  it('should hand an accepted update the etags the import left, and carry back the etags the owner wrote', async () => {
+    // Arrange
+    const seen: unknown[] = [];
+    const writers = componentWriters(
+      () =>
+        owner(async (_name, _text, _files, options) => {
+          seen.push(options);
+          return { ok: true, etags: { github: 'etag-new' } };
+        }),
+      direct,
+    );
+
+    // Act / Assert
+    should(await writers.put({ ...WRITE, replace: true, owned: [], etags: { github: 'etag-old' } })).eql({
+      outcome: 'written',
+      etags: { github: 'etag-new' },
+    });
+    should(seen).eql([{ replace: true, owned: [], etags: { github: 'etag-old' } }]);
   });
 
   it('should answer held when the owner saved it and holds it', async () => {

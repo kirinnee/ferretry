@@ -62,7 +62,7 @@ export class OnboardController {
     for (const step of view.steps) {
       const report = step.state === 'pending' ? await this.#settle(step, options, prompt) : settled(step);
       reports.push(report);
-      if (!json) this.deps.out.report(row(report.step, reportLine(report), width));
+      if (!json) this.deps.out.report(row(report.step, reportLine(report), width, report.check));
     }
     const summary = summarize(reports);
     if (json) this.deps.out.report(renderSummaryJson(summary));

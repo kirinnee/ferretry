@@ -146,6 +146,11 @@ export class FleetProposalStore<Payload, Mutation> {
     );
   }
 
+  /** Whether this store holds a change under this id (pending or spent): an id it minted and has not forgotten. */
+  knows(id: string): boolean {
+    return this.#proposals.has(id);
+  }
+
   /**
    * The live proposal with this id, or a refusal naming exactly why it cannot be used.
    *

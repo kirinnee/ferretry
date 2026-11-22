@@ -106,8 +106,18 @@ export interface ClaimFreshWitness {
    * request or in work the call spawns, so it does not take a proof the owner gives afterwards. The instants are wall-clock
    * milliseconds: a proof made in the same millisecond as the admission, or after the clock stepped back, is not told
    * apart from an earlier one.
+   *
+   * `spentAtAdmission` is said by a standing whose own admission spent the step-up it was admitted on (a step-up window
+   * of `0`: one step-up, one act): the proof that existed then is still its to take, though no window is held now. It
+   * never reaches a proof proved after the admission, and a proof is taken once whoever asks.
    */
-  (subject: StepUpSubject, act?: MachineSkippableStepUpAct, bound?: undefined, notAfterMs?: number): boolean;
+  (
+    subject: StepUpSubject,
+    act?: MachineSkippableStepUpAct,
+    bound?: undefined,
+    notAfterMs?: number,
+    spentAtAdmission?: boolean,
+  ): boolean;
   (subject: StepUpSubject, act: Exclude<EveryCallerStepUpAct, StoredProofStepUpAct>, bound: string): boolean;
 }
 

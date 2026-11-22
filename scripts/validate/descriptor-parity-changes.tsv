@@ -458,6 +458,9 @@ route	GET /v1/projects/folders	added	new in r9 (B6): the folder explorer behind 
 route	POST /v1/projects/folders	added	new in r9 (B6): makes one owner-only folder for the project picker; filesystem configure
 route	GET /v1/projects/:id/repos	added	new in r9 (B5): the git repositories found inside a registered project folder; filesystem use
 route	PUT /v1/projects/:id/accounts	added	new in r9 (B5): which git accounts a project uses (ids only); filesystem configure
+route	GET /v1/projects/:id/files	added	new in &F6061 U5: the project file finder, names only and searched on the daemon; a person's filesystem use, never file content
+route	GET /v1/projects/:id/files/status	added	new in &F6061 U5: the coverage block of a project's file index (counts and folder names) for a badge; filesystem use
+route	POST /v1/projects/:id/files/rescan	added	new in &F6061 U5: starts a rebuild of an in-memory file index; reads the folder and writes nothing on the host, so filesystem use
 route	POST /v1/git-accounts/github/device	added	new in 5.0 (r9 B1 git-accounts): starts a GitHub device-flow sign-in; secrets.configure from a person, no token is returned
 route	GET /v1/git-accounts/github/device/:flowId	added	new in 5.0 (r9 B1 git-accounts): polls a device-flow sign-in and files the account when GitHub authorizes it; secrets.configure from a person, answers only a status and the login
 route	GET /v1/git-accounts	added	new in 5.0 (r9 B1 git-accounts): lists connected Git accounts (login, key titles), secrets.use; never a token

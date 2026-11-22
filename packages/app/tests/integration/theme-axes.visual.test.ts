@@ -4,11 +4,12 @@
  *    my style)"; "highcontrast is a color right? the style should be accessible"; "neo brutalism color with neo
  *    brutalism style? makes not that much sense"; "remove … blueprint, wayfinding, phosphor etc".
  *
- *   1. Pick Neo on a device on Indigo → the page's `data-palette` becomes `neo` (labelled Pop). With `keepPalette` stored
- *      → it stays Indigo. The change shows on the root element the stylesheet reads.
+ *   1. Pick Neo on a device on Inkwell → the page's `data-palette` becomes `neo` (labelled Pop Art). With `keepPalette` stored
+ *      → it stays Inkwell (Studio's palette). The change shows on the root element the stylesheet reads.
  *   2. A stored `{style:'contrast'}` → the FIRST frame (pre-paint, before any module) is Studio + High contrast, and every
  *      removed palette id paints the id the migration table names, with no flash.
- *   3. The palette picker draws exactly 8 chips, each a colour name; none is named after a style.
+ *   3. The palette picker draws one chip per catalogue palette, each by the name the ONE map gives it (`theme/palette-names.ts`;
+ *      C59 O6: proper names); none is named after a style (Briefing, owner's own ask, is the one allowed).
  *
  * The page is the real `App` over a fake machine (`fixtures/device-controls-scene.tsx`); no network, no real homes.
  */
@@ -17,7 +18,10 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser } from 'playwright-core';
+import { PALETTES } from '../../src/theme/catalog.ts';
 import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
+
+const PALETTE_LABELS = PALETTES.map(palette => palette.label);
 
 setDefaultTimeout(120_000);
 
@@ -96,7 +100,7 @@ const root = (tab: Awaited<ReturnType<typeof openSettings>>['tab']) =>
 const INDIGO_STUDIO = { style: 'studio', palette: 'studio', mode: 'light', textScale: 'default' } as const;
 
 describe('picking a style brings its default palette, unless the device keeps its colours', () => {
-  it('Neo on Indigo → Pop; with keepPalette on → stays Indigo', async () => {
+  it('Neo on Inkwell → Pop Art; with keepPalette on → stays Inkwell', async () => {
     const changing = await openSettings(INDIGO_STUDIO);
     try {
       expect(await root(changing.tab)).toEqual({ style: 'studio', palette: 'studio' });
@@ -117,7 +121,7 @@ describe('picking a style brings its default palette, unless the device keeps it
     }
   });
 
-  // Owner C1 (!A581): the palettes are named by colour ONLY. No old palette name, and no "was …", renders anywhere.
+  // Owner C1 (!A581) then !A605: no removed palette's name, and no "was …", renders anywhere; every live palette shows its proper name.
   it('no old palette name renders on the Appearance page, in text, labels or tooltips', async () => {
     const page = await openSettings(INDIGO_STUDIO);
     try {
@@ -128,27 +132,26 @@ describe('picking a style brings its default palette, unless the device keeps it
         return texts.join('\n');
       });
       const OLD =
-        /\b(?:Phosphor|Blueprint|Broadsheet|Wayfinding|Ledger|Ma|Cyberpunk|Gradient mesh|Retro futurism|Vintage analog|Hacker|Vaporwave|High Contrast)\b|\bwas (?:Studio|Geist|Mission|Neo)\b/u;
+        /\b(?:Phosphor|Blueprint|Broadsheet|Wayfinding|Ledger|Ma|Cyberpunk|Retro futurism|Vintage analog|High Contrast)\b|\bwas (?:Studio|Geist|Mission|Neo)\b/u;
       expect(rendered.match(OLD)?.[0]).toBeUndefined();
-      // The names that DO render are exactly the eight colours.
-      for (const colour of ['Indigo', 'Blue', 'Teal', 'Pop', 'Green', 'Rust', 'Magenta', 'High contrast'])
-        expect(rendered).toContain(colour);
+      // The names that DO render are the catalogue's, each from the one map.
+      for (const name of PALETTE_LABELS) expect(rendered).toContain(name);
     } finally {
       await page.close();
     }
   });
 
-  it('the palette picker shows exactly 8 chips, each a colour name, none named after a style', async () => {
+  it('the palette picker shows one chip per palette, each by its proper name, none named after a style', async () => {
     const page = await openSettings(INDIGO_STUDIO);
     try {
       const names = await page.tab
         .locator('[data-palette-chip] .fy-ap-chip__name')
         .evaluateAll(nodes => nodes.map(node => node.textContent?.trim() ?? ''));
-      expect(names).toEqual(['Indigo', 'Blue', 'Teal', 'Pop', 'Green', 'Rust', 'Magenta', 'High contrast']);
+      expect(names).toEqual(PALETTE_LABELS);
       const styleNames = await page.tab
         .locator('[data-choice]')
         .evaluateAll(nodes => nodes.map(node => (node.getAttribute('data-choice') ?? '').toLowerCase()));
-      for (const name of names) expect(styleNames).not.toContain(name.toLowerCase());
+      for (const name of names) if (name !== 'Briefing') expect(styleNames).not.toContain(name.toLowerCase());
       expect(await page.tab.locator('[data-choice="contrast"]').count()).toBe(0);
     } finally {
       await page.close();
@@ -186,9 +189,14 @@ describe('pre-paint: the first frame already wears the migrated look', () => {
     ['ma', 'vaporwave'],
     ['retrofuture', 'vintage'],
     ['cyberpunk', 'vaporwave'],
-    ['mesh', 'studio'],
-    ['briefing', 'geist'],
   ];
+  // C59 O6: Gradient mesh and Briefing are palettes again (and Aurora and Afterglow are new), so a stored one paints itself, no migration.
+  for (const palette of ['mesh', 'briefing', 'aurora', 'afterglow']) {
+    it(`a stored palette "${palette}" paints "${palette}" itself`, async () => {
+      const first = await firstFrame({ style: 'studio', palette, mode: 'dark', textScale: 'default' });
+      expect(first).toMatchObject({ style: 'studio', palette, mode: 'dark' });
+    });
+  }
   for (const [removed, kept] of REMOVED) {
     it(`a stored palette "${removed}" paints "${kept}"`, async () => {
       const first = await firstFrame({ style: 'studio', palette: removed, mode: 'dark', textScale: 'default' });

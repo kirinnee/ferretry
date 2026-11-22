@@ -218,7 +218,7 @@ describe('the page theme switch', () => {
 
   test('opens on the family in force, switches mode and family without closing, and Done closes', async () => {
     const { themes } = await openSwitch();
-    expect(trigger().getAttribute('aria-label')).toBe('Theme: Indigo, Auto (light)');
+    expect(trigger().getAttribute('aria-label')).toBe('Theme: Inkwell, Auto (light)');
     await click(trigger());
     expect(panel()).not.toBeNull();
     expect((document.activeElement as HTMLInputElement).dataset.pickPalette).toBe('studio');
@@ -226,7 +226,7 @@ describe('the page theme switch', () => {
     await click(view?.container.querySelector('input[data-pick-palette="neo"]'));
     expect(themes.snapshot()).toMatchObject({ family: 'neo', mode: 'dark' });
     expect(panel()).not.toBeNull();
-    expect(trigger().getAttribute('aria-label')).toBe('Theme: Pop, Dark');
+    expect(trigger().getAttribute('aria-label')).toBe('Theme: Pop Art, Dark');
     await click(view?.container.querySelector('[data-theme-done]'));
     expect(panel()).toBeNull();
     expect(document.activeElement).toBe(trigger());

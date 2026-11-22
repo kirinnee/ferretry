@@ -86,7 +86,14 @@ export function FolderStep({ client, draft, progress, onDraftChange, onNext }: F
           </label>
         )}
 
-        <FolderPicker client={client} startAt={draft.folder ?? undefined} onOpened={onOpened} onBusyChange={setBusy} />
+        {/* Cloning picks a place to put the project, not the project: only a folder that IS the project is warned about. */}
+        <FolderPicker
+          client={client}
+          startAt={draft.folder ?? undefined}
+          onOpened={onOpened}
+          onBusyChange={setBusy}
+          warnBroad={draft.source !== 'clone'}
+        />
 
         {target !== null && (
           <p className="m-0 text-meta text-muted" data-create-chosen="">
