@@ -53,7 +53,7 @@
     mesh: 'studio',
     aurora: 'studio',
     afterglow: 'studio',
-    briefing: 'studio',
+    briefing: 'briefing',
     contrast: 'studio',
   };
   /* The pre-split "family" ids a stored value may still carry (`THEME_FAMILY_IDS`, frozen): each is a palette id. */

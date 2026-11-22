@@ -1,7 +1,7 @@
 /**
  * THE LUCID + BRIEFING STYLE KITS (r11 T11), measured in a real browser on the theme matrix's specimen page
  * (`plugins/conversation/tests/integration/app/fixtures/theme-matrix-scene.tsx`), each style on its DEFAULT palette (Lucid:
- * Indigo, the `studio` palette id; Briefing: Blue, the `geist` palette id), in both modes at 1280 and 390.
+ * Indigo, the `studio` palette id; Briefing: the `briefing` palette id), in both modes at 1280 and 390.
  *
  * The owner's line (turn 4247, item 12): "BG and grainy-ness can help with the style too -- and ... components too, including
  * how markdown looks", "make sure things like spinner, animation all are unique to their style", "most of them should not have
@@ -50,7 +50,7 @@ const VIEWPORTS = [
 /** Each style's own default palette (T1's table): what a person gets when they pick it. */
 const DEFAULT_PALETTE = {
   lucid: 'studio',
-  briefing: 'geist',
+  briefing: 'briefing',
   studio: 'studio',
   neo: 'neo',
   mission: 'mission',

@@ -81,6 +81,7 @@
   overflow-wrap: normal;
   padding-inline-end: 0;
   text-align: center;
+  text-rendering: geometricPrecision; /* unhinted advances: small Poppins read evenly spaced on a 2x phone screen */
   word-break: normal;
 }
 /* A title-only card keeps its word clear of the check badge on the corner (a long name wraps between words instead of running under it). */

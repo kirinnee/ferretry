@@ -102,8 +102,6 @@
   --field-ground-bottom: transparent;
   /* A palette's blended background (a gradient mesh); `none` unless it draws one. index.css paints it UNDER `--body-wash`, on the app background only. */
   --surface-mesh: none;
-  /* How much of the first-run dot grid (`ui/living-background.css`) shows: 1 normally; a palette that blends a mesh behind the page turns it down, or the dots read as squares over the glow. */
-  --lb-grid-alpha: 1;
   --scrim: rgba(24, 24, 27, 0.38);
   /* ---- focus + selection ---- */
   --ring: rgba(79, 82, 214, 0.38);

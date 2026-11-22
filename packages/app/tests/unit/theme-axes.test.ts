@@ -189,7 +189,7 @@ describe('the catalogue, the files and themes.css agree', () => {
       studio: 'studio',
       geist: 'geist',
       swiss: 'geist',
-      briefing: 'geist',
+      briefing: 'briefing',
       retro: 'geist',
       mission: 'mission',
       hud: 'mission',

@@ -76,7 +76,6 @@
   --step-rail: #cfc6ec;
   --step-seg: #cfc6ec;
   --step-seg-now: #a27dec;
-  --lb-grid-alpha: 0.25;
   --surface-mesh:
     radial-gradient(70% 60% at 8% 6%, rgba(167, 139, 250, 0.6), transparent 72%),
     radial-gradient(65% 55% at 92% 14%, rgba(251, 146, 190, 0.5), transparent 72%),
@@ -161,7 +160,6 @@
   --step-rail: #443d78;
   --step-seg: #443d78;
   --step-seg-now: #735da4;
-  --lb-grid-alpha: 0.25;
   --surface-mesh:
     radial-gradient(70% 60% at 8% 6%, rgba(124, 58, 237, 0.62), transparent 72%),
     radial-gradient(65% 55% at 92% 14%, rgba(236, 72, 153, 0.46), transparent 72%),

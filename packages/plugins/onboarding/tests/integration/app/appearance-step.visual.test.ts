@@ -290,6 +290,38 @@ describe('the new palettes on the Appearance page (C59 O6)', () => {
           );
           if (palette !== 'briefing') expect(after.mesh).toContain('radial-gradient');
           else expect(after.mesh).toBe('none');
+          // The mesh is a LIST of glows, so it is several background layers: each one must be untiled (size auto, no-repeat). It was
+          // tiled in the pattern's 32px squares (a pink checkerboard over the page) when the body's size and repeat lists were too short.
+          const layers = await tab.evaluate(() => {
+            const cs = getComputedStyle(document.body);
+            const split = (value: string): string[] => {
+              const parts: string[] = [];
+              let depth = 0;
+              let from = 0;
+              for (let at = 0; at < value.length; at += 1) {
+                const ch = value[at];
+                if (ch === '(') depth += 1;
+                else if (ch === ')') depth -= 1;
+                else if (ch === ',' && depth === 0) {
+                  parts.push(value.slice(from, at).trim());
+                  from = at + 1;
+                }
+              }
+              parts.push(value.slice(from).trim());
+              return parts;
+            };
+            const sizes = split(cs.backgroundSize);
+            const repeats = split(cs.backgroundRepeat);
+            return split(cs.backgroundImage).map((image, index) => ({
+              glow: /gradient\(/u.test(image),
+              size: sizes[index % sizes.length] ?? '',
+              repeat: repeats[index % repeats.length] ?? '',
+            }));
+          });
+          const glows = layers.filter(layer => layer.glow);
+          expect(glows.length, 'a mesh palette draws its glows').toBe(palette === 'briefing' ? 0 : 4);
+          for (const glow of glows)
+            expect(glow, 'an untiled glow').toEqual({ glow: true, size: 'auto', repeat: 'no-repeat' });
           await tab.evaluate(() => window.scrollTo(0, 0));
           await shot(tab, variant, `palette-${palette}`);
         } finally {
@@ -342,7 +374,7 @@ describe('the Appearance page works in every style and every palette (C59 O6c)',
           const card = tab.locator(`[aria-label="Style"] .fy-cc__card[data-choice="${style.id}"]`);
           await card.scrollIntoViewIfNeeded();
           await card.click();
-          await tab.waitForTimeout(220);
+          await tab.waitForTimeout(450); // past the pick's own pop (260ms at most), even on a loaded machine
           const seen = await probe(tab);
           expect(seen.cut, `${style.id}: a card title is cut`).toEqual([]);
           expect(seen.outside, `${style.id}: a card pokes outside the page by ${seen.lean}px`).toEqual([]);
@@ -367,7 +399,7 @@ describe('the Appearance page works in every style and every palette (C59 O6c)',
         const card = tab.locator(`[aria-label="Style"] .fy-cc__card[data-choice="${style}"]`);
         await card.scrollIntoViewIfNeeded();
         await card.click();
-        await tab.waitForTimeout(220);
+        await tab.waitForTimeout(450); // past the pick's own pop (260ms at most), even on a loaded machine
         const seen = await probe(tab);
         expect(seen.cut, `${style}: a card title is cut at Larger`).toEqual([]);
         expect(seen.overflow, `${style}: horizontal overflow at Larger`).toBeLessThanOrEqual(0);
@@ -384,7 +416,7 @@ describe('the Appearance page works in every style and every palette (C59 O6c)',
           const card = tab.locator(`[aria-label="Palette"] .fy-cc__card[data-choice="${palette.id}"]`);
           await card.scrollIntoViewIfNeeded();
           await card.click();
-          await tab.waitForTimeout(220);
+          await tab.waitForTimeout(450); // past the pick's own pop (260ms at most), even on a loaded machine
           const seen = await probe(tab);
           expect(seen.cut, `${palette.id}: a card title is cut`).toEqual([]);
           expect(seen.outside, `${palette.id}: a card pokes outside the page`).toEqual([]);
