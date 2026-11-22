@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import {
   createTrustedTypes,
   fragmentParsingPolicy,
+  isDurianWorkerScriptUrl,
   isHighlightMarkup,
   isWorkerScriptUrl,
   type TrustedTypePolicyFactoryLike,
@@ -83,6 +84,28 @@ describe('isWorkerScriptUrl', () => {
       '/app/assets/parakeet-worker-abc.js',
       '/assets/other-worker-abc.js',
       '/src/worker/parakeet-worker.ts',
+    ]) {
+      expect(isWorkerScriptUrl(url)).toBe(false);
+    }
+  });
+
+  it('accepts the Durian worker chunk the build emits, and nothing near it', () => {
+    expect(isWorkerScriptUrl('/assets/durian-worker-DonRcPBX.js')).toBe(true);
+    expect(isDurianWorkerScriptUrl('/assets/durian-worker-a_b-9.js')).toBe(true);
+    expect(isDurianWorkerScriptUrl('/assets/parakeet-worker-abc.js')).toBe(false);
+    for (const url of [
+      '/assets/durian-worker-.js',
+      '/assets/durian-worker-abc.js?x=1',
+      '/assets/durian-worker-abc.js#x',
+      'https://evil.test/assets/durian-worker-abc.js',
+      '//evil.test/assets/durian-worker-abc.js',
+      '/app/assets/durian-worker-abc.js',
+      '/assets/sub/durian-worker-abc.js',
+      '/assets/durian-worker-abc.mjs',
+      '/assets/durian-worker-a/b.js',
+      '/assets/durian-worker-abc.js\n',
+      '/assets/durian-worker.js',
+      '/src/hypermedia/durian-worker.ts?worker_file&type=module',
     ]) {
       expect(isWorkerScriptUrl(url)).toBe(false);
     }

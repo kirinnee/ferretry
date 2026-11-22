@@ -7,6 +7,7 @@ import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../../../app/composer/composer.tsx';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
 import { TranscriptRow } from '../../../../app/chat/transcript-row.tsx';
+import { withDurianReader } from '../../../support/durian-reader.tsx';
 import { daemonConnection } from '../../../../app/composer/seam.ts';
 import { daemonFerretScope } from '../../../../app/composer/seam.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../../../app/composer/drafts.ts';
@@ -212,17 +213,21 @@ describe('session screen components', () => {
     ]);
   });
 
-  test('renders transcript prose and daemon chrome with readable defaults and safe timestamps', () => {
+  test('renders transcript prose and daemon chrome with readable defaults and safe timestamps', async () => {
     const rows = render(
-      <>
-        <TranscriptRow entry={{ id: 'user', kind: 'user', text: 'A human message' }} />
-        <TranscriptRow
-          entry={{ at: Number.NaN, id: 'assistant', kind: 'assistant', text: 'A **rendered** response' }}
-        />
-        <TranscriptRow entry={{ id: 'tool', kind: 'tool', text: 'working tree clean' }} />
-        <TranscriptRow entry={{ id: 'notice', kind: 'notice', text: 'Daemon reconnected' }} />
-      </>,
+      withDurianReader(
+        <>
+          <TranscriptRow entry={{ id: 'user', kind: 'user', text: 'A human message' }} />
+          <TranscriptRow
+            entry={{ at: Number.NaN, id: 'assistant', kind: 'assistant', text: 'A **rendered** response' }}
+          />
+          <TranscriptRow entry={{ id: 'tool', kind: 'tool', text: 'working tree clean' }} />
+          <TranscriptRow entry={{ id: 'notice', kind: 'notice', text: 'Daemon reconnected' }} />
+        </>,
+      ),
     );
+    // The message is read by the Durian worker (here, in-process): its document arrives after the first paint.
+    await runAsync(() => Promise.resolve());
     expect(rows.root.findAllByProps({ 'data-transcript-kind': 'user' })[0]?.props.className).toContain(
       'fy-message-user',
     );

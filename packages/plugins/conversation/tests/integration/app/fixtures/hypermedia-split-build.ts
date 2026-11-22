@@ -27,13 +27,19 @@ const out = argument('--out');
 const entry = argument('--entry');
 const conversation = resolve(import.meta.dir, '../../../..');
 
-/** Vite's asset queries (`x.wasm?url`) are the bundler's own: a scene runs no on-device engine, so each is an empty URL. */
+/**
+ * Vite's asset queries (`x.wasm?url`) are the bundler's own: a scene runs no on-device engine, so each is an empty URL. The ONE
+ * exception is the Durian worker (r12 H11): its URL is where the test's server serves the chunk it built the app's way
+ * (`/assets/durian-worker-test.js`, a name the page's real Trusted Types policy accepts), so the page starts it through the
+ * production code (`durian-spawn.ts`) under the real policy.
+ */
+const DURIAN_WORKER_URL = '/assets/durian-worker-test.js';
 const viteAssetUrls: Bun.BunPlugin = {
   name: 'vite-asset-urls',
   setup(build) {
     build.onResolve({ filter: /\?(worker&)?url$/u }, args => ({ path: args.path, namespace: 'vite-asset-url' }));
-    build.onLoad({ filter: /.*/u, namespace: 'vite-asset-url' }, () => ({
-      contents: "export default '';",
+    build.onLoad({ filter: /.*/u, namespace: 'vite-asset-url' }, args => ({
+      contents: `export default '${args.path.includes('durian-worker.ts') ? DURIAN_WORKER_URL : ''}';`,
       loader: 'js',
     }));
   },

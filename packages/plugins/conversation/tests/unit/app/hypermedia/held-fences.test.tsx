@@ -12,7 +12,7 @@ import { interact, mount } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
 import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
 import { loadAnimationEngine } from '../../../../app/hypermedia/animation-engine.ts';
-import { ANIMATION_DRAWS, holdFences } from '../../../../app/hypermedia/held-fences.tsx';
+import { ANIMATION_DRAWS, holdFences } from '../../../../app/hypermedia/held-fence-parse.ts';
 import { mustRead } from './must-read.ts';
 import { fixture, inShell } from './surface-fixture.tsx';
 

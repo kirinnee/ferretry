@@ -11,7 +11,7 @@ import { ReferenceSurfaceProvider } from '@ferretry/app';
 import { interact, mount } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
 import { animationEngineReady, loadAnimationEngine } from '../../../../app/hypermedia/animation-engine.ts';
-import { holdsAnimation } from '../../../../app/hypermedia/held-fences.tsx';
+import { holdsAnimation } from '../../../../app/hypermedia/held-fence-parse.ts';
 import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
 import { mustRead } from './must-read.ts';
 import { fixture, inShell } from './surface-fixture.tsx';
@@ -19,7 +19,8 @@ import { fixture, inShell } from './surface-fixture.tsx';
 const FENCE = '`'.repeat(3);
 const fence = (info: string, ...body: readonly string[]): string => [`${FENCE}${info}`, ...body, FENCE].join('\n');
 const ANIMATION = fence('animation', 'array a: 5 2 8 1', '@step 5 and 2 swap.', 'swap a.0 a.1');
-const types = (text: string): readonly string[] => mustRead(text, 'x-').doc.blocks.map(block => block.type);
+const types = (text: string): readonly string[] =>
+  mustRead(text, 'x-', false, animationEngineReady()).doc.blocks.map(block => block.type);
 
 const draw = async (text: string) => {
   const tree = inShell(
@@ -56,11 +57,12 @@ describe('the animation engine', () => {
     expect(read.doc.problems).toEqual([]);
   });
 
-  it('is NOT fetched for a message that holds an animation while animations are held as code (r12 H11a)', async () => {
+  it('is NOT asked for by a message that holds an animation (r12 H11): the worker has no compiler, so it is shown as the code it is', async () => {
     const { container, unmount } = await draw(ANIMATION);
     await interact(() => Promise.resolve());
     expect(animationEngineReady()).toBe(false);
-    expect(container.querySelector('[data-fy-animation] .scn')).toBeNull();
+    expect(container.querySelector('[data-fy-animation]')).toBeNull();
+    expect(container.querySelector('.dh-doc code')?.textContent).toContain('swap a.0 a.1');
     await unmount();
   });
 
