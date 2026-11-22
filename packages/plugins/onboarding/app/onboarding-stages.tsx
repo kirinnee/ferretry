@@ -12,11 +12,8 @@
  * daemon's output and the two-minute expiry are all still on the page — they are
  * simply no longer competing with the instruction. What was cut is restatement.
  *
- * WHO INSTALLS IT IS NOT A QUESTION ANY MORE (r10 O5, decision D1). The page opens on the commands, and a quiet
- * "Let an agent do it" link, here and on the other-computer page, switches the journey to the agent's own pages (the
- * prompt, then pairing). What the install step offers is a one-tap way to CHANGE EITHER ANSWER — the doer, and the
- * machine these commands are addressed to — but never a second copy of the prompt, because two copies of the thing that
- * answer exists to hand over is two things to keep true.
+ * THERE IS NO "LET AN AGENT DO IT" PATH (owner, C59 O7): installing needs permissions an agent usually does not have,
+ * so the page opens on the commands the reader runs themselves.
  *
  * THE CLAUDE CODE / CODEX INSTALL IS NOT HERE EITHER. These stages stand the daemon up and pair; the setup flow that
  * follows pairing owns installing and signing in to each agent (the Claude and Codex steps), so there is no "install an
@@ -27,13 +24,11 @@
  * keep true, and one of the two would be wrong within a release.
  */
 
-import { Share2 } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 
 import { CommandBlock } from './command-block.tsx';
-import { type ClipboardWriter, CopyButton } from '@ferretry/app/ui';
+import type { ClipboardWriter } from '@ferretry/app/ui';
 import {
-  agentSetupPrompt,
   DAEMON_INSTALL_COMMAND,
   DAEMON_SERVING_OUTPUT,
   DAEMON_START_COMMAND,
@@ -43,10 +38,8 @@ import {
   installChannel,
   PAIR_COMMAND,
   PAIR_OPEN_COMMAND,
-  type SetupTargetId,
   VERIFY_COMMAND,
 } from './onboarding-model.ts';
-import type { SetupSharePort } from './setup-handoff-panel.tsx';
 
 const STAGE = 'flex min-w-0 flex-col gap-2';
 
@@ -79,29 +72,9 @@ function Aside({ summary, children }: { readonly summary: string; readonly child
   );
 }
 
-/**
- * THE QUIET WAY TO HAND THE INSTALL TO AN AGENT: one line and a ghost button, on the install page and on the other
- * computer's page. It is a quiet offer, not a question: most readers type the commands, and the ones who have Claude or Codex
- * open in another window recognise it at once. A real (bordered) button, auto width (never stretched), 44px tall.
- */
-function AgentInstead({ onAgentInstead }: { readonly onAgentInstead: () => void }) {
-  return (
-    <p className="m-0 min-w-0 text-meta leading-base text-muted" data-onboarding-agent-link="">
-      Have Claude or Codex open?{' '}
-      {/* One text flow with a quiet inline action (C59 audit): the outlined 44 px button was twice as tall as the sentence and
-          competed with Next. Its 44 px hit area is an invisible layer, so the line never grows. */}
-      <button type="button" className="fy-inline-action" onClick={onAgentInstead} data-onboarding-agent-instead="">
-        Let an agent do it
-      </button>
-    </p>
-  );
-}
-
 export interface InstallStageProps {
   readonly write: ClipboardWriter;
   readonly channel: InstallChannelId;
-  /** Change answer: hand the whole thing to an agent instead of typing it. */
-  readonly onAgentInstead: () => void;
   /**
    * Change the other answer: these commands are for a machine the reader is not at.
    *
@@ -111,7 +84,7 @@ export interface InstallStageProps {
   readonly onOtherMachine?: (() => void) | undefined;
 }
 
-export function InstallStage({ write, channel, onAgentInstead, onOtherMachine }: InstallStageProps) {
+export function InstallStage({ write, channel, onOtherMachine }: InstallStageProps) {
   const [selected, setSelected] = useState<InstallChannelId>(channel);
   const chosen = installChannel(selected);
   return (
@@ -164,15 +137,6 @@ export function InstallStage({ write, channel, onAgentInstead, onOtherMachine }:
       </Aside>
 
       {/*
-        CHANGING ANSWER, not a second copy of the agent path. A reader who is
-        looking at a command they did not want should not have to find the way
-        back to the first question and re-answer it; and the prompt itself lives
-        on the agent route's own step, where it is the whole screen rather than
-        thirty lines folded under a caret.
-      */}
-      <AgentInstead onAgentInstead={onAgentInstead} />
-
-      {/*
         THE SECOND PLACE THE ASSUMPTION CAN BE ESCAPED, and the one that catches
         the reader who did not read the screen before this. These commands are
         addressed to the machine holding this page; somebody who meant a different
@@ -216,171 +180,6 @@ export function DaemonStage({ write }: { readonly write: ClipboardWriter }) {
           Installs the user service and starts the daemon under it.
         </p>
       </Aside>
-    </div>
-  );
-}
-
-export interface BriefStageProps {
-  readonly write: ClipboardWriter;
-  /**
-   * Which computer the agent is on, which changes both the prompt and how the
-   * prompt has to travel. The clipboard does not cross a device boundary.
-   */
-  readonly target: SetupTargetId;
-  /** The bare setup page, for a reader who would rather open it on that computer. */
-  readonly plainUrl: string;
-  /** The OS share sheet, when this browser has one. Absent is the ordinary case. */
-  readonly share?: SetupSharePort | undefined;
-}
-
-/**
- * THE AGENT PROMPT: on this answer it IS the product, so it is the whole screen.
- *
- * The reader said an agent does it, and everything that answer promises is carried
- * by this text. So it is shown in full rather than behind a second tap: a person
- * is about to hand it to something with a shell on their machine, and "copy this
- * text I will not show you" is not a thing to ask of anybody. It is also generic
- * by construction — it names no host, no user, no daemon and no fleet — and seeing
- * that for themselves is the point on a page anyone can load.
- *
- * A COPY BUTTON IS NOT A HAND-OFF WHEN THE AGENT IS ON ANOTHER MACHINE, and that
- * was the honest gap in the previous release: a phone's clipboard does not reach a
- * laptop, so "copy this" ended in the reader retyping thirty lines or giving up.
- * There is no QR to fix it either — nothing on a desk points a camera at a phone —
- * so the answer is words and the OS share sheet: Messages, mail, a note to
- * yourself, whatever that phone already has. And the plain page address is offered
- * beside it, because the prompt is public and identical on every device: opening
- * this page over there puts the same text one copy away, with nothing sent at all.
- */
-export function BriefStage({ write, target, plainUrl, share }: BriefStageProps) {
-  const prompt = agentSetupPrompt(target);
-  return (
-    <div className={STAGE}>
-      <p className="m-0 text-meta leading-base text-muted">
-        Paste it into Claude, Codex or any agent with a terminal{' '}
-        <strong className="font-semibold text-fg">on {target === 'this' ? 'this computer' : 'that computer'}</strong> —
-        not into anything on this page.
-      </p>
-      <div className="flex min-w-0 flex-col rounded-control border border-code-border bg-code-bg">
-        <div className="flex min-w-0 items-center gap-2 border-b border-code-border py-1 pl-2 pr-1">
-          <span className="min-w-0 flex-1 truncate text-meta font-semibold text-fg">Setup prompt for an AI agent</span>
-          <CopyButton text={prompt} label="Copy setup prompt" write={write} />
-        </div>
-        {/*
-          Scrolls inside its own box: it is thirty lines, and a stage that grows
-          to thirty lines pushes its own next action off a phone.
-        */}
-        <pre
-          className="m-0 max-h-56 overflow-auto px-2 py-2 font-mono text-meta leading-base text-code-fg"
-          data-onboarding-prompt=""
-        >
-          <code>{prompt}</code>
-        </pre>
-      </div>
-
-      {target === 'other' ? (
-        <div className="flex min-w-0 flex-col gap-2" data-onboarding-prompt-handoff="">
-          <p className="m-0 text-meta leading-base text-muted">
-            That agent is on another computer, and this clipboard does not reach it. Send the prompt over — a message to
-            yourself, mail, or your team chat.
-          </p>
-          {share === undefined ? null : (
-            <button
-              type="button"
-              className="kt-btn min-h-[44px] self-start"
-              data-variant="ghost"
-              onClick={() => {
-                /*
-                 * A DECLINED SHARE SHEET IS NOT AN ERROR. Dismissing it rejects
-                 * with `AbortError`, and an unhandled rejection here would be a
-                 * console failure caused by a reader changing their mind.
-                 */
-                void share({ title: 'Ferretry setup prompt', text: prompt }).catch(() => undefined);
-              }}
-              data-onboarding-share-prompt=""
-            >
-              <Share2 size={16} aria-hidden="true" />
-              Share the prompt
-            </button>
-          )}
-          <p className="m-0 text-2xs leading-base text-faint">
-            Or open <span className="font-mono text-syn-string">{plainUrl}</span> on that computer — the same prompt is
-            on this screen there, ready to copy.
-          </p>
-        </div>
-      ) : null}
-
-      <p className="m-0 text-meta leading-base text-muted">
-        It says nothing about you, this browser, or any daemon. It ends by asking your agent to{' '}
-        {target === 'this' ? (
-          <>
-            run <code className="font-mono text-syn-string">{PAIR_OPEN_COMMAND}</code>, which opens Ferretry here
-            already paired
-          </>
-        ) : (
-          <>
-            run <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> and show you the code
-          </>
-        )}{' '}
-        — come back here when it does.
-      </p>
-    </div>
-  );
-}
-
-export interface AgentPairStageProps {
-  readonly pairing: ReactNode;
-  /** The pairing failure on screen already says its remedy, so the code-expiry advice is not added. */
-  readonly stated?: boolean;
-  /**
-   * Which computer the agent is on — which decides whether "you may already be
-   * connected" is true or a lie.
-   *
-   * It used to be this device's KIND, on the reasoning that a computer reading
-   * this page was probably the daemon's own machine. That was a guess standing in
-   * for a fact, and it was wrong for every reader on a laptop setting up a server.
-   * The first question settles it, so the fact is passed instead: `fy pair --open`
-   * opens a browser on the daemon's machine, which is this one exactly when the
-   * reader said the daemon runs here.
-   */
-  readonly target: SetupTargetId;
-}
-
-/**
- * THE END OF THE AGENT ROUTE: the code came from the agent, not from the reader.
- *
- * Nothing here is a command, because nobody here has a terminal open — the agent
- * had it, on the other machine, and it was told to print a code and show it. So
- * this stage is the same pairing surface every other route uses, with the one
- * thing that is different about arriving here said plainly: the reader did not
- * produce this code and cannot re-produce it, so if it has expired the fix is to
- * ask the agent again rather than to go and type something.
- *
- * ON THE DAEMON'S OWN MACHINE THE JOURNEY MAY ALREADY BE OVER, and saying so is
- * not optional: the prompt tells the agent to run `fy pair --open` there, and that
- * opens Ferretry already paired IN ANOTHER TAB. Somebody left staring at a pairing
- * field while a finished app sits one tab away concludes the setup failed. It is
- * said only when the daemon is on this machine, because otherwise that tab opened
- * somewhere the reader is not sitting.
- */
-export function AgentPairStage({ pairing, target, stated = false }: AgentPairStageProps) {
-  return (
-    <div className={STAGE}>
-      <div className="min-w-0" data-onboarding-pairing="">
-        {pairing}
-      </div>
-      {target === 'this' ? (
-        <p className="m-0 text-meta leading-base text-muted" data-onboarding-agent-opened="">
-          If your agent ran <code className="font-mono text-syn-string">{PAIR_OPEN_COMMAND}</code> on this machine, it
-          has already opened Ferretry in another tab, paired. Nothing to do here — carry on there.
-        </p>
-      ) : null}
-      {stated ? null : (
-        <p className="m-0 text-meta leading-base text-muted">
-          The code is single-use and expires after about two minutes. If it has expired, ask your agent to run{' '}
-          <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> again and show you the fresh one.
-        </p>
-      )}
     </div>
   );
 }
@@ -429,8 +228,6 @@ export interface ElsewhereStageProps {
   readonly handoff: ReactNode;
   /** Switch to adding this browser as a client of a daemon that already exists. */
   readonly onAddAsClient: () => void;
-  /** Hand the install on that computer to an agent instead (the prompt to send it, then pairing). */
-  readonly onAgentInstead: () => void;
 }
 
 /**
@@ -453,7 +250,7 @@ export interface ElsewhereStageProps {
  * the reader may have meant — a daemon that already exists, which this browser
  * only wants to watch — is one tap away rather than "go and read the docs".
  */
-export function ElsewhereStage({ handoff, onAddAsClient, onAgentInstead }: ElsewhereStageProps) {
+export function ElsewhereStage({ handoff, onAddAsClient }: ElsewhereStageProps) {
   return (
     <div className={STAGE}>
       <p className="m-0 text-meta leading-base text-muted">
@@ -461,7 +258,6 @@ export function ElsewhereStage({ handoff, onAddAsClient, onAgentInstead }: Elsew
         machine — then come back here to pair this device.
       </p>
       {handoff}
-      <AgentInstead onAgentInstead={onAgentInstead} />
       <Aside summary="A daemon already exists?">
         <p className="m-0 text-meta leading-base text-muted">
           Then nothing needs installing. Add this device as a client of it instead.

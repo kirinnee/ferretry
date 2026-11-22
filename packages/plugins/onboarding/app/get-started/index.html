@@ -108,9 +108,6 @@
         color: var(--muted);
         font: inherit;
       }
-      .jump {
-        font-weight: 700;
-      }
       .hero {
         border-bottom: 1px solid var(--line);
       }
@@ -251,7 +248,6 @@
       }
       .tab:focus-visible,
       .copy:focus-visible,
-      .jump:focus-visible,
       .button:focus-visible,
       .brand:focus-visible,
       .nav-link:focus-visible {
@@ -380,37 +376,6 @@
         background: var(--paper-shade);
         color: var(--ink);
         font-size: 0.8em;
-      }
-      .agent {
-        margin-top: 30px;
-        padding-top: 26px;
-        border-top: 1px solid var(--line);
-      }
-      .agent[hidden] {
-        display: none;
-      }
-      .agent h3 {
-        margin: 0 0 10px;
-        font-family: var(--display);
-        font-size: 1.45rem;
-        font-weight: 500;
-        letter-spacing: -0.03em;
-      }
-      .agent .note {
-        margin-bottom: 16px;
-      }
-      .command.prompt pre {
-        max-height: 340px;
-        overflow: auto;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-      .command.prompt pre code {
-        white-space: inherit;
-        font-weight: 500;
-      }
-      .command.prompt pre code::before {
-        content: none;
       }
       .more {
         margin-top: 22px;
@@ -604,10 +569,6 @@
             steps. Use <code>fy runtime scan</code> to inspect your setup, then <code>fy runtime link claude</code> or
             <code>fy runtime link codex</code> to link it. Pair your phone with <code>fy pair</code>.
           </p>
-          <p class="note after">
-            Rather have your agent do it? <a class="jump" href="#agent">Copy the prompt</a> — it hands you each command
-            to run.
-          </p>
           <ul class="facts" aria-label="Before you start">
             <li>Latest release <strong>v%FY_RELEASE_VERSION%</strong></li>
             <li>macOS on Apple silicon · Linux amd64 / arm64</li>
@@ -726,74 +687,6 @@
                 <a href="https://github.com/kirinnee/ferretry/blob/main/INSTALLATION.md">INSTALLATION.md</a>; run
                 <code>fy onboard</code> after any of them.
               </p>
-              <section class="agent" id="agent" aria-labelledby="agent-title">
-                <h3 id="agent-title">Or let your agent do it.</h3>
-                <p class="note">
-                  Paste this into Claude Code or Codex on the computer you want to use. It looks around, recommends one
-                  way to install, and hands you each command to run. It never installs anything itself, so its safety
-                  checks never get in the way.
-                </p>
-                <div class="command prompt">
-                  <header>
-                    <span>Prompt for Claude Code or Codex</span><button class="copy" type="button" hidden>Copy</button>
-                  </header>
-                  <pre
-                    tabindex="0"
-                    aria-label="Prompt text"
-                  ><code data-agent-prompt>Help me set up Ferretry on this computer. Follow these rules exactly.
-
-How to talk to me
-- Whenever I need to do something, reply in exactly this shape, then stop and wait:
-  **Run this**
-  ```bash
-  &lt;the exact command(s), nothing else&gt;
-  ```
-  **Why:** &lt;one short line&gt;
-  **What you'll see:** &lt;one short line&gt;
-- One action at a time. No paragraphs, no repeated caveats.
-- Report what you find in 3 to 5 short lines, then your recommendation.
-
-What you may run
-- Only read-only checks and the fy commands named below. I run every install, update, sudo or service command myself.
-- Claude Code: tell me to type the command after a ! in this chat. Codex: tell me to run it in my own terminal, and hand me any check your sandbox blocks.
-- Anything that needs sudo goes in my own terminal.
-- If a command is blocked or fails, tell me the error in one line and stop. Never retry it or look for a way around it.
-- Never print, save or ask for a token, a secret or a pairing code.
-
-1. Look around (read-only; an error just means "not there"):
-   uname -sm
-   command -v brew nix fy home-manager darwin-rebuild
-   fy onboard --check --json
-   If that says "complete": true, go to step 3. Otherwise recommend ONE way to install with a one-line reason, list the others one line each, and let me choose:
-   - Homebrew, if brew is there: easiest updates.
-   - Home Manager or nix-darwin, if I use one: it lives in my config.
-   - nix profile, if nix is there: one command, no config.
-   - Installer, otherwise: one line, nothing else needed.
-
-2. Hand me ONE "Run this" for my choice.
-   Homebrew:
-     brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry
-     brew install --cask ferretry
-     fy onboard --yes
-   nix profile:
-     nix profile install github:kirinnee/ferretry
-     fy onboard --yes
-   Home Manager or nix-darwin: first show me where these two lines go in my flake.
-   Then hand me the rebuild (home-manager switch --flake . or darwin-rebuild switch --flake .) and fy onboard --yes:
-     inputs.ferretry.url = "github:kirinnee/ferretry";
-     home.packages = [ inputs.ferretry.packages.${pkgs.stdenv.hostPlatform.system}.default ];
-   Installer:
-     curl -fsSL --connect-timeout 30 --max-time 600 https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash
-     PATH="$HOME/.local/bin:$PATH" fy onboard --yes
-
-3. Check: run fy onboard --check --json. Read the steps and remedies. If incomplete, show the next remedy and wait. --yes leaves missing steps for later; it does not install or import.
-
-4. Pair my phone: hand me fy pair as a "Run this" for my own terminal, not this chat, so the code never reaches you. What I'll see: a QR code to scan with my phone's camera within two minutes.
-
-5. Stop. Afterwards, only when I ask: fy daemon status, fy login ls, fy runtime ls, fy runtime link claude or fy runtime link codex, and fy onboard (it asks questions, so I run it in my own terminal).
-   To update later: fy update, or the Update button in the app.</code></pre>
-                </div>
-              </section>
             </div>
           </div>
         </li>
@@ -974,22 +867,17 @@ What you may run
         group.querySelector('[role="tablist"]').hidden = false;
         select(guess, false);
 
-        /* The agent prompt is static text, the same for every tab: the agent looks at this computer and
-           recommends a method itself. tests/fixtures/agent-setup-prompt.txt is its golden copy. */
         var status = document.querySelector('[data-copy-status]');
         Array.prototype.slice.call(document.querySelectorAll('.command')).forEach(function (block) {
           var button = block.querySelector('.copy');
-          var prompt = block.querySelector('[data-agent-prompt]');
-          var text = prompt
-            ? prompt.textContent
-            : Array.prototype.map
-                .call(block.querySelectorAll('[data-command]'), function (line) {
-                  return line.textContent;
-                })
-                .join('\n');
+          var text = Array.prototype.map
+            .call(block.querySelectorAll('[data-command]'), function (line) {
+              return line.textContent;
+            })
+            .join('\n');
           if (!navigator.clipboard) return;
           button.hidden = false;
-          button.setAttribute('aria-label', prompt ? 'Copy the prompt for your agent' : 'Copy: ' + text);
+          button.setAttribute('aria-label', 'Copy: ' + text);
           button.addEventListener('click', function () {
             navigator.clipboard.writeText(text).then(
               function () {

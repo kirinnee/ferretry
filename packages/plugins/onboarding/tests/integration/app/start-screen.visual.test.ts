@@ -2,7 +2,7 @@
  * THE DAEMON-LESS FIRST RUN'S OWN PAGES in a real browser over fake data (`fixtures/start-screen-scene.tsx`), light and dark at
  * 390 and 1280 (r10 O5): the start screen's three cards (not the page wide, one row on a desktop and a stack on a phone, a
  * select animation that plays on a NEW choice), its auto-width Continue, the target question, and the install page with its
- * quiet "Let an agent do it" link and the shared footer. Set `FY_START_SHOTS_DIR` to keep `<viewport>-<theme>-<case>.png`.
+ * commands (and no agent entry point, C59 O7) and the shared footer. Set `FY_START_SHOTS_DIR` to keep `<viewport>-<theme>-<case>.png`.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -175,15 +175,12 @@ describe('the target question', () => {
 
 describe('the install stage', () => {
   for (const variant of VARIANTS) {
-    it(`${variant.name}: the commands, a quiet agent link, and a footer that is not the page wide`, async () => {
-      const { tab, close } = await open(variant, 'install', '[data-onboarding-agent-instead]');
+    it(`${variant.name}: the commands, no agent entry point, and a footer that is not the page wide`, async () => {
+      const { tab, close } = await open(variant, 'install', '[data-onboarding-next]');
       try {
         await noOverflow(tab);
-        const link = await boxOf(tab, '[data-onboarding-agent-instead]');
-        // C59 audit: the agent link is an inline action in the sentence now, no taller than a text line (its 44 px target is an
-        // invisible layer), not an outlined button twice the sentence's height.
-        expect(link.height, 'a text-size inline action').toBeLessThanOrEqual(30);
-        expect(link.width, 'the agent link is not the page wide').toBeLessThan(variant.width * 0.6);
+        expect(await tab.locator('[data-onboarding-agent-link], [data-onboarding-agent-instead]').count()).toBe(0);
+        expect(await tab.locator('text=/let an agent do it/i').count()).toBe(0);
         const next = await boxOf(tab, '[data-onboarding-next]');
         expect(next.height).toBeGreaterThanOrEqual(44);
         expect(next.width, 'Next is not the page wide').toBeLessThan(variant.width / 2);
@@ -202,10 +199,12 @@ describe('the install stage', () => {
 
 describe('the other computer page', () => {
   for (const variant of VARIANTS) {
-    it(`${variant.name}: the link to open there, and the same quiet agent link`, async () => {
-      const { tab, close } = await open(variant, 'elsewhere', '[data-onboarding-agent-instead]');
+    it(`${variant.name}: the link to open there, and no agent entry point`, async () => {
+      const { tab, close } = await open(variant, 'elsewhere', '[data-onboarding-next]');
       try {
         await noOverflow(tab);
+        expect(await tab.locator('[data-onboarding-agent-link], [data-onboarding-agent-instead]').count()).toBe(0);
+        expect(await tab.locator('text=/let an agent do it/i').count()).toBe(0);
         await shot(tab, variant, 'elsewhere');
       } finally {
         await close();

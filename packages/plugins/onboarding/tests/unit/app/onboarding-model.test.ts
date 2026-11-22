@@ -4,11 +4,10 @@
  * Every command it shows is run by a stranger on a machine nobody here can see,
  * so the tests that matter are the ones that pin the text: against
  * `INSTALLATION.md` for the install routes, against `Taskfile.yaml` and
- * `wrangler.jsonc` for the relay ones, and against a list of things the agent
- * prompt must never contain, because that prompt ships inside a public bundle.
+ * `wrangler.jsonc` for the relay ones.
  *
  * The journey tests exist for a different reason: the step list is a function of
- * WHICH COMPUTER runs the daemon, WHO INSTALLS IT (an agent, by a link on the install page) and WHAT THIS DEVICE IS, and the
+ * WHICH COMPUTER runs the daemon and WHAT THIS DEVICE IS, and the
  * mistakes it can make are all bad in a way coverage cannot see. Offering a phone
  * a step it cannot act on sends a reader to a screen full of commands with nowhere
  * to type them; making a desktop pair by scanning its own screen is the indignity
@@ -20,8 +19,6 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
-  AGENT_HARNESSES,
-  agentSetupPrompt,
   DAEMON_INSTALL_COMMAND,
   DAEMON_SERVING_OUTPUT,
   DAEMON_START_COMMAND,
@@ -34,7 +31,6 @@ import {
   installChannel,
   isDaemonRouteId,
   isLastOnboardingStep,
-  isOnboardingDoerId,
   isOnboardingRouteId,
   isOnboardingStepId,
   isSetupTargetId,
@@ -65,25 +61,16 @@ const repoFile = async (path: string): Promise<string> =>
 
 const installationDoc = await repoFile('INSTALLATION.md');
 
-/** A daemon standing up on the machine reading the page, installed by hand. */
+/** A daemon standing up on the machine reading the page. */
 const here = (route: 'first-time' | 'add-daemon' = 'first-time'): OnboardingPath => ({
   route,
   target: 'this',
-  doer: 'self',
   device: 'desktop',
 });
 
-/** The same by hand, but the daemon lives somewhere the reader has to walk to. */
+/** The same, but the daemon lives somewhere the reader has to walk to. */
 const away = (device: 'desktop' | 'mobile' = 'mobile', route: 'first-time' | 'add-daemon' = 'first-time') =>
-  ({ route, target: 'other', doer: 'self', device }) as OnboardingPath;
-
-/** An agent doing it, on either machine. */
-const byAgent = (target: 'this' | 'other', device: 'desktop' | 'mobile' = 'desktop'): OnboardingPath => ({
-  route: 'first-time',
-  target,
-  doer: 'agent',
-  device,
-});
+  ({ route, target: 'other', device }) as OnboardingPath;
 
 const client = (device: 'desktop' | 'mobile' = 'desktop'): OnboardingPath => ({ route: 'add-client', device });
 
@@ -126,48 +113,10 @@ describe('which computer runs the daemon', () => {
   });
 });
 
-describe('who installs it', () => {
-  it('is no question any more: two ids survive, for a stored place and a link', () => {
-    // r10 O5 (decision D1): the install page opens on the commands and links to the agent's prompt.
-    expect(isOnboardingDoerId('agent')).toBe(true);
-    expect(isOnboardingDoerId('self')).toBe(true);
-    expect(isOnboardingDoerId('someone-else')).toBe(false);
-    expect(isOnboardingDoerId(null)).toBe(false);
-  });
-});
-
 describe('the agents Ferretry runs', () => {
-  it('names both harnesses, with a command that installs and a command that only checks', () => {
-    // Ferretry RUNS Claude Code and Codex; it is not either of them. With both
-    // missing, the daemon starts perfectly and can run nothing at all.
-    expect(AGENT_HARNESSES.map(harness => harness.id)).toEqual(['claude', 'codex']);
-    for (const harness of AGENT_HARNESSES) {
-      expect(harness.command).not.toContain('\n');
-      // The check names the executable a fresh fleet manifest points at, and asks
-      // it for nothing but its version.
-      expect(harness.check).toBe(`${harness.id} --version`);
-    }
-    expect(AGENT_HARNESSES.map(harness => harness.label)).toEqual(['Claude Code', 'Codex']);
-  });
-
-  it('installs each one the way its own documentation does, and nothing local', () => {
-    // These belong to other people's products, so unlike `INSTALL_CHANNELS` no
-    // contract in this repository can hold them to anything. What they must not do
-    // is name a path, a wrapper or this machine.
-    expect(AGENT_HARNESSES.map(harness => harness.command)).toEqual([
-      'npm install -g @anthropic-ai/claude-code',
-      'npm install -g @openai/codex',
-    ]);
-    for (const harness of AGENT_HARNESSES) {
-      expect(harness.command).toContain('npm install -g');
-      for (const local of ['$HOME', '~/', 'nix profile', 'sudo']) expect(harness.command).not.toContain(local);
-    }
-  });
-
-  it('is no step of any journey: the Claude and Codex steps of the setup flow install and sign in', () => {
-    // r10 O5 (decision D1): "Install Claude Code or Codex" was a daemonless stage; the flow that follows pairing owns it now,
-    // and an agent doing the setup covers the check inside its prompt.
-    for (const path of [here(), here('add-daemon'), away(), byAgent('this'), byAgent('other', 'mobile'), client()]) {
+  it('are no step of any journey: the Claude and Codex steps of the setup flow install and sign in', () => {
+    // r10 O5 (decision D1): "Install Claude Code or Codex" was a daemonless stage; the flow that follows pairing owns it now.
+    for (const path of [here(), here('add-daemon'), away(), client()]) {
       expect(onboardingRouteSteps(path)).not.toContain('agents' as never);
     }
     expect(isOnboardingStepId('agents')).toBe(false);
@@ -235,7 +184,7 @@ describe('the steps each set of answers walks', () => {
   });
 
   it('has no "add your phone" step and no "you are set up" step on any journey', () => {
-    for (const path of [here(), here('add-daemon'), away(), byAgent('this'), client()]) {
+    for (const path of [here(), here('add-daemon'), away(), client()]) {
       expect(onboardingRouteSteps(path)).not.toContain('handoff' as never);
       expect(onboardingRouteSteps(path)).not.toContain('done' as never);
     }
@@ -259,19 +208,6 @@ describe('the steps each set of answers walks', () => {
     expect(onboardingRouteSteps(away('desktop'))).toEqual(onboardingRouteSteps(away('mobile')));
   });
 
-  it('walks one agent journey wherever the reader is standing', () => {
-    // No install to be impossible here, no platform to pick: the agent has the
-    // terminal, and this browser only has to end up paired with the daemon.
-    for (const target of ['this', 'other'] as const) {
-      for (const device of ['desktop', 'mobile'] as const) {
-        if (!isTargetPossible(target, device)) continue;
-        expect(onboardingRouteSteps(byAgent(target, device))).toEqual(['brief', 'agent-pair']);
-      }
-    }
-    expect(firstOnboardingStep(byAgent('this'))).toBe('brief');
-    expect(onboardingStepCount(byAgent('other', 'mobile'))).toBe(2);
-  });
-
   it('gives a reader who already has a daemon nothing to install', () => {
     for (const device of ['desktop', 'mobile'] as const) {
       expect(onboardingRouteSteps(client(device))).toEqual(['scan']);
@@ -289,8 +225,6 @@ describe('the steps each set of answers walks', () => {
       here('add-daemon'),
       away('desktop'),
       away('mobile'),
-      byAgent('this'),
-      byAgent('other', 'mobile'),
       client('desktop'),
       client('mobile'),
     ];
@@ -341,7 +275,6 @@ describe('the steps each set of answers walks', () => {
     // Pairing is the last thing the daemonless half does: the setup flow takes over when the daemon answers.
     expect(pairingOnboardingStep(here())).toBe('local');
     expect(pairingOnboardingStep(here('add-daemon'))).toBe('local');
-    expect(pairingOnboardingStep(byAgent('this'))).toBe('agent-pair');
     expect(pairingOnboardingStep(away())).toBe('scan');
     expect(pairingOnboardingStep(client())).toBe('scan');
   });
@@ -366,12 +299,12 @@ describe('the steps each set of answers walks', () => {
     expect(onboardingStep('daemon').title).toBe('Start the daemon');
     expect(onboardingStep('local').summary).toContain('nothing to scan');
     expect(onboardingStep('elsewhere').title).toBe('Open Ferretry on that computer');
-    expect(onboardingStep('brief').title).toBe('Give your agent the prompt');
-    expect(onboardingStep('agent-pair').short).toBe('Pair');
     expect(isOnboardingStepId('local')).toBe(true);
     expect(isOnboardingStepId('elsewhere')).toBe(true);
     // The three r10 O5 removed: installing an agent, offering a phone, and the "you are set up" page.
     for (const gone of ['agents', 'handoff', 'done']) expect(isOnboardingStepId(gone)).toBe(false);
+    // And the two C59 O7 removed with the agent journey: its prompt and its pairing.
+    for (const gone of ['brief', 'agent-pair']) expect(isOnboardingStepId(gone)).toBe(false);
     // The step this replaced, whose subject was the wrong machine entirely.
     expect(isOnboardingStepId('need-computer')).toBe(false);
     expect(isOnboardingStepId('bribe')).toBe(false);
@@ -383,7 +316,7 @@ describe('the steps each set of answers walks', () => {
 describe('going back', () => {
   it('lands on the question that actually opened this journey', () => {
     // A daemon journey was opened by the target question when this device asked it; the pairing entry, and a daemon
-    // journey whose machine was settled, were opened by the entry question itself (r10 O5: there is no doer question).
+    // journey whose machine was settled, were opened by the entry question itself.
     expect(questionBehindRoute('add-daemon', 'desktop')).toBe('target');
     expect(questionBehindRoute('first-time', 'desktop')).toBe('entry');
     expect(questionBehindRoute('first-time', 'mobile')).toBe('entry');
@@ -399,12 +332,12 @@ describe('handing the setup to the other device', () => {
     // sender drew an unreadable QR whenever a laptop handed a server its setup.
     expect(handoffTarget(away('mobile'))).toEqual({
       receiver: 'computer',
-      journey: { route: 'first-time', target: 'this', doer: 'self' },
+      journey: { route: 'first-time', target: 'this' },
       step: 'install',
     });
     expect(handoffTarget(away('desktop', 'add-daemon'))).toEqual({
       receiver: 'computer',
-      journey: { route: 'add-daemon', target: 'this', doer: 'self' },
+      journey: { route: 'add-daemon', target: 'this' },
       step: 'install',
     });
     // A computer with a daemon has only membership to offer, and the phone needs
@@ -421,12 +354,11 @@ describe('handing the setup to the other device', () => {
     });
   });
 
-  it('tells the receiving computer to install BY HAND on ITSELF, which is the recursion', () => {
+  it('tells the receiving computer to install on ITSELF, which is the recursion', () => {
     // One place teaches installation, and it is always teaching the machine the
     // reader is sitting at.
     const sent = handoffTarget(away('mobile'));
     expect(sent.journey.route === 'add-client' ? undefined : sent.journey.target).toBe('this');
-    expect(sent.journey.route === 'add-client' ? undefined : sent.journey.doer).toBe('self');
     expect(isStepOfRoute({ ...sent.journey, device: 'desktop' }, sent.step)).toBe(true);
   });
 });
@@ -499,136 +431,9 @@ describe('install channels', () => {
   });
 });
 
-describe('the agent setup prompt', () => {
-  const both = [agentSetupPrompt('this'), agentSetupPrompt('other')];
-
-  it('carries the same commands the page displays', () => {
-    for (const prompt of both) {
-      for (const channel of INSTALL_CHANNELS) {
-        expect(prompt).toContain(channel.label);
-        for (const line of channel.command.split('\n')) expect(prompt).toContain(line);
-      }
-      for (const command of [VERIFY_COMMAND, DAEMON_START_COMMAND, DAEMON_STATUS_COMMAND]) {
-        expect(prompt).toContain(command);
-      }
-    }
-  });
-
-  it('tells the agent to stop and report rather than improvise', () => {
-    for (const prompt of both) {
-      expect(prompt).toContain('stop and report');
-      expect(prompt).toContain('Do not improvise');
-    }
-  });
-
-  it('names ONE pairing command, because the reader already answered where they are', () => {
-    // It used to make the agent ASK whether the human was on this machine, since
-    // it could not know and guessing spends a single-use code. The first question
-    // settles that before an agent is offered at all.
-    const onThisMachine = agentSetupPrompt('this');
-    expect(onThisMachine).toContain(PAIR_OPEN_COMMAND);
-    expect(onThisMachine).not.toContain('Ask me whether');
-    // With the one fallback that is not hedging: a headless host cannot launch a
-    // browser, and an agent that hits that with no instructions stops dead.
-    expect(onThisMachine).toContain('cannot open a browser');
-    expect(onThisMachine).toContain(PAIR_COMMAND);
-
-    const fromElsewhere = agentSetupPrompt('other');
-    expect(fromElsewhere).toContain(PAIR_COMMAND);
-    expect(fromElsewhere).not.toContain(PAIR_OPEN_COMMAND);
-    expect(fromElsewhere).toContain('the QR code and the pairing link');
-    expect(fromElsewhere).toContain('single-use');
-  });
-
-  it('makes the agent CONFIRM a harness rather than assume one, on either target', () => {
-    // The prompt is pasted INTO Claude or Codex, so one is there by definition —
-    // which is exactly why this says confirm. An agent told "install a harness"
-    // either installs a second one nobody asked for or skips the step as obviously
-    // fine, and neither answer tells the human anything.
-    for (const prompt of both) {
-      expect(prompt).toContain('check and not an install');
-      for (const harness of AGENT_HARNESSES) {
-        expect(prompt).toContain(harness.check);
-        expect(prompt).toContain(harness.command);
-        expect(prompt).toContain(harness.label);
-      }
-      // At least one, never both.
-      expect(prompt).toContain('If at least one answers');
-      expect(prompt).toContain('install exactly one of these');
-      // And it happens before the daemon boots, so the daemon's own report at boot
-      // is about a machine that can already run something.
-      expect(prompt.indexOf('check and not an install')).toBeLessThan(prompt.indexOf(DAEMON_START_COMMAND));
-    }
-  });
-
-  it('tells the agent it IS one of them, so it never reinstalls itself', () => {
-    // The reader of this text is by definition one of the two things it is about.
-    // An agent that reads "install a harness" and dutifully installs the harness it
-    // already IS produces a screenshot nobody wants to see — so the instruction is
-    // guarded twice: named a check, and gated on NEITHER command answering.
-    for (const prompt of both) {
-      expect(prompt).toContain('YOU ARE ONE OF THEM, so this is a check and not an install');
-      expect(prompt).toContain('do not reinstall yourself');
-      expect(prompt).toContain('ONLY if neither answers');
-      // The check comes before any install command in the text, so an agent reading
-      // top to bottom meets the guard first.
-      for (const harness of AGENT_HARNESSES) {
-        expect(prompt.indexOf('do not reinstall yourself')).toBeLessThan(prompt.indexOf(harness.command));
-      }
-    }
-  });
-
-  it('says why the check is worth running even though the reader is a harness', () => {
-    // Ferretry launches an EXECUTABLE, so what matters is one on PATH rather than
-    // the route by which an agent reaches the human — and in that case installing
-    // one is exactly right rather than redundant.
-    for (const prompt of both) {
-      expect(prompt).toContain('Ferretry launches an');
-      expect(prompt).toContain('EXECUTABLE');
-      expect(prompt).toContain('not the way you happen');
-      expect(prompt).toContain('An IDE extension, a wrapper or a remote session');
-    }
-  });
-
-  it('refuses to sign anybody in, and says a version is not an account', () => {
-    // A version string proves an executable exists. An agent that tried to
-    // authenticate on the reader's behalf would be doing the one thing on this
-    // page nobody delegated to it.
-    for (const prompt of both) {
-      expect(prompt).toContain('Being on PATH is not being signed in');
-      expect(prompt).toContain('instead of attempting it');
-    }
-  });
-
-  it('is self-contained: it says what Ferretry is before asking for anything', () => {
-    // The agent may know nothing about this project and must not have to browse
-    // documentation to follow it.
-    for (const prompt of both) {
-      expect(prompt).toContain('Ferretry is a CLI');
-      expect(prompt).toContain('Detect the operating system and CPU architecture');
-      expect(prompt).toContain('Linux amd64');
-    }
-  });
-
-  it('says nothing about the person holding the page', () => {
-    // The bundle is public: anyone can fetch this string. It must describe a
-    // stranger's machine and no one's fleet.
-    const forbidden = [
-      'localhost',
-      '127.0.0.1',
-      'FY_TOKEN',
-      'api-token',
-      'daemonId',
-      'deviceId',
-      'ferretry.pages.dev',
-      '$HOME',
-      '~/.ferretry',
-    ];
-    for (const prompt of both) {
-      for (const secret of forbidden) expect(prompt).not.toContain(secret);
-      // No absolute URL beyond the documented package sources.
-      const urls = prompt.match(/https?:\/\/[^\s"']+/g) ?? [];
-      for (const url of urls) expect(installationDoc).toContain(url);
-    }
+describe('the removed "let an agent do it" path (C59 O7)', () => {
+  it('leaves no agent prompt, harness list or agent step in the model', async () => {
+    const model = await Bun.file(new URL('../../../app/onboarding-model.ts', import.meta.url)).text();
+    expect(model).not.toMatch(/agentSetupPrompt|AGENT_HARNESSES|OnboardingDoerId|agent-pair|'brief'/);
   });
 });

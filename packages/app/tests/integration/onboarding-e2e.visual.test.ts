@@ -456,11 +456,11 @@ const stagePage = async (tab: Page, variant: Variant, key: string): Promise<void
   ).toEqual([]);
   expect(await clippedBoxes(tab, '[data-onboarding]'), `${key}: no box hides what it holds`).toEqual([]);
   const heights = await tab
-    .locator('[data-onboarding-channel], [data-onboarding-actions] button, [data-onboarding-agent-instead]')
+    .locator('[data-onboarding-channel], [data-onboarding-actions] button')
     .evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().height * 10) / 10));
-  // A button that offers something (Let an agent do it, the OS choices) has a border: never a plain text line in a sentence.
+  // A button that offers something (the OS choices) has a border: never a plain text line in a sentence.
   for (const borderless of await tab
-    .locator('[data-onboarding-channel], [data-onboarding-agent-instead]')
+    .locator('[data-onboarding-channel]')
     .evaluateAll(nodes =>
       nodes
         .filter(node => Number.parseFloat(getComputedStyle(node).borderTopWidth) === 0)
