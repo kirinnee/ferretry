@@ -708,6 +708,48 @@ describe('a message is read in the Durian worker, under the real policy', () => 
     }
   }, 60_000);
 
+  // The one visible new state: a message that was ended is its own text with a quiet line under it. Fake text only.
+  const FAKE = [
+    '# Release notes for the demo',
+    '',
+    'FY-SLOW-PARSE This is made-up text for a picture: the build went green, the checklist is done, and nothing here is real.',
+    '',
+    '- first made-up item with a **bold** word',
+    '- second made-up item with `code`',
+  ].join('\n');
+  for (const viewport of ['phone', 'desktop'] as const)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`shows an ended message as its text with a note, inside the page (${viewport}, ${scheme})`, async () => {
+        slowWorker = true;
+        const visit = await open('text=', { viewport, scheme, init: PROBE });
+        try {
+          await visit.page.evaluate(
+            text => (window as unknown as { fyStream: (text: string) => void }).fyStream(text),
+            FAKE,
+          );
+          await until(visit.page, "document.querySelector('[data-fy-plain-note]') !== null", 5_000);
+          const m = await visit.page.evaluate(() => {
+            const note = document.querySelector<HTMLElement>('[data-fy-plain-note]');
+            const box = note?.getBoundingClientRect();
+            const style = note === null ? undefined : getComputedStyle(note);
+            return {
+              text: note?.textContent,
+              role: note?.getAttribute('role') ?? null,
+              inside: box !== undefined && box.left >= 0 && box.right <= window.innerWidth,
+              wide: document.documentElement.scrollWidth > window.innerWidth + 1,
+              fontSize: style?.fontSize,
+            };
+          });
+          expect(m).toMatchObject({ text: 'shown as plain text', role: null, inside: true, wide: false });
+          if (shotsDir !== '')
+            await visit.page.screenshot({ path: join(shotsDir, `plain-note-${viewport}-${scheme}.png`) });
+          await expectNoViolations(visit, 'ended message');
+        } finally {
+          slowWorker = false;
+          await visit.close();
+        }
+      }, 60_000);
+
   it('does not parse the killed message again, and the next message still reads (a new worker)', async () => {
     slowWorker = true;
     const visit = await open('text=', { init: PROBE });

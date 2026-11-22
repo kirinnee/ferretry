@@ -34,8 +34,8 @@ import { type ReadRequest, isWorkerMessage, type WorkerMessage } from './durian-
  * ones on a phone; 500 ms leaves those alone and still ends a parse that does not return in about half a second.
  */
 export const PARSE_BUDGET_MS = 500;
-/** How long a worker may take to say it is loaded before it is given up on. */
-export const STARTUP_BUDGET_MS = 5_000;
+/** How long a worker may take to say it is loaded before it is given up on (a cold start on a phone over a slow link is seconds). */
+export const STARTUP_BUDGET_MS = 8_000;
 /** The least time between two asks for the same streaming message. */
 export const STREAM_INTERVAL_MS = 100;
 /** The most the cache may hold, in characters: a source counts once, a read document up to {@link DOCUMENT_WEIGHT} times more. */
