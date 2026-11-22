@@ -1,17 +1,14 @@
 /* ============================================================================
-   BRIEFING — the look of a long, calm PRINTED report: Gelasio serif headings over thin Poppins body, IBM Plex Mono for every
-   number, label and kicker, pill-shaped controls on medium-radius cards printed on a sheet of paper with a fine grain, soft small
-   shadows, generous spacing, and a HOT focus ring (a 3px saturated outline with a soft band inside it).
+   BRIEFING — the look of the owner's reference report (C59 O6b): Poppins for everything (headings 600 and tight, body 400,
+   buttons and kickers 500), IBM Plex Mono for every number, label and kicker, pill-shaped controls on 16px cards, soft small
+   navy-tinted shadows, generous spacing, a flat page (NO paper grain, NO serif: the reference has neither), and a 2px indigo
+   focus ring with a soft band inside it.
 
-   Look only: the type scale, spacing, radii, shadows, rules and motion are
-   reproduced as tokens; no text, logo or image from any report is copied. Any
-   palette can wear it; the one named "Briefing" (navy, indigo, hot pink) is
-   its suggested pairing.
+   Look only: the type scale, spacing, radii, shadows, rules and motion are reproduced as tokens; no text, logo or image from
+   any report is copied. Any palette can wear it; the one named "Briefing" (lavender-grey, white cards, navy ink, indigo, hot
+   pink) is its suggested pairing.
 
-   Fonts: Gelasio (a variable 400-700 serif), Poppins 300 + 600 and IBM Plex Mono 400 + 700, bundled as OFL woff2
-   (`src/assets/fonts/LICENSES.md`). Poppins has no 400/500 cut here, so the
-   declared faces map 100–450 to the thin cut and 500–900 to the semibold one;
-   `--weight-normal` is therefore 300 and every emphasis is 600. Headings are Gelasio at 700.
+   Fonts: Poppins 400 + 500 + 600 and IBM Plex Mono 400 + 700, bundled as OFL woff2 (`src/assets/fonts/LICENSES.md`).
 
    SCOPE: every element rule below names the page (`:root`, outside any `[data-swatch]`) or a swatch of THIS style, so a preview of
    another style on a Briefing page keeps its own look (and a Briefing preview looks the same on any page).
@@ -19,29 +16,29 @@
 :root[data-style='briefing'],
 [data-swatch][data-style='briefing'] {
   /* ═══ structural token layer ═══ */
-  --font-display: 'Gelasio', 'Times New Roman', Times, 'Liberation Serif', serif;
+  --font-display: 'Poppins', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   --font-body: 'Poppins', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
-  /* Thin body, semibold everything that matters, serif headings: one key point per line. */
-  --weight-normal: 300;
-  --weight-medium: 600;
+  /* The reference's weights: a 400 body, 500 for buttons, 600 for headings and emphasis. */
+  --weight-normal: 400;
+  --weight-medium: 500;
   --weight-strong: 600;
-  --weight-display: 700;
+  --weight-display: 600;
   --weight-heading: var(--weight-display);
   --text-2xs: 11px;
   --text-xs: 12px;
   --text-sm: 13px;
-  --text-base: 14px;
-  --text-md: 15px;
-  --text-lg: 17px;
-  --text-display: 1.9rem;
-  --text-input-desktop: 14px;
-  --font-size-base: 14px;
+  --text-base: 15px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-display: 2.1rem;
+  --text-input-desktop: 15px;
+  --font-size-base: 15px;
   --leading-base: 1.62;
   --leading-tight: 1.25;
-  --tracking-display: -0.01em;
+  --tracking-display: -0.03em;
   --tracking-body: 0;
-  --md-font-size: 14.5px;
+  --md-font-size: 15.5px;
   --md-leading: 1.7;
   --code-font-size: 12.5px;
   --chrome-font-size: 12px;
@@ -50,19 +47,19 @@
   --label-transform: uppercase;
   --label-variant: normal;
   --label-size: 11px;
-  --label-weight: 400;
-  --tracking-label: 0.18em;
+  --label-weight: 600;
+  --tracking-label: 0.12em;
   --display-transform: none;
   /* Pills for controls, a medium radius for cards, a small one for chips of code. A field is 10px: nothing multi-line is ever rounder. */
   --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-lg: 16px;
   --radius-control: var(--radius-pill);
   --radius-tab: var(--radius-pill);
   --radius-badge: var(--radius-pill);
   --radius-input: 10px;
-  --radius-panel: var(--radius-md);
+  --radius-panel: var(--radius-lg);
   --bubble-radius: var(--radius-md);
   --bubble-stroke: 1px;
   --bubble-border: var(--border);
@@ -96,8 +93,8 @@
   --flow-message: 16px;
   --flow-turn: 24px;
   --flow-paragraph: 0.7em;
-  /* Hot focus: thick and saturated, drawn INSIDE the control with a soft band under it (never outside, so no ancestor clips it). */
-  --focus-width: 3px;
+  /* The reference's focus is a 2px indigo outline; drawn INSIDE the control with a soft band under it (never outside, so no ancestor clips it). */
+  --focus-width: 2px;
   --focus-offset: calc(-1 * var(--focus-width));
   --focus-shadow: inset 0 0 0 calc(var(--focus-width) + 4px) var(--ring);
   /* Calm and eased: nothing loops but the busy mark, every change is under 600ms and nothing overshoots. */
@@ -114,25 +111,24 @@
   --motion-loading-shimmer: 3.2s;
 
   /* ═══ the component contract (r11 T11): what carries Briefing in every slot — a printed report ═══ */
-  /* BACKGROUND: paper. No pattern and no wash; a fine fractal grain over the page (an inline data URI: no request), multiplied
-     into the sheet in light and screened in dark. The mode blocks below set the blend. */
+  /* BACKGROUND: a flat page, as the reference draws it: no pattern, no wash, no grain. */
   --bg-pattern: var(--bg-pattern-none);
-  --grain-image: var(--grain-noise);
-  --grain-alpha: 0.07;
+  --grain-image: none;
+  --grain-alpha: 0;
   --grain-scale: 1;
-  --grain-blend: multiply;
-  /* MARKDOWN: a printed page. A 700 serif h1 under a double rule, h2 under a hairline, a ruled box for code, a pull-quote block (no
+  --grain-blend: normal;
+  /* MARKDOWN: a written report. A 600 Poppins h1 and h2 with no rules (the reference draws none), a navy box for code, a pull-quote block (no
      bar), a ledger table (rules between rows and none between columns, an uppercase header), bold underlined links, square bullets. */
   --md-h1-size: 1.55em;
-  --md-h1-weight: 700;
+  --md-h1-weight: 600;
   --md-h1-case: none;
-  --md-h1-rule: 3px double var(--border-strong);
-  --md-h1-rule-pad: 0.2em;
+  --md-h1-rule: none;
+  --md-h1-rule-pad: 0em;
   --md-h2-size: 1.2em;
-  --md-h2-weight: 700;
+  --md-h2-weight: 600;
   --md-h2-case: none;
-  --md-h2-rule: 1px solid var(--border);
-  --md-h2-rule-pad: 0.15em;
+  --md-h2-rule: none;
+  --md-h2-rule-pad: 0em;
   --md-code-border: 1px solid var(--border-strong);
   --md-code-bar: var(--md-code-border);
   --md-code-radius: 4px;
@@ -159,8 +155,8 @@
   --spinner-parts: inline;
   --spinner-parts-speed: 1.6s;
   --spinner-parts-timing: linear;
-  /* HYPERMEDIA (read by r12 H5; no renderer reads an --hm-* slot yet): INK — monochrome strokes on paper: outlined nodes with no fill,
-     a 2px corner, straight edges, a serif label for a header. */
+  /* HYPERMEDIA (read by r12 H5; no renderer reads an --hm-* slot yet): INK — monochrome strokes on the page: outlined nodes with no fill,
+     a 2px corner, straight edges, a label for a header. */
   --hm-shape: ink;
   --hm-radius: 2px;
   --hm-stroke: 1px;
@@ -178,14 +174,12 @@
   --shadow-sm: 0 1px 2px var(--shadow-sm-1);
   --shadow-md: 0 6px 18px var(--shadow-md-1), 0 1px 3px var(--shadow-md-2);
   --shadow-lg: 0 18px 44px var(--shadow-lg-2), 0 4px 12px var(--shadow-lg-1);
-  --grain-alpha: 0.05;
-  --grain-blend: screen;
 }
 
-/* THE REPORT CARD: a printed sheet ruled along its top edge by a hairline, held by the inset rule (no extra border, no layout shift). */
+/* THE REPORT CARD: a white card on the lavender page, held by a hairline border and a soft shadow (no extra rule, no layout shift). */
 :root[data-style='briefing'],
 [data-swatch][data-style='briefing'] {
-  --rule-inset: inset 0 1px 0 var(--border-strong);
+  --rule-inset: inset 0 1px 0 var(--border);
 }
 
 @media (max-width: 640px) {
@@ -224,7 +218,7 @@
   border-width: 1.5px;
 }
 
-/* THE HOT RING: the shared ring (3px, inside) with a soft `--ring` band beneath it. A filled button keeps the shared `--surface`
+/* THE RING: the shared ring (2px, inside, indigo) with a soft `--ring` band beneath it. A filled button keeps the shared `--surface`
    band (design-system.css) so its ring reads against the accent fill; a text field's band is the same rule's (design-system.css). */
 :root[data-style='briefing'] .kt-btn:not([data-variant='primary']):focus-visible:not([data-swatch] *),
 [data-swatch][data-style='briefing'] .kt-btn:not([data-variant='primary']):focus-visible {
@@ -269,11 +263,11 @@
 
 :root[data-style='briefing'] .fy-cc__title:not([data-swatch] *),
 [data-swatch][data-style='briefing'] .fy-cc__title {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 /* The tick is a printed mark: a ruled square in the accent, not a round badge. */
@@ -391,7 +385,7 @@
 }
 
 /* A badge is a printed stamp: its tinted fill is mostly paper (a 60/40 mix of the surface and the tone's tint), so the tone's ink
-   keeps the contrast margin the paper grain (a multiply over the page in light) would otherwise eat on a mid tint. */
+   keeps a wide contrast margin on a mid tint. */
 :root[data-style='briefing'] .kt-badge:not([data-tone]):not([data-swatch] *),
 [data-swatch][data-style='briefing'] .kt-badge:not([data-tone]) {
   background-color: color-mix(in srgb, var(--surface) 60%, var(--pend-bg));
@@ -413,7 +407,7 @@
   background-color: color-mix(in srgb, var(--surface) 60%, var(--accent-soft));
 }
 
-/* Page and section headings of the shell read in the serif too (the shell draws them in the body face), like the report's own. */
+/* Page and section headings of the shell read in the display face (the shell draws them in the body face), like the report's own. */
 :root[data-style='briefing'] :is(.fy-page h1, .fy-page h2):not([data-swatch] *),
 [data-swatch][data-style='briefing'] :is(.fy-page h1, .fy-page h2) {
   font-family: var(--font-display);

@@ -117,6 +117,7 @@ import { livePort } from './live-port.ts';
 import { KERNEL_NEEDER, neederOf, ProvidedPerNeeder } from './needer.ts';
 import { guardedToolResult } from './tool-result.ts';
 import { type LogSink, scopedLog } from './log.ts';
+import { nameUnnamedMachine } from './machine-name.ts';
 import { noWebSockets } from './adapters/process.ts';
 import { outboundSecretTransport } from './adapters/outbound-secret.ts';
 import { exactNetworkHosts, ownSecretsPort } from './secrets.ts';
@@ -1548,6 +1549,8 @@ async function bootLocked(
     },
     clock,
     lease: (options.timings ?? DEFAULT_DAEMON_TIMINGS).lease,
+    // Only a valid, unnamed `host.yaml` takes the name a pairing brought; the answer is the name the machine now goes by.
+    nameMachine: typed => nameUnnamedMachine(hostConfig, typed, () => identityPort.daemonName),
     log: warnings.child('session'),
   });
   own(() => sessionLayer.close());

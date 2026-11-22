@@ -34,7 +34,7 @@ import type { CodexLoginFlow, HarnessLoginLastCode } from '../../contract/index.
 import { CheckCircle2, KeyRound, Link2, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import type { FormEvent } from 'react';
 import { cn } from '../ui.ts';
-import { Button, SecretTextarea, useSecretTextarea } from '../ui.ts';
+import { ActionRow, Button, SecretTextarea, useSecretTextarea } from '../ui.ts';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../ui.ts';
 import { SignInDemo } from './sign-in-demo.tsx';
 import { ResumedNote, StartOverButton } from './sign-in-restart.tsx';
@@ -184,11 +184,16 @@ export function CodexLoginPanel({
                 ? 'Open the link, sign in, then paste back the address the browser ends on.'
                 : 'Open the link and type the code at the provider’s page. Nothing comes back here.'}
             </p>
-            <Button type="button" variant="primary" onClick={onStart} disabled={busy || state === 'starting'}>
-              <Link2 size={16} aria-hidden="true" />
-              {state === 'starting' ? 'Starting sign-in…' : 'Sign in to Codex'}
-            </Button>
-            {state === 'starting' ? <StartOverButton onStartOver={onStartOver} busy={busy} /> : null}
+            {/* The shared answer row: the sign-in is the way on (full width on a phone), Start over the quiet way out. */}
+            <ActionRow
+              secondary={state === 'starting' ? <StartOverButton onStartOver={onStartOver} busy={busy} /> : undefined}
+              primary={
+                <Button type="button" variant="primary" onClick={onStart} disabled={busy || state === 'starting'}>
+                  <Link2 size={16} aria-hidden="true" />
+                  {state === 'starting' ? 'Starting sign-in…' : 'Sign in to Codex'}
+                </Button>
+              }
+            />
           </div>
         ) : null}
 
@@ -219,20 +224,28 @@ export function CodexLoginPanel({
                 stop.
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <p className="m-0 text-ui leading-base text-muted" role="status">
-                Waiting for the provider. Codex finishes on its own — there is nothing to paste back.
-              </p>
-              <StartOverButton onStartOver={onStartOver} busy={busy} />
-              <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
-                Cancel
-              </Button>
-            </div>
+            <p className="m-0 text-ui leading-base text-muted" role="status">
+              Waiting for the provider. Codex finishes on its own — there is nothing to paste back.
+            </p>
+            <ActionRow
+              secondary={<StartOverButton onStartOver={onStartOver} busy={busy} />}
+              primary={
+                <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+                  Cancel
+                </Button>
+              }
+            />
             <div className="border-t border-border pt-3" data-codex-login-use-link="">
               <p className="m-0 text-meta leading-base text-muted">Device code didn’t work?</p>
-              <Button type="button" className="mt-2" onClick={onUseLink} disabled={busy}>
-                Sign in with a link instead
-              </Button>
+              <div className="mt-2">
+                <ActionRow
+                  secondary={
+                    <Button type="button" onClick={onUseLink} disabled={busy}>
+                      Sign in with a link instead
+                    </Button>
+                  }
+                />
+              </div>
             </div>
           </div>
         ) : null}
@@ -281,16 +294,23 @@ export function CodexLoginPanel({
                   disabled={busy}
                   required
                 />
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button type="submit" variant="primary" disabled={busy || !address.filled}>
-                    <ShieldCheck size={16} aria-hidden="true" />
-                    {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
-                  </Button>
-                  <StartOverButton onStartOver={onStartOver} busy={busy} />
-                  <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
-                    Cancel
-                  </Button>
-                </div>
+                {/* Finish is the column's width under the field; Start over and Cancel are one balanced secondary row. */}
+                <ActionRow
+                  primary={
+                    <Button type="submit" variant="primary" disabled={busy || !address.filled}>
+                      <ShieldCheck size={16} aria-hidden="true" />
+                      {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
+                    </Button>
+                  }
+                />
+                <ActionRow
+                  secondary={<StartOverButton onStartOver={onStartOver} busy={busy} />}
+                  primary={
+                    <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+                      Cancel
+                    </Button>
+                  }
+                />
                 <p className="m-0 text-meta leading-base text-faint">
                   Goes straight to Codex on this machine. Kept nowhere, never shown back.
                 </p>
@@ -300,14 +320,18 @@ export function CodexLoginPanel({
         ) : null}
 
         {flow?.state === 'finishing' ? (
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-col gap-3">
             <p className="m-0 text-ui leading-base text-muted" role="status">
               Codex is finishing the sign-in…
             </p>
-            <StartOverButton onStartOver={onStartOver} busy={busy} />
-            <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
-              Cancel
-            </Button>
+            <ActionRow
+              secondary={<StartOverButton onStartOver={onStartOver} busy={busy} />}
+              primary={
+                <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+                  Cancel
+                </Button>
+              }
+            />
           </div>
         ) : null}
 
@@ -335,7 +359,7 @@ export function CodexLoginPanel({
               {ending?.sentence ?? flow.reason}
             </p>
             <p className="m-0 text-meta leading-base">{ending?.next ?? flow.remedy}</p>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="fy-action-stack">
               {onRecheck === undefined ? null : (
                 <Button type="button" variant="primary" onClick={onRecheck} disabled={busy} data-sign-in-recheck="">
                   <RefreshCw size={16} aria-hidden="true" />

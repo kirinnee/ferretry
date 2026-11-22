@@ -10,6 +10,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { ActionRow } from '@ferretry/app/ui';
+
 import type { DaemonConnection } from '../../shell-grants.ts';
 import {
   FirstPasskeyOffer,
@@ -55,16 +57,10 @@ export function PairedNext({ connection, createClient, offer, onContinue }: Pair
     [move],
   );
   // "Not now" is drawn from the first moment, while the machine is still being asked: a machine that is slow to answer
-  // must never leave the person on this screen with no way on. Once the offer shows it sits in the offer's own row,
-  // beside the add button, as a secondary (bordered) button with the same height; before that it stands alone.
+  // must never leave the person on this screen with no way on. Once the offer shows it is the offer's own secondary
+  // answer (left end of the shared row, the add button at the right end); before that it stands alone, at the same end.
   const notNow = (
-    <button
-      type="button"
-      className="kt-btn fy-pair-answer py-3"
-      style={{ height: 'auto' }}
-      data-paired-continue=""
-      onClick={move}
-    >
+    <button type="button" className="kt-btn" data-paired-continue="" onClick={move}>
       Not now
     </button>
   );
@@ -80,18 +76,15 @@ export function PairedNext({ connection, createClient, offer, onContinue }: Pair
         />
       ) : null}
       {phase === 'added' ? (
-        <button
-          type="button"
-          className="kt-btn fy-pair-answer py-3"
-          style={{ height: 'auto' }}
-          data-variant="primary"
-          data-paired-continue=""
-          onClick={move}
-        >
-          Continue
-        </button>
+        <ActionRow
+          primary={
+            <button type="button" className="kt-btn" data-variant="primary" data-paired-continue="" onClick={move}>
+              Continue
+            </button>
+          }
+        />
       ) : phase === 'checking' && offerable ? (
-        notNow
+        <ActionRow secondary={notNow} />
       ) : null}
     </>
   );

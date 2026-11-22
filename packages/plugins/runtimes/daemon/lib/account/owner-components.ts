@@ -40,6 +40,8 @@ export interface OwnerComponentWrite {
   readonly replace?: true;
   /** With `replace`: the owner's own items an earlier import created through this component. */
   readonly owned?: readonly string[];
+  /** With `replace`: the etag each of those items' files had when an import wrote it (the owner's own, by item name). */
+  readonly etags?: Readonly<Record<string, string>>;
   /** Hidden files (a path segment starting with a dot) the import carried but does NOT hand over: the answer names them. */
   readonly skipped?: readonly string[];
 }
@@ -90,11 +92,14 @@ export function ownerWrites(
   assetFiles: (prefix: string) => readonly { readonly path: string; readonly content: string }[] = () => [],
   touched: readonly string[] = [],
   ownedOf: (reference: string) => readonly string[] = () => [],
+  etagsOf: (reference: string) => Readonly<Record<string, string>> = () => ({}),
 ): readonly OwnerComponentWrite[] {
   const writes: OwnerComponentWrite[] = [];
   for (const { kind, name } of changedRefs(before, next, touched)) {
     const replaces = (reference: string) =>
-      touched.includes(reference) ? { replace: true as const, owned: ownedOf(reference) } : {};
+      touched.includes(reference)
+        ? { replace: true as const, owned: ownedOf(reference), etags: etagsOf(reference) }
+        : {};
     if (!OWNER_KINDS.has(kind)) continue;
     const ownerKind = kind as OwnerKind;
     const value: unknown = next.components[ownerKind][name];
@@ -230,8 +235,18 @@ export function ownerReferences(
 
 /** What the owner of a kind answered to one write: written, held for confirmation, or refused in a sentence. */
 export type OwnerWriteOutcome =
-  | { readonly outcome: 'written'; readonly warnings?: readonly string[]; readonly created?: readonly string[] }
-  | { readonly outcome: 'held'; readonly warnings?: readonly string[]; readonly created?: readonly string[] }
+  | {
+      readonly outcome: 'written';
+      readonly warnings?: readonly string[];
+      readonly created?: readonly string[];
+      readonly etags?: Readonly<Record<string, string>>;
+    }
+  | {
+      readonly outcome: 'held';
+      readonly warnings?: readonly string[];
+      readonly created?: readonly string[];
+      readonly etags?: Readonly<Record<string, string>>;
+    }
   | { readonly outcome: 'refused'; readonly reason: string };
 
 /** The door the setup hands an imported component to its owner through (`daemon/adapters/component-writers.ts`). */

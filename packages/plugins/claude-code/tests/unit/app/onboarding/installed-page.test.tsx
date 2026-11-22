@@ -191,7 +191,7 @@ describe('the install page', () => {
 
   it('checks again from the manual command (no package manager) and is done once Claude is found', async () => {
     let installed = false;
-    const { view, run } = await open({
+    const { view, run, calls } = await open({
       'GET /v1/claude-code/update': () => update(installed ? located : absent),
       'GET /v1/runtimes/setup/scan': scan({
         installed: false,
@@ -200,9 +200,14 @@ describe('the install page', () => {
     });
     const check = () => [...view.container.querySelectorAll('button')].find(b => b.textContent === 'Check again');
     expect(run.events).toEqual(['ready', 'busy:Install Claude Code to continue']);
+    const scanQueries = () =>
+      calls.filter(call => call.route === 'GET /v1/runtimes/setup/scan').map(call => call.init?.query);
+    // Opening the page reads the scan as it always did; only an explicit Check again asks past the daemon's lookup cache.
+    expect(scanQueries()).toEqual([undefined]);
     // Still missing: it says so, stays held, and offers the check again.
     await interact(() => must(check(), 'the check button').click());
     await settle();
+    expect(scanQueries().at(-1)).toEqual({ fresh: '1' });
     expect(view.container.textContent).toContain('Claude Code is still not on this machine.');
     expect(run.events).not.toContain('done');
     // Installed by hand meanwhile: found, the hold is released and done is said.

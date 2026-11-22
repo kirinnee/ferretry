@@ -219,17 +219,22 @@
 :root[data-style='pixel'] {
   font-synthesis: none;
 }
-:root[data-style='pixel'] img,
-:root[data-style='pixel'] canvas,
-:root[data-style='pixel'] video {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  img:where(:not([data-swatch]:not([data-style='pixel']) *)),
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  canvas:where(:not([data-swatch]:not([data-style='pixel']) *)),
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  video:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   image-rendering: pixelated;
 }
 
 /* The small caps labels are the one place the 8px bitmap face (Press Start 2P) is used: short fixed words, never a paragraph
    and never user text. A badge holds a user-defined label or a status of any length, so it keeps the readable body face and
    wraps instead of widening its row (Press Start is ~2x as wide per letter). */
-:root[data-style='pixel'] .kt-label,
-:root[data-style='pixel'] .kt-navgroup__title {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+.kt-label:where(:not([data-swatch]:not([data-style='pixel']) *)),
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .kt-navgroup__title:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   font-family: 'Press Start 2P', system-ui, sans-serif;
   line-height: 1.6;
 }
@@ -243,23 +248,28 @@
 }
 
 /* The keyboard on a text field: the field's own `outline: none` would leave only a border change. */
-:root[data-style='pixel'] .kt-input:focus-visible {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+.kt-input:where(:not([data-swatch]:not([data-style='pixel']) *)):focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: 0;
   box-shadow: var(--shadow-md);
 }
 
 /* Switch: a square track with a square thumb that steps across (no slide). */
-:root[data-style='pixel'] [data-neo-switch-track] {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+[data-neo-switch-track]:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   border: var(--stroke-control) solid var(--border-strong);
   border-radius: 0;
   box-shadow: var(--shadow-sm);
   transition: none;
 }
-:root[data-style='pixel'] [role='switch'][aria-checked='true'] [data-neo-switch-track] {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  [role='switch']:where(:not([data-swatch]:not([data-style='pixel']) *))[aria-checked='true']
+  [data-neo-switch-track] {
   background: var(--accent);
 }
-:root[data-style='pixel'] [data-neo-switch-thumb] {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  [data-neo-switch-thumb]:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   background: var(--surface);
   border: var(--stroke-control) solid var(--border-strong);
   border-radius: 0;
@@ -267,27 +277,36 @@
   width: 14px;
   transition: transform var(--motion-fast) var(--ease-standard);
 }
-:root[data-style='pixel'] [role='switch']:active [data-neo-switch-track] {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  [role='switch']:where(:not([data-swatch]:not([data-style='pixel']) *)):active
+  [data-neo-switch-track] {
   box-shadow: none;
   translate: var(--press-translate) var(--press-translate);
 }
 
 /* Segmented control: a ruled tray; the chosen segment is the inverted block. */
-:root[data-style='pixel'] [data-neo-segmented] {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+[data-neo-segmented]:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   border-width: var(--stroke-control);
   border-color: var(--border-strong);
 }
-:root[data-style='pixel'] [data-neo-segmented] > label {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  [data-neo-segmented]:where(:not([data-swatch]:not([data-style='pixel']) *))
+  > label {
   border: var(--stroke-control) solid transparent;
   transition: none;
 }
-:root[data-style='pixel'] [data-neo-segmented] > label:has(:checked) {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  [data-neo-segmented]:where(:not([data-swatch]:not([data-style='pixel']) *))
+  > label:has(:checked) {
   background: var(--nav-sel-bg);
   border-color: var(--border-strong);
   box-shadow: var(--shadow-sm);
   color: var(--nav-sel-fg);
 }
-:root[data-style='pixel'] [data-neo-segmented] > label:has(:focus-visible) {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  [data-neo-segmented]:where(:not([data-swatch]:not([data-style='pixel']) *))
+  > label:has(:focus-visible) {
   box-shadow: none;
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: 2px;
@@ -363,40 +382,51 @@
 }
 
 /* Progress: a health bar, each step a ruled block: empty = surface, done = ink, current = the accent. */
-:root[data-style='pixel'] .fy-sp-progress__bar {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+.fy-sp-progress__bar:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   gap: 4px;
 }
-:root[data-style='pixel'] .fy-sp-progress__segment {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .fy-sp-progress__segment:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   background: var(--surface);
   border: var(--stroke-control) solid var(--border-strong);
   border-radius: 0;
   height: 12px;
   opacity: 1;
 }
-:root[data-style='pixel'] .fy-sp-progress__segment[data-state='done'] {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .fy-sp-progress__segment:where(:not([data-swatch]:not([data-style='pixel']) *))[data-state='done'] {
   background: var(--fg);
 }
-:root[data-style='pixel'] .fy-sp-progress__segment[data-state='current'] {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .fy-sp-progress__segment:where(:not([data-swatch]:not([data-style='pixel']) *))[data-state='current'] {
   background: var(--accent);
 }
 
 /* Bars (voice engine speed / accuracy / size): a ruled track with a solid fill. */
-:root[data-style='pixel'] [data-option-bar-track] {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+[data-option-bar-track]:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   background: var(--surface);
   border: var(--stroke-control) solid var(--border-strong);
   height: 12px;
 }
 
 /* A pressed chip or tab is the inverted block, like the selected row. */
-:root[data-style='pixel'] .kt-tab[aria-pressed='true'],
-:root[data-style='pixel'] .kt-tab[aria-selected='true'] {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+.kt-tab:where(:not([data-swatch]:not([data-style='pixel']) *))[aria-pressed='true'],
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .kt-tab:where(:not([data-swatch]:not([data-style='pixel']) *))[aria-selected='true'] {
   background: var(--nav-sel-bg);
   border-color: var(--border-strong);
   box-shadow: var(--shadow-sm);
   color: var(--nav-sel-fg);
 }
-:root[data-style='pixel'] .kt-tab[aria-pressed='true'] .mono,
-:root[data-style='pixel'] .kt-tab[aria-selected='true'] .mono {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .kt-tab:where(:not([data-swatch]:not([data-style='pixel']) *))[aria-pressed='true']
+  .mono,
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .kt-tab:where(:not([data-swatch]:not([data-style='pixel']) *))[aria-selected='true']
+  .mono {
   color: var(--nav-sel-sub);
 }
 

@@ -11,8 +11,8 @@
  * - WHICH COMPUTER runs the daemon. A daemon needs a terminal, so a phone can
  *   never be it and is never asked; a computer starting from scratch is assumed to
  *   mean itself, with the assumption stated and escapable.
- * - WHO INSTALLS IT is NOT asked (r10 O5): the install page opens on the commands and offers "Let an agent do it" as a
- *   quiet link, which switches to the agent's prompt and pairing.
+ *
+ * The install page opens on the commands the reader runs themselves: there is no "let an agent do it" path (owner, C59 O7).
  *
  * WHEN THE DAEMON ANSWERS, THIS PAGE'S JOB IS OVER. It hands the person to the setup flow (the machine's own steps, then
  * this device's; `onHandOff`), so there is no "you are set up" screen here, no phone offer and no "install an agent" step.
@@ -70,7 +70,6 @@ import {
   isLastOnboardingStep,
   journeyLabel,
   nextOnboardingStep,
-  type OnboardingDoerId,
   type OnboardingPath,
   type OnboardingRouteId,
   type OnboardingStepId,
@@ -83,15 +82,7 @@ import {
   targetBasis,
 } from './onboarding-model.ts';
 import type { OnboardingProgressStore, OnboardingWalking } from './onboarding-progress.ts';
-import {
-  AgentPairStage,
-  BriefStage,
-  DaemonStage,
-  ElsewhereStage,
-  InstallStage,
-  LocalStage,
-  ScanStage,
-} from './onboarding-stages.tsx';
+import { DaemonStage, ElsewhereStage, InstallStage, LocalStage, ScanStage } from './onboarding-stages.tsx';
 import { OnboardingTargetChooser } from './onboarding-target-chooser.tsx';
 import { OnboardingTrack } from './onboarding-track.tsx';
 import { SetupDiagram } from './setup-diagram.tsx';
@@ -287,9 +278,6 @@ export function OnboardingPage({
           onChooseRoute={route => {
             progress.choose(route);
           }}
-          onChooseDoer={doer => {
-            progress.switchDoer(doer);
-          }}
           onChooseTarget={target => {
             progress.chooseTarget(target);
           }}
@@ -301,10 +289,6 @@ export function OnboardingPage({
     </main>
   );
 }
-
-/** What Back from a journey's first page reaches, said in a data attribute so the markup can be asserted against it. */
-const backBehind = (at: OnboardingWalking, path: OnboardingPath): string =>
-  at.route !== 'add-client' && at.doer === 'agent' ? 'commands' : questionBehindRoute(at.route, path.device);
 
 interface RouteFlowProps {
   readonly at: OnboardingWalking;
@@ -321,8 +305,6 @@ interface RouteFlowProps {
   readonly onGoTo: (step: OnboardingStepId) => void;
   /** Switch to a different ENTRY without going back through the question. */
   readonly onChooseRoute: (route: OnboardingRouteId) => void;
-  /** Change who installs it, from a step rather than from the question. */
-  readonly onChooseDoer: (doer: OnboardingDoerId) => void;
   /** Change which computer runs it, from a step rather than from the question. */
   readonly onChooseTarget: (target: SetupTargetId) => void;
   /** Back out of the journey entirely, to the question that opened it. */
@@ -349,7 +331,6 @@ function RouteFlow({
   share,
   onGoTo,
   onChooseRoute,
-  onChooseDoer,
   onChooseTarget,
   onLeaveRoute,
 }: RouteFlowProps) {
@@ -425,10 +406,7 @@ function RouteFlow({
           handoff={handoff}
           fallback={fallback}
           onChooseRoute={onChooseRoute}
-          onChooseDoer={onChooseDoer}
           onChooseTarget={onChooseTarget}
-          href={href}
-          share={share}
         />
       </section>
 
@@ -438,26 +416,26 @@ function RouteFlow({
         <div className="fy-ob-actions" data-onboarding-actions="">
           {/*
             BACK ALWAYS GOES SOMEWHERE, AND SAYS WHERE. On the first step of a journey the place behind it is the question
-            that opened THAT journey — the machine question when it was asked, the start screen otherwise — and from the
-            agent's prompt it is the install page the agent link came from. Picking the wrong answer is a thing a chooser
-            must survive, and a Back that lands on a question the reader never answered does not help them survive it.
+            that opened THAT journey — the machine question when it was asked, the start screen otherwise. Picking the
+            wrong answer is a thing a chooser must survive, and a Back that lands on a question the reader never
+            answered does not help them survive it.
           */}
           <Button
             type="button"
             variant="ghost"
             onClick={first ? onLeaveRoute : () => onGoTo(previousOnboardingStep(path, at.current))}
-            data-onboarding-back={first ? backBehind(at, path) : 'step'}
+            data-onboarding-back={first ? questionBehindRoute(at.route, path.device) : 'step'}
           >
             Back
           </Button>
           {/*
             NEXT EXISTS ONLY WHERE THE PAGE CANNOT CHECK.
-            Install, the daemon, an agent's whole working session and `fy pair` happen on a machine this page will never
+            Install, the daemon and `fy pair` happen on a machine this page will never
             see, so blocking on them would block forever. Pairing is the opposite: the daemon answers, in this tab, and
             that answer is the only thing that may hand the person on. A Next button on a pairing step would manufacture
             a "you are set up" for a browser that is paired with nothing.
           */}
-          {at.current !== 'scan' && at.current !== 'agent-pair' && at.current !== 'local' && !last && (
+          {at.current !== 'scan' && at.current !== 'local' && !last && (
             <Button
               type="button"
               variant="primary"
@@ -482,10 +460,7 @@ interface StageProps {
   readonly handoff: ReactNode;
   readonly fallback: HostedRelayFallback;
   readonly onChooseRoute: (route: OnboardingRouteId) => void;
-  readonly onChooseDoer: (doer: OnboardingDoerId) => void;
   readonly onChooseTarget: (target: SetupTargetId) => void;
-  readonly href: string;
-  readonly share: SetupSharePort | undefined;
   /** The pairing screen shows a failure that already says its remedy; see {@link OnboardingPairingHost}. */
   readonly stated: boolean;
 }
@@ -512,34 +487,17 @@ function Stage({
   handoff,
   fallback,
   onChooseRoute,
-  onChooseDoer,
   onChooseTarget,
-  href,
-  share,
   stated,
 }: StageProps) {
-  /*
-   * THE PAIRING JOURNEY REACHES NONE OF THE STAGES THAT READ THESE — it has no
-   * `brief`, no `agent-pair` and no `install` — but the switch below is over steps
-   * rather than over journeys, so the type cannot say so. The stand-in is the
-   * CONSERVATIVE answer rather than a plausible one: "another computer" never
-   * claims the daemon is on this machine, so nothing can end up telling a reader
-   * they are already paired in a tab that does not exist.
-   */
-  const daemon = path.route === 'add-client' ? undefined : path;
-  const target: SetupTargetId = daemon?.target ?? 'other';
-  const assumed = daemon !== undefined && targetBasis(daemon.route, daemon.device) === 'assumed';
+  /* The pairing journey has no `install` step, so only a daemon journey can offer the "another computer" escape. */
+  const assumed = path.route !== 'add-client' && targetBasis(path.route, path.device) === 'assumed';
   switch (at.current) {
-    case 'brief':
-      return <BriefStage write={write} target={target} plainUrl={setupPageUrl(href)} share={share} />;
-    case 'agent-pair':
-      return <AgentPairStage pairing={pairing} target={target} stated={stated} />;
     case 'install':
       return (
         <InstallStage
           write={write}
           channel={channel}
-          onAgentInstead={() => onChooseDoer('agent')}
           /*
             OFFERED ONLY WHERE "THIS COMPUTER" WAS ASSUMED RATHER THAN CHOSEN. A
             reader who picked this machine on the question one Back away needs no
@@ -565,13 +523,7 @@ function Stage({
     case 'local':
       return <LocalStage write={write} pairing={pairing} />;
     case 'elsewhere':
-      return (
-        <ElsewhereStage
-          handoff={handoff}
-          onAddAsClient={() => onChooseRoute('add-client')}
-          onAgentInstead={() => onChooseDoer('agent')}
-        />
-      );
+      return <ElsewhereStage handoff={handoff} onAddAsClient={() => onChooseRoute('add-client')} />;
     case 'scan':
       return <ScanStage pairing={pairing} stated={stated} />;
   }
@@ -587,8 +539,6 @@ function Stage({
  * verify, so it waits for the daemon rather than for a click.
  */
 const ADVANCE_NOTE: Record<OnboardingStepId, string> = {
-  brief: 'Nothing here watches your agent. Continue when it says it has finished.',
-  'agent-pair': 'This step finishes itself when the daemon answers. Nothing here is waiting on you.',
   install: 'This page cannot see your terminal. Continue when the install finishes.',
   daemon: 'Nothing here waits on it. Continue once it reports that it is serving.',
   local: 'This step finishes itself when the daemon answers. Nothing here is waiting on a scan.',

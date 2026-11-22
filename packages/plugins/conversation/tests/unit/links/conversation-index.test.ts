@@ -550,6 +550,21 @@ describe('review round 1: records, names and duplicates while the index is writt
     expect(index.query({ words: ['old', 'name'] }).matched).toBe(0);
   });
 
+  test('a Codex thread name with a credential and its value never reaches the title; a bare topic mention is kept', async () => {
+    const { index, home } = codexSetup();
+    home.set(rollout(CODEX), codexRollout(CODEX, '/work/app', 'first'));
+    home.set('session_index.jsonl', `${JSON.stringify({ id: CODEX, thread_name: 'password: hunter2 deploy' })}\n`);
+    await index.refresh();
+    const row = index.query().conversations[0]?.row;
+    // Fail closed: the cue and value form drops the Codex name whole (the owner path would keep a stub, "password:").
+    expect(JSON.stringify(row)).not.toContain('hunter2');
+    expect(row).toMatchObject({ name: 'first' });
+    expect(row).not.toHaveProperty('title');
+    home.set('session_index.jsonl', `${JSON.stringify({ id: CODEX, thread_name: 'Fix token refresh' })}\n`);
+    await index.refresh();
+    expect(index.query().conversations[0]?.row).toMatchObject({ title: 'Fix token refresh' });
+  });
+
   test('a Codex session name is looked up by the id the rollout records, not the one its file name carries', async () => {
     const { index, home } = codexSetup();
     home.set(rollout(CODEX), codexRollout(B, '/work/app', 'first'));

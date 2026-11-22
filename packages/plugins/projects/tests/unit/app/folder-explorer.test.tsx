@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must, pressKey, settleUntil } from '@ferretry/app/testing';
 import { FolderPicker } from '../../../app/features/folder-explorer/folder-picker.tsx';
 import { explorerViewPreference } from '../../../app/features/folder-explorer/explorer-view-preference.ts';
+import { BROAD_ROOT_WARNING } from '../../../app/lib/registration-model.ts';
 import { type Call, clickEvent, refusal, scripted, typeInto } from './support/client.ts';
 
 const LIST = 'GET /v1/projects/folders';
@@ -357,6 +358,34 @@ describe('FolderExplorer path box', () => {
     await interact(() => pressKey(pathInput(mounted), 'Escape'));
     await settled(mounted, c => c.querySelector('[data-explorer-path-error]') === null, 'the refusal cleared');
     expect(pathInput(mounted).value).toBe('~');
+    await mounted.unmount();
+  });
+});
+
+describe('FolderExplorer: the broad-root warning (F6061 U4)', () => {
+  const broadListing = (call: Call) => ({ ...listingFor(call), broad: true as const });
+
+  it('warns when the open folder is a broad root, with the one shared sentence, and not for an ordinary folder', async () => {
+    explorerViewPreference.write('auto');
+    const mounted = await open([], {
+      [LIST]: (call: Call) => ((call.query?.path ?? '/home/k') === '/home/k' ? broadListing(call) : listingFor(call)),
+    });
+    expect(must(mounted.container.querySelector('[data-explorer-broad]'), 'the warning').textContent).toContain(
+      BROAD_ROOT_WARNING,
+    );
+    expect(mounted.container.querySelector('[data-explorer-broad]')?.getAttribute('role')).toBe('status');
+    await press(must(mounted.container.querySelector('[data-explorer-entry="work"]'), 'work'));
+    await settled(mounted, c => c.querySelector('[data-explorer-entry="scratch"]') !== null, 'work opened');
+    expect(mounted.container.querySelector('[data-explorer-broad]')).toBeNull();
+    await mounted.unmount();
+  });
+
+  it('says nothing when the caller is not registering the folder (warnBroad off)', async () => {
+    explorerViewPreference.write('auto');
+    const client = scripted({ [LIST]: broadListing });
+    const mounted = await mount(<FolderPicker client={client} onChoose={() => {}} warnBroad={false} />);
+    await settled(mounted, c => c.querySelector('[data-explorer-state="ready"]') !== null, 'the explorer');
+    expect(mounted.container.querySelector('[data-explorer-broad]')).toBeNull();
     await mounted.unmount();
   });
 });

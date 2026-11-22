@@ -6282,7 +6282,6 @@ pwa/src/worker/vosk-glue.d.ts	voice	249	voice app + workers
 pwa/src/worker/vosk-worker.ts	voice	249	voice app + workers
 pwa/src/worker/whisper-worker.ts	voice	249	voice app + workers
 pwa/tailwind.config.ts	app-shell	267	pwa remainder: shell, UI primitives, router, theme, sealed client, dev harness
-pwa/tests/fixtures/agent-setup-prompt.txt	ferrets	246	ferrets app
 pwa/tests/fixtures/fy-render-journey.ts	conversation	247	fy-render, composer, transcript helpers
 pwa/tests/integration/add-to-chat.visual.test.ts	app-shell	267	pwa remainder: shell, UI primitives, router, theme, sealed client, dev harness
 pwa/tests/integration/agenda-clip.visual.test.ts	agenda+asks	223	agenda app

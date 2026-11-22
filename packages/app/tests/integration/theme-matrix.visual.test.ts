@@ -1,5 +1,5 @@
 /**
- * THE THEME MATRIX: every STYLE x every PALETTE x both MODES x two WIDTHS (16 x 8 x 2 x 2 = 512 combinations today), measured
+ * THE THEME MATRIX: every STYLE x every PALETTE x both MODES x two WIDTHS (16 x 12 x 2 x 2 = 768 combinations today), measured
  * in a real browser on one fixed specimen page (`plugins/conversation/tests/integration/app/fixtures/theme-matrix-scene.tsx`). The catalogue is the list (`STYLES`,
  * `PALETTES`), so a style or palette added to it is measured with no edit here, and a new one that cannot be read is a red
  * row the day it lands.
@@ -23,10 +23,10 @@
  * palette, mode, check, what), with no wildcard. The observed miss set is compared with the pinned set both ways: a miss
  * nobody pinned fails, and a pin whose miss is gone fails.
  *
- * r11 T14 turns the owner's theme line (turn 4247, item 12) into asserts, on the same page and the same 512 combinations:
+ * r11 T14 turns the owner's theme line (turn 4247, item 12) into asserts, on the same page and the same combinations:
  *  1. the High contrast palette is HARD on every style, loud included (text 7:1 body / 4.5:1 muted, edges and rings 3:1);
  *  2. no gradient background on the page, panels, cards, buttons, fields or menus (Retro's title bar and Glass's frost are the
- *     two allowed; the body's first layer is the texture pattern, not a wash);
+ *     two allowed, and the page may carry its PALETTE's own mesh, `--surface-mesh`, which Gradient mesh, Aurora and Afterglow set; the body's first layer is the texture pattern, not a wash);
  *  3. a textarea, code block, table or menu has a corner radius <= 16px, and a two-line textarea does not clip its text;
  *  4. display text <= 3.25rem at 1280, body text 0.75-1.15rem (the product's dense body is 13.5px = 0.84rem);
  *  5. each style differs from Studio on >= 6 of 8 component probes, and no two styles share a spinner;
@@ -481,7 +481,14 @@ const FACTS = `(() => {
     const size = /^(\\d*\\.?\\d+)px (\\d*\\.?\\d+)px$/.exec(sizes[index % sizes.length]);
     return tiles.has(layer) && repeats[index % repeats.length] === 'repeat' && size !== null && size[1] === size[2] && Number.parseFloat(size[1]) <= 128;
   };
-  add('Page', splitTop(bodyStyle.backgroundImage).filter((layer, index) => !isTile(layer, index)));
+  // The other gradient the body may keep is the palette's own mesh (Gradient mesh, Aurora, Afterglow: the --surface-mesh token, painted on the
+  // app background only, behind opaque panels): a layer that is exactly one of that token's layers, read the same way.
+  const meshProbe = document.createElement('i');
+  meshProbe.style.backgroundImage = 'var(--surface-mesh)';
+  document.body.append(meshProbe);
+  const meshLayers = new Set(splitTop(getComputedStyle(meshProbe).backgroundImage));
+  meshProbe.remove();
+  add('Page', splitTop(bodyStyle.backgroundImage).filter((layer, index) => !isTile(layer, index) && !meshLayers.has(layer)));
   add('Page overlay', splitTop(getComputedStyle(document.body, '::before').backgroundImage));
   // The grain is a layer of its own (body::after): a gradient substituted for the noise is a gradient background.
   add('Page grain', splitTop(getComputedStyle(document.body, '::after').backgroundImage));

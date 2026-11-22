@@ -119,11 +119,24 @@ export const STYLE_IDS = [
   'exaggerated',
 ] as const;
 export type StyleId = (typeof STYLE_IDS)[number];
-export const PALETTE_IDS = ['studio', 'geist', 'mission', 'neo', 'hacker', 'vintage', 'vaporwave', 'contrast'] as const;
+export const PALETTE_IDS = [
+  'studio',
+  'geist',
+  'mission',
+  'neo',
+  'hacker',
+  'vintage',
+  'vaporwave',
+  'mesh',
+  'aurora',
+  'afterglow',
+  'briefing',
+  'contrast',
+] as const;
 export type PaletteId = (typeof PALETTE_IDS)[number];
 
 /**
- * A palette id a device or a theme item may still carry, and the kept palette it reads as (r11 T1: 18 palettes became 8).
+ * A palette id a device or a theme item may still carry, and the kept palette it reads as (r11 T1: 18 palettes became 8; C59 O6 brought Gradient mesh and Briefing back and added Aurora and Afterglow).
  * `public/pre-paint.js` restates this table, pinned by `pre-paint.test.ts`, so a stored removed id paints the mapped one
  * before React loads. A kept id is not a key here.
  */
@@ -136,8 +149,6 @@ export const REMOVED_PALETTE_IDS = {
   ma: 'vaporwave',
   retrofuture: 'vintage',
   cyberpunk: 'vaporwave',
-  mesh: 'studio',
-  briefing: 'geist',
 } as const satisfies Record<string, PaletteId>;
 
 /** The kept palette an id reads as: itself when kept, the mapped one when removed, `undefined` for any other value. */

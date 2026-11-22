@@ -16,7 +16,7 @@ import {
   RuntimeStart,
   StartDecide,
 } from '@ferretry/core-ferrets/contract';
-import { audit, cap } from '@ferretry/core-gate/contract';
+import { audit, cap, STEP_UP_ACTS } from '@ferretry/core-gate/contract';
 import { ProfileSecrets, VaultPort } from '@ferretry/core-vault/contract';
 import {
   FerretsPort,
@@ -149,7 +149,7 @@ export default definePlugin({
       route('POST /v1/runtimes/proposals/:proposalId/apply', {
         minimum: 'operator',
         caller: 'person',
-        capability: cap('fleet', 'configure'),
+        capability: cap('fleet', 'configure', { act: STEP_UP_ACTS.loosenConfig }),
         noStore: true,
         audit: audit(RUNTIMES_AUDIT.apply),
         guard: { none: 'an outcome of writes; it carries no pane text' },

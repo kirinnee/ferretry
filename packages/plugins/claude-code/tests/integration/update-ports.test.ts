@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FetchPort } from '@ferretry/kernel/contract';
 import { bunSpawn } from '@ferretry/kernel/host';
+import { harnessFallbackDirectories } from '@ferretry/plugin-runtimes/contract';
 import type { HarnessConfig } from '../../contract/index.ts';
 import {
   factsSource,
@@ -101,7 +102,11 @@ describe('locationSource', () => {
   const homeFacts = (home: string): ReturnType<typeof hostFacts> => ({
     home: async () => home,
     platform: async () => 'linux',
+    stateHome: async () => '',
   });
+  /** What a search that found nothing lists after PATH: the built-in install folders, for this home on linux. */
+  const afterPath = (home: string): string[] =>
+    harnessFallbackDirectories({ home, platform: 'linux' }).map(directory => `${directory}/claude`);
 
   it('finds the exact file the config names when it starts', async () => {
     const claude = await standIn('claude', 'echo "2.1.220 (Claude Code)"');
@@ -221,7 +226,7 @@ describe('locationSource', () => {
 
     const found = await locationSource(spawnWith(), () => config({ searchPaths: [nowhere] }), homeFacts('/x')).locate();
 
-    expect(found).toEqual({ outcome: 'absent', searched: [`${nowhere}/claude`, 'PATH'] });
+    expect(found).toEqual({ outcome: 'absent', searched: [`${nowhere}/claude`, 'PATH', ...afterPath('/x')] });
   });
 
   it('is absent when which prints nothing', async () => {
@@ -229,8 +234,44 @@ describe('locationSource', () => {
 
     expect(await locationSource(spawnWith(), () => undefined, homeFacts('/x')).locate()).toEqual({
       outcome: 'absent',
-      searched: ['PATH'],
+      searched: ['PATH', ...afterPath('/x')],
     });
+  });
+
+  it('finds a claude installed into a folder the daemon PATH never listed, only after PATH found nothing', async () => {
+    await standIn('which', 'exit 1');
+    const home = join(folder, 'home');
+    const installed = await mkdir(join(home, '.local', 'bin'), { recursive: true }).then(() =>
+      standIn('claude', 'echo "2.1.220 (Claude Code)"', join(home, '.local', 'bin')),
+    );
+
+    const found = await locationSource(spawnWith(), () => undefined, homeFacts(home)).locate();
+
+    expect(found).toMatchObject({ outcome: 'located', path: installed, rule: 'search directory' });
+  });
+
+  it('keeps the PATH answer over the install folders', async () => {
+    await standIn('which', 'echo /placeholder/bin/claude');
+    const home = join(folder, 'home');
+    await mkdir(join(home, '.local', 'bin'), { recursive: true });
+    await standIn('claude', 'exit 0', join(home, '.local', 'bin'));
+
+    const found = await locationSource(spawnWith(), () => undefined, homeFacts(home)).locate();
+
+    expect(found).toMatchObject({ outcome: 'located', path: '/placeholder/bin/claude', rule: 'inherited environment' });
+  });
+
+  it('stops finding it when it is removed, with PATH held fixed', async () => {
+    await standIn('which', 'exit 1');
+    const home = join(folder, 'home');
+    await mkdir(join(home, '.local', 'bin'), { recursive: true });
+    const installed = await standIn('claude', 'exit 0', join(home, '.local', 'bin'));
+    const source = locationSource(spawnWith(), () => undefined, homeFacts(home));
+    expect((await source.locate()).outcome).toBe('located');
+
+    await rm(installed);
+
+    expect((await source.locate()).outcome).toBe('absent');
   });
 });
 
@@ -247,6 +288,7 @@ describe('factsSource', () => {
   const host = (home = '/placeholder/home/me', platform = 'linux'): ReturnType<typeof hostFacts> => ({
     home: async () => home,
     platform: async () => platform,
+    stateHome: async () => '',
   });
 
   it('reads a plain file as itself: no link, no nix, nothing to ask the profile', async () => {

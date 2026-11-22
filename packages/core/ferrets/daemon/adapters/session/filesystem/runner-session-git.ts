@@ -8,7 +8,6 @@ import {
   parseBatchCheck,
   parseCheckIgnore,
   parseCheckIgnoreRule,
-  parseFileList,
   parseHeadTreeEntry,
   parseNumstat,
   parsePorcelainStatus,
@@ -22,6 +21,7 @@ import {
   type SpawnBudget,
   withLineStats,
 } from '../../../lib/session/filesystem/index.ts';
+import { treeGit } from '../../../../contract/tree-git.ts';
 import type { GitExecution, GitRunner, GitWorkingDirectory } from '../../../lib/worktrees/ports.ts';
 import { decodeGitOutput, GitCommandError, requireGitExit } from '../../git/index.ts';
 
@@ -150,22 +150,14 @@ export class RunnerSessionGit implements SessionGit {
    * the changes list, obtained here by Git's own default rather than by a flag.
    */
   async listFiles(cwd: GitWorkingDirectory, maxBytes: number, budget?: SpawnBudget): Promise<SessionFileList> {
-    // No command was asked, so the empty list is explicitly incomplete rather than confidently empty.
-    if (budget?.expired() === true) return { paths: [], truncated: true };
-    const execution = await this.runner.run({
-      args: ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+    // The question is the shared tree index's (`contract/tree-git.ts`), so a ferret's list and a project's agree on the
+    // owner's global ignore rules. It asks the runner for the budget's remaining time as the child's timeout, and no
+    // caller input is ever spelled into a command line.
+    return treeGit(this.runner, (action, execution) => new GitCommandError(action, execution)).listFiles(
       cwd,
-      maxStdoutBytes: maxBytes,
-      // The caller's remaining budget when it has one, so this child cannot outlive the answer it is
-      // part of. Without one the runner applies its own default — the arguments are a fixed list either
-      // way, and no caller input is ever spelled into a command line.
-      ...spawnBound(budget),
-    });
-    requireGitExit('git ls-files', execution);
-    return {
-      paths: parseFileList(decodeGitOutput(execution), execution.stdoutTruncated),
-      truncated: execution.stdoutTruncated,
-    };
+      maxBytes,
+      budget,
+    );
   }
 
   /**

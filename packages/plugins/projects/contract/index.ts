@@ -1,5 +1,6 @@
 /** @ferretry/plugin-projects/contract — wire schemas, port + token, events, policy refs (§2.1). */
 export * from './app-hooks.ts';
+export * from './files.ts';
 export * from './folders.ts';
 export * from './policy.ts';
 export * from './port.ts';

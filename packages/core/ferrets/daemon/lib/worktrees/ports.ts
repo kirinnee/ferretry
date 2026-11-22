@@ -60,6 +60,11 @@ export interface GitInvocation {
    * defuse the magic itself — `./`-prefixing every path is how this repository does it.
    */
   readonly literalPathspecs?: boolean;
+  /**
+   * The command may see the owner's global Git config (`GIT_CONFIG_GLOBAL` is not closed). Only `git config --global
+   * --get core.excludesFile` asks for it: a read of one value that runs nothing (`contract/tree-git.ts`).
+   */
+  readonly readsGlobalConfig?: true;
 }
 
 export interface GitExecution {

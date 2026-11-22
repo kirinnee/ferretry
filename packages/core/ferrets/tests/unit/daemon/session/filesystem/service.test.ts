@@ -1078,3 +1078,68 @@ describe('SessionFilesystem.diff behind the agent fence', () => {
     should(view.diff).eql('DIFF');
   });
 });
+
+describe('a session rooted AT a key store', () => {
+  // The per-request gates judge names relative to the root, so every name beneath a root that is itself `~/.ssh`
+  // or `.git` is innocent. The shared secret-name rule is applied to the pinned root's own real path (&F6061 U2).
+  const ROOTS = ['/home/kirin/.ssh', '/home/kirin/repo/.git', '/home/kirin/repo/.env', '/home/kirin/.gnupg/private'];
+
+  for (const rootReal of ROOTS) {
+    it(`should refuse every read of ${rootReal} for a person, and close what it pinned`, async () => {
+      // Arrange
+      const { filesystem, pinner } = viewer({ rootReal, tree: treeOf(['config', textFile('Host x\n')]) });
+
+      // Act
+      const failures = [
+        await refusalFrom(async () => await filesystem.index(CWD)),
+        await refusalFrom(async () => await filesystem.list(CWD)),
+        await refusalFrom(async () => await filesystem.readFile(CWD, 'config')),
+        await refusalFrom(async () => await filesystem.changes(CWD)),
+        await refusalFrom(async () => await filesystem.diff(CWD, 'config')),
+      ];
+
+      // Assert
+      for (const failure of failures) should(failure.code).eql('denied');
+      should(pinner.roots.every(root => root.closed)).be.true();
+    });
+
+    it(`should refuse ${rootReal} for an agent as well`, async () => {
+      // Arrange
+      const { filesystem } = viewer({ rootReal, tree: treeOf(['config', textFile('Host x\n')]) });
+
+      // Act
+      const failure = await refusalFrom(async () => await filesystem.index(CWD, { fence: AGENT_READ_FENCE }));
+
+      // Assert
+      should(failure.code).eql('denied');
+    });
+  }
+
+  it('should ask Git nothing for a denied root', async () => {
+    // Arrange
+    const { filesystem, git } = viewer({ rootReal: '/home/kirin/.ssh' });
+
+    // Act
+    await refusalFrom(async () => await filesystem.index(CWD));
+
+    // Assert
+    should(git.listCalls).eql([]);
+    should(git.repoInfoCalls).eql([]);
+  });
+
+  it('should still serve an ordinary root', async () => {
+    // Arrange
+    const { filesystem } = viewer(
+      { rootReal: '/home/kirin/repo', tree: treeOf(['a.ts', textFile('x')]) },
+      {
+        listFiles: () => ({ paths: ['a.ts'], truncated: false }),
+      },
+    );
+
+    // Act
+    const index = await filesystem.index(CWD);
+
+    // Assert
+    should(index.files.map(file => file.path)).eql(['a.ts']);
+  });
+});

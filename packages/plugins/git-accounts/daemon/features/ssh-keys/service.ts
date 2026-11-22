@@ -113,10 +113,21 @@ export class SshKeyService {
       const account = await this.accounts.find(id);
       const auth = account?.keys.ssh?.source === 'generated';
       const signing = account?.keys.signing?.source === 'generated';
+      // No key Ferretry made: nothing to hand over, and the launch is what it always was.
+      if (!auth && !signing) return undefined;
       const publicKey = (auth ? account?.keys.ssh : account?.keys.signing)?.publicKey;
-      if ((!auth && !signing) || publicKey === undefined) return undefined;
-      const socket = await this.agents.socketFor(id, async () => (await this.#sealedKey(id))?.privateKey);
-      if (socket === undefined) return undefined;
+      const socket =
+        publicKey === undefined
+          ? undefined
+          : await this.agents.socketFor(id, async () => (await this.#sealedKey(id))?.privateKey);
+      // A key IS recorded but cannot be served (its sealed entry is gone, or its agent will not start): that is said, never
+      // answered as "no key", which would let the launch fall back silently to the machine's own ssh identity.
+      if (publicKey === undefined || socket === undefined)
+        throw new ApiError(
+          503,
+          'the ssh-agent for this Git account could not be started',
+          GIT_ACCOUNT_CODES.agentUnavailable,
+        );
       return {
         socket,
         publicKeyFile: await this.agents.publicKeyFile(id, publicKey),

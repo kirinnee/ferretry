@@ -63,7 +63,9 @@ export function transcriptNames(harness: Harness, text: string): TranscriptNames
         payload !== null &&
         (payload as Record<string, unknown>).type === 'thread_name_updated'
       )
-        chosen = cleaned((payload as Record<string, unknown>).thread_name) ?? chosen;
+        // Codex's own TUI writes automatic titles as the same `thread_name_updated` record a manual rename makes, so a
+        // name cannot be told apart: it is `generated` (the credential cue applies), never the owner's `chosen`.
+        generated = cleaned((payload as Record<string, unknown>).thread_name) ?? generated;
       continue;
     }
     if (record.type === 'custom-title') chosen = cleaned(record.customTitle) ?? chosen;

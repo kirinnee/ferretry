@@ -1,4 +1,4 @@
-import { Badge } from '@ferretry/app/ui';
+import { Badge, ExternalLink } from '@ferretry/app/ui';
 import type { BadgeTone } from '@ferretry/app/ui';
 import type { CiStatus, PullChecks, PullDetail } from '../../../contract/index.ts';
 import { CI_WORDS } from './format.ts';
@@ -39,9 +39,9 @@ export function CiTab({ pull, checks }: { readonly pull: PullDetail; readonly ch
                 {check.url === undefined ? (
                   <bdi>{check.name}</bdi>
                 ) : (
-                  <a href={check.url} rel="noopener noreferrer" target="_blank">
+                  <ExternalLink href={check.url}>
                     <bdi>{check.name}</bdi>
-                  </a>
+                  </ExternalLink>
                 )}
               </span>
               <Badge tone={TONE[check.status]}>{WORDS[check.status]}</Badge>
@@ -50,9 +50,7 @@ export function CiTab({ pull, checks }: { readonly pull: PullDetail; readonly ch
         </ul>
       )}
       <p className="m-0 text-meta text-muted">
-        <a href={`${pull.url}/checks`} rel="noopener noreferrer" target="_blank">
-          Open the checks on GitHub
-        </a>
+        <ExternalLink href={`${pull.url}/checks`}>Open the checks on GitHub</ExternalLink>
       </p>
     </section>
   );

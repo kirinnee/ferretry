@@ -43,9 +43,16 @@ export const readMachine = async (client: RuntimesClient, press: ReadPress = {})
   MachineViewSchema.parse(await client.call(MACHINE_ROUTE, press));
 
 /** Stage one change. Nothing is written: the answer is the preview a person approves. */
-const stageChange = async (client: RuntimesClient, change: AccountChange): Promise<AccountChangeView> =>
+const stageChange = async (
+  client: RuntimesClient,
+  change: AccountChange,
+  signal?: AbortSignal,
+): Promise<AccountChangeView> =>
   AccountChangeViewSchema.parse(
-    await client.call(PROPOSE_ROUTE, { body: AccountChangeRequestSchema.parse({ change }) }),
+    await client.call(PROPOSE_ROUTE, {
+      body: AccountChangeRequestSchema.parse({ change }),
+      ...(signal === undefined ? {} : { signal }),
+    }),
   );
 
 /** Apply exactly the change that was previewed. */
@@ -53,11 +60,13 @@ const applyChange = async (
   client: RuntimesClient,
   changeId: string,
   request: ProposalApplyRequest = {},
+  signal?: AbortSignal,
 ): Promise<AccountChangeOutcome> =>
   AccountChangeOutcomeSchema.parse(
     await client.call(APPLY_ROUTE, {
       params: { proposalId: changeId },
       body: ProposalApplyRequestSchema.parse(request),
+      ...(signal === undefined ? {} : { signal }),
     }),
   );
 
@@ -181,9 +190,13 @@ const refused = (error: unknown): Extract<ChangeResult, { kind: 'refused' }> => 
  * Stage one change and stop: the answer is the preview a confirm card shows ("3 runtimes will need sign-in"). Use
  * {@link applyStagedChange} to apply it.
  */
-export const stageAccountChange = async (client: RuntimesClient, change: AccountChange): Promise<StageResult> => {
+export const stageAccountChange = async (
+  client: RuntimesClient,
+  change: AccountChange,
+  signal?: AbortSignal,
+): Promise<StageResult> => {
   try {
-    return { kind: 'staged', staged: await stageChange(client, change) };
+    return { kind: 'staged', staged: await stageChange(client, change, signal) };
   } catch (error) {
     return refused(error);
   }
@@ -279,17 +292,39 @@ export const settleOutcome = (staged: AccountChangeView, outcome: AccountChangeO
 };
 
 /** Apply exactly a change that was staged. */
-export const applyStagedChange = async (client: RuntimesClient, staged: AccountChangeView): Promise<ChangeResult> => {
+export const applyStagedChange = async (
+  client: RuntimesClient,
+  staged: AccountChangeView,
+  signal?: AbortSignal,
+): Promise<ChangeResult> => {
   try {
-    return settleOutcome(staged, await applyChange(client, staged.id));
+    return settleOutcome(staged, await applyChange(client, staged.id, {}, signal));
   } catch (error) {
     return refused(error);
   }
 };
 
-/** Stage one change and apply it at once: the common case, one click. */
-export const applyAccountChange = async (client: RuntimesClient, change: AccountChange): Promise<ChangeResult> => {
-  const stage = await stageAccountChange(client, change);
+/** What an attempt that was abandoned before its apply went out answers: nothing was sent, so nothing changed. */
+const ABANDONED: Extract<ChangeResult, { kind: 'refused' }> = {
+  kind: 'refused',
+  sentence: 'This attempt was abandoned before the change was applied, so nothing was changed.',
+  code: 'attempt_abandoned',
+};
+
+/**
+ * Stage one change and apply it at once: the common case, one click.
+ *
+ * A caller that may stop waiting passes a `signal` (an AbortSignal, aborted at its deadline): it reaches BOTH requests,
+ * and a stage that answers after the abort never sends its apply (an abandoned attempt must not write behind the
+ * caller's back).
+ */
+export const applyAccountChange = async (
+  client: RuntimesClient,
+  change: AccountChange,
+  signal?: AbortSignal,
+): Promise<ChangeResult> => {
+  const stage = await stageAccountChange(client, change, signal);
   if (stage.kind === 'refused') return stage;
-  return await applyStagedChange(client, stage.staged);
+  if (signal?.aborted === true) return ABANDONED;
+  return await applyStagedChange(client, stage.staged, signal);
 };

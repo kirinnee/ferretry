@@ -32,6 +32,7 @@ import type { BrowserFirewallFailureSchema, BrowserPortsSettingSchema } from './
 
 export * from './codex-launch.ts';
 export * from './component-source.ts';
+export * from './harness-fallback.ts';
 export * from './homes.ts';
 export * from './layers.ts';
 export * from './profile-stack.ts';

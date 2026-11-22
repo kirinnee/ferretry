@@ -541,6 +541,9 @@ export class GateAdmission implements Admission {
 
     const demand = descriptor.capability;
     let governance: CallerGovernance | undefined;
+    // Whether THIS admission spent the step-up it rode on (a window of `0`): its claim then still takes the proof it was
+    // admitted with, which the spend left in place (`StepUpRegistry.claimFresh`, `spentAtAdmission`).
+    let spentStepUp = false;
     if (demand !== undefined) {
       const decision = this.#guard.decide(demand, presentation);
       if (!decision.allowed) {
@@ -551,7 +554,12 @@ export class GateAdmission implements Admission {
                 {
                   error: message,
                   code: STEP_UP_REQUIRED_CODE,
-                  demand: { capability: demand.capability, axis: demand.axis },
+                  demand: {
+                    capability: demand.capability,
+                    axis: demand.axis,
+                    // A route that names the act its passkey is for (an import) gets the proof stamped for it on the FIRST ask.
+                    ...(demand.act === undefined ? {} : { act: demand.act }),
+                  },
                 } as unknown as StepUpRequiredBody,
                 403,
               )
@@ -559,7 +567,10 @@ export class GateAdmission implements Admission {
         );
       }
       // A step-up the machine wants asked every time is good for this one act (G97): spent at the decision.
-      if (decision.steppedUp === true && subject !== undefined) this.deps.stepUps.spend(subject);
+      if (decision.steppedUp === true && subject !== undefined) {
+        this.deps.stepUps.spend(subject);
+        spentStepUp = true;
+      }
       governance = this.#guard.governance(presentation);
     } else if (descriptor.consultsGrants === true) {
       governance = this.#guard.governance(presentation);
@@ -580,7 +591,7 @@ export class GateAdmission implements Admission {
       spendFreshStepUp: () => {
         if (subject !== undefined) this.deps.stepUps.spendFresh(subject);
       },
-      claimFreshStepUp: this.#claimFresh(subject, now),
+      claimFreshStepUp: this.#claimFresh(subject, now, spentStepUp),
       claimStoredProof: this.#claimStored(subject),
     };
     return { outcome: 'admitted', standing, actor: actOf(authentication, actor) };
@@ -592,7 +603,7 @@ export class GateAdmission implements Admission {
    * after that instant is never taken by this standing, however long its continuations outlive the request, and stays
    * where it is for the act it was given for.
    */
-  #claimFresh(subject: StepUpSubject | undefined, admittedAt: Instant): ClaimFreshStepUp {
+  #claimFresh(subject: StepUpSubject | undefined, admittedAt: Instant, spentAtAdmission: boolean): ClaimFreshStepUp {
     const registry = this.deps.stepUps;
     const notAfterMs = epochMs(admittedAt);
     return ((act?: StepUpAct, bound?: string): boolean => {
@@ -604,7 +615,13 @@ export class GateAdmission implements Admission {
           !stepUpKeepsProof(act) &&
           registry.claimFresh(subject, act as Exclude<EveryCallerStepUpAct, StoredProofStepUpAct>, bound)
         );
-      return registry.claimFresh(subject, act as MachineSkippableStepUpAct | undefined, undefined, notAfterMs);
+      return registry.claimFresh(
+        subject,
+        act as MachineSkippableStepUpAct | undefined,
+        undefined,
+        notAfterMs,
+        spentAtAdmission,
+      );
     }) as ClaimFreshStepUp;
   }
 

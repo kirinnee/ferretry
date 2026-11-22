@@ -227,6 +227,25 @@ export function adaptersCases(): void {
         searched: ['/a'],
       });
     });
+
+    it('tries the built-in install folders only after PATH found nothing, and lists them when nothing is found', async () => {
+      const fallbacks = ['/home/kirin/.local/bin', '/usr/local/bin'];
+      should(
+        await locateCodex({ searchPaths: [] }, executables(['/home/kirin/.local/bin/codex']), '/home/kirin', fallbacks),
+      ).containDeep({ outcome: 'located', path: '/home/kirin/.local/bin/codex', rule: 'extra search path' });
+      should(
+        await locateCodex(
+          { searchPaths: [] },
+          executables(['/usr/local/bin/codex'], '/usr/bin/codex'),
+          '/home/kirin',
+          fallbacks,
+        ),
+      ).containDeep({ outcome: 'located', path: '/usr/bin/codex', rule: 'inherited environment' });
+      should(await locateCodex({ searchPaths: ['/a'] }, executables([]), '/home/kirin', fallbacks)).eql({
+        outcome: 'absent',
+        searched: ['/a', ...fallbacks],
+      });
+    });
   });
 
   /** A manager child whose output and exit the test controls. */
