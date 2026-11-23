@@ -20,12 +20,6 @@
 .fy-wait-gate {
   animation: fy-loading-in var(--loading-fade, 160ms) var(--ease-out) var(--loading-delay, 300ms) both;
 }
-/* A loader that was on screen when its owner answered keeps its minimum as a still copy (loading-hold.ts): fully there
-   from its first frame, over the beat that remains. Specificity beats the gate rules and the reduced-motion restatement. */
-.fy-loading-ghost.fy-loading-ghost.fy-loading-ghost.fy-loading-ghost.fy-loading-ghost {
-  animation: none !important;
-  opacity: 1 !important;
-}
 .fy-spinner-wait {
   display: inline-flex;
   line-height: 0;
@@ -40,9 +34,18 @@
   flex-direction: column;
   gap: 18px;
   justify-content: center;
+  /* A modest minimum, never a share of the parent: a page that draws its own header above the loader (the Board) would be pushed past
+     its box by it, and a loader must never make the page scroll. Inside a flex column the loader's own `flex: 1` fills what is left. */
   min-height: min(46vh, 22rem);
   padding: 32px 16px;
   text-align: center;
+}
+
+/* The shell's own loader, drawn straight in the page area (nothing above it): it fills that area so the mark sits in its vertical
+   middle. Border-box, so its padding is inside the area and adds no height of its own. */
+.fy-loading--fill {
+  box-sizing: border-box;
+  min-height: 100%;
 }
 
 /* Compact: for a small container (popover, dialog, card, panel). No minimum height, a smaller orb, so it never makes the

@@ -17,6 +17,7 @@
  */
 
 import { type ReactNode, useState } from 'react';
+import { useHeldLoading } from '../ui/loading.tsx';
 import { Button } from '../ui/primitives.tsx';
 import { Spinner } from '../ui/spinner.tsx';
 import { StepDemoSlotContext } from './step-demo.tsx';
@@ -68,6 +69,8 @@ export interface StepPageFrameProps {
 
 export function StepPageFrame({ title, line, demo, children, back, next, later, note, progress }: StepPageFrameProps) {
   const locked = next.disabled === true || next.busy === true;
+  // The in-button mark keeps its minimum on screen once shown (the same hold as the page loader); it sits in the button, over nothing.
+  const marked = useHeldLoading(next.busy === true);
   // The demo column always exists so a StepDemo can portal into it; `:empty` (css) hides it while nothing is drawn there.
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   return (
@@ -123,7 +126,7 @@ export function StepPageFrame({ title, line, demo, children, back, next, later, 
               onClick={next.onClick}
               data-step-next=""
             >
-              {next.busy === true ? <Spinner size={14} wait /> : null}
+              {marked ? <Spinner size={14} wait /> : null}
               {next.label}
             </Button>
           </div>
