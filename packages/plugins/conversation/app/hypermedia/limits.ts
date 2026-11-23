@@ -1,6 +1,6 @@
 /**
- * THE SIZE A MESSAGE MAY BE AND STILL BE PARSED AS HYPERMEDIA. Durian's own cap is 1 MB; `marked` is regex-driven and the
- * transcript tail the daemon hands the app is 512 KiB, so a message over 300,000 bytes is a log pasted whole, not prose
+ * THE SIZE A MESSAGE MAY BE AND STILL BE PARSED AS HYPERMEDIA. Durian's own cap is 1 MB; its Markdown reader (markdown-it since 0.6.2, linear in the text) is still
+ * the dearest part of a parse, and the transcript tail the daemon hands the app is 512 KiB, so a message over 300,000 bytes is a log pasted whole, not prose
  * an agent wrote. It is shown as the text it is ({@link exceedsMessageCap}), never as Durian's "the page is too big"
  * error, which would hide the message.
  */
@@ -18,6 +18,8 @@ export const MESSAGE_LIMITS = { maxInputBytes: MAX_MESSAGE_BYTES } as const;
  * the text it is ({@link exceedsParserBudget}), never as that error.
  */
 export const PARSER_LIMITS = { maxInputBytes: 1_000_000 } as const;
+// Durian's other caps are NOT here: this file runs on the page's main thread and may not import Durian. `parse-message.ts` (in
+// the worker) lays this over Durian's `UNTRUSTED_LIMITS`, the caps for text nobody reviewed.
 
 const encoder = new TextEncoder();
 

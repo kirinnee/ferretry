@@ -5,9 +5,9 @@
  * script, and Ferretry installs with `--ignore-scripts` (nix/ferretry.nix), so the package arrives as source and the
  * bundle must read that source (the `bun` export condition) and build the stylesheet itself. This file proves, on the
  * real installed package and a real Vite build:
- *   1. the install is exactly v0.5.1 at its pinned commit, and `prepare` did not run (no `dist/`);
+ *   1. the install is exactly v0.6.2 at its pinned commit, and `prepare` did not run (no `dist/`);
  *   2. one build holds ONE chart.js and ONE dompurify (Durian pins versions of its own);
- *   3. a chunk holds Durian's `VERSION` 0.5.1;
+ *   3. a chunk holds Durian's `VERSION` 0.6.2;
  *   4. the 3D chunk (three.js) is NOT in the static graph of a page without a 3D block: it is a lazy chunk;
  *   5. neither mermaid nor Durian's in-page DOMPurify drawing is in the bundle (the strict entry);
  *   6. the stylesheet is built, scoped under `.dh-doc`.
@@ -26,11 +26,11 @@ const WORKSPACE = join(import.meta.dir, '../../../..');
 const CONVERSATION = join(WORKSPACE, 'packages/plugins/conversation');
 const ENTRY = join(CONVERSATION, 'tests/fixtures/hypermedia-bundle-entry.ts');
 
-/** What the owner approved: durian-hypermedia v0.5.1 (signed tag object 6e8bb8e013cc2e797ae8a3655f02677d5a0135ea), MIT. */
-const PINNED_COMMIT = '951c81c7d537249073724c83a2266166e12f593b';
+/** What the owner approved: durian-hypermedia v0.6.2 (signed tag object c0a189a837a59219c9a927f13e8bc2cf7445ee77), MIT. */
+const PINNED_COMMIT = '635b083de304070660d0df104df5a2055f63e944';
 /** The SHA-512 of the tarball of that commit, as Bun recorded it: the bytes, not only the name. */
 const PINNED_INTEGRITY =
-  'sha512-+wJItdN5Wig3thHqFaZiTfKiLGzcb2q+hq4hKu2ZP/y1zG3udxPUpiYgUF0Hq9q9RX5IXzHYQ/hMh7MihsOyaw==';
+  'sha512-JYtM6KXpO3LkrbIeR6R/nDPXwGJI4hEYK9Bt6Uvku/rwHZMxN+fOq9V19nHN8Mzf53MXhZU7TqJqaKyIFs/HLw==';
 
 /** The versions THIS app pins: the only ones the bundle may hold. */
 const ours = (
@@ -45,12 +45,12 @@ const durianPlugin = (viteConfig.plugins as readonly { name?: string }[]).find(
 const installed = dirname(createRequire(join(CONVERSATION, 'package.json')).resolve('durian-hypermedia/package.json'));
 
 describe('the pinned install', () => {
-  it('is v0.5.1, MIT, and records its commit in the lockfile', () => {
+  it('is v0.6.2, MIT, and records its commit in the lockfile', () => {
     const manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8')) as {
       version: string;
       license: string;
     };
-    expect(manifest.version).toBe('0.5.1');
+    expect(manifest.version).toBe('0.6.2');
     expect(manifest.license).toBe('MIT');
     const lock = readFileSync(join(WORKSPACE, 'bun.lock'), 'utf8');
     const line = lock.split('\n').find(l => l.includes('"durian-hypermedia@'));
@@ -120,9 +120,9 @@ describe('one Vite build of the renderer entry', () => {
     expect(purifiers).toEqual([ours.dompurify]);
   });
 
-  it('holds the chunk with Durian VERSION 0.5.1', () => {
+  it('holds the chunk with Durian VERSION 0.6.2', () => {
     // `VERSION` is a constant the bundler inlines, so the chunk is the one holding the version AND Durian's parser.
-    expect(count(/"0\.5\.1"[\s\S]*registeredBlocks|registeredBlocks[\s\S]*"0\.5\.1"/u)).toBe(1);
+    expect(count(/"0\.6\.2"[\s\S]*registeredBlocks|registeredBlocks[\s\S]*"0\.6\.2"/u)).toBe(1);
   });
 
   it('keeps three.js out of the static graph: the 3D chunk is lazy', () => {

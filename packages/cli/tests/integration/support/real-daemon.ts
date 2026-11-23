@@ -55,12 +55,13 @@ export interface RealDaemon {
 /**
  * @param seed files (path under FY_HOME → text) written before the first boot: the state a ferret with no live agent cannot
  *   be made to produce (a message the owner sent it, which a daemon without a pane refuses to take).
+ * @param options.workOn start with Board and Agenda on (`config/plugins.yaml` `work: on`, which is off by default).
  * @param options.preload a module the daemon process loads first (`bun --preload`): a test's seam at the process boundary.
  */
 export async function bootRealDaemon(
   ferrets: readonly SeededFerret[],
   seed: Readonly<Record<string, string>> = {},
-  options: { readonly preload?: string } = {},
+  options: { readonly preload?: string; readonly workOn?: boolean } = {},
 ): Promise<RealDaemon> {
   const root = await mkdtemp(join(tmpdir(), 'fy-cli-real-'));
   const home = join(root, 'fy-home');
@@ -125,44 +126,64 @@ export async function bootRealDaemon(
     FY_UPDATE_CHECK: 'off',
     FYD_BACKGROUND_DELAY_SECONDS: '3600',
   };
-  const child = Bun.spawn({
-    cmd: [process.execPath, ...(options.preload === undefined ? [] : ['--preload', options.preload]), FYD],
-    cwd: ROOT,
-    env: { ...base, FY_PORT: '0' },
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const log: string[] = [];
-  let ready = false;
-  const pump = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
-    const decoder = new TextDecoder();
-    for await (const chunk of stream) {
-      const text = decoder.decode(chunk, { stream: true });
-      log.push(text);
-      if (/\bfyd \S+ ready \(/u.test(text)) ready = true;
+  /** Starts `fyd` on this home and waits until it is ready: its process, and where and as whom to reach it. */
+  const start = async (): Promise<{ child: ReturnType<typeof Bun.spawn>; url: string; admin: string }> => {
+    const child = Bun.spawn({
+      cmd: [process.execPath, ...(options.preload === undefined ? [] : ['--preload', options.preload]), FYD],
+      cwd: ROOT,
+      env: { ...base, FY_PORT: '0' },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const log: string[] = [];
+    let ready = false;
+    const pump = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
+      const decoder = new TextDecoder();
+      for await (const chunk of stream) {
+        const text = decoder.decode(chunk, { stream: true });
+        log.push(text);
+        if (/\bfyd \S+ ready \(/u.test(text)) ready = true;
+      }
+    };
+    void pump(child.stderr as ReadableStream<Uint8Array>);
+    void pump(child.stdout as ReadableStream<Uint8Array>);
+    const until = Date.now() + READY_MS;
+    while (!ready && Date.now() < until) {
+      if (child.exitCode !== null)
+        throw new Error(`fyd exited ${String(child.exitCode)}: ${log.join('').slice(-1500)}`);
+      await Bun.sleep(200);
     }
+    if (!ready) {
+      await stop(child);
+      throw new Error(`fyd was not ready in ${String(READY_MS)} ms: ${log.join('').slice(-1500)}`);
+    }
+    const run = JSON.parse(await readFile(join(home, 'run/daemon.json'), 'utf8')) as { port: number };
+    const admin = (await readFile(join(home, 'state/gate/admin-token'), 'utf8')).trim();
+    return { child, url: `http://127.0.0.1:${String(run.port)}`, admin };
   };
-  void pump(child.stderr);
-  void pump(child.stdout);
-  const dispose = async (): Promise<void> => {
+  const stop = async (child: ReturnType<typeof Bun.spawn>): Promise<void> => {
     child.kill('SIGTERM');
     await Promise.race([child.exited, Bun.sleep(10_000)]);
     child.kill('SIGKILL');
+  };
+  let { child, url, admin } = await start();
+  const dispose = async (): Promise<void> => {
+    await stop(child);
     await rm(root, { recursive: true, force: true });
   };
-  const until = Date.now() + READY_MS;
-  while (!ready && Date.now() < until) {
-    if (child.exitCode !== null) throw new Error(`fyd exited ${String(child.exitCode)}: ${log.join('').slice(-1500)}`);
-    await Bun.sleep(200);
+  if (options.workOn === true) {
+    // Turning `work` on is a loosening, held for a person; the host's admin token is that person at the machine, so it
+    // applies at once, and the plugins it starts are chosen at boot, so the daemon restarts on it.
+    const put = await fetch(`${url}/v1/config/file`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${admin}`, 'x-ferretry-client': 'cli', 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'plugins.yaml', text: 'work: on\n' }),
+    });
+    if (!put.ok) throw new Error(`turning work on failed (${String(put.status)}): ${await put.text()}`);
+    await stop(child);
+    ({ child, url, admin } = await start());
   }
-  if (!ready) {
-    await dispose();
-    throw new Error(`fyd was not ready in ${String(READY_MS)} ms: ${log.join('').slice(-1500)}`);
-  }
-  const run = JSON.parse(await readFile(join(home, 'run/daemon.json'), 'utf8')) as { port: number };
-  const url = `http://127.0.0.1:${String(run.port)}`;
-  const admin = (await readFile(join(home, 'state/gate/admin-token'), 'utf8')).trim();
   return {
     home,
     dispose,

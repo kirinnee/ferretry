@@ -42,7 +42,7 @@ afterAll(() => setYamlParser(null));
 
 describe('configureDurian', () => {
   it('is the pinned release (no later API under us)', () => {
-    expect(VERSION).toBe('0.5.1');
+    expect(VERSION).toBe('0.6.2');
   });
 
   it('no part of a message reaches a YAML parser', () => {
