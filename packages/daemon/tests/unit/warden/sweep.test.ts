@@ -1290,6 +1290,36 @@ describe('escalating to a human, and clearing it again', () => {
     should(journalTypes(subject)).containEql('fleet.warden_escalation_blind_node');
   });
 
+  it('should say a node’s unreadable board once across sweeps, not on every one', async () => {
+    // Arrange
+    const subject = escalating({ unreadableBoards: ['s1'] });
+    subject.seedBoard('s1', [escalated('unattended_question')]);
+
+    // Act
+    await subject.service.run({ force: false });
+    await subject.service.run({ force: false });
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject).filter(type => type === 'fleet.warden_escalation_blind_node')).have.length(1);
+  });
+
+  it('should say an unreadable node again when it left the fleet and came back unreadable', async () => {
+    // Arrange
+    const subject = escalating({ unreadableBoards: ['s1'] });
+    subject.seedBoard('s1', [escalated('unattended_question')]);
+
+    // Act
+    await subject.service.run({ force: false });
+    subject.setFleet([]);
+    await subject.service.run({ force: false });
+    subject.setFleet([session({ id: 's1', status: 'running' })]);
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject).filter(type => type === 'fleet.warden_escalation_blind_node')).have.length(2);
+  });
+
   it('should not clear as recovered a sub-ferret’s escalation that stands on its agenda home', async () => {
     // Arrange — s1 is a sub-ferret whose notifications sit on the lead's board, named for it.
     const subject = escalating({

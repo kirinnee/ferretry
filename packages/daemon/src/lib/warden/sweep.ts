@@ -822,6 +822,8 @@ function wireAnomaly(anomaly: WardenAnomaly): WireWardenAnomaly {
  */
 export class WardenSweepService {
   private readonly ports: WardenSweepPorts;
+  /** Nodes whose agenda could not be read and that the journal already said so of; cleared when the node reads again. */
+  private readonly blindNodesSaid = new Set<string>();
 
   constructor(
     ports: WardenSweepPorts,
@@ -3330,15 +3332,23 @@ export class WardenSweepService {
         // interruption arriving again. Dropping the node from the plan costs one
         // late escalation; raising without the watermark costs their trust in
         // the board.
-        this.ports.journal.record('fleet.warden_escalation_blind_node', {
-          sessionId: session.config.id,
-          reason: 'this node’s agenda could not be read, so it was neither escalated nor cleared this sweep',
-        });
+        // Said once while it stays unreadable: a damaged file does not change between sweeps.
+        if (!this.blindNodesSaid.has(session.config.id)) {
+          this.blindNodesSaid.add(session.config.id);
+          this.ports.journal.record('fleet.warden_escalation_blind_node', {
+            sessionId: session.config.id,
+            reason: 'this node’s agenda could not be read, so it was neither escalated nor cleared this sweep',
+          });
+        }
         continue;
       }
+      this.blindNodesSaid.delete(session.config.id);
       boards.push(board);
       nodes.push(session);
     }
+    // A node that left the fleet is forgotten, so the set never outgrows the fleet.
+    const present = new Set(read.map(({ session }) => session.config.id));
+    for (const said of this.blindNodesSaid) if (!present.has(said)) this.blindNodesSaid.delete(said);
 
     // Where each ferret's notification sits: a sub-ferret's is on its agenda home, so the plan looks for it there.
     const homes = new Map<string, string>();

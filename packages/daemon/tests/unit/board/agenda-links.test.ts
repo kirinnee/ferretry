@@ -132,6 +132,86 @@ describe("the agenda's link to cards", () => {
     ]);
   });
 
+  it('should say an unchanged damaged agenda once, and again when it fails differently', async () => {
+    // Arrange — the reader hands back the same error object while the file is unchanged.
+    const warnings: string[] = [];
+    const same = new Error('invalid agenda ledger: lead/agenda.json');
+    let failure = same;
+    const reader = new AgendaCardLinks(
+      {
+        open: async () => {
+          throw failure;
+        },
+      },
+      () => MACHINE,
+      { warn: message => warnings.push(message) },
+    );
+
+    // Act
+    for (let each = 0; each < 4; each += 1) await reader.asksFor([card({ assignee: 'lead' })]);
+    failure = new Error('invalid agenda ledger: lead/agenda.json (rewritten, still damaged)');
+    await reader.asksFor([card({ assignee: 'lead' })]);
+
+    // Assert
+    should(warnings).deepEqual([
+      'could not read the agenda of lead for its cards: invalid agenda ledger: lead/agenda.json',
+      'could not read the agenda of lead for its cards: invalid agenda ledger: lead/agenda.json (rewritten, still damaged)',
+    ]);
+  });
+
+  it('should say a first failure even when the rejection is undefined, and once more when the agenda recovers and fails again', async () => {
+    // Arrange
+    const warnings: string[] = [];
+    let outcome: 'fail' | 'ok' = 'fail';
+    const reader = new AgendaCardLinks(
+      {
+        open: async () => {
+          if (outcome === 'fail') throw undefined;
+          return [];
+        },
+      },
+      () => MACHINE,
+      { warn: message => warnings.push(message) },
+    );
+
+    // Act
+    await reader.asksFor([card({ assignee: 'lead' })]);
+    await reader.asksFor([card({ assignee: 'lead' })]);
+    outcome = 'ok';
+    await reader.asksFor([card({ assignee: 'lead' })]);
+    outcome = 'fail';
+    await reader.asksFor([card({ assignee: 'lead' })]);
+
+    // Assert
+    should(warnings).have.length(2);
+  });
+
+  it('should keep at most a bounded number of said failures, forgetting the oldest first', async () => {
+    // Arrange
+    const warnings: string[] = [];
+    const damaged = new Error('damaged');
+    const reader = new AgendaCardLinks(
+      {
+        open: async () => {
+          throw damaged;
+        },
+      },
+      () => MACHINE,
+      { warn: message => warnings.push(message) },
+    );
+    const owners = Array.from({ length: 600 }, (_, index) => `ferret-${index}`);
+    const cards = owners.map(owner => card({ assignee: owner }));
+
+    // Act — a second equal read says again what the bound had forgotten (past it the oldest go first).
+    await reader.asksFor(cards);
+    const first = warnings.length;
+    await reader.asksFor(cards);
+
+    // Assert
+    should(first).be.aboveOrEqual(600);
+    should(warnings.length).be.above(first);
+  });
+
   it('should read the agendas in bounded batches', async () => {
     // Arrange
     const owners = Array.from({ length: AGENDA_READ_CONCURRENCY + 3 }, (_, index) => `ferret-${index}`);
