@@ -199,10 +199,18 @@ export class LoginChangeService {
         : change.kind === 'login.env'
           ? await this.#usersOf(change.id, []).catch(() => [])
           : [];
+    // What the list shows beyond the files' runtimes is derived from the login and goes with it (best effort: a preview only).
+    const derived =
+      change.kind === 'login.remove'
+        ? ((await this.deps.view(change.id).catch(() => undefined))?.usedBy ?? []).filter(
+            name => !users.includes(name) && !movedFirst.includes(name),
+          )
+        : [];
     const edit = deriveLoginChange(files, change, {
       machineName: this.deps.machineName(),
       presets: change.kind === 'login.add' || change.kind === 'login.env' ? await this.deps.presets() : [],
       usedBy: () => users,
+      derived: () => derived,
     });
     // A removal is refused while a runtime uses the login, so it has none to name; an add has none yet.
     const named =

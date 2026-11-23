@@ -145,7 +145,7 @@ offers that picker inline. Past sessions stay in history.
 
 **Browser:** every login's row and its own page carry a red **Remove**, a `fleet.configure` act
 ([grants.md](grants.md)): a device that may not make it sees it disabled with the reason.
-**Terminal:** `fy login rm <id>`, refused while a runtime still uses the login.
+**Terminal:** `fy login rm <id>`, refused while a runtime file still uses the login (a runtime derived from it goes with it).
 
 Both use one `credential.remove` change. **Sign out keeps the login but it needs sign-in again. Remove
 deletes it.** They are different acts and the app says so beside the button.

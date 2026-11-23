@@ -403,6 +403,28 @@ describe('LoginChangeService: removing a login', () => {
     should(events).deepEqual([{ id: 'work', change: 'removed' }]);
   });
 
+  it('should say a runtime derived from the login disappears with it and its sessions cannot resume, without blocking', async () => {
+    // The files name no runtime on the login; the list shows one that Runtimes derives from it.
+    const { service } = world({
+      usedBy: async () => [],
+      view: async () => ({ usedBy: ['work-exppc'] }) as unknown as LoginView,
+    });
+
+    const view = await service.stage({ kind: 'login.remove', id: 'work' });
+
+    should(view.consequences).containEql(
+      'The derived runtime work-exppc disappears with this login. Sessions on it cannot resume until you pick another runtime.',
+    );
+  });
+
+  it('should say nothing of derived runtimes when the login has none', async () => {
+    const { service } = world({ view: async () => ({ usedBy: [] }) as unknown as LoginView });
+
+    const view = await service.stage({ kind: 'login.remove', id: 'work' });
+
+    should(view.consequences.join(' ')).not.containEql('derived');
+  });
+
   it('should ask which runtimes use THAT login', async () => {
     const asked: string[] = [];
     const { service } = world({

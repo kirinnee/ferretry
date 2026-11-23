@@ -43,6 +43,7 @@ import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-
 import { loginsLaunchStores, loginsModelCatalogs } from './adapters/model-sources.ts';
 import { fileFleetSetupDeps } from './adapters/setup-files.ts';
 import { unavailableSharedHistory } from './adapters/shared-history-unavailable.ts';
+import type { AccountModel } from './lib/account/schema.ts';
 import { type FleetManifest, type HarnessKind, harnessKindOfKey } from './lib/manifest.ts';
 import { claudeStatuslineFor } from './lib/account/statusline.ts';
 import { assembleServices, unavailableSetupDeps } from './lib/service/assembly.ts';
@@ -393,6 +394,8 @@ export function fileAssembly(
   readonly profileEtag: (profile: string) => Promise<string>;
   /** The harnesses installed here, as of the last lookup (`CommandCache`); the lookups are made ahead of every read. */
   readonly installed: () => readonly HarnessKind[];
+  /** Looks the harness commands up ahead of a read of `installed`: the ONE lookup every read of it begins with. */
+  readonly primeInstalled: () => Promise<void>;
 } {
   const platform = new HostPlatform(() => ctx.kernel.spawn);
   const commands = new CommandCache(
@@ -409,18 +412,19 @@ export function fileAssembly(
   const { host, directory } = fleetHost(ctx.kernel, commands);
   const home = directory.slice(0, directory.lastIndexOf('/'));
   const configDirectory = configDirectoryOf(home);
+  const primeCommands = async (model: AccountModel | undefined): Promise<void> => {
+    const wanted = new Set<string>(HARNESS_COMMANDS);
+    for (const component of Object.values(model?.components.mcp ?? {}))
+      if (component.command !== undefined) wanted.add(component.command);
+    await Promise.all([commands.prime(wanted), platform.prime()]);
+  };
   const config = runtimesConfigFiles({
     config: ctx.kernel.config,
     logins: ctx.needs.logins,
     components: hook => ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY),
     within: withinMs((delay, fn) => ctx.kernel.clock.after(milliseconds(delay), fn), PROVIDER_ANSWER_MS),
     installed,
-    prime: async model => {
-      const wanted = new Set<string>(HARNESS_COMMANDS);
-      for (const component of Object.values(model?.components.mcp ?? {}))
-        if (component.command !== undefined) wanted.add(component.command);
-      await Promise.all([commands.prime(wanted), platform.prime()]);
-    },
+    prime: primeCommands,
   });
   const unguarded = fileFleetCatalogDeps({
     host,
@@ -532,6 +536,9 @@ export function fileAssembly(
     // not Runtimes' to read: `config/` is no folder `host.files` mounts.)
     profileEtag: async profile => await ctx.kernel.config.etag(PROFILE_ITEMS as never, profile),
     installed,
+    primeInstalled: async () => {
+      await primeCommands(undefined);
+    },
   };
 }
 

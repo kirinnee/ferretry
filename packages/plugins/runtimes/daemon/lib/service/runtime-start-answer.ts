@@ -73,7 +73,12 @@ export function runtimeStartAnswer(deps: RuntimeStartAnswerDeps): RuntimeStartSo
     const spendable = await login(resolved.runtime.login);
     if (!spendable.ok)
       return { ok: false, sentence: `runtime ${id.data} was not started: ${spendable.sentence}; ${REMEDY}` };
-    return { ok: true, harness: resolved.runtime.harness, login: resolved.runtime.login };
+    return {
+      ok: true,
+      harness: resolved.runtime.harness,
+      login: resolved.runtime.login,
+      ...(resolved.derived === true ? { derived: true as const } : {}),
+    };
   };
   const defaultRuntime = async (): Promise<string | undefined> => await deps.default?.().catch(() => undefined);
   const catalogDep = deps.catalog;
