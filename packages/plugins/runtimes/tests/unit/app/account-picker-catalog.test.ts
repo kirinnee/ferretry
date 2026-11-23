@@ -49,6 +49,19 @@ const clientFixture = (overrides: Partial<Record<string, unknown>> = {}): Client
   };
 };
 
+describe('a picker row’s name', () => {
+  it('is the words a person understands, not the stored name', async () => {
+    const fixture = clientFixture({
+      'GET /v1/runtimes': runtimeCatalog(runtimeView({ wrapper: 'claude-you' }), runtimeView({ wrapper: 'codex-you' })),
+    });
+    const catalog = await readAccountPickerCatalog(fixture.client);
+    expect(catalog.accounts.map(row => [row.wrapper, row.displayName])).toEqual([
+      ['claude-you', 'Claude · your terminal sign-in'],
+      ['codex-you', 'Codex · your terminal sign-in'],
+    ]);
+  });
+});
+
 describe('readAccountPickerCatalog', () => {
   it('reads this machine’s runtimes from one daemon-bound client', async () => {
     const fixture = clientFixture();

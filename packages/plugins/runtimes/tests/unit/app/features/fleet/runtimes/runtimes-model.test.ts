@@ -254,7 +254,9 @@ describe('launchLabel', () => {
   });
 
   it('says Launch with the name, or why it cannot', () => {
-    expect(launchLabel(runtimeNamed('claude-default'), 'studio-mac', true)).toBe('Launch claude-default');
+    expect(launchLabel(runtimeNamed('claude-default'), 'studio-mac', true)).toBe(
+      'Launch Claude · your terminal sign-in (personal)',
+    );
     expect(
       launchLabel(
         runtime({ name: 'claude-default', launch: { available: false, reason: 'Sign in first.' } }),

@@ -32,6 +32,7 @@ import type { MachineTool, RuntimeView } from './wire/index.ts';
 import type { BrowserFirewallFailureSchema, BrowserPortsSettingSchema } from './wire/shared.ts';
 
 export * from './codex-launch.ts';
+export * from './display-name.ts';
 export * from './component-source.ts';
 export * from './harness-fallback.ts';
 export * from './homes.ts';

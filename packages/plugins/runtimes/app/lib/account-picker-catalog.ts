@@ -16,7 +16,7 @@
 
 import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { type LoginStatus, LoginListSchema, LoginViewSchema } from '@ferretry/plugin-logins/contract';
-import { type LocalModels, RuntimeCatalogSchema, type RuntimeView } from '../../contract/index.ts';
+import { type LocalModels, RuntimeCatalogSchema, type RuntimeView, runtimeDisplayName } from '../../contract/index.ts';
 import type { RuntimesClient } from './client.ts';
 import type { PickerModel } from './picker-model.ts';
 
@@ -68,10 +68,10 @@ const PICKER_LOGINS_ROUTE = 'GET /v1/logins' as const;
 const PICKER_CHECK_ROUTE = 'POST /v1/logins/:loginId/check' as const;
 
 /** One runtime as the picker reads it. A model set's models are offered; the harness default offers none. */
-export const pickerAccount = (runtime: RuntimeView): PickerAccount => ({
+export const pickerAccount = (runtime: RuntimeView, others: readonly RuntimeView[] = []): PickerAccount => ({
   id: runtime.id,
   wrapper: runtime.wrapper,
-  displayName: runtime.name,
+  displayName: runtimeDisplayName(runtime, others),
   kind: runtime.harness,
   credentialId: runtime.credential.id,
   ...(runtime.models === undefined
@@ -106,7 +106,9 @@ export const pickerAccount = (runtime: RuntimeView): PickerAccount => ({
 
 /** Read this machine's runtimes through the client bound to it. */
 export const readAccountPickerCatalog = async (client: RuntimesClient): Promise<AccountPickerCatalog> => ({
-  accounts: RuntimeCatalogSchema.parse(await client.call('GET /v1/runtimes')).runtimes.map(pickerAccount),
+  accounts: RuntimeCatalogSchema.parse(await client.call('GET /v1/runtimes')).runtimes.map((runtime, _at, all) =>
+    pickerAccount(runtime, all),
+  ),
 });
 
 const healthRow = (credentialId: string, status: LoginStatus): PickerAccountHealth => ({

@@ -240,7 +240,7 @@ describe('Runtime actions: Rename', () => {
     await chooseRuntimeAction(view.container, 'codex-default', 'rename');
 
     // Assert
-    expect(text(view.container, '[data-runtime-dialog="rename"] h2')).toBe('Rename codex-default');
+    expect(text(view.container, '[data-runtime-dialog="rename"] h2')).toBe('Rename Codex · your terminal sign-in');
     expect(renameInput(view.container).value).toBe('codex-default');
     expect(text(view.container, '[data-runtime-rename-notes]')).toContain(
       'Running ferrets keep working — nothing restarts.',
@@ -462,7 +462,7 @@ describe('Runtime actions: Remove', () => {
 
     // Assert
     expect(proposed(calls)).toEqual([{ kind: 'runtime.remove', name: 'codex-default' }]);
-    expect(text(view.container, '[data-runtime-dialog="remove"] h2')).toBe('Remove codex-default?');
+    expect(text(view.container, '[data-runtime-dialog="remove"] h2')).toBe('Remove Codex · your terminal sign-in?');
     expect(text(view.container, '[data-runtime-remove-impact]')).toContain(
       '2 ferrets are running on it. They keep running, but restarting them later needs another runtime.',
     );
@@ -562,7 +562,7 @@ describe('Runtime actions: Remove', () => {
     // Assert
     expect(calls.some(call => call.route.endsWith('/apply'))).toBe(false);
     expect(text(view.container, '[data-runtime-move-failed]')).toContain(
-      '2 ferrets could not be moved, so claude-work was not removed.',
+      '2 ferrets could not be moved, so Claude · Claude.ai sign-in (work) was not removed.',
     );
     expect(text(view.container, '[data-runtime-move-failed]')).toContain(
       'Fisher: Ferrets cannot start a ferret on another runtime yet.',
@@ -655,7 +655,7 @@ describe('Runtime actions: Remove', () => {
     // Assert
     expect(calls.some(call => call.route.endsWith('/apply'))).toBe(false);
     expect(text(view.container, '[data-runtime-move-failed]')).toContain(
-      'One ferret could not be moved, so claude-work was not removed.',
+      'One ferret could not be moved, so Claude · Claude.ai sign-in (work) was not removed.',
     );
     expect(text(view.container, '[data-runtime-move-failed]')).toContain('Otter');
     expect(submit(view.container).textContent).toBe('Remove claude-work');
@@ -681,7 +681,7 @@ describe('Runtime actions: Remove', () => {
 
     // Assert — nothing is staged until a default is picked; every other runtime is offered.
     expect(text(view.container, '[data-runtime-remove-default]')).toBe(
-      'claude-agent is studio-mac’s default runtime for new agents. Pick another default first.',
+      'Claude · your terminal sign-in (personal) is studio-mac’s default runtime for new agents. Pick another default first.',
     );
     expect(proposed(calls)).toEqual([]);
     expect(view.container.querySelector('[data-runtime-default-picker]')).not.toBeNull();

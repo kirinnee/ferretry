@@ -8,7 +8,7 @@
 
 import type { LocalModelsSnapshot, ModelChoice } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { RuntimeCatalogSchema, type RuntimeView } from '@ferretry/plugin-runtimes/contract';
+import { RuntimeCatalogSchema, type RuntimeView, runtimeDisplayName } from '@ferretry/plugin-runtimes/contract';
 import { isPluginOff } from './plugin-off.ts';
 
 /** One model a login offers, as the model field lists it. */
@@ -37,10 +37,10 @@ export interface PickerAccount {
 }
 
 /** One runtime as the picker reads it. A model set's models are offered; the harness default offers none. */
-const pickerAccount = (runtime: RuntimeView): PickerAccount => ({
+const pickerAccount = (runtime: RuntimeView, others: readonly RuntimeView[]): PickerAccount => ({
   id: runtime.id,
   wrapper: runtime.wrapper,
-  displayName: runtime.name,
+  displayName: runtimeDisplayName(runtime, others),
   kind: runtime.harness,
   credentialId: runtime.credential.id,
   ...(runtime.models === undefined
@@ -78,7 +78,9 @@ export const readAccountPickerCatalog = async (
 ): Promise<{ readonly accounts: readonly PickerAccount[] } | 'off'> => {
   try {
     return {
-      accounts: RuntimeCatalogSchema.parse(await client.call<unknown>('GET /v1/runtimes')).runtimes.map(pickerAccount),
+      accounts: RuntimeCatalogSchema.parse(await client.call<unknown>('GET /v1/runtimes')).runtimes.map(
+        (runtime, _at, all) => pickerAccount(runtime, all),
+      ),
     };
   } catch (cause) {
     if (isPluginOff(cause)) return 'off';

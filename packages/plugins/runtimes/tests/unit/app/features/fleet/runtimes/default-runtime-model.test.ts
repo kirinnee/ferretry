@@ -42,7 +42,7 @@ describe('runtimeStateWords', () => {
 describe('the control’s words', () => {
   it('names the runtime only and says what is kept', () => {
     const agent = runtime({ name: 'agent' });
-    expect(defaultOptionLabel(agent)).toBe('agent');
+    expect(defaultOptionLabel(agent, [agent])).toBe('agent');
     expect(isDefaultRuntime(machine({ defaultRuntime: 'agent' }), agent)).toBe(true);
     expect(isDefaultRuntime(null, agent)).toBe(false);
     expect(keepDefaultLabel('agent')).toBe('Keep agent');

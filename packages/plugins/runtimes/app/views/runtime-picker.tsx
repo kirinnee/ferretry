@@ -14,6 +14,7 @@ import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { SlidersHorizontal } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { readAccountPickerCatalog } from '../lib/account-picker-catalog.ts';
 import { RuntimeEffortControls, RuntimeModelControls } from '../components/runtime-controls.tsx';
 import type { RuntimesClient } from '../lib/client.ts';
 import { DaemonRuntimeModelCatalogStore } from '../lib/runtime-models.ts';
@@ -51,6 +52,8 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
   return function RuntimePicker({ subject }: PanelProps): ReactNode {
     const [view, setView] = useState<RuntimeSessionView | null>(null);
     const [failure, setFailure] = useState<string | null>(null);
+    // The words for the runtime this ferret runs on ("Claude · your terminal sign-in"); absent until the roster is read, and never guessed.
+    const [runsOn, setRunsOn] = useState<string | null>(null);
     const [open, setOpen] = useState(false);
     const [placement, setPlacement] = useState<Placement | null>(null);
     const chip = useRef<HTMLButtonElement | null>(null);
@@ -60,10 +63,20 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
       let live = true;
       setView(null);
       setFailure(null);
+      setRunsOn(null);
       setOpen(false);
       readRuntimeSessionView(client, subject).then(
         read => {
-          if (live) setView(read);
+          if (!live) return;
+          setView(read);
+          const wrapper = read.config.runtime;
+          if (wrapper === undefined) return;
+          readAccountPickerCatalog(client).then(
+            roster => {
+              if (live) setRunsOn(roster.accounts.find(account => account.wrapper === wrapper)?.displayName ?? null);
+            },
+            () => undefined,
+          );
         },
         cause => {
           if (live) setFailure(cause instanceof Error ? cause.message : String(cause));
@@ -152,6 +165,11 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
                   width: placement.width,
                 }}
               >
+                {runsOn === null ? null : (
+                  <p className="m-0 px-cell-x pb-2 text-meta leading-base text-muted" data-runtime-runs-on="">
+                    Runs on <span className="font-semibold text-fg">{runsOn}</span>
+                  </p>
+                )}
                 <div className="kt-label px-cell-x pb-0.5">Model</div>
                 <RuntimeModelControls {...common} open presentation="popover" view={view} />
                 <div className="kt-label mt-2 px-cell-x pb-0.5">Reasoning</div>

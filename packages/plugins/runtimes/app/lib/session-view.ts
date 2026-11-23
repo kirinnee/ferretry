@@ -11,6 +11,8 @@ export interface RuntimeSessionView {
   readonly config: {
     readonly id: string;
     readonly harness: KnownHarnessKey;
+    /** The runtime it was started on, by its wrapper: the key the roster names it by. */
+    readonly runtime?: string | undefined;
     readonly model?: string | undefined;
     readonly modelHint?: string | undefined;
     readonly harnessFlags?: readonly string[] | undefined;

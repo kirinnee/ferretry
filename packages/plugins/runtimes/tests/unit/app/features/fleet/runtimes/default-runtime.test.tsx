@@ -76,6 +76,15 @@ const AGENTS: RuntimeCatalog = {
   ],
 };
 
+/** The words the select shows for each runtime above: the three on one terminal sign-in tell themselves apart by their stored name. */
+const SHOWN = {
+  default: 'Claude · your terminal sign-in (personal) — claude-default',
+  work: 'Claude · Claude.ai sign-in (work)',
+  atomi: 'Claude · your terminal sign-in (personal) — claude-atomi',
+  kirin: 'Codex · your terminal sign-in',
+  plain: 'Claude · your terminal sign-in (personal) — claude-plain',
+} as const;
+
 interface Options {
   readonly runtimes?: RuntimeCatalog;
   readonly machine?: MachineView | null;
@@ -159,13 +168,13 @@ describe('Default for new agents on the Runtimes tab', () => {
       'Used when a start names no runtime.',
     );
     expect(await optionTexts(view.container)).toEqual([
-      'claude-default',
-      'claude-work',
-      'claude-atomi',
-      'codex-kirin',
-      'claude-plain',
+      SHOWN.default,
+      SHOWN.work,
+      SHOWN.atomi,
+      SHOWN.kirin,
+      SHOWN.plain,
     ]);
-    expect(shown(view.container)).toBe('claude-default');
+    expect(shown(view.container)).toBe(SHOWN.default);
     expect(view.container.querySelector('[data-change-apply]')).toBeNull();
   });
 
@@ -179,11 +188,11 @@ describe('Default for new agents on the Runtimes tab', () => {
       await closeBox(select(container));
       return rows;
     };
-    expect(await off(view.container)).toEqual(['claude-atomi']);
+    expect(await off(view.container)).toEqual([SHOWN.atomi]);
 
     const held = await open({ machine: machine({ defaultRuntime: 'claude-atomi' }) });
     expect(await off(held.container)).toEqual([]);
-    expect(shown(held.container)).toBe('claude-atomi');
+    expect(shown(held.container)).toBe(SHOWN.atomi);
   });
 
   it('names a CLI that is not installed, in the picked runtime’s badge and not in its option', async () => {
@@ -197,7 +206,7 @@ describe('Default for new agents on the Runtimes tab', () => {
       }),
     });
 
-    expect(await optionTexts(view.container)).toContain('codex-kirin');
+    expect(await optionTexts(view.container)).toContain(SHOWN.kirin);
     expect(view.container.querySelector('[data-default-runtime-state]')?.textContent).toBe('Codex not installed');
   });
 
@@ -213,10 +222,10 @@ describe('Default for new agents on the Runtimes tab', () => {
     const refreshes: string[] = [];
     const view = await open({ calls, refreshes });
 
-    await choose(select(view.container), 'codex-kirin');
+    await choose(select(view.container), SHOWN.kirin);
 
     expect(must(view.container.querySelector('[data-default-runtime-undo]'), 'keep').textContent).toBe(
-      'Keep claude-default',
+      'Keep ' + SHOWN.default,
     );
     expect(must(view.container.querySelector('[data-change-submit]'), 'save').textContent).toBe('Save default runtime');
     await click(view.container, '[data-change-submit]');
@@ -230,11 +239,11 @@ describe('Default for new agents on the Runtimes tab', () => {
   it('Keep puts the select back and sends nothing', async () => {
     const calls: Call[] = [];
     const view = await open({ calls });
-    await choose(select(view.container), 'claude-work');
+    await choose(select(view.container), SHOWN.work);
 
     await click(view.container, '[data-default-runtime-undo]');
 
-    expect(shown(view.container)).toBe('claude-default');
+    expect(shown(view.container)).toBe(SHOWN.default);
     expect(view.container.querySelector('[data-change-apply]')).toBeNull();
     expect(machineChanges(calls)).toEqual([]);
   });
@@ -244,7 +253,7 @@ describe('Default for new agents on the Runtimes tab', () => {
 
     expect((await optionTexts(view.container))[0]).toBe('automatic');
     expect(view.container.querySelector('[data-runtime-default-badge]')).toBeNull();
-    await choose(select(view.container), 'claude-default');
+    await choose(select(view.container), SHOWN.default);
     expect(must(view.container.querySelector('[data-default-runtime-undo]'), 'keep').textContent).toBe(
       'Keep automatic',
     );
@@ -255,7 +264,7 @@ describe('Default for new agents on the Runtimes tab', () => {
   it('R3-M1: a rolled-back save names the file that stayed, keeps the pick and does not refresh', async () => {
     const refreshes: string[] = [];
     const view = await open({ refreshes, routes: { [APPLY]: ROLLED_BACK } });
-    await choose(select(view.container), 'claude-work');
+    await choose(select(view.container), SHOWN.work);
 
     await click(view.container, '[data-change-submit]');
 
@@ -263,14 +272,14 @@ describe('Default for new agents on the Runtimes tab', () => {
     expect(alert.getAttribute('role')).toBe('alert');
     expect(alert.textContent).toStartWith('This change was not applied: the fleet apply failed and was rolled back.');
     expect(alert.textContent).toContain(LANDED_FILE);
-    expect(shown(view.container)).toBe('claude-work');
+    expect(shown(view.container)).toBe(SHOWN.work);
     expect(refreshes).toEqual([]);
   });
 
   it('R3-M1: a rollback-incomplete save names the paths left partly changed and does not refresh', async () => {
     const refreshes: string[] = [];
     const view = await open({ refreshes, routes: { [APPLY]: ROLLBACK_INCOMPLETE } });
-    await choose(select(view.container), 'claude-work');
+    await choose(select(view.container), SHOWN.work);
 
     await click(view.container, '[data-change-submit]');
 
@@ -278,20 +287,20 @@ describe('Default for new agents on the Runtimes tab', () => {
     expect(said).toContain('needs a look');
     expect(said).toContain(UNRESTORED_PATH);
     expect(said).toContain(LANDED_FILE);
-    expect(shown(view.container)).toBe('claude-work');
+    expect(shown(view.container)).toBe(SHOWN.work);
     expect(refreshes).toEqual([]);
   });
 
   it('a refused save says why and keeps the pick', async () => {
     const view = await open({ routes: { [PROPOSE]: new Error('unreachable') } });
-    await choose(select(view.container), 'claude-work');
+    await choose(select(view.container), SHOWN.work);
 
     await click(view.container, '[data-change-submit]');
 
     expect(must(view.container.querySelector('[data-change-refusal]'), 'refusal').textContent).toContain(
       'didn’t answer',
     );
-    expect(shown(view.container)).toBe('claude-work');
+    expect(shown(view.container)).toBe(SHOWN.work);
   });
 });
 
@@ -372,9 +381,9 @@ describe('The Default badge and Make default on the runtimes list', () => {
 
     await chooseRuntimeAction(view.container, 'claude-work', 'make-default');
 
-    expect(shown(view.container)).toBe('claude-work');
+    expect(shown(view.container)).toBe(SHOWN.work);
     expect(must(view.container.querySelector('[data-default-runtime-undo]'), 'keep').textContent).toBe(
-      'Keep claude-default',
+      'Keep ' + SHOWN.default,
     );
     await click(view.container, '[data-change-submit]');
     expect(machineChanges(calls)).toEqual([

@@ -267,7 +267,7 @@ describe('Add runtime from the tab', () => {
 describe('a runtime’s own page', () => {
   it('shows the login and profile as links, with the profile’s size', async () => {
     const view = await page('claude-default');
-    expect(text(view.container, 'h3')).toBe('claude-default');
+    expect(text(view.container, 'h3')).toBe('Claude · your terminal sign-in (personal) — Default profile');
     expect(text(view.container, '[data-runtime-page] p')).toContain('Ready');
     expect(text(view.container, '[data-runtime-page] p')).not.toContain('Agent runtime');
     const login = must(view.container.querySelector('[data-runtime-credential]'), 'login link');
@@ -487,7 +487,7 @@ describe('Launch', () => {
     const calls: Call[] = [];
     const view = await page('claude-default', { calls });
     const launch = must(view.container.querySelector<HTMLAnchorElement>('a[data-runtime-launch]'), 'launch');
-    expect(launch.textContent).toBe('Launch claude-default');
+    expect(launch.textContent).toBe('Launch Claude · your terminal sign-in (personal)');
     expect(launch.getAttribute('href')).toBe('/d/d1/new?agent=claude-default');
     expect(launchHref('d1', 'a b')).toBe('/d/d1/new?agent=a%20b');
     expect(calls.every(call => call.route.startsWith('GET '))).toBe(true);

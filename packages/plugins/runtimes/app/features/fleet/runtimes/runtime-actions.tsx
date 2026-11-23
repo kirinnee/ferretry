@@ -16,12 +16,13 @@
  */
 
 import { Loading } from '@ferretry/app/ui';
-import type {
-  AccountChange,
-  AccountChangeView,
-  MachineView,
-  RunningSession,
-  RuntimeView,
+import {
+  type AccountChange,
+  type AccountChangeView,
+  type MachineView,
+  type RunningSession,
+  type RuntimeView,
+  runtimeDisplayName,
 } from '../../../../contract/index.ts';
 import { MoreHorizontal, Pencil, Star, Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
@@ -248,7 +249,7 @@ export function RenameRuntimeDialog({
   };
 
   return (
-    <RuntimeDialog title={`Rename ${runtime.name}`} name="rename" busy={changes.busy} onClose={onClose}>
+    <RuntimeDialog title={`Rename ${runtimeDisplayName(runtime)}`} name="rename" busy={changes.busy} onClose={onClose}>
       <div className="flex flex-col gap-1">
         <label htmlFor={inputId} className="text-cell font-semibold text-fg">
           New name
@@ -431,7 +432,7 @@ export function RemoveRuntimeDialog({
   };
 
   return (
-    <RuntimeDialog title={`Remove ${runtime.name}?`} name="remove" busy={busy} onClose={onClose}>
+    <RuntimeDialog title={`Remove ${runtimeDisplayName(runtime)}?`} name="remove" busy={busy} onClose={onClose}>
       {blocked ? (
         <DefaultPicker
           runtime={runtime}
@@ -446,7 +447,7 @@ export function RemoveRuntimeDialog({
           }}
         />
       ) : phase.kind === 'reading' ? (
-        <Loading compact kind="page" label={`Checking what runs on ${runtime.name}…`} />
+        <Loading compact kind="page" label={`Checking what runs on ${runtimeDisplayName(runtime)}…`} />
       ) : phase.kind === 'refused' ? (
         <>
           <p role="alert" className="m-0 text-cell leading-base text-err" data-runtime-remove-refused="">
@@ -488,7 +489,7 @@ export function RemoveRuntimeDialog({
             >
               <p className="m-0 font-semibold">
                 {failures.length === 1 ? 'One ferret' : `${String(failures.length)} ferrets`} could not be moved, so{' '}
-                {runtime.name} was not removed.
+                {runtimeDisplayName(runtime)} was not removed.
               </p>
               <ul className="m-0 flex list-none flex-col gap-1 p-0">
                 {failures.map(failure => (
@@ -611,7 +612,7 @@ function DefaultPicker({
   return (
     <>
       <p className="m-0 text-cell leading-base text-fg" data-runtime-remove-default="">
-        {runtime.name} is {machineName}’s default runtime for new agents. Pick another default first.
+        {runtimeDisplayName(runtime)} is {machineName}’s default runtime for new agents. Pick another default first.
       </p>
       {candidates.length === 0 ? (
         <>

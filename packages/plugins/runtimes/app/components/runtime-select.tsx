@@ -33,7 +33,6 @@ import { quotaParts } from '../lib/quota-text.ts';
 import { Button, cn } from '../ui.ts';
 import {
   type AccountPickerOption,
-  accountLabel,
   accountPickerOptions,
   firstUsableAccountOption,
   fleetHarnessLabel,
@@ -99,10 +98,9 @@ const harnessGroups = (options: readonly AccountPickerOption[]) =>
     options: options.filter(option => option.kind === kind),
   })).filter(group => group.options.length > 0);
 
-/** What a runtime runs on, in the words a person picks by: its login's catalog, then its default model. */
+/** What a runtime runs on, in the words a person picks by: its login's catalog, then its default model. The stored name is not one of them: the row's name already tells runtimes apart. */
 const runtimeHint = (account: AccountPickerOption): string => {
-  const label = accountLabel(account);
-  const hint = [label.id, account.modelCatalog?.label, account.defaultModel].filter(part => part != null);
+  const hint = [account.modelCatalog?.label, account.defaultModel].filter(part => part != null);
   return hint.length === 0 ? 'default model' : hint.join(' · ');
 };
 

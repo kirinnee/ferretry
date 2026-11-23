@@ -50,6 +50,9 @@ export function DefaultRuntimeControl({
   const shown = picked ?? current ?? '';
   const pending = picked !== null && picked !== current;
   const shownRuntime = candidates.find(runtime => runtime.name === shown);
+  const currentRuntime = candidates.find(runtime => runtime.name === current);
+  // "Keep" says the runtime in the words the list shows it in; a default the roster no longer holds is named as stored.
+  const currentWords = currentRuntime === undefined ? current : defaultOptionLabel(currentRuntime, candidates);
   const stateWords = shownRuntime === undefined ? null : runtimeStateWords(shownRuntime, machine);
   const save = (): void => {
     if (picked === null) return;
@@ -88,7 +91,7 @@ export function DefaultRuntimeControl({
                   ...(current === null ? [{ value: '', label: AUTOMATIC_DEFAULT }] : []),
                   ...candidates.map(runtime => ({
                     value: runtime.name,
-                    label: defaultOptionLabel(runtime),
+                    label: defaultOptionLabel(runtime, candidates),
                     disabled: runtime.disabled !== undefined && runtime.name !== shown,
                   })),
                 ]}
@@ -134,7 +137,7 @@ export function DefaultRuntimeControl({
                   onPick(null);
                 }}
               >
-                {keepDefaultLabel(current)}
+                {keepDefaultLabel(currentWords)}
               </Button>
             </ChangeApplyPanel>
           ) : null}
