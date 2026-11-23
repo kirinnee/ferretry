@@ -84,9 +84,9 @@ const press = async (container: HTMLElement, selector: string) => {
 };
 
 describe('the declared steps', () => {
-  test('the Codex segment is eleven daemon steps, orders 40 to 50, in the group "Codex"', () => {
+  test('the Codex segment is twelve daemon steps, orders 40 to 51, in the group "Codex"', () => {
     const steps: readonly { id: string; order: number; group?: string; side?: string }[] = manifest.onboarding ?? [];
-    expect(steps.map(step => step.order)).toEqual([40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]);
+    expect(steps.map(step => step.order)).toEqual([40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51]);
     expect(steps.every(step => step.group === 'Codex' && (step.side ?? 'daemon') === 'daemon')).toBe(true);
     expect(steps.map(step => step.id)).toEqual([
       'installed',
@@ -100,6 +100,7 @@ describe('the declared steps', () => {
       'conversations',
       'import-run',
       'permission',
+      'ready',
     ]);
     expect(steps.some(step => step.id === 'harness')).toBe(false);
   });
@@ -807,6 +808,6 @@ describe('no step is recorded as done without its page', () => {
       if (harness.decision === 'shown') shown.push(id);
     }
     // The five kind pages are passed over by the choice (notNeeded); the run page (Codex missing) is the one that skips.
-    expect(shown).toEqual(['installed', 'sign-in', 'import-choice', 'conversations', 'permission']);
+    expect(shown).toEqual(['installed', 'sign-in', 'import-choice', 'conversations', 'permission', 'ready']);
   });
 });

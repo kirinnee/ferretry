@@ -240,6 +240,7 @@ export default definePlugin({
       panel('onboarding.step', { id: 'onboarding-conversations', order: 28 }),
       panel('onboarding.step', { id: 'onboarding-import-run', order: 29 }),
       panel('onboarding.step', { id: 'onboarding-permission', order: 30 }),
+      panel('onboarding.step', { id: 'onboarding-ready', order: 31 }),
     ],
     settings: [settingsTab('claude-code', { icon: 'sparkles', group: 'tools', label: 'Claude Code', order: 20 })],
   },
@@ -280,6 +281,7 @@ export default definePlugin({
     { id: 'conversations', title: 'Conversations', order: 28, stepHost: true },
     { id: 'import-run', title: 'Bring it over', order: 29, stepHost: true },
     { id: 'permission', title: 'Permissions', order: 30, stepHost: true },
+    { id: 'ready', title: 'Your runtime', order: 31, stepHost: true },
   ],
   doctor: ['claude-code-paths'],
 

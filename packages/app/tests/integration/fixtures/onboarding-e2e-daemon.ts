@@ -45,6 +45,7 @@ const CLAUDE = [
   ['conversations', 'Conversations', 28],
   ['import-run', 'Bring it over', 29],
   ['permission', 'Permissions', 30],
+  ['ready', 'Your runtime', 31],
 ] as const;
 const CODEX = [
   ['installed', 'Install Codex', 40],
@@ -58,6 +59,7 @@ const CODEX = [
   ['conversations', 'Conversations', 48],
   ['import-run', 'Bring it over', 49],
   ['permission', 'Permissions', 50],
+  ['ready', 'Your runtime', 51],
 ] as const;
 
 const stepsOf = (plugin: string, rows: readonly (readonly [string, string, number])[], group: string): FakeStep[] =>
@@ -136,7 +138,11 @@ export class FakeDaemon {
       stepHost: true,
       state: this.states.get(`${step.plugin}.${step.id}`) ?? 'pending',
     }));
-    return { steps, complete: steps.every(step => step.state !== 'pending'), setUp: true };
+    const harnesses = [
+      { key: 'claude-code', label: 'Claude Code' },
+      { key: 'codex', label: 'Codex' },
+    ];
+    return { steps, harnesses, complete: steps.every(step => step.state !== 'pending'), setUp: true };
   }
 
   answer(

@@ -957,7 +957,7 @@ describe('the first run, end to end', () => {
         await reach(tab, 'onboarding.agents');
         walked.push('onboarding.agents');
         const agentBox = (row: string) => tab.locator(`[data-agent-row="${row}"] > label input`);
-        expect(await agentBox('claude').isChecked(), 'Which AI: Claude is ticked first').toBe(true);
+        expect(await agentBox('claude-code').isChecked(), 'Which AI: Claude is ticked first').toBe(true);
         await agentBox('others').click();
         await tab.waitForSelector('[data-agent-providers] [data-agent-row]');
         const offered = async (): Promise<string[]> =>
@@ -1059,9 +1059,9 @@ describe('the first run, end to end', () => {
         // ── Claude: installed and signed in are never asked; Choose what to import ──────────────────────────────────
         walked.push('claude-code.import-choice');
         await inspect(tab, variant, 'claude-code.import-choice');
-        // Item 1: the count is known from the answer BEFORE the next page: Import everything (the default) will show 4 pages, not 9.
+        // Item 1: the count is known from the answer BEFORE the next page: Import everything (the default) will show 5 pages, not 10.
         expect(await counterOf(tab), 'Claude: Import everything counts the pages it will show').toBe(
-          'Claude Code · page 1 of 4',
+          'Claude Code · page 1 of 5',
         );
         await shot(tab, variant, 'claude-code.import-choice');
         await backAndForth(tab, 'onboarding.name', 'claude-code.import-choice');
@@ -1088,7 +1088,7 @@ describe('the first run, end to end', () => {
         );
         // Item 1 (continued): Enter picked Choose, so the count is already 9 on this very page, not a page later.
         expect(await counterOf(tab), 'Claude: Choose counts all of its pages as soon as it is picked').toBe(
-          'Claude Code · page 1 of 9',
+          'Claude Code · page 1 of 10',
         );
         await tab.locator('label[data-choice="choose"]').click();
         await shot(tab, variant, 'claude-code.import-choice-chosen');
@@ -1180,8 +1180,19 @@ describe('the first run, end to end', () => {
         // Back to the saved card: Next has nothing to save.
         await tab.locator('[data-flow-page="claude-code.permission"] [data-choice="skip"]').click();
         await tab.waitForTimeout(300);
-        await next(tab, 'codex.import-choice');
+        await next(tab, 'claude-code.ready');
         expect(await recorded(tab, A, 'claude-code.permission')).toBe('done');
+
+        // Ready (O9-6): the Claude segment ENDS by saying what the pick came to: a runtime (the fake machine has one per tool).
+        await reach(tab, 'claude-code.ready');
+        walked.push('claude-code.ready');
+        await inspect(tab, variant, 'claude-code.ready');
+        await shot(tab, variant, 'claude-code.ready');
+        expect(await tab.locator('[data-runtime-ready="ready"]').innerText(), 'Claude says it is ready').toContain(
+          'Claude Code is ready',
+        );
+        await next(tab, 'codex.import-choice');
+        expect(await recorded(tab, A, 'claude-code.ready')).toBe('done');
 
         // ── Codex: Import everything ────────────────────────────────────────────────────────────────────────────────
         await reach(tab, 'codex.import-choice');
@@ -1444,12 +1455,13 @@ describe('the first run, end to end', () => {
           ).toBe(1);
         expect(
           run.filter(counter => counter.key.startsWith('codex.')).map(counter => [counter.n, counter.of]),
-          'Codex: Import everything reads page 1 of 4 on its first page and walks 1, 2, 3, 4',
+          'Codex: Import everything reads page 1 of 5 on its first page and walks 1 to 5 (the last is Codex is ready)',
         ).toEqual([
-          [1, 4],
-          [2, 4],
-          [3, 4],
-          [4, 4],
+          [1, 5],
+          [2, 5],
+          [3, 5],
+          [4, 5],
+          [5, 5],
         ]);
         expect(
           new Set(
@@ -1457,7 +1469,7 @@ describe('the first run, end to end', () => {
               .filter(counter => counter.key.startsWith('claude-code.') && counter.key !== 'claude-code.import-choice')
               .map(counter => counter.of),
           ).size,
-          'Claude: after Choose is picked n stays 9 on every later page',
+          'Claude: after Choose is picked n stays 10 on every later page',
         ).toBe(1);
         expect(
           run
@@ -1522,6 +1534,8 @@ describe('the first run, end to end', () => {
             'claude-code.import-skills',
             'claude-code.import-run',
             'claude-code.permission',
+            'claude-code.ready',
+            'codex.ready',
             'codex.import-choice',
             'warden.warden',
             'lessons.lessons',
