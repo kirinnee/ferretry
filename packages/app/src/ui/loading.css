@@ -34,7 +34,9 @@
   flex-direction: column;
   gap: 18px;
   justify-content: center;
-  min-height: min(46vh, 22rem);
+  /* Fills the area it loads (the page under the top bar) so the mark sits in its vertical middle; a loader inside a box with no height of its own
+     (a card, a sheet) has no area to fill, so it keeps a modest minimum. */
+  min-height: max(min(46vh, 22rem), 100%);
   padding: 32px 16px;
   text-align: center;
 }

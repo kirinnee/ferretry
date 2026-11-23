@@ -671,11 +671,22 @@ describe('a slow daemon: ONE centred loader, never drawn over what is already dr
               inMain:
                 box !== undefined && main !== undefined && box.left >= main.left - 1 && box.right <= main.right + 1,
               form: document.querySelectorAll('[data-new-ferret]').length,
+              // The loader fills the area, it must not make the page scroll.
+              scrolls:
+                (document.querySelector('.fy-main')?.scrollHeight ?? 0) >
+                (document.querySelector('.fy-main')?.clientHeight ?? 0) + 1,
+              // How far the mark sits from the vertical middle of the page area (under the top bar), as a share of that area.
+              offCentre:
+                box !== undefined && main !== undefined
+                  ? Math.abs((box.top + box.bottom) / 2 - (main.top + main.bottom) / 2) / main.height
+                  : 1,
             };
           });
           await shotOf(tab, `o9-11-${viewport.name}-${mode}-1-waiting`);
           expect(waiting.count, 'one loader on screen').toBe(1);
           expect(waiting.inMain, 'centred in the page, not in the side column').toBe(true);
+          expect(waiting.offCentre, 'centred vertically in the page area, not top-heavy').toBeLessThan(0.06);
+          expect(waiting.scrolls, 'the loader does not make the page scroll').toBe(false);
           expect(waiting.form, 'nothing drawn yet').toBe(0);
           // Watch every 25 ms from the answer on: a loader (or a leftover copy of one) must never share the screen with the form.
           await tab.waitForSelector('[data-new-ferret]', { timeout: 6_000 });
