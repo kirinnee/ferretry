@@ -306,7 +306,9 @@ export function NewFerretPage({
                     aria-pressed={starting === choice}
                     className={cn(
                       'min-h-[44px] rounded-control px-2 text-center text-ui font-medium leading-tight transition-colors',
-                      starting === choice ? 'bg-surface text-fg shadow-control' : 'text-muted hover:text-fg',
+                      starting === choice
+                        ? 'border border-border-strong bg-surface text-fg shadow-control'
+                        : 'border border-transparent text-muted hover:text-fg',
                     )}
                     key={choice}
                     onClick={() => chooseStart(choice)}
