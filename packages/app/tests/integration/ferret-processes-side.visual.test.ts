@@ -2,8 +2,8 @@
  * THE PROCESSES PANEL HAS HEIGHT WHERE A FERRET PUTS IT, in a real browser, over fake data: the REAL app over the REAL
  * generated plugins (`fixtures/ferret-asks-scene.tsx`, with its fake processes answer), reached the way a person reaches it.
  *
- *  - at a desk the side column starts closed: the REAL 'Show side panels' button opens it, and every panel stacks at its
- *    natural height in one long scroll. The Processes panel measured 0px there (its list was in the page and drew nothing).
+ *  - at a desk the side column starts closed: the REAL 'Show side panels' button opens it on its first tab, and the REAL
+ *    Processes tab is pressed. The Processes panel measured 0px once (its list was in the page and drew nothing).
  *  - on a phone the side panels are chips: the REAL Processes chip is tapped, and that one panel fills the page.
  *
  * Both are asserted the same way: the panel is at least 160px tall and its first row is what a point at its centre hits.
@@ -105,7 +105,10 @@ const open = async (viewport: Viewport, mode: 'light' | 'dark') => {
 /** The real controls, as a person uses them: the desk's toggle, or the phone's Processes chip. */
 const reachProcesses = async (tab: Page, viewport: Viewport): Promise<void> => {
   if (viewport.phone) await tab.locator('[data-phone-chip]', { hasText: 'Processes' }).tap();
-  else await tab.getByRole('button', { name: 'Show side panels' }).click();
+  else {
+    await tab.getByRole('button', { name: 'Show side panels' }).click();
+    await tab.locator('[data-ferret-side] [role="tab"]', { hasText: 'Processes' }).click();
+  }
   await tab.waitForSelector(FIRST_ROW);
 };
 
