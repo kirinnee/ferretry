@@ -20,6 +20,10 @@ export const kernelOver = (world: FleetWorld) => {
       },
     },
     log: { warn: (message: string) => warned.push(message) },
+    state: {
+      read: async () => ({ ok: true as const, value: undefined }),
+      update: async () => ({ ok: true as const, value: undefined }),
+    },
     identity: {
       daemonId: 'fy_daemon_testid',
       daemonName: 'work-mac',
@@ -31,7 +35,7 @@ export const kernelOver = (world: FleetWorld) => {
       file: () => undefined,
       etag: async () => 'absent',
     },
-  } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log' | 'identity'> & {
+  } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log' | 'identity' | 'state'> & {
     config: Pick<KernelPorts['config'], 'writeAll' | 'collection' | 'file' | 'etag'>;
   };
   return { kernel, warned };

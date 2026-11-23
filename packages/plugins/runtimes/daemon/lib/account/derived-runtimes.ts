@@ -29,9 +29,11 @@
  */
 import type { EnvironmentLoginTemplate, LoginView } from '@ferretry/plugin-logins/contract';
 import type { ModelSetFile, ProfileFile, RuntimeFile } from '../../../contract/index.ts';
-import { builtinProfileLayers, starterModelSet } from './builtin-autonomous.ts';
+import { builtinProfileLayers, pinnedProfileName, starterModelSet } from './builtin-autonomous.ts';
 import { supportedKindOfKey, supportedKinds } from '../harness-kind.ts';
 import { type HarnessKind, harnessKeyOfKind } from '../manifest.ts';
+import { NO_STARTERS, type StarterModels } from '../models/catalog.ts';
+import type { LaunchModels } from '../models/runtime.ts';
 import { isRuntimeName } from './schema.ts';
 
 /** What the explicit files already hold, by name. */
@@ -40,6 +42,25 @@ export interface DerivedFrom {
   readonly profiles: ReadonlyMap<string, ProfileFile>;
   readonly modelSets: ReadonlyMap<string, ModelSetFile>;
   readonly logins: readonly LoginView[];
+  /** The model each harness starts with (the catalog default); what the built-in model sets hold. */
+  readonly starters?: StarterModels;
+  /**
+   * The model each (login, harness) was PINNED to the first time it was seen, by {@link pinKey} (the plugin's state, which
+   * the adapter reads). A pair in here keeps that model whatever the catalogs say next; one that is not is seen for the
+   * first time and starts on what its login's catalog gives (`Derived.firstSeen`). The pin is all that resolution reads once
+   * it exists.
+   */
+  readonly pins?: ReadonlyMap<string, string>;
+  /**
+   * Set when the pin state exists but could not be read (the file it names). Nothing then says what any derived runtime was
+   * pinned to, so every derived runtime is refused: never resolved to the live default, never written over.
+   */
+  readonly pinsUnreadable?: string;
+  /**
+   * The model a login launches `harness` with, and the models its catalog offers, resolved through THAT login's catalog (a
+   * provider login uses its provider's default, not the harness maker's starter). Absent: only the harness's starter is known.
+   */
+  readonly launch?: (login: LoginView, harness: HarnessKind) => LaunchModels;
   /**
    * The harnesses installed here, when the caller knows: a login that drives both CLIs then runs the first (Claude first)
    * that is installed, and a login none of whose CLIs is installed gets no runtime. Absent: not known, so the first it drives.
@@ -58,6 +79,40 @@ export interface Derived {
   readonly runtimes: ReadonlyMap<string, RuntimeFile>;
   readonly profiles: ReadonlyMap<string, ProfileFile>;
   readonly modelSets: ReadonlyMap<string, ModelSetFile>;
+  /** The (login, harness) pairs with no pin yet and the model each launches with now: what the adapter records as their pin. */
+  readonly firstSeen: ReadonlyMap<string, string>;
+  /** The derived runtimes that may not launch, by name, with why (a pinned model no catalog offers, or pins nobody could read). */
+  readonly refused: ReadonlyMap<string, string>;
+}
+
+/** The key a pin is kept under: its login's id and its harness. A login that is removed takes its pins with it. */
+export const pinKey = (login: string, harness: HarnessKind): string => `${harness}:${login}`;
+
+/** The login a pin key belongs to, or `undefined` for a key that is no pin's (it is pruned with the stale ones). */
+export const loginOfPinKey = (key: string): string | undefined => {
+  const at = key.indexOf(':');
+  return at <= 0 || !supportedKinds().some(kind => kind === key.slice(0, at)) ? undefined : key.slice(at + 1);
+};
+
+/** The sentence a pinned model that nothing offers any more is refused with. */
+export const pinGoneSentence = (model: string, login: string): string =>
+  `${model} is no longer offered for ${login}; pick a model or use Update now`;
+
+/** The sentence every derived runtime is refused with while the pin state cannot be read. */
+const pinsUnreadableSentence = (file: string): string => `model pins unreadable: ${file}`;
+
+/**
+ * Why a runtime of this login may not launch on its pin, or `undefined` when it may: the pin state could not be read, or the
+ * pinned model is one the login's catalog no longer offers. Never "fall back": the answer is a refusal.
+ */
+export function pinRefusal(
+  login: string,
+  pin: string | undefined,
+  offered: readonly string[] | undefined,
+  unreadable: string | undefined,
+): string | undefined {
+  if (unreadable !== undefined) return pinsUnreadableSentence(unreadable);
+  return pin !== undefined && offered !== undefined && !offered.includes(pin) ? pinGoneSentence(pin, login) : undefined;
 }
 
 /** The profile and model set a derived runtime of a harness uses. */
@@ -114,9 +169,14 @@ export function deriveRuntimes(from: DerivedFrom): Derived {
   for (const harness of supportedKinds()) {
     const wanted = defaultProfileName(harness);
     if (!from.profiles.has(wanted))
-      profiles.set(wanted, { contents: [...builtinProfileLayers(harness)] } as ProfileFile);
-    if (!from.modelSets.has(wanted)) modelSets.set(wanted, starterModelSet(harness) as ModelSetFile);
+      profiles.set(wanted, {
+        contents: [...builtinProfileLayers(harness, from.starters ?? NO_STARTERS)],
+      } as ProfileFile);
+    const starter = starterModelSet(harness, from.starters ?? NO_STARTERS);
+    if (starter !== undefined && !from.modelSets.has(wanted)) modelSets.set(wanted, starter as ModelSetFile);
   }
+  const firstSeen = new Map<string, string>();
+  const refused = new Map<string, string>();
   const taken = new Set([...from.runtimes.values()].map(runtime => runtime.login as string));
   // Every login's id is a name that login owns (derived, or held by the owner's runtime on it), so a suffixed name never takes one.
   const loginIds = new Set(from.logins.map(login => login.id as string));
@@ -135,14 +195,35 @@ export function deriveRuntimes(from: DerivedFrom): Derived {
       candidate => from.runtimes.has(candidate) || (candidate !== id && loginIds.has(candidate)),
     );
     if (name === undefined) continue;
+    // The pin is keyed by the login's id and the harness it runs, and holds the model that login LAUNCHES with (through its
+    // own catalog). Once it exists it is the only thing the model is read from.
+    const starter = from.starters?.[harness];
+    const now = from.launch?.(login, harness) ?? { model: starter, offered: undefined };
+    const key = pinKey(id, harness);
+    const pin = from.pins?.get(key);
+    if (pin === undefined && now.model !== undefined && from.pinsUnreadable === undefined)
+      firstSeen.set(key, now.model);
+    const model = pin ?? now.model;
+    const refusal = pinRefusal(id, pin, now.offered, from.pinsUnreadable);
+    if (refusal !== undefined) refused.set(name, refusal);
+    // A model other than the harness's starter lives on a profile of its own, so the shared built-in one can follow the
+    // catalog for runtimes seen later while this one stays where it was.
+    const profile =
+      model === undefined || model === starter ? defaultProfileName(harness) : pinnedProfileName(harness, model);
+    if (profile !== defaultProfileName(harness) && !from.profiles.has(profile) && model !== undefined) {
+      profiles.set(profile, {
+        contents: [...builtinProfileLayers(harness, { [harness]: model }, profile)],
+      } as ProfileFile);
+      modelSets.set(profile, starterModelSet(harness, { [harness]: model }) as ModelSetFile);
+    }
     runtimes.set(name, {
       login: id,
-      profile: defaultProfileName(harness),
+      profile,
       // A login that drives both CLIs runs the one chosen here; a one-CLI login's runtime says nothing (its login does).
       ...(login.harnesses.length > 1 ? { harness: harnessKeyOfKind(harness) } : {}),
     } as RuntimeFile);
   }
-  return { runtimes, profiles, modelSets };
+  return { runtimes, profiles, modelSets, firstSeen, refused };
 }
 
 /** The explicit entries with the derived ones beside them; an explicit entry is never replaced. */

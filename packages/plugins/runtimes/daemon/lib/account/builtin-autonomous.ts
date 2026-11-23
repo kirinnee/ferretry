@@ -4,7 +4,8 @@
  * name in `config/` wins (copy it to edit it).
  *
  * WHAT THEY HOLD (runtimes plan U2, owner !A613):
- * - the starter model set of the harness (`FLEET_STARTER_MODELS`);
+ * - the starter model set of the harness: the default model of the catalog its sign-in reads (`StarterModels`, handed in by
+ *   whoever holds Logins' catalogs; absent when none is held, and then the profile holds no model set);
  * - the instructions, ONE generic text each harness writes as its own file (`CLAUDE.md`, `AGENTS.md`). It says only what
  *   the launch instruction parts (`fixed-layer.ts`: tools, settings, agenda, sub-ferret, pack) do not already say;
  * - Claude's comfort settings, only what the fixed layer does not already force. Codex has none: every setting worth
@@ -22,13 +23,20 @@
  *
  * Pure: values only.
  */
-import { FLEET_STARTER_MODELS } from '../defaults.ts';
 import { isKind, supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
+import type { StarterModels } from '../models/catalog.ts';
 import type { InstructionsComponent, SettingsComponent } from './schema.ts';
 
 /** The built-in profile of a harness (the names O8-9 introduced): derived runtimes run on it. */
 export const builtinProfileName = (harness: HarnessKind): string => `ferretry-${harness}`;
+
+/**
+ * The profile a derived runtime PINNED to `model` uses when that model is no longer the harness's starter: the built-in
+ * layers over a model set of that one model. Named by the model, so runtimes pinned to the same model share it.
+ */
+export const pinnedProfileName = (harness: HarnessKind, model: string): string =>
+  `${builtinProfileName(harness)}-pinned-${model.replaceAll(/[\\/]/gu, '-')}`;
 
 /** The generic instructions component every built-in profile names. */
 const AUTONOMOUS_INSTRUCTIONS_NAME = 'ferretry-work-alone';
@@ -71,8 +79,12 @@ export const isBuiltinInstructions = (name: string, body: string | undefined): b
   name === AUTONOMOUS_INSTRUCTIONS_NAME && body === AUTONOMOUS_INSTRUCTIONS;
 
 /** The layers of each built-in profile, oldest first. */
-export const builtinProfileLayers = (harness: HarnessKind): readonly string[] => [
-  `modelSets/${builtinProfileName(harness)}`,
+export const builtinProfileLayers = (
+  harness: HarnessKind,
+  starters: StarterModels,
+  modelSet: string = builtinProfileName(harness),
+): readonly string[] => [
+  ...(starters[harness] === undefined ? [] : [`modelSets/${modelSet}`]),
   `instructions/${AUTONOMOUS_INSTRUCTIONS_NAME}`,
   ...(isKind(harness, 'claude') ? [`settings/${CLAUDE_COMFORT_NAME}`] : []),
 ];
@@ -86,18 +98,21 @@ export const BUILTIN_COMPONENTS: {
   settings: { [CLAUDE_COMFORT_NAME]: COMFORT_SETTINGS as unknown as SettingsComponent },
 };
 
-/** The starter model set of a harness (O8-9's; U1 moves it to the catalog default). */
-export const starterModelSet = (harness: HarnessKind): { readonly models: string[]; readonly default: string } => ({
-  models: [FLEET_STARTER_MODELS[harness]],
-  default: FLEET_STARTER_MODELS[harness],
-});
+/** The starter model set of a harness, or `undefined` when no starter model is known for it. */
+export function starterModelSet(
+  harness: HarnessKind,
+  starters: StarterModels,
+): { readonly models: string[]; readonly default: string } | undefined {
+  const model = starters[harness];
+  return model === undefined ? undefined : { models: [model], default: model };
+}
 
 /**
  * Every built-in piece as an account-model document, for a model assembled with nothing beside it: the first import on a
  * machine with no files, whose profiles name `profile/ferretry-<harness>` as their oldest layer. Equal to what
  * `deriveRuntimes` and the component built-ins give, so a change that starts from it writes none of it.
  */
-export function builtinDocument(): {
+export function builtinDocument(starters: StarterModels): {
   readonly profiles: Readonly<Record<string, { readonly layers: readonly string[] }>>;
   readonly components: {
     readonly modelSets: Readonly<Record<string, unknown>>;
@@ -108,10 +123,15 @@ export function builtinDocument(): {
   const harnesses = supportedKinds();
   return {
     profiles: Object.fromEntries(
-      harnesses.map(harness => [builtinProfileName(harness), { layers: builtinProfileLayers(harness) }]),
+      harnesses.map(harness => [builtinProfileName(harness), { layers: builtinProfileLayers(harness, starters) }]),
     ),
     components: {
-      modelSets: Object.fromEntries(harnesses.map(harness => [builtinProfileName(harness), starterModelSet(harness)])),
+      modelSets: Object.fromEntries(
+        harnesses.flatMap(harness => {
+          const set = starterModelSet(harness, starters);
+          return set === undefined ? [] : [[builtinProfileName(harness), set]];
+        }),
+      ),
       ...BUILTIN_COMPONENTS,
     },
   };

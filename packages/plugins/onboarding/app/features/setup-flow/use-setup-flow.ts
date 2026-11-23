@@ -243,7 +243,12 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
         onboardingScreen(row.client)
           .load(row.daemon === target ? press : {})
           .then(view => {
-            landed.set(row.daemon, { id: row.daemon, name: row.machine, steps: view.steps });
+            landed.set(row.daemon, {
+              id: row.daemon,
+              name: row.machine,
+              steps: view.steps,
+              harnesses: view.harnesses ?? [],
+            });
           });
       const everyRow = env.current.rows;
       const mine = everyRow.find(row => row.daemon === target);
@@ -270,7 +275,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
         pluginTitles: {},
       });
       const pages = pagesOf(flow);
-      const answered = answeredBefore(pages, readLater(env.current.storage()));
+      const answered = answeredBefore(pages, readLater(env.current.storage()), flow.harnesses);
       if (!live) return;
       setLoading({ kind: 'ready', flow, pages, answered, journey: address.journey });
       setRun(startRun(pages, answered));

@@ -5,6 +5,7 @@
 import type { OnboardingEntry } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import {
+  type HarnessView,
   type OnboardingView,
   type Progress,
   type StepAnswerRequest,
@@ -55,9 +56,15 @@ export function viewOf(
   entries: readonly OnboardingEntry[],
   progress: Progress | undefined,
   setUp: boolean,
+  harnesses: readonly HarnessView[] = [],
 ): OnboardingView {
   const steps = joinProgress(entries, progress);
-  return { steps: [...steps], complete: isComplete(steps), setUp };
+  return {
+    steps: [...steps],
+    ...(harnesses.length === 0 ? {} : { harnesses: [...harnesses] }),
+    complete: isComplete(steps),
+    setUp,
+  };
 }
 
 export function findEntry(

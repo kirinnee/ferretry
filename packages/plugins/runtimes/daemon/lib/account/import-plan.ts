@@ -7,6 +7,7 @@ import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { harnessNamed, keepScope, ownMcpItem } from './import-scope.ts';
 import { supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
+import { NO_STARTERS } from '../models/catalog.ts';
 import {
   type Candidate,
   credentialOf,
@@ -137,7 +138,14 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   const skip = new Set(options.skip ?? []);
   const ticked = new Set(options.tickedEnv ?? []);
   const harvests = imported.map(harness =>
-    harvest(scans.find(scan => scan.harness === harness) as HostHarnessScan, names, secrets, skip, ticked),
+    harvest(
+      scans.find(scan => scan.harness === harness) as HostHarnessScan,
+      names,
+      secrets,
+      skip,
+      ticked,
+      options.starters ?? NO_STARTERS,
+    ),
   );
   const harvestOf = (harness: HarnessKind) => harvests.find(entry => entry.harness === harness);
 
@@ -400,6 +408,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     notes,
     updates,
     duplicates,
+    starters: options.starters ?? NO_STARTERS,
     record: {
       version: 1,
       components: recordEntries,
@@ -423,7 +432,7 @@ export function mergeImport(
   acceptedUpdates: readonly LayerReferenceText[] = [],
 ): AccountModel {
   // A machine with no files has no model to read the built-in profiles from, and an imported profile names one as its base.
-  const base = (existing ?? parseAccountModel({ ...EMPTY_MODEL, ...builtinDocument() })) as AccountModel;
+  const base = (existing ?? parseAccountModel({ ...EMPTY_MODEL, ...builtinDocument(plan.starters) })) as AccountModel;
   const components = Object.fromEntries(
     Object.entries(base.components).map(([kind, entries]) => [kind, { ...entries }]),
   ) as Record<ComponentKind, Record<string, unknown>>;
