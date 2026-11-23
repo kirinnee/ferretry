@@ -9,11 +9,11 @@
  *
  * Both wait the one 300 ms threshold (`loading-gate.ts`, drawn by `loading.css`) before they show: a read that answers
  * inside it paints nothing, which is what stops a fast load from flashing. Reduced motion (the OS setting or Settings › Appearance › Motion) keeps both
- * visible and stills the movement. The mark and the bar read colour from the theme's tokens, light and dark alike.
+ * visible and stills the movement. A loader leaves WITH its read: nothing of it is ever left drawn over the content that
+ * replaced it (a page that has drawn shows no blocking loader). The mark and the bar read colour from the theme's tokens, light and dark alike.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { LOADING_DELAY_MS, LOADING_FADE_MS, LOADING_MIN_MS, loadingGateStyle } from './loading-gate.ts';
-import { useLoadingHold } from './loading-hold.ts';
 import { Spinner } from './spinner.tsx';
 
 export { LOADING_DELAY_MS, LOADING_FADE_MS, LOADING_MIN_MS };
@@ -92,16 +92,12 @@ export function Loading({ kind, label, className, compact = false, marks }: Load
 }
 
 function PageLoading({ label, className, compact, marks }: Omit<LoadingProps, 'kind'> & { readonly compact: boolean }) {
-  const root = useRef<HTMLDivElement>(null);
-  // Mounted straight off a read, it would vanish the moment the read answers: keep it for its minimum (loading-hold.ts).
-  useLoadingHold(root, { cover: true });
   const extra = (compact ? ' fy-loading--compact' : '') + (className === undefined ? '' : ` ${className}`);
   return (
     <div
       aria-live="polite"
       className={`fy-loading fy-loading--page${extra}`}
       data-loading="page"
-      ref={root}
       role="status"
       style={delayStyle}
       {...marks}

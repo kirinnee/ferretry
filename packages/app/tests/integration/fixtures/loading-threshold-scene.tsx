@@ -81,33 +81,18 @@ const Scene = SCENES[scene as keyof typeof SCENES] ?? PageWait;
 
 const LOADER = '[data-loading], .fy-loading-bar, [data-cache-updating], .fy-spinner';
 
-interface Box {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
 interface Sample {
   firstVisible: number | null;
   lastVisible: number | null;
   frames: number;
-  /** The last box the live loader (not its held ghost) had, in viewport px. */
-  loaderBox: Box | null;
-  /** The box of the held ghost on the first frame it was in the DOM, and its box on the last such frame. */
-  ghostFirst: Box | null;
-  ghostLast: Box | null;
+  /** The most leftover copies of a loader any single frame held: always 0 (nothing is left over what replaced a loader). */
+  ghosts: number;
 }
 const sample: Sample = {
   firstVisible: null,
   lastVisible: null,
   frames: 0,
-  loaderBox: null,
-  ghostFirst: null,
-  ghostLast: null,
-};
-const boxOf = (element: Element): Box => {
-  const { left, top, width, height } = element.getBoundingClientRect();
-  return { left, top, width, height };
+  ghosts: 0,
 };
 (window as unknown as { __loader: Sample }).__loader = sample;
 
@@ -115,13 +100,7 @@ const began = performance.now();
 const tick = (): void => {
   const at = performance.now() - began;
   sample.frames += 1;
-  const live = document.querySelector('[data-loading]');
-  if (live !== null) sample.loaderBox = boxOf(live);
-  const ghost = document.querySelector('[data-loading-ghost]');
-  if (ghost !== null) {
-    sample.ghostFirst ??= boxOf(ghost);
-    sample.ghostLast = boxOf(ghost);
-  }
+  sample.ghosts = Math.max(sample.ghosts, document.querySelectorAll('[data-loading-ghost], .fy-loading-ghost').length);
   const seen = [...document.querySelectorAll<HTMLElement>(LOADER)].some(element => {
     // The element AND every ancestor up to the root must be painted: the gate may sit on a wrapper.
     for (let node: HTMLElement | null = element; node !== null; node = node.parentElement)

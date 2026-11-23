@@ -105,9 +105,14 @@ interface PluginViewProps {
   readonly fallback?: ReactNode;
   /** Drawn as one of a slot's panels, under the slot's own single `Suspense` ({@link PanelSlot}). */
   readonly shared?: boolean;
+  /**
+   * Drawn BESIDE the page (the side column's screen), not as the page: it waits on the shell's one top bar and never draws a
+   * page loader of its own, because the page itself already stands under the one centred loader.
+   */
+  readonly aside?: boolean;
 }
 
-export function PluginView({ daemon, plugin, section, id, props, fallback, shared }: PluginViewProps) {
+export function PluginView({ daemon, plugin, section, id, props, fallback, shared, aside }: PluginViewProps) {
   const { runtime } = useShell();
   useRuntimeVersion(runtime);
   // Who is drawn here (§1.1): this plugin, on a daemon, with its own reach into every paired daemon (S2).
@@ -115,7 +120,7 @@ export function PluginView({ daemon, plugin, section, id, props, fallback, share
   const title = runtime.titleOf(plugin);
   const stood = (line: ReactNode): ReactNode => (fallback === undefined ? line : fallback);
   const blocked = runtime.blockedLine(daemon, plugin);
-  const page = section === 'screens' || section === 'settings';
+  const page = aside !== true && (section === 'screens' || section === 'settings');
   // Still waiting for the daemon to say what it offers: a loader, not a sentence per view (a page of panels was a stack of
   // them). Held steady (`useHeldLoading`): never shown for a fast answer, never blinked off and on for a slow one.
   const waiting = blocked !== undefined && runtime.waiting(daemon, plugin);
@@ -187,10 +192,13 @@ export function ScreenView({
   daemon,
   screen,
   params,
+  aside = false,
 }: {
   readonly daemon: string | undefined;
   readonly screen: ScreenRef;
   readonly params: Readonly<Record<string, string>>;
+  /** Drawn beside the page (the side column), so it waits on the top bar, not a second page loader. */
+  readonly aside?: boolean;
 }) {
   const daemonless = screen.path.startsWith('/');
   // A daemon-less screen is drawn without a daemon and ONLY without one: never under a `/d/<daemon>/` prefix.
@@ -202,7 +210,16 @@ export function ScreenView({
     );
   }
   if (daemonless) return <ShellLine>{skeletonSentence(screen.label)}</ShellLine>;
-  return <PluginView daemon={daemon} plugin={screen.plugin} section="screens" id={screen.id} props={{ params }} />;
+  return (
+    <PluginView
+      daemon={daemon}
+      plugin={screen.plugin}
+      section="screens"
+      id={screen.id}
+      props={{ params }}
+      aside={aside}
+    />
+  );
 }
 
 /**

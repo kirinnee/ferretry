@@ -38,7 +38,7 @@ export function useSideHolds(daemon: string | undefined, route: Route, overlay =
 export function SideBody({ daemon, holds }: { readonly daemon: string; readonly holds: SideHolds }) {
   return (
     <>
-      {holds.kind === 'screen' ? <ScreenView daemon={daemon} screen={holds.screen} params={{}} /> : null}
+      {holds.kind === 'screen' ? <ScreenView aside daemon={daemon} screen={holds.screen} params={{}} /> : null}
       {/* The side column that holds panels (S4): the `side` slot's panels, for the route's daemon. */}
       {holds.kind === 'panels' ? <PanelSlot daemon={daemon} slot="side" /> : null}
     </>

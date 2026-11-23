@@ -82,6 +82,41 @@ function AgendaScreen(): ReactNode {
 // (`connections/app/features/carrier/relay-fallback-notice.tsx`: the same markup, hosted by a stub plugin).
 const RELAY_FALLBACK_LINE = 'Couldn’t reach it through the relay, using the direct connection.';
 
+// A stand-in for Ferrets' New ferret page (`/d/ws/new`): a form about the size of the real one, so a loader drawn over it shows.
+function NewFerretStand(): ReactNode {
+  return (
+    <form
+      aria-label="New ferret"
+      data-new-ferret=""
+      style={{ display: 'grid', gap: 14, maxWidth: 720, margin: '0 auto', padding: 16 }}
+    >
+      <h1 style={{ margin: 0, fontSize: 22 }}>New ferret</h1>
+      {['Runtime', 'Where it works', 'Model', 'Label'].map(label => (
+        <label key={label} style={{ display: 'grid', gap: 4, fontWeight: 600 }}>
+          {label}
+          <input placeholder={`Fake ${label.toLowerCase()}`} style={{ font: 'inherit', padding: 8 }} />
+        </label>
+      ))}
+      <label style={{ display: 'grid', gap: 4, fontWeight: 600 }}>
+        Opening prompt
+        <textarea
+          placeholder="Describe what you want the agent to do…"
+          rows={6}
+          style={{ font: 'inherit', padding: 8 }}
+        />
+      </label>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button className="kt-btn" type="button">
+          Cancel
+        </button>
+        <button className="kt-btn" data-variant="primary" type="button">
+          Create ferret
+        </button>
+      </div>
+    </form>
+  );
+}
+
 // ─── stand-ins: the ferret list (the side column), the chat beside the side pane, the side panels ─────────────────────
 
 const FERRETS = [
@@ -349,6 +384,7 @@ const ferretsManifest = manifestOf('ferrets', {
     screens: [
       { id: 'ferrets', path: 'ferrets', nav: { label: 'Ferrets', icon: 'list', order: 5 } },
       { id: 'ferret', path: 'ferrets/:ferret' },
+      { id: 'new-ferret', path: 'new' },
     ],
   },
 });
@@ -409,7 +445,9 @@ const surfaces: readonly SurfaceEntry[] = [
     ferretsManifest,
     provideToShell(
       implementApp(ferretsManifest, {
-        build: () => ({ screens: { ferrets: FerretListScreen, ferret: FerretPageScreen } }),
+        build: () => ({
+          screens: { ferrets: FerretListScreen, ferret: FerretPageScreen, 'new-ferret': NewFerretStand },
+        }),
       } as never),
       {},
     ),
@@ -483,8 +521,16 @@ const grants = {
 // SECOND machine (`ws2`) that has the switch ON while `ws` has it off: each machine's own nav answers for itself.
 const WORK = params.get('work');
 const workIsOff = (machine: string): boolean => WORK === 'off' || (WORK === 'split' && machine === 'ws');
+// `?slow=<ms>`: the daemon answers its plugin list that many ms late (a slow machine), so the shell's waiting state shows.
+const SLOW = Number(params.get('slow') ?? '0');
 const transportOf = (machine: string) =>
-  new FakeTransport((request: TransportRequest): TransportAnswer => {
+  new FakeTransport((request: TransportRequest): Promise<TransportAnswer> | TransportAnswer => {
+    if (request.path === '/v1/plugins' && SLOW > 0) {
+      const answer = json(
+        inventoryOf(surfaces, workIsOff(machine) ? { agenda: { on: false }, board: { on: false } } : {}),
+      );
+      return new Promise<TransportAnswer>(resolve => setTimeout(() => resolve(answer), SLOW));
+    }
     if (request.path === '/v1/plugins')
       return json(inventoryOf(surfaces, workIsOff(machine) ? { agenda: { on: false }, board: { on: false } } : {}));
     if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
