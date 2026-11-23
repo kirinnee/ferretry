@@ -279,8 +279,12 @@ for (const style of ['lucid', 'briefing'] as const)
               expect(read.spinner.parts).toEqual(['inline', 'inline', 'none', 'none']);
               expect(read.spinner.markAnimation).toBe('fy-spinner-turn');
             } else {
-              // BACKGROUND: a flat page, as the reference draws it. No pattern, no wash, no grain.
-              expect(read.layers.filter(layer => layer !== 'none')).toEqual([]);
+              // BACKGROUND: the reference's own page (O8-7): the Briefing palette's soft blue glows at the top and hot-pink glows at
+              // the foot (`--surface-mesh`, four radial layers). The STYLE adds nothing: no pattern tile (no linear-gradient, no
+              // image), no grain, and no layer that is not a radial glow.
+              const field = read.layers.join(',');
+              expect(field.match(/radial-gradient\(/gu)?.length, 'the palette paints its four glows').toBe(4);
+              expect(field, 'no pinstripe tile, no image').not.toMatch(/linear-gradient\(|url\(/u);
               expect(read.grain.image).toBe('none');
               expect(Number(read.grain.opacity), 'no grain').toBe(0);
               // TYPE: Poppins headings (600) over the Poppins body, no serif.
@@ -364,14 +368,28 @@ describe('the field is painted as declared', () => {
             // Grain: the variation between neighbouring pixels along one row.
             const row = Array.from({ length: 100 }, (_, x) => lum(x, 50));
             const steps = row.slice(1).filter((value, x) => value !== row[x]).length;
+            // The largest jump between two neighbouring pixels, along the row and down the column. Chromium dithers a soft
+            // gradient (neighbours alternate between adjacent levels: a few units of the summed channels), so counting level
+            // changes proves nothing; a stripe or grain is a jump of tens.
+            const jump = (values: readonly number[]): number =>
+              Math.max(0, ...values.slice(1).map((value, i) => Math.abs(value - (values[i] as number))));
+            const maxJump = Math.max(jump(row), jump(Array.from({ length: 100 }, (_, y) => lum(50, y))));
             return {
               distinct: levels.size,
+              maxJump,
               onLine: [...onLine],
               offLine: [...offLine],
               ground: lum(0, 2),
               steps,
             };
-          }, png)) as { distinct: number; onLine: number[]; offLine: number[]; ground: number; steps: number };
+          }, png)) as {
+            distinct: number;
+            maxJump: number;
+            onLine: number[];
+            offLine: number[];
+            ground: number;
+            steps: number;
+          };
           report[`pattern:${style}:${mode}`] = painted;
           if (style === 'lucid') {
             expect(painted.onLine.length, 'every 4th row paints one level').toBe(1);
@@ -379,8 +397,12 @@ describe('the field is painted as declared', () => {
             expect(painted.onLine[0], 'a visible stripe').not.toBe(painted.offLine[0]);
             expect(Math.abs((painted.onLine[0] as number) - (painted.offLine[0] as number))).toBeLessThanOrEqual(150);
           } else {
-            expect(painted.distinct, 'flat: one ground, no grain').toBeLessThanOrEqual(2);
-            expect(painted.steps, 'the same level between neighbours along a row').toBeLessThanOrEqual(2);
+            // The Briefing page is the reference's own (O8-7): a navy or lavender ground with soft glows at its corners. In the
+            // 100 px corner that is a handful of smooth levels, never a texture: no grain and no stripe, so no two neighbouring
+            // pixels differ by more than the gradient's own dither (a few units of the summed channels; a stripe or grain is
+            // tens).
+            expect(painted.distinct, 'a soft glow: a handful of smooth levels, not grain').toBeLessThanOrEqual(12);
+            expect(painted.maxJump, 'no stripe, no grain: neighbours differ by dither only').toBeLessThanOrEqual(4);
           }
         } finally {
           await close();

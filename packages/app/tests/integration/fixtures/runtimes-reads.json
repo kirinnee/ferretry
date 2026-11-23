@@ -137,7 +137,6 @@
           "status": "ready"
         },
         "profile": "Default",
-        "agent": false,
         "stack": {
           "harness": "claude-code",
           "available": {
@@ -180,7 +179,6 @@
           "status": "ready"
         },
         "profile": "Default",
-        "agent": false,
         "stack": {
           "harness": "codex",
           "available": {
@@ -229,7 +227,6 @@
           "status": "ready"
         },
         "profile": "Agent work",
-        "agent": true,
         "stack": {
           "harness": "claude-code",
           "available": {
@@ -294,7 +291,6 @@
           "status": "ready"
         },
         "profile": "Review",
-        "agent": false,
         "stack": {
           "harness": "claude-code",
           "available": {
@@ -325,7 +321,6 @@
           "status": "refresh_due"
         },
         "profile": "Default",
-        "agent": false,
         "stack": {
           "harness": "claude-code",
           "available": {
