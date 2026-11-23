@@ -371,6 +371,21 @@ describe('a component another plugin owns that does not check (runtimes plan U4b
     ]);
   });
 
+  it('names several in name order, whatever order the owner gave them in', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        components: reading(
+          new Map([
+            ['zed', '"zed" is not a valid instructions component (gemni is not supported here)'],
+            ['abe', '"abe" is not a valid instructions component (gemni is not supported here)'],
+          ]),
+        ),
+      }),
+    );
+
+    expect(assembled.notices?.map(notice => notice.split('"')[1])).toEqual(['abe', 'zed']);
+  });
+
   it('stands in for a used one and says it, naming that component only', () => {
     const assembled = assembleRuntimesModel(
       files({

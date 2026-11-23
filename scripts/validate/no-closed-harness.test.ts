@@ -55,7 +55,13 @@ const run = (
 
 describe('the closed-harness gate', () => {
   test('is clean on this repository', () => {
-    const result = spawnSync('bash', [join(root, GATE)], { cwd: root, encoding: 'utf8' });
+    // Against this very commit, so the ratchet reads a base wherever the test runs (a one-commit CI checkout has no
+    // origin/rebuild/5.0-after in its unit-test step); the ratchet itself is proven on throwaway repositories below.
+    const result = spawnSync('bash', [join(root, GATE)], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, FY_CHECK_BASE: 'HEAD' },
+    });
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);
   });
