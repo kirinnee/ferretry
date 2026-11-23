@@ -92,6 +92,8 @@ export async function execute(argv: readonly string[]): Promise<number> {
       // The channel pump backs off with this wait, and runs ONLY when the launch gave Claude the channel flag.
       sleep: async ms => await Bun.sleep(ms),
       channel: environment[await serveHalf.channelEnv()] === '1',
+      // Which tools to list: the held plugin inventory says whether a package (Board, under the work switch) is on.
+      isOn: async plugin => (await (await deps()).inventory.current()).plugins.some(p => p.id === plugin && p.on),
     });
   } catch (error) {
     return reportFailure(error, io, binary);

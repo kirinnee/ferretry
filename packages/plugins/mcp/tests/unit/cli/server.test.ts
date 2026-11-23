@@ -262,3 +262,48 @@ describe('McpServer — the channel is declared only when the launch gave the fl
     should(JSON.stringify(off)).not.containEql('claude/channel');
   });
 });
+
+describe('McpServer — the work switch', () => {
+  /** A server whose daemon says which packages are on: the plugin inventory, the one owner of on/off. */
+  const listing = async (isOn?: (plugin: string) => Promise<boolean>) => {
+    const server = new McpServer(
+      { call: async () => ({ text: 'ok' }), ...(isOn === undefined ? {} : { isOn }) },
+      { name: 'ferretry', version: '9.9.9' },
+    );
+    const answer = (await server.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' })) as {
+      result: { tools: { name: string }[] };
+    };
+    return answer.result.tools.map(tool => tool.name);
+  };
+
+  it('should not list the task tools while Board is off, and list every other tool', async () => {
+    const names = await listing(async plugin => plugin !== 'board');
+    should(names).not.containEql('task_progress');
+    should(names).not.containEql('card_progress');
+    should(names).have.length(MCP_TOOLS.length - 2);
+    for (const name of ['terminal_open', 'search_work', 'instructions', 'input_wait']) should(names).containEql(name);
+  });
+
+  it('should list every tool, unchanged, while Board is on', async () => {
+    should(await listing(async () => true)).eql(MCP_TOOLS.map(tool => tool.name));
+  });
+
+  it('should list every tool where the inventory cannot be read, as before the switch', async () => {
+    should(await listing()).eql(MCP_TOOLS.map(tool => tool.name));
+    should(
+      await listing(async () => {
+        throw new Error('the daemon is away');
+      }),
+    ).eql(MCP_TOOLS.map(tool => tool.name));
+  });
+
+  it('should ask the inventory about Board only, and never put the owner into a tool schema', async () => {
+    const asked: string[] = [];
+    await listing(async plugin => {
+      asked.push(plugin);
+      return true;
+    });
+    should(asked).eql(['board']);
+    should(JSON.stringify((await harness().request('tools/list')) as object)).not.containEql('"plugin"');
+  });
+});

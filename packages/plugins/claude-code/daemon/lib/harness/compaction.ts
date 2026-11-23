@@ -12,7 +12,7 @@
  *   hook's stdout becomes context the ferret reads.
  *
  * The verbs are the ones the 5.0 CLI manifests declare (a CLI test reads the registry and fails on a verb that is not
- * there): `task show`, `board status`, `agenda ls`, `agenda show`, `logs --turn`, `transcript --tail`, `reply`. The only
+ * there): `agenda ls`, `agenda show`, `logs --turn`, `transcript --tail`, `reply`. The only
  * ferret-specific value is `FY_SESSION_ID`, which every launch hands the pane; nothing secret is read or printed.
  */
 

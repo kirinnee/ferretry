@@ -339,16 +339,16 @@ alone, so a new launch does not read as `awaiting_question` (the mailbox does no
 
 ## After a compaction a Claude ferret re-reads what it owes
 
-A compaction keeps a summary and drops the rest, so a ferret can lose its assignment, its task, its open agenda
+A compaction keeps a summary and drops the rest, so a ferret can lose its assignment, its open agenda
 items and the messages it still owes a reply to. The **fixed layer** puts two more hooks into the `--settings` overlay
 (`daemon/lib/harness/compaction.ts` in the Claude Code plugin), and never in a settings entry:
 
-- `PreCompact` (manual and auto) prints what the summary must keep — assignment, task id and status, agenda item ids, owed
+- `PreCompact` (manual and auto) prints what the summary must keep — assignment, agenda item ids, owed
   messages, PR links;
 - `SessionStart` with the matcher `compact` prints, once the compaction is done, what to read again:
-  `fy logs <session> --turn 1`, `fy task show <task id>` (`fy board status` when the id is lost), `fy agenda ls` and
+  `fy logs <session> --turn 1`, `fy agenda ls` and
   `fy agenda show <id>`, `fy transcript <session> --tail` and `fy reply <id> <text>`. The only value it reads is
-  `FY_SESSION_ID`; it prints no credential and always exits 0.
+  `FY_SESSION_ID`; it prints no credential and always exits 0. It names no Board verb: the work switch (`work:` in `config/plugins.yaml`) can turn Board off, so a ferret re-reads its task from Board's own instruction (`plugins/board/instructions/board.md`, and `board-helper.md` for a sub-ferret), which is in its system prompt, so it survives the compaction, and is given only while Board is on.
 
 Both are in the `fixed-layer` fingerprint, so a ferret launched before them reads as **Restart needed**. A Codex ferret
 gets the same two texts (written once, in `compaction-text.ts` of the Ferrets contract) through Codex's own

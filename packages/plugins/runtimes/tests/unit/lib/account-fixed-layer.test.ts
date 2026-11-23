@@ -1089,12 +1089,12 @@ describe('launchInstructions', () => {
 });
 
 describe('SUB_FERRET_INSTRUCTION', () => {
-  it("should take the place of a lead's notify, board and agenda rules with two short lines that name the real verbs", () => {
+  it("should take the place of a lead's notify and agenda rules with one short line that names the real verbs", () => {
     // Act
     const text = SUB_FERRET_INSTRUCTION('zz');
 
     // Assert
-    should(text.split('\n')).have.length(2);
+    should(text.split('\n')).have.length(1);
     should(text).containEql('`zz send <lead-callsign> "<message>"`');
     should(text).containEql('Never raise agenda items or notify the owner;');
     should(text).containEql(
@@ -1102,30 +1102,20 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     );
     should(text).containEql('batched a minute');
     should(text).containEql('Only a password, code or approval the daemon asks for reaches the owner from you.');
-    should(text).containEql('Link your PR `zz task link <id> --pr <url>` (or `--branch`)');
-    should(text).containEql('`zz task note`');
     should(text).containEql(
       'message your lead (`zz send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make.',
     );
-    // The owner (&C48): "sub-ferrets and ferrets should update them!" — the one task edit a sub-ferret may make.
-    should(text).containEql(
-      'With a task: each step, `zz task show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `zz task patch <id> --file f`; `zz task note` adds history.',
-    );
-    // The holder writes its own How to test now, so its report no longer carries the steps.
-    should(text).not.containEql('Your final report says how the owner tests it.');
-    should(text).containEql(
-      "it moves itself (start, PR, merge, `zz signal done`). Lead's task? `zz task claim <id>`, don't ask. No task? Make none.",
-    );
+    // The work switch (Board, Agenda, Loops) can be off: no task verb here. A helper's task lines are Board's own
+    // instruction (plugins/board/instructions/board-helper.md), given only while Board is on.
+    should(text).not.match(/task/iu);
     should(text).not.containEql('agenda add');
-    should(text).not.containEql('task move');
     should(text).not.match(/card/i);
   });
 
   it('should add the sub-ferret lines to the base prompt a lead gets alone', () => {
     // Assert
     should(leadInstruction('fy')).equal(AGENT_BASE_INSTRUCTION('fy'));
-    // 759 → 840 for the task-status line (&C48, cap 760 → 880).
-    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(880);
+    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(760);
   });
 
   it('should keep the agenda section out of a sub-ferret launch record, whatever FY_AGENDA says', () => {
@@ -1155,14 +1145,6 @@ describe('SUB_FERRET_INSTRUCTION', () => {
   });
 });
 
-describe('the exact words of the Sub-ferret rules (snapshots)', () => {
-  it('should say exactly this for the Sub-ferret task line', () => {
-    should(SUB_FERRET_INSTRUCTION('fy').split('\n')[1]).equal(
-      "With a task: each step, `fy task show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `fy task patch <id> --file f`; `fy task note` adds history. Link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's task? `fy task claim <id>`, don't ask. No task? Make none.",
-    );
-  });
-});
-
 describe('the words every injected prompt uses for a piece of work', () => {
   it('should say task, never the former word or the verb that carried it, in any prompt a ferret is given', () => {
     // Arrange
@@ -1176,7 +1158,6 @@ describe('the words every injected prompt uses for a piece of work', () => {
 
     // Assert — a person reads "task" (the glossary word); an input form is "an input", never "an input task".
     for (const prompt of prompts) should(prompt).not.match(/\bcards?\b/i);
-    should(SUB_FERRET_INSTRUCTION('fy')).containEql('`fy task claim <id>`');
     should(AGENT_BASE_INSTRUCTION('fy')).containEql('types each value in an input');
     should(AGENT_BASE_INSTRUCTION('fy')).not.containEql('input task');
   });

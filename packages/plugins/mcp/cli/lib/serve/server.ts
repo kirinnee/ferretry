@@ -33,6 +33,11 @@ export interface McpToolResult {
 /** What the server needs from the daemon: one tool call, by name, with its arguments. */
 export interface McpToolsPort {
   call(name: string, args: Readonly<Record<string, unknown>>): Promise<McpToolResult>;
+  /**
+   * Whether package `plugin` is on, by the daemon's plugin inventory (the one owner of on/off, `config/plugins.yaml`).
+   * Absent where a build cannot read it: every tool is then listed, as before.
+   */
+  isOn?(plugin: string): Promise<boolean>;
 }
 
 export interface McpServerInfo {
@@ -272,7 +277,11 @@ export class McpServer {
           jsonrpc: '2.0',
           id,
           result: {
-            tools: MCP_TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
+            tools: (await this.listed()).map(({ name, description, inputSchema }) => ({
+              name,
+              description,
+              inputSchema,
+            })),
           },
         };
       case 'tools/call':
@@ -280,6 +289,19 @@ export class McpServer {
       default:
         return failure(id, JSON_RPC_ERRORS.methodNotFound, `this server has no method ${method}`);
     }
+  }
+
+  /**
+   * The tools to list: every one, less those whose owning package is off (an agent is never offered a tool the daemon
+   * has no half for). An inventory that cannot be read lists everything: the daemon still refuses a tool it lacks.
+   */
+  private async listed(): Promise<readonly (typeof MCP_TOOLS)[number][]> {
+    const isOn = this.tools.isOn?.bind(this.tools);
+    if (isOn === undefined) return MCP_TOOLS;
+    const off = new Set<string>();
+    for (const owner of new Set(MCP_TOOLS.flatMap(tool => (tool.plugin === undefined ? [] : [tool.plugin]))))
+      if (!(await isOn(owner).catch(() => true))) off.add(owner);
+    return MCP_TOOLS.filter(tool => tool.plugin === undefined || !off.has(tool.plugin));
   }
 
   private initialize(params: unknown) {

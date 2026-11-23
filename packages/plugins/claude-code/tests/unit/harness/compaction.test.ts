@@ -79,7 +79,7 @@ describe('the compaction hooks in the fixed layer', () => {
     should(CLAUDE_COMPACTION_HOOKS.SessionStart).have.length(1);
   });
 
-  it('prints, after a compaction, the task, the board task, the agenda and the owed messages with the 5.0 verbs and this ferret’s id', async () => {
+  it('prints, after a compaction, the assignment, the agenda and the owed messages with the 5.0 verbs and this ferret’s id, and no verb the work switch turns off', async () => {
     const { code, out, err } = await run(CLAUDE_REABSORB_COMMAND, { FY_SESSION_ID: 'sess-42', FY_TOKEN: SECRET });
     should(code).equal(0);
     should(err).equal('');
@@ -88,8 +88,6 @@ describe('the compaction hooks in the fixed layer', () => {
       'session sess-42',
       'fy logs sess-42 --turn 1',
       'Your assignment',
-      'fy task show <task id>',
-      'fy board status',
       'fy agenda ls',
       'fy agenda show <id>',
       'owe a reply',
@@ -97,6 +95,9 @@ describe('the compaction hooks in the fixed layer', () => {
       'fy reply <id> <text>',
     ])
       should(out).containEql(needle);
+    // The work switch (Board, Agenda, Loops) can be off: this text names none of its verbs. Board's own instruction
+    // (given only while Board is on) tells a ferret to re-read its task after a compaction.
+    should(out).not.match(/\bfy (?:task|board)\b/u);
     should(out).not.containEql('%s');
     should(out).not.containEql(SECRET);
   });
@@ -114,7 +115,7 @@ describe('the compaction hooks in the fixed layer', () => {
     should(declared.has('task zap')).equal(false);
     const { found, unknown } = namedVerbs(CLAUDE_REABSORB_LINES, declared);
     should(unknown).eql([]);
-    should(found).eql(['agenda ls', 'agenda show', 'board status', 'logs', 'reply', 'task show', 'transcript']);
+    should(found).eql(['agenda ls', 'agenda show', 'logs', 'reply', 'transcript']);
     should(namedVerbs(['run fy task zap now'], declared).unknown).eql(['task zap now']);
     should(namedVerbs(CLAUDE_KEEP_LINES, declared).found).eql([]);
   });
@@ -123,8 +124,9 @@ describe('the compaction hooks in the fixed layer', () => {
     const { code, out, err } = await run(CLAUDE_KEEP_COMMAND, { FY_SESSION_ID: 'sess-42', FY_TOKEN: SECRET });
     should(code).equal(0);
     should(err).equal('');
-    for (const needle of ['your assignment', 'your task id', 'agenda item ids', 'owe a reply', 'PR links'])
+    for (const needle of ['your assignment', 'agenda item ids', 'owe a reply', 'PR links'])
       should(out).containEql(needle);
+    should(out).not.containEql('task');
     should(out).not.containEql('card');
     should(out).not.containEql(SECRET);
   });

@@ -236,12 +236,17 @@ for it when the session starts (`work.started`, below), and a PR or release stil
 sub-ferret, it never locks one out it cannot find.
 
 A sub-ferret's system prompt drops the Board rules above and the Notify rule and the Agenda mode section, and
-carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` launch section; the daemon writes
+carries this line instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` launch section; the daemon writes
 `FY_SUB_FERRET=1` from the session's `role` (a helper) at every launch, so a stored value cannot switch it off):
 
 ```text
 Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (`fy send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make. Label every send: `--kind blocker` (stuck until answered; at once), `--kind action` (default; to do; batched a minute), `--kind fyi` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.
-With a task: each step, `fy task show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `fy task patch <id> --file f`; `fy task note` adds history. Link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's task? `fy task claim <id>`, don't ask. No task? Make none.
+```
+
+Its task lines are Board's own, `instructions/board-helper.md` (role `helper`, section `board`), so they are given only while Board is on (the `work` switch):
+
+```text
+With a task: each step, `fy task show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `fy task patch <id> --file f`; `fy task note` adds a note. Link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's task? `fy task claim <id>`, don't ask. No task? Make none. After a compaction, read your task again (`fy task show <id>`) and keep its id and sitrep in the summary.
 ```
 
 Nudges about a sub-ferret's task — the turn that closes without a PR, a reopen, a go-ahead — go to its **lead** instead
