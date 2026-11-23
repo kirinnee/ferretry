@@ -14,10 +14,19 @@ const runtimeFile = (over: Partial<RuntimeFile> = {}): RuntimeFile => ({
 });
 
 /** The parts of a login view the runtimes read; the rest of the wire shape is not this module's. */
-const loginView = (over: { id?: string; harness?: KnownHarnessKey; word?: string; disabled?: LoginView['disabled'] }) =>
+const loginView = (over: {
+  id?: string;
+  harness?: KnownHarnessKey;
+  harnesses?: readonly KnownHarnessKey[];
+  store?: string;
+  word?: string;
+  disabled?: LoginView['disabled'];
+}) =>
   ({
     id: over.id ?? 'main',
     harness: over.harness ?? 'claude-code',
+    harnesses: over.harnesses ?? [over.harness ?? 'claude-code'],
+    ...(over.store === undefined ? {} : { store: over.store }),
     status: { word: over.word ?? 'ready' },
     ...(over.disabled === undefined ? {} : { disabled: over.disabled }),
   }) as unknown as LoginView;
@@ -28,6 +37,9 @@ interface Rig {
   defaultSetting?: string;
   harnesses?: readonly KnownHarnessKey[];
   currentName?: RuntimesApiDeps['currentName'];
+  installed?: RuntimesApiDeps['installed'];
+  /** The ids of the environment logins whose templates Logins gives clean. */
+  templated?: readonly string[];
   logins?: readonly LoginView[] | 'throws';
 }
 
@@ -38,6 +50,8 @@ const api = (rig: Rig = {}) =>
     defaultSetting: () => rig.defaultSetting,
     harnesses: () => rig.harnesses ?? ['claude-code', 'codex'],
     logins: {
+      environmentTemplates: async () =>
+        (rig.templated ?? []).map(id => ({ kind: 'templates', id, harness: 'claude-code' }) as never),
       list: async () => {
         if (rig.logins === 'throws') throw new Error('logins are down');
         return { logins: rig.logins ?? [loginView({})] } as unknown as Awaited<
@@ -47,6 +61,7 @@ const api = (rig: Rig = {}) =>
     },
     now: () => NOW,
     ...(rig.currentName === undefined ? {} : { currentName: rig.currentName }),
+    ...(rig.installed === undefined ? {} : { installed: rig.installed }),
   });
 
 describe('createRuntimesApi — list and get', () => {
@@ -291,5 +306,75 @@ describe('createRuntimesApi — resolve', () => {
       refusal: 'not_signed_in',
       sentence: 'claude-code is not on this machine',
     });
+  });
+});
+
+describe('createRuntimesApi — adding an account makes its runtime (runtimes plan U3)', () => {
+  it('should list a runtime for a login the moment it is added, named after it, on the profile of its harness', async () => {
+    // Arrange — the same files, read before and after a login is added
+    const before = api({ runtimes: {}, logins: [loginView({ id: 'atomi' })] });
+    const after = api({
+      runtimes: {},
+      logins: [
+        loginView({ id: 'atomi' }),
+        loginView({ id: 'kimi', store: 'environment', harnesses: ['claude-code', 'codex'] }),
+      ],
+      templated: ['kimi'],
+    });
+
+    // Act
+    const [listedBefore, listedAfter] = [await before.list(), await after.list()];
+
+    // Assert — nothing was written: the files are empty both times
+    should(listedBefore.map(summary => summary.id)).deepEqual(['atomi']);
+    should(listedAfter.map(summary => summary.id)).deepEqual(['atomi', 'kimi']);
+    should(listedAfter[1]).containDeep({ login: 'kimi', profile: 'ferretry-claude', harness: 'claude-code' });
+  });
+
+  it('should give a name clash -2, then -3, and keep each name across reads whatever order Logins lists them in', async () => {
+    // Arrange — the owner already has runtimes called "work" and "work-2" on other logins
+    const runtimes = { work: runtimeFile({ login: 'other' }), 'work-2': runtimeFile({ login: 'other-two' }) };
+    const logins = [loginView({ id: 'other' }), loginView({ id: 'other-two' }), loginView({ id: 'work' })];
+
+    // Act
+    const first = await api({ runtimes, logins }).list();
+    const second = await api({ runtimes, logins: [...logins].reverse() }).list();
+
+    // Assert
+    should(first.map(summary => summary.id)).deepEqual(second.map(summary => summary.id));
+    should(first.map(summary => summary.id)).deepEqual(['work', 'work-2', 'work-3']);
+    should(first[2]?.login).equal('work');
+  });
+
+  it('should run a login that drives both CLIs on the first one installed here', async () => {
+    // Arrange
+    const both = loginView({ id: 'gateway', store: 'environment', harnesses: ['claude-code', 'codex'] });
+
+    // Act
+    const codexOnly = await api({
+      runtimes: {},
+      logins: [both],
+      templated: ['gateway'],
+      installed: () => ['codex'],
+    }).list();
+    const none = await api({ runtimes: {}, logins: [both], templated: ['gateway'], installed: () => [] }).list();
+
+    // Assert
+    should(codexOnly[0]).containDeep({ id: 'gateway', harness: 'codex', profile: 'ferretry-codex' });
+    // Nothing installed: still listed on its first CLI, which the app words as "isn't installed here".
+    should(none[0]?.harness).equal('claude-code');
+  });
+});
+
+describe('createRuntimesApi — an environment login Logins withheld', () => {
+  it('should not list a runtime for it: it would stand in for variables nobody read', async () => {
+    // Arrange — a key login whose file is not a clean, checked version (no templates for it)
+    const key = loginView({ id: 'kimi', store: 'environment' });
+
+    // Act
+    const actual = await api({ runtimes: {}, logins: [key], templated: [] }).list();
+
+    // Assert
+    should(actual).deepEqual([]);
   });
 });

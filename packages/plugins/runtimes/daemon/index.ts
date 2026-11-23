@@ -41,6 +41,7 @@ import {
   type RuntimesFile,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import type { HarnessKind } from './lib/manifest.ts';
 import { fleetHomes } from './adapters/fleet-home-reader.ts';
 import { PROFILE_COMPONENT_SOURCE_HOOKS } from './adapters/profile-components.ts';
 import {
@@ -107,6 +108,8 @@ export interface RuntimesAssembly {
    * profile layers answer in a sentence that they cannot read the files, and change nothing.
    */
   readonly profileEtag?: (profile: string) => Promise<string>;
+  /** The harnesses installed here, as of the last lookup: which CLI a login that drives both gets its derived runtime on. Absent: not known. */
+  readonly installed?: () => readonly HarnessKind[];
   /**
    * The machine's "Auto-resume after restart" switch: `true` on, `false` off, `undefined` when it cannot be read (a no:
    * nothing is resumed). Absent, the switch is `runtimes.yaml` `autoResume` as that file stands; present, this answer is
@@ -277,6 +280,14 @@ export const hostAssembly: RuntimesAssembler = ctx => {
       ),
     ),
     profileEtag: async profile => await assembled().profileEtag(profile),
+    // The fleet folder may not open: then nothing is known to be installed, and a read says so rather than throwing.
+    installed: () => {
+      try {
+        return assembled().installed();
+      } catch {
+        return [];
+      }
+    },
     launchFacts: launchFactsSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
     hostClaudeAccount: hostClaudeAccountText(ctx.kernel),
     checkEnvironment: checkEnvironmentSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
@@ -303,6 +314,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         logins: ctx.needs.logins,
         now: () => clock.nowMs(),
         currentName: async former => await assembly.catalog.currentRuntimeName?.(former),
+        installed: () => assembly.installed?.(),
       });
       // What a runtime's profile stack names, and the one act that edits a profile's layers: read live, written through
       // the kernel's config writer, never kept. The etag is the profile file's own, read when asked.
