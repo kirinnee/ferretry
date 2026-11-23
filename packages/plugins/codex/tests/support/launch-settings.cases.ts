@@ -199,6 +199,29 @@ export function launchSettingsCases(): void {
       });
     }
 
+    test('a start and a resume name the programs the pane execs through, ending in the located binary', async () => {
+      // Arrange
+      const { port } = await realPortWithBadRecord('not JSON', HEALTHY_RECORD);
+      const harness = over({ value: 'auto' }, port);
+      const seen: Array<readonly string[] | undefined> = [];
+      const capturing = {
+        ...runner,
+        start: async (run: RunSpec) => (seen.push(run.execChain), await runner.start(run)),
+        resume: async (run: RunSpec, id: string) => (seen.push(run.execChain), await runner.resume(run, id)),
+      } as unknown as Runner;
+
+      // Act
+      await harness.start(spec, capturing, {} as never);
+      await harness.resume(spec, capturing, {} as never, 'conv-1');
+
+      // Assert — `env`, the interpreters an installed script runs on, then the binary the launch located.
+      expect(seen).toHaveLength(2);
+      for (const chain of seen) {
+        expect(chain?.slice(0, 4)).toEqual(['env', 'bash', 'sh', 'node']);
+        expect(chain?.at(-1)).toBe('codex');
+      }
+    });
+
     test('F-0422 a record written before the hooks section reads fine: no damage, its other sections still drift, hooks are unknown', async () => {
       // Arrange: a launch recorded by the real port, then rewritten the way an older build wrote it (no hooks section).
       const { port, changed, memory } = await realPortWithBadRecord('not JSON', HEALTHY_RECORD);

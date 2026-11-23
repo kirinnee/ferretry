@@ -11,6 +11,7 @@ import type {
 import type { ChildEnvironment, FerretId } from '@ferretry/kernel/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { isConversationId } from '../../lib/harness/claude-path.ts';
+import { API_KEY_SEED_SHELL } from '../../lib/harness/api-key-seed.ts';
 import { channelsOn, HOME_FILES, launchCommand, settingsFlags } from '../../lib/harness/launch.ts';
 import { HarnessUpdateRefusal } from '../../lib/update/service.ts';
 import { type ClaudeCore, claudeHome, fenced, type Serves } from './core.ts';
@@ -42,6 +43,7 @@ export const lifecyclePart = (core: ClaudeCore): Serves<'discover' | 'resume' | 
     // reload between them cannot leave a record that differs from what the process runs on.
     const inputs = await launchInputs(core, spec.runtime);
     await prepareHomeFrom(core, spec, inputs, found.version);
+    const channels = channelsOn(inputs.channels, spec.parts);
     const command = launchCommand({
       binary: found.binary,
       flags: settingsFlags(inputs.settings),
@@ -49,12 +51,14 @@ export const lifecyclePart = (core: ClaudeCore): Serves<'discover' | 'resume' | 
       permissionMode: inputs.permissionMode,
       model: spec.model,
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
-      channels: channelsOn(inputs.channels, spec.parts),
+      channels,
       dangerousRmWaiver: inputs.dangerousRmWaiver,
       conversation,
       readable: spec.readable,
     });
-    const spec2 = { ferret: spec.ferret, command, cwd: spec.folder, env };
+    // What the pane runs as it execs on: `env`, the seed shell, then Claude (a first turn is typed only into that chain).
+    const execChain = [API_KEY_SEED_SHELL, found.binary].map(path => path.slice(path.lastIndexOf('/') + 1));
+    const spec2 = { ferret: spec.ferret, command, cwd: spec.folder, env, execChain: ['env', ...execChain] };
     await recordLaunchSettings(core, spec.ferret, inputs);
     // Persist only the identity and cwd we chose, so a fresh daemon reads the same exact transcript.
     const home = claudeHome(core, spec.ferret);
@@ -67,6 +71,11 @@ export const lifecyclePart = (core: ClaudeCore): Serves<'discover' | 'resume' | 
     const started = await runner.start(spec2);
     if (!started.ok) return started;
     core.deps.panes.remember(spec.ferret, started.value.handle);
+    // Loading Ferretry's channel makes Claude Code ask "Loading development channels" on EVERY launch. Only a first turn's
+    // delivery answered it, so a ferret started with no prompt (the app's New ferret) sat at that confirm and every
+    // message sent to it was held behind it. It is answered here, before the start is reported, and nothing else is: any
+    // other dialog is left for a person. A pane that never shows it, or a runner that cannot look, changes nothing.
+    if (channels) await runner.answerDevChannels?.(started.value.handle, spec.ferret).catch(() => undefined);
     return ok({ running: started.value, harnessConversation: conversation.id });
   }
 
