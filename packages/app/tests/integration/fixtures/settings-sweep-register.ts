@@ -19,10 +19,14 @@ import { answerWrites } from './sweep/answers-forms.ts';
 
 const requests: string[] = [];
 (globalThis as { __fyRequests?: string[] }).__fyRequests = requests;
+/** The body of every write, so a test can say WHAT a click sent as well as how many. */
+const bodies: { route: string; body: unknown }[] = [];
+(globalThis as { __fyBodies?: typeof bodies }).__fyBodies = bodies;
 
 const answer = async (request: TransportRequest): Promise<TransportAnswer | undefined> => {
   const path = request.path.split('?')[0] ?? '';
   requests.push(`${request.method} ${request.path}`);
+  if (request.method !== 'GET') bodies.push({ route: `${request.method} ${request.path}`, body: request.body });
   if (path === '/v1/plugins' || path === '/v1/health' || path === '/v1/grants') return undefined;
   // The forms' writes first: a PATCH answers with a valid body and is kept for a reload (`sweep/answers-forms.ts`).
   const written = await answerWrites(request);

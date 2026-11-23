@@ -1,4 +1,4 @@
-import { ChoiceCards } from '@ferretry/app';
+import { ChoiceCards, SettingFieldset, SettingSaveBar, useReportUnsaved } from '@ferretry/app';
 import { Button, type ChangeAuthority, ChangeApplyPanel, SetupNote, SetupSection } from '@ferretry/app/ui';
 import { useState } from 'react';
 import type { BrowserMode } from '../../../contract/index.ts';
@@ -53,6 +53,9 @@ export function BrowserModeSection({
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<SaveOutcome | null>(null);
   const pending = draft !== mode;
+  // While the staged mode waits for Save this form is dirty, and the panel below is not a Save bar (which reports it by itself):
+  // tell the shell's leave guard, so Back asks before it drops the pick.
+  useReportUnsaved(pending);
   const submit = (): void => {
     setBusy(true);
     void save(draft).then(result => {
@@ -61,21 +64,23 @@ export function BrowserModeSection({
     });
   };
   return (
-    <SetupSection title="Browser mode" name="browser-mode">
+    <SetupSection title="Browser mode" name="browser-mode" saves="on-save">
       {/* Cards, staged: an arrow key moves the pick, and nothing is written until Save. */}
-      <ChoiceCards
-        label="Browser mode"
-        value={draft}
-        onChange={value => {
-          setDraft(value as BrowserMode);
-          setOutcome(null);
-        }}
-        options={(['headless', 'window'] as const).map(choice => ({
-          id: choice,
-          title: BROWSER_MODE_WORDS[choice].title,
-          line: BROWSER_MODE_WORDS[choice].detail,
-        }))}
-      />
+      <SettingFieldset saving={busy}>
+        <ChoiceCards
+          label="Browser mode"
+          value={draft}
+          onChange={value => {
+            setDraft(value as BrowserMode);
+            setOutcome(null);
+          }}
+          options={(['headless', 'window'] as const).map(choice => ({
+            id: choice,
+            title: BROWSER_MODE_WORDS[choice].title,
+            line: BROWSER_MODE_WORDS[choice].detail,
+          }))}
+        />
+      </SettingFieldset>
       <p className="m-0 text-meta leading-base text-muted" data-browser-mode-hint="">
         Applies the next time the browser on {machineInSentence(machineName)} starts. Neither mode solves a captcha for
         you: when a page asks, take it over and solve it yourself.
@@ -105,7 +110,16 @@ export function BrowserModeSection({
             </Button>
           </ChangeApplyPanel>
         </div>
-      ) : null}
+      ) : (
+        // The Save bar is there from the first paint, with nothing to save; the panel above replaces it while a mode is staged.
+        <SettingSaveBar
+          dirty={false}
+          saved={outcome?.kind === 'saved'}
+          saveLabel="Save browser mode"
+          onSave={() => undefined}
+          onDiscard={() => undefined}
+        />
+      )}
     </SetupSection>
   );
 }

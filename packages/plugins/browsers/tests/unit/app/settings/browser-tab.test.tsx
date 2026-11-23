@@ -170,14 +170,39 @@ describe('the Browser tab', () => {
     await view.unmount();
   });
 
-  it('SF2 says a held proxy change is not in effect, and does not test a proxy that is not saved yet', async () => {
-    const { calls, view } = await tab({ put: { path: 'browsers.yaml', etag: 'etag-2', outcome: 'pending' } });
+  it('SF2 says a held proxy change is not in effect, and tests the saved proxy again only once a save took', async () => {
+    const { calls, view } = await tab({
+      put: { path: 'browsers.yaml', etag: 'etag-2', outcome: 'pending' },
+      test: {
+        reachable: true,
+        tested: 'unsaved',
+        roundTripMs: 42,
+        egressIp: '203.0.113.7',
+        message: 'The proxy answered.',
+      },
+    });
     await typeInto(view.container.querySelector('[data-browser-proxy-url]'), 'http://proxy.example.test:8080');
     await click(view.container.querySelector('[data-browser-proxy-save-panel] [data-change-submit]'), 'Save and test');
     expect(text(view.container, '[data-setup-note="browser-proxy-held"]')).toBe(
       'Saved, but not in effect until you confirm it.',
     );
-    expect(calls.some(call => call.route === PROXY_TEST)).toBe(false);
+    // The proxy was tried BEFORE it was written (the edit, as typed); a held write is not the saved proxy, so nothing tries it again.
+    expect(calls.filter(call => call.route === PROXY_TEST)).toHaveLength(1);
+    expect(body(calls, PROXY_TEST)).toEqual({
+      proxy: expect.objectContaining({ url: 'http://proxy.example.test:8080' }),
+    });
+    await view.unmount();
+  });
+
+  it('a proxy that fails its test is not written, so the one that was saved stays in effect', async () => {
+    const { calls, view } = await tab({
+      test: { reachable: false, tested: 'unsaved', errorClass: 'connect', message: 'Nothing is listening.' },
+    });
+    await typeInto(view.container.querySelector('[data-browser-proxy-url]'), 'http://proxy.example.test:8080');
+    await click(view.container.querySelector('[data-browser-proxy-save-panel] [data-change-submit]'), 'Save and test');
+    expect(calls.some(call => call.route === CONFIG_PUT)).toBe(false);
+    expect(text(view.container, '[data-setup-note="browser-proxy-save-refusal"]')).toContain('Not saved');
+    expect(text(view.container, '[data-browser-proxy-test-class]')).toBe('Nothing is listening.');
     await view.unmount();
   });
 

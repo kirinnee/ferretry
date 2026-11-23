@@ -50,6 +50,8 @@ export {
   parseReferenceToken,
   SettingGroup,
   SettingRow,
+  SettingSaveBar,
+  Segmented,
   SettingSwitch,
   type Reference,
 } from '@ferretry/app';

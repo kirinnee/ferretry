@@ -182,6 +182,8 @@ const harnessView = (
   version: string,
   latest: string,
   native: boolean,
+  /** The version Ferretry verified, when it is not the one installed (Claude Code: an install behind it, a release past it). */
+  verifiedVersion: string = version,
 ) => ({
   harness,
   location: { state: 'located', path, rule: 'on-path', declaredBy: 'config/harnesses.yaml' },
@@ -193,15 +195,15 @@ const harnessView = (
     kind: 'self',
     steps: [{ command: harness === 'codex' ? 'npm install -g @example/codex@latest' : 'claude update' }],
     rollback: 'automatic',
-    pinsVersion: false,
+    pinsVersion: harness === 'claude-code',
   },
   check: {
     state: 'ok',
     checkedAt: LATER,
     latest: { version: latest, url: `https://releases.example.test/${harness}/${latest}`, publishedAt: AT },
   },
-  verified: { version, url: `https://releases.example.test/${harness}/${version}` },
-  verification: harness === 'claude-code' ? 'unverified' : 'verified',
+  verified: { version: verifiedVersion, url: `https://releases.example.test/${harness}/${verifiedVersion}` },
+  verification: version === verifiedVersion ? 'verified' : 'older',
   available: latest !== version,
   job: null,
 });
@@ -354,7 +356,9 @@ const ANSWERS: Readonly<Record<string, () => unknown>> = {
   'GET /v1/shells': () => shells,
   'GET /v1/shells/nix': () => ({ present: true, version: '2.24.0', path: '/nix/var/nix/profiles/default/bin/nix' }),
   'GET /v1/claude-code/update': () =>
-    harnessView('claude-code', '/home/workshop/.local/bin/claude', '2.1.40', '2.1.44', true),
+    harnessView('claude-code', '/home/workshop/.local/bin/claude', '2.1.38', '2.1.44', true, '2.1.40'),
+  'POST /v1/claude-code/update': () =>
+    harnessView('claude-code', '/home/workshop/.local/bin/claude', '2.1.38', '2.1.44', true, '2.1.40'),
   'GET /v1/codex/update': () => harnessView('codex', '/home/workshop/.npm-global/bin/codex', '0.9.2', '0.9.3', false),
   'GET /v1/runtimes/setup/scan': () => scan,
   'GET /v1/usage/budgets': () => budgets,

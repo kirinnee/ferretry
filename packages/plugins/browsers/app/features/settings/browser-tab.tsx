@@ -103,7 +103,6 @@ export function BrowserTab({ client }: { readonly client: CallClient }) {
             save={(mode: BrowserMode) => save({ mode })}
           />
           <BrowserProxySection
-            key={JSON.stringify(reading.document.config.proxy ?? null)}
             client={client}
             machineName={machineName}
             authority={authority}
