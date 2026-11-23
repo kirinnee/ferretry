@@ -643,6 +643,15 @@ export class TmuxRunner implements Runner {
   }
 
   /**
+   * `Runner.answerDevChannels`: Claude Code's development-channels confirm, answered at launch through the SAME guarded
+   * binding a delivery uses (its one key is acted on under `kernel.act(terminal %n, 'keys')`), and nothing else.
+   */
+  async answerDevChannels(handle: RunnerHandle, ferret?: FerretId): Promise<'answered' | 'absent'> {
+    const pane = await this.guardedPane(handle, ferret);
+    return await new TmuxPaneDelivery(new TmuxController(pane.port), pane.sleep).answerDevChannels(pane.session);
+  }
+
+  /**
    * Today's `PaneScreenReader.text`: the visible screen of the ferret pane behind `handle`, dead or alive, for its
    * harness to explain a failed start. Only a ferret's own pane is read (a person's shell answers `''`), only by its
    * exact id, and nothing is written. The text goes to the caller and is never logged here.

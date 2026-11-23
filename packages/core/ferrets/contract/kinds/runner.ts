@@ -207,6 +207,15 @@ export interface Runner {
    */
   settled?(handle: RunnerHandle, ferret?: FerretId): Promise<'settled' | 'timed-out'>;
   /**
+   * Additive (P0): Claude Code's "WARNING: Loading development channels" confirm, which every launch that loads
+   * Ferretry's channel shows, answered with its first row ("I am using this for local development") and NOTHING else.
+   * Watches the pane behind `handle`, boundedly, from its launch: `answered` once that exact dialog took its one key,
+   * `absent` when the pane reached its prompt, showed any OTHER screen that asks something, or the bound passed (nothing
+   * pressed). Rejects when the pane is gone. The key goes through the runner's guarded binding like any write. Absent:
+   * the confirm waits for a first turn's delivery, or a person, to answer it.
+   */
+  answerDevChannels?(handle: RunnerHandle, ferret?: FerretId): Promise<'answered' | 'absent'>;
+  /**
    * Additive (U3, today's `PaneScreenReader.text`): what the pane behind `handle` last showed, dead or alive, so a
    * harness can explain a start that failed ({@link Harness.startFailure}). It only reads, and the text is handed to the
    * harness only: it is never logged, stored or quoted in any answer. A handle with nothing behind it answers `''`.

@@ -2554,3 +2554,64 @@ describe('the Claude channel in a real launch (ClaudeHarness.start)', () => {
     expect(await readFile(join(HOME, 'CLAUDE.md'), 'utf8')).toContain('<channel source="ferretry">');
   });
 });
+
+/**
+ * P0: loading Ferretry's channel makes Claude Code ask "Loading development channels" on every launch, and only a first
+ * turn's delivery answered it, so a ferret started with no prompt (the app's New ferret) sat at that confirm with every
+ * message held behind it. The launch itself asks the runner to answer THAT confirm before the start is reported.
+ */
+describe('the development-channels confirm is answered by the launch (ClaudeHarness.start)', () => {
+  const launch = async (options: {
+    readonly channels: boolean;
+    readonly answer?: () => Promise<'answered' | 'absent'>;
+    readonly method?: 'start' | 'resume';
+  }) => {
+    const { harness } = build({
+      config: {
+        file: () => ({ searchPaths: [], permissionMode: 'auto', channels: options.channels }),
+        collection: () => new Map(),
+      },
+    });
+    const asked: Array<readonly [string, string | undefined]> = [];
+    const answering = {
+      ...(runner({}) as unknown as Record<string, unknown>),
+      answerDevChannels: async (handle: string, ferret?: string) => {
+        asked.push([handle, ferret]);
+        return await (options.answer ?? (async () => 'answered' as const))();
+      },
+    } as unknown as Runner;
+    const input = spec({ parts: [{ kind: 'account', organizationType: 'claude_max' }] });
+    const result =
+      options.method === 'resume'
+        ? await harness.resume(input, answering, {} as never, 'conv-resume')
+        : await harness.start(input, answering, {} as never);
+    return { result, asked };
+  };
+
+  for (const method of ['start', 'resume'] as const)
+    test(`a launch (${method}) that loads the channel asks the runner to answer the confirm on its own pane, once`, async () => {
+      const { result, asked } = await launch({ channels: true, method });
+
+      expect(result.ok).toBe(true);
+      expect(asked).toEqual([['%7', spec().ferret]]);
+    });
+
+  test('a launch with no channel never asks: there is no confirm to answer', async () => {
+    const { result, asked } = await launch({ channels: false });
+
+    expect(result.ok).toBe(true);
+    expect(asked).toEqual([]);
+  });
+
+  test('a runner that cannot answer (the pane went, the bound passed) never fails the start', async () => {
+    const { result, asked } = await launch({
+      channels: true,
+      answer: async () => {
+        throw new Error('the ferret pane is no longer live');
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(asked).toHaveLength(1);
+  });
+});
