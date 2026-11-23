@@ -39,6 +39,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { targetRef } from '@ferretry/core-vault/contract';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
+import { MANAGER_ENVIRONMENT_NAMES } from '../../lib/cgroups/scope.ts';
 import { sessionTarget } from '../../lib/tmux/address.ts';
 import { tmuxStartDirectory } from '../../lib/tmux/format-escape.ts';
 import { maskedScreen } from '../../lib/tmux/screen-mask.ts';
@@ -171,7 +172,7 @@ const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
  * build has neither in its global environment and lives on across a daemon update: without them the wrapper exits 1
  * before the harness runs ("Failed to connect to bus: No medium found"). Neither is a secret: no value is a credential.
  */
-export const PANE_MANAGER_NAMES: readonly string[] = Object.freeze(['XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS']);
+export const PANE_MANAGER_NAMES: readonly string[] = MANAGER_ENVIRONMENT_NAMES;
 
 /** What tmux is asked about a pane: id, process, dead, the session holding it, and when that session began. */
 const PANE_FACTS = '#{pane_id}|#{pane_pid}|#{pane_dead}|#{session_name}|#{session_created}';

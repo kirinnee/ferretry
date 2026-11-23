@@ -37,6 +37,9 @@ The wrapper runs INSIDE the pane, so the pane must be able to reach the user man
 `tmux` client it starts exactly two names from its own environment, `XDG_RUNTIME_DIR` and
 `DBUS_SESSION_BUS_ADDRESS` (the same two `systemctl` and `systemd-run` get, and nothing else), and a ferret's
 launch copies both into its new session, so a tmux server an older build started without them still works.
+The wrapper is also started as `env XDG_RUNTIME_DIR=… DBUS_SESSION_BUS_ADDRESS=… systemd-run …` with the daemon's
+own values, the ones its scope proof ran with, for every limited path (a ferret, an agent terminal, an agent job):
+nothing the pane or a caller's environment holds can point it at a stale bus, and no other name is widened.
 Without them `systemd-run` printed "Failed to connect to bus: No medium found" and every limited pane exited 1
 before its harness ran, while the daemon's own scope probe passed.
 
