@@ -7,11 +7,12 @@ import { NewFerretPage } from '../../../../app/features/new-ferret/new-ferret-pa
 import { run, runAsync, render } from '../support/react.ts';
 import { scripted, type Call } from '../support/client.ts';
 
-/** A stand-in for Projects' panel: one row per project, which proposes its folder through the slot's `onPick`. */
+/** A stand-in for Projects' panel: a box carrying the page's id, recent folders, and a row that proposes a folder through `onPick`. */
 const stubProjects = (props: Record<string, unknown>): ReactNode => {
   const slot = props as unknown as NewFerretProjectSlotProps;
   return (
     <section data-new-ferret-projects="">
+      <output data-id={slot.id} data-recent={slot.recent.join(',')} data-value={slot.value} />
       <button data-row="p2" onClick={() => slot.onPick(FOLDER)} type="button">
         project two
       </button>
@@ -21,14 +22,14 @@ const stubProjects = (props: Record<string, unknown>): ReactNode => {
 
 const FOLDER = '/work/p2 ';
 
-const page = (calls: Call[] = []) =>
+const page = (calls: Call[] = [], ferrets: unknown[] = []) =>
   render(
     <WithSlotPanels
       slots={{ [NEW_FERRET_PROJECT_SLOT]: [{ plugin: 'projects', id: 'new-ferret-projects', view: stubProjects }] }}
     >
       <NewFerretPage
         AccountSlot={({ fallback }) => fallback}
-        client={scripted({ 'GET /v1/ferrets': [], 'POST /v1/ferrets': { id: 'new-ferret' } }, calls)}
+        client={scripted({ 'GET /v1/ferrets': ferrets, 'POST /v1/ferrets': { id: 'new-ferret' } }, calls)}
         daemon="daemon/a"
         onNavigate={() => undefined}
       />
@@ -43,17 +44,38 @@ const hostsOf = (node: ReactTestRendererJSON | ReactTestRendererJSON[] | null): 
 };
 
 describe('the New ferret page and the project slot', () => {
-  it('draws the projects ABOVE the Folder box, and a pick fills that box', () => {
-    const view = page();
-    const hosts = hostsOf(view.toJSON());
-    const slotAt = hosts.findIndex(host => host.props['data-new-ferret-projects'] !== undefined);
-    const folderAt = hosts.findIndex(host => host.props.id === 'fy-new-ferret-folder');
-    expect(slotAt).toBeGreaterThanOrEqual(0);
-    expect(folderAt).toBeGreaterThan(slotAt);
+  it('draws the where-it-works panel IN PLACE of the Folder box, handing it the label id and the recent folders, and a pick fills the folder', () => {
+    const view = page(
+      [],
+      [
+        { folder: '/work/old', stateAt: '2026-11-01T00:00:00.000Z' },
+        { folder: '/work/new', stateAt: '2026-11-02T00:00:00.000Z' },
+      ],
+    );
+    // The panel carries the page's label id; the page draws no folder box of its own beside it.
+    expect(
+      view.root.findAll(node => typeof node.type === 'string' && node.props.id === 'fy-new-ferret-folder'),
+    ).toHaveLength(0);
+    const out = (): Record<string, unknown> => view.root.findByType('output').props;
+    expect(out()['data-id']).toBe('fy-new-ferret-folder');
+    expect(out()['data-value']).toBe('');
 
     run(() => view.root.findByProps({ 'data-row': 'p2' }).props.onClick());
-    const folder = view.root.findAll(node => typeof node.type === 'string' && node.props.id === 'fy-new-ferret-folder');
-    expect(folder.at(0)?.props.value).toBe(FOLDER);
+    expect(out()['data-value']).toBe(FOLDER);
+  });
+
+  it('keeps the typed Folder box when nothing contributes the panel', () => {
+    const view = render(
+      <NewFerretPage
+        AccountSlot={({ fallback }) => fallback}
+        client={scripted({ 'GET /v1/ferrets': [] }, [])}
+        daemon="daemon/a"
+        onNavigate={() => undefined}
+      />,
+    );
+    expect(
+      view.root.findAll(node => typeof node.type === 'string' && node.props.id === 'fy-new-ferret-folder').length,
+    ).toBeGreaterThan(0);
   });
 
   it('starts in the picked project exactly as registered: a trailing space is not trimmed into a sibling folder', async () => {
