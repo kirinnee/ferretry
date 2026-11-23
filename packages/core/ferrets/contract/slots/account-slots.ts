@@ -58,6 +58,8 @@ interface AccountSlotProps {
 export interface NewFerretAccountSlotProps extends AccountSlotProps {
   /** A Launch button's runtime, used only when offered and usable. */
   readonly preferred?: string;
+  /** A picked past conversation was held by this harness: only its runtimes are offered. */
+  readonly harness?: HarnessKey;
 }
 
 export interface MoveAccountSlotProps extends AccountSlotProps {

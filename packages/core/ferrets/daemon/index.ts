@@ -33,6 +33,8 @@ import {
   LaunchParts,
   OPENING_ATTACHMENTS_KEY,
   OpeningAttachments,
+  CONVERSATION_STAGE_KEY,
+  ConversationStage,
   Runners,
   RUNTIME_START_KEY,
   RuntimeStart,
@@ -542,6 +544,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     openingAttachments: () => {
       const found = hooks.provider(OpeningAttachments, OPENING_ATTACHMENTS_KEY);
+      return found === 'unavailable' ? undefined : found;
+    },
+    conversationStage: () => {
+      const found = hooks.provider(ConversationStage, CONVERSATION_STAGE_KEY);
       return found === 'unavailable' ? undefined : found;
     },
     sitrepSources: () => hooks.contributions(SitrepLines).map(contribution => contribution.item),

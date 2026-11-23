@@ -9,7 +9,12 @@
  * runtime is the `runtime` field and the project folder the `folder` field of `POST /v1/ferrets`, which names both.
  */
 
-import { RuntimeNameSchema, StartOptionsSchema } from '@ferretry/core-ferrets/contract';
+import {
+  type HarnessKey,
+  HarnessKeySchema,
+  RuntimeNameSchema,
+  StartOptionsSchema,
+} from '@ferretry/core-ferrets/contract';
 import { z } from 'zod';
 import type { FerretsClient } from '../../lib/client.ts';
 
@@ -30,6 +35,10 @@ export interface NewFerretDraft {
   remoteControl: boolean;
   label: string;
   prompt: string;
+  /** A past conversation to resume (picked from the Continue list): the harness's own id, sent as `harnessConversation`. */
+  harnessConversation?: string;
+  /** The harness that conversation belongs to, sent as `harness` so the daemon refuses a runtime of another harness. */
+  harness?: HarnessKey;
 }
 
 export const emptyNewFerretDraft: NewFerretDraft = {
@@ -59,6 +68,8 @@ const StartBodySchema = z.strictObject({
   runtime: RuntimeNameSchema,
   folder: z.string().min(1).max(4_096),
   prompt: z.string().max(200_000).optional(),
+  harnessConversation: z.string().min(1).max(256).optional(),
+  harness: HarnessKeySchema.optional(),
 });
 export type StartBody = z.infer<typeof StartBodySchema>;
 
@@ -78,6 +89,8 @@ export function buildStartBody(draft: NewFerretDraft): StartBody {
     ...(draft.remoteControl ? { remoteControl: true } : {}),
     ...(label === undefined ? {} : { label }),
     ...(prompt === undefined ? {} : { prompt }),
+    ...(draft.harnessConversation === undefined ? {} : { harnessConversation: draft.harnessConversation }),
+    ...(draft.harness === undefined ? {} : { harness: draft.harness }),
   });
 }
 

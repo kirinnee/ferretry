@@ -7,6 +7,7 @@
  */
 
 import { useRouter } from '@ferretry/app';
+import { NEW_FERRET_CONTINUE_QUERY } from '../../contract/slots/new-ferret-continue.slot.ts';
 import type { AppComponent, ScreenProps } from '@ferretry/kernel/manifest';
 import { NewFerretPage } from '../features/new-ferret/new-ferret-page.tsx';
 import type { LiveFerretsClient } from '../lib/client.ts';
@@ -23,6 +24,10 @@ export const initialFolderOf = (search: string): string | undefined => {
   return folder === null || folder.trim() === '' ? undefined : folder;
 };
 
+/** Whether the address asks for the "Continue a past conversation" section open (`?continue=1`, see `newFerretContinueHref`). */
+export const initialContinueOf = (search: string): boolean =>
+  new URLSearchParams(search).get(NEW_FERRET_CONTINUE_QUERY) === '1';
+
 export function createNewFerretScreen(client: LiveFerretsClient): AppComponent<ScreenProps> {
   return function NewFerretScreen() {
     const { route, navigate, back } = useRouter();
@@ -30,6 +35,7 @@ export function createNewFerretScreen(client: LiveFerretsClient): AppComponent<S
     if (route.kind !== 'screen' || route.daemon === undefined) return null;
     const initialAgent = initialAgentOf(globalThis.location?.search ?? '');
     const initialFolder = initialFolderOf(globalThis.location?.search ?? '');
+    const initialContinue = initialContinueOf(globalThis.location?.search ?? '');
     return (
       <NewFerretPage
         client={client}
@@ -38,6 +44,7 @@ export function createNewFerretScreen(client: LiveFerretsClient): AppComponent<S
         onNavigate={path => navigate(path)}
         {...(initialAgent === undefined ? {} : { initialAgent })}
         {...(initialFolder === undefined ? {} : { initialFolder })}
+        {...(initialContinue ? { initialContinue } : {})}
       />
     );
   };

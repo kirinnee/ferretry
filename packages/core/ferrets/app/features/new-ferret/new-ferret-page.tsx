@@ -1,10 +1,14 @@
-import { PanelSlot } from '@ferretry/app';
+import { PanelSlot, useSlotHasPanels } from '@ferretry/app';
 import {
   type ChosenFerretAccount,
+  type ContinuePick,
+  NEW_FERRET_CONTINUE_SLOT,
+  type NewFerretContinueSlotProps,
   NEW_FERRET_PROJECT_SLOT,
   type NewFerretAccountSlotProps,
   type NewFerretProjectSlotProps,
 } from '@ferretry/core-ferrets/contract';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { type ComponentType, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { LiveFerretsClient } from '../../lib/client.ts';
 import { Button, Card, cn, FastSwitch, ModelSelect, PanelBody, Textarea } from '../../ui.ts';
@@ -40,6 +44,8 @@ const CREATE_BLOCKER_ID = 'fy-new-ferret-create-blocker';
  */
 const TYPED_PATH_PLACEHOLDER = 'Full path, e.g. /home/you/my-project';
 const PICKED_PATH_PLACEHOLDER = 'Choose a folder, or type its full path';
+
+const CONTINUE_LIST_ID = 'fy-new-ferret-continue-list';
 
 /** The Runtime label's id, which the picker (or its typed fallback) is named by. */
 const RUNTIME_LABEL_ID = 'fy-new-ferret-runtime-label';
@@ -124,6 +130,8 @@ export interface NewFerretPageProps {
    * daemon's start route still decides whether it may be used.
    */
   readonly initialFolder?: string;
+  /** Open with the "Continue a past conversation" section shown (`?continue=1`: the Runtimes and setup links to it). */
+  readonly initialContinue?: boolean;
   /** What draws the runtime field's slot. The shell's by default; a test hands a stand-in. */
   readonly AccountSlot?: ComponentType<AccountSlotProps>;
 }
@@ -143,6 +151,7 @@ export function NewFerretPage({
   backPlace,
   initialAgent,
   initialFolder,
+  initialContinue = false,
   AccountSlot = ShellAccountSlot,
 }: NewFerretPageProps) {
   const [draft, setDraft] = useState<NewFerretDraft>(() =>
@@ -156,6 +165,29 @@ export function NewFerretPage({
   const [chosenRuntime, setChosenRuntime] = useState<ChosenFerretAccount | null>(null);
   const [noRunnableAccount, setNoRunnableAccount] = useState(false);
   const [folders, setFolders] = useState<FolderRead>(LOADING_FOLDERS);
+  // A past conversation picked from the Continue list: it fills the form, and Create starts with it named so it resumes.
+  const [picked, setPicked] = useState<ContinuePick | null>(null);
+  const [continueShown, setContinueShown] = useState(initialContinue);
+  const continueOffered = useSlotHasPanels(NEW_FERRET_CONTINUE_SLOT);
+  const pick = (next: ContinuePick | null): void => {
+    setPicked(next);
+    setError(null);
+    // The pick is in the form: the list folds away so the form (runtime, folder, mode, prompt) is what the page shows.
+    if (next !== null) setContinueShown(false);
+    setDraft(current => {
+      const { harnessConversation: _before, harness: _harness, ...rest } = current;
+      if (next === null) return { ...rest, folder: '', folderExact: undefined };
+      // The conversation brings its folder; a runtime of another harness cannot resume it, so that one is cleared.
+      return {
+        ...rest,
+        folder: next.folder,
+        folderExact: next.folder,
+        runtime: next.harness === picked?.harness ? current.runtime : '',
+        harnessConversation: next.conversation,
+        harness: next.harness,
+      };
+    });
+  };
 
   // The Folder box's catalogue: one read of the daemon's ferrets. A failure is a status, never a throw.
   useEffect(() => {
@@ -209,6 +241,7 @@ export function NewFerretPage({
       <NoFerretAccounts onOpenSettings={() => onNavigate(addLoginHref(daemon))} onShown={setNoRunnableAccount} />
     ),
     ...(initialAgent === undefined ? {} : { preferred: initialAgent }),
+    ...(picked === null ? {} : { harness: picked.harness }),
   };
 
   const submit = async (): Promise<void> => {
@@ -249,6 +282,55 @@ export function NewFerretPage({
 
       <Card>
         <PanelBody className="space-y-5">
+          {continueOffered ? (
+            <section className="rounded-control border border-border-strong" data-new-ferret-continue="">
+              <button
+                aria-controls={CONTINUE_LIST_ID}
+                aria-expanded={continueShown}
+                className="flex min-h-[44px] w-full items-center justify-between gap-sm px-control-x text-left text-ui font-semibold text-fg"
+                onClick={() => setContinueShown(shown => !shown)}
+                type="button"
+              >
+                <span>Continue a past conversation</span>
+                {continueShown ? (
+                  <ChevronUp aria-hidden="true" className="shrink-0 text-faint" size={16} />
+                ) : (
+                  <ChevronDown aria-hidden="true" className="shrink-0 text-faint" size={16} />
+                )}
+              </button>
+              {picked === null ? (
+                continueShown ? null : (
+                  <p className="m-0 px-control-x pb-2 text-meta leading-base text-muted">
+                    Pick up where an earlier Claude Code or Codex conversation left off.
+                  </p>
+                )
+              ) : (
+                <p
+                  className="m-0 flex items-center justify-between gap-sm px-control-x pb-2 text-meta leading-base text-fg-soft"
+                  data-new-ferret-picked={picked.key}
+                >
+                  <span className="min-w-0 [overflow-wrap:anywhere]">Continuing: {picked.title}</span>
+                  <button
+                    className="min-h-[44px] shrink-0 px-2 text-ui font-medium text-fg underline"
+                    onClick={() => pick(null)}
+                    type="button"
+                  >
+                    Start fresh instead
+                  </button>
+                </p>
+              )}
+              {continueShown ? (
+                <div className="border-t border-border px-control-x py-3" id={CONTINUE_LIST_ID}>
+                  <PanelSlot
+                    daemon={daemon}
+                    props={{ picked: picked?.key ?? null, onPick: pick } satisfies NewFerretContinueSlotProps}
+                    slot={NEW_FERRET_CONTINUE_SLOT}
+                  />
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
           <FerretField
             hint="what will run this ferret"
             inputId={fieldId('runtime')}

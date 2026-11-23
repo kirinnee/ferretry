@@ -1,3 +1,4 @@
+import type { ConversationStageSource } from '@ferretry/core-ferrets/contract';
 import { LinkKept, SearchSources } from '../../contract/index.ts';
 import { openingAttachmentsSource } from '../attachments/adapters/opening-attachments.ts';
 import { buildReading } from '../reading.ts';
@@ -42,6 +43,9 @@ export default {
         // The files a start was given (`fy start -f`): decoded, bounded and worded here, written and appended by Ferrets.
         // The one provider of this security-path hook (`takers: ['conversation']`), under its one key.
         'opening.attachments:opening': openingAttachmentsSource(),
+        // A start that names a past conversation: its transcript staged into the harness's pool through the index's own
+        // copy-on-link. The one provider of this security-path hook (`takers: ['conversation']`).
+        'conversation.stage:conversation': { stage: b.stage } satisfies ConversationStageSource,
       }),
       stop: () => b.stop(),
     };

@@ -1,6 +1,6 @@
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { Instant, Result } from '@ferretry/std';
-import { err } from '@ferretry/std';
+import { err, ok } from '@ferretry/std';
 import type { z } from 'zod';
 import type {
   KeepRequest,
@@ -156,6 +156,25 @@ export class LinkService {
     if (found === undefined) return undefined;
     const preview = await this.needs.previewer.preview(found);
     return preview === undefined ? undefined : { ...preview, harness };
+  }
+
+  /**
+   * "Continue a past conversation": puts ONE indexed conversation's transcript where its harness resumes from, by the same
+   * copy keep uses (the owner's computer copied into the harness's pool; one already pooled needs nothing; the original is
+   * never written). It starts no ferret and writes no link: the start that asked for it does. A conversation this machine's
+   * index does not hold is `not_found`, one that cannot be copied is `failed`, each with a plain sentence.
+   */
+  async stage(harness: string, id: string): Promise<Result<void, { code: 'not_found' | 'failed'; reason: string }>> {
+    await this.needs.index.ready();
+    const found = this.needs.index.get(harness, id);
+    if (found === undefined)
+      return err({ code: 'not_found', reason: `No ${harness} conversation ${id} is on this machine.` });
+    const copied = await this.needs.copier
+      .copy({ harness, id, location: { kind: found.kind, label: found.label, path: found.path } })
+      .catch((error: unknown) =>
+        err({ reason: error instanceof Error && error.message !== '' ? error.message : 'It could not be copied.' }),
+      );
+    return copied.ok ? ok(undefined) : err({ code: 'failed', reason: copied.error.reason });
   }
 
   /** The read-only foreign history (the harness conversations that predate Ferretry): the same index, never resumable. */

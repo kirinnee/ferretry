@@ -24,9 +24,10 @@ describe('the shipped layouts against the generated surfaces', () => {
       expect(chooseLayout([layout], installed)).toEqual({ kind: 'applied', layout });
     });
 
-    test(`the ${layout.id} layout puts the ferret list first in the nav, then Conversations; a phone follows it (no phone nav)`, () => {
+    test(`the ${layout.id} layout puts the ferret list first in the nav, with no Conversations place; a phone follows it (no phone nav)`, () => {
       expect(layout.nav.items[0]).toBe('ferrets');
-      expect(layout.nav.items[1]).toBe('conversation.links'); // r11 S1: Conversations is a default place (it was Find-only)
+      // O8-12: continuing a past conversation is part of New ferret, so no Conversations place is in the nav or in Find.
+      expect(layout.nav.items.some(item => item.endsWith('.links'))).toBe(false);
       expect(layout.phone?.nav).toBeUndefined();
     });
   }

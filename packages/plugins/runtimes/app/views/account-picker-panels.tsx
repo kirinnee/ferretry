@@ -103,6 +103,7 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
       value={slot.value}
       {...(preferred === undefined ? {} : { preferred })}
       {...(move === null ? {} : { harness: move.harness, offerHealthCheck: true })}
+      {...(move === null && slot.harness !== undefined ? { harness: slot.harness } : {})}
     />
   );
 }

@@ -1,5 +1,5 @@
 /**
- * "Continue a conversation" (today New session › Continue; now on the Conversations screen): ONE list of Ferretry's conversations and stopped ferrets,
+ * "Continue a past conversation" (the New ferret page's disclosure, through Ferrets' `ferrets.new-ferret-continue` slot): ONE list of Ferretry's conversations and stopped ferrets,
  * narrowed by the source chips (All · Ferretry · On this computer · Claude · Codex, see
  * `continue-model.ts`), the date and a search the daemon runs (`source=synced`, `q`, `harness`,
  * `since`). The list is read afresh every time Continue opens (never on a timer), so a conversation
@@ -8,13 +8,12 @@
  * Each row says what it is about without asking anything: what the owner first said, the latest thing
  * they said, and where. Tapping a row opens a short preview of its last few exchanges with the button
  * that continues it. A conversation a ferret already keeps resumes (or opens) that ferret instead of
- * making a second one; any other is kept with `start: true` on a runtime that drives its CLI — the
- * person picks it on the runtime step, unless the runtime slot reports that only one runtime can run it, which is then
- * taken at once — and the new ferret opens on its full history.
+ * making a second one; any other is PICKED into the New ferret form (runtime of its harness, its folder, the
+ * auto|interactive choice) and Create starts a ferret that names its conversation, so the harness resumes it.
  */
 
-import { Button, Loading } from '@ferretry/app/ui';
-import type { FerretSummary } from '@ferretry/core-ferrets/contract';
+import { Button, cn, Loading } from '@ferretry/app/ui';
+import type { ContinuePick, FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { LinkableConversation, LinkPreview } from '../../contract/index.ts';
 import { ChevronDown, ChevronUp } from 'lucide-react';
@@ -30,9 +29,8 @@ import {
   ferretActivityAt,
 } from './continue-model.ts';
 import { ConversationLines, FerretLines, SourceChips } from './conversation-card.tsx';
-import { noRuntimeSentence, type RuntimeField, Segmented } from './conversation-picker.tsx';
-import { DATE_FILTERS, type DateFilter } from './conversation-picker-model.ts';
-import { keepConversations, readConversationPreview, readLinkableConversations } from './conversations-api.ts';
+import { conversationHeadline, DATE_FILTERS, type DateFilter } from './conversation-picker-model.ts';
+import { readConversationPreview, readLinkableConversations } from './conversations-api.ts';
 import { guarded } from './link-refusal.ts';
 import { harnessKeyOf } from './link-words.ts';
 
@@ -49,8 +47,10 @@ export interface ContinueConversationProps {
   readonly daemon: string;
   /** Opens one ferret's chat. */
   readonly onOpenFerret: (ferretId: string) => void;
-  /** Which runtime a conversation continues on: `runtimeSlotField(daemon)` on a screen, a stand-in in tests. */
-  readonly runtimeField: RuntimeField;
+  /** The row now in the New ferret form (its `conversationKey`), or `null`. */
+  readonly picked: string | null;
+  /** Puts a conversation in the New ferret form (the page resumes it on Create). */
+  readonly onPick: (pick: ContinuePick) => void;
   /**
    * This machine's ferrets (`null` while the first read is out): they mark the conversations they keep and add the
    * stopped ones the listing does not describe.
@@ -74,10 +74,8 @@ type Listing =
       readonly computerListed: boolean;
     };
 
-/** A picked row waiting for its runtime, or the sentence saying why it can't continue. */
-type Picking =
-  | { readonly kind: 'runtime'; readonly row: LinkableConversation; readonly draft: string }
-  | { readonly kind: 'issue'; readonly key: string; readonly sentence: string };
+/** The sentence saying why a row can't continue. */
+type Picking = { readonly kind: 'issue'; readonly key: string; readonly sentence: string };
 
 type Preview =
   | { readonly kind: 'reading' }
@@ -95,7 +93,8 @@ export function ContinueConversation(props: ContinueConversationProps) {
 function ContinueConversationBody({
   client,
   onOpenFerret,
-  runtimeField,
+  picked,
+  onPick,
   ferrets,
   resume,
   now = Date.now,
@@ -112,12 +111,8 @@ function ContinueConversationBody({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ReadonlyMap<string, Preview>>(new Map());
   const searchId = useId();
-  const runtimeLabelId = useId();
-  const runtimeInputId = useId();
   const clock = useRef(now);
   clock.current = now;
-  /** The row whose runtime step already heard which runtimes can run it (see `offered`). */
-  const decided = useRef<LinkableConversation | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(text), debounceMs);
@@ -182,31 +177,6 @@ function ContinueConversationBody({
     }
   };
 
-  const keep = async (row: LinkableConversation, wrapper: string): Promise<void> => {
-    const key = conversationKey(row.harness, row.id);
-    setBusy(key);
-    setPicking(null);
-    const answer = await guarded(() =>
-      keepConversations(client, {
-        harness: row.harness,
-        runtime: wrapper,
-        conversations: [{ id: row.id, start: true }],
-      }),
-    );
-    setBusy(null);
-    if (answer.kind === 'refused') {
-      setPicking({ kind: 'issue', key, sentence: answer.sentence });
-      return;
-    }
-    const [made] = answer.value.kept;
-    if (made !== undefined) {
-      onOpenFerret(made.ferret);
-      return;
-    }
-    const [refused] = answer.value.refused;
-    setPicking({ kind: 'issue', key, sentence: refused?.reason ?? 'This machine didn’t keep it.' });
-  };
-
   const continueConversation = (row: LinkableConversation): void => {
     const key = conversationKey(row.harness, row.id);
     if (row.keptBy !== undefined) {
@@ -214,79 +184,29 @@ function ContinueConversationBody({
       else onOpenFerret(row.keptBy);
       return;
     }
-    // A harness this app has no runtime picker for cannot be continued here.
-    if (harnessKeyOf(row.harness) === undefined)
-      setPicking({ kind: 'issue', key, sentence: `This app can’t continue a ${row.harness} conversation.` });
-    else {
-      decided.current = null;
-      setPicking({ kind: 'runtime', row, draft: '' });
-    }
-  };
-
-  /**
-   * The runtime step tells which runtimes can run it. The FIRST real answer decides, once per step: exactly one means
-   * there is nothing to choose, so it continues on that one at once; none or several keep the step. `null` (still
-   * reading) decides nothing, and a list that changes afterwards never continues anything on its own.
-   */
-  const offered = (row: LinkableConversation, wrappers: readonly string[] | null): void => {
-    if (wrappers === null || decided.current === row) return;
-    decided.current = row;
-    const [only] = wrappers;
-    if (wrappers.length === 1 && only !== undefined) void keep(row, only);
-  };
-
-  const runtimeNote = (row: LinkableConversation, draft: string): ReactNode => {
+    // A harness this app has no runtime for cannot be continued here.
     const harness = harnessKeyOf(row.harness);
-    if (harness === undefined) return null;
-    const wrapper = draft.trim();
-    return (
-      <div className="fy-convo-note flex min-w-0 flex-col gap-1" data-continue-runtimes={row.id}>
-        <label id={runtimeLabelId} htmlFor={runtimeInputId} className="m-0 text-cell text-fg">
-          Continue on which runtime?
-        </label>
-        {runtimeField({
-          harness,
-          value: draft,
-          onValueChange: next => setPicking({ kind: 'runtime', row, draft: next }),
-          onChosen: () => undefined,
-          onOffered: wrappers => offered(row, wrappers),
-          fallbackId: runtimeInputId,
-          labelId: runtimeLabelId,
-          fallbackPlaceholder: 'a runtime',
-          noAccounts: (
-            <p className="m-0 text-cell text-warn" data-continue-no-runtime="">
-              {noRuntimeSentence(harness)}
-            </p>
-          ),
-        })}
-        <div>
-          <Button
-            type="button"
-            size="sm"
-            data-continue-on-runtime={wrapper}
-            disabled={wrapper === '' || busy !== null}
-            onClick={() => void keep(row, wrapper)}
-          >
-            Continue
-          </Button>
-        </div>
-      </div>
-    );
+    if (harness === undefined) {
+      setPicking({ kind: 'issue', key, sentence: `This app can’t continue a ${row.harness} conversation.` });
+      return;
+    }
+    // Any other conversation goes into the form; the page starts the ferret (with this id named) on Create.
+    onPick({
+      key,
+      harness,
+      conversation: row.id,
+      folder: row.project,
+      title: conversationHeadline(row).headline,
+    });
   };
 
   const at = now();
-  const notes = (key: string): ReactNode => (
-    <>
-      {picking?.kind === 'runtime' && conversationKey(picking.row.harness, picking.row.id) === key
-        ? runtimeNote(picking.row, picking.draft)
-        : null}
-      {picking?.kind === 'issue' && picking.key === key ? (
-        <p role="alert" className="fy-convo-note m-0 text-cell text-warn" data-continue-issue={key}>
-          {picking.sentence}
-        </p>
-      ) : null}
-    </>
-  );
+  const notes = (key: string): ReactNode =>
+    picking !== null && picking.key === key ? (
+      <p role="alert" className="fy-convo-note m-0 text-cell text-warn" data-continue-issue={key}>
+        {picking.sentence}
+      </p>
+    ) : null;
 
   const entryRow = (entry: ContinueEntry): ReactNode => {
     if (entry.kind === 'ferret') {
@@ -331,13 +251,15 @@ function ContinueConversationBody({
         }
         preview={previews.get(key)}
         actionLabel={
-          busy === key
-            ? 'Starting…'
-            : action === 'keep'
-              ? 'Continue'
-              : action === 'resume'
-                ? 'Resume ferret'
-                : 'Open ferret'
+          action === 'keep'
+            ? picked === key
+              ? 'Selected'
+              : 'Continue this conversation'
+            : action === 'resume'
+              ? busy === key
+                ? 'Resuming…'
+                : 'Resume ferret'
+              : 'Open ferret'
         }
         onAction={() => continueConversation(row)}
         notes={notes(key)}
@@ -369,7 +291,9 @@ function ContinueConversationBody({
             ? 'No ferret keeps a conversation yet, and none is stopped.'
             : source === 'computer' && query === '' && date === 'any' && computerHidden
               ? 'Nothing to show: Keep in sync is off.'
-              : 'No conversation matches.'}
+              : source === 'all' && query === '' && date === 'any'
+                ? 'No past conversations yet.'
+                : 'No conversation matches.'}
         </p>
       );
     const more = searched !== undefined && source !== 'computer' && searched.matched > searched.rows.length;
@@ -411,7 +335,6 @@ function ContinueConversationBody({
         />
         <div className="min-w-0 flex-[0_0_auto]">
           <Segmented<DateFilter>
-            fit
             label="Last active"
             name="date"
             options={DATE_FILTERS}
@@ -550,5 +473,46 @@ function PreviewMessages({ preview }: { readonly preview: Preview | undefined })
         </li>
       ))}
     </ol>
+  );
+}
+
+/** A row of pressed/unpressed buttons: one choice of a few (the "Last active" filter). */
+function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChoose,
+  name,
+}: {
+  readonly label: string;
+  readonly options: readonly { readonly id: T; readonly label: string; readonly title?: string }[];
+  readonly value: T;
+  readonly onChoose: (value: T) => void;
+  readonly name: string;
+}) {
+  return (
+    <div
+      role="toolbar"
+      aria-label={label}
+      data-segmented={name}
+      className="flex min-w-0 gap-1 rounded-control border border-border bg-surface-2 p-0.5"
+    >
+      {options.map(option => (
+        <button
+          key={option.id}
+          type="button"
+          aria-pressed={option.id === value}
+          title={option.title}
+          data-segment={option.id}
+          onClick={() => onChoose(option.id)}
+          className={cn(
+            'h-control-sm min-w-0 flex-auto whitespace-nowrap rounded-control px-2 text-ui font-medium transition-colors',
+            option.id === value ? 'bg-surface text-fg shadow-control' : 'text-muted hover:text-fg',
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
   );
 }

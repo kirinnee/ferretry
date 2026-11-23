@@ -7,7 +7,7 @@ import { daemonOfClient, daemonSettingsHref, useEveryDaemon, useOptionalRouter, 
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { type ReactNode, useMemo } from 'react';
 import { stepsHref } from '../../views/steps-screen.tsx';
-import { addProjectHref, projectAction } from './project-action.ts';
+import { addProjectHref, continueConversationHref, projectAction } from './project-action.ts';
 import { StepperView, type StepperAction } from './stepper-view.tsx';
 import { useStepper } from './use-stepper.ts';
 
@@ -46,7 +46,7 @@ export function createStepperPanel(client: PluginClient) {
           const projects = screenHref(daemon, 'projects', 'projects');
           return projectAction(
             go(projects === undefined ? undefined : addProjectHref(projects)),
-            go(screenHref(daemon, 'conversation', 'links')),
+            go(continueConversationHref(screenHref, daemon)),
           );
         }
         default:
