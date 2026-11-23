@@ -10,7 +10,7 @@ import {
 } from '@ferretry/core-ferrets/contract';
 import { type ComponentType, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { LiveFerretsClient } from '../../lib/client.ts';
-import { Button, Card, cn, FastSwitch, ModelSelect, PanelBody, Textarea } from '../../ui.ts';
+import { Button, Card, cn, FastSwitch, ModelSelect, PanelBody, SegmentedChoice, Textarea } from '../../ui.ts';
 import { FolderPicker } from './folder-picker.tsx';
 import { daemonHomeHref, ferretChatHref, addLoginHref } from './hrefs.ts';
 import {
@@ -88,6 +88,12 @@ const fastUnavailableReason = (account: ChosenFerretAccount | null, typed: strin
   return model?.fast === false ? `${model.label ?? model.id} has no fast mode.` : undefined;
 };
 
+/** The two ways in the page offers, as the switch at its top spells them. */
+const START_CHOICES = [
+  { value: 'new', label: 'New conversation' },
+  { value: 'continue', label: 'Continue a conversation' },
+] as const;
+
 /** What each mode MEANS to the person starting it, one short line each. */
 const MODE_MEANING: Readonly<Record<NewFerretDraft['mode'], string>> = {
   auto: 'the agent works through your request on its own',
@@ -99,8 +105,15 @@ const MODE_MEANING: Readonly<Record<NewFerretDraft['mode'], string>> = {
  * decision; this only names it, checking the same facts in the same order so the sentence can never describe a
  * different blocker from the one actually holding the button.
  */
-const createBlocker = (draft: NewFerretDraft, submitting: boolean, noRunnableAccount: boolean): string | null => {
+const createBlocker = (
+  draft: NewFerretDraft,
+  submitting: boolean,
+  noRunnableAccount: boolean,
+  awaitingPick: boolean,
+): string | null => {
   if (submitting) return null;
+  // Continue mode starts a ferret only from a conversation: until one is picked, Create would start a fresh one.
+  if (awaitingPick) return 'Pick a conversation to continue.';
   if (draft.runtime.trim() === '') {
     return noRunnableAccount ? 'No runtime can run a ferret yet — add a login first.' : 'Choose a runtime first.';
   }
@@ -190,8 +203,9 @@ export function NewFerretPage({
 
   const chooseStart = (choice: 'new' | 'continue'): void => {
     if (choice === starting) return;
-    // Going back to a new conversation drops any pick: no conversation is sent and no harness limits the runtime.
-    if (choice === 'new') pick(null);
+    // Going back to a new conversation drops a pick: no conversation is sent and no harness limits the runtime. With NO
+    // pick there is nothing derived from a conversation to drop, and the Folder (a `?folder=` prefill or typed) stays.
+    if (choice === 'new' && picked !== null) pick(null);
     setStarting(choice);
   };
 
@@ -217,12 +231,14 @@ export function NewFerretPage({
   }, [client]);
 
   const update = (field: TextDraftField, value: string): void => setDraft(current => ({ ...current, [field]: value }));
-  const canSubmit = canStartFerret(draft, submitting);
+  // Continue is a way in only while the list is offered (the switch is drawn); on it, nothing starts before a pick.
+  const awaitingPick = continueOffered && starting === 'continue' && picked === null;
+  const canSubmit = canStartFerret(draft, submitting) && !awaitingPick;
   const homePath = daemonHomeHref(daemon);
   const back = backPlace ?? { path: homePath, label: '← Home' };
   const chosen = chosenForDraft(chosenRuntime, draft.runtime);
   const models = modelSuggestions(chosen);
-  const blocker = createBlocker(draft, submitting, noRunnableAccount);
+  const blocker = createBlocker(draft, submitting, noRunnableAccount, awaitingPick);
   // A model the panel says has no fast mode cannot be launched with it, so the switch says why it is unavailable and
   // the request never carries it (the daemon would refuse it too).
   const fastReason = fastUnavailableReason(chosen, draft.model);
@@ -290,34 +306,14 @@ export function NewFerretPage({
         <PanelBody className="space-y-5">
           {continueOffered ? (
             <section data-new-ferret-continue="">
-              <div
-                aria-label="New or continue"
-                className="grid max-w-[28rem] grid-cols-2 gap-0.5 rounded-control border border-border bg-surface-2 p-0.5"
+              <SegmentedChoice
+                className="max-w-[28rem]"
                 data-new-ferret-switch=""
-                role="toolbar"
-              >
-                {(
-                  [
-                    ['new', 'New conversation'],
-                    ['continue', 'Continue a conversation'],
-                  ] as const
-                ).map(([choice, text]) => (
-                  <button
-                    aria-pressed={starting === choice}
-                    className={cn(
-                      'min-h-[44px] rounded-control px-2 text-center text-ui font-medium leading-tight transition-colors',
-                      starting === choice
-                        ? 'border border-border-strong bg-surface text-fg shadow-control'
-                        : 'border border-transparent text-muted hover:text-fg',
-                    )}
-                    key={choice}
-                    onClick={() => chooseStart(choice)}
-                    type="button"
-                  >
-                    {text}
-                  </button>
-                ))}
-              </div>
+                label="New or continue"
+                onChange={chooseStart}
+                options={START_CHOICES}
+                value={starting}
+              />
               {starting === 'continue' ? (
                 picked === null ? (
                   <div className="mt-3" id={CONTINUE_LIST_ID}>
