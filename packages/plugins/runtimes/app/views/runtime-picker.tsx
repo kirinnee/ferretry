@@ -22,6 +22,7 @@ import {
   RuntimeModelControls,
   RuntimeSpeedControls,
 } from '../components/runtime-controls.tsx';
+import { readAccountPickerCatalog } from '../lib/account-picker-catalog.ts';
 import type { LiveRuntimesClient } from '../lib/client.ts';
 import { DaemonRuntimeModelCatalogStore } from '../lib/runtime-models.ts';
 import { readRuntimeSessionView, runtimeControlApi } from '../lib/runtime-switch.ts';
@@ -63,6 +64,8 @@ export const createRuntimePicker = (client: LiveRuntimesClient): AppComponent<Pa
   return function RuntimePicker({ subject }: PanelProps): ReactNode {
     const [view, setView] = useState<RuntimeSessionView | null>(null);
     const [failure, setFailure] = useState<string | null>(null);
+    // The words for the runtime this ferret runs on ("Claude · your terminal sign-in"); absent until the roster is read, and never guessed.
+    const [runsOn, setRunsOn] = useState<string | null>(null);
     const [section, setSection] = useState<Section | null>(null);
     const [sent, setSent] = useState<Sent>({});
     const [placement, setPlacement] = useState<Placement | null>(null);
@@ -80,11 +83,21 @@ export const createRuntimePicker = (client: LiveRuntimesClient): AppComponent<Pa
       let live = true;
       setView(null);
       setFailure(null);
+      setRunsOn(null);
       setSection(null);
       setSent({});
       readRuntimeSessionView(client, subject).then(
         read => {
-          if (live) setView(read);
+          if (!live) return;
+          setView(read);
+          const wrapper = read.config.runtime;
+          if (wrapper === undefined) return;
+          readAccountPickerCatalog(client).then(
+            roster => {
+              if (live) setRunsOn(roster.accounts.find(account => account.wrapper === wrapper)?.displayName ?? null);
+            },
+            () => undefined,
+          );
         },
         cause => {
           if (live) setFailure(cause instanceof Error ? cause.message : String(cause));
@@ -294,6 +307,11 @@ export const createRuntimePicker = (client: LiveRuntimesClient): AppComponent<Pa
                   width: placement.width,
                 }}
               >
+                {runsOn === null ? null : (
+                  <p className="m-0 px-cell-x pb-2 text-meta leading-base text-muted" data-runtime-runs-on="">
+                    Runs on <span className="font-semibold text-fg">{runsOn}</span>
+                  </p>
+                )}
                 <div data-runtime-list="model" ref={lists.model}>
                   <div className="kt-label px-cell-x pb-0.5">Model</div>
                   <RuntimeMenuFocusContext.Provider value={focusFor('model')}>

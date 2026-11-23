@@ -164,15 +164,22 @@ describe('the Runtimes Settings tab the half builds', () => {
     expect(text(control, '[data-default-runtime-hint]')).toBe('Used when a start names no runtime.');
     const select = must(control.querySelector('[data-default-runtime-select]'), 'the select');
     await openBox(select);
-    expect(optionsOpen().map(labelOf)).toEqual(['claude-default', 'claude-work', 'codex-kirin', 'claude-plain']);
+    expect(optionsOpen().map(labelOf)).toEqual([
+      'Claude · your terminal sign-in (personal) — claude-default',
+      'Claude · Claude.ai sign-in (work)',
+      'Codex · your terminal sign-in',
+      'Claude · your terminal sign-in (personal) — claude-plain',
+    ]);
     await closeBox(select);
-    expect(shownBy(select)).toBe('claude-default');
+    expect(shownBy(select)).toBe('Claude · your terminal sign-in (personal) — claude-default');
     expect(control.querySelector('[data-change-submit]')).toBeNull();
     // Picking another one shows the apply panel, never a save by itself.
-    await choose(select, 'claude-work');
+    await choose(select, 'Claude · Claude.ai sign-in (work)');
     await settle();
     expect(text(control, '[data-change-submit]')).toBe('Save default runtime');
-    expect(text(control, '[data-default-runtime-undo]')).toBe('Keep claude-default');
+    expect(text(control, '[data-default-runtime-undo]')).toBe(
+      'Keep Claude · your terminal sign-in (personal) — claude-default',
+    );
 
     // S-0206: the ⋯ menu on a row offers Make default, Rename and a destructive Remove.
     const trigger = must(
@@ -213,7 +220,7 @@ describe('the Runtimes Settings tab the half builds', () => {
     const dialog = must(document.querySelector('[data-runtime-dialog="rename"]'), 'the rename dialog');
     expect(dialog.getAttribute('role')).toBe('dialog');
     expect(dialog.getAttribute('aria-modal')).toBe('true');
-    expect(text(dialog, 'h2')).toBe('Rename codex-kirin');
+    expect(text(dialog, 'h2')).toBe('Rename Codex · your terminal sign-in');
     expect(must(document.querySelector('[data-runtime-dialog-scrim]'), 'the scrim').getAttribute('aria-label')).toBe(
       'Close without renaming',
     );
@@ -235,7 +242,7 @@ describe('the Runtimes Settings tab the half builds', () => {
       interact,
     );
     const removal = must(document.querySelector('[data-runtime-dialog="remove"]'), 'the remove dialog');
-    expect(text(removal, 'h2')).toBe('Remove codex-kirin?');
+    expect(text(removal, 'h2')).toBe('Remove Codex · your terminal sign-in?');
     expect(text(removal, '[data-runtime-remove-impact]')).toContain('2 ferrets are running on it.');
     expect([...removal.querySelectorAll('[data-runtime-running] li')].map(row => row.textContent)).toEqual([
       'Fisher' + 'Claude Code',
@@ -243,11 +250,12 @@ describe('the Runtimes Settings tab the half builds', () => {
     ]);
     const target = must(removal.querySelector('[data-runtime-move-target]'), 'the move target');
     await openBox(target);
-    expect(optionsOpen().map(option => labelOf(option).split(' · ')[0])).toEqual([
+    // Targets read in the words a person uses (the same words the list shows), never by stored name.
+    expect(optionsOpen().map(labelOf)).toEqual([
       'Leave them running here',
-      'claude-default',
-      'claude-work',
-      'claude-plain',
+      'Claude · your terminal sign-in (personal) — claude-default',
+      'Claude · Claude.ai sign-in (work)',
+      'Claude · your terminal sign-in (personal) — claude-plain',
     ]);
     await closeBox(target);
     expect(text(removal, '[data-runtime-dialog-cancel]')).toBe('Cancel');
@@ -265,7 +273,7 @@ describe('a runtime page on the Runtimes tab', () => {
 
     // S-0209: the page itself, its name, back link, actions and Launch.
     const page = must(root.querySelector('[data-runtime-page="claude-agent"]'), 'the runtime page');
-    expect(text(page, 'h3')).toBe('claude-agent');
+    expect(text(page, 'h3')).toBe('Claude · your terminal sign-in (personal) — Agent work profile');
     expect(text(page, '[data-page-back]')).toBe('Runtimes');
     expect(page.querySelector('[data-runtime-rename="claude-agent"]')).not.toBeNull();
     expect(page.querySelector('[data-runtime-remove="claude-agent"]')).not.toBeNull();
