@@ -40,7 +40,7 @@ import { harnessNamed } from './import-scope.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
 import { FLEET_STARTER_MODELS } from '../defaults.ts';
-import { byHarness, harnessKeyOfKind, isKind, UnsupportedHarnessError } from '../harness-kind.ts';
+import { byHarness, harnessKeyOfKind, isKind } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import {
   parseSettings,
@@ -749,25 +749,25 @@ export function harvest(
   // Settings, with the parts that become their own components taken out.
   const parsed = parsedDocument(scan.settings, format, settingsFile, problems);
   const rest: Record<string, unknown> = { ...(parsed ?? {}) };
-  let hooks: HarnessHarvest['hooks'];
-  let envImport: EnvImport | undefined;
-  switch (harness) {
-    case 'claude': {
+  const taken = byHarness<{ hooks?: HarnessHarvest['hooks']; envImport?: EnvImport | undefined }>(harness, {
+    claude: () => {
       // Hooks are counted so the screen can say "found N, not imported", and dropped: Ferretry runs none of the host's.
-      if (isRecord(rest.hooks) && Object.keys(rest.hooks).length > 0) {
-        hooks = { source: scan.settings.source, count: countHooks(rest.hooks) };
-      }
+      const counted =
+        isRecord(rest.hooks) && Object.keys(rest.hooks).length > 0
+          ? { source: scan.settings.source, count: countHooks(rest.hooks) }
+          : undefined;
       delete rest.hooks;
-      envImport = skipped('env') ? undefined : importEnv(rest.env, 'env.', settingsFile, names, secrets, ticked);
+      const claudeEnv = skipped('env') ? undefined : importEnv(rest.env, 'env.', settingsFile, names, secrets, ticked);
       delete rest.env;
-      break;
-    }
-    case 'codex': {
+      return { hooks: counted, envImport: claudeEnv };
+    },
+    codex: () => {
       delete rest.mcp_servers;
       for (const key of CODEX_PLUMBING_KEYS) delete rest[key];
+      let codexEnv: EnvImport | undefined;
       const policy = rest.shell_environment_policy;
       if (isRecord(policy) && isRecord(policy.set)) {
-        envImport = skipped('env')
+        codexEnv = skipped('env')
           ? undefined
           : importEnv(policy.set, 'shell_environment_policy.set.', settingsFile, names, secrets, ticked);
         const kept = Object.fromEntries(Object.entries(policy).filter(([key]) => key !== 'set'));
@@ -775,17 +775,17 @@ export function harvest(
         else rest.shell_environment_policy = kept;
       }
       const hooksDocument = parsedDocument(scan.hooks, 'json', 'hooks.json', problems);
-      if (hooksDocument !== undefined && Object.keys(hooksDocument).length > 0 && scan.hooks !== undefined) {
-        hooks = {
-          source: scan.hooks.source,
-          count: countHooks(isRecord(hooksDocument.hooks) ? hooksDocument.hooks : hooksDocument),
-        };
-      }
-      break;
-    }
-    default:
-      throw new UnsupportedHarnessError(String(harness));
-  }
+      const counted =
+        hooksDocument !== undefined && Object.keys(hooksDocument).length > 0 && scan.hooks !== undefined
+          ? {
+              source: scan.hooks.source,
+              count: countHooks(isRecord(hooksDocument.hooks) ? hooksDocument.hooks : hooksDocument),
+            }
+          : undefined;
+      return { hooks: counted, envImport: codexEnv };
+    },
+  });
+  const { hooks, envImport } = taken;
   if (envImport !== undefined) {
     secretKeys.push(...envImport.secretKeys);
     if (envImport.dropped.length > 0) {

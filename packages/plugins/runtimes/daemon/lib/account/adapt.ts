@@ -47,7 +47,7 @@
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { mcpOAuthSecretNames } from '../foreign.ts';
 import { harnessAsset, HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, type HarnessAssetTable } from '../assets.ts';
-import { byHarness, isKind, UnsupportedHarnessError } from '../harness-kind.ts';
+import { byHarness, isKind } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { isAssetTreeReference } from '../paths.ts';
 import { deepMergeSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
@@ -560,26 +560,25 @@ function ownStatuslineCommand(settings: SettingsObject): string | undefined {
   return typeof command === 'string' && command.trim() !== '' ? command : undefined;
 }
 
-const plumbingFor = (plumbing: AdaptPlumbing, settings: SettingsObject): readonly PlumbingEntry[] => {
-  switch (plumbing.harness) {
-    case 'claude':
-      return [
-        { key: 'statusLine.type', path: ['statusLine', 'type'], value: 'command' },
-        {
-          key: 'statusLine.command',
-          path: ['statusLine', 'command'],
-          value: plumbing.statusLine(ownStatuslineCommand(settings)),
-        },
-      ];
-    case 'codex':
-      return [
-        { key: CODEX_CREDENTIAL_STORE_KEY, path: [CODEX_CREDENTIAL_STORE_KEY], value: CODEX_CREDENTIAL_STORE_FILE },
-        { key: 'sqlite_home', path: ['sqlite_home'], value: plumbing.sqliteHome },
-      ];
-    default:
-      throw new UnsupportedHarnessError(String((plumbing as { harness: string }).harness));
-  }
-};
+const plumbingFor = (plumbing: AdaptPlumbing, settings: SettingsObject): readonly PlumbingEntry[] =>
+  byHarness<readonly PlumbingEntry[]>(plumbing.harness, {
+    claude: () => [
+      { key: 'statusLine.type', path: ['statusLine', 'type'], value: 'command' },
+      {
+        key: 'statusLine.command',
+        path: ['statusLine', 'command'],
+        value: (plumbing as Extract<AdaptPlumbing, { harness: 'claude' }>).statusLine(ownStatuslineCommand(settings)),
+      },
+    ],
+    codex: () => [
+      { key: CODEX_CREDENTIAL_STORE_KEY, path: [CODEX_CREDENTIAL_STORE_KEY], value: CODEX_CREDENTIAL_STORE_FILE },
+      {
+        key: 'sqlite_home',
+        path: ['sqlite_home'],
+        value: (plumbing as Extract<AdaptPlumbing, { harness: 'codex' }>).sqliteHome,
+      },
+    ],
+  });
 
 /** What `value`, written at `path`, holds at the deeper `at`; `undefined` when nothing. */
 const valueBelow = (value: unknown, path: readonly string[], at: readonly string[]): unknown =>
@@ -663,26 +662,27 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
 
   const servers = adaptMcp(harness, resolved.mcp, launchEnv, problems);
 
-  let settings = baseSettings;
-  let claudeJson: SettingsObject | undefined;
-  switch (harness) {
-    case 'claude':
-      if (hooks.settingsBlock !== undefined) settings = { ...settings, hooks: hooks.settingsBlock };
-      claudeJson = { mcpServers: servers };
-      break;
-    case 'codex':
+  // Where the servers go: Claude's `.claude.json` (and its hooks block in settings), Codex's `mcp_servers` table in config.toml.
+  const documents = byHarness<{ readonly settings: SettingsObject; readonly claudeJson?: SettingsObject }>(harness, {
+    claude: () => ({
+      settings: hooks.settingsBlock === undefined ? baseSettings : { ...baseSettings, hooks: hooks.settingsBlock },
+      claudeJson: { mcpServers: servers },
+    }),
+    codex: () => {
+      let written = baseSettings;
       for (const { layer } of resolved.mcp) {
         const path = ['mcp_servers', layer.name];
         for (const leaf of replacedLeaves(resolved.settings.leaves, path, servers[layer.name])) {
           overrides.push({ key: leaf.key, path: leaf.path, value: leaf.value, layer: leaf.layer, by: layer.reference });
         }
-        const existing = isPlainObject(settings.mcp_servers) ? settings.mcp_servers : {};
-        settings = { ...settings, mcp_servers: { ...existing, [layer.name]: servers[layer.name] } };
+        const existing = isPlainObject(written.mcp_servers) ? written.mcp_servers : {};
+        written = { ...written, mcp_servers: { ...existing, [layer.name]: servers[layer.name] } };
       }
-      break;
-    default:
-      throw new UnsupportedHarnessError(String(harness));
-  }
+      return { settings: written };
+    },
+  });
+  let settings = documents.settings;
+  const { claudeJson } = documents;
 
   // Another harness's plumbing would put its keys in the wrong document, so none is written.
   const plumbingEntries = plumbing.harness === harness ? plumbingFor(plumbing, baseSettings) : [];
