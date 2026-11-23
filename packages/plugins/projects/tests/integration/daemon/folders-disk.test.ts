@@ -253,7 +253,7 @@ describe('the explorer over the real imports root', () => {
     // A dangling link never resolves, so it never reaches the gate (GAP stated in `browse.ts`).
     expect((await failure(() => w.explorer.list('~/to-absent', false, deny))).code).toBe('folder_refused');
     // Nothing the gate refused was read: the outside folder is still whole.
-    expect(await readdir(w.outside)).toEqual(['deep', 'file.txt']);
+    expect((await readdir(w.outside)).sort()).toEqual(['deep', 'file.txt']);
     // A link to a private folder is refused as one; a link that stays inside the home is listed by where it really is.
     expect((await failure(() => w.explorer.list('~/to-ssh', false))).code).toBe('folder_refused');
     expect((await w.explorer.list('~/to-code', false)).path).toBe(join(w.user, 'code'));
@@ -275,7 +275,7 @@ describe('the explorer over the real imports root', () => {
     expect((await failure(() => w.explorer.make({ parent: '~/.config', name: 'GH' }))).code).toBe('private_folder');
     expect((await failure(() => w.explorer.make({ parent: '~/to-outside', name: 'x' }))).code).toBe('folder_refused');
     expect((await failure(() => w.explorer.make({ parent: w.outside, name: 'x' }))).code).toBe('folder_refused');
-    expect(await readdir(w.outside)).toEqual(['deep', 'file.txt']);
+    expect((await readdir(w.outside)).sort()).toEqual(['deep', 'file.txt']);
     expect(await readdir(join(w.user, '.ssh'))).toEqual(['id_work_ed25519']);
   });
 
@@ -364,7 +364,7 @@ describe('the explorer over the real imports root', () => {
     );
     const refused = await failure(() => racing.make({ parent: '~/code', name: 'y' }));
     expect(refused.status).toBe(403);
-    expect(await readdir(w.outside)).toEqual(['deep', 'file.txt']);
+    expect((await readdir(w.outside)).sort()).toEqual(['deep', 'file.txt']);
   });
 
   test('a private folder kept elsewhere in the home and linked from its usual name is private at both names (stow style)', async () => {

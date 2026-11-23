@@ -663,6 +663,10 @@ const open = async (
   if (motion === 'frozen')
     await tab.addStyleTag({ content: '*,*::before,*::after{transition:none!important;animation:none!important}' });
   await tab.waitForSelector('[role="menu"] [role="menuitem"]');
+  // A message is read by the Durian worker (r12 H11), so the specimen's terminal and callout arrive after the page does: the
+  // hypermedia probe must read what the renderer DREW, never the moment before it did.
+  await tab.waitForSelector('[data-probe="hypermedia"] .dh-doc .term');
+  await tab.waitForSelector('[data-probe="hypermedia"] .dh-doc .callout');
   await tab.evaluate(HELPERS);
   await tab.evaluate(`window.__m.backdrop = ${BACKDROP}; window.__m.scan = ${STATIC};`);
   return { tab, close: async () => await context.close() };
