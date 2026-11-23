@@ -273,32 +273,33 @@ describe('the ferret page’s side panel at a desk', () => {
     }
   });
 
-  it('at the narrowest width the tab row clips no label and the chat keeps its room', async () => {
-    const { tab, close } = await open(DESK, 'dark');
-    try {
-      await openColumn(tab);
-      await drag(tab, 2_000);
-      expect(await widthOf(tab, ASIDE)).toBe(300);
-      const cut = await tab.evaluate(query => {
-        return [...document.querySelectorAll<HTMLElement>(query)]
-          .filter(
-            chip =>
-              chip.scrollWidth > chip.clientWidth + 1 ||
-              (chip.firstElementChild as HTMLElement).scrollWidth >
-                (chip.firstElementChild as HTMLElement).clientWidth + 1,
-          )
-          .map(chip => chip.textContent);
-      }, TABS);
-      expect(cut, 'every tab shows its whole label (the row scrolls instead)').toEqual([]);
-      expect(await clippedText(tab, ASIDE)).toEqual([]);
-      await tab.locator(TABS, { hasText: 'Terminals' }).click();
-      await shot(tab, DESK, 'dark', 'narrowest-terminal');
-      await drag(tab, -2_000);
-      expect(await chatWidth(tab), 'the chat keeps at least 320px').toBeGreaterThanOrEqual(320);
-    } finally {
-      await close();
-    }
-  });
+  for (const mode of MODES)
+    it(`${mode}: at the narrowest width the tab row clips no label and the chat keeps its room`, async () => {
+      const { tab, close } = await open(DESK, mode);
+      try {
+        await openColumn(tab);
+        await drag(tab, 2_000);
+        expect(await widthOf(tab, ASIDE)).toBe(300);
+        const cut = await tab.evaluate(query => {
+          return [...document.querySelectorAll<HTMLElement>(query)]
+            .filter(
+              chip =>
+                chip.scrollWidth > chip.clientWidth + 1 ||
+                (chip.firstElementChild as HTMLElement).scrollWidth >
+                  (chip.firstElementChild as HTMLElement).clientWidth + 1,
+            )
+            .map(chip => chip.textContent);
+        }, TABS);
+        expect(cut, 'every tab shows its whole label (the row scrolls instead)').toEqual([]);
+        expect(await clippedText(tab, ASIDE)).toEqual([]);
+        await tab.locator(TABS, { hasText: 'Terminals' }).click();
+        await shot(tab, DESK, mode, 'narrowest-terminal');
+        await drag(tab, -2_000);
+        expect(await chatWidth(tab), 'the chat keeps at least 320px').toBeGreaterThanOrEqual(320);
+      } finally {
+        await close();
+      }
+    });
 
   for (const mode of MODES) {
     it(`${mode}: a stopped ferret says Resume beside its state, and a running one says Stop`, async () => {
@@ -342,6 +343,24 @@ describe('the ferret page on a phone keeps its chips', () => {
         expect(await tab.locator('[data-panel][data-phone-shown]').count(), 'one panel at a time').toBe(1);
       } finally {
         await close();
+      }
+    });
+
+    it(`${mode}: a stopped ferret keeps its Resume on the phone's toolbar line, and a running one leaves Stop to the menu`, async () => {
+      const stopped = await open(PHONE, mode, '&state=stopped');
+      try {
+        await stopped.tab.waitForSelector('[data-ferret-start]');
+        await shot(stopped.tab, PHONE, mode, 'stopped-header');
+      } finally {
+        await stopped.close();
+      }
+      const running = await open(PHONE, mode, '&state=working');
+      try {
+        await running.tab.waitForSelector('[data-phone-chip]');
+        await calm(running.tab);
+        expect(await running.tab.locator('[data-ferret-stop]').count(), 'no Stop on a phone line').toBe(0);
+      } finally {
+        await running.close();
       }
     });
   }

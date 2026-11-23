@@ -637,8 +637,3 @@
   font-size: var(--text-sm);
   white-space: normal;
 }
-@media (max-width: 767.98px) {
-  .fy-ferret-lifecycle__btn {
-    height: 32px;
-  }
-}

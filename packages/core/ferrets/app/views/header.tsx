@@ -29,7 +29,7 @@ export const createStatusPanel =
     return read.kind === 'ready' ? (
       <span className="fy-ferret-statusline">
         <FerretStatus compact={compact} ferret={read.ferret} />
-        <FerretLifecycle client={client} ferret={read.ferret} reload={reload} />
+        <FerretLifecycle client={client} compact={compact} ferret={read.ferret} reload={reload} />
       </span>
     ) : null;
   };

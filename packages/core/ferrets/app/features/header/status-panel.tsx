@@ -44,17 +44,20 @@ export function FerretLifecycle({
   ferret,
   reload,
   canControl = true,
+  compact = false,
 }: {
   readonly client: FerretsClient;
   readonly ferret: FerretSummary;
   readonly reload: () => Promise<unknown>;
   readonly canControl?: boolean;
+  /** A phone's one scrolling toolbar line has no room for a second button: Resume stays (a stopped ferret needs it), Stop is the menu's. */
+  readonly compact?: boolean;
 }) {
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const resumable = reviveOffer(ferret, canControl).offered;
-  const stoppable = canControl && ferret.state !== 'stopped';
+  const stoppable = canControl && !compact && ferret.state !== 'stopped';
   if (!resumable && !stoppable) return null;
 
   const run = (work: () => Promise<void>, what: string): void => {
