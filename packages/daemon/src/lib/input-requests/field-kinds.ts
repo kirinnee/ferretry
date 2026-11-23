@@ -5,9 +5,10 @@ import type { InputBrowserFieldFacts } from '@ferretry/protocol';
  *
  * - `code`: a one-time code, on the page's own evidence for THAT field and nothing else: `autocomplete="one-time-code"`;
  *   or a numeric keypad (`inputmode` numeric, tel or decimal) with a `maxlength` of 4 to 8 and no password signal (a
- *   password-typed input, an autocomplete, name or id that says password, pass, pwd or pin). A name or a label that says
- *   "code" is NOT evidence: a reusable password can sit in a text box called "code", and the ferret's own words (the
- *   label, the prompt) never downgrade a secret. The owner types it and the ferret may see it.
+ *   password-typed input, or {@link passwordSignalled}). A name or a label that says "code" is NOT evidence: a reusable
+ *   password can sit in a text box called "code". A password signal (pass, pwd, pin, ssn, security code, cvv, cvc, csc in
+ *   the name, id, autocomplete or label, the ferret's too) and a field the ferret asked for as a secret ALWAYS win, also
+ *   over `autocomplete="one-time-code"`; the ferret's label may only raise. The owner types it and the ferret may see it.
  * - `card`: a card number, expiry or security code (`autocomplete` cc-number, cc-exp, cc-exp-month, cc-exp-year,
  *   cc-csc, or a name, id or label that says so). A `secret`.
  *
@@ -18,11 +19,12 @@ export type PageFieldKind = 'code' | 'card';
 
 const CARD_AUTOCOMPLETE = /(?:^|\s)cc-(?:number|exp|exp-month|exp-year|csc)(?:\s|$)/iu;
 const CARD_WORDS =
-  /card[\s._-]*(?:number|num|no)\b|cc[\s._-]*(?:num|number|exp|expiry|csc|cvc|cvv)|\bcvc\b|\bcvv\b|\bcsc\b|\bcvn\b|expir(?:y|ation|es)|exp[\s._-]*(?:date|month|year)/iu;
+  /card[\s._-]*(?:number|num|no)\b|cc[\s._-]*(?:num|number|exp|expiry|csc|cvc|cvv)|cvc|cvv|csc|cvn|expir(?:y|ation|es)|exp[\s._-]*(?:date|month|year)/iu;
 const CODE_AUTOCOMPLETE = /(?:^|\s)one-time-code(?:\s|$)/iu;
 /** A page field that says password, in any of the words a page uses: it is never read as a one-time code on a keypad's evidence. */
 const PASSWORD_SIGNAL = /pass|pwd|pin|ssn|security[\s._-]*code|cv[vc]|csc/iu;
-const PASSWORD_NAMED = /pass(?:word|wd)|pwd/iu;
+/** "One-time passcode" and "one-time password" name a code, not a password: they are not a signal. */
+const ONE_TIME_PASS = /one[\s._-]*time[\s._-]*pass(?:code|word)?/giu;
 const KEYPAD = /^(?:numeric|tel|decimal)$/iu;
 
 /** Whether the page's own words for a field (never the ferret's) put it among codes or card fields. */
@@ -38,13 +40,20 @@ export function pageFieldKind(
   if (field.type?.toLowerCase() === 'password') return undefined;
   if (/password/iu.test(field.autocomplete ?? '')) return undefined;
   if (field.autocomplete !== undefined && CODE_AUTOCOMPLETE.test(field.autocomplete))
-    return [field.name, field.id].some(word => word !== undefined && PASSWORD_NAMED.test(word.normalize('NFKC')))
-      ? undefined
-      : 'code';
+    return passwordSignalled(field, label) ? undefined : 'code';
   const length = field.maxlength === undefined ? Number.NaN : Number(field.maxlength);
-  const signalled = [field.name, field.id, field.autocomplete, label].some(
-    word => word !== undefined && PASSWORD_SIGNAL.test(word.normalize('NFKC')),
-  );
-  if (KEYPAD.test(field.inputmode ?? '') && length >= 4 && length <= 8 && !signalled) return 'code';
+  if (KEYPAD.test(field.inputmode ?? '') && length >= 4 && length <= 8 && !passwordSignalled(field, label))
+    return 'code';
   return undefined;
+}
+
+/**
+ * Whether anything on the field says secret: the substring set pass, pwd, pin, ssn, security code, cvv, cvc or csc in
+ * its name, id, autocomplete or label (the page's or the ferret's). THE one definition: a signal ALWAYS wins, also over
+ * `autocomplete="one-time-code"`, in the card's fill (service.ts) and the lock (lock.ts).
+ */
+export function passwordSignalled(field: InputBrowserFieldFacts['field'], label?: string): boolean {
+  return [field.name, field.id, field.autocomplete, label].some(
+    word => word !== undefined && PASSWORD_SIGNAL.test(word.normalize('NFKC').replace(ONE_TIME_PASS, '')),
+  );
 }

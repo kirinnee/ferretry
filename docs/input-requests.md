@@ -155,13 +155,13 @@ one-time.
   text reads for the redaction window, as defence in depth; that covers text only, so the ferret may still see it on
   screen (a screenshot, a scripted read). The owner allowed that: TOTP codes are fine to see (design §11.1).
 - **What makes a page field a code is the PAGE's own evidence for that field**, never a name, a label or the prompt: `autocomplete="one-time-code"`, or a numeric
-  keypad (`inputmode` numeric, tel or decimal) with `maxlength` 4 to 8 and no password signal (a password-typed input, or an
-  autocomplete, name or id that says password, pass, pwd or PIN). A reusable password in a text box called "code" stays a
-  `secret`; the ferret's label or a prompt that says "password" never turns a real code into a secret, nor a secret into a
-  code. A card number, expiry or security code (`autocomplete` cc-number, cc-exp, cc-csc, or card words) is always a `secret`.
+  keypad (`inputmode` numeric, tel or decimal) with `maxlength` 4 to 8 and no password signal (a password-typed input, or pass, pwd, pin, ssn, security code, cvv, cvc or csc in the
+  name, id, autocomplete or label, the ferret's label too). A password signal and a field the ferret asked for as a `secret`
+  ALWAYS win, also over `autocomplete="one-time-code"`; the label may only raise. "One-time passcode" is not a signal. A
+  reusable password in a text box called "code" stays a `secret`. A card number, expiry or security code (`autocomplete` cc-number, cc-exp, cc-csc, or card words) is always a `secret`.
 - **A `code` aimed at a password is a secret.** The daemon handles a code field as `secret` when any of these
   holds (the ferret's words may only ever raise a code, never lower one):
-  - the page field is `type=password`, or its name, id or autocomplete says pass, pwd or PIN (any type);
+  - the page field is `type=password`, or its name, id or autocomplete says pass, pwd, pin, ssn, security code, cvv, cvc or csc (any type);
   - the terminal runs sudo, sudoedit, su, doas or passwd, or its prompt line asks for a password (password,
     passphrase, passwd, Passwort, Kennwort, contraseña, mot de passe, credential, secret, "pw:", PIN), whatever else
     the line says;

@@ -6,7 +6,7 @@ import {
   type InputTargetFacts,
   type LoginObserved,
 } from '@ferretry/protocol';
-import { pageFieldKind } from './field-kinds.ts';
+import { pageFieldKind, passwordSignalled } from './field-kinds.ts';
 import { identityOf, placeOf } from './login-observer.ts';
 
 /**
@@ -167,8 +167,6 @@ const CODE_PROMPT = /\b(?:verification\s+code|one[\s-]?time|otp|2fa|authenticato
  */
 const PASSWORD_PROMPT =
   /pass(?:word|phrase|wd|wort)|kennwort|contrase(?:ñ|n)a|mot de passe|credential|secret|\bpw\s*:|\bpin\b/iu;
-/** A page field whose name, id or autocomplete says password (or PIN), whatever its type. */
-const PASSWORD_FIELD = /pass|pwd|(?:^|[^a-z])pin(?:[^a-z]|$)/iu;
 /** Words that make a prompt line something other than a one-time code, whatever else it says. */
 const NOT_A_CODE = /\b(?:password|passphrase|pin|token|secret)\b/iu;
 
@@ -218,8 +216,9 @@ export function passwordTarget(
   if (kind === 'code') return false;
   return (
     found.field.type?.toLowerCase() === 'password' ||
+    passwordSignalled(found.field) ||
     [found.field.name, found.field.id, found.field.autocomplete].some(
-      word => word !== undefined && (PASSWORD_FIELD.test(matchable(word)) || spellsPassword(word) || lookAlike(word)),
+      word => word !== undefined && (spellsPassword(word) || lookAlike(word)),
     )
   );
 }

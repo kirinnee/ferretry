@@ -70,9 +70,12 @@ describe('pageFieldKind', () => {
 });
 
 describe('passwordTarget on a page', () => {
-  it('should not call a "passcode" or "pin" one-time code a password, but keep a password-typed one', () => {
+  it('should not call an otp or token one-time code a password, but keep a password-typed one', () => {
     should(
-      passwordTarget(page({ tag: 'input', type: 'text', name: 'passcode', autocomplete: 'one-time-code' }), 'f'),
+      passwordTarget(
+        page({ tag: 'input', type: 'text', name: 'verificationCode', autocomplete: 'one-time-code' }),
+        'f',
+      ),
     ).equal(false);
     should(passwordTarget(page({ tag: 'input', type: 'password', name: 'otp' }), 'f')).equal(true);
     should(passwordTarget(page({ tag: 'input', type: 'password', autocomplete: 'current-password' }), 'f')).equal(true);
@@ -84,14 +87,14 @@ describe('passwordTarget on a page', () => {
 });
 
 describe('the cards the owner sees', () => {
-  it('should offer a one-time code field the ferret called a secret as a code', async () => {
+  it('should keep a one-time-code field the ferret called a secret a secret', async () => {
     const { service } = inputRequestService({
       facts: page({ tag: 'input', type: 'text', autocomplete: 'one-time-code' }),
     });
     const view = await service.raise(SESSION, raise('secret'));
     const [request] = await service.list(HOST, SESSION);
     should(view.id).be.ok();
-    should(request?.fields[0]?.sensitivity).equal('code');
+    should(request?.fields[0]?.sensitivity).equal('secret');
   });
 
   it('should keep a password-typed field a secret whatever its name says', async () => {
@@ -127,15 +130,15 @@ describe('the cards the owner sees', () => {
     ).equal('secret');
   });
 
-  it("should offer a real one-time code as a code even when the ferret's prompt mentions the password", async () => {
+  it('should keep a requested secret secret over one-time-code, even when the prompt mentions the password', async () => {
     const otp: Field = { tag: 'input', type: 'text', autocomplete: 'one-time-code' };
     should(await sensitivityOf(otp, 'secret', 'Code', 'Enter your password and the code the bank texted')).equal(
-      'code',
+      'secret',
     );
     const keypad: Field = { tag: 'input', inputmode: 'numeric', maxlength: '6' };
     // The ferret's own label saying password only ever raises: a keypad field labelled so stays a secret (fix round 2).
     should(await sensitivityOf(keypad, 'secret', 'Password code', 'Your one-time password')).equal('secret');
-    should(await sensitivityOf(keypad, 'secret', 'Code', 'Your one-time password')).equal('code');
+    should(await sensitivityOf(keypad, 'secret', 'Code', 'Your one-time password')).equal('secret');
   });
 
   it('should make a card number field a secret even when the ferret said plain', async () => {
@@ -220,5 +223,59 @@ describe('pageFieldKind: the ferret label may only raise (fix round 2, B1 addend
     for (const label of ['Card PIN', 'Account password', 'SSN last 4', 'Security code'])
       should(pageFieldKind({ tag: 'input', inputmode: 'numeric', maxlength: '4' }, label)).equal(undefined);
     should(pageFieldKind({ tag: 'input', inputmode: 'numeric', maxlength: '6' }, 'Verification code')).equal('code');
+  });
+});
+
+describe('password signals and a requested secret always win (fix round 3, B1)', () => {
+  const otp = { tag: 'input', type: 'text', autocomplete: 'one-time-code' } as const;
+  for (const name of ['pincode', 'userPin', 'securityCode', 'ssnLast4', 'userCvv'])
+    it(`${name} with one-time-code is not a code, as a name or an id`, () => {
+      should(pageFieldKind({ ...otp, name })).not.equal('code');
+      should(pageFieldKind({ ...otp, id: name })).not.equal('code');
+    });
+  for (const label of ['Card PIN', 'Account password'])
+    it(`the ferret label "${label}" with one-time-code is not a code`, () => {
+      should(pageFieldKind(otp, label)).equal(undefined);
+    });
+  it('a field the ferret asked for as a secret stays a secret over one-time-code', async () => {
+    const { service } = inputRequestService({ facts: page(otp) });
+    await service.raise(SESSION, raise('secret', 'Code'));
+    const [request] = await service.list(HOST, SESSION);
+    should(request?.fields[0]?.sensitivity).equal('secret');
+  });
+  it('a ferret-raised code on a pincode or userPin keypad is raised to secret (lock)', async () => {
+    for (const name of ['pincode', 'userPin']) {
+      const { service } = inputRequestService({
+        facts: page({ tag: 'input', inputmode: 'numeric', maxlength: '4', name }),
+      });
+      await service.raise(SESSION, raise('code', 'Code'));
+      const [request] = await service.list(HOST, SESSION);
+      should(request?.fields[0]?.sensitivity).equal('secret');
+    }
+  });
+  it('passwordTarget reads pincode and userPin as passwords', () => {
+    for (const name of ['pincode', 'userPin'])
+      should(passwordTarget(page({ tag: 'input', inputmode: 'numeric', maxlength: '4', name }), 'f')).equal(true);
+  });
+});
+
+describe('real one-time codes stay codes, and card words are substrings (fix round 3)', () => {
+  const otp = { tag: 'input', type: 'text', autocomplete: 'one-time-code' } as const;
+  for (const name of ['otp', 'code', 'verificationCode', 'smsCode', 'totp', 'token'])
+    it(`${name} with one-time-code stays a code`, () => {
+      should(pageFieldKind({ ...otp, name })).equal('code');
+      should(passwordTarget(page({ ...otp, name }), 'f')).equal(false);
+    });
+  it('the label "One-time passcode" keeps a one-time-code field a code', () => {
+    should(pageFieldKind(otp, 'One-time passcode')).equal('code');
+  });
+  it('a ferret-raised code labelled "One-time passcode" stays a code', async () => {
+    const { service } = inputRequestService({ facts: page(otp) });
+    await service.raise(SESSION, raise('code', 'One-time passcode'));
+    const [request] = await service.list(HOST, SESSION);
+    should(request?.fields[0]?.sensitivity).equal('code');
+  });
+  it('userCvv is a card field', () => {
+    should(pageFieldKind({ tag: 'input', name: 'userCvv' })).equal('card');
   });
 });

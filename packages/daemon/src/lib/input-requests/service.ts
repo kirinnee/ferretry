@@ -2831,8 +2831,7 @@ function observedAs(
   codeProgram: boolean,
 ): InputRequestField[] {
   return fields.map(original => {
-    // A one-time code the ferret called a secret is a code (the page says so, nothing says password); a card field the
-    // ferret called plain or a code is a secret. The page's own words decide, never the ferret's label alone.
+    // A card field the ferret called plain or a code is a secret. The page's own words decide, never the ferret's label alone.
     const kind =
       facts.kind === 'browser'
         ? pageFieldKind(
@@ -2842,13 +2841,8 @@ function observedAs(
         : undefined;
     if (kind === 'card' && (original.sensitivity === 'plain' || original.sensitivity === 'code'))
       upgraded.add(original.id);
-    const field =
-      kind === 'code' &&
-      original.sensitivity === 'secret' &&
-      !upgraded.has(original.id) &&
-      !passwordTarget(facts, original.id, codeProgram)
-        ? { ...original, sensitivity: 'code' as const }
-        : original;
+    // A field the ferret asked for as a secret STAYS one: it is never lowered to a code (field-kinds.ts, passwordSignalled).
+    const field = original;
     // The ferret's own words (its prompt, the field's label or id) may only ever RAISE a code to a secret.
     // Matched as normalised text, and a look-alike spelling counts, as for the pane's own words (lock.ts).
     // Not for a field the PAGE marks as a one-time code (`kind`): its own attributes decide, so a prompt that says
