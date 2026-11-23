@@ -35,6 +35,7 @@ import { z } from 'zod';
 import { ITEM_NAME_PATTERN } from '../../../contract/config.ts';
 import { AliasSchema, EnvSchema, SafeNameSchema, UsageSchema } from '../config.ts';
 import { isLoopbackHost } from '../foreign.ts';
+import { isKind } from '../harness-kind.ts';
 import { HarnessKindSchema } from '../manifest.ts';
 import { BudgetSchema, TimeZoneSchema } from './budget.ts';
 import { DisabledSchema } from './disabled.ts';
@@ -379,7 +380,7 @@ const CredentialSchema = z
           credential.claude.codexProvider,
         );
       }
-    } else if (credential.codexProvider !== undefined && credential.harness !== 'codex') {
+    } else if (credential.codexProvider !== undefined && !isKind(credential.harness, 'codex')) {
       push(
         '"codexProvider" points Codex at a model provider — this login is for Claude Code',
         'codexProvider',
@@ -827,6 +828,11 @@ const RuntimeSchema = z.preprocess(
     compactAt: CompactAtSchema.optional(),
     /** The source's origin key for this runtime, set by Clone: how a repeat copy finds it again. */
     clonedFromKey: NonEmptyString.optional(),
+    /**
+     * Why a DERIVED runtime may not launch (its pinned model is gone, or the pins could not be read). Held in memory only: no
+     * file carries it, so nothing writes it and the next read decides again.
+     */
+    refused: NonEmptyString.optional(),
   }),
 );
 export type Runtime = z.infer<typeof RuntimeSchema>;

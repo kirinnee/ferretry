@@ -42,6 +42,14 @@ codex: # what Codex is given, the same shape without tiers
   models: []
 ```
 
+- **Halves.** A catalog lists models per harness: `claude:` and `codex:`, and the newer `gemini:`, `copilot:`
+  and `opencode:` (Gemini CLI, GitHub Copilot CLI, OpenCode). At least one is required, every half has the same
+  shape (one default, tiers only on `claude:`, a context `suffix` only on `claude:`). The newer halves are data
+  only for now: no preset or picker reads them until the harness plugins land. Catalogs that only have a newer
+  half: `google-gemini` (`gemini:`, `opencode:`), `github-copilot` (`copilot:`), `xai` and `mistral`
+  (`opencode:`).
+- Every id in a catalog was read on the provider's own documentation or on models.dev **the day `verified:`
+  says**; an id nobody could confirm is left out, never guessed. Each catalog's `docs:` is its source.
 - `suffix: "[1m]"` on a Claude Code model is the context suffix the provider tells Claude Code to use;
   it is part of the value the picker sends and the wrapper passes (`--model deepseek-flash[1m]`).
 - A tier slot holds a model id, optionally with a context suffix, and must name one of the half's models.
@@ -170,8 +178,9 @@ paired daemon follows them.
 `pwa-pages.yaml` on every push to `main`) writes two files beside the app:
 
 - `https://ferretry.pages.dev/catalog/version.json` — `{ "version": N }`;
-- `https://ferretry.pages.dev/catalog/models.json` — `{ "version": N, "catalogs": { … }, "prices": { … } }`,
-  every `packages/plugins/logins/daemon/data/models/*.yaml` as JSON, with each model's price moved into `prices` (§ Prices).
+- `https://ferretry.pages.dev/catalog/models.json` — `{ "version": N, "catalogs": { … }, "prices": { … }, "catalogsV2": { … }, "suggestions": { … } }`,
+  every `packages/plugins/logins/daemon/data/models/*.yaml` as JSON, with each model's price moved into `prices` (§ Prices),
+  the catalogs with a newer half in `catalogsV2` and a trimmed models.dev snapshot in `suggestions` (§ Suggestions).
 
 `N` is the number of commits that changed `packages/plugins/logins/daemon/data/models/`, so it moves exactly when a catalog
 does (the Pages build checks out the full history for it, and fails rather than publish from a shallow
@@ -213,6 +222,59 @@ preloaded by each `bunfig.*.toml`), and refuses any in-process fetch to a Ferret
 3. Merge to `main`. The Pages deploy publishes the new version within minutes; each daemon takes it at
    its next check (at most six hours, or now with `fy models refresh`). The next release also builds it
    in.
+
+## The newer halves and the published document
+
+A daemon older than the `gemini`, `copilot` and `opencode` halves reads every published catalog with a strict
+schema, so one unknown key would make it refuse that catalog and fall back to its built-in one. The same trick
+that carries prices therefore carries the halves:
+
+- `catalogs` keeps **exactly the shape those daemons read**: only catalogs that have a `claude:` or `codex:` half,
+  with only those halves. A test pins that this key is byte-identical to what it was before the newer halves.
+- `catalogsV2` holds, **whole**, every catalog that has a newer half (a catalog with both kinds is therefore in
+  both keys). A daemon that knows the halves reads `catalogsV2[id]` in place of `catalogs[id]`; when that entry
+  does not check it falls back to `catalogs[id]`, and a catalog that exists only in `catalogsV2` is left out and named.
+  A test pins that both routes give the same `claude` and `codex` halves, prices included.
+- Old daemons read neither `catalogsV2` nor `suggestions` (the document schema ignores keys it does not know).
+  A test parses a document with both under the old rules.
+
+## Suggestions
+
+`suggestions` is a **trimmed snapshot of models.dev**, the public model database, so a picker can offer "new from
+<provider>" rows the curated catalog has not reviewed. It is information, never configuration: tiers, defaults and
+efforts stay the curated YAML's, and a suggestion only ADDS a row marked "new / not reviewed"
+(`suggestedModels` in `daemon/lib/catalog/suggestions.ts`). Nothing reads it yet; the live per-login list is the next step.
+
+- **Shape:** `{ generated, sources: { modelsDev, litellm? }, providers: { <models.dev provider id>: { name, api?, env?, models: { <id>: { name, reasoning?, tool_call?, modalities?, limit?, cost?, status? (`alpha`, `beta`, `retiring`), release_date?, retires? } } } } }`.
+  `cost` is the flat USD-per-million fields only. `env` is environment variable NAMES, never values.
+- **Providers kept:** those Ferretry has a preset or a catalog for (`SUGGESTION_PROVIDERS`, 22 of models.dev's ~320).
+- **LiteLLM** adds `retires` (LiteLLM's `deprecation_date`) where its entry matches a model id (bare, or under LiteLLM's prefix for that provider).
+- **Same signature.** It sits inside `catalog/models.json`, whose SHA-256 the signed release list names — no second key.
+  Measured 2026-11-23: the whole file is about 46 KB gzipped; a test holds it **under 300 KB gzipped**.
+- **Only the build contacts models.dev and LiteLLM** (`https://models.dev/api.json` and LiteLLM's
+  `model_prices_and_context_window.json` on GitHub raw: fixed URLs, no environment override). An owner's machine never does.
+- **Untrusted data.** Both documents go through the suggestions schema: every string and list is capped, a row that
+  does not check is dropped and named in the build log, and nothing from them reaches a default or a tier. That
+  includes a model row past the per-provider cap (1,000) and a LiteLLM `deprecation_date` that is not a day: each is
+  left out and named, never cut silently.
+- **Bounded downloads.** Each of the two downloads is read at most **8 MiB** (several times either file today, so a
+  runaway body stops the build and a normal one never meets the cap) and is refused before it is parsed: a declared
+  length over the cap at once, a streamed body as soon as it outgrows it. models.dev over the cap is a source that is
+  down (the committed snapshot below); LiteLLM over it costs only the dates.
+- **When a source is down** (`packages/plugins/logins/scripts/suggestions-source.ts`): the build publishes the last
+  committed snapshot, `daemon/data/suggestions/models-dev.json`, with a `::warning::` line. A fresh models.dev that lost
+  a provider the snapshot has, or half of its models, is not believed either. LiteLLM down costs only the dates. No
+  usable fetch and no valid snapshot fails the build — it never publishes an empty list, and an app deploy never
+  waits on a third party. A snapshot is valid only when it reads whole and **every provider we keep holds models**:
+  one provider with none is not a snapshot, so an offline build with it fails.
+- **The budget is enforced on the final file, before anything is written.** The publisher gzips the finished
+  `catalog/models.json`; over **300 KB** it publishes the committed snapshot instead (with a `::warning::` giving both
+  sizes), and when that is over too the build fails loudly. A test of the committed snapshot alone would not catch a
+  fresh fetch that grew (schema-valid rows reached 834 KB gzipped).
+- **Refreshing the snapshot** is a PR: `bun run packages/plugins/logins/scripts/suggestions-source.ts --refresh`
+  rewrites it with sorted keys and two-space indentation, so the diff reads line by line.
+- **Versioning.** `version` still moves only when `daemon/data/models/` does, so a daemon takes new suggestions when a
+  catalog next changes; the live per-login list will decide whether that is often enough.
 
 ## Prices
 

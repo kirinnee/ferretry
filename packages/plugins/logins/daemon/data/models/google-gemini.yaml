@@ -1,0 +1,76 @@
+# Google Gemini (AI Studio, the Gemini API) models, for the Gemini CLI and for OpenCode.
+label: Google Gemini (AI Studio)
+docs: https://ai.google.dev/gemini-api/docs/models
+verified: '2026-11-23'
+unverified:
+  - "Google does not rank the Gemini 4 family, so each model's tier and the default follow its list price (https://ai.google.dev/gemini-api/docs/pricing); a person's own file can re-rank them."
+  - 'No reasoning effort is listed: the API takes a thinking budget or level per model, which this catalog does not model yet.'
+  - "Models are not priced here (the price maker list has no Google); Suggestions carry models.dev's list cost."
+  - 'Ids were read on the Gemini API models page and cross-checked against models.dev (provider google), 2026-11-23.'
+customIds: true
+gemini:
+  models:
+    - id: gemini-4-neon
+      label: Gemini 4 Neon
+      tier: best
+      context: 1048576
+      reasoning: true
+    - id: gemini-4-carbon
+      label: Gemini 4 Carbon
+      tier: balanced
+      context: 1048576
+      reasoning: true
+      default: true
+    - id: gemini-4-argon
+      label: Gemini 4 Argon
+      tier: balanced
+      context: 1048576
+      reasoning: true
+    - id: gemini-4-hydrogen
+      label: Gemini 4 Hydrogen
+      tier: fast
+      context: 1048576
+      reasoning: true
+    - id: gemini-3.8-flash
+      label: Gemini 3.8 Flash
+      tier: fast
+      context: 1048576
+      reasoning: true
+    - id: gemini-3.5-flash-lite
+      label: Gemini 3.5 Flash-Lite
+      tier: fast
+      context: 1048576
+      reasoning: true
+opencode:
+  models:
+    - id: gemini-4-neon
+      label: Gemini 4 Neon
+      tier: best
+      context: 1048576
+      reasoning: true
+    - id: gemini-4-carbon
+      label: Gemini 4 Carbon
+      tier: balanced
+      context: 1048576
+      reasoning: true
+      default: true
+    - id: gemini-4-argon
+      label: Gemini 4 Argon
+      tier: balanced
+      context: 1048576
+      reasoning: true
+    - id: gemini-4-hydrogen
+      label: Gemini 4 Hydrogen
+      tier: fast
+      context: 1048576
+      reasoning: true
+    - id: gemini-3.8-flash
+      label: Gemini 3.8 Flash
+      tier: fast
+      context: 1048576
+      reasoning: true
+    - id: gemini-3.5-flash-lite
+      label: Gemini 3.5 Flash-Lite
+      tier: fast
+      context: 1048576
+      reasoning: true

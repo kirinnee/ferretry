@@ -24,6 +24,7 @@ import {
 } from '../../contract/index.ts';
 import type { ComponentReading, KindReading } from '../lib/account/runtimes-model.ts';
 import { parseForeignComponent } from '../lib/account/schema.ts';
+import { type HarnessKind, supportedKindOfKey } from '../lib/harness-kind.ts';
 
 /** Who provides a source: the plugin that took the hook, or `unavailable` (nobody took it, or it is not running). */
 export type ComponentSourceLookup = (
@@ -36,7 +37,7 @@ interface SourceDefinition {
   /** The hook the owning plugin takes; absent for Runtimes' own source (`instructions`), which needs no hook. */
   readonly hook?: SourceHook;
   /** The harness every component of the source is for, when the source is one harness's. */
-  readonly harness?: 'claude' | 'codex';
+  readonly harness?: HarnessKind;
 }
 
 /** Which sources make up each kind. A kind is read only when every one of its sources answers. */
@@ -65,7 +66,7 @@ export const PROFILE_COMPONENT_SOURCE_HOOKS: readonly SourceHook[] = [
 ];
 
 /** The hook of the owner that holds one kind's components (for a harness's own kind, that harness's). `undefined`: none. */
-export function sourceHookFor(kind: ProfileComponentKind, harness?: 'claude' | 'codex'): SourceHook | undefined {
+export function sourceHookFor(kind: ProfileComponentKind, harness?: HarnessKind): SourceHook | undefined {
   const sources = SOURCES[kind];
   const source = sources.length === 1 ? sources[0] : sources.find(candidate => candidate.harness === harness);
   return source?.hook;
@@ -78,7 +79,8 @@ const harnessOf = (document: ProfileComponentDocument, source: SourceDefinition)
   // A source of one harness decides it; the document's own word never overrides the owner that provided it.
   if (source.harness !== undefined) return { ...document, harness: source.harness };
   const { harness } = document;
-  return harness === 'claude-code' ? { ...document, harness: 'claude' } : document;
+  const kind = typeof harness === 'string' ? supportedKindOfKey(harness) : undefined;
+  return kind === undefined ? document : { ...document, harness: kind };
 };
 
 /** What {@link Within} answers when the work did not finish in time. */
@@ -119,6 +121,9 @@ async function readKind(
   const sources = SOURCES[kind];
   if (sources.length === 0) return unread('no part of Ferretry provides these components yet');
   const components = new Map<string, unknown>();
+  // A component that does not check (a typo in its `harness`, say) is set aside BY NAME with the rule it broke: it never
+  // takes the good components of its kind down with it.
+  const rejected = new Map<string, string>();
   const providers = new Map<string, string>();
   let partial: string | undefined;
   for (const source of sources) {
@@ -148,7 +153,10 @@ async function readKind(
         // Removed between `list` and `read`: gone.
         if (document === undefined) continue;
         const checked = parseForeignComponent(kind, harnessOf(document, source));
-        if (!checked.ok) return unread(`"${name}" is not a valid ${kind} component (${checked.issues.join('; ')})`);
+        if (!checked.ok) {
+          rejected.set(name, `"${name}" is not a valid ${kind} component (${checked.issues.join('; ')})`);
+          continue;
+        }
         const other = providers.get(name);
         if (other !== undefined) return unread(`two parts of Ferretry give a ${kind} component named "${name}"`);
         providers.set(name, source.hook?.name ?? 'runtimes');
@@ -159,7 +167,12 @@ async function readKind(
       return unread('the part of Ferretry that owns them did not answer');
     }
   }
-  return partial === undefined ? { state: 'read', components } : { state: 'read', components, partial };
+  return {
+    state: 'read',
+    components,
+    ...(partial === undefined ? {} : { partial }),
+    ...(rejected.size === 0 ? {} : { rejected }),
+  };
 }
 
 /** Every kind of component, read now: the owners' through the hooks, and Runtimes' own (`instructions`) directly. */

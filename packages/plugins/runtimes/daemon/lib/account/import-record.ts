@@ -2,6 +2,7 @@
  * The import record as it is stored (`setup/import.json`): read back, keeping only what is usable. Pure. Split out of the
  * setup service (one feature, one file).
  */
+import { supportedKinds } from '../harness-kind.ts';
 import type { ImportRecord } from './import.ts';
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
@@ -47,7 +48,7 @@ export function parseImportRecord(text: string | undefined): ImportRecord | unde
   }
   const profiles = isRecord(raw.profiles)
     ? Object.fromEntries(
-        (['claude', 'codex'] as const).flatMap(harness => {
+        supportedKinds().flatMap(harness => {
           const name = (raw.profiles as Readonly<Record<string, unknown>>)[harness];
           return typeof name === 'string' ? [[harness, name]] : [];
         }),

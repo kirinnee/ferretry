@@ -38,6 +38,7 @@ import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import { looksSecret, namesCredential } from '@ferretry/std/credential-words';
 import type { z } from 'zod';
 import type { CompactAtSchema } from '../../../contract/index.ts';
+import { byHarness, isKind } from '../harness-kind.ts';
 import { HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, harnessAsset } from '../assets.ts';
 import {
   buildFleetManifest,
@@ -294,7 +295,9 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
   ];
 
   // A Ferretry-kept login's store is Logins' (it makes the directory a sign-in writes into): nothing is created for one here.
-  if (runtimeNames.some(name => model.credentials[model.runtimes[name]?.credential ?? '']?.harness === 'codex')) {
+  if (
+    runtimeNames.some(name => isKind(model.credentials[model.runtimes[name]?.credential ?? '']?.harness ?? '', 'codex'))
+  ) {
     operations.push({ kind: 'directory', path: codexSqliteHome, mode: DIRECTORY_MODE });
   }
 
@@ -322,6 +325,8 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     const wrapper = joinPath(layout.binDirectory, name);
     const reasons: string[] = [];
     reasons.push(...(runtimeDisable(model, name, now, binary, input.budgetHolds)?.clauses ?? []));
+    // A derived runtime whose pinned model is gone, or whose pins nobody could read, is refused by name: never moved to the live default.
+    if (runtime.refused !== undefined) reasons.push(runtime.refused);
 
     const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths, harness, loginStores);
     if ('unavailable' in store)
@@ -360,21 +365,23 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
 
     // The fixed layer: computed for a placeholder folder, which never reaches a file.
     let fixed: FixedLayer | undefined;
-    const result =
-      harness === 'claude'
-        ? fixedLayerFor({
-            harness,
-            agentPermissions: model.machine.agentPermissions,
-            cwd: LAUNCH_FOLDER_PLACEHOLDER,
-            acceptsAutoPermissionMode: input.acceptsAutoPermissionMode,
-            fyCommand: input.fyCommand,
-          })
-        : fixedLayerFor({
-            harness,
-            agentPermissions: model.machine.agentPermissions,
-            cwd: LAUNCH_FOLDER_PLACEHOLDER,
-            fyCommand: input.fyCommand,
-          });
+    const result = byHarness<ReturnType<typeof fixedLayerFor>>(harness, {
+      claude: () =>
+        fixedLayerFor({
+          harness: 'claude',
+          agentPermissions: model.machine.agentPermissions,
+          cwd: LAUNCH_FOLDER_PLACEHOLDER,
+          acceptsAutoPermissionMode: input.acceptsAutoPermissionMode,
+          fyCommand: input.fyCommand,
+        }),
+      codex: () =>
+        fixedLayerFor({
+          harness: 'codex',
+          agentPermissions: model.machine.agentPermissions,
+          cwd: LAUNCH_FOLDER_PLACEHOLDER,
+          fyCommand: input.fyCommand,
+        }),
+    });
     if (result.ok) fixed = withoutLaunchFolder(result.layer);
     // An auto launch the harness cannot honour refuses THAT launch only: the person's own run and an interactive ferret
     // never get the fixed layer, so they are not stopped by it.
@@ -383,10 +390,10 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
 
     const adapted = adaptProfile({
       resolved,
-      plumbing:
-        harness === 'claude'
-          ? { harness, statusLine: input.claudeStatusline }
-          : { harness, sqliteHome: codexSqliteHome },
+      plumbing: byHarness<Parameters<typeof adaptProfile>[0]['plumbing']>(harness, {
+        claude: () => ({ harness: 'claude', statusLine: input.claudeStatusline }),
+        codex: () => ({ harness: 'codex', sqliteHome: codexSqliteHome }),
+      }),
       bodies: {
         ...(input.bodies?.instructions === undefined ? {} : { instructions: input.bodies.instructions }),
         ...(input.bodies?.hooks === undefined ? {} : { hooks: input.bodies.hooks }),
@@ -430,12 +437,12 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     env[CREDENTIAL_ENV] = runtime.credential;
     env[RUNTIME_NAME_ENV] = name;
     env[STATE_HOME_ENV] = layout.stateHome;
-    if (harness === 'codex') env.CODEX_SQLITE_HOME = codexSqliteHome;
+    if (isKind(harness, 'codex')) env.CODEX_SQLITE_HOME = codexSqliteHome;
 
     // Codex's own picker lists OpenAI's models and knows nothing of this login's provider, so a runtime on
     // a third-party catalog is given the catalog as the list to offer (docs/model-catalog.md). A person's
     // own `model_catalog_json` is theirs, and stands.
-    const codexModels = harness === 'codex' ? codexCatalogModels(derived) : undefined;
+    const codexModels = isKind(harness, 'codex') ? codexCatalogModels(derived) : undefined;
     const codexCatalog =
       codexModels === undefined || 'model_catalog_json' in adapted.settings.value
         ? undefined
@@ -451,17 +458,18 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         absent: adapted.absent,
         settings: adapted.settings,
         claudeJson: adapted.claudeJson,
-        priorServers:
-          harness === 'claude'
-            ? renderMcpComponents(
-                harness,
-                Object.fromEntries(
-                  Object.entries(model.components.mcp).filter(
-                    ([serverName]) => !resolved.mcp.some(contribution => contribution.layer.name === serverName),
-                  ),
+        priorServers: byHarness(harness, {
+          claude: () =>
+            renderMcpComponents(
+              'claude',
+              Object.fromEntries(
+                Object.entries(model.components.mcp).filter(
+                  ([serverName]) => !resolved.mcp.some(contribution => contribution.layer.name === serverName),
                 ),
-              )
-            : {},
+              ),
+            ),
+          codex: () => ({}),
+        }),
         overlay: fixed?.claudeSettingsOverlay,
         credentialLink: codexCredentialLink(home, store),
         layout,
@@ -500,8 +508,8 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
             ? { refusal: result.ok ? '' : result.refusal.message }
             : {
                 args: [...launchPrefix, ...launch.args, ...fixedSettingsArgs],
-                seedFirstRun: harness === 'claude',
-                trustLaunchFolder: harness === 'codex',
+                seedFirstRun: isKind(harness, 'claude'),
+                trustLaunchFolder: isKind(harness, 'codex'),
               },
         fyCommand: input.fyCommand,
         secretsFile: model.advanced.secretsFile,

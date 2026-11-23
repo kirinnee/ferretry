@@ -224,6 +224,12 @@ const CatalogHalfSchema = z
   });
 export type CatalogHalf = z.infer<typeof CatalogHalfSchema>;
 
+/** The halves a daemon older than U5 reads, and the ones added since: each is one harness's models. */
+export const BASE_HALF_KEYS = ['claude', 'codex'] as const;
+export const NEW_HALF_KEYS = ['gemini', 'copilot', 'opencode'] as const;
+const HALF_KEYS = [...BASE_HALF_KEYS, ...NEW_HALF_KEYS] as const;
+const HARNESS_NAMES = { codex: 'Codex', gemini: 'Gemini', copilot: 'Copilot', opencode: 'OpenCode' } as const;
+
 /** A catalog file, as written. */
 export const ModelCatalogFileSchema = z
   .strictObject({
@@ -240,33 +246,43 @@ export const ModelCatalogFileSchema = z
     detect: z.enum(['ollama']).optional(),
     claude: CatalogHalfSchema.optional(),
     codex: CatalogHalfSchema.optional(),
+    /**
+     * The halves of harnesses added after `claude` and `codex` (U5). A daemon older than them reads a
+     * catalog with a strict schema, so these never ride in `catalogs` of the published document: they
+     * travel in `catalogsV2` (`./published.ts`).
+     */
+    gemini: CatalogHalfSchema.optional(),
+    copilot: CatalogHalfSchema.optional(),
+    opencode: CatalogHalfSchema.optional(),
   })
   .check(ctx => {
     const catalog = ctx.value;
-    if (catalog.claude === undefined && catalog.codex === undefined) {
+    if (HALF_KEYS.every(key => catalog[key] === undefined)) {
       ctx.issues.push({
         code: 'custom',
-        message: 'a catalog lists models for "claude:", "codex:" or both',
+        message: `a catalog lists models for at least one of ${HALF_KEYS.map(key => `"${key}:"`).join(', ')}`,
         input: catalog,
         path: [],
       });
     }
-    catalog.codex?.models.forEach((model, index) => {
-      if (model.suffix === undefined) return;
-      ctx.issues.push({
-        code: 'custom',
-        message: `"suffix" is Claude Code's context suffix; Codex takes ${model.id} as it is`,
-        input: model.suffix,
-        path: ['codex', 'models', index, 'suffix'],
+    for (const key of [...NEW_HALF_KEYS, 'codex'] as const) {
+      catalog[key]?.models.forEach((model, index) => {
+        if (model.suffix === undefined) return;
+        ctx.issues.push({
+          code: 'custom',
+          message: `"suffix" is Claude Code's context suffix; ${HARNESS_NAMES[key]} takes ${model.id} as it is`,
+          input: model.suffix,
+          path: [key, 'models', index, 'suffix'],
+        });
       });
-    });
-    if (catalog.codex?.tiers !== undefined) {
-      ctx.issues.push({
-        code: 'custom',
-        message: '"tiers" pins Claude Code\'s tier slots; Codex has none',
-        input: catalog.codex.tiers,
-        path: ['codex', 'tiers'],
-      });
+      if (catalog[key]?.tiers !== undefined) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `"tiers" pins Claude Code's tier slots; ${HARNESS_NAMES[key]} has none`,
+          input: catalog[key]?.tiers,
+          path: [key, 'tiers'],
+        });
+      }
     }
   });
 export type ModelCatalogFile = z.infer<typeof ModelCatalogFileSchema>;

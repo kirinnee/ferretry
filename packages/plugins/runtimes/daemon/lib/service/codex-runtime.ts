@@ -27,6 +27,7 @@
  *   stop or a reap.
  */
 import type { FencedPath, OwnFolder, ProcessesPort, RootHandle } from '@ferretry/kernel/contract';
+import type { HarnessKind } from '../harness-kind.ts';
 import { wrapperNameOf } from '../manifest.ts';
 
 /** Where Codex records its app-server daemon processes, relative to ONE `CODEX_HOME`. */
@@ -53,7 +54,7 @@ export function parseCodexPidFile(text: string): number | undefined {
 
 /** One published account, as much of it as this decision reads. */
 export interface CodexRuntimeAccount {
-  readonly kind: 'claude' | 'codex';
+  readonly kind: HarnessKind;
   readonly wrapper: string;
   readonly home: string;
 }

@@ -10,6 +10,7 @@
  * Pure.
  */
 import { join } from 'node:path';
+import { supportedKinds } from './harness-kind.ts';
 import type { HarnessKind } from './manifest.ts';
 
 type SharedHistoryEntryType = 'directory' | 'file';
@@ -113,5 +114,5 @@ export function sharedHistoryPoolRequests(
   homes: Readonly<Record<HarnessKind, readonly SharedHistoryHome[]>>,
 ): readonly SharedHistoryRequest[] {
   const poolRoot = sharedHistoryPoolRoot(fleetDirectory);
-  return (['claude', 'codex'] as const).map(kind => ({ kind, poolRoot, homes: homes[kind] }));
+  return supportedKinds().map(kind => ({ kind, poolRoot, homes: homes[kind] }));
 }

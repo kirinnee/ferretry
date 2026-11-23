@@ -38,6 +38,7 @@ import {
   scannedMcpServers,
 } from '../lib/account/import.ts';
 import { isHarnessOwnedSkillEntry } from '../lib/assets.ts';
+import { harnessKeyOfKind } from '../lib/harness-kind.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
 import type { HostEntry, HostFiles } from './ports.ts';
 
@@ -210,7 +211,7 @@ export class HostHarnessScanner {
 
   /** Host links are opaque. Unknown facts stay unknown; never inspect a harness sign-in file. */
   async #login(harness: HarnessKind): Promise<HostLogin> {
-    const key = harness === 'claude' ? 'claude-code' : 'codex';
+    const key = harnessKeyOfKind(harness);
     const unknown: HostLogin = {
       state: 'unknown',
       reason: 'Logins has no unambiguous host sign-in fact for this harness',

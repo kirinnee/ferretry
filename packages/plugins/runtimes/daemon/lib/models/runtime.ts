@@ -186,3 +186,43 @@ export function runtimeModels(input: RuntimeModelsInput): RuntimeModels {
     ...(input.local === undefined ? {} : { local: input.local }),
   };
 }
+
+/** The model a login launches a harness with, and the models its catalog offers (when it reads one). */
+export interface LaunchModels {
+  /** What the runtime launches with when nothing is pinned: `undefined` when nothing names one. */
+  readonly model: string | undefined;
+  /** The models this login can use now, or `undefined` when it reads no catalog (a pinned model is then never judged gone). */
+  readonly offered: readonly string[] | undefined;
+}
+
+/**
+ * What a derived runtime of `harness` on a login launches with NOW, resolved through THAT login's catalog (a provider login
+ * answers its provider's default, never the harness maker's starter). It is `runtimeModels` over the built-in profile's
+ * starter model set, the same call a launch makes, so the pin records exactly what the first launch would have used.
+ */
+export function launchModelsOf(
+  credential: Pick<Credential, 'store' | 'preset'>,
+  harness: HarnessKind,
+  sources: ModelCatalogSources | undefined,
+  starter: string | undefined,
+): LaunchModels {
+  const catalog = sources === undefined ? {} : loginModelCatalog(credential, harness, sources);
+  // Only `source` and `declaredDefault` of a model set are read where a catalog is present, so the starter stands in for the
+  // profile's model set without a layer of its own.
+  const modelSet =
+    starter === undefined
+      ? undefined
+      : ({
+          source: 'model-set',
+          models: [{ id: starter, available: true }],
+          declaredDefault: starter,
+          default: starter,
+          fellBack: false,
+          noneAvailable: false,
+        } as unknown as ResolvedModelSet);
+  const derived = runtimeModels({ harness, modelSet, ...catalog });
+  return {
+    model: derived.default,
+    offered: derived.catalog === undefined ? undefined : derived.models.filter(m => m.available).map(m => m.id),
+  };
+}

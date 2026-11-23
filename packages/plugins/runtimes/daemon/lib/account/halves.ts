@@ -14,6 +14,7 @@
  *
  * Pure.
  */
+import { supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import type { CodexProvider } from './environment.ts';
 
@@ -33,7 +34,7 @@ export interface HalvedCredential {
   readonly codex?: { readonly env?: Readonly<Record<string, string>>; readonly codexProvider?: CodexProvider };
 }
 
-const ORDER: readonly HarnessKind[] = ['claude', 'codex'];
+const ORDER: readonly HarnessKind[] = supportedKinds();
 
 /** Whether the login is written with `claude:` / `codex:` halves. */
 export const hasHalves = (credential: HalvedCredential): boolean =>

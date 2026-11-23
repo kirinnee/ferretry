@@ -10,6 +10,9 @@ import type { ModelSetFile, ProfileFile, RuntimeFile } from '../../../contract/i
 import {
   derivedRuntimeName,
   deriveRuntimes,
+  loginOfPinKey,
+  pinGoneSentence,
+  pinKey,
   stableSuffix,
   withDerived,
 } from '../../../daemon/lib/account/derived-runtimes.ts';
@@ -329,16 +332,17 @@ describe('the built-in profiles and the starter models', () => {
 describe('D4: a derived runtime keeps the model it was pinned to', () => {
   const MOVED = { claude: 'claude-moved-default', codex: TEST_STARTERS.codex };
   const login = sampleLogin('atomi', { store: 'ferretry' });
+  const KEY = pinKey('atomi', 'claude');
 
-  it('reports a runtime with no pin as first seen, on the starter, and puts it on the shared profile', () => {
+  it('reports a pair with no pin as first seen, on the starter, and puts it on the shared profile', () => {
     const derived = deriveRuntimes({ ...none, logins: [login] });
 
-    expect(derived.firstSeen).toEqual(new Map([['atomi', TEST_STARTERS.claude]]));
+    expect(derived.firstSeen).toEqual(new Map([[KEY, TEST_STARTERS.claude]]));
     expect(derived.runtimes.get('atomi')?.profile).toBe('ferretry-claude');
   });
 
   it('keeps a pinned runtime on its model after the starter moved, on a profile of its own', () => {
-    const pins = new Map([['atomi', TEST_STARTERS.claude]]);
+    const pins = new Map([[KEY, TEST_STARTERS.claude]]);
 
     const derived = deriveRuntimes({ ...none, starters: MOVED, pins, logins: [login] });
 
@@ -355,16 +359,16 @@ describe('D4: a derived runtime keeps the model it was pinned to', () => {
     const derived = deriveRuntimes({
       ...none,
       starters: MOVED,
-      pins: new Map([['old', MOVED.claude]]),
+      pins: new Map([[pinKey('old', 'claude'), MOVED.claude]]),
       logins: [sampleLogin('old', { store: 'ferretry' }), sampleLogin('fresh', { store: 'ferretry' })],
     });
 
     expect(derived.runtimes.get('old')?.profile).toBe('ferretry-claude');
     expect(derived.runtimes.get('fresh')?.profile).toBe('ferretry-claude');
-    expect(derived.firstSeen).toEqual(new Map([['fresh', MOVED.claude]]));
+    expect(derived.firstSeen).toEqual(new Map([[pinKey('fresh', 'claude'), MOVED.claude]]));
   });
 
-  it('keys the pin on the runtime NAME, so a login whose id an owner runtime holds is pinned under its suffixed name', () => {
+  it('keys the pin on the LOGIN id and harness, not on the runtime name an owner runtime may have forced into a suffix', () => {
     const name = derivedRuntimeName('atomi', candidate => candidate === 'atomi') as string;
     const owner = { login: 'other', profile: 'ferretry-claude' } as never;
 
@@ -373,12 +377,95 @@ describe('D4: a derived runtime keeps the model it was pinned to', () => {
       ...none,
       runtimes: new Map([['atomi', owner]]),
       starters: MOVED,
-      pins: new Map([[name, TEST_STARTERS.claude]]),
+      pins: new Map([[KEY, TEST_STARTERS.claude]]),
       logins: [login],
     });
 
-    expect(first.firstSeen).toEqual(new Map([[name, TEST_STARTERS.claude]]));
+    expect(name).not.toBe('atomi');
+    expect(first.firstSeen).toEqual(new Map([[KEY, TEST_STARTERS.claude]]));
     expect(later.firstSeen.size).toBe(0);
     expect(later.modelSets.get(later.runtimes.get(name)?.profile as string)?.default).toBe(TEST_STARTERS.claude);
+  });
+
+  it('reads a pin key back to its login, and no other string', () => {
+    expect(loginOfPinKey(KEY)).toBe('atomi');
+    expect(loginOfPinKey(pinKey('a:b', 'codex'))).toBe('a:b');
+    expect(loginOfPinKey('atomi')).toBeUndefined();
+    expect(loginOfPinKey('gemini:atomi')).toBeUndefined();
+  });
+
+  describe('a login on a provider: the pin holds the model THAT login launches with', () => {
+    const glm = sampleLogin('glm', { store: 'environment' });
+    const catalogOf = (offered: readonly string[], model: string | undefined) => () => ({ model, offered });
+
+    it('pins the provider default, not the harness maker’s starter, when first seen', () => {
+      const derived = deriveRuntimes({
+        ...none,
+        logins: [glm],
+        templates: templatesFor('glm'),
+        launch: catalogOf(['provider-old', 'provider-new'], 'provider-old'),
+      });
+
+      expect(derived.firstSeen).toEqual(new Map([[pinKey('glm', 'claude'), 'provider-old']]));
+      const profile = derived.runtimes.get('glm')?.profile as string;
+      expect(derived.modelSets.get(profile)).toEqual({ models: ['provider-old'], default: 'provider-old' });
+    });
+
+    it('does not move when the provider’s default moves while the old model is still offered', () => {
+      const derived = deriveRuntimes({
+        ...none,
+        logins: [glm],
+        templates: templatesFor('glm'),
+        pins: new Map([[pinKey('glm', 'claude'), 'provider-old']]),
+        launch: catalogOf(['provider-old', 'provider-new'], 'provider-new'),
+      });
+
+      const profile = derived.runtimes.get('glm')?.profile as string;
+      expect(derived.modelSets.get(profile)?.default).toBe('provider-old');
+      expect(derived.firstSeen.size).toBe(0);
+      expect(derived.refused.size).toBe(0);
+    });
+
+    it('REFUSES a pinned model the provider no longer offers, saying so, and never falls back to the live default', () => {
+      const derived = deriveRuntimes({
+        ...none,
+        logins: [glm],
+        templates: templatesFor('glm'),
+        pins: new Map([[pinKey('glm', 'claude'), 'provider-old']]),
+        launch: catalogOf(['provider-new'], 'provider-new'),
+      });
+
+      expect(derived.refused.get('glm')).toBe(
+        'provider-old is no longer offered for glm; pick a model or use Update now',
+      );
+      expect(derived.refused.get('glm')).toBe(pinGoneSentence('provider-old', 'glm'));
+      // The runtime stays on its pin: the refusal is the answer, not a quiet move.
+      const profile = derived.runtimes.get('glm')?.profile as string;
+      expect(derived.modelSets.get(profile)?.default).toBe('provider-old');
+    });
+  });
+
+  describe('fail closed on pins nobody could read', () => {
+    it('refuses every derived runtime, records nothing, and names the file', () => {
+      const derived = deriveRuntimes({
+        ...none,
+        pinsUnreadable: 'starter-pins.json',
+        logins: [login, sampleLogin('personal', { harness: 'codex', harnesses: ['codex'] })],
+      });
+
+      expect(derived.runtimes.size).toBe(2);
+      expect([...derived.refused.values()]).toEqual([
+        'model pins unreadable: starter-pins.json',
+        'model pins unreadable: starter-pins.json',
+      ]);
+      expect(derived.firstSeen.size).toBe(0);
+    });
+
+    it('treats a missing file as the first run: an empty set refuses nothing', () => {
+      const derived = deriveRuntimes({ ...none, pins: new Map(), logins: [login] });
+
+      expect(derived.refused.size).toBe(0);
+      expect(derived.firstSeen.size).toBe(1);
+    });
   });
 });

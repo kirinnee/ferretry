@@ -96,7 +96,7 @@ describe('the built-in model catalogs', () => {
 
 describe('a catalog file', () => {
   it('should refuse a catalog with no half, no default, two defaults, or a model listed twice', () => {
-    should(problemOf({})).match(/claude:", "codex:" or both/);
+    should(problemOf({})).match(/at least one of "claude:", "codex:", "gemini:"/);
     should(problemOf({ claude: { models: [model('a')] } })).match(/exactly one model/);
     should(problemOf({ claude: { models: [model('a', { default: true }), model('b', { default: true })] } })).match(
       /a, b all say/,

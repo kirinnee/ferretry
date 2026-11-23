@@ -23,7 +23,7 @@ import {
   type RuntimeFile,
   type RuntimesFile,
 } from '../../contract/index.ts';
-import { foreignComponentChanges, ownedFileEdits, unownedChanges } from '../lib/account/runtimes-edits.ts';
+import { foreignComponentChanges, realisedEdits, unownedChanges } from '../lib/account/runtimes-edits.ts';
 import {
   assembleRuntimesModel,
   type RuntimesModel,
@@ -31,7 +31,9 @@ import {
   stoodInLoginSentence,
 } from '../lib/account/runtimes-model.ts';
 import type { AccountModel } from '../lib/account/schema.ts';
-import { type StarterModels, starterModelsOf } from '../lib/models/catalog.ts';
+import { type ModelCatalogSources, starterModelsOf } from '../lib/models/catalog.ts';
+import { modelCatalogSourcesOf } from './model-sources.ts';
+import { loginOfPinKey } from '../lib/account/derived-runtimes.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
 import {
   FleetCatalogRefusal,
@@ -48,16 +50,22 @@ const profileItems = PROFILE_ITEMS as unknown as ConfigCollectionDef<ProfileFile
 const modelSetItems = MODEL_SET_ITEMS as unknown as ConfigCollectionDef<ModelSetFile>;
 const runtimesFile = RUNTIMES_CONFIG as unknown as ConfigFileDef<RuntimesFile>;
 
+/** What the pin state holds: its pins (empty on the first run, when no file exists), or that it exists and cannot be read. */
+type PinsReading =
+  | { readonly state: 'read'; readonly pins: ReadonlyMap<string, string> }
+  | { readonly state: 'unreadable'; readonly file: string };
+
 /**
- * Where a derived runtime's first-seen model is kept (D4: a runtime's default model never moves by itself). Both halves
- * are asked of the plugin's state; an unreadable one answers `undefined` / records nothing, and the runtime then simply
- * follows the starter for that read.
+ * Where a derived runtime's first-seen model is kept, by login and harness (D4: a runtime's default model never moves by
+ * itself). An unreadable file refuses every derived runtime and is never written over.
  */
 export interface StarterPins {
-  /** The pinned model by runtime name, or `undefined` when the state cannot be read. */
-  read(): Promise<ReadonlyMap<string, string> | undefined>;
-  /** Records the models of runtimes with no pin yet; a pin that is already there is never replaced. */
-  add(models: ReadonlyMap<string, string>): Promise<void>;
+  read(): Promise<PinsReading>;
+  /**
+   * Records the pairs with no pin yet (a pin that is there is never replaced) and prunes the pins of every login not in
+   * `present`, so a login that is removed and an id that returns later never inherit.
+   */
+  record(firstSeen: ReadonlyMap<string, string>, present: ReadonlySet<string>): Promise<void>;
 }
 
 /**
@@ -108,12 +116,12 @@ async function loginTemplates(
 }
 
 /**
- * The model each harness starts with: the default of the catalog its sign-in reads, asked of Logins on every evaluation.
- * `undefined` when Logins cannot say (the built-in profiles then hold no model set until it can).
+ * The catalogs Logins holds, asked on every evaluation: each harness's starter and each login's own default read through
+ * them. `undefined` when Logins cannot say (the built-in profiles then hold no model set, and a pin still holds).
  */
-async function loginStarters(logins: Pick<LoginsApi, 'modelSources'>): Promise<StarterModels | undefined> {
+async function loginCatalogs(logins: Pick<LoginsApi, 'modelSources'>): Promise<ModelCatalogSources | undefined> {
   try {
-    return starterModelsOf(await logins.modelSources());
+    return modelCatalogSourcesOf(await logins.modelSources());
   } catch {
     return undefined;
   }
@@ -131,12 +139,13 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
     // The harness commands are looked up before the model is derived from them (a login that drives both CLIs runs the
     // first that is installed), so the very first read already agrees with every later one.
     if (sources.installed !== undefined) await sources.prime?.(undefined);
-    const [components, templates, starters, pins] = await Promise.all([
+    const [components, templates, catalogs, pinned] = await Promise.all([
       readProfileComponents(sources.components, ownInstructionsSource(sources.config), sources.within),
       loginTemplates(sources.logins),
-      loginStarters(sources.logins),
+      loginCatalogs(sources.logins),
       sources.pins.read(),
     ]);
+    const starters = catalogs === undefined ? undefined : starterModelsOf(catalogs);
     try {
       assembled = assembleRuntimesModel({
         runtimes: sources.config.collection(runtimeItems),
@@ -147,15 +156,23 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
         templates,
         components,
         ...(starters === undefined ? {} : { starters }),
-        ...(pins === undefined ? {} : { pins }),
+        ...(catalogs === undefined ? {} : { catalogs }),
+        ...(pinned.state === 'read' ? { pins: pinned.pins } : { pinsUnreadable: pinned.file }),
         installed: sources.installed?.(),
       });
     } catch (error) {
       throw inconsistent(error);
     }
-    // A derived runtime is pinned the FIRST time it is seen. A pin is written before the model is answered, so no later read
-    // can see a different starter; an unreadable pin file records nothing (the runtime follows the starter for that read).
-    if (pins !== undefined && assembled.firstSeen.size > 0) await sources.pins.add(assembled.firstSeen);
+    // A pair is pinned the FIRST time it is seen. The pin is written before the model is answered, so no later read can see
+    // a different default; a login that is gone takes its pins with it, here, not on a timer. An unreadable file is never written.
+    if (pinned.state === 'read') {
+      const present = new Set(logins.map(login => login.id as string));
+      const stale = [...pinned.pins.keys()].some(key => {
+        const login = loginOfPinKey(key);
+        return login === undefined || !present.has(login);
+      });
+      if (assembled.firstSeen.size > 0 || stale) await sources.pins.record(assembled.firstSeen, present);
+    }
     return {
       evaluation: {
         fleetFiles: assembled.sources,
@@ -209,7 +226,12 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
           'fleet_change_refused',
           `this change also edits ${foreign.join(', ')}, which another part of Ferretry owns or that Runtimes does not write through a change (edit its own file under config/); nothing was changed`,
         );
-      return ownedFileEdits(loaded.evaluation.effective.model, next).map(edit => ({
+      // A derived runtime that is saved is written whole, onto a real profile holding its pinned model (never onto a generated
+      // one), and one that is refused is not saved on its generated profile at all.
+      const realised = realisedEdits(loaded.evaluation.effective.model, next, (loaded.files as RuntimesModel).derived);
+      if (realised.refused.length > 0)
+        throw new FleetCatalogRefusal('fleet_change_refused', `${realised.refused.join('; ')}; nothing was changed`);
+      return realised.edits.map(edit => ({
         path: edit.path,
         ...(edit.patch === undefined ? {} : { patch: edit.patch }),
         ...(edit.remove === true ? { content: undefined } : {}),

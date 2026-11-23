@@ -1,0 +1,58 @@
+# The models GitHub Copilot lists, for the Copilot CLI.
+label: GitHub Copilot
+docs: https://docs.github.com/en/copilot/reference/ai-models/supported-models
+verified: '2026-11-23'
+unverified:
+  - "Which of these a person can use depends on their Copilot plan and their organization's policy; Copilot's own list is the final word."
+  - 'Each tier and the default follow list price; Copilot does not rank its models.'
+  - 'No reasoning effort is listed here (`copilot --effort` takes its own levels per model), and the models are not priced here (Copilot bills credits, not per-token list prices).'
+  - "Ids were read from models.dev (provider github-copilot) and each name was found on GitHub's supported-models page, 2026-11-23; models that models.dev marks as going away are left out."
+customIds: true
+copilot:
+  models:
+    - id: claude-opus-5.5
+      label: Claude Opus 5.5
+      tier: best
+      context: 1000000
+      reasoning: true
+    - id: claude-sonnet-5.5
+      label: Claude Sonnet 5.5
+      tier: balanced
+      context: 1000000
+      reasoning: true
+      default: true
+    - id: claude-haiku-5.5
+      label: Claude Haiku 5.5
+      tier: fast
+      context: 1000000
+      reasoning: true
+    - id: gpt-6.2-sol
+      label: GPT-6.2 Sol
+      tier: best
+      context: 1050000
+      reasoning: true
+    - id: gpt-6.1-terra
+      label: GPT-6.1 Terra
+      tier: balanced
+      context: 1050000
+      reasoning: true
+    - id: gpt-6-luna
+      label: GPT-6 Luna
+      tier: fast
+      context: 1050000
+      reasoning: true
+    - id: gemini-4-neon
+      label: Gemini 4 Neon
+      tier: best
+      context: 1048576
+      reasoning: true
+    - id: gemini-4-hydrogen
+      label: Gemini 4 Hydrogen
+      tier: fast
+      context: 1048576
+      reasoning: true
+    - id: grok-4.7
+      label: Grok 4.7
+      tier: balanced
+      context: 500000
+      reasoning: true

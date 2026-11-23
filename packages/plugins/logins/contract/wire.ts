@@ -1442,9 +1442,8 @@ export const CatalogPriceSchema = z.strictObject({
 });
 
 /**
- * What Usage reads to price a session at list price (`LoginsApi.modelPrices`): each catalog in effect, each half's models
- * THAT STATE A PRICE with the whole of it, and Claude Code's tier slots as bare model ids (`opus` -> the model it is
- * pinned to). No label, no login, no credential: a catalog is public data.
+ * What Usage reads to price a session at list price (`LoginsApi.modelPrices`): each catalog in effect, each half's models THAT STATE
+ * A PRICE with the whole of it, and Claude Code's tier slots as bare model ids (`opus` -> its model). Public data, no credential.
  */
 export const ModelPriceHalfSchema = z.strictObject({
   models: z.array(z.strictObject({ id: ModelIdSchema, price: CatalogPriceSchema })).readonly(),
@@ -1507,6 +1506,9 @@ export const ModelCatalogFileSchema = z.strictObject({
   detect: z.enum(['ollama']).optional(),
   claude: CatalogHalfFileSchema.optional(),
   codex: CatalogHalfFileSchema.optional(),
+  gemini: CatalogHalfFileSchema.optional(),
+  copilot: CatalogHalfFileSchema.optional(),
+  opencode: CatalogHalfFileSchema.optional(),
 });
 export type ModelCatalogFile = z.infer<typeof ModelCatalogFileSchema>;
 

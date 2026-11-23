@@ -254,9 +254,10 @@ export const MODEL_SET_ITEMS = configDef(
 // ─── state (§9.2) ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The model a DERIVED runtime started with the first time Ferretry saw it, by the runtime's (stable) name. A catalog that
- * later names another default is OFFERED in pickers and never moves this: an existing runtime's model changes only when
- * its owner changes it (D4).
+ * The model a (login, harness) launched with the first time Ferretry saw it, through that login's own catalog, by
+ * `<harness>:<login id>`. A missing file is the first run; one that cannot be read refuses derived runtimes and is never
+ * written over. A catalog that later names another default is OFFERED in pickers and never moves this: a runtime's model
+ * changes only when its owner changes it (D4). A login's keys are pruned when the login is removed.
  */
 export const RUNTIMES_PINS = defineState({
   name: 'starter-pins',

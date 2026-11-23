@@ -746,6 +746,24 @@ describe('materialiseFleet', () => {
     should(interactivePart(wrapperOf(result, 'claude-default'))).endWith('exec claude "$@"\n');
   });
 
+  it('should publish a derived runtime that is refused as unavailable with the refusal, and its wrapper says why', () => {
+    // Arrange: a pinned model no catalog offers any more (or pins nobody could read) is a refusal on the runtime.
+    const reason = 'provider-old is no longer offered for claude-you; pick a model or use Update now';
+    const base = modelOf();
+    const model = {
+      ...base,
+      runtimes: { ...base.runtimes, 'claude-default': { ...base.runtimes['claude-default'], refused: reason } },
+    } as AccountModel;
+
+    // Act
+    const result = plan(model);
+
+    // Assert: refused, with the sentence; the runtime that is not refused still launches.
+    should(result.manifest.accounts[0]).match({ available: false, unavailableReason: reason });
+    should(result.manifest.accounts[1]).match({ available: true, unavailableReason: null });
+    should(wrapperOf(result, 'claude-default')).containEql(reason);
+  });
+
   it('should have each wrapper exec the harness path the caller resolved, per harness', () => {
     // Arrange
     const model = modelOf();

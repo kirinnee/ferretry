@@ -25,12 +25,13 @@ import {
   type StartDecideInput,
 } from '@ferretry/core-ferrets/contract';
 import type { HookDecision } from '@ferretry/kernel/contract';
+import type { HarnessKind } from './harness-kind.ts';
 import { FleetManifestUnreadableError } from './manifest-reading.ts';
 import { launchContextWindow, type ModelWindows, resolveLaunchCompactAt } from './launch-compact-at.ts';
 
 /** What the launch gate needs of one published runtime. */
 interface RuntimeLaunchFacts {
-  readonly kind: 'claude' | 'codex';
+  readonly kind: HarnessKind;
   /** Where ferrets on this account compact, in tokens, when the manifest names a number (`auto` is absent). */
   readonly compactAt?: number;
   /** The account's default model and the context window its catalog declares per model: what caps a trigger. */

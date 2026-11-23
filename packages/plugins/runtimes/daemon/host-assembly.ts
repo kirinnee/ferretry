@@ -44,6 +44,7 @@ import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-
 import { loginsLaunchStores, loginsModelCatalogs } from './adapters/model-sources.ts';
 import { fileFleetSetupDeps } from './adapters/setup-files.ts';
 import { unavailableSharedHistory } from './adapters/shared-history-unavailable.ts';
+import { supportedKinds } from './lib/harness-kind.ts';
 import type { AccountModel } from './lib/account/schema.ts';
 import { type FleetManifest, type HarnessKind, harnessKindOfKey } from './lib/manifest.ts';
 import { claudeStatuslineFor } from './lib/account/statusline.ts';
@@ -280,7 +281,7 @@ function fleetTexts(disk: FleetDisk): AdapterHost['texts'] {
 }
 
 /** The harnesses a login can run on, by their command name. */
-const INSTALLABLE: readonly HarnessKind[] = ['claude', 'codex'];
+const INSTALLABLE: readonly HarnessKind[] = supportedKinds();
 
 /** The harness commands every read asks about, looked up ahead (`./adapters/command-cache.ts`). */
 const HARNESS_COMMANDS = ['claude', 'codex', 'npm', 'brew', 'apt-get'] as const;

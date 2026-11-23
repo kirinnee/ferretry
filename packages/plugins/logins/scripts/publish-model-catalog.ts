@@ -12,12 +12,15 @@
  * checks out with `fetch-depth: 0` and sets `MODEL_CATALOG_REQUIRE_HISTORY=1`, which turns a shallow
  * checkout into a failed build instead of a catalog stuck at one version. Anywhere else a shallow
  * checkout publishes version 0, which no deployed catalog equals.
+ *
+ * THE SUGGESTIONS (models.dev, trimmed, plus LiteLLM's retirement dates) are added to the same models.json, so
+ * the one signature covers them. The build is the only thing that contacts those sites.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { builtInModelCatalogs } from '../daemon/lib/catalog/catalog.ts';
-import { publishedModelCatalogFiles } from '../daemon/lib/catalog/published.ts';
+import { buildPublishedFiles, realSuggestionsDeps } from './suggestions-source.ts';
 
 const packageRoot = resolve(import.meta.dir, '..');
 const given = process.argv[2];
@@ -50,7 +53,12 @@ function catalogVersion(): number {
 }
 
 const version = catalogVersion();
-for (const [path, text] of Object.entries(publishedModelCatalogFiles(version, builtInModelCatalogs()))) {
+// The suggestions (models.dev, trimmed) ride in the same signed models.json; a build that can neither fetch them
+// nor read the committed snapshot stops here rather than publish without them, and one whose final file is over
+// the gzip budget publishes the committed snapshot or stops too (scripts/suggestions-source.ts). Nothing is
+// written before every file is known to fit.
+const files = await buildPublishedFiles(version, builtInModelCatalogs(), realSuggestionsDeps());
+for (const [path, text] of Object.entries(files)) {
   const target = join(distDirectory, path);
   await mkdir(dirname(target), { recursive: true });
   await writeFile(target, text);

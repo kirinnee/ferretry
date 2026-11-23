@@ -18,6 +18,7 @@
  */
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { FerretId } from '@ferretry/kernel/contract';
+import { isKind } from '../harness-kind.ts';
 import type { CodexAppServerOutcome } from './codex-runtime.ts';
 
 /** The host seams an ended ferret's follow-up stands on. Absent until the host offers them (see `RuntimesAssembly`). */
@@ -69,7 +70,7 @@ export class RuntimeEndSupervision {
 
   async #ended(seams: RuntimeEndSeams, ferret: string): Promise<void> {
     const summary = await this.deps.ferrets.get(ferret as FerretId);
-    if (summary?.state !== 'stopped' || summary.harness !== 'codex' || summary.runtime === undefined) return;
+    if (summary?.state !== 'stopped' || !isKind(summary.harness, 'codex') || summary.runtime === undefined) return;
     const wrapper = await seams.wrapperOf(summary.runtime);
     if (wrapper !== undefined) await seams.supervisor.afterSessionEnded(wrapper);
     if (summary.cause?.kind !== 'start_failed' || summary.cause.explained === undefined) return;
