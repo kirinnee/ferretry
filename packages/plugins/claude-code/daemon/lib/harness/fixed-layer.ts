@@ -1,5 +1,6 @@
 import type { HarnessConfig } from '../../../contract/index.ts';
-import { CLAUDE_COMPACTION_HOOKS } from './compaction.ts';
+import type { CompactionExtras } from '@ferretry/core-ferrets/contract';
+import { claudeCompactionHooks } from './compaction.ts';
 
 // Copied from fleet/src/lib/account/fixed-layer.ts: these are seen screens, not owner choices.
 export const CLAUDE_PROMPTS_SEEN = {
@@ -94,7 +95,11 @@ export const rmWaiverApplies = (dangerousRmWaiver: boolean, permissionMode: Harn
  * M7: there is NO question hook. An open `AskUserQuestion` form is read off the pane (and its end off the transcript) by
  * the conversation plugin's question watch (`questions/lib/watch.ts`), so no `PreToolUse` hook is written.
  */
-export function fixedLayer(permissionMode: HarnessConfig['permissionMode'], cwd: string) {
+export function fixedLayer(
+  permissionMode: HarnessConfig['permissionMode'],
+  cwd: string,
+  compaction?: CompactionExtras,
+) {
   const skip = permissionMode === 'skip';
   const settings = {
     permissions: { defaultMode: skip ? 'bypassPermissions' : 'auto' },
@@ -103,7 +108,7 @@ export function fixedLayer(permissionMode: HarnessConfig['permissionMode'], cwd:
   };
   return {
     settings,
-    overlay: { ...settings, hooks: { ...CLAUDE_COMPACTION_HOOKS } },
+    overlay: { ...settings, hooks: { ...claudeCompactionHooks(compaction) } },
     claudeJson: {
       hasCompletedOnboarding: true,
       hasCompletedClaudeInChromeOnboarding: true,

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
+import { BOARD_COMPACTION, boardCompactionParts } from '../../daemon/lib/compaction.ts';
 import manifest from '../../manifest.ts';
 
 /**
@@ -58,5 +59,37 @@ describe('the Board instruction', () => {
       'task skip',
     ])
       expect([verb, declared.has(verb)]).toEqual([verb, true]);
+  });
+});
+
+describe('what Board adds to the compaction texts', () => {
+  const part = { kind: 'compaction', ...BOARD_COMPACTION } as const;
+
+  test('says exactly this, and it is what both harnesses compose into their payloads', () => {
+    expect(BOARD_COMPACTION).toEqual({
+      reabsorb:
+        'Your board task, if you have one: `fy task show <task id>` (add --yaml for the editable form); if you do not know the id, `fy board status` says whether the board is on.',
+      keep: 'your task id and its status (now, done so far, next)',
+      reread: 'the task',
+    });
+  });
+
+  test('is handed to the launch of a lead and of a sub-ferret alike', async () => {
+    const source = boardCompactionParts();
+    for (const role of ['lead', 'helper'] as const)
+      expect(await source.parts({ role } as Parameters<typeof source.parts>[0])).toEqual([part]);
+  });
+
+  test('names only task and board verbs this plugin declares, and nothing `printf` would eat', () => {
+    const named = [...BOARD_COMPACTION.reabsorb.matchAll(/`fy (board|task) ([a-z-]+)/gu)].map(
+      match => `${match[1]} ${match[2]}`,
+    );
+    expect(named).toEqual(['task show', 'board status']);
+    for (const verb of named) expect([verb, declared.has(verb)]).toEqual([verb, true]);
+    for (const words of Object.values(BOARD_COMPACTION)) expect(words).not.toMatch(/['%]/u);
+  });
+
+  test('is taken by the manifest as a launch.parts hook', () => {
+    expect(manifest.hooks?.takes?.some(take => take.hook.name === 'launch.parts')).toBe(true);
   });
 });

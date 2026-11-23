@@ -16,7 +16,13 @@
  * ferret-specific value is `FY_SESSION_ID`, which every launch hands the pane; nothing secret is read or printed.
  */
 
-import { COMPACTION_KEEP_LINES, COMPACTION_REABSORB_LINES } from '@ferretry/core-ferrets/contract';
+import {
+  type CompactionExtras,
+  COMPACTION_KEEP_LINES,
+  COMPACTION_REABSORB_LINES,
+  compactionKeepLines,
+  compactionReabsorbTemplate,
+} from '@ferretry/core-ferrets/contract';
 
 /** The matcher that fires a `SessionStart` hook only for the start a compaction makes. */
 export const CLAUDE_COMPACT_MATCHER = 'compact';
@@ -35,7 +41,24 @@ const print = (lines: readonly string[], args: string): string => `printf '${lin
 export const CLAUDE_REABSORB_COMMAND = print(CLAUDE_REABSORB_LINES, [SESSION, SESSION, SESSION].join(' '));
 export const CLAUDE_KEEP_COMMAND = print(CLAUDE_KEEP_LINES, '');
 
-export const CLAUDE_COMPACTION_HOOKS = {
-  PreCompact: [{ hooks: [{ type: 'command', command: CLAUDE_KEEP_COMMAND }] }],
-  SessionStart: [{ matcher: CLAUDE_COMPACT_MATCHER, hooks: [{ type: 'command', command: CLAUDE_REABSORB_COMMAND }] }],
-};
+/**
+ * The two hooks for ONE launch: with a plugin's `extras` (Board's task lines while Board is on) the payloads carry them,
+ * without any they name core's verbs only. The hooks are the same two commands either way, so only their text differs.
+ */
+export const claudeCompactionHooks = (extras?: CompactionExtras) => ({
+  PreCompact: [{ hooks: [{ type: 'command', command: print(compactionKeepLines(extras), '') }] }],
+  SessionStart: [
+    {
+      matcher: CLAUDE_COMPACT_MATCHER,
+      hooks: [
+        {
+          type: 'command',
+          command: print(compactionReabsorbTemplate(extras), [SESSION, SESSION, SESSION].join(' ')),
+        },
+      ],
+    },
+  ],
+});
+
+/** The hooks with nothing added: what a launch gets while every plugin that adds to them is off. */
+export const CLAUDE_COMPACTION_HOOKS = claudeCompactionHooks();

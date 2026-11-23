@@ -75,7 +75,13 @@ export async function serveTools({
   await serveMcpOverStdio(
     new McpServer(
       isOn === undefined ? clientToolsPort(client) : { ...clientToolsPort(client), isOn },
-      { name: SERVER_NAME, version, instructions, channel: channel === true },
+      {
+        name: SERVER_NAME,
+        version,
+        instructions,
+        channel: channel === true,
+        ...(sleep === undefined ? {} : { sleep }),
+      },
       () => {
         // Never awaited: it ends when stopped, and a poll still waiting at the daemon must not hold the process open.
         pump?.start().catch(() => undefined);

@@ -307,3 +307,41 @@ describe('McpServer — the work switch', () => {
     should(JSON.stringify((await harness().request('tools/list')) as object)).not.containEql('"plugin"');
   });
 });
+
+describe('McpServer — a slow plugin inventory never stalls tool discovery', () => {
+  /** A server whose inventory answers after `delayMs` with `on`, and whose discovery wait is `bound` ms. */
+  const slow = (delayMs: number, on: boolean, bound?: number) =>
+    new McpServer(
+      {
+        call: async () => ({ text: 'ok' }),
+        isOn: async () => {
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          return on;
+        },
+      },
+      {
+        name: 'ferretry',
+        version: '9.9.9',
+        sleep: async ms => await new Promise<void>(resolve => setTimeout(resolve, ms)),
+        ...(bound === undefined ? {} : { discoveryWaitMs: bound }),
+      },
+    );
+  const list = async (server: McpServer) => {
+    const answer = (await server.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' })) as {
+      result: { tools: { name: string }[] };
+    };
+    return answer.result.tools.map(tool => tool.name);
+  };
+
+  // The timing claim (the answer comes inside the bound, measured) is in `tests/perf/cli/server.test.ts`.
+  it('should list every tool, as when the inventory cannot be read, when the inventory is slower than the bound', async () => {
+    // The slow inventory would say Board is off; the bound gives up on it first, so the task tools are still listed.
+    should(await list(slow(200, false, 10))).eql(MCP_TOOLS.map(tool => tool.name));
+  });
+
+  it('should still apply the inventory when it answers inside the bound', async () => {
+    const names = await list(slow(5, false, 1000));
+    should(names).not.containEql('task_progress');
+    should(names).have.length(MCP_TOOLS.length - 2);
+  });
+});

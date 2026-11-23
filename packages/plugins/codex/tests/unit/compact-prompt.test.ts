@@ -60,3 +60,42 @@ describe('the Codex launch argv carries the compaction prompt', () => {
     expect(buildCodexLaunchArgv({ executable: 'codex' })).toEqual(['codex']);
   });
 });
+
+/** The prompt's two tails before the work switch moved Board's lines out (the base wording, Board on). */
+const BASE_KEEP =
+  'When you summarise this conversation, keep: your assignment and how far you are; your task id and its status (now, done so far, next); your open agenda item ids; every message you still owe a reply to and who sent it; and the branch and PR links you own. After the compaction you will be told to read the assignment, the task, the agenda and the owed messages again, so the summary must name where each one is.';
+const BASE_REABSORB = [
+  `You were just compacted, so part of your earlier context is gone. This is session ${SESSION}.`,
+  'Before you continue, take back in everything you still owe:',
+  `1. Your assignment: read your first turn again with \`fy logs ${SESSION} --turn 1\`; it names the turn file to read and follow.`,
+  '2. Your board task, if you have one: `fy task show <task id>` (add --yaml for the editable form); if you do not know the id, `fy board status` says whether the board is on.',
+  '3. Your open agenda items: `fy agenda ls`, then `fy agenda show <id>` for each.',
+  `4. Messages you still owe a reply to: \`fy transcript ${SESSION} --tail\`, then answer with \`fy reply <id> <text>\`.`,
+  'Then carry on with your next step. Do not ask the owner for what your assignment or agenda already says.',
+].join('\n');
+
+const BOARD_ADDS = {
+  reabsorb:
+    'Your board task, if you have one: `fy task show <task id>` (add --yaml for the editable form); if you do not know the id, `fy board status` says whether the board is on.',
+  keep: 'your task id and its status (now, done so far, next)',
+  reread: 'the task',
+};
+
+const squash = (text: string): string => text.replaceAll(/\s+/gu, ' ').trim();
+
+describe('the Codex compaction prompt, with the work switch on and off', () => {
+  test('with Board on (its compaction part) the word-for-word prompt carries the task lines: the base wording', () => {
+    const prompt = codexCompactPrompt(SESSION, BOARD_ADDS);
+    expect(squash(prompt)).toContain(squash(BASE_KEEP));
+    expect(prompt).toContain(BASE_REABSORB);
+    expect(prompt).toContain('fy task show <task id>');
+    expect(prompt).toContain('fy board status');
+    expect(prompt).not.toContain('%s');
+  });
+
+  test('with Board off (no part) it is core’s alone and names no task or board verb', () => {
+    expect(codexCompactPrompt(SESSION)).toBe(CODEX_COMPACT_PROMPT);
+    expect(CODEX_COMPACT_PROMPT).not.toMatch(/\bfy (?:task|board)\b/u);
+    expect(CODEX_COMPACT_PROMPT).toContain('3. Messages you still owe');
+  });
+});

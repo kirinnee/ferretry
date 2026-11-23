@@ -1,6 +1,8 @@
 import { describe, it } from 'bun:test';
 import { join } from 'node:path';
+import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import should from 'should';
+import { homeText } from '../../../daemon/lib/harness/launch.ts';
 import {
   CLAUDE_COMPACT_MATCHER,
   CLAUDE_COMPACTION_HOOKS,
@@ -129,5 +131,68 @@ describe('the compaction hooks in the fixed layer', () => {
     should(out).not.containEql('task');
     should(out).not.containEql('card');
     should(out).not.containEql(SECRET);
+  });
+});
+
+/** The two Claude payloads as they were before the work switch moved Board's lines out (the base wording, Board on). */
+const BASE_REABSORB = [
+  'You were just compacted, so part of your earlier context is gone. This is session sess-42.',
+  'Before you continue, take back in everything you still owe:',
+  '1. Your assignment: read your first turn again with `fy logs sess-42 --turn 1`; it names the turn file to read and follow.',
+  '2. Your board task, if you have one: `fy task show <task id>` (add --yaml for the editable form); if you do not know the id, `fy board status` says whether the board is on.',
+  '3. Your open agenda items: `fy agenda ls`, then `fy agenda show <id>` for each.',
+  '4. Messages you still owe a reply to: `fy transcript sess-42 --tail`, then answer with `fy reply <id> <text>`.',
+  'Then carry on with your next step. Do not ask the owner for what your assignment or agenda already says.',
+].join('\n');
+
+const BASE_KEEP =
+  'When you summarise this conversation, keep: your assignment and how far you are; your task id and its status (now, done so far, next); your open agenda item ids; every message you still owe a reply to and who sent it; and the branch and PR links you own. After the compaction you will be told to read the assignment, the task, the agenda and the owed messages again, so the summary must name where each one is.';
+
+/** What Board hands a launch while it is on, in the words Board owns (its own test pins the same words). */
+const BOARD_ADDS = {
+  kind: 'compaction',
+  reabsorb:
+    'Your board task, if you have one: `fy task show <task id>` (add --yaml for the editable form); if you do not know the id, `fy board status` says whether the board is on.',
+  keep: 'your task id and its status (now, done so far, next)',
+  reread: 'the task',
+} as const;
+
+const squash = (text: string): string => text.replaceAll(/\s+/gu, ' ').trim();
+
+describe('the compaction hooks a launch writes, with the work switch on and off', () => {
+  const overlayHooks = (parts: readonly LaunchPart[]) =>
+    JSON.parse(
+      homeText({
+        folder: '/work',
+        permissionMode: 'auto',
+        instructions: [],
+        parts,
+        settings: new Map(),
+        hooks: new Map(),
+      }).overlay,
+    ).hooks as {
+      SessionStart: { hooks: { command: string }[] }[];
+      PreCompact: { hooks: { command: string }[] }[];
+    };
+
+  it('with Board on (its compaction part), the ACTUAL payloads carry the task lines: the base wording', async () => {
+    const hooks = overlayHooks([BOARD_ADDS]);
+    const reabsorb = await run(hooks.SessionStart[0]?.hooks[0]?.command ?? '', { FY_SESSION_ID: 'sess-42' });
+    const keep = await run(hooks.PreCompact[0]?.hooks[0]?.command ?? '', { FY_SESSION_ID: 'sess-42' });
+    should(squash(reabsorb.out)).equal(squash(BASE_REABSORB));
+    should(squash(keep.out)).equal(squash(BASE_KEEP));
+    should(reabsorb.out).containEql('fy task show <task id>');
+    should(reabsorb.out).containEql('fy board status');
+    should(keep.out).containEql('your task id and its status');
+  });
+
+  it('with Board off (no part), the payloads are core’s alone and name no task or board verb', async () => {
+    const hooks = overlayHooks([]);
+    should(hooks).eql(JSON.parse(JSON.stringify({ ...CLAUDE_COMPACTION_HOOKS })));
+    const reabsorb = await run(hooks.SessionStart[0]?.hooks[0]?.command ?? '', { FY_SESSION_ID: 'sess-42' });
+    const keep = await run(hooks.PreCompact[0]?.hooks[0]?.command ?? '', {});
+    should(reabsorb.out).not.match(/\bfy (?:task|board)\b/u);
+    should(reabsorb.out).containEql('3. Messages you still owe');
+    should(keep.out).not.containEql('task');
   });
 });
