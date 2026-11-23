@@ -37,7 +37,6 @@ export function runtime(
     wrapper: `${name}-wrapper`,
     harness,
     credential: { id: `${name}-login`, store: 'ferretry' },
-    agent: true,
     modelSet: { source: 'harness-default' },
     ...(catalogId === undefined
       ? {}

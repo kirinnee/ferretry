@@ -12,7 +12,6 @@ const runtime = (wrapper: string, overrides: Partial<RuntimeView> = {}): Runtime
   harness: 'claude-code',
   credential: { id: `login-${wrapper}`, store: 'host', status: 'ready' },
   profile: 'Default',
-  agent: true,
   stack: {
     harness: 'claude-code',
     available: { available: true },

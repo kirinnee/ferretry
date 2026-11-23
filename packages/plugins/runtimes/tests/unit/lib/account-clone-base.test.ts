@@ -48,7 +48,7 @@ const bundleShape = {
   credentials: [{ id: 'claude-you', harness: 'claude-code', label: 'you', email: 'person@example.test' }],
   components: { instructions: { main: { file: 'components/instructions/main.md' } } },
   profiles: { default: { layers: ['instructions/main'] } },
-  runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: false } },
+  runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default' } },
   files: [{ path: 'components/instructions/main.md', content: '# Main' }],
   notCopied: [],
 };

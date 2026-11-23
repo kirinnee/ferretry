@@ -2,6 +2,7 @@ import type { FerretDetails, FerretRecord, FerretState } from '../../../contract
 import type { SessionConfig } from '../protocol/session.ts';
 import type { SessionStatus } from '../protocol/session-base.ts';
 import { reviveRuling } from '../protocol/session-revive.ts';
+import { launchMode } from '../session/peers/fleet.ts';
 
 /**
  * The supervision fields today's start wrote into every session document it made (today's `SESSION_START_DEFAULTS`,
@@ -106,7 +107,7 @@ export function sessionDocument(seed: SessionDocumentSeed, now: string): Session
       : { model: options.model, launchModelSource: 'requested' as const }),
     ...(options?.effort === undefined ? {} : { launchReasoningEffort: options.effort }),
     ...(options?.fast === undefined ? {} : { launchFast: options.fast }),
-    mode: record.mode ?? 'auto',
+    mode: launchMode(record.mode),
     remoteControl: false,
     harnessFlags: [...(options?.harnessFlags ?? [])],
     cwd: record.folder,

@@ -133,7 +133,7 @@ function ownerPlugins(owners: Owners, absent: readonly string[] = []): DaemonImp
 }
 
 const BASE = {
-  runtimes: { 'claude-default': { login: 'claude-you', profile: 'default', agent: true } },
+  runtimes: { 'claude-default': { login: 'claude-you', profile: 'default' } },
   profiles: { default: { contents: ['modelSets/heavy'] } },
   'model-sets': { heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
 };
@@ -194,7 +194,6 @@ const put = (name: string) => ({
     name,
     credential: 'claude-you',
     profile: 'default',
-    agent: true,
     create: true,
     addAnother: true,
   },
@@ -308,7 +307,7 @@ describe('an apply with every kind a profile layer names provided', () => {
         ...BASE,
         runtimes: {
           ...BASE.runtimes,
-          'glm-work': { login: 'glm', profile: 'default', agent: false },
+          'glm-work': { login: 'glm', profile: 'default' },
         },
       },
     });
@@ -715,7 +714,7 @@ async function composeWithWithheldLogin(
     logins: [sampleLogin('claude-you', { store: 'ferretry' }), glm],
     config:
       options.used === true
-        ? { ...BASE, runtimes: { ...BASE.runtimes, 'glm-work': { login: 'glm', profile: 'default', agent: false } } }
+        ? { ...BASE, runtimes: { ...BASE.runtimes, 'glm-work': { login: 'glm', profile: 'default' } } }
         : BASE,
   });
   composed.logins.setTemplates([
@@ -730,7 +729,7 @@ async function composeWithWithheldLogin(
 }
 
 const putOnGlm = (create: boolean, name = 'glm-work') => ({
-  change: { kind: 'runtime.put', name, credential: 'glm', profile: 'default', agent: true, create, addAnother: true },
+  change: { kind: 'runtime.put', name, credential: 'glm', profile: 'default', create, addAnother: true },
 });
 
 const noGlmWork = (composed: Composed): void =>
@@ -834,7 +833,7 @@ async function composeWithHealthyLogin(
 describe('BG-029 a login that starts standing in after a change was previewed changes the revision, so the apply is refused as stale', () => {
   it('BG-029 R3-P3a a login withheld between propose and apply: refused as stale, homes and wrapper byte-identical', async () => {
     const composed = await composeWithHealthyLogin(ONE_PLAIN_VARIABLE, {
-      'glm-work': { login: 'glm', profile: 'default', agent: false },
+      'glm-work': { login: 'glm', profile: 'default' },
     });
     expect((await stageAndApply(composed.host, put('claude-first'))).status).toBe(200);
     const homes = JSON.stringify(await homesSnapshot(composed.world));
@@ -877,7 +876,7 @@ describe('BG-029 a login that starts standing in after a change was previewed ch
 
   it('BG-029 R3-P1 a rename of a runtime on a withheld login is refused at propose, naming only the login', async () => {
     const composed = await composeWithHealthyLogin([], {
-      'glm-work': { login: 'glm', profile: 'default', agent: false },
+      'glm-work': { login: 'glm', profile: 'default' },
     });
     expect((await stageAndApply(composed.host, put('claude-first'))).status).toBe(200);
     composed.logins.setTemplates([GLM_WITHHELD]);

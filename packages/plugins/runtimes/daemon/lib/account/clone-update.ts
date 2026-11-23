@@ -479,7 +479,6 @@ function differingFields(
       return {
         login: of(`login/${String(value.credential)}`),
         profile: of(`profile/${String(value.profile)}`),
-        agent: value.agent === true,
         harness: value.harness,
         compactAt: value.compactAt,
       };
@@ -1467,7 +1466,6 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
       runtimes[name] = {
         credential,
         profile: profile.slice('profile/'.length),
-        agent: theirRuntime.agent,
         ...(theirRuntime.harness === undefined ? {} : { harness: theirRuntime.harness }),
         ...(theirRuntime.compactAt === undefined ? {} : { compactAt: theirRuntime.compactAt }),
         ...(disabled === undefined ? {} : { disabled }),

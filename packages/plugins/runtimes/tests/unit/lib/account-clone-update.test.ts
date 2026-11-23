@@ -72,7 +72,7 @@ const bundleOf = (side: Side, extra: Record<string, unknown> = {}): CloneBundle 
     credentials: [{ id: 'claude-you', harness: 'claude-code', label: 'you', email: 'person@example.test' }],
     components: { instructions },
     profiles: { default: { layers: [...(side.main === undefined ? [] : ['instructions/main'])] } },
-    runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: false } },
+    runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default' } },
     files,
     notCopied: [],
     ...extra,
@@ -101,7 +101,7 @@ const targetOf = (side: Side, link: Record<string, unknown> = { clonedFromKey: K
       default: { layers: Object.keys(instructions).map(name => `instructions/${name}`), clonedFromKey: KEY_PROFILE },
     },
     runtimes: {
-      'claude-default': { credential: 'claude-you', profile: 'default', agent: false, clonedFromKey: KEY_RUNTIME },
+      'claude-default': { credential: 'claude-you', profile: 'default', clonedFromKey: KEY_RUNTIME },
     },
   });
   return { model, targetFiles };
@@ -425,7 +425,7 @@ describe('dependencies follow', () => {
 describe('a source the bundle cannot be read from here', () => {
   it('should refuse with a sentence, not a stack', () => {
     const input = inputOf({ main: 'A' }, { main: 'A' }, undefined, {
-      bundle: bundleOf({ main: 'A' }, { runtimes: { r: { credential: 'ghost', profile: 'default', agent: false } } }),
+      bundle: bundleOf({ main: 'A' }, { runtimes: { r: { credential: 'ghost', profile: 'default' } } }),
     });
     should(() => analyseCloneUpdate(input)).throw(CloneRefusal);
   });
@@ -579,7 +579,7 @@ describe('a login is never changed (design §14.4)', () => {
 describe('logins during an update', () => {
   const agentOn = (side: Side = { main: 'A' }) =>
     bundleOf(side, {
-      runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: true } },
+      runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', harness: 'claude' } },
     });
   const withTwoLogins = () =>
     parseAccountModel({
@@ -803,8 +803,8 @@ describe('profiles and runtimes new here', () => {
           second: { layers: ['instructions/main'] },
         },
         runtimes: {
-          'claude-default': { credential: 'claude-you', profile: 'default', agent: false },
-          'claude-second': { credential: 'claude-you', profile: 'second', agent: true },
+          'claude-default': { credential: 'claude-you', profile: 'default' },
+          'claude-second': { credential: 'claude-you', profile: 'second' },
         },
       },
     );
@@ -821,7 +821,6 @@ describe('profiles and runtimes new here', () => {
     const plan = planCloneUpdate(analyseCloneUpdate(input), { decisions: {} });
     should(plan.model.profiles.second?.layers).eql(['instructions/main']);
     should(plan.model.runtimes['claude-second']?.credential).equal('claude-you');
-    should(plan.model.runtimes['claude-second']?.agent).equal(true);
   });
 
   it('should refuse a runtime added without the profile it runs on', () => {
@@ -1082,7 +1081,7 @@ describe('linking a profile and a runtime by name', () => {
     const model = parseAccountModel({
       ...here.model,
       profiles: { default: { layers: ['instructions/main'] } },
-      runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: false } },
+      runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default' } },
     });
     const input = inputOf({ main: 'A' }, { main: 'A' }, undefined, { target: model, targetFiles: here.targetFiles });
     const plan = planCloneUpdate(analyseCloneUpdate(input), { decisions: {} });
@@ -1617,7 +1616,7 @@ describe('an owner of the whole asset tree, or reached by stepping out and back 
         components: hookC,
         files: fileC,
         profiles: { p: { layers: ['hooks/c'] }, q: { layers: ['profile/p'] } },
-        runtimes: { r: { credential: 'api', profile: direct ? 'p' : 'q', agent: true } },
+        runtimes: { r: { credential: 'api', profile: direct ? 'p' : 'q' } },
       });
       return analyseCloneUpdate(bareInput(bundle, target, here));
     };
@@ -2008,14 +2007,14 @@ describe('profile and runtime settings an update writes (#F575 finding 4)', () =
       keys: { 'profile/default': KEY_P, 'runtime/agent': KEY_R, 'login/api': KEY_L },
       credentials: [{ id: 'api', harness: 'claude-code', label: 'api' }],
       profiles: { default: { layers: [], ...profile } },
-      runtimes: { agent: { credential: 'api', profile: 'default', agent: true, ...runtime } },
+      runtimes: { agent: { credential: 'api', profile: 'default', ...runtime } },
     });
   const mine = (profile: Record<string, unknown>, runtime: Record<string, unknown>) =>
     parseAccountModel({
       version: 1,
       credentials: { api: { harness: 'claude', store: 'ferretry', label: 'api', ...FROM, clonedFromKey: KEY_L } },
       profiles: { default: { layers: [], clonedFromKey: KEY_P, ...profile } },
-      runtimes: { agent: { credential: 'api', profile: 'default', agent: true, clonedFromKey: KEY_R, ...runtime } },
+      runtimes: { agent: { credential: 'api', profile: 'default', clonedFromKey: KEY_R, ...runtime } },
     });
 
   it('should add a profile and a runtime with the compactAt the source sets', () => {
@@ -2033,10 +2032,10 @@ describe('profile and runtime settings an update writes (#F575 finding 4)', () =
   });
 
   it('should keep an explicit threshold here that the source shares when another field is taken', () => {
-    // Arrange: only agent differs; both sides set the same thresholds.
+    // Arrange: only the harness differs; both sides set the same thresholds.
     const analysis = analyseCloneUpdate(
       bareInput(
-        theirs({ compactAt: 'auto' }, { compactAt: 250000, agent: false }),
+        theirs({ compactAt: 'auto' }, { compactAt: 250000, harness: 'claude' }),
         mine({ compactAt: 'auto' }, { compactAt: 250000 }),
       ),
     );
@@ -2046,7 +2045,6 @@ describe('profile and runtime settings an update writes (#F575 finding 4)', () =
 
     // Assert
     should(plan.done.taken).eql(['runtime/agent']);
-    should(plan.model.runtimes.agent?.agent).be.false();
     should(plan.model.runtimes.agent?.compactAt).equal(250000);
     should(plan.model.profiles.default?.compactAt).equal('auto');
   });
@@ -2103,7 +2101,7 @@ describe('an environment login a copy adds (#F544 finding 3)', () => {
         },
       ],
       profiles: { default: { layers: [] } },
-      runtimes: { agent: { credential: 'api', profile: 'default', agent: false } },
+      runtimes: { agent: { credential: 'api', profile: 'default' } },
     });
 
   it('should list everything it runs with, keeping a secret a reference', () => {
@@ -2387,7 +2385,7 @@ describe('matching a login by email or label after the record and the key (#F544
     const runtimeOn = (login: Record<string, unknown>) =>
       sourceBundle({
         credentials: [{ id: 'you', harness: 'claude-code', ...login }],
-        runtimes: { agent: { credential: 'you', profile: 'default', agent: false } },
+        runtimes: { agent: { credential: 'you', profile: 'default' } },
         profiles: { default: { layers: [] } },
       });
     const update = (
@@ -2471,7 +2469,7 @@ const versionOf = (
     case 'profile':
       return { value: { layers: [`instructions/l-${v}`] }, files: [] };
     case 'runtime':
-      return { value: { credential: 'claude-you', profile: `p-${v}`, agent: false }, files: [] };
+      return { value: { credential: 'claude-you', profile: `p-${v}` }, files: [] };
   }
 };
 

@@ -21,8 +21,6 @@ export interface PickerAccount {
   readonly wrapper: string;
   readonly displayName: string;
   readonly kind: string;
-  /** An agent runtime: the only kind the daemon starts a ferret on. */
-  readonly agent: boolean;
   readonly credentialId: string;
   /** `null` = the harness's own default. */
   readonly defaultModel: string | null;
@@ -44,7 +42,6 @@ const pickerAccount = (runtime: RuntimeView): PickerAccount => ({
   wrapper: runtime.wrapper,
   displayName: runtime.name,
   kind: runtime.harness,
-  agent: runtime.agent,
   credentialId: runtime.credential.id,
   ...(runtime.models === undefined
     ? {

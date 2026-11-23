@@ -224,7 +224,6 @@ describe('the start check and the fleet facts, from the Runtimes provider', () =
     harness: 'claude-code',
     login: 'main',
     profile: 'default',
-    agent: true,
     launch: { available: true },
     ...extra,
   });

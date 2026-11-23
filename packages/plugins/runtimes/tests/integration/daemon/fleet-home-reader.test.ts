@@ -48,7 +48,6 @@ const runtime = (world: FleetWorld, id: string, name: string, wrapper: string, h
   harness,
   credential: 'c',
   profile: 'p',
-  agent: true,
   wrapper: `${world.fleet}/bin/${wrapper}`,
   models: [],
   defaultModel: null,

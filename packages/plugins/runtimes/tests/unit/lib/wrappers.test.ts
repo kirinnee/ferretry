@@ -33,11 +33,10 @@ const account = (overrides: RuntimeFacts = {}): RuntimeWrapperInput => {
     name: overrides.wrapper ?? 'claude-auto-kirin',
     id: overrides.id ?? ID_ONE,
     harness,
-    agent: true,
     configDirectory: overrides.home ?? '$HOME/.state/fleet/homes/auto-kirin',
     env: overrides.env ?? {},
     args: overrides.flags ?? [],
-    seedFirstRun: harness === 'claude',
+    autonomous: { args: overrides.flags ?? [], seedFirstRun: harness === 'claude', trustLaunchFolder: false },
     fyCommand: 'fy',
   };
 };
@@ -135,7 +134,7 @@ describe('renderRuntimeWrapperScript', () => {
     // Assert
     should(actual.startsWith('#!/bin/sh\n')).be.true();
     should(actual).containEql(MANAGED_MARKER);
-    should(actual).containEql(`# runtime claude-auto-kirin ${ID_ONE} (claude, agent)`);
+    should(actual).containEql(`# runtime claude-auto-kirin ${ID_ONE} (claude)`);
     should(actual).containEql('export CLAUDE_CONFIG_DIR="$HOME/.state/fleet/homes/auto-kirin"');
     should(actual.trimEnd().endsWith('exec claude "$@"')).be.true();
   });
@@ -275,6 +274,18 @@ describe('renderRuntimeWrapperScript', () => {
     should(
       actual.trimEnd().endsWith(`exec claude '--dangerously-skip-permissions' '--model' 'model one' "$@"`),
     ).be.true();
+  });
+
+  it('should render no auto block at all when the wrapper has no autonomous launch', () => {
+    // Arrange
+    const { autonomous: _none, ...bare } = account({ flags: ['--model', 'm'] });
+
+    // Act
+    const actual = render(bare);
+
+    // Assert — the person's own CLI and nothing else: no mode test, no seeding, one exec.
+    should(actual).not.containEql('FY_SESSION_MODE');
+    should(actual.split('\n').filter(line => line.startsWith('exec '))).deepEqual([`exec claude '--model' 'm' "$@"`]);
   });
 
   it('should emit environment keys in a stable order so re-rendering is byte-identical', () => {

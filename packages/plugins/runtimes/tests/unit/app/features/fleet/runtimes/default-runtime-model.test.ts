@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { type Instant, InstantSchema } from '@ferretry/std';
 import {
-  agentRuntimes,
   defaultOptionLabel,
   isDefaultRuntime,
   keepDefaultLabel,
@@ -41,11 +40,9 @@ describe('runtimeStateWords', () => {
 });
 
 describe('the control’s words', () => {
-  it('names the runtime only, keeps only agent runtimes, and says what is kept', () => {
-    const plain = runtime({ name: 'plain' });
-    const agent = runtime({ name: 'agent', agent: true });
+  it('names the runtime only and says what is kept', () => {
+    const agent = runtime({ name: 'agent' });
     expect(defaultOptionLabel(agent)).toBe('agent');
-    expect(agentRuntimes([plain, agent])).toEqual([agent]);
     expect(isDefaultRuntime(machine({ defaultRuntime: 'agent' }), agent)).toBe(true);
     expect(isDefaultRuntime(null, agent)).toBe(false);
     expect(keepDefaultLabel('agent')).toBe('Keep agent');

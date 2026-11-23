@@ -28,8 +28,6 @@ export interface AccountPickerOption {
   readonly wrapper: string;
   readonly displayName: string;
   readonly kind: PickerAccount['kind'];
-  /** An agent runtime: the only kind the daemon starts a session on. */
-  readonly agent: boolean;
   /** The login it uses; its health is that login's status. */
   readonly credentialId: string;
   readonly defaultModel: string | null;
@@ -106,7 +104,6 @@ const accountPickerOption = (
   wrapper: account.wrapper,
   displayName: account.displayName,
   kind: account.kind,
-  agent: account.agent,
   credentialId: account.credentialId,
   defaultModel: account.defaultModel,
   models: account.models,
@@ -143,15 +140,6 @@ export const sameHarnessAccountOptions = (
   harness: PickerAccount['kind'],
 ): readonly AccountPickerOption[] | null =>
   options === null ? null : options.filter(option => option.kind === harness);
-
-/**
- * Narrow to the runtimes the daemon can run a session on: its AGENT runtimes. A runtime without the
- * agent flag is the person's own CLI, and offering it only sets up a refusal. Read from the runtime's
- * own `agent` flag — never from the wrapper's spelling. An unreadable roster stays unreadable.
- */
-export const sessionCapableAccountOptions = (
-  options: readonly AccountPickerOption[] | null,
-): readonly AccountPickerOption[] | null => (options === null ? null : options.filter(option => option.agent));
 
 /**
  * The account a new-session form fills in before anybody chooses: the first one

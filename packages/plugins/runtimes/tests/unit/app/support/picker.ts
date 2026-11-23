@@ -22,7 +22,6 @@ export const pickerAccount = (overrides: Partial<PickerAccount> & { wrapper: str
   id: `rt-${overrides.wrapper}`,
   displayName: overrides.wrapper,
   kind: harnessOf(overrides.wrapper),
-  agent: true,
   credentialId: `login-${overrides.wrapper}`,
   defaultModel: null,
   models: [],
@@ -62,7 +61,6 @@ export const runtimeView = (overrides: Partial<RuntimeView> & { wrapper: string 
   harness: harnessOf(overrides.wrapper),
   credential: { id: `login-${overrides.wrapper}`, store: 'host', status: 'ready' },
   profile: 'Default',
-  agent: true,
   stack: {
     harness: harnessOf(overrides.wrapper),
     available: { available: true },

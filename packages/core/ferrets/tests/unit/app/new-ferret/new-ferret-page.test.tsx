@@ -460,13 +460,13 @@ describe('NewFerretPage › the offered runtime slot', () => {
     const text = JSON.stringify(harness.view.toJSON());
     expect(text).toContain('No runtime on this machine can run ferrets yet.');
     expect(harness.view.root.findByProps({ id: 'fy-new-ferret-create-blocker' }).children.join('')).toBe(
-      'No runtime can run a ferret yet — add one first.',
+      'No runtime can run a ferret yet — add a login first.',
     );
   });
 
-  it('opens the daemon’s Runtimes settings from the no-runtime notice', () => {
+  it('opens the daemon’s Sign-ins settings, where a login is added, from the no-runtime notice', () => {
     const harness = page({ panel: slot => <StubPicker account={CODEX} noAccounts slot={slot} /> });
-    run(() => button(harness.view, 'Create a runtime').props.onClick());
-    expect(harness.navigated).toEqual(['/d/daemon%2Fa/settings/runtimes/runtimes']);
+    run(() => button(harness.view, 'Add a login').props.onClick());
+    expect(harness.navigated).toEqual(['/d/daemon%2Fa/settings/logins/sign-ins']);
   });
 });

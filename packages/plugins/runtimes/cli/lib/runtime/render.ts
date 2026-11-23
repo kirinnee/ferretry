@@ -1,8 +1,7 @@
 import type { RuntimeCatalog, RuntimeView, StackView } from '../../../contract/index.ts';
 import { disabledWords, HARNESS_LABEL, indent, listOrNone, unavailable } from '../fleet/account-render.ts';
 
-const kind = (runtime: RuntimeView): string =>
-  runtime.agent ? `${HARNESS_LABEL[runtime.harness]}, agent` : HARNESS_LABEL[runtime.harness];
+const kind = (runtime: RuntimeView): string => HARNESS_LABEL[runtime.harness];
 
 const login = (runtime: RuntimeView): string => {
   const status = runtime.credential.status === undefined ? '' : ` (${runtime.credential.status.replace(/_/gu, ' ')})`;

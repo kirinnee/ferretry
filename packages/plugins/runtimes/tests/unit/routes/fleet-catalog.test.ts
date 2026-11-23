@@ -606,8 +606,8 @@ const DROPPED_MODEL = parseAccountModel({
   },
   profiles: { cl: { layers: ['settings/cl'] }, cx: { layers: ['settings/cx'] } },
   runtimes: {
-    'claude-run': { credential: 'claude-a', profile: 'cl', agent: true },
-    'codex-run': { credential: 'codex-a', profile: 'cx', agent: true },
+    'claude-run': { credential: 'claude-a', profile: 'cl' },
+    'codex-run': { credential: 'codex-a', profile: 'cx' },
   },
 });
 

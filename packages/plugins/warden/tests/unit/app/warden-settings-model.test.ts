@@ -291,7 +291,6 @@ describe('wardenEfforts', () => {
     wrapper: 'claude-glm',
     displayName: 'claude-glm',
     kind: 'claude',
-    agent: true,
     credentialId: 'glm',
     defaultModel: 'glm-5.3',
     models: [

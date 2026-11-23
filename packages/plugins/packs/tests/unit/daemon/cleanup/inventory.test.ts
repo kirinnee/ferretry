@@ -112,14 +112,10 @@ describe('buildInventory', () => {
 });
 
 describe('inventoryRuntimes', () => {
-  it('should list agent runtimes only, with the provider, login, refusal and models each offers', () => {
+  it('should list every runtime, with the provider, login, refusal and models each offers', () => {
     // Arrange
     const known = facts({
-      runtimes: [
-        opusOn('claude-kirin'),
-        runtime('claude-person', { agent: false }),
-        runtime('codex-bare', { harness: 'codex' }),
-      ],
+      runtimes: [opusOn('claude-kirin'), runtime('codex-bare', { harness: 'codex' })],
       credentials: [week('claude-kirin', 30)],
       tools: [tool('claude-code', true), tool('codex', false)],
       now: NOW,

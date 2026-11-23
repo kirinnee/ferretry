@@ -20,20 +20,6 @@ export const otherHarness = (harness: HarnessKind): HarnessKind =>
 /** Every CLI a login drives, Claude Code first: both for an environment login with a `claude-code:` and a `codex:` half, else its one. */
 export const credentialHarnesses = (credential: LoginView): readonly HarnessKind[] => credential.harnesses;
 
-/** A scope as the chip says it: one CLI, or `both`. */
-export type LoginScope = HarnessKind | 'both';
-
-/** Which CLIs a list of harnesses covers, as one scope. An empty list cannot happen; it reads as Claude. */
-export const scopeOfHarnesses = (harnesses: readonly HarnessKind[]): LoginScope =>
-  harnesses.includes('claude-code') && harnesses.includes('codex') ? 'both' : (harnesses[0] ?? 'claude-code');
-
-/** The scope chip's words. */
-export const LOGIN_SCOPE_WORDS: Readonly<Record<LoginScope, string>> = {
-  'claude-code': 'Claude only',
-  codex: 'Codex only',
-  both: 'Claude + Codex',
-};
-
 /** "Claude Code", or "Claude Code + Codex" for a login that drives both. */
 export const harnessesName = (harnesses: readonly HarnessKind[]): string =>
   harnesses.map(harness => HARNESS_NAMES[harness]).join(' + ');

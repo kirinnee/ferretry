@@ -169,7 +169,7 @@ export function rankMoveTargets(input: MoveTargetInput): MoveTargets {
   const ready: FleetRuntimeView[] = [];
   const candidates: readonly (FleetRuntimeView | string)[] = explicit
     ? targets.map(name => facts.runtimes.find(runtime => named(runtime, name)) ?? name)
-    : facts.runtimes.filter(runtime => runtime !== own && runtime.agent && runtime.harness === source.harness);
+    : facts.runtimes.filter(runtime => runtime !== own && runtime.harness === source.harness);
   for (const candidate of candidates) {
     if (typeof candidate === 'string') {
       tried.push({ runtime: candidate, why: 'there is no runtime by that name on this machine' });

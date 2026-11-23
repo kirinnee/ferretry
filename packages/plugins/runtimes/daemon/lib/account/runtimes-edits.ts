@@ -45,7 +45,6 @@ export function ownedFileBodies(model: AccountModel): ReadonlyMap<string, Body> 
       profile: runtime.profile,
       ...(runtime.harness === undefined ? {} : { harness: harnessKeyOfKind(runtime.harness) }),
       ...(runtime.shell === undefined ? {} : { shell: runtime.shell }),
-      agent: runtime.agent,
       ...(runtime.disabled === undefined ? {} : { disabled: runtime.disabled }),
       ...(runtime.compactAt === undefined ? {} : { compactAt: runtime.compactAt }),
       ...(runtime.clonedFromKey === undefined ? {} : { clonedFromKey: runtime.clonedFromKey }),

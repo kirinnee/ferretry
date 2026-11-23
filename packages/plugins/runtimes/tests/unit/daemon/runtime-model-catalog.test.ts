@@ -28,7 +28,6 @@ const view = (extra: Record<string, unknown> = {}): RuntimeView =>
     harness: 'claude-code',
     credential: { id: 'SECRET-CREDENTIAL-ID', store: 'host', label: 'SECRET-LABEL' },
     profile: 'SECRET-PROFILE-NAME',
-    agent: true,
     modelSet: { source: 'harness-default' },
     ...extra,
   }) as unknown as RuntimeView;

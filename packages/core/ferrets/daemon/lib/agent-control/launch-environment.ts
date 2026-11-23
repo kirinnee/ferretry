@@ -1,7 +1,7 @@
 import type { FerretDetails, FerretId, FerretRecord } from '../../../contract/index.ts';
 import { LAUNCH_SWITCH_VARIABLES, SUB_FERRET_ENV } from '../../../contract/index.ts';
 import { effectiveMode } from '../registry/registry.ts';
-import { HYPERMEDIA_ENV } from '../session/peers/fleet.ts';
+import { HYPERMEDIA_ENV, launchMode } from '../session/peers/fleet.ts';
 
 /** What a ferret's launch environment is kept in: the switches it was launched with, per ferret. */
 export interface LaunchEnvironmentRecord {
@@ -47,14 +47,15 @@ export function switchesOfRecord(
   record: FerretRecord | undefined,
   details?: FerretDetails,
 ): Readonly<Record<string, string>> {
-  return sessionModeSwitch(record === undefined ? undefined : effectiveMode(record, details));
+  // No mode on the record is `auto` (`launchMode`), exactly what the launch handed the pane, so they agree.
+  return record === undefined ? {} : sessionModeSwitch(launchMode(effectiveMode(record, details)));
 }
 
 /**
  * The mode a pane is handed (`FY_SESSION_MODE`, v4 parity): the wrappers and `instructions` read it. The ONE spelling
  * of it, shared by what a launch puts in the pane's environment and what the record implies, so the stored switch and
- * the derived one always agree and a launch never makes a ferret read as changed. No mode hands the pane nothing
- * (unattended, as the wrappers read an unset variable).
+ * the derived one always agree and a launch never makes a ferret read as changed. A caller resolves a record's mode
+ * through `launchMode` first (absent is `auto`, owned there); an unresolved one hands the pane nothing.
  */
 export function sessionModeSwitch(mode: FerretRecord['mode']): Readonly<Record<string, string>> {
   return mode === undefined ? {} : { FY_SESSION_MODE: mode };

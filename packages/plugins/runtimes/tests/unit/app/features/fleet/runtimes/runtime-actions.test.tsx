@@ -176,14 +176,15 @@ describe('Runtime actions: the buttons', () => {
     // The danger ink is the shared row's own `[data-danger]` rule (--menu-item-fg), not a `text-err` utility.
     expect(items.get('remove')?.hasAttribute('data-danger')).toBe(true);
     expect(items.get('rename')?.hasAttribute('data-danger')).toBe(false);
-    expect(items.has('make-default')).toBe(false);
+    // Every runtime can be the default, so a runtime that is not already the default offers Make default.
+    expect(items.has('make-default')).toBe(true);
     expect(view.container.querySelector('[data-runtime-actions-refused]')).toBeNull();
   });
 
   it('opens the menu from the keyboard, moves with the arrows and closes on Escape with focus back on the button', async () => {
     // Arrange
     const view = await open();
-    const trigger = menuButton(view.container, 'codex-default');
+    const trigger = menuButton(view.container, 'claude-default');
 
     // Act
     await interact(() => trigger.focus());
@@ -678,15 +679,13 @@ describe('Runtime actions: Remove', () => {
     });
     await chooseRuntimeAction(view.container, 'claude-agent', 'remove');
 
-    // Assert — nothing is staged until a default is picked; only agent runtimes are offered.
+    // Assert — nothing is staged until a default is picked; every other runtime is offered.
     expect(text(view.container, '[data-runtime-remove-default]')).toBe(
       'claude-agent is studio-mac’s default runtime for new agents. Pick another default first.',
     );
     expect(proposed(calls)).toEqual([]);
-    expect(view.container.querySelector('[data-runtime-default-picker]')).toBeNull();
-    expect(text(view.container, '[data-runtime-remove-no-default]')).toBe(
-      'There is no other agent runtime to make the default. Add one first.',
-    );
+    expect(view.container.querySelector('[data-runtime-default-picker]')).not.toBeNull();
+    expect(view.container.querySelector('[data-runtime-remove-no-default]')).toBeNull();
     expect(refreshes).toEqual([]);
   });
 
@@ -707,7 +706,6 @@ describe('Runtime actions: Remove', () => {
           format: 'present',
           runtimes: [...(READS()['GET /v1/runtimes'] as { runtimes: unknown[] }).runtimes].map(entry => ({
             ...(entry as object),
-            agent: true,
           })),
         },
       },
@@ -761,7 +759,6 @@ describe('Runtime actions: Remove', () => {
           format: 'present',
           runtimes: [...(READS()['GET /v1/runtimes'] as { runtimes: unknown[] }).runtimes].map(entry => ({
             ...(entry as object),
-            agent: true,
           })),
         },
       },

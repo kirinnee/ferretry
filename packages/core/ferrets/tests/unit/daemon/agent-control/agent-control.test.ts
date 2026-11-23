@@ -394,11 +394,11 @@ describe('the ferret’s mode reaches the harness and the pane on every launch (
     expect(f.handed.map(env => env.FY_SESSION_MODE)).toEqual(['auto']);
   });
 
-  test('a record with NEITHER a mode nor a persisted start mode hands the harness no mode and the pane no variable (unattended, as an unset variable reads; a converted ferret whose details hold the mode is converted-mode.test.ts)', async () => {
+  test('a record with NEITHER a mode nor a persisted start mode is auto at the launch: the harness and the pane are both told so (`launchMode` owns the default; a converted ferret whose details hold the mode is converted-mode.test.ts)', async () => {
     const f = launching(persisted(), {}, undefined);
     expect((await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN })).ok).toBe(true);
-    expect(f.harness.launched[0]).not.toHaveProperty('mode');
-    expect(f.handed[0]).not.toHaveProperty('FY_SESSION_MODE');
+    expect(f.harness.launched[0]?.mode).toBe('auto');
+    expect(f.handed[0]).toMatchObject({ FY_SESSION_MODE: 'auto' });
   });
 
   test('no launch part can make the pane say another mode than the harness decided from, and a part still sets its section switch', async () => {
@@ -431,5 +431,7 @@ describe('the ferret’s mode reaches the harness and the pane on every launch (
     expect(sessionModeSwitch('auto')).toEqual({ FY_SESSION_MODE: 'auto' });
     expect(sessionModeSwitch(undefined)).toEqual({});
     expect(switchesOfRecord({ mode: 'auto' } as FerretRecord)).toEqual(sessionModeSwitch('auto'));
+    // A record with no mode is `auto` (the one rule, `launchMode`): the derived switch is what the launch handed the pane.
+    expect(switchesOfRecord({} as FerretRecord)).toEqual(sessionModeSwitch('auto'));
   });
 });

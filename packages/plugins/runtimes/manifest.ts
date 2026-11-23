@@ -216,15 +216,11 @@ export default definePlugin({
         options: [{ flag: '--json', help: 'print the answer as JSON' }],
       }),
       verb('runtime add', {
-        summary: 'add a runtime: which sign-in, which profile, and whether Ferretry launches it as an agent',
+        summary: 'add a runtime: which sign-in and which profile',
         args: [{ name: 'name', help: 'the runtime name' }],
         options: [
           { flag: '--login <id>', help: 'the login it uses' },
           { flag: '--profile <name>', help: 'the profile it uses' },
-          {
-            flag: '--agent',
-            help: 'Ferretry launches it as an agent: no trust or onboarding prompts, and the agent permissions',
-          },
           { flag: '--add-another', help: 'add it even when another runtime already uses this login and profile' },
           { flag: '--dry-run', help: 'show what would change, and change nothing' },
           { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
@@ -237,13 +233,11 @@ export default definePlugin({
         options: [{ flag: '--json', help: 'print the answer as JSON' }],
       }),
       verb('runtime set', {
-        summary: 'change which sign-in or profile a runtime uses, or whether it is an agent',
+        summary: 'change which sign-in or profile a runtime uses',
         args: [{ name: 'name', help: 'the runtime' }],
         options: [
           { flag: '--login <id>', help: 'the login it uses' },
           { flag: '--profile <name>', help: 'the profile it uses' },
-          { flag: '--agent', help: 'Ferretry launches it as an agent' },
-          { flag: '--no-agent', help: 'it is not launched as an agent' },
           { flag: '--dry-run', help: 'show what would change, and change nothing' },
           { flag: '-y, --yes', help: 'do not ask before a change that removes or replaces something (for scripts)' },
           { flag: '--json', help: 'print the change and its outcome as JSON' },
