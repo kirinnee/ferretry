@@ -368,7 +368,7 @@
   overflow-wrap: anywhere;
 }
 
-@container (max-width: 519.98px) {
+@container fy-spf (max-width: 899.98px) {
   .fy-wd {
     align-items: center;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -653,7 +653,7 @@
     opacity: 0;
   }
 }
-@container (max-width: 519.98px) {
+@container fy-spf (max-width: 899.98px) {
   @media (prefers-reduced-motion: no-preference) {
     :root:not([data-motion='reduced']) .fy-wd[data-voice-demo='live'] .fy-wd__text {
       animation-name: fy-wd-words-live;

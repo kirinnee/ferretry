@@ -13,7 +13,8 @@
 .fy-spf {
   --spf-button-w: 8.5rem;
   --spf-button-h: 44px;
-  container-type: inline-size;
+  /* Named, so a page's preview can ask "is the heading stacked over me?" (the frame under 900px) from inside its own container. */
+  container: fy-spf / inline-size;
   display: flex;
   flex-direction: column;
   min-height: 100%;
@@ -154,12 +155,18 @@
   .fy-spf__demo {
     align-self: start;
     grid-column: 2;
-    inset-block-start: 16px;
     max-height: none;
     min-height: 160px;
     min-inline-size: 320px;
     order: 1; /* after the choices in the grid, so both sit on one row */
-    position: sticky;
+  }
+  /* Sticky only on a screen tall enough to keep it AND the choices in view: under 560px tall (a wide phone on its side, a short
+     window) the demo scrolls away with the page, the same guard the stacked layout has. */
+  @media (min-height: 560px) {
+    .fy-spf__demo {
+      inset-block-start: 16px;
+      position: sticky;
+    }
   }
 }
 

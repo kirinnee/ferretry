@@ -253,3 +253,83 @@ export async function pinnedStrip(tab: Page, where: PinScroll): Promise<PinReadi
     };
   }, where);
 }
+
+export interface PreviewFit {
+  /** The slot (`.fy-spf__demo`) and the preview's own box, in CSS pixels. */
+  readonly slot: { readonly top: number; readonly bottom: number; readonly left: number; readonly right: number };
+  readonly preview: { readonly top: number; readonly bottom: number; readonly left: number; readonly right: number };
+  /** Every painted element inside the slot whose box (or text lines) crosses the slot's box, by name and edge. */
+  readonly outside: readonly string[];
+  /** The slot clips nothing: its scroll height and width are its client size. */
+  readonly clipped: boolean;
+}
+
+/** Does the preview sit whole inside its slot? Reads the slot, the preview, and every element and text line in between. */
+export async function previewFit(tab: Page, preview: string): Promise<PreviewFit> {
+  return await tab.evaluate(selector => {
+    const slot = document.querySelector('.fy-spf__demo') as HTMLElement;
+    const root = slot.querySelector(selector) as HTMLElement;
+    const s = slot.getBoundingClientRect();
+    const p = root.getBoundingClientRect();
+    const name = (el: Element): string => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 30)}`;
+    const outside: string[] = [];
+    const check = (label: string, r: { top: number; bottom: number; left: number; right: number }): void => {
+      if (r.top < s.top - 0.5) outside.push(`${label} top ${Math.round(r.top - s.top)}`);
+      if (r.bottom > s.bottom + 0.5) outside.push(`${label} bottom +${Math.round(r.bottom - s.bottom)}`);
+      if (r.left < s.left - 0.5) outside.push(`${label} left ${Math.round(r.left - s.left)}`);
+      if (r.right > s.right + 0.5) outside.push(`${label} right +${Math.round(r.right - s.right)}`);
+    };
+    for (const el of [root, ...root.querySelectorAll<HTMLElement>('*')]) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) check(name(el), r);
+      for (const node of el.childNodes) {
+        if (node.nodeType !== Node.TEXT_NODE || (node.textContent ?? '').trim() === '') continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        for (const line of range.getClientRects()) if (line.width > 0) check(`text in ${name(el)}`, line);
+      }
+    }
+    return {
+      slot: { top: s.top, bottom: s.bottom, left: s.left, right: s.right },
+      preview: { top: p.top, bottom: p.bottom, left: p.left, right: p.right },
+      outside,
+      clipped: slot.scrollHeight > slot.clientHeight + 0.5 || slot.scrollWidth > slot.clientWidth + 0.5,
+    };
+  }, preview);
+}
+
+export interface DemoScroll {
+  /** The page can scroll this far (px). */
+  readonly scrollable: number;
+  /** How far the page really moved. */
+  readonly moved: number;
+  /** The demo's top edge at scroll 0 and after scrolling to the end. */
+  readonly topBefore: number;
+  readonly topAfter: number;
+  readonly position: string;
+}
+
+/** Scroll the step page to its end and read where the demo went: a pinned demo's top stays put, an unpinned one scrolls away with the page. */
+export async function demoScroll(tab: Page): Promise<DemoScroll> {
+  return await tab.evaluate(() => {
+    const demo = document.querySelector('.fy-spf__demo') as HTMLElement;
+    const scrollerOf = (node: HTMLElement): HTMLElement => {
+      for (let up = node.parentElement; up !== null; up = up.parentElement) {
+        const { overflowY } = getComputedStyle(up);
+        if ((overflowY === 'auto' || overflowY === 'scroll') && up.scrollHeight > up.clientHeight + 1) return up;
+      }
+      return document.scrollingElement as HTMLElement;
+    };
+    const scroller = scrollerOf(demo);
+    scroller.scrollTop = 0;
+    const topBefore = demo.getBoundingClientRect().top;
+    scroller.scrollTop = scroller.scrollHeight;
+    return {
+      scrollable: scroller.scrollHeight - scroller.clientHeight,
+      moved: scroller.scrollTop,
+      topBefore,
+      topAfter: demo.getBoundingClientRect().top,
+      position: getComputedStyle(demo).position,
+    };
+  });
+}

@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { PALETTES, STYLES } from '@ferretry/app';
-import { pinnedStrip, sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { demoScroll, pinnedStrip, sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
 setDefaultTimeout(60_000);
 
@@ -742,6 +742,40 @@ describe('the pinned Appearance strip (O9)', () => {
         expect(g.demoX).toBeGreaterThan(g.cardRight);
         expect(g.position).toBe('sticky');
         await shot(tab, WIDE(scheme), 'appearance');
+      } finally {
+        await close();
+      }
+    });
+  }
+});
+
+/** O9 round 2: a wide screen under 560 px tall pins no sample (it scrolls away with the page); at 900 px tall it stays pinned. */
+describe('the Appearance sample and the height guard (O9 round 2)', () => {
+  for (const scheme of ['light', 'dark'] as const) {
+    it(`does not pin the sample on a 559 px tall wide screen (${scheme})`, async () => {
+      const variant: Variant = { name: '1440x559', width: 1_440, height: 559, phone: false, scheme };
+      const { tab, close } = await open(variant);
+      try {
+        const scroll = await demoScroll(tab);
+        expect(scroll.scrollable, 'the page scrolls').toBeGreaterThan(150);
+        expect(scroll.position, 'the sample is not sticky').not.toBe('sticky');
+        expect(scroll.topBefore - scroll.topAfter, 'the sample scrolls away with the page').toBeGreaterThan(
+          scroll.moved - 2,
+        );
+        await shot(tab, variant, 'scrolled');
+      } finally {
+        await close();
+      }
+    });
+    it(`keeps the sample pinned on a 900 px tall wide screen (${scheme})`, async () => {
+      const variant: Variant = { name: '1440x900', width: 1_440, height: 900, phone: false, scheme };
+      const { tab, close } = await open(variant);
+      try {
+        const scroll = await demoScroll(tab);
+        expect(scroll.scrollable, 'the page scrolls').toBeGreaterThan(150);
+        expect(scroll.position).toBe('sticky');
+        expect(Math.abs(scroll.topAfter - 16), 'the sample stays 16 px from the top').toBeLessThanOrEqual(1);
+        await shot(tab, variant, 'scrolled');
       } finally {
         await close();
       }
