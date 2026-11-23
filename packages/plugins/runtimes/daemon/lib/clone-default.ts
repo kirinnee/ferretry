@@ -12,12 +12,13 @@
  * Pure and total: the bundle is the source machine's data, so every field is read as `unknown`.
  */
 import { CLONE_FALLBACK_RUNTIME, type CloneBundle } from '../../contract/index.ts';
+import { type HarnessKind, isSupportedKind } from './harness-kind.ts';
 import { harnessKindOfKey } from './manifest.ts';
 
 /** An agent runtime the copy brings, under the name the SOURCE gave it. */
 export interface CloneAgentRuntime {
   readonly name: string;
-  readonly harness: 'claude' | 'codex';
+  readonly harness: HarnessKind;
 }
 
 const recordOf = (value: unknown): Readonly<Record<string, unknown>> =>
@@ -34,7 +35,7 @@ export function cloneAgentRuntimes(bundle: CloneBundle): readonly CloneAgentRunt
   return Object.entries(bundle.runtimes)
     .flatMap(([name, value]): CloneAgentRuntime[] => {
       const runtime = recordOf(value);
-      const own = runtime.harness === 'claude' || runtime.harness === 'codex' ? runtime.harness : undefined;
+      const own = typeof runtime.harness === 'string' && isSupportedKind(runtime.harness) ? runtime.harness : undefined;
       const login = typeof runtime.credential === 'string' ? harnesses.get(runtime.credential) : undefined;
       const harness = own ?? login;
       return harness === undefined ? [] : [{ name, harness }];
@@ -48,7 +49,7 @@ export interface CloneDefaultSuggestion {
   /** The source machine's own default, when the person is copying it along. */
   readonly carried?: string | null | undefined;
   /** The family of the default this copy removes, so the replacement runs the same CLI where it can. */
-  readonly droppedHarness?: 'claude' | 'codex' | undefined;
+  readonly droppedHarness?: HarnessKind | undefined;
 }
 
 /**

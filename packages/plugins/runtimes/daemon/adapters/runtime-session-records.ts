@@ -13,6 +13,7 @@ import {
   type FerretState,
   isRecordedHarness,
 } from '@ferretry/core-ferrets/contract';
+import type { HarnessKind } from '../lib/manifest.ts';
 import type { SessionStatus } from '../lib/service/foreign.ts';
 import type { RuntimeSessionRecord, SessionRuntimeRename } from '../lib/service/runtime-sessions.ts';
 
@@ -31,7 +32,7 @@ export const SESSION_STATUS_OF: Readonly<Record<FerretState, SessionStatus>> = {
 const recordOf = (record: FerretRuntimeRecord): RuntimeSessionRecord | undefined =>
   isRecordedHarness(record.harness) ? known(record, record.harness) : undefined;
 
-const known = (record: FerretRuntimeRecord, harness: 'claude' | 'codex'): RuntimeSessionRecord => ({
+const known = (record: FerretRuntimeRecord, harness: HarnessKind): RuntimeSessionRecord => ({
   id: record.id,
   name: record.name,
   harness,

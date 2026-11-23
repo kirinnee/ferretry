@@ -5,6 +5,7 @@
  */
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { harnessNamed, keepScope, ownMcpItem } from './import-scope.ts';
+import { supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import {
   type Candidate,
@@ -68,7 +69,7 @@ function localInstructionsDigest(
 
 /** The installed harnesses a scan list should import, in a stable order. */
 const importedHarnesses = (scans: readonly HostHarnessScan[], include?: readonly HarnessKind[]): HarnessKind[] =>
-  (['claude', 'codex'] as const).filter(
+  supportedKinds().filter(
     harness =>
       scans.some(scan => scan.harness === harness && scan.command !== undefined) &&
       (include === undefined || include.includes(harness)),

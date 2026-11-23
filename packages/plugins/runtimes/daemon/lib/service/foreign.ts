@@ -10,6 +10,7 @@
  */
 import type { z } from 'zod';
 import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import { harnessKeyOfKind, harnessKindOfKey, isSupportedKind, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { type BrowserModeSchema, type BrowserPortsSettingSchema } from '../../../contract/index.ts';
 
@@ -40,7 +41,7 @@ export function claudeFastSupport(model: string): boolean {
  * The one place a harness's package names are spelled. GAP(updates): the harness update owns this table.
  */
 export const HARNESS_PACKAGES: Readonly<
-  Record<'claude' | 'codex', { readonly npm: string; readonly cask: string; readonly nixpkgs: string }>
+  Record<HarnessKind, { readonly npm: string; readonly cask: string; readonly nixpkgs: string }>
 > = {
   claude: { npm: '@anthropic-ai/claude-code', cask: 'claude-code', nixpkgs: 'claude-code' },
   codex: { npm: '@openai/codex', cask: 'codex', nixpkgs: 'codex' },
@@ -130,15 +131,17 @@ export const CREDENTIALS_DIRECTORY = 'credentials';
  * Inside the services a harness is `claude` or `codex` (the library's word); on the wire and in the configuration it is
  * the Ferrets key `claude-code` or `codex`. These two are the only places the two spellings meet.
  */
-export const harnessKey = (kind: string): KnownHarnessKey =>
-  kind === 'claude' ? 'claude-code' : (kind as KnownHarnessKey);
+export const harnessKey = (kind: string): KnownHarnessKey => {
+  if (!isSupportedKind(kind)) throw new UnsupportedHarnessError(kind);
+  return harnessKeyOfKind(kind);
+};
 
-/** The library's word for a Ferrets harness key. */
-export const harnessKind = (key: string): HarnessKind => (key === 'claude-code' ? 'claude' : (key as HarnessKind));
+/** The library's word for a Ferrets harness key; a key Runtimes has no behaviour for is refused by name. */
+export const harnessKind = (key: string): HarnessKind => harnessKindOfKey(key);
 
-/** A scope word (`claude`, `codex`, `generic`) as the wire spells it. */
-export const scopeKey = <Scope extends string>(scope: Scope): Exclude<Scope, 'claude'> | 'claude-code' =>
-  scope === 'claude' ? 'claude-code' : (scope as Exclude<Scope, 'claude'>);
+/** A scope word (a harness's word, or `generic`) as the wire spells it. */
+export const scopeKey = (scope: HarnessKind | 'generic'): KnownHarnessKey | 'generic' =>
+  scope === 'generic' ? scope : harnessKeyOfKind(scope);
 
 /** `T` with every `claude-code` value spelled `claude`: the change as the library reads it. */
 export type LoweredHarness<T> = T extends 'claude-code'

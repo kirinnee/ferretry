@@ -21,6 +21,8 @@ env:
 cloudCredential: aws-profile:acme # optional: a credential this machine already has
 ```
 
+`harness:` takes the harness's catalog-half word (`claude`, `codex`: what `harnessFacts(key).catalogHalf` publishes). Any other word is refused as "`<word>` is not supported here", naming the file, and the file's last good version stays in effect.
+
 and for one that serves both — one login, one secret, a **half** per CLI:
 
 ```yaml

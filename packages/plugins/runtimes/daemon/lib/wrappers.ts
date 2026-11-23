@@ -33,6 +33,7 @@ import {
   SESSION_MODE_ENV,
   tomlString,
 } from './account/fixed-layer.ts';
+import { byHarness, isKind } from './harness-kind.ts';
 import type { HarnessKind } from './manifest.ts';
 import { shellQuote } from './shell-quote.ts';
 
@@ -484,7 +485,10 @@ const codexTrustLines = (): readonly string[] => [
 const defaultModelArgs = (harness: HarnessKind, model: string | undefined): readonly string[] => {
   if (model === undefined) return [];
   // Codex: a config override rather than `-m`, so a `-m` the caller passes still decides.
-  return harness === 'claude' ? ['--model', model] : ['-c', `model=${tomlBasicString(model)}`];
+  return byHarness<readonly string[]>(harness, {
+    claude: () => ['--model', model],
+    codex: () => ['-c', `model=${tomlBasicString(model)}`],
+  });
 };
 
 /** A TOML basic string, for a value a Codex `-c` override carries. */
@@ -610,7 +614,8 @@ const SECTIONS_VARIABLE = '_fy_sections';
  */
 function ferretSectionLines(harness: HarnessKind, fyCommand: string): string[] {
   const fy = binaryName(fyCommand);
-  const quoted = (text: string): string => shellQuote(harness === 'codex' ? tomlString(text).slice(1, -1) : text);
+  const quoted = (text: string): string =>
+    shellQuote(byHarness(harness, { claude: () => text, codex: () => tomlString(text).slice(1, -1) }));
   return [
     '',
     "# This ferret's own sections of the appended system prompt: each switch the daemon set to 1.",
@@ -640,10 +645,13 @@ function packRoutingLines(quoted: (text: string) => string): string[] {
  * `developer_instructions="…"` with the sections inside its closing quote.
  */
 function instructionArgument(harness: HarnessKind, arg: string): string | undefined {
-  if (harness === 'claude')
-    return arg.startsWith('--append-system-prompt=') ? `${shellQuote(arg)}"$${SECTIONS_VARIABLE}"` : undefined;
-  if (!arg.startsWith('developer_instructions="') || !arg.endsWith('"')) return undefined;
-  return `${shellQuote(arg.slice(0, -1))}"$${SECTIONS_VARIABLE}"${shellQuote('"')}`;
+  return byHarness<string | undefined>(harness, {
+    claude: () => (arg.startsWith('--append-system-prompt=') ? `${shellQuote(arg)}"$${SECTIONS_VARIABLE}"` : undefined),
+    codex: () =>
+      !arg.startsWith('developer_instructions="') || !arg.endsWith('"')
+        ? undefined
+        : `${shellQuote(arg.slice(0, -1))}"$${SECTIONS_VARIABLE}"${shellQuote('"')}`,
+  });
 }
 
 /** Claude's switch for the system-prompt record a conversation keeps, spelled as one argument. */
@@ -664,7 +672,7 @@ const CLAUDE_PROMPT_SNAPSHOT_OFF = '--system-prompt-snapshot=off';
  * every launch, so it needs nothing.
  */
 function promptSnapshotLines(harness: HarnessKind, command: string): string[] {
-  if (harness !== 'claude') return [];
+  if (!isKind(harness, 'claude')) return [];
   // Bounded, and with no terminal to read: a launch must never wait on a harness that answers `--help`
   // by starting a session. Three seconds, then the probe is killed and no flag is added.
   return [
@@ -681,9 +689,10 @@ function promptSnapshotLines(harness: HarnessKind, command: string): string[] {
  * have switched the feature on (the same spelling as the Codex harness's launch, `CODEX_QUESTIONS_OFF`).
  */
 function questionLines(harness: HarnessKind): string[] {
-  return harness === 'claude'
-    ? [`set -- ${CLAUDE_NO_QUESTIONS_FLAG} "$@"`]
-    : [`set -- -c ${CODEX_QUESTIONS_OFF_OVERRIDE} "$@"`];
+  return byHarness(harness, {
+    claude: () => [`set -- ${CLAUDE_NO_QUESTIONS_FLAG} "$@"`],
+    codex: () => [`set -- -c ${CODEX_QUESTIONS_OFF_OVERRIDE} "$@"`],
+  });
 }
 
 /** What {@link renderCommandScript} needs: the command plus its target's declared wrapper name. */

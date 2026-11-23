@@ -1,3 +1,4 @@
+import { isKind } from './harness-kind.ts';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 
 /**
@@ -14,5 +15,5 @@ export async function loginOrganizationType(
   const kept = (await logins.launchStores()).find(store => store.id === login)?.organizationType;
   if (kept !== undefined) return kept;
   const view = await logins.get(login as never);
-  return view?.store === 'host' && view.harness === 'claude-code' ? await readHost() : undefined;
+  return view?.store === 'host' && isKind(view.harness, 'claude') ? await readHost() : undefined;
 }

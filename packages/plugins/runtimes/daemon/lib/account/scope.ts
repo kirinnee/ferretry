@@ -23,6 +23,7 @@
  * Pure and total: an unknown layer or a loop (which the schema refuses anyway) reads as generic
  * rather than throwing, so a caller holding a draft it built itself always gets an answer.
  */
+import { isSupportedKind } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { credentialHarnesses } from './halves.ts';
 import { modelHarness } from './layering.ts';
@@ -74,7 +75,7 @@ export function modelSetScope(set: Pick<ModelSetComponent, 'models'>): HarnessSc
 /** The scope of one component as stored: its `harness` when it names one, else what its kind says. A missing one is generic. */
 export function componentScope(kind: ComponentKind, component: unknown): HarnessScope {
   const value = (component ?? {}) as { harness?: unknown; models?: unknown };
-  if (value.harness === 'claude' || value.harness === 'codex') return value.harness;
+  if (typeof value.harness === 'string' && isSupportedKind(value.harness)) return value.harness;
   if (kind === 'modelSets' && Array.isArray(value.models)) return modelSetScope({ models: value.models as string[] });
   return 'generic';
 }

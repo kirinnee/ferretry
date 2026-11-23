@@ -100,6 +100,7 @@ import { HARNESS_DISPLAY_NAMES } from '../account/layering.ts';
 import { type ComponentWriter, handedText, withoutHookChanges } from '../account/owner-components.ts';
 import { parseImportRecord } from '../account/import-record.ts';
 import { composeOwned, handOver, type OwnedComponents, recordText, withoutHandedBodies } from './owner-hand-over.ts';
+import { supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
 import { parseSettings, type SettingsObject } from '../settings.ts';
@@ -321,7 +322,7 @@ const IMPORT_RECORD_FILE = 'setup/import.json';
 const CLONE_BUNDLE_MAX_BYTES = 384 * 1024;
 
 const DOCUMENT_MODE = 0o600;
-const HARNESSES: readonly HarnessKind[] = ['claude', 'codex'];
+const HARNESSES: readonly HarnessKind[] = supportedKinds();
 const SETTINGS_FORMAT = { claude: 'json', codex: 'toml' } as const satisfies Record<HarnessKind, 'json' | 'toml'>;
 
 type SetupChange = Extract<AccountChange, { kind: 'setup.import' }>;

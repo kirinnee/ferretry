@@ -23,6 +23,7 @@
  * Pure: values only.
  */
 import { FLEET_STARTER_MODELS } from '../defaults.ts';
+import { isKind, supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import type { InstructionsComponent, SettingsComponent } from './schema.ts';
 
@@ -73,7 +74,7 @@ export const isBuiltinInstructions = (name: string, body: string | undefined): b
 export const builtinProfileLayers = (harness: HarnessKind): readonly string[] => [
   `modelSets/${builtinProfileName(harness)}`,
   `instructions/${AUTONOMOUS_INSTRUCTIONS_NAME}`,
-  ...(harness === 'claude' ? [`settings/${CLAUDE_COMFORT_NAME}`] : []),
+  ...(isKind(harness, 'claude') ? [`settings/${CLAUDE_COMFORT_NAME}`] : []),
 ];
 
 /** The built-in components by kind and name; an owner's component of the same name always wins over these. */
@@ -104,7 +105,7 @@ export function builtinDocument(): {
     readonly settings: Readonly<Record<string, SettingsComponent>>;
   };
 } {
-  const harnesses = ['claude', 'codex'] as const;
+  const harnesses = supportedKinds();
   return {
     profiles: Object.fromEntries(
       harnesses.map(harness => [builtinProfileName(harness), { layers: builtinProfileLayers(harness) }]),

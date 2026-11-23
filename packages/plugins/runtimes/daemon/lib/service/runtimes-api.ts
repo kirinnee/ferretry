@@ -24,6 +24,7 @@ import {
   type RuntimeSummary,
 } from '../../../contract/index.ts';
 import { deriveRuntimes, withDerived } from '../account/derived-runtimes.ts';
+import { isKind, supportedKindOfKey, unsupportedHarnessSentence } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { disabledUntilMs } from '../account/disabled.ts';
 import type { EnvironmentLoginTemplate, LoginView, LoginsApi } from '@ferretry/plugin-logins/contract';
@@ -146,6 +147,9 @@ export function createRuntimesApi(
       launch = { available: false, reason: `Login ${file.login} does not exist` };
     } else if (login.status.word === 'needs_sign_in') {
       launch = { available: false, reason: `Login ${file.login} needs sign-in` };
+    } else if (supportedKindOfKey(harness) === undefined) {
+      // Installed or not, a harness Runtimes has no behaviour for is refused by name and never started as Claude.
+      launch = { available: false, reason: unsupportedHarnessSentence(harness) };
     } else if (!deps.harnesses().includes(harness)) {
       launch = { available: false, reason: `${harness} is not on this machine` };
     }
@@ -183,7 +187,7 @@ export function createRuntimesApi(
     // No default named: the first runtime that can launch, Claude Code's before Codex's.
     return (
       fallback ??
-      ready.find(summary => summary.harness === 'claude-code' && summary.launch.available) ??
+      ready.find(summary => isKind(summary.harness, 'claude') && summary.launch.available) ??
       ready.find(summary => summary.launch.available)
     )?.id;
   };
