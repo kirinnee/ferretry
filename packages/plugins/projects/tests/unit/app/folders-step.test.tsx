@@ -85,8 +85,9 @@ describe('the Add your projects step', () => {
       { kind: 'existing-folder', path: '/home/k' },
       { kind: 'existing-folder', path: '/home/k/atlas' },
     ]);
-    expect(recorder.segment['openLabel']).toBe('Open your projects');
-    expect(recorder.segment['openHref']).toBe('/d/workstation/projects');
+    expect(recorder.segment.openLabel).toBe('Open your projects');
+    expect(recorder.segment.openHref).toBe('/d/workstation/projects');
+    expect(recorder.segment.linkProjectId).toBeUndefined();
   });
 
   it('one folder opens that project: its name and its own address', async () => {
@@ -98,8 +99,11 @@ describe('the Add your projects step', () => {
     );
     await addThisFolder(mounted);
     await must(recorder.committed, 'a save').call(null);
-    expect(recorder.segment['openLabel']).toBe('Open scratch');
-    expect(recorder.segment['openHref']).toBe(`/d/workstation/projects/${ANSWERED.id}`);
+    expect(recorder.segment.openLabel).toBe('Open scratch');
+    expect(recorder.segment.openHref).toBe(`/d/workstation/projects/${ANSWERED.id}`);
+    // The next page (Connect GitHub) can link an account to the one project made here; two folders offer no such link.
+    expect(recorder.segment.linkProjectId).toBe(ANSWERED.id);
+    expect(recorder.segment.linkProjectName).toBe('scratch');
   });
 
   it('a refusal keeps the page with the folder still picked, says why, and remembers nothing to open', async () => {
@@ -112,6 +116,6 @@ describe('the Add your projects step', () => {
     await addThisFolder(mounted);
     await expect(must(recorder.committed, 'a save').call(null)).rejects.toThrow('that folder cannot be a project');
     expect(picks(mounted)).toHaveLength(1);
-    expect(recorder.segment['openLabel']).toBeUndefined();
+    expect(recorder.segment.openLabel).toBeUndefined();
   });
 });

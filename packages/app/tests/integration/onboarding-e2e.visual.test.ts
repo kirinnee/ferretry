@@ -325,7 +325,7 @@ const inspect = async (
   tab: Page,
   variant: Variant,
   key: string,
-  opts: { first?: boolean; held?: boolean; centered?: boolean } = {},
+  opts: { first?: boolean; held?: boolean; centered?: boolean; later?: string } = {},
 ): Promise<void> => {
   const read = await tab.evaluate(chrome => {
     const rect = (el: Element) => el.getBoundingClientRect();
@@ -435,14 +435,15 @@ const inspect = async (
   expect(
     row.map(button => button.label),
     `${key}: the footer row is Back · Later · Next`,
-  ).toEqual(opts.first === true ? ['Later', 'Next'] : ['Back', 'Later', 'Next']);
+  ).toEqual(opts.first === true ? [opts.later ?? 'Later', 'Next'] : ['Back', opts.later ?? 'Later', 'Next']);
   expect(
     Math.max(...row.map(button => button.y)) - Math.min(...row.map(button => button.y)),
     `${key}: one row`,
   ).toBeLessThan(2);
-  expect(row.find(button => button.label === 'Later')?.mark, `${key}: Later is the frame's own button`).toContain(
-    'data-step-later',
-  );
+  expect(
+    row.find(button => button.label === (opts.later ?? 'Later'))?.mark,
+    `${key}: Later is the frame's own button`,
+  ).toContain('data-step-later');
   expect(await tab.locator('.fy-spf__page [data-flow-later]').count(), `${key}: no Later link inside the page`).toBe(0);
   // Item 5: at the end of the scroll nothing the page draws sits under the sticky footer (every element measured, not one marker).
   expect(
@@ -1810,6 +1811,120 @@ describe('the End page of a Pair journey', () => {
           );
           await tab.locator('[data-step-next]').click();
           await tab.waitForURL(url => url.pathname.startsWith(`/d/${MACHINE_B.id}`));
+          expect(problems).toEqual([]);
+        } finally {
+          await context.close();
+        }
+      });
+});
+
+// ─── O9-10: the "Connect GitHub" page, the setup flow's last device page ─────────────────────────────────────────────────
+describe('the Connect GitHub step of the setup flow', () => {
+  for (const variant of VARIANTS)
+    for (const answer of ['connect', 'skip'] as const)
+      it(`${variant.name}: ${answer === 'connect' ? 'connect a fake account (the same card, the same consent), then Next' : 'Skip for now leaves it unanswered and ends the flow'}`, async () => {
+        const browser = await sharedChromium();
+        const phone = variant.width < 600;
+        const context = await browser.newContext({
+          viewport: { width: variant.width, height: variant.height },
+          colorScheme: variant.dark ? 'dark' : 'light',
+          deviceScaleFactor: phone ? 2 : 1,
+          hasTouch: phone,
+          isMobile: phone,
+        });
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        // This device already set everything but Projects' pages, so the one page left to ask is Connect GitHub (the project
+        // page passes over itself: the fake machine already has projects).
+        await context.addInitScript(
+          ({ key, daemon }) =>
+            window.localStorage.setItem(
+              key,
+              JSON.stringify({
+                format: 1,
+                steps: Object.fromEntries(
+                  ['onboarding.appearance', 'layouts.layout', 'voice.voice', 'access.passkey'].map(step => [
+                    step,
+                    { at: '2026-11-20T10:00:00.000Z', daemons: [daemon] },
+                  ]),
+                ),
+              }),
+            ),
+          { key: 'fy:onboarding:client', daemon: MACHINE_B.id },
+        );
+        const tab = await context.newPage();
+        tab.setDefaultTimeout(loadAware(60_000, IDLE_FRAME_MS));
+        const problems: string[] = [];
+        tab.on('pageerror', error => problems.push(error.message));
+        try {
+          await tab.goto(`${origin}/pair?theme=studio-${variant.dark ? 'dark' : 'light'}&projects=1`);
+          await tab.getByText('Paste a link').click();
+          await tab.getByLabel('Pairing link').fill(pairLinkOf(MACHINE_B, origin));
+          await tab.getByText('Use this link').click();
+          await tab.locator('[data-pair-confirm]').waitFor();
+          await tab.locator('[data-pair-confirm]').click();
+          const offer = tab.locator('[data-first-passkey-offer]');
+          if (
+            await offer.waitFor({ timeout: 4_000 }).then(
+              () => true,
+              () => false,
+            )
+          )
+            await tab.getByRole('button', { name: 'Not now' }).click();
+          await tab.evaluate(path => {
+            history.pushState(null, '', path);
+            dispatchEvent(new PopStateEvent('popstate'));
+          }, `/d/${MACHINE_B.id}/onboarding/setup?phase=client&journey=pair`);
+
+          await reach(tab, 'projects.github');
+          await inspect(tab, variant, 'projects.github', { first: true, later: 'Skip for now' });
+          const snap = async (name: string): Promise<void> => {
+            if (shotsDir !== '')
+              await tab.screenshot({ path: join(shotsDir, `${variant.name}-github-${name}.png`), fullPage: true });
+          };
+          const text = async (): Promise<string> => await tab.locator('[data-projects-step="github"]').innerText();
+          // Empty: nothing connected, the card to connect is there, and Skip for now is always available.
+          expect(await text(), 'empty: says no account is connected').toContain('No GitHub account is connected');
+          expect(
+            await tab.getByRole('button', { name: 'Connect a GitHub account' }).count(),
+            'the existing connect card is drawn',
+          ).toBe(1);
+          expect(await tab.locator('[data-step-later]').innerText(), 'Skip for now is on the page').toBe(
+            'Skip for now',
+          );
+          const counter = await counterOf(tab);
+          expect(counter, 'the counter counts Connect GitHub as the one page of Projects').toMatch(/page 1 of 1$/u);
+          await snap('1-empty');
+
+          if (answer === 'skip') {
+            await tab.locator('[data-step-later]').click();
+            await reach(tab, 'end');
+            expect(
+              Object.keys(await ledgerOf(tab)),
+              'Skip for now does not put Connect GitHub on the ledger as answered',
+            ).not.toContain('projects.github');
+            expect((await daemonOf(tab, MACHINE_B.id)).mutations, 'skipping wrote nothing to the machine').toEqual([]);
+            await snap('3-skipped');
+          } else {
+            await tab.getByRole('button', { name: 'Connect a GitHub account' }).click();
+            // The same consent words, then the code to type at GitHub (a fake one); the page polls until GitHub approves.
+            await tab.getByRole('button', { name: 'Continue to GitHub' }).click();
+            await tab.locator('[data-testid="git-done"]').waitFor();
+            await tab.waitForFunction(() =>
+              document.querySelector('[data-projects-step="github"]')?.textContent?.includes('@hubot-fake'),
+            );
+            const connected = await text();
+            expect(connected, 'the connected account is listed by login').toContain('@hubot-fake');
+            for (const secret of ['token', 'ghp_', 'gho_'])
+              expect(connected.toLowerCase(), `no ${secret} on the page`).not.toContain(secret);
+            await snap('2-connected');
+            await next(tab, 'end');
+            expect(Object.keys(await ledgerOf(tab)), 'Next puts Connect GitHub on the device ledger').toContain(
+              'projects.github',
+            );
+            await snap('3-end');
+          }
           expect(problems).toEqual([]);
         } finally {
           await context.close();

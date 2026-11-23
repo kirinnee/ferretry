@@ -71,7 +71,11 @@ export function FoldersStep({ step, client, daemon }: FoldersStepProps) {
         }
         left.shift();
       }
+      const [only] = made.current;
       if (daemon !== undefined) host.current?.remember(openOf(daemon, made.current));
+      // The next page ("Connect GitHub") can link an account to the one project made here.
+      if (made.current.length === 1 && only !== undefined)
+        host.current?.remember({ linkProjectId: only.id, linkProjectName: only.name });
       await projectsStoreFor(client)
         .refresh()
         .catch(() => undefined);
