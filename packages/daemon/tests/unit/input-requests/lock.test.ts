@@ -363,7 +363,7 @@ describe('a password target (a `code` aimed at one is handled as a secret)', () 
       should(
         passwordTarget(page([pageField({}, { type: 'text', name: undefined, ...attributes })]), 'password'),
       ).be.true();
-    should(passwordTarget(page([pageField({}, { type: 'text', name: 'delivery', id: 'otp' })]), 'password')).be.false();
+    should(passwordTarget(page([pageField({}, { type: 'text', name: 'shipping', id: 'otp' })]), 'password')).be.false();
   });
 
   it('should see a password prompt by its program, hidden typing or wording, and not an echoing code prompt', () => {

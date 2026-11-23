@@ -22,7 +22,13 @@ const CARD_WORDS =
   /card[\s._-]*(?:number|num|no)\b|cc[\s._-]*(?:num|number|exp|expiry|csc|cvc|cvv)|cvc|cvv|csc|cvn|expir(?:y|ation|es)|exp[\s._-]*(?:date|month|year)/iu;
 const CODE_AUTOCOMPLETE = /(?:^|\s)one-time-code(?:\s|$)/iu;
 /** A page field that says password, in any of the words a page uses: it is never read as a one-time code on a keypad's evidence. */
-const PASSWORD_SIGNAL = /pass|pwd|pin|ssn|security[\s._-]*code|cv[vc]|csc/iu;
+const PASSWORD_SIGNAL = /pass|pwd|ssn|security[\s._-]*code|cv[vc]|csc|mpin|pincode|pinnumber/iu;
+/**
+ * "Pin" as a word of its own, never inside another word (shipping, typing, spinner, otpInput): at the start or after a
+ * non-letter (pin, pin_code, card-pin, PIN), or as a camel-case word (userPin, cardPin, PinCode). Case-sensitive on
+ * purpose: the capital P is what marks a camel-case word, and the lookahead keeps "pinned" and "Pinterest" out.
+ */
+const PIN_WORD = /(?:^|[^A-Za-z])(?:pin|PIN|Pin)(?![a-z])|[a-z]Pin(?![a-z])/u;
 /** "One-time passcode" and "one-time password" name a code, not a password: they are not a signal. */
 const ONE_TIME_PASS = /one[\s._-]*time[\s._-]*pass(?:code|word)?/giu;
 const KEYPAD = /^(?:numeric|tel|decimal)$/iu;
@@ -48,12 +54,14 @@ export function pageFieldKind(
 }
 
 /**
- * Whether anything on the field says secret: the substring set pass, pwd, pin, ssn, security code, cvv, cvc or csc in
+ * Whether anything on the field says secret: the substring set pass, pwd, ssn, mpin, pincode, security code, cvv, cvc or csc, or "pin" as a word of its own, in
  * its name, id, autocomplete or label (the page's or the ferret's). THE one definition: a signal ALWAYS wins, also over
  * `autocomplete="one-time-code"`, in the card's fill (service.ts) and the lock (lock.ts).
  */
 export function passwordSignalled(field: InputBrowserFieldFacts['field'], label?: string): boolean {
-  return [field.name, field.id, field.autocomplete, label].some(
-    word => word !== undefined && PASSWORD_SIGNAL.test(word.normalize('NFKC').replace(ONE_TIME_PASS, '')),
-  );
+  return [field.name, field.id, field.autocomplete, label].some(word => {
+    if (word === undefined) return false;
+    const text = word.normalize('NFKC').replace(ONE_TIME_PASS, '');
+    return PASSWORD_SIGNAL.test(text) || PIN_WORD.test(text);
+  });
 }

@@ -279,3 +279,32 @@ describe('real one-time codes stay codes, and card words are substrings (fix rou
     should(pageFieldKind({ tag: 'input', name: 'userCvv' })).equal('card');
   });
 });
+
+describe('"pin" counts only as a word of its own (fix round 4)', () => {
+  const otp = { tag: 'input', type: 'text', autocomplete: 'one-time-code' } as const;
+  for (const name of ['otpInput', 'OtpInputField', 'shipping', 'typing', 'spinner', 'opinion'])
+    it(`${name} with one-time-code stays a code, in the field kind and the lock`, async () => {
+      should(pageFieldKind({ ...otp, name })).equal('code');
+      should(pageFieldKind({ ...otp, id: name })).equal('code');
+      should(passwordTarget(page({ ...otp, name }), 'f')).equal(false);
+      const { service } = inputRequestService({ facts: page({ ...otp, name }) });
+      await service.raise(SESSION, raise('code', 'Code'));
+      const [request] = await service.list(HOST, SESSION);
+      should(request?.fields[0]?.sensitivity).not.equal('secret');
+    });
+  for (const name of ['pincode', 'userPin', 'mpin', 'PIN', 'pin_code', 'cardPin', 'card-pin', 'PinCode', 'pin'])
+    it(`${name} with one-time-code is a secret, in the field kind and the lock`, () => {
+      should(pageFieldKind({ ...otp, name })).equal(undefined);
+      should(passwordTarget(page({ ...otp, name }), 'f')).equal(true);
+    });
+});
+
+describe('a ferret code labelled with a secret word is raised to secret (fix round 4)', () => {
+  for (const label of ['SSN last 4', 'Security code', 'Card PIN'])
+    it(`"${label}" raises a ferret code to secret`, async () => {
+      const { service } = inputRequestService({ facts: page({ tag: 'input', type: 'text', name: 'x' }) });
+      await service.raise(SESSION, raise('code', label));
+      const [request] = await service.list(HOST, SESSION);
+      should(request?.fields[0]?.sensitivity).equal('secret');
+    });
+});

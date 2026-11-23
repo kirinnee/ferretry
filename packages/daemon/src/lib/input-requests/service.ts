@@ -68,7 +68,7 @@ import { GRANT_MISS_CONTEXT_LINE, grantStops } from '../sign-in-grants/reasons.t
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
-import { lookAlike, matchable, passwordTarget, spellsPassword, terminalHides } from './lock.ts';
+import { lookAlike, passwordTarget, spellsPassword, terminalHides } from './lock.ts';
 import type { LoginDelivery, LoginObserver } from './login-observer.ts';
 import type {
   InputAgendaPort,
@@ -92,7 +92,7 @@ import type {
   TypeResult,
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
-import { pageFieldKind } from './field-kinds.ts';
+import { pageFieldKind, passwordSignalled } from './field-kinds.ts';
 import { bindingOf, mayRebind, sameLineage } from './rebind.ts';
 import {
   codeCardKeys,
@@ -2807,8 +2807,6 @@ function pointerOf(field: { readonly id: string; readonly element?: InputRequest
 }
 
 const UPGRADED_FLAG = 'Treated as a secret: this is a password field.';
-/** The ferret's words that ask for a password, PIN or passphrase. */
-const PASSWORD_WORDS = /pass(?:word|phrase|wd)|(?:^|[^a-z])pin(?:[^a-z]|$)/iu;
 const AMBER_AT_LEAST: Readonly<Record<InputRisk['level'], InputRisk['level']>> = {
   green: 'amber',
   neutral: 'amber',
@@ -2850,7 +2848,7 @@ function observedAs(
     const said =
       kind !== 'code' &&
       [prompt, field.label, field.id].some(
-        word => PASSWORD_WORDS.test(matchable(word)) || spellsPassword(word) || lookAlike(word),
+        word => passwordSignalled({ tag: 'input' }, word) || spellsPassword(word) || lookAlike(word),
       );
     if (field.sensitivity === 'code' && (said || passwordTarget(facts, field.id, codeProgram))) upgraded.add(field.id);
     if (!upgraded.has(field.id)) return { ...field, risk: riskOf(field, facts) };
