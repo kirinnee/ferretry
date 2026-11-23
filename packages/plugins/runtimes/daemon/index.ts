@@ -110,6 +110,8 @@ export interface RuntimesAssembly {
   readonly profileEtag?: (profile: string) => Promise<string>;
   /** The harnesses installed here, as of the last lookup: which CLI a login that drives both gets its derived runtime on. Absent or `undefined`: not known. */
   readonly installed?: () => readonly HarnessKind[] | undefined;
+  /** Looks the harness commands up ahead of a read of `installed`, as the catalogue's own read does. Absent: nothing to look up. */
+  readonly primeInstalled?: () => Promise<void>;
   /**
    * The machine's "Auto-resume after restart" switch: `true` on, `false` off, `undefined` when it cannot be read (a no:
    * nothing is resumed). Absent, the switch is `runtimes.yaml` `autoResume` as that file stands; present, this answer is
@@ -288,6 +290,13 @@ export const hostAssembly: RuntimesAssembler = ctx => {
         return undefined;
       }
     },
+    primeInstalled: async () => {
+      try {
+        await assembled().primeInstalled();
+      } catch {
+        // Not known stays not known: `installed` answers `undefined` too.
+      }
+    },
     launchFacts: launchFactsSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
     hostClaudeAccount: hostClaudeAccountText(ctx.kernel),
     checkEnvironment: checkEnvironmentSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
@@ -315,6 +324,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         now: () => clock.nowMs(),
         currentName: async former => await assembly.catalog.currentRuntimeName?.(former),
         installed: () => assembly.installed?.(),
+        primeInstalled: async () => await assembly.primeInstalled?.(),
       });
       // What a runtime's profile stack names, and the one act that edits a profile's layers: read live, written through
       // the kernel's config writer, never kept. The etag is the profile file's own, read when asked.

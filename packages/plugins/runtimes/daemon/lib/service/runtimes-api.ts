@@ -50,6 +50,8 @@ export interface RuntimesApiDeps {
   currentName?(former: string): Promise<string | undefined>;
   /** The harnesses installed here (`derived-runtimes.ts`): a login that drives both CLIs runs the first installed. Absent: not known. */
   installed?(): readonly HarnessKind[] | undefined;
+  /** Looks the harness commands up ahead of reading `installed`, the way the catalogue's read does, so both see the same CLIs. Absent: nothing to look up. */
+  primeInstalled?(): Promise<void>;
 }
 
 /** The environment logins' variable templates by id, or `undefined` when Logins cannot say (an environment login is then not derived). */
@@ -101,6 +103,8 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
 
   /** The files' runtimes and profile names with the ones derived from ready logins beside them (`derived-runtimes.ts`). */
   const effective = async (logins: ReadonlyMap<string, LoginView>) => {
+    // A CLI installed since the last lookup shows now, as in the catalogue's read (`runtime ls`): one lookup, then `installed`.
+    await deps.primeInstalled?.();
     const derived = deriveRuntimes({
       templates: await templatesById(deps.logins),
       runtimes: deps.runtimes(),
@@ -239,7 +243,7 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
       if (!summary.launch.available) {
         return { ok: false, refusal: 'not_signed_in', sentence: summary.launch.reason };
       }
-      return { ok: true, runtime: summary };
+      return { ok: true, runtime: summary, ...(deps.runtimes().has(wanted) ? {} : { derived: true as const }) };
     },
   };
 }

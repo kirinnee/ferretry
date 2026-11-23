@@ -40,6 +40,7 @@ interface Rig {
   harnesses?: readonly KnownHarnessKey[];
   currentName?: RuntimesApiDeps['currentName'];
   installed?: RuntimesApiDeps['installed'];
+  primeInstalled?: RuntimesApiDeps['primeInstalled'];
   /** The ids of the environment logins whose templates Logins gives clean. */
   templated?: readonly string[];
   /** Logins cannot read the environment templates at all (the call throws). */
@@ -68,6 +69,7 @@ const api = (rig: Rig = {}) =>
     now: () => NOW,
     ...(rig.currentName === undefined ? {} : { currentName: rig.currentName }),
     ...(rig.installed === undefined ? {} : { installed: rig.installed }),
+    ...(rig.primeInstalled === undefined ? {} : { primeInstalled: rig.primeInstalled }),
   });
 
 describe('createRuntimesApi — list and get', () => {
@@ -395,6 +397,38 @@ describe('createRuntimesApi — adding an account makes its runtime (runtimes pl
     should((await rig.list()).map(summary => summary.id)).deepEqual(['claude-you']);
     should(shown).deepEqual({ 'claude-you': ['claude-you'], 'codex-you': [] });
     should(await users.of('claude-you')).deepEqual([]);
+  });
+
+  it('should mark a resolution derived only when no runtime file holds the name', async () => {
+    // Arrange — `claude-you` is derived from its ready login; `play` is a file
+    const rig = api({
+      runtimes: { play: runtimeFile({ login: 'other' }) },
+      logins: [loginView({ id: 'claude-you' }), loginView({ id: 'other' })],
+    });
+
+    // Act
+    const derived = await rig.resolve('claude-you' as never);
+    const file = await rig.resolve('play' as never);
+
+    // Assert
+    should(derived.ok && derived.derived).equal(true);
+    should(file.ok && file.derived).equal(undefined);
+  });
+
+  it('should look the harness commands up before it reads which are installed', async () => {
+    // Arrange — nothing is installed until the lookup is made, as on a daemon that has read no catalogue yet
+    let looked = false;
+    const rig = api({
+      runtimes: {},
+      logins: [loginView({ id: 'claude-you' })],
+      installed: () => (looked ? ['claude'] : []),
+      primeInstalled: async () => {
+        looked = true;
+      },
+    });
+
+    // Act / Assert
+    should((await rig.list()).map(summary => summary.id)).deepEqual(['claude-you']);
   });
 
   it('should run a login that drives both CLIs on the first one installed here', async () => {

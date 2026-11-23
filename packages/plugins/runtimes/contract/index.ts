@@ -89,7 +89,12 @@ export const RESOLVE_REFUSALS = ['unknown', 'disabled', 'no_login', 'no_profile'
 export type ResolveRefusal = (typeof RESOLVE_REFUSALS)[number];
 
 export type ResolveResult =
-  | { readonly ok: true; readonly runtime: RuntimeSummary }
+  | {
+      readonly ok: true;
+      readonly runtime: RuntimeSummary;
+      /** Set when no runtime file holds this name: Runtimes derives the runtime from a ready login, so a login's removal moves its name. */
+      readonly derived?: true;
+    }
   | { readonly ok: false; readonly refusal: ResolveRefusal; readonly sentence: string };
 
 export interface RuntimesApi extends RuntimeHomesApi, RuntimeLayersApi {
