@@ -14,6 +14,7 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
+import { probeToolbar, STYLES } from './fixtures/explorer-toolbar.ts';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
 setDefaultTimeout(60_000);
@@ -83,6 +84,7 @@ const FOLDER_BOX = '[data-new-ferret-where-folder] input';
 const withTab = async (
   viewport: Viewport,
   scheme: 'light' | 'dark',
+  style: string,
   run: (tab: Page, shot: (name: string) => Promise<void>) => Promise<void>,
 ): Promise<void> => {
   const context = await browser.newContext({
@@ -99,7 +101,7 @@ const withTab = async (
   const tab = await context.newPage();
   tab.setDefaultTimeout(10_000);
   try {
-    await tab.goto(`${origin}/?theme=studio-${scheme}`);
+    await tab.goto(`${origin}/?theme=studio-${scheme}&style=${style}`);
     await tab.waitForSelector(TRIGGER);
     // The recent folders come from the ferret list the page reads once; wait until the page has them.
     await tab.waitForFunction(() =>
@@ -109,7 +111,8 @@ const withTab = async (
     const shot = async (name: string): Promise<void> => {
       if (shotsDir !== '') {
         await tab.waitForTimeout(600); // the segmented highlight, the button's fade and a sheet's slide settle
-        const path = (suffix: string): string => join(shotsDir, `${viewport.name}-${scheme}-${name}${suffix}.png`);
+        const path = (suffix: string): string =>
+          join(shotsDir, `${viewport.name}-${scheme}-${style}-${name}${suffix}.png`);
         await tab.screenshot({ fullPage: true, path: path('') });
         // The page scrolls inside its own frame: a second frame brings Create ferret and its hint into view.
         await tab.getByRole('button', { name: 'Create ferret' }).scrollIntoViewIfNeeded();
@@ -141,7 +144,7 @@ describe('New ferret: the path a start sends is the one the visible mode shows',
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const)
       it(`a Recent folder does not ride along under Project, and each mode keeps its own pick (${viewport.name}, ${scheme})`, () =>
-        withTab(viewport, scheme, async (tab, shot) => {
+        withTab(viewport, scheme, 'studio', async (tab, shot) => {
           await fillRest(tab);
           expect(await modeButton(tab, 'Project').getAttribute('aria-checked'), 'opens on Project').toBe('true');
 
@@ -180,7 +183,7 @@ describe('New ferret: the path a start sends is the one the visible mode shows',
         }));
 
   it('switching back to Project restores that mode’s own project, and Folder keeps what it showed', () =>
-    withTab(VIEWPORTS[0], 'light', async tab => {
+    withTab(VIEWPORTS[0], 'light', 'studio', async tab => {
       await tab.locator(TRIGGER).click();
       await tab.locator('[data-where-project-row] button[title]').nth(1).click();
       expect(await tab.locator(TRIGGER).textContent()).toContain('api');
@@ -196,7 +199,7 @@ describe('New ferret: the path a start sends is the one the visible mode shows',
 describe('New ferret on a desktop: the project dropdown is a keyboard-usable dialog', () => {
   for (const scheme of ['light', 'dark'] as const)
     it(`Enter opens it onto the search box, Escape closes it and focus returns to the trigger (${scheme})`, () =>
-      withTab(VIEWPORTS[0], scheme, async (tab, shot) => {
+      withTab(VIEWPORTS[0], scheme, 'studio', async (tab, shot) => {
         const active = () =>
           tab.evaluate(() => {
             const element = document.activeElement;
@@ -233,7 +236,7 @@ describe('New ferret on a desktop: the project dropdown is a keyboard-usable dia
       }));
 
   it('Browse… opens the folder finder as a dialog too: Escape closes it and focus returns to Browse…', () =>
-    withTab(VIEWPORTS[0], 'light', async tab => {
+    withTab(VIEWPORTS[0], 'light', 'studio', async tab => {
       await modeButton(tab, 'Folder').click();
       const browse = tab.locator('[data-where-browse]');
       await browse.focus();
@@ -247,4 +250,23 @@ describe('New ferret on a desktop: the project dropdown is a keyboard-usable dia
         true,
       );
     }));
+});
+
+describe('New ferret: Browse… opens the folder finder, whose toolbar fits the screen in every style', () => {
+  for (const viewport of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      for (const style of STYLES)
+        it(`keeps every toolbar control on screen at a 44x44 touch size (${viewport.name}, ${scheme}, ${style})`, () =>
+          withTab(viewport, scheme, style, async (tab, shot) => {
+            await modeButton(tab, 'Folder').click();
+            await tab.locator('[data-where-browse]').click();
+            await tab.getByRole('dialog', { name: 'Choose a folder' }).waitFor();
+            await tab.waitForSelector('[data-explorer-toolbar]');
+            await shot('browse');
+            const probe = await tab.evaluate(probeToolbar);
+            expect(probe.lastRight, 'every control is on screen').toBeLessThanOrEqual(probe.viewport);
+            expect(probe.clippedLeft, 'nothing is cut off on the left').toBe(false);
+            expect(probe.scrollOverflow, 'no sideways scroll').toBeLessThanOrEqual(0);
+            expect(probe.small, 'every control is a 44x44 touch target on a phone').toEqual([]);
+          }));
 });

@@ -93,9 +93,11 @@ describe('moving the ferrets', () => {
   });
 
   it('should say exactly what the confirm button does', () => {
-    expect(removeLabel(CODEX, 2, null)).toBe('Remove codex-default');
-    expect(removeLabel(CODEX, 0, 'claude-default')).toBe('Remove codex-default');
-    expect(removeLabel(CODEX, 1, 'claude-default')).toBe('Move 1 ferret to claude-default and remove codex-default');
+    expect(removeLabel('codex-default', 2, null)).toBe('Remove codex-default');
+    expect(removeLabel('codex-default', 0, 'claude-default')).toBe('Remove codex-default');
+    expect(removeLabel('codex-default', 1, 'claude-default')).toBe(
+      'Move 1 ferret to claude-default and remove codex-default',
+    );
     expect(movePlanSentence(1, null)).toBe('It keeps running until it ends.');
     expect(movePlanSentence(2, null)).toBe('They keep running until they end.');
     expect(movePlanSentence(1, 'claude-default')).toBe(

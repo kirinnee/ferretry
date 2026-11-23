@@ -182,8 +182,9 @@ export function FolderExplorer(props: FolderExplorerProps) {
         </ol>
       </nav>
 
-      {/* ONE toolbar row, never wrapped: New folder, the hidden switch, and the view choice pushed to the end. */}
-      <div className="flex flex-nowrap items-center gap-sm" data-explorer-toolbar="">
+      {/* ONE toolbar row where it fits: New folder, the hidden switch, and the view choice pushed to the end. A style with wider
+          controls wraps the row as a fallback rather than push a control off the screen. */}
+      <div className="flex flex-wrap items-center gap-sm" data-explorer-toolbar="">
         <Button
           type="button"
           className="shrink-0"
@@ -219,7 +220,7 @@ export function FolderExplorer(props: FolderExplorerProps) {
               data-explorer-view-choice={choice}
               title={label}
               className={cn(
-                'inline-flex min-h-control cursor-pointer items-center gap-1 rounded-control border px-2 text-meta has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus',
+                'inline-flex min-h-control min-w-[var(--target-floor,0px)] cursor-pointer items-center justify-center gap-1 rounded-control border px-2 text-meta has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus',
                 view === choice
                   ? 'border-accent bg-accent-soft text-accent'
                   : 'border-border text-muted hover:border-accent',

@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { probeToolbar, STYLES } from './fixtures/explorer-toolbar.ts';
 
 setDefaultTimeout(60_000);
 
@@ -63,124 +64,134 @@ const VIEWPORTS = [
 describe('the setup flow ends in project setup', () => {
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const)
-      it(`follows the flow's frame, picks folders, registers them, and says nothing of boards (${viewport.name}, ${scheme})`, async () => {
-        const context = await browser.newContext({
-          viewport: { width: viewport.width, height: viewport.height },
-          colorScheme: scheme,
-          deviceScaleFactor: viewport.phone ? 2 : 1,
-          hasTouch: viewport.phone,
-          isMobile: viewport.phone,
-        });
-        const origin = server?.url.origin ?? '';
-        await context.route('**/*', async route =>
-          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
-        );
-        const tab = await context.newPage();
-        const problems: string[] = [];
-        tab.on('pageerror', error => problems.push(error.message));
-        try {
-          await tab.goto(`${origin}/?theme=studio-${scheme}`);
-          await tab.waitForSelector('[data-explorer-state="ready"]');
-          const shot = async (name: string): Promise<void> => {
-            if (shotsDir !== '')
-              await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${name}.png`), fullPage: true });
-          };
-          await shot('1-first');
-
-          // The frame: its title, the "Projects" segment of the bar, and the three footer buttons, all on screen.
-          const frame = await tab.evaluate(() => {
-            const inside = (selector: string) => {
-              const r = document.querySelector(selector)?.getBoundingClientRect();
-              return (
-                r !== undefined &&
-                r.top >= 0 &&
-                r.bottom <= window.innerHeight &&
-                r.left >= 0 &&
-                r.right <= window.innerWidth
-              );
-            };
-            return {
-              title: document.querySelector('.fy-spf__title')?.textContent,
-              later: document.querySelector('[data-step-later]')?.textContent?.trim(),
-              visible: ['[data-step-back]', '[data-step-later]', '[data-step-next]'].map(inside),
-              text: document.body.innerText,
-              overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-            };
+      for (const style of STYLES)
+        it(`follows the flow's frame, picks folders, registers them, and says nothing of boards (${viewport.name}, ${scheme}, ${style})`, async () => {
+          const context = await browser.newContext({
+            viewport: { width: viewport.width, height: viewport.height },
+            colorScheme: scheme,
+            deviceScaleFactor: viewport.phone ? 2 : 1,
+            hasTouch: viewport.phone,
+            isMobile: viewport.phone,
           });
-          expect(frame.title).toBe('Add your projects');
-          expect(frame.later).toBe('Skip for now');
-          expect(frame.visible, 'Back, Skip for now and Next are all on screen').toEqual([true, true, true]);
-          expect(frame.text).toContain('Projects');
-          expect(frame.text.toLowerCase()).not.toMatch(/board|lane|backlog/u);
-          expect(frame.overflow, 'no sideways scroll').toBeLessThanOrEqual(0);
-
-          // Next with nothing picked refuses, in words, and registers nothing.
-          await tab.click('[data-step-next]');
-          expect(await tab.evaluate(() => window.__error)).toContain('Skip for now');
-          expect(await tab.evaluate(() => window.__registered)).toEqual([]);
-
-          // Pick two folders: the open one, then atlas.
-          await tab.getByRole('button', { name: 'Add this folder' }).click();
-          await tab.click('[data-explorer-entry="atlas"]');
-          await tab.waitForFunction(() => document.querySelector('[data-explorer-state="ready"]') !== null);
-          await tab.waitForSelector('[data-explorer-up]');
-          await shot('1b-inside-atlas');
-
-          // O9-4: the toolbar is ONE row (every control shares a line, none wraps), Up sits in the path row with Go inside the
-          // path field, and "Add this folder" is the only primary button in the explorer.
-          const layout = await tab.evaluate(() => {
-            const box = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
-            const bar = document.querySelector('[data-explorer-toolbar]');
-            const kids = [...(bar?.querySelectorAll('button, label, fieldset') ?? [])].map(e =>
-              e.getBoundingClientRect(),
-            );
-            const field = box('[data-explorer-path-box] input');
-            const go = box('[data-explorer-path-box] button[type="submit"]');
-            const up = box('[data-explorer-up]');
-            const barBox = bar?.getBoundingClientRect();
-            return {
-              rowTops: new Set(kids.map(r => Math.round(r.top + r.height / 2))).size,
-              barRight: barBox?.right ?? 0,
-              lastRight: Math.max(...kids.map(r => r.right)),
-              goInside: go !== undefined && field !== undefined && go.left >= field.left && go.right <= field.right,
-              upBeforeField:
-                up !== undefined &&
-                field !== undefined &&
-                up.right <= field.left &&
-                Math.abs(up.top + up.height / 2 - (field.top + field.height / 2)) < 2,
-              primaries: document.querySelectorAll('[data-explorer-state] [data-variant="primary"]').length,
-              upHeight: up?.height ?? 0,
-              barHeight: barBox?.height ?? 0,
-              viewport: window.innerWidth,
-            };
-          });
-          expect(layout.rowTops, 'the toolbar controls share one line').toBe(1);
-          expect(layout.lastRight, 'nothing pokes out of the toolbar').toBeLessThanOrEqual(layout.barRight + 0.5);
-          expect(layout.goInside, 'Go sits inside the path field').toBe(true);
-          expect(layout.upBeforeField, 'Up sits in the path row, before the field').toBe(true);
-          expect(layout.primaries, 'Add this folder is the single primary action').toBe(1);
-          expect(layout.lastRight, 'the toolbar fits the viewport').toBeLessThanOrEqual(layout.viewport);
-          await tab.getByRole('button', { name: 'Add this folder' }).click();
-          await tab.waitForFunction(() => document.querySelectorAll('[data-projects-step-picks] li').length === 2);
-          await shot('2-two-folders');
-
-          await tab.click('[data-step-next]');
-          await tab.waitForFunction(() => window.__registered.length === 2);
-          expect(await tab.evaluate(() => window.__registered)).toEqual(['/home/sam', '/home/sam/atlas']);
-          expect(await tab.evaluate(() => window.__memory)).toEqual({
-            openLabel: 'Open your projects',
-            openHref: '/d/studio-box/projects',
-          });
-
-          await tab.click('[data-step-later]');
-          expect(await tab.evaluate(() => window.__skipped)).toBe(1);
-          const after = await tab.evaluate(
-            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          const origin = server?.url.origin ?? '';
+          await context.route('**/*', async route =>
+            new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
           );
-          expect(after).toBeLessThanOrEqual(0);
-          expect(problems).toEqual([]);
-        } finally {
-          await context.close();
-        }
-      });
+          const tab = await context.newPage();
+          const problems: string[] = [];
+          tab.on('pageerror', error => problems.push(error.message));
+          try {
+            await tab.goto(`${origin}/?theme=studio-${scheme}&style=${style}`);
+            await tab.waitForSelector('[data-explorer-state="ready"]');
+            const shot = async (name: string): Promise<void> => {
+              if (shotsDir !== '')
+                await tab.screenshot({
+                  path: join(shotsDir, `${viewport.name}-${scheme}-${style}-${name}.png`),
+                  fullPage: true,
+                });
+            };
+            await shot('1-first');
+
+            // The frame: its title, the "Projects" segment of the bar, and the three footer buttons, all on screen.
+            const frame = await tab.evaluate(() => {
+              const inside = (selector: string) => {
+                const r = document.querySelector(selector)?.getBoundingClientRect();
+                return (
+                  r !== undefined &&
+                  r.top >= 0 &&
+                  r.bottom <= window.innerHeight &&
+                  r.left >= 0 &&
+                  r.right <= window.innerWidth
+                );
+              };
+              return {
+                title: document.querySelector('.fy-spf__title')?.textContent,
+                later: document.querySelector('[data-step-later]')?.textContent?.trim(),
+                visible: ['[data-step-back]', '[data-step-later]', '[data-step-next]'].map(inside),
+                text: document.body.innerText,
+                overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+              };
+            });
+            expect(frame.title).toBe('Add your projects');
+            expect(frame.later).toBe('Skip for now');
+            expect(frame.visible, 'Back, Skip for now and Next are all on screen').toEqual([true, true, true]);
+            expect(frame.text).toContain('Projects');
+            expect(frame.text.toLowerCase()).not.toMatch(/board|lane|backlog/u);
+            expect(frame.overflow, 'no sideways scroll').toBeLessThanOrEqual(0);
+
+            // Next with nothing picked refuses, in words, and registers nothing.
+            await tab.click('[data-step-next]');
+            expect(await tab.evaluate(() => window.__error)).toContain('Skip for now');
+            expect(await tab.evaluate(() => window.__registered)).toEqual([]);
+
+            // Pick two folders: the open one, then atlas.
+            await tab.getByRole('button', { name: 'Add this folder' }).click();
+            await tab.click('[data-explorer-entry="atlas"]');
+            await tab.waitForFunction(() => document.querySelector('[data-explorer-state="ready"]') !== null);
+            await tab.waitForSelector('[data-explorer-up]');
+            await shot('1b-inside-atlas');
+
+            // O9-4: the toolbar is ONE row (every control shares a line, none wraps), Up sits in the path row with Go inside the
+            // path field, and "Add this folder" is the only primary button in the explorer.
+            const layout = await tab.evaluate(() => {
+              const box = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
+              const bar = document.querySelector('[data-explorer-toolbar]');
+              const kids = [...(bar?.querySelectorAll('button, label, fieldset') ?? [])].map(e =>
+                e.getBoundingClientRect(),
+              );
+              const field = box('[data-explorer-path-box] input');
+              const go = box('[data-explorer-path-box] button[type="submit"]');
+              const up = box('[data-explorer-up]');
+              const barBox = bar?.getBoundingClientRect();
+              return {
+                rowTops: new Set(kids.map(r => Math.round(r.top + r.height / 2))).size,
+                barRight: barBox?.right ?? 0,
+                lastRight: Math.max(...kids.map(r => r.right)),
+                goInside: go !== undefined && field !== undefined && go.left >= field.left && go.right <= field.right,
+                upBeforeField:
+                  up !== undefined &&
+                  field !== undefined &&
+                  up.right <= field.left &&
+                  Math.abs(up.top + up.height / 2 - (field.top + field.height / 2)) < 2,
+                primaries: document.querySelectorAll('[data-explorer-state] [data-variant="primary"]').length,
+                upHeight: up?.height ?? 0,
+                barHeight: barBox?.height ?? 0,
+                viewport: window.innerWidth,
+              };
+            });
+            // The row may wrap in a style whose controls are wider (it never clips); in the default style it stays ONE line.
+            if (style === 'studio') expect(layout.rowTops, 'the toolbar controls share one line').toBe(1);
+            expect(layout.lastRight, 'nothing pokes out of the toolbar').toBeLessThanOrEqual(layout.barRight + 0.5);
+            const probe = await tab.evaluate(probeToolbar);
+            expect(probe.lastRight, `every control is on screen (${style})`).toBeLessThanOrEqual(probe.viewport);
+            expect(probe.clippedLeft, 'nothing is cut off on the left').toBe(false);
+            expect(probe.scrollOverflow, 'no sideways scroll').toBeLessThanOrEqual(0);
+            expect(probe.small, 'every control is a 44x44 touch target on a phone').toEqual([]);
+            expect(layout.goInside, 'Go sits inside the path field').toBe(true);
+            expect(layout.upBeforeField, 'Up sits in the path row, before the field').toBe(true);
+            expect(layout.primaries, 'Add this folder is the single primary action').toBe(1);
+            expect(layout.lastRight, 'the toolbar fits the viewport').toBeLessThanOrEqual(layout.viewport);
+            await tab.getByRole('button', { name: 'Add this folder' }).click();
+            await tab.waitForFunction(() => document.querySelectorAll('[data-projects-step-picks] li').length === 2);
+            await shot('2-two-folders');
+
+            await tab.click('[data-step-next]');
+            await tab.waitForFunction(() => window.__registered.length === 2);
+            expect(await tab.evaluate(() => window.__registered)).toEqual(['/home/sam', '/home/sam/atlas']);
+            expect(await tab.evaluate(() => window.__memory)).toEqual({
+              openLabel: 'Open your projects',
+              openHref: '/d/studio-box/projects',
+            });
+
+            await tab.click('[data-step-later]');
+            expect(await tab.evaluate(() => window.__skipped)).toBe(1);
+            const after = await tab.evaluate(
+              () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            );
+            expect(after).toBeLessThanOrEqual(0);
+            expect(problems).toEqual([]);
+          } finally {
+            await context.close();
+          }
+        });
 });
