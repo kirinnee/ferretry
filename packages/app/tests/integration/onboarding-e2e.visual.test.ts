@@ -953,6 +953,64 @@ describe('the first run, end to end', () => {
 
         // ── the setup flow opens on the machine that answered ───────────────────────────────────────────────────────
         await tab.waitForURL(/\/onboarding\/setup\?phase=daemon&journey=first-time/u);
+        // ── "Which AI do you want to use?" is the first page, over the machine's REAL provider catalog ─────────────────
+        await reach(tab, 'onboarding.agents');
+        walked.push('onboarding.agents');
+        const agentBox = (row: string) => tab.locator(`[data-agent-row="${row}"] > label input`);
+        expect(await agentBox('claude').isChecked(), 'Which AI: Claude is ticked first').toBe(true);
+        await agentBox('others').click();
+        await tab.waitForSelector('[data-agent-providers] [data-agent-row]');
+        const offered = async (): Promise<string[]> =>
+          await tab
+            .locator('[data-agent-providers] > [data-agent-row]')
+            .evaluateAll(rows => rows.map(row => row.getAttribute('data-agent-row') ?? ''));
+        expect(await offered(), 'Which AI: Others lists the catalog providers a supported harness runs').toEqual([
+          'provider-anthropic-api-key',
+          'provider-amazon-bedrock',
+          'provider-amazon-bedrock-api-key',
+          'provider-bedrock-mantle',
+          'provider-google-vertex',
+          'provider-microsoft-foundry-api-key',
+          'provider-microsoft-foundry-azure-cli',
+          'provider-zai-glm',
+          'provider-kimi',
+          'provider-minimax',
+          'provider-deepseek',
+          'provider-qwen-coding-plan',
+          'provider-openrouter',
+          'provider-vercel-ai-gateway',
+          'provider-litellm',
+          'provider-custom-gateway',
+          'provider-openai-api-key',
+          'provider-azure-openai',
+          'provider-ollama-codex',
+        ]);
+        const harnessChoices = async (provider: string): Promise<string[]> => {
+          await agentBox(`provider-${provider}`).check();
+          const values = await tab
+            .locator(`[data-agent-harness="${provider}"] input`)
+            .evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value));
+          await agentBox(`provider-${provider}`).uncheck();
+          return values;
+        };
+        expect(await harnessChoices('zai-glm'), 'Which AI: GLM (Z.ai) runs in Claude Code').toEqual(['claude-code']);
+        for (const provider of ['kimi', 'minimax', 'deepseek'])
+          expect(await harnessChoices(provider), `Which AI: ${provider} offers Claude Code and Codex`).toEqual([
+            'claude-code',
+            'codex',
+          ]);
+        await agentBox('others').uncheck();
+        // Claude AND Codex: this journey walks both harnesses.
+        await agentBox('codex').check();
+        // The bar draws the segments of the harnesses picked, so it is read once the pick is the one the run walks.
+        await tab.waitForFunction(
+          () => document.querySelectorAll('[data-step-progress] [data-segment]').length >= 7,
+          undefined,
+          { timeout: loadAware(15_000, IDLE_FRAME_MS) },
+        );
+        await inspect(tab, variant, 'onboarding.agents', { first: true });
+        await shot(tab, variant, 'onboarding.agents');
+        await tab.locator('[data-step-next]').click();
         await reach(tab, 'onboarding.name');
         walked.push('onboarding.name');
         seen.nameForms = await tab.locator('[data-name-machine]').count();
@@ -963,7 +1021,7 @@ describe('the first run, end to end', () => {
             .evaluateAll(nodes => nodes.filter(node => (node.textContent ?? '').trim() === 'Name this machine').length),
           'Machine name: "Name this machine" is a heading once, not twice',
         ).toBe(1);
-        await inspect(tab, variant, 'onboarding.name', { first: true });
+        await inspect(tab, variant, 'onboarding.name');
         // C59 follow-up: ONE set of actions. The form draws no Save name / Not now of its own; the footer's Later and Next are the
         // answers (Next saves the name on screen), so the page never shows two rows of buttons for one step.
         expect(
@@ -1457,6 +1515,7 @@ describe('the first run, end to end', () => {
         }
         expect(walked, 'the first-run pages, in order').toEqual(
           expect.arrayContaining([
+            'onboarding.agents',
             'onboarding.name',
             'claude-code.import-choice',
             'claude-code.import-settings',
@@ -1716,9 +1775,12 @@ describe('the gaps the gate found, now closed', () => {
     console.info(
       `G6 covers at 100 ms answers (on screen / fully shown): ${slow.map(cover => `${cover.ms}/${cover.fullMs} ms`).join(', ') || 'none'}`,
     );
-    expect(slow.length, 'the slow journey covered at least one page (otherwise this proves nothing)').toBeGreaterThan(
-      0,
-    );
+    // The picker is now the first page and the name page is drawn in advance while it is on screen, so a journey of 100 ms
+    // answers may put up no cover at all (nothing blinked). It must still have WALKED the journey that slowly.
+    expect(
+      moves.filter(move => move.latency === 100).length,
+      'the slow journey walked pages (otherwise this proves nothing)',
+    ).toBeGreaterThan(0);
     for (const cover of seen.covers)
       expect(holdShortfalls(cover), `a cover's loader (frames up to ${cover.gapMs} ms apart)`).toEqual([]);
   });

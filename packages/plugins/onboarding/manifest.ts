@@ -7,6 +7,7 @@ import {
   OnboardingChanged,
   OnboardingPort,
 } from './contract/index.ts';
+import { LoginsPort } from '@ferretry/plugin-logins/contract';
 import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 
@@ -27,7 +28,8 @@ export default definePlugin({
   words: ONBOARDING_WORDS,
 
   // Runtimes is optional: it says whether the machine is set up (it has a runtime). Off, the answer is "not set up".
-  uses: { runtimes: RuntimesPort },
+  // Logins offers the provider catalog the "Which AI do you want to use?" page lists under Others.
+  uses: { runtimes: RuntimesPort, logins: LoginsPort },
   provides: { onboarding: OnboardingPort },
 
   actions: {
@@ -113,12 +115,15 @@ export default definePlugin({
     panels: [
       panel('daemon.status', { id: 'first-run-stepper', order: 1 }),
       // Onboarding's own two pages: name this machine (the machine's) and appearance (this device's).
+      // The first page of setup: which AI the person wants (the flow hides the pages of every harness not picked).
+      panel('onboarding.step', { id: 'agents-step', order: 2 }),
       panel('onboarding.step', { id: 'name-step', order: 5 }),
       panel('onboarding.step', { id: 'appearance-step', order: 1 }),
     ],
   },
 
   onboarding: [
+    { id: 'agents', title: 'Which AI do you want to use?', order: 2, group: 'This machine', stepHost: true },
     { id: 'name', title: 'Name this machine', order: 5, group: 'This machine', stepHost: true },
     { id: 'appearance', title: 'Appearance', order: 1, side: 'client', group: 'This device', stepHost: true },
   ],

@@ -38,6 +38,7 @@
         "zod": "4.4.3",
       },
       "devDependencies": {
+        "@ferretry/plugin-logins": "workspace:*",
         "@happy-dom/global-registrator": "^20.11.1",
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
@@ -546,6 +547,7 @@
         "@ferretry/app": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-logins": "workspace:*",
         "@ferretry/plugin-runtimes": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
