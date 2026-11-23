@@ -36,8 +36,8 @@ const SHORT = (reason: InputLock['reason']): InputLock => ({ seconds: INPUT_SHOR
  * value-level masking (the typed text is scrubbed from the ferret's reads), which blocks nothing else.
  *
  * DECLARED GAP (docs/input-requests.md, "Declared gaps"): a page or program that echoes a password in the clear is
- * readable by the ferret straight after the write. Every lock, short lock and probe below is decided only for a card
- * this returns true for, so none of it is reached.
+ * readable by the ferret straight after the write. {@link lockFor} no longer decides any lock: the service reads only
+ * its `seconds` as the deadline of a grant fill's field cleanup (10 s proven, 120 s otherwise), which holds nothing.
  */
 export function heldFromView(_fields: readonly Pick<InputRequestField, 'sensitivity'>[]): boolean {
   return false;

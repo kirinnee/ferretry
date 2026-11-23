@@ -363,8 +363,14 @@ of blindness after every password, on every sign-in).
   `terminal.wait`, the viewer stream, and a page's text, script, console, network and picture reads.
   `GET .../input-quarantines` lists none. Only a hold an older daemon left in its journal is still restored on start
   and can still be ended or revealed by the owner (`POST .../input-quarantines/:key/end`, "Show anyway", both audited).
-- **A sign-in plan or rule fill** that types a password into a page still has that field emptied shortly before the
-  redaction window ends (the browser's own cleanup, armed before the write). That cleanup holds nothing from the ferret.
+- **A sign-in plan or rule fill** that types a password into a page still has that field emptied shortly before a
+  deadline (the browser's own cleanup, armed before the write). That cleanup holds nothing from the ferret, and its
+  deadline is its own fact, **never shortened or lengthened by what the ferret reads**: 10 s when the daemon has PROVEN
+  the form hides the value (a saved login's observed facts for that very field: masked, no echo after the submit, and the
+  page moved on), 120 s otherwise (nothing proven, the facts contrary, the saved logins unreadable, or a `private`
+  value). The clear runs 2 s before it, and the line stops (`did-not-move-on`) at the same moment, so a password sits
+  in a proven form's field about 8 s and in any other for about 118 s, exactly as before the lock was removed.
+  A terminal fill has no field to clear and so no deadline.
 - **What still applies:**
   - _Value masking_ ([Redaction](#redaction)): the typed text is scrubbed from the ferret's reads for the redaction
     window. It blocks nothing but the value itself.
@@ -1330,8 +1336,8 @@ or nothing is typed:
   pins what it filled; every later fill of that field set must match it.
 - **What is typed** is what a tap types: the account's username and password, opened inside the use boundary after
   every check that can refuse, and a code Ferretry makes only when the line's code tick was approved. Enter is
-  pressed unless the ferret raised the input with `submit: 'agent'`. The write gets the same lock and hold as a tap,
-  never a shorter one.
+  pressed unless the ferret raised the input with `submit: 'agent'`. Nothing is held from the ferret after the write,
+  as for a tap ([no lock after an answer](#no-lock-after-an-answer)); only the field's cleanup deadline applies.
 - **Uses are spent synchronously** (`SignInGrantLedger`), inside the session lock, counting fills still in flight,
   so two raises can't both spend a line's last use. **One use is one sign-in attempt, and each role is typed once per
   use.** An attempt records the roles it typed; a later step within three minutes that types only roles it has not
@@ -1357,17 +1363,16 @@ or nothing is typed:
 - **A password left in a field is emptied, and the line stops.** Before a grant types a password into a page, the
   browser arms (its own `inputArm` call) a `pagehide` listener in an isolated world that empties every password
   input when the page is hidden (the back/forward cache would otherwise keep the value). A worker that refuses the
-  call (one from before it) types nothing. The moment the write is done, the daemon takes a hold of its own on the
-  page that cannot expire while it is in flight (so a stalled timer or a suspended machine never leaves the page
-  unheld with the value in it), and shortly before the write's own hold would end it asks the browser whether a typed
-  field still holds ANY value (same document, node still connected). It sends only which nodes, never a value. A field that holds one is emptied,
+  call (one from before it) types nothing. The write takes no hold on the page: shortly before the field's cleanup
+  deadline (10 s for a proven form, 120 s otherwise, see [no lock after an answer](#no-lock-after-an-answer)) the daemon
+  asks the browser whether a typed field still holds ANY value (same document, node still connected). It sends only which nodes, never a value. A field that holds one is emptied,
   whatever it holds (a character added during the hold changes nothing), and the line stops (`did-not-move-on`). A
   node DevTools says is gone, an empty field or another document is `moved`; any other failure is `unknown`, which
-  stops the line too and keeps the page held a full window more, since the value may still be there. The agent
+  stops the line too (nothing is held from the ferret either way). The agent
   browser runs with the back/forward cache off, so a page never comes back with its old heap; the `pagehide` arm is
   defence in depth. A single-page app that swapped the form has moved on once the node is gone. Terminals need
   none: a line-mode prompt consumes the line. A write that could not say whether it typed (`uncertain`: the
-  password may have landed) gets the same clear and hold, and stops the line at once (`did-not-move-on`).
+  password may have landed) gets the same clear, on the full 120 s deadline, and stops the line at once (`did-not-move-on`).
 - **Audited, never a value.** `input.delivered` carries `by: 'plan'`, the plan, the line and the sign-in beside the
   usual names and flags. A miss is recorded as `input.requested` with `preapproval: 'did-not-apply'`, the plan, the
   line and `because`. A stopped line is recorded as `task-plan-line-stopped`; a write back the plan record refuses
@@ -1421,14 +1426,14 @@ in the table above holds for a rule too, plus these:
   address, a worker too old to report one) taints EVERY page rule, and so does a script that ran and then failed. A
   terminal rule is no page's: its key is never a host, and no page script reaches the tmux pane it types into. Only
   `browser_eval` is seen: a ferret editing the browser profile on disk, or an extension, is outside it.
-- **The clear suspends.** A password left in its field at the hold's end (`cleared`), or a clear that can't tell
+- **The clear suspends.** A password left in its field at the cleanup deadline (`cleared`), or a clear that can't tell
   (`unknown`), suspends the rule (`did-not-move-on`), exactly as it stops a plan line. A write that could not say whether it
-  typed (`uncertain`) gets the same clear and its own hold for the full window, and suspends the rule at once.
+  typed (`uncertain`) gets the same clear on the full 120 s deadline, and suspends the rule at once.
 - **What the ferret is told.** On a fill: "Filled under a rule the owner approved in advance." and `source: saved`,
   never the rule or the account. On a miss: **nothing at all**. Its view, its words and its agenda item are
   byte-identical to a sign-in no rule was ever about (no "didn't apply" note, no context line), and so are the states
   it can read while the rule is tried: until the request really ends it reads the input as it stood when the fill began
-  (never `delivering`, never a longer lock), so a late refusal looks the same as an input nobody answered yet. An input a
+  (never `delivering`), so a late refusal looks the same as an input nobody answered yet. An input a
   plan line was also tried on says the plan's words, as it would without the rule, even when the rule missed only at
   the write. **Timing is not equal:** a raise a
   rule was tried on, and missed, does more work before it answers (the accounts are read, the miss is audited, the input
@@ -1479,11 +1484,9 @@ in the table above holds for a rule too, plus these:
 What it does NOT do, said plainly:
 
 - **A rule checks where the password goes, not why.**
-- **A refusal that lands in the last moment before typing can show.** The fill asks whether the rule still holds
-  before the page is held from the ferret, so a refusal the ferret can cause (a script it starts, say) lands before
-  anything it can read changes. One that lands in the few milliseconds between taking that hold and typing (a revoke, a
-  script started in exactly that gap) leaves the page held from the ferret for that moment, which an input no rule was
-  about never does: a ferret polling its page could so learn that some rule was tried. It learns nothing more.
+- **A refusal that lands in the last moment before typing is invisible.** The fill asks whether the rule still holds
+  right before the write, and the page is held from the ferret at no point (no lock after an answer), so a refusal
+  there leaves nothing the ferret can read changed: an input no rule was about looks the same.
 - **A code page fills only right after the rule's own password.** The owner's history counts a form only when its
   secret went into a password box (`masked`), so a code page is never in it, however often you tap it. A rule with the
   code ticked therefore types a code on a separate page only as a JOIN to the sign-in it just did: the rule typed the

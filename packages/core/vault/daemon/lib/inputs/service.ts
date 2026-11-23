@@ -73,7 +73,7 @@ import { GRANT_MISS_CONTEXT_LINE, grantStops, mergeScriptedOrigins, scriptedSinc
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
-import { lookAlike, matchable, passwordTarget, spellsPassword } from './lock.ts';
+import { lockFor, lookAlike, matchable, passwordTarget, spellsPassword } from './lock.ts';
 import { type LoginDelivery, type LoginObserver } from './login-observer.ts';
 import type {
   InputAgendaPort,
@@ -103,6 +103,7 @@ import {
   type SavedListing,
   savedForFields,
   signInOfAt,
+  signInsAt,
   someoneElse,
   targetMatchKey,
 } from './saved-logins.ts';
@@ -230,7 +231,7 @@ function holdNames(request: InputRequest, seenNames: readonly string[] | undefin
   return request.target.kind === 'page' ? surfaceNames.map(pageName) : surfaceNames;
 }
 
-/** How long before a grant fill's page hold ends its clear takes a hold of its own and runs. */
+/** How long before a grant fill's cleanup deadline its clear runs. */
 const CLEAR_LEAD_MS = 2_000;
 
 export interface InputRequestServiceDependencies {
@@ -989,8 +990,8 @@ export class InputRequestService {
   }
 
   /**
-   * A password a grant fill typed must not stay in its field. Shortly before the redaction window ends
-   * ({@link CLEAR_LEAD_MS}), the browser empties any typed field that still holds a value. This takes NO hold on the
+   * A password a grant fill typed must not stay in its field. Shortly before the cleanup deadline `holdMs`
+   * ({@link CLEAR_LEAD_MS}; {@link clearWindowMs}: 10 s proven, 120 s otherwise), the browser empties any typed field that still holds a value. This takes NO hold on the
    * page (no lock after an answer): it is the field's own cleanup, apart from anyone's access. `cleared` and `unknown`
    * stop the line (`did-not-move-on`): the page didn't move on as the owner approved.
    */
@@ -1011,6 +1012,26 @@ export class InputRequestService {
         if (outcome !== 'moved') await grants.stopped(grant, 'did-not-move-on');
       })
       .catch(() => undefined);
+  }
+
+  /**
+   * How long a grant fill's typed password may stay in its field before it is cleared, and before the grant is judged
+   * (`did-not-move-on`): `INPUT_SHORT_LOCK_SECONDS` for a form the daemon has PROVEN hides the value (a saved login's
+   * observed facts for that very field), the full `INPUT_QUARANTINE_SECONDS` otherwise. Only a deadline for the
+   * field's own cleanup: nothing is held from the ferret's reads. A saved login that cannot be read is not proof.
+   */
+  private async clearWindowMs(
+    facts: InputTargetFacts,
+    fields: readonly InputRequestField[],
+    submitted: boolean,
+  ): Promise<number> {
+    const listing = await this.deps.logins?.listing().catch(() => undefined);
+    const observed =
+      listing === undefined
+        ? []
+        : signInsAt(targetMatchKey(facts, this.deps.hostName ?? ''), listing).flatMap(signIn => signIn.observed ?? []);
+    const unread = listing === undefined && this.deps.logins !== undefined;
+    return lockFor(facts, fields, { observed, ...(unread ? { unread } : {}), probed: false, submitted }).seconds * 1000;
   }
 
   /**
@@ -1871,6 +1892,9 @@ export class InputRequestService {
               seen.facts,
               fields.filter(field => field.sensitivity === 'secret').map(field => field.id),
             );
+      // How long the typed password may stay in its field before the clear (and the grant's did-not-move-on check): the
+      // old adaptive window, decided from facts the daemon saw. It holds nothing from the ferret (no lock after an answer).
+      const clearMs = clear === undefined ? QUARANTINE_MS : await this.clearWindowMs(seen.facts, fields, submitted);
       // Every value that is masked is held before it is typed, so a read racing the write already hides it.
       for (const [index, field] of fields.entries())
         if (maskedFromReads(field, typed))
@@ -1986,7 +2010,7 @@ export class InputRequestService {
         // A grant fill's password may have landed (secrev-1282b F2): it gets the same clear, and the clear's own hold for
         // the full window, as a typed one, and the grant stops (`did-not-move-on`): the sign-in did not go as approved.
         if (grant !== undefined) {
-          if (clear !== undefined) grant.typed(clear, QUARANTINE_MS, holdNames(request, held.names));
+          if (clear !== undefined) grant.typed(clear, clearMs, holdNames(request, held.names));
           // A reader that changed before Enter is the race a standing terminal rule bounds (secrev-1301 M1).
           await grant.uncertain(outcome === 'reader_changed' ? 'program-changed' : 'did-not-move-on');
         }
@@ -2028,7 +2052,7 @@ export class InputRequestService {
         );
       }
       this.signInMovedOn(request, seen.facts);
-      if (clear !== undefined) grant?.typed(clear, QUARANTINE_MS, holdNames(request, held.names));
+      if (clear !== undefined) grant?.typed(clear, clearMs, holdNames(request, held.names));
       if (pasted !== undefined) this.deps.sealed?.used(request.sessionId, pasted, request.target);
       await stored(false);
       const saved =
