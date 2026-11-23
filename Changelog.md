@@ -1,3 +1,10 @@
+## [4.291.21](https://github.com/kirinnee/ferretry/compare/v4.291.20...v4.291.21) (2026-11-23)
+
+### Fixes
+
+* **daemon:** re-read a damaged agenda when its history changes; bound said-failure trackers ([1dbc9d5](https://github.com/kirinnee/ferretry/commit/1dbc9d56200aa1e89f067bfc374b904a3a6d610c))
+* **daemon:** remember a damaged agenda ledger by file identity and say it once ([6eeab86](https://github.com/kirinnee/ferretry/commit/6eeab86dd5469efd748a358cbfbe5979bf5e4cd5))
+
 ## [4.291.20](https://github.com/kirinnee/ferretry/compare/v4.291.19...v4.291.20) (2026-11-22)
 
 ### Fixes

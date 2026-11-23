@@ -1,3 +1,9 @@
+## [4.291.20](https://github.com/kirinnee/ferretry/compare/v4.291.19...v4.291.20) (2026-11-22)
+
+### Fixes
+
+* stop full-journal index rewrites and the chat's agenda read storm ([#2302](https://github.com/kirinnee/ferretry/issues/2302)) ([7b1f1fc](https://github.com/kirinnee/ferretry/commit/7b1f1fcd8d0cfb5f69c2a5095b151ced7a82624d))
+
 ## [4.291.19](https://github.com/kirinnee/ferretry/compare/v4.291.18...v4.291.19) (2026-11-16)
 
 ### Fixes
