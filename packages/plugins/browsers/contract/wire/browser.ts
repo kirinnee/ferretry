@@ -443,6 +443,20 @@ export const BrowserActionSchema = z.discriminatedUnion('action', [
 ]);
 export type BrowserAction = z.infer<typeof BrowserActionSchema>;
 
+/**
+ * THE ONE VIEWER A SCREEN IS. A pane (or a phone) mints one random id and sends it as this query parameter on its
+ * status reads, its toolbar acts and its display stream, so the page it shows is its own: switching tabs in one pane
+ * moves no other pane. A caller that sends none (an older client, `fy`) is the session's one shared view, as before.
+ */
+export const BROWSER_VIEWER_QUERY = 'viewer';
+export const BROWSER_MAX_VIEWER_ID_LENGTH = 64;
+/** Letters, digits, `-` and `_` only: the id is a key in the daemon's memory and never a path or a command. */
+export const BrowserViewerIdSchema = z
+  .string()
+  .min(1)
+  .max(BROWSER_MAX_VIEWER_ID_LENGTH)
+  .regex(/^[A-Za-z0-9_-]+$/u);
+
 const BrowserResultPageSchema = BrowserPageSnapshotSchema.safeExtend({
   actedPageId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH).optional(),
   downloads: z.array(BrowserDownloadNoticeSchema).max(BROWSER_MAX_DOWNLOAD_NOTICES).optional(),

@@ -183,6 +183,7 @@ const browserCases: SchemaCase[] = [
   { name: 'proxy status', schema: browser.BrowserProxyStatusSchema, value: proxyStatus },
   { name: 'status', schema: browser.BrowserStatusSchema, value: runningStatus },
   { name: 'action', schema: browser.BrowserActionSchema, value: { action: 'navigate', url: homePage.url } },
+  { name: 'viewer id', schema: browser.BrowserViewerIdSchema, value: 'a3f9c2d4-7b1e-4c8a-9d52-0e6f1a2b3c4d' },
   { name: 'action result', schema: browser.BrowserActionResultSchema, value: navigateResult },
   { name: 'error code', schema: browser.BrowserErrorCodeSchema, value: 'not_running' },
 ];
@@ -399,6 +400,14 @@ describe('browser schemas', () => {
         name: 'key event without code',
         schema: browser.BrowserInputEventSchema,
         value: { kind: 'key', type: 'keyDown', key: 'a' },
+      },
+      { name: 'empty viewer id', schema: browser.BrowserViewerIdSchema, value: '' },
+      { name: 'viewer id with a separator', schema: browser.BrowserViewerIdSchema, value: 'a/../b' },
+      { name: 'viewer id with a null', schema: browser.BrowserViewerIdSchema, value: 'a\u0000b' },
+      {
+        name: 'viewer id past its bound',
+        schema: browser.BrowserViewerIdSchema,
+        value: 'v'.repeat(browser.BROWSER_MAX_VIEWER_ID_LENGTH + 1),
       },
       { name: 'unknown action key', schema: browser.BrowserActionSchema, value: { action: 'start', force: true } },
       { name: 'unknown action', schema: browser.BrowserActionSchema, value: { action: 'evaluate', script: '1' } },

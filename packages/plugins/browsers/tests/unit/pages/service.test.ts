@@ -460,6 +460,136 @@ describe('the machine agent browser — a person and an agent at once', () => {
     should((await service.status('s1')).viewers).equal(1);
   });
 
+  it('B1 should give each screen its own page: a tab switch in one screen moves no other screen, its stream or its input', async () => {
+    // Arrange — one ferret, two pages, two screens (a desktop pane and a phone) and an older client with no screen id.
+    const { tabs, service } = harness();
+    await service.act('s1', { action: 'new-page' });
+    const first = activeOf(await service.status('s1'));
+    await service.act('s1', { action: 'new-page' });
+    const second = activeOf(await service.status('s1'));
+    const desktop: string[] = [];
+    const phone: string[] = [];
+    const older: string[] = [];
+    await service.attachViewer(
+      's1',
+      frame => desktop.push(frame.pageId),
+      () => undefined,
+      'desktop',
+    );
+    await service.attachViewer(
+      's1',
+      frame => phone.push(frame.pageId),
+      () => undefined,
+      'phone',
+    );
+    await service.attachViewer(
+      's1',
+      frame => older.push(frame.pageId),
+      () => undefined,
+    );
+
+    // Act — the desktop switches to the first page, then every page paints.
+    const answer = await service.act('s1', { action: 'activate-page', pageId: first }, { viewerId: 'desktop' });
+    tabs.emit(first);
+    tabs.emit(second);
+    await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'd' }, 'desktop');
+    await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'p' }, 'phone');
+    await service.act('s1', { action: 'navigate', url: 'https://desk.test/' }, { viewerId: 'desktop' });
+    await service.act('s1', { action: 'navigate', url: 'https://phone.test/' }, { viewerId: 'phone' });
+
+    // Assert — only the desktop moved: its status, stream, typing and toolbar are on the first page; the others stayed.
+    should(activeOf((answer as { status: unknown }).status)).equal(first);
+    should(activeOf(await service.status('s1', 'desktop'))).equal(first);
+    should(activeOf(await service.status('s1', 'phone'))).equal(second);
+    should(activeOf(await service.status('s1'))).equal(second);
+    should(desktop).deepEqual([first]);
+    should(phone).deepEqual([second]);
+    should(older).deepEqual([second]);
+    should(tabs.inputs).deepEqual([
+      { pageId: first, input: { kind: 'insertText', text: 'd' } },
+      { pageId: second, input: { kind: 'insertText', text: 'p' } },
+    ]);
+    should(tabs.calls.slice(-2)).deepEqual([`navigate:${first}`, `navigate:${second}`]);
+  });
+
+  it('B1 should leave a screen that has an id alone when an older client switches, and the other way round', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    await service.act('s1', { action: 'new-page' });
+    const first = activeOf(await service.status('s1'));
+    await service.act('s1', { action: 'new-page' });
+    const second = activeOf(await service.status('s1'));
+    const screen: string[] = [];
+    const older: string[] = [];
+    await service.attachViewer(
+      's1',
+      frame => screen.push(frame.pageId),
+      () => undefined,
+      'screen',
+    );
+    await service.attachViewer(
+      's1',
+      frame => older.push(frame.pageId),
+      () => undefined,
+    );
+
+    // Act — the older client switches (as `fy browser activate-page` does), then the screen does the opposite.
+    await service.act('s1', { action: 'activate-page', pageId: first });
+    await service.act('s1', { action: 'activate-page', pageId: first }, { viewerId: 'screen' });
+    await service.act('s1', { action: 'activate-page', pageId: second }, { viewerId: 'screen' });
+    tabs.emit(first);
+    tabs.emit(second);
+
+    // Assert
+    should(older).deepEqual([first]);
+    should(screen).deepEqual([second]);
+    should(activeOf(await service.status('s1'))).equal(first);
+    should(activeOf(await service.status('s1', 'screen'))).equal(second);
+  });
+
+  it('B1 should start a new screen on the newest page, and fall back to it when its own page closes', async () => {
+    // Arrange — the session's shared view is on the first page; a screen that has never looked arrives.
+    const { service } = harness();
+    await service.act('s1', { action: 'new-page' });
+    const first = activeOf(await service.status('s1'));
+    await service.act('s1', { action: 'new-page' });
+    const second = activeOf(await service.status('s1'));
+    await service.act('s1', { action: 'activate-page', pageId: first });
+    const ended: string[] = [];
+
+    // Act
+    const arrival = activeOf(await service.status('s1', 'new'));
+    await service.act('s1', { action: 'activate-page', pageId: first }, { viewerId: 'new' });
+    await service.attachViewer(
+      's1',
+      () => undefined,
+      signal => ended.push(signal.reason),
+      'new',
+    );
+    await service.act('s1', { action: 'close-page', pageId: first }, { viewerId: 'other' });
+    const after = await service.status('s1', 'new');
+
+    // Assert — it arrived on the newest page, and when its own page closed it fell back, its stream told.
+    should(arrival).equal(second);
+    should(ended).deepEqual(['the page closed']);
+    should(activeOf(after)).equal(second);
+  });
+
+  it('B1 should keep one screen id of one session apart from the same id in another', async () => {
+    // Arrange
+    const { service } = harness();
+    await service.openPage('s1', 'mine');
+    const theirs = await service.openPage('s2', 'theirs');
+    const mine = activeOf(await service.status('s1', 'same'));
+
+    // Act
+    const other = await service.status('s2', 'same');
+
+    // Assert
+    should(activeOf(other)).equal(theirs.id);
+    should(mine).not.equal(theirs.id);
+  });
+
   it('should drive the person’s toolbar on the page they view', async () => {
     // Arrange
     const { tabs, service } = harness();

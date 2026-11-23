@@ -33,8 +33,9 @@ export interface BrowserViewerHost {
     sessionId: string,
     onFrame: (frame: BrowserScreencastFrame) => void,
     onTerminal: (signal: ViewerTerminalSignal) => void,
+    viewerId?: string,
   ): Promise<ViewerAttachment>;
-  dispatchHumanInput(sessionId: string, input: BrowserInputEvent): Promise<void>;
+  dispatchHumanInput(sessionId: string, input: BrowserInputEvent, viewerId?: string): Promise<void>;
 }
 
 /**
@@ -59,6 +60,8 @@ export interface ViewerDeliveryGuard {
 }
 
 export interface ViewerStreamOptions {
+  /** The screen this stream is (`BROWSER_VIEWER_QUERY`): it shows, and types into, that screen's own page. */
+  readonly viewerId?: string | undefined;
   /** Set for an agent's viewer only: a person's stream is never asked. */
   readonly delivery?: ViewerDeliveryGuard | undefined;
   /** Largest single client message accepted before the stream is a protocol violation. */

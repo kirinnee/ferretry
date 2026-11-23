@@ -46,7 +46,7 @@ export function heldViewerHost(
 ): BrowserViewerHost {
   const { mayType, delivery } = viewer;
   return {
-    attachViewer: async (sessionId, onFrame, onTerminal) => {
+    attachViewer: async (sessionId, onFrame, onTerminal, viewerId) => {
       /** Ends the stream with the guard's sentence, once. */
       let ended = false;
       const end = (reason: string): void => {
@@ -84,6 +84,7 @@ export function heldViewerHost(
             })().catch(() => undefined);
           },
           onTerminal,
+          viewerId,
         );
       } catch (error) {
         unwatch?.();
@@ -96,9 +97,9 @@ export function heldViewerHost(
         },
       };
     },
-    dispatchHumanInput: async (sessionId, input) => {
+    dispatchHumanInput: async (sessionId, input, viewerId) => {
       if (!mayType) throw new ViewerInputRefused();
-      await host.dispatchHumanInput(sessionId, input);
+      await host.dispatchHumanInput(sessionId, input, viewerId);
     },
   };
 }

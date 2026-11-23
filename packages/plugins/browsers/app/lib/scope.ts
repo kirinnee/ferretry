@@ -11,7 +11,12 @@ import type { PluginClient, PluginSocket, PluginSocketListeners } from '@ferretr
 
 /** The client a Browsers surface rides: calls, events and the guarded display socket. */
 export interface BrowsersClient extends PluginClient {
-  socket(key: string, params: Readonly<Record<string, string>>, listeners: PluginSocketListeners): PluginSocket;
+  socket(
+    key: string,
+    params: Readonly<Record<string, string>>,
+    listeners: PluginSocketListeners,
+    query?: Readonly<Record<string, string>>,
+  ): PluginSocket;
 }
 
 /** True when the shell's client can open a socket (a client of another build cannot stream a page). */
@@ -29,6 +34,11 @@ export const sameBrowserDaemon = (left: BrowserDaemon, right: BrowserDaemon): bo
 export interface BrowserSessionScope {
   readonly daemonId: string;
   readonly sessionId: string;
+  /**
+   * The ONE screen this scope speaks for (`BROWSER_VIEWER_QUERY`): its status reads, acts and display stream all carry it,
+   * so the page it shows is its own. Absent, the scope is the session's shared view (a test, an older caller).
+   */
+  readonly viewerId?: string;
 }
 
 const requireSessionId = (value: string): string => {
@@ -40,9 +50,11 @@ const requireSessionId = (value: string): string => {
 export const browserSessionScope = (
   daemon: Pick<BrowserDaemon, 'daemonId'>,
   sessionId: string,
+  viewerId?: string,
 ): BrowserSessionScope => ({
   daemonId: daemon.daemonId,
   sessionId: requireSessionId(sessionId),
+  ...(viewerId === undefined ? {} : { viewerId }),
 });
 
 /** A collision-safe key for in-memory session state. */

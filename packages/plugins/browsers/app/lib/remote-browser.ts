@@ -1,5 +1,5 @@
 import { FY_REQUEST_ID_HEADER } from '@ferretry/app';
-import { BROWSER_MAX_PAGE_ID_LENGTH } from '../../contract/index.ts';
+import { BROWSER_MAX_PAGE_ID_LENGTH, BROWSER_VIEWER_QUERY } from '../../contract/index.ts';
 import {
   type BrowserAction,
   type BrowserActionResult,
@@ -53,6 +53,10 @@ const sessionParams = (scope: BrowserSessionScope): Readonly<Record<string, stri
   ferretId: scope.sessionId,
 });
 
+/** The screen's own id as the query every call and the stream carry; nothing for a scope that is the shared view. */
+const viewerQuery = (scope: BrowserSessionScope): { readonly query?: Readonly<Record<string, string>> } =>
+  scope.viewerId === undefined ? {} : { query: { [BROWSER_VIEWER_QUERY]: scope.viewerId } };
+
 const assertScopeDaemon = (daemon: BrowserDaemon, scope: BrowserSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('browser scope must belong to the requested daemon');
 };
@@ -91,7 +95,11 @@ export const fetchRemoteBrowserStatus = async (
   assertScopeDaemon(daemon, scope);
   return parseBrowserStatus(
     scope,
-    await daemon.client.call(SESSION_BROWSER_ROUTES.status, { params: sessionParams(scope), quiet: true }),
+    await daemon.client.call(SESSION_BROWSER_ROUTES.status, {
+      params: sessionParams(scope),
+      ...viewerQuery(scope),
+      quiet: true,
+    }),
   );
 };
 
@@ -106,6 +114,7 @@ export const runRemoteBrowserAction = async (
     scope,
     await daemon.client.call(SESSION_BROWSER_ROUTES.act, {
       params: sessionParams(scope),
+      ...viewerQuery(scope),
       body: action,
       headers: { [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
     }),
@@ -265,11 +274,16 @@ export const remoteBrowserSocketFactory: RemoteBrowserSocketFactory = (daemon, s
   }
   try {
     socket.attach(
-      daemon.client.socket(SESSION_BROWSER_ROUTES.stream, sessionParams(scope), {
-        onOpen: () => socket.opened(),
-        onFrame: frame => socket.receive(frame),
-        onClose: (reason, code) => socket.ended(reason, code),
-      }),
+      daemon.client.socket(
+        SESSION_BROWSER_ROUTES.stream,
+        sessionParams(scope),
+        {
+          onOpen: () => socket.opened(),
+          onFrame: frame => socket.receive(frame),
+          onClose: (reason, code) => socket.ended(reason, code),
+        },
+        viewerQuery(scope).query,
+      ),
     );
   } catch (caught) {
     socket.failed(caught instanceof Error ? caught.message : 'the display stream did not open');

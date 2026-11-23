@@ -233,7 +233,10 @@ export function buildBrowsers(
           sessionId,
           downstream,
           new KernelFrameClock(kernel.clock),
-          delivery === undefined ? {} : { delivery },
+          {
+            ...(delivery === undefined ? {} : { delivery }),
+            ...(who.viewerId === undefined ? {} : { viewerId: who.viewerId }),
+          },
         );
       },
       fromClient: frame => viewer?.fromClient(frame),

@@ -96,12 +96,17 @@ class FakeHost implements BrowserViewerHost {
   onTerminal?: (signal: ViewerTerminalSignal) => void;
   /** Emitted during the attach round trip, before the stream object exists. */
   early?: { readonly frame?: BrowserScreencastFrame; readonly terminal?: ViewerTerminalSignal };
+  /** The screen id the stream attached with, and the one each input was dispatched for. */
+  attachedAs: string | undefined;
+  readonly dispatchedAs: (string | undefined)[] = [];
 
   attachViewer(
     _sessionId: string,
     onFrame: (frame: BrowserScreencastFrame) => void,
     onTerminal: (signal: ViewerTerminalSignal) => void,
+    viewerId?: string,
   ): Promise<ViewerAttachment> {
+    this.attachedAs = viewerId;
     this.onFrame = onFrame;
     this.onTerminal = onTerminal;
     if (this.early?.frame) onFrame(this.early.frame);
@@ -113,7 +118,8 @@ class FakeHost implements BrowserViewerHost {
     });
   }
 
-  dispatchHumanInput(_sessionId: string, input: BrowserInputEvent): Promise<void> {
+  dispatchHumanInput(_sessionId: string, input: BrowserInputEvent, viewerId?: string): Promise<void> {
+    this.dispatchedAs.push(viewerId);
     if (this.failNextDispatch) {
       this.failNextDispatch = false;
       return Promise.reject(new Error('page detached'));
@@ -392,6 +398,24 @@ describe('browser viewer stream — upstream input', () => {
       { kind: 'insertText', text: 'hi' },
       { kind: 'insertText', text: 'there' },
     ]);
+  });
+
+  it('B1 should attach and type as the screen it was opened for, and as none when it was opened for none', async () => {
+    // Arrange
+    const screen = await connect({ options: { viewerId: 'screen-1' } });
+    const older = await connect();
+
+    // Act
+    screen.stream.fromClient(message(mouseMove));
+    older.stream.fromClient(message(mouseMove));
+    await screen.stream.settled;
+    await older.stream.settled;
+
+    // Assert
+    should(screen.host.attachedAs).equal('screen-1');
+    should(screen.host.dispatchedAs).deepEqual(['screen-1']);
+    should(older.host.attachedAs).be.undefined();
+    should(older.host.dispatchedAs).deepEqual([undefined]);
   });
 
   it('should reject a malformed or unparseable client message as a policy violation', async () => {

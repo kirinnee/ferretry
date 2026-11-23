@@ -93,6 +93,7 @@ export class BrowserViewerStream {
   private constructor(
     private readonly host: BrowserViewerHost,
     private readonly sessionId: string,
+    private readonly viewerId: string | undefined,
     private readonly downstream: ViewerDownstream,
     private readonly clock: FrameClock,
     private attachment: ViewerAttachment,
@@ -130,8 +131,9 @@ export class BrowserViewerStream {
         if (stream) stream.acceptTerminal(terminal);
         else earlyTerminal = terminal;
       },
+      options.viewerId,
     );
-    stream = new BrowserViewerStream(host, sessionId, downstream, clock, attachment, options);
+    stream = new BrowserViewerStream(host, sessionId, options.viewerId, downstream, clock, attachment, options);
     // A session that already ended supersedes any frame it produced on the way out.
     if (earlyTerminal) stream.acceptTerminal(earlyTerminal);
     else if (earlyFrame) stream.acceptFrame(earlyFrame);
@@ -175,7 +177,7 @@ export class BrowserViewerStream {
     this.serial = this.serial
       .then(async () => {
         if (this.closed) return;
-        await this.host.dispatchHumanInput(this.sessionId, decoded);
+        await this.host.dispatchHumanInput(this.sessionId, decoded, this.viewerId);
       })
       .catch((error: unknown) => {
         if (error instanceof ViewerInputRefused) this.finish(VIEWER_CLOSE_POLICY, 'browser input not permitted');
@@ -312,7 +314,7 @@ export class BrowserViewerStream {
     if (releases.length > 0) {
       const release = async (): Promise<void> => {
         for (const input of releases) {
-          await this.host.dispatchHumanInput(this.sessionId, input).catch(() => undefined);
+          await this.host.dispatchHumanInput(this.sessionId, input, this.viewerId).catch(() => undefined);
         }
       };
       this.serial = this.serial.then(release, release);

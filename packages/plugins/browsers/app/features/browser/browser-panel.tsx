@@ -11,7 +11,7 @@
 
 import { useFullscreen, usePanelIntent } from '@ferretry/app';
 import type { PanelIntent } from '@ferretry/kernel/manifest';
-import { useCallback, useId, useMemo } from 'react';
+import { useCallback, useId, useMemo, useState } from 'react';
 import { useBrowserControl } from '../../hooks/use-browser-control.ts';
 import { useBrowserLogin } from '../../hooks/use-browser-login.ts';
 import type { DaemonBrowserLoginStore } from '../../lib/browser-login.ts';
@@ -40,7 +40,9 @@ export interface BrowserPanelProps {
 /** The panel for one ferret. Without a ferret there is no browser to show. */
 export function BrowserPanel({ daemon, sessionId, dependencies, loginStore, intent }: BrowserPanelProps) {
   const login = useBrowserLogin(daemon, loginStore);
-  const scope = useMemo(() => browserSessionScope(daemon, sessionId), [daemon, sessionId]);
+  // This panel is ONE viewer: its own id, so another pane or device on the same ferret shows its own page.
+  const [viewerId] = useState(() => crypto.randomUUID());
+  const scope = useMemo(() => browserSessionScope(daemon, sessionId, viewerId), [daemon, sessionId, viewerId]);
   const titleId = useId();
   const pages = useSessionBrowser(scope, daemon);
   const control = useBrowserControl(scope, daemon);

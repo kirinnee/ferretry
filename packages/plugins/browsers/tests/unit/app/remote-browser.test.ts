@@ -104,6 +104,23 @@ describe('remote browser transport', () => {
     );
   });
 
+  it('B1 sends the screen’s own id on its status read, its acts and its display, and none for a shared view', async () => {
+    const { client, calls } = scripted();
+    const sockets = socketClient();
+    const daemon = browserDaemon(client);
+    const screen = daemonSessionScope(daemon, 'same/session', 'screen-1');
+    await fetchRemoteBrowserStatus(daemon, screen);
+    await runRemoteBrowserAction(daemon, screen, { action: 'activate-page', pageId: 'p2' });
+    await fetchRemoteBrowserStatus(daemon, daemonSessionScope(daemon, 'same/session'));
+    remoteBrowserSocketFactory(browserDaemon(sockets.client), daemonSessionScope(daemon, 'same/session', 'screen-1'));
+    remoteBrowserSocketFactory(browserDaemon(sockets.client), daemonSessionScope(daemon, 'same/session'));
+    expect(calls[0]?.init?.query).toEqual({ viewer: 'screen-1' });
+    expect(calls[1]?.init?.query).toEqual({ viewer: 'screen-1' });
+    expect(calls[2]?.init).not.toHaveProperty('query');
+    expect(sockets.opened[0]?.query).toEqual({ viewer: 'screen-1' });
+    expect(sockets.opened[1]).not.toHaveProperty('query');
+  });
+
   it('R548 opens the display on the guarded socket and rebuilds whole frames from contiguous chunks', () => {
     const sockets = socketClient();
     const daemon = browserDaemon(sockets.client);
