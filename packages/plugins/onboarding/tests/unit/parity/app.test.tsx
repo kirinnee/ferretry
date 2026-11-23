@@ -118,9 +118,15 @@ describe('the feature, its routes and its settings entry', () => {
     const half = app.build?.({ manifest: app.manifest, client: {} as PluginClient });
     expect(Object.keys(half?.screens ?? {}).toSorted()).toEqual(['flow', 'handoff', 'onboarding', 'setup', 'steps']);
     expect(Object.keys(half?.settings ?? {})).toEqual(['setup']);
-    expect(Object.keys(half?.panels ?? {})).toEqual(['first-run-stepper', 'name-step', 'appearance-step']);
+    expect(Object.keys(half?.panels ?? {})).toEqual([
+      'first-run-stepper',
+      'agents-step',
+      'name-step',
+      'appearance-step',
+    ]);
     expect((manifest.ui?.panels ?? []).map(panel => `${panel.slot}.${panel.id}`)).toEqual([
       'daemon.status.first-run-stepper',
+      'onboarding.step.agents-step',
       'onboarding.step.name-step',
       'onboarding.step.appearance-step',
     ]);
@@ -135,8 +141,9 @@ describe('the feature, its routes and its settings entry', () => {
         chrome: 'none',
       });
     }
-    // Onboarding’s own two pages: the machine’s name (daemon) and this device’s look (client).
+    // Onboarding’s own pages: which AI (daemon, first), the machine’s name (daemon) and this device’s look (client).
     expect(manifest.onboarding).toEqual([
+      expect.objectContaining({ id: 'agents' }),
       expect.objectContaining({ id: 'name' }),
       expect.objectContaining({ id: 'appearance', side: 'client' }),
     ]);

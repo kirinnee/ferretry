@@ -206,9 +206,12 @@
   height: 6px;
   min-width: 0;
 }
-.fy-sp-progress__segment[data-state='done'],
-.fy-sp-progress__segment[data-state='current'] {
+.fy-sp-progress__segment[data-state='done'] {
   background: var(--accent);
+}
+/* The current segment takes `--fy-progress-now` where a palette names one (Briefing's pink step marker), the accent everywhere else. */
+.fy-sp-progress__segment[data-state='current'] {
+  background: var(--fy-progress-now, var(--accent));
 }
 .fy-sp-progress__segment[data-state='done'] {
   opacity: 0.55;
@@ -217,8 +220,8 @@
 .fy-sp-progress__segment[data-state='current'][data-fills] {
   background: linear-gradient(
     to right,
-    var(--accent) calc(var(--fy-sp-fill) * 100%),
-    color-mix(in srgb, var(--accent) 30%, var(--border)) 0
+    var(--fy-progress-now, var(--accent)) calc(var(--fy-sp-fill) * 100%),
+    color-mix(in srgb, var(--fy-progress-now, var(--accent)) 30%, var(--border)) 0
   );
 }
 /* The words are the one text line under the bar; the per-segment labels are for a screen reader only. */

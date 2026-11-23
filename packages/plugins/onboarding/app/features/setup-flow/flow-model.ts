@@ -13,6 +13,7 @@
  *
  * The position is a step KEY (`<plugin>.<step>`), never an index, so a step list that changes under a run cannot move it.
  */
+import { SUPPORTED_HARNESSES } from '../agents/agents-model.ts';
 import { askableSteps, type Flow, type FlowStep } from '../../lib/index.ts';
 
 /** The place after the last page. */
@@ -27,6 +28,11 @@ export interface RunState {
   readonly gone: ReadonlySet<string>;
   /** Pages that said they are not needed for this run, given the answers so far (cleared when their plugin's memory changes). */
   readonly notNeeded: ReadonlySet<string>;
+  /**
+   * Pages of a harness the picker left out that ALREADY hold an answer: passed over like a not-needed page, but never a mark, so
+   * the end of the run never tells the machine `skipped` over their saved state (see `applyPicked`).
+   */
+  readonly aside: ReadonlySet<string>;
   /** Which way the last move went: the page slides in from that side. */
   readonly direction: 'forward' | 'back';
   /** Counts the moves of this run: a callback a page handed out is good only for the visit it was made in (see use-setup-flow.ts). */
@@ -43,15 +49,31 @@ export const pagesOf = (flow: Flow): readonly FlowStep[] => [
 const isAnsweredBefore = (step: FlowStep, later: ReadonlySet<string>): boolean =>
   step.phase === 'daemon' ? step.state !== undefined && step.state !== 'pending' : later.has(step.key);
 
-/** The keys of the pages answered before the run starts. */
-export const answeredBefore = (pages: readonly FlowStep[], later: ReadonlySet<string>): ReadonlySet<string> =>
-  new Set(pages.filter(page => isAnsweredBefore(page, later)).map(page => page.key));
+/** "Which AI do you want to use?": its answer (the pick) is memory of one run, never stored (see `answeredBefore`). */
+const AGENTS_KEY = 'onboarding.agents';
+
+/**
+ * The keys of the pages answered before the run starts.
+ *
+ * The picker is the one page whose answer is NOT kept: the machine records only that it was answered, and the pick itself lives
+ * in the run's memory. So a run that resumes while a harness page is still unanswered has lost the pick (a Codex-only run would
+ * walk the pending Claude pages): the picker is asked again, and what is picked decides which harness pages the run walks.
+ */
+export const answeredBefore = (pages: readonly FlowStep[], later: ReadonlySet<string>): ReadonlySet<string> => {
+  const answered = new Set(pages.filter(page => isAnsweredBefore(page, later)).map(page => page.key));
+  const harnesses = new Set(SUPPORTED_HARNESSES.map(harness => harness.plugin));
+  const resumed = pages.some(page => page.phase === 'daemon' && harnesses.has(page.plugin) && !answered.has(page.key));
+  if (resumed) answered.delete(AGENTS_KEY);
+  return answered;
+};
 
 const NONE: ReadonlySet<string> = new Set();
 
 /** Every page the run does not draw: the ones it gave up on and the ones marked not needed. */
-export const passedOver = (state: Pick<RunState, 'gone' | 'notNeeded'>): ReadonlySet<string> =>
-  state.notNeeded.size === 0 ? state.gone : new Set([...state.gone, ...state.notNeeded]);
+export const passedOver = (state: Pick<RunState, 'gone' | 'notNeeded' | 'aside'>): ReadonlySet<string> =>
+  state.notNeeded.size === 0 && state.aside.size === 0
+    ? state.gone
+    : new Set([...state.gone, ...state.notNeeded, ...state.aside]);
 
 const liveAfter = (
   pages: readonly FlowStep[],
@@ -66,6 +88,7 @@ export const startRun = (pages: readonly FlowStep[], answered: ReadonlySet<strin
   trail: [],
   gone: NONE,
   notNeeded: NONE,
+  aside: NONE,
   direction: 'forward',
   visit: 0,
 });
@@ -104,7 +127,7 @@ export function dropPage(
   return {
     ...state,
     gone,
-    at: liveAfter(pages, answered, new Set([...gone, ...state.notNeeded]), index + 1),
+    at: liveAfter(pages, answered, passedOver({ ...state, gone }), index + 1),
     direction: 'forward',
     visit: state.visit + 1,
   };
@@ -155,6 +178,48 @@ export function clearNotNeeded(state: RunState, pages: readonly FlowStep[], plug
   return stays.size === state.notNeeded.size ? state : { ...state, notNeeded: stays };
 }
 
+/** The segments the person picked ("Which AI do you want to use?"): the plugins whose pages the run walks and the ones it leaves out. */
+export interface Picked {
+  readonly on: readonly string[];
+  readonly off: readonly string[];
+}
+
+const idsOf = (list: unknown): readonly string[] =>
+  typeof list === 'string' && list !== '' ? list.split(',').filter(id => id !== '') : [];
+
+/** What the picker left in Onboarding's run memory (`agentsOn` / `agentsOff`), or `undefined` when nothing was picked in this run. */
+export function pickedOf(memory: Readonly<Record<string, unknown>>): Picked | undefined {
+  if (typeof memory['agentsOn'] !== 'string' || typeof memory['agentsOff'] !== 'string') return undefined;
+  return { on: idsOf(memory['agentsOn']), off: idsOf(memory['agentsOff']) };
+}
+
+/**
+ * The picker's answer reaches the whole run: every daemon page of an unpicked segment is marked not needed (passed over in both
+ * directions, never counted, never recorded: rule 7), and a segment that is picked again loses the mark so its pages are asked
+ * again. A mark the pages made themselves in a picked segment is dropped too (its plugin's answers are asked again, as for any
+ * changed answer); a page that still passes over calls `notNeeded()` when it mounts. A page that already holds an answer
+ * (`answered`: before the run or during it) is NEVER marked: its saved state and linked sign-in stand whatever the pick says.
+ */
+export function applyPicked(
+  state: RunState,
+  pages: readonly FlowStep[],
+  picked: Picked,
+  answered: ReadonlySet<string> = NONE,
+): RunState {
+  const on = new Set(picked.on);
+  const off = new Set(picked.off);
+  const pluginOf = new Map(pages.map(page => [page.key, page.plugin] as const));
+  const marks = new Set([...state.notNeeded].filter(key => !on.has(pluginOf.get(key) ?? '')));
+  // An answered page of a segment left out is only walked past (`aside`): it is no mark, so nothing is ever told to the machine.
+  const aside = new Set([...state.aside].filter(key => !on.has(pluginOf.get(key) ?? '')));
+  for (const page of pages)
+    if (page.phase === 'daemon' && off.has(page.plugin) && page.key !== state.at)
+      (answered.has(page.key) ? aside : marks).add(page.key);
+  const sameOf = (next: ReadonlySet<string>, was: ReadonlySet<string>): boolean =>
+    next.size === was.size && [...next].every(key => was.has(key));
+  return sameOf(marks, state.notNeeded) && sameOf(aside, state.aside) ? state : { ...state, notNeeded: marks, aside };
+}
+
 /** The progress bar's one segment for the whole client phase (every plugin's client pages read as "This device"). */
 const DEVICE_SEGMENT = { id: 'device', label: 'This device' } as const;
 
@@ -185,6 +250,7 @@ export function progressOf(
   passed: ReadonlySet<string>,
   foreseen: ReadonlySet<string>,
   at: string,
+  leftOut: ReadonlySet<string> = NONE,
 ): ProgressRead | undefined {
   const here = pages.find(page => page.key === at);
   if (here === undefined) return undefined;
@@ -194,6 +260,8 @@ export function progressOf(
   for (const segment of flow.daemon) labels.set(segment.plugin, segment.group);
   const segments: { id: string; label: string }[] = [];
   for (const page of asked) {
+    // A harness the person did not pick has no segment in the bar: its pages are never drawn.
+    if (leftOut.has(page.plugin)) continue;
     const id = segmentOf(page);
     if (!segments.some(segment => segment.id === id))
       segments.push({ id, label: id === DEVICE_SEGMENT.id ? DEVICE_SEGMENT.label : (labels.get(id) ?? id) });

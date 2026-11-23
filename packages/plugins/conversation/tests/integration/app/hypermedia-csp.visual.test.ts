@@ -63,7 +63,7 @@ const durianCss = async (): Promise<string> => {
  * ONE MESSAGE WITH A PART OF EACH KIND, for the pictures: a few of Durian's own fixtures, one after the other, without their
  * front matter (a chat message has none). Chosen by number so a renamed fixture is a loud failure, not a thinner picture.
  */
-const SHOWCASE = ['39', '35', '38', '31', '06', '07', '12', '10', '44'];
+const SHOWCASE = ['43', '39', '42', '32', '05', '06', '11', '09', '48'];
 const showcase = async (): Promise<string> => {
   const bodies = await Promise.all(
     SHOWCASE.map(async number => {
@@ -356,8 +356,8 @@ const expectNoViolations = async (visit: Visit, label: string): Promise<void> =>
 };
 
 describe('Durian’s fixtures inside a transcript, under the real policy', () => {
-  it('has the 84 fixtures of the pinned version (66 of the format, 18 hostile; the plan counted 81 at v0.1.0) (a bump that adds or drops one is a review)', () => {
-    expect(FIXTURES.filter(f => f.name.startsWith('format/')).length).toBe(66);
+  it('has the 91 fixtures of the pinned version (73 of the format, 18 hostile; the plan counted 81 at v0.1.0) (a bump that adds or drops one is a review)', () => {
+    expect(FIXTURES.filter(f => f.name.startsWith('format/')).length).toBe(73);
     expect(FIXTURES.filter(f => f.name.startsWith('hostile/')).length).toBe(18);
   });
 
@@ -385,7 +385,7 @@ describe('Durian’s fixtures inside a transcript, under the real policy', () =>
 describe('a mermaid part is drawn by our sandbox renderer', () => {
   it('appears as an <img src="data:image/svg+xml…"> made in OUR frame, with no author svg or script in the page', async () => {
     const mid = ledger.length;
-    const visit = await open('fixture=format/10-diagram.dh.md');
+    const visit = await open('fixture=format/09-diagram.dh.md');
     try {
       await exercise(visit.page);
       const m = await visit.page.evaluate(() => {
@@ -440,9 +440,9 @@ describe('a mermaid part is drawn by our sandbox renderer', () => {
 
 describe('held tabs and animation draw as code (r12 H11a)', () => {
   const HELD_FIXTURES: readonly (readonly [string, string])[] = [
-    ['tabs', 'fixture=format/06-tabs.dh.md'],
-    ['animation', 'fixture=format/44-animation-binary-search-tree-insert.dh.md'],
-    ['3d animation', 'fixture=format/59-3d-the-stateless-replay-system-in-layers.dh.md'],
+    ['tabs', 'fixture=format/05-tabs.dh.md'],
+    ['animation', 'fixture=format/48-animation-binary-search-tree-insert.dh.md'],
+    ['3d animation', 'fixture=format/64-3d-the-stateless-replay-system-in-layers.dh.md'],
   ];
 
   for (const [label, query] of HELD_FIXTURES)

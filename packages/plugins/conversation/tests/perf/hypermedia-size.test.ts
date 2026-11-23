@@ -33,8 +33,14 @@ import { type BundleSize, measureBundle } from './support/bundle-size.ts';
 const BASE_FIRST_LOAD_GZ = 199_136;
 /** The plan's allowance over the base, kept to say how the measurement stands against it. */
 const PLAN_ALLOWANCE_GZ = 110_000;
-/** The first load as measured at this change (r12 H8 fix), and the room above it for tool noise. */
-const MEASURED_FIRST_LOAD_GZ = 278_023;
+/**
+ * The first load as measured at this change, and the room above it for tool noise. r12 H13 (Durian 0.6.2) re-measured it: the same
+ * entry on the commit before was 260,499 B (the parser has been in the worker since H11, so the page holds only its renderer), and
+ * 0.6.2 added 35.7 KB, ALL of it the Markdown engine the renderer's `markdown.ts` creates at load: markdown-it and the five
+ * libraries it imports replace `marked`. The compiler that a first measurement of 0.6.2 showed in it too (+81 KB, through the alignment
+ * grid's chip widths) is kept out by `durian-shims/text-width.ts`.
+ */
+const MEASURED_FIRST_LOAD_GZ = 296_152;
 const MEASURED_LAZY_GZ = 171_439;
 const HEADROOM_GZ = 5_000;
 const FIRST_LOAD_BUDGET_GZ = MEASURED_FIRST_LOAD_GZ + HEADROOM_GZ;
@@ -59,8 +65,6 @@ const overBudget = (size: BundleSize): string[] => [
 
 /** The Durian source modules by the path under `durian-hypermedia/src/` (a source path may be a symlinked or hashed install). */
 const durianModule = (path: string): string | undefined => /durian-hypermedia\/(src\/.*)$/u.exec(path)?.[1];
-const firstDurian = (size: BundleSize): string[] =>
-  size.firstModules.map(durianModule).filter((name): name is string => name !== undefined);
 
 const conversation = resolve(import.meta.dir, '../..');
 const entry = resolve(import.meta.dir, 'fixtures/transcript-entry.tsx');
@@ -68,9 +72,18 @@ const plugins = [durianBuild.plugin];
 const scratch = mkdtempSync(join(tmpdir(), 'fy-size-budget-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
+/** The page starts the Durian worker by its url (`?worker&url`): the shell builds that as a chunk of its own, with these plugins. */
+const workerPlugins = [durianBuild.plugin, durianBuild.workerPlugin];
 let real: BundleSize;
+/** The parser worker's own build (the one the page's worker chunk is): where the parser and our stand-ins live since r12 H11. */
+let worker: BundleSize;
 beforeAll(async () => {
-  real = await measureBundle({ root: conversation, entry, plugins });
+  real = await measureBundle({ root: conversation, entry, plugins, workerPlugins });
+  worker = await measureBundle({
+    root: conversation,
+    entry: resolve(conversation, 'app/hypermedia/durian-worker.ts'),
+    plugins: workerPlugins,
+  });
 }, 240_000);
 
 describe('the transcript bundle', () => {
@@ -83,31 +96,42 @@ describe('the transcript bundle', () => {
     expect(overBudget(real).filter(line => line.startsWith('lazy'))).toEqual([]);
   });
 
-  test('NO chart code is in the first load, or in the build at all: H4 holds every chart fence as code', () => {
-    const everything = [...real.firstModules, ...real.lazy.flatMap(chunk => chunk.modules)];
+  test('NO chart code is in the page or in the parser worker: every chart fence is held as code', () => {
+    const everything = [
+      ...real.firstModules,
+      ...real.lazy.flatMap(chunk => chunk.modules),
+      ...worker.firstModules,
+      ...worker.lazy.flatMap(chunk => chunk.modules),
+    ];
     const chart = everything.filter(path =>
       /\/(core\/(chart|chart-llm|expr)\.ts|ui\/(chart|chart-config)\.tsx?|react\/chart\.tsx)$|\/node_modules\/chart\.js\//u.test(
         path,
       ),
     );
     expect(chart).toEqual([]);
-    // What stands in for the parser's chart reader is ours, and it is in the first load.
-    expect(real.firstModules.some(path => path.endsWith('hypermedia/durian-shims/chart-held.ts'))).toBe(true);
+    // What stands in for the parser's chart reader is ours, and it is in the worker, which holds the parser (since r12 H11).
+    expect(worker.firstModules.some(path => path.endsWith('hypermedia/durian-shims/chart-held.ts'))).toBe(true);
   });
 
-  test('the 2D animation engine (scene compiler, stage) is one lazy chunk, and the 3D stage another', () => {
-    const first = firstDurian(real);
-    expect(
-      first.filter(name => /^src\/(core\/(scene|story|camera|still9)|ui\/(anim|anim3d|cam3d|geo3d))\./u.test(name)),
-    ).toEqual([]);
-    const engine = real.lazy.find(chunk => chunk.modules.some(path => durianModule(path) === 'src/core/scene.ts'));
-    expect(engine).toBeDefined();
-    expect(engine?.modules.some(path => durianModule(path) === 'src/ui/anim.tsx')).toBe(true);
-    const threeD = real.lazy.find(chunk => chunk.modules.some(path => durianModule(path) === 'src/ui/anim3d.ts'));
-    expect(threeD).toBeDefined();
-    expect(threeD?.name).not.toBe(engine?.name);
-    // The parser reaches the compiler through our door, which the first load holds.
-    expect(real.firstModules.some(path => path.endsWith('hypermedia/durian-shims/scene-late.ts'))).toBe(true);
+  test('NO scene compiler and NO 3D stage is in the page or in the parser worker: the parser reaches the compiler through our door', () => {
+    // Since H11 nothing imports the 2D engine (an animation is held as code until H14), so the compiler is in no chunk at all. The page's
+    // alignment grid imported it for one function through Durian's chip widths until `text-width.ts` stood in (r12 H13: +81 KB gzip).
+    const heavy =
+      /^src\/(core\/(scene|scenes|story|camera|route|depth|data|still9|readable|edge10)|ui\/(anim|anim3d|cam3d|geo3d))\./u;
+    for (const size of [real, worker]) {
+      const found = [...size.firstModules, ...size.lazy.flatMap(chunk => chunk.modules)]
+        .map(durianModule)
+        .filter((name): name is string => name !== undefined && heavy.test(name));
+      expect(found).toEqual([]);
+      expect(
+        [...size.firstModules, ...size.lazy.flatMap(chunk => chunk.modules)].filter(path =>
+          /\/node_modules\/three\//u.test(path),
+        ),
+      ).toEqual([]);
+    }
+    expect(worker.firstModules.some(path => path.endsWith('hypermedia/durian-shims/scene-late.ts'))).toBe(true);
+    // The alignment grid is the page's, so the text-width stand-in is in the page's first load.
+    expect(real.firstModules.some(path => path.endsWith('hypermedia/durian-shims/text-width.ts'))).toBe(true);
   });
 
   test('no YAML reader is in the first load: no part a message draws reads YAML', () => {
@@ -132,7 +156,7 @@ describe('the transcript bundle', () => {
       fake,
       `import ballast from './ballast.js';\nimport { Transcript } from ${JSON.stringify(entry)};\nObject.assign(globalThis, { ballast, Transcript });\n`,
     );
-    const fat = await measureBundle({ root: conversation, entry: fake, plugins });
+    const fat = await measureBundle({ root: conversation, entry: fake, plugins, workerPlugins });
     expect(fat.firstLoadGz - real.firstLoadGz).toBeGreaterThan(150_000);
     const verdict = overBudget(fat);
     expect(verdict.length).toBe(1);

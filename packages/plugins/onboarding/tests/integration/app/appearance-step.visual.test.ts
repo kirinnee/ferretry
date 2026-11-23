@@ -63,7 +63,13 @@ const VARIANTS = [
   { name: '390-light', width: 390, height: 844, phone: true, scheme: 'light' },
   { name: '390-dark', width: 390, height: 844, phone: true, scheme: 'dark' },
 ] as const;
-type Variant = (typeof VARIANTS)[number];
+interface Variant {
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly phone: boolean;
+  readonly scheme: 'light' | 'dark';
+}
 
 /** The most characters the page may say, not counting the card titles (owner line 3). */
 const TEXT_LIMIT = 160;
@@ -412,6 +418,67 @@ describe('the Appearance page works in every style and every palette (C59 O6c)',
       await close();
     }
   });
+  // C59 O8-7 review: the phone pins the sample to the top and the footer to the bottom, so a card a KEY scrolls into view must come to
+  // rest between them, never under either (End and Home on a list, and Tab into the next list), at the smallest screen at Larger text.
+  for (const scheme of ['light', 'dark'] as const)
+    for (const height of [568, 480])
+      it(`keeps the card a key moves to clear of the pinned sample and footer (320x${height} ${scheme}, Larger text)`, async () => {
+        const { tab, close } = await open({ name: `320-${scheme}`, width: 320, height, phone: true, scheme });
+        try {
+          await tab.locator('[aria-label="Text size"] .fy-cc__card[data-choice="larger"]').click();
+          await tab.waitForTimeout(250);
+          const hidden = async (label: string): Promise<string[]> =>
+            (
+              await tab.evaluate(() => {
+                const focused = document.activeElement as HTMLElement | null;
+                const card = focused?.closest('label') ?? focused;
+                if (card === null || card === undefined) return ['nothing is focused'];
+                const rect = card.getBoundingClientRect();
+                const demo = (document.querySelector('.fy-spf__demo') as HTMLElement).getBoundingClientRect();
+                const footer = (document.querySelector('.fy-spf__footer') as HTMLElement).getBoundingClientRect();
+                const found: string[] = [];
+                // Fully visible: below the sample's bottom edge and above the footer's top edge.
+                if (rect.top < demo.bottom - 0.5)
+                  found.push(
+                    `under the sample by ${Math.round(demo.bottom - rect.top)}px of ${Math.round(rect.height)}px`,
+                  );
+                if (rect.bottom > footer.top + 0.5)
+                  found.push(
+                    `under the footer by ${Math.round(rect.bottom - footer.top)}px of ${Math.round(rect.height)}px`,
+                  );
+                return found;
+              })
+            ).map(problem => `${label}: ${problem}`);
+          for (const list of ['Style', 'Palette']) {
+            await tab.locator(`[aria-label="${list}"] input:checked`).focus();
+            await tab.keyboard.press('End');
+            await tab.waitForTimeout(150);
+            expect(await hidden(list), `${list}: after End`).toEqual([]);
+            await tab.keyboard.press('Home');
+            await tab.waitForTimeout(150);
+            expect(await hidden(list), `${list}: after Home`).toEqual([]);
+            for (let step = 0; step < 6; step += 1) {
+              await tab.keyboard.press('ArrowDown');
+              await tab.waitForTimeout(100);
+              expect(await hidden(list), `${list}: after ArrowDown ${step + 1}`).toEqual([]);
+            }
+          }
+          // Tab from the last Style card to the next list, and Shift+Tab back.
+          await tab.locator('[aria-label="Style"] input:checked').focus();
+          for (let step = 0; step < 4; step += 1) {
+            await tab.keyboard.press('Tab');
+            await tab.waitForTimeout(100);
+            expect(await hidden('tab'), `after Tab ${step + 1}`).toEqual([]);
+          }
+          for (let step = 0; step < 3; step += 1) {
+            await tab.keyboard.press('Shift+Tab');
+            await tab.waitForTimeout(100);
+            expect(await hidden('shift-tab'), `after Shift+Tab ${step + 1}`).toEqual([]);
+          }
+        } finally {
+          await close();
+        }
+      });
   for (const variant of [VARIANTS[1], VARIANTS[2]])
     it(`every one of the ${PALETTES.length} palettes keeps the cards, the sample and the page whole (${variant.name})`, async () => {
       const { tab, problems, close } = await open(variant);

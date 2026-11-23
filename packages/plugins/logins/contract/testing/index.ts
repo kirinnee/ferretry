@@ -28,6 +28,15 @@ import {
   type ModelPriceCatalog,
   ProviderPresetCatalogSchema,
 } from '../index.ts';
+import realProviderPresets from './provider-presets.json';
+
+/**
+ * THE one copy of the real provider catalog: what `ProviderPresetService.catalog()` answers over the shipped built-in
+ * presets, whole, so other packages' tests (Onboarding's picker, the app's first-run fake daemon) draw the same rows the
+ * wire carries. It is held to the service by `tests/unit/provider-probe/real-presets.test.ts`: change a built-in preset and
+ * that test goes red until this file is regenerated from the service.
+ */
+export const REAL_PROVIDER_PRESET_CATALOG = ProviderPresetCatalogSchema.parse(realProviderPresets);
 
 /** A signed-in `host` login with no usage measured: the smallest honest row. */
 export function sampleLogin(id: string, overrides: Partial<LoginView> = {}): LoginView {

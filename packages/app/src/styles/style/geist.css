@@ -203,10 +203,12 @@
    Colour is the palette's; nothing here is a colour, a gradient or a side bar. */
 :root[data-style='geist'],
 [data-swatch][data-style='geist'] {
-  /* Background: a hairline grid in the palette's own ink (5% of the accent) every 48px, no grain — graph paper under an
+  /* Background: a 2px grid in the palette's own ink (5% of the accent) every 32px, no grain — graph paper under an
      engineering tool. The flat ground stays the surface; the grid is only the first layer of the body. */
+  --bg-pattern-ink: color-mix(in srgb, var(--accent) 10%, transparent);
+  --bg-pattern-grid: conic-gradient(from 90deg at 2px 2px, transparent 90deg, var(--bg-pattern-ink) 0);
   --bg-pattern: var(--bg-pattern-grid);
-  --bg-pattern-size: 48px;
+  --bg-pattern-size: 32px;
   --grain-alpha: 0;
 
   /* Markdown: a small, tight document. One hairline under the h1 only, a boxed code block on the family's 6px radius,

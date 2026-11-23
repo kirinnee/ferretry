@@ -76,6 +76,7 @@
   --step-rail: #d3d9e6;
   --step-seg: #d3d9e6;
   --step-seg-now: #f91974;
+  --fy-progress-now: #f91974;
   --surface-mesh:
     radial-gradient(60% 50% at 94% 4%, rgba(85, 95, 255, 0.11), transparent 70%),
     radial-gradient(50% 42% at 4% 98%, rgba(249, 25, 116, 0.09), transparent 70%),
@@ -160,6 +161,7 @@
   --step-rail: #2c3449;
   --step-seg: #2c3449;
   --step-seg-now: #ff5c9e;
+  --fy-progress-now: #ff5c9e;
   --surface-mesh:
     radial-gradient(60% 50% at 94% 4%, rgba(85, 95, 255, 0.26), transparent 70%),
     radial-gradient(55% 46% at 4% 98%, rgba(249, 25, 116, 0.2), transparent 70%),

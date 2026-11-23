@@ -1,4 +1,4 @@
-import { type Document, parse } from 'durian-hypermedia';
+import { type Document, parse, UNTRUSTED_LIMITS } from 'durian-hypermedia';
 import { configureDurian } from './durian.ts';
 import { settleFences } from './fence-boundaries.ts';
 import { type DrawableFyRenderBodiesMap, drawableBodies, fyRenderParseBlock } from './fy-render-parse.ts';
@@ -11,6 +11,7 @@ import {
   exceedsPreParseLimits,
   PARSER_LIMITS,
 } from './limits.ts';
+import { hasCapErrorBlock } from './over-caps.ts';
 import { hypermediaUrlPolicy } from './url-policy.ts';
 import { withReferences } from './with-references.ts';
 
@@ -45,7 +46,7 @@ export interface ReadMessage {
  * one (the rest of that line may turn it into content), so that fence stays open and inert until the line ends. A final
  * message is read as written.
  *
- * `null` MEANS "SHOW THE TEXT": the message is over a pre-parse limit (`exceedsPreParseLimits`, shown with a note: see
+ * `null` MEANS "SHOW THE TEXT": the message went over one of Durian's six size caps (`over-caps.ts`: the document has its error block), is over a pre-parse limit (`exceedsPreParseLimits`, shown with a note: see
  * `plain-fallback.tsx`), or over the author's cap (`exceedsMessageCap`, counted on the bytes written), or
  * the text Durian would be given is over the parser's fixed budget (`exceedsParserBudget`: normalising line endings and NULs
  * and holding fences all change the size). Either way the message is shown as the text it is, never answered with Durian's
@@ -74,11 +75,15 @@ export function readMessage(
     blocks: [fyRenderParseBlock(settled), ...heldFenceParseBlocks(text)],
     frontMatter: false,
     idPrefix,
-    limits: PARSER_LIMITS,
+    // A MESSAGE IS TEXT NOBODY REVIEWED: Durian's `UNTRUSTED_LIMITS` (smaller YAML and animation caps), never its default `LIMITS`,
+    // which is sized for authored pages. Our fixed input budget is laid over them (`PARSER_LIMITS`).
+    limits: { ...UNTRUSTED_LIMITS, ...PARSER_LIMITS },
     urlPolicy: hypermediaUrlPolicy,
     // Offered only to a message that can hold such a span: every other message is read by Durian's own lexer.
     inlines: mayHoldLiteralCode(text) ? LITERAL_CODE_PARSE_INLINES : undefined,
   });
+  // OVER ONE OF DURIAN'S SIX SIZE CAPS (`over-caps.ts`): its error block is not drawn, the message is shown as the text it is.
+  if (hasCapErrorBlock(doc.blocks)) return null;
   const read = withReferences(doc);
   return exceedsDocumentBudget(read, source) ? null : { doc: read, drawable: drawableBodies(settled) };
 }
