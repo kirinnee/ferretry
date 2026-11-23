@@ -328,6 +328,17 @@ describe('the last page', () => {
               .locator('[data-end-row]')
               .evaluateAll(nodes => nodes.map(node => node.getAttribute('data-end-row'))),
           ).toEqual(['client:access.passkey']);
+          // Project setup registered a project: the one primary button opens it, and no second "Create a project" is offered.
+          await tab.goto(`${origin}/?case=clean&opens=1&theme=studio-${mode}`);
+          await tab.waitForSelector('[data-flow-end]');
+          expect(await tab.locator('[data-step-next]').textContent()).toBe('Open Atlas');
+          expect(
+            await tab.locator('[data-flow-end-start] button').allTextContents(),
+            'no Create a project after one was made',
+          ).toEqual(['Continue a conversation']);
+          expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `end-page-${viewport.name}-${mode}-opens.png`) });
           await tab.goto(`${origin}/?case=bare&theme=studio-${mode}`);
           await tab.waitForSelector('[data-flow-end]');
           expect(await tab.locator('[data-flow-end-start]').count()).toBe(0);
