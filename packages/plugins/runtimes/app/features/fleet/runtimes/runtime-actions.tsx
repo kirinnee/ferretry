@@ -208,7 +208,7 @@ function RuntimeDialog({ title, name, busy, onClose, children }: RuntimeDialogPr
         className="kt-panel relative flex max-h-[min(86dvh,640px)] w-full max-w-md flex-col gap-3 overflow-y-auto p-panel shadow-popover focus:outline-none"
         data-runtime-dialog={name}
       >
-        <h2 id={titleId} className="m-0 break-all text-ui font-semibold text-fg">
+        <h2 id={titleId} className="m-0 break-words text-ui font-semibold text-fg">
           {title}
         </h2>
         {children}

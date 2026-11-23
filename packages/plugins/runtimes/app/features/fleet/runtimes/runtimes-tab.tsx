@@ -445,7 +445,7 @@ function RuntimeRow({
               <div className="flex min-w-0 flex-wrap items-center gap-x-2">
                 <a
                   href={machineDetailHash(machineName, 'runtimes', runtime.name)}
-                  className="flex min-h-control min-w-[min(11rem,100%)] flex-1 items-start gap-2 py-1 text-left no-underline after:absolute after:inset-0 after:content-[''] hover:no-underline"
+                  className="flex min-h-control basis-[min(18rem,100%)] grow items-start gap-2 py-1 text-left no-underline after:absolute after:inset-0 after:content-[''] hover:no-underline"
                   data-runtime-row={runtime.name}
                 >
                   <AccountStatus
