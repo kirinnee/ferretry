@@ -29,6 +29,7 @@ import {
   type RuntimeFile,
   type RuntimesFile,
 } from '../../../contract/index.ts';
+import { supportedKindOfKey, unsupportedHarnessSentence } from '../harness-kind.ts';
 import { harnessKindOfKey, type HarnessKind } from '../manifest.ts';
 import { BUILTIN_COMPONENTS } from './builtin-autonomous.ts';
 import { deriveRuntimes, withDerived } from './derived-runtimes.ts';
@@ -275,7 +276,16 @@ export function assembleRuntimesModel(explicit: RuntimesFiles): RuntimesModel {
   // A login whose variables stand in blocks only a model that names it (see `standInsNamedBy`), so it is kept apart from
   // the components: the model in effect may use it and still be changed by a change that stops using it.
   const stoodInLogins: StoodInLogin[] = [];
+  // A login or runtime file naming a harness Runtimes has no behaviour for is ONE file's problem: it is set aside and said by
+  // name (the file and the one refusal sentence), and every other file still loads. Never a throw, never Claude.
+  const refusedNotices: string[] = [];
   for (const view of files.logins) {
+    if (supportedKindOfKey(view.harness) === undefined) {
+      refusedNotices.push(
+        `config/logins/${view.id as string}.yaml: ${unsupportedHarnessSentence(view.harness)}, so this login is not used`,
+      );
+      continue;
+    }
     const template = files.templates?.get(view.id as string);
     const { credential, stoodIn } = credentialOf(view, template);
     credentials[view.id as string] = credential;
@@ -322,19 +332,26 @@ export function assembleRuntimesModel(explicit: RuntimesFiles): RuntimesModel {
   const unavailable: UnavailableRuntime[] = [];
   const present = new Map<string, RuntimeFile>();
   for (const [name, file] of files.runtimes) {
-    if (Object.hasOwn(credentials, file.login)) present.set(name, file);
+    if (file.harness !== undefined && supportedKindOfKey(file.harness) === undefined) {
+      refusedNotices.push(
+        `config/runtimes/${name}.yaml: ${unsupportedHarnessSentence(file.harness)}, so this runtime is not started`,
+      );
+      unavailable.push({ runtime: name, login: file.login });
+    } else if (Object.hasOwn(credentials, file.login)) present.set(name, file);
     else unavailable.push({ runtime: name, login: file.login });
   }
   // A saved default that names a runtime that is not here (a derived one whose login needs sign-in, a file removed by hand)
   // is read as unset, never a reason to refuse the whole model: the first runtime stands in, and a notice says so.
   const saved = files.settings?.defaultRuntime;
   const defaultRuntime = saved !== undefined && present.has(saved) ? saved : undefined;
-  const notices: string[] =
-    saved === undefined || defaultRuntime !== undefined
+  const notices: string[] = [
+    ...refusedNotices,
+    ...(saved === undefined || defaultRuntime !== undefined
       ? []
       : [
           `The saved default runtime "${saved}" is not available on this machine (its login may need signing in), so the first runtime that can start is used until you pick another.`,
-        ];
+        ]),
+  ];
   const document = {
     version: 1,
     machine: {

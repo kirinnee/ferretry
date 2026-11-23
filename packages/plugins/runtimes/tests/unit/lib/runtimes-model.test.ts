@@ -303,3 +303,44 @@ describe('C1 the parts of the model no file of Runtimes holds', () => {
     ).toEqual([]);
   });
 });
+
+describe('a file naming a harness Runtimes has no behaviour for (runtimes plan U4b)', () => {
+  it('sets that login and its runtimes aside, says the file and the sentence, and every other file still loads', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        logins: [
+          sampleLogin('claude-you', { store: 'ferretry' }),
+          { ...sampleLogin('typo'), harness: 'gemni', harnesses: ['gemni'] } as never,
+        ],
+        runtimes: new Map([
+          ['claude-default', runtime({})],
+          ['on-typo', runtime({ login: 'typo' })],
+        ]),
+      }),
+    );
+
+    expect(Object.keys(assembled.model.runtimes)).toEqual(['claude-default']);
+    expect(Object.keys(assembled.model.credentials)).toEqual(['claude-you']);
+    expect(assembled.unavailable).toEqual([{ runtime: 'on-typo', login: 'typo' }]);
+    expect(assembled.notices).toContain(
+      'config/logins/typo.yaml: gemni is not supported here, so this login is not used',
+    );
+  });
+
+  it('sets a runtime whose own harness is unknown aside by file name, and keeps the rest', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        runtimes: new Map([
+          ['claude-default', runtime({})],
+          ['odd', runtime({ harness: 'fake-third' as never })],
+        ]),
+      }),
+    );
+
+    expect(Object.keys(assembled.model.runtimes)).toEqual(['claude-default']);
+    expect(assembled.unavailable).toEqual([{ runtime: 'odd', login: 'claude-you' }]);
+    expect(assembled.notices).toContain(
+      'config/runtimes/odd.yaml: fake-third is not supported here, so this runtime is not started',
+    );
+  });
+});
