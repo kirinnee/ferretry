@@ -1507,6 +1507,10 @@ export const ModelCatalogFileSchema = z.strictObject({
   detect: z.enum(['ollama']).optional(),
   claude: CatalogHalfFileSchema.optional(),
   codex: CatalogHalfFileSchema.optional(),
+  /** The halves of the harnesses added after Claude Code and Codex (`daemon/lib/catalog/schema.ts`). */
+  gemini: CatalogHalfFileSchema.optional(),
+  copilot: CatalogHalfFileSchema.optional(),
+  opencode: CatalogHalfFileSchema.optional(),
 });
 export type ModelCatalogFile = z.infer<typeof ModelCatalogFileSchema>;
 
