@@ -161,6 +161,103 @@ describe('the agenda page with a status line drawn in flow', () => {
   });
 });
 
+/** What the app's height and the page's room are, measured: the document, the frame, the main column and the nav. */
+const heights = async (tab: Page) =>
+  await tab.evaluate(() => {
+    const box = (query: string) => document.querySelector(query)?.getBoundingClientRect();
+    return {
+      documentHeight: document.documentElement.scrollHeight,
+      overflowY: document.documentElement.scrollHeight - document.documentElement.clientHeight,
+      overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      frame: box('.fy-frame')?.height ?? -1,
+      main: box('.fy-main')?.height ?? -1,
+      mainTop: box('.fy-main')?.top ?? -1,
+    };
+  });
+
+describe('the install-as-app banner never changes the app’s height (O9-3)', () => {
+  const BANNER_VIEWPORTS = [
+    { name: '390', width: 390, height: 844, phone: true },
+    { name: '1440', width: 1_440, height: 900, phone: false },
+  ] as const;
+  for (const viewport of BANNER_VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`at ${viewport.name} in ${mode}: the document, the frame and the page keep their height with the banner shown`, async () => {
+        const theme = `studio-${mode}`;
+        const hidden = await open(viewport, '/d/ws/agenda', '.fy-main', '&relay=0', theme);
+        const before = await heights(hidden.tab);
+        await hidden.close();
+        const shown = await open(viewport, '/d/ws/agenda', '[data-install-toast]', '&relay=0&install=1', theme);
+        try {
+          const after = await heights(shown.tab);
+          await shotOf(shown.tab, `${viewport.name}-install-banner-${mode}`);
+          expect(after.documentHeight, 'the document is as tall as without the banner').toBe(before.documentHeight);
+          expect(after.overflowY, 'the page does not scroll vertically').toBeLessThanOrEqual(0);
+          expect(after.overflowX, 'the page does not scroll sideways').toBeLessThanOrEqual(0);
+          expect(after.frame, 'the app is as tall as without the banner').toBe(before.frame);
+          expect(after.main, 'the page keeps every pixel it had').toBe(before.main);
+          expect(after.mainTop, 'the page does not move down').toBe(before.mainTop);
+          // It floats: over the top of the page, inside the window, clear of the bottom edge where the composer is.
+          const banner = await shown.tab.evaluate(() => {
+            const box = document.querySelector('[data-install-toast]')?.getBoundingClientRect();
+            return { top: box?.top ?? -1, bottom: box?.bottom ?? -1, left: box?.left ?? -1, right: box?.right ?? -1 };
+          });
+          expect(banner.left).toBeGreaterThanOrEqual(0);
+          expect(banner.right).toBeLessThanOrEqual(viewport.width);
+          expect(banner.bottom).toBeLessThan(viewport.height / 2);
+          // Install and dismiss are still real, named buttons a press reaches (not covered by anything).
+          for (const selector of ['[data-install-accept]', '[data-install-dismiss]'])
+            expect((await hitsItself(shown.tab, selector)).hit, `${selector} is reachable`).toBe(true);
+          expect(await shown.tab.locator('[data-install-dismiss]').getAttribute('aria-label')).toContain('Dismiss');
+        } finally {
+          await shown.close();
+        }
+      });
+});
+
+describe('the install-as-app banner on a ferret’s chat covers none of its chrome (O9-3)', () => {
+  const CHAT_VIEWPORTS = [
+    { name: '390', width: 390, height: 844, phone: true },
+    { name: '1440', width: 1_440, height: 900, phone: false },
+  ] as const;
+  for (const viewport of CHAT_VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`at ${viewport.name} in ${mode}: the header, Menu, Modes, composer and nav still take the press`, async () => {
+        const { tab, close } = await open(
+          viewport,
+          '/d/ws/ferrets/zoe',
+          '[data-install-toast]',
+          '&relay=0&header=modes&install=1',
+          `studio-${mode}`,
+        );
+        try {
+          await tab.waitForSelector('[data-ferret-header] [data-modes-trigger]');
+          await shotOf(tab, `${viewport.name}-install-banner-chat-${mode}`);
+          const controls = ['[data-modes-trigger]', '[data-composer]'];
+          // The page's own controls under the header: the phone's tab chips, the wide page's side-panel toggle.
+          controls.push(viewport.phone ? '[data-phone-tab-row] [role=tab]' : '[data-side-toggle]');
+          if (viewport.phone) controls.push('[data-chat-menu]');
+          // The phone's bottom bar, where the scene draws one, is below the banner as well.
+          if ((await tab.locator('.fy-nav--bottom a').count()) > 0) controls.push('.fy-nav--bottom a');
+          for (const selector of controls)
+            expect((await hitsItself(tab, selector)).hit, `${selector} is not covered by the banner`).toBe(true);
+          // Nothing of the header row is under the banner at all: it hangs below the row.
+          const rows = await tab.evaluate(() => {
+            const box = (query: string) => document.querySelector(query)?.getBoundingClientRect();
+            return {
+              header: box('[data-ferret-header]')?.bottom ?? -1,
+              banner: box('[data-install-toast]')?.top ?? -1,
+            };
+          });
+          expect(rows.banner, 'the banner starts below the header row').toBeGreaterThanOrEqual(rows.header);
+          for (const selector of ['[data-install-accept]', '[data-install-dismiss]'])
+            expect((await hitsItself(tab, selector)).hit, `${selector} is reachable`).toBe(true);
+        } finally {
+          await close();
+        }
+      });
+});
+
 describe('the ferrets page (the screen the side column holds)', () => {
   for (const viewport of VIEWPORTS)
     for (const mode of ['light', 'dark'] as const)

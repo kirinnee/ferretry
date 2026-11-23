@@ -2,7 +2,8 @@
  * THE INSTALL OFFER, in its two places (`lib/install-prompt.ts` decides when; the shell holds the browser's facts, S13):
  *
  *   * a `background` toast on a phone — a small dismissible line, "Install Ferretry", with an Install button where the
- *     browser offered installation, or, on iOS, where to tap: Share › Add to Home Screen;
+ *     browser offered installation, or, on iOS, where to tap: Share › Add to Home Screen. It is an OVERLAY
+ *     (`.fy-status-overlay`, shell.css): it hangs over the top of the page and never changes the app's height;
  *   * a `device.settings` panel — Settings › This device › Install app, always there, so "not now" is never "never".
  *
  * Plain words: "Install", "home screen", "app". Never "PWA", "manifest" or "service worker".
@@ -20,7 +21,7 @@ import {
 } from '@ferretry/app';
 import { useLayoutMode } from '@ferretry/app/ui';
 import { Share, Smartphone, X } from 'lucide-react';
-import { type ReactNode, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useEffect, useState, useSyncExternalStore } from 'react';
 import {
   browserInstallStorage,
   InstallDismissal,
@@ -57,23 +58,30 @@ export interface InstallToastLineProps {
 
 /** The toast's line: what to do, an Install button where the browser offered one, and a way to say "not now". */
 export function InstallToastLine({ kind, onInstall, onDismiss }: InstallToastLineProps): ReactNode {
+  // A polite live region announces text that CHANGES inside it, so it mounts empty and its words arrive a moment later.
+  const [spoken, setSpoken] = useState(false);
+  useEffect(() => setSpoken(true), []);
   return (
     <div
       role="status"
       data-install-toast={kind}
-      className="mx-1 mt-1 flex items-center gap-2 rounded-md border border-accent-border bg-accent-soft px-3 py-1.5 text-ui text-fg"
+      className="fy-status-overlay flex items-center gap-2 rounded-md border border-accent-border bg-accent-soft px-3 py-1.5 text-ui text-fg shadow"
     >
       <Smartphone aria-hidden="true" className="size-4 shrink-0 text-accent" />
       <p className="m-0 min-w-0 flex-1 leading-tight">
-        <span className="font-semibold">Install Ferretry</span>
-        {kind === 'ios-hint' ? (
+        {spoken ? (
           <>
-            {' — '}
-            <ShareSteps />
+            <span className="font-semibold">Install Ferretry</span>
+            {kind === 'ios-hint' ? (
+              <>
+                {' — '}
+                <ShareSteps />
+              </>
+            ) : (
+              <span className="text-muted"> as an app</span>
+            )}
           </>
-        ) : (
-          <span className="text-muted"> as an app</span>
-        )}
+        ) : null}
       </p>
       {kind === 'prompt' ? (
         <Button size="sm" variant="primary" className="shrink-0" onClick={onInstall} data-install-accept="">
