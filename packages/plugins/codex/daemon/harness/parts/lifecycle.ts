@@ -60,6 +60,9 @@ export const lifecyclePart: HarnessPart<'start' | 'resume' | 'stop'> = ({
         ...(resume === undefined ? {} : { resume }),
         ...(spec.model === undefined ? {} : { model: spec.model }),
         ...(spec.effort === undefined ? {} : { effort: spec.effort }),
+        // The recorded start's fast mode, on every launch (a start, a resume, a revive all rebuild the spec from the
+        // ferret's details). Unset passes nothing, so Codex's own tier stays in charge.
+        ...(spec.options?.fast === undefined ? {} : { fast: spec.options.fast }),
       }),
     ];
   };

@@ -446,6 +446,12 @@ export interface FerretSessionPort {
    */
   compactAt?(ferret: FerretId): Promise<'auto' | number | undefined>;
   /**
+   * The fast mode a (re)launch of this ferret should ask for: the harness's own report when it is newer than the last
+   * decision (an owner's live `/fast`), else what the session was launched with (`currentLaunchFast`). `undefined` when
+   * neither was ever decided, or the documents are unreadable: the launch then follows the start options.
+   */
+  launchFast?(ferret: FerretId): Promise<boolean | undefined>;
+  /**
    * Records (or, for `undefined`, drops) the ferret's own compaction choice in its session config, keeping every other field
    * and writing atomically. The value reaching it has already been parsed by the service.
    */
@@ -2268,6 +2274,8 @@ export class FerretsService implements FerretsApi {
     // that default): the harness's question tool, the pane's FY_SESSION_MODE and the derived launch switches all read
     // this one fact, so a record with no mode at all is told `auto` and gets the autonomous layer.
     const mode = launchMode(effectiveMode(record, this.registry.detailsOf(record.id)));
+    // Fast mode is what the session is ON (the chip's answer): a live `/fast` after the start wins over the start's own.
+    const liveFast = await this.ports.session?.launchFast?.(record.id).catch(() => undefined);
     const base: Omit<LaunchSpec, 'parts'> = {
       ferret: record.id,
       name: record.name,
@@ -2279,7 +2287,7 @@ export class FerretsService implements FerretsApi {
       ...(record.login === undefined ? {} : { login: record.login }),
       // Set from the login only, never by a launch part: the spec field has no other writer.
       ...(credential.value === undefined ? {} : { credential: credential.value }),
-      ...launchOptions(this.registry.detailsOf(record.id)?.options),
+      ...launchOptions(this.registry.detailsOf(record.id)?.options, liveFast),
       ...(mode === undefined ? {} : { mode }),
       ...(ownCompactAt === undefined ? {} : { compactAt: ownCompactAt }),
       folder: record.folder as FencedPath,
@@ -2936,7 +2944,11 @@ export class FerretsService implements FerretsApi {
  * The launch spec's share of a ferret's start options: `model` and `effort` on their own fields (where the harness
  * already reads them), and the rest whole, so a harness, runner or supervisor reads today's start fields from the spec.
  */
-function launchOptions(options: FerretDetails['options']): Pick<LaunchSpec, 'model' | 'effort' | 'options'> {
+function launchOptions(
+  recorded: FerretDetails['options'],
+  fast: boolean | undefined,
+): Pick<LaunchSpec, 'model' | 'effort' | 'options'> {
+  const options = fast === undefined ? recorded : { ...recorded, fast };
   if (options === undefined) return {};
   return {
     ...(options.model === undefined ? {} : { model: options.model }),

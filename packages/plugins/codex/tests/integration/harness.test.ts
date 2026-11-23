@@ -1,4 +1,7 @@
-import { describe, it } from 'bun:test';
+import { afterAll, describe, it } from 'bun:test';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Runner, RunSpec, LaunchSpec } from '@ferretry/core-ferrets/contract';
 import type { FencedPath, FerretId, KernelPorts, RootHandle } from '@ferretry/kernel/contract';
 import { ok } from '@ferretry/std';
@@ -185,6 +188,37 @@ describe('the Codex harness', () => {
     should(command).not.containEql('hello');
     should(seen[0]?.spec.cwd).equal(FOLDER);
     should(seen[0]?.call).equal('start');
+  });
+
+  describe('the start’s fast mode (U0c)', () => {
+    const tiers = (command: readonly string[]): string[] => command.filter(word => word.startsWith('service_tier='));
+
+    it('a fast start puts the priority tier on the argv, a no-fast start the default one, and an unset one nothing', async () => {
+      const { harness } = harnessOver(LOCATED);
+      const { runner, seen } = fakeRunner();
+      await harness.start(specOf({ options: { fast: true } }), runner, ENV);
+      await harness.start(specOf({ options: { fast: false } }), runner, ENV);
+      await harness.start(specOf({ options: { effort: 'high' } }), runner, ENV);
+      await harness.start(specOf(), runner, ENV);
+      const [fast, standard, unsetWithOptions, unset] = seen.map(call => call.spec.command);
+
+      should(tiers(fast ?? [])).eql(['service_tier="priority"']);
+      should(fast?.[(fast?.indexOf('service_tier="priority"') ?? 0) - 1]).equal('-c');
+      should(tiers(standard ?? [])).eql(['service_tier="default"']);
+      should(tiers(unsetWithOptions ?? [])).eql([]);
+      should(tiers(unset ?? [])).eql([]);
+    });
+
+    it('a resume carries the recorded fast mode too, so a revived ferret keeps what it started with', async () => {
+      const { harness } = harnessOver(LOCATED);
+      const { runner, seen } = fakeRunner();
+      await harness.resume(specOf({ options: { fast: true } }), runner, ENV, 'conv-1');
+      await harness.resume(specOf(), runner, ENV, 'conv-1');
+
+      should(seen.map(call => call.call)).eql(['resume', 'resume']);
+      should(tiers(seen[0]?.spec.command ?? [])).eql(['service_tier="priority"']);
+      should(tiers(seen[1]?.spec.command ?? [])).eql([]);
+    });
   });
 
   it('hands Codex the compaction prompt on every start, so a compacted ferret re-reads its task and agenda', async () => {
@@ -421,5 +455,70 @@ describe('writing Codex’s TOML', () => {
     should(tomlTables('mcp_servers', { 'my server': { command: 'fy', env: { A: 'b' }, ignored: null } })).equal(
       '[mcp_servers."my server"]\ncommand = "fy"\nenv = { A = "b" }',
     );
+  });
+});
+
+describe('SIT: a fake codex binary sees the fast tier a start and a revive were given (U0c)', () => {
+  const scratch: string[] = [];
+  afterAll(async () => {
+    await Promise.all(scratch.map(async folder => await rm(folder, { recursive: true, force: true })));
+  });
+
+  /** A `codex` that writes each launch's argv, one word per line, to `argv.<n>` beside itself, then exits. */
+  async function fakeCodex() {
+    const folder = await mkdtemp(join(tmpdir(), 'ferretry-fake-codex-'));
+    scratch.push(folder);
+    const binary = join(folder, 'codex');
+    await writeFile(
+      binary,
+      `#!/bin/sh\nn=$(ls "${folder}" | grep -c '^argv\\.')\nprintf '%s\\n' "$@" > "${folder}/argv.$n"\n`,
+    );
+    await chmod(binary, 0o755);
+    return { binary, folder };
+  }
+
+  /** A runner that really runs the command it is given, as the terminals runner would in a pane. */
+  const spawning = (): Runner => {
+    const running = { handle: '%1', startedAt: '2026-10-20T09:00:00.000Z' };
+    const run = async (spec: RunSpec) => {
+      const child = Bun.spawn([...spec.command], { env: { PATH: process.env['PATH'] ?? '' }, stdout: 'ignore' });
+      await child.exited;
+      return ok(running);
+    };
+    return {
+      key: 'tmux',
+      start: run,
+      resume: async (spec: RunSpec) => await run(spec),
+      stop: async () => undefined,
+    } as unknown as Runner;
+  };
+
+  const argvOf = async (folder: string, n: number): Promise<string[]> =>
+    (await readFile(join(folder, `argv.${n}`), 'utf8')).split('\n').filter(word => word !== '');
+
+  it('passes -c service_tier="priority" on a fast start and its revive, and nothing for a start that asked for nothing', async () => {
+    const { binary, folder } = await fakeCodex();
+    const { harness } = harnessOver({ ...LOCATED, path: binary });
+    const runner = spawning();
+
+    await harness.start(specOf({ options: { fast: true } }), runner, ENV);
+    await harness.resume(specOf({ options: { fast: true } }), runner, ENV, 'conv-1');
+    await harness.start(specOf(), runner, ENV);
+    await harness.resume(specOf(), runner, ENV, 'conv-1');
+    // The owner typed /fast off after the start: Ferrets hands the revive what the session is ON, which is false.
+    await harness.resume(specOf({ options: { fast: false } }), runner, ENV, 'conv-1');
+
+    const [started, revived, plain, plainRevived, flipped] = await Promise.all(
+      [0, 1, 2, 3, 4].map(async n => await argvOf(folder, n)),
+    );
+    for (const argv of [started, revived]) {
+      const at = argv?.indexOf('service_tier="priority"') ?? -1;
+      should(at).be.greaterThan(0);
+      should(argv?.[at - 1]).equal('-c');
+    }
+    should(revived?.slice(0, 2)).eql(['resume', 'conv-1']);
+    should(plain?.some(word => word.startsWith('service_tier'))).be.false();
+    should(plainRevived?.some(word => word.startsWith('service_tier'))).be.false();
+    should(flipped?.filter(word => word.startsWith('service_tier'))).eql(['service_tier="default"']);
   });
 });

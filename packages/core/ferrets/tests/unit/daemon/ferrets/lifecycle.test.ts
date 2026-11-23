@@ -570,3 +570,48 @@ test('fy start --detach: a history that cannot be written is no unhandled reject
   expect(unhandled).toEqual([]);
   expect(f.registry.get(child)?.state).toBe('stopped');
 });
+
+test('U0c a start that asked for fast mode hands it to the harness, and a revive hands the SAME recorded answer back', async () => {
+  const f = fixture();
+  const started = await f.service.start({ folder: '/work', by: 'owner', options: { fast: true } }, PERSON_ORIGIN);
+  expect(started.ok).toBe(true);
+  const id = started.ok ? started.value : f.id;
+  expect(f.harness.launched.at(-1)?.options?.fast).toBe(true);
+  await f.service.stop(id, 'now');
+  await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+  expect(f.harness.launched).toHaveLength(2);
+  expect(f.harness.launched.at(-1)?.options?.fast).toBe(true);
+});
+
+test('U0c a start that said nothing about fast mode records none, so no launch carries one', async () => {
+  const f = fixture();
+  const started = await f.service.start({ folder: '/work', by: 'owner', options: { effort: 'high' } }, PERSON_ORIGIN);
+  expect(started.ok).toBe(true);
+  const id = started.ok ? started.value : f.id;
+  await f.service.stop(id, 'now');
+  await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+  expect(f.harness.launched.map(spec => spec.options?.fast)).toEqual([undefined, undefined]);
+});
+
+test('U0c a revive asks for the fast mode the session is ON now (the chip’s answer: a live /fast), not the start’s', async () => {
+  const f = fixture();
+  let live: boolean | undefined;
+  const started = await f.service.start({ folder: '/work', by: 'owner', options: { fast: true } }, PERSON_ORIGIN);
+  expect(started.ok).toBe(true);
+  const id = started.ok ? started.value : f.id;
+  f.ports.session = {
+    prepare: async () => undefined,
+    carry: async () => undefined,
+    launchFast: async () => live,
+  } as never;
+  await f.service.stop(id, 'now');
+
+  live = false; // the owner typed /fast off after the start
+  await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+  expect(f.harness.launched.at(-1)?.options?.fast).toBe(false);
+
+  await f.service.stop(id, 'now');
+  live = undefined; // nothing newer was reported: the start's own answer stands
+  await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+  expect(f.harness.launched.at(-1)?.options?.fast).toBe(true);
+});

@@ -14,7 +14,7 @@ import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import { SessionConfigSchema } from '../../../../daemon/lib/protocol/session.ts';
 import type { RegisteredAncestor } from '../../../../daemon/adapters/session/provenance/storage-session-ancestry.ts';
 import { WARDEN_LABEL } from '../../../../daemon/lib/session/peers/warden-lifecycle.ts';
-import { memoryStorage, sessionConfig } from '../../../support/daemon/storage.ts';
+import { memoryStorage, sessionConfig, sessionState } from '../../../support/daemon/storage.ts';
 import { ok } from '@ferretry/std';
 import { FerretConfigFile, FerretHistoryFiles, type FerretRecord } from '../../../../contract/index.ts';
 import {
@@ -773,6 +773,28 @@ describe('c58-16 the ferret’s own compact-at is one field of its session confi
     expect('compactAt' in cleared).toBe(false);
     expect(cleared).toMatchObject({ label: 'team', agenda: true });
     expect(await subject.port.compactAt?.(ferretId(FERRET))).toBeUndefined();
+  });
+
+  test('U0c launchFast: the launched answer, until the harness reports a newer one (a live /fast), and nothing when never decided', async () => {
+    const { subject, storage } = await documented();
+    const read = async () => await subject.port.launchFast?.(ferretId(FERRET));
+    await storage.writeState(FERRET, sessionState(FERRET));
+    expect(await read()).toBeUndefined();
+
+    await storage.writeConfig(FERRET, sessionConfig(FERRET, { launchFast: true }));
+    expect(await read()).toBe(true);
+
+    // A report from BEFORE the last decision is the old account's, and is ignored; one AFTER it is the owner's /fast.
+    await storage.writeState(
+      FERRET,
+      sessionState(FERRET, { observedFast: false, observedModelAt: '2000-01-01T00:00:00.000Z' }),
+    );
+    expect(await read()).toBe(true);
+    await storage.writeState(
+      FERRET,
+      sessionState(FERRET, { observedFast: false, observedModelAt: '2999-01-01T00:00:00.000Z' }),
+    );
+    expect(await read()).toBe(false);
   });
 
   test('a ferret with no session document is refused and none is made from nothing', async () => {
