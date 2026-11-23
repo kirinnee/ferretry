@@ -5,7 +5,7 @@
  */
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { KnownHarnessKeySchema } from '@ferretry/core-ferrets/contract';
 
 // ─── permission prompt (POST /v1/ferrets/:ferretId/permission) ───────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ export const PermissionRequestIdSchema = z.string().regex(/^[0-9a-f]{16}$/u);
 export const PermissionRequestSchema = z
   .strictObject({
     id: PermissionRequestIdSchema,
-    harness: HarnessKeySchema,
+    harness: KnownHarnessKeySchema,
     tool: z.string().min(1).max(120),
     action: PermissionActionSchema,
     what: z.string().min(1).max(500).optional(),
@@ -111,7 +111,7 @@ export const HarnessDialogIdSchema = z.string().regex(/^[0-9a-f]{16}$/u);
 export const HarnessDialogSchema = z
   .strictObject({
     id: HarnessDialogIdSchema,
-    harness: HarnessKeySchema,
+    harness: KnownHarnessKeySchema,
     kind: HarnessDialogKindSchema,
     title: z.string().min(1).max(300),
     body: z.string().min(1).max(1200).optional(),
@@ -262,7 +262,7 @@ export const HarnessUpdateJobSchema = z.discriminatedUnion('state', [
 
 /** `GET /v1/claude-code/update`: one harness (today's view held both harnesses in a list). */
 export const HarnessCliViewSchema = z.strictObject({
-  harness: HarnessKeySchema,
+  harness: KnownHarnessKeySchema,
   location: HarnessCliLocationSchema,
   installed: HarnessInstalledVersionSchema.nullable(),
   method: HarnessInstallMethodSchema.nullable(),

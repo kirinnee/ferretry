@@ -15,6 +15,7 @@ import {
   isMoveAccountSlotProps,
   isNewFerretAccountSlotProps,
 } from '@ferretry/core-ferrets/contract';
+import { isKnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useRef } from 'react';
 import { type ChosenRuntime, RuntimeSelect } from '../components/runtime-select.tsx';
@@ -102,7 +103,7 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
       usageError={error}
       value={slot.value}
       {...(preferred === undefined ? {} : { preferred })}
-      {...(move === null ? {} : { harness: move.harness, offerHealthCheck: true })}
+      {...(move === null || !isKnownHarnessKey(move.harness) ? {} : { harness: move.harness, offerHealthCheck: true })}
     />
   );
 }

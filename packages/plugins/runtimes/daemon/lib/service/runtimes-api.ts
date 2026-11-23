@@ -9,7 +9,7 @@
  * A runtime whose harness cannot be named (the file does not say, and Logins does not know its login) is not listed:
  * `resolve` answers `no_login` for it, so a start never guesses a harness. The harness of a login comes from the required Logins contract.
  */
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
 import {
   type ProfileFile,
@@ -38,7 +38,7 @@ export interface RuntimesApiDeps {
   /** `config/runtimes.yaml`'s `defaultRuntime`. */
   defaultSetting(): string | undefined;
   /** The harness keys currently on (`FerretsApi.harnesses`). */
-  harnesses(): readonly HarnessKey[];
+  harnesses(): readonly KnownHarnessKey[];
   readonly logins: Pick<LoginsApi, 'list'>;
   now(): number;
   /**

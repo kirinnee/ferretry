@@ -1,4 +1,4 @@
-import type { FerretId, HarnessTranscriptBytes } from '@ferretry/core-ferrets/contract';
+import type { FerretId, HarnessTranscriptBytes, TranscriptFormatId } from '@ferretry/core-ferrets/contract';
 import type {
   MessageRowReadResult,
   MessageRowSource,
@@ -18,6 +18,7 @@ import { tailTranscriptEvents } from '../lib/session/reader.ts';
 import { TranscriptTailCache } from '../lib/session/tail-cache.ts';
 import { ClaudeTranscriptParser } from '../lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../lib/transcript/codex.ts';
+import type { TranscriptParser } from '../lib/transcript/types.ts';
 import { PacedTranscriptParser, type TranscriptParsePacing } from '../lib/transcript/sliced.ts';
 import { BytesTranscriptSource, type TranscriptClock } from './file-source.ts';
 import { HarnessBytesRuntime } from './harness-bytes-runtime.ts';
@@ -57,7 +58,7 @@ type Located =
   | {
       readonly kind: 'found';
       readonly token: string;
-      readonly format: 'claude' | 'codex';
+      readonly format: TranscriptFormatId;
       readonly source: BytesTranscriptSource;
       readonly handle: HarnessTranscriptBytes;
       readonly size: number;
@@ -81,33 +82,53 @@ export class FileTranscriptReads
     TranscriptImageLocator
 {
   readonly runtime = new HarnessBytesRuntime();
-  readonly #sources: Readonly<Record<'claude' | 'codex', BytesTranscriptSource>>;
+  /** One byte source per transcript parser id (`HarnessFacts.transcriptFormat`): a harness whose id is not here is unsupported. */
+  readonly #sources: ReadonlyMap<TranscriptFormatId, BytesTranscriptSource>;
   readonly #index: ConversationIndex;
   readonly #scanner: BytesRecordScanner;
   readonly #tails: TranscriptTailCache;
   /** Per ferret, the token its held handle was proved under, when, and in which generation (see {@link HELD_PROOF_MS}). */
   readonly #proved = new Map<string, { readonly token: string; readonly at: number; readonly generation: number }>();
 
+  /**
+   * `extraParsers`: the parsers other harnesses declare (a harness's `HarnessFacts.transcriptFormat` names one by its
+   * `harness` id). The built-ins are `claude` and `codex`; an extra parser under a built-in id is ignored, never a
+   * replacement, so a plugin cannot change how Claude's or Codex's bytes are read.
+   */
   constructor(
     private readonly open: TranscriptOpener,
     private readonly clock: TranscriptClock,
     private readonly fallback?: EntriesFallback,
+    extraParsers: readonly TranscriptParser[] = [],
   ) {
-    const claude = new BytesTranscriptSource(new ClaudeTranscriptParser(), this.runtime, clock);
-    const codex = new BytesTranscriptSource(new CodexTranscriptParser(), this.runtime, clock);
-    this.#sources = { claude, codex };
-    this.#index = new ConversationIndex([claude, codex], this.runtime, clock.pacing);
+    const parsers = FileTranscriptReads.parsersById(extraParsers);
+    const sources = [...parsers.values()].map(parser => new BytesTranscriptSource(parser, this.runtime, clock));
+    this.#sources = new Map(sources.map(source => [source.harness, source]));
+    this.#index = new ConversationIndex(sources, this.runtime, clock.pacing);
     this.#scanner = new BytesRecordScanner(this.runtime);
     // No file watch exists in 5.0, so a remembered tail is re-validated by one cheap stat on every ask.
     this.#tails = new TranscriptTailCache();
   }
 
+  /** The parser registry: the two built-ins first, then each extra parser whose id is new. */
+  private static parsersById(extra: readonly TranscriptParser[]): ReadonlyMap<TranscriptFormatId, TranscriptParser> {
+    const parsers = new Map<TranscriptFormatId, TranscriptParser>();
+    for (const parser of [new ClaudeTranscriptParser(), new CodexTranscriptParser(), ...extra])
+      if (!parsers.has(parser.harness)) parsers.set(parser.harness, parser);
+    return parsers;
+  }
+
   /** The paced parsers the image reader parses a record with: the same pacing as every other parse here. */
-  static pacedParsers(pacing: TranscriptParsePacing): Readonly<Record<'claude' | 'codex', PacedTranscriptParser>> {
-    return {
-      claude: new PacedTranscriptParser(new ClaudeTranscriptParser(), pacing),
-      codex: new PacedTranscriptParser(new CodexTranscriptParser(), pacing),
-    };
+  static pacedParsers(
+    pacing: TranscriptParsePacing,
+    extraParsers: readonly TranscriptParser[] = [],
+  ): Readonly<Record<TranscriptFormatId, PacedTranscriptParser>> {
+    return Object.fromEntries(
+      [...FileTranscriptReads.parsersById(extraParsers)].map(([id, parser]) => [
+        id,
+        new PacedTranscriptParser(parser, pacing),
+      ]),
+    );
   }
 
   /** v4's `createTranscriptLocation`: which transcript is the ferret's, the source that reads it, its token and size. */
@@ -129,12 +150,16 @@ export class FileTranscriptReads
       this.#proved.delete(ferret);
       return { kind: 'unreadable' };
     }
+    // No parser speaks this harness's declared format: its bytes are never read as another format. The entries
+    // fallback, when the composition has one, answers instead.
+    const source = this.#sources.get(held.format);
+    if (source === undefined) return { kind: this.fallback === undefined ? 'unresolved' : 'unsupported' };
     this.#remember(ferret, token, generation);
     return {
       kind: 'found',
       token,
       format: held.format,
-      source: this.#sources[held.format],
+      source,
       handle: held,
       size: stat.size,
     };
@@ -173,11 +198,13 @@ export class FileTranscriptReads
       this.#proved.delete(ferret);
       return undefined;
     }
+    const source = this.#sources.get(held.format);
+    if (source === undefined) return undefined;
     return {
       kind: 'found',
       token: proved.token,
       format: held.format,
-      source: this.#sources[held.format],
+      source,
       handle: held,
       size: stat.size,
     };

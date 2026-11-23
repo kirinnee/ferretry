@@ -266,12 +266,13 @@ export class FileConversationDescriber implements ConversationDescriber {
     if (cached !== undefined && cached.modifiedAtMs === info.modifiedAtMs && cached.size === info.size)
       return cached.described;
     const read = await boundedTranscript(this.files, candidate.source, info.size);
+    // A family with no parser here is never described as another one.
+    const parser = this.parsers[candidate.harness];
     // A live conversation may end mid-record; the complete records before it still describe it.
     const events =
-      read === undefined
+      read === undefined || parser === undefined
         ? undefined
-        : (await this.parsers[candidate.harness].parse({ text: read.text, source: candidate.source, endOfInput: true }))
-            .events;
+        : (await parser.parse({ text: read.text, source: candidate.source, endOfInput: true })).events;
     const described =
       read === undefined || events === undefined
         ? undefined
@@ -294,7 +295,9 @@ export class FileConversationDescriber implements ConversationDescriber {
     const head = conversationHead(candidate.harness, read.text);
     const id = head === undefined ? undefined : conversationIdOf(candidate, head);
     if (id === undefined) return undefined;
-    const { events } = await this.parsers[candidate.harness].parse({
+    const parser = this.parsers[candidate.harness];
+    if (parser === undefined) return undefined;
+    const { events } = await parser.parse({
       text: read.text,
       source: candidate.source,
       endOfInput: true,

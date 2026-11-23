@@ -1,7 +1,9 @@
+import { CLAUDE_CODE_FACTS } from '../../lib/harness/facts.ts';
 import type { ClaudeCore, Serves } from './core.ts';
 
-export const identityPart = (_core: ClaudeCore): Serves<'accepts' | 'key' | 'turnStop'> => ({
+export const identityPart = (_core: ClaudeCore): Serves<'accepts' | 'facts' | 'key' | 'turnStop'> => ({
   key: 'claude-code' as const,
+  facts: CLAUDE_CODE_FACTS,
   /** Claude spends an Anthropic sign-in, an API key, or a proxy or endpoint that speaks the Anthropic API. */
   accepts: ['anthropic', 'api-key', 'proxy', 'endpoint'] as const,
   /**

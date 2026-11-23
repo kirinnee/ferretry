@@ -14,7 +14,7 @@ import {
   type LinkableConversation,
   type LinkQuery,
 } from '../../contract/index.ts';
-import type { HarnessKey } from './link-words.ts';
+import type { KnownHarnessKey } from './link-words.ts';
 
 const DAY_MS = 86_400_000;
 
@@ -181,7 +181,7 @@ export const keepRequest = (harness: string, runtime: string, selection: PickerS
 export const keepButtonLabel = (count: number): string =>
   count === 1 ? 'Keep 1 as a ferret' : `Keep ${count} as ferrets`;
 
-export type HarnessFilter = 'all' | HarnessKey;
+export type HarnessFilter = 'all' | KnownHarnessKey;
 
 /** The daemon-side search the Continue mode sends: only the narrowing it has. */
 export const listingQuery = (

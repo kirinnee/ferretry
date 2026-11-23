@@ -13,7 +13,7 @@
  * here**: a panel answers only with a login's id or a bare "signed in" — what a sign-in needs is Logins' own, and the
  * daemon holds none of it while it runs (docs/design/harness-login.md).
  */
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 
 /** Under the page's login list: Logins' add-login panel (a Claude Code or Codex sign-in, or a provider key). */
 export const ADD_RUNTIME_LOGIN_SLOT = 'runtimes.add-runtime-login' as const;
@@ -56,7 +56,7 @@ export interface AddRuntimeLoginSlotProps {
 /** What the sign-in slot hands its panels, besides the shell's `subject` (the login's id). */
 export interface AddRuntimeSignInSlotProps {
   /** The CLI the login signs in to. */
-  readonly harness: HarnessKey;
+  readonly harness: KnownHarnessKey;
   /** Told when the sign-in finished, carrying nothing: the page re-reads the machine. */
   readonly onSignedIn: () => void;
 }

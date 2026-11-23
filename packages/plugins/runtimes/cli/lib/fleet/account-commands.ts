@@ -1,4 +1,4 @@
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { VerbInvocation } from '@ferretry/kernel/manifest';
 import { AccountCommandError, type AccountWriteOptions } from './account-ports.ts';
 
@@ -34,7 +34,7 @@ export const writeFlags = (options: Options): AccountWriteOptions => ({
 });
 
 /** A tool as a person typed it. `claude` is Claude Code. */
-export function parseHarness(value: string): HarnessKey {
+export function parseHarness(value: string): KnownHarnessKey {
   const harness = value.trim().toLowerCase();
   if (harness === 'claude' || harness === 'claude-code') return 'claude-code';
   if (harness === 'codex') return 'codex';

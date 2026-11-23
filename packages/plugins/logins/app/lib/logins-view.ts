@@ -10,11 +10,11 @@
  * - **Signing in says how many runtimes it changes.**
  */
 
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { LoginList, LoginUsageWindow, LoginView } from '../../contract/index.ts';
 import { timeUntil } from './harness-login-model.ts';
 
-export type HarnessKind = HarnessKey;
+export type HarnessKind = KnownHarnessKey;
 
 export const HARNESSES: readonly HarnessKind[] = ['claude-code', 'codex'];
 

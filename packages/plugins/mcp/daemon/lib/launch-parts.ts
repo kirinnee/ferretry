@@ -1,4 +1,10 @@
-import type { HarnessKey, LaunchPart, LaunchPartSource, LaunchSpec } from '@ferretry/core-ferrets/contract';
+import {
+  isKnownHarnessKey,
+  type KnownHarnessKey,
+  type LaunchPart,
+  type LaunchPartSource,
+  type LaunchSpec,
+} from '@ferretry/core-ferrets/contract';
 import { optionalSecretReference, type SecretName, secretReferencesIn } from '@ferretry/core-vault/contract';
 import type { JsonValue } from '@ferretry/std';
 import { McpEnvSchema, type McpItem, type McpOAuthSecretNames, mcpOAuthSecretNames } from '../../contract/index.ts';
@@ -12,7 +18,7 @@ type McpLaunchPart = Extract<LaunchPart, { readonly kind: 'mcp' }>;
  * item that names a harness is for that harness only). Inert: a part is a name and the item as data. `env` keeps its
  * `${secret:NAME}` references; the Vault opens them for the child at the moment it starts, so no value is here.
  */
-export function mcpParts(items: ReadonlyMap<string, McpItem>, harness: HarnessKey): readonly McpLaunchPart[] {
+export function mcpParts(items: ReadonlyMap<string, McpItem>, harness: KnownHarnessKey): readonly McpLaunchPart[] {
   const parts: McpLaunchPart[] = [];
   for (const [name, item] of [...items].sort(([left], [right]) => left.localeCompare(right))) {
     if (item.harness !== undefined && item.harness !== harness) continue;
@@ -71,7 +77,8 @@ export class McpLaunchParts implements LaunchPartSource {
     // Only the items this runtime's profile stack names, as a v4 runtime home held only its profile's components.
     const layered = await this.deps.layered(spec.runtime);
     const items = new Map([...this.deps.items()].filter(([name]) => layered.has(name)));
-    const servers = mcpParts(items, spec.harness);
+    // A harness whose MCP format this plugin does not write gets no servers from it: never another harness's.
+    const servers = isKnownHarnessKey(spec.harness) ? mcpParts(items, spec.harness) : [];
     const signedIn = new Map<string, McpOAuthSecretNames>();
     const named = new Set<SecretName>();
     for (const part of servers) {

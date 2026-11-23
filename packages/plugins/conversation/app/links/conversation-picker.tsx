@@ -33,7 +33,7 @@ import {
 } from './conversation-picker-model.ts';
 import { keepConversations, readLinkableConversations } from './conversations-api.ts';
 import { guarded } from './link-refusal.ts';
-import { HARNESS_NAMES, type HarnessKey } from './link-words.ts';
+import { HARNESS_NAMES, type KnownHarnessKey } from './link-words.ts';
 
 /** The most rows one listing read asks for; the picker filters them here. */
 const PICKER_READ_LIMIT = 5_000;
@@ -121,12 +121,12 @@ export const runtimeSlotField =
   props => <RuntimeSlot daemon={daemon} field={props} />;
 
 /** What the runtime field shows when the machine has no runtime of this harness. */
-export const noRuntimeSentence = (harness: HarnessKey): string =>
+export const noRuntimeSentence = (harness: KnownHarnessKey): string =>
   `No ${HARNESS_NAMES[harness]} runtime on this machine yet. Add one in Settings › Runtimes, then try again.`;
 
 export interface ConversationPickerProps {
   readonly client: Pick<PluginClient, 'call'>;
-  readonly harness: HarnessKey;
+  readonly harness: KnownHarnessKey;
   /** The runtime picker: `runtimeSlotField(daemon)` on a screen, a stand-in in tests. */
   readonly runtimeField: RuntimeField;
   /** A runtime already chosen for these ferrets (its wrapper): no runtime picker is shown. */
@@ -459,14 +459,14 @@ function KeepSummary({ result }: { readonly result: KeepResult }) {
   );
 }
 
-const HARNESS_CHOICES: readonly { readonly id: HarnessKey; readonly label: string }[] = [
+const HARNESS_CHOICES: readonly { readonly id: KnownHarnessKey; readonly label: string }[] = [
   { id: 'claude-code', label: HARNESS_NAMES['claude-code'] },
   { id: 'codex', label: HARNESS_NAMES.codex },
 ];
 
 /** Keep conversations (today's Settings › Runtimes › Import conversations): which harness's conversations, and the picker. */
 export function KeepConversations({ client, runtimeField, now }: Omit<ConversationPickerProps, 'harness' | 'runtime'>) {
-  const [harness, setHarness] = useState<HarnessKey>('claude-code');
+  const [harness, setHarness] = useState<KnownHarnessKey>('claude-code');
   return (
     <section className="flex min-w-0 flex-col gap-4" data-keep-conversations="">
       <div>
@@ -475,7 +475,7 @@ export function KeepConversations({ client, runtimeField, now }: Omit<Conversati
           Keep earlier conversations as ferrets. Each one resumes the same history; nothing is copied.
         </p>
       </div>
-      <Segmented<HarnessKey>
+      <Segmented<KnownHarnessKey>
         label="CLI"
         name="harness"
         options={HARNESS_CHOICES}

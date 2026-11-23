@@ -3,7 +3,7 @@
  * reader of one. MCP and Skills read a runtime's user-scope servers and skills through this; they never hold a path
  * they may open, because `home` and `wrapper` below are display text and the reader serves a FIXED list of names.
  */
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { RuntimeId } from './index.ts';
 
 /** One harness home the fleet catalogue published: the runtimes that launch into it. */
@@ -13,7 +13,7 @@ export interface RuntimeHome {
    * served read-only), the id of its account.
    */
   readonly id: string;
-  readonly harness: HarnessKey;
+  readonly harness: KnownHarnessKey;
   /** Wrapper names that launch into it, deduped, in manifest order. */
   readonly runtimes: readonly RuntimeId[];
   /** Absolute, for display and for an inventory row's `source`. A consumer never opens it: only the reader reads a home. */

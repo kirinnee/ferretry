@@ -7,6 +7,7 @@ import {
   FERRETRY_MCP_SERVER,
 } from '@ferretry/plugin-runtimes/contract';
 import { type HarnessConfig, type HooksItem, launchFlagsKept, type SettingsItem } from '../../../contract/index.ts';
+import { CLAUDE_CODE_FACTS } from './facts.ts';
 import { seededCommand } from './api-key-seed.ts';
 import {
   CLAUDE_HOME_ENV,
@@ -28,12 +29,12 @@ import { startupModelArguments } from './startup.ts';
  */
 
 export const HOME_FILES = {
-  memory: 'CLAUDE.md',
+  memory: CLAUDE_CODE_FACTS.instructionFile,
   settings: 'settings.json',
   overlay: 'launch-settings.json',
   claudeJson: '.claude.json',
   conversation: 'conversation.json',
-  mcp: 'mcp.json',
+  mcp: CLAUDE_CODE_FACTS.mcp.file,
 } as const;
 
 export interface HomeInputs {

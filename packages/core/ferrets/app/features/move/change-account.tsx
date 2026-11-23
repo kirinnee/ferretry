@@ -11,6 +11,7 @@
 import { Spinner } from '@ferretry/app/ui';
 import { AlertOctagon, AlertTriangle, ArrowRight, MessageSquare, RefreshCw, ShieldAlert } from 'lucide-react';
 import { type FormEvent, type ReactNode, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ConvertibleSummary } from './conversion-model.ts';
 import type { AskToStopJobsResult, ChosenFerretAccount, FerretSummary, InflightItem } from '../../../contract/index.ts';
 import { Button } from '../../ui.ts';
 import { AccountSlot, type RenderAccountSlot } from './account-slot.tsx';
@@ -72,7 +73,7 @@ const chosenAccountModels = (chosen: ChosenFerretAccount | null, agent: string):
     : chosen.models.filter(model => model.available).map(model => model.id);
 
 export interface ChangeAccountProps {
-  readonly summary: FerretSummary;
+  readonly summary: ConvertibleSummary;
   readonly slot: RenderAccountSlot;
   readonly move: MoveFerret;
   /** Asks the agent to stop its own background jobs. */

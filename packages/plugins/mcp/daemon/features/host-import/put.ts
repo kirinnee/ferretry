@@ -24,13 +24,13 @@
  * on `PATH` and nothing is spawned at import. It runs only when a ferret launches with that server, and only because the
  * person ticked it.
  */
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { ComponentPutOptions, ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
 import { ITEM_NAME_PATTERN } from '@ferretry/std';
 import type { McpConfigWrite } from './ports.ts';
 
 /** Runtimes' word for a harness, and the harness key itself, to the key an MCP item carries (own properties only). */
-const HARNESS_KEY_OF: Readonly<Record<string, HarnessKey | undefined>> = Object.assign(Object.create(null), {
+const HARNESS_KEY_OF: Readonly<Record<string, KnownHarnessKey | undefined>> = Object.assign(Object.create(null), {
   claude: 'claude-code',
   'claude-code': 'claude-code',
   codex: 'codex',

@@ -14,7 +14,7 @@
  * run Ferrets or Runtimes does not offer yet (ports-pending). A run's state is read when somebody asks for it, never
  * polled here.
  */
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { Instant } from '@ferretry/std';
 import {
   PACK_CLEAN_UP_PACK,
@@ -67,7 +67,7 @@ export interface CleanUpRunStore {
 /** A runtime as a start needs it. */
 export interface CleanUpRuntime {
   readonly wrapper: string;
-  readonly harness: HarnessKey;
+  readonly harness: KnownHarnessKey;
   /** The model it launches with when none is named. */
   readonly defaultModel?: string | undefined;
 }
@@ -76,7 +76,7 @@ export interface CleanUpRuntime {
 export interface CleanUpStartRequest {
   readonly runtime: string;
   readonly wrapper: string;
-  readonly harness: HarnessKey;
+  readonly harness: KnownHarnessKey;
   readonly mode: 'auto';
   readonly prompt: string;
   readonly pack: string;
