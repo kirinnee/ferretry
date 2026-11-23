@@ -65,7 +65,7 @@ function ShellCommandBar(props: {
   readonly focusSignal: number;
   readonly onClose: () => void;
 }) {
-  const { runtime, views, routes, owner, layouts } = useShell();
+  const { runtime, views, routes, owner, layouts, offeredOn } = useShell();
   const router = useRouter();
   const { route } = router;
   // The ferret whose page this is, for the entries that are about "this ferret" (Board's, S-0449).
@@ -110,7 +110,10 @@ function ShellCommandBar(props: {
       placeSource({
         daemons,
         daemon,
-        screens: [...views.screens.values()],
+        // A machine's own places are the ones THAT machine has on; a device-wide place (a `/` path) is no machine's.
+        screens: [...views.screens.values()].filter(
+          screen => screen.path.startsWith('/') || offeredOn(daemon, screen.plugin),
+        ),
         routes,
         navigate: href => router.navigate(href),
       }),
@@ -118,7 +121,7 @@ function ShellCommandBar(props: {
       deviceLayoutSource(owner ?? DEFAULT_LAYOUT, layouts),
       ...pluginSources,
     ],
-    [daemons, daemon, views, routes, router, owner, layouts, pluginSources, answers, runtime],
+    [daemons, daemon, views, routes, router, owner, layouts, pluginSources, answers, runtime, offeredOn],
   );
   return <CommandBar open={props.open} focusSignal={props.focusSignal} onClose={props.onClose} sources={sources} />;
 }

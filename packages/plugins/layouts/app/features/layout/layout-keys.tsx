@@ -12,6 +12,7 @@ function sourcesOf(
   path: ListSetting['path'],
   layout: Layout,
   catalog: readonly PlaceSource[] | undefined,
+  absent: ReadonlySet<string>,
 ): readonly PlaceSource[] {
   switch (path) {
     case 'nav.items':
@@ -22,20 +23,27 @@ function sourcesOf(
     case 'phone.top':
       return SHELL_ITEMS.top.map(id => ({ id, label: humanize(id) }));
     case 'panels.ferret.side':
-      return (DEFAULT_LAYOUT.panels['ferret.side'] ?? []).map(id => ({ id, label: humanize(id) }));
+      return (DEFAULT_LAYOUT.panels['ferret.side'] ?? [])
+        .filter(id => !absent.has(id))
+        .map(id => ({ id, label: humanize(id) }));
   }
 }
+
+const NOTHING_ABSENT: ReadonlySet<string> = new Set();
 
 export function LayoutKeys({
   layout,
   apply,
   busy,
   catalog,
+  absentPanels = NOTHING_ABSENT,
 }: {
   readonly layout: Layout;
   readonly apply: Apply;
   readonly busy: boolean;
   readonly catalog: readonly PlaceSource[] | undefined;
+  /** Ferret side panels no paired machine offers (their plugin is off): no control for them, and a save keeps them. */
+  readonly absentPanels?: ReadonlySet<string>;
 }) {
   return (
     <>
@@ -51,9 +59,10 @@ export function LayoutKeys({
                 key={path}
                 setting={setting}
                 layout={layout}
-                sources={sourcesOf(setting.path, layout, catalog)}
+                sources={sourcesOf(setting.path, layout, catalog, absentPanels)}
                 apply={apply}
                 busy={busy}
+                absent={setting.path === 'panels.ferret.side' ? absentPanels : undefined}
               />
             );
           })}

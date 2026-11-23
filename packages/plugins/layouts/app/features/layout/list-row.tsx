@@ -14,15 +14,18 @@ export function ListRow({
   sources,
   apply,
   busy,
+  absent,
 }: {
   readonly setting: ListSetting;
   readonly layout: Layout;
   readonly sources: readonly PlaceSource[];
   readonly apply: Apply;
   readonly busy: boolean;
+  /** Places this list names that are not drawn here (a panel of a plugin that is off): no row, and a save keeps them. */
+  readonly absent?: ReadonlySet<string>;
 }) {
   const id = useId();
-  const held = placesOf(layout, setting.path, sources);
+  const held = placesOf(layout, setting.path, sources, absent);
   const heldKey = held.map(row => `${row.id}:${row.hidden ? 0 : 1}`).join('|');
   // What was just done stays on screen until the daemon's answer arrives and matches it: the row never snaps back.
   const [pending, setPending] = useState<readonly Place[] | undefined>(undefined);
@@ -32,7 +35,18 @@ export function ListRow({
   const rows = pending ?? held;
   const save = async (next: readonly Place[]): Promise<void> => {
     setPending(next);
-    const reason = await apply(keepPhoneNav(layout, setting.path, sources, changesOf(setting.path, next)));
+    const reason = await apply(
+      keepPhoneNav(
+        layout,
+        setting.path,
+        sources,
+        changesOf(setting.path, next, {
+          layout,
+          sources,
+          ...(absent === undefined ? {} : { absent }),
+        }),
+      ),
+    );
     setRefusal(reason);
     if (reason !== undefined) setPending(undefined);
   };

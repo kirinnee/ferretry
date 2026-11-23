@@ -61,9 +61,11 @@ export interface LayoutSettingsProps {
   readonly device?: DeviceLayout;
   /** The installed navigation places (the shell's `useNavCatalog()`); absent outside the shell. */
   readonly navCatalog?: readonly NavCatalogItem[];
+  /** The ferret side panels no paired machine offers (the shell's `useAbsentPanels`): left out of the controls. */
+  readonly absentPanels?: ReadonlySet<string>;
 }
 
-export function LayoutSettings({ client, device, navCatalog }: LayoutSettingsProps) {
+export function LayoutSettings({ client, device, navCatalog, absentPanels }: LayoutSettingsProps) {
   const { state, refresh } = useLayouts(client);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
@@ -162,9 +164,9 @@ export function LayoutSettings({ client, device, navCatalog }: LayoutSettingsPro
       ) : null}
 
       {scope === 'all' ? (
-        <LayoutKeys layout={current.layout} apply={owner} busy={busy} catalog={catalog} />
+        <LayoutKeys layout={current.layout} apply={owner} busy={busy} catalog={catalog} absentPanels={absentPanels} />
       ) : device === undefined ? null : (
-        <LayoutKeys layout={device.inForce} apply={theirs} busy={false} catalog={catalog} />
+        <LayoutKeys layout={device.inForce} apply={theirs} busy={false} catalog={catalog} absentPanels={absentPanels} />
       )}
 
       {scope === 'all' ? (

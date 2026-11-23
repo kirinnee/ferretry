@@ -4,7 +4,7 @@
  * piece that differs blocks everything, whatever a plugin itself needs. Otherwise the call is blocked WITHOUT being
  * sent and fails `plugin_paused`. Pure: the inventory is passed in.
  */
-import { CORE_IDS, KERNEL_REFUSALS, PROTOCOL, type PluginInventory } from '@ferretry/kernel/contract';
+import { CORE_IDS, KERNEL_REFUSALS, PROTOCOL, type PluginInventory, WORK_PLUGINS } from '@ferretry/kernel/contract';
 import { EXIT, ShellError } from './errors.ts';
 
 type EntryReason = 'missing' | 'off' | 'different';
@@ -62,7 +62,10 @@ export function pausedSentence(
     case 'missing':
       return `This daemon does not have ${title}: update the daemon, then try again (\`${binary} daemon restart\`).`;
     case 'off':
-      return `${title} is turned off: turn it on with \`${binary} plugin on ${id}\`. The work surfaces come on together, with \`work: on\` in config/plugins.yaml.`;
+      // Board and Agenda come on together with the one `work` switch; `plugin on` is not wired yet, so it leads only for the rest.
+      return WORK_PLUGINS.includes(id)
+        ? `${title} is turned off: set \`work: on\` in config/plugins.yaml (Board and Agenda come on together).`
+        : `${title} is turned off: turn it on with \`${binary} plugin on ${id}\`.`;
     case 'different':
       return `${title} differs between ${binary} and the daemon: restart the daemon with \`${binary} daemon restart\`.`;
     case 'core':

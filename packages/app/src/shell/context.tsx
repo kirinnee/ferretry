@@ -48,6 +48,12 @@ export interface ShellModel {
   readonly layouts: DeviceLayoutStore;
   /** Where each page was scrolled, per history entry (`fy:app:scroll`, this tab only). */
   readonly scroll: ScrollMemory;
+  /**
+   * Whether `plugin` is offered ON `daemon` (that machine has not turned it off): what a machine's own nav, finder and
+   * side column ask. `views` is the fleet-wide listing (a surface stays while ANY machine has it on) for device-wide
+   * places only. With no daemon there is no machine to ask, so it is `true`.
+   */
+  readonly offeredOn: (daemon: string | undefined, plugin: string) => boolean;
 }
 
 export const ShellContext = createContext<ShellModel | null>(null);
@@ -219,11 +225,21 @@ export function ShellProvider({
   const owner = served?.layout;
   // What the owner is offered (nav, panels, the finder) leaves out a surface every paired daemon has turned off; the
   // route table and the layout check keep every compiled surface, so a deep link still says "off" and a layout still checks.
+  // The key spells out each machine's own listing too, so a machine turning a surface off re-draws what is offered ON that machine.
   const listedKey = useSyncExternalStore(runtime.subscribe, () =>
-    runtime
-      .listedSurfaces()
-      .map(entry => entry.id)
-      .join(','),
+    [
+      runtime
+        .listedSurfaces()
+        .map(entry => entry.id)
+        .join(','),
+      ...runtime.daemons.snapshot().daemons.map(
+        paired =>
+          `${paired.daemon}=${runtime
+            .listedSurfaces(paired.daemon)
+            .map(entry => entry.id)
+            .join(',')}`,
+      ),
+    ].join(';'),
   );
   const everything = useMemo(() => viewsOf(runtime.surfaces), [runtime]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `listedKey` is the listing's value; it rebuilds the views when a surface goes on or off.
@@ -254,9 +270,23 @@ export function ShellProvider({
     }),
     [themes, dark, install, runtime],
   );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `listedKey` is the listing's value; `offeredOn` reads it live, so a new key makes a new model.
   const model = useMemo<ShellModel>(
-    () => ({ runtime, views, routes, layout, owner, plan, viewport, themes, layouts, scroll }),
-    [runtime, views, routes, layout, owner, plan, viewport, themes, layouts, scroll],
+    () => ({
+      runtime,
+      views,
+      routes,
+      layout,
+      owner,
+      plan,
+      viewport,
+      themes,
+      layouts,
+      scroll,
+      offeredOn: (daemon, plugin) =>
+        daemon === undefined || runtime.listedSurfaces(daemon).some(entry => entry.id === plugin),
+    }),
+    [runtime, views, routes, layout, owner, plan, viewport, themes, layouts, scroll, listedKey],
   );
   return (
     <DeviceProvider value={device}>

@@ -140,7 +140,7 @@ export type { OwnerLayout } from './layout/daemon-layout.ts';
 export { LAYOUTS_PLUGIN } from './layout/daemon-layout.ts';
 export type { NavEntry, PanelRef, ScreenRef, SideHolds } from './layout/engine.ts';
 /** @public Layouts' Settings tab lists the fixed set of nav places (label, icon, order) to reorder and hide (§5.3: a layout names places, it never types them). */
-export { type NavCatalogItem, useNavCatalog } from './layout/nav-catalog.ts';
+export { type NavCatalogItem, useAbsentPanels, useNavCatalog } from './layout/nav-catalog.ts';
 /** @public §5.3: Layouts' navigation chips draw the icon of the place they stand for, at the shell's one size and weight. */
 export { Icon as NavIcon } from './shell/icons.tsx';
 export {
@@ -179,7 +179,13 @@ export {
   type PluginCommandSource,
 } from './shell/command-sources.ts';
 /** @public An app hook another half offers (`<offerer>.<name>`): the provider's `shell.hooks`, the offerer's `useAppHook` (§5.2). */
-export { type AppHookContext, type AppHookProvider, type AppHookProviders, useAppHook } from './shell/app-hooks.ts';
+export {
+  type AppHookContext,
+  type AppHookProvider,
+  type AppHookProviders,
+  useAppHook,
+  usePluginOffered,
+} from './shell/app-hooks.ts';
 /** @public This device's theme, read on any screen, daemon-less ones included (§5.2: a device setting; shell contract S9). */
 export {
   type DevicePaired,

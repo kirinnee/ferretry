@@ -8,6 +8,7 @@ import {
   PluginsChanged,
   policyRef,
   SessionModes,
+  WORK_PLUGINS,
 } from './contract/index.ts';
 import { MachineNameSchema } from './contract/kernel.ts';
 import { definePlugin, route, settingsTab, socket, tool } from './manifest/index.ts';
@@ -23,11 +24,8 @@ export const PluginsYamlSchema = z.strictObject({
 });
 export type PluginsYaml = z.infer<typeof PluginsYamlSchema>;
 
-/**
- * The plugins the `work` switch owns. Loops has no plugin in 5.0 (the v4 loop engine was skipped); its slot is
- * reserved here, so it joins the list when it exists and rides the same switch.
- */
-export const WORK_PLUGINS: readonly string[] = ['board', 'agenda'];
+/** The plugins the `work` switch owns: defined with the core ids (`contract/ids.ts`), which `fy` reads. */
+export { WORK_PLUGINS };
 
 /**
  * Whether `config/plugins.yaml` leaves plugin `id` on. A work plugin is on only if `work: on` AND its own line is not

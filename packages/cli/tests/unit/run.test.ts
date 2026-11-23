@@ -263,7 +263,7 @@ describe('runFy', () => {
     });
     should(await runFy(['task', 'show'], world)).equal(69);
     should(io.stderr()).containEql(
-      'Board is turned off: turn it on with `fy plugin on board`. The work surfaces come on together, with `work: on` in config/plugins.yaml.',
+      'Board is turned off: set `work: on` in config/plugins.yaml (Board and Agenda come on together).',
     );
     should(transport.sent).deepEqual([]);
   });

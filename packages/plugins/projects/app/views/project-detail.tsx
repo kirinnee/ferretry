@@ -1,4 +1,4 @@
-import { useAppHook, useRouter } from '@ferretry/app';
+import { useAppHook, usePluginOffered, useRouter } from '@ferretry/app';
 import { Loading, RouteLink } from '@ferretry/app/ui';
 import { ArrowLeft, Bot, FolderTree, GitPullRequest, KanbanSquare, LayoutList, UserRound } from 'lucide-react';
 import { createElement, type ReactNode, useEffect, useMemo, useState } from 'react';
@@ -75,6 +75,7 @@ function ProjectDetailView({
   const set = useMemo(() => (read.ferrets === null ? [] : projectFerrets(project.path, read.ferrets)), [project, read]);
   const active = useMemo(() => activeProjectFerrets(set), [set]);
   // What another plugin tells about this project (PRs & CI, today), if one is installed on this daemon.
+  const boardOffered = usePluginOffered(daemon, 'board');
   const provided = useAppHook(daemon, PROJECTS_INSIGHTS_HOOK);
   const insights = isProjectsInsights(provided) ? provided : undefined;
   // A saved link changes the project record, so the registry is read again and the list re-renders from the daemon's word.
@@ -143,9 +144,12 @@ function ProjectDetailView({
               edit={{ projectId: project.id, onSaved: onAccountsSaved }}
             />
           </Section>
-          <Section icon={<KanbanSquare className="text-muted" size={16} aria-hidden="true" />} title="Board">
-            <ProjectBoardSwitch client={client} projectId={project.id} />
-          </Section>
+          {/* With Board off on this daemon (the work switch) the page offers no trace of it. */}
+          {boardOffered && (
+            <Section icon={<KanbanSquare className="text-muted" size={16} aria-hidden="true" />} title="Board">
+              <ProjectBoardSwitch client={client} projectId={project.id} />
+            </Section>
+          )}
           {insights !== undefined && (
             <Section
               icon={<GitPullRequest className="text-muted" size={16} aria-hidden="true" />}

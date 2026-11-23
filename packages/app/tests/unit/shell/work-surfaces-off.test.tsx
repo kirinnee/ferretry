@@ -44,14 +44,14 @@ const keep = entryOf(
   provideToShell(implementApp(keepManifest, { build: () => ({ screens: { keeper: () => <p>keeper page</p> } }) }), {}),
 );
 
-const layout = () => {
+const layout = (holds: 'panels' | 'desk' = 'panels') => {
   const storage = memoryStore();
   writeRecord(
     storage,
     APP_STORAGE.layout,
     storedOverrides({
       nav: { side: 'left', style: 'list', items: ['desk', 'keeper', 'settings'] },
-      side: { holds: 'panels' },
+      side: { holds, show: 'always', at: 'right' },
       panels: { 'ferret.side': [] },
       'composer.tools': [],
     } as LayoutOverrides),
@@ -179,5 +179,83 @@ describe('a surface its daemon has turned off is offered nowhere (O8-14 P3)', ()
     view = app.view;
     await settle();
     expect(nav()).toContain('Work desk');
+  });
+
+  // The listing is per machine: a machine that turned a surface off does not offer it because ANOTHER machine has it on.
+  const twoMachines = async (path: string, holds: 'panels' | 'desk' = 'panels') => {
+    const app = await bootApp({
+      surfaces: [work, keep],
+      machines: ['d1', 'd2'],
+      path,
+      storage: layout(holds),
+      off: { d1: ['agenda'] },
+    });
+    view = app.view;
+    await settle();
+    return app;
+  };
+
+  test('two machines, d1 off and d2 on: d1 has no nav entry for it, d2 does (item 1)', async () => {
+    await twoMachines('/d/d1');
+    expect(nav()).not.toContain('Work desk');
+    expect(nav()).toContain('Keeper');
+    await view?.unmount();
+    view = null;
+    await twoMachines('/d/d2');
+    expect(nav()).toContain('Work desk');
+  });
+
+  test('two machines: the finder on d1 offers neither its place nor its settings tab, on d2 it does (item 1)', async () => {
+    await twoMachines('/d/d1');
+    const off = await openBar('work');
+    expect(off).not.toContain('Work desk');
+    expect(off).not.toContain('Work tab');
+    expect(off).toContain('Keeper');
+    await view?.unmount();
+    view = null;
+    await twoMachines('/d/d2');
+    const on = await openBar('work');
+    expect(on).toContain('Work desk');
+    expect(on).toContain('Work tab');
+  });
+
+  test('two machines: a side column a layout fills with the screen is empty on d1 and drawn on d2 (item 1)', async () => {
+    await twoMachines('/d/d1', 'desk');
+    // (the column is not drawn at all: not the page, and not the off line a screen that cannot run would say instead)
+    expect(text()).not.toContain('desk page');
+    expect(text()).not.toContain('is off on this daemon');
+    expect(document.querySelector('aside.fy-side')).toBeNull();
+    await view?.unmount();
+    view = null;
+    await twoMachines('/d/d2', 'desk');
+    expect(text()).toContain('desk page');
+  });
+
+  test('two machines: d1 turning it off live takes it out of d1 only', async () => {
+    const app = await bootApp({
+      surfaces: [work, keep],
+      machines: ['d1', 'd2'],
+      path: '/d/d1',
+      storage: layout(),
+    });
+    view = app.view;
+    await settle();
+    expect(nav()).toContain('Work desk');
+    app.machine('d1').off.add('agenda');
+    await app.reread('d1');
+    expect(nav()).not.toContain('Work desk');
+  });
+
+  test('a saved deep link to the off settings tab says it is off, never that the tab does not exist (item 3)', async () => {
+    await boot('/d/d1/settings/agenda', ['agenda']);
+    expect(text()).not.toContain('There is no settings tab');
+    expect(text()).toContain('is off on this daemon');
+    // the list beside it still leaves the tab out
+    expect(document.querySelector('nav[aria-label], .fy-settings-nav')?.textContent ?? '').not.toContain('Work tab');
+  });
+
+  test('a name nothing compiled answers to still says so (item 3 keeps its guard)', async () => {
+    await boot('/d/d1/settings/nothing-here', ['agenda']);
+    expect(text()).toContain('There is no settings tab called "nothing-here"');
   });
 });
