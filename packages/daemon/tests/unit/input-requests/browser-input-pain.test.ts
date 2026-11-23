@@ -133,7 +133,9 @@ describe('the cards the owner sees', () => {
       'code',
     );
     const keypad: Field = { tag: 'input', inputmode: 'numeric', maxlength: '6' };
-    should(await sensitivityOf(keypad, 'secret', 'Password code', 'Your one-time password')).equal('code');
+    // The ferret's own label saying password only ever raises: a keypad field labelled so stays a secret (fix round 2).
+    should(await sensitivityOf(keypad, 'secret', 'Password code', 'Your one-time password')).equal('secret');
+    should(await sensitivityOf(keypad, 'secret', 'Code', 'Your one-time password')).equal('code');
   });
 
   it('should make a card number field a secret even when the ferret said plain', async () => {
@@ -196,5 +198,27 @@ describe('after the owner answers', () => {
     const view = await waiting;
     should(view.state).equal('delivered');
     should(performance.now() - before).be.below(250);
+  });
+});
+
+describe('pageFieldKind: PIN-like fields stay secret (fix round 2, B1)', () => {
+  for (const name of ['pincode', 'userPin', 'mpin', 'ssnLast4', 'securityCode', 'Security Code']) {
+    it(`${name} on a numeric keypad with maxlength 4-8 is not a code`, () => {
+      should(pageFieldKind({ tag: 'input', inputmode: 'numeric', maxlength: '4', name })).equal(undefined);
+      should(pageFieldKind({ tag: 'input', inputmode: 'tel', maxlength: '6', id: name })).equal(undefined);
+    });
+  }
+  it('one-time-code stays a code, but not on a password-typed or password-named field', () => {
+    should(pageFieldKind({ tag: 'input', autocomplete: 'one-time-code' })).equal('code');
+    should(pageFieldKind({ tag: 'input', autocomplete: 'one-time-code', name: 'password' })).equal(undefined);
+    should(pageFieldKind({ tag: 'input', autocomplete: 'one-time-code', type: 'password' })).equal(undefined);
+  });
+});
+
+describe('pageFieldKind: the ferret label may only raise (fix round 2, B1 addendum)', () => {
+  it('a label that says pin, password, ssn or security code keeps a keypad field secret', () => {
+    for (const label of ['Card PIN', 'Account password', 'SSN last 4', 'Security code'])
+      should(pageFieldKind({ tag: 'input', inputmode: 'numeric', maxlength: '4' }, label)).equal(undefined);
+    should(pageFieldKind({ tag: 'input', inputmode: 'numeric', maxlength: '6' }, 'Verification code')).equal('code');
   });
 });

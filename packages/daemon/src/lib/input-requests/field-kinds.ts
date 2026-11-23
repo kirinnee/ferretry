@@ -21,7 +21,8 @@ const CARD_WORDS =
   /card[\s._-]*(?:number|num|no)\b|cc[\s._-]*(?:num|number|exp|expiry|csc|cvc|cvv)|\bcvc\b|\bcvv\b|\bcsc\b|\bcvn\b|expir(?:y|ation|es)|exp[\s._-]*(?:date|month|year)/iu;
 const CODE_AUTOCOMPLETE = /(?:^|\s)one-time-code(?:\s|$)/iu;
 /** A page field that says password, in any of the words a page uses: it is never read as a one-time code on a keypad's evidence. */
-const PASSWORD_SIGNAL = /pass|pwd|(?:^|[^a-z])pin(?:[^a-z]|$)/iu;
+const PASSWORD_SIGNAL = /pass|pwd|pin|ssn|security[\s._-]*code|cv[vc]|csc/iu;
+const PASSWORD_NAMED = /pass(?:word|wd)|pwd/iu;
 const KEYPAD = /^(?:numeric|tel|decimal)$/iu;
 
 /** Whether the page's own words for a field (never the ferret's) put it among codes or card fields. */
@@ -36,9 +37,12 @@ export function pageFieldKind(
   if (words.some(word => CARD_WORDS.test(word))) return 'card';
   if (field.type?.toLowerCase() === 'password') return undefined;
   if (/password/iu.test(field.autocomplete ?? '')) return undefined;
-  if (field.autocomplete !== undefined && CODE_AUTOCOMPLETE.test(field.autocomplete)) return 'code';
+  if (field.autocomplete !== undefined && CODE_AUTOCOMPLETE.test(field.autocomplete))
+    return [field.name, field.id].some(word => word !== undefined && PASSWORD_NAMED.test(word.normalize('NFKC')))
+      ? undefined
+      : 'code';
   const length = field.maxlength === undefined ? Number.NaN : Number(field.maxlength);
-  const signalled = [field.name, field.id, field.autocomplete].some(
+  const signalled = [field.name, field.id, field.autocomplete, label].some(
     word => word !== undefined && PASSWORD_SIGNAL.test(word.normalize('NFKC')),
   );
   if (KEYPAD.test(field.inputmode ?? '') && length >= 4 && length <= 8 && !signalled) return 'code';
