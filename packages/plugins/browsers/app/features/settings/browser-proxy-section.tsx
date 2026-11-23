@@ -6,7 +6,7 @@ import {
   SetupSection,
   useSecretField,
 } from '@ferretry/app/ui';
-import { SettingSaveBar } from '@ferretry/app';
+import { SettingFieldset, SettingSaveBar, useReportUnsaved } from '@ferretry/app';
 import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { BrowserProxySetting } from '../../../contract/index.ts';
@@ -113,6 +113,9 @@ export function BrowserProxySection({
   const wanted = typed ? settingOf(filed) : ({ ok: true, setting: null } as const);
   const before = JSON.stringify(draftOf(saved));
   const dirty = JSON.stringify(filed) !== before || pendingFields.username.filled || pendingFields.password.filled;
+  // The change panel that replaces the Save bar while something valid is staged is not a Save bar, so it cannot report this
+  // form by itself: tell the shell's leave guard, so Back asks before it drops the draft.
+  useReportUnsaved(dirty);
   // What to test: nothing is sent for the saved proxy (`{}`); the edited setting is sent only when it differs.
   const testBody: { readonly proxy?: BrowserProxySetting } | null = !typed
     ? saved === null
@@ -286,110 +289,113 @@ export function BrowserProxySection({
         <span className="font-semibold">Now: </span>
         {now}
       </p>
-      {/* A field is never wider than 28rem; username and password sit side by side when the PANEL (not the window) has room. */}
-      <div className="min-w-0 [container-type:inline-size]">
-        <div className="grid min-w-0 grid-cols-1 gap-3 [@container(min-width:640px)]:grid-cols-2 [@container(min-width:640px)]:gap-x-8">
-          <div className="flex min-w-0 max-w-[28rem] flex-col gap-1 [@container(min-width:640px)]:col-span-2">
-            <label htmlFor={`${ids}-url`} className="text-ui font-semibold text-fg">
-              Proxy address
-            </label>
-            <input
-              id={`${ids}-url`}
-              className="kt-input min-w-0 font-mono"
-              autoComplete="off"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              placeholder="http://proxy.example:8080 or socks5://proxy.example:1080"
-              value={draft.url}
-              data-browser-proxy-url=""
-              onChange={event => edit({ url: event.target.value })}
+      {/* While Save and test is in flight no field takes typing, so the answer that re-bases the form cannot erase an edit. */}
+      <SettingFieldset saving={saving} className="flex flex-col gap-3">
+        {/* A field is never wider than 28rem; username and password sit side by side when the PANEL (not the window) has room. */}
+        <div className="min-w-0 [container-type:inline-size]">
+          <div className="grid min-w-0 grid-cols-1 gap-3 [@container(min-width:640px)]:grid-cols-2 [@container(min-width:640px)]:gap-x-8">
+            <div className="flex min-w-0 max-w-[28rem] flex-col gap-1 [@container(min-width:640px)]:col-span-2">
+              <label htmlFor={`${ids}-url`} className="text-ui font-semibold text-fg">
+                Proxy address
+              </label>
+              <input
+                id={`${ids}-url`}
+                className="kt-input min-w-0 font-mono"
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="http://proxy.example:8080 or socks5://proxy.example:1080"
+                value={draft.url}
+                data-browser-proxy-url=""
+                onChange={event => edit({ url: event.target.value })}
+              />
+            </div>
+            <div className="flex min-w-0 max-w-[28rem] flex-col gap-1 [@container(min-width:640px)]:col-span-2">
+              <label htmlFor={`${ids}-bypass`} className="text-ui font-semibold text-fg">
+                Skip the proxy for (optional)
+              </label>
+              <textarea
+                id={`${ids}-bypass`}
+                className="kt-input min-h-16 min-w-0 font-mono"
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder={'*.internal.example\n10.0.0.0/8'}
+                value={draft.bypass}
+                data-browser-proxy-bypass=""
+                onChange={event => edit({ bypass: event.target.value })}
+              />
+            </div>
+            <BrowserProxyCredential
+              what="Username"
+              stored={isStored(draft.usernameSecret, savedNames.usernameSecret)}
+              field={pendingFields.username}
+              problem={problems.username}
+              onChanged={() => typedInto('username')}
+              onRemove={() => removeCredential('username')}
+            />
+            <BrowserProxyCredential
+              what="Password"
+              stored={isStored(draft.passwordSecret, savedNames.passwordSecret)}
+              field={pendingFields.password}
+              problem={problems.password}
+              onChanged={() => typedInto('password')}
+              onRemove={() => removeCredential('password')}
             />
           </div>
-          <div className="flex min-w-0 max-w-[28rem] flex-col gap-1 [@container(min-width:640px)]:col-span-2">
-            <label htmlFor={`${ids}-bypass`} className="text-ui font-semibold text-fg">
-              Skip the proxy for (optional)
-            </label>
-            <textarea
-              id={`${ids}-bypass`}
-              className="kt-input min-h-16 min-w-0 font-mono"
-              autoComplete="off"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              placeholder={'*.internal.example\n10.0.0.0/8'}
-              value={draft.bypass}
-              data-browser-proxy-bypass=""
-              onChange={event => edit({ bypass: event.target.value })}
-            />
-          </div>
-          <BrowserProxyCredential
-            what="Username"
-            stored={isStored(draft.usernameSecret, savedNames.usernameSecret)}
-            field={pendingFields.username}
-            problem={problems.username}
-            onChanged={() => typedInto('username')}
-            onRemove={() => removeCredential('username')}
-          />
-          <BrowserProxyCredential
-            what="Password"
-            stored={isStored(draft.passwordSecret, savedNames.passwordSecret)}
-            field={pendingFields.password}
-            problem={problems.password}
-            onChanged={() => typedInto('password')}
-            onRemove={() => removeCredential('password')}
-          />
         </div>
-      </div>
-      <div className="flex min-w-0 flex-col gap-2">
-        <button
-          type="button"
-          className="w-fit cursor-pointer border-0 bg-transparent p-0 text-meta text-muted underline"
-          aria-expanded={expert}
-          data-browser-proxy-expert=""
-          onClick={() => setExpert(open => !open)}
-        >
-          Use a different stored secret
-        </button>
-        {expert ? (
-          <>
-            <div className="flex min-w-0 max-w-[28rem] flex-col gap-1">
-              <label htmlFor={`${ids}-username`} className="text-ui font-semibold text-fg">
-                Username secret name
-              </label>
-              <input
-                id={`${ids}-username`}
-                className="kt-input min-w-0 font-mono"
-                autoComplete="off"
-                autoCapitalize="characters"
-                autoCorrect="off"
-                spellCheck={false}
-                placeholder={DEFAULT_USER}
-                value={draft.usernameSecret}
-                data-browser-proxy-username=""
-                onChange={event => edit({ usernameSecret: event.target.value })}
-              />
-            </div>
-            <div className="flex min-w-0 max-w-[28rem] flex-col gap-1">
-              <label htmlFor={`${ids}-password`} className="text-ui font-semibold text-fg">
-                Password secret name
-              </label>
-              <input
-                id={`${ids}-password`}
-                className="kt-input min-w-0 font-mono"
-                autoComplete="off"
-                autoCapitalize="characters"
-                autoCorrect="off"
-                spellCheck={false}
-                placeholder={DEFAULT_PASSWORD}
-                value={draft.passwordSecret}
-                data-browser-proxy-password=""
-                onChange={event => edit({ passwordSecret: event.target.value })}
-              />
-            </div>
-          </>
-        ) : null}
-      </div>
+        <div className="flex min-w-0 flex-col gap-2">
+          <button
+            type="button"
+            className="w-fit cursor-pointer border-0 bg-transparent p-0 text-meta text-muted underline"
+            aria-expanded={expert}
+            data-browser-proxy-expert=""
+            onClick={() => setExpert(open => !open)}
+          >
+            Use a different stored secret
+          </button>
+          {expert ? (
+            <>
+              <div className="flex min-w-0 max-w-[28rem] flex-col gap-1">
+                <label htmlFor={`${ids}-username`} className="text-ui font-semibold text-fg">
+                  Username secret name
+                </label>
+                <input
+                  id={`${ids}-username`}
+                  className="kt-input min-w-0 font-mono"
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder={DEFAULT_USER}
+                  value={draft.usernameSecret}
+                  data-browser-proxy-username=""
+                  onChange={event => edit({ usernameSecret: event.target.value })}
+                />
+              </div>
+              <div className="flex min-w-0 max-w-[28rem] flex-col gap-1">
+                <label htmlFor={`${ids}-password`} className="text-ui font-semibold text-fg">
+                  Password secret name
+                </label>
+                <input
+                  id={`${ids}-password`}
+                  className="kt-input min-w-0 font-mono"
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder={DEFAULT_PASSWORD}
+                  value={draft.passwordSecret}
+                  data-browser-proxy-password=""
+                  onChange={event => edit({ passwordSecret: event.target.value })}
+                />
+              </div>
+            </>
+          ) : null}
+        </div>
+      </SettingFieldset>
       {wanted.ok || halfPair || testRefused ? null : (
         <SetupNote tone="warn" name="browser-proxy-problem" live>
           {wanted.problem}

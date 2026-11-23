@@ -24,10 +24,15 @@ const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_SETTINGS_FORMS_SHOTS_DIR ?? '';
 const scheme = process.env.FY_SETTINGS_FORMS_SCHEME === 'light' ? 'light' : 'dark';
 /** The pages this unit puts on the model (`FY_SETTINGS_FORMS_PAGES` narrows or widens them). */
-const PAGES = (process.env.FY_SETTINGS_FORMS_PAGES ?? 'access/security,warden/warden,usage/budgets')
+const PAGES = (
+  process.env.FY_SETTINGS_FORMS_PAGES ??
+  'access/security,warden/warden,usage/budgets,browsers/browser,voice/voice-cleanup,claude-code/claude-code'
+)
   .split(',')
   .filter(Boolean)
   .map(page => page.split('/') as [string, string]);
+/** Pages with no value field: choices, read-outs and actions only. */
+const CHOICES_ONLY = ['claude-code/claude-code'];
 const VIEWPORTS = [
   { name: '1280', width: 1_280, height: 1_000 },
   { name: '390', width: 390, height: 844 },
@@ -206,10 +211,12 @@ describe('Settings forms: one save model, said out loud', () => {
               fullPage: true,
             });
           }
-          expect(
-            measured.forms,
-            `${plugin}/${tab}: it has a form with value fields, so it has a Save bar`,
-          ).toBeGreaterThan(0);
+          // A page with value fields has a form; a page of choices and actions only (Claude Code) has none to have.
+          if (!CHOICES_ONLY.includes(`${plugin}/${tab}`))
+            expect(
+              measured.forms,
+              `${plugin}/${tab}: it has a form with value fields, so it has a Save bar`,
+            ).toBeGreaterThan(0);
           expect(measured.fieldsOutsideForm, 'a value field that no Save bar saves').toEqual([]);
           expect(measured.formsWithoutBar, 'a form with no Save bar').toEqual([]);
           expect(measured.barsHidden, 'a Save bar that is not drawn until something changes').toEqual([]);
@@ -470,6 +477,166 @@ describe('Settings forms: one save model, said out loud', () => {
         () => (globalThis as { __fyBodies?: { route: string; body: unknown }[] }).__fyBodies?.at(-1)?.body,
       );
       expect(body).toEqual({ target: '2.1.40' });
+    } finally {
+      await close();
+    }
+  });
+
+  // ── PR 2 fix round, item 3: the Browser drafts are guarded like every other form ──
+  const BROWSER_DRAFTS = {
+    mode: async (page: Page) => await page.locator('[data-choice="window"]').click(),
+    proxy: async (page: Page) => await page.locator('[data-browser-proxy-url]').fill('http://proxy.example.test:8080'),
+  } as const;
+  for (const [which, edit] of Object.entries(BROWSER_DRAFTS)) {
+    it(`390: Browser ${which}: Back with a staged change asks first; Keep editing keeps it; Discard leaves`, async () => {
+      const { page, close } = await open(390, 844, 'browsers', 'browser');
+      try {
+        await page.locator('[data-browser-tab]').waitFor();
+        await edit(page);
+        const dialog = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+        await page.locator('.fy-settings-back').click();
+        await dialog.waitFor({ timeout: 3_000 });
+        await shot(page, `390-guard-browser-${which}`);
+        await dialog.getByRole('button', { name: 'Keep editing' }).click();
+        await dialog.waitFor({ state: 'detached', timeout: 3_000 });
+        expect(new URL(page.url()).pathname, 'Keep editing stays on the page').toBe('/d/ws/settings/browsers/browser');
+        expect(await page.locator(`[data-browser-${which}-save-panel]`).count(), 'what was staged is still there').toBe(
+          1,
+        );
+        await page.locator('.fy-settings-back').click();
+        await dialog.getByRole('button', { name: 'Discard' }).click();
+        await page.waitForFunction(() => location.pathname === '/d/ws/settings', null, { timeout: 5_000 });
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  // ── item 2: a failed proxy test leaves the prior proxy (and its secrets) exactly as they were ──
+  const SAVED_PROXY = {
+    'fyFake.browsersYaml':
+      'mode: headless\nproxy:\n  url: http://old-proxy.example.test:3128\n  username: ${secret:PROXY_USER}\n  password: ${secret:PROXY_PASSWORD}\n',
+    'fyFake.secrets': JSON.stringify(['PROXY_USER', 'PROXY_PASSWORD']),
+  } as const;
+  const secretBodies = async (page: Page): Promise<string[]> =>
+    await page.evaluate(() =>
+      ((globalThis as { __fyBodies?: { route: string; body: unknown }[] }).__fyBodies ?? [])
+        .filter(entry => entry.route === 'POST /v1/secrets')
+        .map(entry => String((entry.body as { name?: unknown }).name)),
+    );
+  it('1280: Browser proxy: a failed Save and test saves nothing, overwrites no secret the live proxy reads, and a later one that works saves and keeps its result', async () => {
+    const { page, close } = await open(1_280, 1_000, 'browsers', 'browser', SAVED_PROXY);
+    try {
+      await page.locator('[data-browser-proxy-current]').waitFor();
+      expect(await page.locator('[data-browser-proxy-current]').innerText()).toContain('old-proxy.example.test');
+      await page.locator('[data-browser-proxy-url]').fill('http://new-proxy.example.test:8080');
+      await page.locator('[data-browser-proxy-credential-replace="password"]').click();
+      await page.locator('[data-browser-proxy-credential-value="password"]').fill('a-brand-new-password');
+      const submit = page.locator('[data-browser-proxy-save-panel] [data-change-submit]');
+      await submit.click();
+      await page.locator('[data-browser-proxy-test-class]').waitFor({ timeout: 5_000 });
+      await page.waitForTimeout(300);
+      expect(await writes(page, 'POST /v1/browser/proxy/test'), 'the proxy was tried first').toBe(1);
+      expect(await writes(page, 'PUT /v1/config/file'), 'a proxy that failed its test is NOT saved').toBe(0);
+      expect(
+        await secretBodies(page),
+        'the secret the live proxy reads is not overwritten: the new one is filed under a free name',
+      ).toEqual(['PROXY_PASSWORD_2']);
+      expect(
+        await page.locator('[data-browser-proxy-current]').innerText(),
+        'the proxy in effect is still the old one',
+      ).toContain('old-proxy.example.test');
+      expect(
+        await page.locator('[data-setup-note="browser-proxy-save-refusal"]').innerText(),
+        'the page says it was not saved',
+      ).toContain('Not saved');
+      await shot(page, '1280-proxy-failed');
+
+      await page.evaluate(() => localStorage.setItem('fyFake.proxyTest', 'ok'));
+      await submit.click();
+      await page.waitForFunction(
+        () => document.querySelector('[data-browser-proxy-current]')?.textContent?.includes('new-proxy') === true,
+        null,
+        { timeout: 5_000 },
+      );
+      expect(await writes(page, 'PUT /v1/config/file'), 'a proxy that works is saved, once').toBe(1);
+      const text = await page.evaluate(() => localStorage.getItem('fyFake.browsersYaml') ?? '');
+      expect(text, 'the saved proxy reads the new secret').toContain('${secret:PROXY_PASSWORD_2}');
+      await page.waitForSelector('[data-browser-proxy-test-egress]', { timeout: 5_000 });
+      expect(
+        await page.locator('[data-browser-proxy-test-egress]').count(),
+        'the result of the test survives the section re-reading what was saved',
+      ).toBe(1);
+    } finally {
+      await close();
+    }
+  });
+
+  // ── item 4: the Voice prompt draft, and where a save failure shows ──
+  const VOICE_FIX = 'postProcessing:\n  style: fix\n';
+  it('1280: Voice clean-up: a prompt typed and not saved survives Apply to another style and back', async () => {
+    const { page, close } = await open(1_280, 1_000, 'voice', 'voice-cleanup', { 'fyFake.voiceYaml': VOICE_FIX });
+    try {
+      const prompt = page.locator('#stt-cleanup-prompt-fix');
+      await prompt.fill('My half-typed fix prompt');
+      const styleBar = page.locator('[data-setting-group="Clean-up style"] [data-setting-savebar]');
+      await page.locator('[data-choice="polish"]').click();
+      await styleBar.getByRole('button', { name: 'Apply' }).click();
+      await page.locator('#stt-cleanup-prompt-polish').waitFor({ timeout: 5_000 });
+      await page.locator('[data-choice="fix"]').click();
+      await styleBar.getByRole('button', { name: 'Apply' }).click();
+      await page.locator('#stt-cleanup-prompt-fix').waitFor({ timeout: 5_000 });
+      expect(await page.locator('#stt-cleanup-prompt-fix').inputValue(), 'the draft came back with its style').toBe(
+        'My half-typed fix prompt',
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  it('1280: Voice clean-up: Reset to default keeps what was typed when the machine refuses, and the refusal shows on the prompt bar', async () => {
+    const { page, close } = await open(1_280, 1_000, 'voice', 'voice-cleanup', {
+      'fyFake.voiceYaml': `${VOICE_FIX}  prompts:\n    fix: Saved wording\n`,
+      'fyFake.refuseVoice': '1',
+    });
+    try {
+      const prompt = page.locator('#stt-cleanup-prompt-fix');
+      await prompt.fill('Typed over the saved wording');
+      await page.getByRole('button', { name: 'Reset to default' }).click();
+      const promptBar = page.locator('[data-setting-group="Clean-up prompt"] [data-setting-savebar]');
+      await page.waitForSelector('[data-setting-group="Clean-up prompt"] [data-setting-savebar][data-state="failed"]', {
+        timeout: 5_000,
+      });
+      expect(await prompt.inputValue(), 'a refused reset leaves the draft').toBe('Typed over the saved wording');
+      expect((await promptBar.innerText()).trim().length, 'the bar says why').toBeGreaterThan(0);
+      expect(
+        await page.locator('[data-setting-group="Conversation context"] [data-cleanup-outcome]').count(),
+        'nothing is said under a group that did not save',
+      ).toBe(0);
+      await shot(page, '1280-voice-reset-refused');
+    } finally {
+      await close();
+    }
+  });
+
+  it('1280: Voice clean-up: a refused Apply says so on the style bar, not on the prompt bar', async () => {
+    const { page, close } = await open(1_280, 1_000, 'voice', 'voice-cleanup', {
+      'fyFake.voiceYaml': VOICE_FIX,
+      'fyFake.refuseVoice': '1',
+    });
+    try {
+      await page.locator('[data-choice="polish"]').click();
+      await page
+        .locator('[data-setting-group="Clean-up style"] [data-setting-savebar]')
+        .getByRole('button', { name: 'Apply' })
+        .click();
+      await page.waitForSelector('[data-setting-group="Clean-up style"] [data-setting-savebar][data-state="failed"]', {
+        timeout: 5_000,
+      });
+      expect(
+        await page.locator('[data-setting-group="Clean-up prompt"] [data-setting-savebar]').getAttribute('data-state'),
+        'the prompt bar did not save, so it says nothing',
+      ).not.toBe('failed');
     } finally {
       await close();
     }

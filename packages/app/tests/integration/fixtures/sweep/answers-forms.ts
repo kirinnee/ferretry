@@ -75,8 +75,100 @@ const wardenView = (): Record<string, unknown> | undefined => {
   return { ...view, config: merge(view.config as Record<string, unknown>, stored(WARDEN)) };
 };
 
+// ── Browser (C59 O8-10 PR 2): browsers.yaml kept across writes, secrets by name, a proxy test that fails or works on cue ──
+//   fyFake.browsersYaml   the document `GET /v1/config/file?path=browsers.yaml` reads (a test seeds it; a PUT keeps what it wrote)
+//   fyFake.secrets        JSON array of the secret NAMES filed on the fake machine (a POST adds one; a value is never kept)
+//   fyFake.proxyTest      'ok' | anything else fails: what `POST /v1/browser/proxy/test` answers
+const BROWSERS = 'fyFake.browsersYaml';
+const SECRETS = 'fyFake.secrets';
+const readText = (key: string): string | undefined => {
+  try {
+    return globalThis.localStorage?.getItem(key) ?? undefined;
+  } catch {
+    return undefined;
+  }
+};
+const secretNames = (): string[] => {
+  try {
+    return JSON.parse(readText(SECRETS) ?? '[]') as string[];
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * voice.yaml, kept across writes like browsers.yaml. `fyFake.refuseVoice` = '1' makes a write fail (a machine that says no);
+ * `fyFake.voiceYaml` seeds the document.
+ */
+const VOICE = 'fyFake.voiceYaml';
+const voiceAnswer = (request: TransportRequest, path: string): TransportAnswer | undefined => {
+  if (path !== '/v1/config/file') return undefined;
+  if (request.method === 'GET' && request.query?.path === 'voice.yaml') {
+    const text = readText(VOICE);
+    return text === undefined
+      ? undefined
+      : json({ path: 'voice.yaml', exists: true, text, etag: `etag-${text.length}` });
+  }
+  if (request.method === 'PUT' && bodyOf(request).path === 'voice.yaml') {
+    if (flag('fyFake.refuseVoice'))
+      return json({ error: { code: 'internal', message: 'The machine could not save that.' } }, 500);
+    try {
+      globalThis.localStorage?.setItem(VOICE, String(bodyOf(request).text));
+    } catch {
+      // not kept
+    }
+    return json({ path: 'voice.yaml', etag: `etag-${String(bodyOf(request).text).length}`, outcome: 'applied' });
+  }
+  return undefined;
+};
+
+const browserAnswer = (request: TransportRequest, path: string): TransportAnswer | undefined => {
+  const voice = voiceAnswer(request, path);
+  if (voice !== undefined) return voice;
+  if (path === '/v1/config/file' && request.method === 'GET' && request.query?.path === 'browsers.yaml') {
+    const text = readText(BROWSERS);
+    return text === undefined
+      ? undefined
+      : json({ path: 'browsers.yaml', exists: true, text, etag: `etag-${text.length}` });
+  }
+  if (path === '/v1/config/file' && request.method === 'PUT' && bodyOf(request).path === 'browsers.yaml') {
+    try {
+      globalThis.localStorage?.setItem(BROWSERS, String(bodyOf(request).text));
+    } catch {
+      // a browser with no storage: the write is simply not kept
+    }
+    return json({ path: 'browsers.yaml', etag: `etag-${String(bodyOf(request).text).length}`, outcome: 'applied' });
+  }
+  if (path === '/v1/secrets' && request.method === 'GET' && readText(SECRETS) !== undefined)
+    return json({ health: 'ready', secrets: secretNames().map(name => ({ name })) });
+  if (path === '/v1/secrets' && request.method === 'POST') {
+    try {
+      globalThis.localStorage?.setItem(SECRETS, JSON.stringify([...secretNames(), String(bodyOf(request).name)]));
+    } catch {
+      // not kept
+    }
+    return json({ name: String(bodyOf(request).name) });
+  }
+  if (path === '/v1/browser/proxy/test' && request.method === 'POST') {
+    const tested = isRecord(bodyOf(request).proxy) ? 'unsaved' : 'saved';
+    return json(
+      readText('fyFake.proxyTest') === 'ok'
+        ? { reachable: true, tested, roundTripMs: 120, egressIp: '203.0.113.7', message: 'The proxy answered.' }
+        : {
+            reachable: false,
+            tested,
+            errorClass: 'connect',
+            message: 'Nothing is listening at proxy.example.test:8080.',
+          },
+    );
+  }
+  return undefined;
+};
+
 export const answerWrites = async (request: TransportRequest): Promise<TransportAnswer | undefined> => {
   const path = request.path.split('?')[0] ?? '';
+  const browser = browserAnswer(request, path);
+  if (browser !== undefined) return browser;
   if (path === '/v1/security' && request.method === 'GET') return json(securityView());
   if (path === '/v1/security' && request.method === 'PATCH') {
     await held;
