@@ -42,6 +42,7 @@ describe('onboarding daemon half', () => {
     const view = OnboardingViewSchema.parse(response.json());
     expect(view.steps.map(step => `${step.plugin}:${step.id}`)).toEqual([
       'onboarding:appearance',
+      'onboarding:agents',
       'onboarding:name',
       'claude-code:harness',
       'logins:login',

@@ -129,9 +129,11 @@
   --glow-alpha: 0;
 
   /* ═══ the component contract (r11 T8): what carries Swiss in every slot, in greyscale ═══ */
-  /* BACKGROUND: a baseline grid, a 1px rule every 24px in the palette's texture ink, painted as the page's own first layer
+  /* BACKGROUND: a baseline grid, a 2px rule every 24px in the palette's texture ink, painted as the page's own first layer
      (under every panel and word). No wash, no grain: a poster is a clean sheet with a grid under it. */
   --body-wash: none;
+  --bg-pattern-ink: color-mix(in srgb, var(--accent) 16%, transparent);
+  --bg-pattern-scan: linear-gradient(180deg, var(--bg-pattern-ink) 2px, transparent 2px);
   --bg-pattern: var(--bg-pattern-scan);
   --bg-pattern-size: 24px;
   --bg-pattern-alpha: 100%;
