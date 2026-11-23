@@ -100,10 +100,10 @@ export function WhereProject({ client, store, projects, id, value, onPick }: Whe
                           <Check aria-hidden="true" className="shrink-0 text-fg" size={16} />
                         ) : null}
                       </button>
-                      <div className="px-2 pb-1">
+                      <div className="px-2">
                         <button
                           aria-expanded={linking === project.id}
-                          className="min-h-[36px] text-meta font-medium text-muted underline hover:text-fg"
+                          className="min-h-[36px] text-meta font-medium text-muted underline hover:text-fg sm:min-h-[28px]"
                           data-where-link-github={project.id}
                           onClick={() => setLinking(current => (current === project.id ? null : project.id))}
                           type="button"
