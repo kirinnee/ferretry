@@ -54,6 +54,8 @@ const transportOf = (id: string): FakeTransport => {
     if (latencyMs <= 0) return fake.answer(request, extraRoutes(fake));
     return new Promise(resolve => window.setTimeout(() => resolve(fake.answer(request, extraRoutes(fake))), latencyMs));
   });
+  fake.accounts.onChange = (loginId, change) =>
+    window.setTimeout(() => made.emit({ name: 'logins.changed', payload: { loginId, change } }), 0);
   transports.set(id, made);
   return made;
 };
@@ -71,6 +73,7 @@ const transportOf = (id: string): FakeTransport => {
           named: fake.named,
           writes: fake.writes,
           mutations: fake.mutations,
+          runtimesMade: fake.accounts.made,
         };
   },
   ledger: () => window.localStorage.getItem('fy:onboarding:client'),

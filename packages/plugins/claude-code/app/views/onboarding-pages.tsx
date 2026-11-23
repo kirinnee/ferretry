@@ -4,6 +4,7 @@ import '../features/onboarding/import/import.css';
 export { ImportChoicePage } from '../features/onboarding/import-choice-page.tsx';
 export { InstalledPage } from '../features/onboarding/installed-page.tsx';
 export { PermissionPage } from '../features/onboarding/permission-page.tsx';
+export { ReadyPage } from '../features/onboarding/ready-page.tsx';
 export { SignInPage } from '../features/onboarding/sign-in-page.tsx';
 export { ConversationsPage } from '../features/onboarding/import/conversations-page.tsx';
 export { ImportRunPage } from '../features/onboarding/import/import-run-page.tsx';

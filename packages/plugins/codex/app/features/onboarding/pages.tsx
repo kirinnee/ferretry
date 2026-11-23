@@ -11,6 +11,7 @@ import { IMPORT_PAGES } from './import/index.ts';
 import { InstalledPage } from './installed-page.tsx';
 import type { OnboardingClient, StepHost } from './onboarding-api.ts';
 import { PermissionPage } from './permission-page.tsx';
+import { RuntimeReadyPage } from '@ferretry/plugin-runtimes/import-kit';
 import { SignInPage } from './sign-in-page.tsx';
 
 type Page = (client: OnboardingClient, step: StepHost) => ReactElement;
@@ -22,6 +23,7 @@ const PAGES: Readonly<Record<string, Page>> = {
   'sign-in': (client, step) => createElement(SignInPage, { client, step }),
   'import-choice': (_client, step) => createElement(ImportChoicePage, { step }),
   permission: (client, step) => createElement(PermissionPage, { client, step }),
+  ready: (client, step) => createElement(RuntimeReadyPage, { client, harness: 'codex', label: 'Codex', step }),
 };
 
 function NoPageYet({ step }: { readonly step: StepHost }) {
