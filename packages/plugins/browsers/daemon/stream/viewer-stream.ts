@@ -93,7 +93,6 @@ export class BrowserViewerStream {
   private constructor(
     private readonly host: BrowserViewerHost,
     private readonly sessionId: string,
-    private readonly viewerId: string | undefined,
     private readonly downstream: ViewerDownstream,
     private readonly clock: FrameClock,
     private attachment: ViewerAttachment,
@@ -131,13 +130,17 @@ export class BrowserViewerStream {
         if (stream) stream.acceptTerminal(terminal);
         else earlyTerminal = terminal;
       },
-      options.viewerId,
     );
-    stream = new BrowserViewerStream(host, sessionId, options.viewerId, downstream, clock, attachment, options);
+    stream = new BrowserViewerStream(host, sessionId, downstream, clock, attachment, options);
     // A session that already ended supersedes any frame it produced on the way out.
     if (earlyTerminal) stream.acceptTerminal(earlyTerminal);
     else if (earlyFrame) stream.acceptFrame(earlyFrame);
     return stream;
+  }
+
+  /** The id the daemon minted for this display on attach; every input it carries is for this display alone. */
+  get viewerId(): string {
+    return this.attachment.viewerId;
   }
 
   /** True once the stream has finished, whichever side ended it. */
@@ -177,7 +180,7 @@ export class BrowserViewerStream {
     this.serial = this.serial
       .then(async () => {
         if (this.closed) return;
-        await this.host.dispatchHumanInput(this.sessionId, decoded, this.viewerId);
+        await this.host.dispatchHumanInput(this.sessionId, decoded, this.attachment.viewerId);
       })
       .catch((error: unknown) => {
         if (error instanceof ViewerInputRefused) this.finish(VIEWER_CLOSE_POLICY, 'browser input not permitted');
@@ -314,7 +317,7 @@ export class BrowserViewerStream {
     if (releases.length > 0) {
       const release = async (): Promise<void> => {
         for (const input of releases) {
-          await this.host.dispatchHumanInput(this.sessionId, input, this.viewerId).catch(() => undefined);
+          await this.host.dispatchHumanInput(this.sessionId, input, this.attachment.viewerId).catch(() => undefined);
         }
       };
       this.serial = this.serial.then(release, release);

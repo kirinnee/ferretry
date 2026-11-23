@@ -184,6 +184,11 @@ const browserCases: SchemaCase[] = [
   { name: 'status', schema: browser.BrowserStatusSchema, value: runningStatus },
   { name: 'action', schema: browser.BrowserActionSchema, value: { action: 'navigate', url: homePage.url } },
   { name: 'viewer id', schema: browser.BrowserViewerIdSchema, value: 'a3f9c2d4-7b1e-4c8a-9d52-0e6f1a2b3c4d' },
+  {
+    name: 'stream hello',
+    schema: browser.BrowserStreamHelloSchema,
+    value: { viewer: 'a3f9c2d4-7b1e-4c8a-9d52-0e6f1a2b3c4d' },
+  },
   { name: 'action result', schema: browser.BrowserActionResultSchema, value: navigateResult },
   { name: 'error code', schema: browser.BrowserErrorCodeSchema, value: 'not_running' },
 ];
@@ -402,6 +407,12 @@ describe('browser schemas', () => {
         value: { kind: 'key', type: 'keyDown', key: 'a' },
       },
       { name: 'empty viewer id', schema: browser.BrowserViewerIdSchema, value: '' },
+      {
+        name: 'hello with another member',
+        schema: browser.BrowserStreamHelloSchema,
+        value: { viewer: 'a', page: 'p1' },
+      },
+      { name: 'hello without a viewer', schema: browser.BrowserStreamHelloSchema, value: {} },
       { name: 'viewer id with a separator', schema: browser.BrowserViewerIdSchema, value: 'a/../b' },
       { name: 'viewer id with a null', schema: browser.BrowserViewerIdSchema, value: 'a\u0000b' },
       {

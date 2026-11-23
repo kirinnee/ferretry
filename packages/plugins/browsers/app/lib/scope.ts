@@ -11,12 +11,7 @@ import type { PluginClient, PluginSocket, PluginSocketListeners } from '@ferretr
 
 /** The client a Browsers surface rides: calls, events and the guarded display socket. */
 export interface BrowsersClient extends PluginClient {
-  socket(
-    key: string,
-    params: Readonly<Record<string, string>>,
-    listeners: PluginSocketListeners,
-    query?: Readonly<Record<string, string>>,
-  ): PluginSocket;
+  socket(key: string, params: Readonly<Record<string, string>>, listeners: PluginSocketListeners): PluginSocket;
 }
 
 /** True when the shell's client can open a socket (a client of another build cannot stream a page). */
@@ -35,11 +30,32 @@ export interface BrowserSessionScope {
   readonly daemonId: string;
   readonly sessionId: string;
   /**
-   * The ONE screen this scope speaks for (`BROWSER_VIEWER_QUERY`): its status reads, acts and display stream all carry it,
-   * so the page it shows is its own. Absent, the scope is the session's shared view (a test, an older caller).
+   * Where the ONE screen this scope speaks for keeps the id its display stream was given (`BROWSER_VIEWER_QUERY`): while a
+   * stream is up its status reads and acts carry that id, so the page it shows is its own. Absent, or empty, the scope is
+   * the session's own view.
    */
-  readonly viewerId?: string;
+  readonly viewer?: BrowserViewerSlot;
 }
+
+/**
+ * The id the DAEMON gave one screen's display stream, kept for the calls that name that screen. The stream sets it when
+ * the daemon says who it is and clears it when the stream ends; nothing else ever writes it, and the client never makes
+ * one up.
+ */
+export interface BrowserViewerSlot {
+  current(): string | undefined;
+  set(id: string | undefined): void;
+}
+
+export const browserViewerSlot = (): BrowserViewerSlot => {
+  let held: string | undefined;
+  return {
+    current: () => held,
+    set: id => {
+      held = id;
+    },
+  };
+};
 
 const requireSessionId = (value: string): string => {
   if (value.trim() === '') throw new Error('sessionId must not be empty');
@@ -50,11 +66,11 @@ const requireSessionId = (value: string): string => {
 export const browserSessionScope = (
   daemon: Pick<BrowserDaemon, 'daemonId'>,
   sessionId: string,
-  viewerId?: string,
+  viewer?: BrowserViewerSlot,
 ): BrowserSessionScope => ({
   daemonId: daemon.daemonId,
   sessionId: requireSessionId(sessionId),
-  ...(viewerId === undefined ? {} : { viewerId }),
+  ...(viewer === undefined ? {} : { viewer }),
 });
 
 /** A collision-safe key for in-memory session state. */

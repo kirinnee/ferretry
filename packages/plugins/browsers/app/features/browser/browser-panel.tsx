@@ -16,7 +16,7 @@ import { useBrowserControl } from '../../hooks/use-browser-control.ts';
 import { useBrowserLogin } from '../../hooks/use-browser-login.ts';
 import type { DaemonBrowserLoginStore } from '../../lib/browser-login.ts';
 import { browserPageForKey, useSessionBrowser } from './use-session-browser.ts';
-import { type BrowserDaemon, browserSessionScope } from '../../lib/scope.ts';
+import { type BrowserDaemon, browserSessionScope, browserViewerSlot } from '../../lib/scope.ts';
 import { BrowserSurfaceList, browserPageLabel } from './browser-surface-list.tsx';
 import { remoteBrowserPage } from './remote-browser-chrome.tsx';
 import { type UnifiedBrowserDependencies, UnifiedBrowserSurface } from './unified-browser-surface.tsx';
@@ -40,9 +40,10 @@ export interface BrowserPanelProps {
 /** The panel for one ferret. Without a ferret there is no browser to show. */
 export function BrowserPanel({ daemon, sessionId, dependencies, loginStore, intent }: BrowserPanelProps) {
   const login = useBrowserLogin(daemon, loginStore);
-  // This panel is ONE viewer: its own id, so another pane or device on the same ferret shows its own page.
-  const [viewerId] = useState(() => crypto.randomUUID());
-  const scope = useMemo(() => browserSessionScope(daemon, sessionId, viewerId), [daemon, sessionId, viewerId]);
+  // This panel is ONE viewer: its display stream is told its id by the daemon, so another pane or device on the same ferret
+  // shows its own page.
+  const [viewer] = useState(browserViewerSlot);
+  const scope = useMemo(() => browserSessionScope(daemon, sessionId, viewer), [daemon, sessionId, viewer]);
   const titleId = useId();
   const pages = useSessionBrowser(scope, daemon);
   const control = useBrowserControl(scope, daemon);

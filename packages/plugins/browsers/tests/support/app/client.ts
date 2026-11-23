@@ -77,22 +77,16 @@ export const refusal = (status: number, message: string, code = `http_${status}`
 /** A client with sockets the test drives: what was opened, what was sent, and the daemon's side. */
 export function socketClient(reply: (route: string, init: Init | undefined) => unknown = () => undefined) {
   const base = recordingClient(reply);
-  const opened: { key: string; params: Readonly<Record<string, string>>; query?: Readonly<Record<string, string>> }[] =
-    [];
+  const opened: { key: string; params: Readonly<Record<string, string>> }[] = [];
   const sent: (string | Uint8Array)[] = [];
   const closes: { readonly code?: number; readonly reason?: string }[] = [];
   let listeners: SocketListeners | undefined;
   const client: PluginClient & {
-    socket(
-      key: string,
-      params: Readonly<Record<string, string>>,
-      given: SocketListeners,
-      query?: Readonly<Record<string, string>>,
-    ): TransportSocket;
+    socket(key: string, params: Readonly<Record<string, string>>, given: SocketListeners): TransportSocket;
   } = {
     ...base.client,
-    socket: (key, params, given, query): TransportSocket => {
-      opened.push({ key, params, ...(query === undefined ? {} : { query }) });
+    socket: (key, params, given): TransportSocket => {
+      opened.push({ key, params });
       listeners = given;
       return { send: frame => sent.push(frame), close: (code, reason) => closes.push({ code, reason }) };
     },

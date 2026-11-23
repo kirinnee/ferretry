@@ -19,8 +19,16 @@ export interface ViewerTerminalSignal {
   readonly reason: string;
 }
 
+/** One live display as a call names it: the id the daemon minted for it, and the caller whose stream it is. */
+export interface ViewerRef {
+  readonly id: string;
+  readonly caller: string;
+}
+
 /** Frees the viewer slot the stream holds on the browser session. */
 export interface ViewerAttachment {
+  /** The id the daemon minted for this display: the stream tells its screen, which names it on every later call. */
+  readonly viewerId: string;
   detach(): void;
 }
 
@@ -33,9 +41,9 @@ export interface BrowserViewerHost {
     sessionId: string,
     onFrame: (frame: BrowserScreencastFrame) => void,
     onTerminal: (signal: ViewerTerminalSignal) => void,
-    viewerId?: string,
   ): Promise<ViewerAttachment>;
-  dispatchHumanInput(sessionId: string, input: BrowserInputEvent, viewerId?: string): Promise<void>;
+  /** Input for the display `viewerId` (the attachment's own): it lands on the page that display is showing. */
+  dispatchHumanInput(sessionId: string, input: BrowserInputEvent, viewerId: string): Promise<void>;
 }
 
 /**
@@ -60,8 +68,6 @@ export interface ViewerDeliveryGuard {
 }
 
 export interface ViewerStreamOptions {
-  /** The screen this stream is (`BROWSER_VIEWER_QUERY`): it shows, and types into, that screen's own page. */
-  readonly viewerId?: string | undefined;
   /** Set for an agent's viewer only: a person's stream is never asked. */
   readonly delivery?: ViewerDeliveryGuard | undefined;
   /** Largest single client message accepted before the stream is a protocol violation. */
