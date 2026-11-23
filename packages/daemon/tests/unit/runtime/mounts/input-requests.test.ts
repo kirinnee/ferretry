@@ -209,20 +209,16 @@ describe('the quarantine routes', () => {
   const end = (key: string, headers: Readonly<Record<string, string>> = human) =>
     post(`/v1/sessions/${SESSION}/input-quarantines/${key}/end`, {}, headers);
 
-  it('should list a quarantine once a secret was typed, and end it for the owner', async () => {
+  it('should list no quarantine after a secret was typed, and have nothing to end for the owner', async () => {
     const { dispatch, requestId, digest } = await served();
     await dispatch.dispatch(post(path(requestId, 'deliver'), deliverBody(digest)));
 
     const held = await dispatch.dispatch(list());
     const ended = await dispatch.dispatch(end('dev'));
-    const after = await dispatch.dispatch(list());
-    const again = await dispatch.dispatch(end('dev'));
 
     should(held.status).equal(200);
-    should((jsonBody(held).quarantines as { key: string }[]).map(entry => entry.key)).eql(['dev']);
-    should(ended.status).equal(200);
-    should(jsonBody(after).quarantines).eql([]);
-    should(again.status).equal(404);
+    should(jsonBody(held).quarantines).eql([]);
+    should(ended.status).equal(404);
   });
 
   it('should refuse an agent on both routes', async () => {

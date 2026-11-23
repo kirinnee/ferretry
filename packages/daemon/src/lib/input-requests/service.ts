@@ -20,7 +20,6 @@ import {
   INPUT_CODE_VISIBLE_NOTICE,
   INPUT_PLAIN_VALUE_NOTICE,
   INPUT_QUARANTINE_SECONDS,
-  INPUT_QUARANTINE_WORDS,
   INPUT_SINGLE_FIELD_ID,
   type InputActor,
   type InputAgentView,
@@ -105,6 +104,7 @@ import type {
   TypeResult,
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
+import { pageFieldKind } from './field-kinds.ts';
 import { bindingOf, mayRebind } from './rebind.ts';
 import {
   codeCardKeys,
@@ -1981,11 +1981,7 @@ export class InputRequestService {
         // the full window, as a typed one, and the grant stops (`did-not-move-on`): the sign-in did not go as approved.
         if (grant !== undefined) {
           if (clear !== undefined)
-            grant.typed(
-              clear,
-              (held.request.lock?.seconds ?? INPUT_QUARANTINE_SECONDS) * 1000,
-              holdNames(request, held.names),
-            );
+            grant.typed(clear, (held.request.lock?.seconds ?? 0) * 1000, holdNames(request, held.names));
           // A reader that changed before Enter is the race a standing terminal rule bounds (secrev-1301 M1).
           await grant.uncertain(outcome === 'reader_changed' ? 'program-changed' : 'did-not-move-on');
         }
@@ -2038,11 +2034,7 @@ export class InputRequestService {
       this.signInMovedOn(request, seen.facts);
       if (follows && arming.armed && typedUnder !== undefined) this.followed.add(typedUnder.id);
       if (clear !== undefined)
-        grant?.typed(
-          clear,
-          (held.request.lock?.seconds ?? INPUT_QUARANTINE_SECONDS) * 1000,
-          holdNames(request, held.names),
-        );
+        grant?.typed(clear, (held.request.lock?.seconds ?? 0) * 1000, holdNames(request, held.names));
       if (pasted !== undefined) this.deps.sealed?.used(request.sessionId, pasted);
       await stored(false);
       const saved =
@@ -2581,6 +2573,20 @@ export class InputRequestService {
   ): Promise<Extract<ObserveResult, { readonly ok: true }>> {
     const again = await this.refound(held, looked);
     if (again.ok && digestFacts(again.facts) === held.request.observedDigest) return again;
+    // A page that re-rendered the field the owner answered (a new node, a moved box, a new document) is typed into at
+    // once, from what was just found: the owner never answers twice for a re-render (owner decision, !A607). Only the
+    // SAME target qualifies (`mayRebind`: same page, origin and security, every field with the same frame origin, tag
+    // and attributes), every field is visible, and no human check has appeared since.
+    if (
+      !underGrant &&
+      again.ok &&
+      again.facts.kind === 'browser' &&
+      held.request.target.kind === 'browser' &&
+      held.binding !== undefined &&
+      mayRebind(held.binding, again.facts) &&
+      again.facts.challenge === undefined
+    )
+      return again;
     if (underGrant) throw new GrantUnchecked();
     return await this.redrawOrRefuse(held, again, looked.ok ? 'target_changed' : 'target_gone');
   }
@@ -2745,6 +2751,10 @@ export class InputRequestService {
     };
     // The picture was for the owner deciding; once the request ends nobody may need it, so it is let go.
     delete held.shot;
+    // A ferret waiting on this request (input_wait) is woken NOW, before the journal, audit, agenda and notifier writes
+    // below: the state it reads is already final, and none of those writes may add to the owner's wait (!A607).
+    for (const wake of held.waiters) wake();
+    held.waiters.clear();
     const { request } = held;
     const kind =
       state === 'delivered'
@@ -2994,7 +3004,26 @@ function observedAs(
   /** The daemon saw a code program this account cannot replace in the foreground (`ObserveResult.codeProgram`). */
   codeProgram: boolean,
 ): InputRequestField[] {
-  return fields.map(field => {
+  return fields.map(original => {
+    // A one-time code the ferret called a secret is a code (the page says so, nothing says password); a card field the
+    // ferret called plain or a code is a secret. The page's own words decide, never the ferret's label alone.
+    const kind =
+      facts.kind === 'browser'
+        ? pageFieldKind(
+            facts.fields.find(each => each.fieldId === original.id)?.field ?? { tag: 'input' },
+            original.label,
+          )
+        : undefined;
+    if (kind === 'card' && (original.sensitivity === 'plain' || original.sensitivity === 'code'))
+      upgraded.add(original.id);
+    const field =
+      kind === 'code' &&
+      original.sensitivity === 'secret' &&
+      !upgraded.has(original.id) &&
+      !PASSWORD_WORDS.test(matchable(prompt)) &&
+      !passwordTarget(facts, original.id, codeProgram)
+        ? { ...original, sensitivity: 'code' as const }
+        : original;
     // The ferret's own words (its prompt, the field's label or id) may only ever RAISE a code to a secret.
     // Matched as normalised text, and a look-alike spelling counts, as for the pane's own words (lock.ts).
     const said = [prompt, field.label, field.id].some(
@@ -3090,7 +3119,7 @@ const NEW_DOCUMENT_FLAG: InputRisk = {
   reason:
     'The page loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the one you meant.',
 };
-const PRIVATE_FLAG = `This value will show on screen while the terminal is hidden from the ferret for ${INPUT_QUARANTINE_WORDS}.`;
+const PRIVATE_FLAG = 'This value will show on screen as it is typed.';
 /** A one-time code is not secret: neutral, neither the red of a plain value nor the amber of a private one. */
 const CODE_FLAG: InputRisk = { level: 'neutral', reason: INPUT_CODE_VISIBLE_NOTICE };
 const CODE_ASK = INPUT_CODE_VISIBLE_NOTICE;
@@ -3153,7 +3182,7 @@ const RELAY_FLAG: InputRisk = {
     'The terminal is not reading a line, so the program may be passing each key on to something else (a remote shell or a container) rather than asking for a password itself.',
 };
 
-const PAGE_PRIVATE_FLAG = `This value will show on the page; Ferretry hides the page from the ferret for ${INPUT_QUARANTINE_WORDS}.`;
+const PAGE_PRIVATE_FLAG = 'This value will show on the page as it is typed.';
 /**
  * A page field's flag, worst first: the field the agent named is missing or hidden, covered or off screen, the page is not secure (http
  * crosses the network in the clear), the field sits in a frame from another site, or a secret is going into a

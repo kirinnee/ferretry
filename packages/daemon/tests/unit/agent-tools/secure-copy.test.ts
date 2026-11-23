@@ -199,7 +199,7 @@ describe('the secure.* agent tools', () => {
 });
 
 /** An input port that records each raise and answers what the case set. */
-function recordingInput(state: 'pending' | 'delivered' = 'pending', lockSeconds?: number) {
+function recordingInput(state: 'pending' | 'delivered' = 'pending') {
   const raised: { sessionId: string; raise: InputRaise }[] = [];
   const input: AgentInputPort = {
     raise: async (sessionId, raise) => {
@@ -208,7 +208,6 @@ function recordingInput(state: 'pending' | 'delivered' = 'pending', lockSeconds?
         id: 'A7',
         state,
         ...(state === 'delivered' ? { source: 'sealed' as const, submitted: true } : {}),
-        ...(lockSeconds === undefined ? {} : { lockSeconds }),
       };
     },
     agentView: async () => ({ id: 'A7', state }),
@@ -260,17 +259,7 @@ describe('the secure.paste and secure.preapprove agent tools', () => {
     should(result.summary).startWith(
       'Pasted sealed:vercel into %terminal:dev under a rule the owner approved in advance',
     );
-    should(result.summary).endWith('The terminal is unreadable for about two minutes.');
-  });
-
-  it('should say how long the terminal is unreadable when the daemon chose a short lock', async () => {
-    const { input } = recordingInput('delivered', 10);
-    const world = agentToolWorld({ input });
-    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
-
-    const result = await world.service.call(agent, PASTE);
-
-    should(result.summary).endWith('The terminal is unreadable for 10 seconds.');
+    should(result.summary).endWith('You can read the terminal again at once.');
   });
 
   it('should raise a paste saved as a secret with no terminal of its own, and say how to use it once saved', async () => {

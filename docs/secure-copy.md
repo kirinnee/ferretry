@@ -115,7 +115,7 @@ The agent instruction teaches the rule that makes this work: **capture before yo
 `secure.paste` names a handle and where it goes: a terminal the agent opened, one field on a page the agent
 opened (`{ kind: "browser", name, ref | selector }`), or the secret store. The daemon raises an **input request** whose
 value comes from the copy (`InputRaise.source`), so the card, the daemon-observed destination facts,
-`observedDigest`, the single guarded write, the quarantine and the audit are all the input bridge's own
+`observedDigest`, the single guarded write and the audit are all the input bridge's own
 ([input requests](input-requests.md)):
 
 - **A paste is always a `secret`**, whatever the agent said, and its card says what is pasted and where it
@@ -159,7 +159,7 @@ without ever reading it. It is the same input request, with the store as the des
   item into the store are `terminal` routes, but they change the store, so a governed device also needs
   `secrets.configure` (or its passkey confirmation), exactly as `POST /v1/secrets` does
   ([grants](grants.md)). A device paired without it cannot overwrite a secret by allowing a paste instead.
-- **Nothing is shown**, so there is no quarantine, and a rule naming the exact NAME pastes unasked, but only
+- **Nothing is shown**, and a rule naming the exact NAME pastes unasked, but only
   to ADD that secret: replacing a value the store holds now always waits for the owner.
 - **Audit**: `input.delivered` as for any paste, and `secrets.changed` with the name, `paste` or
   `paste-replace`, the request and the rule if one allowed it; never the value. A write that was cut off is
@@ -447,7 +447,7 @@ Settings › Secure copy › "Paste rules may target programs in my own profile"
   profile does not name is never matched. The write itself checks again that the same profile program, by name and
   by store file, still holds the terminal, or nothing is typed. Names are judged in any case: a rule for `Sudo` is
   a rule for sudo.
-- **What it never allows:** a program proved through your profile earns no green card, no short lock and no one-tap
+- **What it never allows:** a program proved through your profile earns no green card and no one-tap
   saved login; it only lets a rule you wrote match. The proof is the daemon's own and is never sent to the app.
 - **Who may turn it on:** the owner only, and only with a passkey bound to what it widens (secrev-1334 M2, under
   !A244), from every caller, the machine included. Turning it on is **staged** (`POST /v1/copy-rules/settings/stages`,

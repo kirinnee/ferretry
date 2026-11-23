@@ -871,56 +871,39 @@ describe('when the page changes under the card (#B100)', () => {
     fields: [pageField('email'), pageField('password', { backendNodeId: 99, box: { x: 10, y: 64, w: 300, h: 40 } })],
   };
 
-  it('should redraw the card for a field re-rendered as a new node, then type into the new node', async () => {
-    const { service, request, writes, setFacts, shots, typedInto, told } = await raisedLogin();
+  it('should type at once into a field re-rendered as a new node: the owner never answers twice for a re-render', async () => {
+    const { service, request, writes, setFacts, typedInto, told } = await raisedLogin();
     setFacts(RERENDERED);
 
-    const error = await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST));
-    const [card] = await service.list(HOST);
-    const picture = service.shot(HOST, SESSION, request.id);
-    const done = await service.deliver(SESSION, request.id, both(card?.observedDigest ?? ''), HOST);
+    const done = await service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST);
 
-    should(error.code).equal('conflict');
-    should(error.reason).equal('target_rebound');
-    should(error.message).equal(
-      'the page changed since the card was drawn, but it is the same field: Ferretry looked again and redrew the card; check it and send again. Nothing was typed',
-    );
-    should(card?.observed).eql(RERENDERED);
-    should(card?.pictured).equal(true);
-    should(card?.risk?.level).equal('red');
-    should(shots.map(seen => (seen.kind === 'browser' ? seen.fields[1]?.backendNodeId : 0))).eql([12, 99]);
-    should(picture.pngBase64).equal('c2hvdA2');
     should(done.state).equal('delivered');
     should(writes.length).equal(1);
     should(typedInto.map(seen => (seen.kind === 'browser' ? seen.fields[1]?.backendNodeId : 0))).eql([99]);
     should(told.at(-1)).containEql('was answered and typed');
   });
 
-  it("should flag a card redrawn onto a new document amber, above the field's own flag", async () => {
-    const { service, request, setFacts } = await raisedLogin();
+  it('should type at once after the page loaded a new document of the same field', async () => {
+    const { service, request, writes, setFacts } = await raisedLogin();
     setFacts({ ...RERENDERED, navigationId: 'loader-2' });
 
-    const error = await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST));
-    const [card] = await service.list(HOST);
+    const done = await service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST);
 
-    should(error.reason).equal('target_rebound');
-    should(card?.fields.map(field => field.risk?.level)).eql(['red', 'amber']);
-    should(card?.fields[1]?.risk?.reason).equal(
-      'The page loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the one you meant.',
-    );
-    should(request.fields[1]?.risk?.level).equal('green');
+    should(done.state).equal('delivered');
+    should(writes.length).equal(1);
   });
 
-  it('should find a field whose ref went stale by looking for it again, and redraw the card', async () => {
-    const { service, request, setFacts, setRefound, refinds } = await raisedLogin();
+  it('should find a field whose ref went stale by looking for it again, and type into it at once', async () => {
+    const { service, request, writes, setFacts, setRefound, refinds, typedInto } = await raisedLogin();
     setFacts(undefined);
     setRefound({ ok: true, facts: RERENDERED, names: ['page-1'] });
 
-    const error = await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST));
+    const done = await service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST);
 
-    should(error.reason).equal('target_rebound');
+    should(done.state).equal('delivered');
     should(refinds).eql([PAGE]);
-    should((await service.list(HOST))[0]?.observed).eql(RERENDERED);
+    should(writes.length).equal(1);
+    should(typedInto.map(seen => (seen.kind === 'browser' ? seen.fields[1]?.backendNodeId : 0))).eql([99]);
   });
 
   it('should type, without redrawing, when the field found again is exactly the one the card showed', async () => {

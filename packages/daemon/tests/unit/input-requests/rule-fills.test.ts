@@ -965,9 +965,8 @@ describe('a rule’s code joins only the next step of its own sign-in (delta F2)
 });
 
 describe('a refusal the ferret can cause shows it nothing a card with no rule would not (delta F3, F4)', () => {
-  it('should refuse before the page is held when a script is running, so the ferret’s reads never meet a hold', async () => {
-    const journal: string[] = [];
-    const h = await harness({ onJournal: type => void journal.push(type) });
+  it('should refuse and type nothing when a script is running on the page', async () => {
+    const h = await harness();
     await ruleFor(h, await github(h));
     const ended = h.ruleGrants.running();
     const { view } = await raised(h);
@@ -975,29 +974,6 @@ describe('a refusal the ferret can cause shows it nothing a card with no rule wo
     should(h.writes).deepEqual([]);
     should(view.state).equal('pending');
     should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
-    // The attempt never reached the write's journal entry: nothing took the page from the ferret.
-    should(journal.some(type => type.endsWith('delivering'))).be.false();
-  });
-
-  it('should keep reading the lock the card was raised with after a late refusal, as with no rule', async () => {
-    const revokeAtDelivering = async (type: string, at: Harness) => {
-      if (!type.endsWith('delivering')) return;
-      const id = at.rules.fillable()[0]?.body.id;
-      if (id !== undefined) await at.rules.revoke({ kind: 'owner', actor: { kind: 'host' } }, id);
-    };
-    // The ferret acts while the card is raised: the write's look works out a longer lock than the raise's.
-    const h = await harness({ probes: true, actDuringRaise: true, onJournal: revokeAtDelivering });
-    await ruleFor(h, await github(h));
-    const { view } = await raised(h);
-    const noRule = await harness({ probes: true, actDuringRaise: true });
-    await github(noRule);
-    const plain = await raised(noRule);
-
-    should(view.state).equal('pending');
-    should(view.lockSeconds).equal(plain.view.lockSeconds);
-    // The request itself keeps the longer lock (a card never shortens): only the ferret's reading is the raise's.
-    const [request] = await h.service.list(HOST);
-    should(request?.lock?.seconds).be.above(view.lockSeconds ?? 0);
   });
 });
 

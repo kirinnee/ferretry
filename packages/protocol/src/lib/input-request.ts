@@ -433,6 +433,7 @@ const BrowserFieldSchema = z.strictObject({
   name: boundedLine(128).optional(),
   id: boundedLine(128).optional(),
   inputmode: boundedLine(32).optional(),
+  maxlength: boundedLine(8).optional(),
 });
 
 /** One field of a page as the daemon found it: the element the agent pointed at, resolved by the browser. */

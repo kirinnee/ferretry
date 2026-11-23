@@ -26,18 +26,16 @@ import {
   type AccountList,
   grantFilledLineFor,
   grantMissLineFor,
-  INPUT_LOCK_WORDS,
   type InputRequest,
   type InputSavedOffer,
   type InputShot,
-  lockWords,
   pickOneWords,
   type SignInSummary,
   strongestSensitivity,
   type TwoFactorId,
   type TwoFactorStageId,
 } from '@ferretry/protocol';
-import { Eye, EyeOff, Shield, ShieldAlert, ShieldCheck, ShieldQuestion, Timer } from 'lucide-react';
+import { Eye, EyeOff, Shield, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { RulesBinding } from '../accounts/use-sign-in-rules.ts';
 import { SignInRuleOffer } from '../secure-copy/sign-in-rule-offer.tsx';
@@ -395,15 +393,6 @@ export function InputCard({
         >
           <Risk aria-hidden="true" className="mt-0.5 shrink-0" size={16} />
           <span>{request.risk.reason}</span>
-        </p>
-      )}
-
-      {request.lock === undefined ? null : (
-        <p className="m-0 flex items-start gap-2 text-cell text-muted" data-input-lock={request.lock.seconds}>
-          <Timer aria-hidden="true" className="mt-0.5 shrink-0" size={16} />
-          <span>
-            Hidden from the ferret for {lockWords(request.lock)} after typing. {INPUT_LOCK_WORDS[request.lock.reason]}
-          </span>
         </p>
       )}
 

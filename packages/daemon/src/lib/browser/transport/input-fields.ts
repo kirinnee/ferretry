@@ -176,7 +176,7 @@ const ACTIVE_ELEMENT = `(() => {
 /** The longest the page's title may take when it is read for the challenge hint. */
 const TITLE_WAIT_MS = 750;
 
-const FIELD_LIMITS = { type: 32, autocomplete: 64, name: 128, id: 128, inputmode: 32 } as const;
+const FIELD_LIMITS = { type: 32, autocomplete: 64, name: 128, id: 128, inputmode: 32, maxlength: 8 } as const;
 const TAG_LIMIT = 32;
 const ORIGIN_LIMIT = 256;
 const FRAME_ID_LIMIT = 128;
@@ -254,12 +254,13 @@ export function inputFieldAttributes(node: unknown): FieldAttributes {
     ...kept('name'),
     ...kept('id'),
     ...kept('inputmode'),
+    ...kept('maxlength'),
   };
 }
 
 const sameAttributes = (left: FieldAttributes, right: FieldAttributes): boolean =>
   left.tag === right.tag &&
-  (['type', 'autocomplete', 'name', 'id', 'inputmode'] as const).every(key => left[key] === right[key]);
+  (['type', 'autocomplete', 'name', 'id', 'inputmode', 'maxlength'] as const).every(key => left[key] === right[key]);
 
 const objectOf = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};

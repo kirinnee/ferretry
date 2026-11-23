@@ -12,7 +12,7 @@ describe('docs/input-requests.md says what the bridge does and does not promise'
 
     should(DOC).not.containEql('Never reaches the agent, a log or disk');
     should(sensitivity).containEql('bridge never carries');
-    should(sensitivity).containEql('quarantine');
+    should(sensitivity).containEql('masked');
     should(sensitivity).containEql('best effort');
   });
 
@@ -41,9 +41,15 @@ describe('docs/input-requests.md says what the bridge does and does not promise'
     should(DOC).containEql('terminal_request_input');
   });
 
-  it('should describe unresolved holds and the one publication gate', () => {
-    should(DOC).containEql('A hold stays unresolved until its settlement is recorded');
-    should(DOC).containEql('ONE publication gate');
-    should(DOC).containEql('exactly the');
+  it('should say there is no lock after typing, and that masking is the only boundary', () => {
+    should(DOC).containEql('### No lock after typing');
+    should(DOC).containEql('**There is no lock.**');
+    should(DOC).containEql('owner decision 2026-11-23');
+    for (const gone of [
+      'INPUT_QUARANTINE_SECONDS',
+      'hidden from the ferret for two minutes',
+      '### The pane quarantine',
+    ])
+      should(DOC).not.containEql(gone);
   });
 });

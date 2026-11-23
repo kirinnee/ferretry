@@ -719,36 +719,10 @@ describe('use it now: the code of a key just saved from this card', () => {
     should(await h.service.useNow(secret.request.id, use)).be.false();
     should(h.writes).deepEqual([]);
   });
-
-  it('should type nothing into a card redrawn since the owner staged the key, as a tap on it would', async () => {
-    // Arrange — the owner stages from the card as drawn; the page then loads a new document of the same site.
-    const h = harness();
-    await github(h);
-    await plantSeed(h.directory.accounts, 'GITHUB', SEED_A, 'Authy');
-    const { request } = await raised(h);
-    const seen = h.service.cardTarget(request.id)?.observedDigest as string;
-    h.setFacts({ ...page(), navigationId: 'loader-2' });
-    // A Send on the card as it was finds the page moved: the card is redrawn, nothing typed.
-    await refusal(h.service.deliver(SESSION, request.id, useCode(seen, 'GITHUB'), HOST));
-    should(h.writes).deepEqual([]);
-
-    // Act
-    const typed = await h.service.useNow(request.id, {
-      account: 'GITHUB',
-      factor: await keyId(h, 'Authy'),
-      observedDigest: seen,
-      actor: { kind: 'device', deviceId: 'phone' },
-    });
-
-    // Assert
-    should(typed).be.false();
-    should(h.writes).deepEqual([]);
-    should((await h.service.list(HOST))[0]?.observedDigest).not.equal(seen);
-  });
 });
 
 describe('a page that moves between the card and the Send', () => {
-  it('should type no code it made: the card is redrawn onto the new document and the owner checks it again', async () => {
+  it('should type the code at once when the page loaded a new document of the same site: no second answer', async () => {
     // Arrange
     const h = harness();
     await github(h);
@@ -757,17 +731,16 @@ describe('a page that moves between the card and the Send', () => {
     h.setFacts({ ...page(), navigationId: 'loader-2' });
 
     // Act
-    const refused = await refusal(
-      h.service.deliver(SESSION, request.id, useCode(request.observedDigest as string, 'GITHUB'), HOST),
+    const done = await h.service.deliver(
+      SESSION,
+      request.id,
+      useCode(request.observedDigest as string, 'GITHUB'),
+      HOST,
     );
 
-    // Assert — nothing opened or typed; the redrawn card says it is a new document.
-    should(refused.code).equal('conflict');
-    should(h.writes).deepEqual([]);
-    should(h.fills).deepEqual([]);
-    const [redrawn] = await h.service.list(HOST);
-    should(redrawn?.observedDigest).not.equal(request.observedDigest);
-    should(redrawn?.fields[0]?.risk?.reason).containEql('new document');
+    // Assert
+    should(done.state).equal('delivered');
+    should(h.writes).have.length(1);
   });
 });
 

@@ -6,6 +6,7 @@ import {
   type InputTargetFacts,
   type LoginObserved,
 } from '@ferretry/protocol';
+import { pageFieldKind } from './field-kinds.ts';
 import { identityOf, placeOf } from './login-observer.ts';
 
 /**
@@ -34,16 +35,14 @@ import { identityOf, placeOf } from './login-observer.ts';
  */
 
 const SHORT = (reason: InputLock['reason']): InputLock => ({ seconds: INPUT_SHORT_LOCK_SECONDS, reason });
-/** A field the target is kept from the ferret for: a `secret` or a `private` value. */
-const HELD = (field: Pick<InputRequestField, 'sensitivity'>): boolean =>
-  field.sensitivity === 'secret' || field.sensitivity === 'private';
-
 /**
- * Whether a card's target is kept from the ferret after the write at all: only for a `secret` or a `private` value.
- * A card of `plain` values and one-time `code`s gets no lock, no quarantine and no page hold.
+ * Whether a card's target is kept from the ferret after the write. NEVER (owner decision, !A607): no card gets a lock,
+ * a quarantine or a page hold, whatever it holds.
  */
-export function heldFromView(fields: readonly Pick<InputRequestField, 'sensitivity'>[]): boolean {
-  return fields.some(HELD);
+export function heldFromView(_fields: readonly Pick<InputRequestField, 'sensitivity'>[]): boolean {
+  // The owner decided (2026-11-23, !A607): NO lock after typing. Once a card is answered the ferret reads the page or
+  // terminal at once. The typed value stays out of every tool result by masking (ephemeral-values), not by hiding the surface.
+  return false;
 }
 const FULL = (reason: InputLock['reason']): InputLock => ({ seconds: INPUT_QUARANTINE_SECONDS, reason });
 
@@ -212,6 +211,16 @@ export function passwordTarget(
   if (facts.kind !== 'browser') return false;
   const found = facts.fields.find(field => field.fieldId === fieldId);
   if (found === undefined) return false;
+  // A card number, expiry or security code is as secret as a password; a one-time code whose name says "passcode" or "pin"
+  // is not one (field-kinds.ts). The page's own words only, and a password-typed or password-named field stays a password.
+  const kind = pageFieldKind(found.field);
+  if (kind === 'card') return true;
+  if (
+    kind === 'code' &&
+    found.field.type?.toLowerCase() !== 'password' &&
+    !/password/iu.test(found.field.autocomplete ?? '')
+  )
+    return false;
   return (
     found.field.type?.toLowerCase() === 'password' ||
     [found.field.name, found.field.id, found.field.autocomplete].some(

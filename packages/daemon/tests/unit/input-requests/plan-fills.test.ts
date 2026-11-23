@@ -653,29 +653,7 @@ describe('a code Ferretry makes is typed only with its tick, and never returned'
   });
 });
 
-describe('a password left in a field is emptied before the hold ends, and the line stops', () => {
-  it('should ask the browser about the typed nodes only, while the page is still held, shortly before the hold ends', async () => {
-    const h = harness({ clear: 'moved' });
-    await approve(h, await github(h), { remaining: 2 });
-    await raised(h);
-    const hold = h.timers.at(-1);
-    // Two seconds before the write's 120-second hold ends.
-    should(hold?.ms).equal(118_000);
-    // The clear's own hold is taken the moment the write is done: a timer that fires late, after the write's own hold has
-    // run out by the wall clock (a stall, a suspended machine), never leaves the page unheld in between.
-    h.advance(125_000);
-    should(h.service.pageHeld(SESSION, ['app'])).not.be.undefined();
-    hold?.fire();
-    await settled();
-
-    should(h.clears).deepEqual([{ navigationId: 'loader-1', fields: [{ frameId: 'main', backendNodeId: 12 }] }]);
-    should(h.heldDuringClear).deepEqual([true]);
-    should(JSON.stringify(h.clears)).not.containEql(PASSWORD);
-    should(h.stopped).deepEqual([]);
-    // Its own hold is let go once the clear answered.
-    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
-  });
-
+describe('a password left in a field is emptied, and the line stops', () => {
   for (const outcome of ['cleared', 'unknown'] as const)
     it(`should stop the line when the browser answers ${outcome}`, async () => {
       const h = harness({ clear: outcome });

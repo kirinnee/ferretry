@@ -27,10 +27,8 @@ import {
   type CopyMeta,
   copyHandle,
   copyPlanOf,
-  durationWords,
   hidePairingFragments,
   hidePairingFragmentsIn,
-  INPUT_QUARANTINE_SECONDS,
   INPUT_SINGLE_FIELD_ID,
   type InputAgentView,
   type LoginRecipeProposed,
@@ -674,7 +672,7 @@ export class AgentToolService {
         return {
           summary:
             view.state === 'delivered'
-              ? `Pasted ${copyHandle(name)} into ${reference} under a rule the owner approved in advance (!${view.id}). The terminal is unreadable for ${view.lockSeconds === undefined ? `about ${durationWords(INPUT_QUARANTINE_SECONDS)}` : `${String(view.lockSeconds)} seconds`}.`
+              ? `Pasted ${copyHandle(name)} into ${reference} under a rule the owner approved in advance (!${view.id}). You can read the terminal again at once.`
               : `Asked the owner to allow pasting ${copyHandle(name)} into ${reference} (!${view.id}). Wait with input.wait; do not type there yourself.`,
           input: view,
         };
