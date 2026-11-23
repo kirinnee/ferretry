@@ -39,7 +39,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { targetRef } from '@ferretry/core-vault/contract';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
-import { MANAGER_ENVIRONMENT_NAMES } from '../../lib/cgroups/scope.ts';
+import { LAUNCH_WRAPPER_PROGRAMS, MANAGER_ENVIRONMENT_NAMES } from '../../lib/cgroups/scope.ts';
 import { sessionTarget } from '../../lib/tmux/address.ts';
 import { tmuxStartDirectory } from '../../lib/tmux/format-escape.ts';
 import { maskedScreen } from '../../lib/tmux/screen-mask.ts';
@@ -51,6 +51,7 @@ import type { ProcessTreeRead } from '../../lib/session/processes/ports.ts';
 import { isTmuxServerAbsent } from '../../lib/tmux/server-absent.ts';
 import { scriptLine } from '../../lib/tmux/script.ts';
 import { guardedWriteArguments, GUARD_REFUSED } from '../../lib/tmux/write-guard.ts';
+import { DEV_CHANNELS_ON_SCREEN } from '../../lib/tmux/startup.ts';
 import { TERMINAL_TMUX_PREFIX } from '../../lib/terminal/runtime-policy.ts';
 import { paneBlockingDialog } from '../../lib/tmux/harness-dialog.ts';
 import { paneBlockingPermission } from '../../lib/tmux/permission-prompt.ts';
@@ -220,6 +221,38 @@ function parsePaneFacts(line: string): PaneFacts | undefined {
  * Whether the pane read now is still the exact pane a binding was made for: live, same session, process, birth and
  * foreground program, with a cursor row to compare. The row itself may differ; the write's own guard compares it.
  */
+/**
+ * The programs a launch passes through on its way to the harness, at the pane's one pid: the tmux child before its exec,
+ * then the planner's own wrappers (`LAUNCH_WRAPPER_PROGRAMS`, the one list the launch planner draws on).
+ */
+const LAUNCH_CHAIN: ReadonlySet<string> = new Set([TMUX_PROGRAM, ...LAUNCH_WRAPPER_PROGRAMS]);
+
+/** What a launch is meant to pass through (the `RunSpec.execChain`): the programs on the way, and the harness it ends in. */
+interface LaunchChain {
+  readonly through: ReadonlySet<string>;
+  readonly harness: string;
+}
+
+/**
+ * Whether `current` is the next step of the launch `original` was bound mid-way through: the same pane, process and
+ * session, alive, bound while the pane ran a program of the launch chain, and now running another program of it or the
+ * EXPECTED harness. Anything else — a shell, another program, a harness that was never the one launched — is not a step
+ * of the launch. A pane with no chain recorded (not launched here, or a spec that named none) has no steps.
+ */
+function launchStep(current: PaneFacts, original: PaneFacts, chain: LaunchChain | undefined): boolean {
+  if (chain === undefined || original.command === undefined || current.command === undefined) return false;
+  const onTheWay = (program: string): boolean => LAUNCH_CHAIN.has(program) || chain.through.has(program);
+  return (
+    !current.dead &&
+    current.session === original.session &&
+    current.pid === original.pid &&
+    current.created === original.created &&
+    current.cursorRow !== undefined &&
+    onTheWay(original.command) &&
+    (onTheWay(current.command) || current.command === chain.harness)
+  );
+}
+
 function sameBinding(current: PaneFacts, original: PaneFacts): boolean {
   return (
     !current.dead &&
@@ -331,6 +364,9 @@ export class TmuxRunner implements Runner {
    * after a stop the watch never looks again to forget it. A look that lands before the stop ends is forgotten by it.
    */
   #stopEpoch = 0;
+
+  /** The chain each pane THIS runner launched was meant to exec through, by pane id (only a spec that named one). */
+  readonly #launches = new Map<string, LaunchChain>();
 
   constructor(private readonly options: TmuxRunnerOptions) {}
 
@@ -628,6 +664,23 @@ export class TmuxRunner implements Runner {
   }
 
   /**
+   * `Runner.answerDevChannels`: Claude Code's development-channels confirm, answered at launch through the SAME guarded
+   * binding a delivery uses (its one key is acted on under `kernel.act(terminal %n, 'keys')`), and nothing else.
+   */
+  async answerDevChannels(handle: RunnerHandle, ferret?: FerretId): Promise<'answered' | 'absent'> {
+    // The key is written only if tmux still finds the dialog on screen IN the write: a screen redrawn since the frame
+    // that recognised it (the selection moved, another dialog drawn over it) is declined, never answered blind.
+    const pane = await this.guardedPane(handle, ferret, DEV_CHANNELS_ON_SCREEN);
+    try {
+      return await new TmuxPaneDelivery(new TmuxController(pane.port), pane.sleep).answerDevChannels(pane.session);
+    } catch (error) {
+      // The pane is the same but the screen is not the dialog any more: nothing was pressed, and nothing is answered.
+      if (pane.written().blocked === 'moved') return 'absent';
+      throw error;
+    }
+  }
+
+  /**
    * Today's `PaneScreenReader.text`: the visible screen of the ferret pane behind `handle`, dead or alive, for its
    * harness to explain a failed start. Only a ferret's own pane is read (a person's shell answers `''`), only by its
    * exact id, and nothing is written. The text goes to the caller and is never logged here.
@@ -884,6 +937,8 @@ export class TmuxRunner implements Runner {
   private async guardedPane(
     handle: RunnerHandle,
     ferret?: FerretId,
+    /** Text every write of this binding requires to still be on the screen, re-proved by tmux in the write itself. */
+    onScreen?: readonly string[],
   ): Promise<{
     readonly port: TmuxCommandPort;
     readonly session: string;
@@ -907,7 +962,17 @@ export class TmuxRunner implements Runner {
     const guard = this.options.delivery;
     // No act runner bound: nothing may write here (fail closed), said as the kernel's own code for it.
     if (guard === undefined) throw new PaneHeldError('holds_unavailable');
-    const command = original.command;
+    // The binding's program is the one the pane runs when the FIRST key is sent, not when the binding was made: a first
+    // turn is bound while the launch's wrappers are still exec'ing at the pane's one pid (`systemd-run --user --scope`
+    // takes ~60 ms to reach the harness), and a program pinned then made the harness's own first frame read as a pane
+    // that was no longer live, so every limited ferret's first turn failed untyped. Until a write is attempted, a pane
+    // bound while it ran a launch wrapper moves along the launch chain only: another wrapper keeps waiting and the
+    // harness the launch spec named is pinned. Any other program (a shell, a harness that exited) is not adopted, and
+    // the read answers "no longer live" as for any change. From the first write on the program is fixed, and every
+    // write is still compared against it by the server in the write itself.
+    const chain = this.#launches.get(handle);
+    let binding = original;
+    let wrote = false;
     let observed = original;
     let typings = 0;
     let refused: RefusalCode | undefined;
@@ -915,7 +980,7 @@ export class TmuxRunner implements Runner {
     /** After the server's guard refused a write: `moved` when only the cursor row differs from the bound pane. */
     const whyRefused = async (): Promise<BindingBlock> => {
       const now = await this.facts(handle, true).catch(() => undefined);
-      return now !== undefined && sameBinding(now, original) ? 'moved' : 'gone';
+      return now !== undefined && sameBinding(now, binding) ? 'moved' : 'gone';
     };
     // Reuse today's delivery unchanged. Its commands use a validated session name, but every target is rebound to
     // this exact live handle, so a changed active pane or a replacement session cannot receive the message.
@@ -926,7 +991,9 @@ export class TmuxRunner implements Runner {
           // Cleanup must still work after a disappearing pane or a refused paste.
           if (args[0] === 'delete-buffer') return await this.options.tmux.execute(args, stdin);
           const current = await this.facts(handle, true);
-          if (current === undefined || !sameBinding(current, original)) {
+          if (!writing && !wrote && current !== undefined && launchStep(current, binding, chain)) binding = current;
+          if (writing) wrote = true;
+          if (current === undefined || !sameBinding(current, binding)) {
             if (writing) blocked ??= 'gone';
             return { code: 1, stdout: '', stderr: 'the ferret pane is no longer live' };
           }
@@ -942,10 +1009,11 @@ export class TmuxRunner implements Runner {
             handle,
             {
               panePid: original.pid,
-              command,
+              command: binding.command ?? '',
               cursorRow: observed.cursorRow ?? -1,
               session: original.session,
               sessionCreated: original.created,
+              ...(onScreen === undefined ? {} : { onScreen }),
             },
             scriptLine(
               args[0] === 'load-buffer'
@@ -1000,6 +1068,7 @@ export class TmuxRunner implements Runner {
     // Any stop forgets the pane text kept for the look: a polite one only interrupts, but the pane text is not kept.
     // Forgotten again as it ends, so no look that overlaps the stop keeps any (`#stopEpoch`).
     this.#frames.delete(handle);
+    this.#launches.delete(handle);
     try {
       const facts = await this.facts(handle);
       // Nothing, or ANOTHER ferret's pane (or a person's shell), behind this handle: the pane id says nothing about this
@@ -1242,6 +1311,9 @@ export class TmuxRunner implements Runner {
       ...(Number.isInteger(process) && process > 0 ? { pid: process } : {}),
       startedAt: this.options.now(),
     };
+    const harness = spec.execChain?.at(-1);
+    if (harness !== undefined) this.#launches.set(paneId, { through: new Set(spec.execChain?.slice(0, -1)), harness });
+    else this.#launches.delete(paneId);
     await this.options.remember?.(spec.ferret, running);
     return ok(running);
   }

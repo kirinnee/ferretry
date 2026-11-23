@@ -9,11 +9,11 @@
  *
  * Both wait the one 300 ms threshold (`loading-gate.ts`, drawn by `loading.css`) before they show: a read that answers
  * inside it paints nothing, which is what stops a fast load from flashing. Reduced motion (the OS setting or Settings › Appearance › Motion) keeps both
- * visible and stills the movement. The mark and the bar read colour from the theme's tokens, light and dark alike.
+ * visible and stills the movement. A loader leaves WITH its read: nothing of it is ever left drawn over the content that
+ * replaced it (a page that has drawn shows no blocking loader). The mark and the bar read colour from the theme's tokens, light and dark alike.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { LOADING_DELAY_MS, LOADING_FADE_MS, LOADING_MIN_MS, loadingGateStyle } from './loading-gate.ts';
-import { useLoadingHold } from './loading-hold.ts';
 import { Spinner } from './spinner.tsx';
 
 export { LOADING_DELAY_MS, LOADING_FADE_MS, LOADING_MIN_MS };
@@ -92,16 +92,20 @@ export function Loading({ kind, label, className, compact = false, marks }: Load
 }
 
 function PageLoading({ label, className, compact, marks }: Omit<LoadingProps, 'kind'> & { readonly compact: boolean }) {
-  const root = useRef<HTMLDivElement>(null);
-  // Mounted straight off a read, it would vanish the moment the read answers: keep it for its minimum (loading-hold.ts).
-  useLoadingHold(root, { cover: true });
+  useEffect(() => {
+    pages += 1;
+    for (const listener of [...listeners]) listener();
+    return () => {
+      pages -= 1;
+      for (const listener of [...listeners]) listener();
+    };
+  }, []);
   const extra = (compact ? ' fy-loading--compact' : '') + (className === undefined ? '' : ` ${className}`);
   return (
     <div
       aria-live="polite"
       className={`fy-loading fy-loading--page${extra}`}
       data-loading="page"
-      ref={root}
       role="status"
       style={delayStyle}
       {...marks}
@@ -144,6 +148,7 @@ function TopBar() {
 // ---- the background count: one bar for however many views are busy ------------------------------------------------
 
 let busy = 0;
+let pages = 0;
 const listeners = new Set<() => void>();
 
 function change(by: 1 | -1): void {
@@ -158,7 +163,8 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-const anyBusy = (): boolean => busy > 0;
+// One indicator at a time: while a page loader is up the page already shows the wait, so the bar is for side-only reads.
+const barWanted = (): boolean => busy > 0 && pages === 0;
 
 /**
  * Says this view is doing background work while `active` is true (a refresh, a poll, a read behind content that is
@@ -172,9 +178,9 @@ export function useBackgroundLoad(active: boolean): void {
   }, [active]);
 }
 
-/** Whether any view is busy in the background right now. */
+/** Whether the shell's one bar is wanted right now: a view is busy in the background and no page loader is up. */
 export function useAnyBackgroundLoad(): boolean {
-  return useSyncExternalStore(subscribe, anyBusy, () => false);
+  return useSyncExternalStore(subscribe, barWanted, () => false);
 }
 
 /** The shell's one top bar: drawn while any view says it is busy, nothing otherwise. Mount it once. */

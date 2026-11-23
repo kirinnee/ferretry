@@ -5,10 +5,17 @@ export interface WriteGuard {
   readonly cursorRow: number;
   readonly session?: string;
   readonly sessionCreated?: number;
+  /**
+   * Text that must STILL be on the pane's screen when the write runs: tmux searches the screen for each in the write
+   * itself (`#{C:...}`), so a screen redrawn between the caller's last look and the write writes nothing.
+   */
+  readonly onScreen?: readonly string[];
 }
 
 /** A name tmux may safely compare in a format string. */
 const PINNABLE_COMMAND = /^[A-Za-z0-9._:+@ -]+$/u;
+/** Screen text tmux may safely search for inside a format: no format, glob or escape characters of its own. */
+const SEARCHABLE_TEXT = /^[^,}#*?[\]\\\n]+$/u;
 export const GUARD_REFUSED = 'fy-input-guard-refused';
 
 /** Compare and enqueue in the same tmux command; a refused predicate writes nothing. */
@@ -20,6 +27,7 @@ export function guardedWriteArguments(paneId: string, guard: WriteGuard, write: 
     guard.panePid <= 0 ||
     !Number.isSafeInteger(guard.cursorRow) ||
     guard.cursorRow < 0 ||
+    (guard.onScreen ?? []).some(text => !SEARCHABLE_TEXT.test(text)) ||
     (guard.session !== undefined && !PINNABLE_COMMAND.test(guard.session)) ||
     (guard.sessionCreated !== undefined && (!Number.isSafeInteger(guard.sessionCreated) || guard.sessionCreated <= 0))
   )
@@ -32,6 +40,7 @@ export function guardedWriteArguments(paneId: string, guard: WriteGuard, write: 
     '#{==:#{pane_dead},0}',
     ...(guard.session === undefined ? [] : [`#{==:#{session_name},${guard.session}}`]),
     ...(guard.sessionCreated === undefined ? [] : [`#{==:#{session_created},${guard.sessionCreated}}`]),
+    ...(guard.onScreen ?? []).map(text => `#{C:${text}}`),
   ].reduce((left, right) => `#{&&:${left},${right}}`);
   return ['if-shell', '-F', '-t', paneId, condition, write, `display-message -p ${GUARD_REFUSED}`];
 }

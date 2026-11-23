@@ -1,4 +1,5 @@
-import type { RunnerHandle } from '@ferretry/core-ferrets/contract';
+import { describe, expect, it } from 'bun:test';
+import type { RunnerHandle, RunSpec } from '@ferretry/core-ferrets/contract';
 import { emptyChildEnvironment, fenced, ferretId, runnerConformance } from '@ferretry/core-ferrets/contract/testing';
 import type { InputHolds } from '@ferretry/kernel/contract';
 import { testActRunner, TestMintedIds } from '@ferretry/kernel/testing';
@@ -13,7 +14,14 @@ interface WorldPane {
   readonly pid: number;
   readonly session: string;
   readonly created: number;
-  readonly command: string;
+  /** What `#{pane_current_command}` answers: a launch's wrappers exec one into the next at this one pid. */
+  command: string;
+  /** Programs the next facts reads answer before `command`, one per read (a launch still exec'ing its wrappers). */
+  readonly launching: string[];
+  /** Called before each guarded write lands, with its index from 0 (a program that changes under the cursor). */
+  beforeWrite?: (index: number) => void;
+  /** Guarded writes seen so far. */
+  writes: number;
   readonly server: FakeTmuxServer;
 }
 
@@ -40,6 +48,8 @@ function tmuxWorld() {
       session,
       created: 1_000 + next,
       command,
+      launching: [],
+      writes: 0,
       server: new FakeTmuxServer(),
     };
     panes.set(pane.id, pane);
@@ -56,11 +66,11 @@ function tmuxWorld() {
     (server.working ? 1 : 0) +
     server.composer.split('\n').length -
     1;
-  const live = (pane: WorldPane): Record<string, string> => ({
+  const live = (pane: WorldPane, read = false): Record<string, string> => ({
     pane_id: pane.id,
     pane_pid: String(pane.pid),
     pane_dead: pane.server.dead ? '1' : '0',
-    pane_current_command: pane.command,
+    pane_current_command: (read ? pane.launching.shift() : undefined) ?? pane.command,
     cursor_y: String(cursorRow(pane)),
     session_name: pane.session,
     session_created: String(pane.created),
@@ -79,12 +89,14 @@ function tmuxWorld() {
       return done();
     }
     if (command === 'display-message' && args.at(-1)?.startsWith('#{pane_id}|')) {
-      const facts = live(pane);
+      const facts = live(pane, true);
       return done(
         `${facts.pane_id}|${facts.pane_pid}|${facts.pane_dead}|${facts.session_name}|${facts.session_created}|${facts.pane_current_command}|${facts.cursor_y}\n`,
       );
     }
     if (command === 'if-shell') {
+      pane.beforeWrite?.(pane.writes);
+      pane.writes += 1;
       const comparisons = [...(args[4] ?? '').matchAll(/#\{==:#\{(\w+)\},([^}]*)\}/gu)];
       const facts = live(pane);
       if (comparisons.length === 0 || !comparisons.every(([, key = '', value]) => facts[key] === value))
@@ -138,6 +150,7 @@ function tmuxWorld() {
   };
   return {
     runner,
+    paneOf,
     spec: { ferret: ferretId('f1'), command: ['harness'], cwd: fenced('/work'), env: emptyChildEnvironment() },
     // A ferret pane a previous daemon started: it is in the server, and this runner never launched it.
     adoptable: async () => add('fy-f0', 'harness').id as RunnerHandle,
@@ -155,3 +168,186 @@ function tmuxWorld() {
 }
 
 runnerConformance('TmuxRunner (in-memory tmux server)', tmuxWorld);
+
+/** The spec of a Codex launch: it execs `env`, the interpreter its installed script runs on, then the harness. */
+const codexSpec = (spec: RunSpec): RunSpec => ({ ...spec, execChain: ['env', 'bash', 'sh', 'node', 'harness'] });
+
+/** The spec of a Claude launch: it execs `env`, the seed shell, then the harness (named `harness` in this world). */
+const claudeSpec = (spec: RunSpec): RunSpec => ({ ...spec, execChain: ['env', 'sh', 'harness'] });
+
+describe("TmuxRunner first turn at a pane still exec'ing its launch wrappers", () => {
+  it('should type the first turn when the program goes tmux → systemd-run → the harness at one pid after it bound', async () => {
+    // The P0 on a host with a user manager: `systemd-run --user --scope` takes ~60 ms to exec the harness, so the
+    // delivery's first reads saw `systemd-run` and pinned it; the harness's own frame then read as a pane no longer live.
+    // Arrange
+    const world = tmuxWorld();
+    const started = await world.runner.start(claudeSpec(world.spec));
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.launching.push('tmux', 'systemd-run', 'ionice', 'env');
+
+    // Act
+    const delivered = await world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    expect(delivered).toBeDefined();
+    expect(pane.launching).toEqual([]);
+    expect(pane.server.submitted).toEqual(['Reply with the single word OK.']);
+  });
+
+  it('should keep waiting through the launch wrappers and type the first turn once the expected harness runs', async () => {
+    // Arrange
+    const world = tmuxWorld();
+    const started = await world.runner.start(claudeSpec(world.spec));
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.launching.push('tmux', 'env', 'systemd-run', 'ionice', 'systemd-run');
+
+    // Act
+    const delivered = await world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    expect(delivered).toBeDefined();
+    expect(pane.server.submitted).toEqual(['Reply with the single word OK.']);
+  });
+
+  it('should type a Codex first turn once its wrappers and its script interpreter have given way to the harness', async () => {
+    // Arrange — measured on a real limited launch: tmux → systemd-run → bash (the installed script) → codex.
+    const world = tmuxWorld();
+    const started = await world.runner.start(codexSpec(world.spec));
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.launching.push('tmux', 'systemd-run', 'bash', 'bash');
+
+    // Act
+    const delivered = await world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    expect(delivered).toBeDefined();
+    expect(pane.server.submitted).toEqual(['Reply with the single word OK.']);
+  });
+
+  it('should refuse a Codex first turn, and type nothing, when the launch ends in a shell outside its chain', async () => {
+    // Arrange
+    const world = tmuxWorld();
+    const started = await world.runner.start(codexSpec(world.spec));
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.launching.push('systemd-run');
+    pane.command = 'zsh';
+
+    // Act
+    const delivered = world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    await expect(delivered).rejects.toThrow();
+    expect(pane.writes).toBe(0);
+    expect(pane.server.submitted).toEqual([]);
+  });
+
+  it('should refuse the first turn, and type nothing, when the launch ends in a shell instead of the harness', async () => {
+    // Arrange — the wrappers ran and the harness exited at once: the pane is left at a shell.
+    const world = tmuxWorld();
+    const started = await world.runner.start(claudeSpec(world.spec));
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.launching.push('systemd-run');
+    pane.command = 'bash';
+
+    // Act
+    const delivered = world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    await expect(delivered).rejects.toThrow();
+    expect(pane.server.submitted).toEqual([]);
+    expect(pane.server.calls.some(call => PAYLOAD_WRITES.has(call[0] ?? ''))).toBe(false);
+    expect(pane.writes).toBe(0);
+  });
+
+  it('should refuse the first turn when the launch ends in a program other than the one it launched', async () => {
+    // Arrange
+    const world = tmuxWorld();
+    const started = await world.runner.start(claudeSpec(world.spec));
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.launching.push('env', 'systemd-run');
+    pane.command = 'node';
+
+    // Act
+    const delivered = world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    await expect(delivered).rejects.toThrow();
+    expect(pane.writes).toBe(0);
+  });
+
+  it("should keep waiting through the seed shell that Claude is exec'd from", async () => {
+    // Arrange
+    const world = tmuxWorld();
+    const started = await world.runner.start(claudeSpec(world.spec));
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.launching.push('systemd-run', 'env', 'sh', 'sh');
+
+    // Act
+    const delivered = await world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    expect(delivered).toBeDefined();
+    expect(pane.server.submitted).toEqual(['Reply with the single word OK.']);
+  });
+
+  it('should not adopt a launch step for a spec that named no exec chain (Codex)', async () => {
+    // Arrange — a pane bound at a wrapper, with no chain to say what it should become, is bound as it always was.
+    const world = tmuxWorld();
+    const started = await world.runner.start(world.spec);
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.launching.push('systemd-run');
+
+    // Act
+    const delivered = world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    await expect(delivered).rejects.toThrow();
+    expect(pane.writes).toBe(0);
+    expect(pane.server.submitted).toEqual([]);
+  });
+
+  it('should not adopt a program change on a pane that was bound to a stable program', async () => {
+    // Arrange — no launch wrapper ever showed: the pane is bound to its harness and anything else is refused (Codex, a
+    // pane adopted from an earlier daemon, every later delivery).
+    const world = tmuxWorld();
+    const started = await world.runner.start(world.spec);
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.launching.push('harness', 'bash');
+
+    // Act
+    const delivered = world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    await expect(delivered).rejects.toThrow();
+    expect(pane.writes).toBe(0);
+    expect(pane.server.submitted).toEqual([]);
+  });
+
+  it('should refuse the next write when the program changes after the first key really landed', async () => {
+    // Arrange — the first write lands; the harness execs something else under the cursor before the next one.
+    const world = tmuxWorld();
+    const started = await world.runner.start(claudeSpec(world.spec));
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.beforeWrite = index => {
+      if (index === 1) pane.command = 'vim';
+    };
+
+    // Act
+    const delivered = world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    await expect(delivered).rejects.toThrow();
+    expect(pane.writes).toBeGreaterThanOrEqual(2);
+    expect(pane.server.submitted).toEqual([]);
+  });
+});
