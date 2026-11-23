@@ -118,7 +118,24 @@ describe.each(['claude-code', 'codex'] as const satisfies readonly HarnessKey[])
   });
 });
 
-test('a start that names a conversation with no conversation index on the host is refused, not started fresh', async () => {
+// E17: Conversation off means nothing can be COPIED in, not that nothing can be resumed. An adoption of a transcript the
+// pool already holds needs no staging; one the harness proves absent is still refused, never started fresh.
+test('with no conversation index on the host, a transcript the pool already holds is resumed', async () => {
+  const runner = new FakeRunner();
+  const harness = new FakeHarness().honestHistory();
+  harness.pool.add(ORIGINAL);
+  const h = await host([], { harness, runner });
+  const started = await h.request('POST', '/v1/ferrets', {
+    headers: { 'x-fy-request-id': 'no-index-pooled' },
+    body: { folder: '/work/a', harnessConversation: ORIGINAL },
+  });
+  expect(started.status).toBe(201);
+  expect(harness.imported).toEqual([]);
+  expect(harness.resumed).toEqual([ORIGINAL]);
+  expect(runner.starts).toBe(1);
+});
+
+test('with no conversation index on the host, a transcript the harness proves absent is refused, not started fresh', async () => {
   const runner = new FakeRunner();
   const harness = new FakeHarness().honestHistory();
   const h = await host([], { harness, runner });
@@ -127,8 +144,11 @@ test('a start that names a conversation with no conversation index on the host i
     body: { folder: '/work/a', harnessConversation: ORIGINAL },
   });
   expect(refused.status).toBe(409);
-  expect(refused.json<{ error: string }>().error).toContain('cannot continue a past conversation');
+  const said = refused.json<{ error: string }>().error;
+  expect(said).toContain(`conversation ${ORIGINAL} was not found`);
+  expect(said).toContain('only while the Conversations plugin is on');
   expect(runner.starts).toBe(0);
+  expect(harness.resumed).toEqual([]);
 });
 
 test('a stage owner that throws refuses the start in one plain sentence: nothing is launched', async () => {

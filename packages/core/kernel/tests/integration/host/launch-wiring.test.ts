@@ -327,10 +327,17 @@ const ROWS: readonly Row[] = [
     },
   },
   {
-    // An adoption starts a ferret INTO a conversation that already exists: the harness resumes it.
+    // An adoption starts a ferret INTO a conversation that already exists: the harness resumes it. It EXISTS in the shared
+    // pool (where Claude writes through each home's projects link, at Claude's spelling of the folder), so nothing needs
+    // staging and no conversation plugin is composed (E17): an explicit continue of a transcript the harness proves absent
+    // is refused, never started fresh, so a row that adopted a conversation nobody wrote could not launch at all.
     name: 'adopt',
     drive: async (h, runner, name, plant) => {
       const where = await folder(name);
+      h.state('claude-code').files.set(
+        `history-pool/projects/${where.replaceAll(/[^a-zA-Z0-9]/gu, '-')}/${ADOPTED}.jsonl`,
+        '{"type":"user"}\n',
+      );
       await plant(where);
       const before = runner.starts;
       const started = await start(h, { folder: where, harnessConversation: ADOPTED });

@@ -232,8 +232,8 @@ export interface FerretsPorts {
   /** The ONE provider that plans the files a start was given (`start -f`); unbound or none: a start that carries attachments is refused. */
   openingAttachments?(): OpeningAttachmentsSource | undefined;
   /**
-   * The ONE provider that stages a past conversation's transcript (`conversation.stage`): bound, a start that names a
-   * conversation is refused when it answers none. Unbound only in a unit fixture (nothing to ask); the daemon always binds it.
+   * The ONE provider that stages a past conversation's transcript (`conversation.stage`). None (Conversation off): nothing
+   * is staged, and the launch still refuses a conversation the harness proves absent. The daemon always binds it.
    */
   conversationStage?(): ConversationStageSource | undefined;
   sitrepSources(): readonly SitrepLineSource[];
@@ -1090,7 +1090,9 @@ export class FerretsService implements FerretsApi {
   /**
    * "Continue a past conversation": the transcript a start names is put where the harness finds it (the one
    * `conversation.stage` provider: the existing indexed copy-on-link). Nothing to stage when no conversation is named; a
-   * missing provider or a refusal refuses the start with its reason, so a continue is never quietly a fresh conversation.
+   * refusal refuses the start with its reason. With NO provider (Conversation is off) nothing is copied and nothing is
+   * refused here: a transcript the pool already holds is resumed, and the launch refuses one the harness proves absent
+   * (`requireConversation`), so a continue is never quietly a fresh conversation either way (E17).
    * ONLY THE OWNER'S start stages: the transcript comes from the owner's own computer, and a ferret (or a pack, board or
    * warden) must never be able to pull a host conversation into the pool by naming it. Any other asker resumes a
    * conversation the pool already holds, and the launch refuses one it does not.
@@ -1100,14 +1102,8 @@ export class FerretsService implements FerretsApi {
     conversation: string | undefined,
     by: StartRequest['by'],
   ): Promise<Result<void, StartFailure>> {
-    if (conversation === undefined || by !== 'owner' || this.ports.conversationStage === undefined)
-      return ok(undefined);
-    const source = this.ports.conversationStage();
-    if (source === undefined)
-      return failed(
-        'refused',
-        'this daemon cannot continue a past conversation: the plugin that lists them is off, so the ferret was not started',
-      );
+    const source = conversation === undefined || by !== 'owner' ? undefined : this.ports.conversationStage?.();
+    if (conversation === undefined || source === undefined) return ok(undefined);
     const staged = await source
       .stage({ harness, conversation })
       .catch(
@@ -2336,7 +2332,7 @@ export class FerretsService implements FerretsApi {
       if (said.requireConversation === true)
         return failed(
           'refused',
-          `the ${record.harness} conversation ${conversation} was not found, so the ferret was not started`,
+          `the ${record.harness} conversation ${conversation} was not found, so the ferret was not started (only the owner's start copies one in from this computer, and only while the Conversations plugin is on)`,
         );
       said.conversationNotFound = conversation;
     }

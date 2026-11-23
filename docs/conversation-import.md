@@ -12,6 +12,8 @@ The request also names the picked harness (`harness`), so a runtime of the other
 continue REQUIRES that transcript**: before the first write the daemon asks Conversation (`conversation.stage`) to copy a
 host-only transcript into the harness's pool by the same indexed copy-on-link `keep` uses, and a conversation that cannot be
 staged, or that the harness still proves absent, refuses the start (409, with the reason) — it is never a silent fresh start.
+With Conversation off there is nothing to copy with, so nothing is staged: a transcript the pool already holds is resumed,
+and any other is refused by that same proof of absence.
 Only the owner's start stages: a ferret, pack, board or warden that names a conversation resumes one the pool already holds
 and is refused otherwise, so none of them can pull a transcript of the owner's computer into the pool.
 `/d/<machine>/new?continue=1` opens the page with that section shown (Runtimes' "Import conversations" and the setup
