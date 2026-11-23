@@ -37,7 +37,7 @@ export function ShellLine({
  * instead: ten panels waiting on the same daemon are one bar, never ten stacked lines.
  */
 function Waiting({ page, label }: { readonly page: boolean; readonly label: string }) {
-  return <Loading kind={page ? 'page' : 'bar'} label={label} />;
+  return <Loading className="fy-loading--fill" kind={page ? 'page' : 'bar'} label={label} />;
 }
 
 /**

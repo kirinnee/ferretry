@@ -663,11 +663,15 @@ describe('a slow daemon: ONE centred loader, never drawn over what is already dr
                 if (Number(getComputedStyle(node).opacity) <= 0.01) return false;
               return element.getBoundingClientRect().width > 0;
             };
-            const loaders = [...document.querySelectorAll('[data-loading="page"]')].filter(visible);
+            // EVERY visible indicator counts: a page loader and the top bar alike (two at once is two loading states).
+            const indicators = [...document.querySelectorAll('[data-loading="page"], [data-loading="bar"]')].filter(
+              visible,
+            );
+            const loaders = indicators.filter(element => element.getAttribute('data-loading') === 'page');
             const main = document.querySelector('.fy-main')?.getBoundingClientRect();
             const box = loaders[0]?.getBoundingClientRect();
             return {
-              count: loaders.length,
+              count: indicators.length,
               inMain:
                 box !== undefined && main !== undefined && box.left >= main.left - 1 && box.right <= main.right + 1,
               form: document.querySelectorAll('[data-new-ferret]').length,
@@ -683,7 +687,7 @@ describe('a slow daemon: ONE centred loader, never drawn over what is already dr
             };
           });
           await shotOf(tab, `o9-11-${viewport.name}-${mode}-1-waiting`);
-          expect(waiting.count, 'one loader on screen').toBe(1);
+          expect(waiting.count, 'one loading indicator on screen: the page loader, not the bar as well').toBe(1);
           expect(waiting.inMain, 'centred in the page, not in the side column').toBe(true);
           expect(waiting.offCentre, 'centred vertically in the page area, not top-heavy').toBeLessThan(0.06);
           expect(waiting.scrolls, 'the loader does not make the page scroll').toBe(false);
@@ -705,6 +709,59 @@ describe('a slow daemon: ONE centred loader, never drawn over what is already dr
           });
           await shotOf(tab, `o9-11-${viewport.name}-${mode}-3-settled`);
           expect(seen).toEqual([]);
+        } finally {
+          await context.close();
+        }
+      }, 40_000);
+
+  // Item 15 (no jumps): the loader fills the area it loads but adds no height of its own, so a slow read on a real page
+  // (the Board) never makes the page scroll while it waits.
+  for (const viewport of [
+    { name: '1440', width: 1_440, height: 900, phone: false },
+    { name: '390', width: 390, height: 844, phone: true },
+  ] as const)
+    for (const mode of ['light', 'dark'] as const)
+      it(`${viewport.name} ${mode}: a slow Board read draws one loader and adds no vertical overflow`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          colorScheme: mode,
+          deviceScaleFactor: viewport.phone ? 2 : 1,
+          hasTouch: viewport.phone,
+          isMobile: viewport.phone,
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const tab = await context.newPage();
+        try {
+          await tab.goto(`${origin}/d/ws/board?theme=studio-${mode}&relay=0&boardSlow=${SLOW_MS}`);
+          // The shell is ready at once; it is the Board's OWN read that is slow, so its own loader is the one drawn.
+          await tab.waitForSelector('[data-board-stand] [data-loading="page"]', { timeout: 5_000 });
+          await tab.waitForTimeout(650);
+          const state = await tab.evaluate(() => {
+            const visible = (element: Element): boolean => {
+              for (let node: Element | null = element; node !== null; node = node.parentElement)
+                if (Number(getComputedStyle(node).opacity) <= 0.01) return false;
+              return element.getBoundingClientRect().width > 0;
+            };
+            const scroller = (selector: string): number => {
+              const node = document.querySelector(selector);
+              return node === null ? 0 : node.scrollHeight - node.clientHeight;
+            };
+            return {
+              count: [...document.querySelectorAll('[data-loading="page"], [data-loading="bar"]')].filter(visible)
+                .length,
+              mainOverflow: scroller('.fy-main'),
+              boardOverflow: scroller('[data-board-stand]'),
+              pageOverflow: scroller('html'),
+            };
+          });
+          await shotOf(tab, `o9-11-board-${viewport.name}-${mode}-waiting`);
+          expect(state.count, 'one loading indicator').toBe(1);
+          expect(state.boardOverflow, 'the Board does not scroll itself while its read loads').toBeLessThanOrEqual(1);
+          expect(state.mainOverflow, 'the page area does not scroll while it loads').toBeLessThanOrEqual(1);
+          expect(state.pageOverflow, 'the window does not scroll while it loads').toBeLessThanOrEqual(1);
         } finally {
           await context.close();
         }

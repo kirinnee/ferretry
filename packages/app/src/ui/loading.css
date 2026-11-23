@@ -34,11 +34,18 @@
   flex-direction: column;
   gap: 18px;
   justify-content: center;
-  /* Fills the area it loads (the page under the top bar) so the mark sits in its vertical middle; a loader inside a box with no height of its own
-     (a card, a sheet) has no area to fill, so it keeps a modest minimum. */
-  min-height: max(min(46vh, 22rem), 100%);
+  /* A modest minimum, never a share of the parent: a page that draws its own header above the loader (the Board) would be pushed past
+     its box by it, and a loader must never make the page scroll. Inside a flex column the loader's own `flex: 1` fills what is left. */
+  min-height: min(46vh, 22rem);
   padding: 32px 16px;
   text-align: center;
+}
+
+/* The shell's own loader, drawn straight in the page area (nothing above it): it fills that area so the mark sits in its vertical
+   middle. Border-box, so its padding is inside the area and adds no height of its own. */
+.fy-loading--fill {
+  box-sizing: border-box;
+  min-height: 100%;
 }
 
 /* Compact: for a small container (popover, dialog, card, panel). No minimum height, a smaller orb, so it never makes the

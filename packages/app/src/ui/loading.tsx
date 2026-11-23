@@ -92,6 +92,14 @@ export function Loading({ kind, label, className, compact = false, marks }: Load
 }
 
 function PageLoading({ label, className, compact, marks }: Omit<LoadingProps, 'kind'> & { readonly compact: boolean }) {
+  useEffect(() => {
+    pages += 1;
+    for (const listener of [...listeners]) listener();
+    return () => {
+      pages -= 1;
+      for (const listener of [...listeners]) listener();
+    };
+  }, []);
   const extra = (compact ? ' fy-loading--compact' : '') + (className === undefined ? '' : ` ${className}`);
   return (
     <div
@@ -140,6 +148,7 @@ function TopBar() {
 // ---- the background count: one bar for however many views are busy ------------------------------------------------
 
 let busy = 0;
+let pages = 0;
 const listeners = new Set<() => void>();
 
 function change(by: 1 | -1): void {
@@ -154,7 +163,8 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-const anyBusy = (): boolean => busy > 0;
+// One indicator at a time: while a page loader is up the page already shows the wait, so the bar is for side-only reads.
+const barWanted = (): boolean => busy > 0 && pages === 0;
 
 /**
  * Says this view is doing background work while `active` is true (a refresh, a poll, a read behind content that is
@@ -168,9 +178,9 @@ export function useBackgroundLoad(active: boolean): void {
   }, [active]);
 }
 
-/** Whether any view is busy in the background right now. */
+/** Whether the shell's one bar is wanted right now: a view is busy in the background and no page loader is up. */
 export function useAnyBackgroundLoad(): boolean {
-  return useSyncExternalStore(subscribe, anyBusy, () => false);
+  return useSyncExternalStore(subscribe, barWanted, () => false);
 }
 
 /** The shell's one top bar: drawn while any view says it is busy, nothing otherwise. Mount it once. */
