@@ -11,6 +11,7 @@ import type {
 import type { ChildEnvironment, FerretId } from '@ferretry/kernel/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { isConversationId } from '../../lib/harness/claude-path.ts';
+import { API_KEY_SEED_SHELL } from '../../lib/harness/api-key-seed.ts';
 import { channelsOn, HOME_FILES, launchCommand, settingsFlags } from '../../lib/harness/launch.ts';
 import { HarnessUpdateRefusal } from '../../lib/update/service.ts';
 import { type ClaudeCore, claudeHome, fenced, type Serves } from './core.ts';
@@ -54,7 +55,9 @@ export const lifecyclePart = (core: ClaudeCore): Serves<'discover' | 'resume' | 
       conversation,
       readable: spec.readable,
     });
-    const spec2 = { ferret: spec.ferret, command, cwd: spec.folder, env };
+    // What the pane runs as it execs on: `env`, the seed shell, then Claude (a first turn is typed only into that chain).
+    const execChain = [API_KEY_SEED_SHELL, found.binary].map(path => path.slice(path.lastIndexOf('/') + 1));
+    const spec2 = { ferret: spec.ferret, command, cwd: spec.folder, env, execChain: ['env', ...execChain] };
     await recordLaunchSettings(core, spec.ferret, inputs);
     // Persist only the identity and cwd we chose, so a fresh daemon reads the same exact transcript.
     const home = claudeHome(core, spec.ferret);

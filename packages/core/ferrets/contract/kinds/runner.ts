@@ -15,6 +15,12 @@ export interface RunSpec {
   readonly command: readonly string[];
   readonly cwd: FencedPath;
   readonly env: ChildEnvironment;
+  /**
+   * The programs `command` execs through at the pane's one pid, in order, by the name the kernel reports for each,
+   * ending in the harness itself (Claude: `env`, `sh`, `claude`). A runner may bind a first turn to the pane while it is
+   * still on this chain and pin the harness once it runs; absent, a pane is bound to whatever it runs when first read.
+   */
+  readonly execChain?: readonly string[];
   /** The ferret's limits (`limits.yaml`), as the kernel's spawn port applies them. */
   readonly limits?: JsonValue;
 }
