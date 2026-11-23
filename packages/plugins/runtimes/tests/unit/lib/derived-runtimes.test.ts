@@ -363,4 +363,22 @@ describe('D4: a derived runtime keeps the model it was pinned to', () => {
     expect(derived.runtimes.get('fresh')?.profile).toBe('ferretry-claude');
     expect(derived.firstSeen).toEqual(new Map([['fresh', MOVED.claude]]));
   });
+
+  it('keys the pin on the runtime NAME, so a login whose id an owner runtime holds is pinned under its suffixed name', () => {
+    const name = derivedRuntimeName('atomi', candidate => candidate === 'atomi') as string;
+    const owner = { login: 'other', profile: 'ferretry-claude' } as never;
+
+    const first = deriveRuntimes({ ...none, runtimes: new Map([['atomi', owner]]), logins: [login] });
+    const later = deriveRuntimes({
+      ...none,
+      runtimes: new Map([['atomi', owner]]),
+      starters: MOVED,
+      pins: new Map([[name, TEST_STARTERS.claude]]),
+      logins: [login],
+    });
+
+    expect(first.firstSeen).toEqual(new Map([[name, TEST_STARTERS.claude]]));
+    expect(later.firstSeen.size).toBe(0);
+    expect(later.modelSets.get(later.runtimes.get(name)?.profile as string)?.default).toBe(TEST_STARTERS.claude);
+  });
 });
