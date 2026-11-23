@@ -13,7 +13,6 @@
  *
  * The position is a step KEY (`<plugin>.<step>`), never an index, so a step list that changes under a run cannot move it.
  */
-import { SUPPORTED_HARNESSES } from '../agents/agents-model.ts';
 import { askableSteps, type Flow, type FlowStep } from '../../lib/index.ts';
 
 /** The place after the last page. */
@@ -59,9 +58,13 @@ const AGENTS_KEY = 'onboarding.agents';
  * in the run's memory. So a run that resumes while a harness page is still unanswered has lost the pick (a Codex-only run would
  * walk the pending Claude pages): the picker is asked again, and what is picked decides which harness pages the run walks.
  */
-export const answeredBefore = (pages: readonly FlowStep[], later: ReadonlySet<string>): ReadonlySet<string> => {
+export const answeredBefore = (
+  pages: readonly FlowStep[],
+  later: ReadonlySet<string>,
+  installed: readonly { readonly key: string }[],
+): ReadonlySet<string> => {
   const answered = new Set(pages.filter(page => isAnsweredBefore(page, later)).map(page => page.key));
-  const harnesses = new Set(SUPPORTED_HARNESSES.map(harness => harness.plugin));
+  const harnesses = new Set(installed.map(harness => harness.key));
   const resumed = pages.some(page => page.phase === 'daemon' && harnesses.has(page.plugin) && !answered.has(page.key));
   if (resumed) answered.delete(AGENTS_KEY);
   return answered;

@@ -26,6 +26,7 @@ import {
 } from '../../../contract/index.ts';
 import { ownInstructionsSource } from '../../../daemon/adapters/own-instructions-source.ts';
 import { runtimesConfigFiles } from '../../../daemon/adapters/runtimes-config-files.ts';
+import { memoryPins } from '../../support/starters.ts';
 import type { AccountModel } from '../../../daemon/lib/account/schema.ts';
 import { createRuntimesApi } from '../../../daemon/lib/service/runtimes-api.ts';
 
@@ -78,6 +79,7 @@ async function world(seed: Readonly<Record<string, string>>) {
 
 const adapter = (port: Awaited<ReturnType<typeof world>>['port']) =>
   runtimesConfigFiles({
+    pins: memoryPins(),
     config: port,
     logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
     components: () => 'unavailable',
@@ -173,6 +175,7 @@ describe('a good component beside one whose harness word is a typo, through the 
     const { port } = await seeded(profile('instructions/good'));
 
     const loaded = await runtimesConfigFiles({
+      pins: memoryPins(),
       config: port,
       logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
       components: () => 'unavailable',

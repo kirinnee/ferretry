@@ -10,7 +10,7 @@
  * Onboarding's own pages (name, appearance) first; steps inside a segment sort by `order`, then id. The shell knows no
  * plugin's logic: a step that decides it is not needed says so itself when it mounts (`StepHost.skip`).
  */
-import { type StepView, sideOf } from '../../contract/index.ts';
+import { type HarnessView, type StepView, sideOf } from '../../contract/index.ts';
 import { clientStepKey } from '../../contract/step-host.ts';
 import { type ClientLedger, isClientStepSet } from './client-ledger.ts';
 
@@ -22,6 +22,8 @@ export interface PairedDaemon {
   readonly id: string;
   readonly name: string;
   readonly steps: readonly StepView[];
+  /** The harnesses installed on that machine (`GET /v1/onboarding` `harnesses`). */
+  readonly harnesses?: readonly HarnessView[];
 }
 
 export interface FlowStep {
@@ -55,6 +57,8 @@ export interface FlowSegment {
 export interface Flow {
   readonly daemon: readonly FlowSegment[];
   readonly client: readonly FlowSegment[];
+  /** The harnesses installed on the machine being set up: the picker lists them and the run passes over the pages of those left out. */
+  readonly harnesses: readonly HarnessView[];
 }
 
 export interface FlattenInput {
@@ -171,6 +175,7 @@ export function flattenFlow(input: FlattenInput): Flow {
   return {
     daemon: segmentsOf(daemonSteps, groups, titles, 'daemon'),
     client: segmentsOf(clientSteps, groups, titles, 'client'),
+    harnesses: input.daemons.find(daemon => daemon.id === input.target)?.harnesses ?? [],
   };
 }
 

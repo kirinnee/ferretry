@@ -572,8 +572,9 @@ describe('the runtimes on a login, as a change to it would leave them (Logins as
       model: parseAccountModel({
         version: 1,
         credentials: { 'claude-you': { harness: 'claude', store: 'host' } },
-        components: { mcp: { srv: { command: 'srv', args: [] } } },
-        profiles: { default: { layers: ['mcp/srv'] } },
+        // A runtime that names no model cannot launch (the picker says "No model list"), so this one names one.
+        components: { mcp: { srv: { command: 'srv', args: [] } }, modelSets: { m: { models: ['m1'], default: 'm1' } } },
+        profiles: { default: { layers: ['modelSets/m', 'mcp/srv'] } },
         runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default' } },
       }),
     });

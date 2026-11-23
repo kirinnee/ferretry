@@ -7,6 +7,7 @@
  * use a real temp directory as the whole `PATH`, the real cache and the real evaluator, wired the way
  * `host-assembly.ts` wires them. No network, no real home.
  */
+import { memoryPins, TEST_MODEL_SOURCES } from '../../support/starters.ts';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -49,6 +50,7 @@ function daemon() {
     () => clock.now,
   );
   const files = runtimesConfigFiles({
+    pins: memoryPins(),
     config: {
       collection: (_def: ConfigCollectionDef<unknown>) => new Map(),
       file: () => undefined,
@@ -60,6 +62,7 @@ function daemon() {
         logins: [sampleLogin('claude-you', { store: 'ferretry' })],
       }),
       environmentTemplates: async () => [],
+      modelSources: async () => TEST_MODEL_SOURCES,
     },
     components: EMPTY_OWNERS,
     within: work => work,

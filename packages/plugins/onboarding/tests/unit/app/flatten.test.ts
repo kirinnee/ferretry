@@ -220,7 +220,7 @@ describe('flattening: the client phase', () => {
       daemons: [{ id: A, name: 'Studio', steps: [] }],
       ledger: EMPTY_LEDGER,
     });
-    expect(flow).toEqual({ daemon: [], client: [] });
+    expect(flow).toEqual({ daemon: [], client: [], harnesses: [] });
   });
 
   test('a steps without side reads as a daemon step (an old snapshot)', () => {

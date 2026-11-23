@@ -27,12 +27,19 @@ const installed = params.get('claude') !== 'absent';
 // `?scan=fail`: the machine refuses its scan, so the flow's read ahead fails before the picker mounts. Then a second page (the
 // Settings import's scan reader) and the picker can be swapped with `[data-scene-to-reader]` / `[data-scene-to-picker]`.
 const scanFails = params.get('scan') === 'fail';
+// `?third=1`: the machine's registry lists a third harness (a plugin this page has never heard of), registered FIRST.
+const HARNESSES = [
+  ...(params.get('third') === '1' ? [{ key: 'fake-third', label: 'Fake Third' }] : []),
+  { key: 'codex', label: 'Codex' },
+  { key: 'claude-code', label: 'Claude Code' },
+];
 const counted = window as unknown as { __scanCalls: number };
 counted.__scanCalls = 0;
 
 const client = {
   call: async (route: string) => {
     if (route === 'GET /v1/logins/presets') return PROVIDER_PRESETS;
+    if (route === 'GET /v1/onboarding') return { harnesses: HARNESSES };
     if (route === 'GET /v1/runtimes/setup/scan') {
       counted.__scanCalls += 1;
       if (scanFails) throw new Error('the scan was refused');

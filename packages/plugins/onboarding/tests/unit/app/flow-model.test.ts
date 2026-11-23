@@ -43,7 +43,7 @@ describe('the run: which pages, in which order', () => {
       ),
     });
     const pages = pagesOf(flowOf([answered]));
-    const before = answeredBefore(pages, new Set(['onboarding.appearance']));
+    const before = answeredBefore(pages, new Set(['onboarding.appearance']), []);
     expect([...before].sort()).toEqual(['fake-pack.welcome', 'onboarding.appearance', 'onboarding.name']);
     expect(startRun(pages, before).at).toBe('fake-pack.choose');
     // Walking on passes the page left for later.

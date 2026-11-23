@@ -6,6 +6,7 @@ import { type Brand, InstantSchema } from '@ferretry/std';
 import {
   defineConfig,
   defineEvent,
+  defineState,
   definePort,
   type Loosens,
   neverLoosens,
@@ -250,6 +251,22 @@ export const MODEL_SET_ITEMS = configDef(
     loosens: neverLoosens,
   }),
 );
+
+// ─── state (§9.2) ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The model a (login, harness) launched with the first time Ferretry saw it, through that login's own catalog, by
+ * `<harness>:<login id>`. A missing file is the first run; one that cannot be read refuses derived runtimes and is never
+ * written over. A catalog that later names another default is OFFERED in pickers and never moves this: a runtime's model
+ * changes only when its owner changes it (D4). A login's keys are pruned when the login is removed.
+ */
+export const RUNTIMES_PINS = defineState({
+  name: 'starter-pins',
+  path: 'starter-pins.json',
+  store: 'json',
+  format: 1,
+  schema: z.strictObject({ models: z.record(z.string().min(1), z.string().min(1)) }),
+});
 
 // ─── audit kinds this plugin records (Gate's log; today's `fleet.configured` event, told apart by `action`) ─────────
 
