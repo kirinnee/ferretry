@@ -458,8 +458,16 @@ describe('Conversation tab previews', () => {
       await tab.waitForFunction(
         () => document.querySelector('[data-cvp-motion]')?.getAttribute('data-cvp-motion') === 'on',
       );
-      // Beyond two plays (1.4 s each, the last line delayed 320 ms) nothing is left running and the lines are written.
-      await tab.waitForTimeout(LOOP_MS * 2 + 400);
+      // The play ends (1.4 s, the last line delayed 320 ms) and the lines are written. The end is waited FOR, not timed: a
+      // loaded runner paints late, and the page's animation clock then runs behind the wall clock (CI saw all three lines
+      // still running after a fixed wait of two plays). A play that never ends fails this wait.
+      await tab.waitForFunction(
+        () => [...document.querySelectorAll('.fy-cvp-write')].every(node => node.getAnimations().length === 0),
+        undefined,
+        { timeout: 30_000 },
+      );
+      // …and it rests: a whole further play and a half later nothing has started again (it writes once, it does not loop).
+      await tab.waitForTimeout(LOOP_MS * 1.5);
       expect(await writes.evaluateAll(nodes => nodes.flatMap(node => node.getAnimations().length))).toEqual([0, 0, 0]);
       expect(
         await writes.evaluateAll(nodes => nodes.map(node => new DOMMatrixReadOnly(getComputedStyle(node).transform).a)),

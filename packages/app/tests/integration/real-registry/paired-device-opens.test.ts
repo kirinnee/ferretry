@@ -99,7 +99,13 @@ describe.each([['full'], ['limited']] as const)('a %s device on a daemon of this
 
 describe('narrowing still narrows', () => {
   test('a full device sees every package; a limited one loses what its grants do not reach, never a core piece', async () => {
-    const daemon = await startDaemon({ name: 'A', daemon: daemonRegistry } as never, { version: appVersion });
+    // Board and Agenda ride the one `work` switch, which is OFF by default (O8-14 P2): a daemon whose owner has not turned
+    // it on answers them `off`, to a full device as to anyone. "A full device sees every package" is the claim under test,
+    // so the daemon starts the way an owner who turned work on has it.
+    const daemon = await startDaemon({ name: 'A', daemon: daemonRegistry } as never, {
+      version: appVersion,
+      workOn: true,
+    });
     const full = await openApp(daemon, { surfaces, appVersion }, { grants: 'full' });
     const limited = await openApp(daemon, { surfaces, appVersion }, { grants: 'limited' });
     try {

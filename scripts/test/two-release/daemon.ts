@@ -43,6 +43,32 @@ export interface StartedDaemon {
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
+/** The loopback listener's address, from the run record the host wrote. */
+const runRecord = async (home: string): Promise<{ host: string; port: number }> =>
+  await until(
+    async () => JSON.parse(await readFile(join(home, 'run', 'daemon.json'), 'utf8')) as { host: string; port: number },
+    10_000,
+    'the run record',
+  );
+
+/** Reads the admin token Gate minted, waiting for it. */
+async function adminTokenOf(home: string): Promise<string> {
+  const token = await until(
+    async () => (await readFile(join(home, 'state', 'gate', 'admin-token'), 'utf8')).trim() || undefined,
+    15_000,
+    'the admin token',
+  );
+  // Gate writes the admin token, then the warden token, and only then accepts either (every bearer is refused until
+  // its load ends). A reader that took the admin file the moment it appeared was refused as anonymous.
+  await until(
+    async () => (await readFile(join(home, 'state', 'gate', 'warden-token'), 'utf8')).trim() || undefined,
+    15_000,
+    'the warden token',
+  );
+  await sleep(100);
+  return token;
+}
+
 /** Polls `read` until it answers, for at most `ms`. */
 async function until<T>(read: () => Promise<T | undefined>, ms: number, what: string): Promise<T> {
   const deadline = Date.now() + ms;
@@ -63,6 +89,13 @@ export interface StartDaemonOptions {
    * Never a response: every answer still comes from the host.
    */
   readonly seed?: (home: string) => Promise<void>;
+  /**
+   * Starts with Board and Agenda on. They ride the one `work` switch (`config/plugins.yaml` `work: on`), which is OFF by
+   * default, so a full device is told `off` for both unless the owner turned it on. Turning it on is a loosening, so a
+   * hand-written file is HELD and ignored: it goes through the owner's own door (the admin token over loopback, which is
+   * the person at the machine), and the plugins it starts are chosen at boot, so the daemon boots a second time on it.
+   */
+  readonly workOn?: boolean;
 }
 
 /**
@@ -106,13 +139,14 @@ export async function startDaemon(release: Release, options: StartDaemonOptions)
           remove: path => rm(path, { force: true }),
         }),
     });
-  if (options.seed !== undefined) {
+  if (options.seed !== undefined || options.workOn === true) {
     try {
       const made = await boot();
       if (made.kind === 'refused')
         throw new Error(`the ${release.name} daemon refused to make its home: ${made.sentence}`);
+      if (options.workOn === true) await turnWorkOn(home);
       await made.host.stop();
-      await options.seed(home);
+      await options.seed?.(home);
     } catch (error) {
       rmSync(parent, { recursive: true, force: true });
       throw error;
@@ -128,12 +162,7 @@ export async function startDaemon(release: Release, options: StartDaemonOptions)
   // the one process every integration file shares.
   let run: { host: string; port: number };
   try {
-    run = await until(
-      async () =>
-        JSON.parse(await readFile(join(home, 'run', 'daemon.json'), 'utf8')) as { host: string; port: number },
-      10_000,
-      'the run record',
-    );
+    run = await runRecord(home);
   } catch (error) {
     await host.stop().catch(() => undefined);
     rmSync(parent, { recursive: true, force: true });
@@ -144,22 +173,7 @@ export async function startDaemon(release: Release, options: StartDaemonOptions)
     url: `http://${run.host}:${run.port}`,
     home,
     version: options.version,
-    adminToken: async () => {
-      const token = await until(
-        async () => (await readFile(join(home, 'state', 'gate', 'admin-token'), 'utf8')).trim() || undefined,
-        15_000,
-        'the admin token',
-      );
-      // Gate writes the admin token, then the warden token, and only then accepts either (every bearer is refused until
-      // its load ends). A reader that took the admin file the moment it appeared was refused as anonymous.
-      await until(
-        async () => (await readFile(join(home, 'state', 'gate', 'warden-token'), 'utf8')).trim() || undefined,
-        15_000,
-        'the warden token',
-      );
-      await sleep(100);
-      return token;
-    },
+    adminToken: () => adminTokenOf(home),
     diagnose: () => describeDaemon(host, home),
     stop: async () => {
       await host.stop();
@@ -169,6 +183,18 @@ export async function startDaemon(release: Release, options: StartDaemonOptions)
 }
 
 const LOG_TAIL = 6000;
+
+/** Writes `work: on` as the owner (the host's admin token over loopback applies it at once). */
+async function turnWorkOn(home: string): Promise<void> {
+  const run = await runRecord(home);
+  const admin = await adminTokenOf(home);
+  const put = await fetch(`http://${run.host}:${run.port}/v1/config/file`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${admin}`, 'x-ferretry-client': 'cli', 'content-type': 'application/json' },
+    body: JSON.stringify({ path: 'plugins.yaml', text: 'work: on\n' }),
+  });
+  if (!put.ok) throw new Error(`turning work on failed (${String(put.status)}): ${await put.text()}`);
+}
 
 /** Every plugin's status and failure, and the tail of the daemon's log with both Gate tokens masked. */
 function describeDaemon(host: RunningHost, home: string): string {

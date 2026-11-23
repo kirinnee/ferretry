@@ -63,7 +63,13 @@ const VARIANTS = [
   { name: '390-light', width: 390, height: 844, phone: true, scheme: 'light' },
   { name: '390-dark', width: 390, height: 844, phone: true, scheme: 'dark' },
 ] as const;
-type Variant = (typeof VARIANTS)[number];
+interface Variant {
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly phone: boolean;
+  readonly scheme: 'light' | 'dark';
+}
 
 /** The most characters the page may say, not counting the card titles (owner line 3). */
 const TEXT_LIMIT = 160;
@@ -293,8 +299,7 @@ describe('the new palettes on the Appearance page (C59 O6)', () => {
               palette
             ] as string,
           );
-          if (palette !== 'briefing') expect(after.mesh).toContain('radial-gradient');
-          else expect(after.mesh).toBe('none');
+          expect(after.mesh).toContain('radial-gradient');
           // The mesh is a LIST of glows, so it is several background layers: each one must be untiled (size auto, no-repeat). It was
           // tiled in the pattern's 32px squares (a pink checkerboard over the page) when the body's size and repeat lists were too short.
           const layers = await tab.evaluate(() => {
@@ -324,7 +329,7 @@ describe('the new palettes on the Appearance page (C59 O6)', () => {
             }));
           });
           const glows = layers.filter(layer => layer.glow);
-          expect(glows.length, 'a mesh palette draws its glows').toBe(palette === 'briefing' ? 0 : 4);
+          expect(glows.length, 'a mesh palette draws its glows').toBe(4);
           for (const glow of glows)
             expect(glow, 'an untiled glow').toEqual({ glow: true, size: 'auto', repeat: 'no-repeat' });
           await tab.evaluate(() => window.scrollTo(0, 0));
@@ -413,6 +418,67 @@ describe('the Appearance page works in every style and every palette (C59 O6c)',
       await close();
     }
   });
+  // C59 O8-7 review: the phone pins the sample to the top and the footer to the bottom, so a card a KEY scrolls into view must come to
+  // rest between them, never under either (End and Home on a list, and Tab into the next list), at the smallest screen at Larger text.
+  for (const scheme of ['light', 'dark'] as const)
+    for (const height of [568, 480])
+      it(`keeps the card a key moves to clear of the pinned sample and footer (320x${height} ${scheme}, Larger text)`, async () => {
+        const { tab, close } = await open({ name: `320-${scheme}`, width: 320, height, phone: true, scheme });
+        try {
+          await tab.locator('[aria-label="Text size"] .fy-cc__card[data-choice="larger"]').click();
+          await tab.waitForTimeout(250);
+          const hidden = async (label: string): Promise<string[]> =>
+            (
+              await tab.evaluate(() => {
+                const focused = document.activeElement as HTMLElement | null;
+                const card = focused?.closest('label') ?? focused;
+                if (card === null || card === undefined) return ['nothing is focused'];
+                const rect = card.getBoundingClientRect();
+                const demo = (document.querySelector('.fy-spf__demo') as HTMLElement).getBoundingClientRect();
+                const footer = (document.querySelector('.fy-spf__footer') as HTMLElement).getBoundingClientRect();
+                const found: string[] = [];
+                // Fully visible: below the sample's bottom edge and above the footer's top edge.
+                if (rect.top < demo.bottom - 0.5)
+                  found.push(
+                    `under the sample by ${Math.round(demo.bottom - rect.top)}px of ${Math.round(rect.height)}px`,
+                  );
+                if (rect.bottom > footer.top + 0.5)
+                  found.push(
+                    `under the footer by ${Math.round(rect.bottom - footer.top)}px of ${Math.round(rect.height)}px`,
+                  );
+                return found;
+              })
+            ).map(problem => `${label}: ${problem}`);
+          for (const list of ['Style', 'Palette']) {
+            await tab.locator(`[aria-label="${list}"] input:checked`).focus();
+            await tab.keyboard.press('End');
+            await tab.waitForTimeout(150);
+            expect(await hidden(list), `${list}: after End`).toEqual([]);
+            await tab.keyboard.press('Home');
+            await tab.waitForTimeout(150);
+            expect(await hidden(list), `${list}: after Home`).toEqual([]);
+            for (let step = 0; step < 6; step += 1) {
+              await tab.keyboard.press('ArrowDown');
+              await tab.waitForTimeout(100);
+              expect(await hidden(list), `${list}: after ArrowDown ${step + 1}`).toEqual([]);
+            }
+          }
+          // Tab from the last Style card to the next list, and Shift+Tab back.
+          await tab.locator('[aria-label="Style"] input:checked').focus();
+          for (let step = 0; step < 4; step += 1) {
+            await tab.keyboard.press('Tab');
+            await tab.waitForTimeout(100);
+            expect(await hidden('tab'), `after Tab ${step + 1}`).toEqual([]);
+          }
+          for (let step = 0; step < 3; step += 1) {
+            await tab.keyboard.press('Shift+Tab');
+            await tab.waitForTimeout(100);
+            expect(await hidden('shift-tab'), `after Shift+Tab ${step + 1}`).toEqual([]);
+          }
+        } finally {
+          await close();
+        }
+      });
   for (const variant of [VARIANTS[1], VARIANTS[2]])
     it(`every one of the ${PALETTES.length} palettes keeps the cards, the sample and the page whole (${variant.name})`, async () => {
       const { tab, problems, close } = await open(variant);
@@ -437,7 +503,7 @@ describe('the Appearance page works in every style and every palette (C59 O6c)',
 
 describe("the Briefing style and palette match the owner's reference (C59 O6b)", () => {
   for (const variant of VARIANTS)
-    it(`Poppins 600 headings over a Poppins 400 body, a flat page, indigo on lavender-grey (${variant.name})`, async () => {
+    it(`Poppins 600 headings over a Poppins 400 body, blue and pink on navy / lavender-grey (${variant.name})`, async () => {
       const { tab, close } = await open(variant);
       try {
         await tab.locator('[aria-label="Style"] .fy-cc__card[data-choice="briefing"]').click();
@@ -459,6 +525,7 @@ describe("the Briefing style and palette match the owner's reference (C59 O6b)",
             bg: getComputedStyle(document.body).backgroundColor,
             accent: root.getPropertyValue('--accent').trim(),
             focus: root.getPropertyValue('--focus-color').trim(),
+            mesh: root.getPropertyValue('--surface-mesh').trim(),
             radiusPanel: getComputedStyle(document.documentElement).getPropertyValue('--radius-panel').trim(),
             demoButtonColour: getComputedStyle(demoButton).backgroundColor,
           };
@@ -470,10 +537,13 @@ describe("the Briefing style and palette match the owner's reference (C59 O6b)",
         expect(read.bodyWeight).toBe('400');
         expect(Number(read.grain), 'no paper grain').toBe(0);
         expect(read.radiusPanel).toBe('16px');
-        // The reference's own colours: lavender-grey page / navy ground, indigo accent.
+        // The reference's own colours: lavender-grey page / navy ground, a bright blue accent (the reference's #555FFF by day, held
+        // at 4.5:1 as text; its #8A92FF at night) and hot-pink glows (#F91974) behind the page.
         expect(read.bg).toBe(variant.scheme === 'light' ? 'rgb(233, 235, 244)' : 'rgb(14, 18, 32)');
-        expect(read.accent).toBe(variant.scheme === 'light' ? '#3b44e0' : '#a9afff');
-        expect(read.focus).toBe(variant.scheme === 'light' ? '#3b44e0' : '#8a92ff');
+        expect(read.accent).toBe(variant.scheme === 'light' ? '#424cec' : '#9aa1ff');
+        expect(read.focus).toBe(variant.scheme === 'light' ? '#424cec' : '#8a92ff');
+        // The page carries the document's glows (blue and hot pink): four of them, drawn behind the page.
+        expect(read.mesh.match(/radial-gradient\(/gu)?.length, 'four glows').toBe(4);
         await tab.evaluate(() => window.scrollTo(0, 0));
         await shot(tab, variant, 'briefing');
         console.log(`MEASURED briefing ${variant.name}: ${JSON.stringify(read)}`);

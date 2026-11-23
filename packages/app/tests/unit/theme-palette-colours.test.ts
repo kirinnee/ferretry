@@ -16,7 +16,7 @@ import { readStyleFile } from '../../src/testing/theme-css.ts';
 
 const NEW_PALETTES = ['vaporwave', 'hacker', 'vintage', 'mesh', 'aurora', 'afterglow', 'briefing'] as const;
 const STYLE_DEFAULTS = ['vaporwave', 'hacker', 'vintage'] as const;
-const GRADIENT_PALETTES = ['mesh', 'aurora', 'afterglow'] as const;
+const GRADIENT_PALETTES = ['mesh', 'aurora', 'afterglow', 'briefing'] as const;
 const MODES = ['light', 'dark'] as const;
 
 const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//gu, '');

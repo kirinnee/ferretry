@@ -50,9 +50,9 @@
     hacker: 'pixel',
     vintage: 'antiposh',
     vaporwave: 'genz',
-    mesh: 'studio',
-    aurora: 'studio',
-    afterglow: 'studio',
+    mesh: 'lucid',
+    aurora: 'glass',
+    afterglow: 'neumorphism',
     briefing: 'briefing',
     contrast: 'studio',
   };
