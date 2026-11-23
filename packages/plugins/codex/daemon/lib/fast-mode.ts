@@ -59,13 +59,16 @@ export function fastInForce(view: FastView, choice: RuntimeModelChoice | undefin
 /**
  * Why a START that asks for fast mode cannot have it on the model it resolved, or nothing.
  *
- * Only an explicit 'no' refuses. The answer is the live catalog's, which a start looks at only when it asked for fast
- * mode; a model the held catalog does not list is let through — the session then runs on the tier it was given and its
- * chip reports what the harness says. (No catalog at all is refused earlier, in {@link fastStartDecision}.)
+ * Fast is allowed ONLY when the held catalog lists the model AND says it has a fast tier (`fast === true`). A model the list
+ * does not carry, or a row with no fast-tier evidence, is refused: fast is never allowed unverified (#35).
  */
 export function fastStartRefusal(model: string, choices: readonly RuntimeModelChoice[]): string | undefined {
   const choice = catalogChoice({ harness: 'codex', source: 'codex-app-server', choices }, model);
-  return choice?.fast === false ? `${choice.label} has no fast mode` : undefined;
+  if (choice === undefined) return `Codex's model list does not include ${model}, so its fast mode cannot be confirmed`;
+  if (choice.fast === true) return undefined;
+  return choice.fast === false
+    ? `${choice.label} has no fast mode`
+    : `Codex's model list does not say ${choice.label} has fast mode, so it cannot be confirmed`;
 }
 
 /** The facts the planner needs for a fast switch on this session. */
@@ -97,13 +100,17 @@ export const FAST_NOT_CONFIRMED = (label: string, retryInMs = 0): string => {
   return `Fast mode for ${label} is not confirmed yet (Codex's model list could not be read; ${when}); try again then, or start without fast mode`;
 };
 
+/** What a fast start is told when it names no model and the held list has no default to judge it on. */
+export const NO_MODEL_FOR_FAST =
+  "Codex's model list names no default model, so fast mode cannot be confirmed; pick a model";
+
 /** What a fast start is told when the read looked for Codex and it is not there: it will not load, so it does not say so. */
 export const CODEX_NOT_FOUND = 'Codex could not be found, so its fast mode cannot be checked';
 
 /**
  * The models the `openai` catalog lists for Codex, as the choices a fast start is judged against while no read of Codex's
- * own list has landed. The catalog states no service tier, so `fast` is left unset ("nobody can say") and {@link
- * fastStartRefusal} refuses none of them. Nothing when no `openai` catalog (or no codex half of it) is in effect.
+ * own list has landed. The catalog states no service tier, so `fast` is left unset ("nobody can say"), so they never allow a fast start; the
+ * refusal only uses them to say what it is refusing. Nothing when no `openai` catalog (or no codex half of it) is in effect.
  */
 export function openaiFallbackChoices(view: {
   readonly catalogs: readonly {
@@ -140,7 +147,7 @@ export function openaiFallbackChoices(view: {
  * ever, or no read has ever worked. Fast is never allowed unverified, so that REFUSES at once with {@link CATALOG_LOADING} (or {@link CODEX_NOT_FOUND}
  * when the last read found no Codex binary — the same closed code, still fail closed)
  * (britnee, #35). Today a cold read waited, and a failed one allowed (rebuild-ref `bin/fyd.ts:2692`, `.catch(() => [])`);
- * both are tightened on purpose. A catalog that is held but does not list the model refuses nothing, as today.
+ * both are tightened on purpose. A catalog that is held but does not list the model, or lists it without fast-tier evidence, refuses too.
  * `known` is the `openai` catalog's models ({@link openaiFallbackChoices}): they state no service tier, so they never allow
  * a start, but a refusal for a model they list says so ({@link FAST_NOT_CONFIRMED}) instead of "still loading".
  */
@@ -168,7 +175,7 @@ export function fastStartDecision(
     };
   }
   const model = input.model ?? choices.find(choice => choice.isDefault === true)?.value;
-  if (model === undefined) return ALLOW;
+  if (model === undefined) return { allow: false, reason: NO_MODEL_FOR_FAST, code: UNSERVABLE_MODEL };
   const refusal = fastStartRefusal(model, choices);
   return refusal === undefined ? ALLOW : { allow: false, reason: refusal, code: UNSERVABLE_MODEL };
 }

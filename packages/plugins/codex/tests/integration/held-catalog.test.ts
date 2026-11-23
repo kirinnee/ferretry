@@ -6,6 +6,7 @@ import type { Clock, FencedPath, RootHandle } from '@ferretry/kernel/contract';
 import { bunSpawn } from '@ferretry/kernel/host';
 import { instantFromEpochMs, ok } from '@ferretry/std';
 import { HeldCatalogSchema, type HeldCatalogFile } from '../../contract/index.ts';
+import { CodexModelCatalogError } from '../../daemon/lib/app-server.ts';
 import { CodexAppServerCatalog } from '../../daemon/adapters/app-server-catalog.ts';
 import { HeldFastCatalog, STALE_AFTER_MS, type HeldFastCatalogPorts } from '../../daemon/adapters/held-catalog.ts';
 import { catalogSpawn, type Started } from '../support/catalog-child.ts';
@@ -278,14 +279,15 @@ describe('the held Codex catalog', () => {
   test('(no guarantees row) r3 LOW-C a binary found on a later read clears the missing mark', async () => {
     const { root } = await workspace();
     let found = false;
+    const now = { ms: 0 };
     const catalog = new HeldFastCatalog({
       workspace: root,
       environment: async () => undefined,
       locate: async () =>
         (found ? { outcome: 'located', path: '/opt/codex/bin/codex' } : { outcome: 'absent' }) as never,
       read: async () => [SOL],
-      nowMs: () => 0,
-      now: () => instantFromEpochMs(0),
+      nowMs: () => now.ms,
+      now: () => instantFromEpochMs(now.ms),
       load: async () => undefined,
       save: async () => undefined,
       fallback: async () => undefined,
@@ -295,6 +297,7 @@ describe('the held Codex catalog', () => {
     await catalog.refresh();
     expect(catalog.binaryMissing()).toBe(true);
     found = true;
+    now.ms = 60_000;
     await catalog.refresh();
     expect(catalog.binaryMissing()).toBe(false);
     expect(catalog.held()).toHaveLength(1);
@@ -339,38 +342,67 @@ describe('the held Codex catalog', () => {
       },
     });
     await s.catalog.refresh();
+    s.now.ms = 60_000;
     await s.catalog.refresh();
+    s.now.ms = 360_000;
     await s.catalog.refresh();
     expect(s.warnings).toHaveLength(1);
-    // The child's own reason is in the warning, so the log says what to fix.
+    // The failure's KIND is in the warning (never its message), so the log says what to fix.
     expect(s.warnings[0]).toBe(
-      'the Codex model catalog could not be read (boom); fast starts on Codex are refused until it can be read (next try in 1 min)',
+      'the Codex model catalog could not be read (the read failed for a reason that is not logged); fast starts on Codex are refused until it can be read (next try in 1 min)',
     );
     fail = false;
+    s.now.ms = 360_000 + 1_800_000;
     await s.catalog.refresh();
     fail = true;
+    s.now.ms += STALE_AFTER_MS + 1;
     await s.catalog.refresh();
     expect(s.warnings).toHaveLength(2);
   });
 
-  test('U0 a failing read logs its cause once, masked', async () => {
+  test("U0 / rv-2372 #1 a failing read logs an allowlisted kind once and never the child's words, even when stderr holds a JSON token and a credentialed URL", async () => {
     const started: Started[] = [];
+    const stderr =
+      '{"error":"unauthorized","access_token":"tok-SECRET-123","refresh_token":"ref-SECRET-456"} GET https://api.example/v1/models?access_token=urlSECRET789&x=1 https://user:hunter2@api.example/';
     const s = await subject(started, {
-      read: async () => {
-        throw new Error(
-          'GET https://user:hunter2@api.example/v1/models failed: Authorization: Bearer sk-abcdef123456 token=abc.def',
-        );
-      },
+      spawn: catalogSpawn(started, { exitsAtOnce: true, stderr }),
       fallback: async () => [FALLBACK],
     });
     await s.catalog.loaded();
     await s.catalog.refresh();
+    s.now.ms = 60_000;
     await s.catalog.refresh();
-    expect(s.warnings).toHaveLength(1);
-    const line = s.warnings[0] ?? '';
-    expect(line).toContain('could not be read (GET https://***@api.example/v1/models failed');
-    expect(line).toContain('refused until it can be read');
-    for (const secret of ['hunter2', 'sk-abcdef123456', 'abc.def']) expect(line).not.toContain(secret);
+    expect(started).toHaveLength(2);
+    expect(s.warnings).toEqual([
+      'the Codex model catalog could not be read (the app-server ended before the list was complete); fast starts on Codex are refused until it can be read (next try in 1 min)',
+    ]);
+    for (const secret of ['SECRET', 'hunter2', 'access_token', 'unauthorized', 'api.example'])
+      expect(s.warnings.join('\n')).not.toContain(secret);
+  });
+
+  test('rv-2372 #1 a read error that is none of ours, or whose message is a secret, logs only a fixed sentence, an RPC code or an errno code', async () => {
+    const started: Started[] = [];
+    const lines: string[] = [];
+    const run = async (error: unknown): Promise<void> => {
+      const s = await subject(started, {
+        read: async () => {
+          throw error;
+        },
+      });
+      await s.catalog.refresh();
+      lines.push(s.warnings[0] ?? '');
+    };
+    await run(new Error('Authorization: Bearer abc.def.ghi {"api_key":"k-SECRET"}'));
+    await run(Object.assign(new Error('spawn /x/codex?token=SECRET ENOENT'), { code: 'ENOENT' }));
+    await run(Object.assign(new Error('boom SECRET'), { code: 'not an errno SECRET' }));
+    await run(new CodexModelCatalogError('request failed: token=SECRET', 'rpc-error', -32600));
+    expect(lines.map(line => line.replace(/^.*could not be read \(/u, '').replace(/\); fast starts.*$/u, ''))).toEqual([
+      'the read failed for a reason that is not logged',
+      'the app-server could not be run (ENOENT)',
+      'the read failed for a reason that is not logged',
+      'the app-server answered the model list request with an error (RPC code -32600)',
+    ]);
+    expect(lines.join('\n')).not.toContain('SECRET');
   });
 
   test('U0 with nothing held, the openai catalog is known as fallbackChoices(); held() stays real-only and a read that lands takes over', async () => {
@@ -390,6 +422,7 @@ describe('the held Codex catalog', () => {
     expect(s.catalog.held()).toBeUndefined();
     expect(s.catalog.fallbackChoices()?.map(choice => choice.value)).toEqual(['gpt-fallback']);
     fail = false;
+    s.now.ms = 60_000;
     await s.catalog.refresh();
     expect(s.catalog.held()?.map(choice => choice.value)).toEqual(['gpt-6-sol']);
   });
@@ -436,6 +469,28 @@ describe('the held Codex catalog', () => {
     s.now.ms += STALE_AFTER_MS + 1;
     s.catalog.refreshIfStale();
     expect(s.refreshes.count).toBe(5);
+  });
+
+  test('rv-2372 #3 the backoff holds at the read itself: a refresh inside the wait (the job that runs once after start) makes no read and does not lengthen it', async () => {
+    const started: Started[] = [];
+    let reads = 0;
+    const s = await subject(started, {
+      read: async () => {
+        reads += 1;
+        throw new Error('boom');
+      },
+    });
+    await s.catalog.refresh(); // fails at 0: next read no sooner than 60 s
+    expect(reads).toBe(1);
+    s.now.ms = 30_000;
+    await s.catalog.refresh(); // inside the wait: no read, no streak step
+    await s.catalog.refresh();
+    expect(reads).toBe(1);
+    expect(s.catalog.retryInMs()).toBe(30_000);
+    s.now.ms = 60_000;
+    await s.catalog.refresh(); // the wait is over: read, and the second wait is the 5 minutes
+    expect(reads).toBe(2);
+    expect(s.catalog.retryInMs()).toBe(300_000);
   });
 
   test('U0 a missing binary backs off too, so a fast start does not spawn a lookup every time', async () => {

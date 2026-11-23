@@ -3,6 +3,7 @@ import { epochMs, type Instant } from '@ferretry/std';
 import type { HeldCatalogFile } from '../../contract/index.ts';
 import type { RuntimeModelChoice } from '../lib/models.ts';
 import type { HarnessLocation } from '../lib/update/index.ts';
+import { CodexModelCatalogError, type CatalogFailureKind } from '../lib/app-server.ts';
 import { probeEnvironment } from './probe.ts';
 
 /**
@@ -17,8 +18,8 @@ import { probeEnvironment } from './probe.ts';
  * codex half ({@link HeldFastCatalog.fallbackChoices}, the `fallback` port) states no service tier, so it only lets the
  * refusal say whether the model is one Ferretry knows (a retry will work) or not.
  *
- * A read that fails is logged once per failing streak (masked: no credential, no URL with one) and is not asked for again
- * until a backoff has passed: 1 minute, then 5, then 30 ({@link RETRY_BACKOFF_MS}); a read that works resets it.
+ * A read that fails is logged once per failing streak (its allowlisted kind and codes only, never a message: see
+ * {@link describeFailure}) and is not asked for again until a backoff has passed: 1 minute, then 5, then 30 ({@link RETRY_BACKOFF_MS}); a read that works resets it.
  *
  * THE CHILD HAS ITS OWN PLACE AND NO LOGIN. It runs in a folder this class creates under the plugin's own `agent-homes`
  * root, with the scrubbed {@link probeEnvironment} (a throwaway `HOME` and `CODEX_HOME` inside that folder, every proxy
@@ -34,17 +35,33 @@ export const STALE_AFTER_MS = 300_000;
 /** How long a failed (or binary-less) read waits before a fast start may ask for another: 1 minute, then 5, then 30. */
 const RETRY_BACKOFF_MS: readonly number[] = [60_000, 300_000, 1_800_000];
 
+/** What a log says for each kind of failure: a fixed sentence per kind, never anything the failing side wrote. */
+const FAILURE_SENTENCE: Readonly<Record<CatalogFailureKind, string>> = {
+  'rpc-error': 'the app-server answered the model list request with an error',
+  'invalid-response': 'the app-server answered with something that is not a model list',
+  'no-models': 'the app-server listed no selectable models',
+  'non-json': 'the app-server wrote something that is not JSON',
+  timeout: 'the app-server did not answer in time',
+  'ended-early': 'the app-server ended before the list was complete',
+  stopped: 'the read was stopped',
+  setup: "the read's folders could not be set up",
+};
+
 /**
- * A failure's cause, fit for a log: a URL's credentials, bearer values, well-known token shapes and `key=value` pairs whose
- * name says secret are replaced, and the sentence is capped. The cause is a child's last stderr line, which can echo any of them.
+ * A failure described for a log from ALLOWLISTED parts only: one fixed sentence for its kind, plus a JSON-RPC error code
+ * (an integer) or an operating-system error code (`ENOENT` and the like, matched against a strict shape). The error's
+ * own message is NEVER read: it can hold the child's stderr or the server's words (a token in a JSON field, a URL with
+ * `?access_token=`), and no amount of masking free text is a promise about it.
  */
-function maskedCause(message: string): string {
-  return message
-    .replace(/:\/\/[^/\s@]*@/gu, '://***@')
-    .replace(/\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+/giu, '$1 ***')
-    .replace(/\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|eyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+)*)/gu, '***')
-    .replace(/([A-Za-z0-9_-]*(?:key|token|secret|password|auth)[A-Za-z0-9_-]*\s*[=:]\s*)[^\s,;"')]+/giu, '$1***')
-    .slice(0, 300);
+function describeFailure(error: unknown): string {
+  if (error instanceof CodexModelCatalogError) {
+    const code = error.rpcCode === undefined ? '' : ` (RPC code ${error.rpcCode})`;
+    return `${FAILURE_SENTENCE[error.kind]}${code}`;
+  }
+  const errno = (error as { readonly code?: unknown } | null)?.code;
+  if (typeof errno === 'string' && /^E[A-Z0-9_]{2,20}$/u.test(errno))
+    return `the app-server could not be run (${errno})`;
+  return 'the read failed for a reason that is not logged';
 }
 
 export interface HeldFastCatalogPorts {
@@ -172,6 +189,9 @@ export class HeldFastCatalog {
    * restarted. Two refreshes at once share one child.
    */
   async refresh(signal?: AbortSignal): Promise<void> {
+    // THE READ BOUNDARY. Every caller comes through here (a fast start's kick, and the job that runs once after start), so
+    // the backoff is held here and not in whoever asks: a read inside the wait is not made, and does not lengthen it.
+    if (this.#pending === undefined && this.ports.nowMs() < this.#retryAtMs) return;
     this.#pending ??= this.#read(signal)
       .then(landed => {
         if (landed) {
@@ -185,8 +205,8 @@ export class HeldFastCatalog {
         await this.#loadFallback();
         if (this.#failing) return;
         this.#failing = true;
-        // The child's own reason (its last stderr line, or the deadline) is what makes this warning fixable from the log.
-        const why = error instanceof Error && error.message !== '' ? ` (${maskedCause(error.message)})` : '';
+        // The KIND of failure is what makes this warning fixable from the log; the free text never is (it can hold a secret).
+        const why = ` (${describeFailure(error)})`;
         const effect =
           this.#held !== undefined
             ? 'fast starts on Codex are judged from the last good read'
@@ -210,9 +230,11 @@ export class HeldFastCatalog {
     // ("CODEX_HOME points to ..., but that path does not exist"), which is why no read ever landed before O8-4.
     const codexHome = this.ports.workspace.resolve('home/.codex');
     const work = this.ports.workspace.resolve('work');
-    if (!home.ok) throw new Error(`Codex's catalog home could not be placed: ${home.error}`);
-    if (!work.ok) throw new Error(`Codex's catalog folder could not be placed: ${work.error}`);
-    if (!codexHome.ok) throw new Error(`Codex's catalog CODEX_HOME could not be placed: ${codexHome.error}`);
+    if (!home.ok) throw new CodexModelCatalogError(`Codex's catalog home could not be placed: ${home.error}`, 'setup');
+    if (!work.ok)
+      throw new CodexModelCatalogError(`Codex's catalog folder could not be placed: ${work.error}`, 'setup');
+    if (!codexHome.ok)
+      throw new CodexModelCatalogError(`Codex's catalog CODEX_HOME could not be placed: ${codexHome.error}`, 'setup');
     // Created here, because a child started in a folder that is not there does not start at all.
     await this.ports.workspace.makeDirectory(home.value);
     await this.ports.workspace.makeDirectory(codexHome.value);
