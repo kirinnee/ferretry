@@ -15,7 +15,6 @@ import { clearAttachmentCaches } from './composer/attachment-blob-cache.ts';
 import { deviceOutboxFor } from './composer/device-outbox-hook.ts';
 import { documentDraftStore, documentRestoreStore } from './composer/drafts.ts';
 import { lazyComponent } from './lazy.ts';
-import { conversationPlaces } from './command-bar.ts';
 import { workSearchCommandSource } from './search/work-search-commands.ts';
 
 type Surfaces = {
@@ -45,7 +44,7 @@ const deviceSetting = (id: 'chat-width' | 'message-marks') =>
 const notDrawnPerDaemon: AppComponent<PanelProps> = () => null;
 
 /**
- * Conversation's app half: the chat and the links list as screens, the attachment entry, the queue and the compaction
+ * Conversation's app half: the chat as a screen, the past-conversation list in New ferret's slot, the attachment entry, the queue and the compaction
  * setting as panels in the slots Ferrets' screen and the composer offer, the Conversation Settings tab and the renderer
  * for a ferret's question. Every surface reads through the one generated client and the client context (`client.ts`).
  * Bodies arrive by area: composer (`composer/`), chat and transcript (`chat/`, `transcript/`), queue, questions,
@@ -61,7 +60,7 @@ export default provideToShell(
         );
         return surfaces;
       };
-      const screen = (id: 'chat' | 'links' | 'queues') =>
+      const screen = (id: 'chat' | 'queues') =>
         lazyComponent<ScreenProps>(async () => (await surfacesOf()).screens[id] as AppComponent<ScreenProps>);
       const panel = (
         id:
@@ -73,10 +72,11 @@ export default provideToShell(
           | 'files-search'
           | 'interrupt-row'
           | 'stuck-messages-row'
-          | 'agenda-conversation',
+          | 'agenda-conversation'
+          | 'new-ferret-continue',
       ) => lazyComponent<PanelProps>(async () => (await surfacesOf()).panels[id] as AppComponent<PanelProps>);
       return {
-        screens: { chat: screen('chat'), links: screen('links'), queues: screen('queues') },
+        screens: { chat: screen('chat'), queues: screen('queues') },
         panels: {
           attachments: panel('attachments'),
           queue: panel('queue'),
@@ -89,6 +89,7 @@ export default provideToShell(
           'interrupt-row': panel('interrupt-row'),
           'stuck-messages-row': panel('stuck-messages-row'),
           'agenda-conversation': panel('agenda-conversation'),
+          'new-ferret-continue': panel('new-ferret-continue'),
         },
         settings: {
           conversation: lazyComponent<SettingsProps>(
@@ -105,7 +106,7 @@ export default provideToShell(
   }),
   // Lead decision Q10: the shell's command bar lists the cards and asks the daemon's work search finds.
   {
-    commands: context => [conversationPlaces(context), workSearchCommandSource(context)],
+    commands: context => [workSearchCommandSource(context)],
     // S15: the shared "Add to chat" any surface calls (Board's cards today), over this plugin's own daemon.
     hooks: {
       [CONVERSATION_ADD_TO_CHAT_HOOK]: ({ daemon }) => addToChatFor(daemon),

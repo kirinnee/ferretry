@@ -516,6 +516,8 @@ export class FakeHarness implements Harness {
   readonly delivered: OutboundMessage[] = [];
   /** Every launch spec this harness was handed (start and resume), so a test sees what reached it. */
   readonly launched: LaunchSpec[] = [];
+  /** The harness conversation of every RESUME (a launch that names one), in order: a fresh start adds nothing. */
+  readonly resumed: string[] = [];
   /** Every launch spec `prepareHome` was handed, in order. */
   readonly prepared: LaunchSpec[] = [];
   readonly #seen = new Set<string>();
@@ -620,6 +622,7 @@ export class FakeHarness implements Harness {
   }
   async resume(spec: LaunchSpec, runner: Runner, env: ChildEnvironment, conversation: string) {
     this.launched.push(spec);
+    this.resumed.push(conversation);
     const running = await runner.resume(
       { ferret: spec.ferret, command: ['fake-harness', '--resume'], cwd: spec.folder, env },
       conversation,

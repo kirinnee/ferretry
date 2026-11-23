@@ -214,6 +214,21 @@ export function registeredPanel(plugin: string, id: string, client: unknown): Pl
   return { plugin, id, view };
 }
 
+/** One screen a plugin REGISTERS, as the shell builds it over `client` (a screen that reads its address is drawn under a router). */
+export function registeredScreen(
+  plugin: string,
+  id: string,
+  client: unknown,
+): (props: Record<string, unknown>) => ReactNode {
+  const half = generated.surfaces.find(entry => entry.id === plugin)?.app;
+  const built = half?.build?.({ client } as never) as unknown as
+    | { readonly screens?: Readonly<Record<string, (props: Record<string, unknown>) => ReactNode>> }
+    | undefined;
+  const view = built?.screens?.[id];
+  if (view === undefined) throw new Error(`${plugin} registers no screen ${id}`);
+  return view;
+}
+
 /**
  * A DEVICE CONTEXT FOR A SCENE THAT DRAWS ONE REAL PANEL OUTSIDE THE SHELL (r11 G2 review): the panel's own `useDeviceTheme` reads
  * a real `ThemePreferenceStore` (kept in memory, first look = `mode`), and a pick publishes the style, palette, mode and text

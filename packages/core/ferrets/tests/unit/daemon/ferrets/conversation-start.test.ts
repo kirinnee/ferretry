@@ -5,7 +5,8 @@ import { host } from './route-fixture.ts';
 
 test('R-0332 a start accepts and preserves the harness conversation approved by the launch contract', async () => {
   const runner = new FakeRunner();
-  const h = await host([], { harness: new FakeHarness(), runner });
+  const harness = new FakeHarness();
+  const h = await host([], { harness, runner });
   const started = await h.request('POST', '/v1/ferrets', {
     headers: { 'x-fy-request-id': 'conversation' },
     body: { folder: '/work/a', harnessConversation: 'conversation-existing' },
@@ -15,6 +16,8 @@ test('R-0332 a start accepts and preserves the harness conversation approved by 
   expect(JSON.parse(h.state('ferrets').raw(FerretFiles, id) ?? '{}')).toMatchObject({
     harnessConversation: 'conversation-existing',
   });
+  // O8-12: this is the one path "Continue a past conversation" uses; the harness is asked to RESUME that conversation.
+  expect(harness.resumed).toEqual(['conversation-existing']);
   for (const harnessConversation of ['', 'c'.repeat(257)]) {
     const answer = await h.request('POST', '/v1/ferrets', {
       headers: { 'x-fy-request-id': 'invalid-conversation' },

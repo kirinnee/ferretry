@@ -7,7 +7,7 @@
  */
 import { panel, renderer, screen, settingsTab } from '@ferretry/kernel/manifest';
 import { AGENDA_CONVERSATION_SLOT, CONVERSATION_MODES_SLOT } from '../../contract/index.ts';
-import { ACTIONS_ROW_SLOT, FILES_SEARCH_SLOT } from '@ferretry/core-ferrets/contract';
+import { ACTIONS_ROW_SLOT, FILES_SEARCH_SLOT, NEW_FERRET_CONTINUE_SLOT } from '@ferretry/core-ferrets/contract';
 import { fragment } from '../kit.ts';
 
 export default fragment({
@@ -18,7 +18,6 @@ export default fragment({
       // a tool row's shell commands) and the ferret as subject — Voice's read-aloud and Packs' card draw there. It mounts `ferret.toolbar` and
       // `ferret.side` with the ferret as subject.
       screen('chat', { path: 'ferrets/:ferret/chat' }),
-      screen('links', { path: 'links', nav: { label: 'Conversations', icon: 'messages', order: 25 } }),
       // Every ferret's queue on this machine (v4's "All queues"), opened from a ferret's queue panel; no nav entry of its own.
       screen('queues', { path: 'queues' }),
     ],
@@ -43,6 +42,8 @@ export default fragment({
       // Clear stuck messages, Dismiss all cancelled and Queue… (`app/slots/stuck-messages-row-panel.tsx`).
       panel(ACTIONS_ROW_SLOT, { id: 'stuck-messages-row', order: 20 }),
       panel(AGENDA_CONVERSATION_SLOT, { id: 'agenda-conversation', order: 10 }),
+      // "Continue a past conversation" on Ferrets' New ferret page (`app/slots/new-ferret-continue-panel.tsx`).
+      panel(NEW_FERRET_CONTINUE_SLOT, { id: 'new-ferret-continue', order: 10 }),
     ],
     settings: [
       settingsTab('conversation', {

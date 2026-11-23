@@ -4,7 +4,7 @@ nav:
   side: left
   style: dock
   labels: icons
-  items: [ferrets, conversation.links, agenda, board, projects, insights, settings]
+  items: [ferrets, agenda, board, projects, insights, settings]
 side: { show: wide-only, holds: ferrets, at: left }
 top: [daemon-picker, search]
 composer.tools: [attachments, dictation, runtime-picker, composer-quota]

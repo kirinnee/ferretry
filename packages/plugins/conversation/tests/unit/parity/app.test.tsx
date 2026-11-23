@@ -1,6 +1,6 @@
 /**
  * Parity rows S-* that Conversation owns (docs/design/rebuild-parity.tsv). The live tests mount the real screens: the
- * composer's "+" menu (S-0064), the hand-off message (S-0111), the imported-history page (S-0115) and the ledger
+ * composer's "+" menu (S-0064), the hand-off message (S-0111) and the ledger
  * message's "⋯" menu (S-0134). The skipped rows wait on the Conversation app half's remaining ports (ports-pending.json
  * `pendingHalves`, design D2 #4). The voice and warden settings rows are their plugins' own screens.
  */
@@ -8,6 +8,7 @@ import { describe, expect, test } from 'bun:test';
 import { createRef } from 'react';
 import { type HandoffDocument, turnFileInstruction } from '@ferretry/core-mailbox/contract';
 import { ensureDom, interact, mount, must } from '@ferretry/app/testing';
+import manifest from '../../../manifest.ts';
 import { HandoffSourceProvider, TURN_FILE_EXPLANATION } from '../../../app/chat/handoff-message.tsx';
 import { LedgerMessage } from '../../../app/chat/ledger-message.tsx';
 import { TranscriptRow } from '../../../app/chat/transcript-row.tsx';
@@ -15,7 +16,6 @@ import type { TranscriptEntry } from '../../../app/chat/transcript-entries.ts';
 import { AttachmentGalleryProvider } from '../../../app/composer/attachment-gallery.tsx';
 import { addMenuActions, ComposerAddMenu } from '../../../app/composer/composer-add-menu.tsx';
 import { daemonConnection } from '../../../app/composer/seam.ts';
-import { type HistoryEntry, type HistoryList, HistoryPage } from '../../../app/links/history-page.tsx';
 
 ensureDom();
 
@@ -62,6 +62,12 @@ describe('the app surfaces Conversation owns', () => {
     }
   });
 
+  test('S-0115 the imported-history page is removed (O8-12): Conversation declares no links screen and no nav entry for it', () => {
+    const screens = manifest.ui?.screens ?? [];
+    expect(screens.map(screen => screen.id)).not.toContain('links');
+    expect(screens.filter(screen => screen.nav !== undefined)).toEqual([]);
+  });
+
   test('S-0111 the hand-off message shows what the person sent, never the turn-file pointer, and says why on request', async () => {
     const path = '/home/kirin/.ferretry/state/sessions/s1/turns/turn-008.md';
     const row: TranscriptEntry = {
@@ -103,57 +109,6 @@ describe('the app surfaces Conversation owns', () => {
       expect(must(view.container.querySelector('[data-handoff-note="explained"]'), 'the note').textContent).toBe(
         TURN_FILE_EXPLANATION,
       );
-    } finally {
-      await view.unmount();
-    }
-  });
-
-  test('S-0115 the imported-history page lists the archive read-only and opens a transcript without ferret controls', async () => {
-    const entry = {
-      id: 'import-one',
-      harness: 'claude-code',
-      title: 'Keep this transcript read-only',
-      at: '2026-08-01T12:00:00.000Z',
-      turns: 12,
-    } as HistoryList['entries'][number];
-    const detail: HistoryEntry = {
-      entry,
-      messages: [
-        { role: 'user', text: 'Please preserve this.' },
-        { role: 'assistant', text: 'It remains archival evidence.' },
-      ],
-    };
-    const opened: string[] = [];
-    const view = await mount(
-      <HistoryPage
-        daemon="archive-daemon"
-        readEntry={async id => {
-          opened.push(id);
-          return detail;
-        }}
-        readHistory={async () => ({ entries: [entry], skipped: 0 })}
-      />,
-    );
-    const settle = () =>
-      interact(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-    try {
-      await settle();
-      const text = (): string => view.container.textContent ?? '';
-      expect(text()).toContain('Archive · archive-daemon');
-      expect(text()).toContain('cannot be resumed or sent messages');
-      expect(text()).toContain('Claude Code · 12 recorded turns');
-      const open = must(
-        view.container.querySelector<HTMLButtonElement>('button:not([data-theme-trigger])'),
-        'the read button',
-      );
-      await interact(() => open.click());
-      await settle();
-      expect(opened).toEqual(['import-one']);
-      expect(text()).toContain('Read-only transcript');
-      expect(text()).toContain('It remains archival evidence.');
     } finally {
       await view.unmount();
     }

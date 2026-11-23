@@ -4,8 +4,11 @@ An owner who used Claude Code or Codex before Ferretry already has conversations
 can keep any of them "on" as a ferret from the import picker (onboarding's Claude Code / Codex steps, and
 Settings › Runtimes › Import conversations…). The CLI equivalent is `fy import conversations`.
 
-New session › Continue a conversation picks up earlier work (`fy new --continue` searches the second source), from
-one of two sources:
+New ferret › Continue a past conversation picks up earlier work (`fy new --continue` searches the second source). It is a
+disclosure on the New ferret page itself, not a page or nav entry of its own: a conversation no ferret keeps is picked into
+the page's form (its folder, a runtime of its harness, the auto|interactive choice) and Create starts a ferret that names
+the conversation (`harnessConversation`), which the harness resumes; one a ferret already keeps resumes or opens that ferret.
+The list has two sources:
 
 - **Ferretry sessions** — every stopped ferret on the machine, resumed in place with its conversation
   intact through the session's own resume.

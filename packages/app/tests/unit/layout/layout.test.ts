@@ -49,8 +49,7 @@ const surfaces = [
     ],
   }),
   plugin('conversation', {
-    // `links` is Conversations (r11 S1): a default nav place, order 25 as its real manifest declares.
-    screens: [{ id: 'links', path: 'links', nav: { label: 'Conversations', order: 25 } }],
+    // O8-12: Conversation declares no screen with a nav entry any more (the past-conversation list is in New ferret).
     panels: [{ id: 'queue', slot: 'ferret.side', order: 10 }],
   }),
   // The rest of what the real manifests declare for `ferret.side` (the default layout lists every one of them).
@@ -151,17 +150,17 @@ describe('the layout item', () => {
       side: 'bottom',
       style: 'dock',
       labels: 'icons',
-      items: ['ferrets', 'conversation.links', 'agenda', 'board', 'projects', 'insights', 'settings'],
+      items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'],
     });
     // The ferret list is the first bottom-nav item on a phone (S-0231: no Ferrets drawer).
     const bottom = planFrame(phone, views).nav.entries[0];
     expect(bottom?.kind === 'screen' ? `${bottom.screen.plugin}.${bottom.screen.id}` : bottom?.item).toBe(
       'ferrets.ferrets',
     );
-    // Conversations is the second default place.
+    // O8-12: no Conversations place; Agenda is the second default place.
     const second = planFrame(phone, views).nav.entries[1];
     expect(second?.kind === 'screen' ? `${second.screen.plugin}.${second.screen.id}` : second?.item).toBe(
-      'conversation.links',
+      'agenda.agenda',
     );
     const stored = LayoutSchema.parse({ id: 'old', nav: { side: 'top', style: 'bar', items: ['agenda'] } });
     expect(resolveLayout(stored, 'wide').nav).toMatchObject({ side: 'left', style: 'dock' });
@@ -255,7 +254,6 @@ describe('the frame plan', () => {
     const plan = planFrame(resolveLayout(DEFAULT_LAYOUT, 'wide'), views);
     expect(plan.nav.entries.map(e => (e.kind === 'screen' ? `${e.screen.plugin}.${e.screen.id}` : e.item))).toEqual([
       'ferrets.ferrets',
-      'conversation.links',
       'agenda.agenda',
       'board.board',
       'projects.projects',

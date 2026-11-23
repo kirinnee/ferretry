@@ -30,6 +30,8 @@ export interface NewFerretDraft {
   remoteControl: boolean;
   label: string;
   prompt: string;
+  /** A past conversation to resume (picked from the Continue list): the harness's own id, sent as `harnessConversation`. */
+  harnessConversation?: string;
 }
 
 export const emptyNewFerretDraft: NewFerretDraft = {
@@ -59,6 +61,7 @@ const StartBodySchema = z.strictObject({
   runtime: RuntimeNameSchema,
   folder: z.string().min(1).max(4_096),
   prompt: z.string().max(200_000).optional(),
+  harnessConversation: z.string().min(1).max(256).optional(),
 });
 export type StartBody = z.infer<typeof StartBodySchema>;
 
@@ -78,6 +81,7 @@ export function buildStartBody(draft: NewFerretDraft): StartBody {
     ...(draft.remoteControl ? { remoteControl: true } : {}),
     ...(label === undefined ? {} : { label }),
     ...(prompt === undefined ? {} : { prompt }),
+    ...(draft.harnessConversation === undefined ? {} : { harnessConversation: draft.harnessConversation }),
   });
 }
 

@@ -118,10 +118,9 @@ describe('the command bar at v4 parity', () => {
       try {
         await tab.waitForSelector(`${BAR} [role="option"]:has-text("Fixture running")`);
         const labels = await options(tab);
-        expect(labels.slice(0, 12)).toEqual([
+        expect(labels.slice(0, 11)).toEqual([
           'Ferrets',
           'Agenda',
-          'Conversations',
           'Board',
           'Projects',
           'PRs & CI',
@@ -132,6 +131,7 @@ describe('the command bar at v4 parity', () => {
           'Warden',
           'Lessons',
         ]);
+        expect(labels, 'O8-12: Conversations is no place any more').not.toContain('Conversations');
         expect(new Set(labels).size, 'no place twice').toBe(labels.length);
         expect(labels).toContain('New ferret');
         const text = await tab.locator(`${BAR} [role="listbox"]`).innerText();
