@@ -6,6 +6,7 @@
  *   page    one signed-in login's own page
  *   env     an environment login's own page (its variables, its Test)
  *   needs   a login that needs signing in
+ *   needs-codex  a Codex login that needs signing in; its sign-in answers with the link flow (C59 O8-1 review: the 604px panel)
  *   add     the add-a-login panel: the sign-in form and the provider tiles
  *
  *   ?theme=<family>-<mode>   ?panel=<px>  the width of the Settings panel the tab sits in (default: fills the window)
@@ -14,6 +15,7 @@ import { createRoot } from 'react-dom/client';
 import { SignInsTab } from '../../../../app/features/sign-ins-tab.tsx';
 import { login, loginList } from '../../../unit/cli/fakes.ts';
 import { scripted } from '../../../unit/app/support/client.ts';
+import { codexFlow } from '../../../unit/app/support/harness-login.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
@@ -65,6 +67,19 @@ const logins = [
     usage: { fiveHour: {}, weekly: {} },
   }),
   login({ id: 'claude-slot', email: undefined, usedBy: [], status: needsSignIn }),
+  // Only on its own view, so no other view's list or count changes.
+  ...(view === 'needs-codex'
+    ? [
+        login({
+          id: 'codex-slot',
+          harness: 'codex',
+          harnesses: ['codex'],
+          email: undefined,
+          usedBy: [],
+          status: needsSignIn,
+        }),
+      ]
+    : []),
 ];
 
 const presetOf = (id: string, label: string, group: string, harness = 'claude-code') => ({
@@ -105,13 +120,18 @@ const presets = [
 ];
 
 const shown = view === 'empty' ? [] : logins;
-const target = { page: 'claude-personal', env: 'glm-env', needs: 'claude-slot' }[view as 'page' | 'env' | 'needs'];
+const target = { page: 'claude-personal', env: 'glm-env', needs: 'claude-slot', 'needs-codex': 'codex-slot' }[
+  view as 'page' | 'env' | 'needs' | 'needs-codex'
+];
 window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
 if (target !== undefined) window.location.hash = `#machines/box/sign-ins/${target}`;
 
 const client = scripted({
   'GET /v1/logins': loginList(...shown),
   'GET /v1/grants': OPEN,
+  // The Codex link sign-in the fixture "starts": waiting for the address the browser ends on.
+  'POST /v1/logins/sign-in': () => codexFlow('awaiting-callback'),
+  'GET /v1/logins/sign-in/:flowId': () => codexFlow('awaiting-callback'),
   'GET /v1/logins/presets': { presets },
   'POST /v1/logins/changes': (call: { body: unknown }) => ({
     id: 'chg1',

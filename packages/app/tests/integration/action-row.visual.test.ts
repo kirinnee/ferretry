@@ -155,6 +155,54 @@ describe('C59 the shared answer row', () => {
       }
     });
 
+    it(`${variant.name}: ActionRow fits its CONTAINER: side by side as one group only when both fit, else stacked full width, never clipped`, async () => {
+      const { tab, close } = await open(variant, 'narrow');
+      try {
+        for (const width of [160, 309, 399, 400, 604]) {
+          const sample = `[data-sample="w-${width}"]`;
+          const [container] = await boxes(tab, sample);
+          const [secondary] = await boxes(tab, `${sample} [data-b="secondary"]`);
+          const [primary] = await boxes(tab, `${sample} [data-b="primary"]`);
+          if (container === undefined || secondary === undefined || primary === undefined) throw new Error('boxes');
+          const named = `${width}px container`;
+          // The container is its own size (a phone window can still hold 604px at most as wide as the window).
+          const room = container.w;
+          for (const button of [secondary, primary]) {
+            expect(button.x, `${named}: starts inside the container`).toBeGreaterThanOrEqual(container.x - 0.5);
+            expect(button.right, `${named}: ends inside the container`).toBeLessThanOrEqual(container.right + 0.5);
+            expect(button.h, `${named}: a 44 px target`).toBeGreaterThanOrEqual(43.5);
+          }
+          const sideBySide = room >= 400 && !variant.phone;
+          if (sideBySide) {
+            expect(Math.abs(primary.y - secondary.y), `${named}: one row`).toBeLessThanOrEqual(1);
+            expect(Math.abs(primary.right - container.right), `${named}: group at the right end`).toBeLessThanOrEqual(
+              1,
+            );
+            expect(Math.abs(primary.x - (secondary.right + 12)), `${named}: one group`).toBeLessThanOrEqual(1);
+            expect(Math.abs(primary.w - 192), `${named}: 12rem`).toBeLessThanOrEqual(1);
+          } else {
+            // Too narrow for the group (or a phone): one per line, each the container's full width.
+            expect(Math.abs(primary.w - room), `${named}: the way on is full width`).toBeLessThanOrEqual(1);
+            expect(Math.abs(secondary.w - room), `${named}: the way out is full width`).toBeLessThanOrEqual(1);
+            expect(Math.abs(primary.y - secondary.y), `${named}: stacked`).toBeGreaterThan(20);
+            // Tab follows the picture: the DOM order is the drawn order, so the first in the DOM is the upper one.
+            const order = await tab.evaluate(
+              s => [...document.querySelectorAll(`${s} button`)].map(button => button.getAttribute('data-b')),
+              sample,
+            );
+            const upper = primary.y < secondary.y ? 'primary' : 'secondary';
+            expect(order[0], `${named}: Tab reaches the upper answer first`).toBe(upper);
+          }
+        }
+        expect(
+          await tab.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+          'nothing scrolls sideways',
+        ).toBeLessThanOrEqual(0);
+      } finally {
+        await close();
+      }
+    });
+
     it(`${variant.name}: ActionRow, Tab visits the answers in the order they are drawn (phone: the way on first; desktop: the way out first)`, async () => {
       const { tab, close } = await open(variant, 'row');
       try {

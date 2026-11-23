@@ -775,7 +775,10 @@ describe('PairingScreen never shows the loopback address of a relayed daemon', (
   it('confirms with "through the relay" and no address, and keeps the fingerprint behind Details', async () => {
     const screen = await screenWith({ arrival: loopbackArrival, sameMachine: false });
 
-    expect(screen.container.textContent).toContain('through the relay');
+    // Another device is not "this computer": the line names the target and says how it is reached, nothing more.
+    const line = must(screen.container.querySelector('[data-daemon-path]'), 'the machine line');
+    expect(line.textContent).toBe('Connecting to the machine through the relay. Details');
+    expect(screen.container.textContent).not.toContain('this computer');
     expect(screen.container.textContent).not.toContain('127.0.0.1');
     expect(screen.container.textContent).not.toContain('7617');
     // ONE line, and a small "Details" link on its end: the fingerprint is in the page but hidden until the link is pressed.
@@ -795,8 +798,10 @@ describe('PairingScreen never shows the loopback address of a relayed daemon', (
   it("says it is direct, with the address, when the page runs on the daemon's own machine", async () => {
     const screen = await screenWith({ arrival: loopbackArrival, sameMachine: true });
 
-    expect(screen.container.textContent).toContain('127.0.0.1:7617');
-    expect(screen.container.textContent).toContain('direct');
+    // On the daemon's own machine the line is the direct one, with its address: never the relay wording.
+    const line = must(screen.container.querySelector('[data-daemon-path]'), 'the machine line');
+    expect(line.textContent).toBe('Pairing directly with 127.0.0.1:7617. Details');
+    expect(screen.container.textContent).not.toContain('Connecting to the machine');
     expect(screen.container.textContent).not.toContain('through the relay');
     await screen.unmount();
   });

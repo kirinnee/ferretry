@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { expectDetailsOnFinalLine } from './details-on-final-line.ts';
 
 setDefaultTimeout(60_000);
 
@@ -218,8 +219,13 @@ describe('the Connected screen is balanced (C59 O3)', () => {
         expect(await tab.locator('main h1, main h2').allInnerTexts()).toEqual(['Connected']);
         const lines = await tab.locator('[data-paired-with]').allInnerTexts();
         // The one supporting line carries the small "Details" link on its end (C59 O8-1), so it is one line, not a card.
-        expect(lines).toHaveLength(1);
-        expect(lines[0]).toStartWith('Paired with kirin-workstation.');
+        // Exactly the one sentence and its Details link (not a prefix match: anything after the sentence would pass that).
+        expect(lines).toEqual(['Paired with kirin-workstation. Details']);
+        expect(await tab.locator('[data-pair-details] button').count(), 'the Details affordance is present').toBe(1);
+        expect(await tab.locator('[data-pair-details] button').innerText()).toBe('Details');
+        expect(await tab.locator('[data-pair-details] button').getAttribute('aria-expanded')).toBe('false');
+        // It sits on the sentence's own last line (not wrapped onto a line of its own), measured against the text, not the paragraph.
+        await expectDetailsOnFinalLine(tab, '[data-paired-with]', 'the Connected line');
         // The check sits inside the mascot's box (anchored to it, not floating off its corner), in the burrow's lower half.
         const geometry = await tab.evaluate(() => {
           const hero = (document.querySelector('.fy-pair-hero') as HTMLElement).getBoundingClientRect();

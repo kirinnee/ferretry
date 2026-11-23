@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { expectDetailsOnFinalLine } from './details-on-final-line.ts';
 
 setDefaultTimeout(60_000);
 
@@ -148,6 +149,20 @@ const contrast = (a: [number, number, number], b: [number, number, number]): num
 
 describe('The pair page: mascot and night sky', () => {
   for (const variant of VARIANTS) {
+    it(`${variant.name}: on the daemon's own machine the line is the direct one with its address, Details on its final line`, async () => {
+      const { tab, close } = await open(variant, '&same=1');
+      try {
+        expect(await tab.locator('[data-daemon-path]').innerText()).toBe(
+          'Pairing directly with 127.0.0.1:7617. Details',
+        );
+        expect(await tab.locator('[data-daemon-path]').getAttribute('data-daemon-path')).toBe('direct');
+        await expectDetailsOnFinalLine(tab, '[data-daemon-path]', 'the same-machine confirm line');
+        await shot(tab, variant, 'pair-same-machine');
+      } finally {
+        await close();
+      }
+    });
+
     it(`${variant.name}: one primary action, the name control, the mascot peeking, a living sky, no loopback address`, async () => {
       const { tab, problems, close } = await open(variant);
       try {
@@ -181,9 +196,8 @@ describe('The pair page: mascot and night sky', () => {
         expect(properties.filter(key => !['opacity', 'transform'].includes(key))).toEqual([]);
         // C59 O8-1: the machine is ONE line with a small "Details" link on its end, not a card (no panel, one row tall).
         expect(await tab.locator('main .kt-panel').count(), 'no card for the machine').toBe(0);
-        const line = must(await tab.locator('[data-daemon-path]').boundingBox(), 'the machine line');
-        const link = must(await tab.locator('[data-pair-details] button').boundingBox(), 'the Details link');
-        expect(link.y + link.height / 2, 'Details sits on the same line').toBeLessThanOrEqual(line.y + line.height);
+        // Measured against the FINAL TEXT LINE, not the paragraph: Details wrapped onto a line of its own is still inside the paragraph.
+        await expectDetailsOnFinalLine(tab, '[data-daemon-path]', 'the pair confirm line');
         // C59 O8-2: one left-aligned column on a desktop (the heading starts where the buttons start); centred on a phone.
         const column = must(await tab.locator('main').boundingBox(), 'the column');
         const notNowBox = must(await tab.getByRole('button', { name: 'Not now' }).boundingBox(), 'Not now');
@@ -209,6 +223,10 @@ describe('The pair page: mascot and night sky', () => {
             'desktop: Not now sits right beside it, one 12px gap',
           ).toBeCloseTo(12, 0);
         }
+        // Another device is not "this computer": the relayed line names the target and how it is reached, word for word.
+        expect(await tab.locator('[data-daemon-path]').innerText()).toBe(
+          'Connecting to the machine through the relay. Details',
+        );
         await shot(tab, variant, 'pair');
         await tab.locator('[data-pair-details] button', { hasText: 'Details' }).click();
         await shot(tab, variant, 'details');

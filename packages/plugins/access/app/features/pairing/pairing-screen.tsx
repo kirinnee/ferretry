@@ -688,11 +688,12 @@ function PairingFocus({
           </Title>
           {/* ONE heading and ONE supporting line, both centred. How it connected (relay or direct) is a detail, behind a tap. */}
           <LineWithDetails
+            tail="."
             lineProps={{ 'data-paired-with': '' }}
             detailsProps={{ 'data-paired-details': '' }}
             details={<>Connection: {stage.path.path}.</>}
           >
-            Paired with <span className="font-semibold">{stage.path.title}</span>.
+            Paired with <span className="font-semibold">{stage.path.title}</span>
           </LineWithDetails>
           {onContinue !== undefined ? (
             <PairedNext
@@ -778,6 +779,7 @@ function PairingFocus({
         fingerprint (and its address, only when direct) sits behind a small link on the end of it.
       */}
       <LineWithDetails
+        tail="."
         lineProps={{ 'data-daemon-path': target.kind }}
         detailsProps={{ 'data-pair-fingerprint': '' }}
         details={
@@ -788,10 +790,13 @@ function PairingFocus({
         }
       >
         {target.address === undefined ? (
-          <>Pairing with this computer {target.path}.</>
+          // No address means the machine is reached through the relay (a loopback address seen from another device is never
+          // shown), so the line names the target and never claims it is THIS device. On the daemon's own machine the line is
+          // the direct one below, with its address.
+          `Connecting to the machine ${target.path}.`
         ) : (
           <>
-            Pairing directly with <span className="break-all font-mono font-semibold">{target.address}</span>.
+            Pairing directly with <span className="break-all font-mono font-semibold">{target.address}</span>
           </>
         )}
       </LineWithDetails>

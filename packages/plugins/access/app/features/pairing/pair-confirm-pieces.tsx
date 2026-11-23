@@ -148,6 +148,11 @@ export interface LineWithDetailsProps {
   readonly lineProps?: Readonly<Record<`data-${string}`, string>>;
   /** The details block's own `data-*` marker (it carries `hidden` until opened). */
   readonly detailsProps?: Readonly<Record<`data-${string}`, string>>;
+  /**
+   * For a sentence that is not plain text: the piece at its END (a full stop after a name) that must stay on one line with the link.
+   * A plain-text sentence needs none: its own last word is used.
+   */
+  readonly tail?: string;
   readonly className?: string;
   readonly detailsClassName?: string;
 }
@@ -162,24 +167,35 @@ export function LineWithDetails({
   details,
   lineProps,
   detailsProps,
+  tail: tailOf,
   className = 'm-0 text-ui leading-base text-fg',
   detailsClassName = 'm-0 break-all text-meta text-muted',
 }: LineWithDetailsProps) {
   const [open, setOpen] = useState(false);
   const panel = useId();
+  // A plain-text sentence gives its own last word; a sentence with markup in it names the piece that must stay with the link.
+  const split = typeof children === 'string' ? children.lastIndexOf(' ') + 1 : 0;
+  const head = typeof children === 'string' ? children.slice(0, split) : children;
+  const tail = typeof children === 'string' ? children.slice(split) : (tailOf ?? '');
   return (
     <div className="min-w-0" data-pair-details={open ? 'open' : 'closed'}>
       <p className={className} {...lineProps}>
-        {children}{' '}
-        <button
-          type="button"
-          className="fy-inline-action"
-          aria-expanded={open}
-          aria-controls={panel}
-          onClick={() => setOpen(value => !value)}
-        >
-          Details
-        </button>
+        {head}
+        {/* The last word, a no-break space and the link are ONE unbreakable piece, so "Details" wraps WITH the sentence's last word
+            and is never alone on a line under it (a button is an atomic inline: the space alone would not hold it). */}
+        <span className="whitespace-nowrap">
+          {tail}
+          {' '}
+          <button
+            type="button"
+            className="fy-inline-action"
+            aria-expanded={open}
+            aria-controls={panel}
+            onClick={() => setOpen(value => !value)}
+          >
+            Details
+          </button>
+        </span>
       </p>
       <p id={panel} hidden={!open} className={`mt-1 ${detailsClassName}`} {...detailsProps}>
         {details}
