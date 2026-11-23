@@ -11,7 +11,7 @@
  */
 
 import { useState } from 'react';
-import { useKeptDraft } from '../../hooks/use-kept-draft.ts';
+import { type KeptDraft, useKeptDraft } from '../../hooks/use-kept-draft.ts';
 import {
   ChoiceCards,
   cn,
@@ -100,17 +100,23 @@ function MessageCountField({
 function PromptEditor({
   style,
   saved,
+  prompt,
   busy,
+  error,
+  note,
   onSave,
 }: {
   readonly style: EditableCleanupStyle;
   readonly saved: string;
+  /** The draft, held by the view and not by this editor: Apply changes the style (this editor is swapped or hidden), and a draft held here would go with it. */
+  readonly prompt: KeptDraft<string>;
   readonly busy: boolean;
-  onSave(patch: VoiceCleanupPatch): void;
+  /** Why the last save of THIS prompt failed, shown on its own bar. */
+  readonly error: string | null;
+  /** A held (not yet in effect) save of this prompt. */
+  readonly note: string | null;
+  onSave(patch: VoiceCleanupPatch): Promise<VoiceCleanupSave>;
 }) {
-  // Kept while edited, never re-mounted from the saved prompt: a re-read (the first one, or another
-  // device's save) used to land mid-sentence and replace what was being typed.
-  const prompt = useKeptDraft(saved, samePrompt);
   const draft = prompt.value;
   const fallback = DEFAULT_VOICE_CLEANUP_PROMPTS[style];
   const edited = saved !== fallback;
@@ -124,6 +130,7 @@ function PromptEditor({
         <SettingSaveBar
           dirty={draft.trim() !== saved}
           saving={busy}
+          error={error}
           blocked={draft.trim() === ''}
           saveLabel="Save prompt"
           discardLabel="Undo edits"
@@ -134,8 +141,14 @@ function PromptEditor({
             type="button"
             disabled={busy || (!edited && draft === fallback)}
             onClick={() => {
-              prompt.set(fallback);
-              if (edited) onSave({ prompts: { [style]: null } });
+              // The box is emptied only once the machine has taken the reset: a refused (or held) write leaves what was typed.
+              if (!edited) {
+                prompt.set(fallback);
+                return;
+              }
+              void onSave({ prompts: { [style]: null } }).then(result => {
+                if (result.kind === 'applied') prompt.set(fallback);
+              });
             }}
             className="min-h-[44px] rounded-control border border-border-strong bg-surface-2 px-control-x text-ui text-fg disabled:text-muted disabled:opacity-60"
           >
@@ -169,31 +182,62 @@ function PromptEditor({
       <li className="fy-vs-body" data-cleanup-guard="">
         <p className="fy-vs-note">{CLEANUP_GUARD_EXPLANATION}</p>
       </li>
+      {note === null ? null : <OutcomeNote tone="warn" words={note} />}
     </SettingGroup>
   );
 }
 
+/** What a save said, on the group that made it (never under another group). */
+function OutcomeNote({ tone, words }: { readonly tone: 'warn' | 'err'; readonly words: string }) {
+  return (
+    <li className="fy-vs-body">
+      <p role="status" data-cleanup-outcome="" className={cn('fy-vs-note', tone === 'err' ? 'text-err' : 'text-warn')}>
+        {words}
+      </p>
+    </li>
+  );
+}
+
+type SavePlace = 'style' | 'prompt' | 'context';
+
 function VoiceCleanupView({ state }: { readonly state: MachineVoiceCleanup }) {
   const { cleanup, save } = state;
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<VoiceCleanupSave | null>(null);
-  const commit = (patch: VoiceCleanupPatch): void => {
-    setBusy(true);
-    void save(patch).then(result => {
-      setOutcome(result);
+  // What the last save said, kept with the place that made it: a failure shows on THAT bar, not at the foot of the page.
+  const [outcomes, setOutcomes] = useState<Readonly<Partial<Record<SavePlace, VoiceCleanupSave>>>>({});
+  const commitFrom =
+    (place: SavePlace) =>
+    async (patch: VoiceCleanupPatch): Promise<VoiceCleanupSave> => {
+      setBusy(true);
+      setOutcomes({});
+      const result = await save(patch);
+      setOutcomes({ [place]: result });
       setBusy(false);
-    });
-  };
+      return result;
+    };
+  const commit = commitFrom('context');
   const style = cleanup.style;
+  // The prompt drafts live HERE, one per editable style, so applying a different style (or turning clean-up off) never throws
+  // away what was typed into the prompt that goes away.
+  const drafts = {
+    fix: useKeptDraft(promptFor(cleanup, 'fix'), samePrompt),
+    polish: useKeptDraft(promptFor(cleanup, 'polish'), samePrompt),
+  } as const;
+  const outcomeOf = (place: SavePlace): VoiceCleanupSave | null => outcomes[place] ?? null;
+  const failed = (place: SavePlace): string | null => {
+    const outcome = outcomeOf(place);
+    return outcome?.kind === 'refused' ? outcome.message : null;
+  };
+  const held = (place: SavePlace): string | null => {
+    const outcome = outcomeOf(place);
+    return outcome?.kind === 'pending' ? outcome.message : null;
+  };
   // The choice is STAGED: the cards' arrow keys move AND select, so a write per selection would let a stray key
   // press turn hosted clean-up on for every device. Only an explicit Apply writes.
   const [staged, setStaged] = useState<typeof style | null>(null);
   const pending = staged !== null && staged !== style ? staged : null;
   const applyStyle = (next: typeof style): void => {
-    setBusy(true);
-    void save({ style: next }).then(result => {
-      setOutcome(result);
-      setBusy(false);
+    void commitFrom('style')({ style: next }).then(result => {
       if (result.kind === 'applied') setStaged(null);
     });
   };
@@ -207,6 +251,7 @@ function VoiceCleanupView({ state }: { readonly state: MachineVoiceCleanup }) {
           <SettingSaveBar
             dirty={pending !== null}
             saving={busy}
+            error={failed('style')}
             saveLabel="Apply"
             discardLabel="Cancel"
             marks={pending === null ? {} : { 'data-cleanup-staged': '' }}
@@ -240,9 +285,18 @@ function VoiceCleanupView({ state }: { readonly state: MachineVoiceCleanup }) {
             <p className="fy-vs-note">{CLEANUP_OFF_EXPLANATION}</p>
           </li>
         ) : null}
+        {held('style') === null ? null : <OutcomeNote tone="warn" words={held('style') as string} />}
       </SettingGroup>
       {style === 'off' ? null : (
-        <PromptEditor key={style} style={style} saved={promptFor(cleanup, style)} busy={busy} onSave={commit} />
+        <PromptEditor
+          style={style}
+          saved={promptFor(cleanup, style)}
+          prompt={drafts[style]}
+          busy={busy}
+          error={failed('prompt')}
+          note={held('prompt')}
+          onSave={commitFrom('prompt')}
+        />
       )}
       <SettingGroup label="Conversation context" saves="now">
         <SettingRow
@@ -254,23 +308,20 @@ function VoiceCleanupView({ state }: { readonly state: MachineVoiceCleanup }) {
               checked={cleanup.useConversation}
               disabled={busy}
               labelledBy={labelId}
-              onChange={next => commit({ useConversation: next })}
+              onChange={next => void commit({ useConversation: next })}
             />
           )}
         />
         {cleanup.useConversation && (
-          <MessageCountField saved={cleanup.conversationMessages} busy={busy} onSave={commit} />
+          <MessageCountField saved={cleanup.conversationMessages} busy={busy} onSave={patch => void commit(patch)} />
+        )}
+        {outcomeOf('context') === null || outcomeOf('context')?.kind === 'applied' ? null : (
+          <OutcomeNote
+            tone={outcomeOf('context')?.kind === 'refused' ? 'err' : 'warn'}
+            words={(outcomeOf('context') as { message: string }).message}
+          />
         )}
       </SettingGroup>
-      {outcome !== null && outcome.kind !== 'applied' && (
-        <p
-          role="status"
-          data-cleanup-outcome=""
-          className={cn('text-meta leading-base', outcome.kind === 'refused' ? 'text-err' : 'text-warn')}
-        >
-          {outcome.message}
-        </p>
-      )}
     </div>
   );
 }

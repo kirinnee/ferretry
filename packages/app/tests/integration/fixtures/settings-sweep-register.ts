@@ -18,10 +18,14 @@ import { answer as answerC } from './sweep/answers-c.ts';
 
 const requests: string[] = [];
 (globalThis as { __fyRequests?: string[] }).__fyRequests = requests;
+/** The body of every write, so a test can say WHAT a click sent as well as how many. */
+const bodies: { route: string; body: unknown }[] = [];
+(globalThis as { __fyBodies?: typeof bodies }).__fyBodies = bodies;
 
 const answer = (request: TransportRequest): TransportAnswer | undefined => {
   const path = request.path.split('?')[0] ?? '';
   requests.push(`${request.method} ${request.path}`);
+  if (request.method !== 'GET') bodies.push({ route: `${request.method} ${request.path}`, body: request.body });
   if (path === '/v1/plugins' || path === '/v1/health' || path === '/v1/grants') return undefined;
   for (const part of [answerA, answerB, answerC]) {
     const answered = part(request);

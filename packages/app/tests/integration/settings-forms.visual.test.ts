@@ -272,4 +272,48 @@ describe('Settings forms: one save model, said out loud', () => {
       await close();
     }
   });
+
+  it('Claude Code: the risky update asks first: Cancel sends nothing, Confirm sends one write that names the target', async () => {
+    const { page, close } = await open(1_280, 1_000, 'claude-code', 'claude-code');
+    try {
+      const risky = page.locator('[data-unverified-update]');
+      await risky.click();
+      const dialog = page.getByRole('dialog');
+      await dialog.waitFor();
+      expect(await dialog.innerText(), 'the dialog says what the update does').toContain('could break');
+      expect(await writes(page, 'POST /v1/claude-code/update'), 'opening the dialog writes nothing').toBe(0);
+      await page.locator('[data-unverified-cancel]').click();
+      await page.waitForTimeout(200);
+      expect(await page.getByRole('dialog').count(), 'Cancel closes it').toBe(0);
+      expect(await writes(page, 'POST /v1/claude-code/update'), 'Cancel sends nothing').toBe(0);
+      await risky.click();
+      await page.locator('[data-unverified-confirm]').click();
+      await page.waitForTimeout(400);
+      expect(await writes(page, 'POST /v1/claude-code/update'), 'Confirm sends exactly one write').toBe(1);
+      const body = await page.evaluate(
+        () => (globalThis as { __fyBodies?: { route: string; body: unknown }[] }).__fyBodies?.at(-1)?.body,
+      );
+      expect(body, 'the write confirms and names the version the dialog said').toEqual({
+        confirmUnverified: true,
+        target: '2.1.44',
+      });
+    } finally {
+      await close();
+    }
+  });
+
+  it('Claude Code: the safe update names the VERIFIED version and confirms nothing', async () => {
+    const { page, close } = await open(1_280, 1_000, 'claude-code', 'claude-code');
+    try {
+      await page.getByRole('button', { name: 'Update Claude Code' }).click();
+      await page.waitForTimeout(400);
+      expect(await writes(page, 'POST /v1/claude-code/update')).toBe(1);
+      const body = await page.evaluate(
+        () => (globalThis as { __fyBodies?: { route: string; body: unknown }[] }).__fyBodies?.at(-1)?.body,
+      );
+      expect(body).toEqual({ target: '2.1.40' });
+    } finally {
+      await close();
+    }
+  });
 });

@@ -58,6 +58,15 @@ export function BrowserProxySection({
     username: null,
     password: null,
   });
+  // A new SAVED proxy (a save that took, read back) restarts the form from it. The section is NOT remounted for that (a remount
+  // would drop what the test just said); the draft is re-based while it renders, and the test result stays.
+  const savedKey = JSON.stringify(saved ?? null);
+  const [seenSaved, setSeenSaved] = useState(savedKey);
+  if (seenSaved !== savedKey) {
+    setSeenSaved(savedKey);
+    setDraft(draftOf(saved));
+    setProblems({ username: null, password: null });
+  }
   const testRun = useRef(0);
   const [existing, setExisting] = useState<ReadonlySet<string> | null>(null);
   const [expert, setExpert] = useState(
@@ -114,7 +123,8 @@ export function BrowserProxySection({
         ? { proxy: wanted.setting }
         : {}
       : null;
-  const runTest = async (body: { readonly proxy?: BrowserProxySetting }): Promise<void> => {
+  /** Runs one test and shows what it said; answers what it said, or `null` when an edit made the answer stale. */
+  const runTest = async (body: { readonly proxy?: BrowserProxySetting }): Promise<ProxyTestShown | null> => {
     testRun.current += 1;
     const mine = testRun.current;
     setTesting(true);
@@ -125,17 +135,21 @@ export function BrowserProxySection({
     } catch (caught) {
       next = { kind: 'refused', sentence: reasonOf(caught) };
     }
-    if (testRun.current !== mine) return;
+    if (testRun.current !== mine) return null;
     setTesting(false);
     setShown(next);
+    return next;
   };
   const refuseTest = (sentence: string): void => {
     testRun.current += 1;
     setTesting(false);
     setShown({ kind: 'refused', sentence });
   };
-  // Files what was typed in the secret store. False (with one short sentence on the box) when it cannot be.
-  const fileCredentials = async (): Promise<boolean> => {
+  // Files what was typed in the secret store, and answers the form as it is once that is done. `null` (with one short sentence
+  // on the box) when it cannot be. A value is NEVER filed over a name that is already in the store: the proxy that is live
+  // still reads that name, and the new one may yet fail its test. It goes under the next free name instead (PROXY_PASSWORD_2),
+  // which nothing reads until a save that worked points the proxy at it.
+  const fileCredentials = async (): Promise<BrowserProxyDraft | null> => {
     const boxes = [
       ['username', pendingFields.username.read(), filed.usernameSecret],
       ['password', pendingFields.password.read(), filed.passwordSecret],
@@ -148,21 +162,43 @@ export function BrowserProxySection({
           short.map(([key]) => [key, `Use at least ${String(MIN_SECRET_VALUE_LENGTH)} characters.`]),
         ),
       }));
-      return false;
+      return null;
     }
-    for (const [key, value, name] of boxes) {
+    let result: BrowserProxyDraft = filed;
+    if (boxes.every(([, value]) => value === '')) return result;
+    // What is in the store NOW (the list read earlier may be old); what was read, or what is saved, when it cannot be asked.
+    const taken = new Set<string>([...(existing ?? []), savedNames.usernameSecret, savedNames.passwordSecret]);
+    try {
+      for (const name of (await listSecretNames(client)).names) taken.add(name);
+    } catch {
+      // The earlier list and the saved names stand.
+    }
+    for (const [key, value, base] of boxes) {
       if (value === '') continue;
+      let name = base;
+      for (let next = 2; taken.has(name); next += 1) name = `${base.slice(0, 60)}_${String(next)}`;
       try {
         await putSecret(client, name, value);
       } catch (caught) {
         setProblems(current => ({ ...current, [key]: reasonOf(caught) }));
-        return false;
+        return null;
       }
+      taken.add(name);
       setExisting(current => new Set([...(current ?? []), name]));
       pendingFields[key].clear();
+      result = { ...result, [`${key}Secret`]: name };
       setDraft(current => ({ ...current, [`${key}Secret`]: name }));
     }
-    return true;
+    return result;
+  };
+  // What a test of the form as filed sends: nothing for the saved proxy, the edited setting when it differs.
+  const bodyOf = (form: BrowserProxyDraft): { readonly proxy?: BrowserProxySetting } | null => {
+    const setting = settingOf(form);
+    return setting.ok && setting.setting !== null
+      ? JSON.stringify(form) !== before
+        ? { proxy: setting.setting }
+        : {}
+      : testBody;
   };
   const test = (): void => {
     if (typed && !wanted.ok) {
@@ -171,8 +207,10 @@ export function BrowserProxySection({
     }
     if (testBody === null) return;
     void (async () => {
-      if (!(await fileCredentials())) return;
-      await runTest(testBody);
+      const form = await fileCredentials();
+      if (form === null) return;
+      const body = bodyOf(form);
+      if (body !== null) await runTest(body);
     })();
   };
   // Is something filed under this box's name? Until the list has been read, only what was saved is taken to be.
@@ -190,17 +228,35 @@ export function BrowserProxySection({
     pendingFields[key].clear();
     edit({ [`${key}Secret`]: '' });
   };
-  // Save files what was typed, saves the setting, and then tries the saved proxy: "set it, see it work".
+  // Save and test: the proxy is TRIED FIRST, as typed, and only one that works is saved. A failed try writes nothing, so the
+  // proxy that was in effect (and every secret it reads) stays exactly as it was. Turning the proxy off has nothing to try.
   const saveAndTest = (setting: BrowserProxySetting | null): void => {
     void (async () => {
-      if (!(await fileCredentials())) return;
       setSaving(true);
-      const result = await save(setting);
-      setSaving(false);
-      setSaveOutcome(result);
-      // A held setting is not the saved one yet, so there is nothing saved to try.
-      if (result.kind !== 'saved') return;
-      if (setting !== null) await runTest({});
+      try {
+        const form = await fileCredentials();
+        if (form === null) return;
+        let toSave = setting;
+        if (setting !== null) {
+          const filedSetting = settingOf(form);
+          toSave = filedSetting.ok ? filedSetting.setting : setting;
+          const tried = await runTest({ proxy: toSave });
+          if (tried === null) return;
+          if (tried.kind !== 'result' || !tried.result.reachable) {
+            setSaveOutcome({
+              kind: 'refused',
+              sentence: `Not saved: the proxy did not work, so ${saved === null ? 'the browser still goes direct' : 'the proxy saved before stays in effect'}.`,
+            });
+            return;
+          }
+        }
+        const result = await save(toSave);
+        setSaveOutcome(result);
+        // A held setting is not the saved one yet, so there is nothing saved to try again.
+        if (result.kind === 'saved' && toSave !== null) await runTest({});
+      } finally {
+        setSaving(false);
+      }
     })();
   };
 
