@@ -95,7 +95,7 @@ describe('Conversation previews', () => {
     expect(mounted.container.querySelector('.fy-dls__half--typed')).not.toBeNull();
     expect(
       (must(mounted.container.querySelector('[data-choice-sample]'), 'box') as HTMLElement).style.aspectRatio,
-    ).toBe('300 / 112');
+    ).toBe('300 / 120');
   });
 
   it('suggestions: the ladder types @@, the symbols type :, and skills open their OWN menu rather than a row in the agents one', async () => {

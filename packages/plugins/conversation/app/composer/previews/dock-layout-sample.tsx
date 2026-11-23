@@ -17,7 +17,7 @@ import type { ComposerDockLayout } from '../composer-dock-layout.ts';
 import './previews.css';
 
 /** The shape every Button layout sample is drawn in (a phone-width composer, the tallest layout fitting with room). */
-const DOCK_SAMPLE_SIZE: ChoiceSampleSize = { width: 300, height: 112 };
+const DOCK_SAMPLE_SIZE: ChoiceSampleSize = { width: 300, height: 120 };
 
 /** One phone composer. `empty` is what `data-composer-empty` means to Auto: the box has no draft. */
 function MiniComposer({ layout, empty }: { readonly layout: ComposerDockLayout; readonly empty: boolean }) {

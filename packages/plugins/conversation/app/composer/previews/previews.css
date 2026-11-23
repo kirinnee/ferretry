@@ -447,7 +447,7 @@
 
 /* ============================================================================
    Button layout samples (dock-layout-sample.tsx): the REAL phone composer (chat.css draws `.fy-composer` by its
-   `data-composer-layout` / `data-composer-dock-layout` attributes), drawn in a 300 x 112 `ChoiceSample` box. The composer is
+   `data-composer-layout` / `data-composer-dock-layout` attributes), drawn in a 300 x 120 `ChoiceSample` box. The composer is
    centred in the box and never reaches its edge, so a taller layout (stacked) and a slimmer one (one row) share one frame.
    Auto draws its two looks (empty, typed) one above the other and, when its card is chosen, plays once: the typed one arrives.
    Every keyframe set ends on the resting style. Theme tokens only.
@@ -479,7 +479,7 @@
 .fy-dls__hint {
   color: var(--faint);
 }
-/* Auto: two pictures, one above the other (side by side while empty, then stacked once typed), each at 0.55 so both fit the box with room. */
+/* Auto: two pictures, one above the other (side by side while empty, then stacked once typed), each at 0.62 so both fit the box with room. */
 .fy-dls--auto {
   align-items: center;
   display: flex;
@@ -490,7 +490,7 @@
 }
 .fy-dls__half {
   width: 100%;
-  zoom: 0.55;
+  zoom: 0.62;
 }
 .fy-dls__then {
   color: var(--faint);
