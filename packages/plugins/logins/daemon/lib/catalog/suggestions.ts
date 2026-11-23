@@ -14,7 +14,7 @@
  * Pure.
  */
 import { z } from 'zod';
-import type { ModelCatalog } from './schema.ts';
+import type { BaseHalfKey, ModelCatalog, NewHalfKey } from './schema.ts';
 
 /** The two external field names the trim reads, spelled as those databases spell them (allowed by name in no-compat). */
 const MODELS_DEV_RETIRING_STATUS = 'deprecated';
@@ -396,7 +396,7 @@ export interface SuggestedModel {
  * tier or an effort, which stay the catalog's.
  */
 export function suggestedModels(
-  catalog: Pick<ModelCatalog, 'id' | 'claude' | 'codex' | 'gemini' | 'copilot' | 'opencode'>,
+  catalog: Pick<ModelCatalog, 'id' | BaseHalfKey | NewHalfKey>,
   suggestions: Suggestions | undefined,
 ): readonly SuggestedModel[] {
   const provider = SUGGESTION_PROVIDER_OF_CATALOG[catalog.id];
