@@ -25,6 +25,7 @@ import {
 } from '../ids.ts';
 import {
   type AttachRefusal,
+  type ConversationImport,
   type DeliveryOutcome,
   HARNESS_STOP_KEYS,
   type HarnessFacts,
@@ -549,6 +550,8 @@ export class FakeHarness implements Harness {
   readonly delivered: OutboundMessage[] = [];
   /** Every launch spec this harness was handed (start and resume), so a test sees what reached it. */
   readonly launched: LaunchSpec[] = [];
+  /** The harness conversation of every RESUME (a launch that names one), in order: a fresh start adds nothing. */
+  readonly resumed: string[] = [];
   /** Every launch spec `prepareHome` was handed, in order. */
   readonly prepared: LaunchSpec[] = [];
   readonly #seen = new Set<string>();
@@ -558,6 +561,27 @@ export class FakeHarness implements Harness {
   declare hasConversation: Harness['hasConversation'];
   /** The conversation this fake PROVES its last launch wrote (`Harness.provedConversation`); absent until a test sets one. */
   declare provedConversation: Harness['provedConversation'];
+  /** The conversations this fake's shared history pool holds: empty until one is staged (`importConversation`). */
+  readonly pool = new Set<string>();
+  /** The conversations its own launches named (a fresh start's `conv-<ferret>`), which its homes then hold. */
+  readonly #own = new Set<string>();
+  /** Every copy-on-link this fake was asked for, in order. */
+  readonly imported: ConversationImport[] = [];
+  /** Copy-on-link: the transcript lands in the pool (a name already there stays: the answer is still ok). */
+  async importConversation(input: ConversationImport): Promise<Result<void, { readonly reason: string }>> {
+    this.imported.push(input);
+    this.pool.add(input.id);
+    return ok(undefined);
+  }
+  /**
+   * Makes `hasConversation` HONEST, as a real harness's is: `true` only for a conversation staged in the pool or written by
+   * its own launches, `false` (proved absent) for any other. Without it the fake leaves `hasConversation` unset and every
+   * resume is attempted as asked, which hides a conversation that was never staged.
+   */
+  honestHistory(): this {
+    this.hasConversation = async (_spec, id) => this.pool.has(id) || this.#own.has(id);
+    return this;
+  }
   /** The harness's turn stop; a test sets it to `undefined` for a harness that names none. */
   turnStop: HarnessStop | undefined = { key: 'Escape', safeWhenIdle: true };
   /** The transcript this fake proves for a ferret (U5): a test sets one to prove it; a ferret with none has no transcript. */
@@ -653,10 +677,12 @@ export class FakeHarness implements Harness {
   async start(spec: LaunchSpec, runner: Runner, env: ChildEnvironment): Promise<Result<Started, StartRefusal>> {
     this.launched.push(spec);
     const running = await runner.start({ ferret: spec.ferret, command: ['fake-harness'], cwd: spec.folder, env });
+    if (running.ok) this.#own.add(`conv-${spec.ferret}`);
     return running.ok ? ok({ running: running.value, harnessConversation: `conv-${spec.ferret}` }) : running;
   }
   async resume(spec: LaunchSpec, runner: Runner, env: ChildEnvironment, conversation: string) {
     this.launched.push(spec);
+    this.resumed.push(conversation);
     const running = await runner.resume(
       { ferret: spec.ferret, command: ['fake-harness', '--resume'], cwd: spec.folder, env },
       conversation,

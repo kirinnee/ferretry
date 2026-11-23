@@ -60,9 +60,10 @@ describe('the settings tabs a ported app half links to', () => {
 });
 
 describe('the screens a ported app half links to', () => {
-  test('V-0285 runtimes: Import conversations links to /links, the path Conversation declares for its links screen', () => {
+  test('O8-12 conversation: no Conversations screen; its past-conversation list is a panel in New ferret’s slot', () => {
     const conversation = generated.surfaces.find(entry => entry.id === 'conversation');
-    const screen = (conversation?.manifest.ui?.screens ?? []).find(candidate => candidate.id === 'links');
-    expect(screen?.path).toBe('links');
+    expect((conversation?.manifest.ui?.screens ?? []).map(candidate => candidate.id)).not.toContain('links');
+    const panel = (conversation?.manifest.ui?.panels ?? []).find(candidate => candidate.id === 'new-ferret-continue');
+    expect(panel?.slot).toBe('ferrets.new-ferret-continue');
   });
 });

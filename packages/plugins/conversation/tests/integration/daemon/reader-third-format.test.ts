@@ -72,7 +72,7 @@ const reader = (format: string, parsers: readonly TranscriptParser[]) =>
     },
     redactor: { redact: async text => text, batch: async work => work({ text: value => value, data: value => value }) },
     now: () => 0,
-    parsers,
+    parsers: () => parsers,
   });
 
 const logs = async (routes: ReturnType<typeof reader>['routes']): Promise<string> =>

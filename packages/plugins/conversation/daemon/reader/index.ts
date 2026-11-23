@@ -32,7 +32,7 @@ export interface ReaderNeeds {
    * The transcript parsers other harnesses declare, one per `HarnessFacts.transcriptFormat` id. `claude` and `codex`
    * are built in; a harness whose format has no parser here is read through the entries fallback, never as another format.
    */
-  readonly parsers?: readonly TranscriptParser[];
+  readonly parsers?: () => readonly TranscriptParser[];
   /** The current instant as an ISO string, stamped on observed inputs. Absent: derived from `now`. */
   readonly instant?: () => string;
   readonly now: () => number;
@@ -56,11 +56,15 @@ export function registerReader(needs: ReaderNeeds) {
     needs.parsers,
   );
   const reads = new TranscriptReadService(files, files, needs.codec, needs.redactor, files, files);
-  const images = new TranscriptImageReader(
-    files,
-    files.runtime,
-    FileTranscriptReads.pacedParsers(pacing, needs.parsers),
-  );
+  // The image reader looks a parser up by id when it parses a record, so the declared parsers are asked for then (once).
+  let paced: ReturnType<typeof FileTranscriptReads.pacedParsers> | undefined;
+  const pacedParsers = new Proxy({} as ReturnType<typeof FileTranscriptReads.pacedParsers>, {
+    get: (_target, id) => {
+      paced ??= FileTranscriptReads.pacedParsers(pacing, needs.parsers?.() ?? []);
+      return typeof id === 'string' ? paced[id] : undefined;
+    },
+  });
+  const images = new TranscriptImageReader(files, files.runtime, pacedParsers);
   const handlers = readerRoutes({ reads, images, exists: needs.exists });
   return {
     reads,

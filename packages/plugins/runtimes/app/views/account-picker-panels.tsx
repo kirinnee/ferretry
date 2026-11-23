@@ -104,6 +104,9 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
       value={slot.value}
       {...(preferred === undefined ? {} : { preferred })}
       {...(move === null || !isKnownHarnessKey(move.harness) ? {} : { harness: move.harness, offerHealthCheck: true })}
+      {...(move === null && slot.harness !== undefined && isKnownHarnessKey(slot.harness)
+        ? { harness: slot.harness }
+        : {})}
     />
   );
 }

@@ -4,11 +4,13 @@ import should from 'should';
 import { CODEX_PICKER_QUARANTINE_KIND } from './harness-fixture/quarantine.ts';
 import {
   documentRefusal,
+  harnessRefusal,
   needsFastFacts,
   needsLiveCatalog,
   paneRefusal,
   switchRequest,
 } from '../../../../../daemon/lib/session/runtime-control/policy.ts';
+import { sessionView } from '../../../../support/daemon/session-view.ts';
 import { CLAUDE_VIEW, CODEX_VIEW } from './support.ts';
 
 /** Today's conversation-plugin `IDLE_SEND_STATUSES` (`session/send/types.ts`), restated: idle by their own account. */
@@ -192,5 +194,24 @@ describe('deciding whether the live catalog is needed', () => {
 
     // Assert
     should(actual).deepEqual([true, true, false, false, false]);
+  });
+});
+
+describe('a ferret of a harness this control cannot drive', () => {
+  const THIRD_VIEW = () =>
+    sessionView('s1', { harness: 'fake-third', agent: 'third-auto' }, { status: 'running', promptReady: true });
+
+  it('should be refused by name, never planned as Claude', () => {
+    // Act
+    const refusal = harnessRefusal(THIRD_VIEW());
+
+    // Assert
+    should(refusal).match({ failure: 'unsupported', message: /fake-third/u });
+    should(harnessRefusal(CLAUDE_VIEW())).be.undefined();
+    should(harnessRefusal(CODEX_VIEW())).be.undefined();
+  });
+
+  it('should plan no switch for it', () => {
+    should(() => switchRequest(THIRD_VIEW(), { action: 'fast', fast: true })).throw(/fake-third/u);
   });
 });

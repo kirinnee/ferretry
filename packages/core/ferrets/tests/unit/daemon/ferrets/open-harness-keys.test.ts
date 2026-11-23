@@ -118,7 +118,7 @@ describe('a harness the contract never named', () => {
 
     expect(answer).toEqual({
       ok: false,
-      error: { code: 'harness_unavailable', reason: 'no harness gemini is installed on this machine' },
+      error: { code: 'harness_not_installed', reason: 'no harness gemini is installed on this machine' },
     });
     expect(f.runner.starts).toBe(0);
     expect(f.service.harnessFacts('gemini')).toBeUndefined();

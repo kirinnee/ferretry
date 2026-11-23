@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { mount, must } from '@ferretry/app/testing';
-import { addProjectHref, projectAction } from '../../../app/features/stepper/project-action.ts';
+import {
+  addProjectHref,
+  continueConversationHref,
+  projectAction,
+} from '../../../app/features/stepper/project-action.ts';
 import { StepperView } from '../../../app/features/stepper/stepper-view.tsx';
 import { deriveSteps } from '../../../app/features/stepper/stepper-model.ts';
 
@@ -10,6 +14,18 @@ const noop = (): void => undefined;
 describe('the Project step buttons depend on their own plugin only', () => {
   it('Create a project opens the registry with its add form already open (no second press)', () => {
     expect(addProjectHref('/d/studio/projects')).toBe('/d/studio/projects?add=1');
+  });
+
+  it('Continue a conversation goes to New ferret with its continue section open (the Conversations page is gone)', () => {
+    const asked: string[][] = [];
+    const href = continueConversationHref((daemon, plugin, screen) => {
+      asked.push([daemon, plugin, screen]);
+      return `/d/${daemon}/new`;
+    }, 'studio');
+    expect(asked).toEqual([['studio', 'ferrets', 'new-ferret']]);
+    expect(href).toBe('/d/studio/new?continue=1');
+    // With the Ferrets screen off there is no address, and so no button (the same as any other missing plugin).
+    expect(continueConversationHref(() => undefined, 'studio')).toBeUndefined();
   });
 
   it('both plugins on: Create a project is primary, Continue a conversation beside it', () => {

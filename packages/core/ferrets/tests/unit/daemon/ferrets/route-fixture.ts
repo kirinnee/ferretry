@@ -7,6 +7,9 @@ import { definePlugin } from '@ferretry/kernel/manifest';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import {
+  CONVERSATION_STAGE_KEY,
+  ConversationStage,
+  type ConversationStageSource,
   FerretFiles,
   FerretsPort,
   type FerretId,
@@ -53,15 +56,17 @@ export const record = (id: string, parent?: string, folder = `/work/${id}`): Fer
 const harnessPlugin = (harness: FakeHarness) =>
   implementDaemon(
     definePlugin({
-      id: 'claude-code',
-      title: 'Claude Code (fake)',
+      // The plugin's id IS its harness key (`claude-code`, `codex`): the only two takers `harnesses` names.
+      id: harness.key,
+      title: `${harness.key} (fake)`,
       version: '5.0.0',
       api: 5,
       core: false,
       kinds: [],
-      hooks: { takes: [{ hook: Harnesses, key: 'claude-code' }] },
+      hooks: { takes: [{ hook: Harnesses, key: harness.key }] },
     }),
-    { build: () => ({ hooks: { 'harnesses:claude-code': harness } }) },
+    // Each plugin id takes only its own key; the type names both, so the one it does not take is absent by construction.
+    { build: () => ({ hooks: { [`harnesses:${harness.key}`]: harness } as never }) },
   );
 const runnerPlugin = (runner: FakeRunner) =>
   implementDaemon(
@@ -93,6 +98,21 @@ export const fakeAttachmentsOwner = (source: OpeningAttachmentsSource, id = 'con
       hooks: { takes: [{ hook: OpeningAttachments, key: OPENING_ATTACHMENTS_KEY }] },
     }),
     { build: () => ({ hooks: { 'opening.attachments:opening': source } }) },
+  );
+
+/** A stand-in for Conversation on `conversation.stage` (a security-path provide hook): the one provider, under its one key. */
+export const fakeStageOwner = (source: ConversationStageSource, id = 'conversation') =>
+  implementDaemon(
+    definePlugin({
+      id,
+      title: 'Conversation index (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: ConversationStage, key: CONVERSATION_STAGE_KEY }] },
+    }),
+    { build: () => ({ hooks: { 'conversation.stage:conversation': source } }) },
   );
 
 /**

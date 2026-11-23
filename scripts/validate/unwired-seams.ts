@@ -70,6 +70,11 @@ export const ONE_TIME_UNWIRED_ALLOWANCE: readonly { readonly seam: string; reado
     seam: 'hook:task.moving',
     reason: 'the same seam as before, renamed with the Board noun (O18, owner !A539); nothing is newly unwired',
   },
+  {
+    seam: 'hook:transcript.parsers',
+    reason:
+      'the harness seam is open (runtimes plan U4a): the hook is how a third harness plugin declares its transcript parser, and no such plugin exists yet; Claude Code and Codex are built in',
+  },
 ];
 
 // ─── facts ────────────────────────────────────────────────────────────────────────────────────────────────────────

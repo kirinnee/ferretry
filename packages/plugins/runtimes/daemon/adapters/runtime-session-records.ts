@@ -7,7 +7,12 @@
  * Reading is tolerant — a Ferrets that cannot answer leaves the confirm card saying only what it knows — and so is
  * re-pointing: a rename never fails for a record left on the old name, which still resolves through `ids.json`.
  */
-import type { FerretRuntimeRecord, FerretsApi, FerretState } from '@ferretry/core-ferrets/contract';
+import {
+  type FerretRuntimeRecord,
+  type FerretsApi,
+  type FerretState,
+  isRecordedHarness,
+} from '@ferretry/core-ferrets/contract';
 import type { SessionStatus } from '../lib/service/foreign.ts';
 import type { RuntimeSessionRecord, SessionRuntimeRename } from '../lib/service/runtime-sessions.ts';
 
@@ -22,10 +27,14 @@ export const SESSION_STATUS_OF: Readonly<Record<FerretState, SessionStatus>> = {
   stopped: 'stopped',
 };
 
-const recordOf = (record: FerretRuntimeRecord): RuntimeSessionRecord => ({
+/** A ferret of a harness the catalog does not manage (a third harness) names no runtime this catalog owns, so it has no record here. */
+const recordOf = (record: FerretRuntimeRecord): RuntimeSessionRecord | undefined =>
+  isRecordedHarness(record.harness) ? known(record, record.harness) : undefined;
+
+const known = (record: FerretRuntimeRecord, harness: 'claude' | 'codex'): RuntimeSessionRecord => ({
   id: record.id,
   name: record.name,
-  harness: record.harness,
+  harness,
   agent: record.agent,
   ...(record.executable === undefined ? {} : { executable: record.executable }),
   status: SESSION_STATUS_OF[record.state],
@@ -36,7 +45,7 @@ export class RuntimeSessionRecords {
 
   /** Every ferret Ferrets keeps that names a runtime, ended ones included. */
   async sessionRecords(): Promise<readonly RuntimeSessionRecord[]> {
-    return (await this.ferrets.runtimeRecords()).map(recordOf);
+    return (await this.ferrets.runtimeRecords()).flatMap(record => recordOf(record) ?? []);
   }
 
   /** Re-point every record on the old runtime at the new one. Answers how many moved. */

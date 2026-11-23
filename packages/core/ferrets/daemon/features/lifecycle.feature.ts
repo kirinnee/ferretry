@@ -51,9 +51,11 @@ function register(f: FerretsContext): FeatureContribution | undefined {
         ? 409
         : failure.code === 'folder'
           ? 400
-          : failure.code === 'state_home'
-            ? 403
-            : 503;
+          : failure.code === 'harness_not_installed'
+            ? 422
+            : failure.code === 'state_home'
+              ? 403
+              : 503;
     throw new ApiError(status, failure.reason, failure.code);
   };
 

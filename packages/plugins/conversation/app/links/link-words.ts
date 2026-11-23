@@ -7,12 +7,6 @@ import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 
 export type { KnownHarnessKey };
 
-/** A harness as a setup sentence names it. */
-export const HARNESS_NAMES: Readonly<Record<KnownHarnessKey, string>> = {
-  'claude-code': 'Claude Code',
-  codex: 'Codex',
-};
-
 /** A harness as a badge names it. */
 export const HARNESS_SHORT: Readonly<Record<KnownHarnessKey, string>> = { 'claude-code': 'Claude', codex: 'Codex' };
 

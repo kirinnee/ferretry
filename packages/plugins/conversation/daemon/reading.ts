@@ -1,5 +1,5 @@
 import type { AsksApi } from '@ferretry/core-asks/contract';
-import type { FerretId, FerretsApi, HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { ConversationStageSource, FerretId, FerretsApi, HarnessKey } from '@ferretry/core-ferrets/contract';
 import { ApiError, type KernelPorts, type RouteHandler } from '@ferretry/kernel/contract';
 import type { ToolHandler } from '@ferretry/kernel/manifest';
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
@@ -15,6 +15,7 @@ import type { TranscriptOpener } from './reader/adapters/file-reads.ts';
 import type { HarnessTranscripts } from './reader/adapters/entries-source.ts';
 import { registerReader } from './reader/index.ts';
 import { TranscriptReadError, type TranscriptReadRedactor } from './reader/lib/reads.ts';
+import type { TranscriptParser } from './reader/lib/transcript/types.ts';
 import { messageTokenCodec } from './reader/adapters/message-token-key.ts';
 import { buildRenders } from './renders/index.ts';
 import { RenderError } from './renders/lib/types.ts';
@@ -110,6 +111,8 @@ export interface ReadingHalf {
   readonly routes: Readonly<Record<string, RouteHandler>>;
   readonly tools: { readonly search_work: ToolHandler };
   readonly api: ReadingApi;
+  /** `conversation.stage` (Ferrets' start asks it): one indexed conversation's transcript staged where its harness resumes it. */
+  readonly stage: ConversationStageSource['stage'];
   /**
    * A stored original of THIS ferret, its digest re-checked: what a send hands to the agent. Rejects with an
    * {@link AttachmentError} for an id that is not this ferret's, a missing or altered original, or an unknown ferret.
@@ -140,6 +143,8 @@ export function buildReading(deps: {
   readonly onKept: (ferret: FerretId, link: string) => void;
   /** The work other plugins hand the work search through `search.sources` (Board's cards), asked on every use. */
   readonly workSources?: () => readonly WorkSource[];
+  /** The transcript parsers harness plugins declare (`transcript.parsers`), asked on the first read. */
+  readonly parsers?: () => readonly TranscriptParser[];
 }): ReadingHalf {
   const { kernel, ferrets, asks } = deps;
 
@@ -159,7 +164,11 @@ export function buildReading(deps: {
     const id = tryParseSessionId(ferret);
     const summary = id === undefined ? undefined : await ferrets.get(id);
     const harness = id === undefined ? undefined : await ferrets.harness?.(id);
-    const family = summary === undefined ? undefined : harnessFamily(summary.harness);
+    // The format the harness declares for its own entries: Claude Code and Codex by family, any other harness by its facts.
+    const family =
+      summary === undefined
+        ? undefined
+        : (harnessFamily(summary.harness) ?? ferrets.harnessFacts(summary.harness)?.transcriptFormat);
     if (family === undefined || harness === undefined) return undefined;
     // The seam's reader is bound to this ferret; the entries source names the ferret itself, so the binding drops it.
     const bound = harness.transcript;
@@ -175,6 +184,7 @@ export function buildReading(deps: {
   const reader = registerReader({
     bytes,
     transcripts: entries,
+    ...(deps.parsers === undefined ? {} : { parsers: deps.parsers }),
     exists: async ferret => {
       const id = tryParseSessionId(ferret);
       return id !== undefined && (await ferrets.get(id)) !== undefined;
@@ -349,6 +359,7 @@ export function buildReading(deps: {
     },
     tools: search.tools,
     api,
+    stage: async ({ harness, conversation }) => await links.service.stage(harness, conversation),
     download: async (ferret, id) => await attachments.scoped.download(ferret, id),
     release: ferret => {
       // Attachments first (their plaintext is the case worth failing closed for), then the ferret's transcript handle.

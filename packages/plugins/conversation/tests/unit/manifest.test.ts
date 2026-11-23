@@ -59,7 +59,9 @@ describe('conversation manifest', () => {
       'reference.catalog',
       'mailbox.host',
       'turn.question-open',
+      'conversation.stage',
     ]);
+    expect(manifest.hooks.takes[13]?.key).toBe('conversation');
     expect(manifest.hooks.takes[11]?.key).toBe('ferret');
     expect(manifest.hooks.takes[12]?.key).toBe('question');
     expect(manifest.hooks.takes[9]?.key).toBe(':');

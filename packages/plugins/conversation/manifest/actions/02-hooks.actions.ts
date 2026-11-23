@@ -14,6 +14,8 @@ import {
   AskSources,
 } from '@ferretry/core-asks/contract';
 import {
+  CONVERSATION_STAGE_KEY,
+  ConversationStage,
   FerretChanged,
   FerretStopping,
   LaunchParts,
@@ -31,6 +33,7 @@ import {
   QuestionSchema,
   ReferenceCatalog,
   SearchSources,
+  TranscriptParsers,
   TurnEnded,
 } from '../../contract/index.ts';
 import { fragment } from '../kit.ts';
@@ -67,7 +70,16 @@ export default fragment({
       // Whether a ferret has a question open: the stored `question.json` is this plugin's, and Ferrets' turn watch reads a
       // yes as "waiting on a person" (the one provider: `takers: ['conversation']`).
       { hook: QuestionOpen, key: QUESTION_OPEN_KEY },
+      // A start that names a past conversation: this plugin's index knows where its transcript is and stages it into the
+      // harness's pool (a security-path provide hook naming only `conversation` as its taker).
+      { hook: ConversationStage, key: CONVERSATION_STAGE_KEY },
     ],
-    offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
+    offers: [
+      { hook: MessageBeforeSend },
+      { hook: TurnEnded },
+      { hook: SearchSources },
+      { hook: TranscriptParsers },
+      { hook: ReferenceCatalog },
+    ],
   },
 });

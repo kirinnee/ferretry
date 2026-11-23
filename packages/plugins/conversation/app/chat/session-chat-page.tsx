@@ -48,7 +48,7 @@ import {
 } from '../questions/question-form.tsx';
 import { QuestionDrawer, questionTopic } from '../questions/question-drawer.tsx';
 import { ChatSearch, type ChatSearchPort } from '../search/chat-search.tsx';
-import { displayCallsign } from '@ferretry/core-ferrets/contract';
+import { displayCallsign, isRecordedHarness } from '@ferretry/core-ferrets/contract';
 import { usePaneActivity } from '../transcript/live-activity.tsx';
 import { paneFrameReader } from '../transcript/pane-frame-reader.ts';
 import { sessionTurn } from '../transcript/session-activity.ts';
@@ -508,7 +508,9 @@ export function SessionChatPage({
                 ferretId={ferretId}
                 {...(account === undefined ? {} : { account })}
                 {...(askApi === undefined ? {} : { api: askApi })}
-                {...(session.config.harness === undefined ? {} : { harness: session.config.harness })}
+                {...(session.config.harness === undefined || !isRecordedHarness(session.config.harness)
+                  ? {}
+                  : { harness: session.config.harness })}
                 {...(askId === undefined ? {} : { draftSlot: askId })}
                 {...(forForm
                   ? {
