@@ -49,6 +49,7 @@ function SlotPicture({ daemon }: { readonly daemon: string }): ReactNode {
 
 export function EndPage({
   daemon,
+  opens,
   onBack,
   summary,
   unsaved = [],
@@ -56,6 +57,8 @@ export function EndPage({
   picture,
 }: {
   readonly daemon: string;
+  /** Where project setup left the person (the project it registered): the way on is then "Open <project>", not a second project button. */
+  readonly opens?: { readonly label: string; readonly href: string } | undefined;
   readonly onBack: (() => void) | undefined;
   readonly summary: readonly SummaryStep[];
   /** Answers the machine did not take: each is named, with its own Try again. */
@@ -70,17 +73,17 @@ export function EndPage({
     const go = (href: string | undefined) => (href === undefined ? undefined : () => router?.navigate(href));
     const projects = screenHref(daemon, 'projects', 'projects');
     return projectAction(
-      go(projects === undefined ? undefined : addProjectHref(projects)),
+      opens === undefined ? go(projects === undefined ? undefined : addProjectHref(projects)) : undefined,
       go(screenHref(daemon, 'conversation', 'links')),
     );
-  }, [daemon, router, screenHref]);
-  const home = (): void => router?.navigate(daemonHomeHref(daemon));
+  }, [daemon, opens, router, screenHref]);
+  const home = (): void => router?.navigate(opens?.href ?? daemonHomeHref(daemon));
   return (
     <StepPageFrame
       title="You're set up"
       line="Your machine is ready."
       {...(onBack === undefined ? {} : { back: { onClick: onBack } })}
-      next={{ label: 'Open this machine', onClick: home }}
+      next={{ label: opens?.label ?? 'Open this machine', onClick: home }}
     >
       <div className="fy-end" data-flow-end="">
         {unsaved.length === 0 ? null : (

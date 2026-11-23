@@ -223,6 +223,9 @@ export function applyPicked(
 /** The progress bar's one segment for the whole client phase (every plugin's client pages read as "This device"). */
 const DEVICE_SEGMENT = { id: 'device', label: 'This device' } as const;
 
+/** Device pages of these plugins are not "This device": project setup (the flow's last page) is its own segment, named by its group. */
+const OWN_DEVICE_SEGMENT: ReadonlySet<string> = new Set(['projects']);
+
 export interface ProgressRead {
   readonly segments: readonly { readonly id: string; readonly label: string }[];
   readonly current: string;
@@ -255,9 +258,12 @@ export function progressOf(
   const here = pages.find(page => page.key === at);
   if (here === undefined) return undefined;
   const asked = pages.filter(page => !answered.has(page.key));
-  const segmentOf = (step: FlowStep): string => (step.phase === 'client' ? DEVICE_SEGMENT.id : step.plugin);
+  const segmentOf = (step: FlowStep): string =>
+    step.phase === 'client' && !OWN_DEVICE_SEGMENT.has(step.plugin) ? DEVICE_SEGMENT.id : step.plugin;
   const labels = new Map<string, string>();
   for (const segment of flow.daemon) labels.set(segment.plugin, segment.group);
+  for (const segment of flow.client)
+    if (OWN_DEVICE_SEGMENT.has(segment.plugin)) labels.set(segment.plugin, segment.group);
   const segments: { id: string; label: string }[] = [];
   for (const page of asked) {
     // A harness the person did not pick has no segment in the bar: its pages are never drawn.

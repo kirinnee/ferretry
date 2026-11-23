@@ -42,6 +42,8 @@ export interface FlowPageProps {
   readonly onNext: () => void;
   readonly onBack: () => void;
   readonly onLater: () => void;
+  /** The words on the footer's Later button when the page has better ones ("Skip for now" on project setup); default "Later". */
+  readonly laterLabel?: string;
   /** The answers the machine did not take, and the way to try again. */
   readonly unsaved?: { readonly count: number; readonly retry: () => void } | undefined;
   /** Test seam: how long a page may stay silent. */
@@ -238,6 +240,7 @@ export function FlowPage(props: FlowPageProps): ReactNode {
       {...(!covered
         ? {
             later: {
+              ...(props.laterLabel === undefined ? {} : { label: props.laterLabel }),
               title: 'Come back to this from Settings',
               disabled: busy !== null,
               onClick: props.onLater,

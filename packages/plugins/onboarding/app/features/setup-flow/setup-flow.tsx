@@ -27,6 +27,9 @@ function resetScroll(from: HTMLElement | null): void {
   if (window.scrollY !== 0) window.scrollTo(0, 0);
 }
 
+/** The plugin whose last page is project setup: its step memory says where the end page goes on. */
+const PROJECTS_PLUGIN = 'projects';
+
 export function createSetupFlow(client: PluginClient, deps: FlowDeps = {}) {
   return function SetupFlow(_props: ScreenProps): ReactNode {
     const flow = useSetupFlow(client, deps);
@@ -57,16 +60,22 @@ export function createSetupFlow(client: PluginClient, deps: FlowDeps = {}) {
             <Loading kind="page" label="Looking at what this machine can set up…" />
           </div>
         );
-      if (flow.at === END || flow.page === undefined)
+      if (flow.at === END || flow.page === undefined) {
+        // Project setup (the last page) leaves where its project is: the end page opens it instead of the machine's Home.
+        const { openLabel, openHref } = flow.memoryOf(PROJECTS_PLUGIN);
         return (
           <EndPage
             daemon={flow.target}
+            {...(typeof openLabel === 'string' && typeof openHref === 'string'
+              ? { opens: { label: openLabel, href: openHref } }
+              : {})}
             onBack={flow.canBack ? () => flow.back(END, flow.visit) : undefined}
             summary={flow.summary}
             unsaved={flow.unsaved}
             onRetry={flow.retryStep}
           />
         );
+      }
       const { page, visit } = flow;
       return (
         <FlowPage
@@ -88,6 +97,7 @@ export function createSetupFlow(client: PluginClient, deps: FlowDeps = {}) {
           onNext={() => flow.next(page.key, visit)}
           onBack={() => flow.back(page.key, visit)}
           onLater={() => flow.later(page, visit)}
+          {...(page.plugin === PROJECTS_PLUGIN ? { laterLabel: 'Skip for now' } : {})}
           unsaved={flow.unsaved.length === 0 ? undefined : { count: flow.unsaved.length, retry: flow.retrySave }}
           {...(deps.silenceMs === undefined ? {} : { silenceMs: deps.silenceMs })}
           {...(deps.report === undefined ? {} : { report: deps.report })}

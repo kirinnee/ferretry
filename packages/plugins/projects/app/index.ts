@@ -55,6 +55,16 @@ const newFerretProjectsPanel = (client: ProjectsClient): AppComponent<PanelProps
     ((await loadPanels()).createNewFerretProjectsPanel as (client: ProjectsClient) => AppComponent<PanelProps>)(client),
   );
 
+/** The setup flow's last page ("Add your projects"): its module loads when the flow first draws it. */
+const foldersStepPanel = (client: ProjectsClient): AppComponent<PanelProps> =>
+  lazyComponent<PanelProps>(async () =>
+    (
+      ((await import(`./views/${'folders-step'}.tsx`)) as Record<string, unknown>).createFoldersStep as (
+        client: ProjectsClient,
+      ) => AppComponent<PanelProps>
+    )(client),
+  );
+
 /**
  * Projects' app half: the `projects` screen (the registry, the add form, the discoveries) and the `project` screen (one
  * project's provenance, board switch, ferrets and files). The lane editor draws Board's data and is Board's.
@@ -66,7 +76,7 @@ export default provideToShell(
         projects: screen('createProjectsScreen', client),
         project: screen('createProjectScreen', client),
       },
-      panels: { 'new-ferret-projects': newFerretProjectsPanel(client) },
+      panels: { 'new-ferret-projects': newFerretProjectsPanel(client), 'onboarding-step': foldersStepPanel(client) },
     }),
   }),
   {
