@@ -16,6 +16,7 @@ const GPT_6_SOL = {
   model: 'gpt-6-sol',
   displayName: 'GPT-6-Sol',
   supportedReasoningEfforts: [{ reasoningEffort: 'medium' }],
+  serviceTiers: [{ id: 'priority', name: 'Fast' }],
   defaultReasoningEffort: 'medium',
 };
 

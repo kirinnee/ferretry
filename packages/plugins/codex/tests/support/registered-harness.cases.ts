@@ -145,7 +145,12 @@ export function registeredHarnessCases(): void {
       expect(box.state.get('fastCatalog')).toMatchObject({ format: 1, choices: [{ value: 'gpt-6-sol' }] });
       // The read landed, so the next fast start is decided from it.
       expect(await decide(fastInput({ model: 'gpt-6-sol' }))).toEqual({ allow: true });
-      expect(await decide(fastInput({ model: 'gpt-x' }))).toEqual({ allow: true });
+      // A model the read list does not carry is not confirmed, so fast is refused (rv-2372 #2).
+      expect(await decide(fastInput({ model: 'gpt-x' }))).toEqual({
+        allow: false,
+        reason: "Codex's model list does not include gpt-x, so its fast mode cannot be confirmed",
+        code: 'unservable_model',
+      });
 
       const stopped = fixture();
       stopped.freeSleep();
