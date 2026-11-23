@@ -50,6 +50,7 @@ import { harnessAsset, HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, type Harness
 import type { HarnessKind } from '../manifest.ts';
 import { isAssetTreeReference } from '../paths.ts';
 import { deepMergeSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
+import { isBuiltinInstructions } from './builtin-autonomous.ts';
 import { CODEX_CREDENTIAL_STORE_FILE, CODEX_CREDENTIAL_STORE_KEY } from './credentials.ts';
 import {
   type Contribution,
@@ -124,6 +125,11 @@ export type AdaptedEntry =
       readonly dest: string;
       readonly content: string;
       readonly from: readonly LayerReferenceText[];
+      /**
+       * Set when the content is ONLY Ferretry's built-in text (nobody asked for it): the apply then writes it where there
+       * is nothing, or where Ferretry's own earlier text is, and leaves any other file at `dest` exactly as it is.
+       */
+      readonly builtinOnly?: true;
     };
 
 /** A key written into every runtime that is not behaviour (§8.3), and so never shown as a layer. */
@@ -240,10 +246,12 @@ const quoted = (references: readonly string[]): string => references.map(referen
  * Several instructions as the one generated document a harness reads: oldest first, so newer
  * guidance is read last (§3.4), under a line that says where to edit them instead.
  */
+export const GENERATED_INSTRUCTIONS_MARKER = '<!-- Generated from ';
+
 export function concatenateInstructions(
   parts: readonly { readonly reference: LayerReferenceText; readonly body: string }[],
 ): string {
-  const header = `<!-- Generated from ${parts.map(part => part.reference).join(', ')}. Edit those components, not this file. -->`;
+  const header = `${GENERATED_INSTRUCTIONS_MARKER}${parts.map(part => part.reference).join(', ')}. Edit those components, not this file. -->`;
   return `${[header, ...parts.map(part => part.body.trim())].join('\n\n')}\n`;
 }
 
@@ -279,11 +287,13 @@ function adaptInstructions(
     parts.push({ reference: layer.reference, body });
   }
   if (parts.length < instructions.length) return undefined;
+  const builtinOnly = instructions.every(({ layer }) => isBuiltinInstructions(layer.name, bodies[layer.name]));
   return {
     kind: 'generated',
     dest,
     content: concatenateInstructions(parts),
     from: parts.map(part => part.reference),
+    ...(builtinOnly ? { builtinOnly: true as const } : {}),
   };
 }
 

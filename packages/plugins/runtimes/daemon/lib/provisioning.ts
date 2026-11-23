@@ -45,6 +45,14 @@ export type FleetWriteOperation =
       readonly path: string;
       readonly content: string;
       readonly mode: number;
+      /**
+       * Write only where it cannot replace what somebody else made. The file is written when nothing is at `path`, or
+       * when what is there is the plan's own: a link (only the plan makes links there), or a regular file that STARTS with
+       * `marker` (the plan's own generated text). Any other entry is left exactly as it is, word for word, and the
+       * destination is named as skipped. For text nobody asked for (the built-in instructions), which must never cost a
+       * person the `CLAUDE.md` / `AGENTS.md` they wrote.
+       */
+      readonly unlessForeign?: { readonly marker: string };
     }
   | {
       readonly kind: 'copy';

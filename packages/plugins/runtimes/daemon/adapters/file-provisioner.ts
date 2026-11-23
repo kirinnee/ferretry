@@ -595,8 +595,31 @@ export class FileFleetProvisioner implements FleetProvisioner {
       return;
     }
 
+    if (
+      operation.unlessForeign !== undefined &&
+      (await this.holdsForeign(operation.path, operation.unlessForeign.marker))
+    ) {
+      skipped.push({
+        path: operation.path,
+        reason: 'a file Ferretry did not write is there, so it was left exactly as it is',
+      });
+      return;
+    }
     await journal.capture(operation.path);
     await this.writeFileAtomically(operation.path, operation.content, operation.mode);
+  }
+
+  /** Whether `target` holds something the plan did not make: neither absent, nor a link, nor a file of its own text. */
+  private async holdsForeign(target: string, marker: string): Promise<boolean> {
+    const information = await this.disk.lstat(target);
+    if (information === undefined || information.kind === 'symlink') return false;
+    if (information.kind !== 'file') return true;
+    try {
+      return !(await this.disk.readText(target, MAX_READ_BYTES)).startsWith(marker);
+    } catch {
+      // Too big or unreadable is not provably the plan's own.
+      return true;
+    }
   }
 
   /** The text of the regular file at `target`, read without following a link. */
