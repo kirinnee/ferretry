@@ -57,7 +57,6 @@ import type {
   FerretState,
   FerretSummary,
   Harness,
-  HarnessFacts,
   HarnessHistorySource,
   HarnessKey,
   LaunchPart,
@@ -909,11 +908,7 @@ export class FerretsService implements FerretsApi {
   harnesses(): readonly HarnessKey[] {
     return this.ports.harnessKeys();
   }
-
-  /** What the installed harness `key` says about itself (`Harness.facts`); `undefined` when none is installed under it. */
-  harnessFacts(key: HarnessKey): HarnessFacts | undefined {
-    return this.ports.harness(key)?.facts;
-  }
+  harnessFacts = (key: HarnessKey): Harness['facts'] | undefined => this.ports.harness(key)?.facts;
 
   /** The harness's own copy of one conversation of the owner's history, in its shared pool (`Harness.importConversation`). */
   async importConversation(
@@ -1163,7 +1158,6 @@ export class FerretsService implements FerretsApi {
     const login = resolved.value?.login ?? request.login;
     const harnessKey = resolved.value?.harness ?? request.harness ?? this.ports.harnessKeys()[0];
     if (harnessKey === undefined) return failed('harness_unavailable', 'no harness plugin is on');
-    // The registry decides, not a list in the contract: a well-shaped key no installed plugin declares is refused by name.
     if (this.ports.harness(harnessKey) === undefined)
       return failed('harness_not_installed', `no harness ${harnessKey} is installed on this machine`);
     // The folder's identity is captured HERE, before any taker is asked, and re-verified as the last step before the
