@@ -69,6 +69,13 @@ export function subject(options: { readonly unguarded?: boolean; readonly redact
           const comparisons = [...(args[4] ?? '').matchAll(/#\{==:#\{(\w+)\},([^}]*)\}/gu)];
           if (comparisons.length === 0 || !comparisons.every(([, key = '', value]) => live[key] === value))
             return { code: 0, stdout: 'fy-input-guard-refused\n', stderr: '' };
+          // `#{C:text}`: tmux searches the screen as it is NOW, in the write itself.
+          const searches = [...(args[4] ?? '').matchAll(/#\{C:([^}]*)\}/gu)];
+          if (searches.length > 0) {
+            const screen = (await server.execute(['capture-pane', '-p', '-t', pane.id])).stdout;
+            if (!searches.every(([, text = '']) => screen.includes(text)))
+              return { code: 0, stdout: 'fy-input-guard-refused\n', stderr: '' };
+          }
           if (write[0] === 'set-buffer') {
             return await server.execute(['load-buffer', '-b', write[2] ?? '', '-'], write.at(-1)).then(result => {
               if (holdAfterBuffer) held = true;
