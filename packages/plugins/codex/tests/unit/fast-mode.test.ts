@@ -3,6 +3,7 @@ import should from 'should';
 import {
   catalogChoice,
   fastInForce,
+  fastLaunchVerified,
   fastStartRefusal,
   fastModeFacts,
   modelInForce,
@@ -117,6 +118,40 @@ describe('refusing a start that asks for fast mode the model does not have', () 
     should(fastStartRefusal('gpt-daybreak', [])).equal(
       "Codex's model list does not include gpt-daybreak, so its fast mode cannot be confirmed",
     );
+  });
+});
+
+describe('passing the priority tier at a launch only when it was verified', () => {
+  const held = [
+    { ...catalog.choices[1], isDefault: true as const },
+    ...catalog.choices.slice(2),
+  ] as typeof catalog.choices;
+
+  it('should pass no tier when no model list is held, whatever model is named', () => {
+    // Act / Assert
+    should(fastLaunchVerified('gpt-6-sol', undefined)).equal(false);
+    should(fastLaunchVerified(undefined, undefined)).equal(false);
+  });
+
+  it('should pass the tier for a named model only when the list says it has a fast tier', () => {
+    // Act / Assert
+    should(fastLaunchVerified('gpt-6-astra', held)).equal(false); // not in the held list
+    should(fastLaunchVerified('gpt-daybreak', held)).equal(false); // listed with no fast mode
+    should(fastLaunchVerified('unsaid', held)).equal(false); // listed with no fast-tier evidence
+    should(fastLaunchVerified('gpt-6-sol', held)).equal(true);
+  });
+
+  it("should judge a launch that names no model on the held list's default", () => {
+    // Act / Assert
+    should(fastLaunchVerified(undefined, held)).equal(true);
+    should(fastLaunchVerified(undefined, [{ ...catalog.choices[2], isDefault: true as const }] as typeof held)).equal(
+      false,
+    );
+  });
+
+  it('should pass no tier when no model is named and the held list has no default', () => {
+    // Act / Assert
+    should(fastLaunchVerified(undefined, catalog.choices.slice(2))).equal(false);
   });
 });
 

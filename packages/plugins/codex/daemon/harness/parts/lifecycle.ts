@@ -30,6 +30,7 @@ export const lifecyclePart: HarnessPart<'start' | 'resume' | 'stop'> = ({
   rollouts,
   ensureHome,
   poolHistory,
+  options,
 }) => {
   /**
    * `CODEX_HOME` (and, for a pooled ferret, `CODEX_SQLITE_HOME`) is set by an `env` prefix: the Vault's environment is an
@@ -43,6 +44,10 @@ export const lifecyclePart: HarnessPart<'start' | 'resume' | 'stop'> = ({
     resume?: string,
   ): Promise<readonly string[]> => {
     const items = await settingsNow(spec.runtime);
+    // Priority is the paid tier: it goes on the argv only for a model the held catalog says has it. `false` (the default
+    // tier) costs nothing extra, so it is passed as asked.
+    const fast =
+      spec.options?.fast === true && !(await options.fastVerified?.(spec.model)) ? undefined : spec.options?.fast;
     return [
       'env',
       `CODEX_HOME=${spec.home}`,
@@ -60,6 +65,9 @@ export const lifecyclePart: HarnessPart<'start' | 'resume' | 'stop'> = ({
         ...(resume === undefined ? {} : { resume }),
         ...(spec.model === undefined ? {} : { model: spec.model }),
         ...(spec.effort === undefined ? {} : { effort: spec.effort }),
+        // The recorded start's fast mode, on every launch (a start, a resume, a revive all rebuild the spec from the
+        // ferret's details). Unset (or priority nobody verified) passes nothing, so Codex's own tier stays in charge.
+        ...(fast === undefined ? {} : { fast }),
       }),
     ];
   };

@@ -71,6 +71,20 @@ export function fastStartRefusal(model: string, choices: readonly RuntimeModelCh
     : `Codex's model list does not say ${choice.label} has fast mode, so it cannot be confirmed`;
 }
 
+/**
+ * Whether a LAUNCH may carry the paid priority tier: the model it will run (the one named, else the held list's default)
+ * is listed WITH a fast tier. The same rule a start is judged on ({@link fastStartRefusal}), asked again at the argv, so a
+ * relaunch whose model changed, or whose list is gone, never passes a tier nobody verified (#35).
+ */
+export function fastLaunchVerified(
+  model: string | undefined,
+  choices: readonly RuntimeModelChoice[] | undefined,
+): boolean {
+  if (choices === undefined) return false;
+  const run = model ?? choices.find(choice => choice.isDefault === true)?.value;
+  return run !== undefined && fastStartRefusal(run, choices) === undefined;
+}
+
 /** The facts the planner needs for a fast switch on this session. */
 export function fastModeFacts(view: FastView, catalog: RuntimeModelCatalog): FastModeFacts {
   const model = modelInForce(view);

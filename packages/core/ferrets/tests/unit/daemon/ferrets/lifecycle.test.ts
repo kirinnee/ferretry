@@ -570,3 +570,161 @@ test('fy start --detach: a history that cannot be written is no unhandled reject
   expect(unhandled).toEqual([]);
   expect(f.registry.get(child)?.state).toBe('stopped');
 });
+
+test('U0c a start that asked for fast mode hands it to the harness, and a revive hands the SAME recorded answer back', async () => {
+  const f = fixture();
+  const started = await f.service.start({ folder: '/work', by: 'owner', options: { fast: true } }, PERSON_ORIGIN);
+  expect(started.ok).toBe(true);
+  const id = started.ok ? started.value : f.id;
+  expect(f.harness.launched.at(-1)?.options?.fast).toBe(true);
+  await f.service.stop(id, 'now');
+  await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+  expect(f.harness.launched).toHaveLength(2);
+  expect(f.harness.launched.at(-1)?.options?.fast).toBe(true);
+});
+
+test('U0c a start that said nothing about fast mode records none, so no launch carries one', async () => {
+  const f = fixture();
+  const started = await f.service.start({ folder: '/work', by: 'owner', options: { effort: 'high' } }, PERSON_ORIGIN);
+  expect(started.ok).toBe(true);
+  const id = started.ok ? started.value : f.id;
+  await f.service.stop(id, 'now');
+  await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+  expect(f.harness.launched.map(spec => spec.options?.fast)).toEqual([undefined, undefined]);
+});
+
+test('U0c a revive asks for the fast mode the session is ON now (the chip’s answer: a live /fast), not the start’s', async () => {
+  const f = fixture();
+  let live: boolean | undefined;
+  const started = await f.service.start({ folder: '/work', by: 'owner', options: { fast: true } }, PERSON_ORIGIN);
+  expect(started.ok).toBe(true);
+  const id = started.ok ? started.value : f.id;
+  f.ports.session = {
+    prepare: async () => undefined,
+    carry: async () => undefined,
+    launchFast: async () => live,
+  } as never;
+  await f.service.stop(id, 'now');
+
+  live = false; // the owner typed /fast off after the start
+  await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+  expect(f.harness.launched.at(-1)?.options?.fast).toBe(false);
+
+  await f.service.stop(id, 'now');
+  live = undefined; // nothing newer was reported: the start's own answer stands
+  await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+  expect(f.harness.launched.at(-1)?.options?.fast).toBe(true);
+});
+
+/** What each `start.decide` was asked, and a decision that refuses fast mode the way Codex's does for an unverified model. */
+function fastDecisions(f: ReturnType<typeof fixture>, refuseFast: 'unservable' | 'other' | false) {
+  const asked: { by: string; model?: string; fast?: boolean; login?: string }[] = [];
+  f.ports.decide = async input => {
+    asked.push({
+      by: input.by,
+      ...(input.model === undefined ? {} : { model: input.model }),
+      ...(input.fast === undefined ? {} : { fast: input.fast }),
+      ...(input.login === undefined ? {} : { login: input.login }),
+    });
+    if (input.fast === true && input.by === 'resume' && refuseFast !== false)
+      return {
+        allow: false,
+        reason: 'fast mode is not confirmed',
+        ...(refuseFast === 'unservable' ? { code: 'unservable_model' } : {}),
+      };
+    return { allow: true };
+  };
+  return asked;
+}
+
+const withLive = (f: ReturnType<typeof fixture>, live: () => boolean | undefined) => {
+  f.ports.session = {
+    prepare: async () => undefined,
+    carry: async () => undefined,
+    launchFast: async () => live(),
+  } as never;
+};
+
+test('U0c a revive asks start.decide about the model and fast mode it will really run, and keeps fast only when it is verified', async () => {
+  const f = fixture();
+  const asked = fastDecisions(f, false);
+  const started = await f.service.start(
+    { folder: '/work', by: 'owner', options: { fast: true, model: 'gpt-fast' } },
+    PERSON_ORIGIN,
+  );
+  const id = started.ok ? started.value : f.id;
+  await f.service.stop(id, 'now');
+  asked.length = 0;
+
+  await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+
+  expect(asked).toEqual([{ by: 'resume', model: 'gpt-fast', fast: true }]);
+  expect(f.harness.launched.at(-1)?.options?.fast).toBe(true);
+});
+
+test('U0c a revive whose model cannot be verified fast launches WITHOUT the paid tier instead of refusing', async () => {
+  const f = fixture();
+  const started = await f.service.start(
+    { folder: '/work', by: 'owner', options: { fast: true, model: 'gpt-plain' } },
+    PERSON_ORIGIN,
+  );
+  const id = started.ok ? started.value : f.id;
+  await f.service.stop(id, 'now');
+  const asked = fastDecisions(f, 'unservable');
+
+  const revived = await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+
+  expect(revived.ok).toBe(true);
+  expect(f.harness.launched.at(-1)?.options?.fast).toBeUndefined();
+  expect(f.harness.launched.at(-1)?.model).toBe('gpt-plain');
+  // The fast question, then the same start asked plainly so every other taker still has its say.
+  expect(asked.map(question => question.fast)).toEqual([true, undefined]);
+});
+
+test('U0c a true observation for ANOTHER model never turns a start that set no fast into a paid launch of the original model', async () => {
+  const f = fixture();
+  const started = await f.service.start(
+    { folder: '/work', by: 'owner', options: { model: 'gpt-plain' } }, // fast unset
+    PERSON_ORIGIN,
+  );
+  const id = started.ok ? started.value : f.id;
+  await f.service.stop(id, 'now');
+  withLive(f, () => true); // the harness reported fast on, for a model the owner switched to by hand
+  const asked = fastDecisions(f, 'unservable');
+
+  await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+
+  expect(asked[0]).toEqual({ by: 'resume', model: 'gpt-plain', fast: true });
+  expect(f.harness.launched.at(-1)?.options?.fast).toBeUndefined();
+});
+
+test('U0c a refusal that is not about fast mode still refuses the revive', async () => {
+  const f = fixture();
+  const started = await f.service.start({ folder: '/work', by: 'owner', options: { fast: true } }, PERSON_ORIGIN);
+  const id = started.ok ? started.value : f.id;
+  await f.service.stop(id, 'now');
+  fastDecisions(f, 'other');
+
+  const revived = await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+
+  expect(revived.ok).toBe(false);
+  expect(f.harness.launched).toHaveLength(1);
+});
+
+test('U0c a move onto another login never carries fast observations across, and asks the decision about no fast mode', async () => {
+  const f = fixture();
+  const started = await f.service.start({ folder: '/work', by: 'owner', options: { fast: true } }, PERSON_ORIGIN);
+  const id = started.ok ? started.value : f.id;
+  await f.service.stop(id, 'now');
+  // The source pane reported fast on after the move stamp but before its pane was released.
+  withLive(f, () => true);
+  const asked = fastDecisions(f, false);
+
+  await f.service.resume(id, undefined, {
+    origin: PERSON_ORIGIN,
+    target: { runtime: 'claude-two', harness: 'claude-code', conversation: 'conv-fern' },
+  });
+
+  expect(asked).toEqual([{ by: 'resume' }]);
+  expect(f.harness.launched.at(-1)?.options?.fast).toBeUndefined();
+});

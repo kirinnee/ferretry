@@ -47,7 +47,8 @@ import { SessionProvenanceRecorder, type SessionAncestry } from '../lib/session/
 import { resolveWardenLineage } from '../lib/session/provenance/lineage.ts';
 import { SessionProvenanceStamper } from '../lib/session/provenance/stamper.ts';
 import type { SessionSpawnRequest } from '../lib/session/provenance/types.ts';
-import { SessionConfigSchema } from '../lib/protocol/session.ts';
+import { SessionConfigSchema, SessionStateSchema } from '../lib/protocol/session.ts';
+import { currentLaunchFast } from '../lib/session/launch/index.ts';
 import { markedHealth } from '../lib/ferrets/health-mark.ts';
 import { MEDIA_FOLDER, QUESTION_ASKED_FILE } from '../lib/ferrets/session-stores/pane-files.ts';
 import { repointedSessionConfig, sessionRuntimeFacts } from '../lib/ferrets/runtime-repoint.ts';
@@ -219,6 +220,13 @@ export class SessionFiles {
           (document as { compactAt?: unknown } | undefined)?.compactAt,
         );
         return parsed.success ? parsed.data : undefined;
+      },
+      // What the session is ON for fast mode (`currentLaunchFast`): a relaunch asks for it, not for the start's answer.
+      launchFast: async ferret => {
+        const id = parseSessionId(ferret);
+        const config = SessionConfigSchema.safeParse(await this.deps.storage.readConfig(id).catch(() => undefined));
+        const state = SessionStateSchema.safeParse(await this.deps.storage.readState(id).catch(() => undefined));
+        return config.success && state.success ? currentLaunchFast(config.data, state.data) : undefined;
       },
       // Records (or drops) the ferret's own choice: the one field changes, every other keeps its value, and the storage
       // writes the document atomically. A missing or damaged config is refused by the storage, never rebuilt from nothing.
