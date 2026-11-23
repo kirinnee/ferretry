@@ -17,8 +17,11 @@ import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
 import { HARNESSES, type ToolModel, toolModel, versionOf } from './model.ts';
 
 const SCAN_ROUTE = 'GET /v1/runtimes/setup/scan' as const;
-/** Each tool's own update view is served by its own plugin, under its key. */
-const updateRoute = (harness: HarnessKey): string => `GET /v1/${harness}/update`;
+/** Each tool's own update view is served by its own plugin; every route is written out so the declared-routes check reads it. */
+const UPDATE_ROUTE: Readonly<Record<string, string>> = {
+  'claude-code': 'GET /v1/claude-code/update',
+  codex: 'GET /v1/codex/update',
+};
 
 export type ScanRead =
   | { readonly kind: 'idle' }
@@ -55,7 +58,10 @@ const versionsOf = (updates: Readonly<Record<string, unknown>>): Record<string, 
 const readMachine = async (client: RuntimesClient, quiet: boolean): Promise<MachineRead> => {
   const [answer, ...views] = await Promise.all([
     client.call(SCAN_ROUTE, { quiet }),
-    ...HARNESSES.map(harness => client.call(updateRoute(harness), { quiet: true }).catch(() => null)),
+    ...HARNESSES.map(harness => {
+      const route = UPDATE_ROUTE[harness];
+      return route === undefined ? null : client.call(route, { quiet: true }).catch(() => null);
+    }),
   ]);
   return { answer, updates: Object.fromEntries(HARNESSES.map((harness, at) => [harness, views[at]])) };
 };
