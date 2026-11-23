@@ -97,6 +97,7 @@ export function createSetupFlow(client: PluginClient, deps: FlowDeps = {}) {
           onNext={() => flow.next(page.key, visit)}
           onBack={() => flow.back(page.key, visit)}
           onLater={() => flow.later(page, visit)}
+          onShown={() => flow.shown(page)}
           {...(page.plugin === PROJECTS_PLUGIN ? { laterLabel: 'Skip for now' } : {})}
           unsaved={flow.unsaved.length === 0 ? undefined : { count: flow.unsaved.length, retry: flow.retrySave }}
           {...(deps.silenceMs === undefined ? {} : { silenceMs: deps.silenceMs })}

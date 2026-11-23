@@ -46,6 +46,7 @@ import {
 import { onboardingScreen } from '../../onboarding-screen.ts';
 import type { SummaryStep } from '../../views/steps-screen.tsx';
 import { readLater, rememberLater } from './client-later.ts';
+import { markProjectSetupShown, PROJECT_SETUP_STEP } from './project-resume.ts';
 import {
   advance,
   applyPicked,
@@ -91,7 +92,7 @@ interface AnswerLane {
 
 const nowInstant = (): Instant => instantFromEpochMs(Date.now());
 
-const browserLedgerStorage = (): LedgerStorage | undefined => {
+export const browserLedgerStorage = (): LedgerStorage | undefined => {
   try {
     const candidate = (globalThis as { localStorage?: LedgerStorage }).localStorage;
     return candidate !== undefined && typeof candidate.getItem === 'function' && typeof candidate.setItem === 'function'
@@ -150,6 +151,8 @@ export interface SetupFlow {
   readonly next: (key: string, visit: number) => void;
   readonly back: (key: string, visit: number) => void;
   readonly later: (step: FlowStep, visit: number) => void;
+  /** A page was truly drawn (it said ready or put up a busy label): project setup is then marked as shown on the device ledger. */
+  readonly shown: (step: FlowStep) => void;
   readonly retry: () => void;
   /** The machine's own steps and where each ended: what the closing summary lists (a page that skipped itself is not in it). */
   readonly summary: readonly SummaryStep[];
@@ -378,6 +381,14 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     },
     [answer, current, pages, answered],
   );
+  /** A page was truly drawn: project setup leaves a mark on the device ledger so a relaunch returns to it (project-resume.ts). */
+  const shown = useCallback(
+    (step: FlowStep): void => {
+      if (step.key === PROJECT_SETUP_STEP && target !== undefined)
+        markProjectSetupShown(env.current.storage(), target, env.current.now());
+    },
+    [target],
+  );
   const skip = useCallback(
     (step: FlowStep, why: 'not-needed' | 'already-set', visit: number): void => {
       if (!current(step.key, visit)) return;
@@ -487,6 +498,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     next,
     back,
     later,
+    shown,
     retry: () => setAttempt(count => count + 1),
     summary:
       ready === undefined
