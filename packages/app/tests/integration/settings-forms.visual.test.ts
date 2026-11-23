@@ -641,4 +641,50 @@ describe('Settings forms: one save model, said out loud', () => {
       await close();
     }
   });
+
+  // ── the two new states, at a phone and a desktop width: both fit the screen and are drawn in full ──
+  for (const viewport of VIEWPORTS) {
+    it(`${viewport.name}: the risky-update confirm dialog fits the viewport, with Cancel and Update anyway in reach`, async () => {
+      const { page, close } = await open(viewport.width, viewport.height, 'claude-code', 'claude-code');
+      try {
+        await page.locator('[data-unverified-update]').click();
+        const dialog = page.getByRole('dialog');
+        await dialog.waitFor();
+        // The dialog fades in: look at it once it has settled.
+        await page.waitForTimeout(600);
+        await shot(page, `${viewport.name}-claude-confirm`);
+        for (const mark of ['[data-unverified-cancel]', '[data-unverified-confirm]']) {
+          const box = await page.locator(mark).boundingBox();
+          expect(box, `${mark} is drawn`).not.toBeNull();
+          expect(
+            (box?.x ?? -1) >= 0 && (box?.x ?? 0) + (box?.width ?? 0) <= viewport.width,
+            `${mark} is inside the width`,
+          ).toBe(true);
+          expect((box?.y ?? 0) + (box?.height ?? 0) <= viewport.height, `${mark} is inside the height`).toBe(true);
+        }
+      } finally {
+        await close();
+      }
+    });
+
+    it(`${viewport.name}: a failed proxy test shows why and says nothing was saved, inside the viewport`, async () => {
+      const { page, close } = await open(viewport.width, viewport.height, 'browsers', 'browser', SAVED_PROXY);
+      try {
+        await page.locator('[data-browser-proxy-url]').fill('http://new-proxy.example.test:8080');
+        await page.locator('[data-browser-proxy-save-panel] [data-change-submit]').click();
+        const note = page.locator('[data-setup-note="browser-proxy-save-refusal"]');
+        await note.waitFor({ timeout: 5_000 });
+        await note.scrollIntoViewIfNeeded();
+        await shot(page, `${viewport.name}-proxy-failed-state`);
+        expect(await note.innerText()).toContain('Not saved');
+        expect(await page.locator('[data-browser-proxy-test-class]').count(), 'the test result is shown too').toBe(1);
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          'nothing scrolls sideways',
+        ).toBe(true);
+      } finally {
+        await close();
+      }
+    });
+  }
 });
