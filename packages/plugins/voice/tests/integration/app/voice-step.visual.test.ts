@@ -121,7 +121,12 @@ const fakeOf = (tab: Tab) => tab.evaluate(() => (window as unknown as { __fake: 
  */
 function slotText(): string {
   const slot = document.querySelector('.fy-sf-slot') as HTMLElement;
+  // The audio test is measured on its own (`audioText`, its own copy budget): the page's 160 characters are everything else.
+  const audio = slot.querySelector('[data-voice-test]') as HTMLElement | null;
+  const shown = audio?.style.display ?? '';
+  if (audio !== null) audio.style.display = 'none';
   let text = slot.innerText;
+  if (audio !== null) audio.style.display = shown;
   const titles = [
     ...[...slot.querySelectorAll('input[type=radio][aria-label]')].map(el => el.getAttribute('aria-label') ?? ''),
     ...[...slot.querySelectorAll('[data-setting-row] [id$="-label"]')].map(el => (el as HTMLElement).innerText),
@@ -129,7 +134,17 @@ function slotText(): string {
   for (const title of titles) if (title !== '') text = text.replace(title, '');
   return text.replace(/\s+/g, ' ').trim();
 }
+/** What a person reads inside the audio test, as the page lays it out: its own copy budget, apart from the page's 160. */
+function audioText(): string {
+  const audio = document.querySelector('[data-voice-test]') as HTMLElement;
+  return audio.innerText.replace(/\s+/g, ' ').trim();
+}
+/** The page's own text, outside the audio test: r11 O12's 160, unchanged. */
 const SEEN_TEXT_MAX = 160;
+/** How far below the window's bottom edge the footer may end at 1280x900: one short scroll of the wheel. */
+const SHORT_SCROLL = 160;
+/** The audio test's own copy: its heading, status line, hint and three buttons (measured: see the failure line, which prints the text). */
+const AUDIO_TEXT_MAX = 200;
 
 interface DemoProbe {
   names: string[];
@@ -166,6 +181,60 @@ const expectPlays = (probe: DemoProbe, count: number) => {
   expect(probe.atEnd).toEqual(Array<string>(count).fill('1'));
 };
 
+interface WaveProbe {
+  kind: string;
+  /** The picked engine has measurements, so the radar draws a shape. */
+  shape: boolean;
+  names: string[];
+  states: string[];
+  /** The words' clip at the loop's start and at 5 s in (live: written by 3 s; after Stop: by 4 s). */
+  clipStart: string;
+  clipLate: string;
+}
+/**
+ * Does the O8 picture really PLAY? Reads the browser's own animation list for the picture (a picture whose animation CSS was removed
+ * has none), then seeks the words' animation to the loop's start and to 5 s in and reads the computed clip: hidden, then whole.
+ * Destructive (it pauses them), so a test probes once per mount.
+ */
+const probeWave = (tab: Tab): Promise<WaveProbe> =>
+  tab.evaluate(() => {
+    const root = document.querySelector('[data-voice-demo]') as HTMLElement;
+    const animations = root.getAnimations({ subtree: true }) as CSSAnimation[];
+    const states = animations.map(animation => animation.playState);
+    const text = root.querySelector('.fy-wd__text') as HTMLElement;
+    const own = animations.find(animation => (animation.effect as KeyframeEffect).target === text);
+    const clip = (): string => getComputedStyle(text).clipPath;
+    let clipStart = 'none';
+    let clipLate = 'none';
+    if (own !== undefined) {
+      own.pause();
+      own.currentTime = 0;
+      clipStart = clip();
+      own.currentTime = 5_000;
+      clipLate = clip();
+    }
+    return {
+      kind: root.dataset.voiceDemo ?? '',
+      shape: root.querySelector('.fy-wd__shape') !== null,
+      names: [...new Set(animations.map(animation => animation.animationName))],
+      states,
+      clipStart,
+      clipLate,
+    };
+  });
+
+const expectWavePlays = (probe: WaveProbe) => {
+  const kind = probe.kind;
+  expect(probe.names).toContain('fy-wd-envelope');
+  expect(probe.names).toContain('fy-wd-wobble');
+  expect(probe.names).toContain(kind === 'live' ? 'fy-wd-type-live' : 'fy-wd-type-after');
+  if (probe.shape) expect(probe.names).toContain('fy-wd-grow');
+  for (const state of probe.states) expect(['running', 'finished']).toContain(state);
+  // Words: hidden (all clipped away from the right) at the start, whole at 5 s.
+  expect(probe.clipStart).toMatch(/inset\(0(px)? 100%/);
+  expect(probe.clipLate).toMatch(/inset\(0(px)?\)|inset\(0(px)? 0(px)? 0(px)? 0(px)?\)|none/);
+};
+
 const VOICE = '&view=voice';
 const SPEEDUPS = '&view=speedups';
 const CARD = '.fy-engine-card';
@@ -190,7 +259,7 @@ describe('the Voice first-run page', () => {
             clone.querySelector('[data-step-demo]')?.remove();
             const stray = [
               ...document.querySelectorAll(
-                '.fy-voice-step button:not(.fy-engine-mini):not(.fy-engine-info):not([role=radio])',
+                '.fy-voice-step button:not(.fy-engine-mini):not(.fy-engine-info):not([role=radio]):not([data-test-action])',
               ),
             ].map(el => el.textContent);
             return {
@@ -221,8 +290,10 @@ describe('the Voice first-run page', () => {
           const seen = await tab.evaluate(slotText);
           // A failure shows the text itself, so what to cut is on screen.
           expect(seen.length <= SEEN_TEXT_MAX ? '' : `${seen.length} chars: ${seen}`).toBe('');
-          // The demo plays: the browser has the animations running, and each takes its word from invisible to seen.
-          expectPlays(await probeDemo(tab, '[data-voice-demo]'), 5);
+          const audio = await tab.evaluate(audioText);
+          expect(audio.length <= AUDIO_TEXT_MAX ? '' : `${audio.length} chars: ${audio}`).toBe('');
+          // The picture plays: wave, words and radar are really animated, and the words are written between 0 and half a loop.
+          expectWavePlays(await probeWave(tab));
           expect(g.stray).toEqual([]);
           expect(g.scrollX).toBeLessThanOrEqual(0);
           for (const button of g.buttons) expect(button.right).toBeLessThanOrEqual(g.viewport);
@@ -230,8 +301,13 @@ describe('the Voice first-run page', () => {
             expect(g.demo.h).toBeLessThanOrEqual(140);
             expect(g.demo.bottom).toBeLessThanOrEqual((g.cards[0]?.y ?? 0) + 1);
           } else {
-            // All five cards and the footer's buttons are in the window at once: nothing to scroll to.
-            expect(g.footerBottom).toBeLessThanOrEqual(g.height);
+            // All five cards are in the window at once. (O8 item 8 adds "Test your audio" under them, so the footer is below the fold on a
+            // 900 px window; the owner asked for the test on this page.) The footer's Next must stay within ONE SHORT SCROLL: its bottom
+            // edge no more than SHORT_SCROLL (160 px; measured 107) below the fold, so a person never has to hunt for it.
+            expect(
+              g.footerBottom - g.height,
+              `Next is ${Math.round(g.footerBottom - g.height)} px below the fold`,
+            ).toBeLessThanOrEqual(SHORT_SCROLL);
             expect(g.cards.at(-1)?.bottom ?? 0).toBeLessThanOrEqual(g.height);
             expect(g.demo.x).toBeGreaterThan((g.cards[0]?.right ?? 0) + 32);
             expect(Math.abs(g.demo.y - (g.cards[0]?.y ?? 0))).toBeLessThanOrEqual(8);
@@ -306,27 +382,37 @@ describe('the Voice first-run page', () => {
       try {
         await tab.locator('.fy-engine-card[data-engine="browser"] input').click();
         await tab.waitForFunction(() => document.querySelector('[data-voice-demo="live"]') !== null);
-        expectPlays(await probeDemo(tab, '[data-voice-demo]'), 5);
+        expectWavePlays(await probeWave(tab));
         await tab.locator('.fy-engine-card[data-engine="off"] input').click();
         await tab.waitForFunction(() => document.querySelector('[data-voice-demo="off"]') !== null);
-        expectPlays(await probeDemo(tab, '[data-voice-demo]'), 1);
+        // Off: no wave, no words to write, no radar shape; the picture says so instead of animating nothing.
+        const off = await probeWave(tab);
+        expect(off.names.filter(name => name !== 'fy-wd-pulse')).toEqual([]);
+        expect(await tab.locator('[data-radar="none"]').count()).toBe(1);
+        expect(await tab.locator('.fy-wd__shape').count()).toBe(0);
       } finally {
         await close();
       }
     }
   });
 
-  it('with motion reduced the demo has no animation and shows every word (1280)', async () => {
+  it('with motion reduced the picture is one still frame: the wave drawn, the words whole, the radar shown (1280)', async () => {
     const { tab, close } = await open(VIEWPORTS[0], 'studio-light', VOICE, CARD);
     try {
       await tab.emulateMedia({ reducedMotion: 'reduce' });
+      await tab.waitForTimeout(300);
       const now = await tab.evaluate(() => ({
-        animations: (document.querySelector('[data-voice-demo]') as HTMLElement).getAnimations({ subtree: true })
-          .length,
-        opacities: [...document.querySelectorAll('.fy-vd__word')].map(el => getComputedStyle(el).opacity),
+        names: (document.querySelector('[data-voice-demo]') as HTMLElement)
+          .getAnimations({ subtree: true })
+          .map(animation => (animation as CSSAnimation).animationName ?? animation.constructor.name),
+        clip: getComputedStyle(document.querySelector('.fy-wd__text') as Element).clipPath,
+        barHeights: [...document.querySelectorAll('.fy-wd__bar')].map(el =>
+          Math.round(el.getBoundingClientRect().height),
+        ),
       }));
-      expect(now.animations).toBe(0);
-      expect(now.opacities).toEqual(['1', '1', '1', '1', '1']);
+      expect(now.names).toEqual([]);
+      expect(now.clip).toBe('none');
+      expect(new Set(now.barHeights).size, 'the still wave is uneven, so it reads as speech').toBeGreaterThan(5);
     } finally {
       await close();
     }
@@ -374,7 +460,11 @@ describe('the Voice first-run page', () => {
     try {
       await tab.getByText('Show every engine').click();
       await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 10);
-      expect(await tab.locator('.fy-voice-step button:not(.fy-engine-mini):not(.fy-engine-info)').count()).toBe(0);
+      expect(
+        await tab
+          .locator('.fy-voice-step button:not(.fy-engine-mini):not(.fy-engine-info):not([data-test-action])')
+          .count(),
+      ).toBe(0);
       expect(((await fakeOf(tab)) as Fake).writes).toEqual([]);
     } finally {
       await close();
@@ -664,4 +754,290 @@ describe('r11-1b G3: the Voice and Speed-ups buttons and their focus ring', () =
       });
     }
   }
+});
+
+/**
+ * O8 item 8, in a real browser over fake data: the owner's "this animation kinda shit" (a sound wave that turns into text on top,
+ * the voice's spec as a radar chart below), "this is the part to ask for audio permission and testing too" (ask for the
+ * microphone, record a line and see it transcribed, hear a sample), and the states each of those can be in.
+ *
+ * The ASSERT, on computed geometry, the DOM and the fake device (never a snapshot): the wave sits above the radar at 1280 and
+ * beside it, inside the frame's 140 px strip, at 390 (its labels 12 px or more, as text outside the drawing); the radar's vertices ARE the engine's numbers
+ * (Sherpa reaches the top for speed and the full left for live words, Moonshine does not); permission is asked by a button
+ * and never on arrival; a refusal names its remedy; a line is recorded with the picked engine and shows as words; a sample
+ * reaches the speaker; no control sits outside its column or under the footer. Set `FY_VOICE_STEP_SHOTS_DIR` to keep the pictures.
+ */
+const SHERPA = `${VOICE}&saved=sherpa`;
+const TEST = '[data-voice-test]';
+const act = (tab: Tab, id: string) => tab.locator(`[data-test-action="${id}"]`);
+
+describe('O8 item 8: the Voice picture', () => {
+  for (const viewport of VIEWPORTS) {
+    for (const theme of THEMES) {
+      it(`the wave turns into text over the radar (${viewport.name}, ${theme})`, async () => {
+        const { tab, close } = await open(viewport, theme, SHERPA, '[data-voice-demo]');
+        try {
+          await tab.waitForTimeout(400);
+          const g = await tab.evaluate(() => {
+            const box = (selector: string) => {
+              const rect = (document.querySelector(selector) as Element).getBoundingClientRect();
+              return { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, w: rect.width, h: rect.height };
+            };
+            const radar = document.querySelector('.fy-wd__radar') as SVGSVGElement;
+            const labels = [...document.querySelectorAll('.fy-wd__axis')] as HTMLElement[];
+            return {
+              demo: box('[data-step-demo]'),
+              wave: box('.fy-wd__wave'),
+              words: box('.fy-wd__text'),
+              radar: box('.fy-wd__radar'),
+              // The names are HTML text outside the scaled drawing: their computed size IS what is drawn.
+              axisPx: Math.min(...labels.map(el => Number.parseFloat(getComputedStyle(el).fontSize))),
+              axisInsideSvg: document.querySelectorAll('.fy-wd__radar text').length,
+              axisBoxes: labels.map(el => {
+                const rect = el.getBoundingClientRect();
+                return { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, shown: rect.width > 0 };
+              }),
+              axes: labels.map(el => el.textContent),
+              caption: (document.querySelector('.fy-wd__caption') as HTMLElement).textContent,
+              vertices: [...document.querySelectorAll('.fy-wd__vertex')].map(el => [
+                Number(el.getAttribute('cx')),
+                Number(el.getAttribute('cy')),
+              ]),
+              bars: document.querySelectorAll('.fy-wd__bar').length,
+              moreShown: getComputedStyle(document.querySelector('.fy-wd__more') as Element).display !== 'none',
+              hidden: radar.closest('[aria-hidden="true"]') !== null,
+              scrollX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            };
+          });
+          expect(g.bars).toBe(28);
+          expect(g.axes.map(text => (text ?? '').trim())).toEqual(['Speed', 'Accuracy', 'Light', 'Live words']);
+          // A phone's strip is too narrow for "Live words" at a readable size: the tail of the label is not drawn there.
+          expect(g.moreShown).toBe(!viewport.phone);
+          expect(g.hidden, 'the picture is decorative: the cards and the test carry the words').toBe(true);
+          expect(g.scrollX).toBeLessThanOrEqual(0);
+          // The radar IS Sherpa's numbers: the top vertex is speed 0.97 of the radius (46) above the centre (120, 66), the left one is
+          // live words at the full radius (Sherpa streams).
+          expect(g.vertices[0]?.[1] ?? 0).toBeCloseTo(66 - 46 * 0.973, 0);
+          expect(g.vertices[3]?.[0] ?? 0).toBeCloseTo(120 - 46, 0);
+          if (viewport.phone) {
+            expect(g.demo.h).toBeLessThanOrEqual(140);
+            expect(g.wave.right, 'wave and words left of the radar').toBeLessThanOrEqual(g.radar.x + 1);
+            expect(
+              g.axisPx,
+              `the radar's labels are readable on a phone (${g.axisPx.toFixed(1)} px)`,
+            ).toBeGreaterThanOrEqual(12);
+          } else {
+            expect(g.wave.bottom, 'the wave is above the radar').toBeLessThanOrEqual(g.radar.y + 1);
+            expect(g.words.y).toBeGreaterThan(g.wave.y);
+            expect(g.axisPx).toBeGreaterThanOrEqual(12);
+          }
+          // The names are text beside the drawing, never SVG text that shrinks with it, and none is cut off by the strip.
+          expect(g.axisInsideSvg).toBe(0);
+          for (const box of g.axisBoxes) {
+            expect(box.shown).toBe(true);
+            expect(box.x).toBeGreaterThanOrEqual(g.demo.x);
+            expect(box.right).toBeLessThanOrEqual(g.demo.right + 1);
+            expect(box.bottom).toBeLessThanOrEqual(g.demo.bottom + 1);
+          }
+          // The specs stay available as text (the desktop caption; on a phone the cards' own bars carry them).
+          expect((g.caption ?? '').length).toBeGreaterThan(0);
+          expect(g.radar.x).toBeGreaterThanOrEqual(g.demo.x);
+          expect(g.radar.right).toBeLessThanOrEqual(g.demo.right + 1);
+          if (shotsDir !== '') {
+            await tab.waitForTimeout(2_600);
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-o8-picture.png`) });
+          }
+        } finally {
+          await close();
+        }
+      });
+    }
+  }
+
+  it('the radar follows the pick: Moonshine has no live words; the browser voice draws an empty frame (1280)', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', SHERPA, '[data-voice-demo]');
+    try {
+      const left = () =>
+        tab.evaluate(() => Number(document.querySelectorAll('.fy-wd__vertex')[3]?.getAttribute('cx') ?? 'NaN'));
+      expect(await left()).toBeCloseTo(74, 0);
+      await tab.locator('.fy-engine-card[data-engine="moonshine-base-en"] input').click();
+      await tab.waitForFunction(() => document.querySelector('[data-voice-demo="after"]') !== null);
+      expect(await left()).toBeCloseTo(120 - 46 * 0.2, 0);
+      expect((await probeWave(tab)).kind).toBe('after');
+      await tab.locator('.fy-engine-card[data-engine="browser"] input').click();
+      await tab.waitForFunction(() => document.querySelector('[data-radar="none"]') !== null);
+      expect(await tab.locator('.fy-wd__shape').count()).toBe(0);
+      expect(await tab.locator('.fy-wd__caption').innerText()).toContain('no numbers');
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('O8 item 8: test your audio', () => {
+  it('the browser voice is never recorded: Record is off, the page says to pick an on-device voice, and no recognition starts (1280)', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', `${VOICE}&saved=browser&mic=granted`, TEST);
+    try {
+      await tab.evaluate(() => {
+        // Any native recognition the page starts is counted; the page must start none.
+        const w = window as unknown as { __recognitions: number };
+        w.__recognitions = 0;
+        for (const name of ['SpeechRecognition', 'webkitSpeechRecognition']) {
+          Object.defineProperty(window, name, {
+            configurable: true,
+            value: function Counted() {
+              w.__recognitions += 1;
+            },
+          });
+        }
+      });
+      await tab.locator('[data-mic="granted"]').waitFor({ state: 'visible' });
+      expect(await act(tab, 'record').isDisabled()).toBe(true);
+      expect(await tab.locator(TEST).innerText()).toContain('on-device voice');
+      await act(tab, 'record').click({ force: true });
+      await tab.waitForTimeout(300);
+      expect(await tab.evaluate(() => (window as unknown as { __recognitions: number }).__recognitions)).toBe(0);
+    } finally {
+      await close();
+    }
+  });
+
+  for (const viewport of VIEWPORTS) {
+    for (const theme of THEMES) {
+      it(`asks for the microphone by a button, never on arrival; a yes unlocks recording (${viewport.name}, ${theme})`, async () => {
+        const { tab, close } = await open(viewport, theme, `${SHERPA}&mic=prompt`, TEST);
+        try {
+          await tab.locator('[data-mic="prompt"]').waitFor({ state: 'visible' });
+          expect(((await fakeOf(tab)) as unknown as { micRequests: number }).micRequests).toBe(0);
+          expect(await act(tab, 'record').isDisabled()).toBe(true);
+          if (shotsDir !== '') {
+            await tab.locator(TEST).scrollIntoViewIfNeeded();
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-o8-permission-prompt.png`) });
+          }
+          await act(tab, 'allow').click();
+          await tab.locator('[data-mic="granted"]').waitFor({ state: 'visible' });
+          expect(((await fakeOf(tab)) as unknown as { micRequests: number }).micRequests).toBe(1);
+          expect(await act(tab, 'record').isDisabled()).toBe(false);
+          const g = await tab.evaluate(() => {
+            const rect = (el: Element) => el.getBoundingClientRect();
+            const panel = rect(document.querySelector('[data-voice-test]') as Element);
+            return {
+              panel: { x: panel.x, right: panel.right },
+              buttons: [...document.querySelectorAll('[data-test-action]')].map(el => ({
+                h: rect(el).height,
+                right: rect(el).right,
+              })),
+              viewport: window.innerWidth,
+              scrollX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            };
+          });
+          expect(g.scrollX).toBeLessThanOrEqual(0);
+          for (const button of g.buttons) {
+            expect(button.h).toBeGreaterThanOrEqual(44);
+            expect(button.right).toBeLessThanOrEqual(g.panel.right);
+          }
+          expect(g.panel.right).toBeLessThanOrEqual(g.viewport);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-o8-permission-granted.png`) });
+        } finally {
+          await close();
+        }
+      });
+
+      it(`a refusal says what to do, offers Try again and keeps Record off (${viewport.name}, ${theme})`, async () => {
+        const { tab, close } = await open(viewport, theme, `${SHERPA}&mic=prompt-denies`, TEST);
+        try {
+          await act(tab, 'allow').click();
+          await tab.locator('[data-mic="denied"]').waitFor({ state: 'visible' });
+          const text = await tab.locator('[data-mic="denied"]').innerText();
+          expect(text).toContain('lock icon');
+          expect(text).toContain('Microphone to Allow');
+          expect(await act(tab, 'allow').innerText()).toContain('Try again');
+          expect(await act(tab, 'record').isDisabled()).toBe(true);
+          expect(((await fakeOf(tab)) as Fake).writes).toEqual([]);
+          if (shotsDir !== '') {
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-o8-permission-denied.png`) });
+            await open(viewport, theme, `${SHERPA}&mic=insecure&speech=none`, TEST).then(async other => {
+              await other.tab.locator('[data-mic="unavailable"]').waitFor({ state: 'visible' });
+              await other.tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-o8-unavailable.png`) });
+              await other.close();
+            });
+          }
+        } finally {
+          await close();
+        }
+      });
+
+      it(`records a line with the pick and shows the words; plays a sample to the speaker (${viewport.name}, ${theme})`, async () => {
+        const { tab, close } = await open(viewport, theme, `${SHERPA}&mic=granted&speech=hold`, TEST);
+        try {
+          await act(tab, 'record').click();
+          await tab.locator('[data-test-part="record"] [role="status"]').waitFor({ state: 'visible' });
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-o8-recording.png`) });
+          await tab.locator('[data-test-said]').waitFor({ state: 'visible', timeout: 15_000 });
+          expect(await tab.locator('[data-test-said]').innerText()).toContain('Move the deploy to Friday.');
+          expect(((await fakeOf(tab)) as unknown as { sessions: number }).sessions).toBe(1);
+          // A test changes nothing: no write reached the device settings.
+          expect(((await fakeOf(tab)) as Fake).writes).toEqual([]);
+          await act(tab, 'play').click();
+          await act(tab, 'stop-sample').waitFor({ state: 'visible' });
+          expect(((await fakeOf(tab)) as unknown as { spoken: string[] }).spoken).toEqual([
+            'This is how Ferretry reads a reply out loud.',
+          ]);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-o8-transcript-playback.png`) });
+          // The page still goes on: Next is the footer's, untouched by the test.
+          expect(await tab.locator('[data-step-next]').isDisabled()).toBe(false);
+        } finally {
+          await close();
+        }
+      });
+    }
+  }
+
+  it('nothing heard and a failed engine each say so; no voice to read aloud disables Hear a sample (1280)', async () => {
+    const quiet = await open(VIEWPORTS[0], 'studio-light', `${SHERPA}&mic=granted&take=silent`, TEST);
+    try {
+      await act(quiet.tab, 'record').click();
+      await quiet.tab
+        .locator('[data-test-part="record"] [role="alert"]')
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      expect(await quiet.tab.locator('[data-test-part="record"] [role="alert"]').innerText()).toContain(
+        'Nothing was heard',
+      );
+    } finally {
+      await quiet.close();
+    }
+    const broken = await open(VIEWPORTS[0], 'studio-light', `${SHERPA}&mic=granted&take=fail&speech=none`, TEST);
+    try {
+      await act(broken.tab, 'record').click();
+      await broken.tab
+        .locator('[data-test-part="record"] [role="alert"]')
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      expect(await broken.tab.locator('[data-test-part="record"] [role="alert"]').innerText()).toContain('microphone');
+      expect(await act(broken.tab, 'play').isDisabled()).toBe(true);
+      expect(await broken.tab.locator('[data-test-part="playback"]').innerText()).toContain('no voice to read aloud');
+    } finally {
+      await broken.close();
+    }
+  });
+
+  it('with a pick that cannot be tested it says why and offers no recording (1280)', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', `${VOICE}&mic=granted`, TEST);
+    try {
+      // Parakeet 110M is the arrival pick and is not installed in this fake: the test says to install it.
+      await tab.waitForFunction(
+        () => document.querySelector('[data-test-part="record"]')?.textContent?.includes('Install') === true,
+      );
+      expect(await act(tab, 'record').isDisabled()).toBe(true);
+      await tab.locator('.fy-engine-card[data-engine="off"] input').click();
+      await tab.waitForFunction(
+        () => document.querySelector('[data-test-part="record"]')?.textContent?.includes('off') === true,
+      );
+      expect(((await fakeOf(tab)) as unknown as { sessions: number }).sessions).toBe(0);
+    } finally {
+      await close();
+    }
+  });
 });

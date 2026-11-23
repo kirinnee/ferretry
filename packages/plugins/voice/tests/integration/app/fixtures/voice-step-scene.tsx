@@ -15,6 +15,16 @@
  *   ?theme=<family>-<mode>
  */
 import { StepPageFrame } from '@ferretry/app';
+import {
+  MIC_DENIED_MESSAGE,
+  MIC_INSECURE_MESSAGE,
+  MIC_MISSING_MESSAGE,
+  type MicPort,
+} from '../../../../app/features/onboarding/mic-permission.ts';
+import { ReadAloudProvider } from '../../../../app/hooks/use-read-aloud.ts';
+import { BrowserRecognitionError } from '../../../../app/lib/stt/browser-recognition.ts';
+import type { SpeakerPort } from '../../../../app/lib/voice-chat/ports.ts';
+import { createReadAloud } from '../../../../app/lib/voice-chat/read-aloud.ts';
 import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { StepHost } from '@ferretry/kernel/contract';
@@ -23,7 +33,11 @@ import { VoiceStep } from '../../../../app/features/onboarding/voice-step.tsx';
 import type { DeviceClass } from '../../../../app/lib/stt/engine-defaults.ts';
 import { modelDownloadBytes, ON_DEVICE_MODELS } from '../../../../app/lib/stt/model-catalog.ts';
 import type { ModelInstaller, ModelInstallOptions, ModelStoreStatus } from '../../../../app/lib/stt/model-store.ts';
-import { OnDeviceVoice } from '../../../../app/lib/stt/on-device-voice.ts';
+import {
+  OnDeviceVoice,
+  type OnDeviceSession,
+  type OnDeviceSessionOptions,
+} from '../../../../app/lib/stt/on-device-voice.ts';
 import { OnDeviceVoices } from '../../../../app/lib/stt/on-device-voices.ts';
 import { DeviceSpeedupKeys, type SpeedupKeyRecords } from '../../../../app/lib/stt/speedup-keys.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings, type SttSettingsPatch } from '../../../../app/lib/stt/stt-settings.ts';
@@ -48,8 +62,23 @@ interface Fake {
   /** Writes of a sealed key into the in-memory vault (the slot name and the byte length, never the key). */
   keyPuts: { slot: string; sealed: boolean }[];
   advanced: boolean;
+  /** The audio test: permission prompts asked, sessions opened, and the lines the speaker was given. */
+  micRequests: number;
+  sessions: number;
+  spoken: string[];
 }
-const fake: Fake = { writes: [], commits: 0, done: 0, skipped: [], busy: [], keyPuts: [], advanced: false };
+const fake: Fake = {
+  writes: [],
+  commits: 0,
+  done: 0,
+  skipped: [],
+  busy: [],
+  keyPuts: [],
+  advanced: false,
+  micRequests: 0,
+  sessions: 0,
+  spoken: [],
+};
 (window as unknown as { __fake: Fake }).__fake = fake;
 
 class FakeStore implements ModelInstaller {
@@ -71,6 +100,82 @@ class FakeStore implements ModelInstaller {
   }
 }
 
+/**
+ * The audio test's fakes (O8 item 8), set by query: no microphone, no model, no speaker; only the shape of each answer.
+ *   ?mic=prompt|prompt-denies|granted|denied|insecure|missing   what the browser holds / answers (default: granted)
+ *   ?take=ok|silent|fail      what a recorded line comes back as (default: ok, "Move the deploy to Friday.")
+ *   ?speech=ok|none|fail|unavailable   the read-aloud voice (default: ok)
+ *   ?pick=sherpa              the saved engine is the installed Sherpa one, so a line can be recorded with it
+ */
+const micMode = params.get('mic') ?? 'granted';
+const takeMode = params.get('take') ?? 'ok';
+const speechMode = params.get('speech') ?? 'ok';
+const SAID = 'Move the deploy to Friday.';
+const fakeSession = (options: OnDeviceSessionOptions): OnDeviceSession => {
+  fake.sessions += 1;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return {
+    start: () => {
+      setTimeout(() => {
+        options.onStart();
+        if (takeMode === 'ok') timer = setTimeout(() => options.onTranscript('Move the deploy'), 700);
+      }, 120);
+    },
+    finish: () =>
+      new Promise<string>((resolve, reject) =>
+        setTimeout(
+          () =>
+            takeMode === 'fail'
+              ? reject(new BrowserRecognitionError('no-microphone', 'This browser could not open a microphone.'))
+              : resolve(takeMode === 'silent' ? '' : SAID),
+          500,
+        ),
+      ),
+    cancel: () => clearTimeout(timer),
+  };
+};
+const fakeMic: MicPort = {
+  state: () =>
+    Promise.resolve(
+      micMode === 'granted'
+        ? { kind: 'granted' }
+        : micMode === 'denied'
+          ? { kind: 'denied', message: MIC_DENIED_MESSAGE }
+          : micMode === 'insecure'
+            ? { kind: 'unavailable', message: MIC_INSECURE_MESSAGE, retry: false }
+            : micMode === 'missing'
+              ? { kind: 'unavailable', message: MIC_MISSING_MESSAGE, retry: true }
+              : { kind: 'prompt' },
+    ),
+  request: () => {
+    fake.micRequests += 1;
+    return Promise.resolve(
+      micMode === 'prompt'
+        ? { kind: 'granted' }
+        : micMode === 'prompt-denies'
+          ? { kind: 'denied', message: MIC_DENIED_MESSAGE }
+          : { kind: 'prompt' },
+    );
+  },
+};
+const speaker: SpeakerPort = {
+  supported: speechMode !== 'none',
+  voices: () =>
+    speechMode === 'unavailable'
+      ? []
+      : [{ id: 'fake-voice', name: 'Fake voice', lang: 'en-US', local: true, isDefault: true }],
+  unlock: () => undefined,
+  speak: (request, onEvent) => {
+    fake.spoken.push(...request.segments);
+    if (speechMode === 'fail') return onEvent({ type: 'error', reason: 'failed' });
+    onEvent({ type: 'segment', index: 0 });
+    if (speechMode !== 'hold') setTimeout(() => onEvent({ type: 'end' }), 2500);
+  },
+  stop: () => undefined,
+};
+// `?speech=hold` is the "playing" shot: the reading never ends by itself.
+const readAloud = createReadAloud({ speaker, language: () => 'en-US' });
+
 const voices = new OnDeviceVoices(
   ON_DEVICE_MODELS.map(model => {
     const bytes = modelDownloadBytes(model);
@@ -82,9 +187,7 @@ const voices = new OnDeviceVoices(
       model,
       support: { available: true },
       store: new FakeStore(bytes, status),
-      openSession: () => {
-        throw new Error('no microphone in a shot');
-      },
+      openSession: options => fakeSession(options),
     });
   }),
 );
@@ -95,7 +198,7 @@ const initial: SttSettings =
     ? { ...DEFAULT_STT_SETTINGS, engine: 'browser' }
     : saved === 'off'
       ? { ...DEFAULT_STT_SETTINGS, enabled: false, engine: 'browser' }
-      : view === 'speedups'
+      : view === 'speedups' || saved === 'sherpa'
         ? { ...DEFAULT_STT_SETTINGS, engine: 'sherpa-zipformer-en' }
         : DEFAULT_STT_SETTINGS;
 
@@ -195,6 +298,7 @@ function Host() {
               browserSupport={{ available: true, availability: 'available', implementation: 'standard' }}
               deviceClass={deviceClass}
               step={hostRef.current}
+              mic={fakeMic}
             />
           )}
         </div>
@@ -204,4 +308,9 @@ function Host() {
 }
 
 const root = document.getElementById('root');
-if (root !== null) createRoot(root).render(<Host />);
+if (root !== null)
+  createRoot(root).render(
+    <ReadAloudProvider controller={readAloud}>
+      <Host />
+    </ReadAloudProvider>,
+  );

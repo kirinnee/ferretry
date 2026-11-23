@@ -147,8 +147,15 @@ export function browserAudioCapture(global: AudioCaptureGlobalLike): AudioCaptur
         release();
         settle?.reject((event as { error?: unknown } | null)?.error ?? event);
       };
-      recorder.start();
-      const monitor = streamMonitor(stream, global);
+      // From here on, ANY failure releases every track: a recorder that will not start must not leave the microphone live.
+      let monitor: CaptureMonitor | null;
+      try {
+        recorder.start();
+        monitor = streamMonitor(stream, global);
+      } catch (error) {
+        release();
+        throw error;
+      }
       let done = false;
       return {
         monitor,

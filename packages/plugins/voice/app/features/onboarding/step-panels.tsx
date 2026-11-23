@@ -23,7 +23,8 @@ function VoiceStepWithStore({
 }) {
   const { settings, update } = useSttSettings(store);
   const voices = useOnDeviceVoices();
-  const support = useMemo(() => browserRecognitionProvider().support, []);
+  const provider = useMemo(() => browserRecognitionProvider(), []);
+  const support = provider.support;
   const deviceClass = useMemo(() => deviceClassOf(globalThis as DeviceClassGlobalLike), []);
   return (
     <VoiceStep

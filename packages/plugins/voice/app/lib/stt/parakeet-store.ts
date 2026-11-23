@@ -50,6 +50,8 @@ export interface ParakeetModelStoreOptions {
   readonly now?: () => Date;
   /** Defaults to {@link PARAKEET_PART_BYTES}; tests use tiny parts over tiny files. */
   readonly partBytes?: number;
+  /** How many files download at once (default: the store's). */
+  readonly fileConcurrency?: number;
   /** Defaults to the pinned files; tests substitute byte-exact miniatures. */
   readonly files?: readonly ParakeetFile[];
 }
@@ -71,6 +73,7 @@ export class ParakeetModelStore {
       ...(options.storage === undefined ? {} : { storage: options.storage }),
       ...(options.now === undefined ? {} : { now: options.now }),
       ...(options.partBytes === undefined ? {} : { partBytes: options.partBytes }),
+      ...(options.fileConcurrency === undefined ? {} : { fileConcurrency: options.fileConcurrency }),
     });
   }
 

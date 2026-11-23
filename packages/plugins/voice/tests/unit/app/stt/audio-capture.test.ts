@@ -65,6 +65,7 @@ class FakeRecorder implements MediaRecorderLike {
   static last: FakeRecorder | null = null;
   static throwOnConstruct: unknown = undefined;
   static throwOnStop: unknown = undefined;
+  static throwOnStart: unknown = undefined;
   static emitOnStop: Blob[] | null = [];
   static emitOnRequest: Blob[] = [];
   mimeType = 'audio/webm';
@@ -81,6 +82,7 @@ class FakeRecorder implements MediaRecorderLike {
   }
 
   start(): void {
+    if (FakeRecorder.throwOnStart !== undefined) throw FakeRecorder.throwOnStart;
     this.started += 1;
   }
 
@@ -117,6 +119,7 @@ const reset = (): void => {
   FakeRecorder.last = null;
   FakeRecorder.throwOnConstruct = undefined;
   FakeRecorder.throwOnStop = undefined;
+  FakeRecorder.throwOnStart = undefined;
   FakeRecorder.emitOnStop = [];
   FakeRecorder.emitOnRequest = [];
   FakeOffline.args = [];
@@ -210,6 +213,15 @@ describe('browserAudioCapture', () => {
     const stream = new FakeStream();
     await should(browserAudioCapture(fakeGlobal(stream)).start()).be.rejectedWith(failure);
     should(stream.stopped).equal(2);
+  });
+
+  it('releases EVERY track and rethrows when the recorder cannot start (the microphone light goes off)', async () => {
+    reset();
+    const failure = new Error('InvalidStateError');
+    FakeRecorder.throwOnStart = failure;
+    const stream = new FakeStream();
+    await should(browserAudioCapture(fakeGlobal(stream)).start()).be.rejectedWith(failure);
+    should(stream.stopped).equal(stream.tracks.length);
   });
 
   it('stop collects the chunks, releases the microphone, decodes at 16 kHz and returns mono', async () => {
