@@ -14,6 +14,11 @@ export interface McpToolDefinition {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: Readonly<Record<string, unknown>>;
+  /**
+   * The package that owns the tool, set only on a tool a package can be turned off under (Board's, with the `work`
+   * switch): it is listed only while the daemon's plugin inventory says that package is on.
+   */
+  readonly plugin?: string;
 }
 
 /** The input card's reference as the owner and ferret write it: core-asks' `askReference('A<n>')`, pinned by `tools-limits.test.ts`. */
@@ -894,6 +899,7 @@ const idOf = (word: string): Record<string, unknown> => ({
 });
 const progress = (name: string, key: 'task' | 'card', description: string): McpToolDefinition => ({
   name,
+  plugin: 'board',
   description,
   inputSchema: object(
     {

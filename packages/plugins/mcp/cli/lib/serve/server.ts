@@ -33,6 +33,11 @@ export interface McpToolResult {
 /** What the server needs from the daemon: one tool call, by name, with its arguments. */
 export interface McpToolsPort {
   call(name: string, args: Readonly<Record<string, unknown>>): Promise<McpToolResult>;
+  /**
+   * Whether package `plugin` is on, by the daemon's plugin inventory (the one owner of on/off, `config/plugins.yaml`).
+   * Absent where a build cannot read it: every tool is then listed, as before.
+   */
+  isOn?(plugin: string): Promise<boolean>;
 }
 
 export interface McpServerInfo {
@@ -42,7 +47,18 @@ export interface McpServerInfo {
   readonly instructions?: string;
   /** Whether the launch gave Claude the channel flag: declares the `claude/channel` capability and says whose the messages are. */
   readonly channel?: boolean;
+  /**
+   * The most `tools/list` waits for the plugin inventory (milliseconds), whatever the inventory's own transport allows
+   * (a daemon restart is waited out there). Past it every tool is listed, as when the inventory cannot be read. Default
+   * {@link TOOL_DISCOVERY_WAIT_MS}: a harness gives discovery a deadline (Codex 0.170.0: 10 s) and loses every tool at it.
+   */
+  readonly discoveryWaitMs?: number;
+  /** The wait the bound is told by (`ServeContext.sleep`, the build's own clock). Absent, the inventory is waited for in full. */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
+
+/** How long `tools/list` waits for the plugin inventory by default: well inside a harness's discovery deadline. */
+export const TOOL_DISCOVERY_WAIT_MS = 1500;
 
 type JsonRpcId = string | number | null;
 
@@ -233,6 +249,14 @@ function withoutUnsetFlags(args: Readonly<Record<string, unknown>>): Record<stri
 
 const toolError = (message: string) => ({ content: [{ type: 'text', text: message }], isError: true });
 
+/** `work`'s answer, or `fallback` once `sleep(ms)` has passed. */
+const withinMs = async <T>(
+  sleep: (ms: number) => Promise<void>,
+  ms: number,
+  work: Promise<T>,
+  fallback: T,
+): Promise<T> => await Promise.race([work, sleep(ms).then(() => fallback)]);
+
 export class McpServer {
   constructor(
     private readonly tools: McpToolsPort,
@@ -272,7 +296,11 @@ export class McpServer {
           jsonrpc: '2.0',
           id,
           result: {
-            tools: MCP_TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
+            tools: (await this.listed()).map(({ name, description, inputSchema }) => ({
+              name,
+              description,
+              inputSchema,
+            })),
           },
         };
       case 'tools/call':
@@ -280,6 +308,31 @@ export class McpServer {
       default:
         return failure(id, JSON_RPC_ERRORS.methodNotFound, `this server has no method ${method}`);
     }
+  }
+
+  /**
+   * The tools to list: every one, less those whose owning package is off (an agent is never offered a tool the daemon
+   * has no half for). An inventory that cannot be read lists everything: the daemon still refuses a tool it lacks.
+   */
+  private async listed(): Promise<readonly (typeof MCP_TOOLS)[number][]> {
+    const isOn = this.tools.isOn?.bind(this.tools);
+    if (isOn === undefined) return MCP_TOOLS;
+    const owners = [...new Set(MCP_TOOLS.flatMap(tool => (tool.plugin === undefined ? [] : [tool.plugin])))];
+    // ONE deadline for all owners, asked together: a slow inventory costs at most the bound, then every tool is listed
+    // (the daemon still refuses a tool it lacks). A late answer is dropped; the next list asks again.
+    const asked = Promise.all(owners.map(async owner => await isOn(owner).catch(() => true)));
+    const { sleep } = this.info;
+    const verdicts =
+      sleep === undefined
+        ? await asked
+        : await withinMs(
+            sleep,
+            this.info.discoveryWaitMs ?? TOOL_DISCOVERY_WAIT_MS,
+            asked,
+            owners.map(() => true),
+          );
+    const off = new Set(owners.filter((_, index) => !verdicts[index]));
+    return MCP_TOOLS.filter(tool => tool.plugin === undefined || !off.has(tool.plugin));
   }
 
   private initialize(params: unknown) {

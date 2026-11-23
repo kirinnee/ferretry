@@ -339,19 +339,19 @@ alone, so a new launch does not read as `awaiting_question` (the mailbox does no
 
 ## After a compaction a Claude ferret re-reads what it owes
 
-A compaction keeps a summary and drops the rest, so a ferret can lose its assignment, its task, its open agenda
+A compaction keeps a summary and drops the rest, so a ferret can lose its assignment, its open agenda
 items and the messages it still owes a reply to. The **fixed layer** puts two more hooks into the `--settings` overlay
 (`daemon/lib/harness/compaction.ts` in the Claude Code plugin), and never in a settings entry:
 
-- `PreCompact` (manual and auto) prints what the summary must keep — assignment, task id and status, agenda item ids, owed
+- `PreCompact` (manual and auto) prints what the summary must keep — assignment, agenda item ids, owed
   messages, PR links;
 - `SessionStart` with the matcher `compact` prints, once the compaction is done, what to read again:
-  `fy logs <session> --turn 1`, `fy task show <task id>` (`fy board status` when the id is lost), `fy agenda ls` and
+  `fy logs <session> --turn 1`, `fy agenda ls` and
   `fy agenda show <id>`, `fy transcript <session> --tail` and `fy reply <id> <text>`. The only value it reads is
-  `FY_SESSION_ID`; it prints no credential and always exits 0.
+  `FY_SESSION_ID`; it prints no credential and always exits 0. Core's own words name no Board verb: the work switch (`work:` in `config/plugins.yaml`) can turn Board off. While Board is on it hands every launch (a lead's and a sub-ferret's) a `compaction` launch part in its own words (`plugins/board/daemon/lib/compaction.ts`), and the payloads then carry the task lines too: the task id and status to keep, the re-read step (`fy task show <task id>`, the editable form, `fy board status`) numbered after the assignment, and the word "task" in the re-read sentence. With Board on the payload is word for word the one before the switch; with Board off it is core's alone. The task is also in Board's own instruction (`board.md`, and `board-helper.md` for a sub-ferret) in the system prompt.
 
 Both are in the `fixed-layer` fingerprint, so a ferret launched before them reads as **Restart needed**. A Codex ferret
-gets the same two texts (written once, in `compaction-text.ts` of the Ferrets contract) through Codex's own
+gets the same two texts (written once, in `compaction-text.ts` of the Ferrets contract, with Board's lines added the same way) through Codex's own
 `-c compact_prompt=...`, which replaces Codex's summary prompt: it asks for the summary, asks it to keep the same things
 and ends it with the same re-read instructions. No hook is involved, so no `hooks.state` trust entry is needed. It is on
 the launch argv (`daemon/lib/compact-prompt.ts` in the Codex plugin), never in a settings entry.

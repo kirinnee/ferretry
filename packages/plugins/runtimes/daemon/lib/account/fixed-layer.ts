@@ -444,13 +444,13 @@ export const AGENDA_INSTRUCTION = (fy: string): string =>
 export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 
 /**
- * What a sub-ferret is told in place of the notify, board and agenda rules. Two lines on purpose. The one card edit a
- * sub-ferret may make is its card's `status` (the owner: "sub-ferrets and ferrets should update them!").
+ * What a sub-ferret is told in place of the notify and agenda rules: how it reports to its lead. Its task lines (the one
+ * task edit it may make, the owner: "sub-ferrets and ferrets should update them!") are Board's own helper instruction
+ * (`plugins/board/instructions/board-helper.md`), so they are given only while Board is on.
  */
 export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   [
     `Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (\`${fy} send <lead-callsign> "<message>"\`) only for a result, a blocker or a decision it must make. Label every send: \`--kind blocker\` (stuck until answered; at once), \`--kind action\` (default; to do; batched a minute), \`--kind fyi\` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.`,
-    `With a task: each step, \`${fy} task show <id> --yaml\`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then \`${fy} task patch <id> --file f\`; \`${fy} task note\` adds history. Link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's task? \`${fy} task claim <id>\`, don't ask. No task? Make none.`,
   ].join('\n');
 
 /**

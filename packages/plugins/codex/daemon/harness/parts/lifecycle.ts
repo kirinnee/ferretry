@@ -1,5 +1,13 @@
 import type { FerretId } from '@ferretry/kernel/contract';
-import type { LaunchSpec, Runner, RunnerHandle, RunSpec, Started, StartRefusal } from '@ferretry/core-ferrets/contract';
+import {
+  compactionExtrasOf,
+  type LaunchSpec,
+  type Runner,
+  type RunnerHandle,
+  type RunSpec,
+  type Started,
+  type StartRefusal,
+} from '@ferretry/core-ferrets/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, codexCompactPrompt } from '../../lib/index.ts';
 import { settingsFlags } from '../../lib/settings.ts';
@@ -42,7 +50,7 @@ export const lifecyclePart: HarnessPart<'start' | 'resume' | 'stop'> = ({
       ...buildCodexLaunchArgv({
         executable,
         settingsFlags: settingsFlags(items),
-        compactPrompt: codexCompactPrompt(spec.ferret),
+        compactPrompt: codexCompactPrompt(spec.ferret, compactionExtrasOf(spec.parts)),
         harnessFlags: [
           ...codexPermissionArguments(permissionMode),
           ...codexFixedArguments(permissionMode, spec.folder),
