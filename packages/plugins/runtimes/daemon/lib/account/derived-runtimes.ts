@@ -18,8 +18,12 @@
  * drives both CLIs runs the first installed (Claude first). It is derived only while Logins gives its variable templates
  * clean; a withheld one would be a stand-in, which a runtime may not use.
  *
- * A name that is taken (an owner runtime, or another login's) gets `-2`, `-3`...; logins are settled in id order so a name
- * is the same on every read.
+ * A login with no installed CLI to run it (when the installed set is known) gets NO runtime: the login stays, and says which
+ * CLI it needs.
+ *
+ * A name is a pure function of its OWN login: the login's id, else `<id>-<suffix>` with the suffix derived from that id alone
+ * when an owner runtime holds the id. Deleting or adding another login never renames this one, and a saved name whose login
+ * is gone finds no runtime (it never lands on another login, and so never on its home, which is keyed by the name).
  *
  * Pure: no filesystem, no clock.
  */
@@ -37,8 +41,7 @@ export interface DerivedFrom {
   readonly logins: readonly LoginView[];
   /**
    * The harnesses installed here, when the caller knows: a login that drives both CLIs then runs the first (Claude first)
-   * that is installed. Absent: the first it drives. A runtime whose CLI is missing is still derived and says so
-   * ("isn't installed here"): it waits for the install, as a copied one does.
+   * that is installed, and a login none of whose CLIs is installed gets no runtime. Absent: not known, so the first it drives.
    */
   readonly installed?: readonly HarnessKind[] | undefined;
   /**
@@ -62,25 +65,41 @@ const defaultProfileName = (harness: 'claude' | 'codex'): string => `ferretry-${
 /** A login a person can start a ferret on now: signed in (or about to be refreshed). A key or endpoint is usable too. */
 const usable = (login: LoginView): boolean => login.status.word !== 'needs_sign_in';
 
-/** The CLI a login's derived runtime runs: the first it drives (Claude first) that is installed, else the first it drives. */
-function harnessToRun(login: LoginView, installed: readonly HarnessKind[] | undefined): HarnessKind {
+/**
+ * The CLI a login's derived runtime runs: the first it drives (Claude first) that is installed here. `undefined` when the
+ * installed set is KNOWN and none of them is installed: no runtime is derived for it (the login says which CLI it needs), so
+ * a ferret is never offered a runtime whose CLI is absent. When the installed set is not known, the first it drives.
+ */
+function harnessToRun(login: LoginView, installed: readonly HarnessKind[] | undefined): HarnessKind | undefined {
   const drives = login.harnesses.map(harnessKindOfKey);
-  return drives.find(harness => installed?.includes(harness) === true) ?? drives[0] ?? harnessKindOfKey(login.harness);
+  if (installed === undefined) return drives[0] ?? harnessKindOfKey(login.harness);
+  return drives.find(harness => installed.includes(harness));
+}
+
+/** The longest a runtime name may be (`RuntimeNameSchema`). */
+const MAX_NAME = 64;
+
+/** Five lowercase base-36 characters from a 32-bit FNV-1a of `text`: short, stable, and the same on every machine. */
+export function stableSuffix(text: string): string {
+  let hash = 0x811c9dc5;
+  for (const char of text) {
+    hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 0x01000193) >>> 0;
+  }
+  return hash.toString(36).padStart(5, '0').slice(-5);
 }
 
 /**
- * The name a login's runtime gets: the login's own id, else `<id>-2`, `<id>-3`... the first that is free. `isFree` is asked
- * about each candidate, so a name the owner or another login holds is never taken. `undefined` when no candidate is a valid
- * runtime name (a login id the grammar refuses cannot be made valid by a suffix).
+ * The name a login's runtime gets, a pure function of THAT login's own id and of what is already named: the login's id when
+ * nothing holds it, else `<id>-<suffix>` where the suffix is derived from the id alone. Nothing about any OTHER login enters
+ * it, so adding or deleting a login never renames (or re-points) the name of another: a saved reference to a runtime whose
+ * login is gone finds no runtime, rather than a different login's. `undefined` when the id is no valid runtime name, or when
+ * the suffixed name is taken too (the login then has no derived runtime; the owner can make one under Advanced).
  */
-export function freeRuntimeName(id: string, isFree: (name: string) => boolean): string | undefined {
+export function derivedRuntimeName(id: string, isTaken: (name: string) => boolean): string | undefined {
   if (!isRuntimeName(id)) return undefined;
-  if (isFree(id)) return id;
-  for (let n = 2; n < 1000; n += 1) {
-    const candidate = `${id}-${String(n)}`;
-    if (isRuntimeName(candidate) && isFree(candidate)) return candidate;
-  }
-  return undefined;
+  if (!isTaken(id)) return id;
+  const suffixed = `${id.slice(0, MAX_NAME - 6)}-${stableSuffix(id)}`;
+  return isRuntimeName(suffixed) && !isTaken(suffixed) ? suffixed : undefined;
 }
 
 export function deriveRuntimes(from: DerivedFrom): Derived {
@@ -96,28 +115,23 @@ export function deriveRuntimes(from: DerivedFrom): Derived {
     if (!from.modelSets.has(wanted)) modelSets.set(wanted, starterModelSet(harness) as ModelSetFile);
   }
   const taken = new Set([...from.runtimes.values()].map(runtime => runtime.login as string));
-  // In login-id order, so a clash is settled the same way on every read whatever order the logins are listed in.
-  const wanting = from.logins
-    .filter(
-      login =>
-        usable(login) &&
-        !taken.has(login.id as string) &&
-        (login.store !== 'environment' || from.templates?.get(login.id as string)?.kind === 'templates'),
-    )
-    .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  // A login whose own id is free is named by it, so another login's suffixed name never takes it.
-  const plainIds = new Set(wanting.map(login => login.id as string).filter(id => !from.runtimes.has(id)));
-  const claimed = new Set<string>();
+  // Every login's id is a name that login owns (derived, or held by the owner's runtime on it), so a suffixed name never takes one.
+  const loginIds = new Set(from.logins.map(login => login.id as string));
+  const wanting = from.logins.filter(
+    login =>
+      usable(login) &&
+      !taken.has(login.id as string) &&
+      (login.store !== 'environment' || from.templates?.get(login.id as string)?.kind === 'templates'),
+  );
   for (const login of wanting) {
     const id = login.id as string;
-    const name = freeRuntimeName(
+    const harness = harnessToRun(login, from.installed);
+    if (harness === undefined) continue;
+    const name = derivedRuntimeName(
       id,
-      candidate =>
-        !from.runtimes.has(candidate) && !claimed.has(candidate) && (candidate === id || !plainIds.has(candidate)),
+      candidate => from.runtimes.has(candidate) || (candidate !== id && loginIds.has(candidate)),
     );
     if (name === undefined) continue;
-    claimed.add(name);
-    const harness = harnessToRun(login, from.installed);
     runtimes.set(name, {
       login: id,
       profile: defaultProfileName(harness),

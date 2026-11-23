@@ -108,8 +108,8 @@ export interface RuntimesAssembly {
    * profile layers answer in a sentence that they cannot read the files, and change nothing.
    */
   readonly profileEtag?: (profile: string) => Promise<string>;
-  /** The harnesses installed here, as of the last lookup: which CLI a login that drives both gets its derived runtime on. Absent: not known. */
-  readonly installed?: () => readonly HarnessKind[];
+  /** The harnesses installed here, as of the last lookup: which CLI a login that drives both gets its derived runtime on. Absent or `undefined`: not known. */
+  readonly installed?: () => readonly HarnessKind[] | undefined;
   /**
    * The machine's "Auto-resume after restart" switch: `true` on, `false` off, `undefined` when it cannot be read (a no:
    * nothing is resumed). Absent, the switch is `runtimes.yaml` `autoResume` as that file stands; present, this answer is
@@ -280,12 +280,12 @@ export const hostAssembly: RuntimesAssembler = ctx => {
       ),
     ),
     profileEtag: async profile => await assembled().profileEtag(profile),
-    // The fleet folder may not open: then nothing is known to be installed, and a read says so rather than throwing.
+    // The fleet folder may not open: then what is installed is not known (not "nothing"), so no login's runtime is hidden for it.
     installed: () => {
       try {
         return assembled().installed();
       } catch {
-        return [];
+        return undefined;
       }
     },
     launchFacts: launchFactsSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),

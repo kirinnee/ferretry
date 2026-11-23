@@ -6,8 +6,13 @@ import { describe, expect, it } from 'bun:test';
 import type { EnvironmentLoginTemplate } from '@ferretry/plugin-logins/contract';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { ModelSetFile, ProfileFile, RuntimeFile } from '../../../contract/index.ts';
-import { deriveRuntimes, freeRuntimeName, withDerived } from '../../../daemon/lib/account/derived-runtimes.ts';
-import { resolveDefaultRuntime } from '../../../daemon/lib/account/schema.ts';
+import {
+  derivedRuntimeName,
+  deriveRuntimes,
+  stableSuffix,
+  withDerived,
+} from '../../../daemon/lib/account/derived-runtimes.ts';
+import { isRuntimeName, resolveDefaultRuntime } from '../../../daemon/lib/account/schema.ts';
 import {
   assembleRuntimesModel,
   NO_COMPONENTS,
@@ -100,30 +105,57 @@ describe('runtimes derived from logins', () => {
     expect(deriveRuntimes({ ...none, logins: [key], templates: templatesFor('kimi-key') }).runtimes.size).toBe(1);
   });
 
-  it('gives a name clash -2, -3...: the login id is taken by an owner runtime of that name on another login', () => {
-    const own = new Map([
-      ['atomi', { login: 'other', profile: 'mine' } as RuntimeFile],
-      ['atomi-2', { login: 'other-two', profile: 'mine' } as RuntimeFile],
-    ]);
+  it('names a clashing login by its id and a short suffix of THAT id alone, never -2/-3', () => {
+    const own = new Map([['atomi', { login: 'other', profile: 'mine' } as RuntimeFile]]);
     const derived = deriveRuntimes({ ...none, runtimes: own, logins: [sampleLogin('atomi', { store: 'ferretry' })] });
 
-    expect([...derived.runtimes.keys()]).toEqual(['atomi-3']);
-    expect(derived.runtimes.get('atomi-3')).toEqual({ login: 'atomi', profile: 'ferretry-claude' });
+    const name = `atomi-${stableSuffix('atomi')}`;
+    expect([...derived.runtimes.keys()]).toEqual([name]);
+    expect(derived.runtimes.get(name)).toEqual({ login: 'atomi', profile: 'ferretry-claude' });
+    expect(stableSuffix('atomi')).toMatch(/^[0-9a-z]{5}$/);
+    expect(stableSuffix('atomi')).not.toBe(stableSuffix('atomi-b'));
   });
 
-  it('never lets a suffixed name take another login’s plain id', () => {
+  it('never lets another login’s plain id be taken by a suffixed name', () => {
     const own = new Map([['atomi', { login: 'other', profile: 'mine' } as RuntimeFile]]);
+    const taker = `atomi-${stableSuffix('atomi')}`;
     const derived = deriveRuntimes({
       ...none,
       runtimes: own,
-      logins: [sampleLogin('atomi', { store: 'ferretry' }), sampleLogin('atomi-2', { store: 'ferretry' })],
+      logins: [sampleLogin('atomi', { store: 'ferretry' }), sampleLogin(taker, { store: 'ferretry' })],
     });
 
-    expect(derived.runtimes.get('atomi-2')).toEqual({ login: 'atomi-2', profile: 'ferretry-claude' });
-    expect(derived.runtimes.get('atomi-3')).toEqual({ login: 'atomi', profile: 'ferretry-claude' });
+    expect(derived.runtimes.get(taker)).toEqual({ login: taker, profile: 'ferretry-claude' });
+    expect(derived.runtimes.size).toBe(1);
   });
 
-  it('settles a clash the same way whatever order the logins are listed in', () => {
+  it('PROOF (a name is stable): logins work and work-2 and an explicit runtime that clashes; delete one, every surviving name → login mapping is unchanged', () => {
+    // Arrange — the owner's runtime "work" is on another login, so login "work" must take a suffixed name
+    const own = new Map([['work', { login: 'other', profile: 'mine' } as RuntimeFile]]);
+    const other = sampleLogin('other', { store: 'ferretry' });
+    const work = sampleLogin('work', { store: 'ferretry' });
+    const work2 = sampleLogin('work-2', { store: 'ferretry' });
+    const on = (...logins: ReturnType<typeof sampleLogin>[]) =>
+      deriveRuntimes({ ...none, runtimes: own, logins }).runtimes;
+    const mapping = (runtimes: ReadonlyMap<string, RuntimeFile>) =>
+      Object.fromEntries([...runtimes].map(([name, file]) => [name, file.login]));
+
+    // Act
+    const all = mapping(on(other, work, work2));
+    const withoutWork2 = mapping(on(other, work));
+    const withoutWork = mapping(on(other, work2));
+
+    // Assert — a name never moves to another login; the deleted login's name is simply gone
+    const workName = `work-${stableSuffix('work')}`;
+    expect(all).toEqual({ [workName]: 'work', 'work-2': 'work-2' });
+    expect(withoutWork2).toEqual({ [workName]: 'work' });
+    expect(withoutWork).toEqual({ 'work-2': 'work-2' });
+    for (const [name, login] of Object.entries(withoutWork2)) expect(all[name]).toBe(login);
+    for (const [name, login] of Object.entries(withoutWork)) expect(all[name]).toBe(login);
+    expect(Object.keys(withoutWork2)).not.toContain('work-2');
+  });
+
+  it('gives every login the same name whatever order the logins are listed in', () => {
     const own = new Map([['a', { login: 'other', profile: 'mine' } as RuntimeFile]]);
     const first = sampleLogin('a', { store: 'ferretry' });
     const second = sampleLogin('a-2', { store: 'ferretry' });
@@ -131,7 +163,8 @@ describe('runtimes derived from logins', () => {
     const backward = deriveRuntimes({ ...none, runtimes: own, logins: [second, first] });
 
     expect([...forward.runtimes.entries()].toSorted()).toEqual([...backward.runtimes.entries()].toSorted());
-    expect(forward.runtimes.get('a-3')?.login).toBe('a');
+    expect(forward.runtimes.get(`a-${stableSuffix('a')}`)?.login).toBe('a');
+    expect(forward.runtimes.get('a-2')?.login).toBe('a-2');
   });
 
   it('runs a login that drives both CLIs on the first installed one, Claude first, and says which', () => {
@@ -147,16 +180,40 @@ describe('runtimes derived from logins', () => {
 
     expect(on(['claude', 'codex'])).toEqual({ login: 'gateway', profile: 'ferretry-claude', harness: 'claude-code' });
     expect(on(['codex'])).toEqual({ login: 'gateway', profile: 'ferretry-codex', harness: 'codex' });
-    // Neither installed, or not known: the first it drives; the runtime then says its CLI is missing.
-    expect(on([])?.harness).toBe('claude-code');
+    // Nothing installed: no runtime. Not known: the first it drives.
+    expect(on([])).toBeUndefined();
     expect(on(undefined)?.harness).toBe('claude-code');
   });
 
-  it('freeRuntimeName: its own id when free, else the first free suffix, nothing for an id the grammar refuses', () => {
-    expect(freeRuntimeName('kimi', () => true)).toBe('kimi');
-    expect(freeRuntimeName('kimi', name => name !== 'kimi')).toBe('kimi-2');
-    expect(freeRuntimeName('kimi', name => name !== 'kimi' && name !== 'kimi-2')).toBe('kimi-3');
-    expect(freeRuntimeName('Not A Name!', () => true)).toBeUndefined();
+  it('derivedRuntimeName: its own id when free, else id plus its own suffix, nothing when that is taken too or the id is refused', () => {
+    expect(derivedRuntimeName('kimi', () => false)).toBe('kimi');
+    expect(derivedRuntimeName('kimi', name => name === 'kimi')).toBe(`kimi-${stableSuffix('kimi')}`);
+    expect(derivedRuntimeName('kimi', () => true)).toBeUndefined();
+    expect(derivedRuntimeName('Not A Name!', () => false)).toBeUndefined();
+    // A 64-character id still yields a valid name
+    const long = 'a'.repeat(64);
+    expect(isRuntimeName(derivedRuntimeName(long, name => name === long) ?? '')).toBe(true);
+  });
+
+  it('gives a login NO runtime when none of the CLIs it drives is installed here, and keeps one whose CLI is', () => {
+    const claudeOnly = sampleLogin('claude-key', { store: 'environment' });
+    const both = sampleLogin('gateway', { store: 'environment', harnesses: ['claude-code', 'codex'] });
+    const on = (installed: readonly ('claude' | 'codex')[] | undefined) =>
+      [
+        ...deriveRuntimes({
+          ...none,
+          logins: [claudeOnly, both],
+          installed,
+          templates: templatesFor('claude-key', 'gateway'),
+        }).runtimes.keys(),
+      ].toSorted();
+
+    // Codex only: the Claude-only key login is NOT offered a runtime (its CLI is absent); the both-CLI one runs on Codex
+    expect(on(['codex'])).toEqual(['gateway']);
+    expect(on([])).toEqual([]);
+    expect(on(['claude'])).toEqual(['claude-key', 'gateway']);
+    // Not known: nothing is hidden for it
+    expect(on(undefined)).toEqual(['claude-key', 'gateway']);
   });
 
   it('never replaces what the owner made: a login that already has a runtime gets no second one', () => {

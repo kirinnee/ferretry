@@ -3,6 +3,7 @@ import should from 'should';
 import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import type { ProfileFile, RuntimeFile } from '../../../contract/index.ts';
+import { stableSuffix } from '../../../daemon/lib/account/derived-runtimes.ts';
 import { createRuntimesApi, type RuntimesApiDeps } from '../../../daemon/lib/service/runtimes-api.ts';
 
 const NOW = Date.parse('2026-11-08T12:00:00Z');
@@ -331,10 +332,11 @@ describe('createRuntimesApi — adding an account makes its runtime (runtimes pl
     should(listedAfter[1]).containDeep({ login: 'kimi', profile: 'ferretry-claude', harness: 'claude-code' });
   });
 
-  it('should give a name clash -2, then -3, and keep each name across reads whatever order Logins lists them in', async () => {
-    // Arrange — the owner already has runtimes called "work" and "work-2" on other logins
-    const runtimes = { work: runtimeFile({ login: 'other' }), 'work-2': runtimeFile({ login: 'other-two' }) };
-    const logins = [loginView({ id: 'other' }), loginView({ id: 'other-two' }), loginView({ id: 'work' })];
+  it('should name a clashing login by its id and a suffix of that id alone, the same on every read in any order', async () => {
+    // Arrange — the owner already has a runtime called "work" on another login
+    const runtimes = { work: runtimeFile({ login: 'other' }) };
+    const logins = [loginView({ id: 'other' }), loginView({ id: 'work' })];
+    const clashing = `work-${stableSuffix('work')}`;
 
     // Act
     const first = await api({ runtimes, logins }).list();
@@ -342,8 +344,30 @@ describe('createRuntimesApi — adding an account makes its runtime (runtimes pl
 
     // Assert
     should(first.map(summary => summary.id)).deepEqual(second.map(summary => summary.id));
-    should(first.map(summary => summary.id)).deepEqual(['work', 'work-2', 'work-3']);
-    should(first[2]?.login).equal('work');
+    should(first.map(summary => summary.id).toSorted()).deepEqual(['work', clashing].toSorted());
+    should(first.find(summary => summary.id === clashing)?.login).equal('work');
+  });
+
+  it('should never re-point a name when another login is deleted: the survivors keep their names, the deleted one is not found', async () => {
+    // Arrange — logins work and work-2, and an owner runtime "work" that clashes with the first
+    const runtimes = { work: runtimeFile({ login: 'other' }) };
+    const other = loginView({ id: 'other' });
+    const [work, work2] = [loginView({ id: 'work' }), loginView({ id: 'work-2' })];
+    const clashing = `work-${stableSuffix('work')}`;
+    const before = api({ runtimes, logins: [other, work, work2] });
+    const after = api({ runtimes, logins: [other, work2] });
+
+    // Act
+    const resolvedBefore = await before.resolve(clashing as never);
+    const resolvedAfter = await after.resolve(clashing as never);
+    const survivor = await after.resolve('work-2' as never);
+
+    // Assert — the saved name found login work, then finds nothing (never login work-2)
+    should(resolvedBefore.ok).be.true();
+    if (resolvedBefore.ok) should(resolvedBefore.runtime.login).equal('work');
+    should(resolvedAfter).containDeep({ ok: false, refusal: 'unknown' });
+    should(survivor.ok).be.true();
+    if (survivor.ok) should(survivor.runtime.login).equal('work-2');
   });
 
   it('should run a login that drives both CLIs on the first one installed here', async () => {
@@ -361,8 +385,8 @@ describe('createRuntimesApi — adding an account makes its runtime (runtimes pl
 
     // Assert
     should(codexOnly[0]).containDeep({ id: 'gateway', harness: 'codex', profile: 'ferretry-codex' });
-    // Nothing installed: still listed on its first CLI, which the app words as "isn't installed here".
-    should(none[0]?.harness).equal('claude-code');
+    // Nothing installed: no runtime for it at all (the login stays, and needs the CLI)
+    should(none).deepEqual([]);
   });
 });
 
@@ -376,5 +400,25 @@ describe('createRuntimesApi — an environment login Logins withheld', () => {
 
     // Assert
     should(actual).deepEqual([]);
+  });
+});
+
+describe('createRuntimesApi — a login whose CLI is not installed', () => {
+  it('should list NO runtime for a Claude-only key login when only Codex is installed', async () => {
+    // Arrange
+    const key = loginView({ id: 'kimi', store: 'environment' });
+
+    // Act
+    const actual = await api({ runtimes: {}, logins: [key], templated: ['kimi'], installed: () => ['codex'] }).list();
+    const launchable = await api({
+      runtimes: {},
+      logins: [key],
+      templated: ['kimi'],
+      installed: () => ['claude'],
+    }).list();
+
+    // Assert
+    should(actual).deepEqual([]);
+    should(launchable.map(summary => summary.id)).deepEqual(['kimi']);
   });
 });
