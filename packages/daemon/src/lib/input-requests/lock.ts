@@ -6,6 +6,7 @@ import {
   type InputTargetFacts,
   type LoginObserved,
 } from '@ferretry/protocol';
+import { pageFieldKind, passwordSignalled } from './field-kinds.ts';
 import { identityOf, placeOf } from './login-observer.ts';
 
 /**
@@ -34,16 +35,14 @@ import { identityOf, placeOf } from './login-observer.ts';
  */
 
 const SHORT = (reason: InputLock['reason']): InputLock => ({ seconds: INPUT_SHORT_LOCK_SECONDS, reason });
-/** A field the target is kept from the ferret for: a `secret` or a `private` value. */
-const HELD = (field: Pick<InputRequestField, 'sensitivity'>): boolean =>
-  field.sensitivity === 'secret' || field.sensitivity === 'private';
-
 /**
- * Whether a card's target is kept from the ferret after the write at all: only for a `secret` or a `private` value.
- * A card of `plain` values and one-time `code`s gets no lock, no quarantine and no page hold.
+ * Whether a card's target is kept from the ferret after the write. NEVER (owner decision, !A607): no card gets a lock,
+ * a quarantine or a page hold, whatever it holds.
  */
-export function heldFromView(fields: readonly Pick<InputRequestField, 'sensitivity'>[]): boolean {
-  return fields.some(HELD);
+export function heldFromView(_fields: readonly Pick<InputRequestField, 'sensitivity'>[]): boolean {
+  // The owner decided (2026-11-23, !A607): NO lock after typing. Once a card is answered the ferret reads the page or
+  // terminal at once. The typed value stays out of every tool result by masking (ephemeral-values), not by hiding the surface.
+  return false;
 }
 const FULL = (reason: InputLock['reason']): InputLock => ({ seconds: INPUT_QUARANTINE_SECONDS, reason });
 
@@ -168,8 +167,6 @@ const CODE_PROMPT = /\b(?:verification\s+code|one[\s-]?time|otp|2fa|authenticato
  */
 const PASSWORD_PROMPT =
   /pass(?:word|phrase|wd|wort)|kennwort|contrase(?:ñ|n)a|mot de passe|credential|secret|\bpw\s*:|\bpin\b/iu;
-/** A page field whose name, id or autocomplete says password (or PIN), whatever its type. */
-const PASSWORD_FIELD = /pass|pwd|(?:^|[^a-z])pin(?:[^a-z]|$)/iu;
 /** Words that make a prompt line something other than a one-time code, whatever else it says. */
 const NOT_A_CODE = /\b(?:password|passphrase|pin|token|secret)\b/iu;
 
@@ -212,10 +209,16 @@ export function passwordTarget(
   if (facts.kind !== 'browser') return false;
   const found = facts.fields.find(field => field.fieldId === fieldId);
   if (found === undefined) return false;
+  // A card number, expiry or security code is as secret as a password; a field the PAGE marks as a one-time code
+  // (field-kinds.ts) is not one. A password-typed or password-named field stays a password: password signals win.
+  const kind = pageFieldKind(found.field);
+  if (kind === 'card') return true;
+  if (kind === 'code') return false;
   return (
     found.field.type?.toLowerCase() === 'password' ||
+    passwordSignalled(found.field) ||
     [found.field.name, found.field.id, found.field.autocomplete].some(
-      word => word !== undefined && (PASSWORD_FIELD.test(matchable(word)) || spellsPassword(word) || lookAlike(word)),
+      word => word !== undefined && (spellsPassword(word) || lookAlike(word)),
     )
   );
 }
@@ -285,12 +288,6 @@ export function lockFor(
   // Only after the probe: a page that showed or kept the test value never earns the relaxed hold.
   if (history === 'unsubmitted') return FULL('until-moved-on');
   return FULL('first-time');
-}
-
-/** What a card's lock says about the raise-time probe, so a later look at the same card cannot unsay it. */
-export function probeOutcomeOf(lock: InputLock | undefined): 'shown' | 'aborted' | undefined {
-  if (lock?.reason === 'probe-shown') return 'shown';
-  return lock?.reason === 'probe-stopped' ? 'aborted' : undefined;
 }
 
 /**

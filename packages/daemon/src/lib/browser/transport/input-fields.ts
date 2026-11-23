@@ -173,12 +173,19 @@ const ACTIVE_ELEMENT = `(() => {
   }
   return element;
 })()`;
+/**
+ * Which form an element is in, from the trusted world: its id, name, action path and place among the document's forms,
+ * or `none`. The page's attributes are only read, never trusted: this is compared with itself across two looks.
+ */
+const FORM_PLACE =
+  'function () { const f = this.form || (this.closest && this.closest("form")); if (!f) return "none"; const a = (n) => String(f.getAttribute(n) || ""); let path = ""; try { path = new URL(f.action, location.href).pathname; } catch (e) { path = ""; } return "id:" + a("id") + "|name:" + a("name") + "|action:" + path + "|n:" + Array.prototype.indexOf.call(document.forms, f); }';
 /** The longest the page's title may take when it is read for the challenge hint. */
 const TITLE_WAIT_MS = 750;
 
-const FIELD_LIMITS = { type: 32, autocomplete: 64, name: 128, id: 128, inputmode: 32 } as const;
+const FIELD_LIMITS = { type: 32, autocomplete: 64, name: 128, id: 128, inputmode: 32, maxlength: 8 } as const;
 const TAG_LIMIT = 32;
 const ORIGIN_LIMIT = 256;
+const PLACE_LIMIT = 512;
 const FRAME_ID_LIMIT = 128;
 const NAVIGATION_ID_LIMIT = 128;
 
@@ -254,12 +261,13 @@ export function inputFieldAttributes(node: unknown): FieldAttributes {
     ...kept('name'),
     ...kept('id'),
     ...kept('inputmode'),
+    ...kept('maxlength'),
   };
 }
 
 const sameAttributes = (left: FieldAttributes, right: FieldAttributes): boolean =>
   left.tag === right.tag &&
-  (['type', 'autocomplete', 'name', 'id', 'inputmode'] as const).every(key => left[key] === right[key]);
+  (['type', 'autocomplete', 'name', 'id', 'inputmode', 'maxlength'] as const).every(key => left[key] === right[key]);
 
 const objectOf = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
@@ -561,11 +569,13 @@ async function observeLocated(
     const visible = (await handle.isVisible().catch(() => false)) && box.w > 0 && box.h > 0;
     const covered = !(await onTop(session, backendNodeId));
     subject.sessions.remember(frameId, session, owned);
+    const place = await placeOf(session, backendNodeId, frame.url());
     return {
       fieldId,
       frameOrigin: originOfUrl(frame.url()),
       frameId,
       backendNodeId,
+      ...(place === undefined ? {} : { place }),
       field: inputFieldAttributes(node),
       box,
       visible,
@@ -573,6 +583,30 @@ async function observeLocated(
     };
   } finally {
     await handle.dispose().catch(() => undefined);
+  }
+}
+
+/**
+ * Where an element is: its frame's address (no query or fragment) and its form, read in the trusted world. `undefined`
+ * when that cannot be read: a field is then compared by what is known, and the same lack is the same.
+ */
+async function placeOf(session: InputCdpSession, backendNodeId: number, frameUrl: string): Promise<string | undefined> {
+  try {
+    const trusted = await new IsolatedWorlds().resolve(session, backendNodeId);
+    const form = objectOf(
+      objectOf(
+        await ask(session, 'Runtime.callFunctionOn', {
+          objectId: trusted.objectId,
+          functionDeclaration: FORM_PLACE,
+          returnByValue: true,
+        }),
+      ).result,
+    ).value;
+    if (typeof form !== 'string') return undefined;
+    const address = frameUrl.split(/[?#]/u)[0] ?? '';
+    return oneLine(`${address}#${form}`, PLACE_LIMIT);
+  } catch {
+    return undefined;
   }
 }
 
@@ -650,7 +684,12 @@ export function inputFieldSelector(field: FieldAttributes): string {
 
 /** A candidate is the field the card showed: the same frame origin, tag and attributes, and the owner can see it. */
 const isSameField = (want: InputBrowserFieldFacts, got: InputBrowserFieldFacts): boolean =>
-  got.visible && got.frameOrigin === want.frameOrigin && sameAttributes(got.field, want.field);
+  got.visible &&
+  got.frameOrigin === want.frameOrigin &&
+  // The same frame and the same form: a look-alike in another form (a sign-up beside the sign-in) is another field.
+  got.frameId === want.frameId &&
+  got.place === want.place &&
+  sameAttributes(got.field, want.field);
 
 /** The same node: a field fact names one node by its target and backend node id. */
 const sameNodeAs = (left: InputBrowserFieldFacts, right: InputBrowserFieldFacts): boolean =>

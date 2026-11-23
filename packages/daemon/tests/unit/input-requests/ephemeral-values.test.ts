@@ -162,3 +162,16 @@ describe('EphemeralValues when a session ends', () => {
     should(values.scrubAll('sealed-value')).equal('sealed-value');
   });
 });
+
+describe('EphemeralValues: a card number the page reformats (fix round 2, B2)', () => {
+  it('should mask a held number however the page spaces it', () => {
+    const values = build();
+    values.hold('s1', '4111111111111111', 'A9');
+
+    for (const shown of ['4111 1111 1111 1111', '4111-1111-1111-1111', '4111.1111.1111.1111', '4111111111111111']) {
+      should(values.scrub('s1', `card ${shown} ok`)).equal('card [redacted:input A9] ok');
+    }
+    should(values.scrubAll('4111 1111 1111 1111')).equal('[redacted:input A9]');
+    should(values.scrub('s1', '4111 1111 1111 1112')).equal('4111 1111 1111 1112');
+  });
+});

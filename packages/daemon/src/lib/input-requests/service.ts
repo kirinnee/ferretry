@@ -18,9 +18,9 @@ import {
   INPUT_PROMPT_MAX_LENGTH,
   INPUT_QUARANTINE_EVENT_TYPES,
   INPUT_CODE_VISIBLE_NOTICE,
+  INPUT_DEFAULT_REDACTION_SECONDS,
   INPUT_PLAIN_VALUE_NOTICE,
   INPUT_QUARANTINE_SECONDS,
-  INPUT_QUARANTINE_WORDS,
   INPUT_SINGLE_FIELD_ID,
   type InputActor,
   type InputAgentView,
@@ -68,21 +68,8 @@ import { GRANT_MISS_CONTEXT_LINE, grantStops } from '../sign-in-grants/reasons.t
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
-import {
-  heldFromView,
-  type LockContext,
-  lockFor,
-  longerLock,
-  lookAlike,
-  matchable,
-  type PageSteer,
-  passwordTarget,
-  probeable,
-  probeOutcomeOf,
-  spellsPassword,
-  steeredLock,
-} from './lock.ts';
-import { type LoginDelivery, type LoginObserver, placeOf, siteOf } from './login-observer.ts';
+import { lookAlike, passwordTarget, spellsPassword, terminalHides } from './lock.ts';
+import type { LoginDelivery, LoginObserver } from './login-observer.ts';
 import type {
   InputAgendaPort,
   InputAgentNotifier,
@@ -105,14 +92,14 @@ import type {
   TypeResult,
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
-import { bindingOf, mayRebind } from './rebind.ts';
+import { pageFieldKind, passwordSignalled } from './field-kinds.ts';
+import { bindingOf, mayRebind, sameLineage } from './rebind.ts';
 import {
   codeCardKeys,
   codeTargetProblem,
   type SavedListing,
   savedForFields,
   signInOfAt,
-  signInsAt,
   someoneElse,
   targetMatchKey,
 } from './saved-logins.ts';
@@ -185,11 +172,6 @@ interface Held {
    * and may still be refused at its last check, so until the request really ends the ferret reads the card as it was.
    */
   agentSees?: InputRequest;
-  /**
-   * The lock the ferret reads after a grant fill that did not happen (delta F4): the one the card was raised with, though
-   * the request keeps the longer lock the attempt worked out (a card never shortens). Gone at the next write or the end.
-   */
-  agentLock?: { readonly lock: InputRequest['lock'] };
   /** Every name the terminal was seen under (its key and its id), so a quarantine on any of them seals it. */
   names: readonly string[];
   checkFailures: number;
@@ -224,10 +206,6 @@ interface Held {
   readonly waiters: Set<() => void>;
   /** A page's fields as a picture, taken at raise before anything was typed: the owner's card only, RAM only. */
   shot?: InputShot;
-  /** The document a page's values were typed into: once the page has left it, its quarantine lets text reads by. */
-  navigation?: string;
-  /** The daemon's dummy probe at raise found its throwaway value in no read of the page (lock.ts). */
-  probed?: boolean;
   /** The `code` fields the daemon saw going into a password (`observedAs`): handled as `secret` from then on. */
   readonly upgraded: Set<string>;
   /** A rule matched this card only through a program from the owner's profile: what the write and the log name. */
@@ -249,8 +227,11 @@ function holdNames(request: InputRequest, seenNames: readonly string[] | undefin
   return request.target.kind === 'browser' ? surfaceNames.map(pageName) : surfaceNames;
 }
 
-/** How long before a grant fill's page hold ends its clear takes a hold of its own and runs. */
-const CLEAR_LEAD_MS = 2_000;
+/** How often a grant fill's cleanup looks for the page having moved on, and the longest it waits before it empties the field. */
+/** How long after a value that may be on a terminal's screen a restart still holds that terminal (`guardAcrossRestart`). */
+const RESTART_GUARD_SECONDS = INPUT_QUARANTINE_SECONDS;
+const CLEAR_POLL_MS = 250;
+const CLEAR_WAIT_MS = 5_000;
 
 export interface InputRequestServiceDependencies {
   readonly target: InputTargetPort;
@@ -319,11 +300,10 @@ const isFinal = (request: InputRequest): boolean => FINAL.has(request.state);
 export class InputRequestService {
   private readonly held = new Map<string, Held>();
   /**
-   * The page holds that follow their document (`until-moved-on`, secrev-1333 M1), by hold id: pictures of the page come
-   * back once it shows another document, and stop again if it shows the value's document again. A hold the registry
-   * has let go of is simply never asked about again.
+   * The documents a value the owner typed is on screen in, in the clear, by session and page name: pictures of them are
+   * withheld (`pageShows`) until the window ends. In RAM only: a page does not outlive the daemon.
    */
-  private readonly followed = new Set<string>();
+  private readonly shown = new Map<string, { names: readonly string[]; documents: Set<string>; until: number }[]>();
   /**
    * What a card being raised is about, by request id, while `agenda.raise` runs: the card's push is made INSIDE that
    * raise (the deadline push, buzz.ts), before the request is held, so `pushSubjectOf` must already know it.
@@ -407,38 +387,6 @@ export class InputRequestService {
       seen.facts.kind === 'browser'
         ? await this.deps.target.shoot?.(sessionId, target, seen.facts).catch(() => undefined)
         : undefined;
-    // How long the target is kept from the ferret after the write (lock.ts): only what the daemon saw decides it.
-    // The dummy probe runs after the picture, so the picture shows the page as it was.
-    // A card of plain values and one-time codes is kept from nobody (lock.ts, heldFromView): no facts, probe or lock.
-    const kept = heldFromView(fields) && target.kind !== 'secret';
-    // At the raise only a page script counts (on this page or its site): acts before the card are the ferret's own
-    // business.
-    const steered = kept ? this.steerOf(sessionId, seen.facts, Number.POSITIVE_INFINITY) : undefined;
-    const context = {
-      ...(kept ? await this.lockFacts(seen.facts) : { observed: [] }),
-      submitted: raise.submit !== 'agent',
-      ...(steered === undefined ? {} : { steered }),
-    };
-    // A target that cannot probe says nothing about the page; a probe that throws did not finish cleanly.
-    const outcome =
-      kept && probeable(seen.facts, fields, context)
-        ? await this.deps.target
-            .probe?.(
-              sessionId,
-              target,
-              seen.facts,
-              fields.filter(f => f.sensitivity === 'secret').map(f => f.id),
-            )
-            .catch(() => 'aborted' as const)
-        : undefined;
-    const probed = outcome === 'hidden';
-    const lock = kept
-      ? lockFor(seen.facts, fields, {
-          ...context,
-          probed,
-          ...(outcome === undefined || outcome === 'hidden' ? {} : { probe: outcome }),
-        })
-      : undefined;
     const step = raise.chain === undefined ? undefined : this.stepAfter(sessionId, raise.chain);
     const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
     const title =
@@ -462,8 +410,6 @@ export class InputRequestService {
         fields,
         sensitivity,
         shot,
-        lock,
-        probed,
         step,
         matchKey,
         title,
@@ -491,8 +437,6 @@ export class InputRequestService {
       readonly fields: InputRequestField[];
       readonly sensitivity: InputSensitivity;
       readonly shot: InputShot | undefined;
-      readonly lock: InputRequest['lock'];
-      readonly probed: boolean;
       readonly step: number | undefined;
       readonly matchKey: string | undefined;
       readonly title: string;
@@ -501,23 +445,8 @@ export class InputRequestService {
       readonly ruleId?: string;
     },
   ): Promise<InputAgentView> {
-    const {
-      requestId,
-      now,
-      seen,
-      shown,
-      expiresAt,
-      fields,
-      sensitivity,
-      shot,
-      lock,
-      probed,
-      step,
-      matchKey,
-      title,
-      upgraded,
-      copy,
-    } = raised;
+    const { requestId, now, seen, shown, expiresAt, fields, sensitivity, shot, step, matchKey, title, upgraded, copy } =
+      raised;
     let ruleId = raised.ruleId;
     try {
       this.raising.set(requestId, { sessionId, subject: sensitivity === 'code' ? 'one-time-code' : 'other' });
@@ -551,7 +480,6 @@ export class InputRequestService {
         risk: pasteRisk(worstRisk(fields.map(field => field.risk)), copy),
         observedDigest: digestFacts(seen.facts),
         ...(shot === undefined ? {} : { pictured: true as const }),
-        ...(lock === undefined ? {} : { lock }),
         state: 'pending',
       };
       try {
@@ -578,7 +506,6 @@ export class InputRequestService {
         deliveries: new Map(),
         waiters: new Set(),
         ...(shot === undefined ? {} : { shot }),
-        ...(probed ? { probed: true } : {}),
         upgraded,
       };
       this.held.set(requestId, held);
@@ -737,7 +664,6 @@ export class InputRequestService {
       };
       // The ferret reads the card as it stood until the request really ends (a fill, or the card back for the owner).
       held.agentSees = held.request;
-      const raisedLock = held.request.lock;
       try {
         await this.attempt(
           held,
@@ -772,7 +698,7 @@ export class InputRequestService {
                 grants.holds(now, { sessionId, project, roles: match.fills, now: at })
               );
             },
-            typed: (job, holdMs, names) => this.clearBeforeHoldEnds(held, grant, grants, job, holdMs, names),
+            typed: job => this.clearAfterSignIn(held, grant, grants, job),
             uncertain: async because => await grants.stopped(grant, because).catch(() => undefined),
           },
         );
@@ -780,11 +706,7 @@ export class InputRequestService {
         await this.stopMisses(before);
       } catch (error) {
         if (written) settle();
-        else {
-          grants.ledger.release(reservation);
-          // Nothing was typed: the ferret goes on reading the lock the card was raised with, as with no grant.
-          if (held.request.state === 'pending') held.agentLock = { lock: raisedLock };
-        }
+        else grants.ledger.release(reservation);
         delete held.agentSees;
         await this.grantMissed(held, grant, error instanceof GrantMissed ? error.reason : undefined, before);
       } finally {
@@ -1010,35 +932,25 @@ export class InputRequestService {
   }
 
   /**
-   * BEFORE THE PAGE HOLD ENDS, a password a grant fill typed must not still be sitting in its field. The moment the write
-   * is done, a hold of its own is taken on the same page, which cannot expire while it is in flight, so no stalled timer
-   * or suspended machine can leave the page unheld with the value in it. Shortly before the write's own hold would end
-   * ({@link CLEAR_LEAD_MS}), the browser empties any typed field that still holds a value. `moved` and `cleared` let that
-   * hold go; `unknown` (the value may still be there) keeps the page held for a full window more. `cleared` and `unknown`
-   * stop the line (`did-not-move-on`): the page didn't move on as the owner approved.
+   * AFTER A GRANT FILL, a password it typed must not stay in its field. This NEVER holds the page or the terminal from the
+   * ferret (owner decision, !A607): it is the field's own cleanup, apart from anyone's access. It waits for the page to move
+   * on (a new document), looking every {@link CLEAR_POLL_MS}, for at most {@link CLEAR_WAIT_MS}; then the browser empties
+   * any typed field that still holds a value. `moved` means the page had moved on; `cleared` and `unknown` stop the line
+   * (`did-not-move-on`): the page didn't move on as the owner approved. An async sign-in is given its time first, so a
+   * clear never lands before the page could have moved on.
    */
-  private clearBeforeHoldEnds(
-    held: Held,
-    grant: SignInGrant,
-    grants: SignInGrantSource,
-    job: ClearJob,
-    holdMs: number,
-    names: readonly string[],
-  ): void {
-    const { sessionId, target, id } = held.request;
-    const clearing = this.deps.quarantine.begin(sessionId, names, id);
-    let outcome: ClearOutcome = 'unknown';
-    void this.deps.timers
-      .after(Math.max(0, holdMs - CLEAR_LEAD_MS))
-      .then(async () => {
-        outcome = (await this.deps.target.clear?.(sessionId, target, job).catch(() => 'unknown' as const)) ?? 'unknown';
-        if (outcome !== 'moved') await grants.stopped(grant, 'did-not-move-on');
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (outcome === 'unknown') this.deps.quarantine.settle(clearing);
-        else this.deps.quarantine.release(clearing);
-      });
+  private clearAfterSignIn(held: Held, grant: SignInGrant, grants: SignInGrantSource, job: ClearJob): void {
+    const { sessionId, target } = held.request;
+    void (async () => {
+      for (let look = 0; look < CLEAR_WAIT_MS / CLEAR_POLL_MS; look += 1) {
+        const now = await this.deps.target.document?.(sessionId, target.key).catch(() => undefined);
+        if (now !== undefined && now !== job.navigationId) break;
+        await this.deps.timers.after(CLEAR_POLL_MS);
+      }
+      const outcome: ClearOutcome =
+        (await this.deps.target.clear?.(sessionId, target, job).catch(() => 'unknown' as const)) ?? 'unknown';
+      if (outcome !== 'moved') await grants.stopped(grant, 'did-not-move-on');
+    })().catch(() => undefined);
   }
 
   /**
@@ -1099,13 +1011,11 @@ export class InputRequestService {
       })),
     );
     const saved = await this.savedView(held);
-    const lock = this.liveLock(request);
     const withSaved = {
       ...request,
       prompt,
       fields,
       ...(saved === undefined ? {} : { saved }),
-      ...(lock === undefined ? {} : { lock }),
     };
     if (facts === undefined) return withSaved;
     return { ...withSaved, observed: await this.project(request.sessionId, facts, held.names) };
@@ -1430,7 +1340,6 @@ export class InputRequestService {
       held.checkFailures = 0;
       held.rebinds = 0;
       held.binding = bindingOf(seen.facts);
-      held.probed = false;
       rekey(held, targetMatchKey(seen.facts, this.deps.hostName ?? ''));
       if (seen.facts.kind === 'browser') held.raisedOn = seen.facts.navigationId;
       if (shot === undefined) delete held.shot;
@@ -1581,31 +1490,39 @@ export class InputRequestService {
       .map(({ key, until }) => ({ key, until: instant(until) }));
   }
 
-  /**
-   * A page the daemon just typed a secret into, as an agent's read of it must see it: when the hold ends, and the
-   * documents the values went into. A page that has since moved to another document may be READ again (the text
-   * is masked for the redaction window), but not pictured until the hold ends.
-   */
-  pageHeld(
+  /** See {@link AgentInputPort.pageShows}. */
+  pageShows(
     sessionId: string,
     names: readonly (string | undefined)[],
-  ): { readonly until: number; readonly documents: readonly string[]; readonly documentsOnly?: true } | undefined {
-    const marked = names.filter((name): name is string => name !== undefined).map(pageName);
-    const until = this.deps.quarantine.until(sessionId, marked);
-    if (until === undefined) return undefined;
-    // Every hold on the page follows its document (`until-moved-on`): pictures, like text, wait only while the page
-    // shows a document a value went into. Any other hold keeps pictures out for its whole window.
-    const documentsOnly = this.deps.quarantine.until(sessionId, marked, this.followed) === undefined;
-    const documents = [...this.held.values()]
-      .filter(
-        held =>
-          held.request.sessionId === sessionId &&
-          held.request.target.kind === 'browser' &&
-          held.navigation !== undefined &&
-          held.names.some(name => marked.includes(pageName(name))),
-      )
-      .map(held => held.navigation as string);
-    return documentsOnly && documents.length > 0 ? { until, documents, documentsOnly: true } : { until, documents };
+  ): { readonly until: number; readonly documents: readonly string[] } | undefined {
+    const now = this.deps.clock.now();
+    const live = (this.shown.get(sessionId) ?? []).filter(entry => entry.until > now);
+    if (live.length > 0) this.shown.set(sessionId, live);
+    else this.shown.delete(sessionId);
+    const wanted = names.filter((name): name is string => name !== undefined);
+    const here = live.filter(entry => entry.names.some(name => wanted.includes(name)));
+    if (here.length === 0) return undefined;
+    return {
+      until: Math.max(...here.map(entry => entry.until)),
+      documents: here.flatMap(entry => [...entry.documents]),
+    };
+  }
+
+  /** A value typed into a page field that draws it in the clear is on screen in this document, for its window. */
+  private noteShown(request: InputRequest, facts: InputTargetFacts, names: readonly string[]): void {
+    if (facts.kind !== 'browser') return;
+    const clear = request.fields.some(field => {
+      if (field.sensitivity !== 'secret' && field.sensitivity !== 'private') return false;
+      const element = facts.fields.find(each => each.fieldId === field.id)?.field;
+      return element?.type?.toLowerCase() !== 'password';
+    });
+    if (!clear) return;
+    const until = this.deps.clock.now() + INPUT_DEFAULT_REDACTION_SECONDS * 1000;
+    const entries = this.shown.get(request.sessionId) ?? [];
+    this.shown.set(request.sessionId, [
+      ...entries,
+      { names: [...names, ...names.map(pageName)], documents: new Set([facts.navigationId]), until },
+    ]);
   }
 
   /** The document a session's page shows now, so a held page can be read again once it has moved on. */
@@ -1665,6 +1582,7 @@ export class InputRequestService {
 
   private async revive(event: InputEvent, now: number): Promise<void> {
     if (event.type === INPUT_JOURNAL_EVENT_TYPES.delivering) return await this.interrupt(event);
+    if (ENDED_EVENTS.has(event.type)) return await this.replayEnded(event);
     if (event.type !== INPUT_JOURNAL_EVENT_TYPES.requested || event.expiresAt === undefined) return;
     if (Date.parse(event.expiresAt) <= now) return;
     const prompt = await this.deps.agenda.promptOf(event.sessionId, event.agendaItemId);
@@ -1723,6 +1641,52 @@ export class InputRequestService {
       risk: worstRisk(fields.map(field => field.risk)),
       observedDigest: digestFacts(seen.facts),
     };
+  }
+
+  /**
+   * A request that ended (its outcome is in the journal) but whose follow-up work (audit, card, agent notice) was never
+   * marked `settled`: the daemon stopped between the two. The work is done again, at least once; the state the ferret
+   * reads is the journal's, so it is not changed.
+   */
+  private async replayEnded(event: InputEvent): Promise<void> {
+    if (event.after === undefined || this.held.has(event.requestId)) return;
+    const state = event.state === 'pending' ? 'cancelled' : event.state;
+    const prompt = (await this.deps.agenda.promptOf(event.sessionId, event.agendaItemId)) ?? 'input request';
+    const request: InputRequest = {
+      id: event.requestId,
+      sessionId: event.sessionId,
+      agendaItemId: event.agendaItemId,
+      target: { kind: event.target.kind, key: event.target.key },
+      prompt,
+      sensitivity: event.sensitivity,
+      fields: [restoredField(event.sensitivity)],
+      submit: event.submit ?? 'offer-owner',
+      raisedAt: event.at,
+      expiresAt: event.expiresAt ?? event.at,
+      state,
+    };
+    await this.record(
+      request,
+      `input.${state === 'delivered' ? 'delivered' : state === 'expired' ? 'expired' : state === 'refused' ? 'refused' : 'cancelled'}` as InputAuditEvent,
+      { kind: 'daemon' },
+      {
+        ...this.auditOf(request),
+        ...(event.reason === undefined ? {} : { reason: event.reason }),
+      },
+    );
+    if (event.after.closeCard)
+      await this.deps.agenda.close(
+        request.sessionId,
+        request.agendaItemId,
+        noteOf(state, event.reason, request.target.kind, false),
+      );
+    if (event.after.tellAgent)
+      await this.deps.notifier.tell(
+        request.sessionId,
+        request.agendaItemId,
+        tellOf(request, state, event.reason, event.after.uncertain === true, false),
+      );
+    await this.journalQuietly(request, 'settled', event.reason, event.submitted);
   }
 
   /** A write was begun and never recorded as done: it may have landed, so the request ends and never types again. */
@@ -1803,9 +1767,6 @@ export class InputRequestService {
   ): Promise<InputDeliverResult> {
     const { request } = held;
     held.request = { ...request, state: 'delivering' };
-    // A write begins: the lock the ferret reads is the one this write works out (a grant fill's own is hidden by agentSees).
-    delete held.agentLock;
-    let hold: QuarantineHold | undefined;
     try {
       const pasted = request.source?.name;
       if (pasted !== undefined && body.sealed !== true)
@@ -1840,7 +1801,7 @@ export class InputRequestService {
           : await this.guardOffered(held, body.entry, body.signIn, typed, codeFields.length > 0, body.factor);
       const submitted = body.submit && request.submit !== 'agent';
       const looked = await this.deps.target.observe(request.sessionId, request.target, request.fields.map(pointerOf));
-      const seen =
+      let seen =
         looked.ok && digestFacts(looked.facts) === request.observedDigest
           ? looked
           : await this.lookAgain(held, looked, grant !== undefined);
@@ -1858,39 +1819,13 @@ export class InputRequestService {
         values.push({ field: field.id, text });
       }
       held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
-      if (seen.facts.kind === 'browser') held.navigation = seen.facts.navigationId;
       // Checked again at the write, AFTER any saved value was opened (so a saved login still fills the role the owner
       // chose): a code field now going into a password is held, masked and recorded as a secret. Never back.
       const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true);
       held.request = { ...held.request, fields, sensitivity: strongestSensitivity(fields) };
-      // The secret store is no surface anybody reads, so there is nothing to hold from view. The lock is looked at
-      // again from the facts just seen, and the longer of that and the card's is kept: a card never shortens.
-      if (heldFromView(fields) && request.target.kind !== 'secret') {
-        // At the write, an act of the ferret on THIS page (or a tab sharing its storage on its site) since the card was
-        // raised voids a page's proof as well; an act on another tab or a terminal does not (login-observer.ts). Asked
-        // AFTER the store is read, so an act that began during the read counts (secrev-1333 L1).
-        const facts = await this.lockFacts(seen.facts);
-        const raisedProbe = probeOutcomeOf(request.lock);
-        const now = lockFor(seen.facts, fields, {
-          ...facts,
-          probed: held.probed === true,
-          submitted,
-          // The raise-time probe is not run again, but what it found is kept (secrev-1333 L4).
-          ...(raisedProbe === undefined ? {} : { probe: raisedProbe }),
-          ...this.steeredSince(request.sessionId, seen.facts, Date.parse(request.raisedAt)),
-        });
-        const lock = request.lock === undefined ? now : longerLock(request.lock, now);
-        held.request = { ...held.request, lock };
-        // A grant fill asks whether it still holds BEFORE the page is held from the ferret (delta F3): a refusal a ferret
-        // can cause (a script it starts, say) lands before anything it can read changes.
-        if (grant !== undefined && !grant.held()) throw new GrantMissed('expired');
-        hold = await this.holdFor(request, held.names, lock.seconds * 1000);
-      }
       try {
         await this.journal(held.request, 'delivering', undefined, undefined, body.deliveryId);
       } catch {
-        await this.letGo(hold);
-        hold = undefined;
         throw new InputRequestError('unavailable', 'Ferretry could not record the attempt, so nothing was typed');
       }
       // A grant fill that types a password into a page has its fields emptied on `pagehide` (armed before the write) and
@@ -1906,57 +1841,46 @@ export class InputRequestService {
       for (const [index, field] of fields.entries())
         if (maskedFromReads(field, typed))
           this.deps.values.hold(request.sessionId, (values[index] as InputFieldValue).text, request.agendaItemId);
-      // Asked once more with the page held, before the write (secrev-1333 L1): an act on it that began since the
-      // lock was decided (while the attempt was journalled, say) gets the full lock. The full hold is taken before the
-      // short one is let go, so the page is never unheld.
-      const lock = held.request.lock;
-      const late =
-        hold === undefined || lock === undefined
-          ? undefined
-          : this.steerOf(request.sessionId, seen.facts, Date.parse(request.raisedAt));
-      if (late !== undefined && lock !== undefined && lock.reason !== steeredLock(late).reason) {
-        const full = longerLock(lock, steeredLock(late));
-        held.request = { ...held.request, lock: full };
-        const short = hold;
-        hold = await this.holdFor(request, held.names, full.seconds * 1000);
-        await this.letGo(short);
-      }
       // A grant fill types only while its line is still held: a revoke, an expiry or a stop since the last look ends it
       // here, with nothing awaited between this check and the write.
       if (grant !== undefined && !grant.held()) {
-        await this.letGo(hold);
-        hold = undefined;
         await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
         throw new GrantMissed('expired');
       }
-      // A value Ferretry does not submit on a page whose facts prove it after a submit is held while the page shows
-      // that document (`until-moved-on`, secrev-1333 M1), once the browser armed its pagehide clear: a page that moves
-      // on and comes back from the back/forward cache then shows the field empty. Unarmed, it keeps the plain window.
-      const follows =
-        clear === undefined && seen.facts.kind === 'browser' && held.request.lock?.reason === 'until-moved-on';
-      const arming = { armed: false };
-      const outcome: TypeResult = await this.deps.target
-        .type(request.sessionId, request.target, values, submitted, seen.facts, {
-          ...(follows
-            ? {
-                armClear: 'try' as const,
-                armed: (ok: boolean) => {
-                  arming.armed = ok;
-                },
-              }
-            : {}),
-          // A code left visible on the strength of a proven code program is typed only while one still holds it.
-          codeProgram: seen.codeProgram === true && fields.some(field => field.sensitivity === 'code'),
-          ...(by.kind === 'rule' && held.pastedInto !== undefined ? { profileProgram: held.pastedInto } : {}),
-          ...(clear === undefined ? {} : { armClear: true }),
-          // Asked again inside the target's own turn: a write that waited in the page's queue may find the line gone.
-          ...(grant === undefined ? {} : { proceed: () => grant.held() }),
-          // A standing rule's terminal fill: the reader proved again before Enter, and a refused guard said as such.
-          ...(grant !== undefined && by.kind === 'sign-in-rule' && request.target.kind === 'terminal'
-            ? { reprove: true }
-            : {}),
-        })
-        .catch((): TypeResult => 'uncertain');
+      const typeInto = async (facts: InputTargetFacts): Promise<TypeResult> =>
+        await this.deps.target
+          .type(request.sessionId, request.target, values, submitted, facts, {
+            // A code left visible on the strength of a proven code program is typed only while one still holds it.
+            codeProgram: seen.codeProgram === true && fields.some(field => field.sensitivity === 'code'),
+            ...(by.kind === 'rule' && held.pastedInto !== undefined ? { profileProgram: held.pastedInto } : {}),
+            ...(clear === undefined ? {} : { armClear: true }),
+            // Asked again inside the target's own turn: a write that waited in the page's queue may find the line gone.
+            ...(grant === undefined ? {} : { proceed: () => grant.held() }),
+            // A standing rule's terminal fill: the reader proved again before Enter, and a refused guard said as such.
+            ...(grant !== undefined && by.kind === 'sign-in-rule' && request.target.kind === 'terminal'
+              ? { reprove: true }
+              : {}),
+          })
+          .catch((): TypeResult => 'uncertain');
+      let outcome: TypeResult = await typeInto(seen.facts);
+      // The page replaced the field AGAIN between the last look and the write: nothing was typed (`target_changed` writes
+      // nothing), so the field is found once more, in the same document lineage, and the value goes there. Never twice,
+      // and never after a write that may have landed (owner decision, !A607: no second answer for a re-render).
+      if (outcome === 'target_changed' && grant === undefined && request.target.kind === 'browser') {
+        let next: Extract<ObserveResult, { readonly ok: true }>;
+        try {
+          next = await this.lookAgain(
+            held,
+            await this.deps.target.observe(request.sessionId, request.target, request.fields.map(pointerOf)),
+          );
+        } catch (error) {
+          // The field is not the same one any more (the card was redrawn, or the check was counted): nothing was typed.
+          await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
+          throw error;
+        }
+        seen = next;
+        outcome = await typeInto(next.facts);
+      }
       wrote?.(outcome);
       // Taken before anything else is awaited: what the ferret does after this counts against a sign-in's facts.
       const deliveredAt = this.deps.clock.now();
@@ -1974,22 +1898,17 @@ export class InputRequestService {
           .catch(() => undefined);
       };
       if (outcome === 'uncertain' || outcome === 'reader_changed') {
-        await this.settle(hold);
-        hold = undefined;
         this.signInMovedOn(request, seen.facts);
         // A grant fill's password may have landed (secrev-1282b F2): it gets the same clear, and the clear's own hold for
         // the full window, as a typed one, and the grant stops (`did-not-move-on`): the sign-in did not go as approved.
         if (grant !== undefined) {
-          if (clear !== undefined)
-            grant.typed(
-              clear,
-              (held.request.lock?.seconds ?? INPUT_QUARANTINE_SECONDS) * 1000,
-              holdNames(request, held.names),
-            );
+          if (clear !== undefined) grant.typed(clear);
           // A reader that changed before Enter is the race a standing terminal rule bounds (secrev-1301 M1).
           await grant.uncertain(outcome === 'reader_changed' ? 'program-changed' : 'did-not-move-on');
         }
         await stored(true);
+        this.noteShown(held.request, seen.facts, held.names);
+        await this.guardAcrossRestart(held.request, held.names, seen.facts);
         await this.finish(held, 'refused', 'interrupted', undefined, {
           closeCard: true,
           tellAgent: true,
@@ -2003,8 +1922,6 @@ export class InputRequestService {
       if (outcome === 'target_changed' && grant !== undefined && !grant.held()) {
         // The target refused because the line ended while the write waited its turn: nothing was typed, and nothing is
         // wrong with the target, so no check is counted. The card is the owner's.
-        await this.letGo(hold);
-        hold = undefined;
         await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
         throw new GrantMissed('expired');
       }
@@ -2012,14 +1929,10 @@ export class InputRequestService {
         // tmux's own guard refused a standing rule's terminal write after a look that matched (secrev-1301 M1): the
         // reader changed in the race between the kernel's look and the write. Nothing was typed, and the rule is
         // suspended, so it cannot be retried under that approval; the card is the owner's.
-        await this.letGo(hold);
-        hold = undefined;
         await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
         throw new GrantMissed('program-changed');
       }
       if (outcome !== 'typed') {
-        await this.letGo(hold);
-        hold = undefined;
         await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
         // A grant fill is a miss here, with nothing redrawn or counted: no owner tapped anything (C25).
         if (grant !== undefined) throw new GrantUnchecked();
@@ -2032,17 +1945,10 @@ export class InputRequestService {
           outcome === 'guard_refused' ? 'target_changed' : outcome,
         );
       }
-      const typedUnder = hold;
-      await this.settle(hold);
-      hold = undefined;
       this.signInMovedOn(request, seen.facts);
-      if (follows && arming.armed && typedUnder !== undefined) this.followed.add(typedUnder.id);
-      if (clear !== undefined)
-        grant?.typed(
-          clear,
-          (held.request.lock?.seconds ?? INPUT_QUARANTINE_SECONDS) * 1000,
-          holdNames(request, held.names),
-        );
+      if (clear !== undefined) grant?.typed(clear);
+      this.noteShown(held.request, seen.facts, held.names);
+      await this.guardAcrossRestart(held.request, held.names, seen.facts);
       if (pasted !== undefined) this.deps.sealed?.used(request.sessionId, pasted);
       await stored(false);
       const saved =
@@ -2089,8 +1995,6 @@ export class InputRequestService {
         ...(saved === undefined ? {} : { saved }),
       };
     } catch (error) {
-      // A hold still open here is for a write that may have started: it runs its window rather than lifting.
-      await this.settle(hold);
       if (held.request.state === 'delivering') held.request = { ...held.request, state: 'pending' };
       throw error;
     }
@@ -2288,74 +2192,6 @@ export class InputRequestService {
   }
 
   /**
-   * WHY THE FERRET COULD HAVE STEERED THIS PAGE, for its lock (docs/input-requests.md, "How long the lock lasts"):
-   *
-   * - a page script ANY caller ran on this page's site (`siteOf`: sibling subdomains share cookies), on a host that
-   *   couldn't be read, or one running anywhere now (the machine-wide taint the standing rules keep);
-   * - this session's own acts and scripts on this very page (login-observer.ts `pageSteer`): a script on it or on its
-   *   site ever, an act on it, or on a tab that shares its cookies and storage on its site, at or after `since`.
-   *
-   * Never an act on another tab, another site's tab in the same profile, an incognito tab, or a terminal. `unknown`
-   * with no observer wired. Nothing is asked of a terminal: its lock never reads the ferret's acts.
-   */
-  private steerOf(sessionId: string, facts: InputTargetFacts, since: number): PageSteer | undefined {
-    if (facts.kind !== 'browser') return undefined;
-    const host = placeOf(facts, undefined);
-    const site = host === undefined ? undefined : siteOf(host);
-    const machine = this.deps.grants?.scriptedOrigins();
-    if (
-      machine !== undefined &&
-      (machine.running === true ||
-        machine.everywhere !== undefined ||
-        (site === undefined ? machine.hosts.size > 0 : [...machine.hosts.keys()].some(each => siteOf(each) === site)))
-    )
-      return 'scripted';
-    const observer = this.deps.observer;
-    if (observer === undefined) return 'unknown';
-    // An observer that keeps no pages answers for the whole session: stricter, never looser.
-    if (observer.pageSteer === undefined)
-      return observer.tainted(sessionId, 'browser', since)
-        ? since === Number.POSITIVE_INFINITY
-          ? 'scripted'
-          : 'acted'
-        : undefined;
-    return observer.pageSteer(sessionId, { id: facts.pageId, host }, since);
-  }
-
-  /** {@link steerOf} as the part of a {@link LockContext} it fills. */
-  private steeredSince(sessionId: string, facts: InputTargetFacts, since: number): Pick<LockContext, 'steered'> {
-    const steered = this.steerOf(sessionId, facts, since);
-    return steered === undefined ? {} : { steered };
-  }
-
-  /**
-   * The lock a pending page card says NOW: the one it was raised with, or the full lock and its reason once the ferret
-   * acted on this page or a script tainted it after the raise, so the owner reads, before Send, the lock Send will
-   * give (a card never shortens, `longerLock`). Only what the observer holds in memory is read: no store, no page.
-   */
-  private liveLock(request: InputRequest): InputRequest['lock'] {
-    const { lock, observed } = request;
-    if (lock === undefined || request.state !== 'pending' || observed?.kind !== 'browser') return lock;
-    const steered = this.steerOf(request.sessionId, observed, Date.parse(request.raisedAt));
-    return steered === undefined ? lock : longerLock(lock, steeredLock(steered));
-  }
-
-  /**
-   * The facts the lock may read for this target: the UNION of every sign-in the daemon matched to it, of any account
-   * (each keeps its own, so two accounts on one host are two sets read together). None when nothing matches, and
-   * `unread` when the store cannot be read (the lock stays long either way).
-   */
-  private async lockFacts(facts: InputTargetFacts): Promise<Pick<LockContext, 'observed' | 'unread'>> {
-    const listing = await this.deps.logins?.listing().catch(() => undefined);
-    if (listing === undefined) return { observed: [], ...(this.deps.logins === undefined ? {} : { unread: true }) };
-    return {
-      observed: signInsAt(targetMatchKey(facts, this.deps.hostName ?? ''), listing).flatMap(
-        signIn => signIn.observed ?? [],
-      ),
-    };
-  }
-
-  /**
    * A deliver that types from a saved account types only what the card would offer NOW, drawn by the same
    * `savedForFields` over the fields the owner did not type: never a 2FA code from an account that does not sign in here,
    * nothing by hand on a page a sign-in reaches through a provider, never a provider where it is not matched. A
@@ -2510,39 +2346,29 @@ export class InputRequestService {
   }
 
   /**
-   * The terminal is held BEFORE the value is typed, and the hold is journalled before anything is written. If
-   * the journal cannot take it nothing is typed: a hold that a restart would not bring back is no hold. The
-   * hold belongs to this attempt alone and cannot expire while the write is in flight; a pre-write end time
-   * of two windows covers the write landing late, and {@link settle} replaces it with the exact one.
+   * A value that may be on a TERMINAL's screen is masked from reads from RAM, which a restart forgets while the pane (and
+   * its scrollback) survives. So a short restart-only guard is journalled: it is never a live hold (the ferret reads the
+   * terminal at once), but if the daemon restarts inside its window the terminal comes back held for what is left of it.
+   * Not for a prompt proven to hide what is typed (nothing is on screen), and not for a page (pages do not outlive the daemon).
    */
-  private async holdFor(
+  private async guardAcrossRestart(
     request: InputRequest,
-    seenNames: readonly string[] | undefined,
-    window = QUARANTINE_MS,
-  ): Promise<QuarantineHold> {
-    const hold = this.deps.quarantine.begin(request.sessionId, holdNames(request, seenNames), request.id, window);
-    try {
-      await this.journalHold(hold, INPUT_QUARANTINE_EVENT_TYPES.started, this.deps.clock.now() + QUARANTINE_MS, true);
-    } catch {
-      this.deps.quarantine.release(hold);
-      throw new InputRequestError('unavailable', 'Ferretry could not record the quarantine, so nothing was typed');
-    }
-    return hold;
-  }
-
-  /** The write was made, or may have been: this hold now runs a full window from here. */
-  private async settle(hold: QuarantineHold | undefined): Promise<void> {
-    if (hold === undefined) return;
-    const until = this.deps.quarantine.settle(hold);
-    await this.journalHold(hold, INPUT_QUARANTINE_EVENT_TYPES.started, until).catch(() => undefined);
-  }
-
-  /** Nothing was typed after all: this attempt's hold is let go. Another delivery's hold on the terminal stays. */
-  private async letGo(hold: QuarantineHold | undefined): Promise<void> {
-    if (hold === undefined) return;
-    this.deps.quarantine.release(hold);
+    names: readonly string[],
+    facts: InputTargetFacts,
+  ): Promise<void> {
+    if (request.target.kind !== 'terminal' || terminalHides(facts)) return;
+    if (!request.fields.some(field => field.sensitivity === 'secret' || field.sensitivity === 'private')) return;
     const at = this.deps.clock.now();
-    await this.journalHold(hold, INPUT_QUARANTINE_EVENT_TYPES.ended, at).catch(() => undefined);
+    await this.deps.journal
+      .quarantine(request.sessionId, {
+        type: INPUT_QUARANTINE_EVENT_TYPES.started,
+        sessionId: request.sessionId,
+        names: [...holdNames(request, names)],
+        hold: `restart-${request.id}`,
+        until: instant(at + RESTART_GUARD_SECONDS * 1000),
+        at: instant(at),
+      })
+      .catch(() => undefined);
   }
 
   /** Journals a hold by its id; an unresolved one has no end time that can be trusted until it is settled. */
@@ -2581,6 +2407,21 @@ export class InputRequestService {
   ): Promise<Extract<ObserveResult, { readonly ok: true }>> {
     const again = await this.refound(held, looked);
     if (again.ok && digestFacts(again.facts) === held.request.observedDigest) return again;
+    // A page that re-rendered the field the owner answered (a new node, a moved box, a new document) is typed into at
+    // once, from what was just found: the owner never answers twice for a re-render (owner decision, !A607). Only the
+    // SAME target qualifies (`mayRebind`: same page, origin and security, every field with the same frame origin, tag
+    // and attributes), every field is visible, and no human check has appeared since.
+    if (
+      !underGrant &&
+      again.ok &&
+      again.facts.kind === 'browser' &&
+      held.request.target.kind === 'browser' &&
+      held.binding !== undefined &&
+      mayRebind(held.binding, again.facts) &&
+      sameLineage(held.request.observed, again.facts) &&
+      again.facts.challenge === undefined
+    )
+      return again;
     if (underGrant) throw new GrantUnchecked();
     return await this.redrawOrRefuse(held, again, looked.ok ? 'target_changed' : 'target_gone');
   }
@@ -2656,21 +2497,9 @@ export class InputRequestService {
     else held.shot = shot;
     const copy =
       request.source === undefined ? undefined : this.deps.sealed?.describe(request.sessionId, request.source.name);
-    // A dummy probe was about the node the card first showed: a redrawn card earns its lock again without it.
-    held.probed = false;
-    const lock =
-      request.lock === undefined
-        ? undefined
-        : lockFor(seen.facts, request.fields, {
-            ...(await this.lockFacts(seen.facts)),
-            probed: false,
-            submitted: request.submit !== 'agent',
-            ...this.steeredSince(request.sessionId, seen.facts, Date.parse(request.raisedAt)),
-          });
     const { pictured: _pictured, ...rest } = request;
     held.request = {
       ...rest,
-      ...(lock === undefined ? {} : { lock }),
       state: 'pending',
       fields,
       sensitivity: strongestSensitivity(fields),
@@ -2718,7 +2547,6 @@ export class InputRequestService {
   ): Promise<void> {
     // The request ends here: the ferret reads it as it is from now on.
     delete held.agentSees;
-    delete held.agentLock;
     const at = instant(this.deps.clock.now());
     const source =
       options.sealed === true
@@ -2754,7 +2582,16 @@ export class InputRequestService {
           : state === 'refused'
             ? 'refused'
             : 'cancelled';
-    await this.journalQuietly(request, kind, reason, options.submitted);
+    // ORDER (!A607): the durable outcome FIRST, then the waiting ferret (input_wait) is woken, then the audit, agenda and
+    // notifier work, which no longer sits on the owner's wait. The journal event carries what that work needs, and a
+    // `settled` event closes it, so a restart that lost it does it again (`replayEnded`).
+    await this.journal(request, kind, reason, options.submitted, undefined, {
+      closeCard: options.closeCard,
+      tellAgent: options.tellAgent,
+      ...(options.uncertain === true ? { uncertain: true } : {}),
+    }).catch(() => undefined);
+    for (const wake of held.waiters) wake();
+    held.waiters.clear();
     await this.record(request, `input.${kind}`, by ?? { kind: 'daemon' }, {
       ...this.auditOf(seen),
       ...(reason === undefined ? {} : { reason }),
@@ -2786,8 +2623,7 @@ export class InputRequestService {
         request.agendaItemId,
         tellOf(request, state, reason, options.uncertain === true, options.unsettled === true),
       );
-    for (const wake of held.waiters) wake();
-    held.waiters.clear();
+    await this.journalQuietly(request, 'settled', reason, options.submitted);
   }
 
   private byCard(sessionId: string, id: AgendaId): Held | undefined {
@@ -2803,9 +2639,7 @@ export class InputRequestService {
 
   private view(held: Held): InputAgentView {
     const { names } = held;
-    const shown = held.agentSees ?? held.request;
-    const request =
-      held.agentSees === undefined && held.agentLock !== undefined ? { ...shown, lock: held.agentLock.lock } : shown;
+    const request = held.agentSees ?? held.request;
     const quarantined = this.quarantined(request.sessionId, names);
     const facts =
       request.observed?.kind === 'terminal' && quarantined ? maskedFacts(request.observed) : request.observed;
@@ -2869,6 +2703,7 @@ export class InputRequestService {
     reason?: InputReason,
     submitted?: boolean,
     deliveryId?: string,
+    after?: NonNullable<InputEvent['after']>,
   ): Promise<void> {
     await this.deps.journal.publish(request.sessionId, {
       type: INPUT_JOURNAL_EVENT_TYPES[kind],
@@ -2883,6 +2718,7 @@ export class InputRequestService {
       ...(deliveryId === undefined ? {} : { deliveryId }),
       ...(submitted === undefined ? {} : { submitted }),
       ...(reason === undefined ? {} : { reason }),
+      ...(after === undefined ? {} : { after }),
       ...(kind === 'requested' || kind === 'delivering' ? { expiresAt: request.expiresAt } : {}),
       at: instant(this.deps.clock.now()),
     });
@@ -2971,8 +2807,6 @@ function pointerOf(field: { readonly id: string; readonly element?: InputRequest
 }
 
 const UPGRADED_FLAG = 'Treated as a secret: this is a password field.';
-/** The ferret's words that ask for a password, PIN or passphrase. */
-const PASSWORD_WORDS = /pass(?:word|phrase|wd)|(?:^|[^a-z])pin(?:[^a-z]|$)/iu;
 const AMBER_AT_LEAST: Readonly<Record<InputRisk['level'], InputRisk['level']>> = {
   green: 'amber',
   neutral: 'amber',
@@ -2994,12 +2828,28 @@ function observedAs(
   /** The daemon saw a code program this account cannot replace in the foreground (`ObserveResult.codeProgram`). */
   codeProgram: boolean,
 ): InputRequestField[] {
-  return fields.map(field => {
+  return fields.map(original => {
+    // A card field the ferret called plain or a code is a secret. The page's own words decide, never the ferret's label alone.
+    const kind =
+      facts.kind === 'browser'
+        ? pageFieldKind(
+            facts.fields.find(each => each.fieldId === original.id)?.field ?? { tag: 'input' },
+            original.label,
+          )
+        : undefined;
+    if (kind === 'card' && (original.sensitivity === 'plain' || original.sensitivity === 'code'))
+      upgraded.add(original.id);
+    // A field the ferret asked for as a secret STAYS one: it is never lowered to a code (field-kinds.ts, passwordSignalled).
+    const field = original;
     // The ferret's own words (its prompt, the field's label or id) may only ever RAISE a code to a secret.
     // Matched as normalised text, and a look-alike spelling counts, as for the pane's own words (lock.ts).
-    const said = [prompt, field.label, field.id].some(
-      word => PASSWORD_WORDS.test(matchable(word)) || spellsPassword(word) || lookAlike(word),
-    );
+    // Not for a field the PAGE marks as a one-time code (`kind`): its own attributes decide, so a prompt that says
+    // "password" (the ferret's words, shared by the whole card) never turns a real one-time code into a secret.
+    const said =
+      kind !== 'code' &&
+      [prompt, field.label, field.id].some(
+        word => passwordSignalled({ tag: 'input' }, word) || spellsPassword(word) || lookAlike(word),
+      );
     if (field.sensitivity === 'code' && (said || passwordTarget(facts, field.id, codeProgram))) upgraded.add(field.id);
     if (!upgraded.has(field.id)) return { ...field, risk: riskOf(field, facts) };
     const secret = { ...field, sensitivity: 'secret' as const };
@@ -3085,12 +2935,20 @@ const PLAIN_FLAG = INPUT_PLAIN_VALUE_NOTICE;
  * A page card redrawn onto a new document: the field looks the same, but the page may not be the one you were asked
  * on. The card shows the origin and the picture, not the address, so that is what the owner is sent to check.
  */
+/** The journal events that end a request: its outcome, before its follow-up work is settled. */
+const ENDED_EVENTS: ReadonlySet<string> = new Set([
+  INPUT_JOURNAL_EVENT_TYPES.delivered,
+  INPUT_JOURNAL_EVENT_TYPES.refused,
+  INPUT_JOURNAL_EVENT_TYPES.expired,
+  INPUT_JOURNAL_EVENT_TYPES.cancelled,
+]);
+
 const NEW_DOCUMENT_FLAG: InputRisk = {
   level: 'amber',
   reason:
     'The page loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the one you meant.',
 };
-const PRIVATE_FLAG = `This value will show on screen while the terminal is hidden from the ferret for ${INPUT_QUARANTINE_WORDS}.`;
+const PRIVATE_FLAG = 'This value will show on screen as it is typed.';
 /** A one-time code is not secret: neutral, neither the red of a plain value nor the amber of a private one. */
 const CODE_FLAG: InputRisk = { level: 'neutral', reason: INPUT_CODE_VISIBLE_NOTICE };
 const CODE_ASK = INPUT_CODE_VISIBLE_NOTICE;
@@ -3153,7 +3011,7 @@ const RELAY_FLAG: InputRisk = {
     'The terminal is not reading a line, so the program may be passing each key on to something else (a remote shell or a container) rather than asking for a password itself.',
 };
 
-const PAGE_PRIVATE_FLAG = `This value will show on the page; Ferretry hides the page from the ferret for ${INPUT_QUARANTINE_WORDS}.`;
+const PAGE_PRIVATE_FLAG = 'This value will show on the page as it is typed.';
 /**
  * A page field's flag, worst first: the field the agent named is missing or hidden, covered or off screen, the page is not secure (http
  * crosses the network in the clear), the field sits in a frame from another site, or a secret is going into a
@@ -3343,13 +3201,13 @@ function tellOf(
   const tool = `${kind}_request_input`;
   if (kind === 'secret') return storeTellOf(request, state, reason, uncertain, unsettled);
   if (uncertain)
-    return `${request.agendaItemId} was interrupted while the owner's value was going into %${kind}:${key}; it may be partly or fully typed there. Read the ${surface} before you act once its quarantine allows; if you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
+    return `${request.agendaItemId} was interrupted while the owner's value was going into %${kind}:${key}; it may be partly or fully typed there. Read the ${surface} before you act; if you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
   if (state === 'delivered' && request.outcome?.by.kind === 'plan')
-    return `${request.agendaItemId}: Ferretry filled the sign-in on %${kind}:${key} under your task plan. Read the ${surface} to continue once its quarantine allows.`;
+    return `${request.agendaItemId}: Ferretry filled the sign-in on %${kind}:${key} under your task plan. Read the ${surface} to continue.`;
   if (state === 'delivered' && request.outcome?.by.kind === 'sign-in-rule')
-    return `${request.agendaItemId}: Ferretry filled the sign-in on %${kind}:${key} under a rule the owner approved in advance. Read the ${surface} to continue once its quarantine allows.`;
+    return `${request.agendaItemId}: Ferretry filled the sign-in on %${kind}:${key} under a rule the owner approved in advance. Read the ${surface} to continue.`;
   if (state === 'delivered' && request.source !== undefined)
-    return `${request.agendaItemId}: ${copyHandle(request.source.name)} was pasted into %${kind}:${key}. Read the ${surface} to continue once its quarantine allows.`;
+    return `${request.agendaItemId}: ${copyHandle(request.source.name)} was pasted into %${kind}:${key}. Read the ${surface} to continue.`;
   if (state === 'delivered')
     return `${request.agendaItemId} was answered and typed into %${kind}:${key}. Read the ${surface} to continue.`;
   return `${request.agendaItemId} ended without a value (${state}${reason === undefined ? '' : `: ${reasonWords(reason, kind, unsettled)}`}). If you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
@@ -3436,7 +3294,7 @@ interface GrantWrite {
   /** Whether the grant is still held, asked synchronously as the last thing before the write. */
   held(): boolean;
   /** A page password was typed, or may have been: what to check and empty before the hold (`holdMs`, on `names`) ends. */
-  typed(job: ClearJob, holdMs: number, names: readonly string[]): void;
+  typed(job: ClearJob): void;
   /**
    * The write may have typed something and could not say (`did-not-move-on`), or a standing rule's terminal reader
    * changed before Enter (`program-changed`): the grant stops.

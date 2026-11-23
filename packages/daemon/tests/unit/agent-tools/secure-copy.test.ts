@@ -199,7 +199,7 @@ describe('the secure.* agent tools', () => {
 });
 
 /** An input port that records each raise and answers what the case set. */
-function recordingInput(state: 'pending' | 'delivered' = 'pending', lockSeconds?: number) {
+function recordingInput(state: 'pending' | 'delivered' = 'pending') {
   const raised: { sessionId: string; raise: InputRaise }[] = [];
   const input: AgentInputPort = {
     raise: async (sessionId, raise) => {
@@ -208,7 +208,6 @@ function recordingInput(state: 'pending' | 'delivered' = 'pending', lockSeconds?
         id: 'A7',
         state,
         ...(state === 'delivered' ? { source: 'sealed' as const, submitted: true } : {}),
-        ...(lockSeconds === undefined ? {} : { lockSeconds }),
       };
     },
     agentView: async () => ({ id: 'A7', state }),
@@ -260,17 +259,7 @@ describe('the secure.paste and secure.preapprove agent tools', () => {
     should(result.summary).startWith(
       'Pasted sealed:vercel into %terminal:dev under a rule the owner approved in advance',
     );
-    should(result.summary).endWith('The terminal is unreadable for about two minutes.');
-  });
-
-  it('should say how long the terminal is unreadable when the daemon chose a short lock', async () => {
-    const { input } = recordingInput('delivered', 10);
-    const world = agentToolWorld({ input });
-    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
-
-    const result = await world.service.call(agent, PASTE);
-
-    should(result.summary).endWith('The terminal is unreadable for 10 seconds.');
+    should(result.summary).endWith('You can read the terminal again at once.');
   });
 
   it('should raise a paste saved as a secret with no terminal of its own, and say how to use it once saved', async () => {
@@ -392,9 +381,7 @@ describe('the secure tools and the switches', () => {
 
     const result = await world.service.call(agent, { tool: 'input.wait', id: 'A7' });
 
-    should(result.summary).equal(
-      '!A7: the secure copy was pasted and Enter pressed. Read the terminal once its quarantine allows.',
-    );
+    should(result.summary).equal('!A7: the secure copy was pasted and Enter pressed. Read the terminal.');
   });
 });
 
@@ -411,7 +398,7 @@ describe('a person and secure.copy', () => {
 
 describe('copying from a page the agent opened', () => {
   /** The copy service and the page records over a fake page whose document the case moves on. */
-  function pageWorld(options: { readonly heldByOwner?: boolean } = {}) {
+  function pageWorld() {
     const clock = new ManualClock();
     const masking = new EphemeralValues(clock);
     const records = new PageCopyRecords(clock);
@@ -454,10 +441,6 @@ describe('copying from a page the agent opened', () => {
       pendingOn: () => undefined,
       exclusive: async (_sessionId, work) => await work(),
       pageDocument: async () => page.document,
-      // The owner's value was just typed into the page: its text is not read while it shows that document.
-      ...(options.heldByOwner === true
-        ? { pageHeld: () => ({ until: Date.parse('2026-10-31T12:02:00.000Z'), documents: ['loader-1'] }) }
-        : {}),
     };
     const tools = agentToolWorld({
       copy: copies,
@@ -540,17 +523,6 @@ describe('copying from a page the agent opened', () => {
 
     should(JSON.stringify(read)).not.containEql(TOKEN);
     should(read.summary).containEql('created=[sealed:gh]');
-  });
-
-  it("should refuse a copy inside the page's queue while the owner's value holds the page, reading nothing", async () => {
-    const w = pageWorld({ heldByOwner: true });
-    await w.service.call(agent, { tool: 'browser.open', name: 'app' });
-
-    const refusal = await refused(w.service.call(agent, FROM_PAGE));
-
-    should(refusal.code).equal('conflict');
-    should(w.page.asked).eql([]);
-    should(w.copies.list('s1')).eql([]);
   });
 
   it('should not count the copy itself as the agent reading the page', async () => {

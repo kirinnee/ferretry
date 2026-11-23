@@ -108,20 +108,15 @@ export interface AgentInputPort {
   /** Runs `work` as one turn in the session, so a send or close and a raise or secure write never interleave. */
   exclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T>;
   /**
-   * A page the daemon just typed a secret into: when its hold ends and the documents the values went into, or
-   * nothing when it is not held. `names` are every way the page is known. Absent where no page is ever held.
+   * A value the owner just typed that the page SHOWS in the clear (a card number, a private value; never a password
+   * input, which draws dots): the documents it is on screen in, until when. A picture of such a document would show it, and no
+   * mask can be drawn on pixels, so it is withheld while the page shows one; text reads and every act are not touched
+   * (the text is masked). Nothing when no such value is on the page.
    */
-  pageHeld?(
+  pageShows?(
     sessionId: string,
     names: readonly (string | undefined)[],
-  ):
-    | {
-        readonly until: number;
-        readonly documents: readonly string[];
-        /** Every hold on the page follows its document: pictures, like text, wait only while it shows one of them. */
-        readonly documentsOnly?: true;
-      }
-    | undefined;
+  ): { readonly until: number; readonly documents: readonly string[] } | undefined;
   /** The document a session's page shows now, or nothing when it cannot be told. */
   pageDocument?(sessionId: string, key: string): Promise<string | undefined>;
 }

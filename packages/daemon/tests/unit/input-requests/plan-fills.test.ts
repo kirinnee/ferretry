@@ -107,6 +107,8 @@ interface Options {
   onLook?: (look: number, h: { setScripted(next: boolean): void }) => void;
   /** Runs as each journal event is published: `delivering` is the last step before the write. */
   onJournal?: (type: string) => void;
+  /** The document the page shows now, as the target reports it: a different one from the typed one has moved on. */
+  document?: () => string | undefined;
   /** Runs while the card is being raised, before the request is held. */
   onRaise?: () => void;
   /** Runs inside the target's turn, before it asks whether the fill may still go ahead (a write that waited in the queue). */
@@ -185,10 +187,11 @@ function harness(options: Options = {}) {
         if ((options.written ?? 'typed') === 'typed') writes.push(...typed.map(value => value.text));
         return options.written ?? 'typed';
       },
+      ...(options.document === undefined ? {} : { document: async () => options.document?.() }),
       clear: async (_session, _target, job) => {
         clears.push(job);
         // The page must still be held from the ferret while its fields are checked and emptied.
-        heldDuringClear.push(service.pageHeld(options.session ?? SESSION, ['app']) !== undefined);
+        heldDuringClear.push(service.quarantinedUntil(options.session ?? SESSION, ['app']) !== undefined);
         return options.clear ?? 'moved';
       },
     },
@@ -327,6 +330,18 @@ async function raised(h: Harness, raise: InputRaise = SIGN_IN, session = SESSION
 
 /** Lets what runs after a Send (not awaited by it) finish. */
 const settled = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 10));
+
+/** Fires the cleanup's waiting looks one by one until the browser has been asked to clear the field. */
+async function pollUntilCleared(h: {
+  readonly clears: unknown[];
+  readonly timers: { fire: () => void }[];
+}): Promise<void> {
+  await settled();
+  for (let look = 0; look < 40 && h.clears.length === 0; look += 1) {
+    h.timers.at(-1)?.fire();
+    await settled();
+  }
+}
 
 describe('a covered sign-in is filled under the plan line', () => {
   it('should type the username and the password, close the card and spend one use', async () => {
@@ -653,50 +668,48 @@ describe('a code Ferretry makes is typed only with its tick, and never returned'
   });
 });
 
-describe('a password left in a field is emptied before the hold ends, and the line stops', () => {
-  it('should ask the browser about the typed nodes only, while the page is still held, shortly before the hold ends', async () => {
-    const h = harness({ clear: 'moved' });
-    await approve(h, await github(h), { remaining: 2 });
-    await raised(h);
-    const hold = h.timers.at(-1);
-    // Two seconds before the write's 120-second hold ends.
-    should(hold?.ms).equal(118_000);
-    // The clear's own hold is taken the moment the write is done: a timer that fires late, after the write's own hold has
-    // run out by the wall clock (a stall, a suspended machine), never leaves the page unheld in between.
-    h.advance(125_000);
-    should(h.service.pageHeld(SESSION, ['app'])).not.be.undefined();
-    hold?.fire();
-    await settled();
-
-    should(h.clears).deepEqual([{ navigationId: 'loader-1', fields: [{ frameId: 'main', backendNodeId: 12 }] }]);
-    should(h.heldDuringClear).deepEqual([true]);
-    should(JSON.stringify(h.clears)).not.containEql(PASSWORD);
-    should(h.stopped).deepEqual([]);
-    // Its own hold is let go once the clear answered.
-    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
-  });
-
+describe('a password left in a field is emptied, and the line stops', () => {
   for (const outcome of ['cleared', 'unknown'] as const)
     it(`should stop the line when the browser answers ${outcome}`, async () => {
       const h = harness({ clear: outcome });
       await approve(h, await github(h), { remaining: 2 });
       await raised(h);
-      h.advance(125_000);
+      await pollUntilCleared(h);
+      should(h.stopped).deepEqual(['0:did-not-move-on']);
+      // The cleanup is the field's own: whatever it answers, the page is never held from the ferret.
+      should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
+    });
+
+  it('should clear at once, and not stop the line, when the page has moved on', async () => {
+    const h = harness({ clear: 'moved', document: () => 'loader-2' });
+    await approve(h, await github(h), { remaining: 2 });
+    await raised(h);
+    await settled();
+    should(h.clears).have.length(1);
+    should(h.stopped).deepEqual([]);
+  });
+
+  it('should not empty the field before the page has had its bounded wait', async () => {
+    const h = harness({ clear: 'cleared' });
+    await approve(h, await github(h), { remaining: 2 });
+    await raised(h);
+    await settled();
+    for (let look = 0; look < 5; look += 1) {
       h.timers.at(-1)?.fire();
       await settled();
-      should(h.stopped).deepEqual(['0:did-not-move-on']);
-      // An emptied field lets the page go; an unknown one (the value may still be there) keeps it held a window more.
-      if (outcome === 'cleared') should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
-      else should(h.service.pageHeld(SESSION, ['app'])).not.be.undefined();
-    });
+    }
+    should(h.clears).have.length(0);
+    await pollUntilCleared(h);
+    should(h.clears).have.length(1);
+  });
 });
 
 describe('a fill is held from the ferret like a tap, and pressed like one', () => {
-  it('should hold the page after a plan fill', async () => {
+  it('should NOT hold the page after a plan fill: the ferret reads it at once', async () => {
     const h = harness();
     await approve(h, await github(h));
     await raised(h);
-    should(h.service.pageHeld(SESSION, ['app'])).not.be.undefined();
+    should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
   });
 
   it('should press Enter after the last value, unless the ferret raised the card to submit itself', async () => {
@@ -816,7 +829,7 @@ describe('a revoke or an expiry during a fill stops the write', () => {
     should(view.state).equal('pending');
     should(request?.preapproval).match({ outcome: 'did-not-apply', reason: 'expired' });
     // Nothing was typed, so the page is not held and the use is given back.
-    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
     should(h.used).deepEqual([]);
   });
 
@@ -830,7 +843,7 @@ describe('a revoke or an expiry during a fill stops the write', () => {
     should(h.writes).deepEqual([]);
     should(view.state).equal('pending');
     should(request?.preapproval).match({ outcome: 'did-not-apply', reason: 'expired' });
-    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
     should(h.used).deepEqual([]);
   });
 
@@ -980,20 +993,17 @@ describe('the rate limit is the ledger’s, after the matcher', () => {
 });
 
 describe('a write that could not say whether it typed is cleared, held and stops the line (secrev-1282b F2)', () => {
-  it('should keep the page held past the write’s own hold, ask the browser about the typed nodes, and stop the line', async () => {
+  it('should ask the browser about the typed nodes, never hold the page, and stop the line', async () => {
     const h = harness({ written: 'uncertain', clear: 'moved' });
     await approve(h, await github(h), { remaining: 2 });
     await raised(h).catch(() => undefined);
     await settled();
     should(h.used).deepEqual([`${PLAN}:0`]);
     should(h.stopped).deepEqual(['0:did-not-move-on']);
-    should(h.timers).have.length(1);
-    h.advance(600_000);
-    should(h.service.pageHeld(SESSION, ['app'])).not.be.undefined();
-    h.timers[0]?.fire();
-    await settled();
+    should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
+    await pollUntilCleared(h);
     should(h.clears.map(job => job.fields.map(field => field.backendNodeId))).deepEqual([[12]]);
-    should(h.heldDuringClear).deepEqual([true]);
-    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(h.heldDuringClear).deepEqual([false]);
+    should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
   });
 });

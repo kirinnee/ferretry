@@ -262,7 +262,8 @@ describe('pasting a secure copy as an input request', () => {
     const after = await w.service.agentView(SESSION, view.id, 0);
 
     should(result).match({ state: 'delivered', submitted: true });
-    should(w.held.quarantines).be.above(0);
+    should(w.service.quarantinedUntil(SESSION, ['dev'])).be.undefined(); // only a restart guard is journalled, never a live hold
+    should(w.held.quarantines).equal(1);
     should(w.writes).eql([TOKEN]);
     should(after).match({ state: 'delivered', source: 'sealed' });
     should(w.copies.list(SESSION)[0]?.uses).equal(1);
@@ -807,7 +808,7 @@ describe('a paste into a field on a page', () => {
     };
   }
 
-  it("should ask the owner naming the page's host, then type the copy into that one field and hold the page", async () => {
+  it("should ask the owner naming the page's host, then type the copy into that one field and hold nothing", async () => {
     const page = browser();
     const w = await world({ target: page.target });
     await w.capture();
@@ -820,7 +821,7 @@ describe('a paste into a field on a page', () => {
       `Allow pasting sealed:vercel (${String(TOKEN.length)} characters from /usr/bin/vercel) into a field on vercel.com. You type nothing.`,
     );
     should(page.typed).eql([{ field: 'value', text: TOKEN }]);
-    should(w.service.pageHeld(SESSION, ['app'])).match({ documents: ['loader-1'] });
+    should(w.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
     should(w.told.at(-1)).containEql(`${view.id}: sealed:vercel was pasted into %browser:app`);
     should(JSON.stringify([w.audits, w.events, w.told, w.cards])).not.containEql(TOKEN);
   });

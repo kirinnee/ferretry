@@ -5,7 +5,6 @@ import {
   type InputAgentView,
   type InputRaise,
   type InputTargetFacts,
-  padInputValue,
 } from '@ferretry/protocol';
 import should from 'should';
 import type { AgentInputPort, AgentToolError } from '../../../src/lib/index.ts';
@@ -46,12 +45,12 @@ class FakeInput implements AgentInputPort {
     this.turns.push(sessionId);
     return await work();
   }
-  /** A page hold the case set: its end and the documents the value went into. */
-  held: { until: number; documents: string[]; documentsOnly?: true } | undefined;
+  /** A value the page shows in the clear, as the case set it: its end and the documents it is on screen in. */
+  shows: { until: number; documents: string[] } | undefined;
   /** The document the page shows now. */
   document: string | undefined = 'loader-1';
-  pageHeld(): { until: number; documents: string[]; documentsOnly?: true } | undefined {
-    return this.held;
+  pageShows(): { until: number; documents: string[] } | undefined {
+    return this.shows;
   }
   async pageDocument(): Promise<string | undefined> {
     return this.document;
@@ -609,7 +608,6 @@ describe('AgentToolService — a terminal the owner just typed a secret into', (
 
 describe('AgentToolService — a nested input view is sealed where it is published', () => {
   const CANARY = 'pane-consumer-CANARY';
-  const OWNER = { kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' } as const;
   const facts: InputTargetFacts = {
     ...FACTS,
     foreground: { ...FACTS.foreground, comm: CANARY },
@@ -626,57 +624,6 @@ describe('AgentToolService — a nested input view is sealed where it is publish
     await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
     return { ...built, world };
   };
-
-  /** Suspends the call's audit record, lets the owner type a secret, then resumes it. */
-  const deliveredDuring = async (built: Awaited<ReturnType<typeof realWorld>>, call: AgentToolCall) => {
-    let entered!: () => void;
-    let resume!: () => void;
-    const reached = new Promise<void>(resolve => (entered = resolve));
-    const gate = new Promise<void>(resolve => (resume = resolve));
-    built.world.audit.during = async () => {
-      entered();
-      await gate;
-    };
-    const pending = built.world.service.call(agent, call);
-    await reached;
-    const [open] = await built.service.list(OWNER, 's1');
-    await built.service.deliver(
-      's1',
-      open?.id ?? '',
-      {
-        deliveryId: crypto.randomUUID(),
-        observedDigest: open?.observedDigest ?? '',
-        padded: padInputValue('x'),
-        submit: true,
-      },
-      OWNER,
-    );
-    should(built.service.quarantinedUntil('s1', ['dev'])).not.be.undefined();
-    resume();
-    return await pending;
-  };
-
-  it('should not hand back the foreground command when the owner typed a secret while terminal.request_input was audited', async () => {
-    const built = await realWorld();
-
-    const result = await deliveredDuring(built, {
-      tool: 'terminal.request_input',
-      name: 'dev',
-      prompt: 'password',
-      sensitivity: 'secret',
-    });
-
-    should(JSON.stringify(result)).not.containEql(CANARY);
-  });
-
-  it('should not hand back the foreground command when the owner typed a secret while input.wait was audited', async () => {
-    const built = await realWorld();
-    const raised = await built.service.raise('s1', { ...RAISE, target: { kind: 'terminal', key: 'dev' } });
-
-    const result = await deliveredDuring(built, { tool: 'input.wait', id: raised.id, timeoutMs: 0 });
-
-    should(JSON.stringify(result)).not.containEql(CANARY);
-  });
 
   it('should show the foreground command while nothing is quarantined, and name no pane it cannot bind', async () => {
     const built = await realWorld();
@@ -808,7 +755,7 @@ describe('AgentToolService — browser.request_input', () => {
   });
 });
 
-describe('AgentToolService — a page hold that follows its document (secrev-1333 M1)', () => {
+describe('AgentToolService — a picture of a page that shows a typed value (value-level, !A607)', () => {
   const UNTIL = Date.parse('2026-10-31T12:02:00.000Z');
   const shoot = async (world: Awaited<ReturnType<typeof pageWorld>>) =>
     await world.service.call(agent, { tool: 'browser.screenshot', name: 'app' }).then(
@@ -822,12 +769,10 @@ describe('AgentToolService — a page hold that follows its document (secrev-133
   };
 
   it('should keep pictures out while the page shows the value, and let them back once it moved on', async () => {
-    // Arrange — an unsubmitted value: every hold on the page follows its document.
     const input = new FakeInput();
-    input.held = { until: UNTIL, documents: ['loader-1'], documentsOnly: true };
+    input.shows = { until: UNTIL, documents: ['loader-1'] };
     const world = await pageWorld(input);
 
-    // Act / Assert — still on the value's document (also when the page comes back to it), then moved on.
     world.browser.document = 'loader-1';
     input.document = 'loader-1';
     should(await shoot(world)).equal('conflict');
@@ -839,34 +784,44 @@ describe('AgentToolService — a page hold that follows its document (secrev-133
     should(await shoot(world)).equal('conflict');
   });
 
-  it('should tell the ferret pictures come back with the page moving on only for a hold that follows its document', async () => {
-    const said = async (documentsOnly: boolean) => {
-      const input = new FakeInput();
-      input.held = { until: UNTIL, documents: ['loader-1'], ...(documentsOnly ? { documentsOnly } : {}) };
-      const world = await pageWorld(input);
-      world.browser.document = 'loader-1';
-      input.document = 'loader-1';
-      return await world.service.call(agent, { tool: 'browser.screenshot', name: 'app' }).then(
+  it('should keep pictures out when the page cannot say which document it shows', async () => {
+    const input = new FakeInput();
+    input.shows = { until: UNTIL, documents: ['loader-1'] };
+    const world = await pageWorld(input);
+    world.browser.document = undefined;
+    input.document = undefined;
+
+    should(await shoot(world)).equal('conflict');
+  });
+
+  it('should tell an agent to read the text, and a person where to look', async () => {
+    const input = new FakeInput();
+    input.shows = { until: UNTIL, documents: ['loader-1'] };
+    const world = await pageWorld(input);
+    world.browser.document = 'loader-1';
+    input.document = 'loader-1';
+
+    const said = async (who: typeof agent | typeof person): Promise<string> =>
+      await world.service.call(who, { tool: 'browser.screenshot', name: 'app' }).then(
         () => '',
         (failure: unknown) => (failure as AgentToolError).message,
       );
-    };
 
-    should(await said(true)).containEql('text reads and pictures come back once the page has moved on');
-    should(await said(true)).not.containEql('pictures after that time');
-    should(await said(false)).containEql('pictures after that time');
+    should(await said(agent)).containEql('Read it as text');
+    should(await said(person)).containEql('Look at it in the browser view');
   });
 
-  it('should keep pictures out for the whole window for any other hold, or a page whose document cannot be told', async () => {
+  it('should never withhold a read, an act or a script: only pictures', async () => {
     const input = new FakeInput();
-    input.held = { until: UNTIL, documents: ['loader-1'] };
+    input.shows = { until: UNTIL, documents: ['loader-1'] };
     const world = await pageWorld(input);
-    world.browser.document = 'loader-2';
-    input.document = 'loader-2';
-    should(await shoot(world)).equal('conflict');
-    input.held = { until: UNTIL, documents: ['loader-1'], documentsOnly: true };
-    world.browser.document = undefined;
-    input.document = undefined;
-    should(await shoot(world)).equal('conflict');
+    world.browser.document = 'loader-1';
+    input.document = 'loader-1';
+
+    const read = await world.service.call(agent, { tool: 'browser.read', name: 'app' });
+    const script = await world.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' });
+
+    should(read).not.be.undefined();
+    should(script).not.be.undefined();
   });
 });

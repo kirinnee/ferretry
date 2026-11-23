@@ -22,13 +22,13 @@ const VALUE = 'hunter2-UNIQUE';
 
 async function served(crash = false) {
   let crashing = false;
-  const { service, writes } = inputRequestService({ crash: () => crash && crashing });
+  const { service, writes, quarantine } = inputRequestService({ crash: () => crash && crashing });
   await service.raise(SESSION, RAISE);
   const [open] = await service.list({ kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' });
   if (open === undefined) throw new Error('no request');
   crashing = true;
   const dispatch = new ApiDispatcher(new ApiRouter(inputRequestRoutes(service)), CREDENTIALS, GRANTED);
-  return { dispatch, writes, requestId: open.id, digest: open.observedDigest ?? '' };
+  return { dispatch, writes, quarantine, requestId: open.id, digest: open.observedDigest ?? '' };
 }
 
 const json = (body: unknown) => JSON.stringify(body);
@@ -209,16 +209,28 @@ describe('the quarantine routes', () => {
   const end = (key: string, headers: Readonly<Record<string, string>> = human) =>
     post(`/v1/sessions/${SESSION}/input-quarantines/${key}/end`, {}, headers);
 
-  it('should list a quarantine once a secret was typed, and end it for the owner', async () => {
+  it('should list no quarantine after a secret was typed, and have nothing to end for the owner', async () => {
     const { dispatch, requestId, digest } = await served();
     await dispatch.dispatch(post(path(requestId, 'deliver'), deliverBody(digest)));
+
+    const held = await dispatch.dispatch(list());
+    const ended = await dispatch.dispatch(end('dev'));
+
+    should(held.status).equal(200);
+    should(jsonBody(held).quarantines).eql([]);
+    should(ended.status).equal(404);
+  });
+
+  it('should list the guard a restart brought back, and end it for the owner', async () => {
+    const { dispatch, quarantine } = await served();
+    // What restore() puts back for a terminal a value may still be on (the guard window of a restart).
+    quarantine.settle(quarantine.begin(SESSION, ['dev'], 'restart-guard'));
 
     const held = await dispatch.dispatch(list());
     const ended = await dispatch.dispatch(end('dev'));
     const after = await dispatch.dispatch(list());
     const again = await dispatch.dispatch(end('dev'));
 
-    should(held.status).equal(200);
     should((jsonBody(held).quarantines as { key: string }[]).map(entry => entry.key)).eql(['dev']);
     should(ended.status).equal(200);
     should(jsonBody(after).quarantines).eql([]);

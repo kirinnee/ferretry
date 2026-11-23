@@ -1,4 +1,11 @@
-import type { AgendaId, InputEvent, InputRaise, InputShot, InputTargetFacts } from '@ferretry/protocol';
+import type {
+  AgendaId,
+  InputEvent,
+  InputQuarantineEvent,
+  InputRaise,
+  InputShot,
+  InputTargetFacts,
+} from '@ferretry/protocol';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import type { InputAgendaPort, InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
@@ -56,11 +63,24 @@ export function inputRequestService(
     readonly arms?: boolean;
     /** Called each time the journal is written (a request or a hold), before it answers. */
     readonly journalled?: (event: unknown) => void;
+    /** Awaited inside each journal write, before it is stored: a slow journal. */
+    readonly journalGate?: (event: InputEvent) => Promise<void>;
+    /** What the journal replays on start. */
+    readonly history?: readonly InputEvent[];
+    /** Called for every audit record; may be slow. */
+    readonly audited?: (entry: { readonly event: string }) => Promise<void> | void;
+    /** What the journal's quarantine log holds when the daemon starts (a previous run's). */
+    readonly quarantineHistory?: readonly InputQuarantineEvent[];
+    /** Called for every notice told to the agent. */
+    readonly told?: (message: string) => Promise<void> | void;
   } = {},
 ) {
   const live = options.session ?? SESSION;
   const writes: string[] = [];
+  /** The outcomes and requests journalled; the `settled` marks of finished follow-up work are in `settled`. */
   const events: InputEvent[] = [];
+  const settled: InputEvent[] = [];
+  const holds: InputQuarantineEvent[] = [];
   let card = 1;
   let id = 1;
   const clock = { now: () => Date.parse('2026-10-30T12:00:00.000Z') };
@@ -94,17 +114,25 @@ export function inputRequestService(
       close: async () => undefined,
       promptOf: async () => 'sudo wants your password',
     },
-    notifier: { tell: async () => undefined },
+    notifier: { tell: async (_session, _card, message) => void (await options.told?.(message)) },
     journal: {
       publish: async (_session, event) => {
-        events.push(event);
+        await options.journalGate?.(event);
+        (event.type === 'surface.input_settled' ? settled : events).push(event);
         options.journalled?.(event);
       },
-      history: async () => [],
-      quarantine: async (_session, event) => void options.journalled?.(event),
-      quarantines: async () => [],
+      history: async () => options.history ?? [],
+      quarantine: async (_session, event) => {
+        holds.push(event);
+        options.journalled?.(event);
+      },
+      quarantines: async () => [...(options.quarantineHistory ?? []), ...holds],
     },
-    audit: { record: async () => undefined, saved: async () => undefined, stored: async () => undefined },
+    audit: {
+      record: async entry => void (await options.audited?.(entry)),
+      saved: async () => undefined,
+      stored: async () => undefined,
+    },
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },
@@ -134,5 +162,5 @@ export function inputRequestService(
             },
           }),
   });
-  return { service, writes, events, quarantine };
+  return { service, writes, events, settled, holds, quarantine };
 }

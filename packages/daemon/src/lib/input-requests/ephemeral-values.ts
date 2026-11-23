@@ -148,8 +148,25 @@ export class EphemeralValues {
   }
 }
 
+/** Spaces, dashes and dots a page may put between the digits of a number it reformats (a card number). */
+const DIGIT_GAP = '[\\s\\u00a0.\\u2010-\\u2015-]*';
+
+/**
+ * The pattern that finds a digit-heavy value however the page spaces it ("4111 1111 1111 1111", "4111-1111-..."),
+ * or `undefined` for a value that is not a number: a plain exact match then.
+ */
+function spacedDigits(value: string): RegExp | undefined {
+  const digits = value.replace(/\D/gu, '');
+  if (digits.length < 8 || !/^[\d\s.\u2010-\u2015-]+$/u.test(value)) return undefined;
+  return new RegExp([...digits].join(DIGIT_GAP), 'gu');
+}
+
 function mask(entries: readonly Held[], text: string): string {
   return [...entries]
     .sort((a, b) => b.value.length - a.value.length)
-    .reduce((result, entry) => result.replaceAll(entry.value, entry.marker ?? `[redacted:input ${entry.label}]`), text);
+    .reduce((result, entry) => {
+      const marker = entry.marker ?? `[redacted:input ${entry.label}]`;
+      const spaced = spacedDigits(entry.value);
+      return spaced === undefined ? result.replaceAll(entry.value, marker) : result.replace(spaced, () => marker);
+    }, text);
 }

@@ -432,13 +432,13 @@ describe('the next time: the card offers the saved login, and the owner taps Use
     should(await h.everything()).not.containEql(PASSWORD);
   });
 
-  it('should quarantine the terminal after a saved password exactly as after a typed one', async () => {
+  it('should hold nothing after a saved password: the terminal is readable at once, as after a typed one', async () => {
     const h = harness();
     await savedOnce(h);
     const { request } = await raised(h);
     await h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'SUDO_KIRIN_BOX'), HOST);
 
-    should(h.service.quarantinedUntil(SESSION, ['dev'])).be.a.Number();
+    should(h.service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
   });
 
   it('should not offer a login for another target as the one-tap choice, but keep it selectable by hand', async () => {

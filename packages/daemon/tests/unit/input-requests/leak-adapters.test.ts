@@ -401,7 +401,7 @@ describe('the value is unfindable outside the program it was typed into, over th
     });
   }
 
-  it('should keep a program name or argv carrying the value out of every view and record', async () => {
+  it('should show a program name or argv carrying the value only masked, in every view and record', async () => {
     const scenario = SCENARIOS[0] as Scenario;
     const world = composed(scenario);
     await typedInto(world);
@@ -409,7 +409,7 @@ describe('the value is unfindable outside the program it was typed into, over th
     await world.service.raise(SESSION, RAISE);
     const everything = [JSON.stringify(await world.service.list(HOST)), ...world.emitted].join('\n');
 
-    should(everything).not.containEql('sudo --password');
+    should(everything).containEql('sudo --password=[redacted');
     for (const piece of piecesOf(scenario.value)) should(everything).not.containEql(piece);
   });
 
@@ -483,31 +483,9 @@ describe('the value is unfindable outside the program it was typed into, over th
 });
 
 const FULL_REDRAW = `${ESC}[3J${ESC}[2J${ESC}[H`;
-const QUARANTINE_NOTICE = 'Kept from view';
 
-describe('the quarantine is the boundary, over the real adapters (masking is only behind it)', () => {
+describe('the stream is masked, never withheld, over the real adapters', () => {
   const scenario = SCENARIOS[0] as Scenario;
-  const gateOf = (world: ReturnType<typeof composed>) => (session: string, terminal: string) =>
-    world.service.quarantinedUntil(session, [terminal, RECORD.title]);
-
-  it('should show the viewer a notice and not one byte of the pane while the quarantine runs, full and delta', async () => {
-    const world = composed(scenario);
-    await typedInto(world);
-    const view = new RedactingTerminalStreamService(world.underlying, world.redactor, gateOf(world), () => 1);
-    const echoed = world.pane.physical;
-    world.pane.physical = ['[sudo] password for kirin:'];
-    const result = await streamed(view, {
-      polls: 3,
-      resize: { cols: scenario.cols, rows: 5 },
-      between: () => {
-        world.pane.physical = echoed;
-      },
-    });
-
-    should(result.frames).containEql(QUARANTINE_NOTICE);
-    should(result.frames).not.containEql('sudo');
-    for (const piece of piecesOf(scenario.value)) should(result.frames).not.containEql(piece);
-  });
 
   it('should send a real delta frame once the viewer has said how big it is, and keep the value out of it', async () => {
     const world = composed(scenario);
@@ -530,33 +508,6 @@ describe('the quarantine is the boundary, over the real adapters (masking is onl
     should(result.sent.some(frame => frame !== '' && !frame.startsWith(FULL_REDRAW))).be.true();
     should(result.frames).containEql('*');
     for (const piece of piecesOf(scenario.value)) should(result.frames).not.containEql(piece);
-  });
-
-  it('should show the value to a viewer that chose to reveal it, and only to that viewer', async () => {
-    const world = composed(scenario);
-    await typedInto(world);
-    const revealed = await streamed(new RedactingTerminalStreamService(world.underlying, world.redactor));
-    const hidden = await streamed(
-      new RedactingTerminalStreamService(world.underlying, world.redactor, gateOf(world), () => 1),
-    );
-
-    should(revealed.frames).not.containEql(QUARANTINE_NOTICE);
-    should(hidden.frames).containEql(QUARANTINE_NOTICE);
-  });
-
-  it('should keep the quarantine across a restart after a SUCCESSFUL write, and let it end on time', async () => {
-    const log: InputQuarantineEvent[] = [];
-    const world = composed(scenario, { quarantineLog: log });
-    await typedInto(world);
-    const restarted = composed(scenario, { quarantineLog: log, history: world.events });
-    await restarted.service.restore();
-
-    should(world.pane.typed.length).equal(1);
-    should(log.some(event => event.type === 'surface.input_quarantined')).be.true();
-    should(restarted.service.quarantinedUntil(SESSION, ['dev'])).be.a.Number();
-    should(JSON.stringify(log)).not.containEql(scenario.value);
-    restarted.advance(121 * 1000);
-    should(restarted.service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
   });
 
   it('should mask a vault secret that overlaps the typed value from the operator’s screen read, as one run', async () => {
