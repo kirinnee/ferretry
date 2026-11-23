@@ -381,9 +381,7 @@ describe('the secure tools and the switches', () => {
 
     const result = await world.service.call(agent, { tool: 'input.wait', id: 'A7' });
 
-    should(result.summary).equal(
-      '!A7: the secure copy was pasted and Enter pressed. Read the terminal once its quarantine allows.',
-    );
+    should(result.summary).equal('!A7: the secure copy was pasted and Enter pressed. Read the terminal.');
   });
 });
 

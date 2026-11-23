@@ -122,6 +122,16 @@ export interface AgentInputPort {
         readonly documentsOnly?: true;
       }
     | undefined;
+  /**
+   * A value the owner just typed that the page SHOWS in the clear (a card number, a private value; never a password
+   * input, which draws dots): the documents it is on screen in, until when. A picture of such a document would show it, and no
+   * mask can be drawn on pixels, so it is withheld while the page shows one; text reads and every act are not touched
+   * (the text is masked). Nothing when no such value is on the page.
+   */
+  pageShows?(
+    sessionId: string,
+    names: readonly (string | undefined)[],
+  ): { readonly until: number; readonly documents: readonly string[] } | undefined;
   /** The document a session's page shows now, or nothing when it cannot be told. */
   pageDocument?(sessionId: string, key: string): Promise<string | undefined>;
 }

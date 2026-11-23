@@ -262,7 +262,8 @@ describe('pasting a secure copy as an input request', () => {
     const after = await w.service.agentView(SESSION, view.id, 0);
 
     should(result).match({ state: 'delivered', submitted: true });
-    should(w.held.quarantines).equal(0);
+    should(w.service.quarantinedUntil(SESSION, ['dev'])).be.undefined(); // only a restart guard is journalled, never a live hold
+    should(w.held.quarantines).equal(1);
     should(w.writes).eql([TOKEN]);
     should(after).match({ state: 'delivered', source: 'sealed' });
     should(w.copies.list(SESSION)[0]?.uses).equal(1);

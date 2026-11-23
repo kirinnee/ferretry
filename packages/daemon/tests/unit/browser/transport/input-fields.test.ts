@@ -52,6 +52,8 @@ interface FakeElement {
   /** What Playwright measures for the element it holds, when it is not the box DevTools measures. */
   claimedBox?: { x: number; y: number; width: number; height: number } | null;
   visible: boolean;
+  /** The form this element is in, as the trusted world reads it; none when unset. */
+  form?: string;
 }
 
 class FakeFrame implements InputFrame {
@@ -210,6 +212,11 @@ class FakeSession implements InputCdpSession {
       case 'Runtime.callFunctionOn': {
         const objectId = String(params.objectId);
         const node = Number(objectId.split('-').at(-1));
+        // Which form the element is in, read from the trusted world only.
+        if (String(params.functionDeclaration).includes('document.forms')) {
+          if (!this.isolatedObjects.has(objectId)) this.pageWorld.push('Runtime.callFunctionOn');
+          return { result: { value: this.world.elements.find(each => each.backendNodeId === node)?.form ?? 'none' } };
+        }
         // The grant fill's pagehide clear, armed from the trusted world only.
         if (String(params.functionDeclaration).includes('pagehide')) {
           if (!this.isolatedObjects.has(objectId)) this.pageWorld.push('Runtime.callFunctionOn');
@@ -1593,6 +1600,44 @@ describe('refindInputFields (#B100)', () => {
       'target_changed',
     );
     should(insertions(world)).equal(0);
+  });
+
+  it('should record where a field sits (its frame address and form), from the trusted world only', async () => {
+    const world = new FakeWorld();
+    world.element('#otp', 21, ['type', 'text', 'name', 'otp']).form = 'id:login|name:|action:/session|n:0';
+
+    const seen = await observeInputFields(world.subject, [
+      { id: 'code', target: { kind: 'selector', selector: '#otp' } },
+    ]);
+
+    should(seen.ok && seen.facts.fields[0]?.place).equal(`${PAGE_URL}#id:login|name:|action:/session|n:0`);
+    should(world.session('page-target').pageWorld).eql([]);
+  });
+
+  it('should not take a look-alike in another form of the page for the field the card showed', async () => {
+    const world = new FakeWorld();
+    const old = world.element('#otp', 21, ['type', 'text', 'name', 'otp']);
+    old.form = 'id:login|n:0';
+    const selector = { id: 'code', target: { kind: 'selector' as const, selector: '#otp' } };
+    const first = await observeInputFields(world.subject, [selector]);
+    if (!first.ok) throw new Error('not observed');
+    world.rerender(old, 77, { form: 'id:signup|n:1' });
+
+    should(await refindInputFields(world.subject, first.facts, [selector])).eql({ ok: false, missing: 'code' });
+  });
+
+  it('should find the re-rendered field again when it is in the same form', async () => {
+    const world = new FakeWorld();
+    const old = world.element('#otp', 21, ['type', 'text', 'name', 'otp']);
+    old.form = 'id:login|n:0';
+    const selector = { id: 'code', target: { kind: 'selector' as const, selector: '#otp' } };
+    const first = await observeInputFields(world.subject, [selector]);
+    if (!first.ok) throw new Error('not observed');
+    world.rerender(old, 77);
+
+    const again = await refindInputFields(world.subject, first.facts, [selector]);
+
+    should(again.ok && again.facts.fields[0]?.backendNodeId).equal(77);
   });
 
   it("should use the agent's pointer when it still names exactly that field", async () => {

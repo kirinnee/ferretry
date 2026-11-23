@@ -722,7 +722,7 @@ describe('use it now: the code of a key just saved from this card', () => {
 });
 
 describe('a page that moves between the card and the Send', () => {
-  it('should type the code at once when the page loaded a new document of the same site: no second answer', async () => {
+  it('should NOT type a code into a new document of the same site: the owner sees the card again', async () => {
     // Arrange
     const h = harness();
     await github(h);
@@ -731,16 +731,16 @@ describe('a page that moves between the card and the Send', () => {
     h.setFacts({ ...page(), navigationId: 'loader-2' });
 
     // Act
-    const done = await h.service.deliver(
-      SESSION,
-      request.id,
-      useCode(request.observedDigest as string, 'GITHUB'),
-      HOST,
-    );
+    const error = await h.service
+      .deliver(SESSION, request.id, useCode(request.observedDigest as string, 'GITHUB'), HOST)
+      .then(
+        () => new Error('it must refuse'),
+        (caught: unknown) => caught as Error,
+      );
 
     // Assert
-    should(done.state).equal('delivered');
-    should(h.writes).have.length(1);
+    should(error.message).containEql('redrew the card');
+    should(h.writes).have.length(0);
   });
 });
 

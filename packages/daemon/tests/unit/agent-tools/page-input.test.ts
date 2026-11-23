@@ -110,6 +110,7 @@ function world() {
       exclusive: async (sessionId, work) => await service.exclusive(sessionId, work),
       pageHeld: (sessionId, names) => service.pageHeld(sessionId, names),
       pageDocument: async (sessionId, key) => await service.pageDocument(sessionId, key),
+      pageShows: (sessionId, names) => service.pageShows(sessionId, names),
     },
     redactor: new EphemeralAwareRedactor(NO_REDACTION, values),
   });
@@ -315,6 +316,88 @@ describe('a page the owner’s password was just typed into', () => {
     should(service.quarantines(HOST, SESSION)).eql([]);
     should(service.pageHeld(SESSION, ['app'])).be.undefined();
     should(service.quarantinedUntil(SESSION, ['app'])).be.undefined();
+  });
+});
+
+describe('a value the page shows in the clear (value-level protection, never a lock)', () => {
+  const CARD = '4242424242424242';
+  async function typedInClear() {
+    const built = world();
+    await built.tools.service.call(agent, { tool: 'browser.open', name: 'app' });
+    // A secret into an input that draws what it holds (the page's email box stands in for a card number).
+    await built.tools.service.call(agent, {
+      tool: 'browser.request_input',
+      name: 'app',
+      prompt: 'the card number',
+      fields: [{ id: 'email', label: 'Card number', sensitivity: 'secret', selector: '#card' }],
+    });
+    const [request] = await built.service.list(HOST);
+    if (request === undefined) throw new Error('no request');
+    await built.service.deliver(
+      SESSION,
+      request.id,
+      {
+        deliveryId: crypto.randomUUID(),
+        observedDigest: request.observedDigest ?? '',
+        submit: false,
+        padded: padInputValue(CARD),
+      },
+      HOST,
+    );
+    return built;
+  }
+
+  it('should withhold a PICTURE of the document that shows the value, and nothing else', async () => {
+    const { tools } = await typedInClear();
+
+    const shot = await refusal(tools.service.call(agent, { tool: 'browser.screenshot', name: 'app' }));
+    const read = await tools.service.call(agent, { tool: 'browser.read', name: 'app' });
+    const eval1 = await tools.service.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' });
+
+    should(shot.message).containEql('is not pictured');
+    should(JSON.stringify(read)).not.containEql(CARD);
+    should(eval1).not.be.undefined();
+  });
+
+  it('should picture the page again once it shows another document', async () => {
+    const { tools, browser } = await typedInClear();
+    browser.document = 'loader-2';
+    tools.browser.document = 'loader-2';
+
+    const shot = await tools.service.call(agent, { tool: 'browser.screenshot', name: 'app' });
+
+    should(shot.screenshotBase64).be.a.String();
+  });
+
+  it('should picture the page again once the value’s window has ended', async () => {
+    const { tools, clock } = await typedInClear();
+    clock.ms += 601_000;
+
+    const shot = await tools.service.call(agent, { tool: 'browser.screenshot', name: 'app' });
+
+    should(shot.screenshotBase64).be.a.String();
+  });
+
+  it('should never withhold a picture of a password input, which draws dots', async () => {
+    const built = await delivered();
+    await built.service.deliver(
+      SESSION,
+      built.request.id,
+      {
+        deliveryId: crypto.randomUUID(),
+        observedDigest: built.request.observedDigest ?? '',
+        submit: true,
+        fields: [
+          { field: 'email', padded: padInputValue('kirin@example.test') },
+          { field: 'password', padded: padInputValue(PASSWORD) },
+        ],
+      },
+      HOST,
+    );
+
+    const shot = await built.tools.service.call(agent, { tool: 'browser.screenshot', name: 'app' });
+
+    should(shot.screenshotBase64).be.a.String();
   });
 });
 

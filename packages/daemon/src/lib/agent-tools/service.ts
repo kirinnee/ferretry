@@ -1452,6 +1452,7 @@ export class AgentToolService {
   ): Promise<void> {
     if (!PAGE_PICTURES.has(tool) && !PAGE_TEXT.has(tool)) return;
     if (copies && PAGE_PICTURES.has(tool)) await this.assertNotCopiedFrom(caller, surface, document);
+    if (PAGE_PICTURES.has(tool)) await this.assertNoTypedValueShown(caller, surface, document);
     const input = this.ports.input;
     const held = input?.pageHeld?.(caller.sessionId, [surface.name, surface.id]);
     if (input === undefined || held === undefined) return;
@@ -1472,6 +1473,32 @@ export class AgentToolService {
       caller.kind === 'agent'
         ? `${reference} is quarantined until ${when}: the owner's secret was just typed there, so you cannot read or picture it for a short while. You can still click and navigate; ${comesBack}`
         : `${reference} is quarantined until ${when}: a secret was just typed there. Look at it in the browser view, or try again after that time.`,
+    );
+  }
+
+  /**
+   * VALUE-LEVEL protection for pictures (owner decision, !A607: no lock on the page). The page is read, clicked and
+   * navigated at once; only a PICTURE of a document that shows a value the owner just typed in the clear is withheld,
+   * because no mask can be drawn on pixels. It comes back when the page shows another document or the value's window ends.
+   */
+  private async assertNoTypedValueShown(
+    caller: AgentToolCaller,
+    surface: ResolvedSurface,
+    document?: () => Promise<string | undefined>,
+  ): Promise<void> {
+    const input = this.ports.input;
+    const shown = input?.pageShows?.(caller.sessionId, [surface.name, surface.id]);
+    if (input === undefined || shown === undefined) return;
+    const now = await (
+      document ?? (async () => await input.pageDocument?.(caller.sessionId, surface.name ?? surface.id))
+    )();
+    if (now !== undefined && !shown.documents.includes(now)) return;
+    const reference = surfaceReference('browser', surface.name ?? surface.id);
+    throw new AgentToolError(
+      'conflict',
+      caller.kind === 'agent'
+        ? `${reference} shows a value the owner just typed, so it is not pictured (a picture cannot be masked). Read it as text (the value is masked) and carry on: you can click and navigate as usual, and pictures come back once the page has moved on.`
+        : `${reference} shows a value just typed there, so it is not pictured. Look at it in the browser view.`,
     );
   }
 
@@ -2334,7 +2361,7 @@ function inputSummary(view: InputAgentView): string {
       return `${card}: the owner's value is being typed now. Wait again with input.wait.`;
     case 'delivered':
       if (view.source === 'sealed')
-        return `${card}: the secure copy was pasted${view.submitted === true ? ' and Enter pressed' : ''}. Read the terminal once its quarantine allows.`;
+        return `${card}: the secure copy was pasted${view.submitted === true ? ' and Enter pressed' : ''}. Read the terminal.`;
       return `${card}: the owner typed the value${view.submitted === true ? ' and pressed Enter' : ''}. Read the terminal to see what happened.`;
     case 'refused':
       return `${card} was refused${view.reason === undefined ? '' : ` (${view.reason})`}: the value was not typed. Look at the terminal, then raise a new request if it is still needed.`;

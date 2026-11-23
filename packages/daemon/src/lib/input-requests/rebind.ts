@@ -51,6 +51,23 @@ export function bindingOf(facts: InputTargetFacts): string {
   return digestValue({ kind: facts.kind, name: facts.name });
 }
 
+/**
+ * Whether a page sighting is the SAME DOCUMENT LINEAGE as the one the owner was shown: the same document (a navigation
+ * makes another, however alike its fields look), and every field in the same frame and the same form. Only then may a
+ * field the page re-rendered be typed into without asking the owner again; anything else is redrawn for the owner.
+ */
+export function sameLineage(shown: InputTargetFacts | undefined, now: InputTargetFacts): boolean {
+  if (shown?.kind !== 'browser' || now.kind !== 'browser') return false;
+  return (
+    shown.navigationId === now.navigationId &&
+    shown.fields.length === now.fields.length &&
+    shown.fields.every((field, index) => {
+      const next = now.fields[index];
+      return next !== undefined && next.frameId === field.frameId && next.place === field.place;
+    })
+  );
+}
+
 /** What was seen now may take the card's place: the same binding, and on a page every field visible to the owner. */
 export function mayRebind(binding: string, facts: InputTargetFacts): boolean {
   if (bindingOf(facts) !== binding) return false;

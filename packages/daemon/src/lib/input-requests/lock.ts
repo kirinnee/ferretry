@@ -211,16 +211,11 @@ export function passwordTarget(
   if (facts.kind !== 'browser') return false;
   const found = facts.fields.find(field => field.fieldId === fieldId);
   if (found === undefined) return false;
-  // A card number, expiry or security code is as secret as a password; a one-time code whose name says "passcode" or "pin"
-  // is not one (field-kinds.ts). The page's own words only, and a password-typed or password-named field stays a password.
+  // A card number, expiry or security code is as secret as a password; a field the PAGE marks as a one-time code
+  // (field-kinds.ts) is not one. A password-typed or password-named field stays a password: password signals win.
   const kind = pageFieldKind(found.field);
   if (kind === 'card') return true;
-  if (
-    kind === 'code' &&
-    found.field.type?.toLowerCase() !== 'password' &&
-    !/password/iu.test(found.field.autocomplete ?? '')
-  )
-    return false;
+  if (kind === 'code') return false;
   return (
     found.field.type?.toLowerCase() === 'password' ||
     [found.field.name, found.field.id, found.field.autocomplete].some(

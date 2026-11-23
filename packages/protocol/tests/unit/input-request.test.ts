@@ -364,7 +364,19 @@ describe('the events and the audit detail', () => {
       'surface.input_refused',
       'surface.input_expired',
       'surface.input_cancelled',
+      'surface.input_settled',
     ]);
+  });
+
+  it('should carry the follow-up work of an ended request, and nothing else, in its outcome event', () => {
+    const ended = { ...EVENT, type: 'surface.input_delivered', state: 'delivered' };
+    should(
+      InputEventSchema.safeParse({ ...ended, after: { closeCard: true, tellAgent: false, uncertain: true } }).success,
+    ).be.true();
+    should(InputEventSchema.safeParse({ ...ended, after: { closeCard: true } }).success).be.false();
+    should(
+      InputEventSchema.safeParse({ ...ended, after: { closeCard: true, tellAgent: true, value: 'x' } }).success,
+    ).be.false();
   });
 
   it('should carry names and flags in an audit detail, nothing else', () => {

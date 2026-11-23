@@ -445,6 +445,12 @@ export const InputBrowserFieldFactsSchema = z.strictObject({
   /** The frame the element is in, as the browser names it: the write goes there and nowhere else. */
   frameId: boundedLine(128),
   backendNodeId: PositiveIntegerSchema,
+  /**
+   * WHERE in its document the element sits, read by the browser (never the page's word): its frame's address (without a
+   * query or fragment) and its form, by id, name, action path and place among the document's forms. A field found again
+   * after a re-render is the same field only when this is the same.
+   */
+  place: boundedLine(512).optional(),
   field: BrowserFieldSchema,
   box: z.strictObject({
     x: z.number().finite(),
@@ -927,6 +933,8 @@ export const INPUT_JOURNAL_EVENT_TYPES = {
   refused: 'surface.input_refused',
   expired: 'surface.input_expired',
   cancelled: 'surface.input_cancelled',
+  /** Written once an ended request's audit, card and agent notice are done: an ended request without it is replayed on start. */
+  settled: 'surface.input_settled',
 } as const;
 export const InputJournalEventTypeSchema = z.enum([
   INPUT_JOURNAL_EVENT_TYPES.requested,
@@ -935,6 +943,7 @@ export const InputJournalEventTypeSchema = z.enum([
   INPUT_JOURNAL_EVENT_TYPES.refused,
   INPUT_JOURNAL_EVENT_TYPES.expired,
   INPUT_JOURNAL_EVENT_TYPES.cancelled,
+  INPUT_JOURNAL_EVENT_TYPES.settled,
 ]);
 export type InputJournalEventType = z.infer<typeof InputJournalEventTypeSchema>;
 
@@ -960,6 +969,10 @@ export const InputEventSchema = z.strictObject({
   submitted: z.boolean().optional(),
   source: z.enum(['typed', 'saved', 'sealed']).optional(),
   reason: InputReasonSchema.optional(),
+  /** An ended request's follow-up work (card, agent notice), kept so a restart that lost it can do it again. */
+  after: z
+    .strictObject({ closeCard: z.boolean(), tellAgent: z.boolean(), uncertain: z.boolean().optional() })
+    .optional(),
   expiresAt: InstantSchema.optional(),
   at: InstantSchema,
 });

@@ -20,6 +20,7 @@ import type {
   InputLoginPort,
   InputTargetField,
   ObserveResult,
+  TypeResult,
 } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
@@ -99,6 +100,8 @@ function build(
   const refinds: InputTargetFacts[] = [];
   const shots: InputTargetFacts[] = [];
   const typedInto: InputTargetFacts[] = [];
+  /** What the next writes answer before they type (`target_changed`: the page replaced the field again, nothing typed). */
+  const answers: (TypeResult | (() => TypeResult))[] = [];
   let card = 1;
   let id = 1;
   const clock = { now: () => Date.parse('2026-10-31T12:00:00.000Z') };
@@ -141,8 +144,11 @@ function build(
       submit: boolean,
       expected: InputTargetFacts,
     ) => {
-      writes.push({ target, values: typed, submit });
       typedInto.push(expected);
+      const answer = answers.shift();
+      const next = typeof answer === 'function' ? answer() : answer;
+      if (next !== undefined && next !== 'typed') return next;
+      writes.push({ target, values: typed, submit });
       return 'typed' as const;
     },
   };
@@ -204,6 +210,7 @@ function build(
     setRefound: (next: ObserveResult | undefined) => {
       refound = next;
     },
+    answerNext: (...next: (TypeResult | (() => TypeResult))[]) => void answers.push(...next),
   };
 }
 
@@ -883,14 +890,76 @@ describe('when the page changes under the card (#B100)', () => {
     should(told.at(-1)).containEql('was answered and typed');
   });
 
-  it('should type at once after the page loaded a new document of the same field', async () => {
+  it('should NOT type into a new document that merely looks alike: the owner is shown the card again', async () => {
     const { service, request, writes, setFacts } = await raisedLogin();
     setFacts({ ...RERENDERED, navigationId: 'loader-2' });
+
+    const error = await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST));
+
+    should(error.message).containEql('redrew the card');
+    should(writes).eql([]);
+  });
+
+  it('should NOT type into a look-alike in another frame or another form of the same document', async () => {
+    const framed = await raisedLogin();
+    framed.setFacts({
+      ...RERENDERED,
+      fields: [pageField('email'), pageField('password', { backendNodeId: 99, frameId: 'other-frame' })],
+    });
+    await refused(framed.service.deliver(SESSION, framed.request.id, both(framed.request.observedDigest ?? ''), HOST));
+    should(framed.writes).eql([]);
+
+    const formed = await raisedLogin({
+      facts: {
+        ...PAGE,
+        fields: [pageField('email', { place: 'main#id:login' }), pageField('password', { place: 'main#id:login' })],
+      },
+    });
+    formed.setFacts({
+      ...RERENDERED,
+      fields: [
+        pageField('email', { place: 'main#id:login' }),
+        pageField('password', { backendNodeId: 99, place: 'main#id:signup' }),
+      ],
+    });
+    await refused(formed.service.deliver(SESSION, formed.request.id, both(formed.request.observedDigest ?? ''), HOST));
+    should(formed.writes).eql([]);
+  });
+
+  it('should type into the new node when the page replaced the field a second time just before the write', async () => {
+    const { service, request, writes, setFacts, answerNext, typedInto } = await raisedLogin();
+    setFacts(RERENDERED);
+    // The write finds the node replaced AGAIN (nothing typed); the page now shows a third node, in the same document.
+    answerNext(() => {
+      setFacts({
+        ...PAGE,
+        fields: [
+          pageField('email'),
+          pageField('password', { backendNodeId: 123, box: { x: 10, y: 70, w: 300, h: 40 } }),
+        ],
+      });
+      return 'target_changed';
+    });
 
     const done = await service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST);
 
     should(done.state).equal('delivered');
     should(writes.length).equal(1);
+    should(typedInto.map(seen => (seen.kind === 'browser' ? seen.fields[1]?.backendNodeId : 0))).eql([99, 123]);
+  });
+
+  it('should still ask the owner when the second replacement is another document, and type nothing', async () => {
+    const { service, request, writes, setFacts, answerNext } = await raisedLogin();
+    setFacts(RERENDERED);
+    answerNext(() => {
+      setFacts({ ...RERENDERED, navigationId: 'loader-9' });
+      return 'target_changed';
+    });
+
+    await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST));
+
+    should(writes).eql([]);
+    should(request.state).equal('pending');
   });
 
   it('should find a field whose ref went stale by looking for it again, and type into it at once', async () => {

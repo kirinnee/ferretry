@@ -129,6 +129,8 @@ interface Options {
   advertised?: boolean;
   written?: TypeResult;
   clear?: ClearOutcome;
+  /** The document the page shows now, as the target reports it: a different one from the typed one has moved on. */
+  document?: () => string | undefined;
   /** The session's stamped project. */
   project?: string;
   /** Runs as each journal event is published: `delivering` is the last step before the write. */
@@ -162,6 +164,7 @@ async function harness(options: Options = {}) {
   const linesStopped: string[] = [];
   const audits: AuditEntry[] = [];
   const timers: { ms: number; fire: () => void }[] = [];
+  const clears: string[] = [];
   let facts: InputTargetFacts = loginPage();
   let acted: number | undefined;
   let card = 1;
@@ -264,6 +267,7 @@ async function harness(options: Options = {}) {
     audits,
     ruleAudits,
     timers,
+    clears,
     clock,
     /** The ferret clicks, types, navigates or runs a script on its pages now. */
     act: () => {
@@ -284,7 +288,11 @@ async function harness(options: Options = {}) {
         if ((options.written ?? 'typed') === 'typed') writes.push(...typed.map(value => value.text));
         return options.written ?? 'typed';
       },
-      clear: async () => options.clear ?? 'moved',
+      clear: async () => {
+        clears.push('clear');
+        return options.clear ?? 'moved';
+      },
+      ...(options.document === undefined ? {} : { document: async () => options.document?.() }),
       ...(options.probes === true ? { probe: async () => 'hidden' as const } : {}),
     },
     agenda: {
@@ -371,6 +379,15 @@ async function raised(h: Harness, raise: InputRaise = SIGN_IN, session = SESSION
 /** Lets what runs after a Send (not awaited by it) and the rule service's queued writes finish. */
 const settled = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 10));
 
+/** Fires the cleanup's waiting looks one by one until the browser has been asked to clear the field. */
+async function pollUntilCleared(h: Harness): Promise<void> {
+  await settled();
+  for (let look = 0; look < 40 && h.clears.length === 0; look += 1) {
+    h.timers.at(-1)?.fire();
+    await settled();
+  }
+}
+
 const ruleOnDisk = (h: Harness) => h.store.document?.rules[0];
 
 describe('a sign-in a standing rule covers is filled under it, for any ferret (invariant 10)', () => {
@@ -391,7 +408,7 @@ describe('a sign-in a standing rule covers is filled under it, for any ferret (i
     should(h.closes.join(' ')).not.match(/rule|github\.com/u);
     // The notifier records `<card>: <message>`, and the message names its card itself.
     should(h.tells[0]).equal(
-      'A1: A1: Ferretry filled the sign-in on %browser:app under a rule the owner approved in advance. Read the page to continue once its quarantine allows.',
+      'A1: A1: Ferretry filled the sign-in on %browser:app under a rule the owner approved in advance. Read the page to continue.',
     );
     should(ruleOnDisk(h)?.usage).match({ count: 1, lastSession: SESSION });
   });
@@ -804,12 +821,10 @@ describe('hold, clear and arm apply to rule fills (invariant 26)', () => {
       const h = await harness({ clear });
       await ruleFor(h, await github(h));
       await raised(h);
-      // Past the write's own hold: only the clear's own hold (kept on `unknown`) can still hold the page.
-      h.clock.now += 130_000;
-      for (const timer of h.timers) timer.fire();
-      await settled();
+      await pollUntilCleared(h);
       should(ruleOnDisk(h)?.suspended?.because).equal('did-not-move-on');
-      should(h.service.pageHeld(SESSION, ['app']) !== undefined).equal(clear === 'unknown');
+      // The cleanup is the field's own: the page is never held from the ferret, before, during or after it.
+      should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
     });
 });
 
@@ -889,13 +904,36 @@ describe('a write that could not say whether it typed is cleared, held and suspe
     await settled();
     should(view.state).equal('refused');
     should(ruleOnDisk(h)?.suspended?.because).equal('did-not-move-on');
-    // The clear is scheduled, and until it answers the page stays held, however long past the write's own hold.
-    should(h.timers).have.length(1);
-    h.clock.now += 600_000;
-    should(h.service.pageHeld(SESSION, ['app'])).not.be.undefined();
-    for (const timer of h.timers) timer.fire();
-    await settled();
+    // The cleanup waits for the page to move on, never holding it from the ferret meanwhile.
+    should(h.timers.length).be.above(0);
     should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    await pollUntilCleared(h);
+    should(h.clears).have.length(1);
+    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+  });
+
+  it('should not empty the field before the page has had its bounded wait, and then empty it once', async () => {
+    const h = await harness({ clear: 'cleared' });
+    await ruleFor(h, await github(h));
+    await raised(h);
+    await settled();
+    // A sign-in still on the same document: nothing is cleared however long the first looks take.
+    for (let look = 0; look < 5; look += 1) {
+      h.timers.at(-1)?.fire();
+      await settled();
+    }
+    should(h.clears).have.length(0);
+    await pollUntilCleared(h);
+    should(h.clears).have.length(1);
+  });
+
+  it('should clear at once, without waiting out the bound, when the page has moved on', async () => {
+    const h = await harness({ clear: 'moved', document: () => 'loader-2' });
+    await ruleFor(h, await github(h));
+    await raised(h);
+    await settled();
+    should(h.clears).have.length(1);
+    should(ruleOnDisk(h)?.suspended).be.undefined();
   });
 });
 

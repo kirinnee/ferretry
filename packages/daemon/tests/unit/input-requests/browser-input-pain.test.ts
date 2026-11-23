@@ -39,18 +39,25 @@ const raise = (sensitivity: 'secret' | 'code' | 'plain', label = 'Code'): InputR
 });
 
 describe('pageFieldKind', () => {
-  it('should read a one-time code by autocomplete, a numeric keypad of 4 to 8 digits, or its words', () => {
+  it('should read a one-time code only by autocomplete or a numeric keypad of 4 to 8 digits', () => {
     should(pageFieldKind({ tag: 'input', autocomplete: 'one-time-code' })).equal('code');
     should(pageFieldKind({ tag: 'input', inputmode: 'numeric', maxlength: '6' })).equal('code');
-    should(pageFieldKind({ tag: 'input', name: 'otp_value' })).equal('code');
-    should(pageFieldKind({ tag: 'input', id: 'verificationCode' })).equal('code');
-    should(pageFieldKind({ tag: 'input', name: 'twofa' }, '2FA code')).equal('code');
+    should(pageFieldKind({ tag: 'input', inputmode: 'tel', maxlength: '4', name: 'verificationCode' })).equal('code');
   });
 
-  it('should not read a zip code, a long numeric box or a password-typed input as a one-time code', () => {
+  it('should never read a name or a label as evidence of a one-time code', () => {
+    should(pageFieldKind({ tag: 'input', name: 'otp_value' }, 'Verification code')).equal(undefined);
+    should(pageFieldKind({ tag: 'input', id: 'verificationCode' })).equal(undefined);
+    should(pageFieldKind({ tag: 'input', type: 'text', name: 'code' }, '2FA code')).equal(undefined);
+  });
+
+  it('should not read a zip code, a long numeric box, a password signal or a password-typed input as a one-time code', () => {
     should(pageFieldKind({ tag: 'input', name: 'zipcode' })).equal(undefined);
     should(pageFieldKind({ tag: 'input', inputmode: 'numeric', maxlength: '16' })).equal(undefined);
     should(pageFieldKind({ tag: 'input', type: 'password', name: 'otp' })).equal(undefined);
+    should(pageFieldKind({ tag: 'input', inputmode: 'numeric', maxlength: '6', name: 'pin' })).equal(undefined);
+    should(pageFieldKind({ tag: 'input', inputmode: 'numeric', maxlength: '6', id: 'user_password' })).equal(undefined);
+    should(pageFieldKind({ tag: 'input', autocomplete: 'one-time-code current-password' })).equal(undefined);
   });
 
   it('should read a card number, expiry and security code as card fields', () => {
@@ -92,6 +99,41 @@ describe('the cards the owner sees', () => {
     await service.raise(SESSION, raise('secret'));
     const [request] = await service.list(HOST, SESSION);
     should(request?.fields[0]?.sensitivity).equal('secret');
+  });
+
+  const sensitivityOf = async (field: Field, sensitivity: 'secret' | 'plain', label: string, prompt?: string) => {
+    const { service } = inputRequestService({ facts: page(field) });
+    const asked = raise(sensitivity, label);
+    await service.raise(SESSION, prompt === undefined ? asked : { ...asked, prompt });
+    const [request] = await service.list(HOST, SESSION);
+    return request?.fields[0]?.sensitivity;
+  };
+
+  it('should keep a reusable password in a text box called "code" a secret, whatever the ferret labels it', async () => {
+    should(await sensitivityOf({ tag: 'input', type: 'text', name: 'code' }, 'secret', 'One-time code')).equal(
+      'secret',
+    );
+    should(await sensitivityOf({ tag: 'input', type: 'text', id: 'otp' }, 'secret', 'Verification code')).equal(
+      'secret',
+    );
+  });
+
+  it('should keep a numeric box that says pin or password a secret', async () => {
+    should(
+      await sensitivityOf({ tag: 'input', inputmode: 'numeric', maxlength: '6', name: 'pin' }, 'secret', 'Code'),
+    ).equal('secret');
+    should(
+      await sensitivityOf({ tag: 'input', inputmode: 'numeric', maxlength: '6', id: 'password' }, 'secret', 'Code'),
+    ).equal('secret');
+  });
+
+  it("should offer a real one-time code as a code even when the ferret's prompt mentions the password", async () => {
+    const otp: Field = { tag: 'input', type: 'text', autocomplete: 'one-time-code' };
+    should(await sensitivityOf(otp, 'secret', 'Code', 'Enter your password and the code the bank texted')).equal(
+      'code',
+    );
+    const keypad: Field = { tag: 'input', inputmode: 'numeric', maxlength: '6' };
+    should(await sensitivityOf(keypad, 'secret', 'Password code', 'Your one-time password')).equal('code');
   });
 
   it('should make a card number field a secret even when the ferret said plain', async () => {

@@ -209,6 +209,8 @@ function build(overrides: Partial<World> = {}) {
     journal: {
       publish: async (_session, event) => {
         if (w.failJournal === event.type) throw new Error('the journal is full');
+        // The `settled` mark of finished follow-up work is not an outcome: these cases read the outcomes.
+        if (event.type === 'surface.input_settled') return;
         w.order.push(event.type);
         w.events.push(event);
       },
@@ -661,7 +663,7 @@ describe('InputRequestService.deliver', () => {
     should(done.state).equal('delivered');
     should(w.writes).eql([{ text: VALUE, submit: true }]);
     should(values.scrub(SESSION, VALUE)).equal('[redacted:input A1]');
-    should(w.quarantineEvents.length).equal(0);
+    should(w.quarantineEvents.every(event => event.hold.startsWith('restart-'))).be.true(); // a restart guard only: no live hold
   });
 
   it('should still refuse a private code with a control character', async () => {
@@ -1480,7 +1482,7 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
     should(done.state).equal('delivered');
     should(w.writes).eql([{ text: VALUE, submit: true }]);
     should(values.scrub(SESSION, `screen: ${VALUE}`)).equal(`screen: ${VALUE}`);
-    should(w.quarantineEvents.length).equal(0);
+    should(w.quarantineEvents.every(event => event.hold.startsWith('restart-'))).be.true();
     should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
   });
 
@@ -1539,7 +1541,7 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
       should(w.cards[0]?.blocking).be.true();
       should(gate).equal('A1');
       should(values.scrub(SESSION, VALUE)).equal('[redacted:input A1]');
-      should(w.quarantineEvents.length).equal(0);
+      should(w.quarantineEvents.every(event => event.hold.startsWith('restart-'))).be.true();
       should(w.events.map(event => event.sensitivity)).containEql('secret');
       should(w.events.map(event => event.sensitivity)).not.containEql('code');
       should(w.audits.map(entry => entry.detail.sensitivity)).not.containEql('code');
@@ -1603,7 +1605,7 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
     // Assert
     should(back?.sensitivity).equal('secret');
     should(back?.fields[0]?.risk?.reason).equal('Treated as a secret: this is a password field.');
-    should(second.w.quarantineEvents.length).equal(0);
+    should(second.w.quarantineEvents.every(event => event.hold.startsWith('restart-'))).be.true();
   });
 });
 
@@ -1626,5 +1628,149 @@ describe('what a request push is about', () => {
     should(secret.service.pushSubjectOf(SESSION, secret.id)).equal('other');
     await code.service.cancel(SESSION, code.id, HOST);
     should(code.service.pushSubjectOf(SESSION, code.id)).equal('other');
+  });
+});
+
+/**
+ * RESTORED, AT VALUE LEVEL (!A607): no card holds a terminal from the ferret any more, so what these cases keep out of
+ * every view, card and audit record is the typed VALUE (masked wherever it appears), and the program name stays out
+ * of every audit record as it always did. They run through the real service, as the originals did.
+ */
+describe('value-level redaction without a hold', () => {
+  const NAMES = ['dev', '000000000001'];
+  const CANARY = 'pane-consumer-CANARY';
+  const facts = { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY } };
+
+  it('should show a follow-up request no typed value in its prompt line, argv or program name', async () => {
+    const first = await raised({ names: NAMES });
+    await first.service.deliver(SESSION, first.id, bodyFor(first.digest), HOST);
+    first.w.facts = {
+      ...FACTS,
+      promptLine: `login: ${VALUE}`,
+      foreground: { ...FACTS.foreground, comm: VALUE, argv: `tool --password=${VALUE}` },
+    };
+
+    const view = await first.service.raise(SESSION, { ...RAISE, sensitivity: 'plain' });
+    const listed = JSON.stringify(await first.service.list(HOST));
+
+    should(JSON.stringify(view)).not.containEql(VALUE);
+    should(listed).not.containEql(VALUE);
+    should(JSON.stringify(first.w.cards)).not.containEql(VALUE);
+    should(JSON.stringify(first.w.audits)).not.containEql(VALUE);
+    should(listed).containEql('tool --password=[redacted');
+  });
+
+  it('should show a restored request no typed value, and hold the terminal across the restart only for the guard window', async () => {
+    const live = await raised({ names: NAMES });
+    await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
+    // Nothing is held while the daemon runs; a guard for a restart is journalled.
+    should(live.service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
+    should(live.w.quarantineEvents.map(event => event.hold)).eql([`restart-${live.id}`]);
+    const restarted = build({
+      quarantineHistory: live.w.quarantineEvents,
+      history: [
+        {
+          type: 'surface.input_requested',
+          requestId: 'r2',
+          agendaItemId: 'A9',
+          sessionId: SESSION,
+          target: { kind: 'terminal', key: 'dev' },
+          sensitivity: 'plain',
+          submit: 'offer-owner',
+          state: 'pending',
+          expiresAt: '2026-10-30T12:10:00.000Z',
+          at: '2026-10-30T12:00:00.000Z',
+        } as InputEvent,
+      ],
+      facts: {
+        ...FACTS,
+        promptLine: `login: ${VALUE}`,
+        foreground: { ...FACTS.foreground, comm: VALUE, argv: `tool ${VALUE}` },
+      },
+      now: live.w.now + 30_000,
+    });
+
+    await restarted.service.restore();
+    const listed = JSON.stringify(await restarted.service.list(HOST));
+
+    should(listed).containEql('r2');
+    should(listed).not.containEql(VALUE);
+    should(restarted.service.quarantinedUntil(SESSION, ['dev'])).be.a.Number();
+    restarted.w.now += 121_000;
+    should(restarted.service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
+  });
+
+  it('should not guard a restart for a prompt proven to hide what is typed, nor for a plain answer', async () => {
+    const proven = await raised({ facts: { ...FACTS, trustedProgram: true } as InputTargetFacts });
+    await proven.service.deliver(SESSION, proven.id, bodyFor(proven.digest), HOST);
+    should(proven.w.quarantineEvents).eql([]);
+
+    const plain = await raised({}, { ...RAISE, sensitivity: 'plain' });
+    await plain.service.deliver(SESSION, plain.id, bodyFor(plain.digest), HOST);
+    should(plain.w.quarantineEvents).eql([]);
+  });
+
+  it('should keep a consumer name out of the audit record of the delivery', async () => {
+    const { w, service, id, digest } = await raised();
+    await service.deliver(SESSION, id, bodyFor(digest), HOST);
+
+    const delivered = w.audits.find(entry => entry.event === 'input.delivered');
+
+    should(JSON.stringify(delivered)).not.containEql('"consumer":"sudo"');
+  });
+
+  it('should word the agenda card without any program the pane named', async () => {
+    const built = build();
+    built.w.facts = facts;
+
+    await built.service.raise(SESSION, RAISE);
+
+    should(JSON.stringify(built.w.cards)).not.containEql(CANARY);
+  });
+
+  it('should record no program name in any audit entry', async () => {
+    const live = await raised({ facts, names: NAMES });
+    await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
+
+    should(live.w.audits.length).be.above(1);
+    should(JSON.stringify(live.w.audits)).not.containEql(CANARY);
+  });
+
+  describe('audit records', () => {
+    it('should keep the consumer out of the record of a refused check and of a redraw', async () => {
+      const live = await raised({ facts, names: NAMES });
+      await live.service.raise(SESSION, { ...RAISE, target: { kind: 'terminal', key: '000000000001' } });
+      const second = (await live.service.list(HOST)).find(request => request.id !== live.id);
+      await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
+
+      live.w.facts = { ...facts, cursorRow: 5 };
+      await live.service
+        .deliver(SESSION, second?.id ?? '', bodyFor(second?.observedDigest ?? ''), HOST)
+        .catch(() => undefined);
+      const redrawn = (await live.service.list(HOST)).find(request => request.id === second?.id);
+      live.w.facts = { ...facts, echo: 'on' };
+      await live.service
+        .deliver(SESSION, second?.id ?? '', bodyFor(redrawn?.observedDigest ?? ''), HOST)
+        .catch(() => undefined);
+
+      const record = live.w.audits.filter(entry => entry.event === 'input.refused').at(-1);
+      const rebound = live.w.audits.filter(entry => entry.event === 'input.rebound').at(-1);
+      should(record).not.be.undefined();
+      should(rebound).not.be.undefined();
+      should(JSON.stringify([record, rebound])).not.containEql(CANARY);
+    });
+
+    it('should keep the consumer out of the record of a request raised after a delivery, and of a cancellation', async () => {
+      const live = await raised({ facts, names: NAMES });
+      await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
+      await live.service.raise(SESSION, RAISE);
+      const [open] = await live.service.list(HOST);
+      if (open !== undefined) await live.service.cancel(SESSION, open.id, HOST);
+
+      const requested = live.w.audits.filter(entry => entry.event === 'input.requested').at(-1);
+      const cancelled = live.w.audits.filter(entry => entry.event === 'input.cancelled').at(-1);
+      should(JSON.stringify(requested)).not.containEql(CANARY);
+      should(JSON.stringify(cancelled)).not.containEql(CANARY);
+    });
   });
 });
