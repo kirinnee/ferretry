@@ -85,8 +85,8 @@ export const NO_STARTERS: StarterModels = {};
 export function starterModelsOf(sources: Pick<ModelCatalogSources, 'catalogs'> | undefined): StarterModels {
   if (sources === undefined) return NO_STARTERS;
   const starters: Partial<Record<HarnessKind, string>> = {};
-  for (const harness of ['claude', 'codex'] as const) {
-    const half = sources.catalogs[SIGN_IN_MODEL_CATALOGS[harness]]?.[harness];
+  for (const [harness, catalogId] of Object.entries(SIGN_IN_MODEL_CATALOGS) as [HarnessKind, string][]) {
+    const half = sources.catalogs[catalogId]?.[harness];
     const model = half?.models.find(candidate => candidate.default);
     if (model !== undefined) starters[harness] = model.id;
   }

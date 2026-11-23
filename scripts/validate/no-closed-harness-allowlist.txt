@@ -99,7 +99,6 @@ packages/plugins/logins/daemon/adapters/credentials/material-read.ts::branch=3  
 packages/plugins/logins/daemon/adapters/credentials/owned-store.ts::branch=4  # part 2
 packages/plugins/logins/daemon/index.ts::branch=3  # part 2
 packages/plugins/logins/daemon/lib/catalog/catalog.ts::literal=1  # part 2
-packages/plugins/logins/daemon/lib/catalog/published.ts::literal=1  # part 2
 packages/plugins/logins/daemon/lib/changes/derive.ts::branch=3  # part 2
 packages/plugins/logins/daemon/lib/credentials/credential-status.ts::branch=7  # part 2
 packages/plugins/logins/daemon/lib/credentials/credentials-service.ts::branch=5  # part 2
