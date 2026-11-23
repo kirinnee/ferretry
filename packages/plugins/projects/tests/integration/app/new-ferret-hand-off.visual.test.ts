@@ -107,8 +107,15 @@ const withTab = async (
     );
     await tab.waitForTimeout(300);
     const shot = async (name: string): Promise<void> => {
-      if (shotsDir !== '')
-        await tab.screenshot({ fullPage: true, path: join(shotsDir, `${viewport.name}-${scheme}-${name}.png`) });
+      if (shotsDir !== '') {
+        await tab.waitForTimeout(600); // the segmented highlight, the button's fade and a sheet's slide settle
+        const path = (suffix: string): string => join(shotsDir, `${viewport.name}-${scheme}-${name}${suffix}.png`);
+        await tab.screenshot({ fullPage: true, path: path('') });
+        // The page scrolls inside its own frame: a second frame brings Create ferret and its hint into view.
+        await tab.getByRole('button', { name: 'Create ferret' }).scrollIntoViewIfNeeded();
+        await tab.waitForTimeout(200);
+        await tab.screenshot({ path: path('-create') });
+      }
     };
     await run(tab, shot);
   } finally {
