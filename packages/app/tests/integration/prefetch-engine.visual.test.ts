@@ -6,6 +6,13 @@
  * Proved on the REAL built app: one `vite build` of the shell's own config, served as static files, opened in Chromium with a
  * clean profile and left past the idle prefetch. The request ledger is the claim: the view prefetch DID run (view chunks were
  * asked for, so the check cannot pass by the script never firing), and neither the engine's chunk nor the 3D stage's was.
+ *
+ * SINCE r12 H11 THE BUILD CARRIES NEITHER. The Durian worker reads every message and has no scene compiler, so the product no
+ * longer asks for the engine (`animation-engine.ts`: `loadAnimationEngine` has no caller) and an `animation` fence is shown as
+ * code. Nothing imports `animation-stage.tsx`, so Vite emits no `animation-stage-*` chunk, and nothing imports Durian's 3D
+ * stage, so no chunk holds `WebGLRenderer`. The first case therefore pins that truth (a build that brings an engine back
+ * fails it, and its author moves the proof back to the request ledger with the chunk names); the ledger cases read every
+ * chunk the page was served and every chunk the prefetch lists by what it HOLDS, so they cannot pass by a rename.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
@@ -30,8 +37,10 @@ let browser: Browser;
 let dist = '';
 let server: ReturnType<typeof Bun.serve> | undefined;
 let origin = '';
-let engineChunk = '';
-let threeChunk = '';
+/** Every built chunk that is the 2D engine's stage (by name) or the 3D stage's renderer (by content). Empty since r12 H11. */
+const engineChunks: string[] = [];
+/** The built chunk files and their code, for the ledger cases to read by content. */
+const built = new Map<string, string>();
 
 beforeAll(async () => {
   browser = await sharedChromium();
@@ -47,8 +56,8 @@ beforeAll(async () => {
   for (const name of await readdir(join(dist, 'assets'))) {
     if (!name.endsWith('.js')) continue;
     const code = await readFile(join(dist, 'assets', name), 'utf8');
-    if (code.includes('WebGLRenderer')) threeChunk = `assets/${name}`;
-    else if (/^animation-stage-/u.test(name)) engineChunk = `assets/${name}`;
+    built.set(`assets/${name}`, code);
+    if (code.includes('WebGLRenderer') || /^animation-stage-/u.test(name)) engineChunks.push(`assets/${name}`);
   }
   server = Bun.serve({
     hostname: '127.0.0.1',
@@ -78,16 +87,20 @@ const listed = async (): Promise<string[]> => {
 };
 
 describe('what a clean start of the built app fetches', () => {
-  it('finds the engine chunk and the 3D stage in the build', () => {
-    expect(engineChunk).not.toBe('');
-    expect(threeChunk).not.toBe('');
+  it('builds neither the 2D engine nor the 3D stage: the worker reads every message and holds an animation as code', () => {
+    expect(engineChunks).toEqual([]);
+    // The worker's chunk is where the parser lives, so a build that dropped it would pass the case above for the wrong reason.
+    expect([...built.keys()].some(file => /^assets\/durian-worker-/u.test(file))).toBe(true);
   });
 
   it('lists view chunks to prefetch, and not the engine or the 3D stage', async () => {
     const files = await listed();
     expect(files.length).toBeGreaterThan(10);
-    expect(files).not.toContain(engineChunk);
-    expect(files).not.toContain(threeChunk);
+    for (const file of files) {
+      expect(file).not.toMatch(/animation-stage/u);
+      expect(built.has(file)).toBe(true);
+      expect(built.get(file) ?? '').not.toContain('WebGLRenderer');
+    }
   });
 
   it('prefetches the views at idle on a clean start, and never asks for the engine or the 3D stage', async () => {
@@ -104,7 +117,9 @@ describe('what a clean start of the built app fetches', () => {
     await context.close();
     const views = (await listed()).filter(file => asked.includes(file));
     expect(views.length).toBeGreaterThan(10);
-    expect(asked).not.toContain(engineChunk);
-    expect(asked).not.toContain(threeChunk);
+    for (const file of asked) {
+      expect(file).not.toMatch(/animation-stage/u);
+      expect(built.get(file) ?? '').not.toContain('WebGLRenderer');
+    }
   }, 120_000);
 });
