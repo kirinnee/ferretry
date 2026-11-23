@@ -78,13 +78,13 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
     id: 'glass',
     label: 'Glassmorphism',
     blurb: 'Frosted translucent panels over a soft colour field, big radii, light edges.',
-    defaultPalette: 'studio',
+    defaultPalette: 'aurora',
   },
   {
     id: 'neumorphism',
     label: 'Neumorphism',
     blurb: 'Soft forms moulded from one ground: paired light and dark shadows, pressed in when chosen.',
-    defaultPalette: 'studio',
+    defaultPalette: 'afterglow',
   },
   {
     id: 'retro',
@@ -96,7 +96,7 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
     id: 'lucid',
     label: 'Lucid',
     blurb: 'Glossy pill controls, soft deep shadows, a springy halo focus, system fonts.',
-    defaultPalette: 'studio',
+    defaultPalette: 'mesh',
   },
   {
     id: 'hud',
@@ -147,14 +147,14 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
     id: 'exaggerated',
     label: 'Exaggerated Minimalism',
     blurb: 'Huge hair-thin titles, vast air, one hairline for everything, no shadows.',
-    defaultPalette: 'studio',
+    defaultPalette: 'hacker',
   },
 ] as const);
 
 /**
  * Order is the order shown. A palette's display name lives in `palette-names.ts` (the one map; never a style's name); the
  * ids stay what they were so nothing a device stored has to migrate, except the removed ones (`REMOVED_PALETTE_IDS`).
- * High contrast is a palette: it must pass on every style. Four palettes paint a gradient mesh behind the page (`--surface-mesh`).
+ * High contrast is a palette: it must pass on every style. Mesh, Aurora, Afterglow and Briefing paint a gradient mesh behind the page (`--surface-mesh`).
  */
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([
   { id: 'studio', label: PALETTE_NAMES.studio, blurb: 'Indigo on cool zinc.' },
@@ -170,7 +170,7 @@ export const PALETTES: readonly PaletteEntry[] = Object.freeze([
   {
     id: 'briefing',
     label: PALETTE_NAMES.briefing,
-    blurb: 'Lavender-grey page, white panels, navy ink, indigo and one hot pink.',
+    blurb: 'Navy and lavender-grey, a bright blue accent, hot pink glows.',
   },
   { id: 'contrast', label: PALETTE_NAMES.contrast, blurb: 'Pure black and white, AAA-targeted.' },
 ] as const);

@@ -120,6 +120,8 @@
   --step-seg: var(--border);
   /* A paler step of the accent — still >=3:1, but plainly not "done". */
   --step-seg-now: #8486e2;
+  /* The onboarding progress rail's current segment: the accent, unless a palette names its own step marker (Briefing's pink). */
+  --fy-progress-now: var(--accent);
   /* ---- data-visualisation series (an fy-render `chart`, a Mermaid diagram) ----
    Eight series colours, read by `fy-render/palette.ts` and never by a payload: an author asks for a slot
    or a tone, never a colour. Each slot NAMES a hue the palette already restates per mode and tunes for

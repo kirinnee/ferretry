@@ -89,11 +89,13 @@
   --select-pop: 1.02;
   --focus-width: 2px;
   --focus-offset: 1px;
-  /* THE DESKTOP BEHIND THE WINDOWS: a dithered field, the style contract's dot lattice at a 4px period in the palette's own
+  /* THE DESKTOP BEHIND THE WINDOWS: a dithered field, the style contract's dot lattice, coarse: 4px dots on an 8px period in the palette's own
      texture ink. No wash (no gradient on a page), no grain: a window manager's desktop is a flat pattern. */
   --body-wash: none;
+  --bg-pattern-ink: color-mix(in srgb, var(--accent) 14%, transparent);
+  --bg-pattern-dots: radial-gradient(circle at 50% 50%, var(--bg-pattern-ink) 2px, transparent 2.7px);
   --bg-pattern: var(--bg-pattern-dots);
-  --bg-pattern-size: 4px;
+  --bg-pattern-size: 8px;
   --bg-pattern-alpha: 100%;
   --grain-alpha: 0;
   --panel-texture: none;
