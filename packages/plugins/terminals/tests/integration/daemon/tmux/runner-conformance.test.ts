@@ -169,6 +169,9 @@ function tmuxWorld() {
 
 runnerConformance('TmuxRunner (in-memory tmux server)', tmuxWorld);
 
+/** The spec of a Codex launch: it execs `env`, the interpreter its installed script runs on, then the harness. */
+const codexSpec = (spec: RunSpec): RunSpec => ({ ...spec, execChain: ['env', 'bash', 'sh', 'node', 'harness'] });
+
 /** The spec of a Claude launch: it execs `env`, the seed shell, then the harness (named `harness` in this world). */
 const claudeSpec = (spec: RunSpec): RunSpec => ({ ...spec, execChain: ['env', 'sh', 'harness'] });
 
@@ -206,6 +209,40 @@ describe("TmuxRunner first turn at a pane still exec'ing its launch wrappers", (
     // Assert
     expect(delivered).toBeDefined();
     expect(pane.server.submitted).toEqual(['Reply with the single word OK.']);
+  });
+
+  it('should type a Codex first turn once its wrappers and its script interpreter have given way to the harness', async () => {
+    // Arrange — measured on a real limited launch: tmux → systemd-run → bash (the installed script) → codex.
+    const world = tmuxWorld();
+    const started = await world.runner.start(codexSpec(world.spec));
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.launching.push('tmux', 'systemd-run', 'bash', 'bash');
+
+    // Act
+    const delivered = await world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    expect(delivered).toBeDefined();
+    expect(pane.server.submitted).toEqual(['Reply with the single word OK.']);
+  });
+
+  it('should refuse a Codex first turn, and type nothing, when the launch ends in a shell outside its chain', async () => {
+    // Arrange
+    const world = tmuxWorld();
+    const started = await world.runner.start(codexSpec(world.spec));
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.launching.push('systemd-run');
+    pane.command = 'zsh';
+
+    // Act
+    const delivered = world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    await expect(delivered).rejects.toThrow();
+    expect(pane.writes).toBe(0);
+    expect(pane.server.submitted).toEqual([]);
   });
 
   it('should refuse the first turn, and type nothing, when the launch ends in a shell instead of the harness', async () => {
