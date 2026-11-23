@@ -343,7 +343,7 @@ describe('TmuxSessionLifecycleLauncher', () => {
         session: 'fy-tmux-session',
         cwd: '/workspace/project',
         command: [AGENT, '--mode', 'auto'],
-        env: { FY_HYPERMEDIA: '0', FY_SESSION_ID: 'tmux-session' },
+        env: { FY_HYPERMEDIA: '0', FY_SESSION_MODE: 'auto', FY_SESSION_ID: 'tmux-session' },
       } satisfies TmuxLaunch,
     ]);
   });
@@ -1002,7 +1002,11 @@ describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () 
     await subject.launch(record('plain-session'));
 
     // Assert — its own id, and the hypermedia default every pane carries (docs/hypermedia.md).
-    should(firstLaunchEnv(tmux)).deepEqual({ FY_HYPERMEDIA: '0', FY_SESSION_ID: 'plain-session' });
+    should(firstLaunchEnv(tmux)).deepEqual({
+      FY_HYPERMEDIA: '0',
+      FY_SESSION_MODE: 'auto',
+      FY_SESSION_ID: 'plain-session',
+    });
   });
 
   it('should hand the pane its media folder and question file when they are wired', async () => {

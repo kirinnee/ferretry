@@ -373,7 +373,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
       continue;
     }
     if (!isRuntimeName(suggested)) continue;
-    runtimes[suggested] = { credential: credentialId, profile: profileName, agent: true };
+    runtimes[suggested] = { credential: credentialId, profile: profileName };
   }
 
   const recordedProfiles: Partial<Record<HarnessKind, string>> = { ...record.profiles, ...profileOf };

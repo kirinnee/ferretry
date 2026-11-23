@@ -38,21 +38,6 @@ describe('runtimeRefusal', () => {
     should(noModel).be.undefined();
   });
 
-  it('should refuse a runtime that is not an agent first, whatever else is wrong', () => {
-    // Arrange
-    const terminal = runtime('terminal', { agent: false, launch: { available: false, reason: 'Sign in' } });
-
-    // Act
-    const refusal = runtimeRefusal(terminal, 'opus', facts({ tools: [tool('claude-code', false)] }));
-
-    // Assert
-    should(refusal).deepEqual({
-      code: 'not_agent',
-      message: 'terminal is for using its CLI yourself and cannot run helpers.',
-      remedy: 'Pick an agent runtime.',
-    });
-  });
-
   it('should refuse a CLI that is not installed, and ignore a harness the machine knows nothing about', () => {
     // Arrange
     const missing = facts({ tools: [tool('claude-code', false)] });
@@ -467,7 +452,6 @@ describe('availableModels', () => {
           launch: { available: false, reason: 'Sign in' },
         }),
         runtime('claude-main', { catalogId: 'anthropic', choices: [haikuChoice] }),
-        runtime('cli-only', { catalogId: 'anthropic', choices: [sonnetChoice], agent: false }),
       ],
     });
 

@@ -83,7 +83,7 @@ const view = (change: unknown) => ({
     kind: 'apply',
     operations: [],
     documents: [],
-    runtimes: [{ name: 'claude-default', harness: 'claude-code', agent: true, launch: { available: true } }],
+    runtimes: [{ name: 'claude-default', harness: 'claude-code', launch: { available: true } }],
   },
 });
 

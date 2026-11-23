@@ -319,7 +319,7 @@ describe('R2 layers and profiles', () => {
   it('R2 should resolve profile/<base> layers in layer order and keep each item once, at its newest place', async () => {
     // Arrange
     const { port: runtimes } = await world({
-      runtimes: { work: { login: 'claude-you', profile: 'top', agent: true } },
+      runtimes: { work: { login: 'claude-you', profile: 'top' } },
       profiles: {
         top: { contents: ['mcp/own', 'profile/mid', 'skills/last'] },
         mid: { contents: ['mcp/shared', 'profile/base', 'skills/mid'] },
@@ -347,7 +347,7 @@ describe('R2 layers and profiles', () => {
   it('R2 should keep a base two profiles share and refuse only a loop', async () => {
     // Arrange
     const { port: runtimes } = await world({
-      runtimes: { work: { login: 'claude-you', profile: 'top', agent: true } },
+      runtimes: { work: { login: 'claude-you', profile: 'top' } },
       profiles: {
         top: { contents: ['profile/left', 'profile/right'] },
         left: { contents: ['profile/base'] },
@@ -366,7 +366,7 @@ describe('R2 layers and profiles', () => {
   it('R2 should refuse a cycle of bases in a sentence', async () => {
     // Arrange
     const { port: runtimes } = await world({
-      runtimes: { work: { login: 'claude-you', profile: 'a', agent: true } },
+      runtimes: { work: { login: 'claude-you', profile: 'a' } },
       profiles: { a: { contents: ['profile/b'] }, b: { contents: ['profile/a'] } },
     });
 
@@ -384,7 +384,7 @@ describe('R2 layers and profiles', () => {
   it('R2 should refuse a profile that names itself', async () => {
     // Arrange
     const { port: runtimes } = await world({
-      runtimes: { work: { login: 'claude-you', profile: 'a', agent: true } },
+      runtimes: { work: { login: 'claude-you', profile: 'a' } },
       profiles: { a: { contents: ['profile/a'] } },
     });
 
@@ -402,7 +402,7 @@ describe('R2 layers and profiles', () => {
     // Arrange
     const { port: runtimes } = await world({
       runtimes: {
-        work: { login: 'claude-you', profile: 'a', agent: true },
+        work: { login: 'claude-you', profile: 'a' },
         lost: { login: 'claude-you', profile: 'ghost' },
       },
       profiles: { a: { contents: ['profile/gone'] } },
@@ -698,7 +698,7 @@ describe('R2 changeProfileLayers — remove-everywhere is all or nothing', () =>
       port: runtimes,
       writes,
     } = await world({
-      runtimes: { work: { login: 'claude-you', profile: 'child', agent: true } },
+      runtimes: { work: { login: 'claude-you', profile: 'child' } },
       profiles: {
         base: { contents: ['mcp/x', 'skills/keep'] },
         child: { contents: ['profile/base', 'skills/y'] },
@@ -816,7 +816,7 @@ describe('R2 layers — a lattice of shared bases', () => {
       // Arrange
       const profiles = lattice(depth);
       const { port: runtimes } = await world({
-        runtimes: { work: { login: 'claude-you', profile: 'a0', agent: true } },
+        runtimes: { work: { login: 'claude-you', profile: 'a0' } },
         profiles,
       });
 
@@ -837,7 +837,7 @@ describe('R2 layers — a lattice of shared bases', () => {
       base: { contents: ['mcp/b', 'mcp/dup', 'skills/dup'] },
     };
     const { port: runtimes } = await world({
-      runtimes: { work: { login: 'claude-you', profile: 'top', agent: true } },
+      runtimes: { work: { login: 'claude-you', profile: 'top' } },
       profiles,
     });
 
@@ -855,7 +855,7 @@ describe('R2 layers — a lattice of shared bases', () => {
   it('R2 should resolve a 4-deep lattice once per item', async () => {
     // Arrange
     const { port: runtimes } = await world({
-      runtimes: { work: { login: 'claude-you', profile: 'a0', agent: true } },
+      runtimes: { work: { login: 'claude-you', profile: 'a0' } },
       profiles: lattice(4),
     });
 
@@ -872,7 +872,7 @@ describe('R2 layers — a lattice of shared bases', () => {
   it('R2 should list the profiles and change one of a 4-deep lattice', async () => {
     // Arrange
     const { port: runtimes } = await world({
-      runtimes: { work: { login: 'claude-you', profile: 'a0', agent: true } },
+      runtimes: { work: { login: 'claude-you', profile: 'a0' } },
       profiles: lattice(4),
     });
 
@@ -890,7 +890,7 @@ describe('R2 layers — a lattice of shared bases', () => {
   it('R2 should refuse a loop with the exact path, however deep the way into it', async () => {
     // Arrange
     const { port: runtimes } = await world({
-      runtimes: { work: { login: 'claude-you', profile: 'top', agent: true } },
+      runtimes: { work: { login: 'claude-you', profile: 'top' } },
       profiles: {
         top: { contents: ['profile/x'] },
         x: { contents: ['profile/y'] },

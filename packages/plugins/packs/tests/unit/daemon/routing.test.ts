@@ -38,7 +38,6 @@ describe('fleetModels', () => {
     const here = [
       runtime('claude-main', { catalogId: 'anthropic', choices: [choice('opus', 'Opus'), choice('sonnet', 'Sonnet')] }),
       runtime('codex-main', { harness: 'codex', catalogId: 'openai', choices: [choice('gpt-5', 'GPT-5')] }),
-      runtime('cli-only', { catalogId: 'anthropic', choices: [choice('opus', 'Opus')], agent: false }),
     ];
 
     // Act

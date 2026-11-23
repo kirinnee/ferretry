@@ -139,8 +139,8 @@ describe('the access.passkey step, in a real browser', () => {
         console.log(
           `${variant.name} passkey step: add ${add.width}x${add.height} @${add.x},${add.y}; not-now ${later2.width}x${later2.height} @${later2.x},${later2.y}; row ${flow.display}/${flow.direction}`,
         );
-        // C59 O3: the shared answer row: a phone stacks them full width (the way on above), a desktop puts Not now at the
-        // left end and Add a passkey at the right end of one row.
+        // C59 O3 / O8-2: the shared answer row: a phone stacks them full width (the way on above), a desktop puts Not now
+        // and Add a passkey side by side as one group at the right end of one row.
         expect(later2.width, 'one width').toBeCloseTo(add.width, 0);
         expect(add.width, 'width of 136 px or more').toBeGreaterThanOrEqual(136);
         if (variant.phone) {
@@ -160,7 +160,8 @@ describe('the access.passkey step, in a real browser', () => {
         } else {
           expect(flow.direction, 'a desktop puts them in a row').toBe('row');
           expect(Math.abs(later2.y - add.y), 'one row').toBeLessThanOrEqual(1);
-          expect(later2.x, 'Not now is at the left').toBeLessThan(add.x);
+          expect(later2.x, 'Not now is left of Add').toBeLessThan(add.x);
+          expect(add.x - (later2.x + later2.width), 'Not now sits right beside Add (one 12px gap)').toBeCloseTo(12, 0);
         }
 
         // Moving through the page by key starts nothing: no ceremony, no leaving.

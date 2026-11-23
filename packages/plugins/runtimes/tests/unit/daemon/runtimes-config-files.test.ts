@@ -17,7 +17,7 @@ type Values = Record<string, Record<string, unknown>>;
 const EMPTY_OWNERS: ComponentSourceLookup = () => ({ list: async () => [], read: async () => undefined });
 
 const BASE: Values = {
-  runtimes: { 'claude-default': { login: 'claude-you', profile: 'default', agent: true } },
+  runtimes: { 'claude-default': { login: 'claude-you', profile: 'default' } },
   profiles: { default: { contents: ['modelSets/heavy'] } },
   'model-sets': { heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
 };
@@ -71,7 +71,7 @@ describe('the model-in-effect adapter', () => {
             Object.entries(
               {
                 ...BASE,
-                runtimes: { 'glm-work': { login: 'glm', profile: 'default', agent: false } },
+                runtimes: { 'glm-work': { login: 'glm', profile: 'default' } },
               }[(def as unknown as { collection: string }).collection] ?? {},
             ),
           ),

@@ -160,7 +160,7 @@ describe('PairingScreen arrival', () => {
     const screen = await screenWith({ arrival: PREFILLED, onArrivalTaken: () => (taken += 1) });
 
     expect(screen.container.textContent).toContain('Pair this device?');
-    expect(screen.container.textContent).toContain('Its name shows once paired.');
+    expect(screen.container.textContent).toContain('Pairing directly with daemon.example.test.');
     expect(screen.container.textContent).toContain('daemon.example.test');
     expect(screen.container.textContent).toContain('daemon-a');
     // The one-time code is never rendered, and the address bar is emptied of it.
@@ -775,23 +775,33 @@ describe('PairingScreen never shows the loopback address of a relayed daemon', (
   it('confirms with "through the relay" and no address, and keeps the fingerprint behind Details', async () => {
     const screen = await screenWith({ arrival: loopbackArrival, sameMachine: false });
 
-    expect(screen.container.textContent).toContain('through the relay');
+    // Another device is not "this computer": the line names the target and says how it is reached, nothing more.
+    const line = must(screen.container.querySelector('[data-daemon-path]'), 'the machine line');
+    expect(line.textContent).toBe('Connecting to the machine through the relay. Details');
+    expect(screen.container.textContent).not.toContain('this computer');
     expect(screen.container.textContent).not.toContain('127.0.0.1');
     expect(screen.container.textContent).not.toContain('7617');
-    const details = must(screen.container.querySelector('details[data-pair-details]'), 'the Details toggle');
-    expect(details.hasAttribute('open')).toBe(false);
-    expect(details.querySelector('summary')?.textContent).toBe('Details');
-    expect(details.textContent).toContain(LOOPBACK_SEED.daemonId);
-    await interact(() => (details as HTMLDetailsElement).setAttribute('open', ''));
-    expect(details.hasAttribute('open')).toBe(true);
+    // ONE line, and a small "Details" link on its end: the fingerprint is in the page but hidden until the link is pressed.
+    const details = must(screen.container.querySelector('[data-pair-details]'), 'the Details block');
+    const fingerprint = must(details.querySelector<HTMLElement>('[data-pair-fingerprint]'), 'the fingerprint');
+    const toggle = must(details.querySelector('button'), 'the Details link');
+    expect(toggle.textContent).toBe('Details');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(fingerprint.hidden).toBe(true);
+    expect(fingerprint.textContent).toContain(LOOPBACK_SEED.daemonId);
+    await interact(() => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(fingerprint.hidden).toBe(false);
     await screen.unmount();
   });
 
   it("says it is direct, with the address, when the page runs on the daemon's own machine", async () => {
     const screen = await screenWith({ arrival: loopbackArrival, sameMachine: true });
 
-    expect(screen.container.textContent).toContain('127.0.0.1:7617');
-    expect(screen.container.textContent).toContain('direct');
+    // On the daemon's own machine the line is the direct one, with its address: never the relay wording.
+    const line = must(screen.container.querySelector('[data-daemon-path]'), 'the machine line');
+    expect(line.textContent).toBe('Pairing directly with 127.0.0.1:7617. Details');
+    expect(screen.container.textContent).not.toContain('Connecting to the machine');
     expect(screen.container.textContent).not.toContain('through the relay');
     await screen.unmount();
   });

@@ -6,7 +6,6 @@ export const pickerAccount = (overrides: Partial<PickerAccount> & { wrapper: str
   id: `rt-${overrides.wrapper}`,
   displayName: overrides.wrapper,
   kind: overrides.wrapper.startsWith('codex') ? 'codex' : 'claude',
-  agent: true,
   credentialId: `login-${overrides.wrapper}`,
   defaultModel: null,
   models: [],

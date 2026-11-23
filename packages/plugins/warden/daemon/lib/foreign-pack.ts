@@ -57,7 +57,6 @@ interface BudgetPeriod {
 export interface FleetRuntimeView {
   readonly name: string;
   readonly wrapper: string;
-  readonly agent: boolean;
   readonly harness: 'claude' | 'codex';
   readonly credential: { readonly id: string; readonly status?: string; readonly store?: string };
   readonly disabled?: unknown;
@@ -242,12 +241,6 @@ export function runtimeRefusal(
   facts: PackFleetFacts,
 ): PackRefusal | undefined {
   const name = runtime.name;
-  if (!runtime.agent)
-    return refusal(
-      'not_agent',
-      `${name} is for using its CLI yourself and cannot run sub-ferrets.`,
-      'Pick an agent runtime.',
-    );
   const tool = facts.tools.find(candidate => candidate.harness === runtime.harness);
   if (tool !== undefined && !tool.installed)
     return refusal(

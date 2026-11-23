@@ -15,7 +15,7 @@ export const ferretChatHref = (daemon: string, ferret: string): string =>
 /** The new-ferret screen (`new`, per daemon): where "+ New ferret" goes. */
 export const newFerretHref = (daemon: string): string => `${daemonHomeHref(daemon)}/new`;
 
-/** The Runtimes tab of this daemon's settings: where a runtime is created. */
-export const runtimesSettingsHref = (daemon: string): string => daemonSettingsHref(daemon, 'runtimes', 'runtimes');
+/** The Sign-ins tab of this daemon's settings (Logins): where a login is added, which is all a runtime needs. */
+export const addLoginHref = (daemon: string): string => daemonSettingsHref(daemon, 'logins', 'sign-ins');
 
 export { daemonHomeHref };

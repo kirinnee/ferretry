@@ -102,7 +102,7 @@ describe('runChange', () => {
     should(world.out.text('report'))
       .match(/Add runtime claude-work/)
       .and.match(/config\.yaml/)
-      .and.match(/claude-work \(Claude Code, agent\) — ready to launch/);
+      .and.match(/claude-work \(Claude Code\) — ready to launch/);
     should(world.out.text('success')).equal('Done.');
     should(world.out.exitCode).be.undefined();
   });

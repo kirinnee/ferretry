@@ -362,7 +362,6 @@ const runtime = (overrides: Partial<FleetManifestRuntime> = {}): FleetManifestRu
   harness: 'claude',
   credential: 'claude-you',
   profile: 'default',
-  agent: false,
   wrapper: '/state/fleet/bin/claude-default',
   models: [
     { id: 'model-one', available: true },

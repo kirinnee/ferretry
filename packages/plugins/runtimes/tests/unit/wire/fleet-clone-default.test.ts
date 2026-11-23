@@ -31,26 +31,33 @@ const claude = (name: string): CloneAgentRuntime => ({ name, harness: 'claude' }
 const codex = (name: string): CloneAgentRuntime => ({ name, harness: 'codex' });
 
 describe('cloneAgentRuntimes', () => {
-  it('should list only agent runtimes, sorted, with the family of their login unless they name one', () => {
+  it('should list every runtime, sorted, with the family of their login unless they name one', () => {
     // Act
     const actual = cloneAgentRuntimes(
       bundleWith({
-        'codex-work': { credential: 'codex-work', profile: 'p', agent: true },
-        'claude-b': { credential: 'claude-you', profile: 'p', agent: true },
-        helper: { credential: 'claude-you', profile: 'p', agent: false },
-        'claude-a': { credential: 'claude-you', profile: 'p', agent: true, harness: 'claude-code' },
+        'codex-work': { credential: 'codex-work', profile: 'p' },
+        'claude-b': { credential: 'claude-you', profile: 'p' },
+        helper: { credential: 'claude-you', profile: 'p' },
+        'claude-a': { credential: 'claude-you', profile: 'p', harness: 'claude-code' },
         plain: { credential: 'claude-you', profile: 'p' },
-        dual: { credential: 'claude-you', profile: 'p', agent: true, harness: 'codex' },
+        dual: { credential: 'claude-you', profile: 'p', harness: 'codex' },
       }),
     );
 
     // Assert
-    should(actual).deepEqual([claude('claude-a'), claude('claude-b'), codex('codex-work'), codex('dual')]);
+    should(actual).deepEqual([
+      claude('claude-a'),
+      claude('claude-b'),
+      codex('codex-work'),
+      codex('dual'),
+      claude('helper'),
+      claude('plain'),
+    ]);
   });
 
   it('should skip a runtime whose family cannot be told instead of guessing', () => {
     // Act
-    const actual = cloneAgentRuntimes(bundleWith({ lost: { credential: 'gone', profile: 'p', agent: true } }));
+    const actual = cloneAgentRuntimes(bundleWith({ lost: { credential: 'gone', profile: 'p' } }));
 
     // Assert
     should(actual).deepEqual([]);

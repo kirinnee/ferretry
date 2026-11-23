@@ -98,7 +98,6 @@ const OPTIONAL_ON = {
         harness: 'claude-code',
         credential: { id: 'login-claude', store: 'host', status: 'ready' },
         profile: 'Default',
-        agent: true,
         stack: {
           harness: 'claude-code',
           available: { available: true },

@@ -246,11 +246,13 @@ export type FleetManifestAccount = z.infer<typeof FleetManifestAccountSchema>;
  * Published beside `accounts`. The id is the same opaque join key an account's is and, as for an account,
  * `wrapper` is the generated executable's absolute path; {@link wrapperNameOf} recovers its name.
  *
+ * A manifest written before a runtime lost its `agent` flag still reads: the field is dropped, nothing is migrated.
+ *
  * `models` uses the published model shape, so a model this runtime's credential cannot use is carried
  * as `available: false` with its reason (K8) instead of disappearing.
  */
 export const FleetManifestRuntimeSchema = z
-  .strictObject({
+  .object({
     id: AccountIdSchema,
     /** The runtime's name: the word a person types. */
     name: NonEmptyString,
@@ -259,8 +261,6 @@ export const FleetManifestRuntimeSchema = z
     credential: NonEmptyString,
     /** The profile's name in the configuration. */
     profile: NonEmptyString,
-    /** "Ferretry launches this as an agent" (R3). Only an agent runtime may start unattended. */
-    agent: z.boolean(),
     wrapper: NonEmptyString,
     models: z.array(FleetManifestModelSchema).readonly(),
     /** The model the runtime uses when nobody names one, or `null` when its profile has no model set. */

@@ -81,7 +81,6 @@ export const runtime = (overrides: Partial<RuntimeView> & { name: string }): Run
   harness: 'claude-code',
   credential: { id: 'claude-personal', store: 'host', label: 'personal', status: 'ready' },
   profile: 'Default',
-  agent: false,
   stack: stack('claude-code'),
   modelSet: modelSet(
     [
@@ -119,7 +118,6 @@ export const RUNTIMES: RuntimeCatalog = RuntimeCatalogSchema.parse({
     runtime({
       name: 'claude-agent',
       profile: 'Agent work',
-      agent: true,
       fixedLayer: {
         agentPermissions: 'auto',
         entries: [

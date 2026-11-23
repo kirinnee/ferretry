@@ -21,7 +21,6 @@ const READY = {
     harness: 'claude-code',
     login: 'oauth',
     profile: 'plain',
-    agent: true,
     launch: { available: true },
   },
 } as unknown as ResolveResult;

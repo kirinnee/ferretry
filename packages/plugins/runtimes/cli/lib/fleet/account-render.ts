@@ -57,8 +57,7 @@ export function renderChangeView(view: AccountChangeView): string {
         'Runtimes after this change:',
         ...indent(
           preview.runtimes.map(runtime => {
-            const kind = runtime.agent ? `${HARNESS_LABEL[runtime.harness]}, agent` : HARNESS_LABEL[runtime.harness];
-            return `${runtime.name} (${kind}) — ${unavailable(runtime.launch) ?? 'ready to launch'}`;
+            return `${runtime.name} (${HARNESS_LABEL[runtime.harness]}) — ${unavailable(runtime.launch) ?? 'ready to launch'}`;
           }),
         ),
       );

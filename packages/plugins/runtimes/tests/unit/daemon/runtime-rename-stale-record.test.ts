@@ -9,7 +9,7 @@ import type { RuntimeFile } from '../../../contract/index.ts';
 import { createRuntimesApi } from '../../../daemon/lib/service/runtimes-api.ts';
 import { runtimeStartAnswer } from '../../../daemon/lib/service/runtime-start-answer.ts';
 
-const FILE = { login: 'main', profile: 'default', agent: true } as unknown as RuntimeFile;
+const FILE = { login: 'main', profile: 'default' } as unknown as RuntimeFile;
 const logins = {
   list: async () => ({ logins: [{ id: 'main', harness: 'claude-code', status: { word: 'ready' } }] }) as never,
 };

@@ -7,7 +7,8 @@
  *   &arrival=link|cold|broken   a pairing link (default), a cold open, or a link whose redemption fails
  *   &offer=open                the machine says the first-passkey window is open (7 minutes left): the success screen offers
  *                              "Add a passkey now" and waits for "Not now"
- *   &scan=camera               a browser that can scan (an idle camera), so the cold page shows all three ways in
+ *   &same=1                    the page runs on the daemon's own machine (`sameMachine`): the line is the direct one, with its address
+ *   &scan=camera              a browser that can scan (an idle camera), so the cold page shows all three ways in
  *   &back=1                    the host gave the page a way back (Back), as `/pair` does when reached from Settings or the first run
  *   &motion=reduced             the app's own Motion = Reduced (`<html data-motion="reduced">`)
  *   &scene=export              ONLY the cheering ferret, imported from the Access app's export (`FerretMascot`, which the
@@ -99,7 +100,7 @@ if (params.get('scene') === 'export') {
       connections={[]}
       selectedDaemonId={null}
       arrival={arrival === 'cold' ? { kind: 'none' } : { kind: 'seed', seed: SEED }}
-      sameMachine={false}
+      sameMachine={params.get('same') === '1'}
       {...(params.get('scan') === 'camera'
         ? { scanHost: { supported: true, scan: async () => await new Promise<string>(() => {}) } }
         : {})}

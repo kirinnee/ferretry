@@ -9,7 +9,7 @@ import { type ComponentType, type ReactNode, useEffect, useRef, useState } from 
 import type { LiveFerretsClient } from '../../lib/client.ts';
 import { Button, Card, cn, FastSwitch, ModelSelect, PanelBody, Textarea } from '../../ui.ts';
 import { FolderPicker } from './folder-picker.tsx';
-import { daemonHomeHref, ferretChatHref, runtimesSettingsHref } from './hrefs.ts';
+import { daemonHomeHref, ferretChatHref, addLoginHref } from './hrefs.ts';
 import {
   canStartFerret,
   emptyNewFerretDraft,
@@ -97,7 +97,7 @@ const MODE_MEANING: Readonly<Record<NewFerretDraft['mode'], string>> = {
 const createBlocker = (draft: NewFerretDraft, submitting: boolean, noRunnableAccount: boolean): string | null => {
   if (submitting) return null;
   if (draft.runtime.trim() === '') {
-    return noRunnableAccount ? 'No runtime can run a ferret yet — add one first.' : 'Choose a runtime first.';
+    return noRunnableAccount ? 'No runtime can run a ferret yet — add a login first.' : 'Choose a runtime first.';
   }
   if (draft.folder.trim() === '') return 'Choose the folder the agent works in first.';
   return draft.mode === 'auto' && draft.prompt.trim() === '' ? 'Say what you want the agent to do first.' : null;
@@ -206,10 +206,7 @@ export function NewFerretPage({
     labelId: RUNTIME_LABEL_ID,
     fallbackPlaceholder: `e.g. ${FIRST_RUN_RUNTIME}`,
     noAccounts: (
-      <NoFerretAccounts
-        onOpenSettings={() => onNavigate(runtimesSettingsHref(daemon))}
-        onShown={setNoRunnableAccount}
-      />
+      <NoFerretAccounts onOpenSettings={() => onNavigate(addLoginHref(daemon))} onShown={setNoRunnableAccount} />
     ),
     ...(initialAgent === undefined ? {} : { preferred: initialAgent }),
   };
@@ -493,10 +490,10 @@ function NoFerretAccounts({
       data-new-ferret-no-accounts=""
     >
       <p className="m-0 min-w-[14rem] flex-1 text-ui leading-base text-fg-soft">
-        No runtime on this machine can run ferrets yet. Add an agent runtime in Settings › Runtimes.
+        No runtime on this machine can run ferrets yet. Add a login (Claude Code or Codex) and it appears here, ready.
       </p>
       <Button onClick={onOpenSettings} type="button" variant="primary">
-        Create a runtime
+        Add a login
       </Button>
     </div>
   );

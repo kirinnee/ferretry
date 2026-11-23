@@ -24,7 +24,7 @@ import { cleanupWorlds, fleetWorld } from '../../unit/support/fleet-world.ts';
 afterEach(cleanupWorlds);
 
 const CONFIG = {
-  runtimes: { 'claude-default': { login: 'claude-you', profile: 'default', agent: true } },
+  runtimes: { 'claude-default': { login: 'claude-you', profile: 'default' } },
   profiles: { default: { contents: ['modelSets/heavy'] } },
   'model-sets': { heavy: { models: ['claude-opus-5-5', 'claude-sonnet-5-5'], default: 'claude-opus-5-5' } },
 };

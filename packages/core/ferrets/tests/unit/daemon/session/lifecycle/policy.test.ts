@@ -418,15 +418,27 @@ describe('session lifecycle policy', () => {
     const contradicted = sessionPaneEnvironment(id, { FY_SESSION_ID: 'somebody-else' }, 'auto');
 
     // Assert
-    should(withNothingStored).deepEqual({ FY_HYPERMEDIA: '0', FY_SESSION_ID: 'session-1' });
+    should(withNothingStored).deepEqual({ FY_HYPERMEDIA: '0', FY_SESSION_MODE: 'auto', FY_SESSION_ID: 'session-1' });
     should(beside).deepEqual({
       FY_HYPERMEDIA: '0',
+      FY_SESSION_MODE: 'auto',
       FY_SESSION_BOARD_CAPABILITY: 'secret',
       TASK_BOARD: 'board-7',
       FY_SESSION_TOKEN: 'secret',
       FY_SESSION_ID: 'session-1',
     });
-    should(contradicted).deepEqual({ FY_HYPERMEDIA: '0', FY_SESSION_ID: 'session-1' });
+    should(contradicted).deepEqual({ FY_HYPERMEDIA: '0', FY_SESSION_MODE: 'auto', FY_SESSION_ID: 'session-1' });
+    // The mode is the record's, explicit on every launch: a stored `auto` cannot turn an interactive launch autonomous.
+    should(sessionPaneEnvironment(id, { FY_SESSION_MODE: 'auto' }, 'interactive')).have.property(
+      'FY_SESSION_MODE',
+      'interactive',
+    );
+    // A record with NO mode (one from before the mode was a per-launch fact) is `auto`: the pane is told so.
+    should(sessionPaneEnvironment(id, { FY_SESSION_MODE: 'interactive' }, undefined)).have.property(
+      'FY_SESSION_MODE',
+      'auto',
+    );
+    should(sessionPaneEnvironment(id, {}, undefined)).deepEqual(sessionPaneEnvironment(id, {}, 'auto'));
     // Hypermedia defaults by mode — on for interactive, off for auto or unknown — and a stored switch wins.
     should(sessionPaneEnvironment(id, {}, 'interactive')).have.property('FY_HYPERMEDIA', '1');
     should(sessionPaneEnvironment(id, {}, 'auto')).have.property('FY_HYPERMEDIA', '0');
@@ -434,6 +446,7 @@ describe('session lifecycle policy', () => {
     should(sessionPaneEnvironment(id, { FY_HYPERMEDIA: '0' }, 'interactive')).have.property('FY_HYPERMEDIA', '0');
     should(sessionPaneEnvironment(id, { FY_HYPERMEDIA: '0' }, 'interactive')).deepEqual({
       FY_HYPERMEDIA: '0',
+      FY_SESSION_MODE: 'interactive',
       FY_SESSION_ID: 'session-1',
     });
     // The name is a wire contract with the CLI, not a local choice, so it is pinned here too.
@@ -447,6 +460,7 @@ describe('session lifecycle policy', () => {
       }),
     ).deepEqual({
       FY_HYPERMEDIA: '1',
+      FY_SESSION_MODE: 'interactive',
       FY_MEDIA_DIR: '/home/me/.fy/state/sessions/session-1/media',
       FY_QUESTION_FILE: '/home/me/.fy/state/sessions/session-1/question-asked.json',
       FY_SESSION_ID: 'session-1',

@@ -95,6 +95,7 @@ import {
   type FerretDetails,
 } from '../../../contract/index.ts';
 import { effectiveMode, type FerretRegistry, type FerretFilter } from '../registry/registry.ts';
+import { launchMode } from '../session/peers/fleet.ts';
 import { STOP_UNCONFIRMED, withStampedLabel } from './restart-guards.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { resumeTurnAuthor } from '../session/resume/policy.ts';
@@ -1165,7 +1166,7 @@ export class FerretsService implements FerretsApi {
       ...(request.pack === undefined ? {} : { pack: request.pack }),
       role,
       harness: harnessKey,
-      mode: request.options?.mode ?? 'auto',
+      mode: launchMode(request.options?.mode),
       birth: birthOf(origin),
       runner: 'tmux',
       ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
@@ -1615,7 +1616,7 @@ export class FerretsService implements FerretsApi {
         ? undefined
         : {
             ...(message === undefined ? {} : { message }),
-            mode: starting.mode ?? 'auto',
+            mode: launchMode(starting.mode),
             ...(author === undefined ? {} : { by: author }),
           },
       { carried: options.onCarried, bound: bound.value },
@@ -2222,9 +2223,10 @@ export class FerretsService implements FerretsApi {
     const ownCompactAt =
       (await this.ports.session?.compactAt?.(record.id).catch(() => undefined)) ??
       this.registry.detailsOf(record.id)?.options?.compactAt;
-    // Resolved ONCE (the record's own, else a converted ferret's persisted start option): the harness's question tool,
-    // the pane's FY_SESSION_MODE and the derived launch switches all read this one fact.
-    const mode = effectiveMode(record, this.registry.detailsOf(record.id));
+    // Resolved ONCE (the record's own, else a converted ferret's persisted start option, else `auto`: `launchMode` owns
+    // that default): the harness's question tool, the pane's FY_SESSION_MODE and the derived launch switches all read
+    // this one fact, so a record with no mode at all is told `auto` and gets the autonomous layer.
+    const mode = launchMode(effectiveMode(record, this.registry.detailsOf(record.id)));
     const base: Omit<LaunchSpec, 'parts'> = {
       ferret: record.id,
       name: record.name,
@@ -2807,6 +2809,9 @@ export class FerretsService implements FerretsApi {
     // The ferret's mode (v4 parity: the pane is handed FY_SESSION_MODE, which the wrappers and `instructions` read) goes
     // in AFTER the parts: it is the record's own fact, the same one the harness decided its question tool from
     // (`LaunchSpec.mode`), so no part or login file can make the pane say something else.
+    // A runtime wrapper applies its autonomous layer ONLY for `auto`, so a value a login file or a part carried is cleared
+    // first: an interactive launch (or one with no recorded mode) can never read as autonomous.
+    delete env['FY_SESSION_MODE'];
     Object.assign(env, sessionModeSwitch(mode));
     // Whether it is a helper (`FY_SUB_FERRET`) is the record's own fact too: with it the wrapper gives the pane the
     // Sub-ferret section, without it every helper would be handed the lead's Notify, Board and Agenda text.

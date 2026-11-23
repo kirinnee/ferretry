@@ -805,24 +805,30 @@ export type LayeredProfile = z.infer<typeof LayeredProfileSchema>;
  * out, it is the one its profile is scoped to, else the login's own `harness` (`./scope.ts`
  * `runtimeHarness`).
  */
-const RuntimeSchema = z.strictObject({
-  credential: CredentialIdSchema,
-  profile: ComponentNameSchema,
-  harness: HarnessKindSchema.optional(),
-  /** The shell item this runtime enters (Q18), carried so a runtime file's `shell` survives a change that rewrites it. */
-  shell: NonEmptyString.optional(),
-  /** "Ferretry launches this as an agent" (R3): only these get the fixed layer and start unattended. */
-  agent: z.boolean().default(false),
-  /** Switched off without deleting it (`./disabled.ts`). */
-  disabled: DisabledSchema.optional(),
-  /**
-   * Where a runtime's ferret's harness compacts its own conversation, in tokens, or `auto` for the harness's
-   * own trigger (docs/compact-at.md). A ferret's own `compactAt` overrides it. Left out is `auto`.
-   */
-  compactAt: CompactAtSchema.optional(),
-  /** The source's origin key for this runtime, set by Clone: how a repeat copy finds it again. */
-  clonedFromKey: NonEmptyString.optional(),
-});
+const RuntimeSchema = z.preprocess(
+  // A document written before a runtime lost its `agent` flag still says `agent: …`: dropped on read, nothing migrated.
+  input => {
+    if (typeof input !== 'object' || input === null || !('agent' in input)) return input;
+    const { agent: _dropped, ...rest } = input as Record<string, unknown>;
+    return rest;
+  },
+  z.strictObject({
+    credential: CredentialIdSchema,
+    profile: ComponentNameSchema,
+    harness: HarnessKindSchema.optional(),
+    /** The shell item this runtime enters (Q18), carried so a runtime file's `shell` survives a change that rewrites it. */
+    shell: NonEmptyString.optional(),
+    /** Switched off without deleting it (`./disabled.ts`). */
+    disabled: DisabledSchema.optional(),
+    /**
+     * Where a runtime's ferret's harness compacts its own conversation, in tokens, or `auto` for the harness's
+     * own trigger (docs/compact-at.md). A ferret's own `compactAt` overrides it. Left out is `auto`.
+     */
+    compactAt: CompactAtSchema.optional(),
+    /** The source's origin key for this runtime, set by Clone: how a repeat copy finds it again. */
+    clonedFromKey: NonEmptyString.optional(),
+  }),
+);
 export type Runtime = z.infer<typeof RuntimeSchema>;
 
 // ── Advanced ─────────────────────────────────────────────────────────────────────────────────────
@@ -968,13 +974,10 @@ export const AccountModelSchema = z
     // refused here, by name, the same way an unknown credential or profile is.
     if (model.machine.defaultRuntime !== undefined) {
       const named = model.runtimes[model.machine.defaultRuntime];
-      if (named === undefined || !named.agent) {
-        const agentRuntimes = Object.entries(model.runtimes)
-          .filter(([, runtime]) => runtime.agent)
-          .map(([runtimeName]) => runtimeName);
+      if (named === undefined) {
         push({
           code: 'custom',
-          message: `the default runtime for new agents, "${model.machine.defaultRuntime}", is not an agent runtime on this machine (agent runtimes: ${listOf(agentRuntimes)})`,
+          message: `the default runtime for new agents, "${model.machine.defaultRuntime}", is not a runtime on this machine (runtimes: ${listOf(Object.keys(model.runtimes))})`,
           input: model.machine.defaultRuntime,
           path: ['machine', 'defaultRuntime'],
         });
@@ -1054,5 +1057,6 @@ export function parseAccountModel(input: unknown): AccountModel {
  */
 export function resolveDefaultRuntime(model: AccountModel): string | undefined {
   if (model.machine.defaultRuntime !== undefined) return model.machine.defaultRuntime;
-  return model.runtimes[DEFAULT_RUNTIME_NAME]?.agent === true ? DEFAULT_RUNTIME_NAME : undefined;
+  if (model.runtimes[DEFAULT_RUNTIME_NAME] !== undefined) return DEFAULT_RUNTIME_NAME;
+  return Object.keys(model.runtimes).toSorted((left, right) => left.localeCompare(right))[0];
 }

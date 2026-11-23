@@ -2,8 +2,9 @@
  * THE ANSWER ROW of a screen that asks one question: a quiet way out and the one way on, drawn the same everywhere.
  *
  * On a phone the two answers are stacked, each the full width of the container, the way on above the way out. From the
- * desktop breakpoint they share ONE row across the container's width: the way out at the LEFT end, the way on at the RIGHT
- * end (`justify-content: space-between`), both the same size. A lone primary takes the right end, a lone secondary stays at the left (so it does not jump when the primary arrives). The geometry is
+ * desktop breakpoint they are ONE group at the container's RIGHT edge (`justify-content: flex-end`): the way out, then the way
+ * on, side by side, both the same size (the Linear / Stripe onboarding pattern; never one answer on each edge of a wide page). A
+ * lone answer is the same group of one, at the right edge. The geometry is
  * `action-row.css`; a caller passes buttons (`kt-btn`) and never sizes or places them, so no page invents its own row.
  *
  * KEYBOARD ORDER IS THE VISUAL ORDER at both sizes, with no `tabindex` and no CSS `order`: the two answers swap places in the
@@ -45,9 +46,9 @@ const isDesktop = (): boolean =>
   typeof window === 'undefined' || typeof window.matchMedia !== 'function' || window.matchMedia(DESKTOP).matches;
 
 export interface ActionRowProps extends Omit<HTMLAttributes<HTMLDivElement>, 'children'> {
-  /** The quiet answer ("Not now", "Back"): the left end on a desktop, below the primary on a phone. */
+  /** The quiet answer ("Not now", "Back"): beside the primary, on its left, on a desktop; below the primary on a phone. */
   readonly secondary?: ReactNode;
-  /** The answer that moves on ("Pair this device", "Continue"): the right end on a desktop, on top on a phone. */
+  /** The answer that moves on ("Pair this device", "Continue"): the right-most button on a desktop, on top on a phone. */
   readonly primary?: ReactNode;
 }
 
@@ -73,12 +74,7 @@ export function ActionRow({ secondary, primary, className, ...rest }: ActionRowP
   const first = <Fragment key={desktop ? 'secondary' : 'primary'}>{desktop ? secondary : primary}</Fragment>;
   const second = <Fragment key={desktop ? 'primary' : 'secondary'}>{desktop ? primary : secondary}</Fragment>;
   return (
-    <div
-      {...rest}
-      ref={row}
-      className={cn('fy-action-row', primary === undefined && 'fy-action-row--start', className)}
-      data-action-row=""
-    >
+    <div {...rest} ref={row} className={cn('fy-action-row', className)} data-action-row="">
       {[first, second]}
     </div>
   );

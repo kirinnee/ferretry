@@ -16,12 +16,12 @@ import {
 } from '../../../daemon/lib/account/runtimes-model.ts';
 
 const runtime = (overrides: Partial<RuntimeFile> = {}): RuntimeFile =>
-  ({ login: 'claude-you', profile: 'default', agent: false, ...overrides }) as RuntimeFile;
+  ({ login: 'claude-you', profile: 'default', ...overrides }) as RuntimeFile;
 
 const profile = (contents: readonly string[] = []): ProfileFile => ({ contents: [...contents] }) as ProfileFile;
 
 const files = (overrides: Partial<RuntimesFiles> = {}): RuntimesFiles => ({
-  runtimes: new Map([['claude-default', runtime({ agent: true })]]),
+  runtimes: new Map([['claude-default', runtime({})]]),
   profiles: new Map([['default', profile(['modelSets/heavy'])]]),
   modelSets: new Map([['heavy', { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' }]]),
   settings: undefined,
@@ -39,7 +39,6 @@ describe('the model Runtimes assembles from its own files', () => {
     expect(assembled.model.runtimes['claude-default']).toMatchObject({
       credential: 'claude-you',
       profile: 'default',
-      agent: true,
     });
     expect(assembled.model.profiles.default?.layers).toEqual(['modelSets/heavy']);
     expect(assembled.model.components.modelSets.heavy?.default).toBe('claude-opus-5-5');
@@ -144,7 +143,7 @@ describe('the model Runtimes assembles from its own files', () => {
       files({
         logins: [sampleLogin('claude-you', { store: 'ferretry' })],
         runtimes: new Map([
-          ['claude-default', runtime({ agent: true })],
+          ['claude-default', runtime({})],
           ['orphan', runtime({ login: 'gone' })],
         ]),
         settings: { defaultRuntime: 'orphan' },
@@ -170,7 +169,7 @@ describe('the model Runtimes assembles from its own files', () => {
 
     expect(assembleRuntimesModel(files()).revision).toBe(first);
     expect(
-      assembleRuntimesModel(files({ runtimes: new Map([['claude-default', runtime({ agent: false })]]) })).revision,
+      assembleRuntimesModel(files({ runtimes: new Map([['claude-default', runtime({ shell: 'sh' })]]) })).revision,
     ).not.toBe(first);
   });
 });
@@ -185,16 +184,14 @@ describe('the edits that move Runtimes’ own files to another model', () => {
   });
 
   it('patches ONLY the key that changed, so a comment or any other key in the file is never touched', () => {
-    const edits = changed(
-      files({ runtimes: new Map([['claude-default', runtime({ agent: true, compactAt: 'auto' })]]) }),
-    );
+    const edits = changed(files({ runtimes: new Map([['claude-default', runtime({ compactAt: 'auto' })]]) }));
 
     expect(edits).toEqual([{ path: 'runtimes/claude-default.yaml', patch: { compactAt: 'auto' } }]);
   });
 
   it('removes a key the next model no longer has, with an undefined patch value', () => {
     const withShell = assembleRuntimesModel(
-      files({ runtimes: new Map([['claude-default', runtime({ agent: true, shell: 'nix' })]]) }),
+      files({ runtimes: new Map([['claude-default', runtime({ shell: 'nix' })]]) }),
     ).model;
 
     expect(ownedFileEdits(withShell, before)).toEqual([
@@ -206,7 +203,7 @@ describe('the edits that move Runtimes’ own files to another model', () => {
     const edits = changed(
       files({
         runtimes: new Map([
-          ['claude-default', runtime({ agent: true })],
+          ['claude-default', runtime({})],
           ['codex-work', runtime({ login: 'codex-you', harness: 'codex', profile: 'extra' })],
         ]),
         profiles: new Map([
@@ -223,24 +220,35 @@ describe('the edits that move Runtimes’ own files to another model', () => {
     expect(edits).toEqual([
       {
         path: 'runtimes/codex-work.yaml',
-        patch: { login: 'codex-you', profile: 'extra', harness: 'codex', agent: false },
+        patch: { login: 'codex-you', profile: 'extra', harness: 'codex' },
       },
       { path: 'profiles/extra.yaml', patch: { contents: [] } },
     ]);
   });
 
   it('removes the file of a runtime that is gone, and never removes runtimes.yaml', () => {
-    const none = assembleRuntimesModel(files({ runtimes: new Map() })).model;
+    // A ready login always has a runtime (derived), so the login is signed out for the runtime to be truly gone.
+    const signedOut = sampleLogin('claude-you', {
+      store: 'ferretry',
+      status: {
+        word: 'needs_sign_in',
+        label: 'Needs sign-in',
+        reason: 'access_current',
+        explanation: 'Sign in.',
+        lastCheckInconclusive: false,
+      },
+    });
+    const none = assembleRuntimesModel(files({ runtimes: new Map(), logins: [signedOut] })).model;
 
     expect(ownedFileEdits(before, none)).toEqual([{ path: 'runtimes/claude-default.yaml', remove: true }]);
     expect([...ownedFileBodies(none).keys()]).toContain('runtimes.yaml');
   });
 
   it('carries a rename as a new file written whole and the old one removed', () => {
-    const renamed = changed(files({ runtimes: new Map([['claude-main', runtime({ agent: true })]]) }));
+    const renamed = changed(files({ runtimes: new Map([['claude-main', runtime({})]]) }));
 
     expect(renamed).toEqual([
-      { path: 'runtimes/claude-main.yaml', patch: { login: 'claude-you', profile: 'default', agent: true } },
+      { path: 'runtimes/claude-main.yaml', patch: { login: 'claude-you', profile: 'default' } },
       { path: 'runtimes/claude-default.yaml', remove: true },
     ]);
   });

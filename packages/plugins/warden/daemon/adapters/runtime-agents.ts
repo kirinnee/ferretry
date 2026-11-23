@@ -21,14 +21,12 @@ export function runtimesWardenAgents(
     accounts: async (): Promise<readonly CoreAccount[]> => {
       const api = runtimes();
       if (api === undefined) return [];
-      return (await api.catalog())
-        .filter(runtime => runtime.agent)
-        .map(runtime => ({
-          id: runtime.id,
-          agent: runtime.name,
-          mode: 'auto' as const,
-          available: runtime.disabled === undefined,
-        }));
+      return (await api.catalog()).map(runtime => ({
+        id: runtime.id,
+        agent: runtime.name,
+        mode: 'auto' as const,
+        available: runtime.disabled === undefined,
+      }));
     },
   };
   // The default stands in for an owner who never chose a login, so it is offered only when it is one of the agent runtimes
@@ -49,9 +47,7 @@ export function runtimesWardenAgents(
       ),
     ]);
     if (catalog === undefined || fallback === undefined) return undefined;
-    return catalog.some(runtime => runtime.agent && runtime.disabled === undefined && runtime.name === fallback)
-      ? fallback
-      : undefined;
+    return catalog.some(runtime => runtime.disabled === undefined && runtime.name === fallback) ? fallback : undefined;
   };
   return new FleetWardenAgents(inventory, eligibleDefault);
 }

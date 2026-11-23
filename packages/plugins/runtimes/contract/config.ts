@@ -106,21 +106,32 @@ export const RuntimesFileSchema = z.strictObject({
 });
 export type RuntimesFile = z.infer<typeof RuntimesFileSchema>;
 
+/**
+ * A runtime file written before a runtime lost its `agent` flag still says `agent: …`: the key is dropped when the file is
+ * read (nothing is migrated), and every other unknown key is still refused.
+ */
+const withoutOldAgentFlag = (input: unknown): unknown => {
+  if (typeof input !== 'object' || input === null || !('agent' in input)) return input;
+  const { agent: _dropped, ...rest } = input as Record<string, unknown>;
+  return rest;
+};
+
 /** `config/runtimes/<name>.yaml`: one login and one profile, launched under the file's name (R1). */
-export const RuntimeFileSchema = z.strictObject({
-  login: LoginRefSchema,
-  profile: ItemNameSchema,
-  /** For a login that drives both harnesses: which one this runtime runs. Left out: the profile's, else the login's. */
-  harness: HarnessKeySchema.optional(),
-  /** The shell item this runtime enters (Q18): a ferret enters a shell only when its runtime names one. */
-  shell: ItemNameSchema.optional(),
-  /** "Ferretry launches this as an agent" (R3): only these get the fixed layer and start unattended. */
-  agent: z.boolean().default(false),
-  disabled: DisabledConfigSchema.optional(),
-  compactAt: CompactAtSchema.optional(),
-  /** The source's origin key for this runtime, set by Clone: how a repeat copy finds it again. */
-  clonedFromKey: NonEmptyStringSchema.optional(),
-});
+export const RuntimeFileSchema = z.preprocess(
+  withoutOldAgentFlag,
+  z.strictObject({
+    login: LoginRefSchema,
+    profile: ItemNameSchema,
+    /** For a login that drives both harnesses: which one this runtime runs. Left out: the profile's, else the login's. */
+    harness: HarnessKeySchema.optional(),
+    /** The shell item this runtime enters (Q18): a ferret enters a shell only when its runtime names one. */
+    shell: ItemNameSchema.optional(),
+    disabled: DisabledConfigSchema.optional(),
+    compactAt: CompactAtSchema.optional(),
+    /** The source's origin key for this runtime, set by Clone: how a repeat copy finds it again. */
+    clonedFromKey: NonEmptyStringSchema.optional(),
+  }),
+);
 export type RuntimeFile = z.infer<typeof RuntimeFileSchema>;
 
 /** `config/profiles/<name>.yaml`: an ordered stack of layers, OLDEST FIRST; a newer layer overrides an older one (P2). */

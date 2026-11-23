@@ -10,7 +10,6 @@ const NOW = Date.parse('2026-11-08T12:00:00Z');
 const runtimeFile = (over: Partial<RuntimeFile> = {}): RuntimeFile => ({
   login: 'main',
   profile: 'default',
-  agent: true,
   ...over,
 });
 
@@ -54,7 +53,7 @@ describe('createRuntimesApi — list and get', () => {
   it('should list runtimes by name with the harness their login drives and that they can launch', async () => {
     // Arrange
     const runtimes = api({
-      runtimes: { zed: runtimeFile(), 'claude-default': runtimeFile({ agent: false }) },
+      runtimes: { zed: runtimeFile(), 'claude-default': runtimeFile({}) },
     });
 
     // Act
@@ -68,7 +67,6 @@ describe('createRuntimesApi — list and get', () => {
       profile: 'default',
       launch: { available: true },
     });
-    should((await runtimes.get('zed' as never))?.agent).be.true();
     should(await runtimes.get('absent' as never)).be.undefined();
   });
 
@@ -161,20 +159,34 @@ describe('createRuntimesApi — why a start cannot happen', () => {
 
 describe('createRuntimesApi — default runtime', () => {
   it('should use the named default over everything', async () => {
-    should(await api({ defaultSetting: 'zed' }).default()).equal('zed');
+    should(
+      await api({ defaultSetting: 'zed', runtimes: { zed: runtimeFile(), 'claude-default': runtimeFile() } }).default(),
+    ).equal('zed');
   });
 
-  it('should fall back to claude-default only when it is an agent runtime', async () => {
+  it('should read a saved default that is no longer a runtime as unset (2 logins, the saved one needs sign-in)', async () => {
+    // Arrange — "claude-out" was a derived runtime; its login now needs sign-in, so nothing derives it any more.
+    const logins = [loginView({ id: 'claude-two' }), loginView({ id: 'claude-out', word: 'needs_sign_in' })];
+
+    // Act
+    const actual = await api({ runtimes: {}, logins, defaultSetting: 'claude-out' }).default();
+
+    // Assert — the first runtime that can start, not the dangling name
+    should(actual).equal('claude-two');
+  });
+
+  it('should fall back to claude-default, else the first runtime that can launch, else nothing', async () => {
     should(await api().default()).equal('claude-default');
-    should(await api({ runtimes: { 'claude-default': runtimeFile({ agent: false }) } }).default()).be.undefined();
-    should(await api({ runtimes: {} }).default()).be.undefined();
+    // No runtime file: the ready login's own runtime is the default.
+    should(await api({ runtimes: {} }).default()).equal('main');
+    should(await api({ runtimes: {}, logins: [] }).default()).be.undefined();
   });
 });
 
 describe('createRuntimesApi — resolve', () => {
   it('should refuse with unknown when nothing is named and the machine has no default', async () => {
     // Act
-    const actual = await api({ runtimes: {} }).resolve(undefined);
+    const actual = await api({ runtimes: {}, logins: [] }).resolve(undefined);
 
     // Assert
     should(actual).deepEqual({

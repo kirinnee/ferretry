@@ -46,7 +46,7 @@ afterEach(cleanupWorlds);
 const INERT = 'INERT_SIGN_IN_FIXTURE';
 
 const CONFIG = {
-  runtimes: { 'claude-default': { login: 'claude-you', profile: 'default', agent: true } },
+  runtimes: { 'claude-default': { login: 'claude-you', profile: 'default' } },
   profiles: { default: { contents: ['modelSets/heavy'] } },
   'model-sets': { heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
 };
@@ -125,7 +125,6 @@ const put = (name: string, extra: Record<string, unknown> = {}) => ({
     name,
     credential: 'claude-you',
     profile: 'default',
-    agent: true,
     create: true,
     addAnother: true,
     ...extra,
@@ -501,8 +500,8 @@ describe('a real apply through the composed daemon', () => {
       config: {
         ...CONFIG,
         runtimes: {
-          'claude-default': { login: 'claude-you', profile: 'default', agent: true },
-          'claude-second': { login: 'claude-you', profile: 'default', agent: true },
+          'claude-default': { login: 'claude-you', profile: 'default' },
+          'claude-second': { login: 'claude-you', profile: 'default' },
         },
       },
     });

@@ -30,6 +30,7 @@ import {
   type RuntimesFile,
 } from '../../../contract/index.ts';
 import { harnessKindOfKey, type HarnessKind } from '../manifest.ts';
+import { deriveRuntimes, withDerived } from './derived-runtimes.ts';
 import {
   type AccountModel,
   AccountModelSchema,
@@ -118,6 +119,8 @@ export interface RuntimesModel {
    * every one was read. While it is not empty NOTHING is written: a home built from it would replace what is there.
    */
   readonly unreadable: readonly string[];
+  /** Plain sentences about a saved setting that was read as unset (a default runtime that is no longer here); they block nothing. */
+  readonly notices: readonly string[];
   /**
    * The environment logins whose variables stand in (Logins withheld their templates or gave none), used or not. Judged
    * against the model a change would WRITE ({@link standInsNamedBy}), never against the model in effect: a change that
@@ -214,7 +217,6 @@ function runtimeOf(file: RuntimeFile): Runtime {
     profile: file.profile,
     ...(file.harness === undefined ? {} : { harness: harnessKindOfKey(file.harness) }),
     ...(file.shell === undefined ? {} : { shell: file.shell }),
-    agent: file.agent,
     ...(file.disabled === undefined ? {} : { disabled: file.disabled }),
     ...(file.compactAt === undefined ? {} : { compactAt: file.compactAt }),
     ...(file.clonedFromKey === undefined ? {} : { clonedFromKey: file.clonedFromKey }),
@@ -252,7 +254,15 @@ function foreignLayers(
  * profile that is not there, a layer naming a component its owner does not have): the caller words it as the files' own
  * problem.
  */
-export function assembleRuntimesModel(files: RuntimesFiles): RuntimesModel {
+export function assembleRuntimesModel(explicit: RuntimesFiles): RuntimesModel {
+  // A ready login with no runtime of its own has one derived beside the files (`derived-runtimes.ts`); the files win.
+  const derived = deriveRuntimes(explicit);
+  const files: RuntimesFiles = {
+    ...explicit,
+    runtimes: withDerived(explicit.runtimes, derived.runtimes),
+    profiles: withDerived(explicit.profiles, derived.profiles),
+    modelSets: withDerived(explicit.modelSets, derived.modelSets),
+  };
   const unreadable: string[] = [];
   const credentials: Record<string, Credential> = {};
   // A login whose variables stand in blocks only a model that names it (see `standInsNamedBy`), so it is kept apart from
@@ -306,13 +316,20 @@ export function assembleRuntimesModel(files: RuntimesFiles): RuntimesModel {
     if (Object.hasOwn(credentials, file.login)) present.set(name, file);
     else unavailable.push({ runtime: name, login: file.login });
   }
-  const defaultRuntime = files.settings?.defaultRuntime;
+  // A saved default that names a runtime that is not here (a derived one whose login needs sign-in, a file removed by hand)
+  // is read as unset, never a reason to refuse the whole model: the first runtime stands in, and a notice says so.
+  const saved = files.settings?.defaultRuntime;
+  const defaultRuntime = saved !== undefined && present.has(saved) ? saved : undefined;
+  const notices: string[] =
+    saved === undefined || defaultRuntime !== undefined
+      ? []
+      : [
+          `The saved default runtime "${saved}" is not available on this machine (its login may need signing in), so the first runtime that can start is used until you pick another.`,
+        ];
   const document = {
     version: 1,
     machine: {
-      ...(defaultRuntime === undefined || unavailable.some(set => set.runtime === defaultRuntime)
-        ? {}
-        : { defaultRuntime }),
+      ...(defaultRuntime === undefined ? {} : { defaultRuntime }),
       ...(files.settings?.autoResume === undefined ? {} : { autoResume: files.settings.autoResume }),
       ...(files.settings?.browserPorts === undefined ? {} : { browserPorts: files.settings.browserPorts }),
       ...(files.settings?.browserFirewallFailure === undefined
@@ -338,13 +355,14 @@ export function assembleRuntimesModel(files: RuntimesFiles): RuntimesModel {
     model,
     unavailable,
     unreadable,
+    notices,
     stoodInLogins,
     sources:
-      files.runtimes.size +
-      files.profiles.size +
-      files.modelSets.size +
-      files.logins.length +
-      (files.settings === undefined ? 0 : 1),
+      explicit.runtimes.size +
+      explicit.profiles.size +
+      explicit.modelSets.size +
+      explicit.logins.length +
+      (explicit.settings === undefined ? 0 : 1),
     revision: createHash('sha256').update(JSON.stringify(model)).digest('hex'),
   };
 }

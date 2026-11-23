@@ -44,7 +44,7 @@ import { browserDeviceName } from '@ferretry/app';
 import { normalizedDeviceName } from '../../lib/device-name.ts';
 import { FerretMascot, type FerretPose } from './ferret-mascot.tsx';
 import { MachineNameField, machineNameChoice } from './machine-name-field.tsx';
-import { ConfirmActions, DeviceNameLine, PairProgress } from './pair-confirm-pieces.tsx';
+import { ConfirmActions, DeviceNameLine, LineWithDetails, PairProgress } from './pair-confirm-pieces.tsx';
 import { PairScanner } from './pair-scanner.tsx';
 import {
   FirstPasskeyOffer,
@@ -672,7 +672,6 @@ function PairingFocus({
    * than as part of it — and a second `<h1>` would be an outline bug outright.
    */
   const Title = embedded ? 'h3' : 'h1';
-  const TargetTitle = embedded ? 'h3' : 'h2';
   const titleClass = embedded
     ? 'm-0 font-display text-title font-bold tracking-display text-fg'
     : 'm-0 font-display text-display font-bold tracking-display text-fg';
@@ -683,18 +682,19 @@ function PairingFocus({
         stage="paired"
         announce={`Connected. Paired with ${stage.path.title}, ${stage.path.path}.`}
       >
-        <div className="fy-pair-arrive flex flex-col items-center gap-2 pb-8 text-center">
+        <div className="fy-pair-arrive flex flex-col items-center gap-2 pb-8 text-center sm:items-start sm:text-left">
           <Title id="pairing-title" ref={doneTitle} tabIndex={-1} className={`${titleClass} outline-none`}>
             Connected
           </Title>
           {/* ONE heading and ONE supporting line, both centred. How it connected (relay or direct) is a detail, behind a tap. */}
-          <p className="m-0 text-ui leading-base text-fg" data-paired-with="">
-            Paired with <span className="font-semibold">{stage.path.title}</span>.
-          </p>
-          <details className="text-meta text-muted" data-paired-details="">
-            <summary className="cursor-pointer py-2">Details</summary>
-            <p className="m-0">Connection: {stage.path.path}.</p>
-          </details>
+          <LineWithDetails
+            tail="."
+            lineProps={{ 'data-paired-with': '' }}
+            detailsProps={{ 'data-paired-details': '' }}
+            details={<>Connection: {stage.path.path}.</>}
+          >
+            Paired with <span className="font-semibold">{stage.path.title}</span>
+          </LineWithDetails>
           {onContinue !== undefined ? (
             <PairedNext
               connection={stage.connection}
@@ -761,9 +761,9 @@ function PairingFocus({
       onClose={onClose}
       announce={busy ? 'Exchanging the one-time code with this daemon…' : ''}
     >
-      <header className={embedded ? 'min-w-0' : 'min-w-0 text-center'}>
+      <header className={embedded ? 'min-w-0' : 'min-w-0 text-center sm:text-left'}>
         {!embedded && (
-          <div className="mb-2 flex items-center justify-center gap-2 text-accent">
+          <div className="mb-2 flex items-center justify-center gap-2 text-accent sm:justify-start">
             <BrandMark size={20} />
             <span className="text-meta font-semibold uppercase tracking-label">Ferretry</span>
           </div>
@@ -773,28 +773,33 @@ function PairingFocus({
         </Title>
       </header>
 
-      <section className="kt-panel p-panel" aria-labelledby="pairing-target">
-        <TargetTitle id="pairing-target" className="sr-only">
-          The daemon this link points at
-        </TargetTitle>
-        {/* A link carries no machine name, only an address: say HOW it will be reached, and show the address only when that is direct. */}
-        <p className="m-0 break-all text-title font-semibold text-fg" data-daemon-path={target.kind}>
-          {target.address === undefined ? target.title : <span className="font-mono">{target.address}</span>}
-        </p>
-        <p className="m-0 mt-1 text-ui text-muted">{target.address === undefined ? target.path : 'direct'}</p>
-        {/* The link is a credential and carries no name: say so, instead of a stand-in that reads like a product name. */}
-        <p className="m-0 mt-1 text-meta text-faint" data-name-after-pairing="">
-          Its name shows once paired.
-        </p>
-        <details className="-mb-3 mt-1 open:mb-0 open:pb-3" data-pair-details="">
-          {/* The 44 px target is the summary's own padding, so the label sits in the middle of it and the card ends one row under it, not a blank band lower. */}
-          <summary className="cursor-pointer py-3 text-ui font-medium text-muted hover:text-accent">Details</summary>
-          <p className="m-0 break-all font-mono text-meta text-faint">
+      {/*
+        ONE FRIENDLY LINE, NOT A CARD (C59 O8-1). The card said "This machine / through the relay / Its name shows once paired": a link
+        carries no name, so it was the same words every time and took the height of a panel. Now it is one sentence, and the machine's
+        fingerprint (and its address, only when direct) sits behind a small link on the end of it.
+      */}
+      <LineWithDetails
+        tail="."
+        lineProps={{ 'data-daemon-path': target.kind }}
+        detailsProps={{ 'data-pair-fingerprint': '' }}
+        details={
+          <>
             <span className="sr-only">Daemon fingerprint: </span>
-            {seed.daemonId}
-          </p>
-        </details>
-      </section>
+            <span className="font-mono">{seed.daemonId}</span>
+          </>
+        }
+      >
+        {target.address === undefined ? (
+          // No address means the machine is reached through the relay (a loopback address seen from another device is never
+          // shown), so the line names the target and never claims it is THIS device. On the daemon's own machine the line is
+          // the direct one below, with its address.
+          `Connecting to the machine ${target.path}.`
+        ) : (
+          <>
+            Pairing directly with <span className="break-all font-mono font-semibold">{target.address}</span>
+          </>
+        )}
+      </LineWithDetails>
 
       <DeviceNameLine
         name={deviceName}
