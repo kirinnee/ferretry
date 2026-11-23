@@ -24,6 +24,7 @@ export {
   type ScanRead,
   useHarnessScan,
   useScan,
+  useScanAhead,
 } from './use-harness-scan.ts';
 export {
   InstalledDemo,

@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   DEFAULT_PICK,
+  foundOn,
   isEmptyPick,
   memoryOfPick,
   pickFromMemory,
@@ -290,5 +291,18 @@ describe('answers the picker already sees', () => {
     const pages = make(['pending', 'pending', 'pending']);
     const state = applyPicked(startRun(pages, new Set()), pages, { on: ['codex'], off: ['claude-code'] });
     expect([...state.notNeeded]).toEqual(['claude-code.installed']);
+  });
+});
+
+describe('"found on this computer" comes from the scan, for the harnesses installed here', () => {
+  test('a harness not installed, or no scan yet, has no note; an installed one says whether a setup is ready to bring over', () => {
+    expect(foundOn(null)).toEqual({});
+    expect(
+      foundOn({
+        'claude-code': { installed: true, empty: false },
+        codex: { installed: false, empty: true },
+      }),
+    ).toEqual({ claude: { ready: true } });
+    expect(foundOn({ codex: { installed: true, empty: true } })).toEqual({ codex: { ready: false } });
   });
 });

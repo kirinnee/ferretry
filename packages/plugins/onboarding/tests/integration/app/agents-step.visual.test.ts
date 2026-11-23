@@ -63,7 +63,7 @@ const VARIANTS = [
 ] as const;
 type Variant = (typeof VARIANTS)[number];
 
-const open = async (variant: Variant) => {
+const open = async (variant: Variant, query = '') => {
   const context = await browser.newContext({
     viewport: { width: variant.width, height: variant.height },
     colorScheme: variant.scheme,
@@ -79,7 +79,7 @@ const open = async (variant: Variant) => {
   tab.setDefaultTimeout(8_000);
   const problems: string[] = [];
   tab.on('pageerror', error => problems.push(error.message));
-  await tab.goto(`${origin}/?theme=studio-${variant.scheme}`);
+  await tab.goto(`${origin}/?theme=studio-${variant.scheme}${query}`);
   await tab.waitForSelector('[data-agent-row="claude"]');
   await tab.waitForTimeout(400);
   return { tab, problems, close: async () => await context.close() };
@@ -109,9 +109,16 @@ for (const variant of VARIANTS)
         expect(before.rows.map(row => row.row)).toEqual(['claude', 'codex', 'gemini', 'others']);
         expect(before.rows.find(row => row.row === 'claude')?.checked).toBe(true);
         expect(before.rows.find(row => row.row === 'gemini')?.disabled).toBe(true);
+        // The scan the flow started when it opened found Claude on this computer (the fake machine has no Codex).
+        await tab.waitForSelector('[data-agent-row="claude"] [data-agent-found]');
+        expect(await tab.locator('[data-agent-found]').count()).toBe(1);
+        // ONE scan for the machine: the chip reads the shared read, it never starts one of its own.
+        expect(await tab.evaluate(() => (window as unknown as { __scanCalls: number }).__scanCalls)).toBe(1);
         expect(before.overflow).toBeLessThanOrEqual(0);
         for (const row of before.rows) expect(row.height, `${row.row} is a 44px target`).toBeGreaterThanOrEqual(44);
         await shot(tab, variant, 'picker');
+        await tab.waitForTimeout(300);
+        expect(await tab.evaluate(() => (window as unknown as { __scanCalls: number }).__scanCalls)).toBe(1);
 
         await tab.locator('[data-agent-row="others"] > label').click();
         await tab.waitForSelector('[data-agent-row="provider-kimi"]');
@@ -160,6 +167,45 @@ for (const variant of VARIANTS)
       }
     });
   });
+
+describe('the chip is only for what is found here', () => {
+  it('is absent when Claude Code is not installed on this computer, and still one scan', async () => {
+    const { tab, close } = await open(VARIANTS[0], '&claude=absent');
+    try {
+      await tab.waitForTimeout(500);
+      expect(await tab.locator('[data-agent-found]').count()).toBe(0);
+      expect(await tab.evaluate(() => (window as unknown as { __scanCalls: number }).__scanCalls)).toBe(1);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('the picker reads only the flow-owned scan, a failed one included', () => {
+  it('a refused read ahead, another scan reader, then the picker again: the picker never asks the machine', async () => {
+    const { tab, close } = await open(VARIANTS[0], '&scan=fail');
+    const calls = (): Promise<number> => tab.evaluate(() => (window as unknown as { __scanCalls: number }).__scanCalls);
+    try {
+      await tab.waitForTimeout(500);
+      // The flow's read was refused; the picker drew without a chip and asked nothing of its own.
+      expect(await tab.locator('[data-agent-found]').count()).toBe(0);
+      expect(await calls()).toBe(1);
+      // Another scan reader (the Claude import Settings page) reads the machine for itself.
+      await tab.locator('[data-scene-to-reader]').click();
+      await tab.waitForSelector('[data-scene-reader]');
+      await tab.waitForTimeout(300);
+      expect(await calls()).toBe(2);
+      // Back to the picker with no retry: it remounts and reads the flow's read, so no third scan.
+      await tab.locator('[data-scene-to-picker]').click();
+      await tab.waitForSelector('[data-agent-row="claude"]');
+      await tab.waitForTimeout(500);
+      expect(await tab.locator('[data-agent-found]').count()).toBe(0);
+      expect(await calls()).toBe(2);
+    } finally {
+      await close();
+    }
+  });
+});
 
 describe('the fixture reads as the page does', () => {
   it('has the harness question only under a ticked provider', async () => {

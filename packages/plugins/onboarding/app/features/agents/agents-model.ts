@@ -32,13 +32,15 @@ export interface AiChoice {
   readonly id: 'claude' | 'codex' | 'gemini';
   readonly title: string;
   readonly line: string;
+  /** The supported harness that runs it (its plugin id); absent when none does yet. */
+  readonly harness?: string;
   /** Why it cannot be picked; absent when it can. */
   readonly coming?: string;
 }
 
 export const AI_CHOICES: readonly AiChoice[] = [
-  { id: 'claude', title: 'Claude', line: 'Anthropic’s Claude, run by Claude Code.' },
-  { id: 'codex', title: 'Codex', line: 'OpenAI’s Codex.' },
+  { id: 'claude', title: 'Claude', line: 'Anthropic’s Claude, run by Claude Code.', harness: 'claude-code' },
+  { id: 'codex', title: 'Codex', line: 'OpenAI’s Codex.', harness: 'codex' },
   { id: 'gemini', title: 'Gemini', line: 'Google’s Gemini.', coming: 'Coming' },
 ];
 
@@ -156,4 +158,26 @@ export function pickFromMemory(memory: Readonly<Record<string, unknown>>): Pick 
   } catch {
     return DEFAULT_PICK;
   }
+}
+
+/** A harness found on this computer; `ready` when it holds a setup (settings, logins, skills) that can be brought over. */
+export interface Found {
+  readonly ready: boolean;
+}
+
+/** What this computer holds of a harness, as the scan read it: installed, and whether it has a setup to bring over. */
+export interface HostTool {
+  readonly installed: boolean;
+  readonly empty: boolean;
+}
+
+/** The "found on this computer" note of each harness that is installed here, from the scan the flow started when it opened. */
+export function foundOn(tools: Readonly<Record<string, HostTool>> | null): Readonly<Record<string, Found>> {
+  if (tools === null) return {};
+  const found: Record<string, Found> = {};
+  for (const choice of AI_CHOICES) {
+    const tool = choice.harness === undefined ? undefined : tools[choice.harness];
+    if (tool?.installed === true) found[choice.id] = { ready: !tool.empty };
+  }
+  return found;
 }

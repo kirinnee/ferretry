@@ -27,7 +27,7 @@
  */
 import { daemonOfClient, useEveryDaemon } from '@ferretry/app';
 import { readPress } from '@ferretry/app/ui';
-import { forgetSetupScanAhead, readSetupScanAhead } from '@ferretry/plugin-runtimes/import-kit';
+import { forgetSetupScanAhead, readSetupScanAhead } from './machine-scan.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { StepSegmentMemory } from '@ferretry/kernel/contract';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';

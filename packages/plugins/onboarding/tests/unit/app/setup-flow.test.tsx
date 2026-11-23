@@ -20,14 +20,17 @@ import {
 import type { StepHost } from '@ferretry/kernel/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { Instant } from '@ferretry/std';
-import { useEffect, useState, type ReactNode } from 'react';
-import { AgentsPage } from '../../../app/features/agents/agents-page.tsx';
+import { REAL_PROVIDER_PRESET_CATALOG } from '@ferretry/plugin-logins/contract/testing';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createAgentsPanel } from '../../../app/features/agents/agents-panel.tsx';
+import { useScan } from '../../../app/features/setup-flow/machine-scan.ts';
 import { createSetupFlow } from '../../../app/features/setup-flow/setup-flow.tsx';
 import { sideOf } from '../../../contract/index.ts';
 import { isComplete } from '../../../daemon/lib/steps.ts';
 import { CLIENT_LATER_KEY } from '../../../app/features/setup-flow/client-later.ts';
 import { CLIENT_LEDGER_KEY } from '../../../app/lib/client-ledger.ts';
 import { fakeDaemon } from '../../fixtures/fake-steps/index.ts';
+import { hostScan } from '../../fixtures/host-scan.ts';
 import { ChoosePage, FinishPage, LookPage, WelcomePage } from '../../fixtures/fake-steps/pages.tsx';
 
 ensureDom();
@@ -157,13 +160,28 @@ function RunLikePage({ step }: { readonly step: StepHost }): ReactNode {
   return <p>run</p>;
 }
 
+/** The machine the flow under test talks to, set by `setup`: the real picker and the scan reader below talk through its client. */
+let flowClient: PluginClient | undefined;
+/** The real AI picker (what the shell mounts), made for the flow's own client. */
+function RealAgentsPage({ step }: { readonly step: StepHost }): ReactNode {
+  const Panel = useMemo(() => createAgentsPanel(must(flowClient, 'a client')), []);
+  return <Panel step={step} />;
+}
+/** Another reader of the machine's scan, as the Settings import is: it reads the machine afresh (`refresh`). */
+function ScanReaderPage({ step }: { readonly step: StepHost }): ReactNode {
+  useScan(must(flowClient, 'a client'), { run: 'settings-import', refresh: true });
+  useEffect(() => step.ready(), [step]);
+  return <p>another scan reader</p>;
+}
+
 const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
   'fake-pack.pick': step => <PickPage step={step} />,
   'fake-pack.alpha': step => <KindLikePage step={step} name="Alpha" />,
   'fake-pack.beta': step => <KindLikePage step={step} name="Beta" />,
   'fake-pack.run': step => <RunLikePage step={step} />,
   'onboarding.name': step => <ReadyPage step={step} />,
-  'onboarding.agents': step => <AgentsPage step={step} readProviders={async () => []} />,
+  'onboarding.agents': step => <RealAgentsPage step={step} />,
+  'fake-pack.scan-reader': step => <ScanReaderPage step={step} />,
   'claude-code.installed': step => <ReadyPage step={step} />,
   'codex.installed': step => <ReadyPage step={step} />,
   'onboarding.appearance': step => <ReadyPage step={step} />,
@@ -181,10 +199,23 @@ const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
   'fake-pack.forgot': step => <ReadyPage step={step} />,
 };
 
+/**
+ * The slot harness hands every placed panel of a plugin the same subject, so a page that must be drawn ONCE (one that asks the
+ * machine on mount) names the one panel that draws it; the other pages are drawn by whichever panel comes first, as before.
+ */
+const DRAWN_BY: Readonly<Record<string, string>> = {
+  'onboarding.agents': 'agents-step',
+  'fake-pack.scan-reader': 'step',
+};
+
 const stepPanel = (plugin: string, id: string): PlacedPanel => ({
   plugin,
   id,
-  view: props => PAGES[String(props.subject)]?.(props.step as StepHost) ?? null,
+  view: props => {
+    const subject = String(props.subject);
+    if ((DRAWN_BY[subject] ?? id) !== id) return null;
+    return PAGES[subject]?.(props.step as StepHost) ?? null;
+  },
 });
 
 interface Machine {
@@ -208,6 +239,8 @@ function setup(options: {
   /** Holds every steps-list read until the promise settles (the test releases it). */
   readonly holdSteps?: Promise<void>;
   readonly peerWaitMs?: number;
+  /** What the machine's scan answers: nothing useful (the default), a refusal, or a Claude Code found here. */
+  readonly scan?: 'fails' | 'finds';
   readonly report?: (message: string) => void;
   /** Holds a daemon answer until the returned promise settles (the test releases it). */
   readonly gate?: (state: string, step: string) => Promise<void> | undefined;
@@ -224,9 +257,11 @@ function setup(options: {
       async call(route: string, request?: { params?: { plugin: string; stepId: string }; body?: { state: string } }) {
         if (route.startsWith('GET /v1/runtimes/setup/scan')) {
           scans.push({ daemon: machine.id, at: reads.length });
-          return {};
+          if (options.scan === 'fails') throw new Error('the scan was refused');
+          return options.scan === 'finds' ? hostScan(true) : {};
         }
         if (route === 'GET /v1/claude-code/update' || route === 'GET /v1/codex/update') return null;
+        if (route === 'GET /v1/logins/presets') return REAL_PROVIDER_PRESET_CATALOG;
         if (route === 'GET /v1/onboarding') {
           reads.push({ daemon: machine.id, init: request });
           if (options.hangReads?.has(machine.id) === true) return new Promise(() => undefined);
@@ -251,6 +286,7 @@ function setup(options: {
     noteClientDaemon(client, machine.id);
     clients.set(machine.id, client);
   }
+  flowClient = clients.get(must(machines[0], 'a machine').id);
   const writes: string[] = [];
   const store = options.storage ?? new Map<string, string>();
   const storage = {
@@ -1340,5 +1376,66 @@ describe("the machine's own setup is read the moment the flow opens (C59 O8-15)"
     view = await mount(run.tree);
     await settle();
     expect(run.scans).toEqual([]);
+  });
+});
+
+describe('the AI picker reads only the scan the flow started (O8-15 B2)', () => {
+  /** The picker first, then a page that is another reader of the machine's scan (the Settings import is one). */
+  const pickerThenReader = (): Machine => ({
+    id: A,
+    name: 'Studio',
+    steps: [
+      ['onboarding', 'agents', 2],
+      ['fake-pack', 'scan-reader', 20],
+    ].map(([plugin, id, order]) => ({
+      plugin: String(plugin),
+      id: String(id),
+      title: String(id),
+      order: Number(order),
+      side: 'daemon' as const,
+      group: String(plugin),
+      stepHost: true,
+      state: 'pending' as const,
+    })),
+  });
+  const chips = (): (string | null | undefined)[] =>
+    [...(view?.container.querySelectorAll('[data-agent-found]') ?? [])].map(chip =>
+      chip.closest('[data-agent-row]')?.getAttribute('data-agent-row'),
+    );
+
+  it('a read ahead that FAILED: picker, another scan reader, picker again: the picker asks the machine for nothing', async () => {
+    const run = setup({ machines: [pickerThenReader()], scan: 'fails' });
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('onboarding.agents');
+    // The flow's own read, and nothing from the picker.
+    expect(run.scans).toHaveLength(1);
+    await next();
+    await settle();
+    expect(pageKey()).toBe('fake-pack.scan-reader');
+    // The other reader asks for itself (the flow draws the page more than once while it slides in: every draw asks).
+    const withReader = run.scans.length;
+    expect(withReader).toBeGreaterThan(1);
+    await press('[data-step-back]');
+    await settle();
+    expect(pageKey()).toBe('onboarding.agents');
+    expect(chips()).toEqual([]);
+    expect(run.scans).toHaveLength(withReader);
+  });
+
+  it('a read ahead that FOUND Claude: the chip stands through another scan reader, and the picker asks nothing', async () => {
+    const run = setup({ machines: [pickerThenReader()], scan: 'finds' });
+    view = await mount(run.tree);
+    await settle();
+    expect(chips()).toEqual(['claude']);
+    expect(run.scans).toHaveLength(1);
+    await next();
+    await settle();
+    const withReader = run.scans.length;
+    expect(withReader).toBeGreaterThan(1);
+    await press('[data-step-back]');
+    await settle();
+    expect(chips()).toEqual(['claude']);
+    expect(run.scans).toHaveLength(withReader);
   });
 });
