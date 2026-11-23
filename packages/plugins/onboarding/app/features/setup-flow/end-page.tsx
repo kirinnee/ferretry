@@ -24,7 +24,7 @@ import type { Unsaved } from './use-setup-flow.ts';
 import { type ReactNode, useMemo } from 'react';
 import type { SummaryStep } from '../../views/steps-screen.tsx';
 import { SetupSummary } from './setup-summary.tsx';
-import { addProjectHref, projectAction } from '../stepper/project-action.ts';
+import { addProjectHref, continueConversationHref, projectAction } from '../stepper/project-action.ts';
 
 /** The picture, in the frame's demo column. */
 function Picture({ children }: { readonly children: ReactNode }): ReactNode {
@@ -74,7 +74,7 @@ export function EndPage({
     const projects = screenHref(daemon, 'projects', 'projects');
     return projectAction(
       opens === undefined ? go(projects === undefined ? undefined : addProjectHref(projects)) : undefined,
-      go(screenHref(daemon, 'conversation', 'links')),
+      go(continueConversationHref(screenHref, daemon)),
     );
   }, [daemon, opens, router, screenHref]);
   const home = (): void => router?.navigate(opens?.href ?? daemonHomeHref(daemon));

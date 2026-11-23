@@ -178,7 +178,6 @@ describe('the Layout tab', () => {
     }
     expect(names(view.container, 'nav.items')).toEqual([
       'ferrets',
-      'conversation.links',
       'agenda',
       'board',
       'projects',
@@ -194,9 +193,7 @@ describe('the Layout tab', () => {
     await settle();
     await interact(() => press(list(view.container, 'nav.items'), 'Move Ferrets later').click());
     await settle();
-    expect(script.calls).toEqual([
-      'set nav.items conversation.links,ferrets,agenda,board,projects,insights,settings + set nav.hidden ',
-    ]);
+    expect(script.calls).toEqual(['set nav.items agenda,ferrets,board,projects,insights,settings + set nav.hidden ']);
     await view.unmount();
   });
 
@@ -211,13 +208,10 @@ describe('the Layout tab', () => {
       });
     await key(' ');
     await key('ArrowUp');
-    await key('ArrowUp');
     expect(script.calls).toEqual([]);
     await key('Enter');
     await settle();
-    expect(script.calls).toEqual([
-      'set nav.items ferrets,board,conversation.links,agenda,projects,insights,settings + set nav.hidden ',
-    ]);
+    expect(script.calls).toEqual(['set nav.items ferrets,board,agenda,projects,insights,settings + set nav.hidden ']);
     await view.unmount();
   });
 
@@ -228,7 +222,7 @@ describe('the Layout tab', () => {
     await interact(() => press(list(view.container, 'nav.items'), 'Hide Board').click());
     await settle();
     expect(script.calls).toEqual([
-      'set nav.items ferrets,conversation.links,agenda,board,projects,insights,settings + set nav.hidden board',
+      'set nav.items ferrets,agenda,board,projects,insights,settings + set nav.hidden board',
     ]);
     const nav = list(view.container, 'nav.items');
     expect(
@@ -270,9 +264,7 @@ describe('the Layout tab', () => {
     expect(row.textContent).toContain('Board');
     await interact(() => press(list(view.container, 'nav.items'), 'Show Board').click());
     await settle();
-    expect(script.calls).toEqual([
-      'set nav.items ferrets,conversation.links,agenda,board,projects,insights,settings + set nav.hidden ',
-    ]);
+    expect(script.calls).toEqual(['set nav.items ferrets,agenda,board,projects,insights,settings + set nav.hidden ']);
     await view.unmount();
   });
 
@@ -295,7 +287,7 @@ describe('the Layout tab', () => {
     await interact(() => press(list(view.container, 'phone.nav.items'), 'Hide Projects').click());
     await settle();
     expect(script.calls).toEqual([
-      'set phone.nav.items ferrets,conversation.links,agenda,board,projects,insights,settings + set phone.nav.hidden projects',
+      'set phone.nav.items ferrets,agenda,board,projects,insights,settings + set phone.nav.hidden projects',
     ]);
     await pickScope(view.container, 'device');
     await interact(() => press(list(view.container, 'phone.top'), 'Move Daemon picker later').click());
@@ -530,7 +522,7 @@ describe('the Layout tab', () => {
     await interact(() => document.dispatchEvent(point('pointerup', 130)));
     await settle();
     expect(script.calls).toHaveLength(1);
-    expect(script.calls[0]).toContain('set nav.items conversation.links,agenda,ferrets,board,projects');
+    expect(script.calls[0]).toContain('set nav.items agenda,board,ferrets,projects');
     await view.unmount();
   });
 

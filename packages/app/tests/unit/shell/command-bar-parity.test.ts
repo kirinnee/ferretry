@@ -101,7 +101,6 @@ describe('Ctrl+K at rest', () => {
     expect(places.map(entry => entry.label)).toEqual([
       'Ferrets',
       'Agenda',
-      'Conversations',
       'Board',
       'Projects',
       'PRs & CI',
@@ -228,11 +227,10 @@ describe('Board for <ferret> (S-0449)', () => {
 });
 
 describe('the app nav', () => {
-  it('carries Conversations second (r11 S1) and Projects between Board and Insights, as v4’s bar did', () => {
+  it('has no Conversations place (O8-12) and carries Projects between Board and Insights, as v4’s bar did', () => {
     const plan = planFrame(resolveLayout(DEFAULT_LAYOUT, 'wide'), views);
     expect(plan.nav.entries.map(entry => (entry.kind === 'screen' ? entry.screen.label : entry.item))).toEqual([
       'Ferrets',
-      'Conversations',
       'Agenda',
       'Board',
       'Projects',
