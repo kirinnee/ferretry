@@ -175,6 +175,13 @@ export interface LoginUsers {
   /** The runtimes that launch on this login, by name. Throws when the answer is not known. */
   of(loginId: string): Promise<readonly string[]> | readonly string[];
   /**
+   * The runtimes to SHOW as using each of these logins, by login id: the same list `fy runtime ls` prints, so a runtime
+   * derived from a ready login counts too. It is handed the logins (a derived runtime is a function of them) so it never
+   * has to ask Logins for the list it is part of. Display only: a removal asks `of`, since a derived runtime goes away
+   * with its login and must not block its removal. Absent: `of`.
+   */
+  listed?(logins: readonly LoginView[]): Promise<Readonly<Record<string, readonly string[]>>>;
+  /**
    * The runtimes on the login as this change would leave them, each with whether it can launch then and why not. A
    * preview only: nothing is written. Absent, or throwing, the change's preview names the runtimes without a status.
    */

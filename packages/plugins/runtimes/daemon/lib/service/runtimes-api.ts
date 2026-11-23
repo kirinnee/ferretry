@@ -50,6 +50,8 @@ export interface RuntimesApiDeps {
   currentName?(former: string): Promise<string | undefined>;
   /** The harnesses installed here (`derived-runtimes.ts`): a login that drives both CLIs runs the first installed. Absent: not known. */
   installed?(): readonly HarnessKind[] | undefined;
+  /** Looks the harness commands up ahead of reading `installed`, the way the catalogue's read does, so both see the same CLIs. Absent: nothing to look up. */
+  primeInstalled?(): Promise<void>;
 }
 
 /** The environment logins' variable templates by id, or `undefined` when Logins cannot say (an environment login is then not derived). */
@@ -90,13 +92,19 @@ function activeBlock(
 const phrase = (block: { readonly reason?: string; readonly until?: string }): string =>
   `switched off${block.reason === undefined ? '' : ` (${block.reason})`}${block.until === undefined ? '' : ` until ${block.until}`}`;
 
-export function createRuntimesApi(
-  deps: RuntimesApiDeps,
-): Omit<RuntimesApi, keyof RuntimeHomesApi | keyof RuntimeLayersApi | keyof RuntimeFactsApi> {
+export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
+  RuntimesApi,
+  keyof RuntimeHomesApi | keyof RuntimeLayersApi | keyof RuntimeFactsApi
+> & {
+  /** The list `list` gives, made from logins the caller already holds (so it never asks Logins for the list it is part of). */
+  listFor(logins: readonly LoginView[]): Promise<readonly RuntimeSummary[]>;
+} {
   type Read = { readonly summary: RuntimeSummary } | { readonly refusal: Extract<ResolveResult, { ok: false }> };
 
   /** The files' runtimes and profile names with the ones derived from ready logins beside them (`derived-runtimes.ts`). */
   const effective = async (logins: ReadonlyMap<string, LoginView>) => {
+    // A CLI installed since the last lookup shows now, as in the catalogue's read (`runtime ls`): one lookup, then `installed`.
+    await deps.primeInstalled?.();
     const derived = deriveRuntimes({
       templates: await templatesById(deps.logins),
       runtimes: deps.runtimes(),
@@ -161,8 +169,7 @@ export function createRuntimesApi(
     };
   };
 
-  const all = async (): Promise<readonly Read[]> => {
-    const logins = await loginsById(deps.logins);
+  const all = async (logins: ReadonlyMap<string, LoginView>): Promise<readonly Read[]> => {
     const now = deps.now();
     const { runtimes, hasProfile } = await effective(logins);
     return [...runtimes]
@@ -170,8 +177,10 @@ export function createRuntimesApi(
       .map(([name, file]) => read(name, file, logins, now, hasProfile));
   };
 
-  const summaries = async (): Promise<readonly RuntimeSummary[]> =>
-    (await all()).flatMap(entry => ('summary' in entry ? [entry.summary] : []));
+  const summariesOf = async (logins: ReadonlyMap<string, LoginView>): Promise<readonly RuntimeSummary[]> =>
+    (await all(logins)).flatMap(entry => ('summary' in entry ? [entry.summary] : []));
+
+  const summaries = async (): Promise<readonly RuntimeSummary[]> => await summariesOf(await loginsById(deps.logins));
 
   const defaultRuntime = async (): Promise<RuntimeId | undefined> => {
     const named = deps.defaultSetting();
@@ -190,6 +199,7 @@ export function createRuntimesApi(
 
   return {
     list: summaries,
+    listFor: async logins => await summariesOf(new Map(logins.map(login => [login.id, login]))),
     get: async id => (await summaries()).find(summary => summary.id === id),
     default: defaultRuntime,
     resolve: async (id): Promise<ResolveResult> => {
@@ -233,7 +243,7 @@ export function createRuntimesApi(
       if (!summary.launch.available) {
         return { ok: false, refusal: 'not_signed_in', sentence: summary.launch.reason };
       }
-      return { ok: true, runtime: summary };
+      return { ok: true, runtime: summary, ...(deps.runtimes().has(wanted) ? {} : { derived: true as const }) };
     },
   };
 }
