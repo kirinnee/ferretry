@@ -53,12 +53,21 @@ export type FleetWriteOperation =
        * person the `CLAUDE.md` / `AGENTS.md` they wrote.
        */
       readonly unlessForeign?: { readonly marker: string };
+      /**
+       * This file IS the {@link MaterialisedRecord}. Written last, it drops what this apply declined to write (an entry
+       * left as the person had it), so a later apply never mistakes that entry for the plan's own.
+       */
+      readonly recordsMaterialised?: true;
+      /** Replace nothing the plan did not put there: see {@link UnlessUnrecorded}. */
+      readonly unlessUnrecorded?: UnlessUnrecorded;
     }
   | {
       readonly kind: 'copy';
       readonly source: string;
       readonly path: string;
       readonly mode?: number;
+      /** Replace nothing the plan did not put there: see {@link UnlessUnrecorded}. */
+      readonly unlessUnrecorded?: UnlessUnrecorded;
     }
   | {
       readonly kind: 'symlink';
@@ -71,6 +80,8 @@ export type FleetWriteOperation =
        * Every other link must resolve, because a dangling one is a harness quietly finding nothing.
        */
       readonly dangling?: true;
+      /** Replace nothing the plan did not put there: see {@link UnlessUnrecorded}. */
+      readonly unlessUnrecorded?: UnlessUnrecorded;
     }
   | {
       readonly kind: 'settings';
@@ -132,12 +143,31 @@ export type FleetWriteOperation =
        * directory. Absent or unreadable means no record, and so only links are removed.
        */
       readonly record?: string;
+      /**
+       * Without {@link only}, with {@link record}: sweep ONLY the children the record names as `<recordedAs>/<child>` and
+       * that are not in the keep list. An entry the person or the harness added to a shared directory (a skill by hand)
+       * is left and named as skipped instead of removed. Absent, the directory is the plan's own outright.
+       */
+      readonly recordedAs?: string;
     };
+
+/**
+ * A write that replaces nothing the plan did not put there. The destination is written when it is absent, a link (only
+ * the plan makes links there), or an entry the previous apply's record names as `key`. A file must also still hash to
+ * what that record holds for `key`: a file edited since (Claude's `/memory`) is left exactly as it is and named as
+ * skipped. With no record, or no hash, nothing regular is replaced.
+ */
+export interface UnlessUnrecorded {
+  readonly record: string;
+  readonly key: string;
+}
 
 /** What a narrowed sweep's record holds: the entries one apply materialised, relative to their directory. */
 export interface MaterialisedRecord {
   readonly version: 1;
   readonly entries: readonly string[];
+  /** sha256 of the generated text written at each entry, so a later apply can tell an edit from its own file. */
+  readonly hashes?: Readonly<Record<string, string>>;
 }
 
 /** A settings layer as the plan sees it: a file still to be read, or an object already known. */

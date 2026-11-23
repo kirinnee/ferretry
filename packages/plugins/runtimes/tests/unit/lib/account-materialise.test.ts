@@ -280,13 +280,27 @@ describe('materialiseFleet', () => {
       kind: 'symlink',
       source: '/fy/fleet/assets/components/instructions/main.md',
       path: `${HOME_A}/CLAUDE.md`,
+      unlessUnrecorded: {
+        record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
+        key: 'CLAUDE.md',
+      },
     });
     should(inHome[6]).eql({
       kind: 'symlink',
       source: '/fy/fleet/assets/skills/review',
       path: `${HOME_A}/skills/review`,
+      unlessUnrecorded: {
+        record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
+        key: 'skills/review',
+      },
     });
-    should(inHome[7]).eql({ kind: 'prune-directory', path: `${HOME_A}/skills`, keep: ['review'] });
+    should(inHome[7]).eql({
+      kind: 'prune-directory',
+      path: `${HOME_A}/skills`,
+      keep: ['review'],
+      record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
+      recordedAs: 'skills',
+    });
     should(inHome[8]).eql({
       kind: 'settings',
       path: `${HOME_A}/settings.json`,
@@ -322,8 +336,9 @@ describe('materialiseFleet', () => {
     should(inHome[11]).eql({
       kind: 'file',
       path: `${HOME_A}/.fy/materialised.json`,
-      content: '{"version":1,"entries":["CLAUDE.md"]}\n',
+      content: '{"version":1,"entries":["CLAUDE.md","skills/review"]}\n',
       mode: 0o600,
+      recordsMaterialised: true,
     });
   });
 
@@ -337,7 +352,15 @@ describe('materialiseFleet', () => {
     const sweeps = result.operations.filter(
       operation => operation.kind === 'prune-directory' && operation.path === `${HOME_B}/skills`,
     );
-    should(sweeps).eql([{ kind: 'prune-directory', path: `${HOME_B}/skills`, keep: ['review', '.system'] }]);
+    should(sweeps).eql([
+      {
+        kind: 'prune-directory',
+        path: `${HOME_B}/skills`,
+        keep: ['review', '.system'],
+        record: `${HOME_B}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
+        recordedAs: 'skills',
+      },
+    ]);
     should(only(result, `${HOME_B}/config.toml`)).match({
       kind: 'settings',
       format: 'toml',
@@ -355,7 +378,7 @@ describe('materialiseFleet', () => {
     });
     should(JSON.parse((only(result, `${HOME_B}/.fy/materialised.json`) as { content: string }).content)).eql({
       version: 1,
-      entries: ['AGENTS.md'],
+      entries: ['AGENTS.md', 'skills/review'],
     });
   });
 
@@ -1093,6 +1116,10 @@ describe('materialiseFleet', () => {
         kind: 'copy',
         source: '/home/person/AGENTS.md',
         path: `${HOME_B}/AGENTS.md`,
+        unlessUnrecorded: {
+          record: `${HOME_B}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
+          key: 'AGENTS.md',
+        },
       });
     });
 

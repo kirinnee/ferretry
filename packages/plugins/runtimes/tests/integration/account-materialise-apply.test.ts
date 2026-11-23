@@ -187,7 +187,7 @@ describe('materialising the account model onto disk', () => {
     });
     should(JSON.parse(await readFile(path.join(host.claudeHome, '.fy', 'materialised.json'), 'utf8'))).eql({
       version: 1,
-      entries: ['CLAUDE.md'],
+      entries: ['CLAUDE.md', 'skills/review'],
     });
     should((await lstat(path.join(host.layout.binDirectory, 'claude-agent'))).mode & 0o777).equal(0o755);
     should(JSON.parse(await readFile(path.join(host.layout.fleetDirectory, 'ids.json'), 'utf8')).runtimes).eql({

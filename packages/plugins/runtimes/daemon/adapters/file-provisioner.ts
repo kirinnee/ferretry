@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
+import { sha256Hex } from '../lib/foreign.ts';
 import { FleetManifestSchema } from '../lib/manifest.ts';
 import {
   keptAsideName,
@@ -22,6 +23,7 @@ import {
   type FleetWriteOperation,
   type SettingsLayerSource,
   type SkippedDestination,
+  type UnlessUnrecorded,
 } from '../lib/provisioning.ts';
 import {
   mergeSettingsLayers,
@@ -69,6 +71,7 @@ const MAX_READ_BYTES = 4 * 1024 * 1024;
 const MaterialisedRecordSchema = z.strictObject({
   version: z.literal(1),
   entries: z.array(z.string()).readonly(),
+  hashes: z.record(z.string(), z.string()).readonly().optional(),
 });
 
 /** Parsed JSON, or `undefined` for text that is not JSON. */
@@ -78,6 +81,20 @@ function safeJson(text: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/** The record's text without what this apply declined to write. */
+function withoutDeclined(content: string, declined: ReadonlySet<string>): string {
+  const parsed = MaterialisedRecordSchema.safeParse(safeJson(content));
+  if (!parsed.success || declined.size === 0) return content;
+  const { entries, hashes } = parsed.data;
+  return `${JSON.stringify({
+    version: 1,
+    entries: entries.filter(entry => !declined.has(entry)),
+    ...(hashes === undefined
+      ? {}
+      : { hashes: Object.fromEntries(Object.entries(hashes).filter(([key]) => !declined.has(key))) }),
+  })}\n`;
 }
 
 /** A name that is exactly one entry of its directory: never a path that could reach outside it. */
@@ -216,6 +233,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
     const journal: MutationJournal = new FileMutationJournal(this.disk, target => this.assertWritablePath(target));
     const prunedWrappers: string[] = [];
     const skipped: SkippedDestination[] = [];
+    // Keys of entries this apply declined to write, so the record it leaves never claims them.
+    const declined = new Set<string>();
     let operationCount = 0;
     let stage = 'the configuration and asset documents';
 
@@ -236,7 +255,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
           // with a link after the all-or-nothing preflight approved this destination.
           await this.assertOperationWritable(operation);
           const mark = journal.beginOperation();
-          const pruned = await this.applyOperation(operation, journal, skipped);
+          const pruned = await this.applyOperation(operation, journal, skipped, declined);
           await journal.sealOperation(mark);
           operationCount += 1;
           prunedWrappers.push(...pruned);
@@ -502,6 +521,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     operation: FleetWriteOperation,
     journal: MutationJournal,
     skipped: SkippedDestination[],
+    declined: Set<string>,
   ): Promise<readonly string[]> {
     if (operation.kind === 'directory') {
       await journal.captureDirectory(operation.path, operation.mode);
@@ -518,8 +538,18 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
 
     if (operation.kind === 'prune-directory') {
-      if (operation.only === undefined) await this.pruneDirectory(operation.path, new Set(operation.keep), journal);
-      else await this.retireEntries(operation.path, operation.only, new Set(operation.keep), operation.record, journal);
+      if (operation.only !== undefined)
+        await this.retireEntries(operation.path, operation.only, new Set(operation.keep), operation.record, journal);
+      else if (operation.recordedAs !== undefined && operation.record !== undefined) {
+        await this.retireRecorded(
+          operation.path,
+          operation.recordedAs,
+          new Set(operation.keep),
+          operation.record,
+          journal,
+          skipped,
+        );
+      } else await this.pruneDirectory(operation.path, new Set(operation.keep), journal);
       // Deliberately no names: the caller collects what it reports as pruned WRAPPERS, and a removed skill item is not
       // one. What was removed is visible where a person decides — the dry run states the directory and the keep set.
       return [];
@@ -548,7 +578,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
     await journal.captureDirectory(path.dirname(operation.path));
     await this.disk.makeFolder(path.dirname(operation.path), DEFAULT_FOLDER_MODE);
-    await this.writeEntry(operation, journal, skipped);
+    await this.writeEntry(operation, journal, skipped, declined);
     return [];
   }
 
@@ -562,7 +592,19 @@ export class FileFleetProvisioner implements FleetProvisioner {
     operation: Extract<FleetWriteOperation, { readonly kind: 'symlink' | 'copy' | 'file' }>,
     journal: MutationJournal,
     skipped: SkippedDestination[],
+    declined: Set<string>,
   ): Promise<void> {
+    if (operation.unlessUnrecorded !== undefined && (await this.declines(operation, operation.unlessUnrecorded))) {
+      declined.add(operation.unlessUnrecorded.key);
+      skipped.push({
+        path: operation.path,
+        reason:
+          operation.kind === 'file'
+            ? `${path.basename(operation.path)} was edited in the runtime home; Ferretry left it. Delete it to let Ferretry write it again.`
+            : `${path.basename(operation.path)} was not put there by Ferretry; Ferretry left it`,
+      });
+      return;
+    }
     if (operation.kind === 'symlink') {
       // Clear the path only when this batch already owned it. After a fresh capture the path is empty, and anything
       // that has appeared since belongs to somebody else: the link then fails as a refusal instead of deleting their work.
@@ -606,7 +648,34 @@ export class FileFleetProvisioner implements FleetProvisioner {
       return;
     }
     await journal.capture(operation.path);
-    await this.writeFileAtomically(operation.path, operation.content, operation.mode);
+    const content =
+      operation.recordsMaterialised === true ? withoutDeclined(operation.content, declined) : operation.content;
+    await this.writeFileAtomically(operation.path, content, operation.mode);
+  }
+
+  /**
+   * Whether a write must leave its destination alone: something regular is there that the previous apply's record does
+   * not name — and, for a file, that no longer hashes to what that record says was written. Absent and a link are the
+   * plan's to replace.
+   */
+  private async declines(
+    operation: Extract<FleetWriteOperation, { readonly kind: 'symlink' | 'copy' | 'file' }>,
+    { record, key }: UnlessUnrecorded,
+  ): Promise<boolean> {
+    const information = await this.disk.lstat(operation.path);
+    if (information === undefined || information.kind === 'symlink') return false;
+    const recorded = await this.readRecord(record);
+    if (operation.kind !== 'file') return !recorded.entries.has(key);
+    if (information.kind !== 'file') return true;
+    let current: string;
+    try {
+      current = await this.disk.readText(operation.path, MAX_READ_BYTES);
+    } catch {
+      return true;
+    }
+    if (current === operation.content) return false;
+    const hash = recorded.hashes[key];
+    return hash === undefined || hash !== sha256Hex(current);
   }
 
   /** Whether `target` holds something the plan did not make: neither absent, nor a link, nor a file of its own text. */
@@ -715,15 +784,46 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * record: the cost is a leftover the next apply cannot prove is its own, which is the safe direction to be wrong in.
    */
   private async recordedEntries(record: string): Promise<ReadonlySet<string>> {
+    return (await this.readRecord(record)).entries;
+  }
+
+  private async readRecord(
+    record: string,
+  ): Promise<{ readonly entries: ReadonlySet<string>; readonly hashes: Readonly<Record<string, string>> }> {
+    const none = { entries: new Set<string>(), hashes: {} };
     let document: string | undefined;
     try {
       document = await this.readRegularText(record, 'materialised record');
     } catch {
-      return new Set();
+      return none;
     }
-    if (document === undefined) return new Set();
+    if (document === undefined) return none;
     const parsed = MaterialisedRecordSchema.safeParse(safeJson(document));
-    return new Set(parsed.success ? parsed.data.entries : []);
+    return parsed.success ? { entries: new Set(parsed.data.entries), hashes: parsed.data.hashes ?? {} } : none;
+  }
+
+  /**
+   * Sweep a directory the person and the harness add to as well (the skills folder): remove only the children the
+   * previous apply's record names as `<recordedAs>/<child>`. Anything else that is not kept stays, and is named.
+   */
+  private async retireRecorded(
+    directory: string,
+    recordedAs: string,
+    keep: ReadonlySet<string>,
+    record: string,
+    journal: MutationJournal,
+    skipped: SkippedDestination[],
+  ): Promise<void> {
+    if ((await this.disk.lstat(directory))?.kind !== 'directory') return;
+    const recorded = (await this.readRecord(record)).entries;
+    for (const entry of (await this.disk.entries(directory)).toSorted((left, right) =>
+      left.name.localeCompare(right.name),
+    )) {
+      if (keep.has(entry.name) || isMutationReservedName(entry.name)) continue;
+      const target = path.join(directory, entry.name);
+      if (recorded.has(`${recordedAs}/${entry.name}`)) await journal.capture(target);
+      else skipped.push({ path: target, reason: `${entry.name} was not put there by Ferretry; Ferretry left it` });
+    }
   }
 
   private async stillCarries(journal: MutationJournal, target: string, marker: string): Promise<boolean> {

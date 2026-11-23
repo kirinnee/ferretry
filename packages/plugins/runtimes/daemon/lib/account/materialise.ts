@@ -56,7 +56,7 @@ import { expandAssetPath, expandHomePath, joinPath } from '../paths.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, MaterialisedRecord } from '../provisioning.ts';
 import { type SettingsObject, serializeSettings } from '../settings.ts';
 import { sharedHistoryPoolDirectory, sharedHistoryPoolRequests } from '../shared-history.ts';
-import { CREDENTIAL_ENV } from '../foreign.ts';
+import { CREDENTIAL_ENV, sha256Hex } from '../foreign.ts';
 import {
   MANAGED_MARKER,
   RUNTIME_NAME_ENV,
@@ -632,10 +632,10 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
     { kind: 'prune-directory', path: home, keep: [], only: input.absent, record },
   ];
 
-  for (const entry of ownEntries) operations.push(entryOperation(entry, home, layout));
+  for (const entry of ownEntries) operations.push(entryOperation(entry, home, layout, record));
 
   operations.push({ kind: 'directory', path: skillsContainer, mode: DIRECTORY_MODE });
-  for (const entry of skillEntries) operations.push(entryOperation(entry, home, layout));
+  for (const entry of skillEntries) operations.push(entryOperation(entry, home, layout, record));
   operations.push({
     kind: 'prune-directory',
     path: skillsContainer,
@@ -643,6 +643,9 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       ...skillEntries.map(entry => entry.dest.slice(skillsDest.length + 1)),
       ...HARNESS_OWNED_SKILL_ENTRIES[harness],
     ],
+    // Skills the person or the harness added by hand live here too: only what the last apply recorded may go.
+    record,
+    recordedAs: skillsDest,
   });
 
   operations.push({
@@ -691,41 +694,63 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       source: input.credentialLink.target,
       path: input.credentialLink.path,
       dangling: true,
+      unlessUnrecorded: { record, key: CODEX_CREDENTIAL_FILE },
     });
   }
 
+  const recordable = (entry: AdaptedEntry): boolean => !(entry.kind === 'generated' && entry.builtinOnly === true);
+  // What was written, so a later apply can tell a generated file the harness or the person edited from its own.
+  const hashes = Object.fromEntries(
+    ownEntries
+      .filter(recordable)
+      .flatMap(entry => (entry.kind === 'generated' ? [[entry.dest, sha256Hex(entry.content)] as const] : []))
+      .toSorted(([left], [right]) => left.localeCompare(right)),
+  );
   const recorded: MaterialisedRecord = {
     version: 1,
     entries: [
       ...new Set([
+        // Each destination by its full name too: a write that replaces an existing entry asks for exactly that name.
+        ...[...ownEntries, ...skillEntries].filter(recordable).map(entry => entry.dest),
         // Not the built-in text: whether it landed or was left beside a person's own file is only known at the write, and
         // a recorded name is one a later sweep may remove, which must never be a file the person wrote.
-        ...ownEntries
-          .filter(entry => !(entry.kind === 'generated' && entry.builtinOnly === true))
-          .map(entry => topLevel(entry.dest)),
+        ...ownEntries.filter(recordable).map(entry => topLevel(entry.dest)),
         ...(input.credentialLink === undefined ? [] : [CODEX_CREDENTIAL_FILE]),
       ]),
     ].toSorted(),
+    ...(Object.keys(hashes).length === 0 ? {} : { hashes }),
   };
   // After the sweep, so the sweep read the PREVIOUS apply's record.
-  operations.push({ kind: 'file', path: record, content: `${JSON.stringify(recorded)}\n`, mode: PRIVATE_FILE_MODE });
+  operations.push({
+    kind: 'file',
+    path: record,
+    content: `${JSON.stringify(recorded)}\n`,
+    mode: PRIVATE_FILE_MODE,
+    recordsMaterialised: true,
+  });
   return operations;
 }
 
 /** One adapted entry as the write that puts it in the config directory. */
-function entryOperation(entry: AdaptedEntry, home: string, layout: FleetLayout): FleetWriteOperation {
+function entryOperation(entry: AdaptedEntry, home: string, layout: FleetLayout, record: string): FleetWriteOperation {
   const path = joinPath(home, entry.dest);
+  // Nothing the plan did not put there is replaced: a file edited since it was written, or one somebody else made.
+  const unlessUnrecorded = { record, key: entry.dest };
   if (entry.kind === 'generated') {
     return {
       kind: 'file',
       path,
       content: entry.content,
       mode: PRIVATE_FILE_MODE,
-      ...(entry.builtinOnly === true ? { unlessForeign: { marker: GENERATED_INSTRUCTIONS_MARKER } } : {}),
+      ...(entry.builtinOnly === true
+        ? { unlessForeign: { marker: GENERATED_INSTRUCTIONS_MARKER } }
+        : { unlessUnrecorded }),
     };
   }
   const source = expandAssetPath(entry.source, layout.userHome, layout.assetsDirectory);
-  return entry.kind === 'link' ? { kind: 'symlink', source, path } : { kind: 'copy', source, path };
+  return entry.kind === 'link'
+    ? { kind: 'symlink', source, path, unlessUnrecorded }
+    : { kind: 'copy', source, path, unlessUnrecorded };
 }
 
 /**
