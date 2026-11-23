@@ -186,6 +186,32 @@ describe("the agenda's link to cards", () => {
     should(warnings).have.length(2);
   });
 
+  it('should keep at most a bounded number of said failures, forgetting the oldest first', async () => {
+    // Arrange
+    const warnings: string[] = [];
+    const damaged = new Error('damaged');
+    const reader = new AgendaCardLinks(
+      {
+        open: async () => {
+          throw damaged;
+        },
+      },
+      () => MACHINE,
+      { warn: message => warnings.push(message) },
+    );
+    const owners = Array.from({ length: 600 }, (_, index) => `ferret-${index}`);
+    const cards = owners.map(owner => card({ assignee: owner }));
+
+    // Act — a second equal read says again what the bound had forgotten (past it the oldest go first).
+    await reader.asksFor(cards);
+    const first = warnings.length;
+    await reader.asksFor(cards);
+
+    // Assert
+    should(first).be.aboveOrEqual(600);
+    should(warnings.length).be.above(first);
+  });
+
   it('should read the agendas in bounded batches', async () => {
     // Arrange
     const owners = Array.from({ length: AGENDA_READ_CONCURRENCY + 3 }, (_, index) => `ferret-${index}`);
