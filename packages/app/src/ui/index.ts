@@ -14,6 +14,7 @@ export * from './confirm-to-see.tsx';
 export * from './command-bar-model.ts';
 export * from './context-menu.tsx';
 export * from './fast-switch.tsx';
+export * from './segmented-choice.tsx';
 export * from './form-parts.tsx';
 export * from './secret-field.tsx';
 export * from './fullscreen-toggle.tsx';
