@@ -306,7 +306,7 @@ describe('Voice settings in the real Settings shell', () => {
           await page.keyboard.press('Enter');
           const staged = page.locator('[data-cleanup-staged]');
           await staged.waitFor();
-          expect(await staged.innerText()).toContain('turns hosted clean-up ON');
+          expect(await page.locator('[data-cleanup-staged-note]').innerText()).toContain('turns hosted clean-up ON');
           expect(await page.locator('[data-choice-cards] input[value="fix"]').isChecked()).toBe(true);
           for (const name of ['Apply', 'Cancel'])
             expect((await rect(page, `[data-cleanup-staged] button:text-is("${name}")`)).height).toBeGreaterThanOrEqual(
