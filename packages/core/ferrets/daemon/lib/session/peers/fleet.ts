@@ -26,6 +26,16 @@ export const HARNESS_LABEL: Readonly<Record<HarnessKind, string>> = { claude: 'C
 
 /** The launch variable naming a ferret's mode (`interactive` or `auto`). */
 export const SESSION_MODE_ENV = 'FY_SESSION_MODE';
+
+/**
+ * The ONE owner of "a ferret with no mode is `auto`" (`LaunchSpec.mode`). A record from before the mode was a per-launch
+ * fact carries none, and it was run unattended all along, so every place that DECIDES a launch's mode (the pane's
+ * `FY_SESSION_MODE`, the harness's question tool, the revive's turn, a start's default) reads it through here and none
+ * restates the default. Nothing is migrated and no record is rewritten.
+ */
+export function launchMode(mode: 'auto' | 'interactive' | undefined): 'auto' | 'interactive' {
+  return mode ?? 'auto';
+}
 /** Whether this ferret was given the hypermedia section. */
 export const HYPERMEDIA_ENV = 'FY_HYPERMEDIA';
 

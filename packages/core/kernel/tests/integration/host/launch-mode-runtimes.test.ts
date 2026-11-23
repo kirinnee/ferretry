@@ -4,7 +4,14 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeAsks } from '../../../../asks/contract/testing/index.ts';
-import { Logins, Runners, type RunSpec } from '../../../../ferrets/contract/index.ts';
+import {
+  FerretDetailsFile,
+  FerretFiles,
+  LaunchParts,
+  Logins,
+  Runners,
+  type RunSpec,
+} from '../../../../ferrets/contract/index.ts';
 import { FakeLoginKind, FakeRunner } from '../../../../ferrets/contract/testing/index.ts';
 import { FakeGate, ownerStanding, StandInAdmission } from '../../../../gate/contract/testing/index.ts';
 import { type SecretName } from '../../../../vault/contract/index.ts';
@@ -27,8 +34,10 @@ import { diskFolders, type TestHost, testHost } from '../../../testing/index.ts'
  *  - the old runtime is listed (nothing about an old `agent` field hides it) beside one derived per READY login, and a login
  *    that needs sign-in yields none;
  *  - Create in `auto` mode reaches the runner exactly once, with the pane told `FY_SESSION_MODE=auto`;
- *  - an `interactive` launch is told `interactive` EVEN when the daemon's own environment says `auto`, so nothing inherited
- *    can turn an interactive launch autonomous (the runtime wrapper applies its fixed layer only for `auto`).
+ *  - an `interactive` launch is told `interactive` EVEN when a launch part carries `FY_SESSION_MODE=auto`, so nothing a
+ *    plugin adds can turn an interactive launch autonomous (the runtime wrapper applies its fixed layer only for `auto`);
+ *  - a stored ferret record with NO mode (every ferret from before the mode was a per-launch fact) is `auto` at a revive,
+ *    so the pane is told `FY_SESSION_MODE=auto` and its autonomous layer is applied: absent means auto, one rule.
  *
  * Fixture values only; folders are real temporary directories.
  */
@@ -50,7 +59,43 @@ class RecordingRunner extends FakeRunner {
     this.specs.push(spec);
     return await super.start(spec);
   }
+  override async resume(spec: RunSpec) {
+    this.specs.push(spec);
+    return await super.resume(spec);
+  }
 }
+
+/** What the part below hands every launch as `FY_SESSION_MODE` (a plugin that says `auto` whatever the ferret is). */
+let partMode: string | undefined;
+
+/** A `launch.parts` taker that carries `FY_SESSION_MODE` in an env part: the one way a plugin can reach the pane's mode. */
+const modePartPlugin = () =>
+  implementDaemon(
+    definePlugin({
+      id: 'mode-part',
+      title: 'Mode part (fixture)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: LaunchParts }] },
+    }),
+    {
+      build: () => ({
+        hooks: {
+          'launch.parts': () => [
+            {
+              id: 'mode-part',
+              item: {
+                parts: async () =>
+                  partMode === undefined ? [] : [{ kind: 'env' as const, env: { FY_SESSION_MODE: partMode } }],
+              },
+            },
+          ],
+        },
+      }),
+    },
+  );
 
 const runnerPlugin = (runner: FakeRunner) =>
   implementDaemon(
@@ -89,14 +134,11 @@ const NEEDS_SIGN_IN = {
 } as const;
 
 let fixture: string;
-let inherited: string | undefined;
 beforeEach(async () => {
   fixture = await mkdtemp(join(tmpdir(), 'launch-mode-runtimes-'));
-  inherited = process.env.FY_SESSION_MODE;
+  partMode = undefined;
 });
 afterEach(async () => {
-  if (inherited === undefined) delete process.env.FY_SESSION_MODE;
-  else process.env.FY_SESSION_MODE = inherited;
   await rm(fixture, { recursive: true, force: true });
 });
 
@@ -107,7 +149,14 @@ async function boot(runner: RecordingRunner): Promise<TestHost> {
   return await testHost({
     everyDirectory: true,
     harnessHomeFolders: await diskFolders(await mkdtemp(join(fixture, 'roots-'))),
-    plugins: [real('ferrets'), real('runtimes'), real('claude-code'), loginKindPlugin(), runnerPlugin(runner)],
+    plugins: [
+      real('ferrets'),
+      real('runtimes'),
+      real('claude-code'),
+      loginKindPlugin(),
+      runnerPlugin(runner),
+      modePartPlugin(),
+    ],
     // The owner's one runtime: an OLD file that still carries `agent: false` (read, the field dropped, nothing migrated).
     config: {
       runtimes: { 'claude-default': { login: 'claude-you', profile: 'plain', agent: false } },
@@ -178,8 +227,8 @@ test('Create in auto mode on the old agent:false runtime reaches the runner exac
   }
 });
 
-test('an interactive launch is told interactive even when the daemon environment says auto', async () => {
-  process.env.FY_SESSION_MODE = 'auto';
+test('an interactive launch is told interactive even when a launch part carries FY_SESSION_MODE=auto', async () => {
+  partMode = 'auto';
   const runner = new RecordingRunner();
   const h = await boot(runner);
   try {
@@ -187,6 +236,39 @@ test('an interactive launch is told interactive even when the daemon environment
 
     expect([answer.status, runner.starts]).toEqual([201, 1]);
     expect(runner.paneValue('FY_SESSION_MODE')).toBe('interactive');
+  } finally {
+    await h.stop();
+  }
+});
+
+test('a stored ferret record with no mode is revived as auto: the pane is told FY_SESSION_MODE=auto', async () => {
+  const runner = new RecordingRunner();
+  const first = await boot(runner);
+  const answer = await start(first, 'auto');
+  expect(answer.status).toBe(201);
+  const { id } = answer.json<{ id: string }>();
+  await first.settle();
+  expect(
+    (await first.request('POST', `/v1/ferrets/${id}/stop`, { query: { how: 'now' }, body: {} })).status,
+  ).toBeLessThan(300);
+  await first.settle();
+  // The stored record of a ferret from before the mode was a per-launch fact: no `mode`, and no start options either.
+  const stored = JSON.parse(first.state('ferrets').raw(FerretFiles, id) ?? 'null') as Record<string, unknown>;
+  delete stored.mode;
+  first.state('ferrets').plant(FerretFiles, JSON.stringify(stored), id);
+  const details = first.state('ferrets').raw(FerretDetailsFile, id);
+  if (details !== undefined) {
+    const kept = JSON.parse(details) as { options?: Record<string, unknown> };
+    delete kept.options?.mode;
+    first.state('ferrets').plant(FerretDetailsFile, JSON.stringify(kept), id);
+  }
+  const h = await first.restart();
+  try {
+    const before = runner.specs.length;
+    const resumed = await h.request('POST', `/v1/ferrets/${id}/resume`, { body: {} });
+
+    expect([resumed.status, runner.specs.length - before]).toEqual([200, 1]);
+    expect(runner.paneValue('FY_SESSION_MODE')).toBe('auto');
   } finally {
     await h.stop();
   }

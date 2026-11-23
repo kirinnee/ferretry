@@ -433,6 +433,12 @@ describe('session lifecycle policy', () => {
       'FY_SESSION_MODE',
       'interactive',
     );
+    // A record with NO mode (one from before the mode was a per-launch fact) is `auto`: the pane is told so.
+    should(sessionPaneEnvironment(id, { FY_SESSION_MODE: 'interactive' }, undefined)).have.property(
+      'FY_SESSION_MODE',
+      'auto',
+    );
+    should(sessionPaneEnvironment(id, {}, undefined)).deepEqual(sessionPaneEnvironment(id, {}, 'auto'));
     // Hypermedia defaults by mode — on for interactive, off for auto or unknown — and a stored switch wins.
     should(sessionPaneEnvironment(id, {}, 'interactive')).have.property('FY_HYPERMEDIA', '1');
     should(sessionPaneEnvironment(id, {}, 'auto')).have.property('FY_HYPERMEDIA', '0');

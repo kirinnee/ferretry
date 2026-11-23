@@ -95,6 +95,7 @@ import {
   type FerretDetails,
 } from '../../../contract/index.ts';
 import { effectiveMode, type FerretRegistry, type FerretFilter } from '../registry/registry.ts';
+import { launchMode } from '../session/peers/fleet.ts';
 import { STOP_UNCONFIRMED, withStampedLabel } from './restart-guards.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { resumeTurnAuthor } from '../session/resume/policy.ts';
@@ -1165,7 +1166,7 @@ export class FerretsService implements FerretsApi {
       ...(request.pack === undefined ? {} : { pack: request.pack }),
       role,
       harness: harnessKey,
-      mode: request.options?.mode ?? 'auto',
+      mode: launchMode(request.options?.mode),
       birth: birthOf(origin),
       runner: 'tmux',
       ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
@@ -1615,7 +1616,7 @@ export class FerretsService implements FerretsApi {
         ? undefined
         : {
             ...(message === undefined ? {} : { message }),
-            mode: starting.mode ?? 'auto',
+            mode: launchMode(starting.mode),
             ...(author === undefined ? {} : { by: author }),
           },
       { carried: options.onCarried, bound: bound.value },
@@ -2222,9 +2223,10 @@ export class FerretsService implements FerretsApi {
     const ownCompactAt =
       (await this.ports.session?.compactAt?.(record.id).catch(() => undefined)) ??
       this.registry.detailsOf(record.id)?.options?.compactAt;
-    // Resolved ONCE (the record's own, else a converted ferret's persisted start option): the harness's question tool,
-    // the pane's FY_SESSION_MODE and the derived launch switches all read this one fact.
-    const mode = effectiveMode(record, this.registry.detailsOf(record.id));
+    // Resolved ONCE (the record's own, else a converted ferret's persisted start option, else `auto`: `launchMode` owns
+    // that default): the harness's question tool, the pane's FY_SESSION_MODE and the derived launch switches all read
+    // this one fact, so a record with no mode at all is told `auto` and gets the autonomous layer.
+    const mode = launchMode(effectiveMode(record, this.registry.detailsOf(record.id)));
     const base: Omit<LaunchSpec, 'parts'> = {
       ferret: record.id,
       name: record.name,
