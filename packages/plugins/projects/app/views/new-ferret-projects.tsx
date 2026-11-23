@@ -4,13 +4,17 @@
  * dropdown of the registered projects where GitHub can be linked. It opens on Project when there are projects (or the
  * folder in the field is one), else on Folder, and reserves its height while the registry is unread so nothing jumps.
  *
+ * The path the page SENDS is always the one the visible mode shows: each mode remembers its own last pick and gets it
+ * back when the person returns to it, and under Project a folder that is no registered project is cleared (so Create
+ * waits for a choice) rather than sent beside a trigger that says "Choose a project".
+ *
  * It only proposes a folder through the slot's `onPick`; the page's own start (and the daemon's fence) decides.
  */
 import { useAppHook } from '@ferretry/app';
 import { SegmentedChoice, type SegmentedChoiceOption } from '@ferretry/app/ui';
 import { isNewFerretProjectSlotProps } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { isProjectsConnectAccount, type ProjectInfo, PROJECTS_CONNECT_ACCOUNT_HOOK } from '../../contract/index.ts';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
 import type { ProjectsClient } from '../lib/client.ts';
@@ -57,12 +61,28 @@ function NewFerretWhere({
   const unread = projects === null && (status === 'idle' || status === 'loading');
   const known = projects ?? [];
   const kind = chosen ?? defaultKind(value, known);
+  const isProject = (path: string): boolean => known.some(project => project.path === path);
+  // What each mode showed when the person last left it, so coming back restores it.
+  const last = useRef<Record<Kind, string>>({ folder: '', project: '' });
+  const choose = (next: Kind): void => {
+    if (next === kind) return;
+    if (value !== '') last.current[kind] = value;
+    setChosen(next);
+    if (next === 'project') {
+      if (!isProject(value)) onPick(isProject(last.current.project) ? last.current.project : '');
+    } else if (last.current.folder !== '' && last.current.folder !== value) onPick(last.current.folder);
+  };
+  // Under Project the field only ever holds a registered project's folder: anything else (a Recent folder, a
+  // conversation's folder arriving later) would be sent beside a trigger that says "Choose a project".
+  useEffect(() => {
+    if (!unread && kind === 'project' && value !== '' && !isProject(value)) onPick('');
+  });
   return (
     <div className="grid gap-2" data-new-ferret-where="">
       <SegmentedChoice
         data-new-ferret-where-switch=""
         label="Where it works"
-        onChange={setChosen}
+        onChange={choose}
         options={CHOICES}
         value={kind}
       />

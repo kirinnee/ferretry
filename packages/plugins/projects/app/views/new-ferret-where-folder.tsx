@@ -38,6 +38,7 @@ export function WhereFolder({ client, id, value, recent, onPick }: WhereFolderPr
         />
         <button
           aria-expanded={browsing}
+          aria-haspopup="dialog"
           className="kt-btn !h-auto inline-flex shrink-0 items-center gap-1.5"
           data-where-browse=""
           onClick={() => setBrowsing(open => !open)}

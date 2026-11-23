@@ -66,6 +66,7 @@ export function WhereProject({ client, store, projects, connectAccount, id, valu
           <input
             aria-label="Search projects"
             className="kt-input w-full"
+            data-where-initial-focus=""
             data-where-project-search=""
             onChange={event => setQuery(event.target.value)}
             placeholder="Search projects"
