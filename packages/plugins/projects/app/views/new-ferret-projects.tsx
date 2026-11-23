@@ -1,12 +1,13 @@
 /**
  * "WHERE IT WORKS" ON THE NEW FERRET PAGE: the panel Projects puts in Ferrets' `ferrets.new-ferret-project` slot. A clear
- * Folder | Project choice: Folder is the finder project setup uses (plus one-tap recent folders), Project is a searchable
+ * Folder | Project choice (the app's shared SegmentedChoice): Folder is the finder project setup uses (plus one-tap recent folders), Project is a searchable
  * dropdown of the registered projects where GitHub can be linked. It opens on Project when there are projects (or the
  * folder in the field is one), else on Folder, and reserves its height while the registry is unread so nothing jumps.
  *
  * It only proposes a folder through the slot's `onPick`; the page's own start (and the daemon's fence) decides.
  */
 import { useAppHook } from '@ferretry/app';
+import { SegmentedChoice, type SegmentedChoiceOption } from '@ferretry/app/ui';
 import { isNewFerretProjectSlotProps } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { useState } from 'react';
@@ -20,10 +21,10 @@ import { WhereProject } from './new-ferret-where-project.tsx';
 
 type Kind = 'folder' | 'project';
 
-const CHOICES = [
-  ['project', 'Project'],
-  ['folder', 'Folder'],
-] as const satisfies readonly (readonly [Kind, string])[];
+const CHOICES: readonly SegmentedChoiceOption<Kind>[] = [
+  { value: 'project', label: 'Project' },
+  { value: 'folder', label: 'Folder' },
+];
 
 /** What to show before the person chooses: the project a folder already is, else a folder, else Project if any exist. */
 const defaultKind = (value: string, projects: readonly ProjectInfo[]): Kind => {
@@ -58,28 +59,13 @@ function NewFerretWhere({
   const kind = chosen ?? defaultKind(value, known);
   return (
     <div className="grid gap-2" data-new-ferret-where="">
-      <div
-        aria-label="Where it works"
-        className="grid max-w-[20rem] grid-cols-2 gap-0.5 rounded-control border border-border bg-surface-2 p-0.5"
+      <SegmentedChoice
         data-new-ferret-where-switch=""
-        role="toolbar"
-      >
-        {CHOICES.map(([choice, text]) => (
-          <button
-            aria-pressed={!unread && kind === choice}
-            className={
-              !unread && kind === choice
-                ? 'min-h-[44px] rounded-control border border-border-strong bg-surface px-2 text-ui font-medium text-fg shadow-control'
-                : 'min-h-[44px] rounded-control border border-transparent px-2 text-ui font-medium text-muted hover:text-fg'
-            }
-            key={choice}
-            onClick={() => setChosen(choice)}
-            type="button"
-          >
-            {text}
-          </button>
-        ))}
-      </div>
+        label="Where it works"
+        onChange={setChosen}
+        options={CHOICES}
+        value={kind}
+      />
       {unread ? (
         <div className="min-h-[44px] text-ui text-muted" data-new-ferret-where-reading="" role="status">
           Reading your projects…

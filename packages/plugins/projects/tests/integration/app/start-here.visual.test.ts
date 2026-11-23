@@ -120,9 +120,9 @@ describe('New ferret: where it works (Folder | Project)', () => {
         withTab(viewport, scheme, async (tab, open, shot) => {
           await open('view=new&projects=2', '[data-where-project-trigger]');
           const state = await tab.evaluate(() => ({
-            pressed: [...document.querySelectorAll('[data-new-ferret-where-switch] button')].map(button => [
+            pressed: [...document.querySelectorAll('[data-new-ferret-where-switch] [role="radio"]')].map(button => [
               button.textContent,
-              button.getAttribute('aria-pressed'),
+              button.getAttribute('aria-checked'),
             ]),
             height: document.querySelector('[data-where-project-trigger]')?.getBoundingClientRect().height ?? 0,
             label: document.querySelector('label[for]')?.getAttribute('for') ?? undefined,
@@ -196,7 +196,7 @@ describe('New ferret: where it works (Folder | Project)', () => {
       it(`Folder: recent folders are one-tap, and Browse opens the project-setup finder (${viewport.name}, ${scheme})`, () =>
         withTab(viewport, scheme, async (tab, open, shot) => {
           await open('view=new&projects=2&recent=3', '[data-where-project-trigger]');
-          await tab.getByRole('button', { name: 'Folder', exact: true }).click();
+          await tab.getByRole('radio', { name: 'Folder', exact: true }).click();
           await tab.waitForSelector('[data-new-ferret-where-folder]');
           expect(await tab.locator('[data-where-recent-folder]').count()).toBe(3);
           await noSideways(tab);

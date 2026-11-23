@@ -54,7 +54,7 @@ const draw = async (
 const q = <T extends Element>(view: Mounted, selector: string): T | null => view.container.querySelector<T>(selector);
 const switchButton = (view: Mounted, text: string): HTMLButtonElement =>
   must(
-    [...view.container.querySelectorAll<HTMLButtonElement>('[data-new-ferret-where-switch] button')].find(
+    [...view.container.querySelectorAll<HTMLButtonElement>('[data-new-ferret-where-switch] [role="radio"]')].find(
       button => button.textContent === text,
     ),
     text,
@@ -72,8 +72,8 @@ describe('the New ferret where-it-works panel', () => {
     const picked: string[] = [];
     const view = await draw([PROJECT, SECOND], '', folder => picked.push(folder));
     await settleUntil(() => q(view, '[data-where-project-trigger]') !== null, 'the project dropdown', interact);
-    expect(switchButton(view, 'Project').getAttribute('aria-pressed')).toBe('true');
-    expect(switchButton(view, 'Folder').getAttribute('aria-pressed')).toBe('false');
+    expect(switchButton(view, 'Project').getAttribute('aria-checked')).toBe('true');
+    expect(switchButton(view, 'Folder').getAttribute('aria-checked')).toBe('false');
     expect(trigger(view).id).toBe('fy-where');
     expect(rows(view)).toHaveLength(0);
 
@@ -114,7 +114,7 @@ describe('the New ferret where-it-works panel', () => {
   it('opens on Folder with no projects, or when the folder in the field is not a project', async () => {
     const none = await draw([]);
     await settleUntil(() => q(none, '[data-new-ferret-where-folder]') !== null, 'the folder field', interact);
-    expect(switchButton(none, 'Folder').getAttribute('aria-pressed')).toBe('true');
+    expect(switchButton(none, 'Folder').getAttribute('aria-checked')).toBe('true');
     await none.unmount();
     open = null;
     const typed = await draw([PROJECT], '/elsewhere/app');
@@ -122,11 +122,11 @@ describe('the New ferret where-it-works panel', () => {
     expect(q<HTMLInputElement>(typed, '#fy-where')?.value).toBe('/elsewhere/app');
   });
 
-  it('reserves the room while the registry is unread, with neither choice pressed', async () => {
+  it('reserves the room while the registry is unread', async () => {
     const view = await draw(new Promise(() => undefined));
     expect(q(view, '[data-new-ferret-where-reading]')).not.toBeNull();
-    expect(switchButton(view, 'Project').getAttribute('aria-pressed')).toBe('false');
-    expect(switchButton(view, 'Folder').getAttribute('aria-pressed')).toBe('false');
+    expect(q(view, '[data-where-project-trigger]')).toBeNull();
+    expect(q(view, '[data-new-ferret-where-folder]')).toBeNull();
   });
 
   it('Folder: recent folders are one-tap picks and Browse opens the project-setup finder, whose choice is picked', async () => {
