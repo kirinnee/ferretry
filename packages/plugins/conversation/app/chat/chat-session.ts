@@ -37,8 +37,8 @@ interface ChatSessionConfig {
   readonly name?: string | undefined;
   /** Its callsign (Ferrets' `name`). */
   readonly teammate?: string | undefined;
-  /** The runtime it runs on. */
-  readonly agent?: string | undefined;
+  /** The login it runs on: the name Usage's account feed is keyed by (never its runtime's name). */
+  readonly login?: string | undefined;
   /** The harness family it runs (Ferrets' `harness`), or a third harness's own key: the composer reads only the two families. */
   readonly harness?: OpenRecordedHarness | undefined;
 }
@@ -140,7 +140,7 @@ export const chatSessionOf = (summary: FerretSummary, prompt?: ChatPrompt): Chat
     id: summary.id,
     teammate: summary.name,
     ...(summary.title === undefined ? {} : { name: summary.title }),
-    ...(summary.runtime === undefined ? {} : { agent: summary.runtime }),
+    ...(summary.login === undefined ? {} : { login: summary.login }),
     harness: recordedHarnessOf(summary.harness),
   },
   state: {

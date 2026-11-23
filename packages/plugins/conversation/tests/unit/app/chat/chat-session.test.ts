@@ -11,17 +11,23 @@ import { ferretSummary } from '../../../support/app/ferret-view.ts';
  */
 
 describe('Ferrets’ summary, as the chat draws it', () => {
-  test('names the ferret: its id, its callsign, its task title and the runtime it runs on', () => {
-    const session = chatSessionOf(
-      ferretSummary('f1', { name: 'daisy', title: 'Fix the chat', runtime: 'claude-llm1' }),
-    );
+  test('names the ferret: its id, its callsign, its task title and the login it runs on', () => {
+    const session = chatSessionOf(ferretSummary('f1', { name: 'daisy', title: 'Fix the chat', login: 'llm1' }));
     expect(session.config).toEqual({
       id: 'f1',
       teammate: 'daisy',
       name: 'Fix the chat',
-      agent: 'claude-llm1',
+      login: 'llm1',
       harness: 'claude',
     });
+  });
+
+  test('keys the composer’s usage by the LOGIN, never by the runtime’s name (Usage’s feed is keyed by login)', () => {
+    const withBoth = chatSessionOf(ferretSummary('f1', { runtime: 'claude-llm1', login: 'llm1' }));
+    expect(withBoth.config.login).toBe('llm1');
+    expect(JSON.stringify(withBoth.config)).not.toContain('claude-llm1');
+    // A ferret with a runtime but no login has no feed row to look up: no key, so no guess.
+    expect(chatSessionOf(ferretSummary('f1', { runtime: 'claude-llm1' })).config.login).toBeUndefined();
   });
 
   test('spells the harness as the composer takes it: Codex is codex, Claude Code is claude', () => {
