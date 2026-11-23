@@ -13,6 +13,9 @@ import { render, run } from '@ferretry/app/testing';
 import { SelectBox } from '@ferretry/app/ui';
 import { wardenConfig } from '../../support/app/warden.ts';
 
+/** The form's on/off boxes are checkboxes (held until Save): flipping one is a change event carrying the opposite of what it shows. */
+const flip = (box: ReactTestInstance): void => box.props.onChange({ target: { checked: !box.props.checked } });
+
 interface HarnessProps {
   readonly initial: WardenConfig;
   readonly jevKey?: JevKeyStatus;
@@ -118,8 +121,8 @@ describe('WardenSettingsForm', () => {
     expect(json).not.toContain('stays quiet for (min)');
     expect(json).not.toContain('May act alone on a verdict');
     expect(json).toContain('No AI runs and nothing is spent.');
-    expect(renderer.root.findByProps({ 'aria-label': 'Jev on' }).props['aria-checked']).toBe(false);
-    expect(renderer.root.findByProps({ 'aria-label': 'LLM investigation on' }).props['aria-checked']).toBe(false);
+    expect(renderer.root.findByProps({ 'aria-label': 'Jev on' }).props.checked).toBe(false);
+    expect(renderer.root.findByProps({ 'aria-label': 'LLM investigation on' }).props.checked).toBe(false);
     run(() => renderer.unmount());
   });
 
@@ -130,14 +133,14 @@ describe('WardenSettingsForm', () => {
     const toggle = () => renderer.root.findByProps({ 'aria-label': 'Warden on' });
 
     // Act
-    run(() => toggle().props.onClick());
+    run(() => flip(toggle()));
 
     // Assert
     expect(last(changes).enabled).toBe(false);
-    expect(toggle().props['aria-checked']).toBe(false);
+    expect(toggle().props.checked).toBe(false);
     expect(renderer.root.find(node => node.type === 'fieldset' && node.props.disabled === true)).toBeDefined();
     expect(text(renderer)).toContain('The Warden is off.');
-    run(() => toggle().props.onClick());
+    run(() => flip(toggle()));
     expect(last(changes).enabled).toBe(true);
     run(() => renderer.unmount());
   });
@@ -215,7 +218,7 @@ describe('WardenSettingsForm', () => {
     const toggle = (label: string) => renderer.root.findByProps({ 'aria-label': label });
 
     // Act
-    run(() => toggle('Jev on').props.onClick());
+    run(() => flip(toggle('Jev on')));
     const slider = control(renderer, 'Leaves a flag alone only when at least this sure it is healthy', 'input');
     run(() => slider.props.onChange({ target: { value: '0.9' } }));
 
@@ -229,11 +232,11 @@ describe('WardenSettingsForm', () => {
     expect(text(renderer)).toContain('Jev cap ($/day)');
     expect(text(renderer)).toContain('stays quiet for (min)');
     expect(text(renderer)).not.toContain('Investigations run on your own login');
-    run(() => toggle('LLM investigation on').props.onClick());
+    run(() => flip(toggle('LLM investigation on')));
     expect(last(changes).layers).toEqual({ jev: true, llm: true });
     expect(text(renderer)).toContain('LLM cap ($/day)');
     expect(text(renderer)).toContain('each flag Jev did not clear');
-    run(() => toggle('Jev on').props.onClick());
+    run(() => flip(toggle('Jev on')));
     expect(last(changes).layers).toEqual({ jev: false, llm: true });
     expect(renderer.root.findAll(node => node.type === 'input' && node.props.type === 'range')).toHaveLength(0);
     expect(text(renderer)).toContain('looks at every flag');
@@ -670,9 +673,7 @@ describe('WardenSettingsForm: moving a ferret that hit a limit', () => {
     const renderer = render(<Harness initial={wardenConfig()} changes={[]} />);
 
     // Act
-    const checked = renderer.root.findByProps({ 'aria-label': 'Move the ferret to another login on' }).props[
-      'aria-checked'
-    ];
+    const checked = renderer.root.findByProps({ 'aria-label': 'Move the ferret to another login on' }).props.checked;
 
     // Assert
     expect(checked).toBe(true);
@@ -687,8 +688,8 @@ describe('WardenSettingsForm: moving a ferret that hit a limit', () => {
     const toggle = () => renderer.root.findByProps({ 'aria-label': 'Move the ferret to another login on' });
 
     // Act
-    const before = toggle().props['aria-checked'];
-    run(() => toggle().props.onClick());
+    const before = toggle().props.checked;
+    run(() => flip(toggle()));
 
     // Assert
     expect(before).toBe(false);

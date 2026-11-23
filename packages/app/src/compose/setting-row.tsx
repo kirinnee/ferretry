@@ -3,6 +3,8 @@
  *
  *   SettingGroup   a small uppercase label over rows divided by hairlines: ONE level of surface, never a box
  *                  in a box (`kt-groupcard--flat`), 32 px before the next group
+ *                  `saves` says WHEN it saves under the heading (`now` | `on-save`); `foot` is a form's `SettingSaveBar`
+ *                  (see `setting-form.tsx`: one save model per kind of setting)
  *   SettingRow     name + one-line hint in a 40 % label column (min 220 px), the control right beside it (not
  *                  at the far edge), an optional (i) that opens the long explanation, an optional preview
  *                  beside the control from 900 px, and an optional panel under the row
@@ -23,6 +25,7 @@ import { type ReactNode, useContext, useId, useState } from 'react';
 import { cn } from '../ui/lib/class-names.ts';
 import { onRadioGroupKeyDown } from './choice-cards.tsx';
 import { PanelTitleContext } from './panel-title.ts';
+import { type SettingSaves, SettingSavesNote } from './setting-form.tsx';
 /** A deep-link target id (`#setting-<id>`); each settings tab owns its own ids. */
 type SettingId = string;
 
@@ -30,10 +33,14 @@ export interface SettingGroupProps {
   readonly label: string;
   /** A group that is one setting (Connection) carries that setting's deep-link id. */
   readonly settingId?: SettingId;
+  /** WHEN this group saves, said under its heading: `now` for choices (a switch), `on-save` for values held by a Save bar. */
+  readonly saves?: SettingSaves;
+  /** The group's foot, inside the group: a form's `SettingSaveBar`. */
+  readonly foot?: ReactNode;
   readonly children: ReactNode;
 }
 
-export function SettingGroup({ label, settingId, children }: SettingGroupProps) {
+export function SettingGroup({ label, settingId, saves, foot, children }: SettingGroupProps) {
   const headingId = useId();
   // A group named for the tab it sits in (Codex's "Codex") is that tab: the shell's panel heading already says it once, so
   // the group keeps its name for assistive tech and draws no second heading.
@@ -44,6 +51,7 @@ export function SettingGroup({ label, settingId, children }: SettingGroupProps) 
       {...(titledByPanel ? { 'aria-label': label } : { 'aria-labelledby': headingId })}
       className="mb-8 min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-accent"
       data-setting-group={label}
+      {...(saves === undefined ? {} : { 'data-setting-saves': saves })}
       {...(settingId === undefined
         ? {}
         : { id: `settings-${settingId}`, 'data-setting-id': settingId, tabIndex: -1 as const })}
@@ -53,7 +61,9 @@ export function SettingGroup({ label, settingId, children }: SettingGroupProps) 
           {label}
         </h3>
       )}
+      {saves === undefined ? null : <SettingSavesNote saves={saves} />}
       <ul className="kt-groupcard kt-groupcard--flat m-0 list-none p-0">{children}</ul>
+      {foot}
     </section>
   );
 }

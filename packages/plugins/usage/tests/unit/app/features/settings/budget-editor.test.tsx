@@ -210,8 +210,9 @@ describe('BudgetEditor · the fields', () => {
       'Days reset at midnight, weeks on Monday, in America/New_York (written in usage.yaml).',
     );
     expect(editor.querySelector('[data-budget-problem]')).toBeNull();
-    // Nothing to save until a field changes.
-    expect(editor.querySelector('[data-change-submit]')).toBeNull();
+    // Nothing to save until a field changes: the Save bar is there from the start, with Save off.
+    expect((editor.querySelector('[data-change-submit]') as HTMLButtonElement).disabled).toBe(true);
+
     await view.unmount();
   });
 
@@ -303,8 +304,8 @@ describe('BudgetEditor · saving', () => {
     expect(editorOf(c).querySelector('[data-budget-save="pending"]')?.textContent).toContain(
       'Saved — waiting for your confirmation: this login may spend more each day',
     );
-    // The save row stands down while an edit waits.
-    expect(editorOf(c).querySelector('[data-change-submit]')).toBeNull();
+    // The save bar stands down while an edit waits: Save is off.
+    expect((editorOf(c).querySelector('[data-change-submit]') as HTMLButtonElement).disabled).toBe(true);
 
     await press(c, 'Confirm');
     expect(client.calls.filter(call => call.route === CONFIRM).map(call => call.body)).toEqual([

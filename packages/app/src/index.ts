@@ -422,6 +422,7 @@ export * from './compose/composer-keybinding.ts';
 export * from './compose/controls.ts';
 export * from './compose/device-controls.ts';
 export * from './compose/setting-row.tsx';
+export * from './compose/setting-form.tsx';
 export * from './compose/setting-preview.tsx';
 export * from './compose/choice-cards.tsx';
 export * from './compose/option-bars.tsx';

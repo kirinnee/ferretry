@@ -11,7 +11,7 @@
  * first one set unconfirmed could reset a day already over budget.
  */
 
-import { SettingGroup, SettingRow } from '@ferretry/app';
+import { SettingGroup, SettingRow, SettingSaveBar } from '@ferretry/app';
 import { Button } from '@ferretry/app/ui';
 import type { LoginBudget } from '@ferretry/plugin-logins/contract';
 import { useState } from 'react';
@@ -145,39 +145,6 @@ export interface BudgetLogin {
   readonly budget?: LoginBudget | undefined;
 }
 
-/** The editor's save row: the button that writes the budget, and what went wrong as one sentence. */
-function SaveRow({
-  busy,
-  disabled,
-  submitLabel,
-  onSubmit,
-  children,
-}: {
-  readonly busy: boolean;
-  readonly disabled: boolean;
-  readonly submitLabel: string;
-  readonly onSubmit: () => void;
-  readonly children?: React.ReactNode;
-}) {
-  return (
-    <form
-      className="flex flex-col gap-3"
-      onSubmit={event => {
-        event.preventDefault();
-        if (!disabled && !busy) onSubmit();
-      }}
-      data-change-apply=""
-    >
-      <div className="flex flex-wrap gap-2">
-        <Button type="submit" variant="primary" disabled={disabled || busy} data-change-submit="">
-          {busy ? 'Saving…' : submitLabel}
-        </Button>
-        {children}
-      </div>
-    </form>
-  );
-}
-
 /** One login's budget editor (the Budgets tab lists one per login). */
 export function BudgetEditor({
   credential,
@@ -277,15 +244,34 @@ export function BudgetEditor({
   };
 
   const pending = heldOf(save);
-  const notes =
-    problem !== null ||
-    save.status === 'invalid' ||
-    save.status === 'conflict' ||
-    save.status === 'failed' ||
-    save.status === 'applied';
+  const notes = problem !== null || save.status === 'invalid' || save.status === 'conflict' || save.status === 'failed';
   return (
     <div className="min-w-0" data-budget-editor={credential.id}>
-      <SettingGroup label={label}>
+      <SettingGroup
+        label={label}
+        saves="on-save"
+        foot={
+          <SettingSaveBar
+            // Written but held for the owner (the confirm row above says so): nothing more to save until it is confirmed.
+            dirty={changed && save.status !== 'pending'}
+            saving={saving}
+            saved={save.status === 'applied' && !changed}
+            blocked={!online || problem !== null}
+            saveLabel={removing ? 'Remove budget' : 'Save budget'}
+            discardLabel="Undo"
+            savedWords="In effect"
+            saveMarks={{ 'data-change-submit': '' }}
+            discardMarks={{ 'data-budget-undo': '' }}
+            wordsMarks={save.status === 'applied' && !changed ? { 'data-budget-save': 'applied' } : {}}
+            onSave={() => void saveBudget()}
+            onDiscard={() => {
+              setDraft(null);
+              setSave(IDLE);
+              setConfirming('idle');
+            }}
+          />
+        }
+      >
         {held === null && budget === undefined ? null : (
           <li className="flex min-w-0 flex-col gap-2 px-panel py-3">
             {held === null ? null : (
@@ -350,11 +336,6 @@ export function BudgetEditor({
                 {save.held.length === 0 ? 'Nothing was saved.' : 'The budget was not saved.'} {save.sentence}
               </p>
             ) : null}
-            {save.status === 'applied' ? (
-              <p role="status" className="m-0 text-ui font-semibold leading-base text-ok" data-budget-save="applied">
-                In effect
-              </p>
-            ) : null}
           </li>
         ) : null}
         {pending.length > 0 ? (
@@ -384,28 +365,6 @@ export function BudgetEditor({
                 </span>
               ) : null}
             </div>
-          </li>
-        ) : null}
-        {save.status === 'pending' ? null : changed ? (
-          <li className="min-w-0 px-panel py-3">
-            <SaveRow
-              busy={saving}
-              submitLabel={removing ? 'Remove budget' : 'Save budget'}
-              disabled={!online || problem !== null}
-              onSubmit={() => void saveBudget()}
-            >
-              <Button
-                type="button"
-                data-budget-undo=""
-                onClick={() => {
-                  setDraft(null);
-                  setSave(IDLE);
-                  setConfirming('idle');
-                }}
-              >
-                Undo
-              </Button>
-            </SaveRow>
           </li>
         ) : null}
       </SettingGroup>

@@ -84,7 +84,9 @@ function LayerCard({
     <div className="fy-wf-layer" data-warden-layer={title} data-on={on ?? true}>
       <div className="fy-wf-layer__top">
         <span className="fy-wf-layer__title">{title}</span>
-        {on !== undefined && onToggle !== undefined && <Switch on={on} label={`${title} on`} onToggle={onToggle} />}
+        {on !== undefined && onToggle !== undefined && (
+          <Switch on={on} label={`${title} on`} shownLabel="On" onToggle={onToggle} />
+        )}
       </div>
       <span className="fy-wf-layer__line">{line}</span>
       {state !== undefined && <span className="fy-wf-layer__state">{state}</span>}

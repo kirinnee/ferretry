@@ -316,3 +316,12 @@ label.fy-wf-slider.fy-wf-slider {
 .fy-wf-layer .kt-badge[data-tone] {
   border-color: transparent;
 }
+
+/* The on/off box that is saved with the form (`Switch` in fields.tsx): the same native, accent-coloured box as the other checks here,
+   with its words beside it; doubled so the page-wide label rule cannot make it a block. */
+.fy-wf-switch.fy-wf-switch {
+  margin-block: 0;
+}
+.fy-wf-switch input {
+  accent-color: var(--accent);
+}

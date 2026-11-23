@@ -1,5 +1,5 @@
 /**
- * The security settings block: every setting with its value and bounds, a Save only for a changed and
+ * The security settings block: every setting with its value and bounds, a Save bar that stays off until a number has changed and
  * allowed number, a loosening that is never offered to a caller who may not make it, and one sentence
  * for every failure.
  */
@@ -128,7 +128,7 @@ const press = async (block: ReactTestRenderer, marker: string, value: string): P
   });
 };
 
-const saveButton = (block: ReactTestRenderer, field: string) => marked(block, 'data-security-save', field)[0];
+const saveButton = (block: ReactTestRenderer, _field: string) => marked(block, 'data-security-save', 'form')[0];
 
 describe('SecuritySettingsBlock reading', () => {
   it('shows each setting with its value and its bounds, in plain units', async () => {
@@ -224,18 +224,18 @@ describe('SecuritySettingsBlock narrowing', () => {
     // Act
     await typeInto(block, 'idleExpiryDays', '10');
     should(saveButton(block, 'idleExpiryDays')?.props.disabled).equal(false);
-    await press(block, 'data-security-save', 'idleExpiryDays');
+    await press(block, 'data-security-save', 'form');
 
     // Assert
     should(ledger.patches).eql([{ idleExpiryDays: 10 }]);
     expect(text(block)).toContain('10 days');
     expect(text(block)).toContain('This will unpair 2 devices that have not been used within the new period.');
-    should(saveButton(block, 'idleExpiryDays')).be.undefined();
+    should(saveButton(block, 'idleExpiryDays')?.props.disabled).equal(true);
     should(marked(block, 'data-security-failure-settings')).be.empty();
     run(() => block.unmount());
   });
 
-  it('offers no Save for an unchanged number', async () => {
+  it('keeps Save off for an unchanged number', async () => {
     // Arrange
     const block = await mountBlock(machine(view(), () => new Error('unused')));
 
@@ -243,7 +243,7 @@ describe('SecuritySettingsBlock narrowing', () => {
     await typeInto(block, 'idleExpiryDays', '30');
 
     // Assert
-    should(saveButton(block, 'idleExpiryDays')).be.undefined();
+    should(saveButton(block, 'idleExpiryDays')?.props.disabled).equal(true);
     run(() => block.unmount());
   });
 
@@ -331,7 +331,7 @@ describe('SecuritySettingsBlock loosening', () => {
     // Act
     await typeInto(block, 'idleExpiryDays', '60');
     should(saveButton(block, 'idleExpiryDays')?.props.disabled).equal(false);
-    await press(block, 'data-security-save', 'idleExpiryDays');
+    await press(block, 'data-security-save', 'form');
     await press(block, 'data-security-switch', 'unlockOnOpen');
 
     // Assert
@@ -378,7 +378,7 @@ describe('SecuritySettingsBlock raising how long an unlock lasts (up to a week, 
     should(marked(block, 'data-security-note-kind', 'at-machine')).be.empty();
 
     // Act
-    await press(block, 'data-security-save', 'unlockValidityHours');
+    await press(block, 'data-security-save', 'form');
 
     // Assert
     should(ledger.patches).eql([{ unlockValidityHours: 168 }]);
@@ -410,7 +410,7 @@ describe('SecuritySettingsBlock raising how long an unlock lasts (up to a week, 
 
     // Act
     await press(block, 'data-security-preset', 'unlockValidityHours:72');
-    await press(block, 'data-security-save', 'unlockValidityHours');
+    await press(block, 'data-security-save', 'form');
 
     // Assert
     expect(text(block)).toContain('This change needs your passkey, and it was not confirmed. Nothing was changed.');
@@ -442,7 +442,7 @@ describe('SecuritySettingsBlock refusals', () => {
 
     // Act
     await typeInto(block, 'stepUpWindowMinutes', '5');
-    await press(block, 'data-security-save', 'stepUpWindowMinutes');
+    await press(block, 'data-security-save', 'form');
 
     // Assert
     expect(text(block)).toContain(

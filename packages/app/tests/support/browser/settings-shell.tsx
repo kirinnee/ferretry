@@ -101,7 +101,9 @@ export function renderSettingsShell({
 
 export interface ShellOptions {
   /** The fake machine's answer to a request, asked BEFORE the defaults; `undefined` falls through to them. */
-  readonly answer?: ((request: TransportRequest) => TransportAnswer | undefined) | undefined;
+  readonly answer?:
+    | ((request: TransportRequest) => TransportAnswer | undefined | Promise<TransportAnswer | undefined>)
+    | undefined;
   /** The id this browser is paired under on the fake machine. */
   readonly deviceId?: string | undefined;
 }
@@ -112,8 +114,8 @@ export function renderSettingsShellOf(
   options: ShellOptions = {},
   root: HTMLElement | null = document.getElementById('root'),
 ) {
-  const transport = new FakeTransport((request: TransportRequest): TransportAnswer => {
-    const registered = options.answer?.(request);
+  const transport = new FakeTransport(async (request: TransportRequest): Promise<TransportAnswer> => {
+    const registered = await options.answer?.(request);
     if (registered !== undefined) return registered;
     if (request.path === '/v1/plugins') return json(inventoryOf(surfaces));
     if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
