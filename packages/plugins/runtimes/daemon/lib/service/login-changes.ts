@@ -10,7 +10,7 @@ import { LoginChangeError, type LoginChange, type LoginRuntimePreview } from '@f
 import type { AccountModel } from '../account/schema.ts';
 import { type CatalogRefusalCode, isSupportedHarnessKey, type RuntimeView } from '../../../contract/index.ts';
 import { listed } from './catalog.ts';
-import { harnessKeyOfKind, harnessKindOfKey, UnsupportedHarnessError } from '../harness-kind.ts';
+import { harnessKeyOfKind, supportedKindOfKey, unsupportedHarnessSentence } from '../harness-kind.ts';
 import type { LoginAccountChange, LoginRemoval } from './mutations.ts';
 
 /**
@@ -30,12 +30,9 @@ export function movedSentence(change: LoginRemoval): string {
 
 /** The key Logins takes for a harness: a harness Runtimes has no behaviour for is refused by name, never staged as one of two. */
 const shippedKey = (key: string) => {
-  try {
-    return harnessKeyOfKind(harnessKindOfKey(key));
-  } catch (error) {
-    if (error instanceof UnsupportedHarnessError) throw new LoginChangeError('login_change_refused', error.message);
-    throw error;
-  }
+  const kind = supportedKindOfKey(key);
+  if (kind === undefined) throw new LoginChangeError('login_change_refused', unsupportedHarnessSentence(key));
+  return harnessKeyOfKind(kind);
 };
 
 /** A runtime on a login a change touches, as Logins previews it: a harness it cannot read shows none, and its launch says why. */

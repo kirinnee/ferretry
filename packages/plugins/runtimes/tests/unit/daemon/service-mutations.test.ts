@@ -143,6 +143,10 @@ describe('runtime.put', () => {
     should(refusalOf(put({ profile: 'nope' }))).equal('no profile nope exists on this machine');
   });
 
+  it('should refuse a CLI Runtimes has no behaviour for, by name, never as one of the two it knows', () => {
+    should(refusalOf(put({ harness: 'fake-third' }))).equal('fake-third is not supported here');
+  });
+
   it('should refuse a CLI the login does not drive', () => {
     should(refusalOf(put({ harness: 'codex' }))).equal('claude-b does not drive Codex: it is a Claude Code login.');
   });
