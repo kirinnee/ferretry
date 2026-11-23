@@ -12,10 +12,13 @@
  * - Otherwise it is "<Harness> · <where its sign-in comes from>": the CLI the person already uses in a terminal, a
  *   sign-in made inside Ferretry, or a key or endpoint of a provider.
  * - A label the owner put on the login is appended: `Claude · your terminal sign-in (work)`.
+ * - Two that would read the same are told apart by the ACCOUNT (the login's email, else its plan: what the login view
+ *   already shows, never a credential), then by profile, then by the runtime's own name.
  *
  * Pure: no filesystem, no clock.
  */
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import { z } from 'zod';
 import type { CredentialStore } from './wire/shared.ts';
 
 // Words by harness key, read by lookup so a harness this table does not know still has a name (its own key) and no
@@ -78,21 +81,70 @@ const baseName = (source: RuntimeNameSource): string => {
   return label === undefined || label === '' ? named : `${named} (${label})`;
 };
 
+/** What {@link runtimeAccounts} reads of a login: the words its own screen shows for who it is. */
+export interface LoginAccountSource {
+  readonly id: string;
+  readonly email?: string | undefined;
+  readonly status: { readonly planType?: string | undefined };
+}
+
+/** Who a login is, by login id: the email the harness recorded, else the plan it is on. A login that shows neither is absent. */
+export type RuntimeAccounts = ReadonlyMap<string, string>;
+
+const NO_ACCOUNTS: RuntimeAccounts = new Map();
+
+/** Who each login is, in the words its own screen uses. Display only: never a credential. */
+export const runtimeAccounts = (logins: readonly LoginAccountSource[]): RuntimeAccounts =>
+  new Map(
+    logins.flatMap(login => {
+      const words = login.email ?? login.status.planType;
+      return words === undefined ? [] : [[login.id, words] as const];
+    }),
+  );
+
+/**
+ * The part of `GET /v1/logins` the account words read, and nothing else (a loose object: Logins owns the rest of the
+ * shape, and a login this does not understand simply tells nobody apart). A read that does not parse gives no accounts.
+ */
+const LoginAccountsAnswerSchema = z.looseObject({
+  logins: z.array(
+    z.looseObject({
+      id: z.string(),
+      email: z.string().optional(),
+      status: z.looseObject({ planType: z.string().optional() }),
+    }),
+  ),
+});
+
+/** The account words out of a `GET /v1/logins` answer; none when it is not one. */
+export const runtimeAccountsFrom = (answer: unknown): RuntimeAccounts => {
+  const parsed = LoginAccountsAnswerSchema.safeParse(answer);
+  return parsed.success ? runtimeAccounts(parsed.data.logins) : NO_ACCOUNTS;
+};
+
 /**
  * "Claude · your terminal sign-in", "Codex · ChatGPT sign-in", "Claude · API key", or the owner's own name.
  *
  * `others` is the machine's other runtimes, when the caller has the list (a picker, the Runtimes list). Two machine-made
- * runtimes can stand on one login (two profiles on the same sign-in) and would then read the same, so each of them also
- * says its profile (`Claude · your terminal sign-in — Fast profile`), or its stored name when the profile does not tell
- * them apart either. A caller with one runtime alone passes none.
+ * runtimes can read the same (two sign-ins of one kind, or two profiles on one sign-in). Each of them then also says
+ * which ACCOUNT it is (`Claude · your terminal sign-in — kirin@example.com`, from `accounts`); when the account does not
+ * tell them apart (the same account, or one the login does not show) it says its profile (`— Fast profile`), and its
+ * stored name when the profile does not either. A caller with one runtime alone passes none.
  */
-export const runtimeDisplayName = (source: RuntimeNameSource, others: readonly RuntimeNameSource[] = []): string => {
+export const runtimeDisplayName = (
+  source: RuntimeNameSource,
+  others: readonly RuntimeNameSource[] = [],
+  accounts: RuntimeAccounts = NO_ACCOUNTS,
+): string => {
   if (!isMachineMadeRuntimeName(source)) return source.name;
   const base = baseName(source);
   const twins = others.filter(
     other => other.name !== source.name && isMachineMadeRuntimeName(other) && baseName(other) === base,
   );
   if (twins.length === 0) return base;
+  const account = accounts.get(source.credential.id);
+  if (account !== undefined && twins.every(twin => accounts.get(twin.credential.id) !== account))
+    return `${base} — ${account}`;
   const profileTellsApart = source.profile !== undefined && twins.every(twin => twin.profile !== source.profile);
   return profileTellsApart ? `${base} — ${source.profile} profile` : `${base} — ${source.name}`;
 };

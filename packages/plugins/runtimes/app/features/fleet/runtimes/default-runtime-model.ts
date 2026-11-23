@@ -7,7 +7,12 @@
  * so BEFORE it is picked, so a broken default is visible at a glance.
  */
 
-import { type MachineView, type RuntimeView, runtimeDisplayName } from '../../../../contract/index.ts';
+import {
+  type MachineView,
+  type RuntimeAccounts,
+  type RuntimeView,
+  runtimeDisplayName,
+} from '../../../../contract/index.ts';
 import { HARNESS_NAMES } from '../components/component-model.ts';
 import { untilWords } from '../shell/disable-model.ts';
 import { harnessInstalled } from './runtimes-model.ts';
@@ -36,8 +41,11 @@ export const runtimeStateWords = (runtime: RuntimeView, machine: MachineView | n
 };
 
 /** An option of the select: the name only ("claude-default"); its state is the badge beside the select. */
-export const defaultOptionLabel = (runtime: RuntimeView, runtimes: readonly RuntimeView[]): string =>
-  runtimeDisplayName(runtime, runtimes);
+export const defaultOptionLabel = (
+  runtime: RuntimeView,
+  runtimes: readonly RuntimeView[],
+  accounts: RuntimeAccounts,
+): string => runtimeDisplayName(runtime, runtimes, accounts);
 
 /** Whether this runtime is the machine's default for new agents. */
 export const isDefaultRuntime = (machine: MachineView | null, runtime: RuntimeView): boolean =>

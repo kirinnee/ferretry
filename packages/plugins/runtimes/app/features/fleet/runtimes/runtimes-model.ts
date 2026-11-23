@@ -146,9 +146,14 @@ export const harnessInstalled = (machine: MachineView | null, harness: HarnessKi
   machine === null || machine.tools.some(tool => tool.harness === harness && tool.installed);
 
 /** The Launch button's words (R5): "Launch claude-default", or why it cannot. */
-export const launchLabel = (runtime: RuntimeView, machineName: string, online: boolean): string => {
+export const launchLabel = (
+  runtime: RuntimeView,
+  machineName: string,
+  online: boolean,
+  shownName: string = runtimeDisplayName(runtime),
+): string => {
   if (!online) return `Waiting for ${machineName}`;
-  return runtime.launch.available ? `Launch ${runtimeDisplayName(runtime)}` : runtime.launch.reason;
+  return runtime.launch.available ? `Launch ${shownName}` : runtime.launch.reason;
 };
 
 /** The row under a runtime's name: "you@example.com (work) · Default profile · Sonnet 5.5". */

@@ -1,3 +1,4 @@
+import { LoginListSchema } from '@ferretry/plugin-logins/contract';
 import { chooseStarting, labelOf, openBox, optionsOpen } from '../../../../support/select-box.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { MachineView, RunningSession } from '../../../../../../contract/index.ts';
@@ -7,17 +8,26 @@ import { chooseRuntimeAction, menuButton, openRuntimeMenu } from './runtime-menu
 import {
   type Call,
   CHANGE_ID,
+  credential,
   LANDED_FILE,
   machine,
   machineWith,
   READS,
   ROLLBACK_INCOMPLETE,
+  runtime,
   ROLLED_BACK,
   type Route,
   scripted,
   stagedFrom,
   UNRESTORED_PATH,
 } from '../account-support.ts';
+
+/** The words a person reads for the fixture's runtimes (the stored names stay what `--agent` takes). */
+const CODEX_WORDS = 'Codex · your terminal sign-in';
+const REVIEW_WORDS = 'Claude · your terminal sign-in (personal) — Review profile';
+const DEFAULT_WORDS = 'Claude · your terminal sign-in (personal) — Default profile';
+const AGENT_WORDS = 'Claude · your terminal sign-in (personal) — Agent work profile';
+const WORK_WORDS = 'Claude · Claude.ai sign-in (work)';
 
 const PROPOSE = 'POST /v1/runtimes/proposals';
 const MOVE = 'POST /v1/ferrets/:ferretId/move';
@@ -435,7 +445,7 @@ describe('Runtime actions: Remove after a rolled-back apply', () => {
     await chooseRuntimeAction(view.container, 'claude-work', 'remove');
     await choose(
       must(view.container.querySelector<HTMLElement>('[data-runtime-move-target]'), 'move target'),
-      'codex-default',
+      CODEX_WORDS,
     );
 
     // Act
@@ -471,7 +481,7 @@ describe('Runtime actions: Remove', () => {
       'OtterClaude Code',
     ]);
     expect(text(view.container, '[data-runtime-move-plan]')).toBe('They keep running until they end.');
-    expect(submit(view.container).textContent).toBe('Remove codex-default');
+    expect(submit(view.container).textContent).toBe(`Remove ${CODEX_WORDS}`);
     expect(submit(view.container).getAttribute('data-variant')).toBe('danger');
     expect(calls.some(call => call.route.endsWith('/apply'))).toBe(false);
   });
@@ -517,7 +527,7 @@ describe('Runtime actions: Remove', () => {
     // Act
     await choose(
       must(view.container.querySelector<HTMLElement>('[data-runtime-move-target]'), 'move target'),
-      'codex-default',
+      CODEX_WORDS,
     );
     await interact(() => submit(view.container).click());
     await settle();
@@ -552,7 +562,7 @@ describe('Runtime actions: Remove', () => {
     await chooseRuntimeAction(view.container, 'claude-work', 'remove');
     await choose(
       must(view.container.querySelector<HTMLElement>('[data-runtime-move-target]'), 'move target'),
-      'claude-review',
+      REVIEW_WORDS,
     );
 
     // Act
@@ -584,18 +594,19 @@ describe('Runtime actions: Remove', () => {
 
     // Act
     await openBox(select);
-    expect(optionsOpen().map(option => labelOf(option).split(' · ')[0])).toEqual([
+    // Each target reads in the words a person uses, never its stored name; the three on one login differ by profile.
+    expect(optionsOpen().map(option => labelOf(option))).toEqual([
       'Leave them running here',
-      'claude-default',
-      'claude-agent',
-      'claude-review',
-      'codex-default',
+      DEFAULT_WORDS,
+      AGENT_WORDS,
+      REVIEW_WORDS,
+      CODEX_WORDS,
     ]);
-    await choose(select, 'codex-default');
+    await choose(select, CODEX_WORDS);
     expect(text(view.container, '[data-runtime-move-plan]')).toBe(
-      '2 ferrets restart on codex-default first, each with its conversation, then the runtime is removed.',
+      `2 ferrets restart on ${CODEX_WORDS} first, each with its conversation, then the runtime is removed.`,
     );
-    expect(submit(view.container).textContent).toBe('Move 2 ferrets to codex-default and remove claude-work');
+    expect(submit(view.container).textContent).toBe(`Move 2 ferrets to ${CODEX_WORDS} and remove ${WORK_WORDS}`);
     await interact(() => submit(view.container).click());
     await settle();
 
@@ -624,9 +635,9 @@ describe('Runtime actions: Remove', () => {
     // Act
     await choose(
       must(view.container.querySelector<HTMLElement>('[data-runtime-move-target]'), 'move target'),
-      'claude-review',
+      REVIEW_WORDS,
     );
-    expect(submit(view.container).textContent).toBe('Move 1 ferret to claude-review and remove claude-work');
+    expect(submit(view.container).textContent).toBe(`Move 1 ferret to ${REVIEW_WORDS} and remove ${WORK_WORDS}`);
     await interact(() => submit(view.container).click());
     await settle();
 
@@ -645,7 +656,7 @@ describe('Runtime actions: Remove', () => {
     await chooseRuntimeAction(view.container, 'claude-work', 'remove');
     await choose(
       must(view.container.querySelector<HTMLElement>('[data-runtime-move-target]'), 'move target'),
-      'claude-review',
+      REVIEW_WORDS,
     );
 
     // Act
@@ -658,7 +669,7 @@ describe('Runtime actions: Remove', () => {
       'One ferret could not be moved, so Claude · Claude.ai sign-in (work) was not removed.',
     );
     expect(text(view.container, '[data-runtime-move-failed]')).toContain('Otter');
-    expect(submit(view.container).textContent).toBe('Remove claude-work');
+    expect(submit(view.container).textContent).toBe(`Remove ${WORK_WORDS}`);
   });
 
   it('asks for another default first when it is the machine’s default runtime', async () => {
@@ -681,7 +692,7 @@ describe('Runtime actions: Remove', () => {
 
     // Assert — nothing is staged until a default is picked; every other runtime is offered.
     expect(text(view.container, '[data-runtime-remove-default]')).toBe(
-      'Claude · your terminal sign-in (personal) is studio-mac’s default runtime for new agents. Pick another default first.',
+      `${AGENT_WORDS} is studio-mac’s default runtime for new agents. Pick another default first.`,
     );
     expect(proposed(calls)).toEqual([]);
     expect(view.container.querySelector('[data-runtime-default-picker]')).not.toBeNull();
@@ -711,12 +722,12 @@ describe('Runtime actions: Remove', () => {
       },
     });
     await chooseRuntimeAction(view.container, 'claude-default', 'remove');
-    expect(text(view.container, '[data-runtime-dialog] [data-change-submit]')).toBe('Make codex-default the default');
+    expect(text(view.container, '[data-runtime-dialog] [data-change-submit]')).toBe(`Make ${CODEX_WORDS} the default`);
 
     // Act
     await choose(
       must(view.container.querySelector<HTMLElement>('[data-runtime-default-picker]'), 'picker'),
-      'claude-agent',
+      AGENT_WORDS,
     );
     await interact(() => submit(view.container).click());
     await settle();
@@ -766,7 +777,7 @@ describe('Runtime actions: Remove', () => {
     await chooseRuntimeAction(view.container, 'claude-default', 'remove');
     await choose(
       must(view.container.querySelector<HTMLElement>('[data-runtime-default-picker]'), 'picker'),
-      'claude-agent',
+      AGENT_WORDS,
     );
 
     // Act
@@ -791,5 +802,58 @@ describe('Runtime actions: Remove', () => {
     expect(view.container.querySelector('[data-runtime-remove-refused]')).not.toBeNull();
     await click(view.container, '[data-runtime-dialog-cancel]');
     expect(view.container.querySelector('[data-runtime-dialog]')).toBeNull();
+  });
+});
+
+describe('Runtime actions: two accounts of one kind (O9-5)', () => {
+  const two = (emails: readonly [string, string]): Record<string, Route> => ({
+    'GET /v1/runtimes': {
+      format: 'present',
+      runtimes: [
+        runtime({ name: 'claude-you', credential: { id: 'login-a', store: 'host', status: 'ready' } }),
+        runtime({ name: 'claude-you-2', credential: { id: 'login-b', store: 'host', status: 'ready' } }),
+      ],
+    },
+    'GET /v1/logins': LoginListSchema.parse({
+      format: 1,
+      machine: 'studio-mac',
+      logins: [
+        credential({ id: 'login-a', store: 'host', email: emails[0] }),
+        credential({ id: 'login-b', store: 'host', email: emails[1] }),
+      ],
+    }),
+    [PROPOSE]: removalStaged([]),
+    [APPLY]: COMMITTED,
+  });
+
+  it('heads Rename and Remove with the account each runtime belongs to, so the two cannot be mixed up', async () => {
+    const view = await open({ routes: two(['kirin@one.example', 'kirin@two.example']) });
+
+    await chooseRuntimeAction(view.container, 'claude-you', 'rename');
+    expect(text(view.container, '[data-runtime-dialog="rename"] h2')).toBe(
+      'Rename Claude · your terminal sign-in — kirin@one.example',
+    );
+    await click(view.container, '[data-runtime-dialog-cancel]');
+
+    await chooseRuntimeAction(view.container, 'claude-you-2', 'rename');
+    expect(text(view.container, '[data-runtime-dialog="rename"] h2')).toBe(
+      'Rename Claude · your terminal sign-in — kirin@two.example',
+    );
+    await click(view.container, '[data-runtime-dialog-cancel]');
+
+    await chooseRuntimeAction(view.container, 'claude-you-2', 'remove');
+    expect(text(view.container, '[data-runtime-dialog="remove"] h2')).toBe(
+      'Remove Claude · your terminal sign-in — kirin@two.example?',
+    );
+    expect(submit(view.container).textContent).toBe('Remove Claude · your terminal sign-in — kirin@two.example');
+  });
+
+  it('falls back to each runtime’s own name when both are the same account', async () => {
+    const view = await open({ routes: two(['kirin@one.example', 'kirin@one.example']) });
+
+    await chooseRuntimeAction(view.container, 'claude-you-2', 'remove');
+    expect(text(view.container, '[data-runtime-dialog="remove"] h2')).toBe(
+      'Remove Claude · your terminal sign-in — claude-you-2?',
+    );
   });
 });

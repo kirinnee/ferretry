@@ -21,6 +21,7 @@ type Account = PickerAccount;
 
 const claudeAccount = (overrides: Partial<Account> = {}): Account => ({
   id: CLAUDE_ID,
+  name: 'claude-atelier',
   kind: 'claude-code',
   credentialId: 'claude-login',
   wrapper: 'claude-auto-atelier',
@@ -34,6 +35,7 @@ const claudeAccount = (overrides: Partial<Account> = {}): Account => ({
 
 const codexAccount = (overrides: Partial<Account> = {}): Account => ({
   id: CODEX_ID,
+  name: 'codex-forge',
   kind: 'codex',
   credentialId: 'codex-login',
   wrapper: 'codex-auto-forge',
@@ -195,9 +197,22 @@ describe('hintedAccountOption', () => {
     null,
   );
 
-  it('honours a launch hint by wrapper or by runtime name', () => {
+  it('honours a launch hint by wrapper or by stored runtime name', () => {
     expect(hintedAccountOption(options, 'claude-auto-atelier')?.id).toBe(CLAUDE_ID);
-    expect(hintedAccountOption(options, 'Claude Atelier')?.id).toBe(CLAUDE_ID);
+    expect(hintedAccountOption(options, 'claude-atelier')?.id).toBe(CLAUDE_ID);
+  });
+
+  it('never matches the words a person reads, so a label edit or a new twin cannot break or re-aim a link', () => {
+    // The words the row shows are display only: a hint spelled like them finds nothing.
+    expect(hintedAccountOption(options, 'Claude Atelier')).toBeNull();
+    // The stored identities still find the row after its label changes.
+    const relabelled = accountPickerOptions(
+      [claudeAccount({ displayName: 'Claude · your terminal sign-in — kirin@example.com' })],
+      [],
+      null,
+    );
+    expect(hintedAccountOption(relabelled, 'claude-atelier')?.id).toBe(CLAUDE_ID);
+    expect(hintedAccountOption(relabelled, 'Claude · your terminal sign-in — kirin@example.com')).toBeNull();
   });
 
   it('ignores a hint naming a runtime that cannot launch, or none at all', () => {

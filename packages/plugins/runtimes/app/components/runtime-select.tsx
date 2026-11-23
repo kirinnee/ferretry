@@ -98,6 +98,14 @@ const harnessGroups = (options: readonly AccountPickerOption[]) =>
     options: options.filter(option => option.kind === kind),
   })).filter(group => group.options.length > 0);
 
+/**
+ * A runtime's closed select lets its value wrap (a second line) instead of cutting it with an ellipsis: two runtimes of one
+ * kind differ only at the END of their words (`Claude · your terminal sign-in — kirin@example.com`), and a cut there
+ * would hide the one part that tells them apart.
+ */
+export const WRAPPING_SELECT =
+  '!h-auto min-h-control py-1.5 [&>span:first-child]:whitespace-normal [&>span:first-child]:break-words [&>span:first-child]:text-clip';
+
 /** What a runtime runs on, in the words a person picks by: its login's catalog, then its default model. The stored name is not one of them: the row's name already tells runtimes apart. */
 const runtimeHint = (account: AccountPickerOption): string => {
   const hint = [account.modelCatalog?.label, account.defaultModel].filter(part => part != null);
@@ -245,7 +253,7 @@ export function RuntimeSelect({
     <div className="grid gap-xs">
       <div className="grid min-w-0 max-w-sm gap-xs" data-runtime-select="">
         <SelectBox
-          className="w-full"
+          className={cn('w-full', WRAPPING_SELECT)}
           id={fallbackId}
           label={label}
           onChange={onValueChange}

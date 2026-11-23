@@ -3,6 +3,8 @@ import {
   type RuntimeNameSource,
   harnessWord,
   isMachineMadeRuntimeName,
+  runtimeAccounts,
+  runtimeAccountsFrom,
   runtimeDisplayName,
 } from '../../contract/index.ts';
 
@@ -95,6 +97,63 @@ describe('how a runtime is named for a person (O9-5)', () => {
     // Alone on its login, a runtime reads plainly; a runtime the owner named never takes the suffix or gives one.
     expect(runtimeDisplayName(first, [first, owned, other])).toBe('Claude · your terminal sign-in');
     expect(runtimeDisplayName(owned, [first, second, owned])).toBe('Atelier');
+  });
+
+  it('tells two accounts apart by what their login shows, never by a credential', () => {
+    const one = source({ harness: 'claude-code', name: 'claude-you', credential: { id: 'login-a', store: 'host' } });
+    const two = source({ harness: 'claude-code', name: 'claude-you-2', credential: { id: 'login-b', store: 'host' } });
+    const accounts = runtimeAccounts([
+      { id: 'login-a', email: 'kirin@one.example', status: {} },
+      { id: 'login-b', email: 'kirin@two.example', status: {} },
+    ]);
+    expect(runtimeDisplayName(one, [one, two], accounts)).toBe('Claude · your terminal sign-in — kirin@one.example');
+    expect(runtimeDisplayName(two, [one, two], accounts)).toBe('Claude · your terminal sign-in — kirin@two.example');
+    // Without the account words the stored names are the only thing left, as before.
+    expect(runtimeDisplayName(one, [one, two])).toBe('Claude · your terminal sign-in — claude-you');
+    // A login that shows a plan and no email is told apart by its plan.
+    const plans = runtimeAccounts([
+      { id: 'login-a', status: { planType: 'Pro' } },
+      { id: 'login-b', status: { planType: 'Plus' } },
+    ]);
+    expect(runtimeDisplayName(two, [one, two], plans)).toBe('Claude · your terminal sign-in — Plus');
+  });
+
+  it('falls back to profile, then stored name, when both runtimes are on one account', () => {
+    const one = source({
+      harness: 'claude-code',
+      name: 'claude-you',
+      profile: 'Default',
+      credential: { id: 'a', store: 'host' },
+    });
+    const two = source({
+      harness: 'claude-code',
+      name: 'claude-you-2',
+      profile: 'Fast',
+      credential: { id: 'b', store: 'host' },
+    });
+    const same = runtimeAccounts([
+      { id: 'a', email: 'kirin@one.example', status: {} },
+      { id: 'b', email: 'kirin@one.example', status: {} },
+    ]);
+    expect(runtimeDisplayName(one, [one, two], same)).toBe('Claude · your terminal sign-in — Default profile');
+    expect(runtimeDisplayName(two, [one, two], same)).toBe('Claude · your terminal sign-in — Fast profile');
+  });
+
+  it('reads the account words out of a login list answer, and out of nothing when it is not one', () => {
+    const answer = {
+      format: 1,
+      logins: [
+        { id: 'a', email: 'kirin@one.example', status: { word: 'ready' }, token: 'never-read' },
+        { id: 'b', status: { word: 'ready', planType: 'Pro' } },
+        { id: 'c', status: { word: 'ready' } },
+      ],
+    };
+    expect([...runtimeAccountsFrom(answer)]).toEqual([
+      ['a', 'kirin@one.example'],
+      ['b', 'Pro'],
+    ]);
+    expect(runtimeAccountsFrom(undefined).size).toBe(0);
+    expect(runtimeAccountsFrom({ logins: 'no' }).size).toBe(0);
   });
 
   it('says the harness in the words a person uses', () => {

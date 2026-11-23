@@ -487,7 +487,7 @@ describe('Launch', () => {
     const calls: Call[] = [];
     const view = await page('claude-default', { calls });
     const launch = must(view.container.querySelector<HTMLAnchorElement>('a[data-runtime-launch]'), 'launch');
-    expect(launch.textContent).toBe('Launch Claude · your terminal sign-in (personal)');
+    expect(launch.textContent).toBe('Launch Claude · your terminal sign-in (personal) — Default profile');
     expect(launch.getAttribute('href')).toBe('/d/d1/new?agent=claude-default');
     expect(launchHref('d1', 'a b')).toBe('/d/d1/new?agent=a%20b');
     expect(calls.every(call => call.route.startsWith('GET '))).toBe(true);

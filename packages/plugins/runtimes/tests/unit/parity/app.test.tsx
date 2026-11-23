@@ -250,11 +250,12 @@ describe('the Runtimes Settings tab the half builds', () => {
     ]);
     const target = must(removal.querySelector('[data-runtime-move-target]'), 'the move target');
     await openBox(target);
-    expect(optionsOpen().map(option => labelOf(option).split(' · ')[0])).toEqual([
+    // Targets read in the words a person uses (the same words the list shows), never by stored name.
+    expect(optionsOpen().map(labelOf)).toEqual([
       'Leave them running here',
-      'claude-default',
-      'claude-work',
-      'claude-plain',
+      'Claude · your terminal sign-in (personal) — claude-default',
+      'Claude · Claude.ai sign-in (work)',
+      'Claude · your terminal sign-in (personal) — claude-plain',
     ]);
     await closeBox(target);
     expect(text(removal, '[data-runtime-dialog-cancel]')).toBe('Cancel');
