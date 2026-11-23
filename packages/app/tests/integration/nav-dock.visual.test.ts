@@ -210,8 +210,8 @@ describe('r11 S1: the nav sits at the foot of the sidebar (default layout)', () 
         }
         expect(
           seen.items.map(item => item.name),
-          'Conversations is a default place',
-        ).toContain('Conversations');
+          'O8-12: continuing a conversation is part of New ferret, so there is no Conversations place',
+        ).not.toContain('Conversations');
         expect(seen.dockOverflows, 'the dock does not overflow').toBe(false);
         expect(new Set(seen.items.map(item => Math.round(item.box.top))).size, 'one row of icons').toBe(1);
       } finally {
@@ -249,16 +249,15 @@ describe('r11 S1: the nav sits at the foot of the sidebar (default layout)', () 
   for (const [mode, path] of [
     ['light', '/d/ws/agenda'],
     ['dark', '/d/ws/agenda'],
-    ['light', '/d/ws/links'],
   ] as const)
-    it(`900, ${mode}, on ${path}: the words form shows every word whole in the lean 240px drawer, "Conversations" included (also when it is the current, bolder place)`, async () => {
+    it(`900, ${mode}, on ${path}: the words form shows every word whole in the lean 240px drawer (also when it is the current, bolder place)`, async () => {
       const { tab, close } = await open(MID, path, '&nav=words', mode);
       try {
         const seen = await measure(tab);
         await shotOf(tab, `r11-s1-900-words-${mode}-${path.split('/').at(-1)}`);
         await keep(`r11-s1-900-words-${mode}-${path.split('/').at(-1)}`, seen);
         expect(seen.drawer && seen.drawer.right - seen.drawer.left, 'the default lean drawer').toBeLessThanOrEqual(260);
-        expect(seen.items.map(item => item.name)).toContain('Conversations');
+        expect(seen.items.map(item => item.name)).toContain('Agenda');
         for (const item of seen.items) {
           expect(item.visibleWord.length, `${item.name} shows its word`).toBeGreaterThan(0);
           expect(
@@ -372,9 +371,9 @@ describe('r11 S1: phones follow desktop (owner answer C2): the nav is in the dra
         // A place chosen shuts the drawer and goes THERE: the test starts on Board and picks another place, so a press that
         // only closed the drawer (the URL it began on) cannot pass.
         expect(tab.url(), 'it started on Board').toContain('/d/ws/board');
-        await tab.click('nav[data-nav="dock"] a[title="Conversations"]');
-        await tab.waitForURL('**/d/ws/links*');
-        expect(tab.url(), 'Conversations opened').toContain('/d/ws/links');
+        await tab.click('nav[data-nav="dock"] a[title="Agenda"]');
+        await tab.waitForURL('**/d/ws/agenda*');
+        expect(tab.url(), 'Agenda opened').toContain('/d/ws/agenda');
         expect(await tab.locator('.fy-drawer').count(), 'the drawer shuts on a place').toBe(0);
       } finally {
         await close();

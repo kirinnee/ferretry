@@ -44,7 +44,7 @@
  * document can describe completely.
  */
 
-import { TranscriptProvenanceSchema } from '../../../contract/records.ts';
+import { isRecordedHarness, TranscriptProvenanceSchema } from '../../../contract/records.ts';
 import { SessionConfigSchema, SessionStateSchema, type TranscriptProvenance } from '../../lib/protocol/session.ts';
 import type { TransferSourceReader, TransferSourceSession } from '../../lib/transfer/types.ts';
 import { type SessionId, tryParseSessionId } from '../../lib/session-id.ts';
@@ -79,12 +79,15 @@ export class StorageTransferSourceReader implements TransferSourceReader {
     const document = await this.storage.readConfig(id).catch(() => undefined);
     const config = SessionConfigSchema.safeParse(document);
     if (!config.success) return undefined;
+    // A transfer lineage names the two families only: a ferret of any other harness is not a source, never read as Claude.
+    const harness = config.data.harness;
+    if (!isRecordedHarness(harness)) return undefined;
 
     return {
       sessionId: config.data.id,
       incarnation: config.data.incarnation,
       runtimeGeneration: config.data.runtimeGeneration,
-      harness: config.data.harness,
+      harness,
       agent: config.data.agent,
       model: present(config.data.model) ?? (await this.observedModel(id)),
       teammate: present(config.data.teammate),

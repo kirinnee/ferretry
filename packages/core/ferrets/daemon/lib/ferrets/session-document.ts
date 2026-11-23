@@ -1,4 +1,4 @@
-import type { FerretDetails, FerretRecord, FerretState } from '../../../contract/index.ts';
+import { type FerretDetails, type FerretRecord, type FerretState, recordedHarnessOf } from '../../../contract/index.ts';
 import type { SessionConfig } from '../protocol/session.ts';
 import type { SessionStatus } from '../protocol/session-base.ts';
 import { reviveRuling } from '../protocol/session-revive.ts';
@@ -100,7 +100,7 @@ export function sessionDocument(seed: SessionDocumentSeed, now: string): Session
     ...(options?.label === undefined ? {} : { label: options.label }),
     ...(record.parent === undefined ? {} : { parent: record.parent }),
     agent: record.runtime ?? record.harness,
-    harness: record.harness === 'codex' ? 'codex' : 'claude',
+    harness: recordedHarnessOf(record.harness),
     modelHint: options?.model ?? '',
     ...(options?.model === undefined
       ? { launchModelSource: 'account-default' as const }

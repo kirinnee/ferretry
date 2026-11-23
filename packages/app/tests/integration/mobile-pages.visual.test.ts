@@ -143,7 +143,6 @@ describe('the places on a phone (r11 S1, owner C2: in the drawer at its foot, no
         });
         expect(seen.cells.map(cell => cell.text)).toEqual([
           'Ferrets',
-          'Conversations',
           'Agenda',
           'Board',
           'Projects',

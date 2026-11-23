@@ -41,7 +41,7 @@ import {
   type CloneCredential,
   type CloneRunnableKind,
 } from '../../contract/index.ts';
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 
 /** One thing a component would run or change, in words. */
 export interface CloneRunnableEntry {
@@ -59,7 +59,7 @@ export interface CloneRunnable {
   readonly reference: string;
   readonly kind: CloneRunnableKind;
   readonly name: string;
-  readonly harness?: HarnessKey;
+  readonly harness?: KnownHarnessKey;
   readonly entries: readonly CloneRunnableEntry[];
 }
 

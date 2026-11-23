@@ -18,11 +18,11 @@ import type { LinkableConversation } from '../../contract/index.ts';
 import { Asterisk, CodeXml, FlaskConical, Folder, Laptop, PawPrint } from 'lucide-react';
 import type { ReactNode } from 'react';
 import './links.css';
-import { conversationFolder, HARNESS_SHORT, type HarnessKey, harnessKeyOf } from './link-words.ts';
+import { conversationFolder, HARNESS_SHORT, type KnownHarnessKey, harnessKeyOf } from './link-words.ts';
 import { conversationHeadline, type FerretMark, ferretState } from './conversation-picker-model.ts';
 
 /** Who a row belongs to, as its colour says it. */
-export type ConversationSourceMark = 'ferretry' | 'computer' | HarnessKey;
+export type ConversationSourceMark = 'ferretry' | 'computer' | KnownHarnessKey;
 
 /** A harness id as a mark: one this app draws, else the plain harness id (which has no icon of its own). */
 const markOf = (harness: string): ConversationSourceMark | undefined => harnessKeyOf(harness);
@@ -33,7 +33,7 @@ const harnessShort = (harness: string): string => {
   return key === undefined ? harness : HARNESS_SHORT[key];
 };
 
-const HARNESS_ICON: Readonly<Record<HarnessKey, typeof Asterisk>> = { 'claude-code': Asterisk, codex: CodeXml };
+const HARNESS_ICON: Readonly<Record<KnownHarnessKey, typeof Asterisk>> = { 'claude-code': Asterisk, codex: CodeXml };
 
 const MARK_ICON: Readonly<Record<ConversationSourceMark, typeof Asterisk>> = {
   ...HARNESS_ICON,

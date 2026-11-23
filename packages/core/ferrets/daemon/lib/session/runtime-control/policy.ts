@@ -10,6 +10,18 @@ import type { RuntimeControlRequest, SessionStatus, SessionView } from '../../pr
 import { type HarnessRuntimeSwitchRequest, isPickerQuarantined, pickerInputRefusal } from '../peers/harness.ts';
 import { TERMINAL_SEND_STATUSES } from '../peers/send-lifecycle.ts';
 import { type RuntimePaneObservation, SessionRuntimeError } from './types.ts';
+import { isRecordedHarness } from '../../../../contract/index.ts';
+
+/**
+ * The refusal for a ferret whose harness this control cannot drive: only the two families here have a switch plan and a
+ * catalog, so a third harness is refused by name, never planned as Claude.
+ */
+export function harnessRefusal(view: SessionView): SessionRuntimeError | undefined {
+  return isRecordedHarness(view.config.harness) ? undefined : unsupportedHarness(view.config.harness);
+}
+
+const unsupportedHarness = (harness: string): SessionRuntimeError =>
+  new SessionRuntimeError('unsupported', `this ferret's harness (${harness}) offers no runtime control here`);
 
 const PUBLIC_REFUSED_STATUSES: ReadonlySet<SessionStatus> = new Set(['starting', 'kill_failed']);
 
@@ -74,7 +86,7 @@ export function switchRequest(
   request: Exclude<RuntimeControlRequest, { action: 'compact' }>,
 ): HarnessRuntimeSwitchRequest {
   return {
-    harness: view.config.harness,
+    harness: closedHarness(view),
     ...(request.action === 'model' && request.model !== undefined ? { model: request.model } : {}),
     ...((request.action === 'model' || request.action === 'effort') && request.effort !== undefined
       ? { effort: request.effort }
@@ -103,3 +115,9 @@ export function needsLiveCatalog(wanted: HarnessRuntimeSwitchRequest): boolean {
 export function needsFastFacts(wanted: HarnessRuntimeSwitchRequest): boolean {
   return wanted.fast !== undefined;
 }
+
+const closedHarness = (view: SessionView): 'claude' | 'codex' => {
+  const harness = view.config.harness;
+  if (isRecordedHarness(harness)) return harness;
+  throw unsupportedHarness(harness);
+};

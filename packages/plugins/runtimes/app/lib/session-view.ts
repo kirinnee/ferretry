@@ -4,13 +4,13 @@
  * has published its types through a contract yet, so these are the smallest copies the pickers need.
  */
 
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 
 // GAP(ferrets): `SessionView` is not in Ferrets' contract; these are the only fields the runtime pickers read.
 export interface RuntimeSessionView {
   readonly config: {
     readonly id: string;
-    readonly harness: HarnessKey;
+    readonly harness: KnownHarnessKey;
     readonly model?: string | undefined;
     readonly modelHint?: string | undefined;
     readonly harnessFlags?: readonly string[] | undefined;

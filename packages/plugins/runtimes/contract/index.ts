@@ -12,7 +12,7 @@ import {
   type Word,
 } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { FerretsPort, HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { FerretsPort, KnownHarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { configDef } from './config-def.ts';
 import {
   ITEM_NAME_PATTERN,
@@ -69,7 +69,7 @@ export const RUNTIMES_WORDS: readonly Word[] = [
 /** A runtime as others read it: enough to start a ferret on it or to list it. */
 export const RuntimeSummarySchema = z.strictObject({
   id: RuntimeIdSchema,
-  harness: HarnessKeySchema,
+  harness: KnownHarnessKeySchema,
   /** The login it spends. */
   login: z.string().min(1),
   profile: z.string().min(1),

@@ -15,7 +15,7 @@
  *
  * Data only: model ids, runtime and login NAMES, readiness and quota — never a credential or a value.
  */
-import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { KnownHarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
 import {
@@ -47,7 +47,7 @@ export const PACK_CLEAN_UP_PACK = 'ferretry-guide-builder';
 /** One runtime on this machine: its CLI, the catalog its login reads, whether it can start now, its quota. */
 export const PackInventoryRuntimeSchema = z.strictObject({
   name: NonEmpty,
-  harness: HarnessKeySchema,
+  harness: KnownHarnessKeySchema,
   /** The model catalog its login reads, when it reads one. */
   provider: NonEmpty.optional(),
   /** Its login's id — a name, never a credential. */
@@ -64,7 +64,7 @@ export type PackInventoryRuntime = z.infer<typeof PackInventoryRuntimeSchema>;
 /** One model a catalog lists: names, tier, context and efforts — and the runtimes here that run it. */
 export const PackInventoryModelSchema = z.strictObject({
   provider: NonEmpty,
-  harness: HarnessKeySchema,
+  harness: KnownHarnessKeySchema,
   id: NonEmpty,
   label: NonEmpty,
   tier: z.enum(['best', 'balanced', 'fast']),

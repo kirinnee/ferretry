@@ -1,4 +1,4 @@
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type {
   LoginBudget,
   LoginBudgetPeriodView,
@@ -13,7 +13,7 @@ import type {
   ProviderPresetView,
 } from '../../contract/index.ts';
 
-const HARNESS_LABEL: Record<HarnessKey, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+const HARNESS_LABEL: Record<KnownHarnessKey, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
 
 /** Two spaces per level, so nested facts read as belonging to the line above. */
 const indent = (lines: readonly string[], depth = 1): string[] => lines.map(line => `${'  '.repeat(depth)}${line}`);
@@ -147,12 +147,12 @@ export function renderLoginList(list: LoginList, binaryName: string): string {
 }
 
 /** The harnesses a preset is offered for, Claude Code first. */
-const offeredHarnesses = (preset: ProviderPresetView): readonly HarnessKey[] =>
+const offeredHarnesses = (preset: ProviderPresetView): readonly KnownHarnessKey[] =>
   (['claude-code', 'codex'] as const).filter(harness =>
     preset.halves.some(half => half.harness === harness && half.offered.available),
   );
 
-const SCOPE_WORD: Record<HarnessKey, string> = { 'claude-code': 'Claude', codex: 'Codex' };
+const SCOPE_WORD: Record<KnownHarnessKey, string> = { 'claude-code': 'Claude', codex: 'Codex' };
 
 /** The scope chip `login presets` shows: "Claude + Codex", "Claude only", "Codex only", or "not offered". */
 function presetScopeChip(preset: ProviderPresetView): string {

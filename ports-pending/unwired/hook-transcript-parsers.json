@@ -1,0 +1,5 @@
+{
+  "seam": "hook:transcript.parsers",
+  "card": "&F6354",
+  "why": "Extension point for a third harness: until a harness plugin beyond Claude Code and Codex declares a transcript format and takes this hook, a ferret of such a harness is read from its masked entries, never from its own bytes."
+}

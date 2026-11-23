@@ -356,10 +356,6 @@ const agendaManifest = stub('agenda', [{ id: 'agenda', path: 'agenda', label: 'A
 const boardManifest = stub('board', [
   { id: 'board', path: 'board/:project?', label: 'Board', icon: 'columns', order: 2 },
 ]);
-// Conversation's `links` screen (r11 S1: "Conversations" is a default nav place): the ids, path, label, icon and order its manifest declares.
-const conversationManifest = stub('conversation', [
-  { id: 'links', path: 'links', label: 'Conversations', icon: 'messages', order: 25 },
-]);
 const projectsManifest = stub('projects', [
   { id: 'projects', path: 'projects', label: 'Projects', icon: 'folder', order: 35 },
 ]);
@@ -431,13 +427,6 @@ const surfaces: readonly SurfaceEntry[] = [
     projectsManifest,
     provideToShell(
       implementApp(projectsManifest, { build: () => ({ screens: { projects: page('Projects') } }) } as never),
-      {},
-    ),
-  ),
-  entryOf(
-    conversationManifest,
-    provideToShell(
-      implementApp(conversationManifest, { build: () => ({ screens: { links: page('Conversations') } }) } as never),
       {},
     ),
   ),

@@ -14,7 +14,13 @@
  * Today's view is a structural subtype of {@link ChatSession}, so a caller holding one may still pass it.
  */
 
-import type { FerretContext, FerretSummary, FerretView } from '@ferretry/core-ferrets/contract';
+import {
+  type FerretContext,
+  type FerretSummary,
+  type FerretView,
+  type OpenRecordedHarness,
+  recordedHarnessOf,
+} from '@ferretry/core-ferrets/contract';
 import type { ChatPrompt } from './chat-prompt.ts';
 
 type ViewState = FerretView['state'];
@@ -33,8 +39,8 @@ interface ChatSessionConfig {
   readonly teammate?: string | undefined;
   /** The runtime it runs on. */
   readonly agent?: string | undefined;
-  /** The harness family it runs (Ferrets' `harness`), spelled as the composer takes it: how a picked skill is invoked. */
-  readonly harness?: 'claude' | 'codex' | undefined;
+  /** The harness family it runs (Ferrets' `harness`), or a third harness's own key: the composer reads only the two families. */
+  readonly harness?: OpenRecordedHarness | undefined;
 }
 
 export type ChatSessionState = Partial<
@@ -135,7 +141,7 @@ export const chatSessionOf = (summary: FerretSummary, prompt?: ChatPrompt): Chat
     teammate: summary.name,
     ...(summary.title === undefined ? {} : { name: summary.title }),
     ...(summary.runtime === undefined ? {} : { agent: summary.runtime }),
-    harness: summary.harness === 'codex' ? 'codex' : 'claude',
+    harness: recordedHarnessOf(summary.harness),
   },
   state: {
     ...usageOf(summary.quota),

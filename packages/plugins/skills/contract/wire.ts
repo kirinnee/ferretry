@@ -6,7 +6,7 @@
  * Inlined foreign pieces (a contract imports no other plugin's): the harness key (`claude` → `claude-code`, the plugin id).
  */
 import { z } from 'zod';
-import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { KnownHarnessKeySchema } from '@ferretry/core-ferrets/contract';
 
 // ─── inventory (docs/skills-inventory.md) ────────────────────────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ export type SkillProjectRef = z.infer<typeof SkillProjectRefSchema>;
 export const SkillEntrySchema = z.object({
   name: z.string().trim().min(1),
   description: z.string().trim().min(1),
-  harness: HarnessKeySchema,
+  harness: KnownHarnessKeySchema,
   scope: SkillScopeSchema,
   /** Absolute path of the SKILL.md. The only path `GET /v1/skills/file` will serve. */
   path: z.string().min(1),
@@ -43,7 +43,7 @@ export type SkillEntry = z.infer<typeof SkillEntrySchema>;
 
 export const SkillHomeListingSchema = z.object({
   runtime: z.string().min(1),
-  harness: HarnessKeySchema,
+  harness: KnownHarnessKeySchema,
   home: z.string().min(1),
   skills: z.array(SkillEntrySchema),
 });
@@ -68,7 +68,7 @@ export type MachineSkillsInventory = z.infer<typeof MachineSkillsInventorySchema
 /** `GET /v1/ferrets/:ferretId/skills/inventory`: exactly what that ferret sees. (Today's field `sessionId` is `ferretId`.) */
 export const FerretSkillsInventorySchema = z.object({
   ferretId: z.string().min(1),
-  harness: HarnessKeySchema,
+  harness: KnownHarnessKeySchema,
   /** The folder the ferret works in: what "+ Add skills" uses to pre-select the project the ferret sits in. */
   folder: z.string().min(1),
   runtime: z.string().min(1).optional(),
@@ -90,7 +90,7 @@ export const AvailableSkillSchema = z.object({
 });
 export type AvailableSkill = z.infer<typeof AvailableSkillSchema>;
 
-export const FerretSkillsSchema = z.object({ harness: HarnessKeySchema, skills: z.array(AvailableSkillSchema) });
+export const FerretSkillsSchema = z.object({ harness: KnownHarnessKeySchema, skills: z.array(AvailableSkillSchema) });
 export type FerretSkills = z.infer<typeof FerretSkillsSchema>;
 
 // ─── config: config/skills/<name>.yaml (today's SkillsComponentSchema) ───────────────────────────────────────────
@@ -110,7 +110,7 @@ export const SafeNameSchema = NonEmptyString.max(64)
 export const SkillsItemSchema = z
   .strictObject({
     items: z.array(SafeNameSchema).min(1),
-    harness: HarnessKeySchema.optional(),
+    harness: KnownHarnessKeySchema.optional(),
     clonedFrom: NonEmptyString.optional(),
     clonedFromDaemon: NonEmptyString.optional(),
     clonedFromKey: NonEmptyString.optional(),

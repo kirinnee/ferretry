@@ -34,3 +34,19 @@ describe('sessionDocument launch model source (B191/B1)', () => {
     should(config.launchModelSource).equal('account-default');
   });
 });
+
+describe('sessionDocument harness stamp', () => {
+  const stamped = (harness: string) =>
+    sessionDocument(
+      { record: { ...record, harness }, turn: 0, details: { options: {} } } as unknown as SessionDocumentSeed,
+      '2027-01-15T08:00:00.000Z',
+    ).harness;
+
+  it('should stamp the family for Claude Code and Codex and a third harness its own key, never Claude', () => {
+    should([stamped('claude-code'), stamped('codex'), stamped('fake-third')]).deepEqual([
+      'claude',
+      'codex',
+      'fake-third',
+    ]);
+  });
+});

@@ -4,7 +4,7 @@
  * and Codex's own first-run pages use. A copy from another machine is `setup-transfer`'s Start page.
  */
 import { Loading } from '@ferretry/app/ui';
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, SettingsProps } from '@ferretry/kernel/manifest';
 import type { LiveRuntimesClient } from '../../lib/client.ts';
 import { machineSettingsView } from '../../views/machine-settings-host.tsx';
@@ -22,7 +22,7 @@ function Progress({
 }: {
   readonly at: number;
   readonly onPick: (index: number) => void;
-  readonly state: (harness: HarnessKey) => string;
+  readonly state: (harness: KnownHarnessKey) => string;
 }) {
   return (
     <ol
@@ -93,12 +93,12 @@ export function ImportStep({
       <Loading kind="page" compact label="Looking at what is on this machine…" />
     );
 
-  const stateOf = (harness: HarnessKey): string => {
+  const stateOf = (harness: KnownHarnessKey): string => {
     const end = wizard.ends[harness];
     return end === undefined ? 'To do' : end.kind === 'imported' ? 'Done' : 'Left out';
   };
   const last = at === HARNESSES.length - 1;
-  const harness = HARNESSES[at] as HarnessKey;
+  const harness = HARNESSES[at] as KnownHarnessKey;
   const model = wizard.models[harness];
 
   return (
@@ -127,7 +127,7 @@ export function ImportStep({
           model={model}
           wizard={wizard}
           machineName={machineName}
-          nextLabel={last ? 'Finish' : `Next: ${HARNESS_LABEL[HARNESSES[at + 1] as HarnessKey]}`}
+          nextLabel={last ? 'Finish' : `Next: ${HARNESS_LABEL[HARNESSES[at + 1] as KnownHarnessKey]}`}
           onNext={() => (last ? setFinished(true) : setAt(at + 1))}
         />
       )}

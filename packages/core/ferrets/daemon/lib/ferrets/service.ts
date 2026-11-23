@@ -62,6 +62,7 @@ import type {
   LaunchPart,
   LaunchPartSource,
   OpeningAttachmentsSource,
+  ConversationStageSource,
   LaunchSpec,
   LoginCredentialAnswer,
   ManagedWorktreeSummary,
@@ -88,7 +89,6 @@ import {
   diedParked,
   FerretDetailsSchema,
   FerretRecordSchema,
-  HARNESS_KEYS,
   REAL_HARNESS_REFUSED,
   StartRefusalCodeSchema,
   TranscriptProvenanceSchema,
@@ -231,6 +231,11 @@ export interface FerretsPorts {
   daemonPath?(): string | undefined;
   /** The ONE provider that plans the files a start was given (`start -f`); unbound or none: a start that carries attachments is refused. */
   openingAttachments?(): OpeningAttachmentsSource | undefined;
+  /**
+   * The ONE provider that stages a past conversation's transcript (`conversation.stage`): bound, a start that names a
+   * conversation is refused when it answers none. Unbound only in a unit fixture (nothing to ask); the daemon always binds it.
+   */
+  conversationStage?(): ConversationStageSource | undefined;
   sitrepSources(): readonly SitrepLineSource[];
   instructions(): readonly InstructionEntry[];
   /** The folder fenced by the kernel's `work` root, or why not. */
@@ -723,6 +728,8 @@ export const LAUNCH_STEPS_UNSEALED =
 
 /** What one launch attempt found that its caller must say (filled in by `launchAttempt`). */
 interface LaunchSaid {
+  /** Set by a START: a conversation it names that the harness proves absent REFUSES the launch instead of starting a new one. */
+  requireConversation?: true;
   /** The conversation the launch was to resume, which the harness proved it does not have: a new one was started. */
   conversationNotFound?: string;
   /** A resume that had no conversation to resume at all (none was ever recorded): a new one was started. */
@@ -901,6 +908,7 @@ export class FerretsService implements FerretsApi {
   harnesses(): readonly HarnessKey[] {
     return this.ports.harnessKeys();
   }
+  harnessFacts = (key: HarnessKey): Harness['facts'] | undefined => this.ports.harness(key)?.facts;
 
   /** The harness's own copy of one conversation of the owner's history, in its shared pool (`Harness.importConversation`). */
   async importConversation(
@@ -1079,6 +1087,38 @@ export class FerretsService implements FerretsApi {
     return ok({ prompt: `${prompt}\n${planned.value.section}`, files });
   }
 
+  /**
+   * "Continue a past conversation": the transcript a start names is put where the harness finds it (the one
+   * `conversation.stage` provider: the existing indexed copy-on-link). Nothing to stage when no conversation is named; a
+   * missing provider or a refusal refuses the start with its reason, so a continue is never quietly a fresh conversation.
+   * ONLY THE OWNER'S start stages: the transcript comes from the owner's own computer, and a ferret (or a pack, board or
+   * warden) must never be able to pull a host conversation into the pool by naming it. Any other asker resumes a
+   * conversation the pool already holds, and the launch refuses one it does not.
+   */
+  private async stageConversation(
+    harness: HarnessKey,
+    conversation: string | undefined,
+    by: StartRequest['by'],
+  ): Promise<Result<void, StartFailure>> {
+    if (conversation === undefined || by !== 'owner' || this.ports.conversationStage === undefined)
+      return ok(undefined);
+    const source = this.ports.conversationStage();
+    if (source === undefined)
+      return failed(
+        'refused',
+        'this daemon cannot continue a past conversation: the plugin that lists them is off, so the ferret was not started',
+      );
+    const staged = await source
+      .stage({ harness, conversation })
+      .catch(
+        (): Awaited<ReturnType<ConversationStageSource['stage']>> =>
+          err({ code: 'failed', reason: 'the conversation could not be staged' }),
+      );
+    return staged.ok
+      ? ok(undefined)
+      : failed('refused', `${staged.error.reason} The ferret was not started, so nothing was resumed.`);
+  }
+
   /** An agent may start nothing in the state home; a fence that cannot be built refuses too (never a lexical guess). */
   private async stateHomeRefusal(folder: string): Promise<Result<never, StartFailure> | undefined> {
     if (this.ports.stateHomeHolding === undefined) return failed('state_home_unresolved', STATE_HOME_UNRESOLVED);
@@ -1117,8 +1157,9 @@ export class FerretsService implements FerretsApi {
     if (!resolved.ok) return resolved;
     const login = resolved.value?.login ?? request.login;
     const harnessKey = resolved.value?.harness ?? request.harness ?? this.ports.harnessKeys()[0];
-    if (harnessKey === undefined || !(HARNESS_KEYS as readonly string[]).includes(harnessKey))
-      return failed('harness_unavailable', 'no harness plugin is on');
+    if (harnessKey === undefined) return failed('harness_unavailable', 'no harness plugin is on');
+    if (this.ports.harness(harnessKey) === undefined)
+      return failed('harness_not_installed', `no harness ${harnessKey} is installed on this machine`);
     // The folder's identity is captured HERE, before any taker is asked, and re-verified as the last step before the
     // harness starts: a swap in between (a link into the state home put where the project was) cannot be launched in.
     const bound = await this.bindLaunchFolder(folder.value, origin, birthOf(origin));
@@ -1146,6 +1187,9 @@ export class FerretsService implements FerretsApi {
     });
     // A refusal here is BEFORE the first write (details, record, token): `start()` gives the name back.
     if (!decision.allow) return refusedBy(decision);
+    // A start that names a past conversation REQUIRES its transcript: staged before the first write, or refused here.
+    const staged = await this.stageConversation(harnessKey, request.harnessConversation, request.by);
+    if (!staged.ok) return staged;
     // The opening message with its attachments planned, still before the first write: a refusal leaves nothing behind.
     const opening = await this.openingFor(id, request.prompt, request.options?.initialAttachments);
     if (!opening.ok) return opening;
@@ -1786,7 +1830,7 @@ export class FerretsService implements FerretsApi {
       !conversation.success ||
       !model.success ||
       !effort.success ||
-      !(HARNESS_KEYS as readonly string[]).includes(target.harness)
+      this.ports.harness(target.harness) === undefined
     )
       return 'the runtime this ferret is moving onto is not one Ferrets can record';
     const { login: _previous, harnessConversation: _before, ...rest } = record;
@@ -2083,7 +2127,8 @@ export class FerretsService implements FerretsApi {
     let runner: Runner | undefined;
     let failure: StartFailure;
     let turn: PendingTurn | undefined;
-    const said: LaunchSaid = {};
+    // A START that names a conversation is an explicit continue: it never falls back to a fresh conversation.
+    const said: LaunchSaid = kind === 'start' ? { requireConversation: true } : {};
     try {
       const session = await this.sessionStep(record, kind, prompt, revive, attached, notInWardenTree);
       if (!session.ok) return await this.abandon(record, session.error.code, session.error.reason);
@@ -2287,7 +2332,14 @@ export class FerretsService implements FerretsApi {
         : (await harness.hasConversation(spec, conversation).catch(() => undefined)) === false
           ? undefined
           : conversation;
-    if (conversation !== undefined && resumable === undefined) said.conversationNotFound = conversation;
+    if (conversation !== undefined && resumable === undefined) {
+      if (said.requireConversation === true)
+        return failed(
+          'refused',
+          `the ${record.harness} conversation ${conversation} was not found, so the ferret was not started`,
+        );
+      said.conversationNotFound = conversation;
+    }
     if (bound !== undefined) {
       const held = await bound.verify().catch(() => err('the launch folder could not be checked again'));
       if (!held.ok) return failed('refused', held.error);

@@ -80,7 +80,6 @@ describe('the layout settings', () => {
     expect(choiceOf(COMPACT_LAYOUT, 'side.show')).toBe('never');
     expect(listOf(DEFAULT_LAYOUT, 'nav.items')).toEqual([
       'ferrets',
-      'conversation.links',
       'agenda',
       'board',
       'projects',
@@ -102,7 +101,6 @@ describe('the layout settings', () => {
     expect(choiceOf(DEFAULT_LAYOUT, 'phone.nav.side')).toBe('left'); // a phone follows the wide layout: places in the menu, no bottom bar
     expect(listOf(DEFAULT_LAYOUT, 'phone.nav.items')).toEqual([
       'ferrets',
-      'conversation.links',
       'agenda',
       'board',
       'projects',

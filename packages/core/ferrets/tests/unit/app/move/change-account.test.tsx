@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { FerretSummary } from '../../../../contract/index.ts';
+import type { ConvertibleSummary } from '../../../../app/features/move/conversion-model.ts';
 import {
   type AskToStopJobs,
   ChangeAccount,
@@ -16,7 +17,7 @@ const refusal = (message: string, code: string, body?: unknown) =>
   Object.assign(new Error(message), { status: 409, code, ...(body === undefined ? {} : { body }) });
 
 type Over = Parameters<typeof summaryOf>[0];
-const source = (over: Over = {}): FerretSummary =>
+const source = (over: Over = {}): ConvertibleSummary =>
   summaryOf({
     id: 'same-ferret',
     harness: 'codex',
@@ -25,7 +26,7 @@ const source = (over: Over = {}): FerretSummary =>
     state: 'working',
     ...over,
   });
-const stopped = (over: Over = {}): FerretSummary => source({ state: 'stopped', ...over });
+const stopped = (over: Over = {}): ConvertibleSummary => source({ state: 'stopped', ...over });
 
 const ATOMI = chosenAccount('codex-auto-atomi', 'codex', {
   displayName: 'Atomi Codex',

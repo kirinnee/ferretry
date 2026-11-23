@@ -33,7 +33,7 @@ import {
 import { inspectImageBase64 } from '../transcript/image-bytes.ts';
 import { recordImages } from '../transcript/images.ts';
 import type { SlicedTranscriptInput } from '../transcript/sliced.ts';
-import type { TranscriptBytesRef, TranscriptParseResult } from '../transcript/types.ts';
+import type { TranscriptBytesRef, TranscriptHarness, TranscriptParseResult } from '../transcript/types.ts';
 
 export type TranscriptImageFailure =
   | 'invalid_image_handle'
@@ -56,7 +56,7 @@ export class TranscriptImageError extends Error {
 /** The transcript file a session's handles name, and which harness wrote it. */
 export interface TranscriptImageTarget {
   readonly file: string;
-  readonly harness: 'claude' | 'codex';
+  readonly harness: TranscriptHarness;
 }
 
 export interface TranscriptImageLocator {
@@ -125,7 +125,7 @@ export class TranscriptImageReader implements TranscriptImages {
   constructor(
     private readonly locator: TranscriptImageLocator,
     private readonly files: TranscriptImageFiles,
-    private readonly parsers: Readonly<Record<'claude' | 'codex', TranscriptImageParser>>,
+    private readonly parsers: Readonly<Record<TranscriptHarness, TranscriptImageParser>>,
     private readonly capacity: number = TRANSCRIPT_IMAGE_PROOF_CAPACITY,
     private readonly concurrency: number = TRANSCRIPT_IMAGE_CONCURRENCY,
   ) {}
@@ -230,8 +230,9 @@ export class TranscriptImageReader implements TranscriptImages {
 
     // The record with its terminator: only a terminated record has its big strings referenced.
     const record = read.subarray(lead);
+    // A harness whose format has no parser is refused as not found, never read as another format.
     const parsed = await this.parsers[target.harness]
-      .parse({ bytes: record, startByteOffset: recordOffset, endOfInput: true, sessionId })
+      ?.parse({ bytes: record, startByteOffset: recordOffset, endOfInput: true, sessionId })
       .catch(() => undefined);
     if (parsed === undefined || parsed.rawRecords?.length !== 1) return refuse('image_not_found', NOT_FOUND);
     const events = parsed.events.filter(

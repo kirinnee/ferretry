@@ -924,6 +924,7 @@ export class ConversationIndex {
     | undefined
   > {
     const parser = this.needs.parsers[source.parser];
+    if (parser === undefined) return undefined;
     // The two ends of a big file are parsed on their own, so it is known whether the end held anything the owner said.
     let events: readonly TranscriptEvent[];
     let tailSpoke = true;
@@ -962,7 +963,9 @@ export class ConversationIndex {
     // A rename (or a new generated title) changes the name, and the name's wrapper rule needs the whole conversation: re-read.
     const names = transcriptNames(source.parser, text);
     if (names.chosen !== undefined || names.generated !== undefined) return undefined;
-    const { events } = await this.needs.parsers[source.parser].parse({ text, source: found.path, endOfInput: true });
+    const parser = this.needs.parsers[source.parser];
+    if (parser === undefined) return undefined;
+    const { events } = await parser.parse({ text, source: found.path, endOfInput: true });
     // As written (lines kept, not cut short): `#titled` masks the secrets in it, and only then makes it a line and cuts it.
     const spoken = old.written === 1 ? writtenSources(events) : spokenSources(events);
     const seen = activity(events);

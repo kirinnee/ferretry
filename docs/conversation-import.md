@@ -4,8 +4,19 @@ An owner who used Claude Code or Codex before Ferretry already has conversations
 can keep any of them "on" as a ferret from the import picker (onboarding's Claude Code / Codex steps, and
 Settings › Runtimes › Import conversations…). The CLI equivalent is `fy import conversations`.
 
-New session › Continue a conversation picks up earlier work (`fy new --continue` searches the second source), from
-one of two sources:
+New ferret › Continue a past conversation picks up earlier work (`fy new --continue` searches the second source). It is a
+disclosure on the New ferret page itself, not a page or nav entry of its own: a conversation no ferret keeps is picked into
+the page's form (its folder, a runtime of its harness, the auto|interactive choice) and Create starts a ferret that names
+the conversation (`harnessConversation`), which the harness resumes; one a ferret already keeps resumes or opens that ferret.
+The request also names the picked harness (`harness`), so a runtime of the other harness is refused. **An explicit
+continue REQUIRES that transcript**: before the first write the daemon asks Conversation (`conversation.stage`) to copy a
+host-only transcript into the harness's pool by the same indexed copy-on-link `keep` uses, and a conversation that cannot be
+staged, or that the harness still proves absent, refuses the start (409, with the reason) — it is never a silent fresh start.
+Only the owner's start stages: a ferret, pack, board or warden that names a conversation resumes one the pool already holds
+and is refused otherwise, so none of them can pull a transcript of the owner's computer into the pool.
+`/d/<machine>/new?continue=1` opens the page with that section shown (Runtimes' "Import conversations" and the setup
+"Continue a conversation" buttons go there).
+The list has two sources:
 
 - **Ferretry sessions** — every stopped ferret on the machine, resumed in place with its conversation
   intact through the session's own resume.

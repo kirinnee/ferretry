@@ -5,6 +5,7 @@ import { tomlDocument, tomlTables } from '../../lib/index.ts';
 import { settingsDocument } from '../../lib/settings.ts';
 import type { SettingsItem } from '../../../contract/index.ts';
 import { CODEX_CONFIG_DEFAULTS } from '../../lib/fixed-layer.ts';
+import { CODEX_FACTS } from '../../lib/facts.ts';
 import type { HarnessPart } from './context.ts';
 
 /** What Codex itself writes into `skills/` on its first start (its bundled skills): never swept, never replaced. */
@@ -102,15 +103,15 @@ export const homePart: HarnessPart<'homeFor' | 'prepareHome'> = ({
         );
       }
       for (const [name, text] of [
-        ['AGENTS.md', agentsDocument(spec)],
-        ['config.toml', configDocument(spec, items)],
+        [CODEX_FACTS.instructionFile, agentsDocument(spec)],
+        [CODEX_FACTS.mcp.file, configDocument(spec, items)],
       ] as const) {
         const target = root.resolve(name);
         if (!target.ok) throw new Error(`Codex's ${name} could not be placed in the ferret's home: ${target.error}`);
         if (text === '') {
           // Nothing to say now: a config.toml an earlier launch of this reused home left must not stay applied (the
           // settings this profile no longer selects). Agent homes are Ferretry's only, so a FILE there is ours to clear.
-          if (name === 'config.toml' && (await root.lstat(target.value))?.kind === 'file')
+          if (name === CODEX_FACTS.mcp.file && (await root.lstat(target.value))?.kind === 'file')
             await root.remove(target.value);
           continue;
         }

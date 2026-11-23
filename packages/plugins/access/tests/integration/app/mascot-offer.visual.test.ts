@@ -99,8 +99,11 @@ const open = async (variant: Variant, query = '', reducedMotion: 'reduce' | 'no-
   return { tab, problems, close: async () => await context.close() };
 };
 
-const shot = async (tab: Page, variant: Variant, name: string): Promise<void> => {
-  // A finite entrance animation (the card fading in) must have settled: a shot of it half-drawn proves nothing.
+/**
+ * A finite entrance animation (the card fading in and rising 10 px: `.fy-pair-arrive`) must have settled: a shot of it
+ * half-drawn proves nothing, and two boxes read a moment apart would differ by however far it moved in between.
+ */
+const settled = async (tab: Page): Promise<void> => {
   await tab.evaluate(
     async () =>
       await Promise.all(
@@ -112,6 +115,10 @@ const shot = async (tab: Page, variant: Variant, name: string): Promise<void> =>
           .map(animation => animation.finished),
       ),
   );
+};
+
+const shot = async (tab: Page, variant: Variant, name: string): Promise<void> => {
+  await settled(tab);
   if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-${name}.png`) });
 };
 
@@ -471,6 +478,8 @@ describe('r11 O10: the passkey offer buttons are one fixed size', () => {
       try {
         await tab.getByRole('button', { name: 'Pair this device' }).click();
         await tab.waitForSelector('[data-first-passkey-offer]');
+        // The offer rises into place inside `.fy-pair-arrive` (10 px over 560 ms): measure it at rest, not mid-slide.
+        await settled(tab);
         const add = must(await tab.getByRole('button', { name: 'Add a passkey now' }).boundingBox(), 'Add');
         const later = must(await tab.getByRole('button', { name: 'Not now' }).boundingBox(), 'Not now');
         MEASURED.push(

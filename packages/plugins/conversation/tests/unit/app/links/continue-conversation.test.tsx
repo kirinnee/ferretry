@@ -1,25 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
-import type { FerretSummary } from '@ferretry/core-ferrets/contract';
+import type { ContinuePick, FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { LinkableConversation, LinkPreview } from '../../../../contract/index.ts';
 import { ContinueConversation } from '../../../../app/links/continue-conversation.tsx';
-import type { RuntimeField } from '../../../../app/links/conversation-picker.tsx';
 import { type CallHandler, type FakeClient, fakeClient, refusal } from '../../../support/app/fake-client.ts';
-import {
-  conversation,
-  ferret,
-  hoursAgo as at,
-  listing,
-  NOW,
-  runtimeField,
-  sequencedRuntimeField,
-  settle,
-  type,
-} from '../../../support/app/links.ts';
+import { conversation, ferret, hoursAgo as at, listing, NOW, settle, type } from '../../../support/app/links.ts';
 
 const LIST = 'GET /v1/links/conversations';
 const PREVIEW_ROUTE = 'GET /v1/links/conversations/:harness/:conversationId/preview';
-const KEEP = 'POST /v1/links/conversations/keep';
 const ALL = { source: 'synced', limit: '50' };
 const KEPT = { source: 'ferretry', limit: '1000' };
 const DAEMON = 'studio';
@@ -33,19 +21,15 @@ const refuse =
     throw refusal(status, code, message);
   };
 
-/** The listing route answers every search; the preview and keep routes answer as given. */
-const machine = (routes: { list?: Handler; preview?: Handler; keep?: Handler }): FakeClient =>
+/** The listing route answers every search; the preview route answers as given. */
+const machine = (routes: { list?: Handler; preview?: Handler }): FakeClient =>
   fakeClient(
     {
       ...(routes.list === undefined ? {} : { [LIST]: routes.list }),
       ...(routes.preview === undefined ? {} : { [PREVIEW_ROUTE]: routes.preview }),
-      ...(routes.keep === undefined ? {} : { [KEEP]: routes.keep }),
     },
     DAEMON,
   );
-
-/** The runtime slot as Runtimes fills it here: one runtime per CLI. */
-const RUNTIMES = runtimeField({ 'claude-code': ['claude-default-w'], codex: ['codex-default'] });
 
 const ROWS: readonly LinkableConversation[] = [
   conversation('shop-cart', { latest: 'and now the tests' }),
@@ -84,8 +68,10 @@ afterEach(async () => {
 interface OpenOptions {
   readonly list?: Handler;
   readonly preview?: Handler;
-  readonly runtimeField?: RuntimeField;
-  readonly keep?: Handler;
+  /** Collects what the list puts in the New ferret form. */
+  readonly picks?: ContinuePick[];
+  /** The row the form already holds. */
+  readonly picked?: string;
   /** A client to reuse, so its calls are counted across mounts. */
   readonly client?: FakeClient;
   readonly navigated?: string[];
@@ -104,7 +90,6 @@ const open = async (options: OpenOptions = {}): Promise<Mounted> => {
     machine({
       list: options.list ?? (() => listing(ROWS)),
       preview: options.preview ?? (() => PREVIEW),
-      ...(options.keep === undefined ? {} : { keep: options.keep }),
     });
   const resume =
     options.resume ??
@@ -116,7 +101,8 @@ const open = async (options: OpenOptions = {}): Promise<Mounted> => {
       client={client}
       daemon={DAEMON}
       onOpenFerret={id => options.navigated?.push(id)}
-      runtimeField={options.runtimeField ?? RUNTIMES}
+      onPick={pick => options.picks?.push(pick)}
+      picked={options.picked ?? null}
       {...(options.now === false ? {} : { now: () => NOW })}
       {...(options.ferrets === undefined ? {} : { ferrets: options.ferrets, resume })}
       debounceMs={0}
@@ -136,13 +122,7 @@ const click = async (selector: string): Promise<void> => {
 };
 const listed = (from: FakeClient = client): readonly Readonly<Record<string, string>>[] =>
   from.callsTo(LIST).map(call => call.query);
-const sentKeep = (): unknown => client.callsTo(KEEP)[0]?.body;
 const action = (key: string): string => `[data-continue-action="${key}"]`;
-/** Picks a runtime in the slot’s stand-in, then continues on it. */
-const continueOn = async (wrapper: string): Promise<void> => {
-  await click(`[data-test-runtime="${wrapper}"]`);
-  await click(`[data-continue-on-runtime="${wrapper}"]`);
-};
 const SHOP = 'conversation:claude-code:shop-cart';
 
 describe('ContinueConversation over all conversations', () => {
@@ -196,7 +176,7 @@ describe('ContinueConversation over all conversations', () => {
       for (const answer of answers) answer(listing([]));
     });
     await settle();
-    expect(text('[data-continue-empty]')).toBe('No conversation matches.');
+    expect(text('[data-continue-empty]')).toBe('No past conversations yet.');
   });
 
   it('says how many matched when the limit cut the list, and one in the singular', async () => {
@@ -243,7 +223,7 @@ describe('ContinueConversation preview', () => {
       ['user', 'YouFix the cart total'],
       ['assistant', 'AgentFixed the rounding.'],
     ]);
-    expect(text(action(SHOP))).toBe('Continue');
+    expect(text(action(SHOP))).toBe('Continue this conversation');
     expect(client.callsTo(PREVIEW_ROUTE).map(call => call.params)).toEqual([
       { harness: 'claude-code', conversationId: 'shop-cart' },
     ]);
@@ -277,7 +257,7 @@ describe('ContinueConversation continuing', () => {
     expect(text(action('conversation:claude-code:notes-kept'))).toBe('Open ferret');
     await click(action('conversation:claude-code:notes-kept'));
     expect(navigated).toEqual(['notes-ferret']);
-    expect(client.callsTo(KEEP)).toHaveLength(0);
+    expect(client.calls.map(call => call.route)).not.toContain('POST /v1/ferrets');
   });
 
   it('resumes a stopped ferret that keeps a conversation, in place', async () => {
@@ -291,177 +271,58 @@ describe('ContinueConversation continuing', () => {
     expect(navigated).toEqual(['notes-ferret']);
   });
 
-  it('keeps on the runtime picked with start on, then opens the new ferret', async () => {
-    const navigated: string[] = [];
-    let release: (value: unknown) => void = () => undefined;
-    const gate = new Promise(resolve => (release = resolve));
-    await open({
-      navigated,
-      keep: () =>
-        gate.then(() => ({
-          kept: [{ id: 'shop-cart', ferret: 's-9', name: 'shop', state: 'working' }],
-          refused: [],
-        })),
-    });
+  it('puts a conversation no ferret keeps into the New ferret form, calling nothing', async () => {
+    const picks: ContinuePick[] = [];
+    await open({ picks });
     await click('[data-continue-row="shop-cart"]');
+    expect(text(action(SHOP))).toBe('Continue this conversation');
     await click(action(SHOP));
-    expect(text('[data-continue-runtimes="shop-cart"]')).toContain('Continue on which runtime?');
-    expect(client.callsTo(KEEP)).toHaveLength(0);
-    await continueOn('claude-default-w');
-    expect(text(action(SHOP))).toBe('Starting…');
-    expect(find<HTMLButtonElement>('[data-continue-row="api-codex"]').disabled).toBe(true);
-    await interact(() => release(undefined));
-    await settle();
-    expect(sentKeep()).toEqual({
-      harness: 'claude-code',
-      runtime: 'claude-default-w',
-      conversations: [{ id: 'shop-cart', start: true }],
-    });
-    expect(navigated).toEqual(['s-9']);
+    expect(picks).toEqual([
+      {
+        key: SHOP,
+        harness: 'claude-code',
+        conversation: 'shop-cart',
+        folder: '/work/shop',
+        title: 'Fix the shop-cart page',
+      },
+    ]);
+    expect(client.calls.map(call => call.route)).not.toContain('POST /v1/ferrets');
+    expect(client.calls.map(call => call.route)).not.toContain('POST /v1/links/conversations/keep');
   });
 
-  it('asks which runtime of the conversation’s CLI, and continues only once one is picked', async () => {
-    const navigated: string[] = [];
-    await open({
-      navigated,
-      runtimeField: runtimeField({ 'claude-code': ['claude-default-w', 'claude-work'], codex: ['codex-default'] }),
-      keep: () => ({ kept: [{ id: 'shop-cart', ferret: 's-2', name: 'shop', state: 'working' }], refused: [] }),
-    });
+  it('marks the picked row, and a Codex conversation names its own harness', async () => {
+    const picks: ContinuePick[] = [];
+    await open({ picks, picked: SHOP });
     await click('[data-continue-row="shop-cart"]');
-    await click(action(SHOP));
-    expect(text('[data-continue-runtimes="shop-cart"]')).toContain('Continue on which runtime?');
-    expect(
-      [...(view?.container.querySelectorAll('[data-test-runtimes="claude-code"] [data-test-runtime]') ?? [])].map(
-        item => item.textContent,
-      ),
-    ).toEqual(['claude-default-w', 'claude-work']);
-    expect(find<HTMLButtonElement>('[data-continue-on-runtime=""]').disabled).toBe(true);
-    await continueOn('claude-work');
-    expect(sentKeep()).toMatchObject({ runtime: 'claude-work' });
-    expect(navigated).toEqual(['s-2']);
-  });
-
-  it('says when no runtime drives the conversation’s CLI', async () => {
-    await open({ runtimeField: runtimeField({ 'claude-code': ['claude-default-w'] }) });
+    expect(text(action(SHOP))).toBe('Selected');
     await click('[data-continue-row="api-codex"]');
     await click(action('conversation:codex:api-codex'));
-    expect(text('[data-continue-runtimes="api-codex"] [data-continue-no-runtime]')).toBe(
-      'No Codex runtime on this machine yet. Add one in Settings › Runtimes, then try again.',
-    );
-  });
-
-  describe('when the runtime slot reports what it offers', () => {
-    const KEPT_ONE = () => ({
-      kept: [{ id: 'shop-cart', ferret: 's-5', name: 'shop', state: 'working' }],
-      refused: [],
-    });
-    const pick = async (): Promise<void> => {
-      await click('[data-continue-row="shop-cart"]');
-      await click(action(SHOP));
-    };
-
-    it('takes the only runtime at once: no runtime step, one keep, then the new ferret opens', async () => {
-      const navigated: string[] = [];
-      await open({
-        navigated,
-        keep: KEPT_ONE,
-        runtimeField: runtimeField({ 'claude-code': ['claude-default-w'] }, true),
-      });
-      await pick();
-      expect(view?.container.querySelector('[data-continue-runtimes]')).toBeNull();
-      expect(sentKeep()).toEqual({
-        harness: 'claude-code',
-        runtime: 'claude-default-w',
-        conversations: [{ id: 'shop-cart', start: true }],
-      });
-      expect(client.callsTo(KEEP)).toHaveLength(1);
-      expect(navigated).toEqual(['s-5']);
-    });
-
-    it('opens the runtime step when two runtimes can run it, and keeps only on the one picked', async () => {
-      await open({
-        keep: KEPT_ONE,
-        runtimeField: runtimeField({ 'claude-code': ['claude-default-w', 'claude-work'] }, true),
-      });
-      await pick();
-      expect(text('[data-continue-runtimes="shop-cart"]')).toContain('Continue on which runtime?');
-      expect(client.callsTo(KEEP)).toHaveLength(0);
-      await continueOn('claude-work');
-      expect(sentKeep()).toMatchObject({ runtime: 'claude-work' });
-    });
-
-    it('keeps the step and its sentence when no runtime can run it', async () => {
-      await open({ runtimeField: runtimeField({ 'claude-code': ['claude-default-w'] }, true) });
-      await click('[data-continue-row="api-codex"]');
-      await click(action('conversation:codex:api-codex'));
-      expect(text('[data-continue-runtimes="api-codex"] [data-continue-no-runtime]')).toContain('No Codex runtime');
-      expect(client.callsTo(KEEP)).toHaveLength(0);
-    });
-
-    it('decides nothing while the roster is unread, and a list that changes later continues nothing', async () => {
-      await open({
-        keep: KEPT_ONE,
-        runtimeField: sequencedRuntimeField([null, ['claude-default-w', 'claude-work'], ['claude-work']]),
-      });
-      await pick();
-      expect(text('[data-continue-runtimes="shop-cart"]')).toContain('Continue on which runtime?');
-      expect(client.callsTo(KEEP)).toHaveLength(0);
-      await click('[data-test-offer-next]');
-      await click('[data-test-offer-next]');
-      expect(client.callsTo(KEEP)).toHaveLength(0);
-      expect(find('[data-continue-runtimes="shop-cart"]')).toBeTruthy();
-    });
-
-    it('takes the only runtime the first time the list is read, even after an unread moment', async () => {
-      await open({ keep: KEPT_ONE, runtimeField: sequencedRuntimeField([null, ['claude-work']]) });
-      await pick();
-      expect(client.callsTo(KEEP)).toHaveLength(0);
-      await click('[data-test-offer-next]');
-      expect(sentKeep()).toMatchObject({ runtime: 'claude-work' });
-    });
-
-    it('decides again each time the step is opened', async () => {
-      await open({
-        keep: () => ({ kept: [], refused: [{ id: 'shop-cart', code: 'unavailable', reason: 'No room.' }] }),
-        runtimeField: runtimeField({ 'claude-code': ['claude-default-w'] }, true),
-      });
-      await pick();
-      expect(client.callsTo(KEEP)).toHaveLength(1);
-      expect(text(`[data-continue-issue="${SHOP}"]`)).toBe('No room.');
-      await click(action(SHOP));
-      expect(client.callsTo(KEEP)).toHaveLength(2);
-    });
+    expect(picks[0]).toMatchObject({ harness: 'codex', conversation: 'api-codex', folder: '/work/api' });
   });
 
   it('says it cannot continue a conversation of a CLI this app has no words for', async () => {
-    await open({ list: () => listing([conversation('gem-one', { harness: 'gemini' })]) });
+    const picks: ContinuePick[] = [];
+    await open({ picks, list: () => listing([conversation('gem-one', { harness: 'gemini' })]) });
     await click('[data-continue-row="gem-one"]');
     await click(action('conversation:gemini:gem-one'));
     expect(text('[data-continue-issue="conversation:gemini:gem-one"]')).toBe(
       'This app can’t continue a gemini conversation.',
     );
-    expect(view?.container.querySelector('[data-continue-runtimes]')).toBeNull();
+    expect(picks).toEqual([]);
   });
 
-  it('shows a refused keep’s sentence, the daemon’s reason, or a plain fallback', async () => {
-    const keepThen = async (keep: Handler): Promise<string> => {
-      await view?.unmount();
-      await open({ keep });
-      await click('[data-continue-row="shop-cart"]');
-      await click(action(SHOP));
-      await continueOn('claude-default-w');
-      return text(`[data-continue-issue="${SHOP}"]`);
-    };
-    expect(await keepThen(refuse('Only the owner may continue conversations.', 403, 'forbidden'))).toBe(
-      'Only the owner may continue conversations.',
+  it('shows a refused resume’s sentence for a stopped ferret that keeps the conversation', async () => {
+    await open({
+      ferrets: FERRETS,
+      resume: async () => {
+        throw new Error('Only the owner may resume ferrets.');
+      },
+    });
+    await click('[data-continue-row="notes-kept"]');
+    await click(action('conversation:claude-code:notes-kept'));
+    expect(text('[data-continue-issue="conversation:claude-code:notes-kept"]')).toBe(
+      'Only the owner may resume ferrets.',
     );
-    expect(
-      await keepThen(() => ({
-        kept: [],
-        refused: [{ id: 'shop-cart', code: 'unavailable', reason: 'Its file is on another disk.' }],
-      })),
-    ).toBe('Its file is on another disk.');
-    expect(await keepThen(() => ({ kept: [], refused: [] }))).toBe('This machine didn’t keep it.');
   });
 });
 
@@ -626,28 +487,18 @@ describe('ContinueConversation over this computer', () => {
     expect(listed().at(-1)).toEqual({ source: 'synced', limit: '200' });
   });
 
-  it('keeps a computer row like any other: start on, then opens the new ferret', async () => {
+  it('picks a computer row into the form like any other', async () => {
     // Arrange
-    const navigated: string[] = [];
-    await open({
-      navigated,
-      list: () => listing(COMPUTER_ROWS),
-      keep: () => ({ kept: [{ id: 'mac-new', ferret: 's-3', name: 'mac', state: 'working' }], refused: [] }),
-    });
+    const picks: ContinuePick[] = [];
+    await open({ picks, list: () => listing(COMPUTER_ROWS) });
     await click(computer);
 
     // Act
     await click('[data-continue-row="mac-new"]');
     await click(action('conversation:claude-code:mac-new'));
-    await continueOn('claude-default-w');
 
     // Assert
-    expect(sentKeep()).toEqual({
-      harness: 'claude-code',
-      runtime: 'claude-default-w',
-      conversations: [{ id: 'mac-new', start: true }],
-    });
-    expect(navigated).toEqual(['s-3']);
+    expect(picks.map(pick => [pick.harness, pick.conversation])).toEqual([['claude-code', 'mac-new']]);
   });
 
   it('says why nothing is here when Keep in sync is off, and where to turn it on', async () => {
@@ -707,7 +558,8 @@ describe('ContinueConversation over this computer', () => {
         client={other}
         daemon="laptop"
         onOpenFerret={() => undefined}
-        runtimeField={RUNTIMES}
+        onPick={() => undefined}
+        picked={null}
         now={() => NOW}
         debounceMs={0}
       />,
@@ -740,20 +592,5 @@ describe('ContinueConversation while the harness lists are not in 5.0 yet', () =
     await open({ preview: NOT_AVAILABLE });
     await click('[data-continue-row="shop-cart"]');
     expect(text(`[data-continue-preview="${SHOP}"]`)).toContain(NOT_IN_5_0);
-  });
-
-  it('shows it for a keep, as a refusal and as the keeper’s reason', async () => {
-    const keepThen = async (keep: Handler): Promise<string> => {
-      await view?.unmount();
-      await open({ keep });
-      await click('[data-continue-row="shop-cart"]');
-      await click(action(SHOP));
-      await continueOn('claude-default-w');
-      return text(`[data-continue-issue="${SHOP}"]`);
-    };
-    expect(await keepThen(NOT_AVAILABLE)).toBe(NOT_IN_5_0);
-    expect(
-      await keepThen(() => ({ kept: [], refused: [{ id: 'shop-cart', code: 'unavailable', reason: NOT_IN_5_0 }] })),
-    ).toBe(NOT_IN_5_0);
   });
 });

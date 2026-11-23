@@ -1,25 +1,16 @@
 /**
- * The PURE half of keeping existing Claude Code / Codex conversations as ferrets: which rows the picker
- * shows, how they group, what may be ticked, the adoption it sends, the listing query the daemon
- * searches with, and which runtime a picked conversation runs on.
+ * The PURE half of "Continue a past conversation": how a row reads, which rows a search and a date keep, and the listing
+ * query the daemon searches with.
  *
  * Nothing here reads a clock: every rule that depends on "now" is handed it.
  */
 
 import { TERMINAL_STATUSES } from '@ferretry/app';
 import type { Instant } from '@ferretry/std';
-import {
-  CONVERSATION_LAUNCH_MAX,
-  type KeepRequest,
-  type LinkableConversation,
-  type LinkQuery,
-} from '../../contract/index.ts';
-import type { HarnessKey } from './link-words.ts';
+import type { LinkableConversation, LinkQuery } from '../../contract/index.ts';
+import type { KnownHarnessKey } from './link-words.ts';
 
 const DAY_MS = 86_400_000;
-
-/** How many rows the picker shows before "Show all". */
-export const RECENT_LIMIT = 20;
 
 export type DateFilter = 'any' | '7d' | '30d';
 
@@ -88,102 +79,9 @@ export const matchesDate = (row: LinkableConversation, filter: DateFilter, now: 
   return since === undefined || Date.parse(row.lastActivityAt) >= Date.parse(since);
 };
 
-const newestFirst = (rows: readonly LinkableConversation[]): readonly LinkableConversation[] =>
-  [...rows].sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt));
+export type HarnessFilter = 'all' | KnownHarnessKey;
 
-export interface PickerFilter {
-  readonly text: string;
-  readonly date: DateFilter;
-  readonly showAll: boolean;
-}
-
-export const EMPTY_FILTER: PickerFilter = { text: '', date: 'any', showAll: false };
-
-export interface VisibleConversations {
-  readonly rows: readonly LinkableConversation[];
-  /** How many matched but are held back until "Show all". */
-  readonly hidden: number;
-}
-
-/** The rows on screen: matching, newest first, the 20 most recent unless "Show all". */
-export const visibleConversations = (
-  rows: readonly LinkableConversation[],
-  filter: PickerFilter,
-  now: number,
-): VisibleConversations => {
-  const matching = newestFirst(rows).filter(
-    row => matchesSearch(row, filter.text) && matchesDate(row, filter.date, now),
-  );
-  const shown = filter.showAll ? matching : matching.slice(0, RECENT_LIMIT);
-  return { rows: shown, hidden: matching.length - shown.length };
-};
-
-/** "Found 12 conversations · 2 already kept". */
-export const foundLine = (rows: readonly LinkableConversation[]): string => {
-  const kept = rows.filter(row => row.keptBy !== undefined).length;
-  const found = `Found ${rows.length} ${rows.length === 1 ? 'conversation' : 'conversations'}`;
-  return kept === 0 ? found : `${found} · ${kept} already kept`;
-};
-
-export interface PickerSelection {
-  /** Conversation ids to keep as ferrets. */
-  readonly keep: readonly string[];
-  /** The kept ids to launch now; never more than `CONVERSATION_LAUNCH_MAX`. */
-  readonly start: readonly string[];
-}
-
-export const EMPTY_SELECTION: PickerSelection = { keep: [], start: [] };
-
-export const START_LIMIT_HINT = `Up to ${CONVERSATION_LAUNCH_MAX} start at once; the rest stay stopped, ready to resume.`;
-
-/** Tick or untick "Keep as a ferret". A row a ferret already keeps cannot be picked; unticking also stops "Start now". */
-export const toggleKeep = (selection: PickerSelection, row: LinkableConversation, on: boolean): PickerSelection => {
-  if (row.keptBy !== undefined) return selection;
-  if (on) return selection.keep.includes(row.id) ? selection : { ...selection, keep: [...selection.keep, row.id] };
-  return { keep: selection.keep.filter(id => id !== row.id), start: selection.start.filter(id => id !== row.id) };
-};
-
-export type StartToggle =
-  | { readonly kind: 'ok'; readonly selection: PickerSelection }
-  | { readonly kind: 'refused'; readonly sentence: string };
-
-/** "Start now" on a kept row, refused for a row not kept and for one past the launch limit. */
-export const toggleStart = (selection: PickerSelection, id: string, on: boolean): StartToggle => {
-  if (!on) return { kind: 'ok', selection: { ...selection, start: selection.start.filter(item => item !== id) } };
-  if (!selection.keep.includes(id)) return { kind: 'refused', sentence: 'Keep this conversation first.' };
-  if (selection.start.includes(id)) return { kind: 'ok', selection };
-  if (selection.start.length >= CONVERSATION_LAUNCH_MAX) return { kind: 'refused', sentence: START_LIMIT_HINT };
-  return { kind: 'ok', selection: { ...selection, start: [...selection.start, id] } };
-};
-
-/** "Select last 7 days": keeps every row active in the window that no ferret keeps yet. */
-export const selectLastDays = (
-  rows: readonly LinkableConversation[],
-  selection: PickerSelection,
-  now: number,
-  days: number,
-): PickerSelection => {
-  const since = now - days * DAY_MS;
-  const fresh = rows.filter(
-    row => row.keptBy === undefined && Date.parse(row.lastActivityAt) >= since && !selection.keep.includes(row.id),
-  );
-  return { ...selection, keep: [...selection.keep, ...fresh.map(row => row.id)] };
-};
-
-/** The one keep the footer sends: every kept row, launched only when "Start now" is on. */
-export const keepRequest = (harness: string, runtime: string, selection: PickerSelection): KeepRequest => ({
-  harness,
-  runtime,
-  conversations: selection.keep.map(id => ({ id, start: selection.start.includes(id) })),
-});
-
-/** "Keep 3 as ferrets". */
-export const keepButtonLabel = (count: number): string =>
-  count === 1 ? 'Keep 1 as a ferret' : `Keep ${count} as ferrets`;
-
-export type HarnessFilter = 'all' | HarnessKey;
-
-/** The daemon-side search the Continue mode sends: only the narrowing it has. */
+/** The daemon-side search the Continue list sends: only the narrowing it has. */
 export const listingQuery = (
   search: { readonly text: string; readonly harness: HarnessFilter; readonly date: DateFilter },
   now: number,

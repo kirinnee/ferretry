@@ -1,4 +1,5 @@
 import type { ConfigCollectionDef, FerretId } from '@ferretry/kernel/contract';
+import { isKnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import type { CatalogMcpProvider, McpComponentRecord } from '@ferretry/plugin-catalogs/contract';
 import type { SecretName, SecretSummary } from '@ferretry/core-vault/contract';
@@ -203,7 +204,12 @@ export default implementDaemon(manifest, {
         const agent = spec.runtime ?? spec.ferret;
         const own = (await accounts()).find(account => account.runtime === spec.runtime);
         return await new ProjectMcpLaunch({
-          accounts: async () => [own ?? { runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home }],
+          accounts: async () =>
+            own !== undefined
+              ? [own]
+              : isKnownHarnessKey(spec.harness)
+                ? [{ runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home }]
+                : [],
           folders,
           documents,
           approvals: harnessProjectApprovals({ 'claude-code': () => claudeCode.current() }, spec.harness, spec.ferret),
@@ -223,7 +229,7 @@ export default implementDaemon(manifest, {
       ferrets: {
         get: async id => {
           const ferret = await ferrets.get(id as FerretId);
-          return ferret === undefined
+          return ferret === undefined || !isKnownHarnessKey(ferret.harness)
             ? undefined
             : {
                 id: ferret.id,
@@ -315,12 +321,18 @@ export default implementDaemon(manifest, {
         get: async id => await inventoryFerret(id),
         list: async () => {
           const all = await ferrets.list();
-          return all.map(ferret => ({
-            id: ferret.id,
-            harness: ferret.harness,
-            folder: ferret.folder,
-            ...(ferret.runtime === undefined ? {} : { runtime: ferret.runtime }),
-          }));
+          return all.flatMap(ferret =>
+            isKnownHarnessKey(ferret.harness)
+              ? [
+                  {
+                    id: ferret.id,
+                    harness: ferret.harness,
+                    folder: ferret.folder,
+                    ...(ferret.runtime === undefined ? {} : { runtime: ferret.runtime }),
+                  },
+                ]
+              : [],
+          );
         },
       },
       // G177: a project add lands only at a known root: a registered project or a live managed worktree.
@@ -357,7 +369,8 @@ export default implementDaemon(manifest, {
     });
     async function inventoryFerret(id: string) {
       const ferret = await ferrets.get(id as FerretId);
-      return ferret === undefined
+      // A ferret on a harness MCP writes no config for is not one of its ferrets.
+      return ferret === undefined || !isKnownHarnessKey(ferret.harness)
         ? undefined
         : {
             id: ferret.id,

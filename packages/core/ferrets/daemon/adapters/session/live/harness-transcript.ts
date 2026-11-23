@@ -13,7 +13,12 @@ import type { LiveActivityReads } from './storage-live-activity.ts';
 /** The harness behind a ferret, or `undefined` when none answers for it (the registry and the hook decide). */
 export type HarnessOf = (ferret: FerretId) => Harness | undefined;
 
-const harnessName = (key: HarnessKey): TranscriptHarness => (key === 'codex' ? 'codex' : 'claude');
+/**
+ * The transcript format family a harness key reads as, or `undefined` for a harness this live readout has no parser for.
+ * It never answers Claude for a key it does not know: a third harness's tail is `unreadable`, not read as Claude's.
+ */
+const harnessName = (key: HarnessKey): TranscriptHarness | undefined =>
+  key === 'codex' ? 'codex' : key === 'claude-code' ? 'claude' : undefined;
 
 /**
  * One tail record as the normalized event the turn fold and the live readout read. A record carries no text (the
@@ -156,10 +161,11 @@ export class HarnessTranscript {
         cached.limit >= limit
       )
         return { kind: 'read', events: cached.events.slice(-limit) };
+      const name = harnessName(key);
+      if (name === undefined) return { kind: 'unreadable' };
       const read = await harness.transcriptTail(ferret, limit).catch(() => undefined);
       if (read === undefined) return { kind: 'unreadable' };
       if (read.kind !== 'read') return read;
-      const name = harnessName(key);
       const events = read.records.slice(-limit).map(record => eventOfRecord(name, record));
       // Taken BEFORE the read: a file that grew meanwhile is read again at the next look, never served stale.
       if (stamp === undefined) this.#tails.delete(ferret);

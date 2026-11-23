@@ -8,12 +8,13 @@ import { LayoutSchema, ThemeSchema } from './wire.ts';
 /** The built-in default (design §5.3). With Layouts off, the app shell uses its own copy of the same layout. */
 export const DEFAULT_LAYOUT = LayoutSchema.parse({
   id: 'default',
-  // r11 S1: the places are docked at the foot of the side bar as icons (a phone's drawer too: no bottom bar); Conversations is a default place.
+  // r11 S1: the places are docked at the foot of the side bar as icons (a phone's drawer too: no bottom bar). Continuing a past
+  // conversation is part of New ferret (O8-12), so there is no Conversations place.
   nav: {
     side: 'left',
     style: 'dock',
     labels: 'icons',
-    items: ['ferrets', 'conversation.links', 'agenda', 'board', 'projects', 'insights', 'settings'],
+    items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'],
   },
   side: { show: 'wide-only', holds: 'ferrets', at: 'left' },
   top: ['daemon-picker', 'search'],
@@ -48,7 +49,7 @@ export const COMPACT_LAYOUT = LayoutSchema.parse({
   nav: {
     side: 'left',
     style: 'rail',
-    items: ['ferrets', 'conversation.links', 'agenda', 'board', 'projects', 'insights', 'settings'],
+    items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'],
   },
   side: { show: 'never', holds: 'panels' },
   top: ['daemon-picker', 'search'],

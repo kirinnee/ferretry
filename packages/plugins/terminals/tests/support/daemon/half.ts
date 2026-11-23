@@ -132,6 +132,7 @@ export function fakeFerrets(known: readonly FerretSummary[] = [ferretSummary()])
     mayTouch: (caller, target) => caller === target,
     children: () => [],
     harnesses: () => [],
+    harnessFacts: () => undefined,
     start: async () => ({ ok: false, error: { code: 'failed', reason: 'not in this test' } }),
     stop: async () => undefined,
     resume: async () => ({ ok: false, error: { code: 'failed', reason: 'not in this test' } }),

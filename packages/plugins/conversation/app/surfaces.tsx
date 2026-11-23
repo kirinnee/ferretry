@@ -1,5 +1,5 @@
 /**
- * EVERY SURFACE CONVERSATION DRAWS, built once per daemon from the generated client: the chat and links screens, the
+ * EVERY SURFACE CONVERSATION DRAWS, built once per daemon from the generated client: the chat screen, the past-conversation list, the
  * attachments, queue, compact-at, hypermedia and chat-width panels, the Conversation Settings tab and the question
  * renderer.
  *
@@ -24,13 +24,13 @@ import './hypermedia/dh-styles.ts';
 import { ComposerAttachPanel } from './composer/composer-attach.tsx';
 import { ConversationSettings } from './composer/conversation-settings.tsx';
 import { CompactAtPanel } from './compact-at/compact-at-panel.tsx';
-import { LinksScreen } from './links/links-screen.tsx';
 import { QuestionRenderer } from './questions/question-renderer.tsx';
 import { AllQueuesScreen } from './queue/all-queues-screen.tsx';
 import { QueuePanel } from './queue/queue-page.tsx';
 import { AgendaConversationPanel } from './slots/agenda-conversation-panel.tsx';
 import { FilesSearchPanel } from './slots/files-search-panel.tsx';
 import { InterruptRowPanel } from './slots/interrupt-row-panel.tsx';
+import { NewFerretContinuePanel } from './slots/new-ferret-continue-panel.tsx';
 import { StuckMessagesRowPanel } from './slots/stuck-messages-row-panel.tsx';
 import { HypermediaPanel } from './toolbar/hypermedia-panel.tsx';
 import { TurnPanel } from './toolbar/turn-panel.tsx';
@@ -47,7 +47,6 @@ const scoped =
 export interface ConversationSurfaces {
   readonly screens: {
     readonly chat: AppComponent<ScreenProps>;
-    readonly links: AppComponent<ScreenProps>;
     readonly queues: AppComponent<ScreenProps>;
   };
   readonly panels: {
@@ -60,6 +59,7 @@ export interface ConversationSurfaces {
     readonly 'interrupt-row': AppComponent<PanelProps>;
     readonly 'stuck-messages-row': AppComponent<PanelProps>;
     readonly 'agenda-conversation': AppComponent<PanelProps>;
+    readonly 'new-ferret-continue': AppComponent<PanelProps>;
   };
   readonly settings: { readonly conversation: AppComponent<SettingsProps> };
   readonly renderers: { readonly 'ask:question': AppComponent<RendererProps> };
@@ -84,7 +84,6 @@ export const deviceSettingsPanels = {
 export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
   screens: {
     chat: scoped<ScreenProps>(client, ChatScreen),
-    links: scoped<ScreenProps>(client, () => <LinksScreen />),
     queues: scoped<ScreenProps>(client, AllQueuesScreen),
   },
   panels: {
@@ -97,6 +96,7 @@ export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
     'interrupt-row': scoped<PanelProps>(client, InterruptRowPanel),
     'stuck-messages-row': scoped<PanelProps>(client, StuckMessagesRowPanel),
     'agenda-conversation': scoped<PanelProps>(client, AgendaConversationPanel),
+    'new-ferret-continue': scoped<PanelProps>(client, NewFerretContinuePanel),
   },
   settings: { conversation: scoped<SettingsProps>(client, ConversationSettings) },
   renderers: { 'ask:question': scoped<RendererProps>(client, QuestionRenderer) },

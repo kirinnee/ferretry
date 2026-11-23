@@ -1,5 +1,5 @@
 import type { SharedTree } from '@ferretry/kernel/contract';
-import type { HarnessKey, LaunchPart } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey, LaunchPart } from '@ferretry/core-ferrets/contract';
 import type { SkillsItem } from '../../contract/index.ts';
 
 /** The shared folder of a skill named by an item, minted for this launch; `undefined` when the store does not hold it. */
@@ -15,7 +15,7 @@ export type SkillTreeResolver = (name: string) => Promise<SharedTree | undefined
  */
 export async function skillParts(
   items: ReadonlyMap<string, SkillsItem>,
-  harness: HarnessKey,
+  harness: KnownHarnessKey,
   resolve: SkillTreeResolver,
   selected: ReadonlySet<string>,
 ): Promise<readonly LaunchPart[]> {

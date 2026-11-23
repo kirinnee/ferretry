@@ -9,7 +9,9 @@ import {
   isActionsRowSlotProps,
   isFerretListRowMarkSlotProps,
   isFilesSearchSlotProps,
+  isNewFerretContinueSlotProps,
   isNewFerretProjectSlotProps,
+  NEW_FERRET_CONTINUE_SLOT,
   NEW_FERRET_PROJECT_SLOT,
 } from '../../contract/index.ts';
 
@@ -18,6 +20,11 @@ describe('the ferret page’s slots', () => {
     expect(ACTIONS_ROW_SLOT).toBe('ferrets.actions-row');
     expect(FILES_SEARCH_SLOT).toBe('ferrets.files-search');
     expect(NEW_FERRET_PROJECT_SLOT).toBe('ferrets.new-ferret-project');
+    expect(NEW_FERRET_CONTINUE_SLOT).toBe('ferrets.new-ferret-continue');
+    expect(isNewFerretContinueSlotProps({ picked: null, onPick: () => undefined })).toBe(true);
+    expect(isNewFerretContinueSlotProps({ picked: 'k', onPick: () => undefined })).toBe(true);
+    expect(isNewFerretContinueSlotProps({ picked: 1, onPick: () => undefined })).toBe(false);
+    expect(isNewFerretContinueSlotProps({ picked: null })).toBe(false);
     expect(FERRET_LIST_ROW_MARK_SLOT).toBe('ferrets.list-row-mark');
     expect(FERRET_MENU_SLOT).toBe('ferrets.menu');
     expect([...FERRET_SLOTS]).toEqual([
@@ -25,6 +32,7 @@ describe('the ferret page’s slots', () => {
       ACTIONS_ROW_SLOT,
       FILES_SEARCH_SLOT,
       FERRET_MENU_SLOT,
+      NEW_FERRET_CONTINUE_SLOT,
       NEW_FERRET_PROJECT_SLOT,
       FERRET_LIST_ROW_MARK_SLOT,
     ]);

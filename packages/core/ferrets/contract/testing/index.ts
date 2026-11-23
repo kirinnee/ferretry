@@ -25,14 +25,17 @@ import {
 } from '../ids.ts';
 import {
   type AttachRefusal,
+  type ConversationImport,
   type DeliveryOutcome,
   HARNESS_STOP_KEYS,
+  type HarnessFacts,
   type HarnessLaunchSettings,
   type HarnessStop,
   type HarnessTailRecord,
   type HarnessTranscriptBytes,
   HarnessTranscriptReplaced,
   type HarnessTranscriptStamp,
+  type TranscriptFormatId,
   type HarnessTranscriptTail,
   type RunnerDelivery,
   type RunnerDeliveryFailure,
@@ -507,6 +510,37 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
 
 // ─── harness ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** What the fake harnesses say about themselves: shaped like a real harness's, naming no real harness's file. */
+export const FAKE_HARNESS_FACTS: HarnessFacts = {
+  displayName: 'Fake harness',
+  instructionFile: 'INSTRUCTIONS.md',
+  skillsDir: 'skills',
+  mcp: { format: 'json', file: 'mcp.json' },
+  transcriptFormat: 'claude',
+  catalogHalf: 'claude',
+};
+
+/**
+ * The key of the fake THIRD harness: a harness the contract has never heard of (neither `claude-code` nor `codex`).
+ * It exists to prove the harness seam is open: a plugin that declares this key boots, starts, delivers and reads a
+ * transcript with no edit to Ferrets, the way a real third harness will.
+ */
+export const THIRD_HARNESS_KEY: HarnessKey = 'fake-third';
+
+/** What the fake third harness says about itself: every fact differs from both real harnesses'. */
+export const THIRD_HARNESS_FACTS: HarnessFacts = {
+  displayName: 'Fake Third',
+  instructionFile: 'THIRD.md',
+  skillsDir: 'skills',
+  mcp: { format: 'toml', file: 'third-mcp.toml' },
+  transcriptFormat: 'fake-jsonl',
+  catalogHalf: 'fake-third',
+};
+
+/** The fake third harness over its own `agent-homes` folder ({@link THIRD_HARNESS_KEY}). */
+export const fakeThirdHarness = (homes = '/home/third-agent-homes'): FakeHarness =>
+  new FakeHarness(THIRD_HARNESS_KEY, homes, THIRD_HARNESS_FACTS);
+
 /**
  * A harness that names one home per ferret under its own `homes` folder (a fixture path, never a real one), writes
  * one file there, starts through the runner it is given and delivers idempotently.
@@ -516,6 +550,8 @@ export class FakeHarness implements Harness {
   readonly delivered: OutboundMessage[] = [];
   /** Every launch spec this harness was handed (start and resume), so a test sees what reached it. */
   readonly launched: LaunchSpec[] = [];
+  /** The harness conversation of every RESUME (a launch that names one), in order: a fresh start adds nothing. */
+  readonly resumed: string[] = [];
   /** Every launch spec `prepareHome` was handed, in order. */
   readonly prepared: LaunchSpec[] = [];
   readonly #seen = new Set<string>();
@@ -525,6 +561,27 @@ export class FakeHarness implements Harness {
   declare hasConversation: Harness['hasConversation'];
   /** The conversation this fake PROVES its last launch wrote (`Harness.provedConversation`); absent until a test sets one. */
   declare provedConversation: Harness['provedConversation'];
+  /** The conversations this fake's shared history pool holds: empty until one is staged (`importConversation`). */
+  readonly pool = new Set<string>();
+  /** The conversations its own launches named (a fresh start's `conv-<ferret>`), which its homes then hold. */
+  readonly #own = new Set<string>();
+  /** Every copy-on-link this fake was asked for, in order. */
+  readonly imported: ConversationImport[] = [];
+  /** Copy-on-link: the transcript lands in the pool (a name already there stays: the answer is still ok). */
+  async importConversation(input: ConversationImport): Promise<Result<void, { readonly reason: string }>> {
+    this.imported.push(input);
+    this.pool.add(input.id);
+    return ok(undefined);
+  }
+  /**
+   * Makes `hasConversation` HONEST, as a real harness's is: `true` only for a conversation staged in the pool or written by
+   * its own launches, `false` (proved absent) for any other. Without it the fake leaves `hasConversation` unset and every
+   * resume is attempted as asked, which hides a conversation that was never staged.
+   */
+  honestHistory(): this {
+    this.hasConversation = async (_spec, id) => this.pool.has(id) || this.#own.has(id);
+    return this;
+  }
   /** The harness's turn stop; a test sets it to `undefined` for a harness that names none. */
   turnStop: HarnessStop | undefined = { key: 'Escape', safeWhenIdle: true };
   /** The transcript this fake proves for a ferret (U5): a test sets one to prove it; a ferret with none has no transcript. */
@@ -534,8 +591,8 @@ export class FakeHarness implements Harness {
    * REPLACES the file, so a handle opened on the old one rejects `HarnessTranscriptReplaced`. Set `format` for codex.
    */
   readonly bytes = new Map<FerretId, Uint8Array>();
-  /** Which parser speaks the fake's bytes. */
-  bytesFormat: 'claude' | 'codex' = 'claude';
+  /** Which parser speaks the fake's bytes (starts as the facts' `transcriptFormat`). */
+  bytesFormat: TranscriptFormatId;
   /** Every ferret a `transcriptBytes` ask OPENED a handle for, in order (an ask that proves no transcript opens none, so it is not counted: it leaves nothing to close). */
   readonly bytesAsked: FerretId[] = [];
   /** Every ferret whose handle was closed, in order (a handle's `close()` is idempotent in the real harnesses, not here). */
@@ -597,7 +654,11 @@ export class FakeHarness implements Harness {
     readonly key: HarnessKey = 'claude-code',
     /** This harness's own `agent-homes` folder: `homeFor` answers `<homes>/<ferret>`. */
     readonly homes: string = '/home/agent-homes',
-  ) {}
+    /** What it says about itself (`Harness.facts`); the default speaks the Claude transcript format. */
+    readonly facts: HarnessFacts = FAKE_HARNESS_FACTS,
+  ) {
+    this.bytesFormat = facts.transcriptFormat;
+  }
 
   async discover() {
     return { found: true as const, binary: '/usr/bin/fake-harness', version: '1.0.0' };
@@ -616,10 +677,12 @@ export class FakeHarness implements Harness {
   async start(spec: LaunchSpec, runner: Runner, env: ChildEnvironment): Promise<Result<Started, StartRefusal>> {
     this.launched.push(spec);
     const running = await runner.start({ ferret: spec.ferret, command: ['fake-harness'], cwd: spec.folder, env });
+    if (running.ok) this.#own.add(`conv-${spec.ferret}`);
     return running.ok ? ok({ running: running.value, harnessConversation: `conv-${spec.ferret}` }) : running;
   }
   async resume(spec: LaunchSpec, runner: Runner, env: ChildEnvironment, conversation: string) {
     this.launched.push(spec);
+    this.resumed.push(conversation);
     const running = await runner.resume(
       { ferret: spec.ferret, command: ['fake-harness', '--resume'], cwd: spec.folder, env },
       conversation,
@@ -701,6 +764,19 @@ export function harnessConformance(name: string, make: () => HarnessSubject | Pr
       expect(await runner.alive(started.value.running.handle)).toBe(true);
       await harness.stop(spec.ferret, started.value.running.handle, runner, 'now');
       expect(await runner.alive(started.value.running.handle)).toBe(false);
+    });
+    test('facts: a harness says who it is as plain data — a name, plain file names, a parser id and a catalog half', async () => {
+      const { harness } = await make();
+      const { facts } = harness;
+      const plainName = /^[A-Za-z0-9._-]+$/u;
+      expect(facts.displayName.trim()).not.toBe('');
+      expect(facts.instructionFile).toMatch(plainName);
+      expect(facts.mcp.file).toMatch(plainName);
+      expect(['json', 'toml']).toContain(facts.mcp.format);
+      // The skills folder is one relative name in the harness's home, never a path out of it.
+      expect(facts.skillsDir).toMatch(plainName);
+      expect(facts.transcriptFormat.trim()).not.toBe('');
+      expect(facts.catalogHalf.trim()).not.toBe('');
     });
     test('harness-refusals: a harness’s turn stop, when it names one, is a closed stop key — never C-c', async () => {
       const { harness } = await make();
@@ -907,6 +983,9 @@ export class FakeFerrets implements FerretsApi {
   }
   harnesses(): readonly HarnessKey[] {
     return ['claude-code', 'codex'];
+  }
+  harnessFacts(key: HarnessKey): HarnessFacts | undefined {
+    return this.harnesses().includes(key) ? FAKE_HARNESS_FACTS : undefined;
   }
   children(ferret: FerretId): readonly FerretId[] {
     return [...this.#ferrets.values()].filter(f => f.parent === ferret).map(f => f.id);
