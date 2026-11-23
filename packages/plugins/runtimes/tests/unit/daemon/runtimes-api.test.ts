@@ -41,6 +41,8 @@ interface Rig {
   installed?: RuntimesApiDeps['installed'];
   /** The ids of the environment logins whose templates Logins gives clean. */
   templated?: readonly string[];
+  /** Logins cannot read the environment templates at all (the call throws). */
+  templatesThrow?: boolean;
   logins?: readonly LoginView[] | 'throws';
 }
 
@@ -51,8 +53,10 @@ const api = (rig: Rig = {}) =>
     defaultSetting: () => rig.defaultSetting,
     harnesses: () => rig.harnesses ?? ['claude-code', 'codex'],
     logins: {
-      environmentTemplates: async () =>
-        (rig.templated ?? []).map(id => ({ kind: 'templates', id, harness: 'claude-code' }) as never),
+      environmentTemplates: async () => {
+        if (rig.templatesThrow === true) throw new Error('templates are unreadable');
+        return (rig.templated ?? []).map(id => ({ kind: 'templates', id, harness: 'claude-code' }) as never);
+      },
       list: async () => {
         if (rig.logins === 'throws') throw new Error('logins are down');
         return { logins: rig.logins ?? [loginView({})] } as unknown as Awaited<
@@ -397,6 +401,17 @@ describe('createRuntimesApi — an environment login Logins withheld', () => {
 
     // Act
     const actual = await api({ runtimes: {}, logins: [key], templated: [] }).list();
+
+    // Assert
+    should(actual).deepEqual([]);
+  });
+
+  it('should list no runtime for it, and not fail, when Logins cannot read the templates at all', async () => {
+    // Arrange — the same key login, but the template read itself throws
+    const key = loginView({ id: 'kimi', store: 'environment' });
+
+    // Act
+    const actual = await api({ runtimes: {}, logins: [key], templatesThrow: true }).list();
 
     // Assert
     should(actual).deepEqual([]);
