@@ -17,7 +17,7 @@ import { ChevronLeft, ChevronRight, Lock, Plus, TriangleAlert } from 'lucide-rea
 import { useMemo, useRef, useState } from 'react';
 import { cn } from '../../../ui.ts';
 import { Badge, Button } from '../../../ui.ts';
-import { HARNESS_NAMES } from '../components/component-model.ts';
+
 import { credentialEmail } from '../../../lib/logins-view.ts';
 import { conversationsHref } from '../../../lib/conversations-link.ts';
 import { type MoveFerret, moveFerretWith } from '../../../lib/move-ferret.ts';
@@ -48,6 +48,7 @@ import {
   runtimeProfileLine,
 } from './runtimes-model.ts';
 import { SkippedLine } from './skipped-line.tsx';
+import { harnessName } from '../../../../contract/harness-words.ts';
 
 /** The status shape a runtime shows: its login's. */
 const runtimeWord = (runtime: RuntimeView) => runtime.credential.status ?? 'checking';
@@ -70,7 +71,7 @@ function MissingHarness({ runtime }: { readonly runtime: RuntimeView }) {
   return (
     <p className="m-0 flex flex-wrap items-center gap-1 text-cell text-warn" data-runtime-missing-harness="">
       <TriangleAlert size={14} aria-hidden="true" />
-      <span>{HARNESS_NAMES[runtime.harness]} isn’t installed here</span> ·{' '}
+      <span>{harnessName(runtime.harness)} isn’t installed here</span> ·{' '}
       <a
         href={harnessHref(currentDaemon(), runtime.harness)}
         onClick={followInApp}
@@ -204,14 +205,14 @@ function RuntimePage({
 
       {installed ? null : (
         <div role="status" className="kt-panel flex flex-col gap-1 p-panel" data-runtime-note="missing">
-          <p className="m-0 text-row font-semibold text-fg">{HARNESS_NAMES[runtime.harness]} isn’t installed here</p>
+          <p className="m-0 text-row font-semibold text-fg">{harnessName(runtime.harness)} isn’t installed here</p>
           <p className="m-0 text-cell text-muted">Install it on {machineName} to launch this runtime.</p>
           <a
             href={harnessHref(currentDaemon(), runtime.harness)}
             onClick={followInApp}
             className="text-cell font-semibold text-accent underline"
           >
-            Install {HARNESS_NAMES[runtime.harness]}
+            Install {harnessName(runtime.harness)}
           </a>
         </div>
       )}
@@ -250,7 +251,7 @@ function RuntimePage({
           <AccountStatus word={word} />
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="truncate font-mono text-row text-fg">{loginLine(runtime, data)}</span>
-            <span className="text-cell text-muted">{HARNESS_NAMES[runtime.harness]}</span>
+            <span className="text-cell text-muted">{harnessName(runtime.harness)}</span>
           </span>
           <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
         </a>
@@ -287,7 +288,7 @@ function RuntimePage({
                     <span className="break-words text-cell font-semibold text-fg">{layer.title}</span>
                     {layer.notes.length === 0 && !layer.skipped ? null : (
                       <span className="flex flex-wrap gap-1">
-                        {layer.skipped ? <Badge>Skipped on {HARNESS_NAMES[runtime.harness]}</Badge> : null}
+                        {layer.skipped ? <Badge>Skipped on {harnessName(runtime.harness)}</Badge> : null}
                         {layer.notes.map(note => (
                           <Badge
                             key={note}

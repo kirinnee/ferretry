@@ -10,6 +10,7 @@ import type { LoginChange, LoginChangeError } from '@ferretry/plugin-logins/cont
 import type { AccountModel } from '../account/schema.ts';
 import type { CatalogRefusalCode } from '../../../contract/index.ts';
 import { listed } from './catalog.ts';
+import { harnessKeyOfKind, harnessKindOfKey } from '../harness-kind.ts';
 import type { LoginAccountChange, LoginRemoval } from './mutations.ts';
 
 /**
@@ -34,7 +35,7 @@ export function loginChangeOf(change: LoginAccountChange): LoginChange {
       return {
         kind: 'login.add',
         id: change.id,
-        harness: change.harness,
+        harness: harnessKeyOfKind(harnessKindOfKey(change.harness)),
         ...(change.label === undefined ? {} : { label: change.label }),
         ...(change.store === undefined ? {} : { store: change.store }),
         ...(change.preset === undefined ? {} : { preset: change.preset }),

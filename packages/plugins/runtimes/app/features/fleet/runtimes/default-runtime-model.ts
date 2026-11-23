@@ -8,9 +8,10 @@
  */
 
 import type { MachineView, RuntimeView } from '../../../../contract/index.ts';
-import { HARNESS_NAMES } from '../components/component-model.ts';
+
 import { untilWords } from '../shell/disable-model.ts';
 import { harnessInstalled } from './runtimes-model.ts';
+import { harnessName } from '../../../../contract/harness-words.ts';
 
 export const DEFAULT_RUNTIME_LABEL = 'Default for new agents';
 export const DEFAULT_RUNTIME_HINT = 'Used when a start names no runtime.';
@@ -31,7 +32,7 @@ export const runtimeStateWords = (runtime: RuntimeView, machine: MachineView | n
     return runtime.disabled.until === undefined
       ? 'switched off'
       : `switched off until ${untilWords(runtime.disabled.until)}`;
-  if (!harnessInstalled(machine, runtime.harness)) return `${HARNESS_NAMES[runtime.harness]} not installed`;
+  if (!harnessInstalled(machine, runtime.harness)) return `${harnessName(runtime.harness)} not installed`;
   return LOGIN_WORDS[runtime.credential.status ?? 'checking'];
 };
 

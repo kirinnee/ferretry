@@ -196,7 +196,7 @@ describe('runsHarness', () => {
 
   it('runs a one-CLI login’s CLI, whatever was chosen', () => {
     expect(runsHarness(['codex'], 'claude-code', generic)).toBe('codex');
-    expect(runsHarness([], null)).toBe('claude-code');
+    expect(runsHarness([], null)).toBeUndefined();
   });
 
   it('runs a dual login’s chosen CLI, else its profile’s scope, else its first', () => {

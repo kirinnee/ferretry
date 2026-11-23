@@ -25,7 +25,7 @@ import type {
 } from '../../../../contract/index.ts';
 import { MoreHorizontal, Pencil, Star, Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { HARNESS_NAMES } from '../../../lib/shell-ports.ts';
+
 import { Button, ContextMenu, type MenuAnchor, SelectBox, useDialogFocus } from '../../../ui.ts';
 import { machineSettings } from '../machine/machine-settings.ts';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
@@ -42,6 +42,7 @@ import {
   renameProblem,
   runningOnRuntime,
 } from './runtime-actions-model.ts';
+import { harnessName } from '../../../../contract/harness-words.ts';
 
 // ── The buttons ──────────────────────────────────────────────────────────────────────────────────
 
@@ -549,7 +550,7 @@ function RunningFerrets({
         {running.map(session => (
           <li key={session.id} className="flex min-h-[44px] min-w-0 items-center gap-2 px-3 py-2 text-cell">
             <span className="min-w-0 flex-1 truncate font-semibold text-fg">{session.name}</span>
-            <span className="shrink-0 text-meta text-muted">{HARNESS_NAMES[session.harness]}</span>
+            <span className="shrink-0 text-meta text-muted">{harnessName(session.harness)}</span>
           </li>
         ))}
       </ul>
@@ -569,7 +570,7 @@ function RunningFerrets({
                 { value: '', label: 'Leave them running here' },
                 ...targets.map(candidate => ({
                   value: candidate.name,
-                  label: `${candidate.name} · ${HARNESS_NAMES[candidate.harness]}`,
+                  label: `${candidate.name} · ${harnessName(candidate.harness)}`,
                 })),
               ]}
             />
@@ -641,7 +642,7 @@ function DefaultPicker({
                 }}
                 options={candidates.map(candidate => ({
                   value: candidate.name,
-                  label: `${candidate.name} · ${HARNESS_NAMES[candidate.harness]}`,
+                  label: `${candidate.name} · ${harnessName(candidate.harness)}`,
                 }))}
               />
             </span>

@@ -15,9 +15,10 @@
  */
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { z } from 'zod';
+import { unsupportedHarnessSentence } from '../../contract/harness-words.ts';
 
 /** What a harness is called when something refuses it: one sentence, written once. */
-export const unsupportedHarnessSentence = (word: string): string => `${word} is not supported here`;
+export { unsupportedHarnessSentence };
 
 /** Thrown where a harness Runtimes has no behaviour for reaches code that would otherwise have assumed one of two. */
 export class UnsupportedHarnessError extends Error {
@@ -59,7 +60,10 @@ export const harnessKindOfKey = (key: HarnessKey): HarnessKind => {
 };
 
 /** The plugin key a stored word names. */
-export const harnessKeyOfKind = (kind: HarnessKind): (typeof KEY_OF_KIND)[HarnessKind] => KEY_OF_KIND[kind];
+/** The plugin key of a shipped harness: the keys `KEY_OF_KIND` holds, which are the ones Runtimes can run. */
+export type HarnessKeyOfKind = (typeof KEY_OF_KIND)[HarnessKind];
+
+export const harnessKeyOfKind = (kind: HarnessKind): HarnessKeyOfKind => KEY_OF_KIND[kind];
 
 /** The behaviour of each harness Runtimes runs: both are written out, and any other harness is refused. */
 export interface ByHarness<T> {

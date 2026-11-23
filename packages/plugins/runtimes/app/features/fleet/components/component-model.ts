@@ -28,6 +28,8 @@ import {
   type LayeredProfileView,
   type ProfileScope,
 } from '../../../../contract/index.ts';
+import { harnessName } from '../../../../contract/harness-words.ts';
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 
 /**
  * What a copied item's source is called: this browser's own label for that machine when it has one, else the name the
@@ -42,9 +44,8 @@ const cloneOriginName = (
   return item.clonedFrom === undefined ? undefined : `${item.clonedFrom} (the name it gave itself)`;
 };
 
-export type CatalogHarness = 'claude-code' | 'codex';
-
-export const HARNESS_NAMES: Readonly<Record<CatalogHarness, string>> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+/** A harness a catalog item is for: any plugin's key (the words for it are in `contract/harness-words.ts`). */
+export type CatalogHarness = HarnessKey;
 
 /**
  * A scope in words (§3.4 P7): what every badge on a component or a profile says. The ONE place the PWA
@@ -131,7 +132,7 @@ export function componentBadges(
   const origin = cloneOriginName(component, machineNames);
   if (origin !== undefined) badges.push({ text: `Copied from ${origin}`, tone: 'pend' });
   for (const partial of component.partial)
-    badges.push({ text: `Partly supported on ${HARNESS_NAMES[partial.harness]}`, tone: 'warn' });
+    badges.push({ text: `Partly supported on ${harnessName(partial.harness)}`, tone: 'warn' });
   for (const warning of component.warnings) badges.push({ text: warning, tone: 'warn', warn: true });
   if (component.checkPath !== undefined)
     badges.push({ text: `Check this path on ${machineName}`, tone: 'warn', warn: true });

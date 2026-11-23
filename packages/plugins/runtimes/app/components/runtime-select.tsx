@@ -30,6 +30,7 @@ import { accountHealthView } from '../lib/account-health-view.ts';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
 import type { AccountPickerStore } from '../lib/account-picker-store.ts';
 import { quotaParts } from '../lib/quota-text.ts';
+import { supportedHarnessKeys } from '../../contract/harness-words.ts';
 import { Button, cn } from '../ui.ts';
 import {
   type AccountPickerOption,
@@ -41,8 +42,10 @@ import {
   sameHarnessAccountOptions,
 } from '../lib/daemon-picker-model.ts';
 
-/** The harnesses a runtime can drive, in the order their groups are drawn. */
-const HARNESS_ORDER = ['claude-code', 'codex'] as const satisfies readonly PickerAccount['kind'][];
+/** The harnesses a runtime can drive, in the order their groups are drawn; a harness it has no behaviour for follows, unusable. */
+const harnessOrder = (options: readonly AccountPickerOption[]): readonly PickerAccount['kind'][] => [
+  ...new Set([...supportedHarnessKeys(), ...options.map(option => option.kind)]),
+];
 
 const HEALTH_TONE = {
   ok: 'text-ok',
@@ -93,11 +96,13 @@ export interface RuntimeSelectProps {
 
 /** The harness groups that have something to show, in a fixed order. A harness with none is not drawn. */
 const harnessGroups = (options: readonly AccountPickerOption[]) =>
-  HARNESS_ORDER.map(kind => ({
-    kind,
-    label: fleetHarnessLabel(kind),
-    options: options.filter(option => option.kind === kind),
-  })).filter(group => group.options.length > 0);
+  harnessOrder(options)
+    .map(kind => ({
+      kind,
+      label: fleetHarnessLabel(kind),
+      options: options.filter(option => option.kind === kind),
+    }))
+    .filter(group => group.options.length > 0);
 
 /** What a runtime runs on, in the words a person picks by: its login's catalog, then its default model. */
 const runtimeHint = (account: AccountPickerOption): string => {

@@ -17,7 +17,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { cn } from '../../../ui.ts';
 import { Button, SelectBox } from '../../../ui.ts';
-import { HARNESS_NAMES } from '../components/component-model.ts';
+
 import {
   credentialEmail,
   credentialHarnesses,
@@ -38,6 +38,7 @@ import {
   sameLoginAndProfile,
   suggestedRuntimeName,
 } from './runtimes-model.ts';
+import { harnessName } from '../../../../contract/harness-words.ts';
 
 /** What the person has changed from the defaults; every field not touched follows the machine's own choice. */
 interface AddRuntimeDraft {
@@ -166,7 +167,7 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
             <span className="font-mono">{made}</span> is ready to launch
           </p>
           <p className="m-0 text-cell leading-base text-muted">
-            {runtime === undefined ? '' : `${HARNESS_NAMES[runtime.harness]} · ${runtime.profile} profile`}
+            {runtime === undefined ? '' : `${harnessName(runtime.harness)} · ${runtime.profile} profile`}
             {signInFirst ? '. Sign in before you launch.' : ''}
           </p>
         </div>
@@ -275,7 +276,7 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
         <Field title="Profile" name="profile" htmlFor="add-runtime-profile">
           {fitting.length === 0 ? (
             <p className="m-0 text-cell text-muted" data-add-runtime-no-profiles="">
-              No profile on {machineName} applies to {HARNESS_NAMES[harness ?? 'claude-code']} yet.
+              No profile on {machineName} applies to {harness === undefined ? 'this login' : harnessName(harness)} yet.
             </p>
           ) : (
             <span className="contents" data-add-runtime-profile-select="">
@@ -376,7 +377,7 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
                     checked={candidate === harness}
                     onChange={() => set({ runs: candidate, profile: null, name: null, addAnother: false })}
                   />
-                  <span className="text-row font-semibold text-fg">{HARNESS_NAMES[candidate]}</span>
+                  <span className="text-row font-semibold text-fg">{harnessName(candidate)}</span>
                 </label>
               ))}
             </div>

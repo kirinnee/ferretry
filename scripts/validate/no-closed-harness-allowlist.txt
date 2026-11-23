@@ -9,8 +9,8 @@
 #   path::known=N    KnownHarnessKey / KnownHarnessKeySchema / isKnownHarnessKey / KNOWN_HARNESS_KEYS
 #   path::branch=N   a harness-named operand compared with === or !== to 'claude', 'claude-code' or 'codex'
 #
-# Parts: 1a = the check + runtimes daemon (done: its rows are gone, bar the wire types it still answers in); 1b = runtimes
-# contract, cli and app (and the wire types the daemon's rows wait on); 2 = logins; 3 = core ferrets, conversation,
+# Parts: 1a = the check + runtimes daemon (done); 1b = runtimes contract, cli and app (done: no runtimes row stands);
+# 2 = logins; 3 = core ferrets, conversation,
 # mailbox, kernel and the cli; 4 = mcp, skills, packs, catalogs, warden, terminals, lessons, usage, onboarding.
 
 packages/cli/src/lib/machine/flags.ts::branch=3  # part 3
@@ -135,50 +135,6 @@ packages/plugins/packs/daemon/lib/cleanup/service.ts::known=3  # part 4
 packages/plugins/packs/daemon/lib/probe.ts::known=2  # part 4
 packages/plugins/packs/daemon/lib/routing.ts::branch=1  # part 4
 packages/plugins/packs/daemon/lib/routing.ts::literal=1  # part 4
-packages/plugins/runtimes/app/components/runtime-controls.tsx::branch=8  # part 1b
-packages/plugins/runtimes/app/components/runtime-select.tsx::literal=1  # part 1b
-packages/plugins/runtimes/app/features/fleet/components/component-form.tsx::literal=1  # part 1b
-packages/plugins/runtimes/app/features/fleet/components/component-model.ts::literal=1  # part 1b
-packages/plugins/runtimes/app/features/fleet/profiles/profile-model.ts::literal=1  # part 1b
-packages/plugins/runtimes/app/features/fleet/runtimes/runtimes-model.ts::branch=1  # part 1b
-packages/plugins/runtimes/app/features/import-kit/change.ts::known=3  # part 1b
-packages/plugins/runtimes/app/features/import-kit/mapping-words.ts::branch=1  # part 1b
-packages/plugins/runtimes/app/features/import-kit/mapping-words.ts::known=3  # part 1b
-packages/plugins/runtimes/app/features/import-kit/model.ts::branch=1  # part 1b
-packages/plugins/runtimes/app/features/import-kit/model.ts::known=6  # part 1b
-packages/plugins/runtimes/app/features/import-kit/model.ts::literal=1  # part 1b
-packages/plugins/runtimes/app/features/import-kit/use-harness-scan.ts::known=10  # part 1b
-packages/plugins/runtimes/app/features/import-wizard/import-step.tsx::known=5  # part 1b
-packages/plugins/runtimes/app/features/import-wizard/use-import-wizard.ts::known=18  # part 1b
-packages/plugins/runtimes/app/features/import-wizard/wizard-memory.ts::known=6  # part 1b
-packages/plugins/runtimes/app/lib/account-picker-catalog.ts::known=2  # part 1b
-packages/plugins/runtimes/app/lib/daemon-picker-model.ts::branch=1  # part 1b
-packages/plugins/runtimes/app/lib/logins-view.ts::branch=1  # part 1b
-packages/plugins/runtimes/app/lib/logins-view.ts::known=2  # part 1b
-packages/plugins/runtimes/app/lib/logins-view.ts::literal=1  # part 1b
-packages/plugins/runtimes/app/lib/runtime-models.ts::known=5  # part 1b
-packages/plugins/runtimes/app/lib/runtime-switch.ts::known=4  # part 1b
-packages/plugins/runtimes/app/lib/session-view.ts::known=2  # part 1b
-packages/plugins/runtimes/app/lib/shell-ports.ts::known=2  # part 1b
-packages/plugins/runtimes/app/views/account-picker-panels.tsx::known=3  # part 1b
-packages/plugins/runtimes/cli/lib/fleet/account-commands.ts::branch=3  # part 1b
-packages/plugins/runtimes/cli/lib/fleet/account-commands.ts::known=2  # part 1b
-packages/plugins/runtimes/cli/lib/fleet/account-render.ts::known=2  # part 1b
-packages/plugins/runtimes/contract/harness-fallback.ts::literal=1  # part 1b
-packages/plugins/runtimes/contract/homes.ts::known=2  # part 1b
-packages/plugins/runtimes/contract/index.ts::known=2  # part 1b
-packages/plugins/runtimes/contract/slots.ts::branch=2  # part 1b
-packages/plugins/runtimes/contract/slots.ts::known=2  # part 1b
-packages/plugins/runtimes/contract/wire/catalog.ts::known=18  # part 1b
-packages/plugins/runtimes/contract/wire/changes.ts::known=3  # part 1b
-packages/plugins/runtimes/contract/wire/clone.ts::known=2  # part 1b
-packages/plugins/runtimes/contract/wire/import-items.ts::known=5  # part 1b
-packages/plugins/runtimes/contract/wire/setup.ts::known=13  # part 1b
-packages/plugins/runtimes/contract/wire/shared.ts::known=3  # part 1b
-packages/plugins/runtimes/daemon/index.ts::known=2  # part 1b: a wire type the daemon answers in
-packages/plugins/runtimes/daemon/lib/clone-review.ts::known=2  # part 1b: a wire type the daemon answers in
-packages/plugins/runtimes/daemon/lib/service/foreign.ts::known=3  # part 1b: a wire type the daemon answers in
-packages/plugins/runtimes/daemon/lib/service/runtimes-api.ts::known=2  # part 1b: a wire type the daemon answers in
 packages/plugins/skills/app/lib/skills-model.ts::branch=2  # part 4
 packages/plugins/skills/app/lib/skills-model.ts::known=3  # part 4
 packages/plugins/skills/contract/slots.ts::branch=2  # part 4

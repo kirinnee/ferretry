@@ -4,12 +4,8 @@
  * only see `RuntimeControlApi`.
  */
 
-import {
-  type FerretSummary,
-  FerretSummarySchema,
-  isKnownHarnessKey,
-  type KnownHarnessKey,
-} from '@ferretry/core-ferrets/contract';
+import { type FerretSummary, FerretSummarySchema, type HarnessKey } from '@ferretry/core-ferrets/contract';
+import { isSupportedHarnessKey } from '../../contract/harness-words.ts';
 import type { RuntimesClient } from './client.ts';
 import type { RuntimeSessionView } from './session-view.ts';
 
@@ -51,7 +47,7 @@ export const runtimeControlApi = (client: RuntimesClient): RuntimeControlApi => 
  * A field the summary does not carry (the model the pane OBSERVED, its prompt, the launch flags) is ABSENT, never
  * invented: the pickers already read each as "not known".
  */
-const runtimeSessionViewOf = (summary: FerretSummary & { readonly harness: KnownHarnessKey }): RuntimeSessionView => ({
+const runtimeSessionViewOf = (summary: FerretSummary & { readonly harness: HarnessKey }): RuntimeSessionView => ({
   config: {
     id: summary.id,
     harness: summary.harness,
@@ -80,7 +76,7 @@ const stateOf = (summary: FerretSummary): RuntimeSessionView['state'] => {
 export const parseRuntimeSessionView = (value: unknown): RuntimeSessionView => {
   const parsed = FerretSummarySchema.safeParse(value);
   // The pickers speak the two harnesses this build ships: a ferret on another one is refused, not read as one of them.
-  if (!parsed.success || !isKnownHarnessKey(parsed.data.harness))
+  if (!parsed.success || !isSupportedHarnessKey(parsed.data.harness))
     throw new Error('the daemon answered with something the runtime picker cannot read as a ferret');
   return runtimeSessionViewOf({ ...parsed.data, harness: parsed.data.harness });
 };

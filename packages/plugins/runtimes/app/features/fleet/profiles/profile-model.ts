@@ -28,14 +28,8 @@ import {
   type RuntimeView,
 } from '../../../../contract/index.ts';
 import type { AccountCatalog } from '../components/account-catalog.ts';
-import {
-  type CatalogHarness,
-  COMPONENT_KINDS,
-  counted,
-  HARNESS_NAMES,
-  listed,
-  SCOPE_WORDS,
-} from '../components/component-model.ts';
+import { type CatalogHarness, COMPONENT_KINDS, counted, listed, SCOPE_WORDS } from '../components/component-model.ts';
+import { harnessName, supportedHarnessKeys } from '../../../../contract/harness-words.ts';
 
 const PROFILE_PREFIX = 'profile/';
 
@@ -174,9 +168,9 @@ export function addRefusal(input: {
   if (item.scope === 'mixed')
     return `Refused: ${item.name} mixes Claude-only and Codex-only content, so it can’t go in a profile.`;
   if (item.scope === 'generic') return undefined;
-  const other = item.scope === 'claude-code' ? 'codex' : 'claude-code';
+  const other = supportedHarnessKeys().find(key => key !== item.scope) ?? item.scope;
   if (harness !== undefined && item.scope !== harness)
-    return `Refused: ${item.name} is ${SCOPE_WORDS[item.scope]}, but ${label} is for a ${HARNESS_NAMES[harness]} login.`;
+    return `Refused: ${item.name} is ${SCOPE_WORDS[item.scope]}, but ${label} is for a ${harnessName(harness)} login.`;
   const culprits = contents.filter(each => each.scope === other || each.scope === 'mixed');
   if (culprits.length === 0) return undefined;
   return `Refused: ${item.name} is ${SCOPE_WORDS[item.scope]}, but ${label} is ${SCOPE_WORDS[other]} because of ${named(culprits)}. A profile can’t mix Claude-only and Codex-only content.`;
@@ -254,9 +248,8 @@ export function resolvedHarnesses(
 ): readonly CatalogHarness[] {
   if (scope === 'claude-code' || scope === 'codex') return [scope];
   const present = new Set(resolved.map(entry => entry.harness));
-  const both: readonly CatalogHarness[] = ['claude-code', 'codex'];
-  const shown = both.filter(harness => present.has(harness));
-  return shown.length === 0 ? ['claude-code'] : shown;
+  const shown = supportedHarnessKeys().filter(harness => present.has(harness));
+  return shown.length === 0 ? supportedHarnessKeys().slice(0, 1) : shown;
 }
 
 /** The words a Resolved row's key column shows: "MCP · github", "env.MODE", "model". */

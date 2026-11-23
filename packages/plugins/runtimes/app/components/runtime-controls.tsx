@@ -41,6 +41,7 @@ import {
   runtimeModelCatalogErrorMessage,
 } from '../lib/runtime-models.ts';
 import { contextWords, CUSTOM_MODEL_ID, groupByTier, Loading, Spinner } from '@ferretry/app/ui';
+import { harnessWords, unsupportedHarnessSentence } from '../../contract/harness-words.ts';
 import { callFailure } from '../lib/client.ts';
 import type { RuntimeControlApi, RuntimeControlCommand } from '../lib/runtime-switch.ts';
 import {
@@ -250,10 +251,13 @@ export function RuntimeModelControls({
   const { config, state } = view;
   const terminal = TERMINAL_STATUSES.has(state.status);
   const promptRefused = isPromptKnownBusy(state);
+  // The picker is the harness's own: a harness Runtimes has no behaviour for has none, and is never given Claude's.
+  const picker = harnessWords(config.harness)?.picker;
+  const twoStep = picker === 'two-step';
   const { catalog, error: catalogError } = useRuntimeModelCatalog(
     catalogs,
     config.id,
-    open && canControl && !terminal,
+    open && canControl && !terminal && picker !== undefined,
     config.harness,
   );
   const [selectedCodexModel, setSelectedCodexModel] = useState<RuntimeModelChoice | null>(null);
@@ -278,7 +282,7 @@ export function RuntimeModelControls({
   }, [open]);
 
   const codexPickerFallback =
-    config.harness === 'codex' && codexPickerFallbackNeeded(catalog, catalogError, selectedCodexModel ?? undefined);
+    twoStep && codexPickerFallbackNeeded(catalog, catalogError, selectedCodexModel ?? undefined);
 
   async function runModelCommand(model?: string, effort?: string) {
     if (!canControl || terminal || promptRefused || submitting) return;
@@ -293,13 +297,13 @@ export function RuntimeModelControls({
         { action: 'model', ...(model ? { model } : {}), ...(effort ? { effort } : {}) },
         newRequestId(),
       );
-      if (config.harness === 'codex' && !model) {
+      if (twoStep && !model) {
         if (onOpenTerminal?.()) {
           onClose();
           return;
         }
         setNotice('Codex opened its native picker in Terminal. No switch is claimed until Codex reports one.');
-      } else if (config.harness === 'codex') {
+      } else if (twoStep) {
         setSelectedCodexModel(null);
         setNotice(
           effort
@@ -318,6 +322,7 @@ export function RuntimeModelControls({
   }
 
   const title = 'Switch model in place';
+  if (picker === undefined) return <UnusableHarness harness={config.harness} title={title} />;
   if (terminal) {
     return (
       <div className="border-border-soft border-t pt-3">
@@ -379,11 +384,11 @@ export function RuntimeModelControls({
           error={catalogError}
           harness={config.harness}
           onChoose={choice => {
-            if (config.harness === 'codex' && choice.reasoningEfforts.length > 0) setSelectedCodexModel(choice);
+            if (twoStep && choice.reasoningEfforts.length > 0) setSelectedCodexModel(choice);
             else void runModelCommand(choice.value);
           }}
           onCustom={
-            config.harness === 'claude-code' && catalog?.catalog?.customIds === true
+            picker === 'allowlist' && catalog?.catalog?.customIds === true
               ? model => void runModelCommand(model)
               : undefined
           }
@@ -401,6 +406,18 @@ export function RuntimeModelControls({
       ) : null}
 
       <RuntimeOutcome failure={failure} notice={notice} />
+    </div>
+  );
+}
+
+/** What a running ferret on a harness Runtimes has no behaviour for shows in place of a picker: the one sentence, no controls. */
+function UnusableHarness({ harness, title }: { readonly harness: string; readonly title: string }) {
+  return (
+    <div className="border-border-soft border-t pt-3" data-harness-unusable={harness}>
+      <h3 className="m-0 font-semibold text-fg text-ui">{title}</h3>
+      <p className="mt-1 text-meta text-muted leading-base" role="status">
+        {unsupportedHarnessSentence(harness)}
+      </p>
     </div>
   );
 }
@@ -645,6 +662,7 @@ export function RuntimeModelChoices({
   presentation = 'sheet',
   submittingModel,
 }: RuntimeModelChoicesProps) {
+  const picker = harnessWords(harness)?.picker;
   if (error) {
     // In the composer's popover this is a quiet line, said once: a daemon whose runtime discovery is not built yet is
     // a fact about the machine, not an alarm, and the person only sees it by opening the picker.
@@ -681,9 +699,11 @@ export function RuntimeModelChoices({
     <div className={presentation === 'popover' ? undefined : 'mt-3'}>
       {presentation === 'popover' ? null : (
         <p aria-live="polite" className="m-0 text-meta text-muted leading-base" role="status">
-          {harness === 'codex'
+          {picker === 'two-step'
             ? 'Live choices from this account’s Codex model catalog. Choose a model, then one of its advertised reasoning levels.'
-            : 'Only this account’s advertised Claude choices are shown. The model chip updates when Claude confirms a switch.'}
+            : picker === 'allowlist'
+              ? 'Only this account’s advertised Claude choices are shown. The model chip updates when Claude confirms a switch.'
+              : unsupportedHarnessSentence(harness)}
         </p>
       )}
       <RuntimeChoiceMenu
@@ -972,10 +992,11 @@ export function RuntimeEffortControls({
   const [codexSubmittingEffort, setCodexSubmittingEffort] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const picker = harnessWords(config.harness)?.picker;
   const { catalog, error: catalogError } = useRuntimeModelCatalog(
     catalogs,
     config.id,
-    canControl && !terminal,
+    canControl && !terminal && picker !== undefined,
     config.harness,
   );
 
@@ -992,7 +1013,7 @@ export function RuntimeEffortControls({
   const currentCodexModel = catalog?.choices.find(choice => choice.value === runningModel);
   const claudeLevels = claudeEffortLevels(catalog, runningModel);
   const codexPickerFallback =
-    config.harness === 'codex' && codexPickerFallbackNeeded(catalog, catalogError, currentCodexModel, true);
+    picker === 'two-step' && codexPickerFallbackNeeded(catalog, catalogError, currentCodexModel, true);
 
   async function runEffortCommand(level: string) {
     if (!canControl || terminal || promptRefused || submitting) return;
@@ -1087,7 +1108,11 @@ export function RuntimeEffortControls({
         </p>
       ) : null}
 
-      {config.harness === 'claude-code' ? (
+      {picker === undefined ? (
+        <p className="m-0 text-meta text-muted leading-base" data-harness-unusable={config.harness} role="status">
+          {unsupportedHarnessSentence(config.harness)}
+        </p>
+      ) : picker === 'allowlist' ? (
         <ClaudeEffortChoices
           current={claudeEffort}
           disabled={submitting || promptRefused}

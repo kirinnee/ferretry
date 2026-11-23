@@ -19,8 +19,14 @@ import type {
   MachineView,
   RuntimeView,
 } from '../../../../contract/index.ts';
-import { HARNESS_NAMES, SCOPE_WORDS } from '../components/component-model.ts';
-import { HARNESS_SHORT, type HarnessKind, otherHarness, plural } from '../../../lib/logins-view.ts';
+import { SCOPE_WORDS } from '../components/component-model.ts';
+import { type HarnessKind, otherHarnessesShort, plural } from '../../../lib/logins-view.ts';
+import {
+  harnessName,
+  harnessWords,
+  isSupportedHarnessKey,
+  unsupportedHarnessSentence,
+} from '../../../../contract/harness-words.ts';
 
 const NAME_PATTERN = /^[A-Za-z0-9-]+$/u;
 
@@ -61,7 +67,7 @@ export const runtimeNameProblem = (
 };
 
 /** The word a runtime's name starts with: the CLI's short name (`claude`, `codex`), not the wire harness key. */
-const runtimeNamePrefix = (harness: HarnessKind): string => (harness === 'claude-code' ? 'claude' : harness);
+const runtimeNamePrefix = (harness: HarnessKind): string => harnessWords(harness)?.commandWord ?? harness;
 
 /** The prefilled name: harness plus profile, made unique (`claude-default`, `claude-default-2`). */
 export const suggestedRuntimeName = (harness: HarnessKind, profile: string, runtimes: readonly RuntimeView[]): string =>
@@ -78,6 +84,9 @@ export const sameLoginAndProfile = (
 ): RuntimeView | undefined =>
   runtimes.find(runtime => runtime.credential.id === credentialId && runtime.profile === profile);
 
+/** What a login that drives no tool says of a profile: nothing can run, so nothing fits. */
+const NO_TOOL: ProfileFit = { fits: false, reason: 'This login drives no tool' };
+
 export type ProfileFit =
   | { readonly fits: true; readonly notes: readonly string[] }
   | { readonly fits: false; readonly reason: string };
@@ -89,16 +98,18 @@ export type ProfileFit =
  * and says which layers disagree.
  */
 export const profileFit = (profile: LayeredProfileView, harness: HarnessKind): ProfileFit => {
+  // A harness Runtimes has no behaviour for fits nothing: said in the one sentence, never judged as Claude or Codex.
+  if (!isSupportedHarnessKey(harness)) return { fits: false, reason: unsupportedHarnessSentence(harness) };
   if (profile.scope.kind === 'mixed') return { fits: false, reason: profile.scope.sentence };
   if (profile.scope.scope !== 'generic' && profile.scope.scope !== harness)
-    return { fits: false, reason: `${SCOPE_WORDS[profile.scope.scope]} — this login is ${HARNESS_NAMES[harness]}` };
+    return { fits: false, reason: `${SCOPE_WORDS[profile.scope.scope]} — this login is ${harnessName(harness)}` };
   const stack = profile.harnesses.find(candidate => candidate.harness === harness);
   if (stack === undefined) return { fits: true, notes: [] };
   if (!stack.available.available) return { fits: false, reason: stack.available.reason };
   const notes: string[] = [];
   if (stack.skipped.length > 0)
-    notes.push(`${HARNESS_SHORT[otherHarness(harness)]} settings will be skipped on ${HARNESS_NAMES[harness]}`);
-  if (stack.partial.length > 0) notes.push(`Partly supported on ${HARNESS_NAMES[harness]}`);
+    notes.push(`${otherHarnessesShort(harness)} settings will be skipped on ${harnessName(harness)}`);
+  if (stack.partial.length > 0) notes.push(`Partly supported on ${harnessName(harness)}`);
   return { fits: true, notes };
 };
 
@@ -112,7 +123,10 @@ export const profilesFitFirst = (
   harnesses: readonly HarnessKind[],
   chosen: HarnessKind | null = null,
 ): readonly { readonly profile: LayeredProfileView; readonly fit: ProfileFit }[] => {
-  const all = profiles.map(profile => ({ profile, fit: profileFit(profile, runsHarness(harnesses, chosen, profile)) }));
+  const all = profiles.map(profile => {
+    const harness = runsHarness(harnesses, chosen, profile);
+    return { profile, fit: harness === undefined ? NO_TOOL : profileFit(profile, harness) };
+  });
   return [...all.filter(entry => entry.fit.fits), ...all.filter(entry => !entry.fit.fits)];
 };
 
@@ -126,8 +140,8 @@ export const runsHarness = (
   harnesses: readonly HarnessKind[],
   chosen: HarnessKind | null,
   profile?: LayeredProfileView,
-): HarnessKind => {
-  const first = harnesses[0] ?? 'claude-code';
+): HarnessKind | undefined => {
+  const first = harnesses[0];
   if (harnesses.length < 2) return first;
   if (chosen !== null) return chosen;
   const scope = profile?.scope.kind === 'scoped' ? profile.scope.scope : 'generic';
@@ -225,8 +239,8 @@ export const layerRows = (
     if (kind === 'profile') return { reference, title: `Profile · ${name}`, notes: ['Used as a base'], skipped: false };
     const component = componentFor(catalog, reference);
     const notes: string[] = [];
-    if (component?.harness !== undefined) notes.push(`${HARNESS_NAMES[component.harness]} only`);
-    for (const partial of component?.partial ?? []) notes.push(`Partly supported on ${HARNESS_NAMES[partial.harness]}`);
+    if (component?.harness !== undefined) notes.push(`${harnessName(component.harness)} only`);
+    for (const partial of component?.partial ?? []) notes.push(`Partly supported on ${harnessName(partial.harness)}`);
     notes.push(...(component?.warnings ?? []));
     const title = `${KIND_NAMES[kind as ComponentView['kind']] ?? kind} · ${name}`;
     return { reference, title, notes, skipped: skipped.has(reference) };
@@ -240,7 +254,7 @@ export const runtimeProfileLine = (runtime: RuntimeView, profile: LayeredProfile
   const skipped =
     runtime.stack.skipped.length === 0
       ? ''
-      : ` · ${String(runtime.stack.skipped.length)} skipped on ${HARNESS_NAMES[runtime.harness]}`;
+      : ` · ${String(runtime.stack.skipped.length)} skipped on ${harnessName(runtime.harness)}`;
   return `${layers}${plural(parts, 'part')}${skipped}`;
 };
 

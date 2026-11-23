@@ -29,6 +29,7 @@ import {
 } from '../account/scope.ts';
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from '../account/layering.ts';
 import type { HarnessKind } from '../manifest.ts';
+import { byHarness, isSupportedKind, unsupportedHarnessSentence } from '../harness-kind.ts';
 import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
 import { refusedIndexes, type ShownWord, shownWords, shownWordsEtag } from './command-line.ts';
 import { slugName } from '../account/document.ts';
@@ -147,12 +148,14 @@ export interface AccountChangeFacts {
 }
 
 /** The document format each harness's settings file is in. */
-const SETTINGS_FORMAT: Readonly<Record<HarnessKind, SettingsFormat>> = { claude: 'json', codex: 'toml' };
+/** The document format a harness's settings file is written in; a harness Runtimes has no behaviour for is refused. */
+const settingsFormatOf = (harness: string): SettingsFormat =>
+  byHarness<SettingsFormat>(harness, { claude: () => 'json', codex: () => 'toml' });
 
 /** The extension each kind's file is written with. */
 const componentExtension = (input: ComponentInput): string | undefined => {
   if (input.kind === 'instructions') return 'md';
-  if (input.kind === 'settings') return SETTINGS_FORMAT[input.harness];
+  if (input.kind === 'settings') return settingsFormatOf(input.harness);
   if (input.kind === 'hooks') return 'json';
   return undefined;
 };
@@ -354,7 +357,7 @@ function componentBody(
   const owner = `${KIND_WORDS[input.kind]} ${name}`;
   const content =
     input.kind === 'settings' && input.entries !== undefined
-      ? settingsFromEntries(input.entries, existingSettings, owner, SETTINGS_FORMAT[input.harness])
+      ? settingsFromEntries(input.entries, existingSettings, owner, settingsFormatOf(input.harness))
       : given;
   const extension = componentExtension(input);
   const ownFile = extension === undefined ? undefined : componentFilePath(input.kind, name, extension);
@@ -403,7 +406,7 @@ function componentBody(
     case 'skills':
       return { component: { items: [...input.items], ...harness } };
     case 'settings': {
-      if (content !== undefined) assertDocument(content, SETTINGS_FORMAT[input.harness], owner);
+      if (content !== undefined) assertDocument(content, settingsFormatOf(input.harness), owner);
       const env = resolvedEnv(input.env, existingEnv, owner);
       const flags = resolvedWords(
         input.flags,
@@ -867,12 +870,19 @@ function putRuntime(
     return refuse(`no profile ${change.profile} exists on this machine`);
   // A login that drives both CLIs runs the one asked for, else the one the profile is scoped to.
   const served = credentialHarnesses(credential);
-  if (change.harness !== undefined && !served.includes(change.harness)) {
+  if (change.harness !== undefined && !isSupportedKind(change.harness))
+    refuse(unsupportedHarnessSentence(change.harness));
+  if (change.harness !== undefined && isSupportedKind(change.harness) && !served.includes(change.harness)) {
     refuse(
       `${change.credential} does not drive ${HARNESS_DISPLAY_NAMES[change.harness]}: it is a ${HARNESS_DISPLAY_NAMES[credential.harness]} login.`,
     );
   }
-  const harness = runtimeHarness(model, change) as HarnessKind;
+  const pinned = change.harness !== undefined && isSupportedKind(change.harness) ? change.harness : undefined;
+  const harness = runtimeHarness(model, {
+    credential: change.credential,
+    profile: change.profile,
+    ...(pinned === undefined ? {} : { harness: pinned }),
+  }) as HarnessKind;
   // P7: a Claude-only profile never runs on a Codex login, nor the other way round. A profile mixed
   // before P7 existed is refused only when a runtime is moved ONTO it. A login that drives both fits
   // either, unless the runtime was pinned to the other CLI.
