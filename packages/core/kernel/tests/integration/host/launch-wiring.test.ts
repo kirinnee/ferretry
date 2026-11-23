@@ -162,7 +162,6 @@ const manifest = {
       harness: 'claude',
       credential: 'c',
       profile: 'p',
-      agent: true,
       wrapper: '/fleet/bin/claude-work',
       models: [],
       defaultModel: null,
@@ -202,9 +201,9 @@ async function boot(runner: RecordingRunner, fixed: string | null = STALE_FIXED)
     // The v5 runtime world a start by runtime reads: the runtime `work` (its login, a profile, launched as an agent).
     config: {
       runtimes: {
-        [RUNTIME]: { login: RUNTIME, profile: 'plain', agent: true },
+        [RUNTIME]: { login: RUNTIME, profile: 'plain' },
         // Configured on this machine but absent from the published fleet manifest: the case 'a runtime that is not published'.
-        [UNPUBLISHED]: { login: RUNTIME, profile: 'plain', agent: true },
+        [UNPUBLISHED]: { login: RUNTIME, profile: 'plain' },
       },
       profiles: { plain: { contents: [] } },
     },

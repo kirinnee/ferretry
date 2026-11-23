@@ -79,7 +79,6 @@ function runtimesOffering(
   return runtimes
     .filter(
       runtime =>
-        runtime.agent &&
         runtime.harness === harness &&
         runtime.models?.catalog.id === provider &&
         runtime.models.choices.some(choice => choice.id === id),

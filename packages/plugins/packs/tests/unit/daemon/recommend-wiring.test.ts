@@ -27,7 +27,6 @@ const summaryOf = (view: RuntimeView): RuntimeSummary => ({
   harness: view.harness,
   login: view.credential.id,
   profile: view.profile,
-  agent: view.agent,
   launch: view.launch,
 });
 

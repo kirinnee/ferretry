@@ -554,14 +554,13 @@ export function planClone(target: AccountModel, offered: CloneBundle, options: C
     runtimes[free] = {
       credential,
       profile: profileNames.get(runtime.profile) as string,
-      agent: runtime.agent,
       ...(runtime.harness === undefined ? {} : { harness: runtime.harness }),
       ...(runtime.compactAt === undefined ? {} : { compactAt: runtime.compactAt }),
       ...keyed(`runtime/${name}`),
     };
     loginRuntimes.set(runtime.credential, [...(loginRuntimes.get(runtime.credential) ?? []), free]);
     const harness = runtimeHarness(source, runtime) as HarnessKind;
-    if (runtime.agent) copiedAgents.push({ name, harness });
+    copiedAgents.push({ name, harness });
     if (!options.installed.includes(harness)) missingHarnesses.add(harness);
   }
 
@@ -714,7 +713,7 @@ function defaultAfterCopy(input: {
   }
   const current = base.machine.defaultRuntime;
   if (current === undefined) return { machine: without, defaultRuntime: { kind: 'none' } };
-  if (runtimes[current]?.agent === true)
+  if (runtimes[current] !== undefined)
     return { machine: base.machine, defaultRuntime: { kind: 'kept', runtime: current } };
   const droppedHarness =
     base.runtimes[current] === undefined ? undefined : runtimeHarness(base, base.runtimes[current]);

@@ -32,7 +32,6 @@ const runtime = (id: number, name: string, wrapper: string): Runtime => ({
   harness: 'claude',
   credential: 'one',
   profile: 'default',
-  agent: true,
   wrapper,
   models: [{ id: 'model-one', displayName: 'Model One', available: true }],
   defaultModel: 'model-one',

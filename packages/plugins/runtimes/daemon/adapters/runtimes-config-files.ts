@@ -123,6 +123,7 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
       },
       files: assembled,
       unreadable: assembled.unreadable,
+      notices: assembled.notices,
       stoodInLogins: assembled.stoodInLogins,
     };
   };

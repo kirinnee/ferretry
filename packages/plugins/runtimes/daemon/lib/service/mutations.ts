@@ -911,7 +911,6 @@ function putRuntime(
   draft.runtimes[change.name] = {
     credential: change.credential,
     profile: change.profile,
-    agent: change.agent,
     ...(change.harness === undefined ? {} : { harness: change.harness }),
     ...(model.runtimes[change.name]?.disabled === undefined ? {} : { disabled: model.runtimes[change.name]?.disabled }),
     ...(model.runtimes[change.name]?.compactAt === undefined
@@ -919,8 +918,8 @@ function putRuntime(
       : { compactAt: model.runtimes[change.name]?.compactAt }),
     ...cloneLinkOf(model.runtimes[change.name]),
   };
-  // The first agent runtime on a machine becomes its default for new agents (and the Warden's login).
-  if (change.create && change.agent && resolveDefaultRuntime(model) === undefined) {
+  // The first runtime on a machine becomes its default for new agents (and the Warden's login).
+  if (change.create && resolveDefaultRuntime(model) === undefined) {
     draft.machine.defaultRuntime = change.name;
     consequences.push(`${change.name} is now this machine's default runtime for new agents.`);
   }

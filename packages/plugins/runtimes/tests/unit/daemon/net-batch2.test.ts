@@ -166,7 +166,7 @@ describe('(C) a fixed-layer overridden setting row does not show a value the wri
       credentials: { 'claude-a': { harness: 'claude', store: 'ferretry' } },
       components: { settings: { s: { harness: 'claude', file: 'components/settings/s.json' } } },
       profiles: { tuned: { layers: ['settings/s'] } },
-      runtimes: { 'claude-default': { credential: 'claude-a', profile: 'tuned', agent: true } },
+      runtimes: { 'claude-default': { credential: 'claude-a', profile: 'tuned' } },
     });
     return (
       runtimeCatalog(parsed, { ...FACTS, settingsBodies: { s: body } }).runtimes.find(r => r.name === 'claude-default')

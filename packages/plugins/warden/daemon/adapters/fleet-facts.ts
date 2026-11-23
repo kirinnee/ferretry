@@ -54,16 +54,14 @@ export class WardenFleetFacts {
     }
     // The start's own resolution, per agent runtime: a runtime a start would refuse is not ready.
     const refusals = await Promise.all(
-      catalog
-        .filter(runtime => runtime.agent)
-        .map(async runtime => {
-          const id = RuntimeIdSchema.safeParse(runtime.name);
-          if (!id.success) return [[runtime.wrapper, `${runtime.name} is not a runtime name`] as const];
-          const resolved = await runtimes.resolve(id.data);
-          return resolved.ok || (resolved.refusal !== 'unknown' && resolved.refusal !== 'no_profile')
-            ? []
-            : [[runtime.wrapper, resolved.sentence] as const];
-        }),
+      catalog.map(async runtime => {
+        const id = RuntimeIdSchema.safeParse(runtime.name);
+        if (!id.success) return [[runtime.wrapper, `${runtime.name} is not a runtime name`] as const];
+        const resolved = await runtimes.resolve(id.data);
+        return resolved.ok || (resolved.refusal !== 'unknown' && resolved.refusal !== 'no_profile')
+          ? []
+          : [[runtime.wrapper, resolved.sentence] as const];
+      }),
     );
     return {
       runtimes: catalog,

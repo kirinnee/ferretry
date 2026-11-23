@@ -60,7 +60,6 @@ export function runtime(
     harness,
     credential: { id: `${name}-login`, store: 'ferretry' },
     profile: 'default',
-    agent: true,
     stack: { harness, available: { available: true }, applied: [], skipped: [], conflicts: [], partial: [] },
     modelSet: { source: 'harness-default' },
     ...(catalogId === undefined

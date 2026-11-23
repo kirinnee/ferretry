@@ -192,6 +192,8 @@ export interface AccountDocumentReading {
    * the list of the reading it was made from; nothing else answers for it.
    */
   readonly unreadable: readonly string[];
+  /** Plain sentences about a saved setting read as unset (a default runtime that is no longer here); absent: none. */
+  readonly notices?: readonly string[];
   /**
    * The environment logins whose variables stand in, in THIS reading. A model that names one (a runtime using it) is
    * never written ({@link standInsNamedBy}); a change that stops using it is.
@@ -528,7 +530,6 @@ export class FleetCatalogService {
       .map(runtime => ({
         name: runtime.name,
         harness: runtime.harness,
-        agent: runtime.agent,
         launch: runtime.launch.available
           ? { available: true }
           : { available: false, ...(runtime.launch.reason === undefined ? {} : { reason: runtime.launch.reason }) },
@@ -538,7 +539,8 @@ export class FleetCatalogService {
   /** `GET /v1/fleet/machine`, with what this caller may do to it. */
   async machine(governance: CallerGovernance | undefined): Promise<MachineView> {
     const reading = await this.#read();
-    return machineView(reading.model, await this.#facts(reading), machineAuthority(governance));
+    const view = machineView(reading.model, await this.#facts(reading), machineAuthority(governance));
+    return reading.notices === undefined ? view : { ...view, notices: [...reading.notices] };
   }
 
   /** `GET /v1/fleet/components`. */
@@ -1145,7 +1147,7 @@ export class FleetCatalogService {
     const after = runtimeCatalog(candidate, await this.#facts({ ...reading, model: candidate }, bodies));
     return after.runtimes
       .filter(runtime => textUsers.has(runtime.name) || before.get(runtime.name) !== JSON.stringify(runtime))
-      .map(runtime => ({ name: runtime.name, harness: runtime.harness, agent: runtime.agent, launch: runtime.launch }));
+      .map(runtime => ({ name: runtime.name, harness: runtime.harness, launch: runtime.launch }));
   }
 
   /**
@@ -1238,7 +1240,6 @@ export class FleetCatalogService {
       runtimes: rows.map(runtime => ({
         name: runtime.name,
         harness: runtime.harness,
-        agent: runtime.agent,
         launch: runtime.launch,
       })),
       ...orphanedSecrets,

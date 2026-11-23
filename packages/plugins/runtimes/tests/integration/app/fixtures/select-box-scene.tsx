@@ -90,9 +90,7 @@ function Start() {
   );
 }
 
-const defaults = WRAPPERS.map(name =>
-  runtime({ name, agent: true, harness: name.startsWith('codex') ? 'codex' : 'claude-code' }),
-);
+const defaults = WRAPPERS.map(name => runtime({ name, harness: name.startsWith('codex') ? 'codex' : 'claude-code' }));
 
 function Default() {
   const shown = machine({ defaultRuntime: 'claude-personal' });

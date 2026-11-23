@@ -305,7 +305,6 @@ describe('WardenSettingsForm', () => {
       wrapper,
       displayName,
       kind,
-      agent: true,
       credentialId: wrapper,
       defaultModel: null,
       models: [],
@@ -528,7 +527,6 @@ describe('WardenSettingsForm, when the owner chose no login', () => {
       wrapper: 'claude-glm',
       displayName: 'claude-glm',
       kind: 'claude',
-      agent: true,
       credentialId: 'glm',
       defaultModel: 'glm-5.3',
       models: [
@@ -658,7 +656,6 @@ describe('WardenSettingsForm: moving a ferret that hit a limit', () => {
     wrapper,
     displayName: wrapper,
     kind: 'claude',
-    agent: true,
     credentialId: wrapper,
     defaultModel: null,
     models: [],

@@ -46,9 +46,11 @@ describe('the default runtime', () => {
     expect(blocksAsDefault(AGENT, null)).toBe(false);
   });
 
-  it('should offer only the other agent runtimes as the new default', () => {
-    expect(defaultCandidates(AGENT, ALL)).toEqual([]);
-    expect(defaultCandidates(CODEX, ALL).map(entry => entry.name)).toEqual(['claude-agent']);
+  it('should offer every other runtime as the new default', () => {
+    expect(defaultCandidates(AGENT, ALL).map(entry => entry.name)).not.toContain('claude-agent');
+    expect(defaultCandidates(AGENT, ALL).map(entry => entry.name)).toContain('codex-default');
+    expect(defaultCandidates(CODEX, ALL).map(entry => entry.name)).toContain('claude-agent');
+    expect(defaultCandidates(CODEX, ALL).map(entry => entry.name)).not.toContain('codex-default');
   });
 });
 

@@ -102,9 +102,9 @@ const documentOf = (patch: Partial<AccountModelDocument> = {}): AccountModelDocu
     mixed: { layers: ['settings/cl-settings', 'modelSets/codex-set'] },
   },
   runtimes: {
-    'claude-default': { credential: 'claude-a', profile: 'plain', agent: true },
-    second: { credential: 'claude-b', profile: 'derived', agent: false },
-    'codex-run': { credential: 'codex-a', profile: 'codex-only', agent: true },
+    'claude-default': { credential: 'claude-a', profile: 'plain' },
+    second: { credential: 'claude-b', profile: 'derived' },
+    'codex-run': { credential: 'codex-a', profile: 'codex-only' },
   },
   ...patch,
 });
@@ -623,7 +623,7 @@ describe('runtimeCatalog', () => {
     const model = modelOf({
       runtimes: {
         ...documentOf().runtimes,
-        twin: { credential: 'claude-a', profile: 'plain', agent: false },
+        twin: { credential: 'claude-a', profile: 'plain' },
       },
     });
 
@@ -639,7 +639,6 @@ describe('runtimeCatalog', () => {
       harness: 'claude-code',
       credential: { id: 'claude-a', store: 'ferretry', label: 'Work' },
       profile: 'plain',
-      agent: true,
       sameAs: ['twin'],
       modelSet: { source: 'harness-default' },
     });
@@ -672,7 +671,7 @@ describe('runtimeCatalog', () => {
     const model = modelOf({
       runtimes: {
         ...documentOf().runtimes,
-        'claude-empty': { credential: 'claude-b', profile: 'empty', agent: false },
+        'claude-empty': { credential: 'claude-b', profile: 'empty' },
       },
     });
 
@@ -689,7 +688,7 @@ describe('runtimeCatalog', () => {
     });
   });
 
-  it('should refuse an agent runtime when the installed Claude does not accept Auto mode', () => {
+  it('should refuse a runtime when the installed Claude does not accept Auto mode', () => {
     // Arrange
     const model = modelOf({ machine: { agentPermissions: 'auto', defaultRuntime: 'claude-default' } });
 
@@ -702,10 +701,9 @@ describe('runtimeCatalog', () => {
       .be.a.String()
       .and.not.empty();
     should(refused.fixedLayer).be.undefined();
-    should(runtime('second', { acceptsAutoPermissionMode: false }, model).launch).eql({ available: true });
   });
 
-  it('should show an agent runtime’s fixed layer by purpose, once per thing switched off', () => {
+  it('should show a runtime’s fixed layer by purpose, once per thing switched off', () => {
     // Act
     const skipping = modelOf({ machine: { agentPermissions: 'skip', defaultRuntime: 'claude-default' } });
     const claude = runtime('claude-default', {}, skipping).fixedLayer;
@@ -724,14 +722,13 @@ describe('runtimeCatalog', () => {
     should(claude?.entries.filter(entry => entry.key === 'one-time prompts (nudges, upsells, notices)')).have.length(1);
     should(claude?.entries.some(entry => entry.key === 'permissions.defaultMode')).be.true();
     should(codex?.entries.some(entry => entry.key === 'approval_policy')).be.true();
-    should(runtime('second').fixedLayer).be.undefined();
   });
 
   it('should report what the profile sets that the fixed layer overrides', () => {
     // Arrange — a settings value and a flag the fixed layer takes over
     const model = modelOf({
       profiles: { ...documentOf().profiles, tuned: { layers: ['settings/cl-settings'] } },
-      runtimes: { 'claude-default': { credential: 'claude-a', profile: 'tuned', agent: true } },
+      runtimes: { 'claude-default': { credential: 'claude-a', profile: 'tuned' } },
       components: {
         ...documentOf().components,
         settings: {
@@ -775,8 +772,8 @@ describe('runtimeCatalog', () => {
         cx: { layers: ['settings/cx-settings'] },
       },
       runtimes: {
-        'claude-default': { credential: 'claude-a', profile: 'tuned', agent: true },
-        'codex-run': { credential: 'codex-a', profile: 'cx', agent: true },
+        'claude-default': { credential: 'claude-a', profile: 'tuned' },
+        'codex-run': { credential: 'codex-a', profile: 'cx' },
       },
       components: {
         ...documentOf().components,
@@ -824,7 +821,7 @@ describe('runtimeCatalog', () => {
     const own = modelOf({
       runtimes: {
         ...documentOf().runtimes,
-        'claude-default': { credential: 'claude-a', profile: 'plain', agent: true, disabled: { reason: 'resting' } },
+        'claude-default': { credential: 'claude-a', profile: 'plain', disabled: { reason: 'resting' } },
       },
     });
     const login = modelOf({
@@ -858,7 +855,6 @@ describe('runtimeCatalog', () => {
         'claude-default': {
           credential: 'claude-a',
           profile: 'plain',
-          agent: true,
           disabled: { until: '2026-11-01T00:00:00Z' },
         },
       },
@@ -876,7 +872,7 @@ describe('runtimeCatalog', () => {
     const model = modelOf();
     const broken = {
       ...model,
-      runtimes: { ...model.runtimes, orphan: { credential: 'gone', profile: 'plain', agent: false } },
+      runtimes: { ...model.runtimes, orphan: { credential: 'gone', profile: 'plain' } },
     } as unknown as AccountModel;
 
     // Assert
@@ -901,8 +897,8 @@ describe('runtimeCatalog', () => {
       profiles: { ...documentOf().profiles, sets: { layers: ['modelSets/claude-set'] } },
       runtimes: {
         ...documentOf().runtimes,
-        glm: { credential: 'zai', profile: 'sets', agent: false },
-        'plain-set': { credential: 'claude-b', profile: 'sets', agent: false },
+        glm: { credential: 'zai', profile: 'sets' },
+        'plain-set': { credential: 'claude-b', profile: 'sets' },
       },
     });
     const sources = { catalogs: builtInModelCatalogs(), presets: builtInPresets() };
@@ -935,7 +931,7 @@ describe('runtimeCatalog', () => {
         ...documentOf().credentials,
         hand: { harness: 'claude', store: 'environment', env: { ANTHROPIC_BASE_URL: 'https://x.example.invalid' } },
       },
-      runtimes: { ...documentOf().runtimes, byhand: { credential: 'hand', profile: 'plain', agent: false } },
+      runtimes: { ...documentOf().runtimes, byhand: { credential: 'hand', profile: 'plain' } },
     });
 
     // Assert
@@ -967,7 +963,7 @@ describe('runtimeCatalog', () => {
           env: { OLLAMA_HOST: 'http://localhost:11434' },
         },
       },
-      runtimes: { ...documentOf().runtimes, local: { credential: 'ollama', profile: 'plain', agent: false } },
+      runtimes: { ...documentOf().runtimes, local: { credential: 'ollama', profile: 'plain' } },
     });
     const sources = { catalogs: builtInModelCatalogs(), presets: builtInPresets(), local: { ollama: local } };
 
@@ -1115,7 +1111,7 @@ describe('stacks nothing applies to', () => {
     const broken = {
       ...model,
       profiles: { ...model.profiles, ghost: { layers: ['profile/missing'] } },
-      runtimes: { ...model.runtimes, haunted: { credential: 'claude-a', profile: 'ghost', agent: true } },
+      runtimes: { ...model.runtimes, haunted: { credential: 'claude-a', profile: 'ghost' } },
     } as unknown as AccountModel;
 
     // Act

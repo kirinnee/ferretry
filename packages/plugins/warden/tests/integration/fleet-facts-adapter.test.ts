@@ -7,11 +7,10 @@ import type { LoginFactsApi, UsageHeadroomApi } from '../../contract/others.ts';
 type Runtimes = Pick<RuntimesApi, 'catalog' | 'tools' | 'resolve'>;
 type Catalog = Awaited<ReturnType<RuntimesApi['catalog']>>;
 
-const row = (name: string, extra: { agent?: boolean; login?: string } = {}): Catalog[number] =>
+const row = (name: string, extra: { login?: string } = {}): Catalog[number] =>
   ({
     name,
     wrapper: `${name}-wrapper`,
-    agent: extra.agent ?? true,
     credential: { id: extra.login ?? `${name}-login`, store: 'ferretry' },
   }) as unknown as Catalog[number];
 
@@ -29,7 +28,7 @@ function facts(
     'runtimes' in parts
       ? parts.runtimes
       : {
-          catalog: async () => [row('alpha'), row('beta', { login: 'shared' }), row('human', { agent: false })],
+          catalog: async () => [row('alpha'), row('beta', { login: 'shared' }), row('delta')],
           tools: async () => [],
           resolve: async () => ({ ok: true }) as never,
         };
@@ -51,7 +50,7 @@ describe('the fleet facts the Warden moves a ferret from (the real adapter)', ()
     const result = await facts({
       logins: { list: async () => ({ logins: [{ id: 'alpha-login', status: { word: 'ready' } }] }) },
     });
-    expect(result.runtimes.map(runtime => runtime.name)).toEqual(['alpha', 'beta', 'human']);
+    expect(result.runtimes.map(runtime => runtime.name)).toEqual(['alpha', 'beta', 'delta']);
     expect(result.credentials).toEqual([{ id: 'alpha-login', status: { word: 'ready' } }] as never);
     expect(result.tools).toEqual([]);
     expect(result.unlaunchable).toEqual({});
@@ -109,13 +108,7 @@ describe('the fleet facts the Warden moves a ferret from (the real adapter)', ()
   test('a runtime the start would refuse is named unlaunchable with the start’s own sentence', async () => {
     const result = await facts({
       runtimes: {
-        catalog: async () => [
-          row('alpha'),
-          row('beta'),
-          row('gamma'),
-          row('Not A Name'),
-          row('human', { agent: false }),
-        ],
+        catalog: async () => [row('alpha'), row('beta'), row('gamma'), row('Not A Name'), row('delta')],
         tools: async () => [],
         resolve: async id =>
           id === 'alpha'

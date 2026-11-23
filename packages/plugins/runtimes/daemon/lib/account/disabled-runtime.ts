@@ -61,10 +61,7 @@ export function runtimeDisable(
     .toSorted(([left], [right]) => (left < right ? -1 : 1))
     .find(
       ([other, peer]) =>
-        other !== name &&
-        peer.agent === runtime.agent &&
-        runtimeHarness(model, peer) === harness &&
-        !switchedOff(model, peer, now, holds),
+        other !== name && runtimeHarness(model, peer) === harness && !switchedOff(model, peer, now, holds),
     )?.[0];
   const clauses: string[] = [];
   if (own !== undefined) clauses.push(`runtime "${name}" is ${disabledPhrase(own)}`);

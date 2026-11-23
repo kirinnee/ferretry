@@ -23,7 +23,6 @@ const RUNTIME: RuntimeSummary = {
   harness: 'claude-code',
   login: 'work',
   profile: 'work',
-  agent: false,
   launch: { available: true },
 };
 const device = (...capabilities: string[]) => ({ kind: 'device', holder: 'dev_a', capabilities }) as const;

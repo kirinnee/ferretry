@@ -45,23 +45,21 @@ const offered = (runtime: RuntimeView): readonly string[] =>
       ? runtime.modelSet.models.filter(entry => entry.available).map(entry => entry.id)
       : [];
 
-/** Every agent runtime here: what it is, what it offers, whether it can start a ferret now, and its quota. */
+/** Every runtime here: what it is, what it offers, whether it can start a ferret now, and its quota. */
 export function inventoryRuntimes(facts: PackFleetFacts, now: string): readonly PackInventoryRuntime[] {
-  return facts.runtimes
-    .filter(runtime => runtime.agent)
-    .map(runtime => {
-      const refusal = runtimeRefusal(runtime, undefined, facts);
-      return {
-        name: runtime.name,
-        harness: runtime.harness,
-        ...(runtime.models === undefined ? {} : { provider: runtime.models.catalog.id }),
-        login: runtime.credential.id,
-        ready: refusal === undefined,
-        ...(refusal === undefined ? {} : { refusal }),
-        quota: quotaFor(runtime, facts, now),
-        models: offered(runtime),
-      };
-    });
+  return facts.runtimes.map(runtime => {
+    const refusal = runtimeRefusal(runtime, undefined, facts);
+    return {
+      name: runtime.name,
+      harness: runtime.harness,
+      ...(runtime.models === undefined ? {} : { provider: runtime.models.catalog.id }),
+      login: runtime.credential.id,
+      ready: refusal === undefined,
+      ...(refusal === undefined ? {} : { refusal }),
+      quota: quotaFor(runtime, facts, now),
+      models: offered(runtime),
+    };
+  });
 }
 
 /** The ready runtimes, the one with the most headroom first: where a clean-up ferret should run. */

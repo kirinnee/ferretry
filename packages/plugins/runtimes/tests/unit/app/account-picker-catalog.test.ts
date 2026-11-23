@@ -69,13 +69,12 @@ describe('readAccountPickerCatalog', () => {
 });
 
 describe('pickerAccount', () => {
-  it('reads a runtime’s id, wrapper, name, harness, agent flag and login verbatim', () => {
+  it('reads a runtime’s id, wrapper, name, harness and login verbatim', () => {
     expect(pickerAccount(runtimeView({ wrapper: 'claude-auto-a', name: 'Claude Atelier' }))).toEqual({
       id: 'rt-claude-auto-a',
       wrapper: 'claude-auto-a',
       displayName: 'Claude Atelier',
       kind: 'claude-code',
-      agent: true,
       credentialId: 'login-claude-auto-a',
       defaultModel: null,
       models: [],

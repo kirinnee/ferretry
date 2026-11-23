@@ -10,7 +10,6 @@ const WORK: RuntimeSummary = {
   harness: 'claude-code',
   login: 'work',
   profile: 'work',
-  agent: false,
   launch: { available: true },
 };
 const PROFILE = { name: 'work', layers: ['instructions/base'], etag: 'etag-1' };

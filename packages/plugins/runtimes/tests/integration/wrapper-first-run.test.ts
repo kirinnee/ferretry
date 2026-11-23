@@ -18,11 +18,10 @@ const account = (home: string, env: Record<string, string> = {}): RuntimeWrapper
   name: 'claude-auto-work',
   id: '00000000-0000-4000-8000-000000000001',
   harness: 'claude',
-  agent: true,
   configDirectory: home,
   env,
   args: [],
-  seedFirstRun: true,
+  autonomous: { args: [], seedFirstRun: true, trustLaunchFolder: false },
   fyCommand: 'fy',
 });
 
@@ -54,7 +53,7 @@ const withSandbox = async (run: (sandbox: Sandbox) => Promise<void>): Promise<vo
         const spawned = Bun.spawn({
           cmd: ['/bin/sh', script],
           cwd,
-          env: { PATH: `${bin}:${process.env.PATH ?? ''}`, ...environment },
+          env: { PATH: `${bin}:${process.env.PATH ?? ''}`, FY_SESSION_MODE: 'auto', ...environment },
           stdout: 'ignore',
           stderr: 'ignore',
         });

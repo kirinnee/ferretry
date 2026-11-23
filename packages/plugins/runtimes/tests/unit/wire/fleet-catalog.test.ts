@@ -73,7 +73,6 @@ const runtime = {
   harness: 'claude-code',
   credential: { id: 'claude-you', store: 'host', status: 'ready' },
   profile: 'default',
-  agent: true,
   stack,
   modelSet: {
     source: 'model-set',
@@ -134,7 +133,7 @@ const view = {
       { kind: 'credential-link', source: '/fy/fleet/credentials/codex/auth.json', path: '/fy/homes/x/auth.json' },
     ],
     documents: [{ path: '/fy/fleet/config.yaml', bytes: 120 }],
-    runtimes: [{ name: 'claude-default', harness: 'claude-code', agent: true, launch: { available: true } }],
+    runtimes: [{ name: 'claude-default', harness: 'claude-code', launch: { available: true } }],
   },
 } satisfies AccountChangeView;
 
@@ -407,7 +406,6 @@ describe('the account-model catalogue wire contract', () => {
         name: 'Claude Review',
         credential: 'claude-you',
         profile: 'default',
-        agent: false,
         create: true,
       },
       { kind: 'runtime.remove', name: 'claude-review' },
@@ -507,7 +505,6 @@ describe('the account-model catalogue wire contract', () => {
       credential: 'glm',
       profile: 'default',
       harness: 'codex',
-      agent: false,
       create: true,
     });
     const unnamed = catalog.AccountChangeSchema.safeParse({
@@ -515,7 +512,6 @@ describe('the account-model catalogue wire contract', () => {
       name: 'Default',
       credential: 'claude-you',
       profile: 'default',
-      agent: false,
       create: false,
     });
 

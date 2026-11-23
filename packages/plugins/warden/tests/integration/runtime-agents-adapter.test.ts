@@ -5,20 +5,15 @@ import { runtimesWardenAgents } from '../../daemon/adapters/runtime-agents.ts';
 type Catalog = Awaited<ReturnType<RuntimesApi['catalog']>>;
 type Name = Awaited<ReturnType<RuntimesApi['default']>>;
 
-const runtime = (name: string, extra: { agent?: boolean; off?: boolean } = {}): Catalog[number] =>
+const runtime = (name: string, extra: { off?: boolean } = {}): Catalog[number] =>
   ({
     id: `${name}-id`,
     name,
     wrapper: name,
-    agent: extra.agent ?? true,
     ...(extra.off === true ? { disabled: { reason: 'off' } } : {}),
   }) as unknown as Catalog[number];
 
-const CATALOG = [
-  runtime('claude-default'),
-  runtime('shell-helper', { agent: false }),
-  runtime('claude-old', { off: true }),
-];
+const CATALOG = [runtime('claude-default'), runtime('claude-old', { off: true })];
 
 const api = (
   catalog: () => Promise<Catalog>,
@@ -47,10 +42,9 @@ describe('the logins the Warden may investigate on, read from Runtimes (the real
     expect(await agents.defaultRuntime()).toBeUndefined();
   });
 
-  test('offers no default that is a human runtime, switched off, unknown, unset, or unreadable', async () => {
+  test('offers no default that is switched off, unknown, unset, or unreadable', async () => {
     const of = (fallback: () => Promise<Name>, catalog: () => Promise<Catalog> = async () => CATALOG) =>
       runtimesWardenAgents(() => api(catalog, fallback)).defaultRuntime();
-    expect(await of(async () => 'shell-helper' as Name)).toBeUndefined();
     expect(await of(async () => 'claude-old' as Name)).toBeUndefined();
     expect(await of(async () => 'elsewhere' as Name)).toBeUndefined();
     expect(await of(async () => undefined)).toBeUndefined();

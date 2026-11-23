@@ -25,7 +25,6 @@ const summary = (id: RuntimeId): RuntimeSummary =>
     harness: 'claude-code',
     login: 'personal',
     profile: id === A ? 'full' : 'bare',
-    agent: false,
     launch: { available: true },
   }) as RuntimeSummary;
 

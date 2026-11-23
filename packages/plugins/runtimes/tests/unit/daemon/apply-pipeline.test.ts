@@ -33,7 +33,7 @@ const MODEL = parseAccountModel({
   credentials: { 'claude-you': { harness: 'claude', store: 'host' } },
   components: {},
   profiles: { default: { layers: [] } },
-  runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: true } },
+  runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default' } },
 });
 
 const LAYOUT = {

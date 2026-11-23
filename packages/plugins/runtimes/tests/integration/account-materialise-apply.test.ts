@@ -87,7 +87,7 @@ const documentWith = (layers: readonly string[]): AccountModelDocument => ({
   },
   profiles: { default: { layers: [...layers, 'modelSets/models'] } },
   runtimes: {
-    'claude-agent': { credential: 'claude-you', profile: 'default', agent: true },
+    'claude-agent': { credential: 'claude-you', profile: 'default' },
     'codex-default': { credential: 'codex-slot', profile: 'default' },
   },
 });
@@ -360,7 +360,13 @@ describe('a runtime wrapper, run', () => {
 
   const withWrapper = async (
     input: Partial<RuntimeWrapperInput>,
-    options: { readonly fyStatus?: number; readonly cwdName?: string; readonly sessionId?: string } = {},
+    options: {
+      readonly fyStatus?: number;
+      readonly cwdName?: string;
+      readonly sessionId?: string;
+      /** The ferret's launch mode, as the daemon hands it to the pane. */
+      readonly mode?: 'auto' | 'interactive';
+    } = {},
   ): Promise<{ readonly run: (...args: string[]) => Promise<Run>; readonly cwd: string }> => {
     const root = await temporaryDirectory();
     const bin = path.join(root, 'bin');
@@ -388,7 +394,6 @@ describe('a runtime wrapper, run', () => {
         name: 'claude-default',
         id: ID_CLAUDE,
         harness: 'claude',
-        agent: false,
         configDirectory: path.join(root, 'home'),
         env: {},
         args: [],
@@ -415,6 +420,7 @@ describe('a runtime wrapper, run', () => {
             PATH: `${bin}:/usr/bin:/bin`,
             HOME: path.join(root, 'person'),
             FY_SEED_FIRST_RUN: '0',
+            ...(options.mode === undefined ? {} : { FY_SESSION_MODE: options.mode }),
             ...(options.sessionId === undefined ? {} : { FY_SESSION_ID: options.sessionId }),
           },
           stdout: 'ignore',
@@ -520,14 +526,18 @@ describe('a runtime wrapper, run', () => {
     const result = await run();
 
     // Assert
-    should(result.harness).match(/^HOME=.*\/person\n$/);
+    should(result.harness).match(/^HOME=.*\/person\n/);
   });
 
   it('should trust the physical launch folder with exactly the measured Codex override, quotes and backslashes included', async () => {
     // Arrange
     const { run, cwd } = await withWrapper(
-      { harness: 'codex', agent: true, trustLaunchFolder: true, args: ['--no-alt-screen'] },
-      { cwdName: 'we"ird\\dir' },
+      {
+        harness: 'codex',
+        args: ['--no-alt-screen'],
+        autonomous: { args: ['--no-alt-screen'], seedFirstRun: false, trustLaunchFolder: true },
+      },
+      { cwdName: 'we"ird\\dir', mode: 'auto' },
     );
 
     // Act

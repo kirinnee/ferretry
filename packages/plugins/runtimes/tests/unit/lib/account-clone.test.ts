@@ -48,7 +48,7 @@ const sourceModel = (): AccountModel =>
     },
     runtimes: {
       'claude-default': { credential: 'claude-you', profile: 'default' },
-      'codex-agent': { credential: 'codex-work', profile: 'agent', agent: true },
+      'codex-agent': { credential: 'codex-work', profile: 'agent' },
       'codex-extra': { credential: 'codex-work', profile: 'default' },
     },
   });
@@ -76,7 +76,7 @@ const bundleWith = (patch: Record<string, unknown> = {}): CloneBundle =>
     credentials: [{ id: 'claude-you', harness: 'claude-code', label: 'you', email: 'person@example.test' }],
     components: { instructions: { main: { file: 'components/instructions/main.md' } } },
     profiles: { default: { layers: ['instructions/main'] } },
-    runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: false } },
+    runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default' } },
     files: [{ path: 'components/instructions/main.md', content: '# Main' }],
     notCopied: [],
     ...patch,
@@ -352,7 +352,7 @@ describe('planClone with compactAt', () => {
       },
       runtimes: {
         'claude-default': { credential: 'claude-you', profile: 'default', compactAt: 'auto' },
-        'codex-agent': { credential: 'codex-work', profile: 'agent', agent: true },
+        'codex-agent': { credential: 'codex-work', profile: 'agent' },
         'codex-extra': { credential: 'codex-work', profile: 'default' },
       },
     });
@@ -393,7 +393,7 @@ describe('planClone alongside', () => {
     // Assert
     should(plan.renamed).deepEqual([]);
     should(Object.keys(plan.model.runtimes)).deepEqual(['claude-default', 'codex-agent', 'codex-extra']);
-    should(plan.model.runtimes['codex-agent']).deepEqual({ credential: 'codex-work', profile: 'agent', agent: true });
+    should(plan.model.runtimes['codex-agent']).deepEqual({ credential: 'codex-work', profile: 'agent' });
     should(plan.model.credentials['claude-you']).deepEqual({
       harness: 'claude',
       store: 'ferretry',
@@ -438,8 +438,8 @@ describe('planClone alongside', () => {
         agent: { layers: ['profile/default', 'settings/tune'] },
       },
       runtimes: {
-        'claude-default': { credential: 'claude-you', profile: 'default', agent: false },
-        'claude-agent': { credential: 'claude-you', profile: 'agent', agent: true },
+        'claude-default': { credential: 'claude-you', profile: 'default' },
+        'claude-agent': { credential: 'claude-you', profile: 'agent' },
       },
     });
 
@@ -463,17 +463,14 @@ describe('planClone alongside', () => {
     should(plan.model.runtimes['claude-default-2']).deepEqual({
       credential: 'claude-you-2',
       profile: 'default-2',
-      agent: false,
     });
     should(plan.model.runtimes['claude-agent']).deepEqual({
       credential: 'claude-you-2',
       profile: 'agent',
-      agent: true,
     });
     should(plan.model.runtimes['claude-default']).deepEqual({
       credential: 'claude-you',
       profile: 'default',
-      agent: false,
     });
     should(plan.model.credentials['claude-you']).deepEqual({ harness: 'claude', store: 'host' });
     should(plan.slots.map(slot => [slot.id, slot.runtimes])).deepEqual([
@@ -489,7 +486,7 @@ describe('planClone alongside', () => {
     });
     const bundle = bundleWith({
       profiles: { a: { layers: ['instructions/main'] }, 'a-2': { layers: ['instructions/main'] } },
-      runtimes: { 'claude-default': { credential: 'claude-you', profile: 'a-2', agent: false } },
+      runtimes: { 'claude-default': { credential: 'claude-you', profile: 'a-2' } },
     });
 
     // Act
@@ -885,9 +882,9 @@ describe('planClone alongside', () => {
         },
       ],
       runtimes: {
-        'claude-glm': { credential: 'glm', profile: 'default', agent: false },
-        'claude-bedrock': { credential: 'bedrock', profile: 'default', agent: false },
-        'codex-kimi': { credential: 'kimi-codex', profile: 'default', agent: false },
+        'claude-glm': { credential: 'glm', profile: 'default' },
+        'claude-bedrock': { credential: 'bedrock', profile: 'default' },
+        'codex-kimi': { credential: 'kimi-codex', profile: 'default' },
       },
     });
 
@@ -935,8 +932,8 @@ describe('planClone alongside', () => {
         },
       ],
       runtimes: {
-        'claude-glm': { credential: 'glm', profile: 'default', agent: false },
-        'codex-glm': { credential: 'glm', profile: 'default', agent: false, harness: 'codex' },
+        'claude-glm': { credential: 'glm', profile: 'default' },
+        'codex-glm': { credential: 'glm', profile: 'default', harness: 'codex' },
       },
     });
 
@@ -953,10 +950,9 @@ describe('planClone alongside', () => {
     should(plan.model.runtimes['codex-glm']).deepEqual({
       credential: 'glm',
       profile: 'default',
-      agent: false,
       harness: 'codex',
     });
-    should(plan.model.runtimes['claude-glm']).deepEqual({ credential: 'glm', profile: 'default', agent: false });
+    should(plan.model.runtimes['claude-glm']).deepEqual({ credential: 'glm', profile: 'default' });
   });
 
   it('should give a runtime a free name when a command wrapper already holds its name', () => {
@@ -1004,7 +1000,7 @@ describe('planClone alongside', () => {
   it('should refuse a damaged bundle whose runtime names a profile it does not carry', () => {
     // Arrange
     const bundle = bundleWith({
-      runtimes: { 'claude-default': { credential: 'claude-you', profile: 'ghost', agent: false } },
+      runtimes: { 'claude-default': { credential: 'claude-you', profile: 'ghost' } },
     });
 
     // Act
@@ -1047,7 +1043,7 @@ describe('planClone alongside', () => {
       runtimes: { [longName]: { credential: 'you', profile: 'base' } },
     });
     const bundle = bundleWith({
-      runtimes: { [longName]: { credential: 'claude-you', profile: 'default', agent: false } },
+      runtimes: { [longName]: { credential: 'claude-you', profile: 'default' } },
     });
 
     // Act
@@ -1104,7 +1100,6 @@ describe('planClone replace', () => {
     should(plan.model.runtimes['claude-default']).deepEqual({
       credential: 'claude-you-2',
       profile: 'default',
-      agent: false,
     });
     should(plan.files).deepEqual([{ path: 'components/instructions/main.md', content: '# Main' }]);
   });
@@ -1229,8 +1224,8 @@ describe('describeClone', () => {
       },
       profiles: { default: { layers: ['instructions/main', 'mcp/notes', 'skills/mine'] } },
       runtimes: {
-        'claude-default': { credential: 'claude-you', profile: 'default', agent: false },
-        'codex-default': { credential: 'codex-work', profile: 'default', agent: false },
+        'claude-default': { credential: 'claude-you', profile: 'default' },
+        'codex-default': { credential: 'codex-work', profile: 'default' },
       },
       files: [{ path: 'skills/review/SKILL.md', content: 'x' }],
       notCopied: [{ path: 'big.bin', reason: 'too large' }],
@@ -1590,10 +1585,10 @@ describe('planClone default runtime for new agents', () => {
         { id: 'codex-work', harness: 'codex', label: 'work' },
       ],
       runtimes: {
-        'claude-default': { credential: 'claude-you', profile: 'default', agent: true },
-        'claude-liftoff': { credential: 'claude-you', profile: 'default', agent: true },
-        'codex-work': { credential: 'codex-work', profile: 'default', agent: true },
-        helper: { credential: 'claude-you', profile: 'default', agent: false },
+        'claude-default': { credential: 'claude-you', profile: 'default' },
+        'claude-liftoff': { credential: 'claude-you', profile: 'default' },
+        'codex-work': { credential: 'codex-work', profile: 'default' },
+        helper: { credential: 'claude-you', profile: 'default' },
       },
       ...patch,
     });
@@ -1605,7 +1600,7 @@ describe('planClone default runtime for new agents', () => {
       machine: { defaultRuntime: name },
       credentials: { 'claude-kirin': { harness: 'claude', store: 'host' } },
       profiles: { base: { layers: [] } },
-      runtimes: { [name]: { credential: 'claude-kirin', profile: 'base', agent: true } },
+      runtimes: { [name]: { credential: 'claude-kirin', profile: 'base' } },
     });
 
   it('should repair a replace whose target default is removed, to claude-default, and say so', () => {
@@ -1624,8 +1619,8 @@ describe('planClone default runtime for new agents', () => {
     // Arrange
     const bundle = agentBundle({
       runtimes: {
-        'claude-liftoff': { credential: 'claude-you', profile: 'default', agent: true },
-        'codex-work': { credential: 'codex-work', profile: 'default', agent: true },
+        'claude-liftoff': { credential: 'claude-you', profile: 'default' },
+        'codex-work': { credential: 'codex-work', profile: 'default' },
       },
     });
 
@@ -1634,15 +1629,6 @@ describe('planClone default runtime for new agents', () => {
 
     // Assert
     should(plan.model.machine.defaultRuntime).equal('claude-liftoff');
-  });
-
-  it('should leave the default unset, and say so, when the copy brings no agent runtime', () => {
-    // Act
-    const plan = planClone(targetWithDefault(), bundleWith(), options({ mode: 'replace' }));
-
-    // Assert
-    should(plan.model.machine.defaultRuntime).be.undefined();
-    should(plan.defaultRuntime).deepEqual({ kind: 'repaired', was: 'claude-kirin' });
   });
 
   it('should keep the target default on a plain copy because its runtime stays', () => {
@@ -1660,7 +1646,7 @@ describe('planClone default runtime for new agents', () => {
       version: 1,
       credentials: { 'claude-you': { harness: 'claude', store: 'host' } },
       profiles: { default: { layers: [] } },
-      runtimes: { 'claude-liftoff': { credential: 'claude-you', profile: 'default', agent: true } },
+      runtimes: { 'claude-liftoff': { credential: 'claude-you', profile: 'default' } },
     });
 
     // Act
@@ -1669,6 +1655,24 @@ describe('planClone default runtime for new agents', () => {
     // Assert
     should(plan.model.machine.defaultRuntime).equal('claude-liftoff-2');
     should(plan.defaultRuntime).deepEqual({ kind: 'chosen', runtime: 'claude-liftoff-2' });
+  });
+
+  it('should refuse a default the copy does not bring', () => {
+    // Act
+    const run = () => planClone(targetWithDefault(), agentBundle(), options({ defaultRuntime: 'nobody' }));
+
+    // Assert
+    should(run).throw(/nobody can't be the default runtime/);
+  });
+
+  it('should say a replaced default is left unset when the copy brings no runtime to take its place', () => {
+    // Act
+    const bundle = agentBundle({ runtimes: {} });
+    const plan = planClone(targetWithDefault(), bundle, options({ mode: 'replace', sourceName: 'Liftoff EC2' }));
+
+    // Assert
+    should(plan.defaultRuntime).deepEqual({ kind: 'repaired', was: 'claude-kirin' });
+    should(describeClone(plan, bundle, 'Liftoff MBP', 'Liftoff EC2').join('\n')).containEql('so it is left unset');
   });
 
   it('should leave the default unset when the person asks for none', () => {
@@ -1706,36 +1710,6 @@ describe('planClone default runtime for new agents', () => {
     should(lines).containEql(
       'Default runtime for new agents on Liftoff MBP: none. Pick one in Settings › Machine before starting an agent without naming a runtime.',
     );
-  });
-
-  it('should say the default is left unset when the copy has no agent runtime to take its place', () => {
-    // Arrange
-    const plan = planClone(targetWithDefault(), bundleWith(), options({ mode: 'replace' }));
-
-    // Act
-    const lines = describeClone(plan, bundleWith(), 'Liftoff MBP', 'Liftoff EC2');
-
-    // Assert
-    should(lines).containEql(
-      "Liftoff MBP's default runtime for new agents (claude-kirin) is replaced by this copy and the copy has no agent runtime to take its place, so it is left unset.",
-    );
-  });
-
-  it('should refuse a chosen default that is not an agent runtime in the copy, and say what to do', () => {
-    // Act
-    const refusal = refusalOf(() =>
-      planClone(
-        targetWithDefault(),
-        agentBundle(),
-        options({ mode: 'replace', defaultRuntime: 'helper', sourceName: 'Liftoff EC2' }),
-      ),
-    );
-
-    // Assert
-    should(refusal.message).startWith(
-      "helper can't be the default runtime: the setup from Liftoff EC2 has no agent runtime by that name",
-    );
-    should(refusal.message).endWith('Pick another one.');
   });
 
   it('should name the machines by their display names in the refusal when the setup cannot be read', () => {
@@ -1778,7 +1752,6 @@ describe('planClone reuses a login the target already has (L2)', () => {
     should(plan.model.runtimes['claude-default']).deepEqual({
       credential: 'claude-kirin',
       profile: 'default',
-      agent: false,
     });
     should(plan.logins).deepEqual([
       {
@@ -1829,7 +1802,7 @@ describe('planClone reuses a login the target already has (L2)', () => {
     // Arrange
     const bundle = bundleWith({
       credentials: [{ id: 'codex-you', harness: 'codex', email: 'kirin@example.test' }],
-      runtimes: { 'codex-default': { credential: 'codex-you', profile: 'default', agent: false } },
+      runtimes: { 'codex-default': { credential: 'codex-you', profile: 'default' } },
     });
     const target = parseAccountModel({
       version: 1,
@@ -1964,8 +1937,8 @@ describe('planClone reuses a login the target already has (L2)', () => {
         { id: 'claude-spare', harness: 'claude-code', label: 'spare' },
       ],
       runtimes: {
-        'claude-default': { credential: 'claude-you', profile: 'default', agent: false },
-        'claude-spare': { credential: 'claude-spare', profile: 'default', agent: false },
+        'claude-default': { credential: 'claude-you', profile: 'default' },
+        'claude-spare': { credential: 'claude-spare', profile: 'default' },
       },
     });
     const plan = planClone(signedIn(), bundle, options({ targetEmails: emails }));
@@ -1987,8 +1960,8 @@ describe('planClone reuses a login the target already has (L2)', () => {
         { id: 'claude-two', harness: 'claude-code', label: 'two', email: 'kirin@example.test' },
       ],
       runtimes: {
-        'claude-default': { credential: 'claude-you', profile: 'default', agent: false },
-        'claude-other': { credential: 'claude-two', profile: 'default', agent: false },
+        'claude-default': { credential: 'claude-you', profile: 'default' },
+        'claude-other': { credential: 'claude-two', profile: 'default' },
       },
     });
 

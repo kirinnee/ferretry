@@ -29,8 +29,8 @@ export function latticeDocument(depth: number) {
     components: { mcp },
     profiles,
     runtimes: {
-      work: { credential: 'claude-you', profile: 'a0', agent: true },
-      second: { credential: 'claude-you', profile: 'b1', agent: true },
+      work: { credential: 'claude-you', profile: 'a0' },
+      second: { credential: 'claude-you', profile: 'b1' },
     },
   };
 }

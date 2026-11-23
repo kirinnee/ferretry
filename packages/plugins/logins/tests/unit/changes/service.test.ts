@@ -102,9 +102,7 @@ describe('LoginChangeService', () => {
       usedBy: async () => ['alpha'],
       runtimesAfter: async change => {
         seen.push(change);
-        return [
-          { name: 'alpha', harness: 'claude-code', agent: true, launch: { available: false, reason: 'login is off' } },
-        ];
+        return [{ name: 'alpha', harness: 'claude-code', launch: { available: false, reason: 'login is off' } }];
       },
     });
 
@@ -112,7 +110,7 @@ describe('LoginChangeService', () => {
     const signOut = await service.stage({ kind: 'login.signout', id: 'work' });
 
     should(view.runtimes).deepEqual([
-      { name: 'alpha', harness: 'claude-code', agent: true, launch: { available: false, reason: 'login is off' } },
+      { name: 'alpha', harness: 'claude-code', launch: { available: false, reason: 'login is off' } },
     ]);
     should(seen).deepEqual([{ kind: 'login.disable', id: 'work', reason: 'over budget' }]);
     should(signOut.runtimes).be.undefined();

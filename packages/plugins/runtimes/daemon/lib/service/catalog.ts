@@ -1396,7 +1396,7 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): Runtim
         const harness = runtimeHarness(model, runtime) as HarnessKind;
         const resolved = resolvedFor(model, runtime.profile, harness, facts, partial);
         const stack = stackView(resolved, harness);
-        const fixed = runtime.agent ? fixedLayerView(model, harness, resolved, facts) : {};
+        const fixed = fixedLayerView(model, harness, resolved, facts);
         const status = facts.credentialStatus?.[runtime.credential];
         const off = runtimeDisable(model, name, facts.now ?? 0, VIEW_FY_COMMAND, facts.budgetHolds);
         const blocked =
@@ -1427,7 +1427,6 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): Runtim
               ...(status === undefined ? {} : { status }),
             },
             profile: runtime.profile,
-            agent: runtime.agent,
             stack,
             modelSet: modelSetView(resolved),
             ...modelsView(resolved, harness, credential, facts.modelCatalogs),

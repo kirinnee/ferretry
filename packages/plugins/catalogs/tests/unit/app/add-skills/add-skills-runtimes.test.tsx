@@ -16,7 +16,6 @@ const runtime = (wrapper: string, profile = 'Default'): RuntimeView => ({
   harness: 'claude-code',
   credential: { id: `login-${wrapper}`, store: 'host', status: 'ready' },
   profile,
-  agent: true,
   stack: {
     harness: 'claude-code',
     available: { available: true },

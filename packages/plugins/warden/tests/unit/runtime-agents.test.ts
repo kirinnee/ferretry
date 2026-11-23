@@ -7,12 +7,11 @@ import { DEFAULT_WARDEN_CONFIG } from '../../contract/index.ts';
 
 type Catalog = Awaited<ReturnType<RuntimesApi['catalog']>>;
 
-const runtime = (name: string, extra: { agent?: boolean; disabled?: boolean } = {}): Catalog[number] =>
+const runtime = (name: string, extra: { disabled?: boolean } = {}): Catalog[number] =>
   ({
     id: `${name}-id`,
     name,
     wrapper: name,
-    agent: extra.agent ?? true,
     ...(extra.disabled === true ? { disabled: { by: 'runtime', reason: 'off' } } : {}),
   }) as unknown as Catalog[number];
 
@@ -25,12 +24,11 @@ const CATALOG = [
   runtime('claude-default'),
   runtime('claude-work-fast'),
   runtime('codex-main-agent'),
-  runtime('shell-helper', { agent: false }),
   runtime('claude-old', { disabled: true }),
 ];
 
 describe('the logins the Warden offers for an investigation', () => {
-  it("should offer this machine's agent runtimes by name, not the ones that are off or not agents", async () => {
+  it("should offer this machine's agent runtimes by name, not the ones that are off", async () => {
     const installed = await runtimesWardenAgents(() => api(CATALOG, 'claude-default')).installed();
     should(installed).deepEqual(['claude-default', 'claude-work-fast', 'codex-main-agent']);
   });
@@ -88,9 +86,7 @@ describe('the logins the Warden offers for an investigation', () => {
     should(resolved.usable).be.false();
   });
 
-  it('should offer no default that is a human runtime, switched off, or unknown to the catalog', async () => {
-    const human = [runtime('claude-default'), runtime('claude-human', { agent: false })];
-    should(await runtimesWardenAgents(() => api(human, 'claude-human')).defaultRuntime()).be.undefined();
+  it('should offer no default that is switched off, or unknown to the catalog', async () => {
     const off = [runtime('claude-default'), runtime('claude-old', { disabled: true })];
     should(await runtimesWardenAgents(() => api(off, 'claude-old')).defaultRuntime()).be.undefined();
     should(await runtimesWardenAgents(() => api(CATALOG, 'not-on-this-machine')).defaultRuntime()).be.undefined();
