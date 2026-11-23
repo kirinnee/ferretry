@@ -39,6 +39,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { targetRef } from '@ferretry/core-vault/contract';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
+import { MANAGER_ENVIRONMENT_NAMES } from '../../lib/cgroups/scope.ts';
 import { sessionTarget } from '../../lib/tmux/address.ts';
 import { tmuxStartDirectory } from '../../lib/tmux/format-escape.ts';
 import { maskedScreen } from '../../lib/tmux/screen-mask.ts';
@@ -162,6 +163,16 @@ const MAX_TMUX_SESSION_NAME_LENGTH = 80;
 /** A pane id as tmux prints one. */
 const PANE_ID = /^%(?:0|[1-9][0-9]*)$/u;
 const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+
+/**
+ * The two names a pane's `systemd-run --user --scope` (the ferret-limits wrapper) finds the user manager by. The kernel
+ * gives them, and only them, to every `tmux` client it spawns (its `MANAGER_ENVIRONMENT_NAMES`; a test holds the two
+ * lists equal), so a server this daemon starts already has them. They are ALSO copied into each new ferret session from
+ * the launching client, and kept in the server's `update-environment` afterwards, because a server started by an older
+ * build has neither in its global environment and lives on across a daemon update: without them the wrapper exits 1
+ * before the harness runs ("Failed to connect to bus: No medium found"). Neither is a secret: no value is a credential.
+ */
+export const PANE_MANAGER_NAMES: readonly string[] = MANAGER_ENVIRONMENT_NAMES;
 
 /** What tmux is asked about a pane: id, process, dead, the session holding it, and when that session began. */
 const PANE_FACTS = '#{pane_id}|#{pane_pid}|#{pane_dead}|#{session_name}|#{session_created}';
@@ -1176,11 +1187,14 @@ export class TmuxRunner implements Runner {
     if (before.code !== 0) return err('unavailable');
     const [exitEmptyLine = '', ...optionLines] = before.stdout.split('\n');
     const exitEmpty = exitEmptyLine.trim() === 'off' ? 'off' : 'on';
-    const kept = optionLines
+    const read = optionLines
       .join('\n')
       .split(/\s+/u)
       .map(name => name.trim())
       .filter(name => name !== '');
+    // What is put back: the server's own list plus the manager names, so a later session (an agent terminal or job,
+    // whose client carries them too) is given them as well. Only the launch's OWN names are ever taken out again.
+    const kept = [...read, ...PANE_MANAGER_NAMES.filter(name => !read.includes(name))];
     const script = [
       scriptLine(['set-option', '-g', 'update-environment', [...kept, ...names].join(' ')]),
       scriptLine([

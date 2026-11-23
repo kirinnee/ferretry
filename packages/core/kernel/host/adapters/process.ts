@@ -134,8 +134,8 @@ export function sealedEnvironment(source: Readonly<Record<string, string | undef
 }
 
 /**
- * The ONLY names a host-manager child (`systemctl`, `systemd-run`) is given from the daemon's own environment: the two
- * by which a `--user` manager is found. Without them the child cannot reach the session bus, so Terminals' resource-limit
+ * The ONLY names a host-manager child (`systemctl`, `systemd-run`, and `tmux`, see {@link MANAGER_PROGRAMS}) is given
+ * from the daemon's own environment: the two by which a `--user` manager is found. Without them the child cannot reach the session bus, so Terminals' resource-limit
  * probe falls to "no manager" and the limits silently stop protecting the host (v4 inherited the whole environment here).
  * Deliberately not {@link TOOL_ENVIRONMENT_NAMES}: no proxy, no ssh agent, no config folder, and never a token.
  */
@@ -170,8 +170,14 @@ export function childEnvironments(source: Readonly<Record<string, string | undef
 /** The programs that are given {@link TOOL_ENVIRONMENT_NAMES}. */
 const TOOL_PROGRAMS: ReadonlySet<string> = new Set(['git', 'gh']);
 
-/** The programs that are given {@link MANAGER_ENVIRONMENT_NAMES}. */
-const MANAGER_PROGRAMS: ReadonlySet<string> = new Set(['systemctl', 'systemd-run']);
+/**
+ * The programs that are given {@link MANAGER_ENVIRONMENT_NAMES}. `tmux` is one because a limited pane's FIRST program is
+ * `systemd-run --user --scope` (Terminals' ferret limits), and a pane sees only the tmux server's environment and what its
+ * launching client copies in: a server started with nothing but the base had a pane whose `systemd-run` could not reach
+ * the user manager ("Failed to connect to bus: No medium found"), so every limited ferret, agent terminal and agent job
+ * exited 1 at once while the daemon's own probe, run as `systemd-run` with these names, said the scope worked.
+ */
+const MANAGER_PROGRAMS: ReadonlySet<string> = new Set(['systemctl', 'systemd-run', 'tmux']);
 
 /** The allow-listed names that are set in `source`: nothing else of it is copied. */
 export function toolEnvironment(source: Readonly<Record<string, string | undefined>>): Record<string, string> {

@@ -1541,6 +1541,23 @@ describe('mig-harness-home a relaunch whose conversation the harness proves abse
     }
   });
 
+  test('a ferret whose launches die before any conversation begins is started anew at every revive, never resumed', async () => {
+    // The P0 shape: each launch records the id it named (`--session-id`), the pane exits 1 before the harness writes
+    // it, and the warden revives. Every revive must start a NEW conversation, never `--resume` the id nothing wrote.
+    const w = await world();
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+    const calls = spied(w, async () => false);
+
+    expect((await revive(w, id)).ok).toBe(true);
+    await w.service.stop(id as never, 'now');
+    expect((await revive(w, id)).ok).toBe(true);
+
+    expect(calls).toEqual(['start', 'start']);
+    expect(CONVERSATION_NOT_FOUND).toContain('ended before anything was said in it');
+    expect(w.history.filter(event => event.type === 'session.conversation_not_found')).toHaveLength(2);
+  });
+
   test('an interactive ferret with no message types nothing, but its history still says the old conversation is gone', async () => {
     const w = await world();
     const id = await started(w, undefined, { options: { mode: 'interactive' } });

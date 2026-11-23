@@ -167,6 +167,15 @@ export const MACOS_NICE_PREFIX: readonly string[] = ['nice', '-n', '10'];
 export const MACOS_NICE_PROBE: readonly string[] = [...MACOS_NICE_PREFIX, 'true'];
 
 /**
+ * The two names by which a `--user` manager is found. The kernel gives the same two to every `systemctl`, `systemd-run`
+ * and `tmux` child it spawns (its `MANAGER_ENVIRONMENT_NAMES`; a test holds the lists equal).
+ */
+export const MANAGER_ENVIRONMENT_NAMES: readonly string[] = Object.freeze([
+  'XDG_RUNTIME_DIR',
+  'DBUS_SESSION_BUS_ADDRESS',
+]);
+
+/**
  * The exact argv a managed pane execs: the harness (with its priority prefix, if any), inside a
  * transient scope, inside the fleet slice.
  *
@@ -179,8 +188,16 @@ export function agentScopeCommand(input: {
   readonly slice: string;
   readonly properties: readonly string[];
   readonly command: readonly string[];
+  /**
+   * The user-manager names the wrapper itself is started with (`env NAME=value … systemd-run`), so the pane around it,
+   * a tmux server an older build started or a stale caller value, can never decide where the manager is. Only the
+   * names of {@link MANAGER_ENVIRONMENT_NAMES} are ever written; absent or empty, the wrapper is as before.
+   */
+  readonly environment?: Readonly<Record<string, string>>;
 }): readonly string[] {
+  const names = MANAGER_ENVIRONMENT_NAMES.filter(name => (input.environment?.[name] ?? '') !== '');
   return [
+    ...(names.length === 0 ? [] : ['env', ...names.map(name => `${name}=${input.environment?.[name] ?? ''}`)]),
     'systemd-run',
     '--user',
     '--scope',
