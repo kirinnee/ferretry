@@ -160,3 +160,81 @@ describe('while the daemon has not said what it offers', () => {
     expect(count('[data-testid="page"]')).toBe(1);
   });
 });
+
+// ─── one centred loader across the page AND its side column; never drawn over what is already drawn ───
+const withSide = manifestOf('sidey', {
+  ui: {
+    screens: [
+      { id: 'page', path: 'page', nav: { label: 'Page', order: 1 } },
+      { id: 'list', path: 'list', nav: { label: 'List', order: 2 } },
+    ],
+  },
+});
+const sidey = entryOf(
+  withSide,
+  provideToShell(
+    implementApp(withSide, {
+      build: () => ({
+        screens: {
+          page: (): ReactNode => <section data-testid="page">the form</section>,
+          list: (): ReactNode => <section data-testid="side-list">the list</section>,
+        },
+      }),
+    }),
+    {},
+  ),
+);
+const sideScreen = () => {
+  const storage = memoryStore();
+  writeRecord(
+    storage,
+    APP_STORAGE.layout,
+    storedOverrides({
+      nav: { items: ['sidey.page'] },
+      side: { show: 'wide-only', holds: 'sidey.list', at: 'right' },
+      panels: { 'ferret.side': [] },
+      'composer.tools': [],
+    } as LayoutOverrides),
+  );
+  return storage;
+};
+
+describe('a slow daemon: one loader, then content with nothing drawn over it', () => {
+  test('o9-11: the page and the side column wait as ONE centred loader, and the loader never lingers over drawn content', async () => {
+    let answer: (value: unknown) => void = () => {};
+    const holdInventory = new Promise(resolve => {
+      answer = resolve;
+    });
+    const app = await bootApp({
+      surfaces: [sidey],
+      machines: ['d1'],
+      path: '/d/d1/page',
+      storage: sideScreen(),
+      holdInventory,
+      viewport: 'wide',
+    });
+    view = app.view;
+    await settle();
+    await pause(600); // past the 300 ms threshold: the loader is on screen
+    expect(count('[data-loading="page"]')).toBe(1); // not one in the page and a second in the side column
+    expect(count('[data-testid="page"]')).toBe(0);
+    // From here on, record every moment a loader (or a leftover copy of one) shares the document with drawn content.
+    const overlaps: string[] = [];
+    const check = (): void => {
+      const drawn = count('[data-testid="page"], [data-testid="side-list"]') > 0;
+      const loader = count('[data-loading="page"], [data-loading-ghost], .fy-loading-ghost') > 0;
+      if (drawn && loader) overlaps.push(view?.container.textContent ?? '');
+    };
+    const observer = new MutationObserver(check);
+    observer.observe(view.container, { childList: true, subtree: true });
+    answer(undefined);
+    await pause(900);
+    await settle();
+    check();
+    observer.disconnect();
+    expect(count('[data-testid="page"]')).toBe(1);
+    expect(count('[data-testid="side-list"]')).toBeGreaterThanOrEqual(1);
+    expect(count('[data-loading], [data-loading-ghost], .fy-loading-ghost')).toBe(0);
+    expect(overlaps).toEqual([]);
+  });
+});
