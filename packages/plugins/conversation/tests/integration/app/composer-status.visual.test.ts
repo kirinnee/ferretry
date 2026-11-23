@@ -190,7 +190,7 @@ for (const mode of ['light', 'dark'] as const)
               expect(idle.quotaPresent, 'unknown usage draws nothing at all').toBe(false);
               expect(idle.bodyText).not.toMatch(/usage unknown/iu);
             } else if (usage === 'key') {
-              expect(idle.quotaVisibleText).toMatch(/\$3\.20/u);
+              expect(idle.quotaVisibleText).toMatch(/\$12\.40/u);
               expect(idle.quotaVisibleText).not.toMatch(/5h|wk/u);
             } else {
               expect(idle.quotaVisibleText).toMatch(/5h 12%/u);

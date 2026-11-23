@@ -493,6 +493,8 @@ export interface RuntimeChoiceItem {
   readonly description?: string;
   /** The heading of the group it is listed under (a model catalog's tier); items of one group are adjacent. */
   readonly group?: string;
+  /** Not choosable now, whatever the rest of the list is doing; its `description` says why. */
+  readonly disabled?: boolean;
   readonly onSelect: () => void;
 }
 
@@ -600,7 +602,7 @@ export function RuntimeChoiceMenu({ ariaLabel, items, disabled, presentation = '
             aria-checked={item.checked}
             aria-label={item.ariaLabel}
             className={cn('kt-menu-item', dense ? '[--menu-item-py:4px]' : '[--menu-item-py:6px] [--menu-item-h:44px]')}
-            disabled={disabled}
+            disabled={disabled || item.disabled === true}
             key={item.key}
             onClick={item.onSelect}
             onFocus={() => setActiveKey(item.key)}
@@ -1174,9 +1176,10 @@ export interface RuntimeSpeedControlsProps extends RuntimeControlBase {
 
 /**
  * The speed sibling of the model and effort controls: Normal or Fast, on the `fast` action the daemon already takes.
- * Fast is offered only where the catalog says the model in force has it; where the catalog says it has not (or the
+ * Fast is offered only where the catalog CONFIRMS the model in force has it. Where the catalog says it has not (or the
  * ferret is finished, or the origin is read-only) the control says so in a plain sentence instead of drawing a choice
- * that could only be refused. A model the catalog does not rule on keeps both choices: the daemon is the judge.
+ * that could only be refused; while the catalog is still loading, cannot be read, or does not list the model, Fast is
+ * drawn disabled with the reason beside it, never offered on a guess. Normal stays choosable throughout.
  */
 export function RuntimeSpeedControls({
   api,
@@ -1195,7 +1198,12 @@ export function RuntimeSpeedControls({
   const promptRefused = isPromptKnownBusy(state);
   const [submitting, setSubmitting] = useState<boolean | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  const { catalog } = useRuntimeModelCatalog(catalogs, config.id, canControl && !terminal, config.harness);
+  const { catalog, error: catalogError } = useRuntimeModelCatalog(
+    catalogs,
+    config.id,
+    canControl && !terminal,
+    config.harness,
+  );
 
   // A session switch clears the result that belonged to the previous session.
   // biome-ignore lint/correctness/useExhaustiveDependencies: scope reset trigger, see above
@@ -1205,9 +1213,18 @@ export function RuntimeSpeedControls({
 
   const running = runtimeModelInForce(view);
   const supported = catalog?.choices.find(choice => choice.value === running)?.fast;
+  // Why Fast cannot be offered yet, said plainly; absent only when the catalog confirmed the model has it.
+  const unconfirmed =
+    supported === true
+      ? undefined
+      : catalogError
+        ? 'Not offered: the model list is unavailable'
+        : catalog === null
+          ? 'Checking whether this model has Fast…'
+          : 'Not offered: this model is not in the list';
 
   async function choose(next: boolean) {
-    if (!canControl || terminal || promptRefused || submitting !== null) return;
+    if (!canControl || terminal || promptRefused || submitting !== null || (next && supported !== true)) return;
     setSubmitting(next);
     setFailure(null);
     try {
@@ -1257,7 +1274,8 @@ export function RuntimeSpeedControls({
             ariaLabel: `Set speed to fast${fast ? ', current' : ''}`,
             checked: fast,
             pending: submitting === true,
-            description: 'Quicker output, at a higher rate',
+            description: unconfirmed ?? 'Quicker output, at a higher rate',
+            disabled: unconfirmed !== undefined,
             onSelect: () => void choose(true),
           },
         ]}

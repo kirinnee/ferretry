@@ -185,6 +185,110 @@ for (const mode of ['light', 'dark'] as const)
         });
     }
 
+    // KEYBOARD FOCUS (O9-17 review item 4): asserted on document.activeElement, not on a snapshot.
+    const focusedIs = async (tab: Page): Promise<string> =>
+      await tab.evaluate(() => {
+        const active = document.activeElement;
+        if (active === null) return 'nothing';
+        const chip = active.closest('[data-runtime-chip]')?.getAttribute('data-runtime-chip');
+        if (chip) return `chip:${chip}`;
+        if (active.hasAttribute('data-runtime-popover')) return 'popover';
+        return `other:${active.tagName}`;
+      });
+
+    it('returns focus to the chip after Escape', async () => {
+      const { tab, close } = await open(WINDOWS[0], mode);
+      try {
+        await tab.click('[data-runtime-chip="model"]');
+        await tab.waitForSelector('[data-runtime-popover] [role="menuitemradio"]');
+        expect(await focusedIs(tab), 'focus is inside the list, not on the chip').not.toBe('chip:model');
+        await tab.keyboard.press('Escape');
+        await tab.waitForSelector('[data-runtime-popover]', { state: 'detached' });
+        expect(await focusedIs(tab)).toBe('chip:model');
+      } finally {
+        await close();
+      }
+    });
+
+    it('returns focus to the chip after a Fast choice closes the popover', async () => {
+      const { tab, close } = await open(WINDOWS[0], mode);
+      try {
+        await tab.click('[data-runtime-chip="speed"]');
+        await tab.waitForSelector('[data-runtime-list="speed"] [role="menuitemradio"]:not([disabled])');
+        await tab.keyboard.press('ArrowDown');
+        await tab.keyboard.press('Enter');
+        await tab.waitForSelector('[data-runtime-popover]', { state: 'detached' });
+        expect(await focusedIs(tab)).toBe('chip:speed');
+        expect(await tab.textContent('[data-runtime-chip="speed"]')).toBe('Fast');
+      } finally {
+        await close();
+      }
+    });
+
+    it('returns focus to the chip after a model choice, which leaves the popover open', async () => {
+      const { tab, close } = await open(WINDOWS[0], mode);
+      try {
+        await tab.click('[data-runtime-chip="model"]');
+        await tab.waitForSelector('[data-runtime-list="model"] [role="menuitemradio"]');
+        await tab.click('[data-runtime-list="model"] [role="menuitemradio"]:has-text("Sonnet 5.5")');
+        await tab.waitForFunction(
+          () => document.querySelector('[data-runtime-chip="model"]')?.textContent === 'claude-sonnet-5-5',
+        );
+        expect(await focusedIs(tab)).toBe('chip:model');
+      } finally {
+        await close();
+      }
+    });
+
+    for (const size of WINDOWS)
+      it(`at ${size.name}: puts focus on the popover itself when the model has no fast mode, and Escape still returns it to the chip`, async () => {
+        const { tab, close } = await open(size, mode, '&model=claude-sonnet-5-5');
+        try {
+          await tab.click('[data-runtime-chip="speed"]');
+          await tab.waitForSelector('[data-runtime-list="speed"]');
+          await tab.waitForFunction(() =>
+            document.querySelector('[data-runtime-list="speed"]')?.textContent?.includes('no fast mode'),
+          );
+          await tab.waitForTimeout(150);
+          expect(
+            await tab.evaluate(
+              () => document.querySelectorAll('[data-runtime-list="speed"] [role="menuitemradio"]').length,
+            ),
+          ).toBe(0);
+          expect(await focusedIs(tab)).toBe('popover');
+          await shot(tab, `${size.name}-${mode}-no-fast`);
+          await tab.keyboard.press('Escape');
+          await tab.waitForSelector('[data-runtime-popover]', { state: 'detached' });
+          expect(await focusedIs(tab)).toBe('chip:speed');
+        } finally {
+          await close();
+        }
+      });
+
+    for (const size of WINDOWS)
+      it(`at ${size.name}: with the model list unreadable Fast is drawn disabled with its reason, and Normal stays choosable`, async () => {
+        const { tab, close } = await open(size, mode, '&discovery=0');
+        try {
+          await tab.click('[data-runtime-chip="speed"]');
+          await tab.waitForSelector('[data-runtime-list="speed"] [role="menuitemradio"]');
+          await tab.waitForTimeout(150);
+          await shot(tab, `${size.name}-${mode}-fast-unconfirmed`);
+          const items = await tab.evaluate(() =>
+            [...document.querySelectorAll<HTMLButtonElement>('[data-runtime-list="speed"] [role="menuitemradio"]')].map(
+              item => ({
+                text: item.textContent ?? '',
+                disabled: item.disabled,
+              }),
+            ),
+          );
+          expect(items.find(item => item.text.includes('Fast'))?.disabled, 'Fast is not offered on a guess').toBe(true);
+          expect(items.find(item => item.text.includes('Fast'))?.text).toContain('the model list is unavailable');
+          expect(items.find(item => item.text.includes('Normal'))?.disabled).toBe(false);
+        } finally {
+          await close();
+        }
+      });
+
     it('with no runtime discovery the popover says so once, quietly — no red alert', async () => {
       const { tab, close } = await open(WINDOWS[0], mode, '&discovery=0');
       try {

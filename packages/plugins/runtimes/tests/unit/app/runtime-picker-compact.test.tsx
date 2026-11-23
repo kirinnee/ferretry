@@ -16,7 +16,7 @@ import type { PanelProps } from '@ferretry/kernel/manifest';
 import { createElement, type FunctionComponent } from 'react';
 import { ferretSummary } from '@ferretry/core-ferrets/contract/testing';
 import { createRuntimePicker } from '../../../app/views/runtime-picker.tsx';
-import type { RuntimesClient } from '../../../app/lib/client.ts';
+import type { LiveRuntimesClient, RuntimesClient } from '../../../app/lib/client.ts';
 
 const CATALOG = {
   harness: 'claude-code',
@@ -36,6 +36,7 @@ interface Asked {
 const daemon = (
   discovery: boolean,
   ferret: Record<string, unknown> = {},
+  catalog: unknown = CATALOG,
 ): { readonly client: RuntimesClient; readonly asked: Asked[] } => {
   const asked: Asked[] = [];
   const client = {
@@ -51,7 +52,7 @@ const daemon = (
           ...ferret,
         });
       if (route === 'GET /v1/ferrets/:id/runtime-models') {
-        if (discovery) return CATALOG;
+        if (discovery) return catalog;
         throw new Error('Runtime model discovery is not connected to Ferrets yet.');
       }
       return {};
@@ -227,5 +228,115 @@ describe('the runtime picker in the composer row', () => {
     const list = must(popover()?.querySelector('[data-runtime-list="speed"]'), 'the speed list');
     expect(list.textContent).toContain('claude-sonnet-5 has no fast mode');
     expect(list.querySelector('[role="menuitemradio"]')).toBeNull();
+  });
+});
+
+const choiceOf = (list: string, text: string): HTMLButtonElement =>
+  must(
+    [...document.querySelectorAll<HTMLButtonElement>(`[data-runtime-list="${list}"] [role="menuitemradio"]`)].find(
+      item => item.textContent?.includes(text),
+    ),
+    `the ${text} choice of the ${list} list`,
+  );
+
+describe('the runtime picker reads the ferret as it stands NOW', () => {
+  const CODEX = {
+    harness: 'codex',
+    source: 'codex-app-server',
+    choices: [
+      { value: 'gpt-5.5', label: 'GPT-5.5', reasoningEfforts: [{ value: 'medium' }, { value: 'high' }] },
+      { value: 'gpt-5.6', label: 'GPT-5.6', reasoningEfforts: [{ value: 'medium' }, { value: 'xhigh' }] },
+    ],
+  };
+
+  it('keeps a new Codex model when the thinking level is changed next (it used to send the old model back)', async () => {
+    const { client, asked } = daemon(true, { harness: 'codex', model: 'gpt-5.5', effort: 'medium' }, CODEX);
+    const root = await draw(client);
+    await interact(() => must(root.querySelector<HTMLElement>('[data-runtime-chip="model"]'), 'the chip').click());
+    await settle();
+    await interact(() => choiceOf('model', 'GPT-5.6').click());
+    await settle();
+    await interact(() =>
+      must(document.querySelector<HTMLElement>('[aria-label="Set GPT-5.6 reasoning to Extra high"]'), 'xhigh').click(),
+    );
+    await settle();
+    expect(asked.filter(call => call.route === 'POST /v1/ferrets/:id/runtime').at(-1)?.body).toEqual({
+      action: 'model',
+      model: 'gpt-5.6',
+      effort: 'xhigh',
+    });
+
+    // Now only the thinking level: the model in force is the one just chosen.
+    await interact(() => choiceOf('effort', 'Medium').click());
+    await settle();
+    const posts = asked.filter(call => call.route === 'POST /v1/ferrets/:id/runtime');
+    expect(posts.at(-1)?.body).toEqual({ action: 'model', model: 'gpt-5.6', effort: 'medium' });
+  });
+
+  it('enables the controls when a ferret that was working when the page opened goes idle', async () => {
+    let state = 'working';
+    let notify: (() => void) | undefined;
+    const client = {
+      call: async (route: string) => {
+        if (route === 'GET /v1/ferrets/:ferretId')
+          return ferretSummary({ id: 's-1', harness: 'claude-code', model: 'claude-opus-5', state, effort: 'high' });
+        if (route === 'GET /v1/ferrets/:id/runtime-models') return CATALOG;
+        return {};
+      },
+      subscribe: (_event: unknown, handler: (changed: { ferret: string; generation: number }) => void) => {
+        notify = () => handler({ ferret: 's-1', generation: 2 });
+        return () => undefined;
+      },
+    } as unknown as LiveRuntimesClient;
+    const root = await draw(client);
+    await interact(() => must(root.querySelector<HTMLElement>('[data-runtime-chip="effort"]'), 'the chip').click());
+    await settle();
+    expect(choiceOf('effort', 'Low').disabled).toBe(true);
+
+    state = 'idle';
+    await interact(() => notify?.());
+    await settle();
+    expect(choiceOf('effort', 'Low').disabled).toBe(false);
+  });
+});
+
+describe('Fast is offered only when the catalog confirms it for the model in force', () => {
+  const fastChoice = (): HTMLButtonElement => choiceOf('speed', 'Fast');
+  const openSpeed = async (client: RuntimesClient): Promise<void> => {
+    const root = await draw(client);
+    await interact(() => must(root.querySelector<HTMLElement>('[data-runtime-chip="speed"]'), 'the chip').click());
+    await settle();
+  };
+
+  it('draws Fast disabled, with a reason, while the catalog is still loading; Normal stays choosable', async () => {
+    const pending = {
+      call: async (route: string) => {
+        if (route === 'GET /v1/ferrets/:ferretId')
+          return ferretSummary({ id: 's-1', harness: 'claude-code', model: 'claude-opus-5', state: 'idle' });
+        return new Promise(() => undefined);
+      },
+    } as unknown as RuntimesClient;
+    await openSpeed(pending);
+    expect(fastChoice().disabled).toBe(true);
+    expect(fastChoice().textContent).toContain('Checking whether this model has Fast');
+    expect(choiceOf('speed', 'Normal').disabled).toBe(false);
+  });
+
+  it('draws Fast disabled, with a reason, when the catalog cannot be read', async () => {
+    await openSpeed(daemon(false, { model: 'claude-opus-5' }).client);
+    expect(fastChoice().disabled).toBe(true);
+    expect(fastChoice().textContent).toContain('the model list is unavailable');
+    expect(choiceOf('speed', 'Normal').disabled).toBe(false);
+  });
+
+  it('draws Fast disabled, with a reason, when the model in force is not in the catalog', async () => {
+    await openSpeed(daemon(true, { model: 'claude-mystery-9' }).client);
+    expect(fastChoice().disabled).toBe(true);
+    expect(fastChoice().textContent).toContain('this model is not in the list');
+  });
+
+  it('offers Fast when the catalog confirms the model has it', async () => {
+    await openSpeed(daemon(true, { model: 'claude-opus-5' }).client);
+    expect(fastChoice().disabled).toBe(false);
   });
 });

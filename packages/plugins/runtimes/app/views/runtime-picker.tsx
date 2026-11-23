@@ -11,6 +11,7 @@
  * make the composer taller, and it asks for the model catalog only once opened.
  */
 
+import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { Brain, Zap } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -21,7 +22,7 @@ import {
   RuntimeModelControls,
   RuntimeSpeedControls,
 } from '../components/runtime-controls.tsx';
-import type { RuntimesClient } from '../lib/client.ts';
+import type { LiveRuntimesClient } from '../lib/client.ts';
 import { DaemonRuntimeModelCatalogStore } from '../lib/runtime-models.ts';
 import { readRuntimeSessionView, runtimeControlApi } from '../lib/runtime-switch.ts';
 import { type RuntimeParts, type RuntimeSessionView, runtimeParts, runtimeReadout } from '../lib/session-view.ts';
@@ -55,7 +56,7 @@ const popoverPlacement = (
   };
 };
 
-export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelProps> => {
+export const createRuntimePicker = (client: LiveRuntimesClient): AppComponent<PanelProps> => {
   const api = runtimeControlApi(client);
   const store = new DaemonRuntimeModelCatalogStore();
   const catalogs = { load: (sessionId: string) => store.load(client, sessionId) };
@@ -67,6 +68,7 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
     const [placement, setPlacement] = useState<Placement | null>(null);
     const chip = useRef<HTMLButtonElement | null>(null);
     const panel = useRef<HTMLDivElement | null>(null);
+    const refreshNow = useRef<() => void>(() => undefined);
     const lists = {
       model: useRef<HTMLDivElement | null>(null),
       effort: useRef<HTMLDivElement | null>(null),
@@ -92,6 +94,35 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
         live = false;
       };
     }, [subject]);
+
+    // Every list reads the ferret's CURRENT state, not the one read when the page opened: it is read again after each
+    // change this picker sends, when the popover opens, and when the daemon says the ferret changed state (a ferret that
+    // was working when the page opened and has gone idle since must not leave the controls disabled). A read that fails
+    // keeps the last state read: the lists never go blank over a refresh.
+    useEffect(() => {
+      if (subject === undefined) return;
+      let live = true;
+      const refresh = (): void => {
+        readRuntimeSessionView(client, subject).then(
+          read => {
+            if (live) setView(read);
+          },
+          () => undefined,
+        );
+      };
+      refreshNow.current = refresh;
+      const stop = client.subscribe?.(FerretsChanged, changed => {
+        if (changed.ferret === subject) refresh();
+      });
+      return () => {
+        live = false;
+        refreshNow.current = () => undefined;
+        stop?.();
+      };
+    }, [subject]);
+    useEffect(() => {
+      if (open) refreshNow.current();
+    }, [open]);
 
     const close = useCallback((returnFocus: boolean): void => {
       setSection(null);
@@ -120,8 +151,21 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
     useEffect(() => {
       if (section === null || placement === null) return;
       const list = lists[section].current;
-      list?.querySelector<HTMLElement>('[tabindex="0"]')?.focus({ preventScroll: true });
+      // A list with nothing to choose (an unsupported speed, a busy ferret) gives focus to the popover itself, so the
+      // keyboard is never left on a page behind it.
+      const target = list?.querySelector<HTMLElement>('[tabindex="0"]:not(:disabled)') ?? panel.current;
+      target?.focus({ preventScroll: true });
       list?.scrollIntoView?.({ block: 'nearest' });
+      // A list changes under a focused choice (the model catalog arrives and Fast turns out to be unsupported, so the
+      // choices become a sentence): the browser would drop focus to the page behind, so the popover takes it instead.
+      const popover = panel.current;
+      if (popover === null) return;
+      const watch = new MutationObserver(() => {
+        if (document.activeElement === null || document.activeElement === document.body)
+          popover.focus({ preventScroll: true });
+      });
+      watch.observe(popover, { childList: true, subtree: true });
+      return () => watch.disconnect();
     }, [section, placement !== null]);
 
     useEffect(() => {
@@ -153,23 +197,32 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
       };
     }, [open, close]);
 
+    // A choice that was sent leaves focus on the chip that opened the list, never on the control it disabled.
     const common = useMemo(
       () => ({
         api,
         catalogs,
         canControl: true,
-        onClose: () => setSection(null),
-        onModelSent: (model: string, effort?: string) =>
-          setSent(current => ({ ...current, model, ...(effort === undefined ? {} : { effort }) })),
-        onClaudeEffortSent: (effort: string) => setSent(current => ({ ...current, effort })),
+        onClose: () => close(true),
+        onModelSent: (model: string, effort?: string) => {
+          setSent(current => ({ ...current, model, ...(effort === undefined ? {} : { effort }) }));
+          refreshNow.current();
+          chip.current?.focus({ preventScroll: true });
+        },
+        onClaudeEffortSent: (effort: string) => {
+          setSent(current => ({ ...current, effort }));
+          refreshNow.current();
+          chip.current?.focus({ preventScroll: true });
+        },
       }),
-      [],
+      [close],
     );
     if (subject === undefined) return null;
     if (failure !== null) return <p role="alert">{failure}</p>;
     if (view === null) return null;
     const parts: RuntimeParts = { ...runtimeParts(view), ...sent };
-    const label = runtimeReadout({
+    // The ferret as it stands now: what was read, with what this browser has sent since laid over it.
+    const current: RuntimeSessionView = {
       ...view,
       state: {
         ...view.state,
@@ -177,7 +230,8 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
         ...(parts.effort === undefined ? {} : { observedReasoningEffort: parts.effort }),
         ...(parts.fast === undefined ? {} : { observedFast: parts.fast }),
       },
-    });
+    };
+    const label = runtimeReadout(current);
     const fast = parts.fast === true;
     const chips: readonly {
       readonly key: Section;
@@ -232,6 +286,7 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
                 data-runtime-popover=""
                 ref={panel}
                 role="dialog"
+                tabIndex={-1}
                 style={{
                   bottom: placement.bottom,
                   left: placement.left,
@@ -242,13 +297,13 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
                 <div data-runtime-list="model" ref={lists.model}>
                   <div className="kt-label px-cell-x pb-0.5">Model</div>
                   <RuntimeMenuFocusContext.Provider value={focusFor('model')}>
-                    <RuntimeModelControls {...common} open presentation="popover" view={view} />
+                    <RuntimeModelControls {...common} open presentation="popover" view={current} />
                   </RuntimeMenuFocusContext.Provider>
                 </div>
                 <div data-runtime-list="effort" ref={lists.effort}>
                   <div className="kt-label mt-2 px-cell-x pb-0.5">Thinking</div>
                   <RuntimeMenuFocusContext.Provider value={focusFor('effort')}>
-                    <RuntimeEffortControls {...common} {...effortProps} presentation="popover" view={view} />
+                    <RuntimeEffortControls {...common} {...effortProps} presentation="popover" view={current} />
                   </RuntimeMenuFocusContext.Provider>
                 </div>
                 <div data-runtime-list="speed" ref={lists.speed}>
@@ -257,9 +312,12 @@ export const createRuntimePicker = (client: RuntimesClient): AppComponent<PanelP
                     <RuntimeSpeedControls
                       {...common}
                       fast={fast}
-                      onFastSent={next => setSent(current => ({ ...current, fast: next }))}
+                      onFastSent={next => {
+                        setSent(was => ({ ...was, fast: next }));
+                        refreshNow.current();
+                      }}
                       presentation="popover"
-                      view={view}
+                      view={current}
                     />
                   </RuntimeMenuFocusContext.Provider>
                 </div>

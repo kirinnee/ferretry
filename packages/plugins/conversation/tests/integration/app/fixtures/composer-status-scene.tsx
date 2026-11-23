@@ -94,7 +94,7 @@ const Quota = () =>
   ) : usage === 'key' ? (
     <span className="fy-composer-quota" data-quota="known">
       <span aria-hidden="true" className="text-faint">
-        $3.20 this month
+        $12.40 this month
       </span>
     </span>
   ) : null;

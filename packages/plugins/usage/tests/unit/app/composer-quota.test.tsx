@@ -57,3 +57,13 @@ describe('the composer quota', () => {
     expect(both.root.findAllByProps({ className: ' fy-quota-error' })).toHaveLength(2);
   });
 });
+
+describe('the composer quota — the money that was read', () => {
+  test('says the month spend that was read, never the balance left in its place', () => {
+    const openRouter = { spendUsd: 12.4, balance: { amount: 37.6, currency: 'USD' } };
+    expect(composerQuotaSpoken(openRouter)).toBe('Account usage: $12.40 this month.');
+    const drawn = render(<ComposerQuota quota={openRouter} />);
+    expect(findText(drawn.root, '$12.40 this month')).toHaveLength(1);
+    expect(JSON.stringify(drawn.toJSON())).not.toContain('left');
+  });
+});
