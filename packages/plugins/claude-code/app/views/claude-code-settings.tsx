@@ -130,7 +130,7 @@ export const createSettings = (client: PluginClient): AppComponent<SettingsProps
               control={() => (
                 <Button
                   variant="danger"
-                  className="h-auto min-h-[44px] max-w-full whitespace-normal py-2 text-left"
+                  className="h-auto min-h-[44px] w-full max-w-full whitespace-normal py-2 text-left md:w-auto"
                   disabled={running}
                   data-unverified-update=""
                   onClick={() => void update(true)}
