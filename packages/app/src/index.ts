@@ -266,6 +266,7 @@ export {
   DEVICE_SETTINGS_HREF,
   daemonHomeHref,
   daemonSettingsHref,
+  deviceSettingsHref,
   HOME_HREF,
   type Route,
   type RouteTable,

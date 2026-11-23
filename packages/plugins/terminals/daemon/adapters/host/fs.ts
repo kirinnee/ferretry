@@ -18,6 +18,19 @@ export const hostPlatform: string = process.platform;
 /** The one environment variable Terminals reads, the login shell (`SHELL`): by name, never the whole environment. */
 export const hostEnvironment: Readonly<Record<string, string | undefined>> = { SHELL: process.env.SHELL };
 
+/**
+ * The daemon's own value of each NAMED variable that is set and non-empty, and nothing else of its environment: the user-manager
+ * names the ferret-limits wrapper is started with (the same two the kernel gives its `systemd-run` proof).
+ */
+export function hostNamedEnvironment(names: readonly string[]): Record<string, string> {
+  const picked: Record<string, string> = {};
+  for (const name of names) {
+    const value = process.env[name];
+    if (typeof value === 'string' && value !== '') picked[name] = value;
+  }
+  return picked;
+}
+
 /** A whole file as text (today's `Bun.file(path).text()`). */
 export async function readText(path: string): Promise<string> {
   return await Bun.file(path).text();
