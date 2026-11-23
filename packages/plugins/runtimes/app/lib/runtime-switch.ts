@@ -79,10 +79,9 @@ const stateOf = (summary: FerretSummary): RuntimeSessionView['state'] => {
 /** What the daemon answered, read with the schema of the route that serves it (parse, don't validate). */
 export const parseRuntimeSessionView = (value: unknown): RuntimeSessionView => {
   const parsed = FerretSummarySchema.safeParse(value);
-  if (!parsed.success) throw new Error('the daemon answered with something the runtime picker cannot read as a ferret');
   // The pickers speak the two harnesses this build ships: a ferret on another one is refused, not read as one of them.
-  if (!isKnownHarnessKey(parsed.data.harness))
-    throw new Error(`the runtime picker cannot switch a ferret on the ${parsed.data.harness} harness yet`);
+  if (!parsed.success || !isKnownHarnessKey(parsed.data.harness))
+    throw new Error('the daemon answered with something the runtime picker cannot read as a ferret');
   return runtimeSessionViewOf({ ...parsed.data, harness: parsed.data.harness });
 };
 
