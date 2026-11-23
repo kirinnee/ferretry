@@ -54,7 +54,12 @@ describe('judgePlugin (the client guard, §9.6)', () => {
   });
 
   it('should name the command that fixes each block', () => {
-    should(pausedSentence({ ok: false, reason: 'off' }, 'Board', 'board', 'fy')).containEql('`fy plugin on board`');
+    should(pausedSentence({ ok: false, reason: 'off' }, 'Mail', 'mail', 'fy')).containEql('`fy plugin on mail`');
+    // The work surfaces ride one switch (`plugin on` is unwired), so an off one says that and nothing else; no other plugin does.
+    const work = pausedSentence({ ok: false, reason: 'off' }, 'Board', 'board', 'fy');
+    should(work).startWith('Board is turned off: set `work: on`');
+    should(work).not.containEql('plugin on');
+    should(pausedSentence({ ok: false, reason: 'off' }, 'Mail', 'mail', 'fy')).not.containEql('work: on');
     should(pausedSentence({ ok: false, reason: 'different' }, 'Board', 'board', 'fy')).containEql(
       '`fy daemon restart`',
     );

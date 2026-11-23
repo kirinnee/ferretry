@@ -14,6 +14,13 @@ export const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets', 'mailbox'
 export type CoreId = (typeof CORE_IDS)[number];
 
 /**
+ * The plugins the `work` switch owns (`config/plugins.yaml`). Loops has no plugin in 5.0 (the v4 loop engine was skipped);
+ * its slot is reserved here, so it joins the list when it exists and rides the same switch. Here because `fy` names them
+ * when one is off, and it reaches another package only through its contract.
+ */
+export const WORK_PLUGINS: readonly string[] = ['board', 'agenda'];
+
+/**
  * The kinds of item a plugin's items can be (`permissions.spawn: [{ items: 'mcp' }]`, a config collection's
  * `itemKind`). Here because a contract names it (`defineConfig`); the manifest re-exports it.
  */

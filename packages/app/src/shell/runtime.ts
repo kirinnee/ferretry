@@ -302,6 +302,25 @@ export class ShellRuntime {
     return connection.client.standing(packageId);
   }
 
+  /**
+   * THE ONE ANSWER to "is this surface on" for what the owner is OFFERED (nav, settings tabs, the destination finder,
+   * device panels): the compiled surfaces minus those a daemon's inventory reports `off` (it reads the inventory; no
+   * second list). With `daemon`, that machine's say; without, a surface stays while ANY paired machine has it on. Only a
+   * positive `off` hides: unread, a different build or a refusal keeps it, so nothing blinks away while a machine
+   * answers. A deep link still reaches an off surface and says so (`blockedLine`). Opens no connection.
+   */
+  listedSurfaces(daemon?: string): readonly SurfaceEntry[] {
+    const ids = daemon === undefined ? this.daemons.snapshot().daemons.map(paired => paired.daemon) : [daemon];
+    if (ids.length === 0) return this.surfaces;
+    const off = (machine: string, id: string): boolean => {
+      const connection = this.#connections.get(machine);
+      if (connection?.kind !== 'connected') return false;
+      const standing = connection.client.standing(id);
+      return standing.state === 'blocked' && standing.reason === 'off';
+    };
+    return this.surfaces.filter(entry => ids.some(machine => !off(machine, entry.id)));
+  }
+
   remedy(daemon: string): Remedy {
     const connection = this.#connections.get(daemon);
     return remedyFor(this.appVersion, connection?.kind === 'connected' ? connection.client.daemonVersion : undefined);
