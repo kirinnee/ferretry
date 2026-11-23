@@ -169,6 +169,7 @@ export function NewFerretPage({
   // Which of the two ways in the page is on: a fresh conversation, or one picked from the Continue list.
   const [starting, setStarting] = useState<'new' | 'continue'>(initialContinue ? 'continue' : 'new');
   const continueOffered = useSlotHasPanels(NEW_FERRET_CONTINUE_SLOT);
+  const whereOffered = useSlotHasPanels(NEW_FERRET_PROJECT_SLOT);
   const pick = (next: ContinuePick | null): void => {
     setPicked(next);
     setError(null);
@@ -355,31 +356,40 @@ export function NewFerretPage({
             <AccountSlot daemon={daemon} fallback={typedRuntime} slot={slot} />
           </FerretField>
 
-          <FerretField hint="the folder the agent works in" inputId={fieldId('folder')} label="Folder">
-            {/* Registered projects are Projects': its picker fills the folder field through the slot Ferrets offers.
-                It sits ABOVE the box so a machine with projects and no ferret history still shows where to start. */}
-            <PanelSlot
-              daemon={daemon}
-              props={
-                {
-                  value: draft.folder,
-                  onPick: folder => setDraft(current => ({ ...current, folder, folderExact: folder })),
-                } satisfies NewFerretProjectSlotProps
-              }
-              slot={NEW_FERRET_PROJECT_SLOT}
-            />
-            <FolderPicker
-              id={fieldId('folder')}
-              label="Folder"
-              onValueChange={value => update('folder', value)}
-              placeholder={
-                folders.folders === null && folders.status === 'error'
-                  ? TYPED_PATH_PLACEHOLDER
-                  : PICKED_PATH_PLACEHOLDER
-              }
-              read={folders}
-              value={draft.folder}
-            />
+          <FerretField
+            hint={whereOffered ? 'a folder, or one of your projects' : 'the folder the agent works in'}
+            inputId={fieldId('folder')}
+            label={whereOffered ? 'Where it works' : 'Folder'}
+          >
+            {whereOffered ? (
+              // Projects' panel: a Folder | Project choice (the project-setup finder, recent folders, a searchable
+              // project list). It puts the label's id on its main control and only proposes a folder through `onPick`.
+              <PanelSlot
+                daemon={daemon}
+                props={
+                  {
+                    value: draft.folder,
+                    id: fieldId('folder'),
+                    recent: folders.folders?.map(folder => folder.path) ?? [],
+                    onPick: folder => setDraft(current => ({ ...current, folder, folderExact: folder })),
+                  } satisfies NewFerretProjectSlotProps
+                }
+                slot={NEW_FERRET_PROJECT_SLOT}
+              />
+            ) : (
+              <FolderPicker
+                id={fieldId('folder')}
+                label="Folder"
+                onValueChange={value => update('folder', value)}
+                placeholder={
+                  folders.folders === null && folders.status === 'error'
+                    ? TYPED_PATH_PLACEHOLDER
+                    : PICKED_PATH_PLACEHOLDER
+                }
+                read={folders}
+                value={draft.folder}
+              />
+            )}
           </FerretField>
 
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">

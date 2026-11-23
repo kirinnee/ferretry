@@ -22,58 +22,143 @@ afterEach(async () => {
   open = null;
 });
 
-const draw = async (projects: unknown, value = '', onPick: (folder: string) => void = () => undefined) => {
-  // A slot panel is handed the slot's props (`value`, `onPick`), which PanelProps does not name.
-  const Panel = createNewFerretProjectsPanel(scripted({ 'GET /v1/projects': projects })) as (props: {
+const draw = async (
+  projects: unknown,
+  value = '',
+  onPick: (folder: string) => void = () => undefined,
+  recent: readonly string[] = [],
+  routes: Readonly<Record<string, unknown>> = {},
+) => {
+  // A slot panel is handed the slot's props (`value`, `id`, `recent`, `onPick`), which PanelProps does not name.
+  const Panel = createNewFerretProjectsPanel(scripted({ 'GET /v1/projects': projects, ...routes })) as (props: {
     readonly value: string;
+    readonly id: string;
+    readonly recent: readonly string[];
     readonly onPick: (folder: string) => void;
   }) => ReactNode;
-  open = await mount(<Panel onPick={onPick} value={value} />);
+  open = await mount(<Panel id="fy-where" onPick={onPick} recent={recent} value={value} />);
   return open;
 };
 
-const rows = (view: Mounted): HTMLButtonElement[] => [
-  ...view.container.querySelectorAll<HTMLButtonElement>('[data-new-ferret-project-row]'),
+const q = <T extends Element>(view: Mounted, selector: string): T | null => view.container.querySelector<T>(selector);
+const switchButton = (view: Mounted, text: string): HTMLButtonElement =>
+  must(
+    [...view.container.querySelectorAll<HTMLButtonElement>('[data-new-ferret-where-switch] button')].find(
+      button => button.textContent === text,
+    ),
+    text,
+  );
+const rows = (view: Mounted): HTMLElement[] => [
+  ...view.container.querySelectorAll<HTMLElement>('[data-where-project-row]'),
 ];
+const rowPick = (row: HTMLElement): HTMLButtonElement =>
+  must(row.querySelector<HTMLButtonElement>('button[title]'), 'row pick');
+const trigger = (view: Mounted): HTMLButtonElement =>
+  must(q<HTMLButtonElement>(view, '[data-where-project-trigger]'), 'trigger');
 
-describe('the New ferret projects panel', () => {
-  it('lists the registered projects and fills the folder field with the one picked', async () => {
+describe('the New ferret where-it-works panel', () => {
+  it('opens on Project when projects exist, and its dropdown lists them and picks the one pressed', async () => {
     const picked: string[] = [];
     const view = await draw([PROJECT, SECOND], '', folder => picked.push(folder));
-    await settleUntil(() => rows(view).length === 2, 'the project rows', interact);
+    await settleUntil(() => q(view, '[data-where-project-trigger]') !== null, 'the project dropdown', interact);
+    expect(switchButton(view, 'Project').getAttribute('aria-pressed')).toBe('true');
+    expect(switchButton(view, 'Folder').getAttribute('aria-pressed')).toBe('false');
+    expect(trigger(view).id).toBe('fy-where');
+    expect(rows(view)).toHaveLength(0);
 
-    expect(rows(view).map(row => row.textContent)).toEqual(['ferretry/work/ferretry', 'websiteacme/website']);
-    await interact(() => rows(view)[1]?.dispatchEvent(clickEvent()));
+    await interact(() => trigger(view).dispatchEvent(clickEvent()));
+    expect(rows(view).map(row => row.querySelector('button[title]')?.textContent)).toEqual([
+      'ferretry/work/ferretry',
+      'websiteacme/website',
+    ]);
+    await interact(() => rowPick(rows(view)[1] as HTMLElement).dispatchEvent(clickEvent()));
     expect(picked).toEqual(['/work/website']);
+    expect(rows(view)).toHaveLength(0);
   });
 
-  it('marks the row whose folder is in the field, and only that one', async () => {
+  it('searches the projects by name, folder or repository', async () => {
+    const view = await draw([PROJECT, SECOND]);
+    await settleUntil(() => q(view, '[data-where-project-trigger]') !== null, 'the project dropdown', interact);
+    await interact(() => trigger(view).dispatchEvent(clickEvent()));
+    const search = must(q<HTMLInputElement>(view, '[data-where-project-search]'), 'search');
+    const type = async (text: string): Promise<void> =>
+      interact(() => {
+        const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        set?.call(search, text);
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    await type('acme');
+    expect(rows(view)).toHaveLength(1);
+    await type('zzz');
+    expect(rows(view)).toHaveLength(0);
+    expect(q(view, '[data-where-project-none]')?.textContent).toBe('No project matches.');
+  });
+
+  it('shows the picked project on the trigger when the folder in the field is a project', async () => {
     const view = await draw([PROJECT, SECOND], '/work/website');
-    await settleUntil(() => rows(view).length === 2, 'the project rows', interact);
-    expect(rows(view).map(row => row.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
+    await settleUntil(() => q(view, '[data-where-project-trigger]') !== null, 'the project dropdown', interact);
+    expect(trigger(view).textContent).toContain('website');
   });
 
-  it('draws nothing with no projects, so the Folder box is never pushed down for nothing', async () => {
+  it('opens on Folder with no projects, or when the folder in the field is not a project', async () => {
+    const none = await draw([]);
+    await settleUntil(() => q(none, '[data-new-ferret-where-folder]') !== null, 'the folder field', interact);
+    expect(switchButton(none, 'Folder').getAttribute('aria-pressed')).toBe('true');
+    await none.unmount();
+    open = null;
+    const typed = await draw([PROJECT], '/elsewhere/app');
+    await settleUntil(() => q(typed, '[data-new-ferret-where-folder]') !== null, 'the folder field', interact);
+    expect(q<HTMLInputElement>(typed, '#fy-where')?.value).toBe('/elsewhere/app');
+  });
+
+  it('reserves the room while the registry is unread, with neither choice pressed', async () => {
+    const view = await draw(new Promise(() => undefined));
+    expect(q(view, '[data-new-ferret-where-reading]')).not.toBeNull();
+    expect(switchButton(view, 'Project').getAttribute('aria-pressed')).toBe('false');
+    expect(switchButton(view, 'Folder').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('Folder: recent folders are one-tap picks and Browse opens the project-setup finder, whose choice is picked', async () => {
+    const picked: string[] = [];
+    const view = await draw([PROJECT], '', folder => picked.push(folder), ['/work/a', '/work/b'], {
+      'GET /v1/projects/folders': {
+        path: '/work',
+        parent: '/',
+        entries: [{ name: 'x', path: '/work/x', kind: 'folder' }],
+      },
+    });
+    await settleUntil(() => q(view, '[data-where-project-trigger]') !== null, 'the project dropdown', interact);
+    await interact(() => switchButton(view, 'Folder').dispatchEvent(clickEvent()));
+    const chips = [...view.container.querySelectorAll<HTMLButtonElement>('[data-where-recent-folder]')];
+    expect(chips.map(chip => chip.textContent)).toEqual(['a', 'b']);
+    await interact(() => chips[1]?.dispatchEvent(clickEvent()));
+    expect(picked).toEqual(['/work/b']);
+
+    expect(q(view, '[data-where-surface]')).toBeNull();
+    await interact(() => must(q<HTMLButtonElement>(view, '[data-where-browse]'), 'Browse').dispatchEvent(clickEvent()));
+    expect(q(view, '[data-where-surface]')).not.toBeNull();
+  });
+
+  it('Link GitHub opens the account editor in place and picks nothing', async () => {
+    const picked: string[] = [];
+    const view = await draw([PROJECT], '', folder => picked.push(folder), [], {
+      'GET /v1/git-accounts': [{ id: 'acct-1', login: 'octo', provider: 'github', status: 'connected' }],
+    });
+    await settleUntil(() => q(view, '[data-where-project-trigger]') !== null, 'the project dropdown', interact);
+    await interact(() => trigger(view).dispatchEvent(clickEvent()));
+    const link = must(q<HTMLButtonElement>(view, '[data-where-link-github]'), 'Link GitHub');
+    expect(link.textContent).toBe('Link GitHub');
+    await interact(() => link.dispatchEvent(clickEvent()));
+    expect(q(view, '[data-where-link-panel]')).not.toBeNull();
+    expect(picked).toEqual([]);
+  });
+
+  it('says so when there are no projects to choose, in the Project choice', async () => {
     const view = await draw([]);
-    await interact(async () => await new Promise(resolve => setTimeout(resolve, 20)));
-    expect(view.container.querySelector('[data-new-ferret-projects]')).toBeNull();
-  });
-
-  it('shows five rows and the rest behind More…', async () => {
-    const many = Array.from({ length: 7 }, (_, index) => ({
-      ...PROJECT,
-      id: `00000000-0000-4000-8000-00000000000${index}`,
-      name: `p${index}`,
-      path: `/work/p${index}`,
-    }));
-    const view = await draw(many);
-    await settleUntil(() => rows(view).length === 5, 'five rows', interact);
-    const more = must(
-      [...view.container.querySelectorAll('button')].find(button => (button.textContent ?? '').startsWith('More…')),
-      'More…',
-    );
-    await interact(() => more.dispatchEvent(clickEvent()));
-    expect(rows(view)).toHaveLength(7);
+    await settleUntil(() => q(view, '[data-new-ferret-where-folder]') !== null, 'the folder field', interact);
+    await interact(() => switchButton(view, 'Project').dispatchEvent(clickEvent()));
+    await interact(() => trigger(view).dispatchEvent(clickEvent()));
+    expect(q(view, '[data-where-project-none]')?.textContent).toContain('No projects yet');
   });
 });
 

@@ -101,6 +101,7 @@ export function ProjectAccountLinks({
   client,
   project,
   edit,
+  startEditing = false,
 }: {
   readonly client: ProjectsClient;
   readonly project: Pick<ProjectInfo, 'accounts'>;
@@ -109,9 +110,11 @@ export function ProjectAccountLinks({
     /** The daemon accepted a new list; the caller re-reads the project so the list above re-renders. */
     readonly onSaved: () => void;
   };
+  /** Open the editor as soon as the accounts are read (a caller whose own button already said "link"). */
+  readonly startEditing?: boolean;
 }) {
   const { accounts, error, stepUp, confirm } = useGitAccounts(client);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(startEditing);
   const canEdit = edit !== undefined && accounts !== null && accounts.length > 0;
   return (
     <div className="grid gap-xs">

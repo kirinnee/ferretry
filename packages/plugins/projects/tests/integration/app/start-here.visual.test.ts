@@ -57,12 +57,10 @@ afterAll(async () => {
 });
 
 const VIEWPORTS = [
-  { name: '1280', width: 1_280, height: 900, phone: false },
+  { name: '1440', width: 1_440, height: 900, phone: false },
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 type Viewport = (typeof VIEWPORTS)[number];
-
-const FOLDER = '#fy-new-ferret-folder';
 
 const calls = (tab: Page) => tab.evaluate(() => (window as unknown as { __calls: { route: string }[] }).__calls);
 
@@ -103,54 +101,115 @@ const withTab = async (
   }
 };
 
-describe('New ferret lists the projects first', () => {
+const CHOSEN = '[data-chosen-folder]';
+const chosen = (tab: Page): Promise<string | null> => tab.locator(CHOSEN).getAttribute('data-chosen-folder');
+const noSideways = async (tab: Page): Promise<void> => {
+  const widths = await tab.evaluate(() => ({
+    scroll: document.documentElement.scrollWidth,
+    client: document.documentElement.clientWidth,
+  }));
+  expect(widths.scroll, 'no sideways scroll').toBeLessThanOrEqual(widths.client);
+};
+
+describe('New ferret: where it works (Folder | Project)', () => {
   for (const viewport of VIEWPORTS)
-    for (const scheme of ['light', 'dark'] as const)
-      it(`shows the projects above the folder box with no ferret history (${viewport.name}, ${scheme})`, () =>
+    for (const scheme of ['light', 'dark'] as const) {
+      const surface = viewport.phone ? 'sheet' : 'panel';
+
+      it(`Project (the default with projects): a searchable dropdown that picks a project's folder (${viewport.name}, ${scheme})`, () =>
         withTab(viewport, scheme, async (tab, open, shot) => {
-          await open('view=new&projects=2', '[data-new-ferret-projects]');
-          await shot('new-ferret-projects');
-
-          const geometry = await tab.evaluate(() => {
-            const section = document.querySelector('[data-new-ferret-projects]')?.getBoundingClientRect();
-            const field = document.querySelector('#fy-new-ferret-folder')?.getBoundingClientRect();
-            const rows = [...document.querySelectorAll('[data-new-ferret-project-row]')].map(row => {
-              const box = row.getBoundingClientRect();
-              return { height: box.height, right: box.right };
-            });
-            return {
-              sectionTop: section?.top ?? -1,
-              fieldTop: field?.top ?? -1,
-              rows,
-              scrollWidth: document.documentElement.scrollWidth,
-              clientWidth: document.documentElement.clientWidth,
-            };
-          });
-          console.info(
-            `[s8] ${viewport.name} ${scheme}: projects top ${geometry.sectionTop.toFixed(1)} < folder top ${geometry.fieldTop.toFixed(1)}, rows ${geometry.rows.length}, row heights ${geometry.rows.map(row => row.height.toFixed(0)).join('/')}, scrollWidth ${geometry.scrollWidth} <= ${geometry.clientWidth}`,
-          );
-          expect(geometry.rows, 'two projects, two rows').toHaveLength(2);
-          expect(geometry.sectionTop, 'the projects sit above the folder box').toBeLessThan(geometry.fieldTop);
-          expect(geometry.sectionTop).toBeGreaterThanOrEqual(0);
-          for (const row of geometry.rows) expect(row.height, 'a row is a touch target').toBeGreaterThanOrEqual(44);
-          expect(geometry.scrollWidth, 'no sideways scroll').toBeLessThanOrEqual(geometry.clientWidth);
-
-          // Clicking row 2 fills the folder box with project 2's path and marks that row.
-          await tab.locator('[data-new-ferret-project-row]').nth(1).click();
-          expect(await tab.locator(FOLDER).inputValue()).toBe('/fake/p2');
+          await open('view=new&projects=2', '[data-where-project-trigger]');
+          const state = await tab.evaluate(() => ({
+            pressed: [...document.querySelectorAll('[data-new-ferret-where-switch] button')].map(button => [
+              button.textContent,
+              button.getAttribute('aria-pressed'),
+            ]),
+            height: document.querySelector('[data-where-project-trigger]')?.getBoundingClientRect().height ?? 0,
+            label: document.querySelector('label[for]')?.getAttribute('for') ?? undefined,
+            triggerId: document.querySelector('[data-where-project-trigger]')?.id,
+          }));
+          expect(state.pressed).toEqual([
+            ['Project', 'true'],
+            ['Folder', 'false'],
+          ]);
           expect(
-            await tab
-              .locator('[data-new-ferret-project-row]')
-              .evaluateAll(rows => rows.map(row => row.getAttribute('aria-pressed'))),
-          ).toEqual(['false', 'true']);
-          await shot('picked');
+            state.height,
+            'a finger-sized target on a phone, the compact control on a desktop',
+          ).toBeGreaterThanOrEqual(viewport.phone ? 44 : 32);
+          expect(state.triggerId, 'the page label points at the control').toBe(state.label);
+          await noSideways(tab);
+          await shot('project');
+
+          await tab.locator('[data-where-project-trigger]').click();
+          await tab.waitForSelector('[data-where-project-row]');
+          expect(
+            await tab.locator(`[data-where-surface="${surface}"]`).count(),
+            'a sheet on a phone, a panel on a desktop',
+          ).toBe(1);
+          const rows = await tab
+            .locator('[data-where-project-row] button[title]')
+            .evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().height));
+          expect(rows).toHaveLength(2);
+          console.info(
+            `[o9-9] ${viewport.name} ${scheme}: project row heights ${rows.map(height => height.toFixed(0)).join('/')}`,
+          );
+          for (const height of rows) expect(height, 'a row is a touch target').toBeGreaterThanOrEqual(43.5);
+          await noSideways(tab);
+          await tab.waitForTimeout(450); // the sheet's slide-in
+          await shot('project-open');
+
+          await tab.locator('[data-where-project-search]').fill('fake-org');
+          expect(await tab.locator('[data-where-project-row]').count(), 'search narrows by repository').toBe(1);
+          await tab.locator('[data-where-project-search]').fill('');
+          await tab.locator('[data-where-project-row] button[title]').nth(1).click();
+          expect(await chosen(tab)).toBe('/fake/p2');
+          await tab.waitForSelector('[data-where-project-row]', { state: 'detached' });
+          expect(await tab.locator('[data-where-project-trigger]').textContent()).toContain('project-2');
+          await shot('project-picked');
         }));
 
-  it('draws no projects section on a daemon with none', () =>
+      it(`Project: Link GitHub opens the account editor in place and picks nothing (${viewport.name}, ${scheme})`, () =>
+        withTab(viewport, scheme, async (tab, open, shot) => {
+          await open('view=new&projects=2', '[data-where-project-trigger]');
+          await tab.locator('[data-where-project-trigger]').click();
+          await tab.locator('[data-where-link-github]').nth(1).click();
+          await tab.waitForSelector('[data-where-link-panel] [data-project-accounts-editor]');
+          expect(await chosen(tab), 'linking a project does not pick it').toBe('');
+          await noSideways(tab);
+          await tab.waitForTimeout(450);
+          await shot('project-link-github');
+        }));
+
+      it(`Folder: recent folders are one-tap, and Browse opens the project-setup finder (${viewport.name}, ${scheme})`, () =>
+        withTab(viewport, scheme, async (tab, open, shot) => {
+          await open('view=new&projects=2&recent=3', '[data-where-project-trigger]');
+          await tab.getByRole('button', { name: 'Folder', exact: true }).click();
+          await tab.waitForSelector('[data-new-ferret-where-folder]');
+          expect(await tab.locator('[data-where-recent-folder]').count()).toBe(3);
+          await noSideways(tab);
+          await shot('folder');
+
+          await tab.locator('[data-where-recent-folder]').nth(1).click();
+          expect(await chosen(tab)).toBe('/fake/work/web-redesign');
+          expect(await tab.locator('#fy-new-ferret-folder').inputValue()).toBe('/fake/work/web-redesign');
+
+          await tab.locator('[data-where-browse]').click();
+          await tab.waitForSelector(`[data-where-surface="${surface}"]`);
+          await tab.getByRole('button', { name: 'Use this folder' }).waitFor();
+          await noSideways(tab);
+          await tab.waitForTimeout(450);
+          await shot('folder-browse');
+          await tab.getByRole('button', { name: 'Use this folder' }).click();
+          expect(await chosen(tab)).toBe('/fake/work');
+          await tab.waitForSelector(`[data-where-surface="${surface}"]`, { state: 'detached' });
+        }));
+    }
+
+  it('opens on Folder on a daemon with no projects', () =>
     withTab(VIEWPORTS[0], 'light', async (tab, open) => {
-      await open('view=new&projects=0', FOLDER);
-      await tab.waitForTimeout(300);
-      expect(await tab.locator('[data-new-ferret-projects]').count()).toBe(0);
+      await open('view=new&projects=0', '[data-new-ferret-where-folder]');
+      expect(await tab.locator('[data-where-project-trigger]').count()).toBe(0);
+      expect(await tab.locator('#fy-new-ferret-folder').count()).toBe(1);
     }));
 });
 

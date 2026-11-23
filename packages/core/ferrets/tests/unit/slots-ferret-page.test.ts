@@ -52,8 +52,11 @@ describe('the ferret page’s slots', () => {
     expect(isActionsRowSlotProps({ subject: 'f1' })).toBe(false);
     expect(isFilesSearchSlotProps({ ferret: 'f1', openFile: offer })).toBe(true);
     expect(isFilesSearchSlotProps({ ferret: 'f1' })).toBe(false);
-    expect(isNewFerretProjectSlotProps({ value: '', onPick: offer })).toBe(true);
-    expect(isNewFerretProjectSlotProps({ value: 3, onPick: offer })).toBe(false);
+    expect(isNewFerretProjectSlotProps({ value: '', id: 'f', recent: ['/a'], onPick: offer })).toBe(true);
+    expect(isNewFerretProjectSlotProps({ value: '', id: 'f', recent: [], onPick: offer })).toBe(true);
+    expect(isNewFerretProjectSlotProps({ value: '', onPick: offer })).toBe(false);
+    expect(isNewFerretProjectSlotProps({ value: '', id: 'f', onPick: offer })).toBe(false);
+    expect(isNewFerretProjectSlotProps({ value: 3, id: 'f', recent: [], onPick: offer })).toBe(false);
     expect(isNewFerretProjectSlotProps(null)).toBe(false);
   });
 });

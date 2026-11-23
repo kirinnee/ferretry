@@ -1,85 +1,89 @@
 /**
- * "Your projects" on the New ferret page: the panel Projects puts in Ferrets' `ferrets.new-ferret-project` slot, ABOVE the
- * Folder box. One row per registered project; a click fills the Folder field with that project's folder and marks the row.
- * It draws nothing while the registry is unread, fails or is empty, so the Folder box is never pushed down for nothing.
+ * "WHERE IT WORKS" ON THE NEW FERRET PAGE: the panel Projects puts in Ferrets' `ferrets.new-ferret-project` slot. A clear
+ * Folder | Project choice: Folder is the finder project setup uses (plus one-tap recent folders), Project is a searchable
+ * dropdown of the registered projects where GitHub can be linked. It opens on Project when there are projects (or the
+ * folder in the field is one), else on Folder, and reserves its height while the registry is unread so nothing jumps.
  *
  * It only proposes a folder through the slot's `onPick`; the page's own start (and the daemon's fence) decides.
  */
 import { isNewFerretProjectSlotProps } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
-import { Check, FolderOpen } from 'lucide-react';
 import { useState } from 'react';
 import type { ProjectInfo } from '../../contract/index.ts';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
 import type { ProjectsClient } from '../lib/client.ts';
-import { projectLine } from '../lib/project-line.ts';
 import type { ProjectsStore } from '../lib/projects-store.ts';
 import { projectsStoreFor } from './context.ts';
+import { WhereFolder } from './new-ferret-where-folder.tsx';
+import { WhereProject } from './new-ferret-where-project.tsx';
 
-/** Rows shown before "More…". */
-const FIRST_ROWS = 5;
+type Kind = 'folder' | 'project';
 
-function ProjectRow({
-  project,
-  selected,
-  onPick,
-}: {
-  readonly project: ProjectInfo;
-  readonly selected: boolean;
-  readonly onPick: (folder: string) => void;
-}) {
-  return (
-    <li className="m-0 list-none">
-      <button
-        aria-pressed={selected}
-        className="flex min-h-[44px] w-full min-w-0 items-center gap-sm rounded-control border border-border-strong bg-surface px-control-x py-1 text-left hover:border-border aria-pressed:border-fg"
-        data-new-ferret-project-row={project.id}
-        onClick={() => onPick(project.path)}
-        title={project.path}
-        type="button"
-      >
-        <FolderOpen aria-hidden="true" className="shrink-0 text-muted" size={16} />
-        <span className="grid min-w-0 flex-1">
-          <span className="truncate text-ui font-medium text-fg">{project.name}</span>
-          <span className="truncate text-meta text-muted">{projectLine(project)}</span>
-        </span>
-        {selected ? <Check aria-hidden="true" className="shrink-0 text-fg" size={16} /> : null}
-      </button>
-    </li>
-  );
-}
+const CHOICES = [
+  ['project', 'Project'],
+  ['folder', 'Folder'],
+] as const satisfies readonly (readonly [Kind, string])[];
 
-function NewFerretProjects({
+/** What to show before the person chooses: the project a folder already is, else a folder, else Project if any exist. */
+const defaultKind = (value: string, projects: readonly ProjectInfo[]): Kind => {
+  if (value !== '') return projects.some(project => project.path === value) ? 'project' : 'folder';
+  return projects.length > 0 ? 'project' : 'folder';
+};
+
+function NewFerretWhere({
+  client,
   store,
+  id,
   value,
+  recent,
   onPick,
 }: {
+  readonly client: ProjectsClient;
   readonly store: ProjectsStore;
+  readonly id: string;
   readonly value: string;
+  readonly recent: readonly string[];
   readonly onPick: (folder: string) => void;
 }) {
-  const { projects } = useProjectsSlice(store);
-  const [all, setAll] = useState(false);
-  if (projects === null || projects.length === 0) return null;
-  const shown = all ? projects : projects.slice(0, FIRST_ROWS);
+  const { projects, status } = useProjectsSlice(store);
+  const [chosen, setChosen] = useState<Kind | null>(null);
+  const unread = projects === null && (status === 'idle' || status === 'loading');
+  const known = projects ?? [];
+  const kind = chosen ?? defaultKind(value, known);
   return (
-    <section aria-label="Your projects" className="mb-2 grid gap-1.5" data-new-ferret-projects="">
-      <h3 className="m-0 text-meta font-semibold text-muted">Your projects</h3>
-      <ul className="m-0 grid gap-1.5 p-0">
-        {shown.map(project => (
-          <ProjectRow key={project.id} onPick={onPick} project={project} selected={value === project.path} />
+    <div className="grid gap-2" data-new-ferret-where="">
+      <div
+        aria-label="Where it works"
+        className="grid max-w-[20rem] grid-cols-2 gap-0.5 rounded-control border border-border bg-surface-2 p-0.5"
+        data-new-ferret-where-switch=""
+        role="toolbar"
+      >
+        {CHOICES.map(([choice, text]) => (
+          <button
+            aria-pressed={!unread && kind === choice}
+            className={
+              !unread && kind === choice
+                ? 'min-h-[44px] rounded-control border border-border-strong bg-surface px-2 text-ui font-medium text-fg shadow-control'
+                : 'min-h-[44px] rounded-control border border-transparent px-2 text-ui font-medium text-muted hover:text-fg'
+            }
+            key={choice}
+            onClick={() => setChosen(choice)}
+            type="button"
+          >
+            {text}
+          </button>
         ))}
-      </ul>
-      {projects.length > FIRST_ROWS ? (
-        <button
-          className="w-fit text-meta text-muted hover:text-fg"
-          onClick={() => setAll(current => !current)}
-          type="button"
-        >
-          {all ? 'Fewer' : `More… (${projects.length - FIRST_ROWS})`}
-        </button>
-      ) : null}
-    </section>
+      </div>
+      {unread ? (
+        <div className="min-h-[44px] text-ui text-muted" data-new-ferret-where-reading="" role="status">
+          Reading your projects…
+        </div>
+      ) : kind === 'folder' ? (
+        <WhereFolder client={client} id={id} onPick={onPick} recent={recent} value={value} />
+      ) : (
+        <WhereProject client={client} id={id} onPick={onPick} projects={known} store={store} value={value} />
+      )}
+    </div>
   );
 }
 
@@ -88,7 +92,14 @@ export const createNewFerretProjectsPanel = (client: ProjectsClient): AppCompone
   const store = projectsStoreFor(client);
   return function NewFerretProjectsPanel(props: PanelProps) {
     return isNewFerretProjectSlotProps(props) ? (
-      <NewFerretProjects onPick={props.onPick} store={store} value={props.value} />
+      <NewFerretWhere
+        client={client}
+        id={props.id}
+        onPick={props.onPick}
+        recent={props.recent}
+        store={store}
+        value={props.value}
+      />
     ) : null;
   };
 };
