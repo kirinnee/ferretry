@@ -23,6 +23,9 @@ export const PANEL_RANGES: Readonly<Record<PanelId, { readonly min: number; read
   'settings-nav': { min: 180, max: 320 },
 };
 
+/** The ferret page's chat keeps at least this much of its row (`shell.css` `--fy-chat-min`, the same number): the column's real room. */
+const FERRET_CHAT_MIN = 320;
+
 /** The panel's element, measured when a drag starts on a panel that has not been resized yet (its stylesheet width is the start). */
 const PANEL_SELECTORS: Readonly<Record<PanelId, string>> = {
   side: '.fy-side',
@@ -167,6 +170,17 @@ export function measurePanel(panel: PanelId): number | undefined {
   if (typeof document === 'undefined') return undefined;
   const width = document.querySelector(PANEL_SELECTORS[panel])?.getBoundingClientRect().width;
   return width === undefined || width <= 0 ? undefined : width;
+}
+
+/**
+ * The most the panel can be drawn at right now: its range, held to the room its row leaves (the ferret page's column leaves the
+ * chat `FERRET_CHAT_MIN`). Never below the range's minimum. A panel with no room limit has its range's maximum.
+ */
+export function measureMax(panel: PanelId): number {
+  const { min, max } = PANEL_RANGES[panel];
+  if (typeof document === 'undefined' || panel !== 'ferret-side') return max;
+  const row = document.querySelector(PANEL_SELECTORS[panel])?.parentElement?.clientWidth ?? 0;
+  return row <= 0 ? max : Math.max(min, Math.min(max, row - FERRET_CHAT_MIN));
 }
 
 /**

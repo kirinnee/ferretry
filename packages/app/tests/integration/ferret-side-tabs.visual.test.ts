@@ -70,7 +70,15 @@ afterAll(async () => {
 
 const DESK = { name: '1440', width: 1_440, height: 900, phone: false } as const;
 const PHONE = { name: '390', width: 390, height: 844, phone: true } as const;
-type Viewport = typeof DESK | typeof PHONE;
+/** Mid widths: a tablet, and the window a person gets by halving a laptop screen. The default layout keeps its list column there. */
+const TABLET = { name: '768', width: 768, height: 900, phone: false } as const;
+const MIDDLE = { name: '800', width: 800, height: 900, phone: false } as const;
+interface Viewport {
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly phone: boolean;
+}
 type Mode = 'light' | 'dark';
 const MODES: readonly Mode[] = ['light', 'dark'];
 
@@ -364,4 +372,101 @@ describe('the ferret page on a phone keeps its chips', () => {
       }
     });
   }
+});
+
+/**
+ * THE CHAT FLOOR AT MID WIDTHS (rv-2393 item 1): at 768 and 800 the default layout (nav + list column) leaves the ferret row too
+ * little for a 300px column AND a 320px chat. The column then overlays the chat (a drawer, as on a phone) instead of squeezing it,
+ * so the chat is never narrower than 320px whether the column is open or closed.
+ */
+describe('the chat keeps its floor at mid widths', () => {
+  for (const viewport of [TABLET, MIDDLE])
+    for (const mode of MODES)
+      it(`${viewport.name} ${mode}: with the column open the chat is still >= 320px and the column stays on screen`, async () => {
+        const { tab, close } = await open(viewport, mode);
+        try {
+          await shot(tab, viewport, mode, 'closed');
+          await openColumn(tab);
+          const chat = await chatWidth(tab);
+          expect(chat, `the chat is ${chat}px beside an open column at ${viewport.name}`).toBeGreaterThanOrEqual(320);
+          const box = await tab.locator(ASIDE).boundingBox();
+          expect(box, 'the column is drawn').not.toBeNull();
+          expect((box?.x ?? -1) + (box?.width ?? 0), 'the column ends inside the window').toBeLessThanOrEqual(
+            viewport.width + 0.5,
+          );
+          expect(box?.x ?? -1, 'the column starts inside the window').toBeGreaterThanOrEqual(0);
+          expect(await tab.locator(HANDLE).isVisible(), 'an overlaid column has no divider to drag').toBe(false);
+          await shot(tab, viewport, mode, 'open-console');
+        } finally {
+          await close();
+        }
+      });
+});
+
+/**
+ * THE DIVIDER SPEAKS FOR THE WIDTH IT DRAWS (rv-2393 item 2): save 720 at 1440, narrow the window to 900, and the column renders
+ * narrower than its saved width. The divider starts from what is DRAWN: it announces the drawn width and the room there really
+ * is, and a key or a drag moves the edge from there at once.
+ */
+describe('the divider uses the drawn width, not the saved one', () => {
+  const NARROWED = 900;
+  const narrowed = async (mode: Mode) => {
+    const session = await open(DESK, mode);
+    await openColumn(session.tab);
+    await drag(session.tab, -2_000);
+    expect(await widthOf(session.tab, ASIDE), 'saved the widest').toBe(720);
+    await session.tab.setViewportSize({ width: NARROWED, height: DESK.height });
+    await calm(session.tab);
+    return session;
+  };
+  const announced = async (tab: Page) => ({
+    now: Number(await tab.getAttribute(HANDLE, 'aria-valuenow')),
+    max: Number(await tab.getAttribute(HANDLE, 'aria-valuemax')),
+  });
+
+  for (const mode of MODES)
+    it(`${mode}: aria-valuenow and aria-valuemax say the drawn width and the real room`, async () => {
+      const { tab, close } = await narrowed(mode);
+      try {
+        const drawn = await widthOf(tab, ASIDE);
+        expect(drawn, 'the saved 720 does not fit at 900').toBeLessThan(720);
+        const { now, max } = await announced(tab);
+        expect(now, 'valuenow is the drawn width').toBe(Math.round(drawn));
+        expect(max, 'valuemax is the most the window allows, not the saved range').toBeLessThanOrEqual(
+          Math.round(drawn) + 1,
+        );
+        expect(max).toBeGreaterThanOrEqual(now);
+        await shot(tab, DESK, mode, 'saved-wide-narrowed');
+      } finally {
+        await close();
+      }
+    });
+
+  it('ArrowRight narrows the drawn column by a step at once, and ArrowLeft cannot push past the room', async () => {
+    const { tab, close } = await narrowed('light');
+    try {
+      const drawn = await widthOf(tab, ASIDE);
+      await tab.focus(HANDLE);
+      await tab.keyboard.press('ArrowRight');
+      expect(await widthOf(tab, ASIDE), 'one step narrower, visibly').toBe(drawn - 16);
+      expect((await announced(tab)).now).toBe(drawn - 16);
+      await tab.keyboard.press('ArrowLeft');
+      await tab.keyboard.press('ArrowLeft');
+      expect(await widthOf(tab, ASIDE), 'never wider than the room').toBe(drawn);
+      expect((await announced(tab)).now).toBe(drawn);
+    } finally {
+      await close();
+    }
+  });
+
+  it('a 24px drag moves the edge 24px from where it is drawn (it was drawn 340 wide: 48 would pass the 300 minimum)', async () => {
+    const { tab, close } = await narrowed('light');
+    try {
+      const drawn = await widthOf(tab, ASIDE);
+      await drag(tab, 24);
+      expect(await widthOf(tab, ASIDE)).toBe(drawn - 24);
+    } finally {
+      await close();
+    }
+  });
 });

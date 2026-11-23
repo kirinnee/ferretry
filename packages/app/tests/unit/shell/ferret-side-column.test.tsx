@@ -19,6 +19,8 @@ import { bootApp, entryOf, manifestOf, settle } from './frame-fixtures.tsx';
  */
 
 const mounts: string[] = [];
+/** A running session's stream, faked: opened when its panel mounts, closed when it unmounts. Switching tabs must do neither. */
+const stream = { opened: 0, closed: 0, node: null as HTMLElement | null };
 /** What Agenda's `ferrets.needs-you` provider says, by ferret: items on the owner's turn, and whether the chat draws the line. */
 interface Entry {
   readonly waitingOnOwner: number;
@@ -36,6 +38,10 @@ let bring: ((panel: string) => void) | undefined;
 function Note({ subject }: PanelProps) {
   useEffect(() => {
     mounts.push(String(subject));
+    stream.opened += 1;
+    return () => {
+      stream.closed += 1;
+    };
   }, [subject]);
   return <p data-testid="side-note">note for {String(subject)}</p>;
 }
@@ -115,6 +121,8 @@ afterEach(async () => {
   sidePaneOpen.set(false);
   panelWidths.forget();
   mounts.length = 0;
+  stream.opened = 0;
+  stream.closed = 0;
   waiting.clear();
   heard.clear();
   bring = undefined;
@@ -241,6 +249,29 @@ describe('the open side column is a row of tabs over ONE panel, with a draggable
     expect(onShow(page)).toEqual(['ferretpage.note']);
     expect(tab(page, 'ferretpage.note').getAttribute('aria-selected')).toBe('true');
     expect(tab(page, 'ferretpage.files').getAttribute('aria-selected')).toBe('false');
+  });
+
+  test('a running session keeps its stream across tab switches: nothing remounts or reconnects', async () => {
+    const page = await open();
+    await interact(() => toggle(page).click());
+    await settle();
+    await interact(() => tab(page, 'ferretpage.note').click());
+    expect(stream.opened, 'the stream connected once, when its panel first mounted').toBe(1);
+    const node = page.querySelector('[data-testid="side-note"]');
+    expect(node).not.toBeNull();
+    for (let round = 0; round < 3; round += 1) {
+      await interact(() => tab(page, 'ferretpage.files').click());
+      await interact(() => tab(page, 'ferretpage.note').click());
+    }
+    await settle();
+    expect(page.querySelector('[data-testid="side-note"]'), 'the very same element, never a remount').toBe(node);
+    expect(stream.opened, 'no reconnect').toBe(1);
+    expect(stream.closed, 'no disconnect').toBe(0);
+    expect(mounts).toEqual(['zoe']);
+    // Hiding the column keeps it too.
+    await interact(() => toggle(page).click());
+    await settle();
+    expect([stream.opened, stream.closed]).toEqual([1, 0]);
   });
 
   test('a panel another panel asks for is the tab that opens', async () => {

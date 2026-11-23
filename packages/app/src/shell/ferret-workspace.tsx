@@ -155,7 +155,7 @@ export function FerretWorkspace({ daemon, subject, chat, canControl = true }: Fe
         showPanel={reveal}
         shows={shows}
       >
-        <div className="flex min-h-0 min-w-0 flex-1">
+        <div className="fy-ferret-row flex min-h-0 min-w-0 flex-1">
           {chat}
           {panels.length === 0 ? null : open ? (
             <ResizeHandle edge="start" label="side panel" panel="ferret-side" />
@@ -227,7 +227,7 @@ function SideToggle({
       data-waiting={count === 0 ? undefined : count}
       data-side-toggle=""
       onClick={() => sidePaneOpen.set(!open)}
-      title={open ? 'Hide side panels' : 'Agenda, queue, tasks, terminals, files…'}
+      title={open ? 'Hide side panels' : 'Console, agenda, queue, tasks, terminals, files…'}
       type="button"
     >
       <Icon aria-hidden="true" size={16} />
