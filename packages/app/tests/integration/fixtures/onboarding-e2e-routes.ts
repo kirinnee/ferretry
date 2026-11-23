@@ -55,21 +55,6 @@ const scan = {
 /** The routes the import pages read and write on a fake machine. */
 const importRoutes = (): Record<string, unknown> => ({
   'GET /v1/runtimes/setup/scan': scan,
-  'GET /v1/runtimes': {
-    format: 'present',
-    runtimes: ['claude-code', 'codex'].map(harness => ({
-      id: `${harness}-default`,
-      name: `${harness === 'codex' ? 'Codex' : 'Claude Code'} (your terminal sign-in)`,
-      wrapper: harness,
-      harness,
-      credential: { id: harness, store: 'host' },
-      profile: 'default',
-      stack: { layers: [], resolved: [] },
-      modelSet: { models: [] },
-      launch: { available: true },
-      sameAs: [],
-    })),
-  },
   'GET /v1/runtimes/machine': {
     name: 'studio-mac',
     format: 'present',

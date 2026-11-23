@@ -281,7 +281,7 @@ export default definePlugin({
     { id: 'conversations', title: 'Conversations', order: 28, stepHost: true },
     { id: 'import-run', title: 'Bring it over', order: 29, stepHost: true },
     { id: 'permission', title: 'Permissions', order: 30, stepHost: true },
-    { id: 'ready', title: 'Your runtime', order: 31, stepHost: true },
+    { id: 'ready', title: 'Your runtime', order: 31, stepHost: true, informational: true },
   ],
   doctor: ['claude-code-paths'],
 

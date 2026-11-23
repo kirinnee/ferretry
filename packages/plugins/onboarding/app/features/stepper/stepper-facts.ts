@@ -21,7 +21,7 @@ const FileSchema = z.object({ exists: z.boolean(), text: z.string() });
 const FerretsSchema = z.array(z.unknown());
 const ProjectsSchema = z.array(z.unknown());
 const StepsSchema = z.object({
-  steps: z.array(z.object({ plugin: z.string(), id: z.string(), state: z.string(), side: z.string().optional() })),
+  complete: z.boolean(),
 });
 const ArchivedSchema = z.object({ count: z.number() });
 
@@ -75,11 +75,9 @@ export const readStepperFacts = async (
       const archived = await client.call('GET /v1/archived-sessions', { query: { limit: '1' }, ...base });
       return ArchivedSchema.parse(archived).count > 0;
     })());
-  /** Every step the plugins declared for this machine's own setup has an answer (none is `pending`); a client step is answered on the device, never here. */
+  /** The machine says its setup is complete: every step the plugins declared has an answer, but a step that only shows something (a tool's Ready page) never counts. */
   const setupAnswered = async (): Promise<boolean> =>
-    StepsSchema.parse(await client.call('GET /v1/onboarding', base)).steps.every(
-      step => step.side === 'client' || step.state !== 'pending',
-    );
+    StepsSchema.parse(await client.call('GET /v1/onboarding', base)).complete;
   const protectedReads: readonly [FactKey, () => Promise<StepperFact>][] = [
     [
       'name',

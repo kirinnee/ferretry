@@ -18,10 +18,12 @@ const runtime = (
   harness: string,
   name: string,
   launch: ReadyRuntime['launch'] = { available: true },
+  login = `login-of-${name}`,
 ): ReadyRuntime => ({
   id: name,
   name,
   harness,
+  credential: { id: login },
   launch,
 });
 
@@ -42,6 +44,24 @@ describe('readyStateOf', () => {
       reason: 'Sign in to launch',
     });
   });
+  it('O9-6 matches the LOGIN just handled: another ready login of the same tool never hides a blocked or missing runtime', () => {
+    const runtimes = [
+      runtime('codex', 'codex-old', { available: true }, 'old'),
+      runtime('codex', 'codex-new', { available: false, reason: 'Sign in to launch' }, 'new'),
+    ];
+    expect(readyStateOf(runtimes, 'codex', 'new')).toEqual({
+      kind: 'blocked',
+      name: 'codex-new',
+      reason: 'Sign in to launch',
+    });
+    expect(readyStateOf(runtimes, 'codex', 'old')).toEqual({ kind: 'ready', names: ['codex-old'] });
+    // The login just signed in has no runtime at all: none, though the other login is ready.
+    expect(readyStateOf([runtime('codex', 'codex-old', { available: true }, 'old')], 'codex', 'new')).toEqual({
+      kind: 'none',
+    });
+    // No login known (sign-in skipped, or a reload dropped the memory): every runtime of the tool counts.
+    expect(readyStateOf(runtimes, 'codex')).toEqual({ kind: 'ready', names: ['codex-old'] });
+  });
   it('is none when the harness has no runtime', () => {
     expect(readyStateOf([runtime('codex', 'codex-a')], 'claude-code')).toEqual({ kind: 'none' });
     expect(readyStateOf([], 'codex')).toEqual({ kind: 'none' });
@@ -49,7 +69,7 @@ describe('readyStateOf', () => {
 });
 
 /** A step host that only records whether the page said it is ready (the shell lifts its loading cover on that). */
-const stepHarness = () => {
+const stepHarness = (segment: Record<string, string> = {}) => {
   let shown = false;
   const host = {
     ready: () => (shown = true),
@@ -63,7 +83,7 @@ const stepHarness = () => {
     back: () => undefined,
     phase: 'daemon',
     appliesTo: [],
-    segment: {},
+    segment,
   } as unknown as StepHost;
   return {
     host,
@@ -103,6 +123,38 @@ describe('RuntimeReadyPage', () => {
     expect(view.container.querySelector('[data-ready-names]')?.textContent).toBe('Runtime: Claude (atomi).');
     expect(harness.decision).toBe('shown');
     await view.unmount();
+  });
+
+  it('O9-6 with two logins of one tool, the page speaks for the login the sign-in handled', async () => {
+    const answers = () => ({
+      runtimes: [
+        runtime('codex', 'codex-old', { available: true }, 'old'),
+        runtime('codex', 'codex-new', { available: false, reason: 'Sign in to launch' }, 'new'),
+      ],
+    });
+    const blocked = await mount(
+      createElement(RuntimeReadyPage, {
+        client: clientOf([answers]).client,
+        harness: 'codex',
+        label: 'Codex',
+        step: stepHarness({ signedLogin: 'new' }).host,
+      }),
+    );
+    await settle();
+    expect(blocked.container.querySelector('[data-runtime-ready]')?.getAttribute('data-runtime-ready')).toBe('blocked');
+    expect(blocked.container.querySelector('[data-ready-names]')?.textContent).toContain('codex-new');
+    await blocked.unmount();
+    const missing = await mount(
+      createElement(RuntimeReadyPage, {
+        client: clientOf([answers]).client,
+        harness: 'codex',
+        label: 'Codex',
+        step: stepHarness({ signedLogin: 'third' }).host,
+      }),
+    );
+    await settle();
+    expect(missing.container.querySelector('[data-runtime-ready]')?.getAttribute('data-runtime-ready')).toBe('none');
+    await missing.unmount();
   });
 
   it('says plainly that no runtime was made, and where to add one later, when the sign-in was skipped', async () => {

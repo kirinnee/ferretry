@@ -6,6 +6,7 @@
  * Logins' routes.
  */
 import { daemonOfClient, PanelSlot, useSlotHasPanels } from '@ferretry/app';
+import { SIGNED_LOGIN_KEY } from '@ferretry/plugin-runtimes/import-kit';
 import { useEffect, useRef } from 'react';
 import { CLAUDE_CODE_SIGN_IN_SLOT } from '../../../contract/index.ts';
 import type { ClaudeCodeClient } from '../../lib/client.ts';
@@ -42,8 +43,13 @@ export function SignInPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
               step?.ready();
               step?.busy(HOLD);
             },
-            onAlreadySignedIn: () => step?.skip('not-needed'),
-            onSignedIn: () => {
+            // The login handled is kept for the Ready page, which names THAT login's runtime (run memory, never stored).
+            onAlreadySignedIn: (loginId?: string) => {
+              if (loginId !== undefined) step?.remember({ [SIGNED_LOGIN_KEY]: loginId });
+              step?.skip('not-needed');
+            },
+            onSignedIn: (loginId?: string) => {
+              if (loginId !== undefined) step?.remember({ [SIGNED_LOGIN_KEY]: loginId });
               step?.busy(null);
               step?.done();
             },

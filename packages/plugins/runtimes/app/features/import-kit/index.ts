@@ -37,4 +37,10 @@ export {
   StepConfirm,
   StepLine,
 } from './step-parts.tsx';
-export { type ReadyRuntime, type ReadyState, readyStateOf, RuntimeReadyPage } from './runtime-ready.tsx';
+export {
+  type ReadyRuntime,
+  type ReadyState,
+  readyStateOf,
+  RuntimeReadyPage,
+  SIGNED_LOGIN_KEY,
+} from './runtime-ready.tsx';

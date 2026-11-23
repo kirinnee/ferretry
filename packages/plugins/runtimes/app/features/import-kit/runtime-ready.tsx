@@ -24,6 +24,8 @@ const RuntimeRowSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   harness: z.string().min(1),
+  /** The login the runtime is made from: the page matches the login the step just handled on this. */
+  credential: z.object({ id: z.string().min(1) }),
   launch: z.discriminatedUnion('available', [
     z.object({ available: z.literal(true) }),
     z.object({ available: z.literal(false), reason: z.string().min(1) }),
@@ -38,9 +40,16 @@ export type ReadyState =
   | { readonly kind: 'blocked'; readonly name: string; readonly reason: string }
   | { readonly kind: 'none' };
 
-/** The state of one harness from the machine's runtimes: those that can start now win, then one that cannot, else none. */
-export function readyStateOf(runtimes: readonly ReadyRuntime[], harness: string): ReadyState {
-  const mine = runtimes.filter(runtime => runtime.harness === harness);
+/**
+ * The state of one tool from the machine's runtimes: those that can start now win, then one that cannot, else none. With the
+ * login the sign-in step handled (`login`), only THAT login's runtimes count: another ready login of the same tool must not
+ * hide a blocked or missing runtime for the one just signed in. Without it (a sign-in that was skipped, or a reload that
+ * dropped the run's memory) every runtime of the tool counts.
+ */
+export function readyStateOf(runtimes: readonly ReadyRuntime[], harness: string, login?: string): ReadyState {
+  const mine = runtimes.filter(
+    runtime => runtime.harness === harness && (login === undefined || runtime.credential.id === login),
+  );
   const names = mine.filter(runtime => runtime.launch.available).map(runtime => runtime.name);
   if (names.length > 0) return { kind: 'ready', names };
   const [first] = mine;
@@ -53,6 +62,9 @@ type Read =
   | { readonly kind: 'reading' }
   | { readonly kind: 'failed' }
   | { readonly kind: 'done'; readonly state: ReadyState };
+
+/** The segment-memory key a tool's sign-in page writes (`step.remember({ [SIGNED_LOGIN_KEY]: id })`) and this page reads. */
+export const SIGNED_LOGIN_KEY = 'signedLogin';
 
 const SIGN_IN_LATER = 'Sign in any time in Settings › Logins, and a runtime appears by itself.';
 
@@ -72,13 +84,17 @@ export function RuntimeReadyPage({
   const [read, setRead] = useState<Read>({ kind: 'reading' });
   const host = useRef(step);
   host.current = step;
+  const signedLogin = step?.segment[SIGNED_LOGIN_KEY];
+  const login = typeof signedLogin === 'string' && signedLogin !== '' ? signedLogin : undefined;
   const look = useCallback((): void => {
     setRead({ kind: 'reading' });
     client.call('GET /v1/runtimes', { quiet: true }).then(
       answer => {
         const parsed = RuntimeListSchema.safeParse(answer);
         setRead(
-          parsed.success ? { kind: 'done', state: readyStateOf(parsed.data.runtimes, harness) } : { kind: 'failed' },
+          parsed.success
+            ? { kind: 'done', state: readyStateOf(parsed.data.runtimes, harness, login) }
+            : { kind: 'failed' },
         );
         host.current?.ready();
       },
@@ -87,7 +103,7 @@ export function RuntimeReadyPage({
         host.current?.ready();
       },
     );
-  }, [client, harness]);
+  }, [client, harness, login]);
   useEffect(() => {
     look();
   }, [look]);

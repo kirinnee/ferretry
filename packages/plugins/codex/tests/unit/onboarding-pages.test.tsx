@@ -339,6 +339,8 @@ describe('sign-in', () => {
     expect(signInFacts(view(stuck, codexLogin('checking', { id: 'c' })))).toEqual({ state: 'checking' });
     expect(signInFacts(view(codexLogin('needs_sign_in', { disabled: true })))).toEqual({ state: 'no-login' });
     expect(signInFacts(view(codexLogin('refresh_due')))).toMatchObject({ state: 'signed-in' });
+    // O9-6: the facts name the login that works, which the Ready page matches its runtime on.
+    expect(signInFacts(view(codexLogin('ready', { id: 'work' })))).toMatchObject({ state: 'signed-in', id: 'work' });
     expect(
       signInFacts(view(codexLogin('ready', { id: 'off', disabled: true }), codexLogin('ready', { id: 'on' }))),
     ).toMatchObject({ state: 'signed-in' });

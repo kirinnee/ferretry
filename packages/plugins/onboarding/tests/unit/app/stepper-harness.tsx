@@ -27,6 +27,7 @@ const answersFor = (held: Held): Record<string, unknown> => {
         { plugin: 'claude-code', id: 'harness', state: has('setup') ? 'done' : 'pending' },
         { plugin: 'codex', id: 'harness', state: has('setup') ? 'found' : 'pending' },
       ],
+      complete: has('setup'),
     },
     'GET /v1/projects': has('project') ? [{ id: 'p' }] : [],
     'GET /v1/ferrets': held.conversation === true && held.archivedFerret !== true ? [{ id: 'f' }] : [],
