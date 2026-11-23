@@ -4,10 +4,11 @@
  * nothing is migrated, and the moment the owner makes a runtime on that login (or edits the derived one, which writes it)
  * the explicit file is the only one there is.
  *
- * What "Ferretry's default profile" holds is a starter model set. The autonomous settings (permission mode, the Ferretry
- * instructions) are the fixed layer a ferret started in `auto` mode gets (`fixed-layer.ts`, applied by the wrapper only for
- * that launch), so a derived runtime runs unattended exactly as one made by hand does, and runs as the person's own CLI
- * from a shell or for an `interactive` ferret.
+ * What "Ferretry's default profile" holds (`builtin-autonomous.ts`) is a starter model set, the "work alone well"
+ * instructions and Claude's comfort settings, and NO permissions. The autonomous settings (permission mode, the Ferretry
+ * tools) are the fixed layer a ferret started in `auto` mode gets (`fixed-layer.ts`, applied by the wrapper only for that
+ * launch), so a derived runtime runs unattended exactly as one made by hand does, and runs as the person's own CLI from a
+ * shell or for an `interactive` ferret.
  *
  * The two built-in profiles and their starter model sets are derived whether or not any login is, so a runtime saved on
  * one of them never dangles.
@@ -19,7 +20,7 @@
  */
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import type { ModelSetFile, ProfileFile, RuntimeFile } from '../../../contract/index.ts';
-import { FLEET_STARTER_MODELS } from '../defaults.ts';
+import { builtinProfileLayers, starterModelSet } from './builtin-autonomous.ts';
 import { harnessKindOfKey } from '../manifest.ts';
 import { isRuntimeName } from './schema.ts';
 
@@ -52,11 +53,9 @@ export function deriveRuntimes(from: DerivedFrom): Derived {
   // derived: a runtime the owner saves from Advanced on a preset must not dangle the moment its login stops being derived.
   for (const harness of ['claude', 'codex'] as const) {
     const wanted = defaultProfileName(harness);
-    if (!from.profiles.has(wanted)) profiles.set(wanted, { contents: [`modelSets/${wanted}`] } as ProfileFile);
-    if (!from.modelSets.has(wanted)) {
-      const model = FLEET_STARTER_MODELS[harness];
-      modelSets.set(wanted, { models: [model], default: model } as ModelSetFile);
-    }
+    if (!from.profiles.has(wanted))
+      profiles.set(wanted, { contents: [...builtinProfileLayers(harness)] } as ProfileFile);
+    if (!from.modelSets.has(wanted)) modelSets.set(wanted, starterModelSet(harness) as ModelSetFile);
   }
   const taken = new Set([...from.runtimes.values()].map(runtime => runtime.login as string));
   for (const login of from.logins) {

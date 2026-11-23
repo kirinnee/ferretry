@@ -1,5 +1,5 @@
 import type { ConversationStageSource } from '@ferretry/core-ferrets/contract';
-import { LinkKept, SearchSources } from '../../contract/index.ts';
+import { LinkKept, SearchSources, TranscriptParsers } from '../../contract/index.ts';
 import { openingAttachmentsSource } from '../attachments/adapters/opening-attachments.ts';
 import { buildReading } from '../reading.ts';
 import type { ConversationFeature } from './types.ts';
@@ -18,6 +18,8 @@ export default {
       asks: f.asks,
       onKept: (ferret, link) => f.kernel.events.publish(LinkKept, { ferret, link }),
       workSources: () => f.hooks.contributions(SearchSources).map(contribution => contribution.item),
+      // The parsers harness plugins declare for their own transcript formats, asked on the first read (all plugins are built by then).
+      parsers: () => f.hooks.contributions(TranscriptParsers).map(contribution => contribution.item),
     });
     f.late.reading = b;
     return {

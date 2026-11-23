@@ -26,7 +26,7 @@
  *
  * Nothing here holds a value: a skill is text, and a refusal names a skill, a path and a rule, never a file's content.
  */
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { ComponentPutFile, ComponentPutOptions, ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
 import { ITEM_NAME_PATTERN } from '@ferretry/std';
 import {
@@ -45,7 +45,7 @@ export const MAX_DOCUMENT_BYTES = 64 * 1024;
 const MAX_NAME_LENGTH = 64;
 
 /** Runtimes' word for a harness, and the harness key itself, to the key a skills item carries. */
-const HARNESS_KEY_OF: Readonly<Record<string, HarnessKey | undefined>> = Object.assign(Object.create(null), {
+const HARNESS_KEY_OF: Readonly<Record<string, KnownHarnessKey | undefined>> = Object.assign(Object.create(null), {
   claude: 'claude-code',
   'claude-code': 'claude-code',
   codex: 'codex',

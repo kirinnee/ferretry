@@ -15,6 +15,7 @@ import { json } from '../../unit/client/fixtures.ts';
 import { answer as answerA } from './sweep/answers-a.ts';
 import { answer as answerB } from './sweep/answers-b.ts';
 import { answer as answerC } from './sweep/answers-c.ts';
+import { answerWrites } from './sweep/answers-forms.ts';
 
 const requests: string[] = [];
 (globalThis as { __fyRequests?: string[] }).__fyRequests = requests;
@@ -22,11 +23,14 @@ const requests: string[] = [];
 const bodies: { route: string; body: unknown }[] = [];
 (globalThis as { __fyBodies?: typeof bodies }).__fyBodies = bodies;
 
-const answer = (request: TransportRequest): TransportAnswer | undefined => {
+const answer = async (request: TransportRequest): Promise<TransportAnswer | undefined> => {
   const path = request.path.split('?')[0] ?? '';
   requests.push(`${request.method} ${request.path}`);
   if (request.method !== 'GET') bodies.push({ route: `${request.method} ${request.path}`, body: request.body });
   if (path === '/v1/plugins' || path === '/v1/health' || path === '/v1/grants') return undefined;
+  // The forms' writes first: a PATCH answers with a valid body and is kept for a reload (`sweep/answers-forms.ts`).
+  const written = await answerWrites(request);
+  if (written !== undefined) return written;
   for (const part of [answerA, answerB, answerC]) {
     const answered = part(request);
     if (answered !== undefined) return answered;

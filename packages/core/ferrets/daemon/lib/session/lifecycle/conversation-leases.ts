@@ -47,9 +47,11 @@ export function registryLeaseSessions(
   return {
     launchOf: id => {
       const held = registry.get(id as unknown as FerretId);
-      return held === undefined
+      // A harness with no history pool of the two here launches nothing the daemon can name (no lease, never Claude's pool).
+      const pool = held === undefined ? undefined : POOL_OF[held.harness];
+      return held === undefined || pool === undefined
         ? undefined
-        : { harness: POOL_OF[held.harness], ...(held.runtime === undefined ? {} : { runtime: held.runtime }) };
+        : { harness: pool, ...(held.runtime === undefined ? {} : { runtime: held.runtime }) };
     },
     registryState: id => registry.get(id as unknown as FerretId)?.state,
     readState,

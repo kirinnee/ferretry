@@ -1,4 +1,5 @@
 import type { MouseEvent } from 'react';
+import { useAskBeforeLeaving } from '../compose/unsaved-guard.tsx';
 import { useRouter } from '../router/router.tsx';
 
 /** An in-app link: a plain click navigates in place; a modifier or middle click is the browser's (a new tab). */
@@ -18,6 +19,7 @@ export function Link({
   readonly title?: string;
 }) {
   const router = useRouter();
+  const leave = useAskBeforeLeaving();
   const onClick = (event: MouseEvent<HTMLAnchorElement>): void => {
     if (
       event.defaultPrevented ||
@@ -29,7 +31,7 @@ export function Link({
     )
       return;
     event.preventDefault();
-    router.navigate(to);
+    leave(() => router.navigate(to));
   };
   return (
     <a

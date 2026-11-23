@@ -70,6 +70,7 @@ import {
   CLAUDE_JSON_FILE,
   type ClaudeStatuslineCommand,
   componentPartialSupport,
+  GENERATED_INSTRUCTIONS_MARKER,
 } from './adapt.ts';
 import {
   CODEX_CREDENTIAL_FILE,
@@ -697,7 +698,11 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
     version: 1,
     entries: [
       ...new Set([
-        ...ownEntries.map(entry => topLevel(entry.dest)),
+        // Not the built-in text: whether it landed or was left beside a person's own file is only known at the write, and
+        // a recorded name is one a later sweep may remove, which must never be a file the person wrote.
+        ...ownEntries
+          .filter(entry => !(entry.kind === 'generated' && entry.builtinOnly === true))
+          .map(entry => topLevel(entry.dest)),
         ...(input.credentialLink === undefined ? [] : [CODEX_CREDENTIAL_FILE]),
       ]),
     ].toSorted(),
@@ -710,7 +715,15 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
 /** One adapted entry as the write that puts it in the config directory. */
 function entryOperation(entry: AdaptedEntry, home: string, layout: FleetLayout): FleetWriteOperation {
   const path = joinPath(home, entry.dest);
-  if (entry.kind === 'generated') return { kind: 'file', path, content: entry.content, mode: PRIVATE_FILE_MODE };
+  if (entry.kind === 'generated') {
+    return {
+      kind: 'file',
+      path,
+      content: entry.content,
+      mode: PRIVATE_FILE_MODE,
+      ...(entry.builtinOnly === true ? { unlessForeign: { marker: GENERATED_INSTRUCTIONS_MARKER } } : {}),
+    };
+  }
   const source = expandAssetPath(entry.source, layout.userHome, layout.assetsDirectory);
   return entry.kind === 'link' ? { kind: 'symlink', source, path } : { kind: 'copy', source, path };
 }

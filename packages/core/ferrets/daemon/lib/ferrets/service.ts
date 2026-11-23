@@ -89,7 +89,6 @@ import {
   diedParked,
   FerretDetailsSchema,
   FerretRecordSchema,
-  HARNESS_KEYS,
   REAL_HARNESS_REFUSED,
   StartRefusalCodeSchema,
   TranscriptProvenanceSchema,
@@ -909,6 +908,7 @@ export class FerretsService implements FerretsApi {
   harnesses(): readonly HarnessKey[] {
     return this.ports.harnessKeys();
   }
+  harnessFacts = (key: HarnessKey): Harness['facts'] | undefined => this.ports.harness(key)?.facts;
 
   /** The harness's own copy of one conversation of the owner's history, in its shared pool (`Harness.importConversation`). */
   async importConversation(
@@ -1157,8 +1157,9 @@ export class FerretsService implements FerretsApi {
     if (!resolved.ok) return resolved;
     const login = resolved.value?.login ?? request.login;
     const harnessKey = resolved.value?.harness ?? request.harness ?? this.ports.harnessKeys()[0];
-    if (harnessKey === undefined || !(HARNESS_KEYS as readonly string[]).includes(harnessKey))
-      return failed('harness_unavailable', 'no harness plugin is on');
+    if (harnessKey === undefined) return failed('harness_unavailable', 'no harness plugin is on');
+    if (this.ports.harness(harnessKey) === undefined)
+      return failed('harness_not_installed', `no harness ${harnessKey} is installed on this machine`);
     // The folder's identity is captured HERE, before any taker is asked, and re-verified as the last step before the
     // harness starts: a swap in between (a link into the state home put where the project was) cannot be launched in.
     const bound = await this.bindLaunchFolder(folder.value, origin, birthOf(origin));
@@ -1829,7 +1830,7 @@ export class FerretsService implements FerretsApi {
       !conversation.success ||
       !model.success ||
       !effort.success ||
-      !(HARNESS_KEYS as readonly string[]).includes(target.harness)
+      this.ports.harness(target.harness) === undefined
     )
       return 'the runtime this ferret is moving onto is not one Ferrets can record';
     const { login: _previous, harnessConversation: _before, ...rest } = record;

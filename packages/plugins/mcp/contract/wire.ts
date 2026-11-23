@@ -11,7 +11,7 @@
  * (`claude` → `claude-code`, the plugin id), the env grammar and the secure-URL rule of the fleet's component schema.
  */
 import { z } from 'zod';
-import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { KnownHarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { looksLikeRawSecret, RAW_SECRET_FIX, RAW_SECRET_MESSAGE } from './raw-secret.ts';
 
 // ─── foreign pieces, inlined ─────────────────────────────────────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ export const McpInventoryServerSchema = z.strictObject({
   id: z.string().min(1).max(128),
   name: z.string().min(1).max(256),
   scope: McpScopeSchema,
-  harness: HarnessKeySchema,
+  harness: KnownHarnessKeySchema,
   transport: McpTransportSchema,
   target: z.string().max(2048),
   source: z.string().max(4096).optional(),
@@ -382,7 +382,7 @@ export const McpItemSchema = z
     url: z.url().optional(),
     auth: z.literal('oauth').optional(),
     oauth: McpOAuthClientSchema.optional(),
-    harness: HarnessKeySchema.optional(),
+    harness: KnownHarnessKeySchema.optional(),
     clonedFrom: NonEmptyString.optional(),
     clonedFromDaemon: NonEmptyString.optional(),
     clonedFromKey: NonEmptyString.optional(),

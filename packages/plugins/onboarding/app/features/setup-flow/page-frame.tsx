@@ -42,6 +42,10 @@ export interface FlowPageProps {
   readonly onNext: () => void;
   readonly onBack: () => void;
   readonly onLater: () => void;
+  /** The words on the footer's Later button when the page has better ones ("Skip for now" on project setup); default "Later". */
+  readonly laterLabel?: string;
+  /** Called once when this visit has truly drawn its own content (the page said `ready()` or put up a `busy` label). */
+  readonly onShown?: () => void;
   /** The answers the machine did not take, and the way to try again. */
   readonly unsaved?: { readonly count: number; readonly retry: () => void } | undefined;
   /** Test seam: how long a page may stay silent. */
@@ -140,6 +144,7 @@ export function FlowPage(props: FlowPageProps): ReactNode {
       remember: patch => latest.current.remember(patch),
       ready: () => {
         flagless('ready');
+        if (!shown.current) latest.current.onShown?.();
         shown.current = true;
         setReady(true);
       },
@@ -168,7 +173,10 @@ export function FlowPage(props: FlowPageProps): ReactNode {
       },
       busy: label => {
         flagless('busy');
-        if (label !== null) shown.current = true;
+        if (label !== null) {
+          if (!shown.current) latest.current.onShown?.();
+          shown.current = true;
+        }
         setBusy(label);
       },
       next: () => latest.current.onNext(),
@@ -238,6 +246,7 @@ export function FlowPage(props: FlowPageProps): ReactNode {
       {...(!covered
         ? {
             later: {
+              ...(props.laterLabel === undefined ? {} : { label: props.laterLabel }),
               title: 'Come back to this from Settings',
               disabled: busy !== null,
               onClick: props.onLater,

@@ -4,6 +4,7 @@ import { destinationPath, useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import { firstRunEntry, ONBOARDING_SCREEN, PAIR_SCREEN } from './first-run.ts';
 import { SettingGroup } from '../compose/setting-row.tsx';
+import { UnsavedChangesGuard, useAskBeforeLeaving } from '../compose/unsaved-guard.tsx';
 import { CachedDataSetting } from './device-cached-data.tsx';
 import { DeviceAppearance } from './device-appearance.tsx';
 import { DevicePanels } from './device-panels.tsx';
@@ -125,6 +126,7 @@ export function DaemonHomePage({ daemon }: { readonly daemon: string }) {
  */
 function SettingsBackLink({ to }: { readonly to: string }) {
   const router = useRouter();
+  const leave = useAskBeforeLeaving();
   const onClick = (event: MouseEvent<HTMLAnchorElement>): void => {
     if (
       event.defaultPrevented ||
@@ -136,8 +138,11 @@ function SettingsBackLink({ to }: { readonly to: string }) {
     )
       return;
     event.preventDefault();
-    if (router.previousPath === destinationPath(to)) router.back(to);
-    else router.navigate(to, { replace: true });
+    // Back drops whatever is typed and unsaved, so it asks first (the shared guard; nothing here knows which forms exist).
+    leave(() => {
+      if (router.previousPath === destinationPath(to)) router.back(to);
+      else router.navigate(to, { replace: true });
+    });
   };
   return (
     <a href={to} onClick={onClick} className="fy-settings-back">
@@ -204,49 +209,57 @@ export function DaemonSettingsPage({
     }
   }, [named, entryKey, scroll]);
   return (
-    <section className="fy-page fy-settings" data-settings-open={named === undefined ? 'list' : 'panel'}>
-      <header className="fy-settings-head">
-        {/* A phone's way back from a panel to the list of them (hidden wherever the list is beside the panel). */}
-        <SettingsBackLink to={daemonSettingsHref(daemon)} />
-        <h1>Settings</h1>
-        {paired === undefined ? null : (
-          <p className="fy-settings-machine">
-            <span className="fy-settings-machine__name">{daemonTitle(paired)}</span>
-            <span className="fy-settings-machine__state" data-online={online ? 'true' : 'false'}>
-              {online ? 'Online' : 'Offline'}
-            </span>
-            {active === undefined || active.scopeChip === false ? null : (
-              <span className="fy-settings-machine__scope" data-scope={scopeOf(active)}>
-                {SCOPE_WORDS[scopeOf(active)]}
+    <UnsavedChangesGuard>
+      <section className="fy-page fy-settings" data-settings-open={named === undefined ? 'list' : 'panel'}>
+        <header className="fy-settings-head">
+          {/* A phone's way back from a panel to the list of them (hidden wherever the list is beside the panel). */}
+          <SettingsBackLink to={daemonSettingsHref(daemon)} />
+          <h1>Settings</h1>
+          {paired === undefined ? null : (
+            <p className="fy-settings-machine">
+              <span className="fy-settings-machine__name">{daemonTitle(paired)}</span>
+              <span className="fy-settings-machine__state" data-online={online ? 'true' : 'false'}>
+                {online ? 'Online' : 'Offline'}
               </span>
-            )}
-          </p>
-        )}
-      </header>
-      <div className="fy-settings-body">
-        <SettingsNav
-          daemon={daemon}
-          machine={paired === undefined ? 'This machine' : daemonTitle(paired)}
-          tabs={tabs}
-          active={active}
-          named={named !== undefined}
-        />
-        {viewport === 'phone' ? null : <ResizeHandle panel="settings-nav" edge="end" label="settings list" />}
-        {choice.kind === 'none' ? (
-          <ShellLine>No plugin on this daemon has settings.</ShellLine>
-        ) : choice.kind === 'missing' ? (
-          <ShellLine>{`There is no settings tab called "${choice.name}" on this daemon. Pick one from the list.`}</ShellLine>
-        ) : listOnly ? null : (
-          <section ref={pageRef} className="fy-settings-page" aria-label={choice.tab.label} tabIndex={-1}>
-            {/* The shell owns the panel's heading, for EVERY tab at EVERY width: one h2 from the tab's own label (a tab draws none). */}
-            <h2 className="fy-settings-title">{choice.tab.label}</h2>
-            <PanelTitleContext.Provider value={choice.tab.label}>
-              <PluginView daemon={daemon} plugin={choice.tab.plugin} section="settings" id={choice.tab.id} props={{}} />
-            </PanelTitleContext.Provider>
-          </section>
-        )}
-      </div>
-    </section>
+              {active === undefined || active.scopeChip === false ? null : (
+                <span className="fy-settings-machine__scope" data-scope={scopeOf(active)}>
+                  {SCOPE_WORDS[scopeOf(active)]}
+                </span>
+              )}
+            </p>
+          )}
+        </header>
+        <div className="fy-settings-body">
+          <SettingsNav
+            daemon={daemon}
+            machine={paired === undefined ? 'This machine' : daemonTitle(paired)}
+            tabs={tabs}
+            active={active}
+            named={named !== undefined}
+          />
+          {viewport === 'phone' ? null : <ResizeHandle panel="settings-nav" edge="end" label="settings list" />}
+          {choice.kind === 'none' ? (
+            <ShellLine>No plugin on this daemon has settings.</ShellLine>
+          ) : choice.kind === 'missing' ? (
+            <ShellLine>{`There is no settings tab called "${choice.name}" on this daemon. Pick one from the list.`}</ShellLine>
+          ) : listOnly ? null : (
+            <section ref={pageRef} className="fy-settings-page" aria-label={choice.tab.label} tabIndex={-1}>
+              {/* The shell owns the panel's heading, for EVERY tab at EVERY width: one h2 from the tab's own label (a tab draws none). */}
+              <h2 className="fy-settings-title">{choice.tab.label}</h2>
+              <PanelTitleContext.Provider value={choice.tab.label}>
+                <PluginView
+                  daemon={daemon}
+                  plugin={choice.tab.plugin}
+                  section="settings"
+                  id={choice.tab.id}
+                  props={{}}
+                />
+              </PanelTitleContext.Provider>
+            </section>
+          )}
+        </div>
+      </section>
+    </UnsavedChangesGuard>
   );
 }
 

@@ -9,7 +9,7 @@
  * Pure: no IO.
  */
 import type { z } from 'zod';
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { HarnessKind } from '../manifest.ts';
 import { type BrowserModeSchema, type BrowserPortsSettingSchema } from '../../../contract/index.ts';
 
@@ -130,7 +130,8 @@ export const CREDENTIALS_DIRECTORY = 'credentials';
  * Inside the services a harness is `claude` or `codex` (the library's word); on the wire and in the configuration it is
  * the Ferrets key `claude-code` or `codex`. These two are the only places the two spellings meet.
  */
-export const harnessKey = (kind: string): HarnessKey => (kind === 'claude' ? 'claude-code' : (kind as HarnessKey));
+export const harnessKey = (kind: string): KnownHarnessKey =>
+  kind === 'claude' ? 'claude-code' : (kind as KnownHarnessKey);
 
 /** The library's word for a Ferrets harness key. */
 export const harnessKind = (key: string): HarnessKind => (key === 'claude-code' ? 'claude' : (key as HarnessKind));

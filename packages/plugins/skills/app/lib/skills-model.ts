@@ -5,7 +5,7 @@
  * The rows, chips and sentences only: the daemon owns which skills exist, which one wins a name. Nothing here recomputes any of that.
  */
 import { chipsFor, matchesQuery } from '@ferretry/app/ui';
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { parseReferenceToken } from '@ferretry/app';
 import type { FerretSkillsInventory, SkillEntry, SkillScope } from '../../contract/index.ts';
 
@@ -47,11 +47,11 @@ export const sortedSkills = (skills: readonly SkillEntry[]): SkillEntry[] =>
  * `/skills` to BROWSE and `$name` to actually invoke one, so inserting `/name` there would type a command Codex does not
  * have. What lands in the draft is whatever that harness understands.
  */
-export const skillInsertText = (harness: HarnessKey, name: string): string =>
+export const skillInsertText = (harness: KnownHarnessKey, name: string): string =>
   harness === 'codex' ? `$${name}` : `/${name}`;
 
 /** The one-line reminder of which harness the reader is inserting for. */
-export const skillHarnessLabel = (harness: HarnessKey): string =>
+export const skillHarnessLabel = (harness: KnownHarnessKey): string =>
   harness === 'codex' ? 'Codex · inserts $name' : 'Claude · inserts /name';
 
 /** Append one invocation as a new draft token while preserving real content. */

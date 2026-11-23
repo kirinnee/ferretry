@@ -38,7 +38,7 @@ const sceneBodies: ReadonlyMap<string, () => ReactNode> =
  */
 interface SceneRegistration {
   readonly real?: readonly string[];
-  readonly answer?: (request: TransportRequest) => TransportAnswer | undefined;
+  readonly answer?: (request: TransportRequest) => TransportAnswer | undefined | Promise<TransportAnswer | undefined>;
   readonly deviceId?: string;
 }
 const registration = (globalThis as { __FY_SCENE__?: SceneRegistration }).__FY_SCENE__ ?? {};
@@ -90,8 +90,8 @@ const surfaces: SurfaceEntry[] = [
     }),
 ];
 renderSettingsShellOf(surfaces, {
-  answer: request => {
-    const registered = registration.answer?.(request);
+  answer: async request => {
+    const registered = await registration.answer?.(request);
     if (registered !== undefined) return registered;
     const scripted = (fleetReads as Record<string, unknown>)[`${request.method} ${request.path}`];
     return scripted !== undefined && params.get('real') === 'runtimes' ? json(scripted) : undefined;

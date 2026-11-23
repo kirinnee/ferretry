@@ -14,7 +14,7 @@ import { Loading } from '@ferretry/app/ui';
 import type { WardenAccount, WardenConfig, WardenConfigPatch, WardenConfigView } from '../../wire.ts';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { daemonSettingsHref, SettingSavesNote, SettingSaveBar } from '@ferretry/app';
+import { daemonSettingsHref, SettingFieldset, SettingSavesNote, SettingSaveBar } from '@ferretry/app';
 import { configChangeEffect } from '../../hooks/use-config-change-effect.ts';
 import { type PickerAccount, readAccountPickerCatalog } from '../../lib/account-picker.ts';
 import type { DaemonConnection } from '../../lib/machine.ts';
@@ -95,21 +95,26 @@ export function WardenConfigCard({
     >
       {/* Every control here (the three on/off boxes too) is held until the ONE Save bar below is pressed. */}
       <SettingSavesNote saves="on-save" />
-      <WardenSettingsForm
-        value={draft}
-        onChange={onChange}
-        jevKey={jevKey}
-        errors={errors}
-        loginOptions={loginOptions}
-        runtimes={runtimes}
-        {...(view.login === undefined ? {} : { login: view.login })}
-        {...(wardenMachineDefaultLogin(view) === undefined ? {} : { machineDefault: wardenMachineDefaultLogin(view) })}
-        {...(speedupsHref === undefined ? {} : { speedupsHref })}
-        {...(browserHref === undefined ? {} : { browserHref })}
-        {...(onNavigate === undefined ? {} : { onNavigate })}
-        {...(onUseStoredKey === undefined ? {} : { onUseStoredKey })}
-        namingKey={namingKey}
-      />
+      {/* Fields are off while a Save is in flight: the answer replaces the whole draft, so a keystroke made meanwhile would be erased. */}
+      <SettingFieldset saving={saving}>
+        <WardenSettingsForm
+          value={draft}
+          onChange={onChange}
+          jevKey={jevKey}
+          errors={errors}
+          loginOptions={loginOptions}
+          runtimes={runtimes}
+          {...(view.login === undefined ? {} : { login: view.login })}
+          {...(wardenMachineDefaultLogin(view) === undefined
+            ? {}
+            : { machineDefault: wardenMachineDefaultLogin(view) })}
+          {...(speedupsHref === undefined ? {} : { speedupsHref })}
+          {...(browserHref === undefined ? {} : { browserHref })}
+          {...(onNavigate === undefined ? {} : { onNavigate })}
+          {...(onUseStoredKey === undefined ? {} : { onUseStoredKey })}
+          namingKey={namingKey}
+        />
+      </SettingFieldset>
       <SettingSaveBar
         dirty={dirty}
         saving={saving}

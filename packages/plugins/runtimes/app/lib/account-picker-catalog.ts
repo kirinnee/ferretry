@@ -14,7 +14,7 @@
  * represented by the store's error slice and never converted into that empty array.
  */
 
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { type LoginStatus, LoginListSchema, LoginViewSchema } from '@ferretry/plugin-logins/contract';
 import { type LocalModels, RuntimeCatalogSchema, type RuntimeView } from '../../contract/index.ts';
 import type { RuntimesClient } from './client.ts';
@@ -28,7 +28,7 @@ export interface PickerAccount {
   readonly wrapper: string;
   /** The runtime's name, as the Runtimes tab shows it. */
   readonly displayName: string;
-  readonly kind: HarnessKey;
+  readonly kind: KnownHarnessKey;
   /** The login it uses, which is what its health is read from. */
   readonly credentialId: string;
   /** `null` = the harness's own default. */

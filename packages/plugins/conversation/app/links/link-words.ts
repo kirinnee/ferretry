@@ -3,15 +3,15 @@
  * `conversationFolder` is today's (`@ferretry/protocol` `conversation-import.ts`), which only the browser used.
  */
 
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 
-export type { HarnessKey };
+export type { KnownHarnessKey };
 
 /** A harness as a badge names it. */
-export const HARNESS_SHORT: Readonly<Record<HarnessKey, string>> = { 'claude-code': 'Claude', codex: 'Codex' };
+export const HARNESS_SHORT: Readonly<Record<KnownHarnessKey, string>> = { 'claude-code': 'Claude', codex: 'Codex' };
 
 /** The wire's harness id as one this app draws, or `undefined` for a harness it has no words for. */
-export const harnessKeyOf = (harness: string): HarnessKey | undefined =>
+export const harnessKeyOf = (harness: string): KnownHarnessKey | undefined =>
   harness === 'claude-code' || harness === 'codex' ? harness : undefined;
 
 /** Where a throwaway run works: the system's temp folders, and a harness's scratch folder anywhere. */

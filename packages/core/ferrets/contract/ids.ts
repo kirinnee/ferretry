@@ -35,10 +35,36 @@ export const PackIdSchema = z
   .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u)
   .transform(value => value as PackId);
 
-/** A harness key under `harnesses`: `claude-code`, `codex`. */
-export const HARNESS_KEYS = ['claude-code', 'codex'] as const;
-export const HarnessKeySchema = z.enum(HARNESS_KEYS);
-export type HarnessKey = z.infer<typeof HarnessKeySchema>;
+/**
+ * The harnesses this build ships (`claude-code`, `codex`). A type-level convenience only: it is NOT the list of
+ * harnesses a machine has. That list is the registry the harness plugins declare (the `Harness` providers under
+ * `harnesses`, asked through `FerretsApi.harnessKeys()`); a third plugin adds a key without editing this file.
+ */
+export const KNOWN_HARNESS_KEYS = ['claude-code', 'codex'] as const;
+export type KnownHarnessKey = (typeof KNOWN_HARNESS_KEYS)[number];
+
+/**
+ * The closed spelling of those two keys, for a consumer that has not been opened yet (runtimes plan U4b opens each plugin
+ * in its own step): its wire keeps rejecting any other key at its own boundary, exactly as before, and its code keeps
+ * the two-literal type. A consumer that has been opened uses {@link HarnessKeySchema} and `harnessFacts` instead.
+ */
+export const KnownHarnessKeySchema = z.enum(KNOWN_HARNESS_KEYS);
+/** Whether `key` is one of the two this build ships: the entry check where an open key meets a not-yet-opened consumer. */
+export const isKnownHarnessKey = (key: string): key is KnownHarnessKey =>
+  (KNOWN_HARNESS_KEYS as readonly string[]).includes(key);
+
+/**
+ * A harness key under `harnesses`: the harness plugin's id. Open: `KnownHarnessKey` keeps its literals (so `=== 'codex'`
+ * and autocompletion still work) and any other well-shaped string is a key too. Whether a key names a harness this
+ * machine has is decided by the registry, never by this type.
+ */
+export type HarnessKey = KnownHarnessKey | (string & {});
+
+/** A harness key's SHAPE (kebab-case, at most 40). Membership is the registry's to decide, at the point of use. */
+export const HarnessKeySchema = z
+  .string()
+  .regex(KEBAB_NAME, 'a harness key is lowercase letters, digits and -')
+  .max(40);
 
 /** A runner key under `runners`: `tmux`. */
 export const RUNNER_KEYS = ['tmux'] as const;

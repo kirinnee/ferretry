@@ -1,4 +1,4 @@
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 
 /**
  * THE START CHECK (docs/pack-mode.md): before the clean-up ferret starts, its runtime is checked with a bounded timeout.
@@ -18,7 +18,7 @@ import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 export interface PackProbeRequest {
   /** The runtime's wrapper NAME, as a start is asked for it; the probe resolves its launcher the way a start does. */
   readonly wrapper: string;
-  readonly harness: HarnessKey;
+  readonly harness: KnownHarnessKey;
   /** Absent: the runtime's own default model. */
   readonly model?: string | undefined;
   /**

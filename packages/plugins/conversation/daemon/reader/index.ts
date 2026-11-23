@@ -3,6 +3,7 @@ import { FileTranscriptReads, type TranscriptOpener } from './adapters/file-read
 import { TranscriptReadService, type TranscriptReadRedactor } from './lib/reads.ts';
 import { TranscriptImageReader } from './lib/session/image-reader.ts';
 import type { SessionTranscriptMessageTokenCodec } from './lib/session/message-token.ts';
+import type { TranscriptParser } from './lib/transcript/types.ts';
 import { type FerretExists, readerRoutes } from './routes.ts';
 
 export * from './lib/reads.ts';
@@ -27,6 +28,11 @@ export interface ReaderNeeds {
   readonly yieldToLoop?: () => Promise<void>;
   /** Sleeps; used only by a live follower, which no read path uses. Absent: returns at once. */
   readonly sleep?: (milliseconds: number) => Promise<void>;
+  /**
+   * The transcript parsers other harnesses declare, one per `HarnessFacts.transcriptFormat` id. `claude` and `codex`
+   * are built in; a harness whose format has no parser here is read through the entries fallback, never as another format.
+   */
+  readonly parsers?: () => readonly TranscriptParser[];
   /** The current instant as an ISO string, stamped on observed inputs. Absent: derived from `now`. */
   readonly instant?: () => string;
   readonly now: () => number;
@@ -47,9 +53,18 @@ export function registerReader(needs: ReaderNeeds) {
       sleep: needs.sleep ?? (async () => undefined),
     },
     entries,
+    needs.parsers,
   );
   const reads = new TranscriptReadService(files, files, needs.codec, needs.redactor, files, files);
-  const images = new TranscriptImageReader(files, files.runtime, FileTranscriptReads.pacedParsers(pacing));
+  // The image reader looks a parser up by id when it parses a record, so the declared parsers are asked for then (once).
+  let paced: ReturnType<typeof FileTranscriptReads.pacedParsers> | undefined;
+  const pacedParsers = new Proxy({} as ReturnType<typeof FileTranscriptReads.pacedParsers>, {
+    get: (_target, id) => {
+      paced ??= FileTranscriptReads.pacedParsers(pacing, needs.parsers?.() ?? []);
+      return typeof id === 'string' ? paced[id] : undefined;
+    },
+  });
+  const images = new TranscriptImageReader(files, files.runtime, pacedParsers);
   const handlers = readerRoutes({ reads, images, exists: needs.exists });
   return {
     reads,

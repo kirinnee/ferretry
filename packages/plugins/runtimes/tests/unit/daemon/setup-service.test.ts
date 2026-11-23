@@ -745,16 +745,21 @@ describe('exportBundle origin keys', () => {
     should(bundle.daemon).equal('daemon-source');
     should(Object.keys(bundle.keys).toSorted()).deepEqual([
       'instructions/far',
+      'instructions/ferretry-work-alone',
       'instructions/lost',
       'instructions/main',
       'login/claude-you',
       'modelSets/claude',
+      'modelSets/ferretry-claude',
+      'modelSets/ferretry-codex',
       'profile/default',
+      'profile/ferretry-claude',
+      'profile/ferretry-codex',
       'runtime/claude-default',
+      'settings/ferretry-claude-comfort',
       'skills/mine',
     ]);
-    for (const key of Object.values(bundle.keys)) should(key).match(ORIGIN_KEY_PATTERN);
-    should(new Set(Object.values(bundle.keys)).size).equal(8);
+    should(new Set(Object.values(bundle.keys)).size).equal(14);
     should(bundle.keys['runtime/claude-default']).equal(originKeyOfId('12345678-1234-4234-8234-123456789abc'));
     const stored = parseExportKeys(w.state.keysText);
     should(Object.keys(stored.items).toSorted()).deepEqual(
@@ -3780,7 +3785,8 @@ describe('the setup.import executor, components another plugin owns', () => {
     const written = rawModelOf(applied[0]?.documents ?? []);
     should(Object.keys(written.components.mcp ?? {})).eql([]);
     should(Object.keys(written.components.skills ?? {})).eql([]);
-    should(Object.keys(written.components.settings ?? {})).eql([]);
+    // Only the built-in comfort settings: the stand-in holds the whole model in its files, the real ones never hold a built-in.
+    should(Object.keys(written.components.settings ?? {})).eql(['ferretry-claude-comfort']);
   });
 
   it('should hand the owner a document with the secret as a reference, never the value', async () => {

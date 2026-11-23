@@ -100,6 +100,14 @@ function SavePage({ step }: { readonly step: StepHost }): ReactNode {
   }, [step]);
   return <p>pick something</p>;
 }
+/** Project setup's page (C59 O8-13): it commits like the real one and leaves where its project is. */
+function ProjectSetupPage({ step }: { readonly step: StepHost }): ReactNode {
+  useEffect(() => {
+    step.ready();
+    step.commit(async () => step.remember({ openLabel: 'Open Atlas', openHref: '/d/fy_daemon_a/projects/p1' }));
+  }, [step]);
+  return <p>folders</p>;
+}
 /** A page that keeps its host and calls it late, after the person has moved on. */
 const stale: { host: StepHost | undefined } = { host: undefined };
 function StalePage({ step }: { readonly step: StepHost }): ReactNode {
@@ -197,6 +205,7 @@ const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
   'fake-pack.after': step => <ReadyPage step={step} />,
   'fake-pack.legacy': () => <p>an old page that never calls ready</p>,
   'fake-pack.forgot': step => <ReadyPage step={step} />,
+  'projects.folders': step => <ProjectSetupPage step={step} />,
 };
 
 /**
@@ -318,6 +327,7 @@ function setup(options: {
       stepPanel('onboarding', 'agents-step'),
       stepPanel('claude-code', 'step'),
       stepPanel('codex', 'step'),
+      stepPanel('projects', 'step'),
     ],
   };
   const tree = (
@@ -1437,5 +1447,67 @@ describe('the AI picker reads only the scan the flow started (O8-15 B2)', () => 
     await settle();
     expect(chips()).toEqual(['claude']);
     expect(run.scans).toHaveLength(withReader);
+  });
+});
+
+describe('the flow ends in project setup (C59 O8-13)', () => {
+  const folders = {
+    plugin: 'projects',
+    id: 'folders',
+    title: 'Add your projects',
+    order: 90,
+    side: 'client' as const,
+    group: 'Projects',
+    stepHost: true as const,
+    state: 'pending' as const,
+  };
+  const atlas = (): Machine => {
+    const machine = fakeDaemon(A, 'Studio', { withFake: false });
+    return { ...machine, steps: [...machine.steps.map(step => ({ ...step, state: 'done' as const })), folders] };
+  };
+  const ledgerWithAppearance = (): Map<string, string> =>
+    new Map([
+      [CLIENT_LEDGER_KEY, JSON.stringify({ format: 1, steps: { 'onboarding.appearance': { at: AT, daemons: [A] } } })],
+    ]);
+
+  it('project setup is the LAST page, after the device pages, with its own bar segment and "Skip for now"', async () => {
+    view = await mount(setup({ machines: [atlas()] }).tree);
+    await settle();
+    expect(pageKey()).toBe('onboarding.appearance');
+    await next();
+    await settle();
+    expect(pageKey()).toBe('projects.folders');
+    expect(progressText()).toBe('Projects · page 1 of 1');
+    expect(buttonText('Skip for now')).toBeDefined();
+    expect(buttonText('Later')).toBeUndefined();
+  });
+
+  it('finishing it ends on the project: the way on is "Open <project>", not the machine', async () => {
+    view = await mount(setup({ machines: [atlas()], storage: ledgerWithAppearance() }).tree);
+    await settle();
+    expect(pageKey()).toBe('projects.folders');
+    await next();
+    await settle();
+    expect(view.container.querySelector('[data-flow-end]')).not.toBeNull();
+    expect(view.container.querySelector('[data-step-next]')?.textContent).toBe('Open Atlas');
+  });
+
+  it('Skip for now goes to the end page with the machine as the way on, and records later on this device', async () => {
+    const run = setup({ machines: [atlas()], storage: ledgerWithAppearance() });
+    view = await mount(run.tree);
+    await settle();
+    await click('Skip for now');
+    await settle();
+    expect(view.container.querySelector('[data-flow-end]')).not.toBeNull();
+    expect(view.container.querySelector('[data-step-next]')?.textContent).toBe('Open this machine');
+    const later = JSON.parse(run.store.get(CLIENT_LATER_KEY) ?? '{}') as { steps: object };
+    expect(Object.keys(later.steps)).toEqual(['projects.folders']);
+  });
+
+  it('resumes in project setup: with everything else answered, the run starts on it, not at machine setup', async () => {
+    view = await mount(setup({ machines: [atlas()], storage: ledgerWithAppearance() }).tree);
+    await settle();
+    expect(pageKey()).toBe('projects.folders');
+    expect(view.container.querySelector('[data-step-back]')).toBeNull();
   });
 });

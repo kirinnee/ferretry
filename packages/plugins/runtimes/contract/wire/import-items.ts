@@ -11,9 +11,9 @@
  * Naming something that is not there, or of a harness that is not being imported, leaves out nothing.
  */
 import { z } from 'zod';
-import type { HarnessKeySchema } from './shared.ts';
+import type { KnownHarnessKeySchema } from './shared.ts';
 
-type HarnessKey = z.infer<typeof HarnessKeySchema>;
+type KnownHarnessKey = z.infer<typeof KnownHarnessKeySchema>;
 
 /** What a harness has one of. */
 export const IMPORT_SINGLE_ITEMS = ['instructions', 'settings', 'env', 'model-set'] as const;
@@ -36,8 +36,8 @@ export const ImportItemIdSchema = z.string().regex(ITEM_ID_PATTERN, 'an import i
 export type ImportItemId = z.infer<typeof ImportItemIdSchema>;
 
 /** The id of a single item (`claude-code:instructions`). */
-export const importItemId = (harness: HarnessKey, kind: ImportSingleItem): ImportItemId => `${harness}:${kind}`;
+export const importItemId = (harness: KnownHarnessKey, kind: ImportSingleItem): ImportItemId => `${harness}:${kind}`;
 
 /** The id of a named item (`codex:skill:review`). */
-export const importNamedItemId = (harness: HarnessKey, kind: ImportNamedItem, name: string): ImportItemId =>
+export const importNamedItemId = (harness: KnownHarnessKey, kind: ImportNamedItem, name: string): ImportItemId =>
   `${harness}:${kind}:${name}`;

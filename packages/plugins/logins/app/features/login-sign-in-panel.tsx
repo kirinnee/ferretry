@@ -7,7 +7,7 @@
 import { Loading } from '@ferretry/app/ui';
 import { useCallback, useEffect, useState } from 'react';
 import type { LoginList } from '../../contract/index.ts';
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { readLogins } from '../lib/logins-api.ts';
 import { HARNESS_NAMES } from '../lib/logins-view.ts';
@@ -15,7 +15,7 @@ import { LoginSignIn } from './login-sign-in.tsx';
 
 export interface LoginSignInPanelProps {
   readonly client: LoginsClient;
-  readonly harness: HarnessKey;
+  readonly harness: KnownHarnessKey;
   /** The login's id. */
   readonly subject?: string;
   readonly pollMs?: number;

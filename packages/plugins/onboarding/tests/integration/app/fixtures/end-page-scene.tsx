@@ -8,6 +8,7 @@
  *            later = some of everything set up, one segment set up in part (Claude Code: one page left), three skipped
  *            on the machine and one on this device; clean = all set up, nothing skipped;
  *            device = only this device's own pages; bare = no start button (both screens' plugins paused)
+ *   &opens=1   project setup registered a project (C59 O8-13): the way on is "Open Atlas" (a project), not the machine
  *   &picture=none   Access places no panel in `onboarding.end` (it is off): the page has no picture column
  *
  * The picture is a STAND-IN with the real ferret's box (240 x 190, `.fy-ferret`): Onboarding imports nothing of Access, so
@@ -97,7 +98,15 @@ if (root !== null)
         >
           <div className="fy-sf-root" data-scene-ready="">
             <LivingBackground />
-            <EndPage daemon="studio-mac" onBack={noop} summary={STEPS[scene] ?? STEPS.later ?? []} picture={PICTURE} />
+            <EndPage
+              daemon="studio-mac"
+              {...(params.get('opens') === '1'
+                ? { opens: { label: 'Open Atlas', href: '/d/studio-mac/projects/atlas' } }
+                : {})}
+              onBack={noop}
+              summary={STEPS[scene] ?? STEPS.later ?? []}
+              picture={PICTURE}
+            />
           </div>
         </main>
       </div>

@@ -241,6 +241,7 @@ describe('planImport — a machine with both harnesses set up', () => {
     should(plan.profiles).deepEqual({
       'claude-default': {
         layers: [
+          'profile/ferretry-claude',
           'instructions/main',
           'mcp/github',
           'mcp/notes',
@@ -253,6 +254,7 @@ describe('planImport — a machine with both harnesses set up', () => {
       },
       'codex-default': {
         layers: [
+          'profile/ferretry-codex',
           'instructions/main',
           'mcp/github',
           'mcp/linear',
@@ -420,14 +422,14 @@ describe('planImport — logins (E4, E6, G5)', () => {
 });
 
 describe('planImport — nothing found (E5)', () => {
-  it('should make a plain Starter profile with only a model set', () => {
+  it('should make a plain Starter profile: the built-in profile of the harness under a model set', () => {
     // Act
     const plan = planImport([claude(), codex()], { digest });
 
     // Assert
     should(plan.profiles).deepEqual({
-      'claude-starter': { layers: ['modelSets/claude-models'] },
-      'codex-starter': { layers: ['modelSets/codex-models'] },
+      'claude-starter': { layers: ['profile/ferretry-claude', 'modelSets/claude-models'] },
+      'codex-starter': { layers: ['profile/ferretry-codex', 'modelSets/codex-models'] },
     });
     should(component(plan, 'modelSets', 'claude-models')).deepEqual({
       models: [FLEET_STARTER_MODELS.claude],
@@ -435,7 +437,7 @@ describe('planImport — nothing found (E5)', () => {
     });
     should(Object.keys(plan.runtimes)).deepEqual(['claude-starter', 'codex-starter']);
     should(plan.notes.map(note => note.text)).containEql(
-      'Nothing found. A plain Starter profile with only a model set. You can add to it later.',
+      "Nothing found. A plain Starter profile: Ferretry's autonomous defaults and a model set. You can add to it later.",
     );
   });
 
@@ -668,7 +670,7 @@ describe('planImport — Import again (O6)', () => {
     // Arrange
     const earlier = planImport([claude({ instructions: text('/c', 'mine') })], { digest });
     const merged = mergeImport(undefined, earlier);
-    const profileName = Object.keys(merged.profiles)[0] as string;
+    const profileName = 'claude-default';
     const tuned = parseAccountModel({
       ...merged,
       profiles: { ...merged.profiles, [profileName]: { ...merged.profiles[profileName], compactAt: 250_000 } },
@@ -753,7 +755,12 @@ describe('planImport — Import again (O6)', () => {
     // Assert
     should(again.profiles).deepEqual({
       'claude-default': {
-        layers: ['instructions/claude-instructions', 'modelSets/claude-models', 'skills/claude-skills'],
+        layers: [
+          'profile/ferretry-claude',
+          'instructions/claude-instructions',
+          'modelSets/claude-models',
+          'skills/claude-skills',
+        ],
       },
     });
   });
@@ -873,7 +880,9 @@ describe('planImport — one profile per harness (P7)', () => {
 
     // Assert — Codex gets its own instructions and model set, never Claude's instructions.
     should(again.profiles).deepEqual({
-      'codex-default': { layers: ['instructions/codex-instructions', 'modelSets/codex-models'] },
+      'codex-default': {
+        layers: ['profile/ferretry-codex', 'instructions/codex-instructions', 'modelSets/codex-models'],
+      },
     });
     should(again.runtimes).deepEqual({
       'codex-default': { credential: 'codex-you', profile: 'codex-default' },
@@ -897,7 +906,9 @@ describe('planImport — one profile per harness (P7)', () => {
     const again = planImport([claude(), codex()], { digest, existing: own, record: first.record, include: ['codex'] });
 
     // Assert
-    should(again.profiles).deepEqual({ 'codex-starter': { layers: ['modelSets/codex-models-2'] } });
+    should(again.profiles).deepEqual({
+      'codex-starter': { layers: ['profile/ferretry-codex', 'modelSets/codex-models-2'] },
+    });
   });
 
   it('should still extend the ONE shared profile a record written before P7 names', () => {
@@ -967,6 +978,7 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
     should(afterCodex.profiles['claude-default']?.layers).containEql('instructions/claude-instructions');
     should(afterCodex.profiles['claude-default']?.layers).containEql('skills/claude-skills');
     should(afterCodex.profiles['codex-default']?.layers).deepEqual([
+      'profile/ferretry-codex',
       'instructions/codex-instructions',
       'skills/codex-skills',
       'modelSets/codex-models',

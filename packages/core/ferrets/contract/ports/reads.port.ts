@@ -1,7 +1,7 @@
 import type { FerretId } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import type { FerretState, FerretSummary, HarnessKey, PackId } from '../ids.ts';
-import type { ConversationImport, SitrepLine } from '../kinds.ts';
+import type { ConversationImport, HarnessFacts, SitrepLine } from '../kinds.ts';
 import type { HarnessHistorySource } from '../history.ts';
 
 /**
@@ -84,6 +84,12 @@ export interface ReadsApi {
   children(ferret: FerretId): readonly FerretId[];
   /** The harness keys currently provided under `harnesses` (a plugin off is absent). */
   harnesses(): readonly HarnessKey[];
+  /**
+   * What the harness `key` says about itself as data (`Harness.facts`): the ONE place a caller learns a harness's
+   * instruction file, skills folder, MCP format, display name, transcript parser id and catalog half. `undefined` when no
+   * installed harness has that key: a caller refuses by name and never falls back to another harness.
+   */
+  harnessFacts(key: HarnessKey): HarnessFacts | undefined;
   /**
    * Additive (shared history): asks the harness `harness` to copy one conversation of the owner's own history into its
    * shared pool (`Harness.importConversation`). Conversation's alone (it writes no other plugin's state: the harness does);

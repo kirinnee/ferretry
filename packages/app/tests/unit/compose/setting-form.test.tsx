@@ -5,7 +5,14 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { SettingField, SettingSaveBar } from '../../../src/compose/setting-form.tsx';
+import {
+  SettingField,
+  SettingFieldset,
+  SettingSaveBar,
+  SettingStatus,
+  UnsavedChangesGuard,
+  useAskBeforeLeaving,
+} from '../../../src/compose/setting-form.tsx';
 import { SettingGroup, SettingRow } from '../../../src/compose/setting-row.tsx';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
@@ -126,5 +133,113 @@ describe('SettingGroup saves', () => {
       </SettingGroup>,
     );
     expect(mounted.container.querySelector('[data-setting-saves-note]')).toBeNull();
+  });
+});
+
+/** A "Back" the way the shell draws one: it leaves through the guard. */
+function Leave({ onLeave }: { readonly onLeave: () => void }) {
+  const leave = useAskBeforeLeaving();
+  return (
+    <button type="button" onClick={() => leave(onLeave)}>
+      Leave
+    </button>
+  );
+}
+
+describe('UnsavedChangesGuard', () => {
+  it('lets a clean page leave at once, with no question', async () => {
+    let left = 0;
+    mounted = await mount(
+      <UnsavedChangesGuard>
+        <SettingSaveBar dirty={false} onSave={noop} onDiscard={noop} />
+        <Leave onLeave={() => (left += 1)} />
+      </UnsavedChangesGuard>,
+    );
+    await interact(() => button(mounted?.container as HTMLElement, 'Leave').click());
+    expect(left).toBe(1);
+    expect(document.body.textContent).not.toContain('Discard unsaved changes?');
+  });
+
+  it('asks before leaving a page whose Save bar is dirty; Keep editing stays, Discard leaves', async () => {
+    let left = 0;
+    mounted = await mount(
+      <UnsavedChangesGuard>
+        <SettingSaveBar dirty onSave={noop} onDiscard={noop} />
+        <Leave onLeave={() => (left += 1)} />
+      </UnsavedChangesGuard>,
+    );
+    await interact(() => button(mounted?.container as HTMLElement, 'Leave').click());
+    expect(left, 'nothing left yet').toBe(0);
+    expect(document.body.textContent).toContain('Discard unsaved changes?');
+    await interact(() => button(document.body, 'Keep editing').click());
+    expect(left, 'Keep editing stays').toBe(0);
+    expect(document.body.textContent).not.toContain('Discard unsaved changes?');
+    await interact(() => button(mounted?.container as HTMLElement, 'Leave').click());
+    await interact(() => button(document.body, 'Discard').click());
+    expect(left, 'Discard leaves').toBe(1);
+  });
+
+  it('forgets a form that is gone: leaving after it unmounts asks nothing', async () => {
+    let left = 0;
+    mounted = await mount(
+      <UnsavedChangesGuard>
+        <SettingSaveBar dirty onSave={noop} onDiscard={noop} />
+        <Leave onLeave={() => (left += 1)} />
+      </UnsavedChangesGuard>,
+    );
+    await mounted.render(
+      <UnsavedChangesGuard>
+        <Leave onLeave={() => (left += 1)} />
+      </UnsavedChangesGuard>,
+    );
+    await interact(() => button(mounted?.container as HTMLElement, 'Leave').click());
+    expect(left).toBe(1);
+  });
+
+  it('is a plain pass-through outside a guard', async () => {
+    let left = 0;
+    mounted = await mount(
+      <>
+        <SettingSaveBar dirty onSave={noop} onDiscard={noop} />
+        <Leave onLeave={() => (left += 1)} />
+      </>,
+    );
+    await interact(() => button(mounted?.container as HTMLElement, 'Leave').click());
+    expect(left).toBe(1);
+  });
+});
+
+describe('SettingFieldset', () => {
+  it('turns every control in it off while a Save is in flight, and back on after', async () => {
+    mounted = await mount(
+      <SettingFieldset saving>
+        <input aria-label="Size" />
+      </SettingFieldset>,
+    );
+    const fieldset = must(mounted.container.querySelector('fieldset'), 'the fieldset');
+    expect(fieldset.disabled).toBe(true);
+    await mounted.render(
+      <SettingFieldset saving={false}>
+        <input aria-label="Size" />
+      </SettingFieldset>,
+    );
+    expect(must(mounted.container.querySelector('fieldset'), 'the fieldset').disabled).toBe(false);
+  });
+});
+
+describe('SettingStatus', () => {
+  it('says a failure as an alert and a success as a status, in the row it sits in', async () => {
+    mounted = await mount(
+      <SettingGroup label="Prompts" saves="now">
+        <SettingRow name="Ask">
+          <SettingStatus tone="err">The machine refused it.</SettingStatus>
+        </SettingRow>
+      </SettingGroup>,
+    );
+    const alert = must(mounted.container.querySelector('[role=alert]'), 'the alert');
+    expect(alert.textContent).toBe('The machine refused it.');
+    expect(alert.closest('[data-setting-row]')?.getAttribute('data-setting-row')).toBe('Ask');
+    await mounted.render(<SettingStatus tone="ok">Ask: now on.</SettingStatus>);
+    expect(must(mounted.container.querySelector('[role=status]'), 'the status').textContent).toBe('Ask: now on.');
   });
 });

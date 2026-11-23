@@ -1,5 +1,6 @@
 import type { ConfigCollectionDef, FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import { isKnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { CatalogSkillProvider } from '@ferretry/plugin-catalogs/contract';
 import {
   type FerretSkills,
@@ -105,7 +106,8 @@ export default implementDaemon(manifest, {
 
     const ferretView = async (id: string): Promise<FerretSkillsInventory | undefined> => {
       const ferret = await ferrets.get(id as FerretId);
-      if (ferret === undefined) return undefined;
+      // A ferret on a harness this plugin has no skills layout for has no inventory here: never read as another harness.
+      if (ferret === undefined || !isKnownHarnessKey(ferret.harness)) return undefined;
       const work = {
         files: new RootSkillFiles(kernel.roots.root('work', { ferret: ferret.id }), ferret.folder),
         base: ferret.folder,
@@ -217,7 +219,7 @@ export default implementDaemon(manifest, {
             id: 'skills',
             item: {
               parts: async spec =>
-                spec.runtime === undefined
+                spec.runtime === undefined || !isKnownHarnessKey(spec.harness)
                   ? []
                   : await skillParts(
                       items(),

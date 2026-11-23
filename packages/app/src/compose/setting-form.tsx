@@ -17,6 +17,9 @@
 import { type ReactNode, useId } from 'react';
 import { Button } from '../ui/primitives.tsx';
 import { cn } from '../ui/lib/class-names.ts';
+import { useReportUnsaved } from './unsaved-guard.tsx';
+
+export * from './unsaved-guard.tsx';
 
 /** What a form's Save bar says, as one word: what `data-state` carries and a test reads. */
 export type SettingFormState = 'clean' | 'dirty' | 'saving' | 'saved' | 'failed';
@@ -79,6 +82,8 @@ export function SettingSaveBar(props: SettingSaveBarProps) {
     onDiscard,
     children,
   } = props;
+  // The shell's guard asks before leaving a page whose form is dirty; the bar reports it, so no page wires it.
+  useReportUnsaved(dirty);
   const state = stateOf(props);
   const words = state === 'failed' ? error : state === 'saved' ? savedWords : STATE_WORDS[state];
   return (
@@ -181,5 +186,57 @@ export function SettingSavesNote({ saves }: { readonly saves: SettingSaves }) {
     <p data-setting-saves-note="" className="m-0 mb-1 px-1 text-meta leading-tight text-muted">
       {SAVES_WORDS[saves]}
     </p>
+  );
+}
+
+/**
+ * The fields of ONE form. While its Save is in flight every control in it is disabled (a native `fieldset disabled`), so nothing typed
+ * during a Save can be erased by the answer that replaces the draft. Wrap a form's controls in it and give it the Save bar's `saving`.
+ */
+export function SettingFieldset({
+  saving,
+  children,
+  className,
+}: {
+  readonly saving: boolean;
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  return (
+    <fieldset
+      disabled={saving}
+      aria-busy={saving || undefined}
+      data-setting-fieldset=""
+      className={cn('m-0 min-w-0 border-0 p-0', className)}
+    >
+      {children}
+    </fieldset>
+  );
+}
+
+/**
+ * What an INSTANT setting (a switch) says about its own last change, in its own row, next to the control: "now on", or the sentence that
+ * says why it did not change. Never a line somewhere else on a page where a phone cannot see it.
+ */
+export function SettingStatus({
+  tone,
+  children,
+  marks,
+}: {
+  readonly tone: 'ok' | 'err';
+  readonly children: ReactNode;
+  readonly marks?: Readonly<Record<`data-${string}`, string>>;
+}) {
+  return (
+    <div className="px-panel pb-2">
+      <p
+        role={tone === 'err' ? 'alert' : 'status'}
+        data-setting-status={tone}
+        {...marks}
+        className={cn('m-0 break-words text-meta leading-tight', tone === 'err' ? 'text-err' : 'text-muted')}
+      >
+        {children}
+      </p>
+    </div>
   );
 }
