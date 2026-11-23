@@ -196,6 +196,12 @@ export function buildLoginsDaemon() {
           test: (subject, consent) => providerProbe.test(subject, consent),
         },
         listCache: { now: () => clock.nowMs(), freshMs: CREDENTIAL_LIST_FRESH_MS },
+        // What a row's "Used by" shows is what Runtimes lists (files plus derived); no provider keeps the files' answer.
+        shownUsers: async logins => {
+          const users = hooks.provider(LoginsUsedBy, 'runtimes');
+          if (users === 'unavailable' || users.listed === undefined) throw new Error('nothing lists the runtimes');
+          return await users.listed(logins);
+        },
         // Usage reads the provider quotas: an environment login's last reading rides on its row (none when it is off).
         providerQuota: {
           peek: id => {

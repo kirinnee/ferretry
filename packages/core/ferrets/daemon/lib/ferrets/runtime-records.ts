@@ -1,4 +1,10 @@
-import { type FerretRuntimeRecord, type FerretRuntimeRename, recordedHarnessOf } from '../../../contract/index.ts';
+import {
+  type FerretRuntimeRecord,
+  type FerretRuntimeRename,
+  recordedHarnessOf,
+  type RuntimeStartResolution,
+} from '../../../contract/index.ts';
+import { ok, type Result } from '@ferretry/std';
 import type { FerretsCore } from './core.ts';
 
 /** Every ferret and the runtime it launched as (`FerretsApi.runtimeRecords`): the record, with the session config's words. */
@@ -50,4 +56,27 @@ export async function repointRuntime(
     }
   }
   return moved;
+}
+
+/** The refusal's sentence when a derived runtime's name moved off the login a ferret started on: it picks a runtime. */
+const loginGoneSentence = (login: string): string =>
+  `the login ${login} this ferret used was removed or renamed; pick a runtime to continue`;
+
+/**
+ * The harness and login a relaunch spends, from what Runtimes resolved. A DERIVED runtime (made from a ready login, no
+ * file holds the name) is only that login's: if its name now answers on ANOTHER login than the one the ferret started on
+ * (that login was removed or renamed), a relaunch would silently spend a different account, so it is refused. An explicit
+ * runtime file keeps its own say: re-pointing it is the owner's act, and a ferret on it follows the file as it always did.
+ */
+export function accountOf<Failure>(
+  answer: Extract<RuntimeStartResolution, { ok: true }>,
+  stored: string | undefined,
+  refuse: (reason: string) => Result<never, Failure>,
+): Result<
+  { readonly harness: Extract<RuntimeStartResolution, { ok: true }>['harness']; readonly login: string },
+  Failure
+> {
+  if (answer.derived === true && stored !== undefined && stored !== answer.login)
+    return refuse(loginGoneSentence(stored));
+  return ok({ harness: answer.harness, login: answer.login });
 }

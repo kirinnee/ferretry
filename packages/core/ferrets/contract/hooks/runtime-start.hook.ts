@@ -5,7 +5,13 @@ import type { RuntimeModelCatalog } from '../view/runtime-control.ts';
 
 /** What a start needs of the runtime it names: the harness it runs and the login it spends. */
 export type RuntimeStartResolution =
-  | { readonly ok: true; readonly harness: z.infer<typeof HarnessKeySchema>; readonly login: string }
+  | {
+      readonly ok: true;
+      readonly harness: z.infer<typeof HarnessKeySchema>;
+      readonly login: string;
+      /** The runtime is derived from its login (no runtime file holds the name), so the name follows whichever login now derives it. */
+      readonly derived?: true;
+    }
   | { readonly ok: false; readonly sentence: string };
 
 /** Whether a login may be spent by a launch now: yes, or the plain sentence naming the login and why not. */
