@@ -8,7 +8,7 @@
  * the hyper media completely", and "most of them should not have gradient background". So each style fills every slot of the
  * component style contract with its own idiom, not with a padding tweak:
  *
- *   Retro = an early-2000s desktop. A dithered page (a 4px dot lattice, no wash, no grain); an etched (groove) rule under
+ *   Retro = an early-2000s desktop. A dithered page (a coarse 8px dot lattice, no wash, no grain); an etched (groove) rule under
  *           headings, a sunken (inset) code frame, a double-rule note, a full grid table with a raised header row; a spinner
  *           that is a SEGMENTED ring (twelve ticks, a three-tick arc) stepping one tick at a time; a window manager's quick,
  *           unbouncy motion and a 1px press; hypermedia as filled windows with a title band. No gradient on any button:
@@ -221,7 +221,7 @@ for (const style of ['retro', 'pixel'] as const)
               read.layers.slice(1).filter(layer => /gradient\(/u.test(layer)),
               'no wash under it',
             ).toEqual([]);
-            expect(read.bgSize.split(',')[0]).toBe(style === 'retro' ? '4px 4px' : '8px 8px');
+            expect(read.bgSize.split(',')[0]).toBe('8px 8px');
             expect(read.bgRepeat.split(',')[0]).toBe('repeat');
             expect(Number(read.grain.opacity), 'no grain').toBe(0);
             expect(read.panelTexture).toBe('none');
@@ -285,7 +285,7 @@ for (const style of ['retro', 'pixel'] as const)
 
 /**
  * The pattern is really PAINTED, not only declared: with the specimen's own opaque page cover taken off, a 96 x 96 corner of the
- * page screenshot (device scale 1) is read pixel by pixel. Retro: a dot lattice at a 4px period (every 4 x 4 cell holds the same
+ * page screenshot (device scale 1) is read pixel by pixel. Retro: a coarse dot lattice at an 8px period (every 8 x 8 cell holds the same
  * few ink pixels); Pixel: 1px rules every 8px in both directions (12 vertical rules in 96px). Each step from the ground is
  * visible but quiet (a few levels of 255, never a wash).
  */
@@ -329,13 +329,13 @@ describe('the field pattern is painted', () => {
             let span = 0;
             for (const level of counts.keys()) span = Math.max(span, Math.abs(level - ground));
             const ink = (x: number, y: number) => lum(x, y) !== ground;
-            // Retro: every 4x4 cell holds ink, and the cells are the same (a lattice at a 4px period).
+            // Retro: every 8x8 cell holds ink, and the cells are the same (a coarse lattice at an 8px period).
             const cells = new Set<string>();
             let emptyCell = false;
-            for (let cy = 0; cy < 96; cy += 4)
-              for (let cx = 0; cx < 96; cx += 4) {
+            for (let cy = 0; cy < 96; cy += 8)
+              for (let cx = 0; cx < 96; cx += 8) {
                 let key = '';
-                for (let y = 0; y < 4; y += 1) for (let x = 0; x < 4; x += 1) key += ink(cx + x, cy + y) ? '1' : '0';
+                for (let y = 0; y < 8; y += 1) for (let x = 0; x < 8; x += 1) key += ink(cx + x, cy + y) ? '1' : '0';
                 if (!key.includes('1')) emptyCell = true;
                 cells.add(key);
               }
@@ -354,7 +354,7 @@ describe('the field pattern is painted', () => {
           expect(painted.span).toBeGreaterThanOrEqual(6);
           expect(painted.span).toBeLessThanOrEqual(120);
           if (style === 'retro') {
-            expect(painted.emptyCell, 'every 4px cell carries a dot').toBe(false);
+            expect(painted.emptyCell, 'every 8px cell carries a dot').toBe(false);
             expect(painted.latticeCells, 'one lattice: every cell identical').toBe(1);
           } else {
             expect(painted.columns.length, '12 rules across 96px (one per 8px)').toBe(12);
