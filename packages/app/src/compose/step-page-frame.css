@@ -2,7 +2,8 @@
    StepPageFrame + StepProgress (compose/step-page-frame.tsx, step-progress.tsx): the one page of a stepper.
    r11 O2 layout. At >= 900px of the frame's own width: two columns, the choices 44% (360..480px) and the demo the
    rest (>= 320px, sticky to the top), 40px apart, on a page up to 1080px wide. A page with no demo draws no column and
-   keeps the 880px page. Below 900px the demo sits above the body, <= 140px tall.
+   keeps the 880px page. Below 900px the demo sits under the heading and above the body, <= 140px tall; a PINNED demo
+   (`<StepDemo pinned>`) keeps the heading and the demo on screen over an opaque, full-width strip (see THE PIN).
    Buttons are FIXED: the footer's Back / Later / Next are each 8.5rem (136px) wide, 44px tall, 12px apart, right
    aligned; on a phone (< 600px of the frame) the three are equal thirds of a sticky row above the safe area. Any
    Button inside the body is the same size and 12px from its neighbour (one rule here, so no plugin page edits).
@@ -12,7 +13,8 @@
 .fy-spf {
   --spf-button-w: 8.5rem;
   --spf-button-h: 44px;
-  container-type: inline-size;
+  /* Named, so a page's preview can ask "is the heading stacked over me?" (the frame under 900px) from inside its own container. */
+  container: fy-spf / inline-size;
   display: flex;
   flex-direction: column;
   min-height: 100%;
@@ -72,7 +74,14 @@
 .fy-spf__body :has(> .kt-btn + .kt-btn) {
   gap: 12px;
 }
-/* On a phone the demo comes first and is short; a column with nothing in it is not drawn. */
+/* THE PIN: the heading and the demo, one block above the body. On a phone the demo comes right under the heading and is short; a
+   column with nothing in it is not drawn. */
+.fy-spf__pin {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
 .fy-spf__demo {
   align-items: center;
   background: var(--surface-2);
@@ -82,38 +91,82 @@
   justify-content: center;
   max-height: 140px;
   min-width: 0;
-  order: -1;
   overflow: hidden;
 }
 .fy-spf__demo:empty {
   display: none;
 }
+/* ON A PHONE a PINNED demo (`<StepDemo pinned>`: Appearance, Voice) keeps the heading and the demo on screen while the body scrolls
+   under them. The pin is OPAQUE (the page's own fill) and runs the page's FULL width, gutters included (it bleeds out over the page's
+   16px padding), and starts at the very top (0, no gap above it), so nothing of the body shows around or behind it; z-index 6 puts it
+   over every card (a card's own layer, a kit's hard shadow). A soft shadow under it reads as the body passing under. A screen under
+   560px tall (a phone on its side) pins nothing: the strip and the footer would leave no room for the choices. */
+@container (max-width: 899.98px) {
+  /* A KEY (Tab, Home, End, an arrow) scrolls a control into view; without a margin it came to rest UNDER the pin or the pinned footer.
+     The bottom margin is the footer (a row of 44px buttons that may wrap at Larger text, its padding, the safe area, a gap); the top
+     one (below) is the pin's whole reach (padding, a heading of up to three lines, the 140px demo, gaps; it grows with the text size). */
+  .fy-spf__page:has([data-step-demo-pinned])
+    .fy-spf__body
+    :is(input, button, a, select, textarea, summary, [tabindex], .fy-cc__card) {
+    scroll-margin-block-end: calc(104px + env(safe-area-inset-bottom, 0px));
+  }
+  @media (min-height: 560px) {
+    .fy-spf__pin:has([data-step-demo-pinned]) {
+      background: var(--bg);
+      box-shadow: 0 8px 14px -8px var(--shadow-lg-2);
+      inset-block-start: 0;
+      margin-inline: -16px;
+      padding: 8px 16px 12px;
+      position: sticky;
+      z-index: 6;
+    }
+    .fy-spf__page:has([data-step-demo-pinned])
+      .fy-spf__body
+      :is(input, button, a, select, textarea, summary, [tabindex], .fy-cc__card) {
+      scroll-margin-block-start: calc(240px + 60px * var(--fy-text-scale, 1));
+    }
+  }
+}
 @container (min-width: 900px) {
+  /* Beside the choices: the page is a grid (progress and heading across, then the choices 44% and the demo, sticky). The pin is
+     just a name for the heading and the demo, so it draws no box of its own. A page with no demo keeps the single column. */
   .fy-spf__page:has(.fy-spf__demo:not(:empty)) {
+    column-gap: 40px;
+    display: grid;
+    grid-template-columns: clamp(360px, 44%, 480px) minmax(320px, 1fr);
+    /* The choices' row takes the room left over (a block with `margin-block: auto` centres in it, as it did in the column). */
+    grid-template-rows: auto 1fr;
     max-width: 1080px;
+    row-gap: 20px;
   }
-  .fy-spf__main {
-    align-items: flex-start;
-    flex-direction: row;
-    gap: 40px;
+  .fy-spf__page:has(> .fy-sp-progress):has(.fy-spf__demo:not(:empty)) {
+    grid-template-rows: auto auto 1fr;
   }
-  .fy-spf__body {
-    flex: 1 1 0;
+  .fy-spf__page:has(.fy-spf__demo:not(:empty)) > .fy-sp-progress,
+  .fy-spf__page:has(.fy-spf__demo:not(:empty)) .fy-spf__head {
+    grid-column: 1 / -1;
   }
-  .fy-spf__main:has(> .fy-spf__demo:not(:empty)) > .fy-spf__body {
-    flex: 0 1 44%;
-    max-inline-size: 480px;
-    min-inline-size: 360px;
+  .fy-spf__page:has(.fy-spf__demo:not(:empty)) .fy-spf__main {
+    grid-column: 1;
+  }
+  .fy-spf__pin {
+    display: contents;
   }
   .fy-spf__demo {
-    align-self: flex-start;
-    flex: 1 1 0;
-    inset-block-start: 16px;
+    align-self: start;
+    grid-column: 2;
     max-height: none;
     min-height: 160px;
     min-inline-size: 320px;
-    order: 0;
-    position: sticky;
+    order: 1; /* after the choices in the grid, so both sit on one row */
+  }
+  /* Sticky only on a screen tall enough to keep it AND the choices in view: under 560px tall (a wide phone on its side, a short
+     window) the demo scrolls away with the page, the same guard the stacked layout has. */
+  @media (min-height: 560px) {
+    .fy-spf__demo {
+      inset-block-start: 16px;
+      position: sticky;
+    }
   }
 }
 

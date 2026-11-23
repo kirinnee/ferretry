@@ -7,7 +7,7 @@
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { FerretName } from '../features/header/name-panel.tsx';
 import { ActionsPanel } from '../features/header/actions-panel.tsx';
-import { FerretStatus } from '../features/header/status-panel.tsx';
+import { FerretLifecycle, FerretStatus } from '../features/header/status-panel.tsx';
 import '../features/header/ferret-actions.css';
 import type { LiveFerretsClient } from '../lib/client.ts';
 import { useFerret } from '../lib/ferret-read.ts';
@@ -24,9 +24,14 @@ export const createNamePanel =
 export const createStatusPanel =
   (client: LiveFerretsClient): AppComponent<PanelProps> =>
   ({ subject }) => {
-    const { read } = useFerret(client, subject);
+    const { read, reload } = useFerret(client, subject);
     const compact = useLayoutMode() === 'drawer';
-    return read.kind === 'ready' ? <FerretStatus compact={compact} ferret={read.ferret} /> : null;
+    return read.kind === 'ready' ? (
+      <span className="fy-ferret-statusline">
+        <FerretStatus compact={compact} ferret={read.ferret} />
+        <FerretLifecycle client={client} compact={compact} ferret={read.ferret} reload={reload} />
+      </span>
+    ) : null;
   };
 
 export const createActionsPanel =

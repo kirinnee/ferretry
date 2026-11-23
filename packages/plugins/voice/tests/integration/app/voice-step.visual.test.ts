@@ -20,7 +20,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   arrowWalkRings,
+  demoScroll,
   edgeRings,
+  pinnedStrip,
+  previewFit,
   ringContrastOf,
   sceneBuilder,
   sharedChromium,
@@ -79,7 +82,7 @@ const THEMES = ['studio-light', 'studio-dark'] as const;
 type Tab = Awaited<ReturnType<Awaited<ReturnType<typeof sharedChromium>>['newPage']>>;
 
 async function open(
-  viewport: (typeof VIEWPORTS)[number],
+  viewport: { readonly name: string; readonly width: number; readonly height: number; readonly phone: boolean },
   theme: string,
   query: string,
   waitFor: string,
@@ -190,6 +193,10 @@ interface WaveProbe {
   /** The words' clip at the loop's start and at 5 s in (live: written by 3 s; after Stop: by 4 s). */
   clipStart: string;
   clipLate: string;
+  /** The picture is in its phone strip (the frame under 900 px, where the heading stacks over it): the words arrive by a fade there, never a clip. */
+  narrow: boolean;
+  opacityStart: string;
+  opacityLate: string;
 }
 /**
  * Does the O8 picture really PLAY? Reads the browser's own animation list for the picture (a picture whose animation CSS was removed
@@ -206,12 +213,18 @@ const probeWave = (tab: Tab): Promise<WaveProbe> =>
     const clip = (): string => getComputedStyle(text).clipPath;
     let clipStart = 'none';
     let clipLate = 'none';
+    let opacityStart = '0';
+    let opacityLate = '1';
     if (own !== undefined) {
       own.pause();
       own.currentTime = 0;
       clipStart = clip();
       own.currentTime = 5_000;
       clipLate = clip();
+      own.currentTime = 0;
+      opacityStart = getComputedStyle(text).opacity;
+      own.currentTime = 5_000;
+      opacityLate = getComputedStyle(text).opacity;
     }
     return {
       kind: root.dataset.voiceDemo ?? '',
@@ -220,6 +233,9 @@ const probeWave = (tab: Tab): Promise<WaveProbe> =>
       states,
       clipStart,
       clipLate,
+      narrow: (root.closest('.fy-spf') as HTMLElement).getBoundingClientRect().width < 900,
+      opacityStart,
+      opacityLate,
     };
   });
 
@@ -227,9 +243,24 @@ const expectWavePlays = (probe: WaveProbe) => {
   const kind = probe.kind;
   expect(probe.names).toContain('fy-wd-envelope');
   expect(probe.names).toContain('fy-wd-wobble');
-  expect(probe.names).toContain(kind === 'live' ? 'fy-wd-type-live' : 'fy-wd-type-after');
+  expect(probe.names).toContain(
+    probe.narrow
+      ? kind === 'live'
+        ? 'fy-wd-words-live'
+        : 'fy-wd-words-after'
+      : kind === 'live'
+        ? 'fy-wd-type-live'
+        : 'fy-wd-type-after',
+  );
   if (probe.shape) expect(probe.names).toContain('fy-wd-grow');
   for (const state of probe.states) expect(['running', 'finished']).toContain(state);
+  // A phone's strip: the words are never clipped; they are faded out at the start and in at 5 s.
+  if (probe.narrow) {
+    expect(probe.clipStart).toBe('none');
+    expect(probe.opacityStart).toBe('0');
+    expect(probe.opacityLate).toBe('1');
+    return;
+  }
   // Words: hidden (all clipped away from the right) at the start, whole at 5 s.
   expect(probe.clipStart).toMatch(/inset\(0(px)? 100%/);
   expect(probe.clipLate).toMatch(/inset\(0(px)?\)|inset\(0(px)? 0(px)? 0(px)? 0(px)?\)|none/);
@@ -1041,3 +1072,141 @@ describe('O8 item 8: test your audio', () => {
     }
   });
 });
+
+/**
+ * O9 items 1 and 2, the Voice half: on a phone the heading and the demo are ONE pinned strip (the same frame layout Appearance uses),
+ * opaque and as wide as the screen, with nothing of the page showing behind or around it at the top, halfway down and at the end; the
+ * demo's words are never cut at the strip's edge. At 1440 the demo sits right of the cards and stays pinned. Every shot is kept when
+ * `FY_VOICE_STEP_SHOTS_DIR` is set.
+ */
+describe('the pinned Voice strip (O9)', () => {
+  const PHONE = { name: '390', width: 390, height: 844, phone: true } as const;
+  const WIDE = { name: '1440', width: 1_440, height: 900, phone: false } as const;
+  for (const theme of THEMES) {
+    for (const where of ['top', 'mid', 'bottom'] as const) {
+      it(`pins the heading and the demo over an opaque strip (390 ${theme}, scrolled to ${where})`, async () => {
+        const { tab, close } = await open(PHONE, theme, VOICE, CARD);
+        try {
+          // Every engine open, so the page is long enough to scroll under the strip.
+          await tab.locator('.fy-voice-more summary').click();
+          await tab.waitForTimeout(300);
+          const strip = await pinnedStrip(tab, where);
+          await tab.waitForTimeout(150);
+          expect(strip.scrollable, 'the page scrolls').toBeGreaterThan(200);
+          expect(strip.opaque, 'the strip is opaque').toBe(true);
+          expect(strip.pin.left, 'the strip starts at the screen edge').toBeLessThanOrEqual(0.5);
+          expect(strip.pin.right, 'the strip runs to the other edge').toBeGreaterThanOrEqual(strip.screenWidth - 0.5);
+          expect(strip.headingInside, 'the heading is inside the strip').toBe(true);
+          expect(strip.behind, 'nothing of the page shows over the strip').toEqual([]);
+          expect(strip.above, 'nothing of the page shows above the strip').toEqual([]);
+          expect(strip.spill, 'the demo words fit the demo').toEqual([]);
+          if (where !== 'top') expect(strip.pin.top, 'the strip is pinned at the top').toBeLessThanOrEqual(0.5);
+          // The words are written 22%..88% (live) or 66%..88% (after Stop) into the 6 s loop: stand on 4.6 s so the shot shows them.
+          await tab.evaluate(() => {
+            for (const animation of document.getAnimations()) {
+              animation.pause();
+              animation.currentTime = 4_600;
+            }
+          });
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `390-${theme}-voice-pinned-${where}.png`) });
+        } finally {
+          await close();
+        }
+      });
+    }
+    it(`keeps the demo to the right and pinned (1440 ${theme})`, async () => {
+      const { tab, close } = await open(WIDE, theme, VOICE, CARD);
+      try {
+        const g = await tab.evaluate(() => {
+          const demo = (document.querySelector('.fy-spf__demo') as HTMLElement).getBoundingClientRect();
+          const card = (document.querySelector('.fy-engine-card') as HTMLElement).getBoundingClientRect();
+          return {
+            demoX: demo.x,
+            cardRight: card.right,
+            position: getComputedStyle(document.querySelector('.fy-spf__demo') as Element).position,
+          };
+        });
+        expect(g.demoX).toBeGreaterThan(g.cardRight + 32);
+        expect(g.position).toBe('sticky');
+        await standOnWords(tab);
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `1440-${theme}-voice.png`) });
+      } finally {
+        await close();
+      }
+    });
+  }
+});
+
+/**
+ * O9 round 2 (jovanna's CHANGES on 746a92aaf9). 1: wherever the heading and the preview STACK (the frame under 900 px), the preview
+ * is the compact one and sits whole inside its 140 px slot, at every width (it was cut at 650: the wide picture, 355 px tall, in a slot
+ * that clips). 2: a screen under 560 px tall pins nothing on the wide layout either; at 900 tall the preview stays pinned.
+ */
+describe('the Voice preview fits its slot and the height guard holds (O9 round 2)', () => {
+  const tall = (width: number, height = 844) =>
+    ({ name: `${width}x${height}`, width, height, phone: width < 520 }) as const;
+  for (const width of [390, 520, 650, 899, 900]) {
+    for (const theme of THEMES) {
+      it(`fits the whole preview inside the slot (${width} wide, ${theme})`, async () => {
+        const { tab, close } = await open(tall(width), theme, VOICE, CARD);
+        try {
+          await tab.waitForTimeout(200);
+          const fit = await previewFit(tab, '.fy-wd');
+          expect(fit.outside, `parts of the preview outside the slot (slot ${JSON.stringify(fit.slot)})`).toEqual([]);
+          expect(fit.clipped, 'the slot clips nothing').toBe(false);
+          if (width < 900)
+            expect(fit.slot.bottom - fit.slot.top, 'a stacked slot is at most 140 px tall').toBeLessThanOrEqual(140.5);
+          await standOnWords(tab);
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${width}x844-${theme}-voice.png`) });
+        } finally {
+          await close();
+        }
+      });
+    }
+  }
+  const WIDE_SHORT = { name: '1440x559', width: 1_440, height: 559, phone: false } as const;
+  const WIDE = { name: '1440x900', width: 1_440, height: 900, phone: false } as const;
+  for (const theme of THEMES) {
+    it(`does not pin the preview on a 559 px tall wide screen (${theme})`, async () => {
+      const { tab, close } = await open(WIDE_SHORT, theme, VOICE, CARD);
+      try {
+        await tab.locator('.fy-voice-more summary').click();
+        await tab.waitForTimeout(300);
+        const scroll = await demoScroll(tab);
+        expect(scroll.scrollable, 'the page scrolls').toBeGreaterThan(150);
+        expect(scroll.position, 'the preview is not sticky').not.toBe('sticky');
+        expect(scroll.topBefore - scroll.topAfter, 'the preview scrolls away with the page').toBeGreaterThan(
+          scroll.moved - 2,
+        );
+        await standOnWords(tab);
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `1440x559-${theme}-voice-scrolled.png`) });
+      } finally {
+        await close();
+      }
+    });
+    it(`keeps the preview pinned on a 900 px tall wide screen (${theme})`, async () => {
+      const { tab, close } = await open(WIDE, theme, VOICE, CARD);
+      try {
+        await tab.locator('.fy-voice-more summary').click();
+        await tab.waitForTimeout(300);
+        const scroll = await demoScroll(tab);
+        expect(scroll.scrollable, 'the page scrolls').toBeGreaterThan(150);
+        expect(scroll.position).toBe('sticky');
+        expect(Math.abs(scroll.topAfter - 16), 'the preview stays 16 px from the top').toBeLessThanOrEqual(1);
+        await standOnWords(tab);
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `1440x900-${theme}-voice-scrolled.png`) });
+      } finally {
+        await close();
+      }
+    });
+  }
+});
+
+/** Stand every animation on 4.6 s (the words are written 22%..88% into the 6 s loop), so a shot shows the transcript, not an empty line. */
+const standOnWords = (tab: Tab) =>
+  tab.evaluate(() => {
+    for (const animation of document.getAnimations()) {
+      animation.pause();
+      animation.currentTime = 4_600;
+    }
+  });

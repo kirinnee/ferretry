@@ -36,6 +36,7 @@
 .fy-resize:hover::after,
 .fy-resize:focus-visible::after,
 html[data-panel-resizing='side'] .fy-resize--side::after,
+html[data-panel-resizing='ferret-side'] .fy-resize--ferret-side::after,
 html[data-panel-resizing='drawer'] .fy-resize--drawer::after,
 html[data-panel-resizing='settings-nav'] .fy-resize--settings-nav::after {
   background: var(--accent);

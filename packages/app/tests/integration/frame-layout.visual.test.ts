@@ -296,7 +296,7 @@ describe('the ferret page', () => {
       const rail = await width(tab, '[data-side-rail]');
       expect(rail, 'a closed column costs a slim rail, not a column').toBeLessThanOrEqual(40);
       await toggle.click();
-      await tab.waitForSelector('[data-slot="ferret.side"] [data-side-panel]');
+      await tab.waitForSelector('[data-ferret-side] [data-side-panel]', { state: 'attached' });
       expect(await toggle.getAttribute('aria-expanded')).toBe('true');
       await toggle.click();
       expect(await tab.locator('[data-side-panel]:visible').count(), 'pressed again, it closes').toBe(0);
@@ -305,41 +305,42 @@ describe('the ferret page', () => {
     }
   });
 
-  it('at 1280 gives the side pane its own scrolling column and keeps the chat most of the row', async () => {
+  it('at 1280 gives the open side column a row of tabs over ONE panel and keeps the chat most of the row', async () => {
     const { tab, close } = await open(VIEWPORTS[0], '/d/ws/ferrets/zoe', '[data-chat]');
     try {
       await tab.click('[data-side-toggle]');
-      await tab.waitForSelector('[data-slot="ferret.side"] [data-side-panel]');
-      const panels = await tab.locator('[data-slot="ferret.side"] [data-side-panel]').count();
-      expect(panels, 'every panel the default layout lists is drawn').toBe(15);
-      const slot = await tab.evaluate(() => {
-        const element = document.querySelector('[data-slot="ferret.side"]') as HTMLElement;
+      await tab.waitForSelector('[data-ferret-side] [data-side-panel]', { state: 'attached' });
+      const tabs = await tab.locator('[data-ferret-side] [role="tab"]').count();
+      expect(tabs, 'one tab per panel the default layout lists').toBe(15);
+      expect(await tab.locator('[data-side-panel]:visible').count(), 'one panel on screen at a time').toBe(1);
+      const column = await tab.evaluate(() => {
+        const element = document.querySelector('[data-ferret-side]') as HTMLElement;
         const box = element.getBoundingClientRect();
-        return {
-          width: box.width,
-          height: box.height,
-          scrolls: getComputedStyle(element).overflowY === 'auto' || getComputedStyle(element).overflowY === 'scroll',
-        };
+        return { width: box.width, height: box.height };
       });
-      expect(slot.width, 'the pane is a column, not the chat’s width').toBeLessThanOrEqual(420);
-      expect(slot.scrolls, 'the pane scrolls on its own').toBe(true);
-      expect(slot.height, 'the pane is never taller than the window').toBeLessThanOrEqual(VIEWPORTS[0].height);
+      expect(column.width, 'the column is a column, not the chat’s width').toBeLessThanOrEqual(420);
+      expect(column.height, 'the column is never taller than the window').toBeLessThanOrEqual(VIEWPORTS[0].height);
       expect(await width(tab, '[data-chat]'), 'the chat keeps the row').toBeGreaterThanOrEqual(400);
       if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, '1280-ferret-side-panels.png') });
-      // The last panel is reachable: scrolled into its column it is on screen.
-      await tab.locator('[data-side-panel="insights"]').scrollIntoViewIfNeeded();
-      const insights = await hitsItself(tab, '[data-side-panel="insights"]');
-      expect(insights.hit, 'the last panel can be reached').toBe(true);
-      if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, '1280-ferret-side-panels-scrolled.png') });
+      // The last panel is reachable: its tab scrolled into the row is pressed and the panel is on screen.
+      await tab.locator('[data-ferret-side] [data-phone-chip="stubs.insights"]').scrollIntoViewIfNeeded();
+      await tab.click('[data-ferret-side] [data-phone-chip="stubs.insights"]');
+      expect((await hitsItself(tab, '[data-side-panel="insights"]')).hit, 'the last panel can be reached').toBe(true);
+      expect(await tab.locator('[data-side-panel]:visible').count(), 'still one panel').toBe(1);
+      if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, '1280-ferret-side-panels-last.png') });
     } finally {
       await close();
     }
   });
 
-  it('at 1280 there is no chip row: the panels are beside the chat', async () => {
+  it('at 1280 the page has no phone chip row: the tabs live inside the side column, and only while it is open', async () => {
     const { tab, close } = await open(VIEWPORTS[0], '/d/ws/ferrets/zoe', '[data-chat]');
     try {
-      expect(await tab.locator('[data-phone-tab-row]').count()).toBe(0);
+      expect(await tab.locator('[data-phone-tab-row]').count(), 'closed: no tab row at all').toBe(0);
+      await tab.click('[data-side-toggle]');
+      await tab.waitForSelector('[data-ferret-side] [data-phone-tab-row]');
+      expect(await tab.locator('[data-phone-tab-row]').count()).toBe(1);
+      expect(await tab.locator('[data-phone-chip="chat"]').count(), 'no Chat tab beside the chat').toBe(0);
     } finally {
       await close();
     }

@@ -142,3 +142,13 @@ export function revealPanel(panels: readonly PanelRef[], panelId: string): void 
  * lands on a file). The Files panel reads and checks the path itself; the page only needs to bring that panel on screen.
  */
 export const addressNamesFile = (search: string): boolean => (new URLSearchParams(search).get('file') ?? '') !== '';
+
+/**
+ * THE WIDE SIDE COLUMN'S TABS: the same chips the phone has, without Chat (the chat is the page beside the column). Console
+ * comes first, so it is the tab the column opens on and the first thing the owner finds.
+ */
+export const sideTabs = (panels: readonly PanelRef[]): readonly PhoneTab[] => phoneTabs(panels).slice(1);
+
+/** The side tab a key names, or the first one when it names nothing now (nothing chosen yet, or a panel no longer placed). */
+export const sideTabOrFirst = (tabs: readonly PhoneTab[], key: string | undefined): string =>
+  tabs.find(tab => tab.key === key)?.key ?? tabs[0]?.key ?? '';

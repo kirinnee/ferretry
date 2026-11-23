@@ -149,7 +149,7 @@ export function AppearanceChoices({
         </div>
       </section>
       <p className="fy-astep__note">This device only.</p>
-      <StepDemo>
+      <StepDemo pinned>
         <AppearanceDemo picks={picks} />
       </StepDemo>
     </div>
