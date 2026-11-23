@@ -7,6 +7,7 @@ import { ensureDom, type Mounted, mount } from '@ferretry/app/testing';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { REAL_PROVIDER_PRESET_CATALOG } from '@ferretry/plugin-logins/contract/testing';
 import { createAgentsPanel } from '../../../app/features/agents/agents-panel.tsx';
+import { forgetSetupScanAhead, readSetupScanAhead, useScan } from '../../../app/features/setup-flow/machine-scan.ts';
 import { hostScan } from '../../fixtures/host-scan.ts';
 
 ensureDom();
@@ -19,18 +20,30 @@ afterEach(async () => {
 
 const SCAN = 'GET /v1/runtimes/setup/scan';
 
-const machine = (installed: boolean) => {
+/** The machines whose flow this test opened: closed again after each test, as the flow closes its read when it ends. */
+const opened: PluginClient[] = [];
+afterEach(() => {
+  for (const client of opened.splice(0)) forgetSetupScanAhead(client);
+});
+
+/** A machine whose scan answers `installed` (or is refused: `null`); the flow's read-ahead is started as the flow starts it. */
+const machine = (installed: boolean | null) => {
   const calls: string[] = [];
   const client = {
     call: async (route: string) => {
       calls.push(route);
       if (route === 'GET /v1/logins/presets') return REAL_PROVIDER_PRESET_CATALOG;
-      if (route === SCAN) return hostScan(installed);
+      if (route === SCAN) {
+        if (installed === null) throw new Error('the scan was refused');
+        return hostScan(installed);
+      }
       if (route === 'GET /v1/claude-code/update') return { installed: { state: 'ok', version: '2.1.0' } };
       if (route === 'GET /v1/codex/update') return { installed: null };
       throw new Error(`unexpected route ${route}`);
     },
   } as unknown as PluginClient;
+  opened.push(client);
+  readSetupScanAhead(client);
   return { client, scans: () => calls.filter(route => route === SCAN).length };
 };
 
@@ -74,5 +87,41 @@ describe('the "Found on this computer" chip', () => {
     await settle();
     expect(chips()).toEqual(['claude']);
     expect(scans()).toBe(1);
+  });
+
+  it('shows no chip, and asks nothing, when the flow holds no read (the picker never scans for itself)', async () => {
+    const { client, scans } = machine(true);
+    forgetSetupScanAhead(client);
+    await settle();
+    const Panel = createAgentsPanel(client);
+    view = await mount(<Panel step={step} />);
+    await settle();
+    expect(chips()).toEqual([]);
+    // Only the flow's own read, started before the flow "closed": the picker asked for no other.
+    expect(scans()).toBe(1);
+  });
+
+  it('a read that was refused shows no chip, and the picker, another reader and the picker again make no extra call', async () => {
+    const { client, scans } = machine(null);
+    await settle();
+    const Panel = createAgentsPanel(client);
+    view = await mount(<Panel step={step} />);
+    await settle();
+    expect(chips()).toEqual([]);
+    expect(scans()).toBe(1);
+    await view.unmount();
+    // Another reader of the machine's scan (the Settings import) asks the machine for itself.
+    function Reader(): null {
+      useScan(client, { run: 'settings-import', refresh: true });
+      return null;
+    }
+    view = await mount(<Reader />);
+    await settle();
+    expect(scans()).toBe(2);
+    await view.unmount();
+    view = await mount(<Panel step={step} />);
+    await settle();
+    expect(chips()).toEqual([]);
+    expect(scans()).toBe(2);
   });
 });

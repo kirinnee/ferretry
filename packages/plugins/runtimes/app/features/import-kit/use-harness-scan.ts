@@ -10,7 +10,7 @@
 import { daemonOfClient } from '@ferretry/app';
 import { isStepUpRefusal } from '@ferretry/app/ui';
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
-import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { type SetupScan, SetupScanSchema } from '../../../contract/index.ts';
 import type { RuntimesClient } from '../../lib/client.ts';
 import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
@@ -140,6 +140,52 @@ const aheadFor = (client: RuntimesClient, nowMs: number): Promise<MachineRead> |
   if (held.settled === 'failed') AHEAD.delete(machine);
   return held.read;
 };
+
+/**
+ * The read started ahead for `client`'s machine, LOOKED AT and never taken: a failed read stays for the one page that is to show
+ * its failure, and nothing here starts, replaces or consumes a read. `undefined` when no flow holds one that may still stand.
+ */
+const peekAhead = (client: RuntimesClient, nowMs: number): Promise<MachineRead> | undefined => {
+  const held = AHEAD.get(machineOf(client));
+  if (held === undefined || held.closed === true || nowMs - held.at >= AHEAD_MS) return undefined;
+  return held.read;
+};
+
+/** The tools' models of one machine read, or null when the scan did not answer (a refusal, or a passkey it wants). */
+const modelsOf = (read: MachineRead): Readonly<Record<HarnessKey, ToolModel>> | null => {
+  const parsed = SetupScanSchema.safeParse(read.answer);
+  if (!parsed.success) return null;
+  const versions = { 'claude-code': versionOf(read.claude), codex: versionOf(read.codex) };
+  return Object.fromEntries(
+    HARNESSES.map(harness => [harness, toolModel(harness, parsed.data, versions[harness])]),
+  ) as Record<HarnessKey, ToolModel>;
+};
+
+/**
+ * The models the setup flow's own read ahead found, for a page that only NOTES what the machine holds (the AI picker's "Found
+ * on this computer"). It reads ONLY that read, a failure included (null: no note), never asks the machine itself and never
+ * touches the machine's scan store, so another page that reads the scan (the Settings import) is not disturbed and the note
+ * costs no extra scan, however often the page is drawn again. Null while the read is out, and when no flow holds one.
+ */
+export function useScanAhead(client: RuntimesClient): Readonly<Record<HarnessKey, ToolModel>> | null {
+  const [models, setModels] = useState<Readonly<Record<HarnessKey, ToolModel>> | null>(null);
+  useEffect(() => {
+    let live = true;
+    const ahead = peekAhead(client, Date.now());
+    if (ahead === undefined) {
+      setModels(null);
+      return;
+    }
+    ahead.then(
+      read => live && setModels(modelsOf(read)),
+      () => live && setModels(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [client]);
+  return models;
+}
 
 export function createScanStore(client: RuntimesClient): ScanStore {
   let state: ScanRead = { kind: 'idle' };

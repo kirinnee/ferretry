@@ -10,10 +10,11 @@ import { LivingBackground } from '@ferretry/app/ui';
 import { WithDeviceTheme } from '@ferretry/app/testing/settings-shell';
 import type { StepHost } from '@ferretry/kernel/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { hostScan } from '../../../fixtures/host-scan.ts';
 import { createAgentsPanel } from '../../../../app/features/agents/agents-panel.tsx';
+import { readSetupScanAhead, useScan } from '../../../../app/features/setup-flow/machine-scan.ts';
 import { FlowPage } from '../../../../app/features/setup-flow/page-frame.tsx';
 import type { FlowStep } from '../../../../app/lib/index.ts';
 import { REAL_PROVIDER_PRESET_CATALOG as PROVIDER_PRESETS } from '@ferretry/plugin-logins/contract/testing';
@@ -23,6 +24,9 @@ const first = params.get('theme') ?? 'studio-light';
 document.documentElement.dataset.theme = first;
 // `?claude=absent`: the fake machine has no Claude Code. `window.__scanCalls`: how many times the page asked the machine to scan.
 const installed = params.get('claude') !== 'absent';
+// `?scan=fail`: the machine refuses its scan, so the flow's read ahead fails before the picker mounts. Then a second page (the
+// Settings import's scan reader) and the picker can be swapped with `[data-scene-to-reader]` / `[data-scene-to-picker]`.
+const scanFails = params.get('scan') === 'fail';
 const counted = window as unknown as { __scanCalls: number };
 counted.__scanCalls = 0;
 
@@ -31,6 +35,7 @@ const client = {
     if (route === 'GET /v1/logins/presets') return PROVIDER_PRESETS;
     if (route === 'GET /v1/runtimes/setup/scan') {
       counted.__scanCalls += 1;
+      if (scanFails) throw new Error('the scan was refused');
       return hostScan(installed);
     }
     if (route === 'GET /v1/claude-code/update') return { installed: { state: 'ok', version: '2.1.0' } };
@@ -63,10 +68,41 @@ const PROGRESS = {
 };
 const noop = (): void => undefined;
 
+// The setup flow starts the machine's scan the moment it opens (`useSetupFlow`); the picker only reads that read.
+readSetupScanAhead(client);
 const Panel = createAgentsPanel(client);
 const mode = first.endsWith('dark') ? 'dark' : 'light';
 
+/** Another reader of the machine's scan, as the real Claude import Settings page is (it reads the machine afresh). */
+function ScanReader(): ReactNode {
+  useScan(client, { run: 'settings-import', refresh: true });
+  return <p data-scene-reader="">The import page, reading the machine.</p>;
+}
+
 function Scene(): ReactNode {
+  const [onReader, setOnReader] = useState(false);
+  if (onReader)
+    return (
+      <div>
+        <ScanReader />
+        <button type="button" data-scene-to-picker="" onClick={() => setOnReader(false)}>
+          Back to the picker
+        </button>
+      </div>
+    );
+  return (
+    <>
+      {scanFails ? (
+        <button type="button" data-scene-to-reader="" onClick={() => setOnReader(true)}>
+          Open the import page
+        </button>
+      ) : null}
+      <Picker />
+    </>
+  );
+}
+
+function Picker(): ReactNode {
   return (
     <FlowPage
       step={STEP}

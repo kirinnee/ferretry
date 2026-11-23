@@ -181,6 +181,32 @@ describe('the chip is only for what is found here', () => {
   });
 });
 
+describe('the picker reads only the flow-owned scan, a failed one included', () => {
+  it('a refused read ahead, another scan reader, then the picker again: the picker never asks the machine', async () => {
+    const { tab, close } = await open(VARIANTS[0], '&scan=fail');
+    const calls = (): Promise<number> => tab.evaluate(() => (window as unknown as { __scanCalls: number }).__scanCalls);
+    try {
+      await tab.waitForTimeout(500);
+      // The flow's read was refused; the picker drew without a chip and asked nothing of its own.
+      expect(await tab.locator('[data-agent-found]').count()).toBe(0);
+      expect(await calls()).toBe(1);
+      // Another scan reader (the Claude import Settings page) reads the machine for itself.
+      await tab.locator('[data-scene-to-reader]').click();
+      await tab.waitForSelector('[data-scene-reader]');
+      await tab.waitForTimeout(300);
+      expect(await calls()).toBe(2);
+      // Back to the picker with no retry: it remounts and reads the flow's read, so no third scan.
+      await tab.locator('[data-scene-to-picker]').click();
+      await tab.waitForSelector('[data-agent-row="claude"]');
+      await tab.waitForTimeout(500);
+      expect(await tab.locator('[data-agent-found]').count()).toBe(0);
+      expect(await calls()).toBe(2);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('the fixture reads as the page does', () => {
   it('has the harness question only under a ticked provider', async () => {
     const { tab, close } = await open(VARIANTS[0]);
