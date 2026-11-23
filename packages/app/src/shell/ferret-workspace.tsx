@@ -13,8 +13,8 @@
 
 import type { PanelIntent } from '@ferretry/kernel/manifest';
 import { PanelRight, PanelRightClose } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
-import { cn } from '../ui/lib/class-names.ts';
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { ResizeHandle } from '../ui/resize-handle.tsx';
 import { useLayoutMode } from '../ui/hooks/use-layout-mode.ts';
 import { useAppHook } from './app-hooks.ts';
 import { FerretWorkspaceActionsProvider } from './ferret-workspace-actions.tsx';
@@ -27,6 +27,8 @@ import {
   panelPlaced,
   phoneTabs,
   revealPanel,
+  sideTabOrFirst,
+  sideTabs,
   tabOrChat,
 } from './ferret-workspace-model.ts';
 import { phoneChipId, PhoneTabRow } from './phone-tab-row.tsx';
@@ -74,6 +76,25 @@ function useWaitingAsks(daemon: string, subject: string): number {
   return useSyncExternalStore(needsYou?.subscribe ?? noSubscription, read, nothing);
 }
 
+/**
+ * WHAT "+" ASKS OF A PANEL, shared by the phone's chip row and the wide column's tab row: choosing a choice shows the panel that
+ * owns the act (`select`) and, when the act is not just showing it, hands that panel a numbered `PanelIntent`.
+ */
+function usePanelIntent(select: (key: string) => void) {
+  const [intent, setIntent] = useState<PanelIntent | undefined>(undefined);
+  const requests = useRef(0);
+  const choose = useCallback(
+    (choice: NewTabChoice): void => {
+      select(choice.panel);
+      if (choice.action === undefined) return;
+      requests.current += 1;
+      setIntent({ id: requests.current, action: choice.action });
+    },
+    [select],
+  );
+  return { intent, choose };
+}
+
 export interface FerretWorkspaceProps {
   readonly daemon: string;
   /** The ferret the panels are drawn for. */
@@ -92,6 +113,12 @@ export function FerretWorkspace({ daemon, subject, chat, canControl = true }: Fe
   // Panels mount the first time the column opens and then stay mounted (a terminal keeps its stream behind a closed column).
   const [mounted, setMounted] = useState(open);
   const [wanted, setWanted] = useState<string | undefined>(undefined);
+  // Beside the chat the open column shows ONE panel at a time behind a row of tabs (Console, Terminals, Browser…).
+  const rowId = useId();
+  const tabs = useMemo(() => sideTabs(panels), [panels]);
+  const [chosenTab, setChosenTab] = useState<string | undefined>(undefined);
+  const activeTab = sideTabOrFirst(tabs, chosenTab);
+  const { intent, choose } = usePanelIntent(setChosenTab);
   useEffect(() => {
     if (open) setMounted(true);
   }, [open]);
@@ -103,7 +130,9 @@ export function FerretWorkspace({ daemon, subject, chat, canControl = true }: Fe
   }, [wanted, open, mounted, panels]);
   const reveal = useCallback(
     (panelId: string): void => {
-      if (!panelPlaced(panels, panelId)) return;
+      const panel = panels.find(candidate => candidate.id === panelId);
+      if (panel === undefined) return;
+      setChosenTab(panelKey(panel));
       sidePaneOpen.set(true);
       setWanted(panelId);
     },
@@ -128,12 +157,39 @@ export function FerretWorkspace({ daemon, subject, chat, canControl = true }: Fe
       >
         <div className="flex min-h-0 min-w-0 flex-1">
           {chat}
-          {mounted ? (
-            <div id={sideId} style={{ display: open ? 'contents' : 'none' }}>
-              <PanelSlot daemon={daemon} slot={SIDE} subject={subject} />
-            </div>
+          {panels.length === 0 ? null : open ? (
+            <ResizeHandle edge="start" label="side panel" panel="ferret-side" />
           ) : null}
-          {panels.length === 0 ? null : <SideToggle controls={sideId} daemon={daemon} open={open} subject={subject} />}
+          {panels.length > 0 && (mounted || open) ? (
+            <aside
+              aria-label="Ferret side panel"
+              className="fy-ferret-side"
+              data-ferret-side=""
+              id={sideId}
+              style={open ? undefined : { display: 'none' }}
+            >
+              <PhoneTabRow
+                active={activeTab}
+                choices={newTabChoices(panels)}
+                label="Side panel tabs"
+                onChoose={choose}
+                onSelect={setChosenTab}
+                rowId={rowId}
+                tabs={tabs}
+                trailing={<SideToggle controls={sideId} daemon={daemon} open={true} subject={subject} />}
+              />
+              <PanelSlot
+                daemon={daemon}
+                phone={{ active: activeTab, labelledBy: key => phoneChipId(rowId, key) }}
+                slot={SIDE}
+                subject={subject}
+                {...(intent === undefined ? {} : { props: { intent } })}
+              />
+            </aside>
+          ) : null}
+          {panels.length === 0 || open ? null : (
+            <SideToggle controls={sideId} daemon={daemon} open={false} subject={subject} />
+          )}
         </div>
       </FerretWorkspaceActionsProvider>
     );
@@ -156,35 +212,38 @@ function SideToggle({
   // Only a CLOSED column hides the asks: open, the agenda tab is on screen and says them itself.
   const waiting = useWaitingAsks(daemon, subject);
   const count = open ? 0 : waiting;
-  return (
-    <div
-      className={cn('flex w-10 shrink-0 flex-col items-center py-2', open ? '' : 'border-l border-border-soft')}
-      data-side-rail=""
+  const button = (
+    <button
+      aria-controls={controls}
+      aria-expanded={open}
+      aria-label={
+        open
+          ? 'Hide side panels'
+          : count === 0
+            ? 'Show side panels'
+            : `Show side panels, ${count} ${count === 1 ? 'ask waits' : 'asks wait'} on you`
+      }
+      className="relative flex h-8 w-8 items-center justify-center rounded-control text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+      data-waiting={count === 0 ? undefined : count}
+      data-side-toggle=""
+      onClick={() => sidePaneOpen.set(!open)}
+      title={open ? 'Hide side panels' : 'Agenda, queue, tasks, terminals, files…'}
+      type="button"
     >
-      <button
-        aria-controls={controls}
-        aria-expanded={open}
-        aria-label={
-          open
-            ? 'Hide side panels'
-            : count === 0
-              ? 'Show side panels'
-              : `Show side panels, ${count} ${count === 1 ? 'ask waits' : 'asks wait'} on you`
-        }
-        className="relative flex h-8 w-8 items-center justify-center rounded-control border border-border-strong bg-surface text-fg hover:bg-surface-2"
-        data-waiting={count === 0 ? undefined : count}
-        data-side-toggle=""
-        onClick={() => sidePaneOpen.set(!open)}
-        title={open ? 'Hide side panels' : 'Agenda, queue, tasks, terminals, files…'}
-        type="button"
-      >
-        <Icon aria-hidden="true" size={16} />
-        {count === 0 ? null : (
-          <span aria-hidden="true" className="fy-side-toggle__count" data-side-toggle-count="">
-            {count > 99 ? '99+' : count}
-          </span>
-        )}
-      </button>
+      <Icon aria-hidden="true" size={16} />
+      {count === 0 ? null : (
+        <span aria-hidden="true" className="fy-side-toggle__count" data-side-toggle-count="">
+          {count > 99 ? '99+' : count}
+        </span>
+      )}
+    </button>
+  );
+  // Open, the button sits at the end of the tab row; closed, it is the one thing on a slim rail at the page's edge.
+  return open ? (
+    button
+  ) : (
+    <div className="flex w-10 shrink-0 flex-col items-center border-l border-border-soft py-2" data-side-rail="">
+      {button}
     </div>
   );
 }
@@ -195,15 +254,7 @@ function PhoneWorkspace({ daemon, subject, chat, canControl = true }: FerretWork
   const tabs = phoneTabs(panels);
   const [chosen, setChosen] = useState(CHAT_TAB);
   const active = tabOrChat(tabs, chosen);
-  const [intent, setIntent] = useState<PanelIntent | undefined>(undefined);
-  const requests = useRef(0);
-
-  const choose = useCallback((choice: NewTabChoice): void => {
-    setChosen(choice.panel);
-    if (choice.action === undefined) return;
-    requests.current += 1;
-    setIntent({ id: requests.current, action: choice.action });
-  }, []);
+  const { intent, choose } = usePanelIntent(setChosen);
 
   /** A panel of this ferret asks for another one (`files`): its chip becomes the one on show. */
   const showPanel = useCallback(

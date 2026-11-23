@@ -9,6 +9,8 @@ import {
   panelPlaced,
   phoneTabs,
   revealPanel,
+  sideTabOrFirst,
+  sideTabs,
   tabOrChat,
 } from '../../../src/shell/ferret-workspace-model.ts';
 import { ensureDom } from '../../../src/testing/index.ts';
@@ -156,5 +158,27 @@ describe('addressNamesFile', () => {
     expect(addressNamesFile('?file=src%2Fentry-ts')).toBe(true);
     expect(addressNamesFile('?find=a&file=a.ts')).toBe(true);
     for (const search of ['', '?file=', '?find=entry', '?files=a.ts']) expect(addressNamesFile(search)).toBe(false);
+  });
+});
+
+describe('the wide side column’s tabs', () => {
+  test('are the phone’s chips without Chat, Console first, so it is the tab the column opens on', () => {
+    const tabs = sideTabs(DEFAULT);
+    expect(tabs.map(tab => tab.label)).toEqual(
+      phoneTabs(DEFAULT)
+        .map(tab => tab.label)
+        .slice(1),
+    );
+    expect(tabs.some(tab => tab.key === CHAT_TAB)).toBe(false);
+    expect(tabs[0]?.label).toBe('Console');
+    expect(sideTabOrFirst(tabs, undefined)).toBe(tabs[0]?.key ?? '');
+  });
+
+  test('keep a chosen tab, and fall back to the first when it is no longer placed', () => {
+    const tabs = sideTabs(DEFAULT);
+    const second = tabs[1]?.key ?? '';
+    expect(sideTabOrFirst(tabs, second)).toBe(second);
+    expect(sideTabOrFirst(tabs, 'gone.panel')).toBe(tabs[0]?.key ?? '');
+    expect(sideTabOrFirst([], 'x')).toBe('');
   });
 });

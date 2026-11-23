@@ -96,6 +96,37 @@ describe('the name and status panels', () => {
     expect(h.calls.every(call => call.route === GET)).toBe(true);
   });
 
+  it('say how to start and stop beside the state: Resume when stopped, Stop (asked twice) when running', async () => {
+    const h = harness(ferretSummary('a1', { state: 'stopped' }));
+    const Status = createStatusPanel(h.client) as ComponentType<PanelProps>;
+    mounted = await mount(<Status subject="a1" />);
+    await settle();
+    const root = mounted.container;
+    expect(root.querySelector('[data-ferret-stop]')).toBeNull();
+    await click(root, '[data-ferret-start]');
+    expect(h.calls.map(call => call.route)).toContain('POST /v1/ferrets/:ferretId/resume');
+    h.ferret = ferretSummary('a1', { state: 'working' });
+    h.announce('a1');
+    await settle();
+    expect(root.querySelector('[data-ferret-start]')).toBeNull();
+    await click(root, '[data-ferret-stop]');
+    expect(h.calls.map(call => call.route)).not.toContain('POST /v1/ferrets/:ferretId/stop');
+    await click(root, '[data-ferret-stop-confirm]');
+    expect(h.calls.map(call => call.route)).toContain('POST /v1/ferrets/:ferretId/stop');
+  });
+
+  it('say a refused Resume in words, beside the button', async () => {
+    const h = harness(ferretSummary('a1', { state: 'stopped' }));
+    h.refuse.set('POST /v1/ferrets/:ferretId/resume', new Refused('not now', 409, 'conflict'));
+    const Status = createStatusPanel(h.client) as ComponentType<PanelProps>;
+    mounted = await mount(<Status subject="a1" />);
+    await settle();
+    await click(mounted.container, '[data-ferret-start]');
+    expect(mounted.container.querySelector('[data-ferret-lifecycle-failure]')?.textContent).toContain(
+      'Resume failed: not now',
+    );
+  });
+
   it('draw nothing when the ferret cannot be read, and read again when the daemon says it changed', async () => {
     const h = harness(ferretSummary('a1', { title: 'Before' }));
     h.refuse.set(GET, new Refused('no such ferret', 404, 'not-found'));

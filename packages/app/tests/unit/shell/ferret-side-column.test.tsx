@@ -5,6 +5,7 @@ import { provideToShell } from '../../../src/connect/provides.ts';
 import { storedOverrides } from '../../../src/layout/device-layout.ts';
 import { FerretWorkspace } from '../../../src/shell/ferret-workspace.tsx';
 import { useFerretWorkspace } from '../../../src/shell/ferret-workspace-actions.tsx';
+import { panelWidths } from '../../../src/shell/panel-widths.ts';
 import { sidePaneOpen } from '../../../src/shell/side-pane-open.ts';
 import { APP_STORAGE } from '../../../src/storage/names.ts';
 import { memoryStore, writeRecord } from '../../../src/storage/records.ts';
@@ -112,6 +113,7 @@ afterEach(async () => {
   await view?.unmount();
   view = null;
   sidePaneOpen.set(false);
+  panelWidths.forget();
   mounts.length = 0;
   waiting.clear();
   heard.clear();
@@ -195,6 +197,91 @@ describe('the ferret page opens on the chat, with the side column one click away
     await interact(() => bring?.('insights'));
     await settle();
     expect(column(page)).toBeNull();
+  });
+});
+
+const tab = (page: HTMLElement, key: string): HTMLButtonElement => {
+  const chip = page.querySelector<HTMLButtonElement>(`[data-ferret-side] [data-phone-chip="${key}"]`);
+  if (chip === null) throw new Error(`no tab ${key}`);
+  return chip;
+};
+const onShow = (page: HTMLElement): string[] =>
+  [...page.querySelectorAll('[data-ferret-side] [data-panel][data-phone-shown]')].map(
+    node => node.getAttribute('data-panel') ?? '',
+  );
+const handle = (page: HTMLElement): HTMLElement => {
+  const strip = page.querySelector<HTMLElement>('[data-resize-handle="ferret-side"]');
+  if (strip === null) throw new Error('no resize handle');
+  return strip;
+};
+const press = async (node: HTMLElement, key: string): Promise<void> => {
+  await interact(() => {
+    node.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  });
+};
+
+describe('the open side column is a row of tabs over ONE panel, with a draggable edge', () => {
+  test('it opens on the first tab and draws only that panel; the others stay mounted behind it', async () => {
+    const page = await open();
+    await interact(() => toggle(page).click());
+    await settle();
+    const tabs = [...page.querySelectorAll('[data-ferret-side] [role="tab"]')].map(node =>
+      node.getAttribute('data-phone-chip'),
+    );
+    expect(tabs).toEqual(['ferretpage.files', 'ferretpage.note']);
+    expect(onShow(page)).toEqual(['ferretpage.files']);
+    expect(page.querySelector('[data-testid="side-note"]')).not.toBeNull();
+  });
+
+  test('a tab switches the panel on show', async () => {
+    const page = await open();
+    await interact(() => toggle(page).click());
+    await settle();
+    await interact(() => tab(page, 'ferretpage.note').click());
+    expect(onShow(page)).toEqual(['ferretpage.note']);
+    expect(tab(page, 'ferretpage.note').getAttribute('aria-selected')).toBe('true');
+    expect(tab(page, 'ferretpage.files').getAttribute('aria-selected')).toBe('false');
+  });
+
+  test('a panel another panel asks for is the tab that opens', async () => {
+    const page = await open();
+    await interact(() => bring?.('note'));
+    await settle();
+    expect(onShow(page)).toEqual(['ferretpage.note']);
+  });
+
+  test('the toggle is inside the tab row while open and on the slim rail while closed — never both', async () => {
+    const page = await open();
+    expect(page.querySelector('[data-side-rail] [data-side-toggle]')).not.toBeNull();
+    await interact(() => toggle(page).click());
+    await settle();
+    expect(page.querySelector('[data-side-rail]')).toBeNull();
+    expect(page.querySelector('[data-phone-tab-row] [data-side-toggle]')).not.toBeNull();
+    expect(page.querySelectorAll('[data-side-toggle]').length).toBe(1);
+  });
+
+  test('the divider is a keyboard-resizable separator with the allowed range, and Home puts it back', async () => {
+    const page = await open();
+    await interact(() => toggle(page).click());
+    await settle();
+    const strip = handle(page);
+    expect(strip.getAttribute('role')).toBe('separator');
+    expect(strip.getAttribute('aria-valuemin')).toBe('300');
+    expect(strip.getAttribute('aria-valuemax')).toBe('720');
+    await press(strip, 'ArrowLeft');
+    expect(panelWidths.width('ferret-side')).toBe(316);
+    await press(strip, 'ArrowRight');
+    await press(strip, 'ArrowRight');
+    expect(panelWidths.width('ferret-side')).toBe(300); // never below its minimum
+    for (let step = 0; step < 40; step += 1) await press(strip, 'ArrowLeft');
+    expect(panelWidths.width('ferret-side')).toBe(720); // never above its maximum
+    await press(strip, 'Home');
+    expect(panelWidths.width('ferret-side')).toBeUndefined();
+  });
+
+  test('a closed column draws no divider', async () => {
+    const page = await open();
+    expect(page.querySelector('[data-resize-handle="ferret-side"]')).toBeNull();
   });
 });
 
