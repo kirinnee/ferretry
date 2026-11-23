@@ -20,6 +20,11 @@ export const StepDemoSlotContext = createContext<HTMLElement | null | undefined>
 
 export interface StepDemoProps {
   readonly children: ReactNode;
+  /**
+   * On a phone, keep the demo (and the page's heading) pinned to the top of the screen while the body scrolls under them,
+   * so every pick is seen working. Beside the choices (a wide frame) the demo is always pinned. Layout: `step-page-frame.css`.
+   */
+  readonly pinned?: boolean;
 }
 
 /** True while `node` or any ancestor up to (not including) `stop` carries the `hidden` attribute: the page is covered. */
@@ -34,7 +39,7 @@ const coveredAbove = (node: Element, stop: Element): boolean => {
  * so the demo would play beside the cover. A zero-size mark rides in the page where `<StepDemo>` is written; while the
  * mark or an ancestor inside the frame's body is `hidden`, the demo is not drawn, and it is drawn when the page shows.
  */
-export function StepDemo({ children }: StepDemoProps) {
+export function StepDemo({ children, pinned = false }: StepDemoProps) {
   const slot = useContext(StepDemoSlotContext);
   const mark = useRef<HTMLSpanElement>(null);
   const [covered, setCovered] = useState(false);
@@ -52,7 +57,18 @@ export function StepDemo({ children }: StepDemoProps) {
   return (
     <>
       <span ref={mark} data-step-demo-mark="" style={{ display: 'none' }} />
-      {slot === null || covered ? null : createPortal(children, slot)}
+      {slot === null || covered
+        ? null
+        : createPortal(
+            pinned ? (
+              <div data-step-demo-pinned="" style={{ inlineSize: '100%', minInlineSize: 0 }}>
+                {children}
+              </div>
+            ) : (
+              children
+            ),
+            slot,
+          )}
     </>
   );
 }
