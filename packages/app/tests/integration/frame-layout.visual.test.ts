@@ -161,6 +161,60 @@ describe('the agenda page with a status line drawn in flow', () => {
   });
 });
 
+/** What the app's height and the page's room are, measured: the document, the frame, the main column and the nav. */
+const heights = async (tab: Page) =>
+  await tab.evaluate(() => {
+    const box = (query: string) => document.querySelector(query)?.getBoundingClientRect();
+    return {
+      documentHeight: document.documentElement.scrollHeight,
+      overflowY: document.documentElement.scrollHeight - document.documentElement.clientHeight,
+      overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      frame: box('.fy-frame')?.height ?? -1,
+      main: box('.fy-main')?.height ?? -1,
+      mainTop: box('.fy-main')?.top ?? -1,
+    };
+  });
+
+describe('the install-as-app banner never changes the app’s height (O9-3)', () => {
+  const BANNER_VIEWPORTS = [
+    { name: '390', width: 390, height: 844, phone: true },
+    { name: '1440', width: 1_440, height: 900, phone: false },
+  ] as const;
+  for (const viewport of BANNER_VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`at ${viewport.name} in ${mode}: the document, the frame and the page keep their height with the banner shown`, async () => {
+        const theme = `studio-${mode}`;
+        const hidden = await open(viewport, '/d/ws/agenda', '.fy-main', '&relay=0', theme);
+        const before = await heights(hidden.tab);
+        await hidden.close();
+        const shown = await open(viewport, '/d/ws/agenda', '[data-install-toast]', '&relay=0&install=1', theme);
+        try {
+          const after = await heights(shown.tab);
+          await shotOf(shown.tab, `${viewport.name}-install-banner-${mode}`);
+          expect(after.documentHeight, 'the document is as tall as without the banner').toBe(before.documentHeight);
+          expect(after.overflowY, 'the page does not scroll vertically').toBeLessThanOrEqual(0);
+          expect(after.overflowX, 'the page does not scroll sideways').toBeLessThanOrEqual(0);
+          expect(after.frame, 'the app is as tall as without the banner').toBe(before.frame);
+          expect(after.main, 'the page keeps every pixel it had').toBe(before.main);
+          expect(after.mainTop, 'the page does not move down').toBe(before.mainTop);
+          // It floats: over the top of the page, inside the window, clear of the bottom edge where the composer is.
+          const banner = await shown.tab.evaluate(() => {
+            const box = document.querySelector('[data-install-toast]')?.getBoundingClientRect();
+            return { top: box?.top ?? -1, bottom: box?.bottom ?? -1, left: box?.left ?? -1, right: box?.right ?? -1 };
+          });
+          expect(banner.left).toBeGreaterThanOrEqual(0);
+          expect(banner.right).toBeLessThanOrEqual(viewport.width);
+          expect(banner.bottom).toBeLessThan(viewport.height / 2);
+          // Install and dismiss are still real, named buttons a press reaches (not covered by anything).
+          for (const selector of ['[data-install-accept]', '[data-install-dismiss]'])
+            expect((await hitsItself(shown.tab, selector)).hit, `${selector} is reachable`).toBe(true);
+          expect(await shown.tab.locator('[data-install-dismiss]').getAttribute('aria-label')).toContain('Dismiss');
+        } finally {
+          await shown.close();
+        }
+      });
+});
+
 describe('the ferrets page (the screen the side column holds)', () => {
   for (const viewport of VIEWPORTS)
     for (const mode of ['light', 'dark'] as const)

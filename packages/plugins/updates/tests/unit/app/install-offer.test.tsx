@@ -58,6 +58,8 @@ describe('the toast line', () => {
       />,
     );
     expect(toastOf(mounted)?.textContent).toContain('Install Ferretry as an app');
+    // An overlay, never a row of the page: the shell's `.fy-status-overlay` takes it out of the layout's height (O9-3).
+    expect(toastOf(mounted)?.classList.contains('fy-status-overlay')).toBe(true);
     await interact(() => button(mounted as Mounted, 'data-install-accept').click());
     await interact(() => button(mounted as Mounted, 'data-install-dismiss').click());
     expect(calls).toEqual(['install', 'dismiss']);

@@ -430,6 +430,46 @@ function RelayFallbackWatcher(): ReactNode {
   );
 }
 
+// `?install=1`: a stand-in for Updates' install toast (`plugins/updates/app/views/install-offer.tsx`, which this package cannot import):
+// the same contract the real one meets — a `role="status"` line carrying the shell's `fy-status-overlay` class — with its words and
+// buttons, drawn from the theme's own tokens. A suite there pins that the real toast carries the class.
+function InstallToastStand(): ReactNode {
+  if (params.get('install') !== '1') return null;
+  return (
+    <div
+      role="status"
+      data-install-toast="prompt"
+      className="fy-status-overlay"
+      style={{
+        alignItems: 'center',
+        background: 'var(--accent-soft)',
+        border: '1px solid var(--accent-border)',
+        borderRadius: 6,
+        boxShadow: '0 2px 8px rgba(0,0,0,.18)',
+        color: 'var(--fg)',
+        display: 'flex',
+        gap: 8,
+        padding: '6px 12px',
+      }}
+    >
+      <p style={{ flex: 1, margin: 0 }}>
+        <strong>Install Ferretry</strong> <span style={{ color: 'var(--muted)' }}>as an app</span>
+      </p>
+      <button className="kt-btn" data-install-accept="" type="button">
+        Install
+      </button>
+      <button
+        aria-label="Dismiss — don’t offer to install again on this device"
+        className="kt-btn"
+        data-install-dismiss=""
+        type="button"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
 // A stand-in for the Board page: the same shape as the real one (`plugins/board/app/views/board.css` `.fy-board`): a flex column
 // that is the page's height and scrolls itself, a header (title, views, filters) ABOVE a read that draws its own page loader.
 // `?boardSlow=<ms>`: that read answers that many ms late.
@@ -518,7 +558,7 @@ const surfaces: readonly SurfaceEntry[] = [
   entryOf(
     connectionsManifest,
     provideToShell(implementApp(connectionsManifest, { build: () => ({}) } as never), {
-      background: { 'relay-fallback': RelayFallbackWatcher },
+      background: { 'relay-fallback': RelayFallbackWatcher, 'install-offer': InstallToastStand },
     }),
   ),
   entryOf(
