@@ -246,7 +246,7 @@ const quoted = (references: readonly string[]): string => references.map(referen
  * Several instructions as the one generated document a harness reads: oldest first, so newer
  * guidance is read last (§3.4), under a line that says where to edit them instead.
  */
-export const GENERATED_INSTRUCTIONS_MARKER = '<!-- Generated from ';
+const GENERATED_INSTRUCTIONS_MARKER = '<!-- Generated from ';
 
 export function concatenateInstructions(
   parts: readonly { readonly reference: LayerReferenceText; readonly body: string }[],
@@ -356,6 +356,27 @@ function codexServer(server: McpComponent, env: ServerEnvironment, bearer: strin
     ...(Object.keys(env.literal).length > 0 ? { env: env.literal } : {}),
     ...(env.forwarded.length > 0 ? { env_vars: env.forwarded } : {}),
   };
+}
+
+/**
+ * Servers as the plan would write them for `harness`, whether or not the profile in effect has them. It is how an upgrade
+ * proves an old server of the machine's was Ferretry's: it is written exactly so, and nobody else wrote it that way.
+ */
+export function renderMcpComponents(
+  harness: HarnessKind,
+  components: Readonly<Record<string, McpComponent>>,
+): Readonly<Record<string, SettingsObject>> {
+  const contributions = Object.entries(components).map(([name, component]) => ({
+    layer: {
+      reference: `mcp/${name}` as LayerReferenceText,
+      componentKind: 'mcp' as const,
+      name,
+      origin: `mcp/${name}` as LayerReferenceText,
+      via: [],
+    },
+    component,
+  }));
+  return adaptMcp(harness, contributions, {}, []);
 }
 
 function adaptMcp(

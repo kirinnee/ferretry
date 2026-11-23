@@ -16,8 +16,9 @@ export interface SkippedItem {
   readonly reason: string;
 }
 
-/** Every skip today has the one cause, so one sentence says it; it names no folder. */
-export const SKIPPED_REASON = 'A link here could point outside this runtime, so it was left as it was.';
+/** What the skips share: Ferretry left it as it was, because it is not Ferretry's to change; it names no folder. */
+export const SKIPPED_REASON =
+  'Ferretry left this as it was: it was added or edited outside Ferretry, or a link here could point outside this runtime.';
 
 export const skippedItems = (runtime: RuntimeView): readonly SkippedItem[] =>
   (runtime.skipped ?? []).map(within => ({ within, reason: SKIPPED_REASON }));
