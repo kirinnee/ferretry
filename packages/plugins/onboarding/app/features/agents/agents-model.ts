@@ -14,7 +14,7 @@ import { z } from 'zod';
 
 /**
  * A harness this build can run. Its `plugin` id is the ONE name for it: the catalog's preset halves name a harness by its plugin
- * id (`claude-code`, `codex`; logins/contract/wire.ts `HarnessKeySchema`), and the flow's pages belong to the plugin of that id.
+ * id (`claude-code`, `codex`; logins/contract/wire.ts `KnownHarnessKeySchema`), and the flow's pages belong to the plugin of that id.
  */
 export interface SupportedHarness {
   readonly plugin: string;

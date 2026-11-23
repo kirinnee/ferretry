@@ -32,7 +32,14 @@ import type {
 } from '../../protocol/session.ts';
 import type { RuntimeSwitchAccount } from '../../../../contract/kinds/runtime-switch.ts';
 import { runtimeRequestFingerprint } from './ledger.ts';
-import { documentRefusal, needsFastFacts, needsLiveCatalog, paneRefusal, switchRequest } from './policy.ts';
+import {
+  documentRefusal,
+  harnessRefusal,
+  needsFastFacts,
+  needsLiveCatalog,
+  paneRefusal,
+  switchRequest,
+} from './policy.ts';
 import { findAccountByAgent, servableModels } from '../peers/core.ts';
 import { type FrozenJsonValue, jsonObject } from '@ferretry/std';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
@@ -148,6 +155,8 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
     });
     if (current === undefined)
       throw new SessionRuntimeError('failed', `session ${id} exists but its documents do not satisfy the protocol`);
+    const refused = harnessRefusal(current);
+    if (refused !== undefined) throw refused;
     return current;
   }
 

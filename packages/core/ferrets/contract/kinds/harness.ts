@@ -222,6 +222,33 @@ export class HarnessTranscriptReplaced extends Error {
 }
 
 /**
+ * The id of a transcript parser: the name a harness gives the byte format of its transcript (`claude`, `codex`, or a
+ * format a third harness declares). Conversation's reader keeps ONE parser per id; an id it has no parser for is read as
+ * unsupported, never as another format.
+ */
+export type TranscriptFormatId = string;
+
+/**
+ * What a harness says about itself as DATA, so no caller has to know which harness it is talking to
+ * (`FerretsApi.harnessFacts(key)`). One owner per fact: the harness's own home writer reads these, so a value here
+ * cannot drift from what the harness writes.
+ */
+export interface HarnessFacts {
+  /** What a person reads: "Claude Code", "Codex". */
+  readonly displayName: string;
+  /** The instruction file the harness reads from its home (`CLAUDE.md`, `AGENTS.md`). */
+  readonly instructionFile: string;
+  /** The folder in the harness's home that holds the skills it loads, relative to that home. */
+  readonly skillsDir: string;
+  /** How the harness takes MCP servers: the document format and the file in its home that holds them. */
+  readonly mcp: { readonly format: 'json' | 'toml'; readonly file: string };
+  /** The parser id for its transcript bytes (`HarnessTranscriptBytes.format`). */
+  readonly transcriptFormat: TranscriptFormatId;
+  /** The key of this harness's half in a model catalog file (`claude`, `codex`): the catalog side's name for it. */
+  readonly catalogHalf: string;
+}
+
+/**
  * The transcript a harness PROVED to be one ferret's own, as RAW bytes, for the one reader that parses records itself
  * (Conversation's transcript reader, G162). UNMASKED: it is evidence, not an answer. Its consumer, Conversation's
  * reader, masks every answer it cuts from these bytes through the kernel's read-scoped redaction (Conversation's
@@ -232,7 +259,7 @@ export class HarnessTranscriptReplaced extends Error {
  */
 export interface HarnessTranscriptBytes {
   /** Which parser speaks these bytes. */
-  readonly format: 'claude' | 'codex';
+  readonly format: TranscriptFormatId;
   /**
    * Opaque. A digest of the path and of the OPENED object (device, inode and, where the host reports one, its creation
    * time): the same for every handle on one generation of the file, and different for every replacement generation,
@@ -289,6 +316,8 @@ export type HarnessLaunchSettings =
 /** The value of `harnesses:<key>` (§4.3). */
 export interface Harness {
   readonly key: HarnessKey;
+  /** What this harness says about itself as data (`FerretsApi.harnessFacts`); see {@link HarnessFacts}. */
+  readonly facts: HarnessFacts;
   /** Binary and version; never reads its sign-in files. */
   discover(): Promise<HarnessInstall | HarnessMissing>;
   update?(): Promise<UpdateResult>;

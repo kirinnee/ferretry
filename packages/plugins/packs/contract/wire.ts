@@ -15,7 +15,7 @@
  *
  * Data only: model ids, labels and limits — never a credential.
  */
-import { FerretStateSchema, FerretSummarySchema, HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { FerretStateSchema, FerretSummarySchema, KnownHarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { CardIdSchema } from './task.ts';
@@ -179,7 +179,7 @@ export type RoutingPromptView = z.infer<typeof RoutingPromptViewSchema>;
 export const PackFleetModelSchema = z.strictObject({
   provider: NonEmpty,
   providerLabel: NonEmpty,
-  harness: HarnessKeySchema,
+  harness: KnownHarnessKeySchema,
   id: NonEmpty,
   label: NonEmpty,
   tier: z.enum(['best', 'balanced', 'fast']),
@@ -326,7 +326,7 @@ export const PackModelOptionSchema = z.strictObject({
   provider: NonEmpty.optional(),
   model: NonEmpty,
   modelLabel: NonEmpty,
-  harness: HarnessKeySchema,
+  harness: KnownHarnessKeySchema,
   tier: z.enum(['best', 'balanced', 'fast']).optional(),
   efforts: z.array(NonEmpty).readonly(),
   /** The runtime to pass as `--runtime`: the ready one with the most headroom, else the first. */

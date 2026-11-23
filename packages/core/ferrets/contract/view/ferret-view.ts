@@ -5,7 +5,12 @@
  * daemon builds it, every surface reads it.
  */
 import { z } from 'zod';
-import { SessionProvenanceSchema, SessionTransferEdgeSchema, TranscriptProvenanceSchema } from '../records.ts';
+import {
+  OpenRecordedHarnessSchema,
+  SessionProvenanceSchema,
+  SessionTransferEdgeSchema,
+  TranscriptProvenanceSchema,
+} from '../records.ts';
 import { SessionAgendaSummarySchema } from './agenda.ts';
 import { BoardProjectIdSchema, BoardSkipSchema, TaskRefSchema } from './board-refs.ts';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
@@ -147,7 +152,7 @@ export const SessionConfigSchema = z.object({
    */
   provenance: SessionProvenanceSchema.optional(),
   agent: z.string().min(1),
-  harness: HarnessSchema,
+  harness: OpenRecordedHarnessSchema,
   modelHint: z.string(),
   model: z.string().optional(),
   /**

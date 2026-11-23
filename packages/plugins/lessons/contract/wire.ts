@@ -1,4 +1,4 @@
-import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { KnownHarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { NonNegativeIntegerSchema, PositiveIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
 
@@ -133,7 +133,7 @@ export const RunManifestSchema = z.object({
   proposalsCreated: NonNegativeIntegerSchema,
   proposalsStrengthened: NonNegativeIntegerSchema,
   proposalsSuppressedByTombstone: NonNegativeIntegerSchema,
-  perHarness: z.record(HarnessKeySchema, NonNegativeIntegerSchema),
+  perHarness: z.record(KnownHarnessKeySchema, NonNegativeIntegerSchema),
   message: z.string().optional(),
 });
 export type RunManifest = z.infer<typeof RunManifestSchema>;

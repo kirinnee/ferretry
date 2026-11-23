@@ -14,14 +14,14 @@ import type {
   SkillScope,
   SkillToggle,
 } from '../../contract/index.ts';
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { skillFrontMatter } from './front-matter.ts';
 
 export const MAX_SKILL_MANIFEST_BYTES = 256 * 1024;
 /** Per-directory cap; beyond it a listing is cut short and flagged `truncated`. */
 export const MAX_SKILLS_PER_ROOT = 200;
 
-type Harness = HarnessKey;
+type Harness = KnownHarnessKey;
 
 /** What the inventory needs to know about one ferret: where it works and which runtime it spends. */
 export interface SkillsFerret {

@@ -27,7 +27,7 @@ import {
   type McpSignInTarget,
   sha256Hex,
 } from '../../../contract/index.ts';
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import {
   type ClaudeApprovalKeys,
   claudeApproval,
@@ -45,7 +45,7 @@ import { type McpInventoryFolder, type McpProjectFolders, mcpFolderSubject } fro
 
 // ── Ports ────────────────────────────────────────────────────────────────────────────────────────
 
-export type McpHarness = HarnessKey;
+export type McpHarness = KnownHarnessKey;
 
 /** What the inventory needs of one ferret: where it works, which harness, which runtime it spends. */
 export interface McpFerretView {

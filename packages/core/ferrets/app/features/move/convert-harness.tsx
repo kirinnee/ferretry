@@ -22,6 +22,7 @@ import {
   type ConversionFailure,
   conversionFailure,
   conversionSentences,
+  type ConvertibleSummary,
   HARNESS_SHORT,
   otherHarness,
   refusedCause,
@@ -31,7 +32,7 @@ type ReadConversionPreview = (agent: string) => Promise<ConversionPreview>;
 type MoveToOtherHarness = (agent: string, requestId: string, forceInflight: boolean) => Promise<FerretSummary>;
 
 export interface ConvertHarnessProps {
-  readonly summary: FerretSummary;
+  readonly summary: ConvertibleSummary;
   readonly slot: RenderAccountSlot;
   readonly readPreview: ReadConversionPreview;
   readonly move: MoveToOtherHarness;

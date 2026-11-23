@@ -19,7 +19,7 @@
 import type { FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { LinkableConversation, LinkQuery } from '../../contract/index.ts';
 import { displayCallsign } from '@ferretry/core-ferrets/contract';
-import type { HarnessKey } from './link-words.ts';
+import type { KnownHarnessKey } from './link-words.ts';
 import {
   type DateFilter,
   type FerretMark,
@@ -29,7 +29,7 @@ import {
   sinceInstant,
 } from './conversation-picker-model.ts';
 
-export type ContinueSource = 'all' | 'ferretry' | 'computer' | HarnessKey;
+export type ContinueSource = 'all' | 'ferretry' | 'computer' | KnownHarnessKey;
 
 export const CONTINUE_SOURCES: readonly { readonly id: ContinueSource; readonly label: string }[] = [
   { id: 'all', label: 'All' },

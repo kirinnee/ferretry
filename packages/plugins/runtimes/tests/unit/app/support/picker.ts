@@ -4,7 +4,7 @@
  * `GET /v1/logins`).
  */
 
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import {
   type LoginList,
   LoginIdSchema,
@@ -15,7 +15,7 @@ import {
 import type { PickerAccount, PickerAccountHealth } from '../../../../app/lib/account-picker-catalog.ts';
 import { type RuntimeCatalog, RuntimeCatalogSchema, type RuntimeView } from '../../../../contract/index.ts';
 
-const harnessOf = (wrapper: string): HarnessKey => (wrapper.startsWith('codex') ? 'codex' : 'claude-code');
+const harnessOf = (wrapper: string): KnownHarnessKey => (wrapper.startsWith('codex') ? 'codex' : 'claude-code');
 
 /** One picker row. `credentialId` defaults to one login per wrapper. */
 export const pickerAccount = (overrides: Partial<PickerAccount> & { wrapper: string }): PickerAccount => ({

@@ -839,7 +839,7 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
       throw new Error('the source fixture must carry completed transcript provenance');
     const digest = await conversation.digest({
       sourceSessionId: SOURCE_ID,
-      sourceHarness: config.harness,
+      sourceHarness: config.harness === 'codex' ? 'codex' : 'claude',
       transcriptProvenance: provenance,
       through: CUT,
     });

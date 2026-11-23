@@ -30,6 +30,7 @@ import {
   type RuntimesFile,
 } from '../../../contract/index.ts';
 import { harnessKindOfKey, type HarnessKind } from '../manifest.ts';
+import { BUILTIN_COMPONENTS } from './builtin-autonomous.ts';
 import { deriveRuntimes, withDerived } from './derived-runtimes.ts';
 import {
   type AccountModel,
@@ -249,6 +250,10 @@ function foreignLayers(
   return named;
 }
 
+/** The built-in components of a kind (`builtin-autonomous.ts`); an owner's component of the same name wins over them. */
+const builtIn = (kind: ProfileComponentKind): Readonly<Record<string, unknown>> =>
+  kind === 'instructions' || kind === 'settings' ? BUILTIN_COMPONENTS[kind] : {};
+
 /**
  * Assembles the model. Throws the account model's `ZodError` when a cross-file rule fails (a runtime naming a login or
  * profile that is not there, a layer naming a component its owner does not have): the caller words it as the files' own
@@ -289,11 +294,11 @@ export function assembleRuntimesModel(explicit: RuntimesFiles): RuntimesModel {
     if (reading.state === 'read') {
       // The owner's components, as it projected them. A name a layer uses that the owner does not have is a real gap in
       // the machine's files, which the cross-reference rules below refuse by name.
-      components[kind] = Object.fromEntries(reading.components);
+      components[kind] = { ...builtIn(kind), ...Object.fromEntries(reading.components) };
       if (reading.partial === undefined) continue;
       // ...unless a part of the kind is not running: then the name may be one of ITS components, which stands in.
       for (const name of [...names].toSorted((left, right) => left.localeCompare(right))) {
-        if (reading.components.has(name)) continue;
+        if (reading.components.has(name) || Object.hasOwn(builtIn(kind), name)) continue;
         components[kind][name] = standIn(kind);
         unreadable.push(
           `the ${kind} component "${name}" could not be read from the part of Ferretry that owns it: ${reading.partial}`,
@@ -301,8 +306,10 @@ export function assembleRuntimesModel(explicit: RuntimesFiles): RuntimesModel {
       }
       continue;
     }
-    components[kind] = Object.fromEntries([...names].map(name => [name, standIn(kind)]));
-    for (const name of [...names].toSorted((left, right) => left.localeCompare(right)))
+    // A built-in component needs no owner to read it, so it is never a stand-in and never unread.
+    const missing = [...names].filter(name => !Object.hasOwn(builtIn(kind), name));
+    components[kind] = { ...builtIn(kind), ...Object.fromEntries(missing.map(name => [name, standIn(kind)])) };
+    for (const name of missing.toSorted((left, right) => left.localeCompare(right)))
       unreadable.push(
         `the ${kind} component "${name}" could not be read from the part of Ferretry that owns it: ${reading.reason}`,
       );

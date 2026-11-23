@@ -33,6 +33,7 @@ import {
   QuestionSchema,
   ReferenceCatalog,
   SearchSources,
+  TranscriptParsers,
   TurnEnded,
 } from '../../contract/index.ts';
 import { fragment } from '../kit.ts';
@@ -73,6 +74,12 @@ export default fragment({
       // harness's pool (a security-path provide hook naming only `conversation` as its taker).
       { hook: ConversationStage, key: CONVERSATION_STAGE_KEY },
     ],
-    offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
+    offers: [
+      { hook: MessageBeforeSend },
+      { hook: TurnEnded },
+      { hook: SearchSources },
+      { hook: TranscriptParsers },
+      { hook: ReferenceCatalog },
+    ],
   },
 });

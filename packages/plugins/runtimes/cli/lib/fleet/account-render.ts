@@ -1,4 +1,4 @@
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type {
   AccountChangeOutcome,
   AccountChangeView,
@@ -13,7 +13,7 @@ import type {
  * file concept and "manifest" never reach a person.
  */
 
-export const HARNESS_LABEL: Record<HarnessKey, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+export const HARNESS_LABEL: Record<KnownHarnessKey, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
 
 /** Two spaces per level, so nested facts read as belonging to the line above. */
 export const indent = (lines: readonly string[], depth = 1): string[] =>

@@ -164,8 +164,18 @@ export default definePlugin({
     ],
     // The registered-projects picker Ferrets' New ferret page offers as a slot above its Folder box: Projects contributes,
     // Ferrets imports nothing of it.
-    panels: [panel(NEW_FERRET_PROJECT_SLOT, { id: 'new-ferret-projects', order: 10 })],
+    panels: [
+      panel(NEW_FERRET_PROJECT_SLOT, { id: 'new-ferret-projects', order: 10 }),
+      // The setup flow's last page: pick the folders you work in (the same registration "Add project" sends).
+      panel('onboarding.step', { id: 'onboarding-step', order: 90 }),
+    ],
   },
+
+  // The setup flow ends in project setup: a device page (so it is the LAST page, after the machine's and this device's own),
+  // with its own bar segment. It is left unasked on a machine that already has a project.
+  onboarding: [
+    { id: 'folders', title: 'Add your projects', order: 90, side: 'client', group: 'Projects', stepHost: true },
+  ],
 
   data: {
     state: [PROJECTS_STATE],

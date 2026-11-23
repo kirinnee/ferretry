@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import type { ProfileFile, RuntimeFile } from '../../../contract/index.ts';
 import { createRuntimesApi, type RuntimesApiDeps } from '../../../daemon/lib/service/runtimes-api.ts';
@@ -14,7 +14,7 @@ const runtimeFile = (over: Partial<RuntimeFile> = {}): RuntimeFile => ({
 });
 
 /** The parts of a login view the runtimes read; the rest of the wire shape is not this module's. */
-const loginView = (over: { id?: string; harness?: HarnessKey; word?: string; disabled?: LoginView['disabled'] }) =>
+const loginView = (over: { id?: string; harness?: KnownHarnessKey; word?: string; disabled?: LoginView['disabled'] }) =>
   ({
     id: over.id ?? 'main',
     harness: over.harness ?? 'claude-code',
@@ -26,7 +26,7 @@ interface Rig {
   runtimes?: Record<string, RuntimeFile>;
   profiles?: readonly string[];
   defaultSetting?: string;
-  harnesses?: readonly HarnessKey[];
+  harnesses?: readonly KnownHarnessKey[];
   currentName?: RuntimesApiDeps['currentName'];
   logins?: readonly LoginView[] | 'throws';
 }

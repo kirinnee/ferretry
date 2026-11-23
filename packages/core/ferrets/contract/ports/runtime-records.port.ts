@@ -1,12 +1,14 @@
 import type { FerretId } from '@ferretry/kernel/contract';
 import type { FerretState } from '../ids.ts';
+import type { OpenRecordedHarness } from '../records.ts';
 
 /** One ferret as a runtime removal or rename sees it (see {@link FerretsApi.runtimeRecords}). */
 export interface FerretRuntimeRecord {
   readonly id: FerretId;
   /** What the person calls it: its callsign. */
   readonly name: string;
-  readonly harness: 'claude' | 'codex';
+  /** The family for Claude Code and Codex, a third harness's own key otherwise. */
+  readonly harness: OpenRecordedHarness;
   /** The runtime it launched as (in an old record, the wrapper path). */
   readonly agent: string;
   /** The wrapper it launched (`command[0]`), when the session config has one. */

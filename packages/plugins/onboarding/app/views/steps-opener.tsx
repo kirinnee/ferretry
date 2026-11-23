@@ -19,6 +19,8 @@ import { useEffect, useRef } from 'react';
 import { sideOf } from '../../contract/index.ts';
 import { onboardingScreen } from '../onboarding-screen.ts';
 import { setupFlowHref } from '../features/setup-flow/flow-href.ts';
+import { unfinishedProjectSetup } from '../features/setup-flow/project-resume.ts';
+import { browserLedgerStorage } from '../features/setup-flow/use-setup-flow.ts';
 
 /** The first run's screen ids (the manifest's `onboarding` screen and its `/setup` hand-off address): the journey that owns the address while it is open. */
 const FIRST_RUN_SCREENS: ReadonlySet<string> = new Set(['onboarding', 'handoff']);
@@ -38,6 +40,28 @@ export function createStepsOpener() {
     where.current = onFirstRun;
     const go = useRef(navigate);
     go.current = navigate;
+    // PROJECT SETUP LEFT UNFINISHED (C59 O8-13): when the app is OPENED (no entry behind this one) at the home page or at a
+    // machine's home, a device that was shown project setup and neither finished nor skipped it returns to the flow, which
+    // resumes on that page. Opened from a deep link, it is never taken over. Decided again on each route change until the
+    // flow is on screen, because the shell's own opened-app redirect (home -> the machine) may land after this one.
+    const router = useOptionalRouter();
+    const resumed = useRef(false);
+    const kind = router?.route.kind;
+    const onFlow =
+      router?.route.kind === 'screen' &&
+      router.route.screen.plugin === 'onboarding' &&
+      router.route.screen.id === 'flow';
+    const launch = router !== null && router.previousPath === undefined;
+    useEffect(() => {
+      if (resumed.current || !launch) return;
+      if (kind !== 'home' && kind !== 'daemon-home') return;
+      const daemon = unfinishedProjectSetup(browserLedgerStorage());
+      if (daemon === undefined || !paired.some(machine => machine.daemon === daemon)) return;
+      go.current(setupFlowHref(daemon, { phase: 'daemon', journey: 'add-daemon' }), { replace: true });
+    }, [kind, launch, paired]);
+    useEffect(() => {
+      if (onFlow) resumed.current = true;
+    }, [onFlow]);
     useEffect(() => {
       for (const row of rows) {
         const fresh = !(before.current?.has(row.daemon) ?? true);

@@ -23,6 +23,24 @@ export const StoredSessionIdSchema = z
 /** The harness family today's records name (`claude`, `codex`; today's `HarnessSchema`). */
 export const RecordedHarnessSchema = z.enum(['claude', 'codex']);
 
+/**
+ * The harness a session document names: the family for the two harnesses this build ships (`claude`, `codex`), and the
+ * harness's OWN key for any other the registry declares. It is never a family guessed for a key that has none: a consumer
+ * that reads only the two families asks {@link isRecordedHarness} and refuses the rest, rather than reading Claude.
+ */
+export type OpenRecordedHarness = z.infer<typeof RecordedHarnessSchema> | (string & {});
+export const OpenRecordedHarnessSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9-]{0,39}$/u, 'a harness is lowercase letters, digits and -')
+  .transform(value => value as OpenRecordedHarness);
+
+/** Whether a session's harness is one of the two families a closed consumer can read. */
+export const isRecordedHarness = (harness: string): harness is z.infer<typeof RecordedHarnessSchema> =>
+  harness === 'claude' || harness === 'codex';
+
+/** The harness a session document stamps for a ferret's harness key: the family for the two known, the key itself otherwise. */
+export const recordedHarnessOf = (key: string): OpenRecordedHarness => (key === 'claude-code' ? 'claude' : key);
+
 /** Where a session stands, as today's wire spells it (`SessionStatusSchema`): the fork's summary names one. */
 export const SessionStatusSchema = z.enum([
   'created',

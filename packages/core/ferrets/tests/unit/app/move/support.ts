@@ -1,8 +1,11 @@
 /** Fixtures for the move page's suites: a ferret summary and a few daemon answers, as the contract spells them. */
 import type { FerretId } from '@ferretry/kernel/contract';
-import type { ConversionPreview, FerretSummary } from '../../../../contract/index.ts';
+import type { ConversionPreview, FerretSummary, KnownHarnessKey } from '../../../../contract/index.ts';
 
-export const summaryOf = (over: Partial<Omit<FerretSummary, 'id'>> & { id?: string } = {}): FerretSummary =>
+/** A ferret on one of the two harnesses a conversation converts between (the move page only offers those). */
+export const summaryOf = (
+  over: Partial<Omit<FerretSummary, 'id' | 'harness'>> & { id?: string; harness?: KnownHarnessKey } = {},
+): FerretSummary & { readonly harness: KnownHarnessKey } =>
   ({
     name: 'Hadi',
     role: 'lead',
@@ -16,7 +19,7 @@ export const summaryOf = (over: Partial<Omit<FerretSummary, 'id'>> & { id?: stri
     stateAt: '2026-11-01T00:00:00.000Z',
     ...over,
     id: (over.id ?? 'f-1') as FerretId,
-  }) as FerretSummary;
+  }) as FerretSummary & { readonly harness: KnownHarnessKey };
 
 export const readyPreview: Extract<ConversionPreview, { kind: 'ready' }> = {
   kind: 'ready',

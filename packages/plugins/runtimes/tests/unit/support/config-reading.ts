@@ -6,6 +6,7 @@
  * this stand-in holds the model in two files: `machine.yaml` (the machine's settings) and `model.yaml` (the
  * rest). Both are JSON, which is valid YAML, so a test reads what a change wrote with `JSON.parse`.
  */
+import { builtinDocument } from '../../../daemon/lib/account/builtin-autonomous.ts';
 import { type AccountModel, parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { AccountDocumentReading } from '../../../daemon/lib/service/catalog-service.ts';
 import type { FleetDocumentWrite } from '../../../daemon/lib/provisioning.ts';
@@ -22,12 +23,26 @@ function filesOf(model: AccountModel): { readonly 'machine.yaml': string; readon
   };
 }
 
+/**
+ * The model the daemon reads: the built-in profiles, model sets and components are always beside the files' own (an
+ * explicit one of the same name wins), exactly as `assembleRuntimesModel` assembles it. This stand-in holds the whole model
+ * in its two files, so the built-ins are in them too; the real files never hold one.
+ */
+function withBuiltins(model: AccountModel): AccountModel {
+  const builtin = builtinDocument();
+  const components: Record<string, unknown> = { ...model.components };
+  for (const [kind, entries] of Object.entries(builtin.components))
+    components[kind] = { ...entries, ...(components[kind] as object | undefined) };
+  return parseAccountModel({ ...model, components, profiles: { ...builtin.profiles, ...model.profiles } });
+}
+
 /** A reading of `model`, its writes composed against the files it would be held in. */
 export function configReading(
-  model: AccountModel,
+  unbuilt: AccountModel,
   revision: string,
   format: AccountDocumentReading['format'] = 'present',
 ): AccountDocumentReading {
+  const model = withBuiltins(unbuilt);
   const before = filesOf(model);
   return {
     format,

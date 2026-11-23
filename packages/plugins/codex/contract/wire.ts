@@ -7,7 +7,7 @@
  */
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { KnownHarnessKeySchema } from '@ferretry/core-ferrets/contract';
 
 // ─── the program itself (GET/POST /v1/codex/update) ────────────────────────────────────────────────────────
 
@@ -119,7 +119,7 @@ export const HarnessUpdateJobSchema = z.discriminatedUnion('state', [
 
 /** `GET /v1/codex/update`: one harness (today's view held both harnesses in a list). */
 export const HarnessCliViewSchema = z.strictObject({
-  harness: HarnessKeySchema,
+  harness: KnownHarnessKeySchema,
   location: HarnessCliLocationSchema,
   installed: HarnessInstalledVersionSchema.nullable(),
   method: HarnessInstallMethodSchema.nullable(),

@@ -1,4 +1,4 @@
-import type { FerretRuntimeRecord, FerretRuntimeRename } from '../../../contract/index.ts';
+import { type FerretRuntimeRecord, type FerretRuntimeRename, recordedHarnessOf } from '../../../contract/index.ts';
 import type { FerretsCore } from './core.ts';
 
 /** Every ferret and the runtime it launched as (`FerretsApi.runtimeRecords`): the record, with the session config's words. */
@@ -13,7 +13,7 @@ export async function runtimeRecords({ registry, ports }: FerretsCore): Promise<
       return {
         id: ferret.id,
         name: ferret.name,
-        harness: ferret.harness === 'codex' ? 'codex' : 'claude',
+        harness: recordedHarnessOf(ferret.harness),
         agent,
         ...(facts?.executable === undefined ? {} : { executable: facts.executable }),
         state: ferret.state,

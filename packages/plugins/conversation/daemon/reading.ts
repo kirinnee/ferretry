@@ -15,6 +15,7 @@ import type { TranscriptOpener } from './reader/adapters/file-reads.ts';
 import type { HarnessTranscripts } from './reader/adapters/entries-source.ts';
 import { registerReader } from './reader/index.ts';
 import { TranscriptReadError, type TranscriptReadRedactor } from './reader/lib/reads.ts';
+import type { TranscriptParser } from './reader/lib/transcript/types.ts';
 import { messageTokenCodec } from './reader/adapters/message-token-key.ts';
 import { buildRenders } from './renders/index.ts';
 import { RenderError } from './renders/lib/types.ts';
@@ -142,6 +143,8 @@ export function buildReading(deps: {
   readonly onKept: (ferret: FerretId, link: string) => void;
   /** The work other plugins hand the work search through `search.sources` (Board's cards), asked on every use. */
   readonly workSources?: () => readonly WorkSource[];
+  /** The transcript parsers harness plugins declare (`transcript.parsers`), asked on the first read. */
+  readonly parsers?: () => readonly TranscriptParser[];
 }): ReadingHalf {
   const { kernel, ferrets, asks } = deps;
 
@@ -161,7 +164,11 @@ export function buildReading(deps: {
     const id = tryParseSessionId(ferret);
     const summary = id === undefined ? undefined : await ferrets.get(id);
     const harness = id === undefined ? undefined : await ferrets.harness?.(id);
-    const family = summary === undefined ? undefined : harnessFamily(summary.harness);
+    // The format the harness declares for its own entries: Claude Code and Codex by family, any other harness by its facts.
+    const family =
+      summary === undefined
+        ? undefined
+        : (harnessFamily(summary.harness) ?? ferrets.harnessFacts(summary.harness)?.transcriptFormat);
     if (family === undefined || harness === undefined) return undefined;
     // The seam's reader is bound to this ferret; the entries source names the ferret itself, so the binding drops it.
     const bound = harness.transcript;
@@ -177,6 +184,7 @@ export function buildReading(deps: {
   const reader = registerReader({
     bytes,
     transcripts: entries,
+    ...(deps.parsers === undefined ? {} : { parsers: deps.parsers }),
     exists: async ferret => {
       const id = tryParseSessionId(ferret);
       return id !== undefined && (await ferrets.get(id)) !== undefined;
