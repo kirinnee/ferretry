@@ -53,6 +53,14 @@ const SOL = {
   defaultReasoningEffort: 'medium',
   fast: false,
 };
+/** An `openai` catalog model as the fallback restates it: no `fast` field, because the catalog says nothing about tiers. */
+const FALLBACK = {
+  value: 'gpt-fallback',
+  label: 'GPT Fallback',
+  tier: 'balanced' as const,
+  isDefault: true as const,
+  reasoningEfforts: [{ value: 'medium' }],
+};
 const persisted = (readAtMs: number, value = 'gpt-persisted'): HeldCatalogFile => ({
   format: 1,
   readAt: instantFromEpochMs(readAtMs),
@@ -74,6 +82,7 @@ async function subject(
     readonly disk?: HeldCatalogFile;
     readonly read?: HeldFastCatalogPorts['read'];
     readonly spawn?: ReturnType<typeof catalogSpawn>;
+    readonly fallback?: HeldFastCatalogPorts['fallback'];
   } = {},
 ): Promise<Subject> {
   const { root, base } = await workspace();
@@ -95,6 +104,7 @@ async function subject(
     read: more.read ?? (async (binary, cwd, env, signal) => await appServer.models(binary, cwd, env, signal)),
     nowMs: () => now.ms,
     now: () => instantFromEpochMs(now.ms),
+    fallback: more.fallback ?? (async () => undefined),
     load: async () => more.disk,
     save: async file => {
       saved.push(file);
@@ -188,6 +198,7 @@ describe('the held Codex catalog', () => {
       now: () => instantFromEpochMs(0),
       load: async () => undefined,
       save: async () => undefined,
+      fallback: async () => undefined,
       requestRefresh: () => undefined,
       warn: () => undefined,
     });
@@ -253,6 +264,7 @@ describe('the held Codex catalog', () => {
       now: () => instantFromEpochMs(0),
       load: async () => undefined,
       save: async () => undefined,
+      fallback: async () => undefined,
       requestRefresh: () => undefined,
       warn: () => undefined,
     });
@@ -276,6 +288,7 @@ describe('the held Codex catalog', () => {
       now: () => instantFromEpochMs(0),
       load: async () => undefined,
       save: async () => undefined,
+      fallback: async () => undefined,
       requestRefresh: () => undefined,
       warn: () => undefined,
     });
@@ -331,13 +344,125 @@ describe('the held Codex catalog', () => {
     expect(s.warnings).toHaveLength(1);
     // The child's own reason is in the warning, so the log says what to fix.
     expect(s.warnings[0]).toBe(
-      'the Codex model catalog could not be read (boom); fast starts on Codex are refused until it can be, or kept from the last good read',
+      'the Codex model catalog could not be read (boom); fast starts on Codex are refused until it can be read (next try in 1 min)',
     );
     fail = false;
     await s.catalog.refresh();
     fail = true;
     await s.catalog.refresh();
     expect(s.warnings).toHaveLength(2);
+  });
+
+  test('U0 a failing read logs its cause once, masked', async () => {
+    const started: Started[] = [];
+    const s = await subject(started, {
+      read: async () => {
+        throw new Error(
+          'GET https://user:hunter2@api.example/v1/models failed: Authorization: Bearer sk-abcdef123456 token=abc.def',
+        );
+      },
+      fallback: async () => [FALLBACK],
+    });
+    await s.catalog.loaded();
+    await s.catalog.refresh();
+    await s.catalog.refresh();
+    expect(s.warnings).toHaveLength(1);
+    const line = s.warnings[0] ?? '';
+    expect(line).toContain('could not be read (GET https://***@api.example/v1/models failed');
+    expect(line).toContain('refused until it can be read');
+    for (const secret of ['hunter2', 'sk-abcdef123456', 'abc.def']) expect(line).not.toContain(secret);
+  });
+
+  test('U0 with nothing held, the openai catalog is known as fallbackChoices(); held() stays real-only and a read that lands takes over', async () => {
+    const started: Started[] = [];
+    let fail = true;
+    const s = await subject(started, {
+      read: async () => {
+        if (fail) throw new Error('boom');
+        return [SOL];
+      },
+      fallback: async () => [FALLBACK],
+    });
+    await s.catalog.loaded();
+    expect(s.catalog.held()).toBeUndefined();
+    expect(s.catalog.fallbackChoices()?.map(choice => choice.value)).toEqual(['gpt-fallback']);
+    await s.catalog.refresh();
+    expect(s.catalog.held()).toBeUndefined();
+    expect(s.catalog.fallbackChoices()?.map(choice => choice.value)).toEqual(['gpt-fallback']);
+    fail = false;
+    await s.catalog.refresh();
+    expect(s.catalog.held()?.map(choice => choice.value)).toEqual(['gpt-6-sol']);
+  });
+
+  test('U0 with no openai catalog in effect, fallbackChoices() is nothing', async () => {
+    const started: Started[] = [];
+    const s = await subject(started);
+    await s.catalog.loaded();
+    expect(s.catalog.fallbackChoices()).toBeUndefined();
+  });
+
+  test('U0 a failing read is not asked for again until 1 minute, then 5, then 30, and a read that works resets it', async () => {
+    const started: Started[] = [];
+    let fail = true;
+    const s = await subject(started, {
+      read: async () => {
+        if (fail) throw new Error('boom');
+        return [SOL];
+      },
+    });
+    const ask = async (at: number): Promise<number> => {
+      s.now.ms = at;
+      s.catalog.refreshIfStale();
+      return s.refreshes.count;
+    };
+    expect(await ask(0)).toBe(1);
+    await s.catalog.refresh(); // fails at 0: next ask no sooner than 60 s
+    expect(await ask(59_999)).toBe(1);
+    expect(await ask(60_000)).toBe(2);
+    s.now.ms = 60_000;
+    await s.catalog.refresh(); // fails again: 5 minutes
+    expect(await ask(359_999)).toBe(2);
+    expect(await ask(360_000)).toBe(3);
+    s.now.ms = 360_000;
+    await s.catalog.refresh(); // fails a third time: 30 minutes
+    expect(await ask(360_000 + 1_799_999)).toBe(3);
+    expect(await ask(360_000 + 1_800_000)).toBe(4);
+    s.now.ms = 360_000 + 1_800_000;
+    await s.catalog.refresh(); // fails a fourth time: stays at 30 minutes
+    expect(await ask(360_000 + 3_599_999)).toBe(4);
+    fail = false;
+    s.now.ms = 360_000 + 3_600_000;
+    await s.catalog.refresh(); // works: the wait is gone
+    s.now.ms += STALE_AFTER_MS + 1;
+    s.catalog.refreshIfStale();
+    expect(s.refreshes.count).toBe(5);
+  });
+
+  test('U0 a missing binary backs off too, so a fast start does not spawn a lookup every time', async () => {
+    const started: Started[] = [];
+    const s = await subject(started, {});
+    const missing = new HeldFastCatalog({
+      workspace: {} as unknown as RootHandle,
+      environment: async () => undefined,
+      locate: async () => ({ outcome: 'absent', searched: [] }),
+      read: async () => [],
+      nowMs: () => s.now.ms,
+      now: () => instantFromEpochMs(s.now.ms),
+      fallback: async () => undefined,
+      load: async () => undefined,
+      save: async () => undefined,
+      requestRefresh: () => {
+        s.refreshes.count += 1;
+      },
+      warn: () => undefined,
+    });
+    missing.refreshIfStale();
+    await missing.refresh();
+    missing.refreshIfStale();
+    expect(s.refreshes.count).toBe(1);
+    s.now.ms = 60_000;
+    missing.refreshIfStale();
+    expect(s.refreshes.count).toBe(2);
   });
 
   test('(no guarantees row) a stop signal ends a running read and kills its child', async () => {

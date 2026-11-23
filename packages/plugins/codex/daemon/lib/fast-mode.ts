@@ -87,8 +87,48 @@ export function fastModeFacts(view: FastView, catalog: RuntimeModelCatalog): Fas
  */
 export const CATALOG_LOADING = "Codex's model list is still loading; try again in a few seconds";
 
+/**
+ * What a fast start is told for a model Ferretry's `openai` catalog lists while Codex's own list has not been read: fast
+ * mode is not confirmed yet, the read is retried by itself, and a start without fast works now.
+ */
+export const FAST_NOT_CONFIRMED = (label: string, retryInMs = 0): string => {
+  const minutes = Math.ceil(retryInMs / 60_000);
+  const when = minutes > 0 ? `the next read is in about ${minutes} min` : 'it is read again on the next fast start';
+  return `Fast mode for ${label} is not confirmed yet (Codex's model list could not be read; ${when}); try again then, or start without fast mode`;
+};
+
 /** What a fast start is told when the read looked for Codex and it is not there: it will not load, so it does not say so. */
 export const CODEX_NOT_FOUND = 'Codex could not be found, so its fast mode cannot be checked';
+
+/**
+ * The models the `openai` catalog lists for Codex, as the choices a fast start is judged against while no read of Codex's
+ * own list has landed. The catalog states no service tier, so `fast` is left unset ("nobody can say") and {@link
+ * fastStartRefusal} refuses none of them. Nothing when no `openai` catalog (or no codex half of it) is in effect.
+ */
+export function openaiFallbackChoices(view: {
+  readonly catalogs: readonly {
+    readonly id: string;
+    readonly codex?: readonly {
+      readonly id: string;
+      readonly label: string;
+      readonly tier: 'best' | 'balanced' | 'fast';
+      readonly context?: number;
+      readonly efforts: readonly string[];
+      readonly default: boolean;
+    }[];
+  }[];
+}): readonly RuntimeModelChoice[] | undefined {
+  const models = view.catalogs.find(catalog => catalog.id === 'openai')?.codex;
+  if (models === undefined || models.length === 0) return undefined;
+  return models.map(model => ({
+    value: model.id,
+    label: model.label,
+    tier: model.tier,
+    ...(model.context === undefined ? {} : { context: model.context }),
+    ...(model.default ? { isDefault: true as const } : {}),
+    reasoningEfforts: model.efforts.map(value => ({ value })),
+  }));
+}
 
 /**
  * The `start.decide` answer for a start that asks for fast mode: refuse it, with the code Ferrets maps to `409
@@ -101,16 +141,32 @@ export const CODEX_NOT_FOUND = 'Codex could not be found, so its fast mode canno
  * when the last read found no Codex binary — the same closed code, still fail closed)
  * (britnee, #35). Today a cold read waited, and a failed one allowed (rebuild-ref `bin/fyd.ts:2692`, `.catch(() => [])`);
  * both are tightened on purpose. A catalog that is held but does not list the model refuses nothing, as today.
+ * `known` is the `openai` catalog's models ({@link openaiFallbackChoices}): they state no service tier, so they never allow
+ * a start, but a refusal for a model they list says so ({@link FAST_NOT_CONFIRMED}) instead of "still loading".
  */
 export function fastStartDecision(
   input: StartDecideInput,
   held: () => readonly RuntimeModelChoice[] | undefined,
   binaryMissing: () => boolean = () => false,
+  known: () => readonly RuntimeModelChoice[] | undefined = () => undefined,
+  retryInMs: () => number = () => 0,
 ): HookDecision {
   if (input.harness !== 'codex' || input.fast !== true) return ALLOW;
   const choices = held();
-  if (choices === undefined)
-    return { allow: false, reason: binaryMissing() ? CODEX_NOT_FOUND : CATALOG_LOADING, code: UNSERVABLE_MODEL };
+  if (choices === undefined) {
+    if (binaryMissing()) return { allow: false, reason: CODEX_NOT_FOUND, code: UNSERVABLE_MODEL };
+    const listed = known();
+    const model = input.model ?? listed?.find(choice => choice.isDefault === true)?.value;
+    const entry =
+      model === undefined
+        ? undefined
+        : catalogChoice({ harness: 'codex', source: 'codex-app-server', choices: listed ?? [] }, model);
+    return {
+      allow: false,
+      reason: entry === undefined ? CATALOG_LOADING : FAST_NOT_CONFIRMED(entry.label, retryInMs()),
+      code: UNSERVABLE_MODEL,
+    };
+  }
   const model = input.model ?? choices.find(choice => choice.isDefault === true)?.value;
   if (model === undefined) return ALLOW;
   const refusal = fastStartRefusal(model, choices);

@@ -13,7 +13,12 @@ import { probeEnvironment } from './probe.ts';
  * boot decides from it at once. It is read again at boot and then only when a fast start finds the held copy older than
  * {@link STALE_AFTER_MS} (or nothing held); that refresh is fire and forget, and the start is answered from what is held.
  * With nothing held — the first boot ever, or no read has ever worked — {@link HeldFastCatalog.held} is `undefined` and
- * the Codex decision REFUSES a fast start (`fast-mode.ts`).
+ * the Codex decision REFUSES a fast start (`fast-mode.ts`). Fast is never allowed unverified: the `openai` model catalog's
+ * codex half ({@link HeldFastCatalog.fallbackChoices}, the `fallback` port) states no service tier, so it only lets the
+ * refusal say whether the model is one Ferretry knows (a retry will work) or not.
+ *
+ * A read that fails is logged once per failing streak (masked: no credential, no URL with one) and is not asked for again
+ * until a backoff has passed: 1 minute, then 5, then 30 ({@link RETRY_BACKOFF_MS}); a read that works resets it.
  *
  * THE CHILD HAS ITS OWN PLACE AND NO LOGIN. It runs in a folder this class creates under the plugin's own `agent-homes`
  * root, with the scrubbed {@link probeEnvironment} (a throwaway `HOME` and `CODEX_HOME` inside that folder, every proxy
@@ -25,6 +30,22 @@ import { probeEnvironment } from './probe.ts';
 
 /** How old the held copy may get before a fast start asks for a fresh read: Codex's own on-disk model cache lifetime. */
 export const STALE_AFTER_MS = 300_000;
+
+/** How long a failed (or binary-less) read waits before a fast start may ask for another: 1 minute, then 5, then 30. */
+const RETRY_BACKOFF_MS: readonly number[] = [60_000, 300_000, 1_800_000];
+
+/**
+ * A failure's cause, fit for a log: a URL's credentials, bearer values, well-known token shapes and `key=value` pairs whose
+ * name says secret are replaced, and the sentence is capped. The cause is a child's last stderr line, which can echo any of them.
+ */
+function maskedCause(message: string): string {
+  return message
+    .replace(/:\/\/[^/\s@]*@/gu, '://***@')
+    .replace(/\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+/giu, '$1 ***')
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|eyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]+)*)/gu, '***')
+    .replace(/([A-Za-z0-9_-]*(?:key|token|secret|password|auth)[A-Za-z0-9_-]*\s*[=:]\s*)[^\s,;"')]+/giu, '$1***')
+    .slice(0, 300);
+}
 
 export interface HeldFastCatalogPorts {
   /** The plugin's own `agent-homes` root, scoped to the folder this catalog's child lives in. */
@@ -42,6 +63,11 @@ export interface HeldFastCatalogPorts {
   ) => Promise<readonly RuntimeModelChoice[]>;
   readonly nowMs: () => number;
   readonly now: () => Instant;
+  /**
+   * The models the `openai` catalog lists for Codex, as choices with `fast` left unset (it says nothing about service
+   * tiers), or nothing when no such catalog is in effect. Judged from only while no read has landed.
+   */
+  readonly fallback: () => Promise<readonly RuntimeModelChoice[] | undefined>;
   /** The last good catalog on disk, or nothing (never written, or not a catalog this version can read). */
   readonly load: () => Promise<HeldCatalogFile | undefined>;
   /** Write the catalog atomically (the state seam does); the model list only. */
@@ -57,8 +83,11 @@ export class HeldFastCatalog {
   #readAtMs = 0;
   #pending: Promise<void> | undefined;
   #loaded: Promise<void> | undefined;
+  #fallback: readonly RuntimeModelChoice[] | undefined;
   #failing = false;
   #unlocated = false;
+  #misses = 0;
+  #retryAtMs = 0;
 
   constructor(private readonly ports: HeldFastCatalogPorts) {}
 
@@ -69,6 +98,7 @@ export class HeldFastCatalog {
   }
 
   async #load(): Promise<void> {
+    await this.#loadFallback();
     let file: HeldCatalogFile | undefined;
     try {
       file = await this.ports.load();
@@ -80,9 +110,27 @@ export class HeldFastCatalog {
     this.#readAtMs = epochMs(file.readAt);
   }
 
+  async #loadFallback(): Promise<void> {
+    try {
+      const choices = await this.ports.fallback();
+      this.#fallback = choices !== undefined && choices.length > 0 ? choices : undefined;
+    } catch {
+      this.#fallback = undefined;
+    }
+  }
+
   /** The catalog the last read produced (or the disk held), or nothing. Never waits, never spawns. */
   held(): readonly RuntimeModelChoice[] | undefined {
     return this.#held;
+  }
+
+  /**
+   * The `openai` catalog's Codex models as last looked up (at load, and after a failed read), or nothing. They say nothing
+   * about fast mode, so a fast start is never allowed from them; they only tell the refusal what it is refusing. Never
+   * waits, never spawns. The model switch does not use them: it needs the labels Codex advertises, which only a read gives.
+   */
+  fallbackChoices(): readonly RuntimeModelChoice[] | undefined {
+    return this.#fallback;
   }
 
   /**
@@ -98,12 +146,24 @@ export class HeldFastCatalog {
    * Called when a fast start arrives: if nothing is held, or the held copy is older than {@link STALE_AFTER_MS}, ask for
    * a read. Fire and forget — the start is answered from what is held, now.
    */
-  // LOW-B (r3, left as is on purpose): a read that keeps failing, or finds no binary, is asked for again on every fast start,
-  // with no backoff. Not changed in this round.
+  // A read that keeps failing, or finds no binary, waits out {@link RETRY_BACKOFF_MS} before it is asked for again.
   refreshIfStale(): void {
     if (this.#pending !== undefined) return;
-    if (this.#held !== undefined && this.ports.nowMs() - this.#readAtMs <= STALE_AFTER_MS) return;
+    const now = this.ports.nowMs();
+    if (this.#held !== undefined && now - this.#readAtMs <= STALE_AFTER_MS) return;
+    if (now < this.#retryAtMs) return;
     this.ports.requestRefresh();
+  }
+
+  /** Milliseconds until a failed read is next asked for (rounded up to a whole minute by callers); 0 when none is waiting. */
+  retryInMs(): number {
+    return Math.max(0, this.#retryAtMs - this.ports.nowMs());
+  }
+
+  #backOff(): void {
+    const wait = RETRY_BACKOFF_MS[Math.min(this.#misses, RETRY_BACKOFF_MS.length - 1)] as number;
+    this.#misses += 1;
+    this.#retryAtMs = this.ports.nowMs() + wait;
   }
 
   /**
@@ -113,17 +173,26 @@ export class HeldFastCatalog {
    */
   async refresh(signal?: AbortSignal): Promise<void> {
     this.#pending ??= this.#read(signal)
-      .then(() => {
-        this.#failing = false;
+      .then(landed => {
+        if (landed) {
+          this.#failing = false;
+          this.#misses = 0;
+          this.#retryAtMs = 0;
+        } else this.#backOff();
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
+        this.#backOff();
+        await this.#loadFallback();
         if (this.#failing) return;
         this.#failing = true;
         // The child's own reason (its last stderr line, or the deadline) is what makes this warning fixable from the log.
-        const why = error instanceof Error && error.message !== '' ? ` (${error.message})` : '';
-        this.ports.warn(
-          `the Codex model catalog could not be read${why}; fast starts on Codex are refused until it can be, or kept from the last good read`,
-        );
+        const why = error instanceof Error && error.message !== '' ? ` (${maskedCause(error.message)})` : '';
+        const effect =
+          this.#held !== undefined
+            ? 'fast starts on Codex are judged from the last good read'
+            : 'fast starts on Codex are refused until it can be read';
+        const wait = `next try in ${Math.round((RETRY_BACKOFF_MS[Math.min(this.#misses, RETRY_BACKOFF_MS.length) - 1] as number) / 60_000)} min`;
+        this.ports.warn(`the Codex model catalog could not be read${why}; ${effect} (${wait})`);
       })
       .finally(() => {
         this.#pending = undefined;
@@ -131,10 +200,11 @@ export class HeldFastCatalog {
     await this.#pending;
   }
 
-  async #read(signal: AbortSignal | undefined): Promise<void> {
+  /** True when a catalog landed; false when there was no binary to ask. A failed read throws. */
+  async #read(signal: AbortSignal | undefined): Promise<boolean> {
     const location = await this.ports.locate();
     this.#unlocated = location.outcome !== 'located';
-    if (location.outcome !== 'located') return;
+    if (location.outcome !== 'located') return false;
     const home = this.ports.workspace.resolve('home');
     // The child's CODEX_HOME (`probeEnvironment`: `<home>/.codex`). Codex refuses to start at all when it is not there
     // ("CODEX_HOME points to ..., but that path does not exist"), which is why no read ever landed before O8-4.
@@ -156,5 +226,6 @@ export class HeldFastCatalog {
     await this.ports
       .save({ format: 1, readAt: this.ports.now(), choices: choices as HeldCatalogFile['choices'] })
       .catch(() => undefined);
+    return true;
   }
 }
