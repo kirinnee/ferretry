@@ -166,6 +166,23 @@ export const MACOS_PROBE: readonly string[] = [...MACOS_PREFIX, 'true'];
 export const MACOS_NICE_PREFIX: readonly string[] = ['nice', '-n', '10'];
 export const MACOS_NICE_PROBE: readonly string[] = [...MACOS_NICE_PREFIX, 'true'];
 
+/** The programs the scope wrapper itself names, so what the planner emits and what is recognised are one fact. */
+const ENV_PROGRAM = 'env';
+const SCOPE_PROGRAM = 'systemd-run';
+
+/**
+ * Every program a planned launch may exec through at the pane's one pid before the harness takes over (the argv
+ * {@link agentScopeCommand} and the priority prefixes build), by the name the kernel reports for it. A pane reading as
+ * one of these is a launch still on its way, not a program of its own.
+ */
+export const LAUNCH_WRAPPER_PROGRAMS: readonly string[] = Object.freeze([
+  ...new Set(
+    [ENV_PROGRAM, SCOPE_PROGRAM, IONICE_PREFIX[0], MACOS_PREFIX[0], MACOS_NICE_PREFIX[0]].filter(
+      name => name !== undefined,
+    ),
+  ),
+]);
+
 /**
  * The two names by which a `--user` manager is found. The kernel gives the same two to every `systemctl`, `systemd-run`
  * and `tmux` child it spawns (its `MANAGER_ENVIRONMENT_NAMES`; a test holds the lists equal).
@@ -197,8 +214,8 @@ export function agentScopeCommand(input: {
 }): readonly string[] {
   const names = MANAGER_ENVIRONMENT_NAMES.filter(name => (input.environment?.[name] ?? '') !== '');
   return [
-    ...(names.length === 0 ? [] : ['env', ...names.map(name => `${name}=${input.environment?.[name] ?? ''}`)]),
-    'systemd-run',
+    ...(names.length === 0 ? [] : [ENV_PROGRAM, ...names.map(name => `${name}=${input.environment?.[name] ?? ''}`)]),
+    SCOPE_PROGRAM,
     '--user',
     '--scope',
     '--quiet',

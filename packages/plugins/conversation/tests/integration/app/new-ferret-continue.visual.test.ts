@@ -4,7 +4,7 @@
  * synthetic transcripts held in memory (no real ~/.claude or ~/.codex is read).
  *
  * The owner's line: "when starting a new ferret, offer to continue a conversation; mix it together; no Conversations tab".
- * As computed DOM, at 1280 and 390, light and dark:
+ * As computed DOM, at 1440 and 390, light and dark:
  *  - the offer is on the New ferret page itself, closed until opened, with the fresh form still below it (one page, one flow);
  *  - opened, it lists the conversations newest first with title, folder, harness and age, and an empty daemon says so;
  *  - picking one fills the Folder box, limits the runtime field to its harness, keeps the auto|interactive choice, and Create
@@ -110,12 +110,14 @@ afterAll(async () => {
 });
 
 const VARIANTS = [
-  { name: '1280', width: 1_280, height: 1_000, phone: false },
+  { name: '1440', width: 1_440, height: 1_000, phone: false },
   { name: '390', width: 390, height: 900, phone: true },
 ] as const;
 type Variant = (typeof VARIANTS)[number];
 
-const DISCLOSURE = '[data-new-ferret-continue] button[aria-expanded]';
+const SWITCH = '[data-new-ferret-switch]';
+const NEW_CHOICE = `${SWITCH} [role="radio"]:nth-child(1)`;
+const CONTINUE_CHOICE = `${SWITCH} [role="radio"]:nth-child(2)`;
 
 interface Recorded {
   route: string;
@@ -143,7 +145,7 @@ const withPage = async (
     const tab = await context.newPage();
     tab.setDefaultTimeout(15_000);
     await tab.goto(`${origin}/?theme=studio-${scheme}${query}`);
-    await tab.waitForSelector(DISCLOSURE);
+    await tab.waitForSelector(SWITCH);
     await run(tab);
   } finally {
     await context.close();
@@ -166,29 +168,38 @@ const noSideways = async (tab: Page): Promise<void> => {
 describe('New ferret: continue a past conversation', () => {
   for (const variant of VARIANTS)
     for (const scheme of ['light', 'dark'] as const) {
-      it(`${variant.name} ${scheme}: one page: the offer is closed above the fresh form, and opens to the list`, () =>
+      it(`${variant.name} ${scheme}: one page: a New | Continue switch sits above the form; New is on, Continue shows the list`, () =>
         withPage(variant, scheme, '', async tab => {
-          const closed = await tab.evaluate(selector => {
-            const button = document.querySelector<HTMLElement>(selector) as HTMLElement;
-            const form = document.querySelector<HTMLElement>('#fy-new-ferret-runtime') as HTMLElement;
-            return {
-              expanded: button.getAttribute('aria-expanded'),
-              label: button.textContent ?? '',
-              buttonTop: button.getBoundingClientRect().top,
-              formTop: form.getBoundingClientRect().top,
-              listed: document.querySelectorAll('[data-continue-row]').length,
-              height: button.getBoundingClientRect().height,
-            };
-          }, DISCLOSURE);
-          expect(closed.expanded).toBe('false');
-          expect(closed.label).toContain('Continue a past conversation');
-          expect(closed.buttonTop, 'the offer sits above the form, on the same page').toBeLessThan(closed.formTop);
-          expect(closed.listed, 'closed: no list yet').toBe(0);
-          expect(closed.height, 'a finger-sized target').toBeGreaterThanOrEqual(44);
-          await shot(tab, variant, scheme, 'closed');
+          const fresh = await tab.evaluate(
+            ([switchSelector, newSelector, continueSelector]) => {
+              const group = document.querySelector<HTMLElement>(switchSelector as string) as HTMLElement;
+              const form = document.querySelector<HTMLElement>('#fy-new-ferret-runtime') as HTMLElement;
+              const choices = [...group.querySelectorAll<HTMLElement>('[role="radio"]')];
+              return {
+                labels: choices.map(choice => choice.textContent),
+                checked: choices.map(choice => choice.getAttribute('aria-checked')),
+                groupTop: group.getBoundingClientRect().top,
+                formTop: form.getBoundingClientRect().top,
+                listed: document.querySelectorAll('[data-continue-row]').length,
+                heights: choices.map(choice => choice.getBoundingClientRect().height),
+                folded: document.querySelectorAll('[data-new-ferret-continue] [aria-expanded]').length,
+                newFound: document.querySelector(newSelector as string) !== null,
+                continueFound: document.querySelector(continueSelector as string) !== null,
+              };
+            },
+            [SWITCH, NEW_CHOICE, CONTINUE_CHOICE],
+          );
+          expect(fresh.labels).toEqual(['New conversation', 'Continue a conversation']);
+          expect(fresh.checked, 'New conversation is on to begin with').toEqual(['true', 'false']);
+          expect(fresh.groupTop, 'the switch sits above the form, on the same page').toBeLessThan(fresh.formTop);
+          expect(fresh.listed, 'New: no list').toBe(0);
+          expect(fresh.folded, 'no folded disclosure any more').toBe(0);
+          for (const height of fresh.heights) expect(height, 'a finger-sized target').toBeGreaterThanOrEqual(44);
+          await shot(tab, variant, scheme, 'new');
 
-          await tab.click(DISCLOSURE);
+          await tab.click(CONTINUE_CHOICE);
           await tab.waitForSelector('[data-continue-row]');
+          expect(await tab.getAttribute(CONTINUE_CHOICE, 'aria-checked')).toBe('true');
           const open = await tab.evaluate(() => ({
             ids: [...document.querySelectorAll('[data-continue-row]')].map(row =>
               row.getAttribute('data-continue-row'),
@@ -203,12 +214,14 @@ describe('New ferret: continue a past conversation', () => {
           expect(open.text).toContain('Claude');
           expect(open.formStillThere, 'the fresh form is still on the same page').toBe(true);
           await noSideways(tab);
-          await shot(tab, variant, scheme, 'list');
+          await shot(tab, variant, scheme, 'continue');
+          await tab.click(NEW_CHOICE);
+          expect(await tab.evaluate(() => document.querySelector('[data-continue-row]') !== null)).toBe(false);
         }));
 
       it(`${variant.name} ${scheme}: an empty daemon says so inside the open offer`, () =>
         withPage(variant, scheme, '&empty=1', async tab => {
-          await tab.click(DISCLOSURE);
+          await tab.click(CONTINUE_CHOICE);
           await tab.waitForSelector('[data-continue-empty]');
           expect(await tab.textContent('[data-continue-empty]')).toBe('No past conversations yet.');
           await noSideways(tab);
@@ -217,7 +230,7 @@ describe('New ferret: continue a past conversation', () => {
 
       it(`${variant.name} ${scheme}: picking a conversation fills the form, and Create resumes THAT conversation`, () =>
         withPage(variant, scheme, '', async tab => {
-          await tab.click(DISCLOSURE);
+          await tab.click(CONTINUE_CHOICE);
           await tab.waitForSelector(`[data-continue-row="${LOGIN}"]`);
           await tab.click(`[data-continue-row="${LOGIN}"]`);
           await tab.waitForSelector('[data-continue-action]');
@@ -270,7 +283,7 @@ describe('New ferret: continue a past conversation', () => {
 
   it('a runtime typed for the OTHER harness is refused by the daemon and says why; nothing is resumed or opened', () =>
     withPage(VARIANTS[0], 'light', '', async tab => {
-      await tab.click(DISCLOSURE);
+      await tab.click(CONTINUE_CHOICE);
       await tab.click(`[data-continue-row="${CODEX}"]`);
       await tab.click('[data-continue-action]');
       await tab.waitForSelector('[data-new-ferret-picked]');
@@ -287,19 +300,110 @@ describe('New ferret: continue a past conversation', () => {
   it('`?continue=1` opens New ferret with the list already shown (the Runtimes and setup links)', () =>
     withPage(VARIANTS[0], 'light', '&continue=1', async tab => {
       await tab.waitForSelector('[data-continue-row]');
-      expect(await tab.getAttribute(DISCLOSURE, 'aria-expanded')).toBe('true');
+      expect(await tab.getAttribute(CONTINUE_CHOICE, 'aria-checked')).toBe('true');
     }));
 
-  it('a Codex pick names Codex and its own conversation id; "Start fresh instead" starts without one', () =>
+  it('a Codex pick names Codex and its own conversation id; switching back to New conversation starts without one', () =>
     withPage(VARIANTS[0], 'light', '', async tab => {
-      await tab.click(DISCLOSURE);
+      await tab.click(CONTINUE_CHOICE);
       await tab.click(`[data-continue-row="${CODEX}"]`);
       await tab.click('[data-continue-action]');
       await tab.waitForSelector('[data-new-ferret-picked]');
       expect(await tab.evaluate(() => (window as unknown as { __harness?: string }).__harness)).toBe('codex');
-      await tab.getByRole('button', { name: 'Start fresh instead' }).click();
+      await tab.click(NEW_CHOICE);
       expect(await tab.evaluate(() => (window as unknown as { __harness?: string }).__harness)).toBeUndefined();
       expect(await tab.inputValue('#fy-new-ferret-folder')).toBe('');
       expect(rowIds).toContain(CODEX);
+    }));
+
+  for (const variant of VARIANTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`${variant.name} ${scheme}: the switch is a labelled radio group with ONE Tab stop, and the arrow keys move the choice with visible focus`, () =>
+        withPage(variant, scheme, '', async tab => {
+          expect(await tab.getAttribute(SWITCH, 'role')).toBe('radiogroup');
+          expect(await tab.getAttribute(SWITCH, 'aria-label')).toBe('New or continue');
+          const stops = () =>
+            tab.evaluate(
+              selector =>
+                [...document.querySelectorAll(`${selector} [role="radio"]`)].map(radio =>
+                  radio.getAttribute('tabindex'),
+                ),
+              SWITCH,
+            );
+          expect(await stops(), 'only the chosen segment is a Tab stop').toEqual(['0', '-1']);
+          // Tab into the group from the heading's back button: it lands on the chosen segment, and one more Tab leaves it.
+          await tab.focus('button:has-text("← Home")');
+          await tab.keyboard.press('Tab');
+          expect(await tab.evaluate(() => document.activeElement?.getAttribute('data-segment'))).toBe('new');
+          await tab.keyboard.press('ArrowRight');
+          expect(await tab.evaluate(() => document.activeElement?.getAttribute('data-segment')), 'focus follows').toBe(
+            'continue',
+          );
+          expect(await tab.getAttribute(CONTINUE_CHOICE, 'aria-checked'), 'ArrowRight selects Continue').toBe('true');
+          await tab.waitForSelector('[data-continue-row]');
+          expect(await stops()).toEqual(['-1', '0']);
+          await shot(tab, variant, scheme, 'keyboard-focus');
+          const ring = await tab.evaluate(selector => {
+            const style = getComputedStyle(document.querySelector(selector) as Element);
+            return { style: style.outlineStyle, width: style.outlineWidth };
+          }, CONTINUE_CHOICE);
+          expect(ring.style, 'the focused segment shows a ring').not.toBe('none');
+          expect(Number.parseFloat(ring.width)).toBeGreaterThan(0);
+          await tab.keyboard.press('ArrowRight');
+          expect(await tab.getAttribute(NEW_CHOICE, 'aria-checked'), 'it wraps back to New').toBe('true');
+          await tab.keyboard.press('ArrowLeft');
+          expect(await tab.getAttribute(CONTINUE_CHOICE, 'aria-checked')).toBe('true');
+          await tab.keyboard.press('Home');
+          expect(await tab.getAttribute(NEW_CHOICE, 'aria-checked')).toBe('true');
+          await tab.keyboard.press('Tab');
+          expect(
+            await tab.evaluate(selector => document.activeElement?.closest(selector) === null, SWITCH),
+            'one Tab leaves the group',
+          ).toBe(true);
+        }));
+
+  for (const variant of VARIANTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`${variant.name} ${scheme}: Continue with NO pick cannot start a ferret: Create is disabled and says why; a pick frees it`, () =>
+        withPage(variant, scheme, '&continue=1&folder=/work/prefilled', async tab => {
+          await tab.waitForSelector('[data-continue-row]');
+          await tab.fill('#fy-new-ferret-runtime', 'claude-default');
+          await tab.fill('#fy-new-ferret-prompt', 'Start something');
+          const create = tab.getByRole('button', { name: 'Create ferret' });
+          expect(await create.isDisabled(), 'Create is disabled until a conversation is picked').toBe(true);
+          expect(await tab.textContent('#fy-new-ferret-create-blocker')).toBe('Pick a conversation to continue.');
+          await tab.locator('#fy-new-ferret-create-blocker').scrollIntoViewIfNeeded();
+          await shot(tab, variant, scheme, 'continue-no-pick');
+          await create.click({ force: true }).catch(() => undefined);
+          expect(
+            await tab.evaluate(
+              () =>
+                (window as unknown as { __calls: Recorded[] }).__calls.filter(call => call.route === 'POST /v1/ferrets')
+                  .length,
+            ),
+            'nothing was started',
+          ).toBe(0);
+          expect(await tab.evaluate(() => window.location.pathname)).toBe('/d/fake/new');
+          await tab.click(`[data-continue-row="${LOGIN}"]`);
+          await tab.click('[data-continue-action]');
+          await tab.waitForSelector('[data-new-ferret-picked]');
+          // The pick's harness clears a runtime chosen before it, so the runtime is named again; then Create is free.
+          await tab.fill('#fy-new-ferret-runtime', 'claude-default');
+          expect(await create.isDisabled(), 'a pick frees Create').toBe(false);
+        }));
+
+  it('New → Continue → New with NO pick keeps the Folder, the ?folder= prefill included', () =>
+    withPage(VARIANTS[0], 'light', '&folder=/work/prefilled', async tab => {
+      expect(await tab.inputValue('#fy-new-ferret-folder')).toBe('/work/prefilled');
+      await tab.click(CONTINUE_CHOICE);
+      await tab.waitForSelector('[data-continue-row]');
+      await tab.click(NEW_CHOICE);
+      expect(await tab.inputValue('#fy-new-ferret-folder'), 'the prefill survives a trip with no pick').toBe(
+        '/work/prefilled',
+      );
+      await tab.fill('#fy-new-ferret-folder', '/work/typed');
+      await tab.click(CONTINUE_CHOICE);
+      await tab.click(NEW_CHOICE);
+      expect(await tab.inputValue('#fy-new-ferret-folder'), 'a typed folder survives it too').toBe('/work/typed');
     }));
 });
