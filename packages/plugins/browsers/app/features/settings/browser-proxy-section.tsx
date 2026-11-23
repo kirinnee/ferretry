@@ -6,6 +6,7 @@ import {
   SetupSection,
   useSecretField,
 } from '@ferretry/app/ui';
+import { SettingSaveBar } from '@ferretry/app';
 import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { BrowserProxySetting } from '../../../contract/index.ts';
@@ -224,7 +225,7 @@ export function BrowserProxySection({
   const testRefused = shown?.kind === 'refused';
 
   return (
-    <SetupSection title="Browser proxy" name="browser-proxy">
+    <SetupSection title="Browser proxy" name="browser-proxy" saves="on-save">
       <p className="m-0 min-w-0 break-words text-ui text-fg" data-browser-proxy-current="">
         <span className="font-semibold">Now: </span>
         {now}
@@ -380,7 +381,23 @@ export function BrowserProxySection({
             </Button>
           </ChangeApplyPanel>
         </div>
-      ) : null}
+      ) : (
+        // The Save bar is there from the first paint; the panel above replaces it once there is something valid to save.
+        <SettingSaveBar
+          dirty={dirty}
+          blocked
+          saved={saveOutcome?.kind === 'saved' && !dirty}
+          saveLabel="Save and test"
+          onSave={() => undefined}
+          onDiscard={() => {
+            setDraft(draftOf(saved));
+            pendingFields.username.clear();
+            pendingFields.password.clear();
+            setProblems({ username: null, password: null });
+            forgetTest();
+          }}
+        />
+      )}
       <p className="m-0 text-meta leading-base text-muted" data-browser-proxy-hint="">
         Applies the next time the browser on {machineInSentence(machineName)} starts.
       </p>

@@ -118,20 +118,29 @@ export const createSettings = (client: PluginClient): AppComponent<SettingsProps
               )}
             />
           ) : null}
-          {view.plan?.kind === 'self' && view.verification === 'unverified' ? (
-            <SettingRow name="Unverified version" hint="Ferretry has not verified the newest version.">
-              <div className="pb-3">
+        </SettingGroup>
+        {view.plan?.kind === 'self' && view.verification === 'unverified' ? (
+          // RISKY, so it is a group of its own at the foot with a danger button and the consequence in words (not a neutral
+          // button beside the safe update): the same install can break what Ferretry has tested.
+          <SettingGroup label="Risky: an unverified version" settingId="claude-code-unverified-update">
+            <SettingRow
+              name="Update to the newest version"
+              hint="Ferretry has not verified this version. It may change how Claude Code behaves and could break runs that work today. The verified update above is the safe one."
+              wide
+              control={() => (
                 <Button
+                  variant="danger"
                   className="h-auto min-h-[44px] max-w-full whitespace-normal py-2 text-left"
                   disabled={running}
+                  data-unverified-update=""
                   onClick={() => void update(true)}
                 >
                   Update to a version Ferretry has not verified
                 </Button>
-              </div>
-            </SettingRow>
-          ) : null}
-        </SettingGroup>
+              )}
+            />
+          </SettingGroup>
+        ) : null}
         {note === null ? null : (
           <p className="m-0 mb-8 text-meta text-err" role="alert">
             {note}

@@ -5,6 +5,7 @@
  */
 
 import { onRadioGroupKeyDown } from '../compose/choice-cards.tsx';
+import { type SettingSaves, SettingSavesNote } from '../compose/setting-form.tsx';
 import { cn } from './lib/class-names.ts';
 import { Check } from 'lucide-react';
 import { type ReactNode, useId, useRef } from 'react';
@@ -14,14 +15,22 @@ export function SetupSection({
   title,
   children,
   name,
+  saves,
 }: {
   readonly title: string;
   readonly children: ReactNode;
   readonly name?: string;
+  /** WHEN this section saves, said under its heading (see `compose/setting-form.tsx`: one save model per kind of setting). */
+  readonly saves?: SettingSaves;
 }) {
   return (
-    <section className="flex min-w-0 flex-col gap-2" data-setup-section={name}>
+    <section
+      className="flex min-w-0 flex-col gap-2"
+      data-setup-section={name}
+      {...(saves === undefined ? {} : { 'data-setting-saves': saves, 'data-setting-group': title })}
+    >
       <h4 className="m-0 text-meta font-semibold uppercase text-muted">{title}</h4>
+      {saves === undefined ? null : <SettingSavesNote saves={saves} />}
       {children}
     </section>
   );

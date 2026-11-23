@@ -12,7 +12,15 @@
 
 import { useState } from 'react';
 import { useKeptDraft } from '../../hooks/use-kept-draft.ts';
-import { ChoiceCards, cn, SettingGroup, SettingRow, SettingSwitch } from '../../shell-voice.ts';
+import {
+  ChoiceCards,
+  cn,
+  Segmented,
+  SettingGroup,
+  SettingRow,
+  SettingSaveBar,
+  SettingSwitch,
+} from '../../shell-voice.ts';
 import type { DaemonConnection } from '../../shell-voice.ts';
 import {
   DEFAULT_VOICE_CLEANUP_PROMPTS,
@@ -55,47 +63,37 @@ export const CLEANUP_OFF_EXPLANATION =
 /** A prompt is saved trimmed, so a trailing newline the machine dropped is not an edit still open. */
 const samePrompt = (a: string, b: string): boolean => a.trim() === b.trim();
 
+/** The counts offered; a count the machine already holds (any whole number up to the limit) is shown too, never hidden. */
+const MESSAGE_COUNTS = [1, 2, 3, 5, MAX_CONVERSATION_MESSAGES] as const;
+
 /**
- * How many messages to include, typed as a draft and saved when the field is left or Enter is pressed —
- * never per keystroke: typing "12" used to save "1", disable the field under the cursor and lose the "2".
+ * How many messages to include: a CHOICE, so it saves at once like the switch above it (never typed into a box that saves on blur).
  */
-function MessageCountField({ saved, onSave }: { readonly saved: number; onSave(patch: VoiceCleanupPatch): void }) {
-  const count = useKeptDraft(String(saved));
-  const commit = (): void => {
-    const next = Number(count.value);
-    if (!count.dirty) return;
-    if (Number.isInteger(next) && next >= 1 && next <= MAX_CONVERSATION_MESSAGES)
-      onSave({ conversationMessages: next });
-    else count.reload();
-  };
+function MessageCountField({
+  saved,
+  busy,
+  onSave,
+}: {
+  readonly saved: number;
+  readonly busy: boolean;
+  onSave(patch: VoiceCleanupPatch): void;
+}) {
+  const counts = [...new Set<number>([...MESSAGE_COUNTS, saved])].sort((a, b) => a - b);
   return (
     <SettingRow
       name="Latest messages to include"
       hint="How much of the conversation to send"
-      control={labelId => (
-        <input
-          id="stt-cleanup-messages"
-          aria-labelledby={labelId}
-          className="kt-input fy-vs-num"
-          type="number"
-          min={1}
-          max={MAX_CONVERSATION_MESSAGES}
-          value={count.value}
-          data-voice-cleanup-messages=""
-          onChange={event => count.set(event.target.value)}
-          onBlur={commit}
-          onKeyDown={event => {
-            if (event.key === 'Enter') commit();
-          }}
+      wide
+      control={() => (
+        <Segmented
+          label="Latest messages to include"
+          value={String(saved)}
+          disabled={busy}
+          options={counts.map(count => ({ id: String(count), label: String(count) }))}
+          onChange={next => onSave({ conversationMessages: Number(next) })}
         />
       )}
-    >
-      {count.changedElsewhere ? (
-        <div className="fy-vs-body">
-          <ChangedElsewhereNote field="voice-messages" onReload={count.reload} />
-        </div>
-      ) : null}
-    </SettingRow>
+    />
   );
 }
 
@@ -117,50 +115,61 @@ function PromptEditor({
   const fallback = DEFAULT_VOICE_CLEANUP_PROMPTS[style];
   const edited = saved !== fallback;
   const id = `stt-cleanup-prompt-${style}`;
+  // The prompt is a VALUE, so it is a form of its own: one Save bar says what state it is in; Reset to default is an action beside it.
   return (
-    <li className="fy-vs-body" data-setting-row="Prompt">
-      <div className="flex items-center justify-between gap-2">
-        <label htmlFor={id} className="text-ui font-semibold">
-          Prompt
-        </label>
-        {edited && (
-          <span className="rounded-control border border-border-strong px-2 text-meta text-muted">Edited</span>
-        )}
-      </div>
-      <Textarea
-        id={id}
-        className="min-h-[44px] w-full max-w-[44rem]"
-        rows={5}
-        spellCheck
-        maxLength={MAX_VOICE_PROMPT_CHARS}
-        value={draft}
-        onChange={event => prompt.set(event.target.value)}
-      />
-      {prompt.changedElsewhere ? (
-        <ChangedElsewhereNote field={`voice-prompt-${style}`} onReload={prompt.reload} />
-      ) : null}
-      <div className="fy-vs-field">
-        <button
-          type="button"
-          disabled={busy || draft.trim() === saved || draft.trim() === ''}
-          onClick={() => onSave({ prompts: { [style]: draft } })}
-          className="min-h-[44px] rounded-control border border-accent bg-accent-soft px-control-x text-ui font-semibold text-accent disabled:border-border disabled:bg-surface-2 disabled:text-muted disabled:opacity-60"
+    <SettingGroup
+      label="Clean-up prompt"
+      saves="on-save"
+      foot={
+        <SettingSaveBar
+          dirty={draft.trim() !== saved}
+          saving={busy}
+          blocked={draft.trim() === ''}
+          saveLabel="Save prompt"
+          discardLabel="Undo edits"
+          onSave={() => onSave({ prompts: { [style]: draft } })}
+          onDiscard={() => prompt.reload()}
         >
-          Save prompt
-        </button>
-        <button
-          type="button"
-          disabled={busy || (!edited && draft === fallback)}
-          onClick={() => {
-            prompt.set(fallback);
-            if (edited) onSave({ prompts: { [style]: null } });
-          }}
-          className="min-h-[44px] rounded-control border border-border-strong bg-surface-2 px-control-x text-ui text-fg disabled:text-muted disabled:opacity-60"
-        >
-          Reset to default
-        </button>
-      </div>
-    </li>
+          <button
+            type="button"
+            disabled={busy || (!edited && draft === fallback)}
+            onClick={() => {
+              prompt.set(fallback);
+              if (edited) onSave({ prompts: { [style]: null } });
+            }}
+            className="min-h-[44px] rounded-control border border-border-strong bg-surface-2 px-control-x text-ui text-fg disabled:text-muted disabled:opacity-60"
+          >
+            Reset to default
+          </button>
+        </SettingSaveBar>
+      }
+    >
+      <li className="fy-vs-body" data-setting-row="Prompt">
+        <div className="flex items-center justify-between gap-2">
+          <label htmlFor={id} className="text-ui font-semibold">
+            Prompt
+          </label>
+          {edited && (
+            <span className="rounded-control border border-border-strong px-2 text-meta text-muted">Edited</span>
+          )}
+        </div>
+        <Textarea
+          id={id}
+          className="min-h-[44px] w-full max-w-[44rem]"
+          rows={5}
+          spellCheck
+          maxLength={MAX_VOICE_PROMPT_CHARS}
+          value={draft}
+          onChange={event => prompt.set(event.target.value)}
+        />
+        {prompt.changedElsewhere ? (
+          <ChangedElsewhereNote field={`voice-prompt-${style}`} onReload={prompt.reload} />
+        ) : null}
+      </li>
+      <li className="fy-vs-body" data-cleanup-guard="">
+        <p className="fy-vs-note">{CLEANUP_GUARD_EXPLANATION}</p>
+      </li>
+    </SettingGroup>
   );
 }
 
@@ -190,7 +199,24 @@ function VoiceCleanupView({ state }: { readonly state: MachineVoiceCleanup }) {
   };
   return (
     <div data-voice-cleanup="">
-      <SettingGroup label="Clean-up style">
+      <SettingGroup
+        label="Clean-up style"
+        saves="on-save"
+        foot={
+          // A style is staged (a stray arrow key must never turn hosted clean-up on), so it is saved by a Save bar like a value.
+          <SettingSaveBar
+            dirty={pending !== null}
+            saving={busy}
+            saveLabel="Apply"
+            discardLabel="Cancel"
+            marks={pending === null ? {} : { 'data-cleanup-staged': '' }}
+            onSave={() => {
+              if (pending !== null) applyStyle(pending);
+            }}
+            onDiscard={() => setStaged(null)}
+          />
+        }
+      >
         <li className="fy-vs-body" data-setting-row="Clean-up style">
           <p className="fy-vs-note">
             Prompts are saved on this machine (<code>voice.yaml</code>) and shared by every device paired to it.
@@ -203,44 +229,22 @@ function VoiceCleanupView({ state }: { readonly state: MachineVoiceCleanup }) {
             options={CLEANUP_STYLES.map(option => ({ id: option.id, title: option.label, line: option.hint }))}
           />
           {pending !== null && (
-            <div className="fy-vs-field" data-cleanup-staged="">
-              <p className="fy-vs-note" role="status">
-                {CLEANUP_STYLE_STAGED_EXPLANATION}{' '}
-                {style === 'off' && pending !== 'off' ? CLEANUP_HOSTED_ON_EXPLANATION : null}
-              </p>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => applyStyle(pending)}
-                className="min-h-[44px] rounded-control border border-accent bg-accent-soft px-control-x text-ui font-semibold text-accent disabled:border-border disabled:bg-surface-2 disabled:text-muted disabled:opacity-60"
-              >
-                Apply
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setStaged(null)}
-                className="min-h-[44px] rounded-control border border-border-strong bg-surface-2 px-control-x text-ui text-fg disabled:text-muted disabled:opacity-60"
-              >
-                Cancel
-              </button>
-            </div>
+            <p className="fy-vs-note" role="status" data-cleanup-staged-note="">
+              {CLEANUP_STYLE_STAGED_EXPLANATION}{' '}
+              {style === 'off' && pending !== 'off' ? CLEANUP_HOSTED_ON_EXPLANATION : null}
+            </p>
           )}
         </li>
         {style === 'off' ? (
           <li className="fy-vs-body">
             <p className="fy-vs-note">{CLEANUP_OFF_EXPLANATION}</p>
           </li>
-        ) : (
-          <>
-            <PromptEditor key={style} style={style} saved={promptFor(cleanup, style)} busy={busy} onSave={commit} />
-            <li className="fy-vs-body" data-cleanup-guard="">
-              <p className="fy-vs-note">{CLEANUP_GUARD_EXPLANATION}</p>
-            </li>
-          </>
-        )}
+        ) : null}
       </SettingGroup>
-      <SettingGroup label="Conversation context">
+      {style === 'off' ? null : (
+        <PromptEditor key={style} style={style} saved={promptFor(cleanup, style)} busy={busy} onSave={commit} />
+      )}
+      <SettingGroup label="Conversation context" saves="now">
         <SettingRow
           name="Use the conversation for context"
           hint="Spell names the way the conversation does"
@@ -254,11 +258,14 @@ function VoiceCleanupView({ state }: { readonly state: MachineVoiceCleanup }) {
             />
           )}
         />
-        {cleanup.useConversation && <MessageCountField saved={cleanup.conversationMessages} onSave={commit} />}
+        {cleanup.useConversation && (
+          <MessageCountField saved={cleanup.conversationMessages} busy={busy} onSave={commit} />
+        )}
       </SettingGroup>
       {outcome !== null && outcome.kind !== 'applied' && (
         <p
           role="status"
+          data-cleanup-outcome=""
           className={cn('text-meta leading-base', outcome.kind === 'refused' ? 'text-err' : 'text-warn')}
         >
           {outcome.message}

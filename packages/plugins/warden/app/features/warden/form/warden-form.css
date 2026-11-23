@@ -16,11 +16,20 @@
   flex-direction: column;
   gap: 12px;
 }
+/* A section heading is a group title like every other settings page's (`SettingGroup`): small, upper-case, muted, with a hairline
+   over the group so the long page reads as titled groups, not one wall. */
 .fy-wf-section > h3 {
   margin: 0;
-  font-size: var(--text-row, 15px);
+  font-size: var(--text-meta, 12px);
   font-weight: 600;
-  color: var(--fg);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.fy-wf > .fy-wf-section + .fy-wf-section,
+.fy-wf fieldset > .fy-wf-section + .fy-wf-section {
+  padding-top: 24px;
+  border-top: var(--divider-width, 1px) solid var(--border);
 }
 .fy-wf-note {
   margin: 0;

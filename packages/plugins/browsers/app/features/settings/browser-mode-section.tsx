@@ -1,4 +1,4 @@
-import { ChoiceCards } from '@ferretry/app';
+import { ChoiceCards, SettingSaveBar } from '@ferretry/app';
 import { Button, type ChangeAuthority, ChangeApplyPanel, SetupNote, SetupSection } from '@ferretry/app/ui';
 import { useState } from 'react';
 import type { BrowserMode } from '../../../contract/index.ts';
@@ -61,7 +61,7 @@ export function BrowserModeSection({
     });
   };
   return (
-    <SetupSection title="Browser mode" name="browser-mode">
+    <SetupSection title="Browser mode" name="browser-mode" saves="on-save">
       {/* Cards, staged: an arrow key moves the pick, and nothing is written until Save. */}
       <ChoiceCards
         label="Browser mode"
@@ -105,7 +105,16 @@ export function BrowserModeSection({
             </Button>
           </ChangeApplyPanel>
         </div>
-      ) : null}
+      ) : (
+        // The Save bar is there from the first paint, with nothing to save; the panel above replaces it while a mode is staged.
+        <SettingSaveBar
+          dirty={false}
+          saved={outcome?.kind === 'saved'}
+          saveLabel="Save browser mode"
+          onSave={() => undefined}
+          onDiscard={() => undefined}
+        />
+      )}
     </SetupSection>
   );
 }

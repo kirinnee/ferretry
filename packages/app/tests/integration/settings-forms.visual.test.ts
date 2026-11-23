@@ -24,10 +24,15 @@ const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_SETTINGS_FORMS_SHOTS_DIR ?? '';
 const scheme = process.env.FY_SETTINGS_FORMS_SCHEME === 'light' ? 'light' : 'dark';
 /** The pages this unit puts on the model (`FY_SETTINGS_FORMS_PAGES` narrows or widens them). */
-const PAGES = (process.env.FY_SETTINGS_FORMS_PAGES ?? 'access/security,warden/warden,usage/budgets')
+const PAGES = (
+  process.env.FY_SETTINGS_FORMS_PAGES ??
+  'access/security,warden/warden,usage/budgets,browsers/browser,voice/voice-cleanup,claude-code/claude-code'
+)
   .split(',')
   .filter(Boolean)
   .map(page => page.split('/') as [string, string]);
+/** Pages with no value field: choices, read-outs and actions only. */
+const CHOICES_ONLY = ['claude-code/claude-code'];
 const VIEWPORTS = [
   { name: '1280', width: 1_280, height: 1_000 },
   { name: '390', width: 390, height: 844 },
@@ -188,10 +193,12 @@ describe('Settings forms: one save model, said out loud', () => {
               fullPage: true,
             });
           }
-          expect(
-            measured.forms,
-            `${plugin}/${tab}: it has a form with value fields, so it has a Save bar`,
-          ).toBeGreaterThan(0);
+          // A page with value fields has a form; a page of choices and actions only (Claude Code) has none to have.
+          if (!CHOICES_ONLY.includes(`${plugin}/${tab}`))
+            expect(
+              measured.forms,
+              `${plugin}/${tab}: it has a form with value fields, so it has a Save bar`,
+            ).toBeGreaterThan(0);
           expect(measured.fieldsOutsideForm, 'a value field that no Save bar saves').toEqual([]);
           expect(measured.formsWithoutBar, 'a form with no Save bar').toEqual([]);
           expect(measured.barsHidden, 'a Save bar that is not drawn until something changes').toEqual([]);
@@ -236,6 +243,31 @@ describe('Settings forms: one save model, said out loud', () => {
         await page.locator('[data-security-note="unlockOnOpen"]').innerText(),
         'the reason is on the page, beside the control',
       ).toContain('fy daemon security set');
+    } finally {
+      await close();
+    }
+  });
+
+  it('Claude Code: the update to a version Ferretry has not verified is RISKY: a danger button in a group of its own at the foot, with the consequence in words', async () => {
+    const { page, close } = await open(1_280, 1_000, 'claude-code', 'claude-code');
+    try {
+      const risky = await page.evaluate(() => {
+        const button = document.querySelector<HTMLElement>('[data-unverified-update]');
+        const group = button?.closest<HTMLElement>('[data-setting-group]') ?? null;
+        const groups = [...document.querySelectorAll<HTMLElement>('.fy-settings-page [data-setting-group]')];
+        return {
+          variant: button?.getAttribute('data-variant') ?? null,
+          group: group?.getAttribute('data-setting-group') ?? null,
+          last: groups.at(-1) === group,
+          alone: group?.querySelectorAll('button').length === 1,
+          words: group?.textContent ?? '',
+        };
+      });
+      expect(risky.variant, 'a danger button').toBe('danger');
+      expect(risky.group, 'its own group').toMatch(/^Risky/);
+      expect(risky.last, 'at the foot of the page').toBe(true);
+      expect(risky.alone, 'the safe update is not beside it').toBe(true);
+      expect(risky.words, 'the consequence is said').toContain('could break');
     } finally {
       await close();
     }

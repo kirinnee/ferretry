@@ -191,23 +191,15 @@ describe('<VoiceCleanupSettings>', () => {
 
     const on = fakeState({ ...DEFAULT_VOICE_CLEANUP, useConversation: true, conversationMessages: 6 });
     await shown?.render(<VoiceCleanupSettings state={on.state} />);
-    const count = must(c.querySelector<HTMLInputElement>('#stt-cleanup-messages'), 'the count');
-    expect(count.value).toBe('6');
-    // Typed as a draft and saved when the field is left — never per keystroke, which saved "1" of "10".
-    await typeInto(count, '1');
-    await typeInto(count, '10');
-    expect(on.saved).toEqual([]);
-    expect(count.disabled).toBe(false);
-    await interact(() => {
-      count.focus();
-      count.blur();
-    });
+    // The count is a CHOICE (it saves at once, like the switch): the saved 6 is offered beside the usual counts and is the one picked.
+    const radios = [
+      ...c.querySelectorAll<HTMLInputElement>('[role="radiogroup"][aria-label="Latest messages to include"] input'),
+    ];
+    expect(radios.map(radio => radio.value)).toEqual(['1', '2', '3', '5', '6', '10']);
+    expect(radios.find(radio => radio.checked)?.value).toBe('6');
+    expect(c.querySelector('#stt-cleanup-messages')).toBeNull();
+    await interact(() => radios.find(radio => radio.value === '10')?.click());
     expect(on.saved).toEqual([{ conversationMessages: 10 }]);
-    // A value no machine would take is put back rather than sent.
-    await typeInto(count, '');
-    await interact(() => count.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
-    expect(on.saved).toHaveLength(1);
-    expect(count.value).toBe('6');
   });
 
   it('keeps a prompt being typed when the machine’s copy is read again, and offers the new one', async () => {
@@ -254,7 +246,7 @@ describe('<VoiceCleanupSettings>', () => {
     await interact(async () => {
       await Promise.resolve();
     });
-    expect(c.querySelector('[role="status"]')?.textContent).toBe('Saved, but not in effect yet.');
+    expect(c.querySelector('[data-cleanup-outcome]')?.textContent).toBe('Saved, but not in effect yet.');
 
     const refused = fakeState(DEFAULT_VOICE_CLEANUP, { kind: 'refused', message: 'Nope.' });
     await shown?.render(<VoiceCleanupSettings state={refused.state} />);
@@ -262,7 +254,7 @@ describe('<VoiceCleanupSettings>', () => {
     await interact(async () => {
       await Promise.resolve();
     });
-    expect(c.querySelector('[role="status"]')?.textContent).toBe('Nope.');
+    expect(c.querySelector('[data-cleanup-outcome]')?.textContent).toBe('Nope.');
   });
 
   it('renders nothing connected without a machine', async () => {

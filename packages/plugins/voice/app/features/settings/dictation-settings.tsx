@@ -262,7 +262,7 @@ export function DictationSettings({
 
   return (
     <div data-voice-settings="">
-      <SettingGroup label="Dictation">
+      <SettingGroup label="Dictation" saves="now">
         <SettingRow
           settingId="dictation"
           name="Dictation"
