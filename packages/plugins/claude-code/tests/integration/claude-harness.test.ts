@@ -201,11 +201,12 @@ const spec = (more: Record<string, unknown> = {}): LaunchSpec =>
     ...more,
   }) as unknown as LaunchSpec;
 
-const runner = (started: { command?: readonly string[]; cwd?: string }): Runner =>
+const runner = (started: { command?: readonly string[]; cwd?: string; execChain?: readonly string[] }): Runner =>
   ({
     key: 'tmux',
-    start: async (run: { command: readonly string[]; cwd: string }) => {
+    start: async (run: { command: readonly string[]; cwd: string; execChain?: readonly string[] }) => {
       started.command = run.command;
+      started.execChain = run.execChain;
       started.cwd = run.cwd;
       return ok({ handle: '%7', startedAt: T });
     },
@@ -407,6 +408,20 @@ describe('ClaudeHarness', () => {
       expect(result.ok).toBe(true);
       expect(started.command).toBeDefined();
     });
+  });
+
+  test('a start names the programs the pane execs through, ending in Claude itself, for the runner to bind a first turn to', async () => {
+    const { harness } = build();
+    const started: { command?: readonly string[]; execChain?: readonly string[] } = {};
+
+    const result = await harness.start(spec(), runner(started), {} as never);
+
+    expect(result.ok).toBe(true);
+    // `env`, the seed shell (`/bin/sh -c`), then the located claude binary: the argv's own order, by the names the kernel reports.
+    expect(started.execChain?.slice(0, 2)).toEqual(['env', 'sh']);
+    expect(started.execChain).toHaveLength(3);
+    expect(started.command?.[0]).toBe('env');
+    expect(started.command?.some(word => word.endsWith(`/${started.execChain?.[2]}`))).toBe(true);
   });
 
   test('S42 a fresh ferret with only the agent-homes parent gets a private home made by the kernel and launches', async () => {
