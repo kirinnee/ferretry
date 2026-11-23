@@ -282,7 +282,19 @@ describe('real one-time codes stay codes, and card words are substrings (fix rou
 
 describe('"pin" counts only as a word of its own (fix round 4)', () => {
   const otp = { tag: 'input', type: 'text', autocomplete: 'one-time-code' } as const;
-  for (const name of ['otpInput', 'OtpInputField', 'shipping', 'typing', 'spinner', 'opinion'])
+  for (const name of [
+    'otpInput',
+    'otpinput',
+    'OtpInputField',
+    'shipping',
+    'typing',
+    'spinner',
+    'opinion',
+    'pinned',
+    'Pinterest',
+    'verificationCode',
+    'otp',
+  ])
     it(`${name} with one-time-code stays a code, in the field kind and the lock`, async () => {
       should(pageFieldKind({ ...otp, name })).equal('code');
       should(pageFieldKind({ ...otp, id: name })).equal('code');
@@ -292,7 +304,23 @@ describe('"pin" counts only as a word of its own (fix round 4)', () => {
       const [request] = await service.list(HOST, SESSION);
       should(request?.fields[0]?.sensitivity).not.equal('secret');
     });
-  for (const name of ['pincode', 'userPin', 'mpin', 'PIN', 'pin_code', 'cardPin', 'card-pin', 'PinCode', 'pin'])
+  for (const name of [
+    'pincode',
+    'userPin',
+    'mpin',
+    'PIN',
+    'pin_code',
+    'cardPin',
+    'card-pin',
+    'PinCode',
+    'pin',
+    'pinCode',
+    'userPIN',
+    'cardPIN',
+    'userpin',
+    'cardpin',
+    'atmpin',
+  ])
     it(`${name} with one-time-code is a secret, in the field kind and the lock`, () => {
       should(pageFieldKind({ ...otp, name })).equal(undefined);
       should(passwordTarget(page({ ...otp, name }), 'f')).equal(true);

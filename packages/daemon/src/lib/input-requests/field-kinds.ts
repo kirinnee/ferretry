@@ -29,6 +29,11 @@ const PASSWORD_SIGNAL = /pass|pwd|ssn|security[\s._-]*code|cv[vc]|csc|mpin|pinco
  * purpose: the capital P is what marks a camel-case word, and the lookahead keeps "pinned" and "Pinterest" out.
  */
 const PIN_WORD = /(?:^|[^A-Za-z])(?:pin|PIN|Pin)(?![a-z])|[a-z]Pin(?![a-z])/u;
+/**
+ * "pin" ENDING a name, in any case (userPIN, cardPIN, userpin, cardpin, atmpin): nothing lowercase follows it, so
+ * "shipping", "typing", "opinion", "spinner", "pinned" and "otpinput" stay out. Over-raises "spin" as a secret, accepted.
+ */
+const PIN_SUFFIX = /pin(?![a-z])/iu;
 /** "One-time passcode" and "one-time password" name a code, not a password: they are not a signal. */
 const ONE_TIME_PASS = /one[\s._-]*time[\s._-]*pass(?:code|word)?/giu;
 const KEYPAD = /^(?:numeric|tel|decimal)$/iu;
@@ -62,6 +67,6 @@ export function passwordSignalled(field: InputBrowserFieldFacts['field'], label?
   return [field.name, field.id, field.autocomplete, label].some(word => {
     if (word === undefined) return false;
     const text = word.normalize('NFKC').replace(ONE_TIME_PASS, '');
-    return PASSWORD_SIGNAL.test(text) || PIN_WORD.test(text);
+    return PASSWORD_SIGNAL.test(text) || PIN_WORD.test(text) || PIN_SUFFIX.test(text);
   });
 }
