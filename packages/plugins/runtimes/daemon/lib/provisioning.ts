@@ -46,19 +46,21 @@ export type FleetWriteOperation =
       readonly content: string;
       readonly mode: number;
       /**
-       * Write only where it cannot replace what somebody else made. The file is written when nothing is at `path`, or
-       * when what is there is the plan's own: a link (only the plan makes links there), or a regular file that STARTS with
-       * `marker` (the plan's own generated text). Any other entry is left exactly as it is, word for word, and the
-       * destination is named as skipped. For text nobody asked for (the built-in instructions), which must never cost a
-       * person the `CLAUDE.md` / `AGENTS.md` they wrote.
+       * This file IS the {@link MaterialisedRecord}. Written last, it drops what this apply declined to write (an entry
+       * left as the person had it), and fingerprints what it did write (a file's hash, a link's stamp, a folder), so a
+       * later apply never mistakes an entry that is not the plan's for the plan's own. It replaces only a record.
        */
-      readonly unlessForeign?: { readonly marker: string };
+      readonly recordsMaterialised?: true;
+      /** Replace nothing the plan did not put there: see {@link UnlessUnrecorded}. */
+      readonly unlessUnrecorded?: UnlessUnrecorded;
     }
   | {
       readonly kind: 'copy';
       readonly source: string;
       readonly path: string;
       readonly mode?: number;
+      /** Replace nothing the plan did not put there: see {@link UnlessUnrecorded}. */
+      readonly unlessUnrecorded?: UnlessUnrecorded;
     }
   | {
       readonly kind: 'symlink';
@@ -71,6 +73,8 @@ export type FleetWriteOperation =
        * Every other link must resolve, because a dangling one is a harness quietly finding nothing.
        */
       readonly dangling?: true;
+      /** Replace nothing the plan did not put there: see {@link UnlessUnrecorded}. */
+      readonly unlessUnrecorded?: UnlessUnrecorded;
     }
   | {
       readonly kind: 'settings';
@@ -84,12 +88,21 @@ export type FleetWriteOperation =
        */
       readonly preserveExisting: boolean;
       /**
-       * Top-level keys the layers REPLACE whole rather than merge into. For a document the harness
-       * also writes — Claude's `.claude.json` — where a key is entirely the plan's and a deep merge
-       * would keep, say, an MCP server the profile no longer has. Every other key is folded in as
-       * `preserveExisting` says.
+       * Top-level keys that are a MAP the plan fills member by member (Claude's `.claude.json` `mcpServers`). The
+       * person's own members are kept: the plan's are merged in, and a member the plan wrote earlier — named, with the
+       * hash of what it wrote, in `record` — is dropped when the plan no longer has it, but only while it still holds
+       * exactly that value. A member the person made, or edited, is kept and named as skipped. Without `record` nothing
+       * is ever dropped. Every other key is folded in as `preserveExisting` says.
        */
       readonly replaceKeys?: readonly string[];
+      /** The {@link MaterialisedRecord} that remembers which `replaceKeys` members the plan wrote. */
+      readonly record?: string;
+      /**
+       * With {@link replaceKeys} and a record from before members were recorded (it has no `members`): the members an
+       * earlier plan could have written under each key that this plan no longer has, as they would be written. A member
+       * that is equal to one of these is provably Ferretry's and goes; any other member stays and is named.
+       */
+      readonly priorMembers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
     }
   | {
       readonly kind: 'prune';
@@ -122,22 +135,71 @@ export type FleetWriteOperation =
       /**
        * Narrow the sweep to these direct children, for a directory the plan does NOT own outright — a
        * runtime's config directory, which the harness and the person write into too (Claude's
-       * `/memory` makes `CLAUDE.md` there). Each named child is removed only on evidence it is this
-       * plan's: it is a symbolic link (only the plan makes links there), or {@link record} names it.
-       * Anything else stays.
+       * `/memory` makes `CLAUDE.md` there). Each named child is removed only when it is provably the plan's (see
+       * {@link UnlessUnrecorded}): {@link record} names it and it still matches. A symbolic link is no exception. Anything
+       * else stays, and is named as skipped.
        */
       readonly only?: readonly string[];
       /**
        * With {@link only}: the previous apply's {@link MaterialisedRecord} of what it put in this
-       * directory. Absent or unreadable means no record, and so only links are removed.
+       * directory. Absent or unreadable means no record, and so nothing is removed.
        */
       readonly record?: string;
+      /**
+       * Without {@link only}, with {@link record}: sweep ONLY the children the record names as `<recordedAs>/<child>` and
+       * that are not in the keep list, each on the same proof. An entry the person or the harness added to a shared
+       * directory (a skill by hand, a note in the state folder) is left and named as skipped instead of removed. Absent,
+       * the directory is the plan's own outright.
+       */
+      readonly recordedAs?: string;
+      /**
+       * With {@link recordedAs} or {@link only}: a folder Ferretry itself fills (its assets). With a record from before links
+       * were fingerprinted, a link in this directory is still removed when it leads into this folder — only Ferretry makes
+       * such a link, and an upgrade must not leave its old ones behind. Any other unrecorded link stays.
+       */
+      readonly ownLinksUnder?: string;
     };
 
-/** What a narrowed sweep's record holds: the entries one apply materialised, relative to their directory. */
+/**
+ * A write that replaces nothing the plan did not put there. THE ONE RULE for every removal or replacement in a runtime
+ * home: Ferretry takes an entry away only when the entry captured at that moment is provably the one it wrote — the
+ * record of THIS runtime names the exact path, and the entry still matches what was recorded (a file: the same hash; a
+ * link: the same stamp; a folder: recorded as written). Anything else is left exactly as it is and named as skipped. A
+ * header, or text equal to what would be written, proves nothing.
+ */
+export interface UnlessUnrecorded {
+  readonly record: string;
+  readonly key: string;
+  /**
+   * One of Ferretry's own FIXED names (its record, its `--settings` overlay, its model catalog): a regular file at the
+   * name is Ferretry's whatever its bytes — nobody edits what Ferretry's own corner holds, and a frozen one would keep a
+   * stale permission default in force. A link or a folder at the name is not, and stays.
+   */
+  readonly byName?: true;
+  /**
+   * A record from before links were fingerprinted (it has no `links`) cannot vouch for a link. A link that leads into
+   * this folder — the one only Ferretry fills — is still provably its own and is claimed once, then stamped.
+   */
+  readonly ownLinksUnder?: string;
+  /**
+   * With a record from before links were fingerprinted: a link at this name that record NAMES is Ferretry's. For the
+   * credential link, whose target the fleet root cannot read; replacing it costs a link, never the file it leads to.
+   */
+  readonly namedLinkIsOurs?: true;
+}
+
+/** What a record holds for the entries one apply materialised, relative to their runtime home. */
 export interface MaterialisedRecord {
   readonly version: 1;
   readonly entries: readonly string[];
+  /** sha256 of the bytes written at each file entry, so a later apply can tell an edit from its own file. */
+  readonly hashes?: Readonly<Record<string, string>>;
+  /** What each link entry looked like when written (its identity, size and time), so a swapped link is not taken for it. */
+  readonly links?: Readonly<Record<string, string>>;
+  /** The entries written as a folder. */
+  readonly dirs?: readonly string[];
+  /** The hash of each `replaceKeys` member the plan wrote, as `<key>.<member>`. */
+  readonly members?: Readonly<Record<string, string>>;
 }
 
 /** A settings layer as the plan sees it: a file still to be read, or an object already known. */

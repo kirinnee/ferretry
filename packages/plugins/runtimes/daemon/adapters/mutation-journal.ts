@@ -211,6 +211,24 @@ export class FileMutationJournal implements MutationJournal {
   }
 
   /**
+   * Undo ONE capture: the entry moved aside goes back under its name, and the journal forgets it. The name must still be
+   * free (nothing arrives at a captured name but this batch); a name that is taken fails the apply and its rollback
+   * decides, as every other surprise does.
+   */
+  async keep(target: string): Promise<void> {
+    const index = this.#entries.findLastIndex(candidate => candidate.path === target);
+    const entry = this.#entries[index];
+    if (entry?.kind !== 'restore') return;
+    await this.#sameFolder(entry);
+    if ((await this.disk.lstat(entry.path)) !== undefined) {
+      throw new Error(`refusing to put back ${entry.path}: something arrived at the name after it was captured`);
+    }
+    await this.disk.rename(entry.backup, entry.path);
+    this.#entries.splice(index, 1);
+    this.#captured.delete(target);
+  }
+
+  /**
    * Record the folders a create is about to bring into existence, and the mode an already-present folder is about to
    * lose. Ancestors are recorded outermost-first so the reverse-order undo removes the deepest one first.
    *

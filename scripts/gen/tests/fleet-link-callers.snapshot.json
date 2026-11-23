@@ -27,6 +27,7 @@
       "FleetDisk.readSource",
       "FleetDisk.readSourceText",
       "FleetDisk.readText",
+      "FleetDisk.realPath",
       "FleetDisk.remove",
       "FleetDisk.rename",
       "FleetDisk.setMode",

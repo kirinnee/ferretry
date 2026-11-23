@@ -159,6 +159,11 @@ export interface MutationJournal {
   /** Runs `read` with the name the capture of `target` moved it to; `undefined` when nothing was there. */
   withBackup<T>(target: string, read: (backup: string) => Promise<T>): Promise<T | undefined>;
   capture(target: string): Promise<boolean>;
+  /**
+   * Put back what the last capture of `target` moved aside, as if it had never been captured: the entry is back under its
+   * name, and nothing is left to roll back or to discard. For an entry the plan then judged not its own.
+   */
+  keep(target: string): Promise<void>;
   captureDirectory(target: string, mode?: number): Promise<void>;
   rollback(): Promise<{
     readonly unrestored: readonly UnrestoredPath[];

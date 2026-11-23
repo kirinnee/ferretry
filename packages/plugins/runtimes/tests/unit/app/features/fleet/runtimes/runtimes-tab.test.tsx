@@ -594,7 +594,7 @@ describe('Runtimes tab › items the provisioner skipped', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     const items = [...line.querySelectorAll('li')];
     expect(items.map(item => item.querySelector('code')?.textContent)).toEqual(['skills/review', 'commands/ship.md']);
-    expect(items[0]?.textContent).toContain('left as it was');
+    expect(items[0]?.textContent).toContain('left this as it was');
     expect(view.container.textContent).not.toContain('/home/kirin');
     await view.unmount();
   });
