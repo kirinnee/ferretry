@@ -43,7 +43,7 @@ const login = sampleLogin;
 
 const FILES = {
   runtimes: {
-    'claude-default': { login: 'claude-you', profile: 'default', agent: true },
+    'claude-default': { login: 'claude-you', profile: 'default' },
     'codex-work': { login: 'codex-work', profile: 'default' },
   },
   profiles: { default: { contents: [] } },
@@ -189,24 +189,63 @@ describe('the runtimes daemon', () => {
     const list = await host.provided(RuntimesPort).list();
 
     // Assert
-    should(list.map(runtime => [runtime.id, runtime.harness, runtime.agent, runtime.launch.available])).deepEqual([
-      ['claude-default', 'claude-code', true, true],
-      ['codex-work', 'codex', false, true],
+    should(list.map(runtime => [runtime.id, runtime.harness, runtime.launch.available])).deepEqual([
+      ['claude-default', 'claude-code', true],
+      ['codex-work', 'codex', true],
     ]);
   });
 
-  it('should resolve the default setting, else claude-default when it is an agent runtime here', async () => {
+  it('should resolve the default setting, else claude-default, else the first runtime that can launch', async () => {
     // Arrange
     const unset = await build();
     const named = await build({ config: { ...FILES, 'runtimes.yaml': { defaultRuntime: 'codex-work' } } });
-    const noAgent = await build({
-      config: { ...FILES, runtimes: { 'claude-default': { login: 'claude-you', profile: 'default' } } },
+    const claudeDerived = await build({
+      config: { ...FILES, runtimes: { 'codex-work': { login: 'codex-work', profile: 'default' } } },
     });
 
     // Act / Assert
     should(await unset.host.provided(RuntimesPort).default()).equal('claude-default');
     should(await named.host.provided(RuntimesPort).default()).equal('codex-work');
-    should(await noAgent.host.provided(RuntimesPort).default()).be.undefined();
+    should(await claudeDerived.host.provided(RuntimesPort).default()).equal('claude-you');
+  });
+
+  it('should give a fresh machine a runtime for each ready login with no runtime file, and start on it', async () => {
+    // Arrange: nothing but logins (one is signed out), no runtimes, no profiles.
+    const signedOut = login('claude-out', {
+      store: 'ferretry',
+      status: {
+        word: 'needs_sign_in',
+        label: 'Needs sign-in',
+        reason: 'access_current',
+        explanation: 'x',
+        lastCheckInconclusive: false,
+      },
+    });
+    const { host } = await build({
+      config: {},
+      logins: [
+        login('claude-you'),
+        login('claude-two', { store: 'ferretry' }),
+        login('codex-work', { harness: 'codex' }),
+        signedOut,
+      ],
+    });
+    const runtimes = host.provided(RuntimesPort);
+
+    // Act
+    const list = await runtimes.list();
+    const started = await runtimes.resolve('codex-work' as never);
+    const left = await runtimes.resolve('claude-out' as never);
+
+    // Assert
+    should(list.map(runtime => [runtime.id, runtime.harness, runtime.launch.available])).deepEqual([
+      ['claude-two', 'claude-code', true],
+      ['claude-you', 'claude-code', true],
+      ['codex-work', 'codex', true],
+    ]);
+    should(await runtimes.default()).equal('claude-two');
+    should(started.ok).be.true();
+    should(left.ok).be.false();
   });
 
   it('should refuse a start in a sentence for each reason it cannot happen', async () => {
@@ -214,7 +253,7 @@ describe('the runtimes daemon', () => {
     const { host } = await build({
       config: {
         runtimes: {
-          'claude-default': { login: 'claude-you', profile: 'default', agent: true },
+          'claude-default': { login: 'claude-you', profile: 'default' },
           off: { login: 'claude-you', profile: 'default', disabled: { reason: 'quota' } },
           orphan: { login: 'nobody', profile: 'default', harness: 'codex' },
           headless: { login: 'claude-you', profile: 'ghost' },
@@ -302,7 +341,9 @@ describe('the runtimes daemon', () => {
     // Act
     host.setConfig('runtimes.yaml', { defaultRuntime: 'codex-work' });
     await host.settle();
-    await Promise.resolve();
+    // Choosing the default now also reads the logins (a saved default that is no longer a runtime reads as unset).
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    await host.settle();
 
     // Assert
     should(host.published.slice(before)).deepEqual([

@@ -10,7 +10,6 @@ import {
   normalizedModelSelection,
   sameHarnessAccountOptions,
   sessionAccountLabel,
-  sessionCapableAccountOptions,
 } from '../../../app/lib/daemon-picker-model.ts';
 import type { PickerAccount } from '../../../app/lib/account-picker-catalog.ts';
 import { pickerHealth } from './support/picker.ts';
@@ -23,7 +22,6 @@ type Account = PickerAccount;
 const claudeAccount = (overrides: Partial<Account> = {}): Account => ({
   id: CLAUDE_ID,
   kind: 'claude-code',
-  agent: true,
   credentialId: 'claude-login',
   wrapper: 'claude-auto-atelier',
   displayName: 'Claude Atelier',
@@ -37,7 +35,6 @@ const claudeAccount = (overrides: Partial<Account> = {}): Account => ({
 const codexAccount = (overrides: Partial<Account> = {}): Account => ({
   id: CODEX_ID,
   kind: 'codex',
-  agent: true,
   credentialId: 'codex-login',
   wrapper: 'codex-auto-forge',
   displayName: 'Codex Forge',
@@ -136,24 +133,6 @@ describe('accountPickerOptions', () => {
     expect(sameHarnessAccountOptions(null, 'codex')).toBeNull();
   });
 
-  it('offers a new session only agent runtimes, never the person’s own CLI', () => {
-    // The default fleet's own shape: the terminal account is published FIRST.
-    const terminal = claudeAccount({
-      id: '33333333-3333-4333-8333-333333333333',
-      agent: false,
-      wrapper: 'claude-default',
-      displayName: 'Claude (default)',
-    });
-    const options = accountPickerOptions([terminal, claudeAccount(), codexAccount()], [], null);
-
-    expect(sessionCapableAccountOptions(options)?.map(option => option.wrapper)).toEqual([
-      'claude-auto-atelier',
-      'codex-auto-forge',
-    ]);
-    expect(sessionCapableAccountOptions(accountPickerOptions([terminal], [], null))).toEqual([]);
-    expect(sessionCapableAccountOptions(null)).toBeNull();
-  });
-
   it('pre-fills the first usable account in the daemon order and nothing when none is usable', () => {
     const down = claudeAccount({ available: false, unavailableReason: 'wrapper missing' });
     const options = accountPickerOptions([down, codexAccount()], [], null);
@@ -233,5 +212,38 @@ describe('fleetHarnessLabel', () => {
   it('names each harness', () => {
     expect(fleetHarnessLabel('claude-code')).toBe('Claude');
     expect(fleetHarnessLabel('codex')).toBe('Codex');
+  });
+});
+
+describe('the New ferret runtime list: one runtime per ready login (O8-9)', () => {
+  const four = ['atomi', 'llm1', 'llm2', 'personal'].map(login =>
+    claudeAccount({ id: `rt-${login}`, wrapper: login, displayName: login, credentialId: login }),
+  );
+
+  it('offers every runtime a login yields, because no runtime is filtered on an autonomous/interactive property', () => {
+    // A runtime the app reads carries no such property any more: the one onboarding made for the owner's single login
+    // is offered exactly like any other, and is the one pre-filled.
+    const options = accountPickerOptions([claudeAccount({ wrapper: 'claude-default' })], [], new Map());
+
+    expect(options?.map(option => option.wrapper)).toEqual(['claude-default']);
+    expect(firstUsableAccountOption(options)?.wrapper).toBe('claude-default');
+  });
+
+  it('lists four ready Claude logins as four runtimes, pre-filling the first, then Codex after them', () => {
+    const options = accountPickerOptions([...four, codexAccount({ wrapper: 'codex-personal' })], [], new Map());
+
+    expect(options?.map(option => option.wrapper)).toEqual(['atomi', 'llm1', 'llm2', 'personal', 'codex-personal']);
+    expect(options?.map(option => option.kind)).toEqual([
+      'claude-code',
+      'claude-code',
+      'claude-code',
+      'claude-code',
+      'codex',
+    ]);
+    expect(firstUsableAccountOption(options)?.wrapper).toBe('atomi');
+  });
+
+  it('says nothing is startable only when there is truly no ready login', () => {
+    expect(firstUsableAccountOption(accountPickerOptions([], [], new Map()))).toBeNull();
   });
 });

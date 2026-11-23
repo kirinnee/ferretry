@@ -115,11 +115,11 @@ describe('the mode is resolved once: the record wins, a genuine auto stays auto,
     expect(f.handed[0]?.FY_SESSION_MODE).toBe('auto');
   });
 
-  test('a record with neither field hands the harness no mode and the pane no variable', async () => {
+  test('a record with neither field is auto at the launch: the harness and the pane are both told so', async () => {
     const f = launching({});
     expect((await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN })).ok).toBe(true);
-    expect(f.harness.launched[0]).not.toHaveProperty('mode');
-    expect(f.handed[0]).not.toHaveProperty('FY_SESSION_MODE');
+    expect(f.harness.launched[0]?.mode).toBe('auto');
+    expect(f.handed[0]?.FY_SESSION_MODE).toBe('auto');
   });
 
   test('effectiveMode is the one rule', () => {

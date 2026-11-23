@@ -20,7 +20,7 @@ export const owner = { governed: false, decide: () => ({ allowed: true, refusal:
 
 const FILES = {
   runtimes: {
-    work: { login: 'claude-you', profile: 'a', agent: true },
+    work: { login: 'claude-you', profile: 'a' },
     other: { login: 'claude-you', profile: 'c' },
   },
   profiles: {

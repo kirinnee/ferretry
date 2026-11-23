@@ -87,17 +87,15 @@ const modelOf = (disabled?: { login?: object; first?: object; second?: object })
       'claude-a': {
         credential: 'claude-work',
         profile: 'default',
-        agent: true,
         ...(disabled?.first ? { disabled: disabled.first } : {}),
       },
-      'claude-b': { credential: 'claude-home', profile: 'default', agent: true },
+      'claude-b': { credential: 'claude-home', profile: 'default' },
       'claude-c': {
         credential: 'claude-home',
         profile: 'default',
-        agent: true,
         ...(disabled?.second ? { disabled: disabled.second } : {}),
       },
-      'codex-a': { credential: 'codex-work', profile: 'default', agent: true },
+      'codex-a': { credential: 'codex-work', profile: 'default' },
     },
   } satisfies AccountModelDocument);
 

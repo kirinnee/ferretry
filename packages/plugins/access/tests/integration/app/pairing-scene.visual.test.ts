@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { expectDetailsOnFinalLine } from './details-on-final-line.ts';
 
 setDefaultTimeout(60_000);
 
@@ -148,6 +149,20 @@ const contrast = (a: [number, number, number], b: [number, number, number]): num
 
 describe('The pair page: mascot and night sky', () => {
   for (const variant of VARIANTS) {
+    it(`${variant.name}: on the daemon's own machine the line is the direct one with its address, Details on its final line`, async () => {
+      const { tab, close } = await open(variant, '&same=1');
+      try {
+        expect(await tab.locator('[data-daemon-path]').innerText()).toBe(
+          'Pairing directly with 127.0.0.1:7617. Details',
+        );
+        expect(await tab.locator('[data-daemon-path]').getAttribute('data-daemon-path')).toBe('direct');
+        await expectDetailsOnFinalLine(tab, '[data-daemon-path]', 'the same-machine confirm line');
+        await shot(tab, variant, 'pair-same-machine');
+      } finally {
+        await close();
+      }
+    });
+
     it(`${variant.name}: one primary action, the name control, the mascot peeking, a living sky, no loopback address`, async () => {
       const { tab, problems, close } = await open(variant);
       try {
@@ -179,8 +194,41 @@ describe('The pair page: mascot and night sky', () => {
           return [...found].filter(key => !['offset', 'easing', 'composite', 'computedOffset'].includes(key)).sort();
         });
         expect(properties.filter(key => !['opacity', 'transform'].includes(key))).toEqual([]);
+        // C59 O8-1: the machine is ONE line with a small "Details" link on its end, not a card (no panel, one row tall).
+        expect(await tab.locator('main .kt-panel').count(), 'no card for the machine').toBe(0);
+        // Measured against the FINAL TEXT LINE, not the paragraph: Details wrapped onto a line of its own is still inside the paragraph.
+        await expectDetailsOnFinalLine(tab, '[data-daemon-path]', 'the pair confirm line');
+        // C59 O8-2: one left-aligned column on a desktop (the heading starts where the buttons start); centred on a phone.
+        const column = must(await tab.locator('main').boundingBox(), 'the column');
+        const notNowBox = must(await tab.getByRole('button', { name: 'Not now' }).boundingBox(), 'Not now');
+        const titleBox = await tab.locator('#pairing-title').evaluate(node => {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          return range.getBoundingClientRect().x;
+        });
+        if (variant.phone) expect(titleBox, 'phone: the heading is centred').toBeGreaterThan(notNowBox.x + 24);
+        else {
+          expect(column.width, 'desktop: a reading column').toBeLessThanOrEqual(640);
+          // C59 O8-2: the two answers are ONE group at the column's right edge (Not now beside Pair this device), under a
+          // heading and a field that start at the column's left edge: no answer on each edge of the page.
+          const pairBox = must(await tab.getByRole('button', { name: 'Pair this device' }).boundingBox(), 'Pair');
+          const field = must(await tab.locator('main input').first().boundingBox(), 'the name field');
+          expect(Math.abs(titleBox - field.x), 'desktop: heading and field share the left edge').toBeLessThanOrEqual(2);
+          expect(
+            Math.abs(pairBox.x + pairBox.width - (field.x + field.width)),
+            'desktop: Pair this device ends at the column right edge',
+          ).toBeLessThanOrEqual(1);
+          expect(
+            pairBox.x - (notNowBox.x + notNowBox.width),
+            'desktop: Not now sits right beside it, one 12px gap',
+          ).toBeCloseTo(12, 0);
+        }
+        // Another device is not "this computer": the relayed line names the target and how it is reached, word for word.
+        expect(await tab.locator('[data-daemon-path]').innerText()).toBe(
+          'Connecting to the machine through the relay. Details',
+        );
         await shot(tab, variant, 'pair');
-        await tab.locator('summary', { hasText: 'Details' }).click();
+        await tab.locator('[data-pair-details] button', { hasText: 'Details' }).click();
         await shot(tab, variant, 'details');
         expect(problems).toEqual([]);
       } finally {
@@ -325,24 +373,32 @@ describe('The pair page: mascot and night sky', () => {
           expect(await tab.getByRole('button', { name: 'Add a passkey now' }).isVisible()).toBe(true);
           // ONE primary action: the passkey. "Not now" is the quiet way on; nothing else asks for a press.
           // The DOM follows the picture (Tab too): the way on first on a phone, where it is on top; the way out first on a desktop.
-          expect(await tab.locator('main button:visible').allInnerTexts()).toEqual(
+          expect(await tab.locator('main button:visible:not([data-pair-details] button)').allInnerTexts()).toEqual(
             variant.phone ? ['Add a passkey now', 'Not now'] : ['Not now', 'Add a passkey now'],
           );
           expect(await tab.locator('[data-variant="primary"]').allInnerTexts()).toEqual(['Add a passkey now']);
           expect(await tab.locator('#pairing-title').innerText()).toBe('Connected');
           // C59 O3: the shared answer row. Each answer is at least 44 px tall; on a phone both are the card's width and stacked;
-          // on a desktop Not now is at the left end and Add a passkey now at the right end of one row.
+          // on a desktop Not now and Add a passkey now are one group at the right end of one row.
           const add = must(await tab.getByRole('button', { name: 'Add a passkey now' }).boundingBox(), 'add');
           const later = must(await tab.getByRole('button', { name: 'Not now' }).boundingBox(), 'later');
           for (const box of [add, later]) expect(box.height, 'at least 44 px tall').toBeGreaterThanOrEqual(43.5);
           expect(Math.abs(add.width - later.width), 'same size').toBeLessThanOrEqual(1);
           const row = must(await offer.boundingBox(), 'offer');
+          // C59 O8-3: the dimmed hint is clearly apart from the buttons (not one 12px gap, the same as between its own lines).
+          const hint = must(await tab.locator('[data-first-passkey-when]').boundingBox(), 'the hint');
+          const firstButton = variant.phone ? add : later;
+          expect(
+            firstButton.y - (hint.y + hint.height),
+            'a clear gap between the hint and the buttons',
+          ).toBeGreaterThanOrEqual(20);
           if (variant.phone) {
             expect(Math.abs(add.width - row.width), 'phone: full width').toBeLessThanOrEqual(1);
             expect(add.y, 'phone: stacked, the way on above').toBeLessThan(later.y);
           } else {
             expect(Math.abs(add.y - later.y), 'desktop: one row').toBeLessThanOrEqual(1);
-            expect(Math.abs(later.x - row.x), 'Not now at the left end').toBeLessThanOrEqual(1);
+            expect(later.x - row.x, 'Not now is beside Add, not at the far left end').toBeGreaterThan(40);
+            expect(add.x - (later.x + later.width), 'Not now sits right beside Add (one 12px gap)').toBeCloseTo(12, 0);
             expect(
               Math.abs(add.x + add.width - (row.x + row.width)),
               'Add a passkey now at the right end',

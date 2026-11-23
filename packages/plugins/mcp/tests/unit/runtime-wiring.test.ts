@@ -11,7 +11,6 @@ const summary = (name: string): RuntimeSummary =>
     harness: 'claude-code',
     login: 'l',
     profile: 'p',
-    agent: false,
     launch: { available: true },
   }) as RuntimeSummary;
 const ITEMS = new Map<string, McpItem>([

@@ -264,8 +264,8 @@ describe('planImport — a machine with both harnesses set up', () => {
       },
     });
     should(plan.runtimes).deepEqual({
-      'claude-default': { credential: 'claude-you', profile: 'claude-default', agent: true },
-      'codex-default': { credential: 'codex-you', profile: 'codex-default', agent: true },
+      'claude-default': { credential: 'claude-you', profile: 'claude-default' },
+      'codex-default': { credential: 'codex-you', profile: 'codex-default' },
     });
   });
 
@@ -605,7 +605,7 @@ describe('planImport — Import again (O6)', () => {
   it('should add a duplicate runtime when asked to anyway', () => {
     const again = planImport(fullScans(), { digest, existing, record: first.record, addDuplicates: ['claude'] });
     should(again.runtimes).deepEqual({
-      'claude-default-2': { credential: 'claude-you', profile: 'claude-default', agent: true },
+      'claude-default-2': { credential: 'claude-you', profile: 'claude-default' },
     });
   });
 
@@ -876,7 +876,7 @@ describe('planImport — one profile per harness (P7)', () => {
       'codex-default': { layers: ['instructions/codex-instructions', 'modelSets/codex-models'] },
     });
     should(again.runtimes).deepEqual({
-      'codex-default': { credential: 'codex-you', profile: 'codex-default', agent: true },
+      'codex-default': { credential: 'codex-you', profile: 'codex-default' },
     });
     should(again.record.profiles).deepEqual({ claude: 'claude-default', codex: 'codex-default' });
   });
@@ -915,8 +915,8 @@ describe('planImport — one profile per harness (P7)', () => {
       components: { ...shared.components, mcp },
       profiles: { default: { layers: legacyLayers } },
       runtimes: {
-        'claude-default': { credential: 'claude-you', profile: 'default', agent: true },
-        'codex-default': { credential: 'codex-you', profile: 'default', agent: true },
+        'claude-default': { credential: 'claude-you', profile: 'default' },
+        'codex-default': { credential: 'codex-you', profile: 'default' },
       },
     };
     const record = { version: 1 as const, components, profile: 'default' };

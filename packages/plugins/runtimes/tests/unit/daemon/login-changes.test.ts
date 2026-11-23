@@ -36,8 +36,8 @@ const MODEL = parseAccountModel({
   components: {},
   profiles: { default: { layers: [] } },
   runtimes: {
-    'claude-default': { credential: 'claude-you', profile: 'default', agent: true },
-    'claude-local': { credential: 'glm', profile: 'default', agent: false },
+    'claude-default': { credential: 'claude-you', profile: 'default' },
+    'claude-local': { credential: 'glm', profile: 'default' },
   },
 });
 
@@ -530,7 +530,7 @@ describe('the runtimes on a login, as a change to it would leave them (Logins as
     });
 
     should(after).have.length(1);
-    should(after[0]).containDeep({ name: 'claude-default', harness: 'claude-code', agent: true });
+    should(after[0]).containDeep({ name: 'claude-default', harness: 'claude-code' });
     should(after[0]?.launch?.available).be.false();
     should(after[0]?.launch?.reason).match(/claude-you/);
     should(after[0]?.launch?.reason).match(/Out of credit/);
@@ -549,7 +549,6 @@ describe('the runtimes on a login, as a change to it would leave them (Logins as
         {
           name: 'claude-default',
           harness: 'claude-code',
-          agent: true,
           launch: { available: false, reason: 'This profile has no layers yet.' },
         },
       ]);
@@ -563,12 +562,12 @@ describe('the runtimes on a login, as a change to it would leave them (Logins as
         credentials: { 'claude-you': { harness: 'claude', store: 'host' } },
         components: { mcp: { srv: { command: 'srv', args: [] } } },
         profiles: { default: { layers: ['mcp/srv'] } },
-        runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: true } },
+        runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default' } },
       }),
     });
 
     should(await catalog.runtimesAfterLoginChange({ kind: 'login.enable', id: 'claude-you' })).eql([
-      { name: 'claude-default', harness: 'claude-code', agent: true, launch: { available: true } },
+      { name: 'claude-default', harness: 'claude-code', launch: { available: true } },
     ]);
   });
 

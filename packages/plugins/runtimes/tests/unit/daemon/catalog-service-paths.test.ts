@@ -62,11 +62,10 @@ const DOCUMENT = {
     },
   },
   runtimes: {
-    'claude-default': { credential: 'claude-you', profile: 'default', agent: true },
+    'claude-default': { credential: 'claude-you', profile: 'default' },
     second: {
       credential: 'claude-two',
       profile: 'default',
-      agent: true,
       disabled: { reason: 'later', until: '2029-01-01' },
     },
   },

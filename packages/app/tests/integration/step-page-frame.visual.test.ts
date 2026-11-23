@@ -207,13 +207,10 @@ describe('r11 O2: step page layout, stacked choices left and demo right', () => 
           near(button.w, 136, 1);
           expect(button.h).toBeGreaterThanOrEqual(44);
         }
-        // C59 O3, the shared answer-row rule: the way back (Back) is at the LEFT end, the way on (Later, Next) is a pair 12 apart
-        // at the right end, so Back is far from Later.
+        // C59 O8-2, the shared answer-row rule: Back, Later and Next are ONE group, each 12 apart, at the right end of the column
+        // (no Back stranded on the far edge).
         near((m.footer[2]?.x ?? 0) - (m.footer[1]?.right ?? 0), 12, 1);
-        expect(
-          (m.footer[1]?.x ?? 0) - (m.footer[0]?.right ?? 0),
-          'Back is at the left end, away from Later',
-        ).toBeGreaterThan(100);
+        near((m.footer[1]?.x ?? 0) - (m.footer[0]?.right ?? 0), 12, 1);
         // An in-body Button is fixed too and 12px from its neighbour.
         for (const button of m.bodyButtons) {
           expect(button.w).toBeGreaterThanOrEqual(135);

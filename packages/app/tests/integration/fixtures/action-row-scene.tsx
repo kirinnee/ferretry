@@ -4,7 +4,7 @@
  * three buttons.
  *
  *   ?theme=<family>-<mode>
- *   ?scene=row|stack|inline|footer1|footer2|footer3
+ *   ?scene=row|narrow|stack|inline|footer1|footer2|footer3
  */
 import { createRoot } from 'react-dom/client';
 import { StepPageFrame } from '../../../src/compose/step-page-frame.tsx';
@@ -40,6 +40,25 @@ const Row = () => (
     <div data-sample="lone-secondary">
       <ActionRow secondary={<Button data-b="secondary">Check again</Button>} />
     </div>
+  </div>
+);
+
+/** The row in containers of several widths inside one wide window: it must fit the CONTAINER, whatever the window (O8-1 review). */
+const NARROW_WIDTHS = [160, 309, 399, 400, 604] as const;
+const Narrow = () => (
+  <div className="flex flex-col gap-6 p-3" data-case="narrow">
+    {NARROW_WIDTHS.map(width => (
+      <div key={width} data-sample={`w-${width}`} style={{ width, maxWidth: '100%' }}>
+        <ActionRow
+          secondary={<Button data-b="secondary">Start over</Button>}
+          primary={
+            <Button variant="primary" data-b="primary">
+              Cancel sign-in
+            </Button>
+          }
+        />
+      </div>
+    ))}
   </div>
 );
 
@@ -82,6 +101,8 @@ if (root === null) throw new Error('the scene page has no #root');
 createRoot(root).render(
   scene === 'stack' ? (
     <Stack />
+  ) : scene === 'narrow' ? (
+    <Narrow />
   ) : scene === 'inline' ? (
     <Inline />
   ) : scene === 'footer1' ? (

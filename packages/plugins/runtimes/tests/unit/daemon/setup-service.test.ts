@@ -134,7 +134,7 @@ const SET_UP_MODEL = (): AccountModel =>
       modelSets: { claude: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
     },
     profiles: { default: { layers: ['instructions/main', 'skills/mine', 'modelSets/claude'] } },
-    runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: true } },
+    runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default' } },
   });
 
 const credentialRow = (id: string, email?: string): LoginView =>
@@ -950,7 +950,7 @@ describe('the setup.import executor', () => {
     should(configTextOf(applied[0]?.documents ?? [])).containEql('Be kind.');
     should(secrets.get('ANTHROPIC_API_KEY')).equal(SECRET_VALUE);
     for (const document of applied[0]?.documents ?? []) should(document.content).not.containEql(SECRET_VALUE);
-    should(configTextOf(applied[0]?.documents ?? [])).containEql('"agent": true');
+    should(configTextOf(applied[0]?.documents ?? [])).not.containEql('"agent"');
   });
 
   it('should write none of what the person skipped, and move no secret whose env was skipped', async () => {
@@ -2044,7 +2044,7 @@ describe('the clone.import executor in update mode refuses what the review did n
         keys: { 'login/api': KEY_API },
         credentials: [{ id: 'api', harness: 'claude-code', store: 'environment', env: { NODE_OPTIONS: value } }],
         profiles: { default: { layers: [] } },
-        runtimes: { agent: { credential: 'api', profile: 'default', agent: false } },
+        runtimes: { agent: { credential: 'api', profile: 'default' } },
       });
     const w = world();
     const review = await w.service.reviewClone({ bundle: environment('--trace-warnings') });
@@ -3455,7 +3455,7 @@ describe('API keys newer on the source', () => {
       ],
       components: {},
       profiles: { default: { layers: [] } },
-      runtimes: { agent: { credential: 'glm', profile: 'default', agent: false } },
+      runtimes: { agent: { credential: 'glm', profile: 'default' } },
       files: [],
       notCopied: [],
     }) as unknown as Record<string, unknown>;

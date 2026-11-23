@@ -1,5 +1,6 @@
 import { type FerretId, type FerretRecord, LaunchOriginSchema, type StartFailure } from '../../../contract/index.ts';
 import type { Result } from '@ferretry/std';
+import { launchMode } from '../session/peers/fleet.ts';
 import { ResumeRefused } from '../session/resume/types.ts';
 import type { ResumeOutcome } from '../session/resume/service.ts';
 import type { RestartRelaunch } from '../../modules/restart-in-place.ts';
@@ -70,7 +71,7 @@ export function ferretsRestartResume(
       target: {
         id: request.id,
         status: 'running',
-        mode: after?.mode ?? 'auto',
+        mode: launchMode(after?.mode),
         cwd: after?.folder ?? '',
         turn: 0,
       },

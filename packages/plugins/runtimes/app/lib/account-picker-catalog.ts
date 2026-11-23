@@ -2,7 +2,7 @@
  * The pickable runtime roster of ONE daemon, and each login's health beside it.
  *
  * THE ROSTER IS THE MACHINE'S RUNTIMES (docs/design/account-model.md §4.1, §7): `GET /v1/runtimes`, one row per
- * runtime with its stable `id`, the `wrapper` a ferret is started with, its harness, its agent flag, whether it can
+ * runtime with its stable `id`, the `wrapper` a ferret is started with, its harness, whether it can
  * launch now and the models its model set offers. Nothing here derives a row from a wrapper's spelling.
  *
  * HEALTH IS THE LOGIN'S STATUS WORD, read from `GET /v1/logins` — `ready`, `refresh_due`, `needs_sign_in`,
@@ -29,8 +29,6 @@ export interface PickerAccount {
   /** The runtime's name, as the Runtimes tab shows it. */
   readonly displayName: string;
   readonly kind: HarnessKey;
-  /** An agent runtime: the only kind the daemon starts a ferret on. */
-  readonly agent: boolean;
   /** The login it uses, which is what its health is read from. */
   readonly credentialId: string;
   /** `null` = the harness's own default. */
@@ -75,7 +73,6 @@ export const pickerAccount = (runtime: RuntimeView): PickerAccount => ({
   wrapper: runtime.wrapper,
   displayName: runtime.name,
   kind: runtime.harness,
-  agent: runtime.agent,
   credentialId: runtime.credential.id,
   ...(runtime.models === undefined
     ? {

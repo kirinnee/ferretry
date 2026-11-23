@@ -56,10 +56,10 @@ const documentOf = (patch: Partial<AccountModelDocument> = {}): AccountModelDocu
     'cx-twice': { layers: ['settings/cx-settings'] },
   },
   runtimes: {
-    'claude-default': { credential: 'claude-a', profile: 'plain', agent: true, clonedFromKey: 'k1' },
-    second: { credential: 'claude-b', profile: 'derived', agent: true },
-    'codex-run': { credential: 'codex-a', profile: 'codex-only', agent: true },
-    'dual-run': { credential: 'both', profile: 'claude-only', agent: true },
+    'claude-default': { credential: 'claude-a', profile: 'plain', clonedFromKey: 'k1' },
+    second: { credential: 'claude-b', profile: 'derived' },
+    'codex-run': { credential: 'codex-a', profile: 'codex-only' },
+    'dual-run': { credential: 'both', profile: 'claude-only' },
   },
   ...patch,
   machine: {
@@ -109,14 +109,13 @@ describe('runtime.put', () => {
     create: true,
     credential: 'claude-b',
     profile: 'plain',
-    agent: true,
     ...over,
   });
 
   it('should add a runtime and say it was added', () => {
     const edit = derive(put());
     should(edit.summary).equal('Add runtime fresh');
-    should(edit.model.runtimes.fresh).containEql({ credential: 'claude-b', profile: 'plain', agent: true });
+    should(edit.model.runtimes.fresh).containEql({ credential: 'claude-b', profile: 'plain' });
     should(edit.consequences).eql([]);
     should(edit.files).eql([]);
   });
@@ -177,7 +176,7 @@ describe('runtime.put', () => {
     const model = modelOf({
       runtimes: {
         ...documentOf().runtimes,
-        'claude-twin': { credential: 'claude-a', profile: 'plain', agent: true },
+        'claude-twin': { credential: 'claude-a', profile: 'plain' },
       },
     });
     should(refusalOf(put({ credential: 'claude-a', profile: 'plain' }), {}, model)).equal(
@@ -196,7 +195,6 @@ describe('runtime.put', () => {
         'claude-default': {
           credential: 'claude-a',
           profile: 'plain',
-          agent: true,
           disabled: { reason: 'budget' },
           compactAt: 200000,
           clonedFromKey: 'origin-1',
@@ -210,7 +208,6 @@ describe('runtime.put', () => {
         create: false,
         credential: 'claude-b',
         profile: 'base',
-        agent: true,
         harness: 'claude-code',
       },
       {},
@@ -228,13 +225,13 @@ describe('runtime.put', () => {
     should(edit.consequences).eql(['Running sessions keep the old setup until restarted.']);
   });
 
-  it('should make the first agent runtime the default for new agents', () => {
+  it('should make the first runtime the default for new agents, and leave the default alone after', () => {
     const model = modelOf({ runtimes: {} });
     const edit = derive(put({ name: 'first' }), {}, model);
     should(edit.model.machine.defaultRuntime).equal('first');
     should(edit.consequences).eql(["first is now this machine's default runtime for new agents."]);
-    const notAgent = derive(put({ name: 'plainer', agent: false }), {}, model);
-    should(notAgent.model.machine.defaultRuntime).be.undefined();
+    const later = derive(put({ name: 'plainer', addAnother: true }), {}, edit.model);
+    should(later.model.machine.defaultRuntime).equal('first');
   });
 });
 
@@ -343,7 +340,7 @@ describe('runtime.disable and runtime.enable', () => {
       credentials: { ...documentOf().credentials, 'claude-b': { harness: 'claude', store: 'ferretry', disabled: {} } },
       runtimes: {
         ...documentOf().runtimes,
-        second: { credential: 'claude-b', profile: 'derived', agent: true, disabled: { reason: 'x' } },
+        second: { credential: 'claude-b', profile: 'derived', disabled: { reason: 'x' } },
       },
     });
     const edit = derive({ kind: 'runtime.enable', name: 'second' }, {}, model);
@@ -438,7 +435,7 @@ describe('profile.remove', () => {
       remove({ name: 'base', removeFromProfiles: true }),
       {},
       modelOf({
-        runtimes: { ...documentOf().runtimes, second: { credential: 'claude-b', profile: 'plain', agent: true } },
+        runtimes: { ...documentOf().runtimes, second: { credential: 'claude-b', profile: 'plain' } },
       }),
     );
     should(idle.consequences[0]).equal(
@@ -459,7 +456,7 @@ describe('profile.remove', () => {
     const model = modelOf({
       runtimes: {
         ...documentOf().runtimes,
-        'claude-twin': { credential: 'claude-b', profile: 'plain', agent: true },
+        'claude-twin': { credential: 'claude-b', profile: 'plain' },
       },
     });
     should(refusalOf(used, {}, model)).equal(
@@ -819,7 +816,7 @@ describe('credential.remove (the Runtimes half)', () => {
     const model = modelOf({
       runtimes: {
         ...documentOf().runtimes,
-        third: { credential: 'claude-b', profile: 'plain', agent: true },
+        third: { credential: 'claude-b', profile: 'plain' },
       },
     });
     const edit = derive(remove({ switchRuntimes: { second: 'claude-a', third: 'claude-a' } }), {}, model);
@@ -845,7 +842,7 @@ describe('credential.remove (the Runtimes half)', () => {
     const model = modelOf({
       runtimes: {
         ...documentOf().runtimes,
-        third: { credential: 'claude-b', profile: 'plain', agent: true },
+        third: { credential: 'claude-b', profile: 'plain' },
       },
     });
     const edit = derive(
@@ -868,8 +865,8 @@ describe('credential.remove (the Runtimes half)', () => {
     const model = modelOf({
       runtimes: {
         ...documentOf().runtimes,
-        third: { credential: 'claude-b', profile: 'plain', agent: true },
-        fourth: { credential: 'claude-b', profile: 'plain', agent: true },
+        third: { credential: 'claude-b', profile: 'plain' },
+        fourth: { credential: 'claude-b', profile: 'plain' },
       },
     });
     should(refusalOf(remove(), {}, model)).equal(
@@ -881,7 +878,7 @@ describe('credential.remove (the Runtimes half)', () => {
     const one = modelOf({
       runtimes: {
         ...documentOf().runtimes,
-        third: { credential: 'claude-b', profile: 'plain', agent: true },
+        third: { credential: 'claude-b', profile: 'plain' },
       },
     });
     should(refusalOf(remove({ switchRuntimes: { second: 'claude-a' } }), {}, one)).equal(
@@ -893,8 +890,8 @@ describe('credential.remove (the Runtimes half)', () => {
     const model = modelOf({
       runtimes: {
         ...documentOf().runtimes,
-        'claude-default': { credential: 'claude-b', profile: 'plain', agent: true },
-        second: { credential: 'claude-a', profile: 'derived', agent: true },
+        'claude-default': { credential: 'claude-b', profile: 'plain' },
+        second: { credential: 'claude-a', profile: 'derived' },
       },
     });
     should(refusalOf(remove({ removeRuntimes: ['claude-default'] }), {}, model)).equal(
@@ -1075,7 +1072,7 @@ describe('the schema and scope checks after a change', () => {
         instructions: { notes: { file: 'components/instructions/notes.md' } },
       },
       profiles: { plain: { layers: ['instructions/notes'] } },
-      runtimes: { only: { credential: 'codex-a', profile: 'plain', agent: true } },
+      runtimes: { only: { credential: 'codex-a', profile: 'plain' } },
     });
     should(
       refusalOf(

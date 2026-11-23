@@ -32,7 +32,7 @@ export function MoveToAnotherLogin({
   const setMoving = (patch: Partial<WardenConfig['autoMove']>) =>
     onChange({ ...value, autoMove: { ...moving, ...patch } });
   const named = moving.targets.length > 0;
-  const agents = runtimes.filter(runtime => runtime.agent);
+  const agents = runtimes;
   return (
     <Section
       title="When a login runs out"

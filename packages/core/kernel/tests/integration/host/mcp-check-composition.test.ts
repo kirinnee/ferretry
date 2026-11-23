@@ -39,7 +39,6 @@ const RUNTIME: RuntimeSummary = {
   harness: 'claude-code',
   login: 'work',
   profile: 'work',
-  agent: false,
   launch: { available: true },
 };
 

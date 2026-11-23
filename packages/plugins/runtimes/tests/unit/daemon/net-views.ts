@@ -100,7 +100,7 @@ export function viewsOf(line: readonly string[]): readonly ViewText[] {
       },
     },
     profiles: { tuned: { layers: ['settings/cl-settings'] } },
-    runtimes: { 'claude-default': { credential: 'claude-a', profile: 'tuned', agent: true } },
+    runtimes: { 'claude-default': { credential: 'claude-a', profile: 'tuned' } },
   });
   const overridden =
     runtimeCatalog(overriddenModel, FACTS).runtimes.find(entry => entry.name === 'claude-default')?.fixedLayer

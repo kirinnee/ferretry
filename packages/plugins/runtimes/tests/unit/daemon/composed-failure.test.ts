@@ -26,7 +26,7 @@ import { cleanupWorlds, fleetWorld } from '../support/fleet-world.ts';
 afterEach(cleanupWorlds);
 
 const CONFIG = {
-  runtimes: { 'claude-default': { login: 'claude-you', profile: 'default', agent: true } },
+  runtimes: { 'claude-default': { login: 'claude-you', profile: 'default' } },
   profiles: { default: { contents: ['modelSets/heavy'] } },
   'model-sets': { heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
 };
@@ -72,7 +72,6 @@ describe('a failure after the configuration landed, through the composed daemon'
           name: 'claude-work',
           credential: 'claude-you',
           profile: 'default',
-          agent: true,
           create: true,
           addAnother: true,
         },
@@ -106,8 +105,8 @@ describe('a failure after the configuration landed, through the composed daemon'
 const TWO_RUNTIMES = {
   ...CONFIG,
   runtimes: {
-    'claude-default': { login: 'claude-you', profile: 'default', agent: true },
-    'claude-work': { login: 'claude-you', profile: 'default', agent: true },
+    'claude-default': { login: 'claude-you', profile: 'default' },
+    'claude-work': { login: 'claude-you', profile: 'default' },
   },
 };
 
@@ -134,7 +133,7 @@ describe('the remedy after a rolled-back change is true whether the landed file 
       name: 'claude-work',
       credential: 'claude-you',
       profile: 'default',
-      agent: false,
+      harness: 'claude-code',
       create: false,
       addAnother: true,
     });

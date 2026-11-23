@@ -75,19 +75,17 @@ export class FleetFacts {
       runtimes === undefined
         ? []
         : await Promise.all(
-            catalog
-              .filter(runtime => runtime.agent)
-              .map(async runtime => {
-                // A runtime is resolved by its NAME, the word a person types: `id` is the catalogue's own opaque id (the
-                // minted id the sessions name), which Runtimes does not resolve.
-                const id = RuntimeIdSchema.safeParse(runtime.name);
-                if (!id.success) return [[runtime.wrapper, `${runtime.name} is not a runtime name`] as const];
-                const resolved = await runtimes.resolve(id.data);
-                // Sign-in, switches and a missing login are judged from the facts above; only a runtime that cannot be built is unlaunchable.
-                return resolved.ok || (resolved.refusal !== 'unknown' && resolved.refusal !== 'no_profile')
-                  ? []
-                  : [[runtime.wrapper, resolved.sentence] as const];
-              }),
+            catalog.map(async runtime => {
+              // A runtime is resolved by its NAME, the word a person types: `id` is the catalogue's own opaque id (the
+              // minted id the sessions name), which Runtimes does not resolve.
+              const id = RuntimeIdSchema.safeParse(runtime.name);
+              if (!id.success) return [[runtime.wrapper, `${runtime.name} is not a runtime name`] as const];
+              const resolved = await runtimes.resolve(id.data);
+              // Sign-in, switches and a missing login are judged from the facts above; only a runtime that cannot be built is unlaunchable.
+              return resolved.ok || (resolved.refusal !== 'unknown' && resolved.refusal !== 'no_profile')
+                ? []
+                : [[runtime.wrapper, resolved.sentence] as const];
+            }),
           );
     return {
       runtimes: catalog,

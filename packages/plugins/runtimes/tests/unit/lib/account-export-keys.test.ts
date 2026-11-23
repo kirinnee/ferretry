@@ -35,7 +35,7 @@ const bundle = (patch: Record<string, unknown> = {}): CloneBundle =>
       skills: { mine: { items: ['review'] } },
     },
     profiles: { default: { layers: ['instructions/main', 'skills/mine'] } },
-    runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: true } },
+    runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default' } },
     files: [
       { path: 'components/instructions/main.md', content: 'Main.\n' },
       { path: 'skills/review/SKILL.md', content: 'review\n' },

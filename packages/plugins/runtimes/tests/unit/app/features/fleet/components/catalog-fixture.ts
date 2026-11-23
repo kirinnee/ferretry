@@ -230,7 +230,6 @@ export const runtime = (name: string, profileName: string): RuntimeView => ({
   harness: 'claude-code',
   credential: { id: 'personal', store: 'host' },
   profile: profileName,
-  agent: false,
   stack: stack('claude-code'),
   modelSet: { source: 'harness-default' },
   launch: { available: true },

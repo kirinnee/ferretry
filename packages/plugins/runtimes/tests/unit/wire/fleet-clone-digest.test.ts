@@ -182,7 +182,7 @@ describe('cloneItemDigest', () => {
     const profile = (layers: readonly string[]): CloneDigestItem => ({ kind: 'profile', value: { layers } });
     const runtime = (value: Record<string, unknown>): CloneDigestItem => ({
       kind: 'runtime',
-      value: { credential: 'one', profile: 'default', agent: true, ...value },
+      value: { credential: 'one', profile: 'default', ...value },
     });
 
     it('should hold a profile as the identities of its layers, so renaming one is no change', () => {
@@ -207,12 +207,11 @@ describe('cloneItemDigest', () => {
       should(cloneItemDigest(profile(['mcp/a']), NONE)).not.equal(cloneItemDigest(profile(['mcp/b']), NONE));
     });
 
-    it('should hold a runtime as its login, profile, agent and harness — and nothing else', () => {
+    it('should hold a runtime as its login, profile and harness — and nothing else', () => {
       const digest = cloneItemDigest(runtime({ harness: 'claude' }), NONE, identityOf);
       should(cloneItemDigest(runtime({ harness: 'claude', clonedFrom: 'studio' }), NONE, identityOf)).equal(digest);
       should(cloneItemDigest(runtime({ harness: 'claude', profile: 'renamed' }), NONE, identityOf)).equal(digest);
       should(cloneItemDigest(runtime({ harness: 'codex' }), NONE, identityOf)).not.equal(digest);
-      should(cloneItemDigest(runtime({ harness: 'claude', agent: false }), NONE, identityOf)).not.equal(digest);
       should(cloneItemDigest(runtime({ harness: 'claude', credential: 'two' }), NONE, identityOf)).not.equal(digest);
       should(cloneItemDigest(runtime({ harness: 'claude', profile: 'other' }), NONE, identityOf)).not.equal(digest);
       should(cloneItemDigest(runtime({}), NONE, identityOf)).not.equal(digest);

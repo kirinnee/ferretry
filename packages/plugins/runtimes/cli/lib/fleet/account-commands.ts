@@ -10,14 +10,6 @@ export function flagOn(options: Options, ...names: readonly string[]): boolean {
   return names.some(name => options[name] === true || options[name] === 'true');
 }
 
-/** A switch the person turned off with `--no-name`; `undefined` when they said nothing. */
-export function flagSet(options: Options, name: string): boolean | undefined {
-  const value = options[name];
-  if (value === true || value === 'true') return true;
-  if (value === false || value === 'false') return false;
-  return undefined;
-}
-
 /** The last value of a flag that takes one. */
 export function flagText(options: Options, name: string): string | undefined {
   const value = options[name];

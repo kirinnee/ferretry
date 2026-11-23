@@ -100,6 +100,8 @@ interface ConfigLoad<Model, Files = unknown> {
    * load and is never a field shared between loads, so a decision about a plan asks the load the plan was made from.
    */
   readonly unreadable: readonly string[];
+  /** Plain sentences about a saved setting this load read as unset; they block nothing. Absent: none. */
+  readonly notices?: readonly string[];
   /**
    * The environment logins whose variables stand in, in THIS load. They block only a model that names one (a runtime
    * using it), so a change that stops using a login stays possible while a runtime on it is in effect.

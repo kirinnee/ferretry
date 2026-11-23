@@ -75,8 +75,6 @@ export const RuntimeSummarySchema = z.strictObject({
   profile: z.string().min(1),
   /** The shell item it enters (Q18), when it names one. */
   shell: z.string().min(1).optional(),
-  /** Launched as an unattended agent (R3). */
-  agent: z.boolean(),
   /** Whether it can launch now; when not, `reason` is the button's words. */
   launch: z.discriminatedUnion('available', [
     z.strictObject({ available: z.literal(true) }),

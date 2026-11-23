@@ -49,15 +49,10 @@ export function parseReason(text: string | undefined): string | undefined {
 
 const HARNESS_LABEL = { 'claude-code': 'Claude Code', codex: 'Codex' } as const;
 
-/** One runtime as v4 worded it: `alpha (Claude Code, agent) — ready to launch`, or the reason it cannot. */
+/** One runtime as v4 worded it: `alpha (Claude Code) — ready to launch`, or the reason it cannot. */
 function runtimeWords(runtime: LoginRuntimePreview): string {
   if (runtime.launch === undefined) return runtime.name;
-  const kind =
-    runtime.harness === undefined
-      ? undefined
-      : runtime.agent === true
-        ? `${HARNESS_LABEL[runtime.harness]}, agent`
-        : HARNESS_LABEL[runtime.harness];
+  const kind = runtime.harness === undefined ? undefined : HARNESS_LABEL[runtime.harness];
   const status = runtime.launch.available ? 'ready to launch' : (runtime.launch.reason ?? 'cannot launch');
   return `${runtime.name}${kind === undefined ? '' : ` (${kind})`} — ${status}`;
 }

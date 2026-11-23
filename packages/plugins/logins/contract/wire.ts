@@ -670,8 +670,6 @@ export type LoginChange = z.infer<typeof LoginChangeSchema>;
 export const LoginRuntimePreviewSchema = z.strictObject({
   name: NonEmptyStringSchema,
   harness: HarnessKindSchema.optional(),
-  /** An agent runtime, as against an interactive one. */
-  agent: z.boolean().optional(),
   launch: z.strictObject({ available: z.boolean(), reason: NonEmptyStringSchema.optional() }).optional(),
 });
 export type LoginRuntimePreview = z.infer<typeof LoginRuntimePreviewSchema>;

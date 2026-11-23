@@ -138,3 +138,27 @@ describe('the switches the lifecycle launch hands a ferret', () => {
     for (const env of on.tmux.launches) should(switches(env)).deepEqual({ FY_HYPERMEDIA: '1', FY_PACK: '1' });
   });
 });
+
+describe('the mode a pane is handed is its record, never an inherited value', () => {
+  it('should keep an interactive launch interactive when its stored environment (or a parent auto ferret) says auto', async () => {
+    // Arrange — the record is interactive; the stored environment carries FY_SESSION_MODE=auto.
+    const subject = await fixture('interactive', { FY_SESSION_MODE: 'auto', FY_PACK: '1' });
+
+    // Act
+    await subject.first.launch(subject.record);
+
+    // Assert
+    should(subject.tmux.launches[0]?.FY_SESSION_MODE).equal('interactive');
+  });
+
+  it('should hand an auto launch auto even when its stored environment is silent', async () => {
+    // Arrange
+    const subject = await fixture('auto', {});
+
+    // Act
+    await subject.first.launch(subject.record);
+
+    // Assert
+    should(subject.tmux.launches[0]?.FY_SESSION_MODE).equal('auto');
+  });
+});

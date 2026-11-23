@@ -205,7 +205,7 @@ describe('newlyMisfitRuntimes', () => {
     );
     const broken = {
       ...base,
-      runtimes: { ...base.runtimes, ghost: { credential: 'nobody', profile: 'legacy', agent: false } },
+      runtimes: { ...base.runtimes, ghost: { credential: 'nobody', profile: 'legacy' } },
     } as AccountModel;
     should(newlyMisfitRuntimes(base, broken)).deepEqual([]);
   });
@@ -227,7 +227,7 @@ describe('newlyMisfitRuntimes', () => {
           codex: { env: { OPENROUTER_API_KEY: '${secret:S}' } },
         },
       },
-      runtimes: { glm: { credential: 'glm', profile: 'tools', agent: false } },
+      runtimes: { glm: { credential: 'glm', profile: 'tools' } },
     } as AccountModel;
     const after = {
       ...before,

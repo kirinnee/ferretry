@@ -145,11 +145,9 @@
     max-width: 1080px;
   }
 }
-/* C59 O3, the same rule as the answer row (`ui/action-row.css`): the way back is at the LEFT end of the footer, the way on (Later,
-   Next) at the right. A phone keeps its equal thirds below (full width, one size). */
-.fy-spf__footer [data-step-back] {
-  margin-inline-end: auto;
-}
+/* C59 O8-2, the same rule as the answer row (`ui/action-row.css`): Back, Later and Next are ONE group at the right end of the
+   column (`.fy-spf__actions` is `flex-end`), not Back on one edge and the rest on the other. A phone keeps its equal thirds
+   below (full width, one size). */
 /* Fixed width, never stretched or shrunk to the label; 44px tall. */
 .fy-spf__footer .fy-spf__button {
   flex: 0 0 auto;
@@ -173,9 +171,6 @@
     display: grid;
     grid-auto-columns: 1fr;
     grid-auto-flow: column;
-  }
-  .fy-spf__footer [data-step-back] {
-    margin-inline-end: 0;
   }
   .fy-spf__footer .fy-spf__button {
     inline-size: auto;
