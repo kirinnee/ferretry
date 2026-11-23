@@ -158,3 +158,98 @@ export async function footerButtons(tab: Page, footer = '[data-step-footer]'): P
     return buttons.sort((a, b) => a.x - b.x);
   }, footer);
 }
+
+/** Where a page is scrolled to when its pinned strip is read: the very top, halfway down, or the very end. */
+export type PinScroll = 'top' | 'mid' | 'bottom';
+
+export interface PinReading {
+  /** The strip's box (heading + demo) and the screen's width, in CSS pixels. */
+  readonly pin: { readonly top: number; readonly left: number; readonly right: number; readonly bottom: number };
+  readonly screenWidth: number;
+  /** The strip's own fill is a fully opaque colour. */
+  readonly opaque: boolean;
+  /** The heading's box is inside the strip. */
+  readonly headingInside: boolean;
+  /** The sampled points of the strip (a grid, gutters included) whose topmost painted element is NOT part of the strip. */
+  readonly behind: readonly string[];
+  /** Points in the band above the strip (the page edge to the strip's top) whose topmost element is page body, not the strip. */
+  readonly above: readonly string[];
+  /** The demo's text lines that spill out of the demo's box (sideways or below). */
+  readonly spill: readonly string[];
+  /** How far the page was scrolled (px) and how far it can scroll. */
+  readonly scrolled: number;
+  readonly scrollable: number;
+}
+
+/**
+ * Scroll the step page to `where`, then read its pinned strip (`.fy-spf__pin`): is it opaque, as wide as the screen, does it hold the
+ * heading, and is anything of the body painted over or around it? `elementsFromPoint` answers "what is drawn there" for a grid of points,
+ * so a card showing through (the "Ag" tiles above Appearance's preview) is found, not guessed.
+ */
+export async function pinnedStrip(tab: Page, where: PinScroll): Promise<PinReading> {
+  return await tab.evaluate(position => {
+    const pin = document.querySelector('.fy-spf__pin') as HTMLElement;
+    const scrollerOf = (node: HTMLElement): HTMLElement => {
+      for (let up = node.parentElement; up !== null; up = up.parentElement) {
+        const { overflowY } = getComputedStyle(up);
+        if ((overflowY === 'auto' || overflowY === 'scroll') && up.scrollHeight > up.clientHeight + 1) return up;
+      }
+      return document.scrollingElement as HTMLElement;
+    };
+    const scroller = scrollerOf(pin);
+    const reach = scroller.scrollHeight - scroller.clientHeight;
+    scroller.scrollTop = position === 'top' ? 0 : position === 'mid' ? reach / 2 : reach;
+    const box = pin.getBoundingClientRect();
+    const fill = getComputedStyle(pin).backgroundColor;
+    const alpha = /rgba\(.*,\s*([\d.]+)\)$/.exec(fill);
+    const heading = (pin.querySelector('.fy-spf__title') as HTMLElement).getBoundingClientRect();
+    const name = (el: Element): string => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 30)}`;
+    const behind: string[] = [];
+    const above: string[] = [];
+    const inset = 1;
+    for (const x of [inset, box.width * 0.25, box.width * 0.5, box.width * 0.75, box.width - inset - 1]) {
+      for (let row = 0; row <= 6; row += 1) {
+        const y = box.top + inset + ((box.height - 2 * inset - 1) * row) / 6;
+        if (y < 0 || y >= innerHeight) continue;
+        const top = document.elementsFromPoint(box.left + x, y)[0];
+        if (top === undefined || !pin.contains(top))
+          behind.push(`${Math.round(box.left + x)},${Math.round(y)}: ${top === undefined ? 'nothing' : name(top)}`);
+      }
+      // The band between the screen's top and the strip (only exists once the strip has stuck below something).
+      for (let y = 1; y < box.top - 1; y += 4) {
+        const top = document.elementsFromPoint(box.left + x, y)[0];
+        if (top !== undefined && top.closest('.fy-spf__main') !== null)
+          above.push(`${Math.round(x)},${y}: ${name(top)}`);
+      }
+    }
+    const demo = pin.querySelector('.fy-spf__demo') as HTMLElement;
+    const demoBox = demo.getBoundingClientRect();
+    const spill: string[] = [];
+    for (const text of demo.querySelectorAll<HTMLElement>('p, span')) {
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      for (const rect of range.getClientRects())
+        if (
+          rect.width > 0 &&
+          (rect.right > demoBox.right + 0.5 ||
+            rect.left < demoBox.left - 0.5 ||
+            rect.bottom > demoBox.bottom + 0.5 ||
+            rect.top < demoBox.top - 0.5)
+        )
+          spill.push(
+            `${name(text)} ${Math.round(rect.left)}..${Math.round(rect.right)} of ${Math.round(demoBox.left)}..${Math.round(demoBox.right)}`,
+          );
+    }
+    return {
+      pin: { top: box.top, left: box.left, right: box.right, bottom: box.bottom },
+      screenWidth: document.documentElement.clientWidth,
+      opaque: alpha === null ? fill !== 'rgba(0, 0, 0, 0)' && fill !== 'transparent' : Number(alpha[1]) === 1,
+      headingInside: heading.top >= box.top - 0.5 && heading.bottom <= box.bottom + 0.5,
+      behind,
+      above,
+      spill,
+      scrolled: scroller.scrollTop,
+      scrollable: reach,
+    };
+  }, where);
+}

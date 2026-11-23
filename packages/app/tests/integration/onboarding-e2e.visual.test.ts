@@ -42,6 +42,12 @@ import { FAKE_CODE, MACHINE_A, MACHINE_B, pairLinkOf } from './fixtures/onboardi
 setDefaultTimeout(280_000);
 
 const scene = new URL('./fixtures/onboarding-e2e-scene.tsx', import.meta.url).pathname;
+/** What the gap under the title is measured into: beside the choices (a wide page) the body; on a phone the demo too, which is drawn between the heading and the body. */
+const gapRoot = async (tab: Page): Promise<string> =>
+  (await tab.evaluate(() => (document.querySelector('.fy-spf__page') as HTMLElement).clientWidth)) >= 900
+    ? '.fy-spf__main'
+    : '.fy-spf__demo:not(:empty), .fy-spf__main';
+
 const shotsDir = process.env.FY_ONBOARDING_E2E_SHOTS_DIR ?? '';
 const VARIANTS = (process.env.FY_ONBOARDING_E2E_VARIANTS ?? '1280-light,390-dark').split(',').map(name => {
   const [width = '1280', scheme = 'light'] = name.trim().split('-');
@@ -405,9 +411,9 @@ const inspect = async (tab: Page, variant: Variant, key: string, opts: { first?:
     expect(button.h, `${key}: ${button.label} is a 44px target`).toBeGreaterThanOrEqual(43.5);
   }
   // Item 3: the title sits right over the page (no dead band between them), and Later is a real button in the footer row
-  // (Back · Later · Next), never a link floating in the page. Measured from `.fy-spf__main` (demo + body): on a phone the
+  // (Back · Later · Next), never a link floating in the page. Measured from the demo when there is one (it follows the heading), else the body: on a phone the
   // populated demo panel is drawn ABOVE the body, so the body alone would count the demo's height as dead space.
-  const gap = await gapUnderTitle(tab, '.fy-spf__head', '.fy-spf__main');
+  const gap = await gapUnderTitle(tab, '.fy-spf__head', await gapRoot(tab));
   expect(gap.gap, `${key}: something is drawn under the title (first: ${gap.first})`).toBeGreaterThanOrEqual(0);
   expect(gap.gap, `${key}: no dead gap between the title and the page (first thing: ${gap.first})`).toBeLessThanOrEqual(
     40,
@@ -701,8 +707,8 @@ const endPage = async (tab: Page, variant: Variant, key: string): Promise<void> 
     await underFooter(tab, '[data-step-footer]'),
     `${key}: nothing is under the footer at the end of the scroll`,
   ).toEqual([]);
-  // Measured from `.fy-spf__main` (picture + body): on a phone the picture (the ferret) is drawn ABOVE the body, like every demo.
-  const gap = await gapUnderTitle(tab, '.fy-spf__head', '.fy-spf__main');
+  // Measured from the picture (the demo), which follows the heading: on a phone the picture (the ferret) is drawn ABOVE the body, like every demo.
+  const gap = await gapUnderTitle(tab, '.fy-spf__head', await gapRoot(tab));
   expect(gap.gap, `${key}: no dead gap under the title`).toBeLessThanOrEqual(40);
 };
 

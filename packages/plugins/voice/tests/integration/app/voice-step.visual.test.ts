@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import {
   arrowWalkRings,
   edgeRings,
+  pinnedStrip,
   ringContrastOf,
   sceneBuilder,
   sharedChromium,
@@ -79,7 +80,7 @@ const THEMES = ['studio-light', 'studio-dark'] as const;
 type Tab = Awaited<ReturnType<Awaited<ReturnType<typeof sharedChromium>>['newPage']>>;
 
 async function open(
-  viewport: (typeof VIEWPORTS)[number],
+  viewport: { readonly name: string; readonly width: number; readonly height: number; readonly phone: boolean },
   theme: string,
   query: string,
   waitFor: string,
@@ -190,6 +191,10 @@ interface WaveProbe {
   /** The words' clip at the loop's start and at 5 s in (live: written by 3 s; after Stop: by 4 s). */
   clipStart: string;
   clipLate: string;
+  /** The picture is in its phone strip (under 520 px): the words arrive by a fade there, never a clip. */
+  narrow: boolean;
+  opacityStart: string;
+  opacityLate: string;
 }
 /**
  * Does the O8 picture really PLAY? Reads the browser's own animation list for the picture (a picture whose animation CSS was removed
@@ -206,12 +211,18 @@ const probeWave = (tab: Tab): Promise<WaveProbe> =>
     const clip = (): string => getComputedStyle(text).clipPath;
     let clipStart = 'none';
     let clipLate = 'none';
+    let opacityStart = '0';
+    let opacityLate = '1';
     if (own !== undefined) {
       own.pause();
       own.currentTime = 0;
       clipStart = clip();
       own.currentTime = 5_000;
       clipLate = clip();
+      own.currentTime = 0;
+      opacityStart = getComputedStyle(text).opacity;
+      own.currentTime = 5_000;
+      opacityLate = getComputedStyle(text).opacity;
     }
     return {
       kind: root.dataset.voiceDemo ?? '',
@@ -220,6 +231,9 @@ const probeWave = (tab: Tab): Promise<WaveProbe> =>
       states,
       clipStart,
       clipLate,
+      narrow: root.getBoundingClientRect().width < 520,
+      opacityStart,
+      opacityLate,
     };
   });
 
@@ -227,9 +241,24 @@ const expectWavePlays = (probe: WaveProbe) => {
   const kind = probe.kind;
   expect(probe.names).toContain('fy-wd-envelope');
   expect(probe.names).toContain('fy-wd-wobble');
-  expect(probe.names).toContain(kind === 'live' ? 'fy-wd-type-live' : 'fy-wd-type-after');
+  expect(probe.names).toContain(
+    probe.narrow
+      ? kind === 'live'
+        ? 'fy-wd-words-live'
+        : 'fy-wd-words-after'
+      : kind === 'live'
+        ? 'fy-wd-type-live'
+        : 'fy-wd-type-after',
+  );
   if (probe.shape) expect(probe.names).toContain('fy-wd-grow');
   for (const state of probe.states) expect(['running', 'finished']).toContain(state);
+  // A phone's strip: the words are never clipped; they are faded out at the start and in at 5 s.
+  if (probe.narrow) {
+    expect(probe.clipStart).toBe('none');
+    expect(probe.opacityStart).toBe('0');
+    expect(probe.opacityLate).toBe('1');
+    return;
+  }
   // Words: hidden (all clipped away from the right) at the start, whole at 5 s.
   expect(probe.clipStart).toMatch(/inset\(0(px)? 100%/);
   expect(probe.clipLate).toMatch(/inset\(0(px)?\)|inset\(0(px)? 0(px)? 0(px)? 0(px)?\)|none/);
@@ -1040,4 +1069,67 @@ describe('O8 item 8: test your audio', () => {
       await close();
     }
   });
+});
+
+/**
+ * O9 items 1 and 2, the Voice half: on a phone the heading and the demo are ONE pinned strip (the same frame layout Appearance uses),
+ * opaque and as wide as the screen, with nothing of the page showing behind or around it at the top, halfway down and at the end; the
+ * demo's words are never cut at the strip's edge. At 1440 the demo sits right of the cards and stays pinned. Every shot is kept when
+ * `FY_VOICE_STEP_SHOTS_DIR` is set.
+ */
+describe('the pinned Voice strip (O9)', () => {
+  const PHONE = { name: '390', width: 390, height: 844, phone: true } as const;
+  const WIDE = { name: '1440', width: 1_440, height: 900, phone: false } as const;
+  for (const theme of THEMES) {
+    for (const where of ['top', 'mid', 'bottom'] as const) {
+      it(`pins the heading and the demo over an opaque strip (390 ${theme}, scrolled to ${where})`, async () => {
+        const { tab, close } = await open(PHONE, theme, VOICE, CARD);
+        try {
+          // Every engine open, so the page is long enough to scroll under the strip.
+          await tab.locator('.fy-voice-more summary').click();
+          await tab.waitForTimeout(300);
+          const strip = await pinnedStrip(tab, where);
+          await tab.waitForTimeout(150);
+          expect(strip.scrollable, 'the page scrolls').toBeGreaterThan(200);
+          expect(strip.opaque, 'the strip is opaque').toBe(true);
+          expect(strip.pin.left, 'the strip starts at the screen edge').toBeLessThanOrEqual(0.5);
+          expect(strip.pin.right, 'the strip runs to the other edge').toBeGreaterThanOrEqual(strip.screenWidth - 0.5);
+          expect(strip.headingInside, 'the heading is inside the strip').toBe(true);
+          expect(strip.behind, 'nothing of the page shows over the strip').toEqual([]);
+          expect(strip.above, 'nothing of the page shows above the strip').toEqual([]);
+          expect(strip.spill, 'the demo words fit the demo').toEqual([]);
+          if (where !== 'top') expect(strip.pin.top, 'the strip is pinned at the top').toBeLessThanOrEqual(0.5);
+          // The words are written 22%..88% (live) or 66%..88% (after Stop) into the 6 s loop: stand on 4.6 s so the shot shows them.
+          await tab.evaluate(() => {
+            for (const animation of document.getAnimations()) {
+              animation.pause();
+              animation.currentTime = 4_600;
+            }
+          });
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `390-${theme}-voice-pinned-${where}.png`) });
+        } finally {
+          await close();
+        }
+      });
+    }
+    it(`keeps the demo to the right and pinned (1440 ${theme})`, async () => {
+      const { tab, close } = await open(WIDE, theme, VOICE, CARD);
+      try {
+        const g = await tab.evaluate(() => {
+          const demo = (document.querySelector('.fy-spf__demo') as HTMLElement).getBoundingClientRect();
+          const card = (document.querySelector('.fy-engine-card') as HTMLElement).getBoundingClientRect();
+          return {
+            demoX: demo.x,
+            cardRight: card.right,
+            position: getComputedStyle(document.querySelector('.fy-spf__demo') as Element).position,
+          };
+        });
+        expect(g.demoX).toBeGreaterThan(g.cardRight + 32);
+        expect(g.position).toBe('sticky');
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `1440-${theme}-voice.png`) });
+      } finally {
+        await close();
+      }
+    });
+  }
 });

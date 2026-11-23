@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { PALETTES, STYLES } from '@ferretry/app';
-import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { pinnedStrip, sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
 setDefaultTimeout(60_000);
 
@@ -689,4 +689,62 @@ describe('the onboarding Appearance step (r11 G2)', () => {
       await close();
     }
   });
+});
+
+/**
+ * O9 item 2: on a phone the heading and the sample are ONE pinned strip (the frame's own pin layout, the one Voice uses), opaque and as
+ * wide as the screen, with nothing of the option cards showing over, above or behind it at the top, halfway down and at the end, in the
+ * Pixel art style the owner's walk used (its hard card shadows were the worst offender). At 1440 the sample stays beside the cards.
+ */
+describe('the pinned Appearance strip (O9)', () => {
+  const WIDE = (scheme: 'light' | 'dark'): Variant => ({
+    name: `1440-${scheme}`,
+    width: 1_440,
+    height: 900,
+    phone: false,
+    scheme,
+  });
+  for (const scheme of ['light', 'dark'] as const) {
+    const phone = VARIANTS.find(v => v.phone && v.scheme === scheme) as Variant;
+    for (const where of ['top', 'mid', 'bottom'] as const)
+      it(`keeps nothing behind the pinned heading and sample (390 ${scheme}, scrolled to ${where})`, async () => {
+        const { tab, close } = await open(phone);
+        try {
+          await tab.locator('[aria-label="Style"] .fy-cc__card[data-choice="pixel"]').click();
+          await tab.waitForTimeout(450);
+          const strip = await pinnedStrip(tab, where);
+          await tab.waitForTimeout(150);
+          expect(strip.scrollable, 'the page scrolls').toBeGreaterThan(200);
+          expect(strip.opaque, 'the strip is opaque').toBe(true);
+          expect(strip.pin.left, 'the strip starts at the screen edge').toBeLessThanOrEqual(0.5);
+          expect(strip.pin.right, 'the strip runs to the other edge').toBeGreaterThanOrEqual(strip.screenWidth - 0.5);
+          expect(strip.headingInside, 'the heading is inside the strip').toBe(true);
+          expect(strip.behind, 'nothing of the page shows over the strip').toEqual([]);
+          expect(strip.above, 'nothing of the page shows above the strip').toEqual([]);
+          if (where !== 'top') expect(strip.pin.top, 'the strip is pinned at the top').toBeLessThanOrEqual(0.5);
+          await shot(tab, phone, `pinned-${where}`);
+        } finally {
+          await close();
+        }
+      });
+    it(`keeps the sample beside the cards and pinned (1440 ${scheme})`, async () => {
+      const { tab, close } = await open(WIDE(scheme));
+      try {
+        const g = await tab.evaluate(() => {
+          const demo = document.querySelector('.fy-spf__demo') as HTMLElement;
+          const card = document.querySelector('.fy-cc__card') as HTMLElement;
+          return {
+            demoX: demo.getBoundingClientRect().x,
+            cardRight: card.getBoundingClientRect().right,
+            position: getComputedStyle(demo).position,
+          };
+        });
+        expect(g.demoX).toBeGreaterThan(g.cardRight);
+        expect(g.position).toBe('sticky');
+        await shot(tab, WIDE(scheme), 'appearance');
+      } finally {
+        await close();
+      }
+    });
+  }
 });
