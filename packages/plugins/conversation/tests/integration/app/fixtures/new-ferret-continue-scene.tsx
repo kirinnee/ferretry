@@ -33,7 +33,11 @@ interface Recorded {
   body: unknown;
 }
 const calls: Recorded[] = [];
-const win = window as unknown as { __calls: Recorded[]; __harness: string | undefined };
+const win = window as unknown as {
+  __calls: Recorded[];
+  __harness: string | undefined;
+  __resumed: string | undefined;
+};
 win.__calls = calls;
 
 const words = (text: string): readonly string[] =>
@@ -54,6 +58,32 @@ const listing = (query: Record<string, string> | undefined): unknown => {
   return { conversations: found, matched: found.length, skipped: 0 };
 };
 
+/** The harness each runtime name starts (Runtimes' `runtime.start`): `codex-*` runs Codex, any other Claude Code. */
+const harnessOfRuntime = (runtime: string): string => (runtime.startsWith('codex') ? 'codex' : 'claude-code');
+
+/**
+ * `POST /v1/ferrets` as the daemon answers it, HONESTLY: a start that names a conversation resumes THAT conversation, and
+ * only when this machine's index holds it for the harness asked (it is then staged first); otherwise it is refused with a
+ * reason and starts nothing. A harness the runtime does not run is refused too. A start naming no conversation is a fresh
+ * ferret, and its id says so. The conversation the daemon resumed is on `window.__resumed`.
+ */
+const start = (body: unknown): { id: string } => {
+  const sent = body as { runtime: string; harness?: string; harnessConversation?: string };
+  const runs = harnessOfRuntime(sent.runtime);
+  if (sent.harness !== undefined && sent.harness !== runs)
+    throw new Error(
+      `runtime ${sent.runtime} runs the ${runs} harness, not ${sent.harness}, so the ferret was not started`,
+    );
+  if (sent.harnessConversation === undefined) return { id: 'fresh-1' };
+  const held = rows.find(row => row.id === sent.harnessConversation && row.harness === runs);
+  if (held === undefined)
+    throw new Error(
+      `No ${runs} conversation ${sent.harnessConversation} is on this machine. The ferret was not started, so nothing was resumed.`,
+    );
+  win.__resumed = held.id;
+  return { id: 'resumed-1' };
+};
+
 const client = {
   call: async <Answer,>(
     route: string,
@@ -71,7 +101,7 @@ const client = {
           { role: 'assistant', text: 'It races the session cookie; I added a wait.' },
         ],
       } as Answer;
-    if (route === 'POST /v1/ferrets') return { id: 'resumed-1' } as Answer;
+    if (route === 'POST /v1/ferrets') return start(init?.body) as Answer;
     throw new Error(`no route ${route}`);
   },
   subscribe: () => () => undefined,

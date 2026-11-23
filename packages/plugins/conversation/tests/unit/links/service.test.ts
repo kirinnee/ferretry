@@ -240,6 +240,60 @@ describe('links', () => {
     expect(result.kept).toEqual([]);
   });
 
+  test('O8-12 stage copies a host-only Claude transcript into the pool by the index’s own path, and starts no ferret and writes no link', async () => {
+    const { service, copies, asked, stored } = await build();
+    expect(await service.stage('claude-code', ID)).toEqual(ok(undefined));
+    // The source is the file's path below the harness's history folder, exactly what `Harness.importConversation` takes.
+    expect(copies).toEqual([{ id: ID, path: PATH }]);
+    expect(asked).toEqual([]);
+    expect(stored.links).toEqual([]);
+  });
+
+  test('O8-12 stage copies a host-only Codex rollout the same way', async () => {
+    const home = new MemoryHistory();
+    const rollout = `sessions/2026/10/10/rollout-2026-10-10T09-00-00-${CODEX}.jsonl`;
+    home.set(rollout, codexRollout(CODEX, '/work/notes', 'take notes'));
+    const { needs, copies } = await build();
+    const index = new ConversationIndex({
+      sqlite: () => memorySqlite(),
+      sources: async () => [{ harness: 'codex', parser: 'codex', kind: 'computer', label: 'owner', files: home }],
+      ferretNames: async () => new Map(),
+      parsers: PARSERS,
+      nowMs: () => 0,
+    });
+    await index.refresh();
+    expect(await new LinkService({ ...needs, index }).stage('codex', CODEX)).toEqual(ok(undefined));
+    expect(copies).toEqual([{ id: CODEX, path: rollout }]);
+  });
+
+  test('O8-12 stage refuses a conversation no history holds (not_found), and one that cannot be copied (failed), each in a plain sentence', async () => {
+    const { service } = await build();
+    const missing = await service.stage('claude-code', 'ffffffff-0000-4000-8000-000000000009');
+    expect(missing).toEqual(
+      err({
+        code: 'not_found',
+        reason: 'No claude-code conversation ffffffff-0000-4000-8000-000000000009 is on this machine.',
+      }),
+    );
+    // The same id under the other harness is not this machine's Codex conversation either.
+    expect((await service.stage('codex', ID)).ok).toBe(false);
+    const full = await build({ copyFails: true });
+    expect(await full.service.stage('claude-code', ID)).toEqual(err({ code: 'failed', reason: 'the disk is full' }));
+  });
+
+  test('O8-12 stage reports a copier that throws in its own words', async () => {
+    const { needs } = await build();
+    const service = new LinkService({
+      ...needs,
+      copier: {
+        copy: async () => {
+          throw new Error('permission denied');
+        },
+      },
+    });
+    expect(await service.stage('claude-code', ID)).toEqual(err({ code: 'failed', reason: 'permission denied' }));
+  });
+
   test('the routes refuse a bad query with 400 and an unknown preview with 404', async () => {
     const { service } = await build();
     const routes = linkRoutes(service);

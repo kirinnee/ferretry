@@ -254,12 +254,41 @@ describe('New ferret: continue a past conversation', () => {
             mode: 'auto',
             prompt: 'Carry on with the fix',
             harnessConversation: LOGIN,
+            harness: 'claude-code',
           });
+          // The fake daemon is honest: it resumes a conversation only when its index holds it for that harness, and the
+          // ferret it answers with is the resumed one (`resumed-1`), never a fresh one (`fresh-1`).
+          expect(
+            await tab.evaluate(() => (window as unknown as { __resumed?: string }).__resumed),
+            'the daemon resumed the ORIGINAL conversation',
+          ).toBe(LOGIN);
           expect(await tab.evaluate(() => window.location.pathname), 'it opens the resumed ferret’s chat').toBe(
             '/d/fake/ferrets/resumed-1/chat',
           );
         }));
     }
+
+  it('a runtime typed for the OTHER harness is refused by the daemon and says why; nothing is resumed or opened', () =>
+    withPage(VARIANTS[0], 'light', '', async tab => {
+      await tab.click(DISCLOSURE);
+      await tab.click(`[data-continue-row="${CODEX}"]`);
+      await tab.click('[data-continue-action]');
+      await tab.waitForSelector('[data-new-ferret-picked]');
+      // The runtime box is typed by hand, so it can name a Claude Code runtime although a Codex conversation is picked.
+      await tab.fill('#fy-new-ferret-runtime', 'claude-default');
+      await tab.fill('#fy-new-ferret-prompt', 'Carry on');
+      await tab.getByRole('button', { name: 'Create ferret' }).click();
+      await tab.waitForSelector('[role="alert"]');
+      expect(await tab.textContent('[role="alert"]')).toContain('runs the claude-code harness, not codex');
+      expect(await tab.evaluate(() => (window as unknown as { __resumed?: string }).__resumed)).toBeUndefined();
+      expect(await tab.evaluate(() => window.location.pathname), 'no ferret was opened').toBe('/d/fake/new');
+    }));
+
+  it('`?continue=1` opens New ferret with the list already shown (the Runtimes and setup links)', () =>
+    withPage(VARIANTS[0], 'light', '&continue=1', async tab => {
+      await tab.waitForSelector('[data-continue-row]');
+      expect(await tab.getAttribute(DISCLOSURE, 'aria-expanded')).toBe('true');
+    }));
 
   it('a Codex pick names Codex and its own conversation id; "Start fresh instead" starts without one', () =>
     withPage(VARIANTS[0], 'light', '', async tab => {

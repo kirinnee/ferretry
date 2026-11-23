@@ -7,6 +7,13 @@ import type { HarnessKey } from '../ids.ts';
  */
 export const NEW_FERRET_CONTINUE_SLOT = 'ferrets.new-ferret-continue' as const;
 
+/** The one word on New ferret's address (`?continue=1`) that opens the "Continue a past conversation" section. */
+export const NEW_FERRET_CONTINUE_QUERY = 'continue';
+
+/** `newFerretHref` (the New ferret screen's address) with the "Continue a past conversation" section already open. */
+export const newFerretContinueHref = (newFerretHref: string): string =>
+  `${newFerretHref}?${NEW_FERRET_CONTINUE_QUERY}=1`;
+
 /** One past conversation the owner picked. */
 export interface ContinuePick {
   /** Which row it is, so the list can mark it. */

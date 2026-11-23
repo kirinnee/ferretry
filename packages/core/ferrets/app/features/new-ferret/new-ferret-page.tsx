@@ -130,6 +130,8 @@ export interface NewFerretPageProps {
    * daemon's start route still decides whether it may be used.
    */
   readonly initialFolder?: string;
+  /** Open with the "Continue a past conversation" section shown (`?continue=1`: the Runtimes and setup links to it). */
+  readonly initialContinue?: boolean;
   /** What draws the runtime field's slot. The shell's by default; a test hands a stand-in. */
   readonly AccountSlot?: ComponentType<AccountSlotProps>;
 }
@@ -149,6 +151,7 @@ export function NewFerretPage({
   backPlace,
   initialAgent,
   initialFolder,
+  initialContinue = false,
   AccountSlot = ShellAccountSlot,
 }: NewFerretPageProps) {
   const [draft, setDraft] = useState<NewFerretDraft>(() =>
@@ -164,7 +167,7 @@ export function NewFerretPage({
   const [folders, setFolders] = useState<FolderRead>(LOADING_FOLDERS);
   // A past conversation picked from the Continue list: it fills the form, and Create starts with it named so it resumes.
   const [picked, setPicked] = useState<ContinuePick | null>(null);
-  const [continueShown, setContinueShown] = useState(false);
+  const [continueShown, setContinueShown] = useState(initialContinue);
   const continueOffered = useSlotHasPanels(NEW_FERRET_CONTINUE_SLOT);
   const pick = (next: ContinuePick | null): void => {
     setPicked(next);
@@ -172,7 +175,7 @@ export function NewFerretPage({
     // The pick is in the form: the list folds away so the form (runtime, folder, mode, prompt) is what the page shows.
     if (next !== null) setContinueShown(false);
     setDraft(current => {
-      const { harnessConversation: _before, ...rest } = current;
+      const { harnessConversation: _before, harness: _harness, ...rest } = current;
       if (next === null) return { ...rest, folder: '', folderExact: undefined };
       // The conversation brings its folder; a runtime of another harness cannot resume it, so that one is cleared.
       return {
@@ -181,6 +184,7 @@ export function NewFerretPage({
         folderExact: next.folder,
         runtime: next.harness === picked?.harness ? current.runtime : '',
         harnessConversation: next.conversation,
+        harness: next.harness,
       };
     });
   };

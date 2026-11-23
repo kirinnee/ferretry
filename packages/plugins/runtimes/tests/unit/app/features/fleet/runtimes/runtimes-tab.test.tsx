@@ -556,11 +556,11 @@ describe('Launch', () => {
 });
 
 describe('Runtimes tab › Import conversations', () => {
-  it('V-0285 links to Conversation’s links screen, where `fy link` is drawn, next to Add runtime', async () => {
+  it('V-0285 links to New ferret with its “Continue a past conversation” section open (the Conversations page is gone), next to Add runtime', async () => {
     const view = await open();
     const link = must(view.container.querySelector<HTMLAnchorElement>('a[data-import-conversations-link]'), 'link');
     expect(link.textContent).toBe('Import conversations');
-    expect(link.getAttribute('href')).toBe('/d/d1/links');
+    expect(link.getAttribute('href')).toBe('/d/d1/new?continue=1');
     expect(link.getAttribute('href')).toBe(conversationsHref('d1'));
     expect(view.container.querySelector('[data-import-conversations-open]')).toBeNull();
     await view.unmount();

@@ -9,6 +9,7 @@ import { WithSlotPanels } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { NewFerretPage } from '../../../../app/features/new-ferret/new-ferret-page.tsx';
+import { initialContinueOf } from '../../../../app/views/new-ferret.tsx';
 import { run, runAsync, render } from '../support/react.ts';
 import { scripted, type Call } from '../support/client.ts';
 
@@ -73,6 +74,28 @@ describe('the New ferret page and the continue slot', () => {
     expect(byId(view, 'fy-new-ferret-prompt')).toBeTruthy();
   });
 
+  it('opens with the list shown when the address asks for it (`?continue=1`: the Runtimes and setup links)', () => {
+    expect(initialContinueOf('?continue=1')).toBe(true);
+    expect(initialContinueOf('?agent=a&continue=1')).toBe(true);
+    expect(initialContinueOf('')).toBe(false);
+    expect(initialContinueOf('?continue=0')).toBe(false);
+    const view = render(
+      <WithSlotPanels
+        slots={{ [NEW_FERRET_CONTINUE_SLOT]: [{ plugin: 'conversation', id: 'new-ferret-continue', view: stubList }] }}
+      >
+        <NewFerretPage
+          AccountSlot={({ fallback }) => fallback}
+          client={scripted({ 'GET /v1/ferrets': [] }, [])}
+          daemon="daemon/a"
+          initialContinue
+          onNavigate={() => undefined}
+        />
+      </WithSlotPanels>,
+    );
+    expect(view.root.findAllByProps({ 'data-continue-list': '' })).toHaveLength(1);
+    expect(disclosure(view).props['aria-expanded']).toBe(true);
+  });
+
   it('draws no disclosure at all when nothing contributes a list', () => {
     const view = render(
       <NewFerretPage
@@ -116,6 +139,25 @@ describe('the New ferret page and the continue slot', () => {
       folder: '/work/api',
       mode: 'interactive',
       harnessConversation: 'c-77',
+      // The pick's harness travels with the request, so the daemon refuses a runtime of the OTHER harness
+      // (`runtime rt runs the claude-code harness, not codex`) even when the runtime field was typed by hand.
+      harness: 'codex',
+    });
+  });
+
+  it('a runtime typed for the OTHER harness is still sent with the picked harness, so the daemon can refuse the mismatch', async () => {
+    const calls: Call[] = [];
+    const view = page(calls, []);
+    run(() => disclosure(view).props.onClick());
+    run(() => view.root.findByProps({ 'data-row': 'c-77' }).props.onClick());
+    typeInto(view, 'fy-new-ferret-runtime', 'claude-main');
+    typeInto(view, 'fy-new-ferret-prompt', 'carry on');
+    const create = found(view, node => node.type === 'button' && node.children.join('') === 'Create ferret');
+    await runAsync(async () => create.props.onClick());
+    expect(calls.find(call => call.route === 'POST /v1/ferrets')?.body).toMatchObject({
+      runtime: 'claude-main',
+      harness: 'codex',
+      harnessConversation: 'c-77',
     });
   });
 
@@ -137,5 +179,6 @@ describe('the New ferret page and the continue slot', () => {
     const body = calls.find(call => call.route === 'POST /v1/ferrets')?.body as Record<string, unknown>;
     expect(body).toMatchObject({ folder: '/work/web', runtime: 'claude-auto' });
     expect(body).not.toHaveProperty('harnessConversation');
+    expect(body).not.toHaveProperty('harness');
   });
 });
