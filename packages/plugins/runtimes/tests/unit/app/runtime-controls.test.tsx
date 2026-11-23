@@ -369,7 +369,7 @@ describe('RuntimeModelControls', () => {
     expect(sent[0]!.sessionId).toBe('s-1');
     expect(sent[0]!.command).toEqual({ action: 'model', model: 'claude-opus-5' });
     expect(sent[0]!.requestId).toMatch(/^req-\d+$/);
-    expect(screen.container.textContent).toContain('The model chip updates when Claude confirms the switch');
+    expect(screen.container.textContent).toContain('The bar names it as sent');
     await screen.unmount();
   });
 
@@ -899,7 +899,9 @@ describe('popover presentation', () => {
   test('the Claude effort popover checks the level in force and says it persists in one line', async () => {
     const screen = await mount(<RuntimeEffortControls {...base} claudeEffort="high" />);
     expect(screen.container.querySelector('h3')).toBeNull();
-    expect(screen.container.textContent).toContain('Also saved as this account’s default for new sessions.');
+    expect(screen.container.textContent).toContain(
+      'The thinking level is also saved as this account’s default for new sessions.',
+    );
     expect(screen.container.textContent).not.toContain('Claude does not echo the level back');
     expect(byLabel(screen.container, 'Set reasoning effort to high').getAttribute('aria-checked')).toBe('true');
     expect(byLabel(screen.container, 'Set reasoning effort to low').getAttribute('aria-checked')).toBe('false');

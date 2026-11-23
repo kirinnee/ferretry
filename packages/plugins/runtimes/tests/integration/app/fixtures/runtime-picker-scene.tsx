@@ -1,11 +1,13 @@
 /**
- * The browser entry for "the runtime picker in the composer's row": the REAL `RuntimePicker` panel beside the composer's
- * own row classes (`.fy-composer`, `.fy-composer-row`, `.fy-composer-input-layer`, `.fy-composer-send`: the stylesheet
- * that ships), in the chat page's column structure inside the `main` that clips its overflow. The daemon is a fake that
+ * The browser entry for "the runtime picker on the composer's status line": the REAL `RuntimePicker` panel (model, thinking and
+ * speed) on the status line under the composer's own row classes (`.fy-composer`, `.fy-composer-row`, `.fy-composer-actions`,
+ * `.fy-composer-input-layer`, `.fy-composer-send`: the stylesheet that ships), in the chat page's column structure inside the
+ * `main` that clips its overflow. The daemon is a fake that
  * answers one ferret and (unless `?discovery=0`) its model catalog. Fake data only; no network.
  *
  *   ?compact=1       the phone's composer layout
  *   ?discovery=0     a daemon whose runtime discovery is not connected (the catalog read fails)
+ *   ?model=<id>      the model the ferret runs (default: Opus 5.5; Sonnet and Haiku have no fast mode)
  *   ?theme=<family>-<mode>
  *
  * `window.__asked` is every route the picker called, in order.
@@ -20,6 +22,7 @@ const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const compact = params.get('compact') === '1';
 const discovery = params.get('discovery') !== '0';
+const model = params.get('model') ?? 'claude-opus-5-5';
 
 const FERRET = 'mvzoe001-5e7d0b1e';
 const asked: string[] = [];
@@ -35,9 +38,22 @@ const CATALOG = {
       description: 'The most capable',
       isDefault: true,
       reasoningEfforts: [],
+      fast: true,
     },
-    { value: 'claude-sonnet-5-5', label: 'Sonnet 5.5', description: 'Fast and balanced', reasoningEfforts: [] },
-    { value: 'claude-haiku-5-5', label: 'Haiku 5.5', description: 'Quick and light', reasoningEfforts: [] },
+    {
+      value: 'claude-sonnet-5-5',
+      label: 'Sonnet 5.5',
+      description: 'Fast and balanced',
+      reasoningEfforts: [],
+      fast: false,
+    },
+    {
+      value: 'claude-haiku-5-5',
+      label: 'Haiku 5.5',
+      description: 'Quick and light',
+      reasoningEfforts: [],
+      fast: false,
+    },
   ],
 };
 
@@ -53,7 +69,8 @@ const client = {
         runner: 'tmux',
         folder: '/work/project',
         state: 'idle',
-        model: 'claude-sonnet-5-5',
+        model,
+        effort: 'high',
         createdAt: '2026-11-01T00:00:00.000Z',
         stateAt: '2026-11-01T00:00:00.000Z',
       };
@@ -92,13 +109,6 @@ createRoot(document.getElementById('root') as HTMLElement).render(
               <button aria-label="Add to message" className="fy-composer-icon" type="button">
                 +
               </button>
-              {compact ? (
-                <div className="fy-composer-dock" data-composer-dock="start">
-                  {tools}
-                </div>
-              ) : (
-                tools
-              )}
               <div className="fy-composer-input-layer">
                 <textarea aria-label="Message" placeholder="Message this ferret" rows={1} />
               </div>
@@ -107,6 +117,9 @@ createRoot(document.getElementById('root') as HTMLElement).render(
                   ↑
                 </button>
               </div>
+            </div>
+            <div className="fy-composer-actions" data-composer-status="">
+              <span className="fy-composer-status-chrome">{tools}</span>
             </div>
           </form>
         </div>

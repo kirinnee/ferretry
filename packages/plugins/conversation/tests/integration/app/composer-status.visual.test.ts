@@ -4,12 +4,15 @@
  * model, thinking, speed and usage belong "nicely at the bottom, not blocking or eating up space", as in v4).
  *
  * The scene (`fixtures/composer-status-scene.tsx`) is the REAL `Composer` in the chat page's column, its status line
- * holding the model chip and the quota readout. At a desktop and a phone, light and dark, idle and typing:
+ * holding the three readouts (model, thinking, speed) and the quota readout. At a desktop and a phone, light and dark, idle and typing:
  *
  *  - ONE ROW holds attach, the text and send (and the mic, when the scene draws Voice's panel), on one line, the text
  *    keeping most of it;
  *  - the status line sits UNDER the row (model chip, usage), never in it, and is a line high, not a block;
- *  - an unknown usage is never drawn as the raw words `usage unknown` (its sentence stays for a screen reader).
+ *  - the status line is ONE line (the model's name gives way, never the line wrapping), at a phone too;
+ *  - a subscription login shows 5h and weekly, a key login the money spent, an unknown usage NOTHING (no element, no
+ *    raw `usage unknown`);
+ *  - the mic carries no offset shadow at rest, in the loud theme families too.
  *
  * Set `FY_COMPOSER_STATUS_SHOTS_DIR` to keep `<viewport>-<mode>-<state>.png`.
  */
@@ -68,11 +71,16 @@ afterAll(async () => {
 });
 
 const WINDOWS = [
-  { name: '1280', width: 1_280, height: 800, phone: false },
+  { name: '1440', width: 1_440, height: 900, phone: false },
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 
-const open = async (size: (typeof WINDOWS)[number], mode: 'light' | 'dark', usage: 'known' | 'unknown') => {
+const open = async (
+  size: (typeof WINDOWS)[number],
+  mode: 'light' | 'dark',
+  usage: 'known' | 'key' | 'unknown',
+  style = '',
+) => {
   const context = await browser.newContext({
     viewport: { width: size.width, height: size.height },
     colorScheme: mode,
@@ -85,7 +93,9 @@ const open = async (size: (typeof WINDOWS)[number], mode: 'light' | 'dark', usag
   );
   const tab = await context.newPage();
   tab.setDefaultTimeout(8_000);
-  await tab.goto(`${origin}/?theme=studio-${mode}&usage=${usage}${size.phone ? '&compact=1' : ''}`);
+  await tab.goto(
+    `${origin}/?theme=studio-${mode}&usage=${usage}${style === '' ? '' : `&style=${style}`}${size.phone ? '&compact=1' : ''}`,
+  );
   await tab.waitForSelector('[data-composer-send]');
   return { tab, close: async () => await context.close() };
 };
@@ -100,8 +110,12 @@ const layout = async (tab: Page) =>
     const field = rect('.fy-composer-input-layer');
     const send = rect('[data-composer-send]');
     const row = rect('.fy-composer-row');
-    const model = rect('[data-runtime-chip]');
-    const chipLabel = document.querySelector('[data-runtime-chip] > span');
+    const model = rect('[data-runtime-chip="model"]');
+    const chips = [...document.querySelectorAll('[data-runtime-chip]')];
+    const chipLabel = document.querySelector('[data-runtime-chip="model"] > span');
+    const lastChip = chips.at(-1)?.getBoundingClientRect();
+    const quotaBox = document.querySelector('.fy-composer-quota')?.getBoundingClientRect();
+    const micEl = document.querySelector('button[aria-label="Dictate"]');
     const quota = document.querySelector('.fy-composer-quota');
     const form = rect('form.fy-composer');
     return {
@@ -115,8 +129,13 @@ const layout = async (tab: Page) =>
       rowContainsModel: row !== undefined && model !== undefined && model.top >= row.top && model.bottom <= row.bottom,
       rowContainsQuota: quota !== null && row !== undefined && quota.getBoundingClientRect().top < row.bottom,
       quotaVisibleText: quota === null ? null : (quota.querySelector('[aria-hidden="true"]')?.textContent ?? ''),
-      // The chip's whole readout (model, thinking, speed) is on screen, not cut to the model by an ellipsis.
-      chipText: chipLabel?.textContent ?? '',
+      // The three readouts (model, thinking, speed) are all on screen, on one line.
+      chipTexts: chips.map(chip => chip.textContent ?? ''),
+      chipTops: chips.map(chip => Math.round(chip.getBoundingClientRect().top)),
+      quotaTop: quotaBox === undefined ? null : Math.round(quotaBox.top),
+      lastChipRight: lastChip?.right ?? 0,
+      quotaPresent: document.querySelector('.fy-composer-quota') !== null,
+      micShadow: micEl === null ? '' : getComputedStyle(micEl).boxShadow,
       chipClipped: chipLabel === null ? true : chipLabel.scrollWidth > chipLabel.clientWidth + 1,
       quotaWidth: quota?.getBoundingClientRect().width ?? 0,
       bodyText: document.body.innerText,
@@ -126,7 +145,7 @@ const layout = async (tab: Page) =>
 for (const mode of ['light', 'dark'] as const)
   describe(`the composer's row and status line (${mode})`, () => {
     for (const size of WINDOWS)
-      for (const usage of ['unknown', 'known'] as const)
+      for (const usage of ['unknown', 'known', 'key'] as const)
         it(`at ${size.name}, usage ${usage}: one row of attach, text, send; the status line under it`, async () => {
           const { tab, close } = await open(size, mode, usage);
           try {
@@ -157,19 +176,29 @@ for (const mode of ['light', 'dark'] as const)
             expect(model.top, 'the model chip is under the row').toBeGreaterThanOrEqual(row.bottom - 1);
             expect(form.height, 'row plus ONE status line, not a block').toBeLessThan(row.height + 36);
 
-            // E4b: the status line carries model, THINKING and SPEED whenever the session reports them — a fixture ferret
-            // that reports none (the relay check's) shows only the model because there is nothing more to say.
-            expect(idle.chipText).toBe('claude-opus-5-5 · high · fast');
-            expect(idle.chipClipped, 'the chip is not cut to the model alone').toBe(false);
+            // The bar carries the model, the THINKING level and the SPEED, one button each.
+            expect(idle.chipTexts).toEqual(['claude-opus-5-5', 'high', 'Fast']);
+            expect(idle.chipClipped, 'a short model name is not cut').toBe(false);
+            expect(new Set(idle.chipTops).size, 'the three readouts share one line').toBe(1);
+
+            // ONE CALM LINE, at a phone too: the quota sits on the readouts' line, never wrapped under them.
+            if (idle.quotaTop !== null)
+              expect(Math.abs(idle.quotaTop - (idle.chipTops[0] ?? 0)), 'the quota shares the line').toBeLessThan(8);
+            expect(idle.lastChipRight, 'the readouts stay inside the window').toBeLessThanOrEqual(size.width);
 
             if (usage === 'unknown') {
-              expect(idle.quotaVisibleText ?? '', 'unknown usage is never drawn as raw words').not.toMatch(
-                /usage unknown/u,
-              );
+              expect(idle.quotaPresent, 'unknown usage draws nothing at all').toBe(false);
+              expect(idle.bodyText).not.toMatch(/usage unknown/iu);
+            } else if (usage === 'key') {
+              expect(idle.quotaVisibleText).toMatch(/\$12\.40/u);
+              expect(idle.quotaVisibleText).not.toMatch(/5h|wk/u);
             } else {
               expect(idle.quotaVisibleText).toMatch(/5h 12%/u);
               expect(idle.quotaVisibleText).toMatch(/wk 38%/u);
             }
+
+            // THE MIC IS FLAT: no resting offset shadow.
+            if (mic) expect(idle.micShadow, 'the mic has no resting shadow').toBe('none');
 
             // Typing leaves the row one row and the status line where it was.
             await tab.locator(FIELD).first().click();
@@ -185,3 +214,37 @@ for (const mode of ['light', 'dark'] as const)
           }
         });
   });
+
+// The loud families give a button a hard offset shadow; the row's quiet controls stay flat in all of them, resting and focused.
+describe('the mic carries no heavy shadow in the loud theme families', () => {
+  for (const [style, mode] of [
+    ['genz', 'light'],
+    ['neo', 'light'],
+    ['pixel', 'light'],
+    ['exaggerated', 'dark'],
+    ['antiposh', 'light'],
+  ] as const)
+    it(`in the ${style} look (${mode}), at rest and with keyboard focus`, async () => {
+      const theme = style;
+      const { tab, close } = await open(WINDOWS[1], mode, 'known', style);
+      try {
+        const shadowOf = async () =>
+          await tab.evaluate(
+            () => getComputedStyle(document.querySelector('button[aria-label="Dictate"]') as Element).boxShadow,
+          );
+        expect(await shadowOf(), 'resting').toBe('none');
+        await tab.keyboard.press('Tab');
+        await tab.locator('button[aria-label="Dictate"]').focus();
+        await tab.keyboard.press('Shift+Tab');
+        await tab.keyboard.press('Tab');
+        const focused = await shadowOf();
+        // A focus band inside the control is allowed; a stacked OFFSET shadow (a non-inset layer) is the heavy blob.
+        expect(focused === 'none' || !focused.split(/,(?![^(]*\))/u).some(layer => !layer.includes('inset'))).toBe(
+          true,
+        );
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `390-${theme}-mic-focus.png`) });
+      } finally {
+        await close();
+      }
+    });
+});
