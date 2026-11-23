@@ -1,9 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import { THIRD_HARNESS_KEY } from '@ferretry/core-ferrets/contract/testing';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import type { ProfileFile, RuntimeFile } from '../../../contract/index.ts';
 import { stableSuffix } from '../../../daemon/lib/account/derived-runtimes.ts';
+import { runtimeStartAnswer } from '../../../daemon/lib/service/runtime-start-answer.ts';
 import { loginUsers } from '../../../daemon/lib/service/login-users.ts';
 import { createRuntimesApi, type RuntimesApiDeps } from '../../../daemon/lib/service/runtimes-api.ts';
 
@@ -492,5 +494,64 @@ describe('createRuntimesApi — a login whose CLI is not installed', () => {
     // Assert
     should(actual).deepEqual([]);
     should(launchable.map(summary => summary.id)).deepEqual(['kimi']);
+  });
+});
+
+describe('createRuntimesApi — a harness Runtimes has no behaviour for (runtimes plan U4b)', () => {
+  it('should refuse a runtime on the fake third harness by name, even though that harness is installed', async () => {
+    // Arrange: the third harness is on this machine (Ferrets lists it) and its login is ready.
+    const third = THIRD_HARNESS_KEY as KnownHarnessKey;
+    const runtimes = api({
+      runtimes: { third: runtimeFile({ login: 'third-login' }) },
+      logins: [loginView({ id: 'third-login', harness: third })],
+      harnesses: [third, 'claude-code', 'codex'],
+    });
+
+    // Act
+    const actual = await runtimes.get('third' as never);
+
+    // Assert: the sentence is the one refusal, never "not on this machine" and never a launch.
+    should(actual?.launch).deepEqual({ available: false, reason: `${third} is not supported here` });
+  });
+
+  it('should never pick the fake third harness as the default runtime, nor read it as Claude', async () => {
+    // Arrange
+    const third = THIRD_HARNESS_KEY as KnownHarnessKey;
+    const runtimes = api({
+      runtimes: { a: runtimeFile({ login: 'third-login' }), b: runtimeFile() },
+      logins: [loginView({ id: 'third-login', harness: third }), loginView({ id: 'main' })],
+      harnesses: [third, 'claude-code', 'codex'],
+    });
+
+    // Act
+    const actual = await runtimes.list();
+
+    // Assert
+    should(actual.find(summary => summary.id === 'a')?.harness).equal(third);
+    should(actual.find(summary => summary.id === 'a')?.launch.available).be.false();
+    should(actual.find(summary => summary.id === 'b')?.launch.available).be.true();
+  });
+});
+
+describe('runtime.start for a harness Runtimes has no behaviour for (runtimes plan U4b)', () => {
+  it('should answer a start on the fake third harness with the one refusal, and start nothing', async () => {
+    // Arrange
+    const third = THIRD_HARNESS_KEY as KnownHarnessKey;
+    const runtimes = api({
+      runtimes: { third: runtimeFile({ login: 'third-login' }) },
+      logins: [loginView({ id: 'third-login', harness: third })],
+      harnesses: [third, 'claude-code', 'codex'],
+    });
+    const answer = runtimeStartAnswer({
+      logins: { list: async () => ({ logins: [loginView({ id: 'third-login', harness: third })] }) as never },
+      resolve: (id: never) => runtimes.resolve(id),
+    } as never);
+
+    // Act
+    const actual = await answer.resolve('third');
+
+    // Assert
+    should(actual.ok).be.false();
+    should(actual.ok === false ? actual.sentence : '').containEql(`${third} is not supported here`);
   });
 });

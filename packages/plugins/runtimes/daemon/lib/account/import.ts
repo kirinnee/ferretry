@@ -40,6 +40,7 @@ import { harnessNamed } from './import-scope.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
 import { FLEET_STARTER_MODELS } from '../defaults.ts';
+import { byHarness, harnessKeyOfKind, isKind } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import {
   parseSettings,
@@ -596,14 +597,14 @@ const CODEX_MCP_KEYS: ReadonlySet<string> = new Set(['command', 'args', 'env', '
 
 /** Where each harness's MCP servers sit: Claude's `mcpServers` in `.claude.json`, Codex's `mcp_servers`. */
 const mcpTableOf = (harness: HarnessKind, document: SettingsObject | undefined): SettingsObject => {
-  const table = document?.[harness === 'claude' ? 'mcpServers' : 'mcp_servers'];
+  const table = document?.[byHarness(harness, { claude: () => 'mcpServers', codex: () => 'mcp_servers' })];
   return isRecord(table) ? table : {};
 };
 
 function scannedServer(harness: HarnessKind, name: string, entry: unknown): ScannedMcpServer | undefined {
   if (!isRecord(entry)) return undefined;
-  if (harness === 'codex' && entry.enabled === false) return undefined;
-  const known = harness === 'claude' ? CLAUDE_MCP_KEYS : CODEX_MCP_KEYS;
+  if (isKind(harness, 'codex') && entry.enabled === false) return undefined;
+  const known = byHarness(harness, { claude: () => CLAUDE_MCP_KEYS, codex: () => CODEX_MCP_KEYS });
   const command = typeof entry.command === 'string' && entry.command.trim() !== '' ? entry.command : undefined;
   const url = typeof entry.url === 'string' && entry.url.trim() !== '' ? entry.url : undefined;
   const args = Array.isArray(entry.args) ? entry.args.filter((arg): arg is string => typeof arg === 'string') : [];
@@ -623,10 +624,10 @@ function scannedServer(harness: HarnessKind, name: string, entry: unknown): Scan
  */
 export function scannedMcpServers(scan: HostHarnessScan): readonly ScannedMcpServer[] {
   const problems: string[] = [];
-  const document =
-    scan.harness === 'claude'
-      ? parsedDocument(scan.mcp, 'json', '.claude.json', problems)
-      : parsedDocument(scan.settings, 'toml', 'config.toml', problems);
+  const document = byHarness(scan.harness, {
+    claude: () => parsedDocument(scan.mcp, 'json', '.claude.json', problems),
+    codex: () => parsedDocument(scan.settings, 'toml', 'config.toml', problems),
+  });
   return Object.entries(mcpTableOf(scan.harness, document)).flatMap(([name, entry]) => {
     const server = scannedServer(scan.harness, name, entry);
     return server === undefined ? [] : [server];
@@ -641,7 +642,7 @@ const PROJECT_FOLDERS_LIMIT = 200;
  * under each key are never looked at. Absolute paths with no control character, in the host's order, bounded.
  */
 export function claudeProjectFolders(scan: HostHarnessScan): readonly string[] {
-  if (scan.harness !== 'claude') return [];
+  if (!isKind(scan.harness, 'claude')) return [];
   const document = parsedDocument(scan.mcp, 'json', '.claude.json', []);
   const projects = document?.projects;
   if (!isRecord(projects)) return [];
@@ -703,7 +704,7 @@ const countHooks = (block: Readonly<Record<string, unknown>>): number =>
   );
 
 /** The wire key a harness goes by in an item id. */
-const itemHarness = (harness: HarnessKind): 'claude-code' | 'codex' => (harness === 'claude' ? 'claude-code' : 'codex');
+const itemHarness = (harness: HarnessKind) => harnessKeyOfKind(harness);
 
 /** The profiles a `config.toml` declares: names, and the two keys an import would keep. Never anything else. */
 function codexProfilesOf(settings: Readonly<Record<string, unknown>> | undefined): CodexProfileHint[] {
@@ -734,7 +735,7 @@ export function harvest(
   const problems: string[] = [...scan.problems];
   const secretKeys: string[] = [];
   const format = HOST_SETTINGS_FORMAT[harness];
-  const settingsFile = harness === 'claude' ? 'settings.json' : 'config.toml';
+  const settingsFile = byHarness(harness, { claude: () => 'settings.json', codex: () => 'config.toml' });
 
   // Instructions.
   const instructionsName = HOST_INSTRUCTIONS_NAME[harness];
@@ -748,36 +749,43 @@ export function harvest(
   // Settings, with the parts that become their own components taken out.
   const parsed = parsedDocument(scan.settings, format, settingsFile, problems);
   const rest: Record<string, unknown> = { ...(parsed ?? {}) };
-  let hooks: HarnessHarvest['hooks'];
-  let envImport: EnvImport | undefined;
-  if (harness === 'claude') {
-    // Hooks are counted so the screen can say "found N, not imported", and dropped: Ferretry runs none of the host's.
-    if (isRecord(rest.hooks) && Object.keys(rest.hooks).length > 0) {
-      hooks = { source: scan.settings.source, count: countHooks(rest.hooks) };
-    }
-    delete rest.hooks;
-    envImport = skipped('env') ? undefined : importEnv(rest.env, 'env.', settingsFile, names, secrets, ticked);
-    delete rest.env;
-  } else {
-    delete rest.mcp_servers;
-    for (const key of CODEX_PLUMBING_KEYS) delete rest[key];
-    const policy = rest.shell_environment_policy;
-    if (isRecord(policy) && isRecord(policy.set)) {
-      envImport = skipped('env')
-        ? undefined
-        : importEnv(policy.set, 'shell_environment_policy.set.', settingsFile, names, secrets, ticked);
-      const kept = Object.fromEntries(Object.entries(policy).filter(([key]) => key !== 'set'));
-      if (Object.keys(kept).length === 0) delete rest.shell_environment_policy;
-      else rest.shell_environment_policy = kept;
-    }
-    const hooksDocument = parsedDocument(scan.hooks, 'json', 'hooks.json', problems);
-    if (hooksDocument !== undefined && Object.keys(hooksDocument).length > 0 && scan.hooks !== undefined) {
-      hooks = {
-        source: scan.hooks.source,
-        count: countHooks(isRecord(hooksDocument.hooks) ? hooksDocument.hooks : hooksDocument),
-      };
-    }
-  }
+  const taken = byHarness<{ hooks?: HarnessHarvest['hooks']; envImport?: EnvImport | undefined }>(harness, {
+    claude: () => {
+      // Hooks are counted so the screen can say "found N, not imported", and dropped: Ferretry runs none of the host's.
+      const counted =
+        isRecord(rest.hooks) && Object.keys(rest.hooks).length > 0
+          ? { source: scan.settings.source, count: countHooks(rest.hooks) }
+          : undefined;
+      delete rest.hooks;
+      const claudeEnv = skipped('env') ? undefined : importEnv(rest.env, 'env.', settingsFile, names, secrets, ticked);
+      delete rest.env;
+      return { hooks: counted, envImport: claudeEnv };
+    },
+    codex: () => {
+      delete rest.mcp_servers;
+      for (const key of CODEX_PLUMBING_KEYS) delete rest[key];
+      let codexEnv: EnvImport | undefined;
+      const policy = rest.shell_environment_policy;
+      if (isRecord(policy) && isRecord(policy.set)) {
+        codexEnv = skipped('env')
+          ? undefined
+          : importEnv(policy.set, 'shell_environment_policy.set.', settingsFile, names, secrets, ticked);
+        const kept = Object.fromEntries(Object.entries(policy).filter(([key]) => key !== 'set'));
+        if (Object.keys(kept).length === 0) delete rest.shell_environment_policy;
+        else rest.shell_environment_policy = kept;
+      }
+      const hooksDocument = parsedDocument(scan.hooks, 'json', 'hooks.json', problems);
+      const counted =
+        hooksDocument !== undefined && Object.keys(hooksDocument).length > 0 && scan.hooks !== undefined
+          ? {
+              source: scan.hooks.source,
+              count: countHooks(isRecord(hooksDocument.hooks) ? hooksDocument.hooks : hooksDocument),
+            }
+          : undefined;
+      return { hooks: counted, envImport: codexEnv };
+    },
+  });
+  const { hooks, envImport } = taken;
   if (envImport !== undefined) {
     secretKeys.push(...envImport.secretKeys);
     if (envImport.dropped.length > 0) {
@@ -802,7 +810,7 @@ export function harvest(
   const modelSource: SettingsObject = {
     ...(namedModel === undefined || skipped('model-set') ? {} : { model: namedModel }),
     ...(rest.profiles === undefined ? {} : { profiles: rest.profiles }),
-    ...(harness === 'claude' && !skipped('env') && !skipped('model-set') && isRecord(parsed?.env)
+    ...(isKind(harness, 'claude') && !skipped('env') && !skipped('model-set') && isRecord(parsed?.env)
       ? { env: parsed.env }
       : {}),
   };
@@ -824,7 +832,10 @@ export function harvest(
 
   // MCP servers.
   const missing = new Set(scan.missingCommands);
-  const mcpSource = harness === 'claude' ? (scan.mcp?.source ?? '.claude.json') : scan.settings.source;
+  const mcpSource = byHarness(harness, {
+    claude: () => scan.mcp?.source ?? '.claude.json',
+    codex: () => scan.settings.source,
+  });
   const mcp = scannedMcpServers(scan).flatMap(server => {
     if (skip.has(importNamedItemId(key, 'mcp', server.name))) return [];
     const warnings: string[] = [];
@@ -881,7 +892,7 @@ export function harvest(
     ...(instructions === undefined ? {} : { instructions }),
     ...(settings === undefined ? {} : { settings }),
     ...(hooks === undefined ? {} : { hooks }),
-    codexProfiles: harness === 'codex' ? codexProfilesOf(parsed) : [],
+    codexProfiles: isKind(harness, 'codex') ? codexProfilesOf(parsed) : [],
     mcp,
     skills,
     skillsLeft,
@@ -1113,7 +1124,7 @@ export function credentialOf(harness: HarnessKind, login: HostLogin): Credential
 
 export function loginNote(harness: HarnessKind, login: HostLogin): string {
   const label = HARNESS_DISPLAY_NAMES[harness];
-  const own = harness === 'claude' ? 'claude' : 'codex';
+  const own = byHarness(harness, { claude: () => 'claude', codex: () => 'codex' });
   const who = login.email === undefined ? 'your login' : login.email;
   switch (login.state) {
     case 'signed-in':

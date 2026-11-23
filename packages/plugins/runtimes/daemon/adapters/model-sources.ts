@@ -5,10 +5,8 @@
  * a catalogue read).
  */
 import type { LoginLaunchStore, LoginsApi } from '@ferretry/plugin-logins/contract';
-import type { HarnessKind } from '../lib/manifest.ts';
+import { supportedKinds } from '../lib/harness-kind.ts';
 import type { ModelCatalogSources, ModelSourcePreset } from '../lib/models/catalog.ts';
-
-const HARNESSES: readonly HarnessKind[] = ['claude', 'codex'];
 
 export function loginsModelCatalogs(
   logins: Pick<LoginsApi, 'modelSources'>,
@@ -24,7 +22,7 @@ export function loginsModelCatalogs(
             id: preset.id,
             ...(preset.catalog === undefined ? {} : { catalog: preset.catalog }),
             halves: Object.fromEntries(
-              HARNESSES.flatMap(harness => {
+              supportedKinds().flatMap(harness => {
                 const names = preset.variables[harness];
                 return names === undefined
                   ? []

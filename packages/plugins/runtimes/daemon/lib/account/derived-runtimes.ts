@@ -30,7 +30,8 @@
 import type { EnvironmentLoginTemplate, LoginView } from '@ferretry/plugin-logins/contract';
 import type { ModelSetFile, ProfileFile, RuntimeFile } from '../../../contract/index.ts';
 import { builtinProfileLayers, starterModelSet } from './builtin-autonomous.ts';
-import { type HarnessKind, harnessKeyOfKind, harnessKindOfKey } from '../manifest.ts';
+import { supportedKindOfKey, supportedKinds } from '../harness-kind.ts';
+import { type HarnessKind, harnessKeyOfKind } from '../manifest.ts';
 import { isRuntimeName } from './schema.ts';
 
 /** What the explicit files already hold, by name. */
@@ -60,7 +61,7 @@ export interface Derived {
 }
 
 /** The profile and model set a derived runtime of a harness uses. */
-const defaultProfileName = (harness: 'claude' | 'codex'): string => `ferretry-${harness}`;
+const defaultProfileName = (harness: HarnessKind): string => `ferretry-${harness}`;
 
 /** A login a person can start a ferret on now: signed in (or about to be refreshed). A key or endpoint is usable too. */
 const usable = (login: LoginView): boolean => login.status.word !== 'needs_sign_in';
@@ -71,8 +72,10 @@ const usable = (login: LoginView): boolean => login.status.word !== 'needs_sign_
  * a ferret is never offered a runtime whose CLI is absent. When the installed set is not known, the first it drives.
  */
 function harnessToRun(login: LoginView, installed: readonly HarnessKind[] | undefined): HarnessKind | undefined {
-  const drives = login.harnesses.map(harnessKindOfKey);
-  if (installed === undefined) return drives[0] ?? harnessKindOfKey(login.harness);
+  // A harness Runtimes has no behaviour for is skipped here: a login that drives only that one derives no runtime, and is never
+  // handed Claude's.
+  const drives = login.harnesses.flatMap(key => supportedKindOfKey(key) ?? []);
+  if (installed === undefined) return drives[0] ?? supportedKindOfKey(login.harness);
   return drives.find(harness => installed.includes(harness));
 }
 
@@ -108,7 +111,7 @@ export function deriveRuntimes(from: DerivedFrom): Derived {
   const modelSets = new Map<string, ModelSetFile>();
   // The built-in profiles and model sets are ALWAYS here (an explicit one of the same name wins), never only while a runtime is
   // derived: a runtime the owner saves from Advanced on a preset must not dangle the moment its login stops being derived.
-  for (const harness of ['claude', 'codex'] as const) {
+  for (const harness of supportedKinds()) {
     const wanted = defaultProfileName(harness);
     if (!from.profiles.has(wanted))
       profiles.set(wanted, { contents: [...builtinProfileLayers(harness)] } as ProfileFile);

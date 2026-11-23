@@ -24,6 +24,7 @@ import {
   type RuntimeSummary,
 } from '../../../contract/index.ts';
 import { deriveRuntimes, withDerived } from '../account/derived-runtimes.ts';
+import { isKind, supportedKindOfKey, unsupportedHarnessSentence } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { disabledUntilMs } from '../account/disabled.ts';
 import type { EnvironmentLoginTemplate, LoginView, LoginsApi } from '@ferretry/plugin-logins/contract';
@@ -128,7 +129,9 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
   ): Read => {
     const id = RuntimeIdSchema.parse(name);
     const login = logins.get(file.login);
-    const harness = file.harness ?? login?.harness;
+    // A file may name ANY word (a typo loads, so it is refused by name below and not kept from an older copy). The summary's
+    // wire type is still the two shipped keys until the contract opens (part 1b); an unsupported word never launches.
+    const harness = (file.harness ?? login?.harness) as RuntimeSummary['harness'] | undefined;
     if (harness === undefined) {
       return {
         refusal: {
@@ -154,6 +157,9 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
       launch = { available: false, reason: `Login ${file.login} does not exist` };
     } else if (login.status.word === 'needs_sign_in') {
       launch = { available: false, reason: `Login ${file.login} needs sign-in` };
+    } else if (supportedKindOfKey(harness) === undefined) {
+      // Installed or not, a harness Runtimes has no behaviour for is refused by name and never started as Claude.
+      launch = { available: false, reason: unsupportedHarnessSentence(harness) };
     } else if (!deps.harnesses().includes(harness)) {
       launch = { available: false, reason: `${harness} is not on this machine` };
     }
@@ -192,7 +198,7 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
     // No default named: the first runtime that can launch, Claude Code's before Codex's.
     return (
       fallback ??
-      ready.find(summary => summary.harness === 'claude-code' && summary.launch.available) ??
+      ready.find(summary => isKind(summary.harness, 'claude') && summary.launch.available) ??
       ready.find(summary => summary.launch.available)
     )?.id;
   };
@@ -241,7 +247,12 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
         return { ok: false, refusal: 'no_profile', sentence: `Profile ${file.profile} does not exist` };
       }
       if (!summary.launch.available) {
-        return { ok: false, refusal: 'not_signed_in', sentence: summary.launch.reason };
+        // A harness Runtimes has no behaviour for is one FILE's fault: say which.
+        const sentence =
+          supportedKindOfKey(summary.harness) === undefined
+            ? `config/runtimes/${wanted}.yaml: ${summary.launch.reason}`
+            : summary.launch.reason;
+        return { ok: false, refusal: 'not_signed_in', sentence };
       }
       return { ok: true, runtime: summary, ...(deps.runtimes().has(wanted) ? {} : { derived: true as const }) };
     },

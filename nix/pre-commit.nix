@@ -322,6 +322,18 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # A third harness must never quietly get Claude's paths, flags or parser: outside the two harness plugins no code names the
+    # shipped harnesses as a closed set (a union, an array, `KnownHarnessKey`, a harness-named `=== 'codex'`). A ledger holds what
+    # the runtimes plan U4b has not swept yet and only shrinks. See scripts/validate/no-closed-harness.sh.
+    a-no-closed-harness = {
+      enable = true;
+      name = "No closed harness set outside the harness plugins";
+      entry = validator "scripts/validate/no-closed-harness.sh";
+      files = "^(packages/.*\\.tsx?|scripts/validate/no-closed-harness[^/]*)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # A busy mark is the shared `Spinner`: themed per style and, for a wait, held back by the one 300 ms loader threshold.
     # A lucide icon with `animate-spin` is neither. See scripts/validate/no-stray-spinner.sh.
     a-no-stray-spinner = {

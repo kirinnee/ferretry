@@ -36,6 +36,7 @@
  * is computed by the credential-store adapter, which is where every platform fact is applied.
  */
 import { isAbsolute, join } from 'node:path';
+import { byHarness, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import {
@@ -188,41 +189,48 @@ export function resolveCredentialStore(
 ): CredentialStoreResolution {
   if (credential.store === 'environment') return environmentResolution(credential, harness, paths.userHome);
   if (credential.store === 'ferretry') {
-    if (credential.harness === 'claude') {
-      const secureStorage = stores.get(id)?.variables[CLAUDE_SECURE_STORAGE_VARIABLE];
-      if (secureStorage === undefined || secureStorage.length === 0)
-        return { harness: 'claude', store: 'ferretry', unavailable: 'Logins names no store for it' };
-      const storageDirectory = claudeStorageDirectory(secureStorage, paths.userHome);
+    return byHarness<CredentialStoreResolution>(credential.harness, {
+      claude: () => {
+        const secureStorage = stores.get(id)?.variables[CLAUDE_SECURE_STORAGE_VARIABLE];
+        if (secureStorage === undefined || secureStorage.length === 0)
+          return { harness: 'claude', store: 'ferretry', unavailable: 'Logins names no store for it' };
+        const storageDirectory = claudeStorageDirectory(secureStorage, paths.userHome);
+        return {
+          harness: 'claude',
+          store: 'ferretry',
+          secureStorage,
+          storageDirectory,
+          credentialFile: join(storageDirectory, CLAUDE_CREDENTIAL_FILE),
+        };
+      },
+      codex: () => {
+        const signInFile = stores.get(id)?.signInFile;
+        return signInFile === undefined || signInFile.length === 0
+          ? { harness: 'codex', store: 'ferretry', unavailable: 'Logins names no store for it' }
+          : { harness: 'codex', store: 'ferretry', signInFile };
+      },
+    });
+  }
+  return byHarness<CredentialStoreResolution>(credential.harness, {
+    claude: () => {
+      const storageDirectory = claudeStorageDirectory(HOST_CLAUDE_SECURE_STORAGE, paths.userHome);
       return {
         harness: 'claude',
-        store: 'ferretry',
-        secureStorage,
+        store: 'host',
+        secureStorage: HOST_CLAUDE_SECURE_STORAGE,
         storageDirectory,
         credentialFile: join(storageDirectory, CLAUDE_CREDENTIAL_FILE),
       };
-    }
-    const signInFile = stores.get(id)?.signInFile;
-    return signInFile === undefined || signInFile.length === 0
-      ? { harness: 'codex', store: 'ferretry', unavailable: 'Logins names no store for it' }
-      : { harness: 'codex', store: 'ferretry', signInFile };
-  }
-  if (credential.harness === 'claude') {
-    const storageDirectory = claudeStorageDirectory(HOST_CLAUDE_SECURE_STORAGE, paths.userHome);
-    return {
-      harness: 'claude',
-      store: 'host',
-      secureStorage: HOST_CLAUDE_SECURE_STORAGE,
-      storageDirectory,
-      credentialFile: join(storageDirectory, CLAUDE_CREDENTIAL_FILE),
-    };
-  }
-  return paths.hostCodexHome === undefined
-    ? {
-        harness: 'codex',
-        store: 'host',
-        unavailable: 'your own Codex home could not be named, because CODEX_HOME is set to a relative path',
-      }
-    : { harness: 'codex', store: 'host', canonicalFile: join(paths.hostCodexHome, CODEX_CREDENTIAL_FILE) };
+    },
+    codex: () =>
+      paths.hostCodexHome === undefined
+        ? {
+            harness: 'codex',
+            store: 'host',
+            unavailable: 'your own Codex home could not be named, because CODEX_HOME is set to a relative path',
+          }
+        : { harness: 'codex', store: 'host', canonicalFile: join(paths.hostCodexHome, CODEX_CREDENTIAL_FILE) },
+  });
 }
 
 /**
@@ -235,8 +243,14 @@ export function resolveCredentialStore(
 export function credentialLaunchEnvironment(resolution: CredentialStoreResolution): Readonly<Record<string, string>> {
   if (resolution.store === 'environment') return resolution.env;
   if ('unavailable' in resolution) return {};
-  if (resolution.harness === 'claude') return { [CLAUDE_SECURE_STORAGE_VARIABLE]: resolution.secureStorage };
-  return {};
+  switch (resolution.harness) {
+    case 'claude':
+      return { [CLAUDE_SECURE_STORAGE_VARIABLE]: resolution.secureStorage };
+    case 'codex':
+      return {};
+    default:
+      throw new UnsupportedHarnessError(String((resolution as { harness: string }).harness));
+  }
 }
 
 /** The link one Codex runtime's home holds: its own `auth.json`, pointing at the canonical file. */
@@ -250,8 +264,7 @@ export function codexCredentialLink(
   runtimeHome: string,
   resolution: CredentialStoreResolution,
 ): CodexCredentialLink | undefined {
-  if (resolution.harness !== 'codex' || !('canonicalFile' in resolution) || resolution.canonicalFile === undefined)
-    return undefined;
+  if (!('canonicalFile' in resolution) || resolution.canonicalFile === undefined) return undefined;
   return { path: join(runtimeHome, CODEX_CREDENTIAL_FILE), target: resolution.canonicalFile };
 }
 
@@ -264,8 +277,7 @@ export function codexWrapperLink(
   runtimeHome: string,
   resolution: CredentialStoreResolution,
 ): CodexCredentialLink | undefined {
-  if (resolution.harness !== 'codex' || !('signInFile' in resolution) || resolution.signInFile === undefined)
-    return undefined;
+  if (!('signInFile' in resolution) || resolution.signInFile === undefined) return undefined;
   return { path: join(runtimeHome, CODEX_CREDENTIAL_FILE), target: resolution.signInFile };
 }
 

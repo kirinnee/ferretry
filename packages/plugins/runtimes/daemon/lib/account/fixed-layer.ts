@@ -76,6 +76,7 @@ import {
   settingsKey,
 } from './layering.ts';
 import { FERRETRY_MCP_ARGS, FERRETRY_MCP_SERVER } from '../../../contract/tools-server.ts';
+import { UnsupportedHarnessError } from '../harness-kind.ts';
 import type { AgentPermissions } from './schema.ts';
 import { AGENDA_ENV, HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from './pane-contract.ts';
 
@@ -536,92 +537,98 @@ export const binaryName = (fyCommand: string): string => fyCommand.split('/').po
 export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
   const { agentPermissions, cwd, fyCommand } = input;
   const instruction = AGENT_BASE_INSTRUCTION(binaryName(fyCommand));
-  if (input.harness === 'claude') {
-    if (agentPermissions === 'auto' && !input.acceptsAutoPermissionMode) {
-      return { ok: false, refusal: { kind: 'claude-auto-mode-unsupported', message: AUTO_MODE_REFUSAL } };
+  switch (input.harness) {
+    case 'claude': {
+      if (agentPermissions === 'auto' && !input.acceptsAutoPermissionMode) {
+        return { ok: false, refusal: { kind: 'claude-auto-mode-unsupported', message: AUTO_MODE_REFUSAL } };
+      }
+      const mode = CLAUDE_PERMISSION_MODES[agentPermissions];
+      const skip = agentPermissions === 'skip';
+      const entries = [
+        entry('permission-mode', 'settings', ['permissions', 'defaultMode'], mode),
+        ...(skip ? [entry('skip-prompt', 'settings', ['skipDangerousModePermissionPrompt'], true)] : []),
+        entry('trust', 'claude-json', ['projects', cwd, 'hasTrustDialogAccepted'], true),
+        entry('onboarding', 'claude-json', ['hasCompletedOnboarding'], true),
+        entry('remote-control', 'settings', [CLAUDE_REMOTE_CONTROL_KEY], false),
+        ...Object.entries(CLAUDE_PROMPTS_SEEN).map(([key, value]) =>
+          entry('one-time-prompts', 'claude-json', [key], value),
+        ),
+        ...(skip ? [] : [entry('skip-prompt', 'settings', ['skipAutoPermissionPrompt'], true)]),
+        entry('no-questions', 'launch', [CLAUDE_NO_QUESTIONS_FLAG], true),
+        entry('tools', 'launch', ['--mcp-config'], claudeToolsConfig(fyCommand)),
+        entry('instructions', 'launch', ['--append-system-prompt'], instruction),
+      ];
+      return {
+        ok: true,
+        layer: {
+          harness: 'claude',
+          agentPermissions,
+          entries,
+          // Both in their `=` spelling: `--mcp-config` takes several values, and a bare one would swallow
+          // the arguments after it — the prompt included.
+          args: [
+            '--permission-mode',
+            mode,
+            CLAUDE_NO_QUESTIONS_FLAG,
+            `--mcp-config=${JSON.stringify(claudeToolsConfig(fyCommand))}`,
+            `--append-system-prompt=${instruction}`,
+          ],
+          // The mode is named HERE too: the overlay is the flag settings source, and a mode named by one
+          // is what keeps the auto-default dialog away (see the header).
+          claudeSettingsOverlay: {
+            permissions: { defaultMode: mode },
+            [CLAUDE_REMOTE_CONTROL_KEY]: false,
+            ...(skip ? { skipDangerousModePermissionPrompt: true } : { skipAutoPermissionPrompt: true }),
+          },
+          claudeJson: {
+            hasCompletedOnboarding: true,
+            ...CLAUDE_PROMPTS_SEEN,
+            projects: { [cwd]: { hasTrustDialogAccepted: true } },
+          },
+        },
+      };
     }
-    const mode = CLAUDE_PERMISSION_MODES[agentPermissions];
-    const skip = agentPermissions === 'skip';
-    const entries = [
-      entry('permission-mode', 'settings', ['permissions', 'defaultMode'], mode),
-      ...(skip ? [entry('skip-prompt', 'settings', ['skipDangerousModePermissionPrompt'], true)] : []),
-      entry('trust', 'claude-json', ['projects', cwd, 'hasTrustDialogAccepted'], true),
-      entry('onboarding', 'claude-json', ['hasCompletedOnboarding'], true),
-      entry('remote-control', 'settings', [CLAUDE_REMOTE_CONTROL_KEY], false),
-      ...Object.entries(CLAUDE_PROMPTS_SEEN).map(([key, value]) =>
-        entry('one-time-prompts', 'claude-json', [key], value),
-      ),
-      ...(skip ? [] : [entry('skip-prompt', 'settings', ['skipAutoPermissionPrompt'], true)]),
-      entry('no-questions', 'launch', [CLAUDE_NO_QUESTIONS_FLAG], true),
-      entry('tools', 'launch', ['--mcp-config'], claudeToolsConfig(fyCommand)),
-      entry('instructions', 'launch', ['--append-system-prompt'], instruction),
-    ];
-    return {
-      ok: true,
-      layer: {
-        harness: 'claude',
-        agentPermissions,
-        entries,
-        // Both in their `=` spelling: `--mcp-config` takes several values, and a bare one would swallow
-        // the arguments after it — the prompt included.
-        args: [
-          '--permission-mode',
-          mode,
-          CLAUDE_NO_QUESTIONS_FLAG,
-          `--mcp-config=${JSON.stringify(claudeToolsConfig(fyCommand))}`,
-          `--append-system-prompt=${instruction}`,
-        ],
-        // The mode is named HERE too: the overlay is the flag settings source, and a mode named by one
-        // is what keeps the auto-default dialog away (see the header).
-        claudeSettingsOverlay: {
-          permissions: { defaultMode: mode },
-          [CLAUDE_REMOTE_CONTROL_KEY]: false,
-          ...(skip ? { skipDangerousModePermissionPrompt: true } : { skipAutoPermissionPrompt: true }),
+    case 'codex': {
+      const { approvalPolicy, sandboxMode } = CODEX_PERMISSIONS[agentPermissions];
+      return {
+        ok: true,
+        layer: {
+          harness: 'codex',
+          agentPermissions,
+          entries: [
+            entry('permission-mode', 'settings', ['approval_policy'], approvalPolicy),
+            entry('permission-mode', 'settings', ['sandbox_mode'], sandboxMode),
+            entry('trust', 'settings', ['projects', cwd, 'trust_level'], 'trusted'),
+            entry('no-alt-screen', 'launch', [CODEX_NO_ALT_SCREEN_FLAG], true),
+            ...CODEX_HIDDEN_NOTICES.map(key => entry('one-time-prompts', 'settings', ['notice', key], true)),
+            entry('tools', 'settings', ['mcp_servers', FERRETRY_MCP_SERVER], codexToolsServer(fyCommand)),
+            entry('instructions', 'settings', ['developer_instructions'], instruction),
+          ],
+          args: [
+            '-c',
+            `approval_policy=${tomlString(approvalPolicy)}`,
+            '-c',
+            `sandbox_mode=${tomlString(sandboxMode)}`,
+            '-c',
+            codexTrustOverride(cwd),
+            CODEX_NO_ALT_SCREEN_FLAG,
+            '-c',
+            codexNoticeOverride(),
+            '-c',
+            `mcp_servers.${FERRETRY_MCP_SERVER}.command=${tomlString(fyCommand)}`,
+            '-c',
+            `mcp_servers.${FERRETRY_MCP_SERVER}.args=${tomlArray(FERRETRY_MCP_ARGS)}`,
+            '-c',
+            `mcp_servers.${FERRETRY_MCP_SERVER}.env_vars=${tomlArray(FERRETRY_MCP_ENV_VARS)}`,
+            '-c',
+            `developer_instructions=${tomlString(instruction)}`,
+          ],
         },
-        claudeJson: {
-          hasCompletedOnboarding: true,
-          ...CLAUDE_PROMPTS_SEEN,
-          projects: { [cwd]: { hasTrustDialogAccepted: true } },
-        },
-      },
-    };
+      };
+    }
+    default:
+      throw new UnsupportedHarnessError(String((input as { harness: string }).harness));
   }
-  const { approvalPolicy, sandboxMode } = CODEX_PERMISSIONS[agentPermissions];
-  return {
-    ok: true,
-    layer: {
-      harness: 'codex',
-      agentPermissions,
-      entries: [
-        entry('permission-mode', 'settings', ['approval_policy'], approvalPolicy),
-        entry('permission-mode', 'settings', ['sandbox_mode'], sandboxMode),
-        entry('trust', 'settings', ['projects', cwd, 'trust_level'], 'trusted'),
-        entry('no-alt-screen', 'launch', [CODEX_NO_ALT_SCREEN_FLAG], true),
-        ...CODEX_HIDDEN_NOTICES.map(key => entry('one-time-prompts', 'settings', ['notice', key], true)),
-        entry('tools', 'settings', ['mcp_servers', FERRETRY_MCP_SERVER], codexToolsServer(fyCommand)),
-        entry('instructions', 'settings', ['developer_instructions'], instruction),
-      ],
-      args: [
-        '-c',
-        `approval_policy=${tomlString(approvalPolicy)}`,
-        '-c',
-        `sandbox_mode=${tomlString(sandboxMode)}`,
-        '-c',
-        codexTrustOverride(cwd),
-        CODEX_NO_ALT_SCREEN_FLAG,
-        '-c',
-        codexNoticeOverride(),
-        '-c',
-        `mcp_servers.${FERRETRY_MCP_SERVER}.command=${tomlString(fyCommand)}`,
-        '-c',
-        `mcp_servers.${FERRETRY_MCP_SERVER}.args=${tomlArray(FERRETRY_MCP_ARGS)}`,
-        '-c',
-        `mcp_servers.${FERRETRY_MCP_SERVER}.env_vars=${tomlArray(FERRETRY_MCP_ENV_VARS)}`,
-        '-c',
-        `developer_instructions=${tomlString(instruction)}`,
-      ],
-    },
-  };
 }
 
 // ── Applying it ──────────────────────────────────────────────────────────────────────────────────
@@ -786,27 +793,34 @@ function appendedInstructions(
   if (own === undefined) return { fixed, absorbed: () => false };
   const theirs: string[] = [];
   const flagOf = (flag: string): string => flag.split('=')[0] as string;
-  if (fixed.harness === 'claude') {
-    resolved.flags.forEach((contribution, index) => {
-      const { flag } = contribution;
-      if (flag.startsWith('--append-system-prompt=')) theirs.push(flag.slice('--append-system-prompt='.length));
-      else if (flag === '--append-system-prompt' && resolved.flags[index + 1] !== undefined)
-        theirs.push((resolved.flags[index + 1] as FlagContribution).flag);
-    });
-  } else {
-    for (const leaf of resolved.settings.leaves)
-      if (leaf.path.length === 1 && leaf.path[0] === 'developer_instructions' && typeof leaf.value === 'string')
-        theirs.push(leaf.value);
-    resolved.flags.forEach((contribution, index) => {
-      const { flag } = contribution;
-      const assignment = flag.startsWith('--config=')
-        ? flag.slice('--config='.length)
-        : (flag === '-c' || flag === '--config') && resolved.flags[index + 1] !== undefined
-          ? (resolved.flags[index + 1] as FlagContribution).flag
-          : '';
-      if (assignment.trim().startsWith('developer_instructions='))
-        theirs.push(unquoted(assignment.slice(assignment.indexOf('=') + 1)));
-    });
+  switch (fixed.harness) {
+    case 'claude': {
+      resolved.flags.forEach((contribution, index) => {
+        const { flag } = contribution;
+        if (flag.startsWith('--append-system-prompt=')) theirs.push(flag.slice('--append-system-prompt='.length));
+        else if (flag === '--append-system-prompt' && resolved.flags[index + 1] !== undefined)
+          theirs.push((resolved.flags[index + 1] as FlagContribution).flag);
+      });
+      break;
+    }
+    case 'codex': {
+      for (const leaf of resolved.settings.leaves)
+        if (leaf.path.length === 1 && leaf.path[0] === 'developer_instructions' && typeof leaf.value === 'string')
+          theirs.push(leaf.value);
+      resolved.flags.forEach((contribution, index) => {
+        const { flag } = contribution;
+        const assignment = flag.startsWith('--config=')
+          ? flag.slice('--config='.length)
+          : (flag === '-c' || flag === '--config') && resolved.flags[index + 1] !== undefined
+            ? (resolved.flags[index + 1] as FlagContribution).flag
+            : '';
+        if (assignment.trim().startsWith('developer_instructions='))
+          theirs.push(unquoted(assignment.slice(assignment.indexOf('=') + 1)));
+      });
+      break;
+    }
+    default:
+      throw new UnsupportedHarnessError(String((fixed as { harness: string }).harness));
   }
   if (theirs.length === 0) return { fixed, absorbed: () => false };
   const combined = [...theirs, own.value as string].join('\n\n');

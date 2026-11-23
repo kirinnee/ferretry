@@ -43,6 +43,7 @@ import { componentPartialSupport, describePartialSupport } from '../account/adap
 import { freeName } from '../account/import.ts';
 import { findFlagSecrets, looksSecret, rawTextHoldsSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
 import { hooksDocumentRefusedLines } from './hooks-document-net.ts';
+import { byHarness, supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { runtimeDisable, type BudgetHolds } from '../account/disabled-runtime.ts';
 import type { SettingsObject } from '../settings.ts';
@@ -205,7 +206,7 @@ export interface CatalogFacts {
   readonly budgetHolds?: BudgetHolds;
 }
 
-const HARNESSES: readonly HarnessKind[] = ['claude', 'codex'];
+const HARNESSES: readonly HarnessKind[] = supportedKinds();
 
 const act = (reason: string | undefined): CatalogAct =>
   reason === undefined ? { available: true } : { available: false, reason };
@@ -1290,7 +1291,10 @@ function modelsView(
         ...model,
         efforts: [...model.efforts],
         // Claude's fast mode is a rule on the model id; Codex's is the live account's to say.
-        ...(harness === 'claude' ? { fast: claudeFastSupport(model.id) } : {}),
+        ...byHarness<{ fast?: ReturnType<typeof claudeFastSupport> }>(harness, {
+          claude: () => ({ fast: claudeFastSupport(model.id) }),
+          codex: () => ({}),
+        }),
       })),
       ...(derived.default === undefined ? {} : { default: derived.default }),
       ...(derived.local === undefined ? {} : { local: derived.local }),
@@ -1335,21 +1339,12 @@ function fixedLayerView(
   resolved: ResolvedProfile | undefined,
   facts: CatalogFacts,
 ): { readonly view?: FixedLayerView; readonly refusal?: string } {
-  const result =
-    harness === 'claude'
-      ? fixedLayerFor({
-          harness,
-          agentPermissions: model.machine.agentPermissions,
-          cwd: VIEW_FOLDER,
-          acceptsAutoPermissionMode: facts.acceptsAutoPermissionMode,
-          fyCommand: VIEW_FY_COMMAND,
-        })
-      : fixedLayerFor({
-          harness,
-          agentPermissions: model.machine.agentPermissions,
-          cwd: VIEW_FOLDER,
-          fyCommand: VIEW_FY_COMMAND,
-        });
+  const shared = { agentPermissions: model.machine.agentPermissions, cwd: VIEW_FOLDER, fyCommand: VIEW_FY_COMMAND };
+  const result = byHarness<ReturnType<typeof fixedLayerFor>>(harness, {
+    claude: () =>
+      fixedLayerFor({ harness: 'claude', ...shared, acceptsAutoPermissionMode: facts.acceptsAutoPermissionMode }),
+    codex: () => fixedLayerFor({ harness: 'codex', ...shared }),
+  });
   if (!result.ok) return { refusal: result.refusal.message };
   const fixed = result.layer;
   const overridden =

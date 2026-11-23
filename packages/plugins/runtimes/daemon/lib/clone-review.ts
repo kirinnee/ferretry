@@ -41,6 +41,7 @@ import {
   type CloneCredential,
   type CloneRunnableKind,
 } from '../../contract/index.ts';
+import { harnessKeyOfKind, isSupportedKind, supportedKinds } from './harness-kind.ts';
 import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 
 /** One thing a component would run or change, in words. */
@@ -280,7 +281,7 @@ export function cloneLoginRunnable(credential: CloneCredential): readonly CloneR
   if (credential.codexProvider !== undefined) {
     entries.push({ label: 'Codex provider', text: JSON.stringify(credential.codexProvider, null, 2), document: true });
   }
-  for (const half of ['claude', 'codex'] as const) {
+  for (const half of supportedKinds()) {
     const given = credential[half];
     if (given === undefined) continue;
     entries.push(...envEntries(given.env).map(entry => ({ ...entry, label: `${half} ${entry.label}` })));
@@ -335,7 +336,9 @@ export function cloneRunnables(bundle: CloneBundle): readonly CloneRunnable[] {
       // never touched, so it plants nothing to review.
       if (entries.length === 0) continue;
       const harness =
-        component.harness === 'claude' ? 'claude-code' : component.harness === 'codex' ? 'codex' : undefined;
+        typeof component.harness === 'string' && isSupportedKind(component.harness)
+          ? harnessKeyOfKind(component.harness)
+          : undefined;
       runnables.push({
         reference: `${kind}/${name}`,
         kind,

@@ -15,7 +15,7 @@
 import { basename } from 'node:path';
 import { z } from 'zod';
 import { malformedSecretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import { HarnessKindSchema } from './harness-kind.ts';
 import { CompactAtSchema } from '../../contract/index.ts';
 
 const NonEmptyString = z.string().min(1);
@@ -47,15 +47,8 @@ const SecretTemplateSchema = NonEmptyString.check(ctx => {
 
 /** Opaque, stable, per-account identity. The only key any consumer may join on. */
 export const AccountIdSchema = z.uuid();
-/** The agent harness an account drives. */
-export const HarnessKindSchema = z.enum(['claude', 'codex']);
-export type HarnessKind = z.infer<typeof HarnessKindSchema>;
-
-/** The harness a wire or plugin key names: the plugin id `claude-code` is the CLI `claude`. */
-export const harnessKindOfKey = (key: KnownHarnessKey): HarnessKind => (key === 'claude-code' ? 'claude' : key);
-
-/** The wire and plugin key of a harness: the CLI `claude` is the plugin `claude-code`. */
-export const harnessKeyOfKind = (kind: HarnessKind): KnownHarnessKey => (kind === 'claude' ? 'claude-code' : kind);
+/** The harness an account drives, as the word it is stored under; `harness-kind.ts` owns it and what it refuses. */
+export { type HarnessKind, HarnessKindSchema, harnessKeyOfKind, harnessKindOfKey } from './harness-kind.ts';
 
 /**
  * The lane an account runs in. Declared, never derived from a name: an account whose wrapper is

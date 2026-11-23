@@ -303,3 +303,99 @@ describe('C1 the parts of the model no file of Runtimes holds', () => {
     ).toEqual([]);
   });
 });
+
+describe('a file naming a harness Runtimes has no behaviour for (runtimes plan U4b)', () => {
+  it('sets that login and its runtimes aside, says the file and the sentence, and every other file still loads', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        logins: [
+          sampleLogin('claude-you', { store: 'ferretry' }),
+          { ...sampleLogin('typo'), harness: 'gemni', harnesses: ['gemni'] } as never,
+        ],
+        runtimes: new Map([
+          ['claude-default', runtime({})],
+          ['on-typo', runtime({ login: 'typo' })],
+        ]),
+      }),
+    );
+
+    expect(Object.keys(assembled.model.runtimes)).toEqual(['claude-default']);
+    expect(Object.keys(assembled.model.credentials)).toEqual(['claude-you']);
+    expect(assembled.unavailable).toEqual([{ runtime: 'on-typo', login: 'typo' }]);
+    expect(assembled.notices).toContain(
+      'config/logins/typo.yaml: gemni is not supported here, so this login is not used',
+    );
+  });
+
+  it('sets a runtime whose own harness is unknown aside by file name, and keeps the rest', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        runtimes: new Map([
+          ['claude-default', runtime({})],
+          ['odd', runtime({ harness: 'fake-third' as never })],
+        ]),
+      }),
+    );
+
+    expect(Object.keys(assembled.model.runtimes)).toEqual(['claude-default']);
+    expect(assembled.unavailable).toEqual([{ runtime: 'odd', login: 'claude-you' }]);
+    expect(assembled.notices).toContain(
+      'config/runtimes/odd.yaml: fake-third is not supported here, so this runtime is not started',
+    );
+  });
+});
+
+describe('a component another plugin owns that does not check (runtimes plan U4b)', () => {
+  const reading = (rejected: ReadonlyMap<string, string>) => ({
+    ...NO_COMPONENTS,
+    instructions: {
+      state: 'read' as const,
+      components: new Map<string, unknown>([['good', { text: 'be kind' }]]),
+      rejected,
+    },
+  });
+  const REJECTED = new Map([['odd', '"odd" is not a valid instructions component (gemni is not supported here)']]);
+
+  it('names an unused one in the notices and holds nothing back', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        profiles: new Map([['default', profile(['modelSets/heavy', 'instructions/good'])]]),
+        components: reading(REJECTED),
+      }),
+    );
+
+    expect(assembled.unreadable).toEqual([]);
+    expect(assembled.model.components.instructions.good).toBeDefined();
+    expect(assembled.notices).toEqual([
+      'the instructions component "odd" is not a valid instructions component (gemni is not supported here), so it is not used',
+    ]);
+  });
+
+  it('names several in name order, whatever order the owner gave them in', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        components: reading(
+          new Map([
+            ['zed', '"zed" is not a valid instructions component (gemni is not supported here)'],
+            ['abe', '"abe" is not a valid instructions component (gemni is not supported here)'],
+          ]),
+        ),
+      }),
+    );
+
+    expect(assembled.notices?.map(notice => notice.split('"')[1])).toEqual(['abe', 'zed']);
+  });
+
+  it('stands in for a used one and says it, naming that component only', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        profiles: new Map([['default', profile(['modelSets/heavy', 'instructions/good', 'instructions/odd'])]]),
+        components: reading(REJECTED),
+      }),
+    );
+
+    expect(assembled.unreadable).toEqual([
+      'the instructions component "odd" is set aside: "odd" is not a valid instructions component (gemni is not supported here)',
+    ]);
+  });
+});
