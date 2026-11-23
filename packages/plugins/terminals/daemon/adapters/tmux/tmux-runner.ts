@@ -51,6 +51,7 @@ import type { ProcessTreeRead } from '../../lib/session/processes/ports.ts';
 import { isTmuxServerAbsent } from '../../lib/tmux/server-absent.ts';
 import { scriptLine } from '../../lib/tmux/script.ts';
 import { guardedWriteArguments, GUARD_REFUSED } from '../../lib/tmux/write-guard.ts';
+import { DEV_CHANNELS_ON_SCREEN } from '../../lib/tmux/startup.ts';
 import { TERMINAL_TMUX_PREFIX } from '../../lib/terminal/runtime-policy.ts';
 import { paneBlockingDialog } from '../../lib/tmux/harness-dialog.ts';
 import { paneBlockingPermission } from '../../lib/tmux/permission-prompt.ts';
@@ -647,8 +648,16 @@ export class TmuxRunner implements Runner {
    * binding a delivery uses (its one key is acted on under `kernel.act(terminal %n, 'keys')`), and nothing else.
    */
   async answerDevChannels(handle: RunnerHandle, ferret?: FerretId): Promise<'answered' | 'absent'> {
-    const pane = await this.guardedPane(handle, ferret);
-    return await new TmuxPaneDelivery(new TmuxController(pane.port), pane.sleep).answerDevChannels(pane.session);
+    // The key is written only if tmux still finds the dialog on screen IN the write: a screen redrawn since the frame
+    // that recognised it (the selection moved, another dialog drawn over it) is declined, never answered blind.
+    const pane = await this.guardedPane(handle, ferret, DEV_CHANNELS_ON_SCREEN);
+    try {
+      return await new TmuxPaneDelivery(new TmuxController(pane.port), pane.sleep).answerDevChannels(pane.session);
+    } catch (error) {
+      // The pane is the same but the screen is not the dialog any more: nothing was pressed, and nothing is answered.
+      if (pane.written().blocked === 'moved') return 'absent';
+      throw error;
+    }
   }
 
   /**
@@ -908,6 +917,8 @@ export class TmuxRunner implements Runner {
   private async guardedPane(
     handle: RunnerHandle,
     ferret?: FerretId,
+    /** Text every write of this binding requires to still be on the screen, re-proved by tmux in the write itself. */
+    onScreen?: readonly string[],
   ): Promise<{
     readonly port: TmuxCommandPort;
     readonly session: string;
@@ -979,6 +990,7 @@ export class TmuxRunner implements Runner {
               cursorRow: observed.cursorRow ?? -1,
               session: original.session,
               sessionCreated: original.created,
+              ...(onScreen === undefined ? {} : { onScreen }),
             },
             scriptLine(
               args[0] === 'load-buffer'

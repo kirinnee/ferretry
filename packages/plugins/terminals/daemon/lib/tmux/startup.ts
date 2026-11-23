@@ -103,6 +103,13 @@ const DEV_CHANNELS_BODY =
   'channels you have downloaded off the internet. Please use --channels to run a list of approved channels. ' +
   'Channels: server:ferretry';
 const DEV_CHANNELS_OPTIONS = ['I am using this for local development', 'Exit'] as const;
+/**
+ * What tmux itself must still find on the screen in the write that answers the confirm (`WriteGuard.onScreen`): the
+ * title, and the FIRST row with the selection marker on it. `devChannelsAction` judged the whole dialog from a captured
+ * frame; the write re-proves its two decisive facts, so a redraw that replaced the dialog or moved the selection
+ * between that frame and the key is answered with nothing.
+ */
+export const DEV_CHANNELS_ON_SCREEN: readonly string[] = [DEV_CHANNELS_TITLE, `❯ 1. ${DEV_CHANNELS_OPTIONS[0]}`];
 /** The hint under the options. */
 const DEV_CHANNELS_FOOTER = /^Enter to confirm\s*[·•|-]\s*Esc to cancel$/u;
 /** A line that is only a box edge: drawing characters and spaces. */
