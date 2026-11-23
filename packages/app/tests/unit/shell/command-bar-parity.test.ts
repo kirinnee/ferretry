@@ -140,6 +140,24 @@ describe('Ctrl+K at rest', () => {
     ]);
   });
 
+  it('"This device’s settings" opens the This device section INSIDE the machine’s Settings, not the standalone page', () => {
+    const { sources } = sourcesOn();
+    went.length = 0;
+    commandBarResults(sources, '')
+      .results.find(entry => entry.label === 'This device’s settings')
+      ?.run();
+    expect(went).toEqual(['/d/dm1/settings/device']);
+  });
+
+  it('"What’s new" opens the same section, on the machine the reader is on', async () => {
+    const { sources } = sourcesOn();
+    went.length = 0;
+    commandBarResults(sources, 'changelog')
+      .results.find(entry => entry.label === 'What’s new')
+      ?.run();
+    expect(went).toEqual(['/d/dm1/settings/device']);
+  });
+
   it('offers the ferrets as "where was I": live work first, newest first, then the stopped ones', async () => {
     const { sources, changed } = sourcesOn();
     expect(commandBarResults(sources, '').groups.map(group => group.heading)).not.toContain('Ferrets');

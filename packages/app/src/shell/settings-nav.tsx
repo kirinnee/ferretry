@@ -1,13 +1,14 @@
 import { ChevronRight } from 'lucide-react';
 import { useId, useLayoutEffect, useRef } from 'react';
 import { useAskBeforeLeaving } from '../compose/unsaved-guard.tsx';
-import { daemonSettingsHref, DEVICE_SETTINGS_HREF } from '../router/routes.ts';
+import { daemonSettingsHref } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { SelectBox, type SelectOption } from '../ui/select-box.tsx';
 import { Icon } from './icons.tsx';
 import { Link } from './link.tsx';
 import {
   DEVICE_BLOCK_HEADING,
+  DEVICE_TAB,
   groupSettingsTabs,
   splitTabsByScope,
   type GroupableTab,
@@ -32,6 +33,7 @@ export function SettingsNav({
   machine,
   tabs,
   active,
+  deviceActive,
   named,
 }: {
   readonly daemon: string;
@@ -39,6 +41,8 @@ export function SettingsNav({
   readonly machine: string;
   readonly tabs: readonly NavTab[];
   readonly active: NavTab | undefined;
+  /** This device's own section is the one open (it is a section of THIS page, so the list keeps its place). */
+  readonly deviceActive: boolean;
   /** A tab is named by the address (so the list marks it current for assistive tech, not just by colour). */
   readonly named: boolean;
 }) {
@@ -85,6 +89,7 @@ export function SettingsNav({
         </div>
       </details>
     ));
+  const deviceHref = daemonSettingsHref(daemon, DEVICE_TAB);
   const hrefOf = (tab: NavTab): string => daemonSettingsHref(daemon, tab.plugin, tab.id);
   /** The mid-width picker: every page of both blocks, in the same titled groups, as one grouped select that is always fully visible. */
   const optionsOf = (blockTitle: string, list: readonly NavTab[], first?: SelectOption): SelectOption[] => {
@@ -99,7 +104,7 @@ export function SettingsNav({
     return grouped.length === 0 && first !== undefined ? [{ ...first, group: blockTitle }] : grouped;
   };
   const pickerOptions = [
-    ...optionsOf(DEVICE_BLOCK_HEADING, device, { value: DEVICE_SETTINGS_HREF, label: 'This device' }),
+    ...optionsOf(DEVICE_BLOCK_HEADING, device, { value: deviceHref, label: 'This device' }),
     ...optionsOf(`${machine} · every device`, machineTabs),
   ];
   return (
@@ -114,7 +119,7 @@ export function SettingsNav({
           label="Settings page"
           onChange={href => leave(() => router.navigate(href))}
           options={pickerOptions}
-          value={active === undefined ? DEVICE_SETTINGS_HREF : hrefOf(active)}
+          value={deviceActive || active === undefined ? deviceHref : hrefOf(active)}
         />
       </div>
       <section aria-labelledby="fy-settings-block-device" className="fy-settings-block">
@@ -122,8 +127,12 @@ export function SettingsNav({
           {DEVICE_BLOCK_HEADING}
         </p>
         {/* This device's own settings (theme, text size, motion, notifications…) are saved in this browser, not on a daemon:
-        the shell's own entry. Its address is the one a reload still serves. */}
-        <Link to={DEVICE_SETTINGS_HREF} className="fy-tab fy-settings-device">
+        the shell's own section, opened INSIDE this page like any other (the bare /settings page is for a browser with no machine). */}
+        <Link
+          to={deviceHref}
+          className={deviceActive ? 'fy-tab fy-settings-device fy-tab--active' : 'fy-tab fy-settings-device'}
+          current={deviceActive && named}
+        >
           <Icon name="monitor" />
           This device
         </Link>

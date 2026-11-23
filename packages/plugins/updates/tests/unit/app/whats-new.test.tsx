@@ -261,7 +261,7 @@ describe('the command bar entry', () => {
     changed: () => {},
   });
 
-  it('is findable by the words people use for it, and goes to This device with a request for the sheet', () => {
+  it('is findable by the words people use for it, and goes to This device inside the machine’s Settings, with a request for the sheet', () => {
     const visited: string[] = [];
     const built = whatsNewCommands(context(href => visited.push(href)));
     const source = built as unknown as (query: string) => readonly CommandBarEntry[];
@@ -271,7 +271,7 @@ describe('the command bar entry', () => {
     expect(command?.keywords).toContain('release notes');
     try {
       command?.run();
-      expect(visited).toEqual(['/settings']);
+      expect(visited).toEqual(['/d/d1/settings/device']);
       expect(whatsNewRequests.snapshot()).toBe(true);
     } finally {
       whatsNewRequests.take();
