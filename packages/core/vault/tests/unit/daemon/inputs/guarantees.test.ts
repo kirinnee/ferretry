@@ -19,7 +19,7 @@ const VALUE = 'fake-value-hunter2-UNIQUE';
 const HOST: InputCaller = { kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' };
 const DEV: TargetRef = { kind: 'terminal' as TargetKind, key: 'dev' };
 const NOW = Date.parse('2026-10-30T12:00:00.000Z');
-/** A program the daemon has not proven hides typing: the hold runs its FULL window. */
+/** A program the daemon has not proven hides typing (before: held the FULL window). */
 const UNPROVEN: InputTargetFacts = { ...FACTS, recognisedConsumer: false };
 /** An OTP prompt that shows what is typed (ssh's "Verification code:" with echo on). */
 const OTP: InputTargetFacts = {
@@ -56,24 +56,86 @@ const refused = async (promise: Promise<unknown>): Promise<InputRequestError> =>
   throw new Error('expected a refusal');
 };
 
-describe('the pane quarantine (I3, I70)', () => {
-  it('I3 a typed secret keeps its terminal away from the ferret, the owner’s tools and the viewer for the window, and no other terminal', async () => {
-    // Arrange
-    const { service, quarantine, id, digest } = await raised({ facts: UNPROVEN });
+/** A sign-in page with one password input, as the browser reports it. */
+const PAGE: InputTargetFacts = {
+  kind: 'page',
+  pageId: 'page-1',
+  origin: 'https://accounts.example.test',
+  secure: true,
+  navigationId: 'loader-1',
+  fields: [
+    {
+      fieldId: 'password',
+      frameOrigin: 'https://accounts.example.test',
+      frameId: 'main',
+      backendNodeId: 9,
+      field: { tag: 'input', type: 'password' },
+      box: { x: 0, y: 0, w: 10, h: 10 },
+      visible: true,
+    },
+  ],
+};
+const PAGE_RAISE = {
+  target: { kind: 'page', key: 'page-1' },
+  prompt: 'the password',
+  submit: 'owner-default',
+  fields: [{ id: 'password', sensitivity: 'secret', element: { kind: 'ref', ref: 'e3' } }],
+} as InputRaise;
+const PAGE_DEV: TargetRef = { kind: 'page' as TargetKind, key: 'page-1' };
+
+describe('no lock after an answer (I3, I70)', () => {
+  it('I3 an answered secret card lets the ferret, the owner’s tools and the viewer read the terminal at once', async () => {
+    // Arrange — a program the daemon has not proven hides typing: before, this was the full 120 s.
+    const { service, quarantine, id, digest, request } = await raised({ facts: UNPROVEN });
     const holds = new InputHoldsOverService(service, quarantine, () => NOW);
     should(holds.decide(DEV, 'read', 'ferret')).equal('allow');
+    should(request.lock).be.undefined();
 
     // Act
     await service.deliver(SESSION, id, send(digest), HOST);
 
-    // Assert — every reader of the pane is kept out, the ferret may still send keys, another terminal is untouched
+    // Assert — no reader is kept out, nothing is quarantined, and no clock has to run down
     for (const actor of ['ferret', 'owner-tools', 'owner-viewer'] as const)
-      should(holds.decide(DEV, 'read', actor)).deepEqual({ refused: 'quarantined' });
-    should(holds.decide(DEV, 'stream', 'owner-viewer')).deepEqual({ refused: 'quarantined' });
-    should(holds.decide({ ...DEV, key: 'other' }, 'read', 'ferret')).equal('allow');
+      should(holds.decide(DEV, 'read', actor)).equal('allow');
+    should(holds.decide(DEV, 'wait', 'ferret')).equal('allow');
+    should(holds.decide(DEV, 'stream', 'owner-viewer')).equal('allow');
+    should(quarantine.until(SESSION, ['dev'])).be.undefined();
+    should(service.quarantines(HOST, SESSION)).eql([]);
   });
 
-  it('I70 masking is defence in depth only: a value the daemon cannot recognise is not masked, and the quarantine still holds the pane', async () => {
+  it('I3 an answered password on a page lets the ferret read, script and picture it at once, and never probes it', async () => {
+    // Arrange
+    let probed = 0;
+    const { service, quarantine, id, digest, request } = await raised(
+      {
+        facts: PAGE,
+        probe: async () => {
+          probed += 1;
+          return 'hidden';
+        },
+      },
+      PAGE_RAISE,
+    );
+    const holds = new InputHoldsOverService(service, quarantine, () => NOW);
+    should(request.lock).be.undefined();
+
+    // Act
+    await service.deliver(
+      SESSION,
+      id,
+      { ...send(digest), padded: undefined, fields: [{ field: 'password', padded: padInputValue(VALUE) }] } as never,
+      HOST,
+    );
+    await holds.prepare(PAGE_DEV, 'read', 'ferret');
+
+    // Assert
+    for (const act of ['read', 'script', 'picture'] as const)
+      should(holds.decide(PAGE_DEV, act, 'ferret')).equal('allow');
+    should(probed).equal(0);
+    should(service.quarantines(HOST, SESSION)).eql([]);
+  });
+
+  it('I70 masking still hides the value as typed but is not what blocks reading: a transformed value shows, the pane is readable', async () => {
     // Arrange
     const { service, quarantine, values, id, digest } = await raised({ facts: UNPROVEN });
     const holds = new InputHoldsOverService(service, quarantine, () => NOW);
@@ -84,10 +146,10 @@ describe('the pane quarantine (I3, I70)', () => {
     const masked = values.scrub(SESSION, `typed ${VALUE}`);
     const transformed = values.scrub(SESSION, `typed ${reversed}`);
 
-    // Assert — the mask finds the value as typed and misses a transformed one; the boundary is the hold, not the mask
+    // Assert — the mask finds the value as typed and misses a transformed one; nothing else holds the pane
     should(masked).not.containEql(VALUE);
     should(transformed).containEql(reversed);
-    should(holds.decide(DEV, 'read', 'ferret')).deepEqual({ refused: 'quarantined' });
+    should(holds.decide(DEV, 'read', 'ferret')).equal('allow');
   });
 });
 

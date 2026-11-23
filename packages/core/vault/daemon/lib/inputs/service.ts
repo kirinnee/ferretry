@@ -42,7 +42,6 @@ import {
   INPUT_QUARANTINE_EVENT_TYPES,
   INPUT_CODE_VISIBLE_NOTICE,
   INPUT_PLAIN_VALUE_NOTICE,
-  INPUT_QUARANTINE_WORDS,
   INPUT_SINGLE_FIELD_ID,
   type InputActor,
   type InputAgentView,
@@ -820,7 +819,7 @@ export class InputRequestService {
                 grants.holds(now, { sessionId, project, roles: match.fills, now: at })
               );
             },
-            typed: (job, holdMs, names) => this.clearBeforeHoldEnds(held, grant, grants, job, holdMs, names),
+            typed: (job, holdMs) => this.clearBeforeHoldEnds(held, grant, grants, job, holdMs),
             uncertain: async because => await grants.stopped(grant, because).catch(() => undefined),
           },
         );
@@ -1075,11 +1074,9 @@ export class InputRequestService {
   }
 
   /**
-   * BEFORE THE PAGE HOLD ENDS, a password a grant fill typed must not still be sitting in its field. The moment the write
-   * is done, a hold of its own is taken on the same page, which cannot expire while it is in flight, so no stalled timer
-   * or suspended machine can leave the page unheld with the value in it. Shortly before the write's own hold would end
-   * ({@link CLEAR_LEAD_MS}), the browser empties any typed field that still holds a value. `moved` and `cleared` let that
-   * hold go; `unknown` (the value may still be there) keeps the page held for a full window more. `cleared` and `unknown`
+   * A password a grant fill typed must not stay in its field. Shortly before the redaction window ends
+   * ({@link CLEAR_LEAD_MS}), the browser empties any typed field that still holds a value. This takes NO hold on the
+   * page (no lock after an answer): it is the field's own cleanup, apart from anyone's access. `cleared` and `unknown`
    * stop the line (`did-not-move-on`): the page didn't move on as the owner approved.
    */
   private clearBeforeHoldEnds(
@@ -1088,22 +1085,17 @@ export class InputRequestService {
     grants: SignInGrantSource,
     job: ClearJob,
     holdMs: number,
-    names: readonly string[],
   ): void {
-    const { sessionId, target, id } = held.request;
-    const clearing = this.deps.quarantine.begin(sessionId, names, id);
-    let outcome: ClearOutcome = 'unknown';
+    const { sessionId, target } = held.request;
+    // The field's own cleanup only: it takes NO hold on the page, so the ferret reads it at once (no lock after an answer).
     void this.deps.timers
       .after(Math.max(0, holdMs - CLEAR_LEAD_MS))
       .then(async () => {
-        outcome = (await this.deps.target.clear?.(sessionId, target, job).catch(() => 'unknown' as const)) ?? 'unknown';
+        const outcome: ClearOutcome =
+          (await this.deps.target.clear?.(sessionId, target, job).catch(() => 'unknown' as const)) ?? 'unknown';
         if (outcome !== 'moved') await grants.stopped(grant, 'did-not-move-on');
       })
-      .catch(() => undefined)
-      .finally(() => {
-        if (outcome === 'unknown') this.deps.quarantine.settle(clearing);
-        else this.deps.quarantine.release(clearing);
-      });
+      .catch(() => undefined);
   }
 
   /**
@@ -3317,7 +3309,8 @@ const NEW_DOCUMENT_FLAG: InputRisk = {
   reason:
     'The page loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the one you meant.',
 };
-const PRIVATE_FLAG = `This value will show on screen while the terminal is hidden from the ferret for ${INPUT_QUARANTINE_WORDS}.`;
+const PRIVATE_FLAG =
+  'This value will show on screen as it is typed, and the ferret can read the terminal as soon as you send it.';
 /** A one-time code is not secret: neutral, neither the red of a plain value nor the amber of a private one. */
 const CODE_FLAG: InputRisk = { level: 'neutral', reason: INPUT_CODE_VISIBLE_NOTICE };
 const CODE_ASK = INPUT_CODE_VISIBLE_NOTICE;
@@ -3380,7 +3373,7 @@ const RELAY_FLAG: InputRisk = {
     'The terminal is not reading a line, so the program may be passing each key on to something else (a remote shell or a container) rather than asking for a password itself.',
 };
 
-const PAGE_PRIVATE_FLAG = `This value will show on the page; Ferretry hides the page from the ferret for ${INPUT_QUARANTINE_WORDS}.`;
+const PAGE_PRIVATE_FLAG = 'This value will show on the page, and the ferret can read the page as soon as you send it.';
 /**
  * A page field's flag, worst first: the field the agent named is missing or hidden, covered or off screen, the page is not secure (http
  * crosses the network in the clear), the field sits in a frame from another site, or a secret is going into a
@@ -3597,13 +3590,13 @@ function tellOf(
   const tool = `${named}_request_input`;
   if (kind === 'secret') return storeTellOf(request, state, reason, uncertain, unsettled);
   if (uncertain)
-    return `${request.agendaItemId} was interrupted while the owner's value was going into %${named}:${key}; it may be partly or fully typed there. Read the ${surface} before you act once its quarantine allows; if you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
+    return `${request.agendaItemId} was interrupted while the owner's value was going into %${named}:${key}; it may be partly or fully typed there. Read the ${surface} before you act at once; if you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
   if (state === 'delivered' && request.outcome?.by.kind === 'plan')
-    return `${request.agendaItemId}: Ferretry filled the sign-in on %${named}:${key} under your task plan. Read the ${surface} to continue once its quarantine allows.`;
+    return `${request.agendaItemId}: Ferretry filled the sign-in on %${named}:${key} under your task plan. Read the ${surface} to continue.`;
   if (state === 'delivered' && request.outcome?.by.kind === 'sign-in-rule')
-    return `${request.agendaItemId}: Ferretry filled the sign-in on %${named}:${key} under a rule the owner approved in advance. Read the ${surface} to continue once its quarantine allows.`;
+    return `${request.agendaItemId}: Ferretry filled the sign-in on %${named}:${key} under a rule the owner approved in advance. Read the ${surface} to continue.`;
   if (state === 'delivered' && request.source !== undefined)
-    return `${request.agendaItemId}: ${copyHandle(request.source.name)} was pasted into %${named}:${key}. Read the ${surface} to continue once its quarantine allows.`;
+    return `${request.agendaItemId}: ${copyHandle(request.source.name)} was pasted into %${named}:${key}. Read the ${surface} to continue.`;
   if (state === 'delivered')
     return `${request.agendaItemId} was answered and typed into %${named}:${key}. Read the ${surface} to continue.`;
   return `${request.agendaItemId} ended without a value (${state}${reason === undefined ? '' : `: ${reasonWords(reason, kind, unsettled)}`}). If you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;

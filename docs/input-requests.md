@@ -18,11 +18,10 @@ hostname, `y`) is not secret: the input says so and the ferret may see it.**
 the audit log, a push payload or disk.** This extends [secrets](secrets.md) ("use, never read"): no route,
 command or API returns a value or a digest of one, and nothing logs a body.
 
-That is a promise about how the **bridge** handles the value, and one more: for a limited window
-(the quarantine below) the daemon keeps the **terminal** the value was typed into from the agent and from
-the viewer. It is **not** a promise that the value can never be read off the target afterwards. After the
-window ends, or when the owner ends it or chooses "Show anyway", what the target program printed is read
-back through best-effort masking, and masking cannot recognise every form of a value. See the honest
+That is a promise about how the **bridge** handles the value.
+It is **not** a promise that the value can never be read off the target afterwards: the target is not held from the ferret after the write ([no lock after an
+answer](#no-lock-after-an-answer)), and what the target program printed is read back through best-effort masking, which
+cannot recognise every form of a value. A page that echoes a password is readable (a declared GAP). See the honest
 limits.
 
 | Place                                            | Holds the value?                                                                                      |
@@ -94,12 +93,12 @@ through the input tool; the generic add refuses it.
 
 ### Sensitivity
 
-| Value     | Meaning                                                                                                                                                                          | Checks                                                                                                                                                                                                                                            |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `secret`  | A password or passphrase. The bridge never carries it to the agent, a log or disk; what the target prints afterwards is held back (quarantine) and then only masked best effort. | Never refused for its target: the input flags the risk (green, amber or red) and Send stays available. Hard refusals: a control character or line break in the value, a changed target (409 `target_changed`), and a caller who is not the owner. |
-| `plain`   | A username, email, hostname or `y`. **Not secret.**                                                                                                                              | Target binding only. The input says "Not secret: the ferret can see this value." and flags it.                                                                                                                                                    |
-| `private` | A value that is not one-time but shows on screen as it is typed (rare).                                                                                                          | Never refused: the input flags it amber ("This value will show on screen while the terminal is hidden from the ferret for two minutes."). Quarantine and masking apply exactly as for `secret`. Same hard refusals as `secret`.                   |
-| `code`    | A one-time code: 2FA, an e-mail or SMS verification code, a device code. **Not secret.**                                                                                         | Never refused: the input says "One-time code: the ferret can see it." and flags it **neutral**. No lock, no quarantine, no page hold, not masked (but see [one-time codes](#one-time-codes-code)). Same hard refusals as `secret`.                |
+| Value     | Meaning                                                                                                                                                               | Checks                                                                                                                                                                                                                                             |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `secret`  | A password or passphrase. The bridge never carries it to the agent, a log or disk; what the target prints afterwards is masked best effort (no lock after an answer). | Never refused for its target: the input flags the risk (green, amber or red) and Send stays available. Hard refusals: a control character or line break in the value, a changed target (409 `target_changed`), and a caller who is not the owner.  |
+| `plain`   | A username, email, hostname or `y`. **Not secret.**                                                                                                                   | Target binding only. The input says "Not secret: the ferret can see this value." and flags it.                                                                                                                                                     |
+| `private` | A value that is not one-time but shows on screen as it is typed (rare).                                                                                               | Never refused: the input flags it amber ("This value will show on screen as it is typed, and the ferret can read the terminal as soon as you send it."). Masking applies exactly as for `secret`; nothing is held. Same hard refusals as `secret`. |
+| `code`    | A one-time code: 2FA, an e-mail or SMS verification code, a device code. **Not secret.**                                                                              | Never refused: the input says "One-time code: the ferret can see it." and flags it **neutral**. No lock, no quarantine, no page hold, not masked (but see [one-time codes](#one-time-codes-code)). Same hard refusals as `secret`.                 |
 
 `secret`, `private` and `code` values containing a control character or a line break are refused
 ("this would press keys"). `plain` allows Tab. `inputValueProblem` is that rule.
@@ -180,7 +179,7 @@ one-time.
   "ᴘᴀssword", Armenian "Passwօrd") counts as a password word; and a password word spelled with spaces, dots, dashes or
   underscores between its letters ("Pass-word", "P a s s w o r d") is still one.
 
-  Then the field is hidden on the input, fully locked, masked, blocks the ferret's typing, and is `secret` in the
+  Then the field is hidden on the input, masked, blocks the ferret's typing, and is `secret` in the
   journal and audit. The input says "Treated as a secret: this is a password field." This is decided at raise and
   checked again at a redraw, a restart and the write (never undone); a saved login still fills the role the owner
   picked, **except a code the daemon makes**: a code field found going into a password at the write gets no code
@@ -193,7 +192,7 @@ Where `code` is weaker than `private`, and why that is the design:
 
 | `private` does                                 | `code` does                                                                                                       | Why                                                                                                 |
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Locks the target 120 s (quarantine, page hold) | No lock                                                                                                           | The ferret may see the code; a lock would hide nothing it may not read.                             |
+| Locks nothing (no lock after an answer)        | No lock, not masked                                                                                               | The ferret may see the code. Nothing is locked after an answer for either.                          |
 | Masks the typed value for the redaction window | Not masked (a daemon-made code's text still is)                                                                   | Same. No tool returns a daemon-made code (open question 11), though the ferret may see it on screen |
 | Keeps the ferret's keystrokes off the surface  | A code-only input lets `terminal_send` and `browser_type` through; scripts, key presses and form fills still wait | The ferret may type a code it read itself                                                           |
 | Flagged amber                                  | Flagged neutral                                                                                                   | It is not secret and goes where it was asked for.                                                   |
@@ -348,195 +347,48 @@ The relay sees message sizes. The value is length-prefixed and padded to the nex
 
 Masking can only hide a value it can recognise: a prefix cut at a row edge, a value wrapped over
 rows, an escape payload or a program that echoes it differently all defeat a matcher. So masking is
-**defence in depth**; the confidentiality boundary is the quarantine below.
+**the only protection**: nothing is held from the ferret after an answer ([no lock after an answer](#no-lock-after-an-answer), a declared GAP).
 
-### The pane quarantine
+### No lock after an answer
 
-When a `secret` is delivered the terminal is **quarantined** from the write for its **lock**: `INPUT_QUARANTINE_SECONDS`
-(120), or `INPUT_SHORT_LOCK_SECONDS` (10) when the daemon proved the target hides what is typed (see
-[how long the lock lasts](#how-long-the-lock-lasts)):
+**Once the owner has answered, the ferret reads the terminal or the page at once.** Nothing is quarantined, held,
+short-locked or probed after a write, for a terminal and for a page, whatever the value's sensitivity (`secret`,
+`private`, `plain` or `code`). This is the owner's explicit call (the old lock cost the ferret up to two minutes
+of blindness after every password, on every sign-in).
 
-- **Nobody reads it through an ordinary tool.** `terminal.read` and `terminal.wait` are refused with a
-  `conflict` error that says when the quarantine ends, for the agent **and for the owner's ordinary
-  terminal-tools endpoint** (`POST /v1/ferrets/:ferretId/surfaces/terminals/tools`); the owner's way to
-  look is the viewer's "Show anyway", which is audited. The agent can still send keys.
-- **ONE publication gate, asked where a result is published.** Whatever is derived from a pane is checked
-  again, synchronously, at the point it leaves the daemon: after every awaited capture, redaction, batch,
-  audit record and wait tail, and before it is returned, matched against a predicate, sent as a stream
-  frame (full, delta, re-attach and the second capture of a redraw) or remembered as the last frame sent.
-  A screen read before the quarantine began is discarded if the quarantine began before it was published.
-  The routes that carry such a body also hand back a way to spell it again (`ApiResponse.late`). The dispatcher
-  keeps it on the response, and every carrier calls it (`finalised`) as the last synchronous step before the bytes
-  leave: the direct HTTP server and the relay tunnel (which the relay link and the direct carrier both use), so no
-  await sits between the final check and the wire. The relay link also asks once more after the record is
-  queued and sealed, because those are awaits: an answer, or a terminal stream frame (the bridge hands the
-  downstream a permit with every frame, true while its capture may still be shown), whose last word changed in the
-  meantime is dropped unsent, and its session ends so no sequence number is reused. The viewer reconnects and is
-  shown the quarantine notice. Only the write to the socket itself remains, which is the
-  declared compare-and-enqueue gap.
-- **Every projection of what the daemon saw is covered.** While a pane is quarantined the prompt line, the
-  program name and the argv in the owner's list, the agent's view and a restored request are replaced with a
-  notice, not just masked. The agenda item and the audit trail never carry what the pane showed at all: the input
-  says "Type it into the terminal", and an audit record holds ids, kinds, flags and outcomes, not the program name,
-  so no later fold, flush or projection of either can republish it.
-- **A viewer gets a notice instead of the pane**, unless that viewer chose "Show anyway". That choice
-  is per connection (`?reveal=1` on the viewer socket), owner-gated, and audited as
-  `input.quarantine_revealed`.
-- **The owner can end it early** (`POST /v1/ferrets/:ferretId/input-quarantines/:key/end`, audited as
-  `input.quarantine_ended`); `GET .../input-quarantines` lists the live ones. Ending it lets go of exactly the
-  settled holds it released, each journalled by its own id, never every hold that shares a name. A hold whose
-  write may still be in flight or unresolved is never ended this way.
-- **It is durable before the write, or nothing is written.** The hold is journalled before the first byte
-  is typed. If the journal cannot record it, the delivery is aborted with nothing typed. While the write is
-  in flight the hold reads as "now plus the window" and so cannot expire before the write; once the write
-  returns, the window runs in full from that moment.
-- **Each delivery attempt has its own hold.** An attempt that fails, is refused or is uncertain releases
-  only its own hold, never one an earlier delivery left on the same terminal, live or after a restart.
-- **A hold stays unresolved until its settlement is recorded.** The first journal entry for a delivery is
-  marked `unresolved` and has no end time. The end time is only journalled after the write, so a daemon that
-  stops, or a journal that cannot record the settlement, leaves the unresolved entry: a delivery that landed,
-  and one that was uncertain, are both still held after a restart. A request reaching a final state does not
-  remove that evidence.
-- **It survives a restart, and a restart reads closed.** The daemon journals every name of the terminal (its
-  key, name and id), the hold and its end time or unresolved state (`surface.input_quarantined`,
-  `surface.input_quarantine_ended`; no value, digest or length) and replays them on start. Every hold,
-  with all its names, is restored in a first pass over every session before anything is unlocked; recovery
-  does not wait on the agenda or the request history. Until then every terminal reads as quarantined, and a
-  session whose replay fails stays quarantined for a window. A hold still unresolved after a restart gets a
-  fresh window from the restart. A quarantine whose window has passed is not restored.
-- **"Show anyway" is audited, and is refused if it cannot be.** If the daemon cannot record that the owner
-  chose to see the terminal, it does not show it. The audit log itself may report a persistence failure
-  rather than propagate it, so a lost audit record is a limit, below.
-- **A terminal is known by every name** (its key, name and id), so a read by any of them is refused.
-- **Raise-time rules**: nothing is refused for its target. A `secret` on a terminal that echoes, or whose
-  echo is unknown, is allowed and flagged amber; the quarantine hides the pane, including what echoed, and
-  the facts are checked again at delivery (the compare-and-enqueue check below). A `private` value is allowed and flagged amber, with the same quarantine. A one-time `code` gets no quarantine at all.
-
-### How long the lock lasts
-
-The owner chose an **adaptive** lock (!A149). The input shows its length and why ("Hidden from the ferret for 10 s
-after typing. …"), from `request.lock` (`InputLockSchema`: `seconds` and a fixed `reason`); the agent learns the
-seconds (`lockSeconds`). It is decided only from what the daemon observed (`packages/daemon/src/lib/input-requests/lock.ts`):
-
-| Reason               | Lock  | When                                                                                                                                                                                                                                                                                                                                                                   |
-| -------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hidden-terminal`    | 10 s  | A LOCAL password prompt: echo off AND line (canonical) mode, the PROVED program is sudo, sudoedit, su, doas or passwd, and EVERY process of the foreground group runs setuid root (effective uid 0, real uid not), which a script or binary the ferret wrote cannot. ssh, docker, psql, every readline or raw-mode program and every unverified input are never short. |
-| `proven-field`       | 10 s  | Exactly the page fields below, AND the facts of the sign-ins matched to this page (every account's, read together) for that very field identity say masked, no echo after submit and moved on, with no record saying otherwise; only for a value Ferretry SUBMITS.                                                                                                     |
-| `probed-field`       | 10 s  | One password field as below, and the daemon's **dummy probe** at raise came back clean.                                                                                                                                                                                                                                                                                |
-| `code`               | 120 s | A `private` value: it shows as it is typed. (A one-time `code` field gets no lock at all; the reason's name is older than the sensitivity.)                                                                                                                                                                                                                            |
-| `terminal-shows`     | 120 s | Any other terminal: "Ferretry couldn't prove this is a local sudo, su, doas or passwd prompt with typing hidden."                                                                                                                                                                                                                                                      |
-| `scripted`           | 120 s | A page script ran on this page or on its site (see [what the ferret did](#what-the-ferret-did-judged-per-page)): "A ferret ran a script on this page or this site."                                                                                                                                                                                                    |
-| `steered`            | 120 s | The ferret used this page, or a tab sharing its storage on its site, after the input was raised: "The ferret used this page, or another tab on this site, after asking you."                                                                                                                                                                                           |
-| `not-password-field` | 120 s | A secret field that does not qualify (below): "This is not a plain password box on a secure page."                                                                                                                                                                                                                                                                     |
-| `did-not-move-on`    | 120 s | A record for this field says it was not masked, showed the value or did not move on: "Last time here, the page didn't move on or it showed the value."                                                                                                                                                                                                                 |
-| `until-moved-on`     | 120 s | The facts hold but Ferretry is not pressing Enter: held while the page shows the document the value went into, at most 120 s (below): "It ends sooner once the page moves on, because the value hasn't been submitted yet."                                                                                                                                            |
-| `probe-shown`        | 120 s | The probe found its throwaway value: "A test value Ferretry typed showed in the page's text."                                                                                                                                                                                                                                                                          |
-| `probe-stopped`      | 120 s | The probe did not finish cleanly: "Ferretry's quick test of this page didn't finish cleanly."                                                                                                                                                                                                                                                                          |
-| `first-time`         | 120 s | No facts for this field and no probe ran: "First time on this page: Ferretry hasn't seen it hide a password yet."                                                                                                                                                                                                                                                      |
-| `not-proven`         | 120 s | Nothing could be checked: no observer is wired, or the login store can't be read. (An older daemon's one word for every long lock.)                                                                                                                                                                                                                                    |
-
-The input shows the reason's sentence after "Hidden from the ferret for … after typing." The sentences are fixed
-(`INPUT_LOCK_WORDS`), never page or terminal text. While an input waits, the lock it shows is the lock Send would give
-now: once the ferret uses the input's page, or a script taints it, the input says "2 minutes" and why before the owner
-presses Send. New reasons need no feature gate: the app ships before the daemon (Architecture, "The app ships
-before the daemon"), so the app that knows them is out before any daemon sends one.
-
-A page field qualifies when every secret field is a visible, uncovered `input type=password` on a secure page, in the
-page's own origin, with no human check showing.
-
-An input of `plain` values and one-time `code`s has **no lock** (`heldFromView`): the ferret may see both. An input with a
-`code` beside a `secret` is locked for the secret alone, by the rules above.
-
-- **Masking does not shorten.** The redaction window stays 10 minutes whatever the lock; the owner can still end a
-  lock early or reveal.
-- **An input never shortens at the write.** The lock is decided again from the facts seen at Send and the longer of
-  that and the input's is used. An input redrawn onto a re-rendered field drops its probe result.
-- **The ferret's own steering voids a page's proof, judged per page** (below): a page a script ran on, or whose site
-  one ran on, never gets a short lock and is never probed, and at Send an act of the ferret on THAT page since the input
-  was raised voids it. An act on another tab or a terminal does not.
-- **A value Ferretry does not submit is held until the page moves on** (`until-moved-on`, secrev-1333 M1). The facts
-  say what the page does AFTER a submit; they never looked at the document while a value sits in its field (only the
-  dummy probe does), so they never shorten that value's lock, not even with the owner's own tap (`tapped`) on record.
-  Instead its page hold FOLLOWS ITS DOCUMENT: pictures, like text, are refused while the page shows the document the
-  value went into, and come back once it shows another (the ferret clicked Next, say), for at most the full 120 s. A
-  page that goes back to that document is held again. The write arms the same `pagehide` clear a grant fill uses, so a
-  page restored from the back/forward cache shows the field empty; when the browser cannot arm it, the page keeps the
-  plain full hold. Only the document is watched: a field the page empties itself does not end the hold early.
-  A page whose probe showed the test value, or did not finish, gets no such relaxation (secrev-1333 L4): the plain full
-  hold, with the probe's own reason (`probe-shown`, `probe-stopped`) at the raise and again at Send.
-- **A terminal's OBSERVED facts never shorten it** (a program the ferret placed can carry the right name). Only the
-  input's own facts do, and only when every process of the foreground group is a setuid-root password program.
-- **The dummy probe** runs on a page input only, for exactly ONE secret field, after the field picture and before the
-  owner is asked, inside the page's own queue. It is skipped for a session that ran a page script, for any input with a
-  `private` value or a one-time `code`, and for a field whose `autocomplete`, `name` or `id` says code, PIN, OTP, 2FA, verification, CVV or
-  token, or whose `inputmode` is numeric, tel or decimal. It runs only on an EMPTY field in the page's main frame, and
-  only when the page holds no WebSocket open. A throwaway value of three characters (a tilde and two random letters or
-  digits, shorter than any code or PIN field and than the minimum length of nearly every password field) is typed the way the owner's will be; the page's text is
-  searched for it at once and again 750 ms later (visible text, accessibility snapshot, markup, title and address);
-  the field is emptied with Backspace, or the native value setter if Backspace did not, and proven empty. It never
-  presses Enter and never moves to another field. If the page fires any request it can see or shows another document while it
-  runs, opens a WebSocket (even one it closes again), a field does not empty or the page cannot be read whole, the probe is `aborted` and the lock
-  stays 120 s.
-- **Limits.**
-  - The probe reads the page's text, not its pixels: an echo drawn only on a canvas, or only after the second look,
-    or only on submit, is not seen. `proven-field` covers what happened after a real submit on that field identity.
-  - The probe sees the page's own requests and sockets: a service worker's or a shared worker's traffic, and WebRTC,
-    are not seen.
-  - The short lock will often not happen, in the safe direction: a busy page aborts the probe, and a `sudo` with
-    `pwfeedback` reads in raw mode.
-  - A field's identity has no path: two forms on one host with the same field attributes share their facts.
-  - The probe moves the focus into the field and may make the page show a "required" message.
-  - GAP: once a page's hold ends while the page still shows the document the value was typed into, a page script
-    (`browser_eval`, when the owner allows scripts) can read the field and transform the value past masking. The
-    short lock makes that sooner; the full lock never closed it.
-
-#### What the ferret did, judged per page
-
-A page input's lock reads only what could have changed what THAT page shows (`LoginObserver.pageSteer`, and the
-input service's `steerOf`):
-
-- **By site.** Hosts are grouped by SITE (`siteOf`): sibling subdomains of one registrable domain share cookies, so
-  `mail.example.com` and `accounts.example.com` are one site. With no public-suffix list it is the host's last two
-  labels, port dropped: never narrower than the registrable domain, sometimes wider (every `*.co.uk` page is one site),
-  which only ever counts more. An IP address or a one-label host is its own site.
-- **Scripts, ever.** A page script this session ran on the input's page, or on any page while it was on the input's site,
-  or where the page or host could not be told; a script of this session still running; and, from any caller in any
-  session, a script on the input's site, on a host that couldn't be read, or one running anywhere now (the machine-wide
-  taint the standing rules keep, [below](#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret)). Any of
-  these: `scripted`, no probe, the full lock.
-- **Acts, since the input was raised** (at Send, and on the input while it waits): an act of this session on the input's
-  page (a click, a key, a navigation, a close), or on another page that may share its cookies and storage (two pages of
-  the shared agent profile, or a popup, which lives in its opener's context) while that page was on the input's site.
-  An incognito page shares nothing with any other page, so an act on one never counts for another. At Send this is
-  asked after the login store is read, and once more with the page held, right before the write: an act that began in
-  between gets the full hold, taken before the short one is let go.
-- **Not counted**: an act on a tab of another site, on any incognito tab but the input's own, or on a terminal; a
-  script on another site's page. The owner's two Google tabs (one profile, one incognito) no longer lengthen each
-  other's lock.
-- **How an act is placed.** The agent tools tell the observer before an act runs. Until the call is over it counts
-  on EVERY page; then it is placed on the page it touched, with every host that page was on around the act: where it
-  was when it was looked up, where it is now, and where its popups are now. A page that can't be looked up leaves the
-  act on every page; a host that can't be read leaves it on every host of that page. An input's page the observer never
-  saw an act on may share storage with any page.
-- **Limits.**
-  - Only the hosts before and after an act are known: a page that went through a third host on the way (a redirect
-    chain) is not seen at that host.
-  - Another session's non-script acts are not counted, as before: every ferret's profile pages share sign-ins and
-    storage, and only scripts are tainted machine-wide.
-  - The facts a sign-in keeps (`navigatedAway`, `tapped`, ...) are still dropped for ANY act of the session on a page
-    since the input was raised (below), so a standing rule's history is unchanged.
+- **`heldFromView` is false for every input.** The raise decides no lock and runs no dummy probe; the write takes
+  no hold, so no input's `lock` is ever set, the agent's view carries no `lockSeconds`, and the input shows no
+  "Hidden from the ferret" line or timer.
+- **Reads are allowed at once**, for the ferret and for the owner's tools and viewer: `terminal.read`,
+  `terminal.wait`, the viewer stream, and a page's text, script, console, network and picture reads. The owner has no
+  quarantine to end or reveal (`GET .../input-quarantines` lists none).
+- **A sign-in plan or rule fill** that types a password into a page still has that field emptied shortly before the
+  redaction window ends (the browser's own cleanup, armed before the write). That cleanup holds nothing from the ferret.
+- **What still applies:**
+  - _Value masking_ ([Redaction](#redaction)): the typed text is scrubbed from the ferret's reads for the redaction
+    window. It blocks nothing but the value itself.
+  - _The pending-input rules_: while an input waits, the ferret's `terminal_send` / `browser_type` and the like are still
+    refused (those values are the owner's to type); a code-only input lets typing through.
+  - _The restart replay lock_: from boot until the input half has restored, reads of every terminal and page
+    are refused. It is not tied to any answer and ends when the restore finishes.
+- **Declared GAP: a page or program that echoes a password is now readable by the ferret.** Masking recognises a
+  value as it was typed; a page that shows it back in another form (reformatted, split, in an image), or a program
+  that prints it differently, is shown. Before this change the quarantine was the boundary behind the mask; there is
+  none now. The ferret may also read a password a page echoes in the clear. The owner accepted this to remove
+  the post-answer wait.
+- **Not restored:** the old adaptive lock (10 s / 120 s by what the daemon proved) and its reasons. The wire still has
+  an optional `lock` field and `lockSeconds`; they are never set.
 
 The daemon holds each delivered `secret` in RAM, for the window above, and masks it as
 `[redacted:input ^A7]` wherever it scrubs text: the operator's screen, transcript and journal reads,
-and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
+and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
 
 - **The same text is scrubbed everywhere.** The ephemeral window and the vault's `SecretRedactor` are
   composed into one redactor (`EphemeralAwareRedactor`), and the operator's list and read routes go
   through it, so an owner read never shows what an agent read hides. The two stores are masked as a
   **union**: both are asked where they match in the original text, overlapping matches are merged and
   each run is replaced once, so a vault secret overlapping a typed value cannot leave a tail behind.
-- **`terminal.wait` tests scrubbed text.** Its predicate runs on the redacted screen, so once the
-  quarantine is over, waiting for a prefix of a value masking recognises does not reveal whether the
+- **`terminal.wait` tests scrubbed text.** Its predicate runs on the redacted screen, so waiting for a prefix of a value masking recognises does not reveal whether the
   screen holds it. Masking is best effort: a value it cannot recognise is not covered by this.
 - **What the daemon saw is a projection, made once.** The prompt line, the program name (`comm`) and
   the argv are masked WHOLE first and only then cut to their limits (200, 64 and 200 characters), so a
@@ -617,29 +469,17 @@ compare-then-write gap the terminal has: the page's own events (the `select` it 
 the moment between the proof and the insert. The value crosses the worker pipe in that one request and is in no answer,
 error or log.
 
-### The hold on a page
+### No hold on a page
 
-A `secret` or `private` value typed into a page (never a one-time `code`) holds that page for the same window as a terminal
-(`INPUT_QUARANTINE_SECONDS`):
+A value typed into a page does not hold the page (see [No lock after an answer](#no-lock-after-an-answer)). What
+stays on a page:
 
-- The agent's **pictures** of it (`browser_screenshot`, `browser_pdf`, `browser_highlight`) are refused for
-  the whole window: no mask can be drawn on pixels. The one exception is a value Ferretry did not submit on a page
-  whose facts prove it after a submit: that hold follows its document (see [how long the lock lasts](#how-long-the-lock-lasts)).
-- Its **text** (`browser_read` in every mode, `browser_console`, `browser_network`, `browser_wait_for`, `browser_eval` and
-  its results) is refused while the page still shows the document the value went into. Once the
-  page has moved on (a new `loaderId`), text reads come back, and they are **masked** for the redaction
-  window like every other read: a next page that prints the password back shows a mask.
 - While a request is pending on a page, the agent's `browser_type`, `browser_fill_form`, `browser_press` and `browser_eval`
   on it are refused: those values are the owner's to type.
 - **The decision is made inside the page's own queue**, immediately before the act runs, for every caller:
-  a request raised or a value typed while an act waited in the queue stops it there. The check before the queue
-  only fails fast, and a check after the act still withholds a result a hold began under.
-- **Errors are reads too.** A failed page call under a hold answers with the hold; every other error message
-  passes the same redactor as a read (a page that throws the password back shows a mask), and fails closed to a
-  fixed sentence when the redactor cannot run.
-- Page holds share the terminal's registry under their own names (a hold on page `app` never seals terminal
-  `app`) and are not journalled: a page does not outlive the daemon that drove it, and a page's input ends as
-  interrupted on restart. GAP: the owner cannot end a page's hold early from the app; it runs its two minutes.
+  a request raised while an act waited in the queue stops it there.
+- **Errors are reads too.** A page call that fails passes its message through the same redactor as a read (a page that
+  throws the password back shows a mask), and fails closed to a fixed sentence when the redactor cannot run.
 
 ### Password saving is off in the agent profile
 
@@ -985,7 +825,7 @@ accounts that may be picked by hand.
 
 - **The tap is the permission.** Nothing is typed until the owner taps. Every rule of a delivery applies
   unchanged: owner only (twice), the `deliveryId`, the target re-observed and compared, the tmux guard, one
-  hex write, the quarantine, the risk flag. The value is opened **inside the daemon**, after every check that
+  hex write, the risk flag. The value is opened **inside the daemon**, after every check that
   can refuse without typing, and goes only into that write.
 - **A saved value never passes through the app.** The input sends the entry's handle (and the offer's `signIn`);
   the daemon resolves it. **The input's rules are the daemon's, not only the app's list**: at Send it draws the offers
@@ -1154,7 +994,7 @@ same ids):
 | each observed fact                     | the sign-in at its place; a fact from no place of the entry is dropped, counted |
 | nothing matched                        | an account with no sign-ins                                                     |
 
-Dropping a fact is safe: facts only ever shorten the [lock](#how-long-the-lock-lasts). A via link the new rules
+Dropping a fact is safe: no fact decides a lock any more ([no lock after an answer](#no-lock-after-an-answer)). A via link the new rules
 refuse (gone, itself, a provider with no site, a circle) is dropped and counted rather than written. An older
 daemon reads a `v: 2` index as **damaged**, never as empty.
 
@@ -1594,9 +1434,9 @@ in the table above holds for a rule too, plus these:
   It learns nothing more (not which account, not why), and it is accepted. A grant fill that finds the target changed
   is a miss: it neither redraws the input nor counts a failed check, because nobody tapped anything. **Declared (R4):**
   the session's event log (`GET /v1/events` socket from that ferret's cursor, readable by any ferret) is not frozen like the view. A rule
-  attempt that reaches the write takes the page hold and journals `surface.input_delivering` and the quarantine start
+  attempt that reaches the write journals `surface.input_delivering`
   before its last `held()` check, because nothing may be awaited between that check and the write; a miss there
-  journals the request pending again and the quarantine's end. So a ferret that reads the event log could tell that a
+  journals the request pending again. So a ferret that reads the event log could tell that a
   fill was tried, as it could from the timing, and nothing more. A suspension raises no input in the ferret's session: the owner sees it in Settings, on the input's reason
   line and in the audit.
 - **What the owner reads.** The request carries `preapproval: { by: 'rule', rule, revision, outcome, reason }`, and the
@@ -1673,7 +1513,7 @@ What it does NOT do, said plainly:
 
 ## Who reads the terminal
 
-A secret input's green flag, its short lock, the code exception, a secure-copy rule's destination and a saved login's
+A secret input's green flag, the code exception, a secure-copy rule's destination and a saved login's
 one-tap match all rest on ONE question: which program will read what the owner types? The daemon answers it from
 the kernel (`TmuxInputTarget` with `KernelProgramProof`, `packages/daemon/src/adapters/system/kernel-program-proof.ts`),
 never from the name `ps` shows. Before this (#1218's review, &B112) every one of them trusted that name, for the
@@ -1700,7 +1540,7 @@ So the daemon proves the GROUP or nothing:
    one) is never proved: its executable cannot be read, and it is whatever a ferret with a cached sudo started.
    Separately, the daemon may note a program every member runs that is proved only through the owner's OWN Nix
    profile (`~/.nix-profile`), and only under a name no root-controlled folder holds that is no password or code
-   program. That note is the daemon's own, never on the input's facts; it earns no green, no short lock and no one-tap,
+   program. That note is the daemon's own, never on the input's facts; it earns no green and no one-tap,
    and only a secure-copy rule the owner allowed for it ([secure copy](secure-copy.md#programs-in-your-own-profile))
    reads it.
 2. No process whose controlling terminal is another (or none) holds the TTY open: on Linux every `/proc/<pid>/fd`,
@@ -1720,14 +1560,14 @@ So the daemon proves the GROUP or nothing:
 4. **Line mode too.** A proved program that RELAYS keys (`ssh -t` to a remote shell, `docker exec -it`) hands them to a
    reader outside this machine's foreground group. A real password prompt (getpass, readpassphrase, Go's
    `ReadPassword`) reads a line; a relay puts the terminal in raw mode. So green, a secure-copy rule's match and the
-   one-tap saved login also need the terminal in line (canonical) mode, as the short lock always did. Otherwise the
+   one-tap saved login also need the terminal in line (canonical) mode, as the old short lock did. Otherwise the
    input is amber: "The terminal is not reading a line…".
 
 Raising an input to a password from the NAME (`sudo` in `ps`, or the prompt line) still happens: a fake name there only
 makes the input stricter.
 
 - **GAP: a macOS daemon proves only setuid programs.** No reading of a macOS process's executable is wired, so ssh,
-  gpg, psql and every other program there is unverified (amber, full lock); sudo and su stay green.
+  gpg, psql and every other program there is unverified (amber); sudo and su stay green.
 - **GAP: another account's processes are not looked at.** They cannot open this account's pty for reading unless
   they are root, and root is outside this model. A setuid-root process whose descriptors cannot be read is passed over
   too: it is a program root placed, the same trust its proof gives.
@@ -1751,15 +1591,14 @@ makes the input stricter.
   honest-client rule, as everything under the admin token is.
 - **A hand-typed value is masked for the window only, and masking is best effort.** Afterwards a program
   that echoes it is not masked, unless the value was saved to the vault, and a value it cannot recognise
-  (cut at a row edge, wrapped, inside an escape, printed differently) is shown. The quarantine is the
-  stronger boundary but is a finite window: it ends after 120 seconds, or when the owner ends it or
-  chooses "Show anyway". After that, target output can expose the value.
+  (cut at a row edge, wrapped, inside an escape, printed differently) is shown.
+- **Declared GAP: nothing is held from the ferret after an answer.** A page or program that echoes a password in the
+  clear, in a form masking does not recognise, is readable by the ferret at once. This is the owner's explicit call
+  ([no lock after an answer](#no-lock-after-an-answer)): the old quarantine and page hold were the boundary behind the
+  mask, and they are gone.
 - **The audit trail is best effort.** The reveal and end acts are recorded through the common audit log,
   which reports a persistence failure instead of propagating it. A reveal is refused if the call to record
   it is rejected, but a record the log silently loses is lost.
-- **The quarantine hides the pane from the agent's reads, not from the pane's program.** An agent that
-  can send keys can still make the program print what it received; the agent's `terminal.read` of it is
-  refused, but a process the agent started in another pane or a file it redirected to is not covered.
 - **A sign-in plan is for honest-client ferrets** (RF-5 is no-go: nobody can be walled on this machine). Ferrets
   here can read Ferretry's own files, so this stops misuse through their tools and page text, not a ferret that goes
   around Ferretry. A ferret that reads the admin token or `secrets.key` through its shell can already do everything a
@@ -1794,10 +1633,9 @@ makes the input stricter.
   short window and the masking above. The `if-shell` syntax itself is exercised against a real tmux
   in CI (`tmux-input-guard.test.ts`); if a tmux build rejects it the write fails closed as _uncertain_,
   never as a silent type.
-- **A value cut by the capture window is not matched, which is why the quarantine exists.** The viewer
+- **A value cut by the capture window is not matched.** The viewer
   masks what one capture holds; a value whose head scrolled out of the capture, or a fragment at a row
-  edge, is not found as a whole. The quarantine hides the whole pane for the window, so this is only
-  reachable after it ends, when the value has by then normally left the screen.
+  edge, is not found as a whole. Nothing hides the pane after the write, so this is reachable at once.
 - **An uncertain write is not a retry.** If the single write fails or throws the owner is told the
   value may have been typed, and must raise a new request. Typing it again could put the password in
   the wrong place twice.

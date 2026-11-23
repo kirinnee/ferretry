@@ -29,16 +29,18 @@ import { identityOf, placeOf } from './login-observer.ts';
  */
 
 const SHORT = (reason: InputLock['reason']): InputLock => ({ seconds: INPUT_SHORT_LOCK_SECONDS, reason });
-/** A field the target is kept from the ferret for: a `secret` or a `private` value. */
-const HELD = (field: Pick<InputRequestField, 'sensitivity'>): boolean =>
-  field.sensitivity === 'secret' || field.sensitivity === 'private';
 
 /**
- * Whether a card's target is kept from the ferret after the write at all: only for a `secret` or a `private` value.
- * A card of `plain` values and one-time `code`s gets no lock, no quarantine and no page hold.
+ * Whether a card's target is kept from the ferret after the write: NEVER (owner decision: no lock after an answer).
+ * Once the owner has answered, the ferret reads the terminal or the page at once, whatever the card held. What stays is
+ * value-level masking (the typed text is scrubbed from the ferret's reads), which blocks nothing else.
+ *
+ * DECLARED GAP (docs/input-requests.md, "Declared gaps"): a page or program that echoes a password in the clear is
+ * readable by the ferret straight after the write. Every lock, short lock and probe below is decided only for a card
+ * this returns true for, so none of it is reached.
  */
-export function heldFromView(fields: readonly Pick<InputRequestField, 'sensitivity'>[]): boolean {
-  return fields.some(HELD);
+export function heldFromView(_fields: readonly Pick<InputRequestField, 'sensitivity'>[]): boolean {
+  return false;
 }
 const FULL = (reason: InputLock['reason']): InputLock => ({ seconds: INPUT_QUARANTINE_SECONDS, reason });
 

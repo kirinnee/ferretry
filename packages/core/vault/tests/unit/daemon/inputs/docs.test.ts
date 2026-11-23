@@ -12,13 +12,22 @@ describe('docs/input-requests.md says what the bridge does and does not promise'
 
     should(DOC).not.containEql('Never reaches the agent, a log or disk');
     should(sensitivity).containEql('bridge never carries');
-    should(sensitivity).containEql('quarantine');
+    should(sensitivity).containEql('no lock after an answer');
     should(sensitivity).containEql('best effort');
   });
 
-  it('should open its promise as the bridge’s own, and name the window in which the pane is held back', () => {
+  it('should open its promise as the bridge’s own, and say nothing holds the target back after an answer', () => {
     should(DOC).containEql('The bridge itself never carries a `secret` value');
     should(DOC).containEql('It is **not** a promise that the value can never be read off the target');
+    should(DOC).containEql('no lock after an answer');
+  });
+
+  it('should declare the GAP: a page that echoes a password is readable by the ferret straight after an answer', () => {
+    should(DOC).containEql('### No lock after an answer');
+    should(DOC).containEql('Declared GAP: a page or program that echoes a password is now readable by the ferret');
+    should(DOC).containEql('Declared GAP: nothing is held from the ferret after an answer');
+    should(DOC).not.containEql('### The pane quarantine');
+    should(DOC).not.containEql('### How long the lock lasts');
   });
 
   it('should describe the risk flag instead of a refusal or a trust tick', () => {
@@ -41,9 +50,8 @@ describe('docs/input-requests.md says what the bridge does and does not promise'
     should(DOC).containEql('terminal_request_input');
   });
 
-  it('should describe unresolved holds and the one publication gate', () => {
-    should(DOC).containEql('A hold stays unresolved until its settlement is recorded');
-    should(DOC).containEql('ONE publication gate');
-    should(DOC).containEql('exactly the');
+  it('should say what stays after an answer: value masking, the pending-input rules and the restart replay lock', () => {
+    should(DOC).containEql('_Value masking_');
+    should(DOC).containEql('_The restart replay lock_');
   });
 });
