@@ -338,6 +338,8 @@ const stub = (id: string, screens: { id: string; path: string; label: string; or
   manifestOf(id, {
     ui: {
       screens: screens.map(s => ({ id: s.id, path: s.path, nav: { label: s.label, icon: s.icon, order: s.order } })),
+      // One settings tab each, so `?work=off` has Agenda's and Board's to leave out of the Settings list.
+      settings: [{ id: id, label: `${id[0]?.toUpperCase()}${id.slice(1)}`, order: 20, group: 'behaviour' }],
     },
   });
 
@@ -489,7 +491,11 @@ const grants = {
   steppedUp: false,
 };
 const transport = new FakeTransport((request: TransportRequest): TransportAnswer => {
-  if (request.path === '/v1/plugins') return json(inventoryOf(surfaces));
+  // `?work=off`: the daemon's work switch is off, so its inventory says Board and Agenda are `off`.
+  if (request.path === '/v1/plugins')
+    return json(
+      inventoryOf(surfaces, params.get('work') === 'off' ? { agenda: { on: false }, board: { on: false } } : {}),
+    );
   if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
   if (request.path === '/v1/grants') return json(grants);
   // `?host=unnamed`: the machine has no `host.yaml` name, so it goes by its host name (the "Name this machine" offer); `?host=named` has one.

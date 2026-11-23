@@ -55,6 +55,8 @@ describe('judgePlugin (the client guard, §9.6)', () => {
 
   it('should name the command that fixes each block', () => {
     should(pausedSentence({ ok: false, reason: 'off' }, 'Board', 'board', 'fy')).containEql('`fy plugin on board`');
+    // The work surfaces ride one switch, so an off one also says where it is.
+    should(pausedSentence({ ok: false, reason: 'off' }, 'Board', 'board', 'fy')).containEql('`work: on`');
     should(pausedSentence({ ok: false, reason: 'different' }, 'Board', 'board', 'fy')).containEql(
       '`fy daemon restart`',
     );

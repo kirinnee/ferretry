@@ -217,8 +217,23 @@ export function ShellProvider({
   const overrides = useSyncExternalStore(layouts.subscribe, layouts.snapshot);
   const served = useOwnerLayout(runtime);
   const owner = served?.layout;
-  const views = useMemo(() => viewsOf(runtime.surfaces), [runtime]);
-  const routes = useMemo(() => routeTable(views.screens.values()), [views]);
+  // What the owner is offered (nav, panels, the finder) leaves out a surface every paired daemon has turned off; the
+  // route table and the layout check keep every compiled surface, so a deep link still says "off" and a layout still checks.
+  const listedKey = useSyncExternalStore(runtime.subscribe, () =>
+    runtime
+      .listedSurfaces()
+      .map(entry => entry.id)
+      .join(','),
+  );
+  const everything = useMemo(() => viewsOf(runtime.surfaces), [runtime]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `listedKey` is the listing's value; it rebuilds the views when a surface goes on or off.
+  const views = useMemo<Views>(() => {
+    const listed = runtime.listedSurfaces();
+    return listed.length === runtime.surfaces.length
+      ? everything
+      : { ...viewsOf(listed), installed: everything.installed };
+  }, [runtime, everything, listedKey]);
+  const routes = useMemo(() => routeTable(everything.screens.values()), [everything]);
   const layout = useMemo(
     () => chooseLayout(layoutCandidates(owner, overrides), views.installed),
     [owner, overrides, views],

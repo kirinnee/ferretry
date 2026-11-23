@@ -93,7 +93,7 @@ function ShellCommandBar(props: {
       daemon === undefined || !props.open
         ? []
         : buildPluginCommandSources({
-            surfaces: runtime.surfaces,
+            surfaces: runtime.listedSurfaces(daemon),
             daemon,
             clientOf: plugin => runtime.client(daemon, plugin),
             navigate: href => router.navigate(href),
@@ -114,7 +114,7 @@ function ShellCommandBar(props: {
         routes,
         navigate: href => router.navigate(href),
       }),
-      settingsSource({ daemon, surfaces: runtime.surfaces, navigate: href => router.navigate(href) }),
+      settingsSource({ daemon, surfaces: runtime.listedSurfaces(daemon), navigate: href => router.navigate(href) }),
       deviceLayoutSource(owner ?? DEFAULT_LAYOUT, layouts),
       ...pluginSources,
     ],

@@ -62,7 +62,7 @@ export function pausedSentence(
     case 'missing':
       return `This daemon does not have ${title}: update the daemon, then try again (\`${binary} daemon restart\`).`;
     case 'off':
-      return `${title} is turned off: turn it on with \`${binary} plugin on ${id}\`.`;
+      return `${title} is turned off: turn it on with \`${binary} plugin on ${id}\`. The work surfaces come on together, with \`work: on\` in config/plugins.yaml.`;
     case 'different':
       return `${title} differs between ${binary} and the daemon: restart the daemon with \`${binary} daemon restart\`.`;
     case 'core':

@@ -262,7 +262,9 @@ describe('runFy', () => {
       inventory: inventoryOf({ id: 'board', on: false, contract: 'h-board' }),
     });
     should(await runFy(['task', 'show'], world)).equal(69);
-    should(io.stderr()).containEql('Board is turned off: turn it on with `fy plugin on board`.');
+    should(io.stderr()).containEql(
+      'Board is turned off: turn it on with `fy plugin on board`. The work surfaces come on together, with `work: on` in config/plugins.yaml.',
+    );
     should(transport.sent).deepEqual([]);
   });
 

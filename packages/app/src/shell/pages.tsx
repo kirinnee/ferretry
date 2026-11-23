@@ -166,9 +166,9 @@ export function DaemonSettingsPage({
   useRuntimeVersion(runtime);
   const paired = runtime.daemons.get(daemon);
   const online = runtime.online(daemon);
-  const tabs = runtime.surfaces.flatMap(entry =>
-    (entry.manifest.ui?.settings ?? []).map(setting => ({ plugin: entry.id, ...setting })),
-  );
+  const tabs = runtime
+    .listedSurfaces(daemon)
+    .flatMap(entry => (entry.manifest.ui?.settings ?? []).map(setting => ({ plugin: entry.id, ...setting })));
   tabs.sort((a, b) => a.order - b.order || a.plugin.localeCompare(b.plugin));
   // A tab is found by its plugin AND its own id; a plugin's first tab is what `settings/<plugin>` names, a bare tab id
   // names that tab, and a name nothing answers to is said so (never the first tab in its place).
