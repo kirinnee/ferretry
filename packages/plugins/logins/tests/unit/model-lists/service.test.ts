@@ -18,10 +18,12 @@ const DEEPSEEK = {
 
 class MemoryStore implements ModelListStore {
   readonly lists = new Map<string, ModelListView>();
+  failWrites = false;
   async read(loginId: string) {
     return this.lists.get(loginId);
   }
   async write(loginId: string, list: ModelListView) {
+    if (this.failWrites) throw new Error('disk full');
     this.lists.set(loginId, list);
   }
   async remove(loginId: string) {
@@ -285,6 +287,22 @@ describe('ModelListService', () => {
     should(first?.ids).eql(['deepseek-chat', 'deepseek-reasoner']);
     should(store.lists.get('deepseek')).eql(first);
     should(asked).eql([]);
+  });
+
+  it('should keep the last list, and not throw, when a list cannot be written', async () => {
+    // Arrange
+    const { service, store } = world([listed(DEEPSEEK), listed(DEEPSEEK)]);
+    await service.refresh('deepseek');
+    const before = store.lists.get('deepseek');
+    store.failWrites = true;
+
+    // Act
+    const refreshed = await service.refresh('deepseek', { force: true });
+    await service.record('deepseek', DEEPSEEK);
+
+    // Assert
+    should(refreshed.outcome).equal('kept');
+    should(store.lists.get('deepseek')).eql(before);
   });
 
   it('should drop a login’s list with the login', async () => {

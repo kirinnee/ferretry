@@ -62,4 +62,21 @@ describe('modelListRoutes', () => {
     should(String((strange as Error).message)).not.containEql('sk-nope');
     should(unknown).containDeep({ status: 404, code: 'fleet_credential_unknown' });
   });
+
+  it('should let an error that is not a refusal through, and refuse an empty login id', async () => {
+    // Arrange
+    const routes = modelListRoutes({
+      refresh: async () => {
+        throw new Error('the list service broke');
+      },
+    });
+
+    // Act / Assert
+    await call(routes, PATH, { path: '/v1/logins/deepseek/model-list/refresh', body: {} }).should.be.rejectedWith(
+      'the list service broke',
+    );
+    await call(routes, PATH, { path: '/v1/logins//model-list/refresh', body: {} }).should.be.rejectedWith(
+      'the login id in the path is not usable',
+    );
+  });
 });
