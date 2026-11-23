@@ -54,6 +54,7 @@ export function MoveToAnotherLogin({
           <Switch
             on={moving.enabled}
             label="Move the ferret to another login on"
+            shownLabel="On"
             onToggle={enabled => setMoving({ enabled })}
           />
         </div>

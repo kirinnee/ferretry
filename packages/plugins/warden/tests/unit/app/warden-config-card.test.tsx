@@ -66,7 +66,7 @@ const settle = async (): Promise<void> => {
 
 /** A config whose next state the test can drive by setting one field. */
 const turnOff = (renderer: ReactTestRenderer): void => {
-  run(() => renderer.root.findByProps({ 'aria-label': 'Warden on' }).props.onClick());
+  run(() => renderer.root.findByProps({ 'aria-label': 'Warden on' }).props.onChange({ target: { checked: false } }));
 };
 
 describe('jevKeyStatus', () => {
@@ -116,18 +116,18 @@ describe('WardenConfigCard', () => {
     // Arrange
     const saves: WardenConfigPatch[] = [];
     const renderer = render(<Harness base={view()} saves={saves} />);
-    expect(button(renderer, 'Save').props.disabled).toBe(true);
-    expect(json(renderer)).not.toContain('Discard changes');
+    expect(button(renderer, 'Save Warden settings').props.disabled).toBe(true);
+    expect(button(renderer, 'Discard changes').props.disabled).toBe(true);
 
     // Act
     turnOff(renderer);
-    run(() => button(renderer, 'Save').props.onClick());
+    run(() => button(renderer, 'Save Warden settings').props.onClick());
     run(() => button(renderer, 'Discard changes').props.onClick());
 
     // Assert
     expect(saves).toEqual([{ enabled: false }]);
-    expect(renderer.root.findByProps({ 'aria-label': 'Warden on' }).props['aria-checked']).toBe(true);
-    expect(button(renderer, 'Save').props.disabled).toBe(true);
+    expect(renderer.root.findByProps({ 'aria-label': 'Warden on' }).props.checked).toBe(true);
+    expect(button(renderer, 'Save Warden settings').props.disabled).toBe(true);
     run(() => renderer.unmount());
   });
 
@@ -141,7 +141,7 @@ describe('WardenConfigCard', () => {
     turnOff(renderer);
 
     // Assert
-    expect(button(renderer, 'Save').props.disabled).toBe(true);
+    expect(button(renderer, 'Save Warden settings').props.disabled).toBe(true);
     run(() => renderer.unmount());
   });
 
@@ -154,7 +154,7 @@ describe('WardenConfigCard', () => {
 
     // Assert
     expect(json(saving)).toContain('Saving…');
-    expect(json(saving)).not.toContain('Discard changes');
+    expect(button(saving, 'Discard changes').props.disabled).toBe(true);
     expect(json(saved)).toContain('Saved — in effect now.');
     expect(json(saved)).toContain('Loosened: confirm on the host.');
     expect(json(failed)).toContain('save refused');
@@ -215,7 +215,7 @@ describe('WardenConfigSurface', () => {
     expect(json(renderer)).toContain('codex-default');
     const link = renderer.root.findAll(node => node.type === 'a' && node.props.href === '/d/a/settings/voice/speedups');
     expect(link).toHaveLength(0);
-    run(() => renderer.root.findByProps({ 'aria-label': 'Warden on' }).props.onClick());
+    run(() => renderer.root.findByProps({ 'aria-label': 'Warden on' }).props.onChange({ target: { checked: false } }));
     run(() => renderer.unmount());
   });
 
@@ -347,7 +347,7 @@ describe('WardenConfigSurface', () => {
     // Act
     turnOff(renderer);
     await runAsync(async () => {
-      button(renderer, 'Save').props.onClick();
+      button(renderer, 'Save Warden settings').props.onClick();
       await Promise.resolve();
     });
     await settle();
@@ -356,7 +356,7 @@ describe('WardenConfigSurface', () => {
     expect(patches).toEqual([{ enabled: false }]);
     expect(json(renderer)).toContain('Saved — in effect now.');
     expect(json(renderer)).toContain('Noted.');
-    expect(button(renderer, 'Save').props.disabled).toBe(true);
+    expect(button(renderer, 'Save Warden settings').props.disabled).toBe(true);
     run(() => renderer.unmount());
   });
 
@@ -373,14 +373,14 @@ describe('WardenConfigSurface', () => {
     // Act
     turnOff(renderer);
     await runAsync(async () => {
-      button(renderer, 'Save').props.onClick();
+      button(renderer, 'Save Warden settings').props.onClick();
       await Promise.resolve();
     });
     await settle();
 
     // Assert
     expect(json(renderer)).toContain('save refused');
-    expect(renderer.root.findByProps({ 'aria-label': 'Warden on' }).props['aria-checked']).toBe(false);
+    expect(renderer.root.findByProps({ 'aria-label': 'Warden on' }).props.checked).toBe(false);
     run(() => renderer.unmount());
   });
 
@@ -402,7 +402,7 @@ describe('WardenConfigSurface', () => {
     const renderer = render(<Surface connection={connection('a')} createClient={createClient} />);
     await settle();
     turnOff(renderer);
-    run(() => button(renderer, 'Save').props.onClick());
+    run(() => button(renderer, 'Save Warden settings').props.onClick());
 
     // Act
     run(() => renderer.update(<Surface connection={connection('b')} createClient={createClient} />));
@@ -435,7 +435,7 @@ describe('WardenConfigSurface', () => {
     const renderer = render(<Surface connection={connection('a')} createClient={createClient} />);
     await settle();
     turnOff(renderer);
-    run(() => button(renderer, 'Save').props.onClick());
+    run(() => button(renderer, 'Save Warden settings').props.onClick());
 
     // Act
     run(() => renderer.update(<Surface connection={connection('b')} createClient={createClient} />));
@@ -478,7 +478,7 @@ describe('WardenConfigSurface', () => {
         <Surface connection={connection('a')} createClient={async () => daemon.make()} deps={daemon.depsOf(harness)} />,
       );
       await settle();
-      expect(switchOf(renderer).props['aria-checked']).toBe(true);
+      expect(switchOf(renderer).props.checked).toBe(true);
       expect(json(renderer)).toContain('needs Jev key');
 
       // Act
@@ -491,10 +491,10 @@ describe('WardenConfigSurface', () => {
 
       // Assert
       expect(daemon.state.reads).toBe(2);
-      expect(switchOf(renderer).props['aria-checked']).toBe(false);
+      expect(switchOf(renderer).props.checked).toBe(false);
       expect(json(renderer)).toContain('Edited on the host.');
       expect(json(renderer)).not.toContain('needs Jev key');
-      expect(json(renderer)).not.toContain('Discard changes');
+      expect(button(renderer, 'Discard changes').props.disabled).toBe(true);
       run(() => renderer.unmount());
     });
 
@@ -518,10 +518,10 @@ describe('WardenConfigSurface', () => {
       // Assert
       expect(daemon.state.reads).toBe(2);
       expect(json(renderer)).toContain('Loosened elsewhere.');
-      expect(switchOf(renderer).props['aria-checked']).toBe(false);
-      expect(button(renderer, 'Save').props.disabled).toBe(false);
+      expect(switchOf(renderer).props.checked).toBe(false);
+      expect(button(renderer, 'Save Warden settings').props.disabled).toBe(false);
       run(() => button(renderer, 'Discard changes').props.onClick());
-      expect(switchOf(renderer).props['aria-checked']).toBe(true);
+      expect(switchOf(renderer).props.checked).toBe(true);
       run(() => renderer.unmount());
     });
 
@@ -541,7 +541,7 @@ describe('WardenConfigSurface', () => {
 
       // Assert
       expect(daemon.state.reads).toBe(2);
-      expect(switchOf(renderer).props['aria-checked']).toBe(true);
+      expect(switchOf(renderer).props.checked).toBe(true);
       expect(json(renderer)).not.toContain('Warden settings unavailable');
       run(() => renderer.unmount());
     });

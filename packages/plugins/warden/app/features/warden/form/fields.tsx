@@ -6,7 +6,6 @@
 
 import { type ReactNode, useId } from 'react';
 import type { PickerAccount } from '../../../lib/account-picker.ts';
-import { cn } from '../../../ui.ts';
 import './warden-form.css';
 
 /** A login in the picker: its name, then the harness and the label the Runtimes tab shows for it. */
@@ -136,40 +135,35 @@ export function Segmented<T extends string | number>({
   );
 }
 
-/** An on/off switch: the track and its knob, and the word. */
+/**
+ * An on/off box that is SAVED WITH THE FORM. It is a checkbox, not a switch: a switch takes effect the moment it moves, and nothing here
+ * does until the Save bar is pressed (Material 3: a switch applies at once; Shopify: a checkbox is saved with its form). The visible
+ * words ARE its name, so it never floats at the edge of a card unlabelled.
+ */
 export function Switch({
   on,
   label,
+  shownLabel = label,
   onToggle,
 }: {
   readonly on: boolean;
+  /** Its accessible name. */
   readonly label: string;
+  /** The words drawn beside the box, when the card around it already names the thing ("On" in a card titled "Jev"). */
+  readonly shownLabel?: string;
   readonly onToggle: (next: boolean) => void;
 }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      onClick={() => onToggle(!on)}
-      className="-mx-2 flex min-h-[44px] shrink-0 items-center gap-sm rounded-control px-2 text-ui font-semibold text-fg"
-    >
-      <span
-        aria-hidden="true"
-        className={cn(
-          'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
-          on ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
-        )}
-      >
-        <span
-          className={cn(
-            'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg transition-transform',
-            on ? 'translate-x-[18px]' : 'translate-x-[2px]',
-          )}
-        />
-      </span>
-      {on ? 'On' : 'Off'}
-    </button>
+    // `.x.x` doubles the selector for the page-wide `.fy-page label` rule, as the other labels of this form do.
+    <label className="fy-wf-switch fy-wf-switch -mx-2 flex min-h-[44px] shrink-0 cursor-pointer items-center gap-sm rounded-control px-2 text-ui font-semibold text-fg">
+      <input
+        type="checkbox"
+        aria-label={label}
+        checked={on}
+        onChange={event => onToggle(event.target.checked)}
+        className="m-0 h-5 w-5 shrink-0 cursor-pointer"
+      />
+      {shownLabel}
+    </label>
   );
 }

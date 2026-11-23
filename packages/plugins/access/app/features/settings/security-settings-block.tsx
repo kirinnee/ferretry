@@ -24,7 +24,6 @@
 
 import { Loading } from '@ferretry/app/ui';
 import {
-  isSecuritySwitch,
   SECURITY_SETTING_BOUNDS,
   type SecuritySettingField,
   type SecuritySettingsPatch,
@@ -33,7 +32,7 @@ import {
   widensSecurity,
   widensWithPasskey,
 } from '@ferretry/core-gate/contract';
-import { SettingGroup, SettingRow, Segmented } from '@ferretry/app';
+import { SettingGroup, SettingRow, SettingSaveBar, Segmented } from '@ferretry/app';
 import { useEffect, useId, useState } from 'react';
 import type { DaemonConnection } from '../../shell-grants.ts';
 import { AccessTab, LabelledSwitch, Notice, StateBlock } from './access-kit.tsx';
@@ -59,14 +58,14 @@ import {
 type SecuritySettingsClientFactory = (connection: DaemonConnection) => Promise<SecuritySettingsClient>;
 
 /**
- * The order the design lists them in: each switch is followed by the number it governs. The change
+ * Two groups, because they save differently: the two switches take effect NOW; the numbers are one form with ONE Save bar.
+ * The numbers follow the order the design lists them in. The change
  * confirmation window is shown only while the machine asks per act, because with it off the number
  * governs nothing a person could see.
  */
-const rowsFor = (view: SecuritySettingsView): readonly SecuritySettingField[] => [
-  'unlockOnOpen',
+const SWITCH_FIELDS = ['unlockOnOpen', 'stepUpOnActions'] as const satisfies readonly SecuritySwitchField[];
+const numberFieldsFor = (view: SecuritySettingsView): readonly NumericSecuritySetting[] => [
   'unlockValidityHours',
-  'stepUpOnActions',
   ...(view.settings.stepUpOnActions ? (['stepUpWindowMinutes'] as const) : []),
   'deviceKeyRotationDays',
   'idleExpiryDays',
@@ -79,21 +78,10 @@ interface NumberRowProps {
   readonly draft: string | undefined;
   readonly busy: boolean;
   readonly onDraft: (draft: string) => void;
-  readonly onSave: (value: number) => void;
 }
 
-/** The id the "other value" segment carries when what is typed is not one of the common choices. */
-const CUSTOM_CHOICE = 'custom';
-
-/**
- * A number with its common choices: a `Segmented` for the presets, a number box, its unit, and Save once it differs from the
- * saved value. A preset only fills the box; Save sends it. The saved value, the bounds and any limit sit under the row.
- */
-function NumberRow({ field, view, draft, busy, onDraft, onSave }: NumberRowProps) {
-  const inputId = useId();
-  const noteId = useId();
-  const copy = SECURITY_SETTING_COPY[field];
-  const bounds = SECURITY_SETTING_BOUNDS[field];
+/** What one typed number comes to: changed or not, the number it parses to, and the sentence that stops or qualifies it. */
+function judgeNumber(field: NumericSecuritySetting, view: SecuritySettingsView, draft: string | undefined) {
   const current = view.settings[field];
   const dirty = draft !== undefined && draft !== String(current);
   const parsed = draft === undefined ? null : parseSettingDraft(field, draft);
@@ -109,6 +97,22 @@ function NumberRow({ field, view, draft, busy, onDraft, onSave }: NumberRowProps
       : withPasskey
         ? WIDEN_WITH_PASSKEY_SENTENCE
         : null);
+  return { current, dirty, parsed, outOfBounds, withPasskey, blocked, note };
+}
+
+/** The id the "other value" segment carries when what is typed is not one of the common choices. */
+const CUSTOM_CHOICE = 'custom';
+
+/**
+ * A number with its common choices: a `Segmented` for the presets, a number box and its unit. It is a FIELD of the Limits form: a
+ * preset only fills the box, and the form's one Save bar sends what changed. The saved value, the bounds and any limit sit under the row.
+ */
+function NumberRow({ field, view, draft, busy, onDraft }: NumberRowProps) {
+  const inputId = useId();
+  const noteId = useId();
+  const copy = SECURITY_SETTING_COPY[field];
+  const bounds = SECURITY_SETTING_BOUNDS[field];
+  const { current, outOfBounds, blocked, note } = judgeNumber(field, view, draft);
   const shown = draft ?? String(current);
   const presets = SECURITY_SETTING_PRESETS[field] ?? [];
   const onPreset = presets.some(value => String(value) === shown);
@@ -153,20 +157,6 @@ function NumberRow({ field, view, draft, busy, onDraft, onSave }: NumberRowProps
           <span className="text-meta text-muted" aria-hidden="true">
             {copy.unit?.many}
           </span>
-          {dirty ? (
-            <button
-              type="button"
-              className="kt-btn min-h-[44px]"
-              data-variant="primary"
-              data-security-save={field}
-              disabled={busy || parsed === null || blocked}
-              onClick={() => {
-                if (parsed !== null) onSave(parsed);
-              }}
-            >
-              Save
-            </button>
-          ) : null}
         </div>
       )}
     >
@@ -258,11 +248,15 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [formFailure, setFormFailure] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     let current = true;
     setLoaded({ kind: 'loading' });
     setDrafts({});
+    setFormFailure(null);
+    setSaved(false);
     setFailure(null);
     setNotice(null);
     void createClient(connection)
@@ -301,38 +295,63 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
 
   const { client, view } = loaded;
 
-  const save = async (patch: SecuritySettingsPatch, field: SecuritySettingField): Promise<void> => {
+  /** Sends one patch (a switch's one field, or every changed number of the form) and says what the machine now holds. */
+  const save = async (
+    patch: SecuritySettingsPatch,
+    fields: readonly SecuritySettingField[],
+    from: 'switch' | 'form',
+  ): Promise<void> => {
     setBusy(true);
     setFailure(null);
+    setFormFailure(null);
     setNotice(null);
+    setSaved(false);
     try {
       const change = await changeSecuritySettings(client, patch);
       setLoaded({ kind: 'ready', client, view: change.view });
-      setDrafts(({ [field as NumericSecuritySetting]: _saved, ...rest }) => rest);
-      const copy = SECURITY_SETTING_COPY[field];
-      const value = change.view.settings[field];
-      const now =
-        typeof value === 'boolean'
+      setDrafts(current =>
+        Object.fromEntries(Object.entries(current).filter(([key]) => !fields.includes(key as SecuritySettingField))),
+      );
+      const now = (field: SecuritySettingField): string => {
+        const value = change.view.settings[field];
+        return typeof value === 'boolean'
           ? value
             ? 'on'
             : 'off'
           : describeSettingValue(field as NumericSecuritySetting, value);
+      };
       setNotice(
-        [`${copy.label}: now ${now}.`, devicesExpiringSentence(change.devicesExpiring)]
+        [
+          ...fields.map(field => `${SECURITY_SETTING_COPY[field].label}: now ${now(field)}.`),
+          devicesExpiringSentence(change.devicesExpiring),
+        ]
           .filter((sentence): sentence is string => sentence !== null)
           .join(' '),
       );
+      if (from === 'form') setSaved(true);
     } catch (reason) {
+      const field = fields[0] ?? 'unlockOnOpen';
       const asked = (patch as Readonly<Record<string, string | number | boolean>>)[field];
-      setFailure(securityFailureSentence(reason, view.widenCommand, { field, value: asked ?? '' }));
+      const sentence = securityFailureSentence(reason, view.widenCommand, { field, value: asked ?? '' });
+      if (from === 'form') setFormFailure(sentence);
+      else setFailure(sentence);
     }
     setBusy(false);
   };
 
+  // The Limits form: what is typed, judged field by field; Save sends every changed number as ONE patch and stays off while any is refused.
+  const numberFields = numberFieldsFor(view);
+  const judged = numberFields.map(field => ({ field, ...judgeNumber(field, view, drafts[field]) }));
+  const changed = judged.filter(row => row.dirty);
+  const formBlocked = changed.some(row => row.parsed === null || row.blocked || row.outOfBounds !== null);
+  const formPatch = Object.fromEntries(
+    changed.flatMap(row => (row.parsed === null ? [] : [[row.field, row.parsed]])),
+  ) as SecuritySettingsPatch;
+
   return (
     <AccessTab name="security-settings">
       <div data-security-settings="">
-        <SettingGroup label="Security settings">
+        <SettingGroup label="Prompts" saves="now">
           {view.source === 'damaged' ? (
             <li className="min-w-0">
               <Notice tone="err" role="alert" marks={{ 'data-security-damaged': '' }}>
@@ -340,27 +359,56 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
               </Notice>
             </li>
           ) : null}
-          {rowsFor(view).map(field =>
-            isSecuritySwitch(field) ? (
-              <SwitchRow
-                key={field}
-                field={field}
-                view={view}
-                busy={busy}
-                onSave={value => void save({ [field]: value }, field)}
-              />
-            ) : (
-              <NumberRow
-                key={field}
-                field={field}
-                view={view}
-                draft={drafts[field]}
-                busy={busy}
-                onDraft={draft => setDrafts(current => ({ ...current, [field]: draft }))}
-                onSave={value => void save({ [field]: value }, field)}
-              />
-            ),
-          )}
+          {SWITCH_FIELDS.map(field => (
+            <SwitchRow
+              key={field}
+              field={field}
+              view={view}
+              busy={busy}
+              onSave={value => void save({ [field]: value }, [field], 'switch')}
+            />
+          ))}
+        </SettingGroup>
+        <SettingGroup
+          label="Limits"
+          saves="on-save"
+          foot={
+            <SettingSaveBar
+              dirty={changed.length > 0}
+              saving={busy}
+              saved={saved}
+              error={formFailure}
+              blocked={formBlocked}
+              saveLabel="Save limits"
+              saveMarks={{ 'data-security-save': 'form' }}
+              onSave={() =>
+                void save(
+                  formPatch,
+                  changed.map(row => row.field),
+                  'form',
+                )
+              }
+              onDiscard={() => {
+                setDrafts({});
+                setFormFailure(null);
+                setSaved(false);
+              }}
+            />
+          }
+        >
+          {numberFields.map(field => (
+            <NumberRow
+              key={field}
+              field={field}
+              view={view}
+              draft={drafts[field]}
+              busy={busy}
+              onDraft={draft => {
+                setSaved(false);
+                setDrafts(current => ({ ...current, [field]: draft }));
+              }}
+            />
+          ))}
         </SettingGroup>
         {notice === null ? null : (
           <Notice tone="info" role="status" marks={{ 'data-security-notice': '' }}>

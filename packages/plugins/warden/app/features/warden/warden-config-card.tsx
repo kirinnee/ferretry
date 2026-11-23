@@ -14,7 +14,7 @@ import { Loading } from '@ferretry/app/ui';
 import type { WardenAccount, WardenConfig, WardenConfigPatch, WardenConfigView } from '../../wire.ts';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { daemonSettingsHref } from '@ferretry/app';
+import { daemonSettingsHref, SettingSavesNote, SettingSaveBar } from '@ferretry/app';
 import { configChangeEffect } from '../../hooks/use-config-change-effect.ts';
 import { type PickerAccount, readAccountPickerCatalog } from '../../lib/account-picker.ts';
 import type { DaemonConnection } from '../../lib/machine.ts';
@@ -86,7 +86,15 @@ export function WardenConfigCard({
   const patch = wardenConfigPatchFrom(view.config, draft);
   const dirty = Object.keys(patch).length > 0;
   return (
-    <section aria-label="Warden settings" className="flex min-w-0 flex-col gap-3" data-testid="warden-config-card">
+    <section
+      aria-label="Warden settings"
+      className="flex min-w-0 flex-col gap-3"
+      data-testid="warden-config-card"
+      data-setting-group="Warden settings"
+      data-setting-saves="on-save"
+    >
+      {/* Every control here (the three on/off boxes too) is held until the ONE Save bar below is pressed. */}
+      <SettingSavesNote saves="on-save" />
       <WardenSettingsForm
         value={draft}
         onChange={onChange}
@@ -102,37 +110,17 @@ export function WardenConfigCard({
         {...(onUseStoredKey === undefined ? {} : { onUseStoredKey })}
         namingKey={namingKey}
       />
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          className="kt-btn min-h-[44px]"
-          data-variant="primary"
-          disabled={!dirty || saving || hasWardenFormErrors(errors)}
-          onClick={() => onSave(patch)}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-        {dirty && !saving && (
-          <button
-            type="button"
-            className="kt-btn min-h-[44px]"
-            data-variant="ghost"
-            onClick={() => onChange(view.config)}
-          >
-            Discard changes
-          </button>
-        )}
-        {saved && !dirty && error === null && (
-          <span role="status" className="text-meta text-ok">
-            Saved — in effect now.
-          </span>
-        )}
-      </div>
-      {error !== null && (
-        <p role="alert" className="m-0 text-ui text-err">
-          {error}
-        </p>
-      )}
+      <SettingSaveBar
+        dirty={dirty}
+        saving={saving}
+        saved={saved && error === null}
+        error={error}
+        blocked={hasWardenFormErrors(errors)}
+        saveLabel="Save Warden settings"
+        savedWords="Saved — in effect now."
+        onSave={() => onSave(patch)}
+        onDiscard={() => onChange(view.config)}
+      />
       {view.warnings.map(warning => (
         <p key={warning} className="m-0 text-ui text-warn">
           {warning}
