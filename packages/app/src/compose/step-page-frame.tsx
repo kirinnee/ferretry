@@ -78,15 +78,18 @@ export function StepPageFrame({ title, line, demo, children, back, next, later, 
       <section className="fy-spf" data-step-page="" aria-busy={next.busy === true || undefined}>
         <div className="fy-spf__page">
           {progress === undefined ? null : <StepProgress {...progress} />}
-          <header className="fy-spf__head">
-            <h1 className="fy-spf__title">{title}</h1>
-            {line === undefined ? null : <p className="fy-spf__line">{line}</p>}
-          </header>
-          <div className="fy-spf__main">
-            <div className="fy-spf__body">{children}</div>
+          {/* The pin holds the heading and the demo: on a phone a pinned demo (`<StepDemo pinned>`) keeps both on screen. */}
+          <div className="fy-spf__pin">
+            <header className="fy-spf__head">
+              <h1 className="fy-spf__title">{title}</h1>
+              {line === undefined ? null : <p className="fy-spf__line">{line}</p>}
+            </header>
             <aside className="fy-spf__demo" aria-hidden="true" data-step-demo="" ref={setSlot}>
               {demo}
             </aside>
+          </div>
+          <div className="fy-spf__main">
+            <div className="fy-spf__body">{children}</div>
           </div>
         </div>
         <footer className="fy-spf__footer" data-step-footer="">
