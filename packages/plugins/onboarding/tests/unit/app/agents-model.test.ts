@@ -18,7 +18,7 @@ import {
 } from '../../../app/features/agents/agents-model.ts';
 import { EMPTY_LEDGER, flattenFlow, type PairedDaemon } from '../../../app/lib/index.ts';
 import { ProviderPresetCatalogSchema } from '@ferretry/plugin-logins/contract';
-import realCatalog from '../../fixtures/provider-presets.json';
+import { REAL_PROVIDER_PRESET_CATALOG as realCatalog } from '@ferretry/plugin-logins/contract/testing';
 import {
   advance,
   answeredBefore,
@@ -207,8 +207,8 @@ describe('the flow hides the unpicked segments and records nothing', () => {
 });
 
 /**
- * The REAL catalog: `provider-presets.json` is `ProviderPresetService.catalog()` over the shipped built-in presets (logins
- * daemon), whole. Regenerate it with the service when a built-in preset changes. It names a harness the way the wire does
+ * The REAL catalog: Logins' `REAL_PROVIDER_PRESET_CATALOG` is `ProviderPresetService.catalog()` over the shipped built-in presets,
+ * whole, and Logins' own test (`real-presets.test.ts`) turns red when a shipped preset changes without it. It names a harness the way the wire does
  * (`claude-code`), which a hand-made catalog once got wrong without any test noticing.
  */
 describe('the provider list over the real catalog', () => {

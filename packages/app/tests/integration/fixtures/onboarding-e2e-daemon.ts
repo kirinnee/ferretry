@@ -8,9 +8,9 @@
  */
 import type { TransportAnswer, TransportRequest } from '../../../src/client/transport.ts';
 import { json } from '../../unit/client/fixtures.ts';
-// The REAL catalog (`ProviderPresetService.catalog()` over the shipped built-in presets); a copy of the Onboarding plugin's own
-// fixture, because a test reaches another package only through its contract.
-import PROVIDER_PRESETS from './provider-presets.json';
+// The REAL catalog (`ProviderPresetService.catalog()` over the shipped built-in presets): the ONE copy, held to the service by
+// Logins' own test, reached through Logins' contract/testing.
+import { REAL_PROVIDER_PRESET_CATALOG as PROVIDER_PRESETS } from '@ferretry/plugin-logins/contract/testing';
 import { answerFor } from './mobile-fake-daemon.ts';
 
 /** The fixed fake pairing code. It is not a real one and opens nothing. */

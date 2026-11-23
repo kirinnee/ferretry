@@ -11,7 +11,7 @@ import { bootRealDaemon, type RealDaemon } from './support/real-daemon.ts';
  * subscription, planted as state), and the push captured at the process boundary (`push-capture-preload.ts`: a request to a
  * push service host is answered and counted, nothing leaves the machine).
  *
- * The same journeys run with Agenda OFF (`config/plugins.yaml`) and ON, and must buzz the same: a `--buzz` notice exactly
+ * The same journeys run with Agenda OFF (`work` absent, the default) and ON (`work: on`), and must buzz the same: a `--buzz` notice exactly
  * once, a quiet notice and an ordinary `fy agenda add` not at all. A card's own ask buzzes through the same subscriber (the
  * host-level `ask-buzz.test.ts` in Access); a card's ask cannot be raised by a verb, so it is not repeated here.
  */
@@ -85,15 +85,11 @@ afterAll(async () => {
 });
 
 describe.each([
-  ['Agenda OFF', { 'config/plugins.yaml': 'plugins:\n  agenda: off\n' }],
-  ['Agenda ON', {}],
-] as const)('the phone buzz with %s', (_name, extra) => {
+  ['Agenda OFF (the default: work is off)', false],
+  ['Agenda ON (work: on)', true],
+] as const)('the phone buzz with %s', (_name, workOn) => {
   const booted = (async () => {
-    const daemon = await bootRealDaemon(
-      [{ id: 'f1', mode: 'auto' }],
-      { ...(await enrolment()), ...extra },
-      { preload: PRELOAD },
-    );
+    const daemon = await bootRealDaemon([{ id: 'f1', mode: 'auto' }], await enrolment(), { preload: PRELOAD, workOn });
     disposers.push(daemon.dispose);
     return daemon;
   })();

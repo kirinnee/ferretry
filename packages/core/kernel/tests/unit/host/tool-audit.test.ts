@@ -53,6 +53,7 @@ test('audited tool handlers report every settled outcome exactly once and skip c
   const outcome = await bootHost({
     home,
     version: '5.0.0',
+    enabled: () => true,
     adapters: realAdapters(home, () => {}, { binary: 'fy' }),
     implementations: [
       implementDaemon(

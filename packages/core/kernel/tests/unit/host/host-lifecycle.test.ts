@@ -91,7 +91,7 @@ async function world() {
       };
     },
   };
-  const options: HostOptions = { home, version: '5.0.0', implementations: [], adapters };
+  const options: HostOptions = { home, version: '5.0.0', implementations: [], adapters, enabled: () => true };
   return {
     home,
     fs,

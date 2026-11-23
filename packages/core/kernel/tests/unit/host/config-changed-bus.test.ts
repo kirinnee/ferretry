@@ -123,6 +123,7 @@ async function boot(rules: Rules) {
   const outcome = await bootHost({
     home,
     version: '5.0.0',
+    enabled: () => true,
     adapters: {
       ...realAdapters(home, record => void records.push(record), { binary: 'fy' }),
       clock: fixedClock(),

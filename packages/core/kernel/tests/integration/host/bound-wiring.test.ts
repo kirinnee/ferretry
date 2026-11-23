@@ -127,6 +127,7 @@ describe('decision 8: Gate checks ferret bearers through Ferrets (bearers:ferret
     const outcome = await bootHost({
       home,
       version: '5.0.0',
+      enabled: () => true,
       implementations: [gate(), ferrets({}), rogue],
       adapters: realAdapters(home, () => {}, { binary: 'fy' }),
     });

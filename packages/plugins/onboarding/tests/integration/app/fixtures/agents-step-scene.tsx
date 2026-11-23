@@ -1,7 +1,7 @@
 /**
  * The browser entry for the ONBOARDING "WHICH AI DO YOU WANT TO USE?" STEP over fake data (no daemon): the REAL `createAgentsPanel`
  * (what the setup flow mounts) drawn by the REAL `FlowPage` (cover, frame, footer). The one fake is the client, whose
- * `GET /v1/logins/presets` answers the REAL provider catalog (`tests/fixtures/provider-presets.json`: what the shipped built-in
+ * `GET /v1/logins/presets` answers the REAL provider catalog (Logins' `REAL_PROVIDER_PRESET_CATALOG`, held to the service by Logins' own test: what the shipped built-in
  * presets say, with the harness ids the wire carries).
  *
  *   ?theme=<family>-<mode>   the first look (the mode is read from it)
@@ -15,7 +15,7 @@ import { createRoot } from 'react-dom/client';
 import { createAgentsPanel } from '../../../../app/features/agents/agents-panel.tsx';
 import { FlowPage } from '../../../../app/features/setup-flow/page-frame.tsx';
 import type { FlowStep } from '../../../../app/lib/index.ts';
-import PROVIDER_PRESETS from '../../../fixtures/provider-presets.json';
+import { REAL_PROVIDER_PRESET_CATALOG as PROVIDER_PRESETS } from '@ferretry/plugin-logins/contract/testing';
 
 const params = new URLSearchParams(window.location.search);
 const first = params.get('theme') ?? 'studio-light';
