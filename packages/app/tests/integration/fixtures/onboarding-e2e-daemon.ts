@@ -10,6 +10,7 @@ import type { TransportAnswer, TransportRequest } from '../../../src/client/tran
 import { json } from '../../unit/client/fixtures.ts';
 // The REAL catalog (`ProviderPresetService.catalog()` over the shipped built-in presets): the ONE copy, held to the service by
 // Logins' own test, reached through Logins' contract/testing.
+import { FakeAccounts } from './onboarding-e2e-accounts.ts';
 import { REAL_PROVIDER_PRESET_CATALOG as PROVIDER_PRESETS } from '@ferretry/plugin-logins/contract/testing';
 import { answerFor } from './mobile-fake-daemon.ts';
 
@@ -45,6 +46,7 @@ const CLAUDE = [
   ['conversations', 'Conversations', 28],
   ['import-run', 'Bring it over', 29],
   ['permission', 'Permissions', 30],
+  ['ready', 'Your runtime', 31],
 ] as const;
 const CODEX = [
   ['installed', 'Install Codex', 40],
@@ -58,6 +60,7 @@ const CODEX = [
   ['conversations', 'Conversations', 48],
   ['import-run', 'Bring it over', 49],
   ['permission', 'Permissions', 50],
+  ['ready', 'Your runtime', 51],
 ] as const;
 
 const stepsOf = (plugin: string, rows: readonly (readonly [string, string, number])[], group: string): FakeStep[] =>
@@ -128,6 +131,9 @@ export class FakeDaemon {
   /** The Warden's layers in effect: a new machine has both off. */
   layers = { jev: false, llm: false };
 
+  /** The machine's logins and the runtimes they make: none at the start (O9-6), so each pick's sign-in is what creates its runtime. */
+  readonly accounts = new FakeAccounts();
+
   constructor(readonly machine: FakeMachine) {}
 
   view(): unknown {
@@ -136,7 +142,11 @@ export class FakeDaemon {
       stepHost: true,
       state: this.states.get(`${step.plugin}.${step.id}`) ?? 'pending',
     }));
-    return { steps, complete: steps.every(step => step.state !== 'pending'), setUp: true };
+    const harnesses = [
+      { key: 'claude-code', label: 'Claude Code' },
+      { key: 'codex', label: 'Codex' },
+    ];
+    return { steps, harnesses, complete: steps.every(step => step.state !== 'pending'), setUp: true };
   }
 
   answer(
@@ -158,6 +168,8 @@ export class FakeDaemon {
 
   private own(request: TransportRequest): TransportAnswer | undefined {
     if (request.method === 'GET' && request.path === '/v1/onboarding') return json(this.view());
+    const account = this.accounts.answer(request);
+    if (account !== undefined) return account;
     // "Which AI do you want to use?" lists the provider catalog: the REAL one (the shipped built-in presets, as
     // `GET /v1/logins/presets` answers them), so the picker is walked over the harness ids the wire really carries.
     if (request.method === 'GET' && request.path === '/v1/logins/presets') return json(PROVIDER_PRESETS);

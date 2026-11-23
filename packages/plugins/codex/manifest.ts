@@ -43,6 +43,7 @@ const CODEX_STEPS = [
   { id: 'conversations', title: 'Conversations', order: 48, group: 'Codex', stepHost: true },
   { id: 'import-run', title: 'Bring it over', order: 49, group: 'Codex', stepHost: true },
   { id: 'permission', title: 'Permissions', order: 50, group: 'Codex', stepHost: true },
+  { id: 'ready', title: 'Your runtime', order: 51, group: 'Codex', stepHost: true, informational: true },
 ] as const;
 
 /** The panel id that draws one step's body. */

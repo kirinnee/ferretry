@@ -31,12 +31,23 @@ const step = (state: 'pending' | 'found' | 'done') => ({
 });
 
 /** One machine's Onboarding client: `GET /v1/onboarding` answers these step states (or fails). */
-function machineClient(daemon: string, state: 'pending' | 'found' | 'done' | 'fails', setUp = false) {
+function machineClient(
+  daemon: string,
+  state: 'pending' | 'found' | 'done' | 'fails' | 'finished-with-new-ready',
+  setUp = false,
+) {
   const calls: string[] = [];
   const client = {
     call: async (route: string) => {
       calls.push(route);
       if (state === 'fails') throw new Error('unreachable');
+      // A finished setup an upgrade gave a tool's Ready step: it reads pending, and the daemon still says complete.
+      if (state === 'finished-with-new-ready')
+        return {
+          steps: [step('done'), { ...step('pending'), plugin: 'claude-code', id: 'ready', order: 31 }],
+          complete: true,
+          setUp: true,
+        };
       return { steps: [step(state)], complete: state !== 'pending', setUp };
     },
     subscribe: () => () => {},
@@ -130,6 +141,14 @@ describe('m2 a just-paired machine opens its steps page by itself', () => {
 
   it('opens nothing when the machine has nothing left to look at', async () => {
     const b = machineClient(B, 'found');
+    const { harness, went } = await open([]);
+    await pairNow(harness, [B], [fakeReachRow({ daemon: B, client: b.client })]);
+    expect(b.calls).toEqual(['GET /v1/onboarding']);
+    expect(went).toEqual([]);
+  });
+
+  it('O9-6 pairing a new device to a finished machine never opens setup for the Ready step an upgrade added', async () => {
+    const b = machineClient(B, 'finished-with-new-ready');
     const { harness, went } = await open([]);
     await pairNow(harness, [B], [fakeReachRow({ daemon: B, client: b.client })]);
     expect(b.calls).toEqual(['GET /v1/onboarding']);
