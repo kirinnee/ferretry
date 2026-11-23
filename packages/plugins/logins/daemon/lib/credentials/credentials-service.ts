@@ -522,6 +522,11 @@ export interface FleetCredentialsServiceDeps {
    * list is shared only by the callers that ask while it is being made.
    */
   readonly listCache?: CredentialListCache;
+  /**
+   * The runtimes to show per login, once the list's rows exist (`LoginUsers.listed`: files plus the runtimes derived from
+   * ready logins). Absent, or throwing: each row keeps the runtimes the files name.
+   */
+  shownUsers?(logins: readonly LoginView[]): Promise<Readonly<Record<string, readonly string[]>>>;
 }
 
 /** The list's short keep: a clock, and how long a made list is answered again. */
@@ -629,10 +634,18 @@ export class FleetCredentialsService {
   ): Promise<LoginList> {
     const emails = await this.#emails(entries);
     const environment = await this.#environmentFacts(entries);
-    const credentials: LoginView[] = [];
-    for (const entry of entries) {
-      const view = await this.deps.status.view(subjectOf(entry), options);
-      credentials.push(this.#row(entry, view, emails, entries, environment));
+    const views = new Map<string, CredentialStatusView>();
+    for (const entry of entries) views.set(entry.id, await this.deps.status.view(subjectOf(entry), options));
+    const rowsOf = (shown: readonly CredentialEntry[]): LoginView[] =>
+      shown.map(entry => this.#row(entry, views.get(entry.id) as CredentialStatusView, emails, shown, environment));
+    let credentials = rowsOf(entries);
+    // Which runtimes use a login is what `runtime ls` shows: the files' runtimes plus the ones derived from ready logins,
+    // which depend on these very rows. So Runtimes is handed the rows, and the rows are made again with its answer.
+    try {
+      const users = (await this.deps.shownUsers?.(credentials)) ?? {};
+      credentials = rowsOf(entries.map(entry => ({ ...entry, usedBy: [...(users[entry.id] ?? entry.usedBy)].sort() })));
+    } catch {
+      // Runtimes cannot say: the rows keep what the files name.
     }
     return LoginListSchema.parse({ format, machine: this.deps.machineName(), logins: credentials });
   }

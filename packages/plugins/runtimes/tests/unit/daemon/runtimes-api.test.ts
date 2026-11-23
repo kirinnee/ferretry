@@ -4,6 +4,7 @@ import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import type { ProfileFile, RuntimeFile } from '../../../contract/index.ts';
 import { stableSuffix } from '../../../daemon/lib/account/derived-runtimes.ts';
+import { loginUsers } from '../../../daemon/lib/service/login-users.ts';
 import { createRuntimesApi, type RuntimesApiDeps } from '../../../daemon/lib/service/runtimes-api.ts';
 
 const NOW = Date.parse('2026-11-08T12:00:00Z');
@@ -372,6 +373,28 @@ describe('createRuntimesApi — adding an account makes its runtime (runtimes pl
     should(resolvedAfter).containDeep({ ok: false, refusal: 'unknown' });
     should(survivor.ok).be.true();
     if (survivor.ok) should(survivor.runtime.login).equal('work-2');
+  });
+
+  it('should say a ready login with no runtime file is used by its derived runtime, and one that is not ready by none', async () => {
+    // Arrange — the files hold no runtime; one login is ready, one needs sign-in (so derives none)
+    const logins = [
+      loginView({ id: 'claude-you' }),
+      loginView({ id: 'codex-you', harness: 'codex', word: 'needs_sign_in' }),
+    ];
+    const rig = api({ runtimes: {}, logins });
+    const users = loginUsers(
+      () => new Map(),
+      undefined,
+      async handed => await rig.listFor(handed),
+    );
+
+    // Act
+    const shown = await users.listed?.(logins);
+
+    // Assert — the same names `list` (runtime ls) gives; a removal's `of` still names only files
+    should((await rig.list()).map(summary => summary.id)).deepEqual(['claude-you']);
+    should(shown).deepEqual({ 'claude-you': ['claude-you'], 'codex-you': [] });
+    should(await users.of('claude-you')).deepEqual([]);
   });
 
   it('should run a login that drives both CLIs on the first one installed here', async () => {

@@ -305,7 +305,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
       const { config, events, clock } = ctx.kernel;
       const assembly = assemble(ctx);
 
-      const api = createRuntimesApi({
+      const { listFor, ...api } = createRuntimesApi({
         runtimes: () => config.collection(runtimeItems),
         profiles: () => config.collection(profileItems),
         defaultSetting: () => config.file(runtimesFile)?.defaultRuntime,
@@ -628,6 +628,8 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
               if (assembly.catalog.runtimesAfterLoginChange === undefined) throw new Error('no preview here');
               return await assembly.catalog.runtimesAfterLoginChange(change);
             },
+            // What "Used by" shows is the list `runtime ls` shows: the files plus the runtimes derived per ready login.
+            listFor,
           ),
           // Whether an automatic resume may spend (W2-a): the switch, then the ferret's runtime, each a no when in doubt.
           'auto-resume.decide': autoResumeAnswer({

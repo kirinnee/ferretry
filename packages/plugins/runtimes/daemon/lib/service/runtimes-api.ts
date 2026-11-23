@@ -90,9 +90,13 @@ function activeBlock(
 const phrase = (block: { readonly reason?: string; readonly until?: string }): string =>
   `switched off${block.reason === undefined ? '' : ` (${block.reason})`}${block.until === undefined ? '' : ` until ${block.until}`}`;
 
-export function createRuntimesApi(
-  deps: RuntimesApiDeps,
-): Omit<RuntimesApi, keyof RuntimeHomesApi | keyof RuntimeLayersApi | keyof RuntimeFactsApi> {
+export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
+  RuntimesApi,
+  keyof RuntimeHomesApi | keyof RuntimeLayersApi | keyof RuntimeFactsApi
+> & {
+  /** The list `list` gives, made from logins the caller already holds (so it never asks Logins for the list it is part of). */
+  listFor(logins: readonly LoginView[]): Promise<readonly RuntimeSummary[]>;
+} {
   type Read = { readonly summary: RuntimeSummary } | { readonly refusal: Extract<ResolveResult, { ok: false }> };
 
   /** The files' runtimes and profile names with the ones derived from ready logins beside them (`derived-runtimes.ts`). */
@@ -161,8 +165,7 @@ export function createRuntimesApi(
     };
   };
 
-  const all = async (): Promise<readonly Read[]> => {
-    const logins = await loginsById(deps.logins);
+  const all = async (logins: ReadonlyMap<string, LoginView>): Promise<readonly Read[]> => {
     const now = deps.now();
     const { runtimes, hasProfile } = await effective(logins);
     return [...runtimes]
@@ -170,8 +173,10 @@ export function createRuntimesApi(
       .map(([name, file]) => read(name, file, logins, now, hasProfile));
   };
 
-  const summaries = async (): Promise<readonly RuntimeSummary[]> =>
-    (await all()).flatMap(entry => ('summary' in entry ? [entry.summary] : []));
+  const summariesOf = async (logins: ReadonlyMap<string, LoginView>): Promise<readonly RuntimeSummary[]> =>
+    (await all(logins)).flatMap(entry => ('summary' in entry ? [entry.summary] : []));
+
+  const summaries = async (): Promise<readonly RuntimeSummary[]> => await summariesOf(await loginsById(deps.logins));
 
   const defaultRuntime = async (): Promise<RuntimeId | undefined> => {
     const named = deps.defaultSetting();
@@ -190,6 +195,7 @@ export function createRuntimesApi(
 
   return {
     list: summaries,
+    listFor: async logins => await summariesOf(new Map(logins.map(login => [login.id, login]))),
     get: async id => (await summaries()).find(summary => summary.id === id),
     default: defaultRuntime,
     resolve: async (id): Promise<ResolveResult> => {
