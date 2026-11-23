@@ -111,7 +111,7 @@ export type SavedListing = Pick<AccountList, 'accounts' | 'signIns'>;
  * The sign-ins the daemon matched to this target's key: EXACT, a page by where a sign-in signs in (its login domains),
  * a terminal by its `tool@host` key. One account has at most one here: (account, place) is unique in the store.
  */
-export function signInsAt(matchKey: string | undefined, listing: SavedListing): readonly SignInSummary[] {
+function signInsAt(matchKey: string | undefined, listing: SavedListing): readonly SignInSummary[] {
   return matchedSignIns(matchKey, listing.signIns);
 }
 

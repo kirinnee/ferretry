@@ -84,7 +84,7 @@ const PAGE_RAISE = {
 const PAGE_DEV: TargetRef = { kind: 'page' as TargetKind, key: 'page-1' };
 
 describe('no lock after an answer (I3, I70)', () => {
-  it('I3 an answered secret card lets the ferret, the owner’s tools and the viewer read the terminal at once', async () => {
+  it('an answered secret card lets the ferret, the owner’s tools and the viewer read the terminal at once', async () => {
     // Arrange — a program the daemon has not proven hides typing: before, this was the full 120 s.
     const { service, quarantine, id, digest, request } = await raised({ facts: UNPROVEN });
     const holds = new InputHoldsOverService(service, quarantine, () => NOW);
@@ -103,7 +103,7 @@ describe('no lock after an answer (I3, I70)', () => {
     should(service.quarantines(HOST, SESSION)).eql([]);
   });
 
-  it('I3 an answered password on a page lets the ferret read, script and picture it at once, and never probes it', async () => {
+  it('an answered password on a page lets the ferret read, script and picture it at once, and never probes it', async () => {
     // Arrange
     let probed = 0;
     const { service, quarantine, id, digest, request } = await raised(
@@ -135,7 +135,38 @@ describe('no lock after an answer (I3, I70)', () => {
     should(service.quarantines(HOST, SESSION)).eql([]);
   });
 
-  it('I70 masking still hides the value as typed but is not what blocks reading: a transformed value shows, the pane is readable', async () => {
+  it('I98 a script the ferret ran on the card’s page or site no longer earns a lock: nothing is locked or probed', async () => {
+    // Arrange — an observer that says the ferret steered the page (a script ran on it)
+    let probed = 0;
+    const { service, quarantine, id, digest, request } = await raised(
+      {
+        facts: PAGE,
+        steered: () => true,
+        probe: async () => {
+          probed += 1;
+          return 'hidden';
+        },
+      },
+      PAGE_RAISE,
+    );
+    const holds = new InputHoldsOverService(service, quarantine, () => NOW);
+
+    // Act
+    await service.deliver(
+      SESSION,
+      id,
+      { ...send(digest), padded: undefined, fields: [{ field: 'password', padded: padInputValue(VALUE) }] } as never,
+      HOST,
+    );
+    await holds.prepare(PAGE_DEV, 'read', 'ferret');
+
+    // Assert
+    should(request.lock).be.undefined();
+    should(probed).equal(0);
+    should(holds.decide(PAGE_DEV, 'read', 'ferret')).equal('allow');
+  });
+
+  it('masking still hides the value as typed but is not what blocks reading: a transformed value shows, the pane is readable', async () => {
     // Arrange
     const { service, quarantine, values, id, digest } = await raised({ facts: UNPROVEN });
     const holds = new InputHoldsOverService(service, quarantine, () => NOW);

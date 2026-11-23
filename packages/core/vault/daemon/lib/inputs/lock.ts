@@ -268,12 +268,6 @@ export function lockFor(
   return FULL('first-time');
 }
 
-/** What a card's lock says about the raise-time probe, so a later look at the same card cannot unsay it. */
-export function probeOutcomeOf(lock: InputLock | undefined): 'shown' | 'aborted' | undefined {
-  if (lock?.reason === 'probe-shown') return 'shown';
-  return lock?.reason === 'probe-stopped' ? 'aborted' : undefined;
-}
-
 /**
  * Attributes that say a field takes a code or a PIN, where a wrong attempt can count: never probed. The agent picks a
  * field's sensitivity, so a `type=password` PIN it called `secret` is caught here, by what the page says it is.

@@ -360,8 +360,9 @@ of blindness after every password, on every sign-in).
   no hold, so no input's `lock` is ever set, the agent's view carries no `lockSeconds`, and the input shows no
   "Hidden from the ferret" line or timer.
 - **Reads are allowed at once**, for the ferret and for the owner's tools and viewer: `terminal.read`,
-  `terminal.wait`, the viewer stream, and a page's text, script, console, network and picture reads. The owner has no
-  quarantine to end or reveal (`GET .../input-quarantines` lists none).
+  `terminal.wait`, the viewer stream, and a page's text, script, console, network and picture reads.
+  `GET .../input-quarantines` lists none. Only a hold an older daemon left in its journal is still restored on start
+  and can still be ended or revealed by the owner (`POST .../input-quarantines/:key/end`, "Show anyway", both audited).
 - **A sign-in plan or rule fill** that types a password into a page still has that field emptied shortly before the
   redaction window ends (the browser's own cleanup, armed before the write). That cleanup holds nothing from the ferret.
 - **What still applies:**
@@ -376,8 +377,9 @@ of blindness after every password, on every sign-in).
   that prints it differently, is shown. Before this change the quarantine was the boundary behind the mask; there is
   none now. The ferret may also read a password a page echoes in the clear. The owner accepted this to remove
   the post-answer wait.
-- **Not restored:** the old adaptive lock (10 s / 120 s by what the daemon proved) and its reasons. The wire still has
-  an optional `lock` field and `lockSeconds`; they are never set.
+- **Gone:** the old adaptive lock (10 s / 120 s by what the daemon proved), its reasons, the raise-time dummy probe, the
+  page hold that followed its document, and the live-lock estimate on a pending input. The wire still has an optional
+  `lock` field and `lockSeconds`; they are never set.
 
 The daemon holds each delivered `secret` in RAM, for the window above, and masks it as
 `[redacted:input ^A7]` wherever it scrubs text: the operator's screen, transcript and journal reads,

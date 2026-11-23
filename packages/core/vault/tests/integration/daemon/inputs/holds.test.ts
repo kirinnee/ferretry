@@ -201,7 +201,7 @@ describe('the observer view, once a script has run on a page', () => {
 describe('no lock after an answer, through the real input path (adapters, service and hold decider)', () => {
   const HOST = { kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' } as const;
 
-  it('I3 should let the ferret read the terminal at once after an answered secret card', async () => {
+  it('should let the ferret read the terminal at once after an answered secret card', async () => {
     const adapter = new FakeInputTarget('terminal', 'dev');
     const target = new TerminalTargetThroughHook(() => adapter) as unknown as InputTargetPort;
     const { service, quarantine } = inputRequestService({ target });
@@ -230,7 +230,7 @@ describe('no lock after an answer, through the real input path (adapters, servic
     should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
   });
 
-  it('I3 should let the ferret read, script and picture the page at once after an answered password card', async () => {
+  it('should let the ferret read, script and picture the page at once after an answered password card', async () => {
     const adapter = new FakeInputTarget('page', 'page-1');
     const target = new PageTargetThroughHook(() => adapter) as unknown as InputTargetPort;
     const { service, quarantine } = inputRequestService({ target });
