@@ -2,7 +2,7 @@ import type { Credential } from '../shared/credential.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
 import type { LoginId, LoginTestCode, LoginTestResult } from '../../../contract/index.ts';
 import type { AuthorizedOutcome } from '@ferretry/core-vault/contract';
-import { planProviderProbe } from './plan.ts';
+import { planProviderProbe, type ProviderProbePlan } from './plan.ts';
 import type { ProviderProbeClock, ProviderProbePort } from './ports.ts';
 
 /**
@@ -61,7 +61,19 @@ export function probeCode(outcome: AuthorizedOutcome): LoginTestCode {
 export interface ProviderProbeServiceParts {
   readonly probe: ProviderProbePort;
   readonly clock: ProviderProbeClock;
+  /**
+   * A Test (or a list read) that asked a model list and got a body: hand it on to be kept as ids. The body is the
+   * provider's reply and is never logged or returned; the callee reads the ids and drops it. Must not throw.
+   */
+  readonly onModelList?: (loginId: string, payload: unknown) => Promise<void>;
 }
+
+/** A model list is asked at a path ending `/models` (every provider's list endpoint); a quota or key read is not one. */
+const MODEL_LIST_PATH = /\/models\/?$/u;
+
+/** Whether a plan is one free read of a model list. */
+const asksModelList = (plan: ProviderProbePlan): boolean =>
+  plan.kind === 'authorized' && plan.spends === 'nothing' && MODEL_LIST_PATH.test(new URL(plan.request.url).pathname);
 
 /** One login to test: its id, what it is, and the preset it was made from. */
 export interface ProviderProbeSubject {
@@ -108,8 +120,26 @@ export class ProviderProbeService {
     if (plan.spends === 'one-token' && !consent.allowInference) return result('consent_required', 'nothing');
     const outcome = await this.parts.probe.probe(plan);
     const code = probeCode(outcome);
+    // The Test of a provider whose Test IS its model list keeps the ids from that same reply: no second request.
+    if (outcome.kind === 'completion' && asksModelList(plan)) {
+      await this.parts.onModelList?.(subject.id, outcome.payload).catch(() => undefined);
+    }
     // A refusal, a missing secret or a damaged store sent nothing; anything else reached the provider.
     const sent = !['refused', 'not_set', 'vault_damaged'].includes(code);
     return result(code, sent ? plan.spends : 'nothing', PROVIDER_TEST_MESSAGES[code], sent);
+  }
+
+  /**
+   * The model-list reply of an environment login whose Test is a free read of the provider's model list: the parsed body,
+   * for the list service to read the ids from. `undefined` for every login that has no such read (a sign-in, a preset
+   * with no key, a Test that is a quota read or an inference, a refusal), and for any answer that is not a 2xx body: the
+   * caller keeps the list it had. Nothing is spent, and the body goes no further than the caller.
+   */
+  async listModels(subject: ProviderProbeSubject): Promise<{ readonly payload: unknown } | 'failed' | undefined> {
+    if (subject.credential.store !== 'environment' || subject.preset === undefined) return undefined;
+    const plan = planProviderProbe(subject.preset, subject.credential);
+    if ('reason' in plan || !asksModelList(plan)) return undefined;
+    const outcome = await this.parts.probe.probe(plan);
+    return outcome.kind === 'completion' ? { payload: outcome.payload } : 'failed';
   }
 }

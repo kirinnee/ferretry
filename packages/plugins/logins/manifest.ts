@@ -16,6 +16,7 @@ import {
   LOGINS_CONFIG,
   LOGINS_CREDENTIALS,
   LOGINS_MODELS,
+  LOGINS_MODEL_LISTS,
   LOGINS_PASSIVE_ASSIGNMENTS,
   LOGINS_READ_MODELS,
   LOGINS_WORDS,
@@ -158,6 +159,15 @@ export default definePlugin({
         noStore: true,
         audit: { skip: 'a read' },
         guard: { none: 'labels, model ids and tiers only' },
+      }),
+      // "Refresh list" and a picker's open: one read of a login's own model list, with its key on that one request to that one host.
+      route('POST /v1/logins/:loginId/model-list/refresh', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('fleet', 'use'),
+        noStore: true,
+        audit: { skip: 'the Vault records every use of the key itself (secrets.used); a refresh spends nothing' },
+        guard: { none: 'model ids only; no key, price or provider body has a field' },
       }),
       route('POST /v1/models/refresh', {
         minimum: 'operator',
@@ -336,7 +346,7 @@ export default definePlugin({
     private: ['credentials'],
   },
   data: {
-    state: [LOGINS_CREDENTIALS, LOGINS_MODELS, LOGINS_PASSIVE_ASSIGNMENTS],
+    state: [LOGINS_CREDENTIALS, LOGINS_MODELS, LOGINS_MODEL_LISTS, LOGINS_PASSIVE_ASSIGNMENTS],
     config: [LOGINS_CONFIG, ENDPOINTS_CONFIG, MODELS_CONFIG],
     readModels: LOGINS_READ_MODELS,
     publishes: [LoginSignedIn, LoginChanged, ModelsChanged],

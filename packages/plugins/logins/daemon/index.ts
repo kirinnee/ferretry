@@ -23,7 +23,7 @@ import {
   LoginSignedIn,
   ModelsChanged,
 } from '../contract/index.ts';
-import { HostedModelCatalog, StateModelCatalogCache } from './adapters/models/index.ts';
+import { HostedModelCatalog, StateModelCatalogCache, StateModelListStore } from './adapters/models/index.ts';
 import { spendHostsOf, spendableHosts, spendSecretOf } from './lib/credentials/spend-secret.ts';
 import { AuthorizedProviderProbe, BoundedTransport } from './adapters/provider-probe/index.ts';
 import { deliverCodexCallback } from './adapters/harness-login/callback-delivery.ts';
@@ -59,6 +59,8 @@ import { LoginChangeService } from './lib/changes/service.ts';
 import { changeRoutes } from './lib/routes/changes.ts';
 import { loginRoutes } from './lib/routes/logins.ts';
 import { modelRoutes } from './lib/routes/models.ts';
+import { modelListRoutes } from './lib/routes/model-lists.ts';
+import { ModelListService } from './lib/model-lists/service.ts';
 import { signInRoutes } from './lib/routes/sign-in.ts';
 import { HOSTED_APP_ORIGIN, HOSTED_APP_RELEASE_KEY } from './lib/shared/hosted.ts';
 import { endpointFiles, loginFiles, modelFiles } from './lib/config.ts';
@@ -142,6 +144,28 @@ export function buildLoginsDaemon() {
       const providerProbe = new ProviderProbeService({
         probe,
         clock: { monotonicMs: () => clock.nowMs(), now: () => clock.now() },
+        onModelList: (loginId, payload) => modelLists.record(loginId, payload),
+      });
+      // Each login's live model list: read when somebody's act causes it (Add login, Test, a picker open past a day,
+      // "Refresh list"), never on a timer. Ids only, in `state/logins/model-lists/`.
+      const modelLists: ModelListService = new ModelListService({
+        store: new StateModelListStore(state),
+        now: () => clock.now(),
+        nowMs: () => clock.nowMs(),
+        read: async id => {
+          const entry = await catalog.entry(id).catch(() => undefined);
+          if (entry === undefined) return undefined;
+          const preset =
+            entry.credential.preset === undefined
+              ? undefined
+              : (await presetService.presets()).find(candidate => candidate.id === entry.credential.preset);
+          const answer = await providerProbe.listModels({ id, credential: entry.credential, preset });
+          if (answer === undefined) return undefined;
+          return answer === 'failed' ? { kind: 'none' } : { kind: 'listed', payload: answer.payload };
+        },
+        onChanged: async () => {
+          events.publish(ModelsChanged, {});
+        },
       });
 
       // ── logins ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -336,6 +360,7 @@ export function buildLoginsDaemon() {
         models: modelsView,
         modelPrices: async () => modelPriceCatalogs(await catalogs.catalogs()),
         modelSources: async () => modelCatalogSourcesView(await catalogs.sources()),
+        modelLists: () => modelLists.all(),
       };
 
       /**
@@ -434,6 +459,10 @@ export function buildLoginsDaemon() {
           if (JSON.stringify(before) === JSON.stringify(after)) continue;
           const change = before === undefined ? 'added' : after === undefined ? 'removed' : 'edited';
           events.publish(LoginChanged, { loginId: id as LoginId, change });
+          // Add login (and an edit that may have moved its address or key) reads the provider's model list once; a removed
+          // login's list goes with it. A refresh never throws and a provider that is down keeps the last list.
+          if (change === 'removed') void modelLists.forget(id);
+          else void modelLists.refresh(id, { force: true });
         }
         inEffect = next;
       });
@@ -465,6 +494,12 @@ export function buildLoginsDaemon() {
             if (quotas !== 'unavailable') await quotas.watch().catch(() => undefined);
           }),
           ...changeRoutes(changes),
+          ...modelListRoutes({
+            refresh: async (id, options) => {
+              await catalog.entry(id); // a login this machine does not have is a 404
+              return await modelLists.refresh(id, options);
+            },
+          }),
           ...modelRoutes({
             view: modelsView,
             refresh: () => published.refresh(true),

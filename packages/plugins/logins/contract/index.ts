@@ -16,6 +16,7 @@ import {
 import type { AuthorizedOutcome, CredentialPlacement, OutboundHttpRequest } from '@ferretry/core-vault/contract';
 import { z } from 'zod';
 import { configDef } from './config-def.ts';
+import type { ModelListView } from './model-list.ts';
 import {
   BUDGET_PERIODS,
   type EndpointFile,
@@ -48,6 +49,7 @@ import {
 } from './wire.ts';
 
 export * from './wire.ts';
+export * from './model-list.ts';
 export * from './slots.ts';
 export * from './env-import.ts';
 export { hasTokenShape, nameLooksLikeKey, storedEnvironmentIssue } from './secret-shape.ts';
@@ -105,6 +107,11 @@ export interface LoginsApi {
    * server found: what Runtimes derives each runtime's models from. Public catalog data only; no login, key or value.
    */
   modelSources(): Promise<ModelCatalogSourcesView>;
+  /**
+   * The live model list each login last read from its provider, by login id (ids only; see `model-list.ts`). Held lists
+   * only: no network, no refresh. A login with none is absent.
+   */
+  modelLists(): Promise<Readonly<Record<string, ModelListView>>>;
   /**
    * Puts ONE login's own key on ONE request to a host it names, and returns only what came back (Usage's quota read).
    * The caller names the LOGIN and the variable that carries its key, never a secret: Logins resolves the secret from

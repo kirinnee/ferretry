@@ -417,6 +417,43 @@ models too, so `/model` in a Codex session offers what Ollama has, not the two s
 A read that changes what a runtime offers republishes the fleet (as a newer catalog does); one that does not
 changes nothing.
 
+## Live model list
+
+An environment login whose provider documents a model list also keeps **the ids that list returned for this
+key**, so a picker can say which curated models the key lacks and which models the catalog has not reviewed yet
+(that picker is a later change; this section is the daemon half).
+
+**Reading.** The request is the one a login's **Test** already sends, through the Vault's `authorizeFetch`: the
+Vault puts the key on that one request to that one host and returns only the body. Logins never holds the key.
+Only a Test that is **a free read at a path ending `/models`** is a model list (Anthropic, OpenAI, Azure OpenAI,
+DeepSeek, Kimi, LiteLLM and a custom gateway today); a Test that reads a quota, a key or sends one message is
+never read as a list, so a balance can never be taken for models. Three reply shapes are read, each as the
+provider documents it: Anthropic's `{ data: [{ id }], has_more }` (also MiniMax's Anthropic-compatible
+`/anthropic/v1/models`), OpenAI-style `{ object: "list", data: [{ id }] }`, and Gemini's
+`{ models: [{ name: "models/<id>" }], nextPageToken }`.
+
+**What is kept.** Ids only, in `state/logins/model-lists/<login>.json`: the ids (an id that is not one word of
+the catalog's grammar is dropped, at most 2,000 are kept), when they were read, and `complete`. `complete: false`
+means the provider paged or the list was cut, so an id missing from it proves nothing. No name, price, owner,
+header, key or body is kept, logged or returned. A reply that is not a model list (an error status, `[]`, a
+page that is HTML, a map) is **never stored** and the last list stands.
+
+**When it reads.** Only when somebody's act causes it — never on a timer:
+
+- **Add login** (and an edit of one): once, when the login's file appears or changes.
+- **Test**: the same reply is kept, with no second request.
+- **A picker opens and the list is older than 24 hours**: `POST /v1/logins/:loginId/model-list/refresh` with `{}`
+  reads only when due and otherwise answers from the held list.
+- **"Refresh list"**: the same route with `{ "force": true }`. (It is not "Update now", which moves a runtime's
+  pinned default; a list refresh **never moves a default or a pin**.)
+
+Callers that arrive while a read of the same login is under way share one request. Offline or a provider that is
+down keeps the last list and answers `kept`: an answer, never an error. The route is `fleet.use`; the Vault records
+each use of the key itself (`secrets.used`). A removed login's list is deleted with it.
+
+`LoginsApi.modelLists()` hands the held lists (by login id, no network) to Runtimes; `ModelsChanged` is published
+when a stored list differs from the one before it.
+
 ## Declared gaps
 
 - **Only Ollama on this machine is detected.** Another host (a GPU box on the network) is refused, not
