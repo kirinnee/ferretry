@@ -1339,22 +1339,11 @@ function fixedLayerView(
   resolved: ResolvedProfile | undefined,
   facts: CatalogFacts,
 ): { readonly view?: FixedLayerView; readonly refusal?: string } {
+  const shared = { agentPermissions: model.machine.agentPermissions, cwd: VIEW_FOLDER, fyCommand: VIEW_FY_COMMAND };
   const result = byHarness<ReturnType<typeof fixedLayerFor>>(harness, {
     claude: () =>
-      fixedLayerFor({
-        harness: 'claude',
-        agentPermissions: model.machine.agentPermissions,
-        cwd: VIEW_FOLDER,
-        acceptsAutoPermissionMode: facts.acceptsAutoPermissionMode,
-        fyCommand: VIEW_FY_COMMAND,
-      }),
-    codex: () =>
-      fixedLayerFor({
-        harness: 'codex',
-        agentPermissions: model.machine.agentPermissions,
-        cwd: VIEW_FOLDER,
-        fyCommand: VIEW_FY_COMMAND,
-      }),
+      fixedLayerFor({ harness: 'claude', ...shared, acceptsAutoPermissionMode: facts.acceptsAutoPermissionMode }),
+    codex: () => fixedLayerFor({ harness: 'codex', ...shared }),
   });
   if (!result.ok) return { refusal: result.refusal.message };
   const fixed = result.layer;
