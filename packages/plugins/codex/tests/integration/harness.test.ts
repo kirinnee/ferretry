@@ -13,6 +13,22 @@ import { codexCompactPrompt, tomlString, tomlTables } from '../../daemon/lib/ind
 import { CODEX_LAUNCH_SETTINGS, CODEX_SETTINGS } from '../../contract/index.ts';
 import { CODEX_QUESTIONS_FEATURE, CODEX_QUESTIONS_OFF, codexFixedArguments } from '../../daemon/lib/fixed-layer.ts';
 import { selectEverything } from '../support/selected.ts';
+import { fastLaunchVerified } from '../../daemon/lib/fast-mode.ts';
+import type { RuntimeModelChoice } from '../../daemon/lib/models.ts';
+
+const choice = (value: string, extra: Partial<RuntimeModelChoice> = {}): RuntimeModelChoice => ({
+  value,
+  label: value,
+  reasoningEfforts: [],
+  ...extra,
+});
+
+/** The held catalog a launch's priority tier is verified against: one default with a fast tier, one with none, one unsaid. */
+const HELD: readonly RuntimeModelChoice[] = [
+  choice('gpt-fast', { isDefault: true, fast: true }),
+  choice('gpt-plain', { fast: false }),
+  choice('gpt-unsaid'),
+];
 
 const FERRET = 'f1' as FerretId;
 const HOME = '/state/codex/agent-homes/f1' as FencedPath;
@@ -73,6 +89,8 @@ const harnessOver = (
   settings?: Record<string, unknown>,
   /** The settings items (`config/codex/settings/`) in the config, with any launch flags they carry. */
   items: ReadonlyMap<string, unknown> = new Map(),
+  /** The held catalog the launch's priority tier is verified against (absent: none is held). */
+  held: readonly RuntimeModelChoice[] | null = HELD,
 ) => {
   const { written, privateDirectories, roots } = fakeRoots();
   /** The launch-settings records the launches wrote, in order. */
@@ -101,6 +119,7 @@ const harnessOver = (
       } as never,
     },
     ...(permissionMode === undefined ? {} : { permissionMode: () => permissionMode }),
+    fastVerified: async model => fastLaunchVerified(model, held ?? undefined),
     locate: async () => location,
     probe: {
       version: async () => ({ state: 'ok', version: '0.145.0' }),
@@ -207,6 +226,27 @@ describe('the Codex harness', () => {
       should(tiers(standard ?? [])).eql(['service_tier="default"']);
       should(tiers(unsetWithOptions ?? [])).eql([]);
       should(tiers(unset ?? [])).eql([]);
+    });
+
+    it('priority goes on the argv ONLY for a model the held catalog verified fast (#35): any other launch passes nothing', async () => {
+      const argvFor = async (model: string | undefined, held: readonly RuntimeModelChoice[] | null) => {
+        const { harness } = harnessOver(LOCATED, undefined, undefined, new Map(), held);
+        const { runner, seen } = fakeRunner();
+        await harness.start(
+          specOf({ ...(model === undefined ? {} : { model }), options: { fast: true } }),
+          runner,
+          ENV,
+        );
+        return tiers(seen[0]?.spec.command ?? []);
+      };
+
+      should(await argvFor('gpt-fast', HELD)).eql(['service_tier="priority"']);
+      should(await argvFor(undefined, HELD)).eql(['service_tier="priority"']); // the held default has a fast tier
+      should(await argvFor('gpt-plain', HELD)).eql([]); // listed without one
+      should(await argvFor('gpt-unsaid', HELD)).eql([]); // listed, nobody can say
+      should(await argvFor('gpt-elsewhere', HELD)).eql([]); // not listed at all
+      should(await argvFor('gpt-fast', null)).eql([]); // no catalog held
+      should(await argvFor(undefined, [choice('gpt-fast', { fast: true })])).eql([]); // implicit model, no held default
     });
 
     it('a resume carries the recorded fast mode too, so a revived ferret keeps what it started with', async () => {
@@ -520,5 +560,18 @@ describe('SIT: a fake codex binary sees the fast tier a start and a revive were 
     should(plain?.some(word => word.startsWith('service_tier'))).be.false();
     should(plainRevived?.some(word => word.startsWith('service_tier'))).be.false();
     should(flipped?.filter(word => word.startsWith('service_tier'))).eql(['service_tier="default"']);
+  });
+
+  it('passes no priority tier to a revive whose model the held catalog does not verify, however fast was recorded', async () => {
+    const { binary, folder } = await fakeCodex();
+    const { harness } = harnessOver({ ...LOCATED, path: binary });
+    const runner = spawning();
+
+    await harness.resume(specOf({ model: 'gpt-plain', options: { fast: true } }), runner, ENV, 'conv-1');
+    await harness.resume(specOf({ model: 'gpt-elsewhere', options: { fast: true } }), runner, ENV, 'conv-1');
+
+    const [plain, elsewhere] = await Promise.all([0, 1].map(async n => await argvOf(folder, n)));
+    should(plain?.some(word => word.startsWith('service_tier'))).be.false();
+    should(elsewhere?.some(word => word.startsWith('service_tier'))).be.false();
   });
 });

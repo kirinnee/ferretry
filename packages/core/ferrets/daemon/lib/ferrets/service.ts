@@ -6,7 +6,7 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { applicableInstructions, sectionDigests } from './launch-sections.ts';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { openHarness } from './harness-facade.ts';
-import { launchOptions } from './launch-options.ts';
+import { type DecidedFast, decideResume, launchFastOf, launchOptions } from './launch-options.ts';
 import type { FerretsCore } from './core.ts';
 import { compactAt, setCompactAt } from './compact-at.ts';
 import { agentControl, effectiveLimits, revokeToken, turnUsage } from './insights.ts';
@@ -512,6 +512,7 @@ interface LaunchExtras {
   readonly attached?: readonly OpeningFile[] | undefined;
   readonly carried?: ResumeOptions['onCarried'] | undefined;
   readonly notInWardenTree?: true | undefined;
+  readonly fast?: DecidedFast | undefined;
 }
 
 /**
@@ -1616,18 +1617,24 @@ export class FerretsService implements FerretsApi {
     // this binding held, which a folder already swapped into the state home satisfies.
     const bound = await this.bindLaunchFolder(retargeted.folder, options.origin, found.birth);
     if (!bound.ok) return bound;
-    const decision = await this.ports.decide({
-      ferret,
-      name: retargeted.name,
-      role: retargeted.role,
-      ...(retargeted.parent === undefined ? {} : { parent: retargeted.parent }),
-      ...(retargeted.pack === undefined ? {} : { pack: retargeted.pack }),
-      harness: retargeted.harness,
-      ...(retargeted.runtime === undefined ? {} : { runtime: retargeted.runtime }),
-      ...(retargeted.login === undefined ? {} : { login: retargeted.login }),
-      folder: retargeted.folder,
-      by: 'resume',
-    });
+    const { decision, fast } = await decideResume(
+      input => this.ports.decide(input),
+      {
+        ferret,
+        name: retargeted.name,
+        role: retargeted.role,
+        ...(retargeted.parent === undefined ? {} : { parent: retargeted.parent }),
+        ...(retargeted.pack === undefined ? {} : { pack: retargeted.pack }),
+        harness: retargeted.harness,
+        ...(retargeted.runtime === undefined ? {} : { runtime: retargeted.runtime }),
+        ...(retargeted.login === undefined ? {} : { login: retargeted.login }),
+        folder: retargeted.folder,
+        by: 'resume',
+      },
+      target === undefined
+        ? { live: this.ports.session?.launchFast?.(ferret), recorded: this.registry.detailsOf(ferret)?.options }
+        : undefined,
+    );
     if (!decision.allow) return refusedBy(decision);
     if (replacing) {
       const ready = await this.launchable(retargeted);
@@ -1666,7 +1673,7 @@ export class FerretsService implements FerretsApi {
             mode: launchMode(starting.mode),
             ...(author === undefined ? {} : { by: author }),
           },
-      { carried: options.onCarried, bound: bound.value },
+      { carried: options.onCarried, bound: bound.value, fast: { value: fast } },
     );
     if (resumed.ok && options.noTurn !== true) {
       const text = message?.trim();
@@ -2125,7 +2132,7 @@ export class FerretsService implements FerretsApi {
     revive?: ReviveTurnRequest,
     extras: LaunchExtras = {},
   ): Promise<Result<FerretId, StartFailure>> {
-    const { attached = [], carried, notInWardenTree, bound } = extras;
+    const { attached = [], carried, notInWardenTree, bound, fast } = extras;
     const created = new Set<RunnerHandle>();
     let runner: Runner | undefined;
     let failure: StartFailure;
@@ -2150,7 +2157,7 @@ export class FerretsService implements FerretsApi {
           return typeof value === 'function' ? value.bind(target) : value;
         },
       });
-      const result = await this.launchAttempt(record, prompt, conversation, tracked, bound, said);
+      const result = await this.launchAttempt(record, prompt, conversation, tracked, bound, said, fast);
       // A RESUME with no conversation to resume starts a new one just as a missing one does, and is said the same way: a
       // ferret that silently forgot everything (proof run 8, a converted Codex ferret) is the defect this names.
       if (kind === 'resume' && conversation === undefined) said.conversationUnknown = true;
@@ -2246,6 +2253,7 @@ export class FerretsService implements FerretsApi {
     runner: Runner,
     bound: BoundLaunchFolder | undefined,
     said: LaunchSaid = {},
+    decidedFast?: DecidedFast,
   ): Promise<Result<FerretId, StartFailure>> {
     this.requireTokens();
     if (await this.isCutOff(record.id))
@@ -2288,7 +2296,7 @@ export class FerretsService implements FerretsApi {
       ...(record.login === undefined ? {} : { login: record.login }),
       // Set from the login only, never by a launch part: the spec field has no other writer.
       ...(credential.value === undefined ? {} : { credential: credential.value }),
-      ...launchOptions(this.registry.detailsOf(record.id)?.options, liveFast),
+      ...launchOptions(this.registry.detailsOf(record.id)?.options, launchFastOf(decidedFast, liveFast)),
       ...(mode === undefined ? {} : { mode }),
       ...(ownCompactAt === undefined ? {} : { compactAt: ownCompactAt }),
       folder: record.folder as FencedPath,

@@ -42,6 +42,11 @@ export interface CodexHarnessOptions {
   readonly update: HarnessUpdateSubsystem & { settled(): Promise<void> };
   /** Changing a running ferret's model, effort or fast mode (`Harness.runtimeSwitch`); absent: it cannot be switched live. */
   readonly runtimeSwitch?: (pane: RuntimeSwitchPane) => HarnessRuntimeSwitch;
+  /**
+   * Whether a launch on this model (absent: the default one) may carry the paid priority tier: the held catalog lists it
+   * with a fast tier. Absent, nothing is verified and a launch never passes priority.
+   */
+  readonly fastVerified?: (model: string | undefined) => Promise<boolean>;
 }
 
 export type CodexHarness = Harness & { readonly credentials: CodexCredentialLinks };

@@ -6,7 +6,8 @@ import type { ObservedSession } from '../lib/moves/outcome-render.ts';
 import { handOffJobs, handoverMessage, type JobsMovePorts, markJobsTold } from '../lib/moves/jobs-move.ts';
 import type { MovePreflight } from '../lib/moves/preflight-service.ts';
 import type { MoveReportStore } from '../lib/moves/report-store.ts';
-import { SessionConfigSchema, type SessionView } from '../lib/protocol/session.ts';
+import { SessionConfigSchema, SessionStateSchema, type SessionView } from '../lib/protocol/session.ts';
+import { currentLaunchFast } from '../lib/session/launch/index.ts';
 import { SessionMoveError, type SessionMoveSubsystem } from '../lib/runtime/mounts/session-move.ts';
 import { ResumeRefused } from '../lib/session/resume/index.ts';
 import type { ResumeOutcome, ResumeRequest } from '../lib/session/resume/service.ts';
@@ -86,7 +87,7 @@ export interface RestartNeeds {
 
 /** What a Restart is run from: the move's own closures, handed in so this file imports nothing from the module that calls it. */
 export interface RestartContext {
-  readonly storage: Pick<DaemonStorage, 'append' | 'updateConfig'>;
+  readonly storage: Pick<DaemonStorage, 'append' | 'readState' | 'updateConfig'>;
   readonly clock: Pick<Clock, 'now'>;
   readonly reports: MoveReportStore;
   readonly preflight: MovePreflight;
@@ -100,6 +101,18 @@ export interface RestartContext {
   readonly refused: (report: InflightReport, decision: GateDecision) => Promise<void>;
   readonly view: (when: string) => Promise<SessionView>;
   readonly observed: () => Promise<ObservedSession | undefined>;
+}
+
+/**
+ * The fast mode a Restart keeps, as the one field it writes: what `currentLaunchFast` says the session is ON, read against
+ * the decision as it stood before this restamp. Nothing when the documents say none or cannot be read.
+ */
+function currentFastOf(config: Readonly<Record<string, unknown>>, state: unknown): { launchFast?: boolean } {
+  const parsedConfig = SessionConfigSchema.safeParse(config);
+  const parsedState = SessionStateSchema.safeParse(state);
+  if (!parsedConfig.success || !parsedState.success) return {};
+  const fast = currentLaunchFast(parsedConfig.data, parsedState.data);
+  return fast === undefined ? {} : { launchFast: fast };
 }
 
 /** A session's moves before this one, oldest first: its `moves` list. A malformed entry is dropped, not thrown. */
@@ -163,6 +176,7 @@ export async function restartInPlace(
     ...(config.model === undefined ? {} : { model: config.model }),
     handle: record.handle,
     conversation,
+    keepFast: true,
     // A Restart restamps only the bookkeeping: the runtime, model, effort and login are the ones it is already on.
     restamp: retained => retained,
   });
@@ -178,6 +192,12 @@ export interface RelaunchShape {
   /** The pane the gate looks at: the relaunch refuses, writing nothing, if the registry's handle is not this one by then. */
   readonly handle: string | undefined;
   readonly conversation: RestartConversation;
+  /**
+   * A Restart stays on the same runtime and model, so the fast mode the session is ON now (an owner's `/fast off` the
+   * harness reported) is folded into the record BEFORE the move stamp makes that newer report look old. Absent for a move
+   * onto another login, which drops the fast mode with the rest of the previous login's launch record.
+   */
+  readonly keepFast?: true;
   /** The target a MOVE relaunches on (see {@link RestartRelaunch.onto}); absent for a Restart. */
   readonly onto?: RestartRelaunch['onto'];
   /** What the move writes onto the session document beside the bookkeeping, over the document as it stands. */
@@ -232,11 +252,13 @@ export async function relaunchInPlace(
   // document is restamped, which happens only once everything that can refuse without launching has passed (`committed`).
   let recordBefore: Readonly<Record<string, unknown>> | undefined;
   const restamp = async (): Promise<void> => {
+    const state = shape.keepFast === true ? await ctx.storage.readState(id).catch(() => undefined) : undefined;
     await ctx.storage.updateConfig(id, current => {
       const retained = jsonObject(current) ?? {};
       recordBefore = retained;
       return {
         ...shape.restamp(retained),
+        ...currentFastOf(retained, state),
         // THE INTENT RIDES IN THIS SAME WRITE: config.json and the record are two files, so a crash after this write and
         // before the record is retargeted leaves them disagreeing. The next boot reads this and puts config.json back.
         [MOVE_INTENT_KEY]: moveIntentOf(retained, { from, to: agent, at }),
