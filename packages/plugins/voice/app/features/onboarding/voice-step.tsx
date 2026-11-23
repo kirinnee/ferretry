@@ -13,6 +13,8 @@
  *     Voice does) and answers the step. A pick equal to what the device already holds saves nothing.
  *   - Choosing never downloads. A card's own Install button does, and while it runs the step is busy (`busy(label)`), so
  *     Next waits for it.
+ *   - "Test your audio" (`voice-test.tsx`) is the step that asks for the microphone and lets the person record a line, see it
+ *     transcribed by the pick, and hear a sample read aloud. It changes nothing and is never needed to go on.
  *   - The list is short on purpose: this device's default first, then the fastest, a balanced one, the browser's own and
  *     Off. "Show every engine" (a disclosure, not a button) opens the whole catalog, the same cards Settings › Voice draws.
  */
@@ -20,13 +22,15 @@
 import { StepDemo } from '@ferretry/app';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SttSettings, SttSettingsPatch } from '../../lib/stt/stt-settings.ts';
-import type { BrowserRecognitionSupport } from '../../lib/stt/browser-recognition.ts';
+import type { BrowserRecognitionProvider, BrowserRecognitionSupport } from '../../lib/stt/browser-recognition.ts';
 import { DEFAULT_ON_DEVICE_ENGINE, type DeviceClass } from '../../lib/stt/engine-defaults.ts';
 import { ON_DEVICE_MODELS, type OnDeviceModel, type OnDeviceModelId } from '../../lib/stt/model-catalog.ts';
 import type { OnDeviceVoices } from '../../lib/stt/on-device-voices.ts';
 import { EngineCardGrid, type EngineChoice } from '../engine-card/engine-card-grid.tsx';
 import type { StepHost } from '@ferretry/kernel/contract';
+import type { MicPort } from './mic-permission.ts';
 import { VoiceDemo } from './voice-demo.tsx';
+import { VoiceTest } from './voice-test.tsx';
 import { useStepReady } from './use-step-ready.ts';
 import './voice-step.css';
 
@@ -56,11 +60,25 @@ export interface VoiceStepProps {
    */
   persisted?(): boolean;
   readonly step?: StepHost | undefined;
+  /** The browser's own recognizer, for testing the "Browser voice" pick (`null`: it cannot be tested here). */
+  readonly browserProvider?: BrowserRecognitionProvider | null | undefined;
+  /** The microphone's permission. Left out, the page's own; suites and shots hand a fake. */
+  readonly mic?: MicPort | undefined;
 }
 
 const NOT_KEPT = 'This device would not keep that choice. Allow site storage for this page, then press Next again.';
 
-export function VoiceStep({ settings, update, voices, browserSupport, deviceClass, persisted, step }: VoiceStepProps) {
+export function VoiceStep({
+  settings,
+  update,
+  voices,
+  browserSupport,
+  deviceClass,
+  persisted,
+  step,
+  browserProvider,
+  mic,
+}: VoiceStepProps) {
   useStepReady(step);
   const [all, setAll] = useState(false);
   const saved = choiceOf(settings);
@@ -110,6 +128,8 @@ export function VoiceStep({ settings, update, voices, browserSupport, deviceClas
       >
         <summary>{all ? 'Show fewer engines' : 'Show every engine'}</summary>
       </details>
+      {/* Keyed by the pick: a new pick starts a new test, so what the last engine heard is never shown under this one. */}
+      <VoiceTest key={pick ?? 'none'} pick={pick} voices={voices} browserProvider={browserProvider} mic={mic} />
       <StepDemo>
         <VoiceDemo pick={pick} />
       </StepDemo>

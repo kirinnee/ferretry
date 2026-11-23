@@ -123,19 +123,19 @@ describe('RuntimeModelStore', () => {
     should(store(caches, network(SERVED).fetch, bundle('a', MODEL_A)).totalBytes).equal(250);
   });
 
-  it('installs the runtime first, then the model, as one progress stream that ends at the total', async () => {
+  it('installs the runtime and the model side by side, as one progress stream that ends at the total', async () => {
     const caches = new MemoryCaches();
     const { fetch, asked } = network(SERVED);
     const a = store(caches, fetch, bundle('a', MODEL_A));
     const seen: ModelInstallProgress[] = [];
     await a.install({ onProgress: progress => seen.push(progress) });
-    should(asked).eql(['/assets/runtime.wasm', 'https://models.test/a/encoder']);
+    should([...asked].sort()).eql(['/assets/runtime.wasm', 'https://models.test/a/encoder']);
     should(seen.every(progress => progress.totalBytes === 250)).be.true();
     const downloaded = seen.map(progress => progress.downloadedBytes);
     should(downloaded).eql([...downloaded].sort((x, y) => x - y));
     should(downloaded.at(-1)).equal(250);
     should(seen.some(progress => progress.label === 'runtime')).be.true();
-    should(seen.at(-1)?.label).equal('encoder');
+    should(seen.some(progress => progress.label === 'encoder')).be.true();
     should(await a.status()).eql({ state: 'installed', version: 'a · 1', bytes: 250, installedAt: NOW.toISOString() });
   });
 

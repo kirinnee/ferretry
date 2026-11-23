@@ -72,6 +72,11 @@ multilingual), as the int8 ONNX export
 - **Progress, Cancel, Resume.** Files are stored in 32 MiB parts, each with the hash state so far
   (`lib/stt/parakeet-store.ts`). Cancel keeps every finished part; Resume continues with an HTTP `Range`
   request from the first missing byte.
+- **Side by side.** The files of one bundle download at most three at a time (`FILE_CONCURRENCY` in
+  `lib/stt/model-store.ts`), and a model's runtime and its model files download together
+  (`runtime-model-store.ts`), so peak memory is at most three 32 MiB parts. Progress counts each file's own bytes once, so it only
+  moves forward. One failed file stops the others (what they finished is kept) and its error is the one shown; the status check
+  reads every file at once.
 - **Kept in this browser** in the Cache Storage cache `fy-stt-parakeet-v1`. **Remove** deletes it and
   unloads the model. Browsers may still clear site data when they need room (Safari after about seven
   days without a visit); the status then reads "not installed" and Install starts again.
