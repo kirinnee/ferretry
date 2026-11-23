@@ -9,6 +9,7 @@ import { Badge } from '@ferretry/app';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
   AI_CHOICES,
+  type Found,
   type Pick,
   type Provider,
   SUPPORTED_HARNESSES,
@@ -37,6 +38,7 @@ function Row({
   checked,
   disabled,
   badge,
+  found,
   onChange,
   children,
   name,
@@ -46,6 +48,8 @@ function Row({
   readonly checked: boolean;
   readonly disabled?: boolean;
   readonly badge?: string;
+  /** What was found on this computer for this row (the scan read it; nothing is written). */
+  readonly found?: Found;
   readonly onChange: (on: boolean) => void;
   readonly children?: ReactNode;
   readonly name: string;
@@ -66,8 +70,15 @@ function Row({
           <span className="inline-flex flex-wrap items-center gap-2 text-row font-semibold text-fg">
             {label}
             {badge === undefined ? null : <Badge data-agent-coming="">{badge}</Badge>}
+            {found === undefined ? null : (
+              <Badge tone="ok" data-agent-found="">
+                Found on this computer
+              </Badge>
+            )}
           </span>
-          <span className="text-cell text-muted">{line}</span>
+          <span className="text-cell text-muted">
+            {found?.ready === true ? `${line} Your setup on this computer is ready to bring over.` : line}
+          </span>
         </span>
       </label>
       {children}
@@ -112,11 +123,13 @@ function AgentsChoices({
   onPick,
   read,
   onRetry,
+  found,
 }: {
   readonly pick: Pick;
   readonly onPick: (next: Pick) => void;
   readonly read: ProviderRead;
   readonly onRetry: () => void;
+  readonly found: Readonly<Record<string, Found>>;
 }): ReactNode {
   const [othersOpen, setOthersOpen] = useState(() => Object.keys(pick.others).length > 0);
   const listed = AI_CHOICES;
@@ -131,6 +144,7 @@ function AgentsChoices({
           checked={choice.id === 'gemini' ? false : pick[choice.id]}
           disabled={choice.coming !== undefined}
           {...(choice.coming === undefined ? {} : { badge: choice.coming })}
+          {...(found[choice.id] === undefined ? {} : { found: found[choice.id] as Found })}
           onChange={on => (choice.id === 'gemini' ? undefined : onPick({ ...pick, [choice.id]: on }))}
         />
       ))}
@@ -185,14 +199,18 @@ function AgentsChoices({
 }
 
 const NO_PROVIDERS: readonly Provider[] = [];
+const NO_FOUND: Readonly<Record<string, Found>> = {};
 
 /** The real page: reads the catalog once (a retry reads again), and keeps the pick in the run's memory. */
 export function AgentsPage({
   step,
   readProviders,
+  found = NO_FOUND,
 }: {
   readonly step: StepHost | undefined;
   readonly readProviders: () => Promise<readonly Provider[]>;
+  /** The harnesses found on this computer, by catalog key (claude, codex). */
+  readonly found?: Readonly<Record<string, Found>>;
 }): ReactNode {
   const [pick, setPick] = useState<Pick>(() => pickFromMemory(step?.segment ?? {}));
   const [read, setRead] = useState<ProviderRead>({ kind: 'reading' });
@@ -234,7 +252,7 @@ export function AgentsPage({
   }, [empty]);
   return (
     <>
-      <AgentsChoices pick={pick} onPick={setPick} read={read} onRetry={load} />
+      <AgentsChoices pick={pick} onPick={setPick} read={read} onRetry={load} found={found} />
       {empty ? (
         <p className="m-0 mt-3 text-cell text-muted" role="status" data-agent-none="">
           Pick at least one AI to set up, or choose Later.

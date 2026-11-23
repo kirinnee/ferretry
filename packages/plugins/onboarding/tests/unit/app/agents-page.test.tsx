@@ -65,6 +65,18 @@ describe('Which AI do you want to use?', () => {
     expect(view?.container.querySelector('[data-agent-coming]')?.textContent).toBe('Coming');
   });
 
+  it('shows what was found on this computer beside Claude and Codex, and nothing beside Gemini', async () => {
+    const fake = fakeStep();
+    view = await mount(
+      <AgentsPage step={fake.step} readProviders={async () => PROVIDERS} found={{ claude: { ready: true } }} />,
+    );
+    const noted = [...(view?.container.querySelectorAll('[data-agent-found]') ?? [])].map(note =>
+      note.closest('[data-agent-row]')?.getAttribute('data-agent-row'),
+    );
+    expect(noted).toEqual(['claude']);
+    expect(fake.calls).toEqual(['ready']);
+  });
+
   it('says it is ready at once, and remembers Claude only: nothing is written by drawing it', async () => {
     const { calls, memory } = await mountPage();
     expect(calls).toEqual(['ready']);

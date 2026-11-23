@@ -12,6 +12,7 @@ import type { StepHost } from '@ferretry/kernel/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { hostScan } from '../../../fixtures/host-scan.ts';
 import { createAgentsPanel } from '../../../../app/features/agents/agents-panel.tsx';
 import { FlowPage } from '../../../../app/features/setup-flow/page-frame.tsx';
 import type { FlowStep } from '../../../../app/lib/index.ts';
@@ -20,10 +21,20 @@ import { REAL_PROVIDER_PRESET_CATALOG as PROVIDER_PRESETS } from '@ferretry/plug
 const params = new URLSearchParams(window.location.search);
 const first = params.get('theme') ?? 'studio-light';
 document.documentElement.dataset.theme = first;
+// `?claude=absent`: the fake machine has no Claude Code. `window.__scanCalls`: how many times the page asked the machine to scan.
+const installed = params.get('claude') !== 'absent';
+const counted = window as unknown as { __scanCalls: number };
+counted.__scanCalls = 0;
 
 const client = {
   call: async (route: string) => {
     if (route === 'GET /v1/logins/presets') return PROVIDER_PRESETS;
+    if (route === 'GET /v1/runtimes/setup/scan') {
+      counted.__scanCalls += 1;
+      return hostScan(installed);
+    }
+    if (route === 'GET /v1/claude-code/update') return { installed: { state: 'ok', version: '2.1.0' } };
+    if (route === 'GET /v1/codex/update') return { installed: null };
     throw new Error(`unexpected route ${route}`);
   },
 } as unknown as PluginClient;
