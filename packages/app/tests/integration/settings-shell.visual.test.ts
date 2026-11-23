@@ -4,7 +4,9 @@
  *
  *  - SETTINGS lists its tabs under titled groups (v4 parity), and reaches This device from the page itself;
  *  - THIS DEVICE is a section INSIDE a machine's Settings (`/d/<daemon>/settings/device`, the same list and layout), and the
- *    bare `/settings` page links back to the daemon's Settings;
+ *    old bare `/settings` bookmark on a paired device opens that section;
+ *  - NO PAINTED FADE sits on the list or behind its first label (computed style, so a restored fade fails here, not only on a
+ *    screenshot);
  *
  * Set `FY_SETTINGS_SHELL_SHOTS_DIR` to keep `<viewport>-<case>.png` (desktop 1440 and phone 390, light and dark).
  */
@@ -139,6 +141,27 @@ describe('Settings shell', () => {
         expect(await tab.getByRole('link', { name: 'This device', exact: true }).getAttribute('href')).toBe(
           '/d/ws/settings/device',
         );
+        // The list paints no scroll fade: neither the list, its blocks nor the first label carries a background image (the old
+        // fade was a `var(--bg)` gradient layer, white over a tinted page, that read as a bar behind "Just this device").
+        const painted = await tab.evaluate(() => {
+          const nav = document.querySelector('nav[aria-label="Plugin settings"]') as HTMLElement;
+          const label = document.getElementById('fy-settings-block-device') as HTMLElement;
+          const layers: string[] = [];
+          for (
+            let node: HTMLElement | null = label;
+            node !== null;
+            node = node.parentElement === nav.parentElement ? null : node.parentElement
+          ) {
+            for (const pseudo of [null, '::before', '::after'] as const) {
+              const style = getComputedStyle(node, pseudo);
+              if (style.backgroundImage !== 'none')
+                layers.push(`${node.className || node.tagName}${pseudo ?? ''}: ${style.backgroundImage}`);
+            }
+          }
+          return { layers, navCue: getComputedStyle(nav).getPropertyValue('--fy-scroll-cue').trim() };
+        });
+        expect(painted.layers, 'no gradient or fade layer behind the nav label').toEqual([]);
+        expect(painted.navCue, 'the scroll-cue layer is gone').toBe('');
         await tall(tab, variant, 2_300);
         await shotOf(tab, variant, 'settings-groups');
       } finally {
@@ -165,12 +188,14 @@ describe('Settings shell', () => {
       }
     });
 
-    it(`${variant.name}: This device links back to the daemon's Settings`, async () => {
-      const { tab, close } = await open(variant, '/settings', '[aria-label="Daemon settings"]');
+    it(`${variant.name}: the old /settings bookmark on a paired device opens This device inside Settings`, async () => {
+      const { tab, close } = await open(variant, '/settings', '.fy-settings-title');
       try {
-        expect(await tab.locator('[aria-label="Daemon settings"] a').getAttribute('href')).toBe('/d/ws/settings');
+        await tab.waitForFunction(() => location.pathname === '/d/ws/settings/device');
+        expect(await tab.locator('.fy-settings-title').innerText()).toBe('This device');
+        expect(await tab.locator('[aria-label="Daemon settings"]').count(), 'not the standalone page').toBe(0);
         await tall(tab, variant, 2_300);
-        await shotOf(tab, variant, 'this-device');
+        await shotOf(tab, variant, 'this-device-bookmark');
       } finally {
         await close();
       }
