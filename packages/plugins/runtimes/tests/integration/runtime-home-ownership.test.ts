@@ -52,7 +52,7 @@ const documentWith = (layers: readonly string[]): AccountModelDocument => ({
       main: { file: 'components/instructions/main.md' },
       extra: { file: 'components/instructions/extra.md' },
     },
-    mcp: { notes: { command: 'notes-server' } },
+    mcp: { notes: { command: 'notes-server' }, old: { command: 'old-server', args: ['--legacy'] } },
     skills: { mine: { items: ['review'] } },
     modelSets: { models: { models: ['claude-opus-5-5', 'gpt-6'], default: 'claude-opus-5-5' } },
   },
@@ -352,16 +352,22 @@ describe('case 3: the state folder, settings files and the generated files besid
     should(left(result)).containEql(overlay);
   });
 
-  it('should keep a file at the record name that is not a record', async () => {
+  it('should replace a regular file at the record name whatever it holds, and keep a link or a folder there', async () => {
     const host = await machine();
     const record = path.join(host.claudeHome, '.fy', 'materialised.json');
     await mkdir(path.dirname(record), { recursive: true });
-    await writeFile(record, 'a person kept their own list here\n');
+    await writeFile(record, 'not a record at all\n');
 
     const result = await host.apply(['mcp/notes']);
 
-    should(await text(record)).equal('a person kept their own list here\n');
-    should(left(result)).containEql(record);
+    should((await recordOf(host.claudeHome)).entries).be.an.Array();
+    should(left(result)).not.containEql(record);
+
+    await rm(record);
+    await mkdir(record);
+    const folder = await host.apply(['mcp/notes']);
+    should((await lstat(record)).isDirectory()).be.true();
+    should(left(folder)).containEql(record);
   });
 });
 
@@ -389,6 +395,8 @@ describe('case 4: what one runtime declines is never another runtime’s', () =>
   it('should remove a skill link from before the record held skills only if it leads into Ferretry’s own skills store', async () => {
     const host = await machine();
     await host.apply(['mcp/notes']);
+    // A record from before links were kept: it names no link, so none can be vouched for by its stamp.
+    await writeFile(path.join(host.codexHome, '.fy', 'materialised.json'), '{"version":1,"entries":[]}\n');
     const store = path.join(host.layout.assetsDirectory, 'skills', 'review');
     const elsewhere = path.join(host.person, 'their-skill');
     await mkdir(elsewhere);
@@ -431,6 +439,114 @@ describe('case 5: a narrowed retirement that keeps an unrecorded file says so', 
 
     should(await text(file)).equal('My own rules.\n');
     should(left(result)).containEql(file);
+  });
+});
+
+describe('upgrade: a home an older Ferretry filled is taken over once, and nothing of the person’s is lost', () => {
+  /**
+   * What the code before this fix left: a record that is only `{version, entries:[top-level names]}`, with no hashes, links,
+   * dirs or members. Everything else on disk is what that Ferretry wrote — plus what the person put beside it.
+   */
+  const asOlderFerretryLeftIt = async (host: Awaited<ReturnType<typeof machine>>) => {
+    await writeFile(
+      path.join(host.claudeHome, '.fy', 'materialised.json'),
+      `${JSON.stringify({ version: 1, entries: ['CLAUDE.md'] })}\n`,
+    );
+    await writeFile(
+      path.join(host.codexHome, '.fy', 'materialised.json'),
+      `${JSON.stringify({ version: 1, entries: ['AGENTS.md', 'auth.json'] })}\n`,
+    );
+  };
+  const OLD_PLAN = ['instructions/main', 'mcp/notes', 'mcp/old', 'skills/mine'];
+  const servers = async (host: Awaited<ReturnType<typeof machine>>) =>
+    (JSON.parse(await text(path.join(host.claudeHome, '.claude.json'))) as { mcpServers: Record<string, unknown> })
+      .mcpServers;
+  const named = (result: Parameters<typeof left>[0]): string =>
+    (result.skipped ?? []).map(entry => entry.path).join('\n');
+  /** The runtime home as the old Ferretry left it, plus a stale overlay, a person's own server and one nobody can vouch for. */
+  const upgraded = async () => {
+    const host = await machine();
+    await host.apply(OLD_PLAN);
+    const fixed = path.join(host.claudeHome, '.fy', 'fixed.json');
+    const current = await text(fixed);
+    await asOlderFerretryLeftIt(host);
+    // The overlay an older Ferretry wrote: it forced a laxer permission default than this one does.
+    await writeFile(fixed, '{"permissions":{"defaultMode":"bypassPermissions"}}\n');
+    const claudeJson = path.join(host.claudeHome, '.claude.json');
+    const written = JSON.parse(await text(claudeJson)) as { mcpServers: Record<string, unknown> };
+    await writeFile(
+      claudeJson,
+      JSON.stringify({
+        ...written,
+        mcpServers: {
+          ...written.mcpServers,
+          mine: { type: 'stdio', command: 'mine-server', args: [] },
+          ghost: { type: 'stdio', command: 'ghost-server', args: ['--who-knows'] },
+        },
+      }),
+    );
+    return { host, fixed, current };
+  };
+
+  it('should bring Ferretry’s own fixed files, links and servers up to date, and keep what the person added', async () => {
+    const { host, fixed, current } = await upgraded();
+    const claudeMd = path.join(host.claudeHome, 'CLAUDE.md');
+    const agentsMd = path.join(host.codexHome, 'AGENTS.md');
+    const skill = path.join(host.claudeHome, 'skills', 'review');
+    const auth = path.join(host.codexHome, 'auth.json');
+    const authTarget = await readlink(auth);
+
+    // The profile now reads another instructions file and has dropped the old server.
+    const first = await host.apply(['instructions/extra', 'mcp/notes', 'skills/mine']);
+
+    // The overlay is Ferretry's by name: it is written again, so a stale permission default cannot stay in force.
+    should(await text(fixed)).equal(current);
+    // The links an older Ferretry made are claimed once: the instructions follow the profile, nothing says otherwise.
+    should(await readlink(claudeMd)).endWith(path.join('instructions', 'extra.md'));
+    should(await readlink(agentsMd)).endWith(path.join('instructions', 'extra.md'));
+    should(await isLink(skill)).be.true();
+    should(await readlink(auth)).equal(authTarget);
+    // The server the profile dropped is provably Ferretry's (written exactly as its component renders), so it goes.
+    const afterFirst = await servers(host);
+    should(Object.keys(afterFirst).toSorted()).eql(['ghost', 'mine', 'notes']);
+    // Nothing of Ferretry's own is called the person's; what cannot be proved is kept, and named once.
+    const mentioned = named(first);
+    for (const own of [fixed, claudeMd, agentsMd, skill, auth]) should(mentioned).not.containEql(own);
+    should(
+      (first.skipped ?? [])
+        .filter(entry => entry.path.endsWith('.claude.json'))
+        .map(entry => entry.reason)
+        .toSorted(),
+    ).eql([
+      'mcpServers "ghost" may have been put there by an older Ferretry, which cannot be proved; Ferretry left it',
+      'mcpServers "mine" may have been put there by an older Ferretry, which cannot be proved; Ferretry left it',
+    ]);
+
+    // The record now vouches for all of it, so the SECOND apply has nothing left to say about Ferretry's own entries.
+    const second = await host.apply(['instructions/extra', 'mcp/notes', 'skills/mine']);
+    should(second.skipped ?? []).eql([]);
+    should(await servers(host)).eql(afterFirst);
+  });
+
+  it('should remove a link of Ferretry’s when the profile drops what it led to, and keep the person’s own', async () => {
+    const { host } = await upgraded();
+    const claudeMd = path.join(host.claudeHome, 'CLAUDE.md');
+    const agentsMd = path.join(host.codexHome, 'AGENTS.md');
+    const skill = path.join(host.claudeHome, 'skills', 'review');
+    const theirs = path.join(host.claudeHome, 'skills', 'their-link');
+    await symlink(path.join(host.person, '.codex'), theirs);
+
+    // Instructions and the skill are dropped: the older Ferretry's links must not outlive the profile that made them.
+    const result = await host.apply(['mcp/notes']);
+
+    should(await exists(claudeMd)).be.false();
+    should(await exists(agentsMd)).be.false();
+    should(await exists(skill)).be.false();
+    should(await isLink(theirs)).be.true();
+    should(named(result)).not.containEql(claudeMd);
+    should(named(result)).not.containEql(skill);
+    should(left(result)).containEql(theirs);
+    should(Object.keys(await servers(host)).toSorted()).eql(['ghost', 'mine', 'notes']);
   });
 });
 

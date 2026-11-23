@@ -72,6 +72,7 @@ import {
   CLAUDE_JSON_FILE,
   type ClaudeStatuslineCommand,
   componentPartialSupport,
+  renderMcpComponents,
   SKILLS_STORE_DIRECTORY,
 } from './adapt.ts';
 import {
@@ -450,6 +451,17 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         absent: adapted.absent,
         settings: adapted.settings,
         claudeJson: adapted.claudeJson,
+        priorServers:
+          harness === 'claude'
+            ? renderMcpComponents(
+                harness,
+                Object.fromEntries(
+                  Object.entries(model.components.mcp).filter(
+                    ([serverName]) => !resolved.mcp.some(contribution => contribution.layer.name === serverName),
+                  ),
+                ),
+              )
+            : {},
         overlay: fixed?.claudeSettingsOverlay,
         credentialLink: codexCredentialLink(home, store),
         layout,
@@ -593,6 +605,8 @@ interface ConfigDirectoryInput {
   readonly absent: readonly string[];
   readonly settings: ReturnType<typeof adaptProfile>['settings'];
   readonly claudeJson: SettingsObject | undefined;
+  /** The machine's MCP servers the profile in effect does not have, as they would be written. */
+  readonly priorServers: Readonly<Record<string, SettingsObject>>;
   readonly overlay: SettingsObject | undefined;
   /** The text of the model catalog file a Codex runtime on a third-party provider reads. */
   readonly codexCatalog: string | undefined;
@@ -631,7 +645,15 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       recordedAs: RUNTIME_STATE_DIRECTORY,
     },
     // The config directory is not Ferretry's either: only a name the last apply recorded, still as it was written.
-    { kind: 'prune-directory', path: home, keep: [], only: input.absent, record },
+    {
+      kind: 'prune-directory',
+      path: home,
+      keep: [],
+      only: input.absent,
+      record,
+      // A link an earlier Ferretry made, before the record held links, is still provably its own.
+      ownLinksUnder: layout.assetsDirectory,
+    },
   ];
 
   for (const entry of ownEntries) operations.push(entryOperation(entry, home, layout, record));
@@ -673,6 +695,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       preserveExisting: true,
       replaceKeys: Object.keys(input.claudeJson),
       record,
+      priorMembers: { mcpServers: input.priorServers },
     });
   }
   if (input.overlay !== undefined) {
@@ -681,7 +704,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       path: joinPath(state, FIXED_SETTINGS_FILE),
       content: serializeSettings(input.overlay, 'json'),
       mode: PRIVATE_FILE_MODE,
-      unlessUnrecorded: { record, key: `${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}` },
+      unlessUnrecorded: { record, key: `${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}`, byName: true },
     });
   }
   if (input.codexCatalog !== undefined) {
@@ -690,7 +713,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       path: joinPath(state, CODEX_MODEL_CATALOG_FILE),
       content: input.codexCatalog,
       mode: PRIVATE_FILE_MODE,
-      unlessUnrecorded: { record, key: `${RUNTIME_STATE_DIRECTORY}/${CODEX_MODEL_CATALOG_FILE}` },
+      unlessUnrecorded: { record, key: `${RUNTIME_STATE_DIRECTORY}/${CODEX_MODEL_CATALOG_FILE}`, byName: true },
     });
   }
   if (input.credentialLink !== undefined) {
@@ -701,7 +724,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       source: input.credentialLink.target,
       path: input.credentialLink.path,
       dangling: true,
-      unlessUnrecorded: { record, key: CODEX_CREDENTIAL_FILE },
+      unlessUnrecorded: { record, key: CODEX_CREDENTIAL_FILE, namedLinkIsOurs: true },
     });
   }
 
@@ -733,7 +756,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
 function entryOperation(entry: AdaptedEntry, home: string, layout: FleetLayout, record: string): FleetWriteOperation {
   const path = joinPath(home, entry.dest);
   // Nothing the plan did not put there is replaced: a file edited since it was written, or one somebody else made.
-  const unlessUnrecorded = { record, key: entry.dest };
+  const unlessUnrecorded = { record, key: entry.dest, ownLinksUnder: layout.assetsDirectory };
   if (entry.kind === 'generated') {
     return {
       kind: 'file',

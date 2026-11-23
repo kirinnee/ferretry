@@ -270,6 +270,7 @@ describe('materialiseFleet', () => {
       keep: [],
       only: ['hooks'],
       record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
+      ownLinksUnder: '/fy/fleet/assets',
     });
     should(inHome[2]).eql({
       kind: 'prune-directory',
@@ -285,6 +286,7 @@ describe('materialiseFleet', () => {
       unlessUnrecorded: {
         record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
         key: 'CLAUDE.md',
+        ownLinksUnder: '/fy/fleet/assets',
       },
     });
     should(inHome[6]).eql({
@@ -294,6 +296,7 @@ describe('materialiseFleet', () => {
       unlessUnrecorded: {
         record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
         key: 'skills/review',
+        ownLinksUnder: '/fy/fleet/assets',
       },
     });
     should(inHome[7]).eql({
@@ -335,6 +338,7 @@ describe('materialiseFleet', () => {
       preserveExisting: true,
       replaceKeys: ['mcpServers'],
       record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
+      priorMembers: { mcpServers: {} },
     });
     should(inHome[10]).match({ kind: 'file', path: `${HOME_A}/.fy/fixed.json` });
     should(inHome[11]).eql({
@@ -880,6 +884,7 @@ describe('materialiseFleet', () => {
         unlessUnrecorded: {
           record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
           key: '.fy/fixed.json',
+          byName: true,
         },
       });
       should(
@@ -1134,6 +1139,7 @@ describe('materialiseFleet', () => {
         unlessUnrecorded: {
           record: `${HOME_B}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
           key: 'AGENTS.md',
+          ownLinksUnder: '/fy/fleet/assets',
         },
       });
     });

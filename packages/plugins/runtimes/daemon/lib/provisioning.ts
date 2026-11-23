@@ -97,6 +97,12 @@ export type FleetWriteOperation =
       readonly replaceKeys?: readonly string[];
       /** The {@link MaterialisedRecord} that remembers which `replaceKeys` members the plan wrote. */
       readonly record?: string;
+      /**
+       * With {@link replaceKeys} and a record from before members were recorded (it has no `members`): the members an
+       * earlier plan could have written under each key that this plan no longer has, as they would be written. A member
+       * that is equal to one of these is provably Ferretry's and goes; any other member stays and is named.
+       */
+      readonly priorMembers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
     }
   | {
       readonly kind: 'prune';
@@ -147,9 +153,9 @@ export type FleetWriteOperation =
        */
       readonly recordedAs?: string;
       /**
-       * With {@link recordedAs}: a folder Ferretry itself fills (its skills store). A link in this directory that a record
-       * from before links were fingerprinted does not name is still removed when it leads into this folder — only Ferretry
-       * makes such a link, and an upgrade must not leave its old ones behind. Any other unrecorded link stays.
+       * With {@link recordedAs} or {@link only}: a folder Ferretry itself fills (its assets). With a record from before links
+       * were fingerprinted, a link in this directory is still removed when it leads into this folder — only Ferretry makes
+       * such a link, and an upgrade must not leave its old ones behind. Any other unrecorded link stays.
        */
       readonly ownLinksUnder?: string;
     };
@@ -164,6 +170,22 @@ export type FleetWriteOperation =
 export interface UnlessUnrecorded {
   readonly record: string;
   readonly key: string;
+  /**
+   * One of Ferretry's own FIXED names (its record, its `--settings` overlay, its model catalog): a regular file at the
+   * name is Ferretry's whatever its bytes — nobody edits what Ferretry's own corner holds, and a frozen one would keep a
+   * stale permission default in force. A link or a folder at the name is not, and stays.
+   */
+  readonly byName?: true;
+  /**
+   * A record from before links were fingerprinted (it has no `links`) cannot vouch for a link. A link that leads into
+   * this folder — the one only Ferretry fills — is still provably its own and is claimed once, then stamped.
+   */
+  readonly ownLinksUnder?: string;
+  /**
+   * With a record from before links were fingerprinted: a link at this name that record NAMES is Ferretry's. For the
+   * credential link, whose target the fleet root cannot read; replacing it costs a link, never the file it leads to.
+   */
+  readonly namedLinkIsOurs?: true;
 }
 
 /** What a record holds for the entries one apply materialised, relative to their runtime home. */

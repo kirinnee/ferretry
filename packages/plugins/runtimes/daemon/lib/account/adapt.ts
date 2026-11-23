@@ -358,6 +358,27 @@ function codexServer(server: McpComponent, env: ServerEnvironment, bearer: strin
   };
 }
 
+/**
+ * Servers as the plan would write them for `harness`, whether or not the profile in effect has them. It is how an upgrade
+ * proves an old server of the machine's was Ferretry's: it is written exactly so, and nobody else wrote it that way.
+ */
+export function renderMcpComponents(
+  harness: HarnessKind,
+  components: Readonly<Record<string, McpComponent>>,
+): Readonly<Record<string, SettingsObject>> {
+  const contributions = Object.entries(components).map(([name, component]) => ({
+    layer: {
+      reference: `mcp/${name}` as LayerReferenceText,
+      componentKind: 'mcp' as const,
+      name,
+      origin: `mcp/${name}` as LayerReferenceText,
+      via: [],
+    },
+    component,
+  }));
+  return adaptMcp(harness, contributions, {}, []);
+}
+
 function adaptMcp(
   harness: HarnessKind,
   servers: readonly Contribution<McpComponent>[],
