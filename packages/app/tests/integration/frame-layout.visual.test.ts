@@ -215,6 +215,49 @@ describe('the install-as-app banner never changes the app’s height (O9-3)', ()
       });
 });
 
+describe('the install-as-app banner on a ferret’s chat covers none of its chrome (O9-3)', () => {
+  const CHAT_VIEWPORTS = [
+    { name: '390', width: 390, height: 844, phone: true },
+    { name: '1440', width: 1_440, height: 900, phone: false },
+  ] as const;
+  for (const viewport of CHAT_VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`at ${viewport.name} in ${mode}: the header, Menu, Modes, composer and nav still take the press`, async () => {
+        const { tab, close } = await open(
+          viewport,
+          '/d/ws/ferrets/zoe',
+          '[data-install-toast]',
+          '&relay=0&header=modes&install=1',
+          `studio-${mode}`,
+        );
+        try {
+          await tab.waitForSelector('[data-ferret-header] [data-modes-trigger]');
+          await shotOf(tab, `${viewport.name}-install-banner-chat-${mode}`);
+          const controls = ['[data-modes-trigger]', '[data-composer]'];
+          // The page's own controls under the header: the phone's tab chips, the wide page's side-panel toggle.
+          controls.push(viewport.phone ? '[data-phone-tab-row] [role=tab]' : '[data-side-toggle]');
+          if (viewport.phone) controls.push('[data-chat-menu]');
+          // The phone's bottom bar, where the scene draws one, is below the banner as well.
+          if ((await tab.locator('.fy-nav--bottom a').count()) > 0) controls.push('.fy-nav--bottom a');
+          for (const selector of controls)
+            expect((await hitsItself(tab, selector)).hit, `${selector} is not covered by the banner`).toBe(true);
+          // Nothing of the header row is under the banner at all: it hangs below the row.
+          const rows = await tab.evaluate(() => {
+            const box = (query: string) => document.querySelector(query)?.getBoundingClientRect();
+            return {
+              header: box('[data-ferret-header]')?.bottom ?? -1,
+              banner: box('[data-install-toast]')?.top ?? -1,
+            };
+          });
+          expect(rows.banner, 'the banner starts below the header row').toBeGreaterThanOrEqual(rows.header);
+          for (const selector of ['[data-install-accept]', '[data-install-dismiss]'])
+            expect((await hitsItself(tab, selector)).hit, `${selector} is reachable`).toBe(true);
+        } finally {
+          await close();
+        }
+      });
+});
+
 describe('the ferrets page (the screen the side column holds)', () => {
   for (const viewport of VIEWPORTS)
     for (const mode of ['light', 'dark'] as const)

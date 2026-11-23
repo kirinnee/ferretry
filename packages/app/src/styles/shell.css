@@ -403,6 +403,20 @@
   z-index: 5;
   margin: 4px 8px 0;
 }
+/* On a ferret's page the strip's bottom edge IS the top of the chat: its header row (the Menu button, the name, Modes) sits right
+   there, and under it the page's own controls — on a phone the row of tab chips (one 44px chip, ferret-workspace's phone-tab-row),
+   wide the slim rail holding the side-panel toggle (40px, at the right edge). The overlay hangs below the header row and the chip
+   row and stops short of the rail, so it never covers a hit target of the chat's chrome. */
+.fy-frame[data-chat-chrome] .fy-status > .fy-status-overlay {
+  top: calc(100% + var(--chat-head-h) + var(--chat-tabs-h, 0px));
+  right: 48px;
+}
+@media (max-width: 767.98px) {
+  .fy-frame[data-chat-chrome] .fy-status > .fy-status-overlay {
+    --chat-tabs-h: 49px;
+    right: 0;
+  }
+}
 
 /* The page scroll region adds a node to listen on, never a box (scroll/page-scroll-region.tsx). */
 .contents {

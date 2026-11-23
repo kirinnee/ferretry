@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { InstallOutcome, InstallPrompt } from '@ferretry/app';
 import { deviceViewHarness, interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { renderToStaticMarkup } from 'react-dom/server';
 import half from '../../../app/index.ts';
 import {
   InstallAppPanel,
@@ -48,6 +49,12 @@ const opened = async (view: Mounted): Promise<void> => {
 };
 
 describe('the toast line', () => {
+  it('mounts its live region empty, so the words are announced when they arrive', () => {
+    const first = renderToStaticMarkup(<InstallToastLine kind="prompt" onDismiss={() => {}} onInstall={() => {}} />);
+    expect(first).toContain('role="status"');
+    expect(first).not.toContain('Install Ferretry');
+  });
+
   it('offers the browser’s install with a button, and iOS the Share steps without one', async () => {
     const calls: string[] = [];
     mounted = await mount(
