@@ -204,6 +204,24 @@ describe('readSuggestions (what a daemon makes of the published value)', () => {
     should(read.suggestions?.providers.odd).be.undefined();
     should(read.dropped.map(entry => entry.where)).eql(['odd']);
   });
+
+  it('should name every model past the per-provider cap and every provider past the provider cap', () => {
+    // Arrange
+    const bulk = Object.fromEntries(Array.from({ length: 1003 }, (_, index) => [`m-${index}`, { name: 'M' }]));
+    const many = Object.fromEntries(
+      Array.from({ length: 65 }, (_, index) => [`p-${String(index).padStart(2, '0')}`, { name: 'P', models: {} }]),
+    );
+    const value = { ...published(), providers: { xai: { name: 'xai', models: bulk }, ...many } };
+
+    // Act
+    const read = readSuggestions(value);
+
+    // Assert
+    should(Object.keys(read.suggestions?.providers.xai?.models ?? {})).have.length(1000);
+    should(read.dropped.map(entry => entry.where)).eql(['p-63', 'p-64', 'xai/m-1000', 'xai/m-1001', 'xai/m-1002']);
+    should(read.dropped[0]?.problem).equal('beyond the 64 providers kept');
+    should(read.dropped[2]?.problem).equal('beyond the 1000 models kept per provider');
+  });
 });
 
 describe('suggestedModels ("new / not reviewed", never a default, tier or effort)', () => {
