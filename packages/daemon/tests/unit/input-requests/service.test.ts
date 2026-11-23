@@ -1774,3 +1774,93 @@ describe('value-level redaction without a hold', () => {
     });
   });
 });
+
+describe('the restart guard, restored at its edges (the quarantine journal outlives the daemon)', () => {
+  const NAMES = ['dev', '000000000001'];
+  const STARTED = 'surface.input_quarantined';
+  const ENDED = 'surface.input_quarantine_ended';
+  const at = '2026-10-30T12:00:00.000Z';
+  const until = '2026-10-30T12:02:00.000Z';
+  const held = (hold: string, over: Partial<InputQuarantineEvent> = {}): InputQuarantineEvent =>
+    ({ type: STARTED, sessionId: SESSION, names: NAMES, hold, until, at, ...over }) as InputQuarantineEvent;
+  const AGENT = { kind: 'agent', sessionId: SESSION } as unknown as InputCaller;
+
+  it('should hold every terminal, for a window, when the sessions cannot be listed, and say so', async () => {
+    const built = build({ sessionsThrow: true });
+
+    await built.service.restore().then(
+      () => should.fail(undefined, undefined, 'it must fail'),
+      () => undefined,
+    );
+
+    should(built.service.quarantinedUntil(SESSION, ['dev'])).be.a.Number();
+  });
+
+  it('should hold the one session whose quarantine journal cannot be read, and then open the others up', async () => {
+    const built = build({ quarantinesThrow: true });
+
+    await built.service.restore();
+
+    should(built.service.quarantinedUntil(SESSION, ['dev'])).be.a.Number();
+    should(built.service.quarantinedUntil('other-session', ['dev'])).be.undefined();
+  });
+
+  it('should bring a guard back for the time it had left, and not once it ended or was ended', async () => {
+    const built = build({ quarantineHistory: [held('restart-a')], now: Date.parse(at) + 30_000 });
+    await built.service.restore();
+    should(built.service.quarantinedUntil(SESSION, ['dev'])).equal(Date.parse(until));
+
+    const ended = build({
+      quarantineHistory: [held('restart-a'), { ...held('restart-a'), type: ENDED } as InputQuarantineEvent],
+      now: Date.parse(at) + 30_000,
+    });
+    await ended.service.restore();
+    should(ended.service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
+
+    const expired = build({ quarantineHistory: [held('restart-a')], now: Date.parse(until) + 1_000 });
+    await expired.service.restore();
+    should(expired.service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
+  });
+
+  it('should hold a write that was in flight when the daemon stopped for a fresh window, and journal the new end', async () => {
+    const built = build({ quarantineHistory: [held('flight', { unresolved: true })], now: Date.parse(at) + 30_000 });
+
+    await built.service.restore();
+
+    should(built.service.quarantinedUntil(SESSION, ['dev'])).be.a.Number();
+    should(built.w.quarantineEvents.at(-1)?.type).equal(STARTED);
+    should(built.w.quarantineEvents.at(-1)?.unresolved).be.undefined();
+  });
+
+  it('should let only the owner end a guard, and journal and record the end', async () => {
+    const built = build({ quarantineHistory: [held('restart-a')], now: Date.parse(at) + 30_000 });
+    await built.service.restore();
+
+    await built.service.endQuarantine(HOST, SESSION, 'dev').then(
+      () => undefined,
+      () => should.fail(undefined, undefined, 'the owner may end it'),
+    );
+
+    should(built.service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
+    should(built.w.quarantineEvents.at(-1)?.type).equal(ENDED);
+    should(built.w.audits.at(-1)?.event).equal('input.quarantine_ended');
+    should((await refused(built.service.endQuarantine(HOST, SESSION, 'dev'))).code).equal('not_found');
+    should((await refused(built.service.endQuarantine(AGENT, SESSION, 'dev'))).code).equal('forbidden');
+  });
+
+  it('should list a guard for the owner only, and record a viewer that chose to reveal one', async () => {
+    const built = build({ quarantineHistory: [held('restart-a')], now: Date.parse(at) + 30_000 });
+    await built.service.restore();
+
+    should(built.service.quarantines(HOST, SESSION).map(entry => entry.key)).containEql('dev');
+    should(() => built.service.quarantines(AGENT, SESSION)).throw();
+    await built.service.revealed(HOST, SESSION, 'dev');
+    should(built.w.audits.at(-1)?.event).equal('input.quarantine_revealed');
+  });
+
+  it('should refuse to reveal a guard when the reveal cannot be recorded', async () => {
+    const built = build({ auditThrows: true });
+
+    should((await refused(built.service.revealed(HOST, SESSION, 'dev'))).code).equal('unavailable');
+  });
+});

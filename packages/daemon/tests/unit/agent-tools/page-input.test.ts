@@ -108,7 +108,6 @@ function world() {
       agentView: async (sessionId, card, waitMs) => await service.agentView(sessionId, card, waitMs),
       pendingOn: (sessionId, target, options) => service.pendingOn(sessionId, target, options),
       exclusive: async (sessionId, work) => await service.exclusive(sessionId, work),
-      pageHeld: (sessionId, names) => service.pageHeld(sessionId, names),
       pageDocument: async (sessionId, key) => await service.pageDocument(sessionId, key),
       pageShows: (sessionId, names) => service.pageShows(sessionId, names),
     },
@@ -314,7 +313,7 @@ describe('a page the owner’s password was just typed into', () => {
     const { service } = await typedIn();
 
     should(service.quarantines(HOST, SESSION)).eql([]);
-    should(service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(service.quarantinedUntil(SESSION, ['app'])).be.undefined();
     should(service.quarantinedUntil(SESSION, ['app'])).be.undefined();
   });
 });

@@ -1614,6 +1614,22 @@ describe('refindInputFields (#B100)', () => {
     should(world.session('page-target').pageWorld).eql([]);
   });
 
+  it('should say nothing of where a field sits when the trusted world cannot be asked, and still look at it', async () => {
+    const world = new FakeWorld();
+    world.element('#otp', 21, ['type', 'text', 'name', 'otp']);
+    world.session('page-target').failOn = (method, params) =>
+      method === 'Runtime.callFunctionOn' && String(params.functionDeclaration).includes('document.forms')
+        ? new Error('the world is gone')
+        : undefined;
+
+    const seen = await observeInputFields(world.subject, [
+      { id: 'code', target: { kind: 'selector', selector: '#otp' } },
+    ]);
+
+    should(seen.ok).be.true();
+    should(seen.ok && seen.facts.fields[0]?.place).be.undefined();
+  });
+
   it('should not take a look-alike in another form of the page for the field the card showed', async () => {
     const world = new FakeWorld();
     const old = world.element('#otp', 21, ['type', 'text', 'name', 'otp']);

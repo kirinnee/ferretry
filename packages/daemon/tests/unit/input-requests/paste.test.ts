@@ -821,7 +821,7 @@ describe('a paste into a field on a page', () => {
       `Allow pasting sealed:vercel (${String(TOKEN.length)} characters from /usr/bin/vercel) into a field on vercel.com. You type nothing.`,
     );
     should(page.typed).eql([{ field: 'value', text: TOKEN }]);
-    should(w.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(w.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
     should(w.told.at(-1)).containEql(`${view.id}: sealed:vercel was pasted into %browser:app`);
     should(JSON.stringify([w.audits, w.events, w.told, w.cards])).not.containEql(TOKEN);
   });

@@ -191,7 +191,7 @@ function harness(options: Options = {}) {
       clear: async (_session, _target, job) => {
         clears.push(job);
         // The page must still be held from the ferret while its fields are checked and emptied.
-        heldDuringClear.push(service.pageHeld(options.session ?? SESSION, ['app']) !== undefined);
+        heldDuringClear.push(service.quarantinedUntil(options.session ?? SESSION, ['app']) !== undefined);
         return options.clear ?? 'moved';
       },
     },
@@ -677,7 +677,7 @@ describe('a password left in a field is emptied, and the line stops', () => {
       await pollUntilCleared(h);
       should(h.stopped).deepEqual(['0:did-not-move-on']);
       // The cleanup is the field's own: whatever it answers, the page is never held from the ferret.
-      should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+      should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
     });
 
   it('should clear at once, and not stop the line, when the page has moved on', async () => {
@@ -709,7 +709,7 @@ describe('a fill is held from the ferret like a tap, and pressed like one', () =
     const h = harness();
     await approve(h, await github(h));
     await raised(h);
-    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
   });
 
   it('should press Enter after the last value, unless the ferret raised the card to submit itself', async () => {
@@ -829,7 +829,7 @@ describe('a revoke or an expiry during a fill stops the write', () => {
     should(view.state).equal('pending');
     should(request?.preapproval).match({ outcome: 'did-not-apply', reason: 'expired' });
     // Nothing was typed, so the page is not held and the use is given back.
-    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
     should(h.used).deepEqual([]);
   });
 
@@ -843,7 +843,7 @@ describe('a revoke or an expiry during a fill stops the write', () => {
     should(h.writes).deepEqual([]);
     should(view.state).equal('pending');
     should(request?.preapproval).match({ outcome: 'did-not-apply', reason: 'expired' });
-    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
     should(h.used).deepEqual([]);
   });
 
@@ -1000,10 +1000,10 @@ describe('a write that could not say whether it typed is cleared, held and stops
     await settled();
     should(h.used).deepEqual([`${PLAN}:0`]);
     should(h.stopped).deepEqual(['0:did-not-move-on']);
-    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
     await pollUntilCleared(h);
     should(h.clears.map(job => job.fields.map(field => field.backendNodeId))).deepEqual([[12]]);
     should(h.heldDuringClear).deepEqual([false]);
-    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
   });
 });

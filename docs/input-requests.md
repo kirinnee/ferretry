@@ -154,6 +154,11 @@ one-time.
   the observed field of that sign-in ([Codes Ferretry makes](#codes-ferretry-makes)). Its text is also masked from
   text reads for the redaction window, as defence in depth; that covers text only, so the ferret may still see it on
   screen (a screenshot, a scripted read). The owner allowed that: TOTP codes are fine to see (design §11.1).
+- **What makes a page field a code is the PAGE's own evidence for that field**, never a name, a label or the prompt: `autocomplete="one-time-code"`, or a numeric
+  keypad (`inputmode` numeric, tel or decimal) with `maxlength` 4 to 8 and no password signal (a password-typed input, or an
+  autocomplete, name or id that says password, pass, pwd or PIN). A reusable password in a text box called "code" stays a
+  `secret`; the ferret's label or a prompt that says "password" never turns a real code into a secret, nor a secret into a
+  code. A card number, expiry or security code (`autocomplete` cc-number, cc-exp, cc-csc, or card words) is always a `secret`.
 - **A `code` aimed at a password is a secret.** The daemon handles a code field as `secret` when any of these
   holds (the ferret's words may only ever raise a code, never lower one):
   - the page field is `type=password`, or its name, id or autocomplete says pass, pwd or PIN (any type);
@@ -256,6 +261,15 @@ raise naming `code`, and the agent is told so.
 - **Limits**: 3 pending requests and 20 raises an hour per session; 30 remote deliveries an hour per
   daemon.
 
+## How an answered request ends
+
+The durable outcome comes first. `finish` writes the outcome event to the session journal (it carries what the follow-up
+needs: whether the card closes, whether the ferret is told, whether it was uncertain; never a value), **then** wakes a
+ferret waiting with `input_wait`, **then** does the follow-up (audit record, card close, notice to the ferret) and
+writes a `surface.input_settled` event. A ferret therefore never hears "delivered" for an outcome the journal does not
+hold, and the follow-up work never adds to its wait. If the daemon stops between the outcome and `settled`, `restore`
+does the follow-up again (at least once; the state the ferret reads is the journal's and does not change).
+
 ## When the target changes
 
 The card binds to everything the daemon saw, so ANY change refuses the write: a page's field node, its box,
@@ -272,6 +286,11 @@ page's main frame (or an open shadow root) with the same tag and attributes. Eve
 the first look (the node Playwright holds, described by the session that holds it); one that cannot be proved, more
 than eight, or a page that changes while it is searched makes the search ambiguous, and then not even the pointer
 decides. A field inside a frame is found again only through the pointer. A terminal is looked at again.
+A re-find only counts when it is the **same document lineage**: the same document (a new navigation is another document,
+however alike its fields look), and every field in the same frame and the same form (the browser reads the frame's address
+and the form's id, name, action path and place among the document's forms). Anything else is redrawn for the owner. When the
+page replaces the field a second time between that look and the write, nothing was typed, so the field is found once more
+under the same rule and the value goes there (once; never after a write that may have landed).
 What it finds is then compared on its **binding**, the part of the facts that names the target itself
 (`lib/input-requests/rebind.ts`):
 
@@ -352,7 +371,7 @@ rows, an escape payload or a program that echoes it differently all defeat a mat
 **There is no lock.** Once a card is answered (terminal or page, `secret`, `private`, `code` or `plain`), the ferret
 may read the terminal or page **at once** (owner decision 2026-11-23). Nothing is quarantined, held or probed after the
 write: `request.lock` and `lockSeconds` are never set, `heldFromView` (`packages/daemon/src/lib/input-requests/lock.ts`)
-is always false, no `surface.input_quarantined` event is journalled, and the agent is told "You can read the terminal
+is always false, nothing is held live (a restart-only guard may be journalled, below), and the agent is told "You can read the terminal
 again at once." (a secure-copy paste says the same).
 
 What keeps the typed value out of reach is **masking**, below: the daemon holds each delivered `secret` in RAM for the
@@ -364,9 +383,19 @@ what it reads. The card still flags the risk (green, amber or red) and Send stay
 - **While a card is pending**, the ferret's `terminal_send` (and, on a page, `browser_type`, `browser_fill_form`,
   `browser_press` and `browser_eval`) on that target is refused: those values are the owner's to type. A card of
   one-time codes lets the ferret type a code itself.
-- **A restart** has nothing to restore: no hold was ever journalled for a typed value.
-- **Left over from the older design**: the quarantine routes (`GET /v1/sessions/:sessionId/input-quarantines`,
-  `POST .../:key/end`) and the viewer's "Show anyway" remain but list nothing, because nothing is ever quarantined.
+- **Value-level protection is all that remains, never a lock on the whole surface.** Three things, each about the typed
+  value and nothing else:
+  - **Text** is masked wherever the daemon scrubs it (above).
+  - **A picture of a page** (`browser_screenshot`, `browser_pdf`, `browser_highlight`) is withheld only while the page
+    shows a document in which the owner just typed a `secret` or `private` value into an input that draws what it
+    holds (a card number in a text box, say): no mask can be drawn on pixels. A `type=password` input draws dots, so a
+    password never withholds a picture. Reading, clicking, navigating and scripts are never touched, and the picture
+    comes back when the page shows another document or the value's redaction window ends.
+  - **A restart forgets the masks** (they live in RAM), while a terminal pane and its scrollback survive. So when a
+    `secret` or `private` value is typed into a terminal that does not provably hide it (not a setuid getpass prompt),
+    a `restart-<request id>` guard is journalled for 2 minutes. It is **never a live hold**: the ferret reads the terminal
+    at once. Only if the daemon restarts inside that window does the terminal come back held for what was left of it.
+    The owner can end it (`POST .../input-quarantines/:key/end`) or reveal it in the viewer.
 
 The daemon holds each delivered `secret` in RAM, for the redaction window (10 minutes), and masks it as
 `[redacted:input !A7]` wherever it scrubs text: the operator's screen, transcript and journal reads,
@@ -465,8 +494,9 @@ A value typed into a page (`secret`, `private` or `code`) holds nothing: the fer
 page **at once** ([no lock after typing](#no-lock-after-typing), owner decision 2026-11-23). Page text and errors it
 reads are still **masked** for the redaction window, so a next page that prints the password back shows a mask, and a
 page that throws the password back shows a mask (the redactor fails closed to a fixed sentence when it cannot run).
-Pictures (`browser_screenshot`, `browser_pdf`, `browser_highlight`) cannot be masked, so a picture taken while the value
-is still on screen shows it: a trade the owner accepted.
+Pictures (`browser_screenshot`, `browser_pdf`, `browser_highlight`) cannot be masked, so a picture of a document that
+shows a just-typed `secret` or `private` value in the clear is refused until the page moves on or the window ends
+([value-level protection](#no-lock-after-typing)); a password input draws dots and is never refused.
 
 - While a request is pending on a page, the agent's `browser_type`, `browser_fill_form`, `browser_press` and `browser_eval`
   on it are refused: those values are the owner's to type.
@@ -1336,17 +1366,18 @@ or nothing is typed:
 - **A password left in a field is emptied, and the line stops.** Before a grant types a password into a page, the
   browser arms (its own `inputArm` call) a `pagehide` listener in an isolated world that empties every password
   input when the page is hidden (the back/forward cache would otherwise keep the value). A worker that refuses the
-  call (one from before it) types nothing. The moment the write is done, the daemon takes a momentary hold of its own on the
-  page that cannot expire while the clear is in flight, and at once (no lock follows a write, so there is no hold to
-  wait for) asks the browser whether a typed
+  call (one from before it) types nothing. **The cleanup never holds the page from the ferret** (it is the field's own, apart
+  from anyone's access). After the write it looks every 250 ms whether the page moved on (a new document) and, when it
+  has, asks the browser at once; otherwise it waits at most 5 seconds, so an asynchronous sign-in is given its time, and
+  then asks whether a typed
   field still holds ANY value (same document, node still connected). It sends only which nodes, never a value. A field that holds one is emptied,
   whatever it holds, and the line stops (`did-not-move-on`). A
   node DevTools says is gone, an empty field or another document is `moved`; any other failure is `unknown`, which
-  stops the line too and keeps the page held a full window more, since the value may still be there. The agent
+  stops the line too. The agent
   browser runs with the back/forward cache off, so a page never comes back with its old heap; the `pagehide` arm is
   defence in depth. A single-page app that swapped the form has moved on once the node is gone. Terminals need
   none: a line-mode prompt consumes the line. A write that could not say whether it typed (`uncertain`: the
-  password may have landed) gets the same clear and hold, and stops the line at once (`did-not-move-on`).
+  password may have landed) gets the same clear, and stops the line at once (`did-not-move-on`).
 - **Audited, never a value.** `input.delivered` carries `by: 'plan'`, the plan, the line and the sign-in beside the
   usual names and flags. A miss is recorded as `input.requested` with `preapproval: 'did-not-apply'`, the plan, the
   line and `because`. A stopped line is recorded as `task-plan-line-stopped`; a write back the plan record refuses
@@ -1402,7 +1433,7 @@ in the table above holds for a rule too, plus these:
   `browser_eval` is seen: a ferret editing the browser profile on disk, or an extension, is outside it.
 - **The clear suspends.** A password left in its field at the hold's end (`cleared`), or a clear that can't tell
   (`unknown`), suspends the rule (`did-not-move-on`), exactly as it stops a plan line. A write that could not say whether it
-  typed (`uncertain`) gets the same clear and its own hold for the full window, and suspends the rule at once.
+  typed (`uncertain`) gets the same clear, and suspends the rule at once.
 - **What the ferret is told.** On a fill: "Filled under a rule the owner approved in advance." and `source: saved`,
   never the rule or the account. On a miss: **nothing at all**. Its view, its words and its agenda card are
   byte-identical to a sign-in no rule was ever about (no "didn't apply" note, no context line), and so are the states

@@ -824,7 +824,7 @@ describe('hold, clear and arm apply to rule fills (invariant 26)', () => {
       await pollUntilCleared(h);
       should(ruleOnDisk(h)?.suspended?.because).equal('did-not-move-on');
       // The cleanup is the field's own: the page is never held from the ferret, before, during or after it.
-      should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+      should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
     });
 });
 
@@ -906,10 +906,10 @@ describe('a write that could not say whether it typed is cleared, held and suspe
     should(ruleOnDisk(h)?.suspended?.because).equal('did-not-move-on');
     // The cleanup waits for the page to move on, never holding it from the ferret meanwhile.
     should(h.timers.length).be.above(0);
-    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
     await pollUntilCleared(h);
     should(h.clears).have.length(1);
-    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
   });
 
   it('should not empty the field before the page has had its bounded wait, and then empty it once', async () => {
@@ -1011,7 +1011,7 @@ describe('a refusal the ferret can cause shows it nothing a card with no rule wo
     ended();
     should(h.writes).deepEqual([]);
     should(view.state).equal('pending');
-    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(h.service.quarantinedUntil(SESSION, ['app'])).be.undefined();
   });
 });
 

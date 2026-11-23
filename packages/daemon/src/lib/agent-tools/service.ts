@@ -1435,12 +1435,8 @@ export class AgentToolService {
   }
 
   /**
-   * A page the daemon just typed a secret into is not READ while it is held: masking can only hide a value it
-   * recognises, so the page's text, its log and any picture of it wait for the window to end. A picture always
-   * waits (no mask can be drawn on pixels). Text may be read again as soon as the page has left the document the
-   * value went into, because every read is masked for the redaction window anyway. A hold that follows its document
-   * (`documentsOnly`: a value Ferretry did not submit, input service `until-moved-on`) lets pictures back the same way;
-   * a page that cannot say which document it shows is held.
+   * What an agent may not READ or PICTURE of a page, by value (owner decision, !A607: no lock on the page; the page is read,
+   * clicked and navigated at once): a picture of a document that shows a copied value, or a value the owner just typed.
    */
   private async assertPageReadable(
     caller: AgentToolCaller,
@@ -1450,30 +1446,9 @@ export class AgentToolService {
     /** Whether a copy's hold is checked too: before an act and inside its queue, not after it. */
     copies = true,
   ): Promise<void> {
-    if (!PAGE_PICTURES.has(tool) && !PAGE_TEXT.has(tool)) return;
-    if (copies && PAGE_PICTURES.has(tool)) await this.assertNotCopiedFrom(caller, surface, document);
-    if (PAGE_PICTURES.has(tool)) await this.assertNoTypedValueShown(caller, surface, document);
-    const input = this.ports.input;
-    const held = input?.pageHeld?.(caller.sessionId, [surface.name, surface.id]);
-    if (input === undefined || held === undefined) return;
-    if ((PAGE_TEXT.has(tool) || held.documentsOnly === true) && held.documents.length > 0) {
-      const now = await (
-        document ?? (async () => await input.pageDocument?.(caller.sessionId, surface.name ?? surface.id))
-      )();
-      if (now !== undefined && !held.documents.includes(now)) return;
-    }
-    const reference = surfaceReference('browser', surface.name ?? surface.id);
-    const when = new Date(held.until).toISOString();
-    const comesBack =
-      held.documentsOnly === true
-        ? 'text reads and pictures come back once the page has moved on.'
-        : 'text reads come back once the page has moved on, pictures after that time.';
-    throw new AgentToolError(
-      'conflict',
-      caller.kind === 'agent'
-        ? `${reference} is quarantined until ${when}: the owner's secret was just typed there, so you cannot read or picture it for a short while. You can still click and navigate; ${comesBack}`
-        : `${reference} is quarantined until ${when}: a secret was just typed there. Look at it in the browser view, or try again after that time.`,
-    );
+    if (!PAGE_PICTURES.has(tool)) return;
+    if (copies) await this.assertNotCopiedFrom(caller, surface, document);
+    await this.assertNoTypedValueShown(caller, surface, document);
   }
 
   /**
