@@ -16,14 +16,19 @@ const GPT_6_SOL = {
   model: 'gpt-6-sol',
   displayName: 'GPT-6-Sol',
   supportedReasoningEfforts: [{ reasoningEffort: 'medium' }],
+  serviceTiers: [{ id: 'priority', name: 'Fast' }],
   defaultReasoningEffort: 'medium',
 };
 
 /**
  * A spawn port whose child speaks just enough of the app-server handshake, noting where and how it was started.
  * `answers: false` makes a child that never answers (a hung read), so only the deadline or an abort ends it.
+ * `stderr` is what the child writes to its error stream; `exitsAtOnce` closes its output without a catalog (it died).
  */
-export function catalogSpawn(started: Started[], options: { readonly answers?: boolean } = {}): SpawnPort {
+export function catalogSpawn(
+  started: Started[],
+  options: { readonly answers?: boolean; readonly stderr?: string; readonly exitsAtOnce?: boolean } = {},
+): SpawnPort {
   const encoder = new TextEncoder();
   const answers = options.answers ?? true;
   return {
@@ -49,12 +54,18 @@ export function catalogSpawn(started: Started[], options: { readonly answers?: b
       const stdout = new ReadableStream<Uint8Array>({
         start(controller) {
           push = line => controller.enqueue(encoder.encode(`${line}\n`));
+          if (options.exitsAtOnce === true) controller.close();
         },
       });
       return {
         pid: 1,
         stdout,
-        stderr: new ReadableStream<Uint8Array>({ start: controller => controller.close() }),
+        stderr: new ReadableStream<Uint8Array>({
+          start: controller => {
+            if (options.stderr !== undefined) controller.enqueue(encoder.encode(`${options.stderr}\n`));
+            controller.close();
+          },
+        }),
         write: chunk => {
           if (!answers) return;
           const text = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);

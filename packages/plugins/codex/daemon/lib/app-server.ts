@@ -38,9 +38,32 @@ export interface CodexModelListPage {
   readonly nextCursor?: string;
 }
 
+/**
+ * WHY a catalog read failed, from a closed list. This is the only part of a failure a log may carry: the message of
+ * the error can hold the child's stderr or the server's own words, so it is never logged.
+ */
+export type CatalogFailureKind =
+  | 'rpc-error'
+  | 'invalid-response'
+  | 'no-models'
+  | 'non-json'
+  | 'timeout'
+  | 'ended-early'
+  | 'stopped'
+  | 'setup';
+
 /** The app-server refused, or answered something that is not a catalog. */
 export class CodexModelCatalogError extends Error {
-  constructor(message: string) {
+  /**
+   * @param message free text for a person who has the error in hand; never written to a log.
+   * @param kind which failure this is (the log's whole sentence about it).
+   * @param rpcCode the JSON-RPC error code, when the server sent one (a number, never its words).
+   */
+  constructor(
+    message: string,
+    readonly kind: CatalogFailureKind = 'invalid-response',
+    readonly rpcCode?: number,
+  ) {
     super(message);
     this.name = 'CodexModelCatalogError';
   }
@@ -92,11 +115,13 @@ export function parseCodexModelListPage(message: unknown): CodexModelListPage {
   if (failure !== undefined) {
     throw new CodexModelCatalogError(
       `Codex model catalog request failed: ${asString(failure.message) ?? 'unknown app-server error'}`,
+      'rpc-error',
+      Number.isInteger(failure.code) ? (failure.code as number) : undefined,
     );
   }
   const result = asObject(envelope?.result);
   if (result === undefined || !Array.isArray(result.data))
-    throw new CodexModelCatalogError('Codex model/list returned an invalid response');
+    throw new CodexModelCatalogError('Codex model/list returned an invalid response', 'invalid-response');
 
   const choices: RuntimeModelChoice[] = [];
   for (const raw of result.data) {
@@ -192,7 +217,7 @@ export class CodexModelListExchange {
     }
     this.#done = true;
     if (this.#choices.length === 0)
-      throw new CodexModelCatalogError('Codex did not advertise any selectable runtime models');
+      throw new CodexModelCatalogError('Codex did not advertise any selectable runtime models', 'no-models');
     return { send: [], choices: this.#choices };
   }
 
