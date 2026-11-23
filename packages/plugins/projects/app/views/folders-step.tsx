@@ -111,11 +111,9 @@ export function FoldersStep({ step, client, daemon }: FoldersStepProps) {
   );
 }
 
-/** The panel Projects places in `onboarding.step`: it draws only for its own step. */
+/** The panel Projects places in `onboarding.step` (the app half hands it only its own step's subject). */
 export function createFoldersStep(client: PluginClient): AppComponent<PanelProps> {
   return function FoldersStepPanel(props: PanelProps) {
-    return props.subject === 'projects.folders' ? (
-      <FoldersStep step={props.step} client={client} daemon={daemonOfClient(client)} />
-    ) : null;
+    return <FoldersStep step={props.step} client={client} daemon={daemonOfClient(client)} />;
   };
 }

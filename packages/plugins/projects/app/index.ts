@@ -1,6 +1,6 @@
 import { FERRETS_LIST_SCOPE_HOOK, type FerretsListScope } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, PanelProps, ScreenProps } from '@ferretry/kernel/manifest';
-import { daemonHomeHref, daemonOfClient, deviceControls, provideToShell } from '@ferretry/app';
+import { daemonHomeHref, forSubject, daemonOfClient, deviceControls, provideToShell } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { projectsCommands } from './command-bar.ts';
@@ -76,7 +76,10 @@ export default provideToShell(
         projects: screen('createProjectsScreen', client),
         project: screen('createProjectScreen', client),
       },
-      panels: { 'new-ferret-projects': newFerretProjectsPanel(client), 'onboarding-step': foldersStepPanel(client) },
+      panels: {
+        'new-ferret-projects': newFerretProjectsPanel(client),
+        'onboarding-step': forSubject('projects.folders', foldersStepPanel(client)),
+      },
     }),
   }),
   {
