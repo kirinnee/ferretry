@@ -113,6 +113,37 @@ describe('completeness', () => {
   });
 });
 
+describe('a step added after the setup was finished (O9-6 upgrade)', () => {
+  const finished: Progress = {
+    format: 1,
+    steps: {
+      'claude-code:harness': { state: 'found', at: AT },
+      'codex:harness': { state: 'found', at: AT },
+      'logins:login': { state: 'done', at: AT },
+      'shells:nix': { state: 'skipped', at: AT },
+    },
+  };
+  const ready = (plugin: string, order: number): OnboardingEntry => ({
+    ...entry(plugin, 'ready', order),
+    informational: true,
+  });
+
+  test("new informational Ready steps leave a finished setup complete, though both read 'pending'", () => {
+    const view = viewOf([...ENTRIES, ready('claude-code', 31), ready('codex', 51)], finished, true);
+    expect(view.steps.filter(step => step.id === 'ready').map(step => step.state)).toEqual(['pending', 'pending']);
+    expect(view.complete).toBe(true);
+  });
+
+  test('a new step that asks something still reopens the run: only informational steps are exempt', () => {
+    expect(viewOf([...ENTRIES, entry('claude-code', 'ask', 31)], finished, true).complete).toBe(false);
+  });
+
+  test('an informational step does not make an unfinished setup complete either', () => {
+    const view = viewOf([...ENTRIES, ready('codex', 51)], undefined, false);
+    expect(view.complete).toBe(false);
+  });
+});
+
 describe('recording an answer', () => {
   test('an answer is added with its time and leaves the other steps alone', () => {
     const before: Progress = { format: 1, steps: { 'codex:harness': { state: 'later', at: AT } } };
