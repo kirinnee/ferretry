@@ -89,12 +89,13 @@ export class CodexAppServerCatalog {
     signal?: AbortSignal,
   ): Promise<readonly RuntimeModelChoice[]> {
     if (!isAbsolute(binary))
-      throw new CodexModelCatalogError('the Codex model catalog probe needs an absolute wrapper path');
+      throw new CodexModelCatalogError('the Codex model catalog probe needs an absolute wrapper path', 'setup');
     if (!isAbsolute(cwd))
-      throw new CodexModelCatalogError('the Codex model catalog probe needs an absolute session directory');
+      throw new CodexModelCatalogError('the Codex model catalog probe needs an absolute session directory', 'setup');
 
     // A stop that came before the start spawns nothing.
-    if (signal?.aborted === true) throw new CodexModelCatalogError('the Codex model catalog probe was stopped');
+    if (signal?.aborted === true)
+      throw new CodexModelCatalogError('the Codex model catalog probe was stopped', 'stopped');
 
     const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     // The child sees `env` when one is given (a scrubbed one, for a read no login asked for); otherwise what the
@@ -154,13 +155,18 @@ export class CodexAppServerCatalog {
       // knows only that the exchange is over, and Codex usually says why on the way out. Both endings
       // get it, because "it timed out, and here is what it was complaining about" is strictly more
       // than "it timed out" — and reading it can no longer reintroduce a hang.
-      if (outcome.kind === 'aborted') throw new CodexModelCatalogError('the Codex model catalog probe was stopped');
+      if (outcome.kind === 'aborted')
+        throw new CodexModelCatalogError('the Codex model catalog probe was stopped', 'stopped');
       const detail = await this.#lastDiagnostic(stderr.settled, diagnostics);
       if (outcome.kind === 'expired')
         throw new CodexModelCatalogError(
           `the Codex model catalog probe timed out after ${formatDeadline(timeoutMs)}${detail}`,
+          'timeout',
         );
-      throw new CodexModelCatalogError(`the Codex model catalog probe ended before the catalog was complete${detail}`);
+      throw new CodexModelCatalogError(
+        `the Codex model catalog probe ended before the catalog was complete${detail}`,
+        'ended-early',
+      );
     } finally {
       stderr.cancel();
     }
@@ -204,7 +210,10 @@ export class CodexAppServerCatalog {
           try {
             message = JSON.parse(line);
           } catch {
-            throw new CodexModelCatalogError('the Codex app-server wrote a non-JSON model catalog response');
+            throw new CodexModelCatalogError(
+              'the Codex app-server wrote a non-JSON model catalog response',
+              'non-json',
+            );
           }
           const step = exchange.receive(message);
           for (const outgoing of step.send) write(outgoing);

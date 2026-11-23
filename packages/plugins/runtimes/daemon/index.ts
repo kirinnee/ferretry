@@ -41,6 +41,7 @@ import {
   type RuntimesFile,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import type { HarnessKind } from './lib/manifest.ts';
 import { fleetHomes } from './adapters/fleet-home-reader.ts';
 import { PROFILE_COMPONENT_SOURCE_HOOKS } from './adapters/profile-components.ts';
 import {
@@ -107,6 +108,10 @@ export interface RuntimesAssembly {
    * profile layers answer in a sentence that they cannot read the files, and change nothing.
    */
   readonly profileEtag?: (profile: string) => Promise<string>;
+  /** The harnesses installed here, as of the last lookup: which CLI a login that drives both gets its derived runtime on. Absent or `undefined`: not known. */
+  readonly installed?: () => readonly HarnessKind[] | undefined;
+  /** Looks the harness commands up ahead of a read of `installed`, as the catalogue's own read does. Absent: nothing to look up. */
+  readonly primeInstalled?: () => Promise<void>;
   /**
    * The machine's "Auto-resume after restart" switch: `true` on, `false` off, `undefined` when it cannot be read (a no:
    * nothing is resumed). Absent, the switch is `runtimes.yaml` `autoResume` as that file stands; present, this answer is
@@ -277,6 +282,21 @@ export const hostAssembly: RuntimesAssembler = ctx => {
       ),
     ),
     profileEtag: async profile => await assembled().profileEtag(profile),
+    // The fleet folder may not open: then what is installed is not known (not "nothing"), so no login's runtime is hidden for it.
+    installed: () => {
+      try {
+        return assembled().installed();
+      } catch {
+        return undefined;
+      }
+    },
+    primeInstalled: async () => {
+      try {
+        await assembled().primeInstalled();
+      } catch {
+        // Not known stays not known: `installed` answers `undefined` too.
+      }
+    },
     launchFacts: launchFactsSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
     hostClaudeAccount: hostClaudeAccountText(ctx.kernel),
     checkEnvironment: checkEnvironmentSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
@@ -294,7 +314,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
       const { config, events, clock } = ctx.kernel;
       const assembly = assemble(ctx);
 
-      const api = createRuntimesApi({
+      const { listFor, ...api } = createRuntimesApi({
         runtimes: () => config.collection(runtimeItems),
         profiles: () => config.collection(profileItems),
         defaultSetting: () => config.file(runtimesFile)?.defaultRuntime,
@@ -303,6 +323,8 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         logins: ctx.needs.logins,
         now: () => clock.nowMs(),
         currentName: async former => await assembly.catalog.currentRuntimeName?.(former),
+        installed: () => assembly.installed?.(),
+        primeInstalled: async () => await assembly.primeInstalled?.(),
       });
       // What a runtime's profile stack names, and the one act that edits a profile's layers: read live, written through
       // the kernel's config writer, never kept. The etag is the profile file's own, read when asked.
@@ -616,6 +638,8 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
               if (assembly.catalog.runtimesAfterLoginChange === undefined) throw new Error('no preview here');
               return await assembly.catalog.runtimesAfterLoginChange(change);
             },
+            // What "Used by" shows is the list `runtime ls` shows: the files plus the runtimes derived per ready login.
+            listFor,
           ),
           // Whether an automatic resume may spend (W2-a): the switch, then the ferret's runtime, each a no when in doubt.
           'auto-resume.decide': autoResumeAnswer({

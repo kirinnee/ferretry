@@ -122,6 +122,27 @@ describe('the logins list names the runtimes that use each login', () => {
     expect(logins.find(login => login.id === 'work')?.usedBy).toEqual(['claude-a']);
   });
 
+  test('a login only a derived runtime launches on lists it, while a removal still asks only the files', async () => {
+    // Runtimes derives a runtime for every ready login with no file of its own: `listed` is what `runtime ls` shows.
+    const users: LoginUsers = {
+      of: () => [],
+      listed: async handed => Object.fromEntries(handed.map(login => [login.id, login.id === 'work' ? ['work'] : []])),
+    };
+    const logins = await listed(users);
+    expect(logins.find(login => login.id === 'work')?.usedBy).toEqual(['work']);
+    // A login nothing derives a runtime for still says so.
+    expect((await listed({ ...users, listed: async () => ({}) })).find(login => login.id === 'work')?.usedBy).toEqual(
+      [],
+    );
+    // The derived runtime is not a file: it never blocks the login's removal.
+    const { host, staged } = await removal(users);
+    try {
+      expect(staged.status).toBe(200);
+    } finally {
+      await host.stop();
+    }
+  });
+
   test('with no provider, or one that throws, the list still reads and names none', async () => {
     expect((await listed(undefined)).find(login => login.id === 'work')?.usedBy).toEqual([]);
     const throwing = await listed({

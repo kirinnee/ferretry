@@ -51,6 +51,8 @@ export interface LoginChangeFacts {
   readonly presets: readonly ProviderPreset[];
   /** The runtimes on each login, by name, when known. */
   readonly usedBy: (id: string) => readonly string[];
+  /** The runtimes Runtimes DERIVES from the login (no file names them): they go with it, and a removal does not wait for them. */
+  readonly derived?: (id: string) => readonly string[];
 }
 
 const ENVIRONMENT_CONSEQUENCE =
@@ -394,6 +396,13 @@ export function deriveLoginChange(
       // C10: a runtime on it would have nothing to launch with.
       if (users.length > 0) refuse(inUseSentence(users));
       const consequences: string[] = [];
+      const derived = facts.derived?.(change.id) ?? [];
+      if (derived.length > 0) {
+        const one = derived.length === 1;
+        consequences.push(
+          `The derived runtime${one ? '' : 's'} ${listed(derived)} disappear${one ? 's' : ''} with this login. Sessions on ${one ? 'it' : 'them'} cannot resume until you pick another runtime.`,
+        );
+      }
       const credential = credentialOf(file);
       if (file.store === 'host') {
         consequences.push(

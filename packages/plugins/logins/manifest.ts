@@ -287,7 +287,7 @@ export default definePlugin({
         ],
       }),
       verb('login rm', {
-        summary: 'remove a sign-in (refused while a runtime uses it)',
+        summary: 'remove a sign-in (refused while a runtime file uses it; a runtime derived from it goes with it)',
         args: [{ name: 'id', help: 'the login' }],
         options: [
           { flag: '--dry-run', help: 'show what would change, and change nothing' },

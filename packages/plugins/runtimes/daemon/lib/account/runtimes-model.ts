@@ -77,6 +77,8 @@ export interface RuntimesFiles {
   readonly starters?: StarterModels;
   /** The model each derived runtime was pinned to when first seen, by runtime name (`derived-runtimes.ts`). */
   readonly pins?: ReadonlyMap<string, string>;
+  /** The harnesses installed here (`derived-runtimes.ts`); absent when the caller does not know. */
+  readonly installed?: readonly HarnessKind[] | undefined;
 }
 
 /** An environment login whose variables the model holds as a stand-in, and why (names and rules only, never a value). */

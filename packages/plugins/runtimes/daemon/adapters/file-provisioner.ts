@@ -20,8 +20,10 @@ import {
   type FleetDocumentWrite,
   type FleetProvisioner,
   type FleetWriteOperation,
+  type MaterialisedRecord,
   type SettingsLayerSource,
   type SkippedDestination,
+  type UnlessUnrecorded,
 } from '../lib/provisioning.ts';
 import {
   mergeSettingsLayers,
@@ -69,6 +71,10 @@ const MAX_READ_BYTES = 4 * 1024 * 1024;
 const MaterialisedRecordSchema = z.strictObject({
   version: z.literal(1),
   entries: z.array(z.string()).readonly(),
+  hashes: z.record(z.string(), z.string()).readonly().optional(),
+  links: z.record(z.string(), z.string()).readonly().optional(),
+  dirs: z.array(z.string()).readonly().optional(),
+  members: z.record(z.string(), z.string()).readonly().optional(),
 });
 
 /** Parsed JSON, or `undefined` for text that is not JSON. */
@@ -78,6 +84,90 @@ function safeJson(text: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/** A record as the provisioner reads it. No record, or one that is not one, holds nothing: nothing is then provably the plan's. */
+interface RecordView {
+  readonly entries: ReadonlySet<string>;
+  readonly hashes: Readonly<Record<string, string>>;
+  readonly links: Readonly<Record<string, string>>;
+  readonly dirs: ReadonlySet<string>;
+  readonly members: Readonly<Record<string, string>>;
+  /** A record from before links were fingerprinted: it has no `links`, so it cannot vouch for one. */
+  readonly withoutLinks: boolean;
+  /** A record from before members were recorded: it has no `members`, so every member there reads as the person's. */
+  readonly withoutMembers: boolean;
+}
+
+/** No record at all is not a record from before: there is nothing to claim by. */
+const NO_RECORD: RecordView = {
+  entries: new Set(),
+  hashes: {},
+  links: {},
+  dirs: new Set(),
+  members: {},
+  withoutLinks: false,
+  withoutMembers: false,
+};
+
+/** What is at a name NOW, in the terms a record can vouch for. */
+type Observed =
+  | { readonly kind: 'file'; readonly hash: string }
+  | { readonly kind: 'link'; readonly stamp: string }
+  | { readonly kind: 'dir' }
+  | { readonly kind: 'other' };
+
+/** Why the entry captured at a name may, or may not, be taken away. */
+type Verdict = 'ours' | 'edited' | 'unrecorded';
+
+/**
+ * Whether what is there NOW is what `record` says Ferretry wrote at `key`. A file: the same hash. A link: the same stamp.
+ * A folder: recorded as written, or — in a record from before folders were told apart — named with no file or link
+ * fingerprint beside it. Nothing else is Ferretry's, whatever it says or looks like.
+ */
+function verdictOf(record: RecordView, key: string, seen: Observed): Verdict {
+  if (seen.kind === 'file') {
+    const hash = record.hashes[key];
+    if (hash === undefined) return 'unrecorded';
+    return hash === seen.hash ? 'ours' : 'edited';
+  }
+  if (seen.kind === 'link') {
+    const stamp = record.links[key];
+    if (stamp === undefined) return 'unrecorded';
+    return stamp === seen.stamp ? 'ours' : 'edited';
+  }
+  if (seen.kind === 'dir') {
+    const known = record.dirs.has(key);
+    const namedOnly = record.entries.has(key) && record.hashes[key] === undefined && record.links[key] === undefined;
+    return known || namedOnly ? 'ours' : 'unrecorded';
+  }
+  return 'unrecorded';
+}
+
+/** Canonical text of a JSON value (keys sorted), so a member hashes the same however its keys were ordered. */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (typeof value === 'object' && value !== null) {
+    return `{${Object.entries(value)
+      .toSorted(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, member]) => `${JSON.stringify(key)}:${stableJson(member)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+const isPlainRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** Everything one apply learns while it runs, keyed by the record of the runtime home it is about. */
+interface ApplyState {
+  readonly skipped: SkippedDestination[];
+  /** Entries this apply left as found, per record: a record is ONE runtime's, so a name is never shared between two. */
+  readonly declined: Map<string, Set<string>>;
+  /** The `replaceKeys` members this apply wrote, per record, as `<key>.<member>` to the hash of the value. */
+  readonly members: Map<string, Record<string, string>>;
+  /** Each record as it was before this apply, read once. */
+  readonly records: Map<string, RecordView>;
 }
 
 /** A name that is exactly one entry of its directory: never a path that could reach outside it. */
@@ -118,6 +208,21 @@ function reasonOf(error: unknown): string {
 }
 
 const sha256 = (bytes: Uint8Array): string => new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
+const sha256Text = (text: string): string => sha256(new TextEncoder().encode(text));
+
+/** The sentence for an entry left as found: its name and what happened, never what it holds. */
+function leftReason(name: string, seen: Observed, verdict: Verdict, why: 'write' | 'remove'): string {
+  if (seen.kind === 'file' && verdict === 'edited') {
+    return why === 'write'
+      ? `${name} was edited in the runtime home; Ferretry left it. Delete it to let Ferretry write it again.`
+      : `${name} was edited in the runtime home since Ferretry wrote it; Ferretry left it`;
+  }
+  if (seen.kind === 'file' && verdict === 'unrecorded' && why === 'write') {
+    return `${name} predates Ferretry's tracking; Ferretry left it. Delete it to get the generated one.`;
+  }
+  if (seen.kind === 'link' && verdict === 'edited') return `${name} is not the link Ferretry made; Ferretry left it`;
+  return `${name} was not put there by Ferretry; Ferretry left it`;
+}
 
 /**
  * Writes a plan to the fleet folder.
@@ -215,7 +320,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
     const journal: MutationJournal = new FileMutationJournal(this.disk, target => this.assertWritablePath(target));
     const prunedWrappers: string[] = [];
-    const skipped: SkippedDestination[] = [];
+    const state: ApplyState = { skipped: [], declined: new Map(), members: new Map(), records: new Map() };
+    const skipped = state.skipped;
     let operationCount = 0;
     let stage = 'the configuration and asset documents';
 
@@ -236,7 +342,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
           // with a link after the all-or-nothing preflight approved this destination.
           await this.assertOperationWritable(operation);
           const mark = journal.beginOperation();
-          const pruned = await this.applyOperation(operation, journal, skipped);
+          const pruned = await this.applyOperation(operation, journal, state);
           await journal.sealOperation(mark);
           operationCount += 1;
           prunedWrappers.push(...pruned);
@@ -501,7 +607,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   private async applyOperation(
     operation: FleetWriteOperation,
     journal: MutationJournal,
-    skipped: SkippedDestination[],
+    state: ApplyState,
   ): Promise<readonly string[]> {
     if (operation.kind === 'directory') {
       await journal.captureDirectory(operation.path, operation.mode);
@@ -518,8 +624,27 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
 
     if (operation.kind === 'prune-directory') {
-      if (operation.only === undefined) await this.pruneDirectory(operation.path, new Set(operation.keep), journal);
-      else await this.retireEntries(operation.path, operation.only, new Set(operation.keep), operation.record, journal);
+      if (operation.only !== undefined) {
+        await this.retireEntries(
+          operation.path,
+          operation.only,
+          new Set(operation.keep),
+          operation.record,
+          journal,
+          state,
+          operation.ownLinksUnder,
+        );
+      } else if (operation.recordedAs !== undefined && operation.record !== undefined) {
+        await this.retireRecorded(
+          operation.path,
+          operation.recordedAs,
+          new Set(operation.keep),
+          operation.record,
+          journal,
+          state,
+          operation.ownLinksUnder,
+        );
+      } else await this.pruneDirectory(operation.path, new Set(operation.keep), journal);
       // Deliberately no names: the caller collects what it reports as pruned WRAPPERS, and a removed skill item is not
       // one. What was removed is visible where a person decides — the dry run states the directory and the keep set.
       return [];
@@ -539,8 +664,22 @@ export class FileFleetProvisioner implements FleetProvisioner {
             async backup => await this.readExistingSettings(backup, operation.format),
           )
         : undefined;
-      const content = await this.resolveSettings(existing, operation.format, operation.layers, {
+      // A link at a settings file is somebody's (a home-manager link, a dotfile manager's): the merge cannot be written
+      // through it, and replacing it would cost them the link. It is put back, and the apply says nothing was written.
+      if (existing?.kind === 'link') {
+        await journal.keep(operation.path);
+        state.skipped.push({
+          path: operation.path,
+          reason: `${path.basename(operation.path)} is a link Ferretry did not make; Ferretry left it, so nothing was written to it`,
+        });
+        return [];
+      }
+      const content = await this.resolveSettings(existing?.settings, operation.format, operation.layers, {
         replaceKeys: operation.replaceKeys ?? [],
+        priorMembers: operation.priorMembers ?? {},
+        path: operation.path,
+        ...(operation.record === undefined ? {} : { record: operation.record }),
+        state,
       });
       await this.writeFileAtomically(operation.path, content, operation.mode);
       return [];
@@ -548,7 +687,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
     await journal.captureDirectory(path.dirname(operation.path));
     await this.disk.makeFolder(path.dirname(operation.path), DEFAULT_FOLDER_MODE);
-    await this.writeEntry(operation, journal, skipped);
+    await this.writeEntry(operation, journal, state);
     return [];
   }
 
@@ -557,16 +696,109 @@ export class FileFleetProvisioner implements FleetProvisioner {
     if ((await this.disk.lstat(target)) !== undefined) await this.disk.remove(target);
   }
 
+  /** What is at `target` now, the leaf not followed, as a record can vouch for it; `undefined` when nothing is. */
+  private async observe(target: string): Promise<Observed | undefined> {
+    const found = await this.disk.lstat(target);
+    if (found === undefined) return undefined;
+    if (found.kind === 'directory') return { kind: 'dir' };
+    if (found.kind === 'symlink') {
+      // The root cannot read where a link leads, so a link is vouched for by WHICH link it is: the object, its size and
+      // the time it was made. Swapped for another link, even one to the same place, it is a different one.
+      const identity = await this.disk.identity(target);
+      return identity === undefined
+        ? { kind: 'other' }
+        : { kind: 'link', stamp: `${identity}:${found.size}:${found.modified}` };
+    }
+    if (found.kind !== 'file') return { kind: 'other' };
+    try {
+      return { kind: 'file', hash: sha256(await this.disk.readBytes(target, MAX_READ_BYTES)) };
+    } catch {
+      // Too big or unreadable is not provably the plan's own.
+      return { kind: 'other' };
+    }
+  }
+
+  /** The record as the previous apply left it, read once per apply. */
+  /** Whether the link at `target` leads, every hop resolved, into `folder` — and so into something Ferretry itself keeps. */
+  private async leadsInto(target: string, folder: string | undefined): Promise<boolean> {
+    if (folder === undefined) return false;
+    const [real, store] = [await this.disk.realPath(target), await this.disk.realPath(folder)];
+    if (real === undefined || store === undefined) return false;
+    const below = path.relative(store, real);
+    return below !== '' && !below.startsWith(`..${path.sep}`) && below !== '..' && !path.isAbsolute(below);
+  }
+
+  private async recordView(record: string, state: ApplyState): Promise<RecordView> {
+    const known = state.records.get(record);
+    if (known !== undefined) return known;
+    const view = await this.readRecord(record);
+    state.records.set(record, view);
+    return view;
+  }
+
+  private decline(state: ApplyState, record: string, key: string): void {
+    const names = state.declined.get(record) ?? new Set<string>();
+    names.add(key);
+    state.declined.set(record, names);
+  }
+
+  /**
+   * THE ONE GATE in front of a removal or a replacement in a runtime home. The entry at `target` is moved aside FIRST —
+   * one atomic step, after which nobody can change it — and then judged: is the entry that was captured provably the one
+   * the record of THIS runtime says Ferretry wrote there? If so it stays captured, and the caller removes or replaces it.
+   * If not it is put back untouched, named as skipped, and the sentence is answered. Nothing there is not a refusal.
+   *
+   * @param why `write`: something is about to take its place. `remove`: nothing is.
+   */
+  private async takeName(
+    target: string,
+    rule: UnlessUnrecorded,
+    why: 'write' | 'remove',
+    journal: MutationJournal,
+    state: ApplyState,
+    ownLinksUnder?: string,
+  ): Promise<{ readonly taken: true; readonly own: boolean } | { readonly taken: false }> {
+    // A name this batch already captured holds this batch's own work.
+    if (!(await journal.capture(target))) return { taken: true, own: true };
+    const ownLinks = rule.ownLinksUnder ?? ownLinksUnder;
+    const found = await journal.withBackup(target, async backup => {
+      const observed = await this.observe(backup);
+      if (observed === undefined) throw new Error(`the original of ${target} is gone from ${backup}`);
+      return { observed, intoStore: observed.kind === 'link' && (await this.leadsInto(backup, ownLinks)) };
+    });
+    if (found === undefined) return { taken: true, own: false };
+    const seen = found.observed;
+    const record = await this.recordView(rule.record, state);
+    // A link no record fingerprinted (the record is from before links were) is still Ferretry's when it leads into the
+    // folder only Ferretry fills, or is the credential link that record names. It is claimed once, and the record this
+    // apply writes stamps it.
+    const unstampedLink =
+      seen.kind === 'link' &&
+      record.withoutLinks &&
+      (found.intoStore || (rule.namedLinkIsOurs === true && record.entries.has(rule.key)));
+    // One of Ferretry's fixed names: a regular file there is its own whatever its bytes, and nothing else is.
+    const fixedName = rule.byName === true ? (seen.kind === 'file' ? 'ours' : 'unrecorded') : undefined;
+    const verdict = fixedName ?? (unstampedLink ? 'ours' : verdictOf(record, rule.key, seen));
+    if (verdict === 'ours') return { taken: true, own: false };
+    await journal.keep(target);
+    this.decline(state, rule.record, rule.key);
+    state.skipped.push({ path: target, reason: leftReason(path.basename(target), seen, verdict, why) });
+    return { taken: false };
+  }
+
   /** A link, a copy or a file, written into its folder. */
   private async writeEntry(
     operation: Extract<FleetWriteOperation, { readonly kind: 'symlink' | 'copy' | 'file' }>,
     journal: MutationJournal,
-    skipped: SkippedDestination[],
+    state: ApplyState,
   ): Promise<void> {
+    const rule = operation.unlessUnrecorded;
     if (operation.kind === 'symlink') {
-      // Clear the path only when this batch already owned it. After a fresh capture the path is empty, and anything
-      // that has appeared since belongs to somebody else: the link then fails as a refusal instead of deleting their work.
-      if (!(await journal.capture(operation.path))) await this.removeEntry(operation.path);
+      if (rule !== undefined) {
+        const taken = await this.takeName(operation.path, rule, 'write', journal, state);
+        if (!taken.taken) return;
+        if (taken.own) await this.removeEntry(operation.path);
+      } else if (!(await journal.capture(operation.path))) await this.removeEntry(operation.path);
       // Asked again at the write: what the link leads to is read later by the harness, so this is the last moment the
       // daemon can refuse it. Nothing is read here: a credential link is the planner's own and leads into a home.
       await this.disk.linkTo(operation.path, operation.source, operation.dangling === true);
@@ -585,41 +817,82 @@ export class FileFleetProvisioner implements FleetProvisioner {
         // A template linked out of a read-only store copies as 0444; force the copied root writable so a harness can
         // rewrite a file it owns. Directories remain private to the account.
         await this.disk.setMode(staged, operation.mode ?? (kind === 'directory' ? 0o700 : 0o644));
-        if (!(await journal.capture(operation.path))) await this.removeEntry(operation.path);
+        if (rule !== undefined) {
+          const taken = await this.takeName(operation.path, rule, 'write', journal, state);
+          if (!taken.taken) return;
+          if (taken.own) await this.removeEntry(operation.path);
+        } else if (!(await journal.capture(operation.path))) await this.removeEntry(operation.path);
         await this.publish(staged, operation.path);
         // Named in the outcome of a committed apply: what the copy could not carry is missing from the destination.
-        skipped.push(...left.map(entry => ({ path: path.join(operation.path, entry.path), reason: entry.reason })));
+        state.skipped.push(
+          ...left.map(entry => ({ path: path.join(operation.path, entry.path), reason: entry.reason })),
+        );
       } finally {
         await discardQuietly(this.disk, staged);
       }
       return;
     }
 
-    if (
-      operation.unlessForeign !== undefined &&
-      (await this.holdsForeign(operation.path, operation.unlessForeign.marker))
-    ) {
-      skipped.push({
-        path: operation.path,
-        reason: 'a file Ferretry did not write is there, so it was left exactly as it is',
-      });
+    if (operation.recordsMaterialised === true) {
+      const content = await this.recordContent(operation, journal, state);
+      if (content === undefined) return;
+      await this.writeFileAtomically(operation.path, content, operation.mode);
       return;
     }
-    await journal.capture(operation.path);
+    if (rule !== undefined) {
+      if (!(await this.takeName(operation.path, rule, 'write', journal, state)).taken) return;
+    } else await journal.capture(operation.path);
     await this.writeFileAtomically(operation.path, operation.content, operation.mode);
   }
 
-  /** Whether `target` holds something the plan did not make: neither absent, nor a link, nor a file of its own text. */
-  private async holdsForeign(target: string, marker: string): Promise<boolean> {
-    const information = await this.disk.lstat(target);
-    if (information === undefined || information.kind === 'symlink') return false;
-    if (information.kind !== 'file') return true;
-    try {
-      return !(await this.disk.readText(target, MAX_READ_BYTES)).startsWith(marker);
-    } catch {
-      // Too big or unreadable is not provably the plan's own.
-      return true;
+  /**
+   * The text of the record this apply leaves, or `undefined` when what is at the record's name is not a record (it is put
+   * back untouched and named): a record replaces a record and nothing else. The text is the plan's, without what this
+   * apply declined to write, and with a fingerprint of everything it did — read from the disk NOW, so a record can only
+   * ever vouch for what is there.
+   */
+  private async recordContent(
+    operation: Extract<FleetWriteOperation, { readonly kind: 'file' }>,
+    journal: MutationJournal,
+    state: ApplyState,
+  ): Promise<string | undefined> {
+    if (await journal.capture(operation.path)) {
+      // Ferretry's own fixed name: a regular file there is a record (or what is left of one) whatever its bytes. A link or
+      // a folder is somebody's, and stays.
+      const isFile = await journal.withBackup(
+        operation.path,
+        async backup => (await this.disk.lstat(backup))?.kind === 'file',
+      );
+      if (isFile === false) {
+        await journal.keep(operation.path);
+        state.skipped.push({
+          path: operation.path,
+          reason: `${path.basename(operation.path)} is not Ferretry's record; Ferretry left it, so nothing in this home is tracked`,
+        });
+        return undefined;
+      }
     }
+    const parsed = MaterialisedRecordSchema.safeParse(safeJson(operation.content));
+    if (!parsed.success) return operation.content;
+    const declined = state.declined.get(operation.path) ?? new Set<string>();
+    const home = path.dirname(path.dirname(operation.path));
+    const entries: string[] = [];
+    const hashes: Record<string, string> = {};
+    const links: Record<string, string> = {};
+    const dirs: string[] = [];
+    for (const key of parsed.data.entries) {
+      if (declined.has(key)) continue;
+      const seen = await this.observe(path.join(home, key));
+      if (seen === undefined || seen.kind === 'other') continue;
+      entries.push(key);
+      if (seen.kind === 'file') hashes[key] = seen.hash;
+      else if (seen.kind === 'link') links[key] = seen.stamp;
+      else dirs.push(key);
+    }
+    const members = state.members.get(operation.path) ?? {};
+    // Always all four, even empty: a record without `links` or `members` is one from before they were kept, and is read as that.
+    const record: MaterialisedRecord = { version: 1, entries, hashes, links, dirs, members };
+    return `${JSON.stringify(record)}\n`;
   }
 
   /** The text of the regular file at `target`, read without following a link. */
@@ -687,9 +960,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
   }
 
   /**
-   * Remove the named direct children of a directory the plan shares with the harness and the person, each only on
-   * evidence it is the plan's own: a symbolic link, or an entry the previous apply's record names. A regular file or a
-   * directory with neither — a person's own `CLAUDE.md` — stays.
+   * Remove the named direct children of a directory the plan shares with the harness and the person, each only when it
+   * is provably the plan's own (see {@link takeName}). Anything else stays, and is named: a regular file or a folder, but
+   * also a link — a link is no more the plan's than a file is.
    */
   private async retireEntries(
     directory: string,
@@ -697,33 +970,70 @@ export class FileFleetProvisioner implements FleetProvisioner {
     keep: ReadonlySet<string>,
     record: string | undefined,
     journal: MutationJournal,
+    state: ApplyState,
+    ownLinksUnder?: string,
   ): Promise<void> {
-    const recorded = record === undefined ? new Set<string>() : await this.recordedEntries(record);
     if ((await this.disk.lstat(directory))?.kind !== 'directory') return;
     for (const entry of only) {
       if (keep.has(entry) || isMutationReservedName(entry) || !isSingleComponent(entry)) continue;
       const target = path.join(directory, entry);
-      const information = await this.disk.lstat(target);
-      if (information === undefined) continue;
-      if (information.kind !== 'symlink' && !recorded.has(entry)) continue;
-      await journal.capture(target);
+      if ((await this.disk.lstat(target)) === undefined) continue;
+      // With no record there is nothing to prove an entry by: a rule that names a record nobody wrote reads as empty.
+      await this.takeName(target, { record: record ?? '', key: entry }, 'remove', journal, state, ownLinksUnder);
     }
   }
 
-  /**
-   * What the previous apply recorded putting in a directory. No record, or one that cannot be read as one, is an empty
-   * record: the cost is a leftover the next apply cannot prove is its own, which is the safe direction to be wrong in.
-   */
-  private async recordedEntries(record: string): Promise<ReadonlySet<string>> {
+  private async readRecord(record: string): Promise<RecordView> {
+    if (record === '') return NO_RECORD;
     let document: string | undefined;
     try {
       document = await this.readRegularText(record, 'materialised record');
     } catch {
-      return new Set();
+      return NO_RECORD;
     }
-    if (document === undefined) return new Set();
+    if (document === undefined) return NO_RECORD;
     const parsed = MaterialisedRecordSchema.safeParse(safeJson(document));
-    return new Set(parsed.success ? parsed.data.entries : []);
+    if (!parsed.success) return NO_RECORD;
+    return {
+      entries: new Set(parsed.data.entries),
+      hashes: parsed.data.hashes ?? {},
+      links: parsed.data.links ?? {},
+      dirs: new Set(parsed.data.dirs ?? []),
+      members: parsed.data.members ?? {},
+      withoutLinks: parsed.data.links === undefined,
+      withoutMembers: parsed.data.members === undefined,
+    };
+  }
+
+  /**
+   * Sweep a directory the person and the harness add to as well (the skills folder, the state folder): remove only the
+   * children the previous apply's record names as `<recordedAs>/<child>` and that are still what it recorded. Anything
+   * else that is not kept stays, and is named.
+   */
+  private async retireRecorded(
+    directory: string,
+    recordedAs: string,
+    keep: ReadonlySet<string>,
+    record: string,
+    journal: MutationJournal,
+    state: ApplyState,
+    ownLinksUnder?: string,
+  ): Promise<void> {
+    if ((await this.disk.lstat(directory))?.kind !== 'directory') return;
+    for (const entry of (await this.disk.entries(directory)).toSorted((left, right) =>
+      left.name.localeCompare(right.name),
+    )) {
+      if (keep.has(entry.name) || isMutationReservedName(entry.name)) continue;
+      // A record names a child by its path from the runtime home: the state folder's own children are `<recordedAs>/<child>`.
+      await this.takeName(
+        path.join(directory, entry.name),
+        { record, key: `${recordedAs}/${entry.name}` },
+        'remove',
+        journal,
+        state,
+        ownLinksUnder,
+      );
+    }
   }
 
   private async stillCarries(journal: MutationJournal, target: string, marker: string): Promise<boolean> {
@@ -739,10 +1049,16 @@ export class FileFleetProvisioner implements FleetProvisioner {
     existing: SettingsObject | undefined,
     format: SettingsFormat,
     layers: readonly SettingsLayerSource[],
-    options: { readonly replaceKeys: readonly string[] },
+    options: {
+      readonly replaceKeys: readonly string[];
+      readonly priorMembers: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+      readonly path: string;
+      readonly record?: string;
+      readonly state: ApplyState;
+    },
   ): Promise<string> {
     const resolved: SettingsObject[] = [];
-    // A replaced key is the plan's, all of it, so nothing of the old value may survive the merge.
+    // A map the plan fills member by member is folded in below, member by member; the layers must not deep-merge into it.
     if (existing !== undefined) {
       resolved.push(Object.fromEntries(Object.entries(existing).filter(([key]) => !options.replaceKeys.includes(key))));
     }
@@ -753,23 +1069,83 @@ export class FileFleetProvisioner implements FleetProvisioner {
           : parseSettings(await this.disk.readSourceText(path.resolve(layer.path)), format),
       );
     }
-    return serializeSettings(mergeSettingsLayers(resolved), format);
+    const merged = mergeSettingsLayers(resolved);
+    if (options.replaceKeys.length === 0) return serializeSettings(merged, format);
+    const previous = options.record === undefined ? NO_RECORD : await this.recordView(options.record, options.state);
+    const written: Record<string, string> = {};
+    const result: Record<string, unknown> = { ...merged };
+    for (const key of options.replaceKeys) {
+      const planned = merged[key];
+      if (planned === undefined) continue;
+      const current = existing?.[key];
+      if (!isPlainRecord(planned) || (current !== undefined && !isPlainRecord(current))) {
+        // Not a map on one side: there is nothing to fold member by member, so the person's value stands.
+        if (current !== undefined) {
+          result[key] = current;
+          options.state.skipped.push({
+            path: options.path,
+            reason: `${key} is not what Ferretry writes there; Ferretry left it`,
+          });
+        }
+        continue;
+      }
+      const owner = current ?? {};
+      const former = options.priorMembers[key] ?? {};
+      // A record from before members were recorded cannot say which members Ferretry wrote — the old code replaced the whole
+      // map. A member EQUAL to what the plan writes now, or to what an earlier plan would have written, is provably its own
+      // and is claimed (and recorded below); any other stays and is named, once, because the record now has `members`.
+      const ours = (name: string, value: unknown): boolean => {
+        const recorded = previous.members[`${key}.${name}`];
+        if (recorded !== undefined) return recorded === sha256Text(stableJson(value));
+        if (!previous.withoutMembers) return false;
+        const proof = name in planned ? planned[name] : former[name];
+        return proof !== undefined && stableJson(proof) === stableJson(value);
+      };
+      const out: Record<string, unknown> = {};
+      for (const [name, value] of Object.entries(owner)) {
+        // A member Ferretry wrote, unchanged, that the plan no longer has: it goes. Every other member of the person's stays.
+        if (ours(name, value) && !(name in planned)) continue;
+        if (previous.withoutMembers && !(name in planned) && !ours(name, value)) {
+          options.state.skipped.push({
+            path: options.path,
+            reason: `${key} "${name}" may have been put there by an older Ferretry, which cannot be proved; Ferretry left it`,
+          });
+        }
+        out[name] = value;
+      }
+      for (const [name, value] of Object.entries(planned)) {
+        const present = name in owner;
+        if (present && !ours(name, owner[name])) {
+          options.state.skipped.push({
+            path: options.path,
+            reason: `${key} "${name}" was not put there by Ferretry, or was edited since; Ferretry left it`,
+          });
+          continue;
+        }
+        out[name] = value;
+        written[`${key}.${name}`] = sha256Text(stableJson(value));
+      }
+      result[key] = out;
+    }
+    if (options.record !== undefined) {
+      options.state.members.set(options.record, { ...options.state.members.get(options.record), ...written });
+    }
+    return serializeSettings(result, format);
   }
 
   /**
-   * The file the harness has been writing to, folded back in as the base layer so a re-apply keeps runtime keys. A
-   * symlink holds only template content and an unparseable file holds nothing that can be merged, so both yield nothing
-   * rather than failing the apply.
+   * The file the harness has been writing to, folded back in as the base layer so a re-apply keeps runtime keys. A link
+   * is answered as one, never followed: it is somebody's, and the caller leaves it. An unreadable or unparseable file is
+   * refused, because an apply that merged without it would replace what the person has.
    */
-  private async readExistingSettings(backup: string, format: SettingsFormat): Promise<SettingsObject | undefined> {
+  private async readExistingSettings(
+    backup: string,
+    format: SettingsFormat,
+  ): Promise<{ readonly kind: 'link' } | { readonly kind: 'settings'; readonly settings: SettingsObject } | undefined> {
     const stats = await this.disk.lstat(backup);
     // Absent is the ordinary first-apply case and carries nothing to preserve.
     if (stats === undefined) return undefined;
-    // A symlink is the one justified exception: it holds template content the assets directory is the authority for,
-    // not runtime keys, so there is nothing of the person's in it to lose. Everything else is fail-closed: a settings
-    // file that cannot be read or parsed — and a directory or a device node where one should be — is state this apply
-    // is about to replace with a merge computed without it.
-    if (stats.kind === 'symlink') return undefined;
+    if (stats.kind === 'symlink') return { kind: 'link' };
     if (stats.kind !== 'file') {
       throw new Error(`refusing to merge settings over ${backup}: it is not a regular file`);
     }
@@ -780,7 +1156,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       throw new Error(`refusing to merge settings over ${backup}: it could not be read (${reasonOf(error)})`);
     }
     try {
-      return parseSettings(document, format);
+      return { kind: 'settings', settings: parseSettings(document, format) };
     } catch (error) {
       throw new Error(`refusing to merge settings over ${backup}: it could not be parsed (${reasonOf(error)})`);
     }

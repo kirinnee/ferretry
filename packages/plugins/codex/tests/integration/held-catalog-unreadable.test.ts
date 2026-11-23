@@ -18,6 +18,7 @@ describe('HeldFastCatalog', () => {
         throw new Error('the held catalog is damaged');
       },
       save: async () => undefined,
+      fallback: async () => undefined,
       requestRefresh: () => undefined,
       warn: () => undefined,
     });

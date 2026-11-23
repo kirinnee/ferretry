@@ -18,11 +18,13 @@
  *   filled in by the wrapper at launch, because only then is it known.
  * - **history** — one pool per harness, always (`sharedHistoryPoolRequests`).
  *
- * WHAT IS NEVER REMOVED. A config directory is shared with the harness and the person: Claude's
- * `/memory` writes `CLAUDE.md` there. So a destination the profile no longer fills is swept only on
- * evidence it is this plan's own — a link (only the plan makes links there), or a name the previous
- * apply recorded in `.fy/materialised.json`. A regular file or directory with neither stays. Codex's
- * own `skills/.system` is never swept.
+ * WHAT IS NEVER REMOVED OR REPLACED. A config directory is shared with the harness and the person: Claude's
+ * `/memory` writes `CLAUDE.md` there, and the person adds skills, notes and servers. ONE rule covers every removal and
+ * every replacement: an entry is taken away only when what is there NOW is provably what Ferretry wrote there — the
+ * record of THIS runtime (`.fy/materialised.json`) names the exact path, and the entry still matches what it recorded
+ * (a file: the same hash; a link: the same stamp; a folder: written by Ferretry). Anything else stays, and is named.
+ * Neither a link, nor a header, nor text that matches what would be written proves anything. Codex's own
+ * `skills/.system` is never swept.
  *
  * A runtime that cannot launch — Auto mode on a Claude that does not accept it (O4), a profile with
  * nothing for its harness (P5), a credential with no store to reach (G5) — still materialises. Its
@@ -70,7 +72,8 @@ import {
   CLAUDE_JSON_FILE,
   type ClaudeStatuslineCommand,
   componentPartialSupport,
-  GENERATED_INSTRUCTIONS_MARKER,
+  renderMcpComponents,
+  SKILLS_STORE_DIRECTORY,
 } from './adapt.ts';
 import {
   CODEX_CREDENTIAL_FILE,
@@ -261,9 +264,6 @@ function withoutLaunchFolder(layer: FixedLayer): FixedLayer {
   return { ...rest, args, entries: layer.entries.filter(entry => entry.purpose !== 'trust') };
 }
 
-/** The top-level name an entry occupies in the config directory. */
-const topLevel = (dest: string): string => dest.split('/')[0] as string;
-
 /**
  * Plan the whole format-1 fleet. Throws {@link FleetMaterialiseError} naming every problem when the
  * configuration asks for something no apply can write; never writes anything itself.
@@ -451,6 +451,17 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         absent: adapted.absent,
         settings: adapted.settings,
         claudeJson: adapted.claudeJson,
+        priorServers:
+          harness === 'claude'
+            ? renderMcpComponents(
+                harness,
+                Object.fromEntries(
+                  Object.entries(model.components.mcp).filter(
+                    ([serverName]) => !resolved.mcp.some(contribution => contribution.layer.name === serverName),
+                  ),
+                ),
+              )
+            : {},
         overlay: fixed?.claudeSettingsOverlay,
         credentialLink: codexCredentialLink(home, store),
         layout,
@@ -594,6 +605,8 @@ interface ConfigDirectoryInput {
   readonly absent: readonly string[];
   readonly settings: ReturnType<typeof adaptProfile>['settings'];
   readonly claudeJson: SettingsObject | undefined;
+  /** The machine's MCP servers the profile in effect does not have, as they would be written. */
+  readonly priorServers: Readonly<Record<string, SettingsObject>>;
   readonly overlay: SettingsObject | undefined;
   /** The text of the model catalog file a Codex runtime on a third-party provider reads. */
   readonly codexCatalog: string | undefined;
@@ -618,7 +631,8 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
   const operations: FleetWriteOperation[] = [
     { kind: 'directory', path: home, mode: DIRECTORY_MODE },
     { kind: 'directory', path: state, mode: DIRECTORY_MODE },
-    // Ferretry's corner is wholly its own, so it is swept outright, down to what this apply writes.
+    // Ferretry's corner is a folder the person can write in too (a note, a log): only the names the last apply recorded
+    // may go, down to what this apply writes.
     {
       kind: 'prune-directory',
       path: state,
@@ -627,15 +641,25 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
         ...(input.overlay === undefined ? [] : [FIXED_SETTINGS_FILE]),
         ...(input.codexCatalog === undefined ? [] : [CODEX_MODEL_CATALOG_FILE]),
       ],
+      record,
+      recordedAs: RUNTIME_STATE_DIRECTORY,
     },
-    // The config directory is not: only a link, or a name the last apply recorded, is removed.
-    { kind: 'prune-directory', path: home, keep: [], only: input.absent, record },
+    // The config directory is not Ferretry's either: only a name the last apply recorded, still as it was written.
+    {
+      kind: 'prune-directory',
+      path: home,
+      keep: [],
+      only: input.absent,
+      record,
+      // A link an earlier Ferretry made, before the record held links, is still provably its own.
+      ownLinksUnder: layout.assetsDirectory,
+    },
   ];
 
-  for (const entry of ownEntries) operations.push(entryOperation(entry, home, layout));
+  for (const entry of ownEntries) operations.push(entryOperation(entry, home, layout, record));
 
   operations.push({ kind: 'directory', path: skillsContainer, mode: DIRECTORY_MODE });
-  for (const entry of skillEntries) operations.push(entryOperation(entry, home, layout));
+  for (const entry of skillEntries) operations.push(entryOperation(entry, home, layout, record));
   operations.push({
     kind: 'prune-directory',
     path: skillsContainer,
@@ -643,6 +667,11 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       ...skillEntries.map(entry => entry.dest.slice(skillsDest.length + 1)),
       ...HARNESS_OWNED_SKILL_ENTRIES[harness],
     ],
+    // Skills the person or the harness added by hand live here too: only what the last apply recorded may go.
+    record,
+    recordedAs: skillsDest,
+    // A link to a skill that an earlier Ferretry made, before the record held links, is still provably Ferretry's.
+    ownLinksUnder: expandAssetPath(SKILLS_STORE_DIRECTORY, layout.userHome, layout.assetsDirectory),
   });
 
   operations.push({
@@ -661,10 +690,12 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       format: 'json',
       layers: [{ from: 'inline', settings: input.claudeJson }],
       mode: PRIVATE_FILE_MODE,
-      // Claude keeps its own state in this file, so all of it survives — except the keys the profile
-      // owns outright, which are replaced whole so a removed MCP server leaves too.
+      // Claude keeps its own state in this file, and so does the person (their own MCP servers): all of it survives.
+      // The MCP servers the profile wrote are folded in by name, so one the profile drops leaves too — and only that one.
       preserveExisting: true,
       replaceKeys: Object.keys(input.claudeJson),
+      record,
+      priorMembers: { mcpServers: input.priorServers },
     });
   }
   if (input.overlay !== undefined) {
@@ -673,6 +704,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       path: joinPath(state, FIXED_SETTINGS_FILE),
       content: serializeSettings(input.overlay, 'json'),
       mode: PRIVATE_FILE_MODE,
+      unlessUnrecorded: { record, key: `${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}`, byName: true },
     });
   }
   if (input.codexCatalog !== undefined) {
@@ -681,6 +713,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       path: joinPath(state, CODEX_MODEL_CATALOG_FILE),
       content: input.codexCatalog,
       mode: PRIVATE_FILE_MODE,
+      unlessUnrecorded: { record, key: `${RUNTIME_STATE_DIRECTORY}/${CODEX_MODEL_CATALOG_FILE}`, byName: true },
     });
   }
   if (input.credentialLink !== undefined) {
@@ -691,41 +724,52 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       source: input.credentialLink.target,
       path: input.credentialLink.path,
       dangling: true,
+      unlessUnrecorded: { record, key: CODEX_CREDENTIAL_FILE, namedLinkIsOurs: true },
     });
   }
 
+  // The names this apply puts in the home. What each one IS — a file's hash, a link's stamp, a folder — is read off the disk by
+  // the provisioner when it writes this record, so the record can only ever vouch for what is really there.
   const recorded: MaterialisedRecord = {
     version: 1,
     entries: [
       ...new Set([
-        // Not the built-in text: whether it landed or was left beside a person's own file is only known at the write, and
-        // a recorded name is one a later sweep may remove, which must never be a file the person wrote.
-        ...ownEntries
-          .filter(entry => !(entry.kind === 'generated' && entry.builtinOnly === true))
-          .map(entry => topLevel(entry.dest)),
+        ...[...ownEntries, ...skillEntries].map(entry => entry.dest),
+        ...(input.overlay === undefined ? [] : [`${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}`]),
+        ...(input.codexCatalog === undefined ? [] : [`${RUNTIME_STATE_DIRECTORY}/${CODEX_MODEL_CATALOG_FILE}`]),
         ...(input.credentialLink === undefined ? [] : [CODEX_CREDENTIAL_FILE]),
       ]),
     ].toSorted(),
   };
   // After the sweep, so the sweep read the PREVIOUS apply's record.
-  operations.push({ kind: 'file', path: record, content: `${JSON.stringify(recorded)}\n`, mode: PRIVATE_FILE_MODE });
+  operations.push({
+    kind: 'file',
+    path: record,
+    content: `${JSON.stringify(recorded)}\n`,
+    mode: PRIVATE_FILE_MODE,
+    recordsMaterialised: true,
+  });
   return operations;
 }
 
 /** One adapted entry as the write that puts it in the config directory. */
-function entryOperation(entry: AdaptedEntry, home: string, layout: FleetLayout): FleetWriteOperation {
+function entryOperation(entry: AdaptedEntry, home: string, layout: FleetLayout, record: string): FleetWriteOperation {
   const path = joinPath(home, entry.dest);
+  // Nothing the plan did not put there is replaced: a file edited since it was written, or one somebody else made.
+  const unlessUnrecorded = { record, key: entry.dest, ownLinksUnder: layout.assetsDirectory };
   if (entry.kind === 'generated') {
     return {
       kind: 'file',
       path,
       content: entry.content,
       mode: PRIVATE_FILE_MODE,
-      ...(entry.builtinOnly === true ? { unlessForeign: { marker: GENERATED_INSTRUCTIONS_MARKER } } : {}),
+      unlessUnrecorded,
     };
   }
   const source = expandAssetPath(entry.source, layout.userHome, layout.assetsDirectory);
-  return entry.kind === 'link' ? { kind: 'symlink', source, path } : { kind: 'copy', source, path };
+  return entry.kind === 'link'
+    ? { kind: 'symlink', source, path, unlessUnrecorded }
+    : { kind: 'copy', source, path, unlessUnrecorded };
 }
 
 /**

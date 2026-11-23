@@ -87,6 +87,10 @@ export function operationSummary(operation: FleetWriteOperation): FleetWireOpera
   if (operation.kind === 'prune') {
     return { kind: 'prune', path: operation.path, marker: operation.marker, keep: [...operation.keep] };
   }
+  if (operation.kind === 'prune-directory' && operation.recordedAs !== undefined) {
+    // Only what the earlier apply recorded goes, which no name list can say: it names nothing and keeps what it keeps.
+    return { kind: 'retire', path: operation.path, only: [], keep: [...operation.keep] };
+  }
   if (operation.kind === 'prune-directory' && operation.only !== undefined) {
     return { kind: 'retire', path: operation.path, only: [...operation.only], keep: [...operation.keep] };
   }

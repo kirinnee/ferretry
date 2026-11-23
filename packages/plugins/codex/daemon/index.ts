@@ -35,7 +35,13 @@ import {
   locateCodex,
 } from './lib/index.ts';
 import { codexDoctor } from './lib/doctor.ts';
-import { CATALOG_LOADING, CODEX_NOT_FOUND, fastStartDecision } from './lib/fast-mode.ts';
+import {
+  CATALOG_LOADING,
+  CODEX_NOT_FOUND,
+  fastLaunchVerified,
+  fastStartDecision,
+  openaiFallbackChoices,
+} from './lib/fast-mode.ts';
 import { codexHooksSource, codexSettingsSource } from './lib/profile-components.ts';
 import { codexProjectApprovals } from './lib/project-approvals.ts';
 import { codexSettingsPut } from './features/host-import/index.ts';
@@ -150,6 +156,10 @@ export default implementDaemon(manifest, {
       read: async (binary, cwd, env, signal) => await appServer.models(binary, cwd, env, signal),
       nowMs: () => kernel.clock.nowMs(),
       now: () => kernel.clock.now(),
+      fallback: async () => {
+        const view = await ctx.uses.logins.current()?.models();
+        return view === undefined ? undefined : openaiFallbackChoices(view);
+      },
       load: async () => {
         const read = await kernel.state.read(CODEX_FAST_CATALOG);
         return read.ok ? read.value : undefined;
@@ -204,6 +214,11 @@ export default implementDaemon(manifest, {
         sleeper: { sleep: async delay => await kernel.clock.sleep(milliseconds(delay)) },
         binaryName: 'fy',
       }),
+      // The argv's paid tier is verified against the held catalog here, at the launch, not only when the start was judged.
+      fastVerified: async model => {
+        await catalog.loaded();
+        return fastLaunchVerified(model, catalog.held());
+      },
       selected: async runtime => await selectedComponents(ctx.uses.runtimes.current(), runtime),
       locate,
       probe,
@@ -248,6 +263,8 @@ export default implementDaemon(manifest, {
             input,
             () => catalog.held(),
             () => catalog.binaryMissing(),
+            () => catalog.fallbackChoices(),
+            () => catalog.retryInMs(),
           );
         },
         'harnesses:codex': harness,

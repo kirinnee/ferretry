@@ -290,15 +290,14 @@ describe('a person’s own CLAUDE.md and AGENTS.md', () => {
     should(await text(path.join(host.claudeHome, 'CLAUDE.md'))).containEql('# Working well on your own');
   });
 
-  it('should have the built-in text updated when the file there is Ferretry’s own', async () => {
-    const host = await freshMachine({
-      seedClaude: {
-        'CLAUDE.md': '<!-- Generated from instructions/old. Edit those components, not this file. -->\n\nold\n',
-      },
-    });
+  it('should keep a file that merely starts with the generated header: a header cannot prove it is unedited', async () => {
+    const generated = '<!-- Generated from instructions/old. Edit those components, not this file. -->\n\nold\n';
+    const host = await freshMachine({ seedClaude: { 'CLAUDE.md': generated } });
 
-    should(await text(path.join(host.claudeHome, 'CLAUDE.md'))).containEql(AUTONOMOUS_INSTRUCTIONS);
-    should(await text(path.join(host.claudeHome, 'CLAUDE.md'))).not.containEql('\nold\n');
+    should(await text(path.join(host.claudeHome, 'CLAUDE.md'))).equal(generated);
+    should((host.result.skipped ?? []).find(entry => entry.path.endsWith('CLAUDE.md'))?.reason).equal(
+      "CLAUDE.md predates Ferretry's tracking; Ferretry left it. Delete it to get the generated one.",
+    );
   });
 });
 

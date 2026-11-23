@@ -185,10 +185,12 @@ describe('materialising the account model onto disk', () => {
       remoteControlAtStartup: false,
       skipDangerousModePermissionPrompt: true,
     });
-    should(JSON.parse(await readFile(path.join(host.claudeHome, '.fy', 'materialised.json'), 'utf8'))).eql({
-      version: 1,
-      entries: ['CLAUDE.md'],
-    });
+    // What each entry IS is read off the disk when the record is written: the two links are told apart, the overlay is hashed.
+    const record = JSON.parse(await readFile(path.join(host.claudeHome, '.fy', 'materialised.json'), 'utf8'));
+    should(record.entries).eql(['.fy/fixed.json', 'CLAUDE.md', 'skills/review']);
+    should(Object.keys(record.links)).eql(['CLAUDE.md', 'skills/review']);
+    should(Object.keys(record.hashes)).eql(['.fy/fixed.json']);
+    should(Object.keys(record.members)).eql(['mcpServers.notes']);
     should((await lstat(path.join(host.layout.binDirectory, 'claude-agent'))).mode & 0o777).equal(0o755);
     should(JSON.parse(await readFile(path.join(host.layout.fleetDirectory, 'ids.json'), 'utf8')).runtimes).eql({
       'claude-agent': { id: ID_CLAUDE, formerNames: [] },
@@ -238,10 +240,12 @@ describe('materialising the account model onto disk', () => {
 
     // Assert
     should(await exists(generated)).be.false();
-    should(JSON.parse(await readFile(path.join(host.claudeHome, '.fy', 'materialised.json'), 'utf8')).entries).eql([]);
+    should(JSON.parse(await readFile(path.join(host.claudeHome, '.fy', 'materialised.json'), 'utf8')).entries).eql([
+      '.fy/fixed.json',
+    ]);
   });
 
-  it(".claude.json: replace the profile's MCP servers whole and keep Claude's own keys", async () => {
+  it(".claude.json: fold the profile's MCP servers in by name and keep Claude's own keys and the person's servers", async () => {
     // Arrange
     const host = await machine();
     await host.apply(['mcp/notes']);
@@ -249,7 +253,7 @@ describe('materialising the account model onto disk', () => {
     const written = JSON.parse(await readFile(claudeJson, 'utf8'));
     await writeFile(
       claudeJson,
-      JSON.stringify({ ...written, numStartups: 3, mcpServers: { ...written.mcpServers, old: { command: 'gone' } } }),
+      JSON.stringify({ ...written, numStartups: 3, mcpServers: { ...written.mcpServers, mine: { command: 'mine' } } }),
     );
 
     // Act
@@ -258,7 +262,7 @@ describe('materialising the account model onto disk', () => {
     // Assert
     should(JSON.parse(await readFile(claudeJson, 'utf8'))).eql({
       numStartups: 3,
-      mcpServers: { notes: { type: 'stdio', command: 'notes-server', args: [] } },
+      mcpServers: { notes: { type: 'stdio', command: 'notes-server', args: [] }, mine: { command: 'mine' } },
     });
   });
 
@@ -288,7 +292,7 @@ describe('the narrowed sweep on its own', () => {
     });
   };
 
-  it('should read an unreadable or malformed record as no record, so only links are removed', async () => {
+  it('should read an unreadable or malformed record as no record, so nothing is removed, a link included', async () => {
     // Arrange
     const root = await temporaryDirectory();
     const home = path.join(fleetOf(root), 'homes', 'one');
@@ -316,8 +320,8 @@ describe('the narrowed sweep on its own', () => {
     });
     await sweep(root, { kind: 'prune-directory', path: home, keep: [], only: ['recorded.md'] });
 
-    // Assert
-    should(await exists(path.join(home, 'linked.md'))).be.false();
+    // Assert: with nothing to prove an entry by, a link is no more Ferretry's than a file is.
+    should(await exists(path.join(home, 'linked.md'))).be.true();
     should(await readFile(path.join(home, 'recorded.md'), 'utf8')).equal('mine\n');
     should(await readFile(path.join(root, 'target.md'), 'utf8')).equal('target\n');
   });
@@ -329,9 +333,15 @@ describe('the narrowed sweep on its own', () => {
     await mkdir(path.join(home, '.fy'), { recursive: true });
     await writeFile(path.join(home, 'kept.md'), 'kept\n');
     await writeFile(path.join(home, 'gone.md'), 'gone\n');
+    const { createHash } = await import('node:crypto');
+    const hash = (text: string): string => createHash('sha256').update(text).digest('hex');
     await writeFile(
       path.join(home, '.fy', 'materialised.json'),
-      JSON.stringify({ version: 1, entries: ['kept.md', 'gone.md'] }),
+      JSON.stringify({
+        version: 1,
+        entries: ['kept.md', 'gone.md'],
+        hashes: { 'kept.md': hash('kept\n'), 'gone.md': hash('gone\n') },
+      }),
     );
 
     // Act

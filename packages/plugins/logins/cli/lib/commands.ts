@@ -305,7 +305,7 @@ export const loginLabel: VerbBody = async (deps, invocation) => {
   });
 };
 
-/** `login rm <id>`: remove a login (refused while a runtime uses it). */
+/** `login rm <id>`: remove a login (refused while a runtime file uses it; a runtime derived from it goes with it). */
 export const loginRm: VerbBody = async (deps, invocation) => {
   await runChange(deps, {
     change: { kind: 'login.remove', id: loginArg(invocation) },

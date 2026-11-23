@@ -305,6 +305,54 @@ describe('a start by runtime launches with the runtime’s login', () => {
     expect(resumed.ok ? '' : resumed.error.reason).toMatch(/runtime rt runs the codex harness, not claude-code/u);
   });
 
+  test('a resume of a ferret on a DERIVED runtime whose name now answers on another login is refused, never moved onto it', async () => {
+    // The ferret started on the derived runtime `work-exppc`, which was login `work-exppc`'s. That login is removed; the
+    // `work` login now derives the same name (an explicit runtime `work` sits on a third login, so it takes the suffixed one).
+    let login = 'work-exppc';
+    const f = fixture(async () => ({ ok: true, harness: 'claude-code', login, derived: true }));
+    const id = startedId(await f.service.start({ folder: '/work', runtime: 'work-exppc', by: 'owner' }, PERSON_ORIGIN));
+    await f.service.stop(id, 'now');
+    login = 'work';
+    const launches = f.harness.launched.length;
+    f.loginsAsked.length = 0;
+    f.decided.length = 0;
+
+    const resumed = await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+
+    expect(resumed.ok).toBe(false);
+    expect(resumed.ok ? '' : resumed.error.reason).toBe(
+      'the login work-exppc this ferret used was removed or renamed; pick a runtime to continue',
+    );
+    expect(f.harness.launched).toHaveLength(launches);
+    expect(f.decided).toEqual([]);
+    expect(f.registry.get(id)?.login).toBe('work-exppc');
+    expect(f.registry.get(id)?.state).toBe('stopped');
+  });
+
+  test('a resume of a ferret on a derived runtime that still answers on its login is unchanged', async () => {
+    const f = fixture(async () => ({ ok: true, harness: 'claude-code', login: 'work', derived: true }));
+    const id = startedId(await f.service.start({ folder: '/work', runtime: 'work', by: 'owner' }, PERSON_ORIGIN));
+    await f.service.stop(id, 'now');
+
+    const resumed = await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+
+    expect(resumed.ok).toBe(true);
+    expect(f.registry.get(id)?.login).toBe('work');
+  });
+
+  test('a resume of a ferret on an explicit runtime file moved to another login still follows the file', async () => {
+    let login = 'old';
+    const f = fixture(async () => ({ ok: true, harness: 'claude-code', login }));
+    const id = startedId(await f.service.start({ folder: '/work', runtime: 'rt', by: 'owner' }, PERSON_ORIGIN));
+    await f.service.stop(id, 'now');
+    login = 'new';
+
+    const resumed = await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
+
+    expect(resumed.ok).toBe(true);
+    expect(f.registry.get(id)?.login).toBe('new');
+  });
+
   test('a resume of a record with no runtime is unchanged: its own stored login, no question asked', async () => {
     let asked = 0;
     const f = fixture(async () => {

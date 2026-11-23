@@ -50,6 +50,17 @@ describe('runtimeStartAnswer', () => {
     expect(asked.map(String)).toEqual(['rt']);
   });
 
+  test('a derived runtime says so, so a relaunch can tell its name moved to another login', async () => {
+    const { resolve } = resolving({ ...READY, derived: true } as ResolveResult);
+
+    expect(await runtimeStartAnswer({ resolve, logins: listing(OK) }).resolve('rt')).toEqual({
+      ok: true,
+      harness: 'claude-code',
+      login: 'oauth',
+      derived: true,
+    });
+  });
+
   test('every refusal Runtimes gives becomes a sentence naming the runtime, its reason and the way forward', async () => {
     const refusals: ResolveResult[] = [
       { ok: false, refusal: 'unknown', sentence: 'no runtime ghost exists on this machine' },
