@@ -8,7 +8,6 @@ import {
   type NewFerretAccountSlotProps,
   type NewFerretProjectSlotProps,
 } from '@ferretry/core-ferrets/contract';
-import { ChevronDown, ChevronUp } from 'lucide-react';
 import { type ComponentType, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { LiveFerretsClient } from '../../lib/client.ts';
 import { Button, Card, cn, FastSwitch, ModelSelect, PanelBody, Textarea } from '../../ui.ts';
@@ -130,7 +129,7 @@ export interface NewFerretPageProps {
    * daemon's start route still decides whether it may be used.
    */
   readonly initialFolder?: string;
-  /** Open with the "Continue a past conversation" section shown (`?continue=1`: the Runtimes and setup links to it). */
+  /** Open with "Continue a conversation" chosen (`?continue=1`: the Runtimes and setup links to it). */
   readonly initialContinue?: boolean;
   /** What draws the runtime field's slot. The shell's by default; a test hands a stand-in. */
   readonly AccountSlot?: ComponentType<AccountSlotProps>;
@@ -167,13 +166,13 @@ export function NewFerretPage({
   const [folders, setFolders] = useState<FolderRead>(LOADING_FOLDERS);
   // A past conversation picked from the Continue list: it fills the form, and Create starts with it named so it resumes.
   const [picked, setPicked] = useState<ContinuePick | null>(null);
-  const [continueShown, setContinueShown] = useState(initialContinue);
+  // Which of the two ways in the page is on: a fresh conversation, or one picked from the Continue list.
+  const [starting, setStarting] = useState<'new' | 'continue'>(initialContinue ? 'continue' : 'new');
   const continueOffered = useSlotHasPanels(NEW_FERRET_CONTINUE_SLOT);
   const pick = (next: ContinuePick | null): void => {
     setPicked(next);
     setError(null);
-    // The pick is in the form: the list folds away so the form (runtime, folder, mode, prompt) is what the page shows.
-    if (next !== null) setContinueShown(false);
+    // The pick is in the form: the list gives way to a one-line "Continuing" so the form is what the page shows.
     setDraft(current => {
       const { harnessConversation: _before, harness: _harness, ...rest } = current;
       if (next === null) return { ...rest, folder: '', folderExact: undefined };
@@ -187,6 +186,13 @@ export function NewFerretPage({
         harness: next.harness,
       };
     });
+  };
+
+  const chooseStart = (choice: 'new' | 'continue'): void => {
+    if (choice === starting) return;
+    // Going back to a new conversation drops any pick: no conversation is sent and no harness limits the runtime.
+    if (choice === 'new') pick(null);
+    setStarting(choice);
   };
 
   // The Folder box's catalogue: one read of the daemon's ferrets. A failure is a status, never a throw.
@@ -283,50 +289,57 @@ export function NewFerretPage({
       <Card>
         <PanelBody className="space-y-5">
           {continueOffered ? (
-            <section className="rounded-control border border-border-strong" data-new-ferret-continue="">
-              <button
-                aria-controls={CONTINUE_LIST_ID}
-                aria-expanded={continueShown}
-                className="flex min-h-[44px] w-full items-center justify-between gap-sm px-control-x text-left text-ui font-semibold text-fg"
-                onClick={() => setContinueShown(shown => !shown)}
-                type="button"
+            <section data-new-ferret-continue="">
+              <div
+                aria-label="New or continue"
+                className="grid max-w-[28rem] grid-cols-2 gap-0.5 rounded-control border border-border bg-surface-2 p-0.5"
+                data-new-ferret-switch=""
+                role="toolbar"
               >
-                <span>Continue a past conversation</span>
-                {continueShown ? (
-                  <ChevronUp aria-hidden="true" className="shrink-0 text-faint" size={16} />
-                ) : (
-                  <ChevronDown aria-hidden="true" className="shrink-0 text-faint" size={16} />
-                )}
-              </button>
-              {picked === null ? (
-                continueShown ? null : (
-                  <p className="m-0 px-control-x pb-2 text-meta leading-base text-muted">
-                    Pick up where an earlier Claude Code or Codex conversation left off.
-                  </p>
-                )
-              ) : (
-                <p
-                  className="m-0 flex items-center justify-between gap-sm px-control-x pb-2 text-meta leading-base text-fg-soft"
-                  data-new-ferret-picked={picked.key}
-                >
-                  <span className="min-w-0 [overflow-wrap:anywhere]">Continuing: {picked.title}</span>
+                {(
+                  [
+                    ['new', 'New conversation'],
+                    ['continue', 'Continue a conversation'],
+                  ] as const
+                ).map(([choice, text]) => (
                   <button
-                    className="min-h-[44px] shrink-0 px-2 text-ui font-medium text-fg underline"
-                    onClick={() => pick(null)}
+                    aria-pressed={starting === choice}
+                    className={cn(
+                      'min-h-[44px] rounded-control px-2 text-center text-ui font-medium leading-tight transition-colors',
+                      starting === choice ? 'bg-surface text-fg shadow-control' : 'text-muted hover:text-fg',
+                    )}
+                    key={choice}
+                    onClick={() => chooseStart(choice)}
                     type="button"
                   >
-                    Start fresh instead
+                    {text}
                   </button>
-                </p>
-              )}
-              {continueShown ? (
-                <div className="border-t border-border px-control-x py-3" id={CONTINUE_LIST_ID}>
-                  <PanelSlot
-                    daemon={daemon}
-                    props={{ picked: picked?.key ?? null, onPick: pick } satisfies NewFerretContinueSlotProps}
-                    slot={NEW_FERRET_CONTINUE_SLOT}
-                  />
-                </div>
+                ))}
+              </div>
+              {starting === 'continue' ? (
+                picked === null ? (
+                  <div className="mt-3" id={CONTINUE_LIST_ID}>
+                    <PanelSlot
+                      daemon={daemon}
+                      props={{ picked: null, onPick: pick } satisfies NewFerretContinueSlotProps}
+                      slot={NEW_FERRET_CONTINUE_SLOT}
+                    />
+                  </div>
+                ) : (
+                  <p
+                    className="m-0 mt-3 flex items-center justify-between gap-sm text-meta leading-base text-fg-soft"
+                    data-new-ferret-picked={picked.key}
+                  >
+                    <span className="min-w-0 [overflow-wrap:anywhere]">Continuing: {picked.title}</span>
+                    <button
+                      className="min-h-[44px] shrink-0 px-2 text-ui font-medium text-fg underline"
+                      onClick={() => pick(null)}
+                      type="button"
+                    >
+                      Choose another
+                    </button>
+                  </p>
+                )
               ) : null}
             </section>
           ) : null}

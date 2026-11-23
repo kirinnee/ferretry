@@ -57,21 +57,32 @@ const found = (view: ReturnType<typeof render>, predicate: (node: ReactTestInsta
 };
 const byId = (view: ReturnType<typeof render>, id: string): ReactTestInstance =>
   found(view, node => typeof node.type === 'string' && node.props.id === id);
-const disclosure = (view: ReturnType<typeof render>): ReactTestInstance =>
-  found(view, node => node.type === 'button' && node.props['aria-controls'] === 'fy-new-ferret-continue-list');
+const choice = (view: ReturnType<typeof render>, text: string): ReactTestInstance =>
+  found(
+    view,
+    node => node.type === 'button' && node.props['aria-pressed'] !== undefined && node.children.join('') === text,
+  );
+const NEW = 'New conversation';
+const CONTINUE = 'Continue a conversation';
 const typeInto = (view: ReturnType<typeof render>, id: string, value: string): void =>
   run(() => byId(view, id).props.onChange({ target: { value } }));
 
 describe('the New ferret page and the continue slot', () => {
-  it('offers "Continue a past conversation" closed, on the same page, and opens the list on press', () => {
+  it('opens on a "New conversation | Continue a conversation" switch at the top, and Continue shows the list in place', () => {
     const view = page();
+    expect(choice(view, NEW).props['aria-pressed']).toBe(true);
+    expect(choice(view, CONTINUE).props['aria-pressed']).toBe(false);
     expect(view.root.findAllByProps({ 'data-continue-list': '' })).toHaveLength(0);
-    expect(disclosure(view).props['aria-expanded']).toBe(false);
-    run(() => disclosure(view).props.onClick());
+    run(() => choice(view, CONTINUE).props.onClick());
     expect(view.root.findAllByProps({ 'data-continue-list': '' })).toHaveLength(1);
-    expect(disclosure(view).props['aria-expanded']).toBe(true);
+    expect(choice(view, CONTINUE).props['aria-pressed']).toBe(true);
+    expect(choice(view, NEW).props['aria-pressed']).toBe(false);
     // The form is still there: fresh and continue are ONE page.
     expect(byId(view, 'fy-new-ferret-prompt')).toBeTruthy();
+    // And back: the list goes, nothing is folded behind a disclosure.
+    run(() => choice(view, NEW).props.onClick());
+    expect(view.root.findAllByProps({ 'data-continue-list': '' })).toHaveLength(0);
+    expect(view.root.findAll(node => node.props['aria-controls'] === 'fy-new-ferret-continue-list')).toHaveLength(0);
   });
 
   it('opens with the list shown when the address asks for it (`?continue=1`: the Runtimes and setup links)', () => {
@@ -93,10 +104,10 @@ describe('the New ferret page and the continue slot', () => {
       </WithSlotPanels>,
     );
     expect(view.root.findAllByProps({ 'data-continue-list': '' })).toHaveLength(1);
-    expect(disclosure(view).props['aria-expanded']).toBe(true);
+    expect(choice(view, CONTINUE).props['aria-pressed']).toBe(true);
   });
 
-  it('draws no disclosure at all when nothing contributes a list', () => {
+  it('draws no switch at all when nothing contributes a list', () => {
     const view = render(
       <NewFerretPage
         AccountSlot={({ fallback }) => fallback}
@@ -112,7 +123,7 @@ describe('the New ferret page and the continue slot', () => {
     const calls: Call[] = [];
     const accountSlots: NewFerretAccountSlotProps[] = [];
     const view = page(calls, accountSlots);
-    run(() => disclosure(view).props.onClick());
+    run(() => choice(view, CONTINUE).props.onClick());
     run(() => view.root.findByProps({ 'data-row': 'c-77' }).props.onClick());
 
     expect(byId(view, 'fy-new-ferret-folder').props.value).toBe('/work/api');
@@ -148,7 +159,7 @@ describe('the New ferret page and the continue slot', () => {
   it('a runtime typed for the OTHER harness is still sent with the picked harness, so the daemon can refuse the mismatch', async () => {
     const calls: Call[] = [];
     const view = page(calls, []);
-    run(() => disclosure(view).props.onClick());
+    run(() => choice(view, CONTINUE).props.onClick());
     run(() => view.root.findByProps({ 'data-row': 'c-77' }).props.onClick());
     typeInto(view, 'fy-new-ferret-runtime', 'claude-main');
     typeInto(view, 'fy-new-ferret-prompt', 'carry on');
@@ -161,15 +172,14 @@ describe('the New ferret page and the continue slot', () => {
     });
   });
 
-  it('"Start fresh instead" clears the pick: no conversation is sent and no harness limits the picker', async () => {
+  it('switching back to "New conversation" clears the pick: no conversation is sent and no harness limits the picker', async () => {
     const calls: Call[] = [];
     const accountSlots: NewFerretAccountSlotProps[] = [];
     const view = page(calls, accountSlots);
-    run(() => disclosure(view).props.onClick());
+    run(() => choice(view, CONTINUE).props.onClick());
     run(() => view.root.findByProps({ 'data-row': 'c-77' }).props.onClick());
-    run(() =>
-      found(view, node => node.type === 'button' && node.children.join('') === 'Start fresh instead').props.onClick(),
-    );
+    run(() => choice(view, NEW).props.onClick());
+    expect(view.root.findAllByProps({ 'data-continue-list': '' })).toHaveLength(0);
     expect(accountSlots.at(-1)?.harness).toBeUndefined();
     typeInto(view, 'fy-new-ferret-runtime', 'claude-auto');
     typeInto(view, 'fy-new-ferret-folder', '/work/web');
