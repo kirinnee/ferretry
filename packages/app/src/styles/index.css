@@ -28,7 +28,8 @@
    are written on `:root` AND on a swatch so a look preview recolours its own. The standard properties are what Chromium and current
    Safari/Firefox read; the `::-webkit-scrollbar` rules below are for older Safari (Chromium ignores them once `scrollbar-color` is set).
    A component that must hide its own strip (a tab row) names `scrollbar-width: none` itself; nothing else restyles a scrollbar.
-   `scrollbar-gutter: stable` on the page keeps the content from jumping when a long list first needs to scroll. */
+   No `scrollbar-gutter` on the page: the shell does not scroll, so a reserved strip would be an empty margin; the chat transcript measures
+   and reserves its own (`use-chat-scrollbar-gutter`). */
 :root,
 [data-swatch] {
   --scrollbar-thumb: color-mix(in srgb, var(--muted) 55%, transparent);
@@ -66,7 +67,6 @@
 
 html {
   -webkit-text-size-adjust: 100%;
-  scrollbar-gutter: stable;
 }
 
 body {

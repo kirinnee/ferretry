@@ -7,7 +7,6 @@
  *  - the page and every scroll area a real page draws is thin and coloured: not the engine's default `auto` / `auto`, and a thumb that
  *    is not the track (a scrollbar cannot be seen if both are one colour), unless the component hides its own strip on purpose;
  *  - the three surfaces that used to restyle their own (a code block, a table, the xterm viewport) read the same two values as the page;
- *  - the page reserves its scrollbar's room (`scrollbar-gutter: stable`) so a list that first needs to scroll does not jump the layout.
  *
  * `FY_SCROLLBAR_SHOTS_DIR=<dir>` keeps `<width>-<theme>-<name>.png` (local evidence for the PR, never committed).
  */
@@ -157,7 +156,6 @@ describe('the three surfaces that used to restyle their own read the page rule',
           const value = await read(tab, id);
           expect(value, `${id} reads the page rule`).toEqual(page);
         }
-        expect(await tab.evaluate(() => getComputedStyle(document.documentElement).scrollbarGutter)).toBe('stable');
       } finally {
         await close();
       }
