@@ -275,6 +275,8 @@ describe('materialiseFleet', () => {
       kind: 'prune-directory',
       path: `${HOME_A}/.fy`,
       keep: ['materialised.json', 'fixed.json'],
+      record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
+      recordedAs: RUNTIME_STATE_DIRECTORY,
     });
     should(inHome[4]).eql({
       kind: 'symlink',
@@ -300,6 +302,7 @@ describe('materialiseFleet', () => {
       keep: ['review'],
       record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
       recordedAs: 'skills',
+      ownLinksUnder: '/fy/fleet/assets/skills',
     });
     should(inHome[8]).eql({
       kind: 'settings',
@@ -331,12 +334,13 @@ describe('materialiseFleet', () => {
       mode: 0o600,
       preserveExisting: true,
       replaceKeys: ['mcpServers'],
+      record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
     });
     should(inHome[10]).match({ kind: 'file', path: `${HOME_A}/.fy/fixed.json` });
     should(inHome[11]).eql({
       kind: 'file',
       path: `${HOME_A}/.fy/materialised.json`,
-      content: '{"version":1,"entries":["CLAUDE.md","skills/review"]}\n',
+      content: '{"version":1,"entries":[".fy/fixed.json","CLAUDE.md","skills/review"]}\n',
       mode: 0o600,
       recordsMaterialised: true,
     });
@@ -359,6 +363,7 @@ describe('materialiseFleet', () => {
         keep: ['review', '.system'],
         record: `${HOME_B}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
         recordedAs: 'skills',
+        ownLinksUnder: '/fy/fleet/assets/skills',
       },
     ]);
     should(only(result, `${HOME_B}/config.toml`)).match({
@@ -872,10 +877,20 @@ describe('materialiseFleet', () => {
           2,
         )}\n`,
         mode: 0o600,
+        unlessUnrecorded: {
+          record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
+          key: '.fy/fixed.json',
+        },
       });
       should(
         result.operations.find(operation => operation.path === `${HOME_A}/.fy` && operation.kind === 'prune-directory'),
-      ).eql({ kind: 'prune-directory', path: `${HOME_A}/.fy`, keep: ['materialised.json', 'fixed.json'] });
+      ).eql({
+        kind: 'prune-directory',
+        path: `${HOME_A}/.fy`,
+        keep: ['materialised.json', 'fixed.json'],
+        record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
+        recordedAs: RUNTIME_STATE_DIRECTORY,
+      });
       should(JSON.stringify(result.operations)).not.containEql('ferretry-launch-folder');
     });
 

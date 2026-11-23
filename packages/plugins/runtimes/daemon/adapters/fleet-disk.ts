@@ -131,6 +131,18 @@ export class FleetDisk {
     return await absentWhenFolderMissing(async () => await this.fleet.lstat(this.fenced(path)));
   }
 
+  /**
+   * The real path of an EXISTING name with every link resolved, or `undefined` when nothing is there or the name leads out
+   * of the fleet folder (which is not a place Ferretry can vouch for).
+   */
+  async realPath(path: string): Promise<string | undefined> {
+    try {
+      return await this.fleet.realPath(this.fenced(path));
+    } catch {
+      return undefined;
+    }
+  }
+
   /** The names in a folder, each with its own kind (a link is listed, never entered). */
   async entries(path: string): Promise<readonly RootEntry[]> {
     return await this.fleet.entries(this.fenced(path));

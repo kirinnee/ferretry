@@ -246,7 +246,7 @@ const quoted = (references: readonly string[]): string => references.map(referen
  * Several instructions as the one generated document a harness reads: oldest first, so newer
  * guidance is read last (§3.4), under a line that says where to edit them instead.
  */
-export const GENERATED_INSTRUCTIONS_MARKER = '<!-- Generated from ';
+const GENERATED_INSTRUCTIONS_MARKER = '<!-- Generated from ';
 
 export function concatenateInstructions(
   parts: readonly { readonly reference: LayerReferenceText; readonly body: string }[],
