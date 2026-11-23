@@ -31,6 +31,7 @@ import {
   stoodInLoginSentence,
 } from '../lib/account/runtimes-model.ts';
 import type { AccountModel } from '../lib/account/schema.ts';
+import type { HarnessKind } from '../lib/manifest.ts';
 import {
   FleetCatalogRefusal,
   type FleetCatalogServiceDeps,
@@ -59,6 +60,8 @@ export interface RuntimesConfigSources {
   readonly within: Within;
   /** Looks up, ahead of a read, the commands the read will ask about (`./command-cache.ts`). */
   readonly prime?: (model: AccountModel | undefined) => Promise<void>;
+  /** The harnesses installed here, as of the last `prime`: which CLI a login that drives both gets its derived runtime on. */
+  readonly installed?: () => readonly HarnessKind[];
 }
 
 /**
@@ -98,6 +101,9 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
     logins: NonNullable<typeof lastLogins>,
   ): Promise<Awaited<ReturnType<ConfigFilesPort<AccountModel>['load']>>> => {
     let assembled: RuntimesModel;
+    // The harness commands are looked up before the model is derived from them (a login that drives both CLIs runs the
+    // first that is installed), so the very first read already agrees with every later one.
+    if (sources.installed !== undefined) await sources.prime?.(undefined);
     const [components, templates] = await Promise.all([
       readProfileComponents(sources.components, ownInstructionsSource(sources.config), sources.within),
       loginTemplates(sources.logins),
@@ -111,6 +117,7 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
         logins,
         templates,
         components,
+        installed: sources.installed?.(),
       });
     } catch (error) {
       throw inconsistent(error);

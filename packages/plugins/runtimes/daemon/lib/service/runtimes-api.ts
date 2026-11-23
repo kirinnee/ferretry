@@ -24,8 +24,9 @@ import {
   type RuntimeSummary,
 } from '../../../contract/index.ts';
 import { deriveRuntimes, withDerived } from '../account/derived-runtimes.ts';
+import type { HarnessKind } from '../manifest.ts';
 import { disabledUntilMs } from '../account/disabled.ts';
-import type { LoginView, LoginsApi } from '@ferretry/plugin-logins/contract';
+import type { EnvironmentLoginTemplate, LoginView, LoginsApi } from '@ferretry/plugin-logins/contract';
 
 /** The runtime a start uses when nobody names one and the setting is empty, when it is an agent runtime here. */
 const FALLBACK_DEFAULT_RUNTIME = 'claude-default';
@@ -39,7 +40,7 @@ export interface RuntimesApiDeps {
   defaultSetting(): string | undefined;
   /** The harness keys currently on (`FerretsApi.harnesses`). */
   harnesses(): readonly KnownHarnessKey[];
-  readonly logins: Pick<LoginsApi, 'list'>;
+  readonly logins: Pick<LoginsApi, 'list'> & Partial<Pick<LoginsApi, 'environmentTemplates'>>;
   now(): number;
   /**
    * The runtime a name it no longer carries now answers to (`ids.json` `formerNames`), or `undefined` when none claims it
@@ -47,6 +48,20 @@ export interface RuntimesApiDeps {
    * ferrets' records are rewritten, so a record left on the old name (a failed write, a crash between the two) still starts.
    */
   currentName?(former: string): Promise<string | undefined>;
+  /** The harnesses installed here (`derived-runtimes.ts`): a login that drives both CLIs runs the first installed. Absent: not known. */
+  installed?(): readonly HarnessKind[] | undefined;
+}
+
+/** The environment logins' variable templates by id, or `undefined` when Logins cannot say (an environment login is then not derived). */
+async function templatesById(
+  logins: RuntimesApiDeps['logins'],
+): Promise<ReadonlyMap<string, EnvironmentLoginTemplate> | undefined> {
+  try {
+    const templates = await logins.environmentTemplates?.();
+    return templates === undefined ? undefined : new Map(templates.map(template => [template.id, template]));
+  } catch {
+    return undefined;
+  }
 }
 
 async function loginsById(logins: Pick<LoginsApi, 'list'>): Promise<ReadonlyMap<string, LoginView>> {
@@ -81,12 +96,14 @@ export function createRuntimesApi(
   type Read = { readonly summary: RuntimeSummary } | { readonly refusal: Extract<ResolveResult, { ok: false }> };
 
   /** The files' runtimes and profile names with the ones derived from ready logins beside them (`derived-runtimes.ts`). */
-  const effective = (logins: ReadonlyMap<string, LoginView>) => {
+  const effective = async (logins: ReadonlyMap<string, LoginView>) => {
     const derived = deriveRuntimes({
+      templates: await templatesById(deps.logins),
       runtimes: deps.runtimes(),
       profiles: deps.profiles(),
       modelSets: new Map(),
       logins: [...logins.values()],
+      installed: deps.installed?.(),
     });
     return {
       runtimes: withDerived(deps.runtimes(), derived.runtimes),
@@ -147,7 +164,7 @@ export function createRuntimesApi(
   const all = async (): Promise<readonly Read[]> => {
     const logins = await loginsById(deps.logins);
     const now = deps.now();
-    const { runtimes, hasProfile } = effective(logins);
+    const { runtimes, hasProfile } = await effective(logins);
     return [...runtimes]
       .toSorted(([left], [right]) => left.localeCompare(right))
       .map(([name, file]) => read(name, file, logins, now, hasProfile));
@@ -159,7 +176,7 @@ export function createRuntimesApi(
   const defaultRuntime = async (): Promise<RuntimeId | undefined> => {
     const named = deps.defaultSetting();
     // A saved default that points at a runtime that is no longer here (a derived one whose login needs sign-in) is unset.
-    if (named !== undefined && effective(await loginsById(deps.logins)).runtimes.has(named))
+    if (named !== undefined && (await effective(await loginsById(deps.logins))).runtimes.has(named))
       return RuntimeIdSchema.parse(named);
     const ready = await summaries();
     const fallback = ready.find(summary => summary.id === FALLBACK_DEFAULT_RUNTIME);
@@ -186,7 +203,7 @@ export function createRuntimesApi(
       }
       let wanted = named;
       const logins = await loginsById(deps.logins);
-      const { runtimes, hasProfile } = effective(logins);
+      const { runtimes, hasProfile } = await effective(logins);
       let file = runtimes.get(wanted);
       if (file === undefined) {
         const current = await deps.currentName?.(named).catch(() => undefined);
