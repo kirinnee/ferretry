@@ -121,7 +121,12 @@ const fakeOf = (tab: Tab) => tab.evaluate(() => (window as unknown as { __fake: 
  */
 function slotText(): string {
   const slot = document.querySelector('.fy-sf-slot') as HTMLElement;
+  // The audio test is measured on its own (`audioText`, its own copy budget): the page's 160 characters are everything else.
+  const audio = slot.querySelector('[data-voice-test]') as HTMLElement | null;
+  const shown = audio?.style.display ?? '';
+  if (audio !== null) audio.style.display = 'none';
   let text = slot.innerText;
+  if (audio !== null) audio.style.display = shown;
   const titles = [
     ...[...slot.querySelectorAll('input[type=radio][aria-label]')].map(el => el.getAttribute('aria-label') ?? ''),
     ...[...slot.querySelectorAll('[data-setting-row] [id$="-label"]')].map(el => (el as HTMLElement).innerText),
@@ -129,8 +134,17 @@ function slotText(): string {
   for (const title of titles) if (title !== '') text = text.replace(title, '');
   return text.replace(/\s+/g, ' ').trim();
 }
-/** 160 on r11 O12's page; O8 item 8 adds the audio test ("Test your audio", its status line and three buttons), measured at 259 characters on the arrival pick (Parakeet 110M, not installed: "Install Parakeet 110M above to test it with your voice."), and about 290 with an installed engine and its "Press Record" hint. */
-const SEEN_TEXT_MAX = 320;
+/** What a person reads inside the audio test, as the page lays it out: its own copy budget, apart from the page's 160. */
+function audioText(): string {
+  const audio = document.querySelector('[data-voice-test]') as HTMLElement;
+  return audio.innerText.replace(/\s+/g, ' ').trim();
+}
+/** The page's own text, outside the audio test: r11 O12's 160, unchanged. */
+const SEEN_TEXT_MAX = 160;
+/** How far below the window's bottom edge the footer may end at 1280x900: one short scroll of the wheel. */
+const SHORT_SCROLL = 160;
+/** The audio test's own copy: its heading, status line, hint and three buttons (measured: see the failure line, which prints the text). */
+const AUDIO_TEXT_MAX = 200;
 
 interface DemoProbe {
   names: string[];
@@ -276,6 +290,8 @@ describe('the Voice first-run page', () => {
           const seen = await tab.evaluate(slotText);
           // A failure shows the text itself, so what to cut is on screen.
           expect(seen.length <= SEEN_TEXT_MAX ? '' : `${seen.length} chars: ${seen}`).toBe('');
+          const audio = await tab.evaluate(audioText);
+          expect(audio.length <= AUDIO_TEXT_MAX ? '' : `${audio.length} chars: ${audio}`).toBe('');
           // The picture plays: wave, words and radar are really animated, and the words are written between 0 and half a loop.
           expectWavePlays(await probeWave(tab));
           expect(g.stray).toEqual([]);
@@ -285,9 +301,13 @@ describe('the Voice first-run page', () => {
             expect(g.demo.h).toBeLessThanOrEqual(140);
             expect(g.demo.bottom).toBeLessThanOrEqual((g.cards[0]?.y ?? 0) + 1);
           } else {
-            // All five cards are in the window at once. (O8 item 8 adds "Test your audio" under them, so the footer is one scroll away on a 900 px
-            // window; the owner asked for the test on this page. The footer must still be inside the page, with Next in it.)
-            expect(g.footerBottom).toBeGreaterThan(0);
+            // All five cards are in the window at once. (O8 item 8 adds "Test your audio" under them, so the footer is below the fold on a
+            // 900 px window; the owner asked for the test on this page.) The footer's Next must stay within ONE SHORT SCROLL: its bottom
+            // edge no more than SHORT_SCROLL (160 px; measured 107) below the fold, so a person never has to hunt for it.
+            expect(
+              g.footerBottom - g.height,
+              `Next is ${Math.round(g.footerBottom - g.height)} px below the fold`,
+            ).toBeLessThanOrEqual(SHORT_SCROLL);
             expect(g.cards.at(-1)?.bottom ?? 0).toBeLessThanOrEqual(g.height);
             expect(g.demo.x).toBeGreaterThan((g.cards[0]?.right ?? 0) + 32);
             expect(Math.abs(g.demo.y - (g.cards[0]?.y ?? 0))).toBeLessThanOrEqual(8);
@@ -742,7 +762,7 @@ describe('r11-1b G3: the Voice and Speed-ups buttons and their focus ring', () =
  * microphone, record a line and see it transcribed, hear a sample), and the states each of those can be in.
  *
  * The ASSERT, on computed geometry, the DOM and the fake device (never a snapshot): the wave sits above the radar at 1280 and
- * beside it, inside the frame's 140 px strip, at 390 (its labels still >= 9 px); the radar's vertices ARE the engine's numbers
+ * beside it, inside the frame's 140 px strip, at 390 (its labels 12 px or more, as text outside the drawing); the radar's vertices ARE the engine's numbers
  * (Sherpa reaches the top for speed and the full left for live words, Moonshine does not); permission is asked by a button
  * and never on arrival; a refusal names its remedy; a line is recorded with the picked engine and shows as words; a sample
  * reaches the speaker; no control sits outside its column or under the footer. Set `FY_VOICE_STEP_SHOTS_DIR` to keep the pictures.
@@ -764,14 +784,21 @@ describe('O8 item 8: the Voice picture', () => {
               return { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, w: rect.width, h: rect.height };
             };
             const radar = document.querySelector('.fy-wd__radar') as SVGSVGElement;
-            const label = document.querySelector('.fy-wd__axis') as SVGTextElement;
+            const labels = [...document.querySelectorAll('.fy-wd__axis')] as HTMLElement[];
             return {
               demo: box('[data-step-demo]'),
               wave: box('.fy-wd__wave'),
               words: box('.fy-wd__text'),
               radar: box('.fy-wd__radar'),
-              axisPx: (label.getScreenCTM()?.a ?? 0) * Number.parseFloat(getComputedStyle(label).fontSize),
-              axes: [...document.querySelectorAll('.fy-wd__axis')].map(el => el.textContent),
+              // The names are HTML text outside the scaled drawing: their computed size IS what is drawn.
+              axisPx: Math.min(...labels.map(el => Number.parseFloat(getComputedStyle(el).fontSize))),
+              axisInsideSvg: document.querySelectorAll('.fy-wd__radar text').length,
+              axisBoxes: labels.map(el => {
+                const rect = el.getBoundingClientRect();
+                return { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, shown: rect.width > 0 };
+              }),
+              axes: labels.map(el => el.textContent),
+              caption: (document.querySelector('.fy-wd__caption') as HTMLElement).textContent,
               vertices: [...document.querySelectorAll('.fy-wd__vertex')].map(el => [
                 Number(el.getAttribute('cx')),
                 Number(el.getAttribute('cy')),
@@ -798,12 +825,22 @@ describe('O8 item 8: the Voice picture', () => {
             expect(
               g.axisPx,
               `the radar's labels are readable on a phone (${g.axisPx.toFixed(1)} px)`,
-            ).toBeGreaterThanOrEqual(9);
+            ).toBeGreaterThanOrEqual(12);
           } else {
             expect(g.wave.bottom, 'the wave is above the radar').toBeLessThanOrEqual(g.radar.y + 1);
             expect(g.words.y).toBeGreaterThan(g.wave.y);
-            expect(g.axisPx).toBeGreaterThanOrEqual(10);
+            expect(g.axisPx).toBeGreaterThanOrEqual(12);
           }
+          // The names are text beside the drawing, never SVG text that shrinks with it, and none is cut off by the strip.
+          expect(g.axisInsideSvg).toBe(0);
+          for (const box of g.axisBoxes) {
+            expect(box.shown).toBe(true);
+            expect(box.x).toBeGreaterThanOrEqual(g.demo.x);
+            expect(box.right).toBeLessThanOrEqual(g.demo.right + 1);
+            expect(box.bottom).toBeLessThanOrEqual(g.demo.bottom + 1);
+          }
+          // The specs stay available as text (the desktop caption; on a phone the cards' own bars carry them).
+          expect((g.caption ?? '').length).toBeGreaterThan(0);
           expect(g.radar.x).toBeGreaterThanOrEqual(g.demo.x);
           expect(g.radar.right).toBeLessThanOrEqual(g.demo.right + 1);
           if (shotsDir !== '') {
@@ -838,6 +875,33 @@ describe('O8 item 8: the Voice picture', () => {
 });
 
 describe('O8 item 8: test your audio', () => {
+  it('the browser voice is never recorded: Record is off, the page says to pick an on-device voice, and no recognition starts (1280)', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', `${VOICE}&saved=browser&mic=granted`, TEST);
+    try {
+      await tab.evaluate(() => {
+        // Any native recognition the page starts is counted; the page must start none.
+        const w = window as unknown as { __recognitions: number };
+        w.__recognitions = 0;
+        for (const name of ['SpeechRecognition', 'webkitSpeechRecognition']) {
+          Object.defineProperty(window, name, {
+            configurable: true,
+            value: function Counted() {
+              w.__recognitions += 1;
+            },
+          });
+        }
+      });
+      await tab.locator('[data-mic="granted"]').waitFor({ state: 'visible' });
+      expect(await act(tab, 'record').isDisabled()).toBe(true);
+      expect(await tab.locator(TEST).innerText()).toContain('on-device voice');
+      await act(tab, 'record').click({ force: true });
+      await tab.waitForTimeout(300);
+      expect(await tab.evaluate(() => (window as unknown as { __recognitions: number }).__recognitions)).toBe(0);
+    } finally {
+      await close();
+    }
+  });
+
   for (const viewport of VIEWPORTS) {
     for (const theme of THEMES) {
       it(`asks for the microphone by a button, never on arrival; a yes unlocks recording (${viewport.name}, ${theme})`, async () => {

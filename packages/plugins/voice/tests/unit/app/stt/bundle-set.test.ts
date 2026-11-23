@@ -104,7 +104,7 @@ describe('BundleSetInstaller', () => {
     should(await setOf(half, done).status()).eql({ state: 'partial', downloadedBytes: 94 });
   });
 
-  it('installs both in order with one progress across them', async () => {
+  it('installs both side by side with one progress across them', async () => {
     const runtime = new FakeInstaller(10);
     const model = new FakeInstaller(90);
     const seen: ModelInstallProgress[] = [];
@@ -125,13 +125,14 @@ describe('BundleSetInstaller', () => {
     await setOf(runtime, model).install();
   });
 
-  it('passes the cancel signal down and stops at the first failure', async () => {
+  it('passes the cancel signal down and throws the first failure, stopping the other part', async () => {
     const runtime = new FakeInstaller(10);
     runtime.failWith = new Error('offline');
     const model = new FakeInstaller(90);
     const controller = new AbortController();
     await should(setOf(runtime, model).install({ signal: controller.signal })).be.rejectedWith('offline');
-    should(model.installs).equal(0);
+    // The parts start together, so the model was asked too; `offline` is what is thrown, whatever the stopped part says.
+    should(model.installs).equal(1);
     runtime.failWith = null;
     controller.abort();
     await should(setOf(runtime, model).install({ signal: controller.signal })).be.rejectedWith('aborted');

@@ -19,6 +19,8 @@ import {
   type PinnedBundle,
   PinnedModelStore,
 } from '../../../../app/lib/stt/model-store.ts';
+import { RuntimeModelStore } from '../../../../app/lib/stt/runtime-model-store.ts';
+import { runtimeAndModelInstaller } from '../../../../app/lib/stt/bundle-set.ts';
 
 const bytesOf = (length: number, seed: number): Uint8Array =>
   Uint8Array.from({ length }, (_, index) => (index * 31 + seed * 17 + 7) % 251);
@@ -179,6 +181,88 @@ describe('PinnedModelStore downloads the files of a bundle side by side', () => 
     const failure = await run;
     should(failure).be.instanceOf(ModelInstallError);
     should((failure as ModelInstallError).code).equal('cancelled');
+    should(net.live.now).equal(0);
+  });
+});
+
+/** The runtime's own bundle (one file), downloaded beside the model's six. */
+const RUNTIME_BYTES = bytesOf(90, 99);
+const RUNTIME_BUNDLE: PinnedBundle = {
+  name: 'Runtime',
+  cache: 'fy:voice:parallel-runtime',
+  keyRoot: '/fy-stt/parallel-runtime',
+  versionLabel: 'runtime · 1',
+  files: [
+    {
+      role: 'runtime',
+      label: 'Runtime',
+      url: 'https://models.test/runtime',
+      bytes: RUNTIME_BYTES.length,
+      sha256: sha256Of(RUNTIME_BYTES),
+    },
+  ],
+};
+bodies.set('https://models.test/runtime', RUNTIME_BYTES);
+const environment = (caches: MemoryCaches, fetch: (url: string, init?: RequestInit) => Promise<Response>) => ({
+  caches,
+  fetch,
+  storage: null,
+});
+
+describe('one download budget across the whole install', () => {
+  it('the runtime store never downloads a fourth file beside the model’s three', async () => {
+    const net = heldNetwork();
+    const store = new RuntimeModelStore({
+      runtime: RUNTIME_BUNDLE,
+      model: BUNDLE,
+      caches: new MemoryCaches(),
+      fetch: net.fetch,
+      partBytes: 64,
+      runtimeInUse: () => false,
+    });
+    const done = store.install();
+    await drain(net.release);
+    await done;
+    should(net.live.max).equal(FILE_CONCURRENCY);
+    should((await store.status()).state).equal('installed');
+  });
+
+  it('the production sherpa installer overlaps the runtime and the model, within the same three', async () => {
+    const net = heldNetwork();
+    const installer = runtimeAndModelInstaller(
+      RUNTIME_BUNDLE,
+      BUNDLE,
+      environment(new MemoryCaches(), net.fetch),
+      () => false,
+    );
+    const seen: ModelInstallProgress[] = [];
+    const done = installer.install({ onProgress: progress => seen.push(progress) });
+    // The first thing in flight is the model's files AND the runtime, side by side: the runtime does not go first alone.
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const first = net.waiting.map(request => request.url);
+    should(first).containEql('https://models.test/runtime');
+    should(first.some(url => url !== 'https://models.test/runtime')).be.true();
+    await drain(net.release);
+    await done;
+    should(net.live.max).equal(FILE_CONCURRENCY);
+    const downloaded = seen.map(progress => progress.downloadedBytes);
+    should(downloaded).eql([...downloaded].sort((a, b) => a - b));
+    should(downloaded.at(-1)).equal(TOTAL + RUNTIME_BYTES.length);
+    should((await installer.status()).state).equal('installed');
+  });
+
+  it('one failure stops the other part and is the error thrown', async () => {
+    const net = heldNetwork(new Set(['https://models.test/runtime']));
+    const installer = runtimeAndModelInstaller(
+      RUNTIME_BUNDLE,
+      BUNDLE,
+      environment(new MemoryCaches(), net.fetch),
+      () => false,
+    );
+    const failed = installer.install().catch((error: unknown) => error);
+    await drain(net.release);
+    const failure = await failed;
+    should(failure).be.instanceOf(ModelInstallError);
     should(net.live.now).equal(0);
   });
 });

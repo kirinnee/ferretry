@@ -17,6 +17,7 @@
  */
 
 import {
+  DownloadSlots,
   type ModelCacheStorage,
   type ModelFetch,
   type ModelInstaller,
@@ -60,8 +61,10 @@ export class RuntimeModelStore implements ModelInstaller {
       ...(options.now === undefined ? {} : { now: options.now }),
       ...(options.partBytes === undefined ? {} : { partBytes: options.partBytes }),
     };
-    this.#runtime = new PinnedModelStore({ ...shared, bundle: options.runtime });
-    this.#model = new PinnedModelStore({ ...shared, bundle: options.model });
+    // ONE budget for the whole install: the runtime's file and the model's files draw from the same three slots.
+    const slots = new DownloadSlots();
+    this.#runtime = new PinnedModelStore({ ...shared, slots, bundle: options.runtime });
+    this.#model = new PinnedModelStore({ ...shared, slots, bundle: options.model });
     this.#runtimeInUse = () => options.runtimeInUse();
   }
 

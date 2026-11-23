@@ -58,13 +58,8 @@ const radarOf = (model: OnDeviceModel | undefined, bars: readonly EngineBar[]): 
 const CENTER = { x: 120, y: 66 } as const;
 const RADIUS = 46;
 /** Top, right, bottom, left. */
-const TOP = { id: 'top', x: 0, y: -1, anchor: 'middle' as const };
-const DIRECTIONS = [
-  TOP,
-  { id: 'right', x: 1, y: 0, anchor: 'start' as const },
-  { id: 'bottom', x: 0, y: 1, anchor: 'middle' as const },
-  { id: 'left', x: -1, y: 0, anchor: 'end' as const },
-];
+const TOP = { id: 'top', x: 0, y: -1 };
+const DIRECTIONS = [TOP, { id: 'right', x: 1, y: 0 }, { id: 'bottom', x: 0, y: 1 }, { id: 'left', x: -1, y: 0 }];
 const directionOf = (axis: number): (typeof DIRECTIONS)[number] => DIRECTIONS[axis] ?? TOP;
 const at = (axis: number, reach: number): { x: number; y: number } => {
   const direction = directionOf(axis);
@@ -79,43 +74,41 @@ const pointsOf = (reach: (axis: number) => number): string =>
 function Radar({ axes }: { readonly axes: readonly RadarAxis[] | null }) {
   const labels = axes ?? ['Speed', 'Accuracy', 'Light', 'Live words'].map(label => ({ label, value: 0 }));
   return (
-    <svg className="fy-wd__radar" viewBox="0 0 240 134" role="presentation" data-radar={axes === null ? 'none' : ''}>
-      {[1, 0.66, 0.33].map(ring => (
-        <polygon key={ring} className="fy-wd__ring" points={pointsOf(() => ring)} />
+    <div className="fy-wd__chart">
+      <svg
+        className="fy-wd__radar"
+        viewBox="70 16 100 100"
+        role="presentation"
+        data-radar={axes === null ? 'none' : ''}
+      >
+        {[1, 0.66, 0.33].map(ring => (
+          <polygon key={ring} className="fy-wd__ring" points={pointsOf(() => ring)} />
+        ))}
+        {DIRECTIONS.map((direction, axis) => {
+          const tip = at(axis, 1);
+          return <line key={direction.id} className="fy-wd__spoke" x1={CENTER.x} y1={CENTER.y} x2={tip.x} y2={tip.y} />;
+        })}
+        {axes === null ? null : (
+          <>
+            <polygon className="fy-wd__shape" points={pointsOf(axis => axes[axis]?.value ?? 0)} />
+            {axes.map((axis, index) => {
+              const point = at(index, axis.value);
+              return <circle key={axis.label} className="fy-wd__vertex" cx={point.x} cy={point.y} r={2.6} />;
+            })}
+          </>
+        )}
+      </svg>
+      {/* The spoke names are HTML text around the chart, not SVG text inside it: the chart scales with its column and its
+          text would scale down with it (9 px on a phone); this text keeps its own size on every width. */}
+      {labels.map((axis, index) => (
+        <span key={axis.label} className="fy-wd__axis" data-at={directionOf(index).id}>
+          {axis.label.split(' ')[0]}
+          {axis.label.includes(' ') ? (
+            <span className="fy-wd__more">{` ${axis.label.split(' ').slice(1).join(' ')}`}</span>
+          ) : null}
+        </span>
       ))}
-      {DIRECTIONS.map((direction, axis) => {
-        const tip = at(axis, 1);
-        return <line key={direction.id} className="fy-wd__spoke" x1={CENTER.x} y1={CENTER.y} x2={tip.x} y2={tip.y} />;
-      })}
-      {axes === null ? null : (
-        <>
-          <polygon className="fy-wd__shape" points={pointsOf(axis => axes[axis]?.value ?? 0)} />
-          {axes.map((axis, index) => {
-            const point = at(index, axis.value);
-            return <circle key={axis.label} className="fy-wd__vertex" cx={point.x} cy={point.y} r={2.6} />;
-          })}
-        </>
-      )}
-      {labels.map((axis, index) => {
-        const direction = directionOf(index);
-        const tip = at(index, 1);
-        const gap = direction.y === 0 ? 7 : 0;
-        return (
-          <text
-            key={axis.label}
-            className="fy-wd__axis"
-            textAnchor={direction.anchor}
-            x={tip.x + direction.x * gap}
-            y={tip.y + direction.y * 13 + (direction.y === 0 ? 4 : direction.y < 0 ? -1 : 0)}
-          >
-            {axis.label.split(' ')[0]}
-            {axis.label.includes(' ') ? (
-              <tspan className="fy-wd__more">{` ${axis.label.split(' ').slice(1).join(' ')}`}</tspan>
-            ) : null}
-          </text>
-        );
-      })}
-    </svg>
+    </div>
   );
 }
 

@@ -22,7 +22,7 @@
 import { StepDemo } from '@ferretry/app';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SttSettings, SttSettingsPatch } from '../../lib/stt/stt-settings.ts';
-import type { BrowserRecognitionProvider, BrowserRecognitionSupport } from '../../lib/stt/browser-recognition.ts';
+import type { BrowserRecognitionSupport } from '../../lib/stt/browser-recognition.ts';
 import { DEFAULT_ON_DEVICE_ENGINE, type DeviceClass } from '../../lib/stt/engine-defaults.ts';
 import { ON_DEVICE_MODELS, type OnDeviceModel, type OnDeviceModelId } from '../../lib/stt/model-catalog.ts';
 import type { OnDeviceVoices } from '../../lib/stt/on-device-voices.ts';
@@ -60,8 +60,6 @@ export interface VoiceStepProps {
    */
   persisted?(): boolean;
   readonly step?: StepHost | undefined;
-  /** The browser's own recognizer, for testing the "Browser voice" pick (`null`: it cannot be tested here). */
-  readonly browserProvider?: BrowserRecognitionProvider | null | undefined;
   /** The microphone's permission. Left out, the page's own; suites and shots hand a fake. */
   readonly mic?: MicPort | undefined;
 }
@@ -76,7 +74,6 @@ export function VoiceStep({
   deviceClass,
   persisted,
   step,
-  browserProvider,
   mic,
 }: VoiceStepProps) {
   useStepReady(step);
@@ -129,7 +126,7 @@ export function VoiceStep({
         <summary>{all ? 'Show fewer engines' : 'Show every engine'}</summary>
       </details>
       {/* Keyed by the pick: a new pick starts a new test, so what the last engine heard is never shown under this one. */}
-      <VoiceTest key={pick ?? 'none'} pick={pick} voices={voices} browserProvider={browserProvider} mic={mic} />
+      <VoiceTest key={pick ?? 'none'} pick={pick} voices={voices} mic={mic} />
       <StepDemo>
         <VoiceDemo pick={pick} />
       </StepDemo>

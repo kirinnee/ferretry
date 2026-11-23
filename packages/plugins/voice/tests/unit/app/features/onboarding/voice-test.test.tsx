@@ -275,8 +275,52 @@ describe('<VoiceTest> hear a sample', () => {
 
 describe('testEngineOf', () => {
   it('blocks Off, no pick and an unavailable browser voice with a sentence, and opens nothing for them', () => {
-    expect('blocked' in testEngineOf('off', null, null, null)).toBe(true);
-    expect('blocked' in testEngineOf(null, null, null, null)).toBe(true);
-    expect('blocked' in testEngineOf('browser', null, null, null)).toBe(true);
+    expect('blocked' in testEngineOf('off', null, null)).toBe(true);
+    expect('blocked' in testEngineOf(null, null, null)).toBe(true);
+    expect('blocked' in testEngineOf('browser', null, null)).toBe(true);
+  });
+});
+
+describe('<VoiceTest> the browser’s own voice', () => {
+  /** A browser voice that counts every recognition it is asked to start: the browser sends that audio to its maker. */
+  const watchedBrowser = () => {
+    const started = { create: 0 };
+    const provider = {
+      support: { available: true, availability: 'available', implementation: 'standard' },
+      create: () => {
+        started.create += 1;
+        throw new Error('recognition must never start in the onboarding test');
+      },
+      watchHidden: () => () => undefined,
+      setTimeout: (cb: () => void, ms: number) => setTimeout(cb, ms),
+      clearTimeout: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>),
+    };
+    return { started, provider };
+  };
+
+  it('never starts recognition: Record is off and the page says to pick an on-device voice', async () => {
+    const { started, provider } = watchedBrowser();
+    const voices = await voicesOf(voiceOf(INSTALLED, 'hi'));
+    const { controller } = speakerOf();
+    // Even handed a perfectly available browser voice, the test must not use it.
+    const props = { browserProvider: provider };
+    const view = await mount(
+      withSpeech(
+        controller,
+        <VoiceTest pick="browser" voices={voices} mic={micOf({ kind: 'granted' })} clock={FAST} {...props} />,
+      ),
+    );
+    await settleUntil(() => view.container.querySelector('[data-mic="granted"]') !== null, 'the mic state', interact);
+    expect(action(view.container, 'record')?.disabled).toBe(true);
+    await interact(() => action(view.container, 'record')?.click());
+    expect(started.create).toBe(0);
+    expect(view.container.textContent).toContain('pick an on-device voice to test the mic here');
+    await view.unmount();
+  });
+
+  it('testEngineOf says why the browser voice is not tested, and opens nothing', () => {
+    const engine = testEngineOf('browser', null, null);
+    expect('blocked' in engine && engine.blocked).toContain('on-device voice');
+    expect('open' in engine).toBe(false);
   });
 });

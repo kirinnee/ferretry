@@ -33,7 +33,6 @@ function VoiceStepWithStore({
       persisted={() => store.persisted}
       voices={voices}
       browserSupport={support}
-      browserProvider={provider}
       deviceClass={deviceClass}
       step={step}
     />

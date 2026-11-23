@@ -72,9 +72,10 @@ multilingual), as the int8 ONNX export
 - **Progress, Cancel, Resume.** Files are stored in 32 MiB parts, each with the hash state so far
   (`lib/stt/parakeet-store.ts`). Cancel keeps every finished part; Resume continues with an HTTP `Range`
   request from the first missing byte.
-- **Side by side.** The files of one bundle download at most three at a time (`FILE_CONCURRENCY` in
-  `lib/stt/model-store.ts`), and a model's runtime and its model files download together
-  (`runtime-model-store.ts`), so peak memory is at most three 32 MiB parts. Progress counts each file's own bytes once, so it only
+- **Side by side.** An install downloads at most three files at a time in ALL (`FILE_CONCURRENCY` and `DownloadSlots` in
+  `lib/stt/model-store.ts`): a model's runtime and its model files are separate bundles that download together, out of ONE
+  budget (`runtime-model-store.ts` for Whisper, `runtimeAndModelInstaller` in `bundle-set.ts` for the sherpa models), so peak
+  memory is at most three 32 MiB parts. Progress counts each file's own bytes once, so it only
   moves forward. One failed file stops the others (what they finished is kept) and its error is the one shown; the status check
   reads every file at once.
 - **Kept in this browser** in the Cache Storage cache `fy-stt-parakeet-v1`. **Remove** deletes it and
@@ -290,7 +291,9 @@ cd packages/pwa && bunx vite build && bun harness/vosk-smoke.ts
 The browser's own `SpeechRecognition` (`lib/stt/browser-recognition.ts`). Nothing to download, live
 words while you speak, and on Chrome, Android and Safari the audio goes to the vendor's speech service,
 so it needs a connection and the vendor's privacy policy applies. Firefox does not offer it, and an
-installed iPhone/iPad Home Screen app cannot use it.
+installed iPhone/iPad Home Screen app cannot use it. **First-run onboarding never records with it**: the
+"Test your audio" step (`features/onboarding/voice-test.tsx`) only records with a verified on-device engine, so
+choosing Browser voice there sends no audio anywhere and Record says to pick an on-device voice.
 
 ## Speed: which path each engine runs on
 

@@ -303,10 +303,35 @@
   justify-items: center;
   padding: 10px 16px 14px;
 }
+/* The chart is the SVG with its four spoke names as real text around it (top, right, bottom, left), so the names never scale
+   down with the drawing: 13 px here, 12 px on a phone's strip. */
+.fy-wd__chart {
+  align-items: center;
+  column-gap: 6px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 150px) auto;
+  justify-content: center;
+  justify-items: center;
+  row-gap: 2px;
+}
 .fy-wd__radar {
+  aspect-ratio: 1;
   block-size: auto;
-  inline-size: min(100%, 300px);
+  grid-area: 2 / 2;
+  inline-size: 100%;
   overflow: visible;
+}
+.fy-wd__axis[data-at='top'] {
+  grid-area: 1 / 2;
+}
+.fy-wd__axis[data-at='right'] {
+  grid-area: 2 / 3;
+}
+.fy-wd__axis[data-at='bottom'] {
+  grid-area: 3 / 2;
+}
+.fy-wd__axis[data-at='left'] {
+  grid-area: 2 / 1;
 }
 .fy-wd__ring {
   fill: none;
@@ -327,8 +352,10 @@
   fill: var(--accent);
 }
 .fy-wd__axis {
-  fill: var(--muted);
-  font-size: 11px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 .fy-wd__radar[data-radar='none'] .fy-wd__ring {
   stroke-dasharray: 3 4;
@@ -369,15 +396,15 @@
     border-inline-start: 1px solid var(--border);
     padding: 6px 8px;
   }
-  .fy-wd__radar {
-    inline-size: 100%;
-    max-block-size: 124px;
+  /* The names are 12 px text beside and above the drawing; the drawing takes what is left of the half-width, at most 80 px. */
+  .fy-wd__chart {
+    grid-template-columns: auto minmax(0, 80px) auto;
+    row-gap: 0;
   }
-  /* The strip draws the chart at about 0.6 scale, so its labels are set larger to land near 10 px. */
   .fy-wd__axis {
-    font-size: 14px;
+    font-size: 12px;
   }
-  /* "Live words" is just "Live" here: the strip is too narrow for the long label at a readable size. */
+  /* "Live words" is just "Live" here: the strip is too narrow for the long label beside the drawing. */
   .fy-wd__more {
     display: none;
   }

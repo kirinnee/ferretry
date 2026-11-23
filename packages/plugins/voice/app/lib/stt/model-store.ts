@@ -22,8 +22,8 @@
  * refused, not loaded.
  *
  * NEVER BUFFERED WHOLE ON INSTALL. Peak memory while downloading is one part per file in flight: at most
- * {@link FILE_CONCURRENCY} (3) files download at once, so at most 3 parts (96 MiB), and a file smaller than a part
- * is held at its own size. The files are independent, so a slow start or a short file never queues behind a long one.
+ * {@link FILE_CONCURRENCY} (3) files download at once across the whole install (a model and its runtime share one
+ * {@link DownloadSlots}), so at most 3 parts (96 MiB), and a file smaller than a part is held at its own size. The files are independent, so a slow start or a short file never queues behind a long one.
  *
  * Generalised from the Parakeet store, which is now this class over Parakeet's bundle
  * (`parakeet-store.ts`) with the same cache name and keys, so a Parakeet install made before the
@@ -35,8 +35,37 @@ import { isSha256State, Sha256, type Sha256State } from './sha256.ts';
 /** 32 MiB: a multiple of the 64-byte hash block, small enough to hold, large enough to be few. */
 export const MODEL_PART_BYTES = 32 * 1024 * 1024;
 
-/** How many files of one bundle download at once. */
+/** How many files download at once across ONE install, however many bundles it holds. */
 export const FILE_CONCURRENCY = 3;
+
+/**
+ * The download budget of one install: at most `size` files in flight, shared by every store that is handed the same
+ * instance. A model and the runtime it shares are separate bundles that download together, so they share one budget
+ * (the peak memory and the connections stay what {@link FILE_CONCURRENCY} says, not that many per bundle).
+ */
+export class DownloadSlots {
+  readonly size: number;
+  #free: number;
+  readonly #waiting: (() => void)[] = [];
+
+  constructor(size: number = FILE_CONCURRENCY) {
+    this.size = size;
+    this.#free = size;
+  }
+
+  /** Run `task` once a slot is free, and give the slot back however it ends. */
+  async run<T>(task: () => Promise<T>): Promise<T> {
+    if (this.#free > 0) this.#free -= 1;
+    else await new Promise<void>(resolve => this.#waiting.push(resolve));
+    try {
+      return await task();
+    } finally {
+      const next = this.#waiting.shift();
+      if (next === undefined) this.#free += 1;
+      else next();
+    }
+  }
+}
 
 /** Decimal megabytes, the unit storage settings on phones and browsers report. */
 export const formatMegabytes = (bytes: number): string => `${Math.max(0, Math.round(bytes / 1_000_000))} MB`;
@@ -135,6 +164,8 @@ export interface PinnedModelStoreOptions {
   readonly partBytes?: number;
   /** How many files download at once. Defaults to {@link FILE_CONCURRENCY}; a suite that specifies one file at a time passes 1. */
   readonly fileConcurrency?: number;
+  /** The budget this install's files draw from. Stores that download together are handed one; otherwise each has its own. */
+  readonly slots?: DownloadSlots;
 }
 
 interface ProgressRecord {
@@ -239,14 +270,19 @@ export class PinnedModelStore implements ModelInstaller {
     if (signal?.aborted) throw cancelled();
     signal?.addEventListener('abort', relay, { once: true });
     const queue = files.filter((_, index) => have[index] !== true);
+    const slots = this.#options.slots ?? new DownloadSlots(this.#options.fileConcurrency ?? FILE_CONCURRENCY);
     let failure: { readonly error: unknown } | null = null;
     const lane = async (): Promise<void> => {
       try {
         for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
           if (stop.signal.aborted) throw cancelled();
-          await this.#installFile(cache, file, stop.signal, bytes => {
-            stored.set(file, bytes);
-            report();
+          await slots.run(async () => {
+            // A sibling may have failed while this file waited for a slot.
+            if (stop.signal.aborted) throw cancelled();
+            await this.#installFile(cache, file, stop.signal, bytes => {
+              stored.set(file, bytes);
+              report();
+            });
           });
           stored.set(file, file.bytes);
           finishedFiles.add(file);
@@ -260,9 +296,7 @@ export class PinnedModelStore implements ModelInstaller {
     // Files already held are reported at once; a partly held one is reported when its turn starts.
     if (finished > 0) report();
     try {
-      await Promise.all(
-        Array.from({ length: Math.min(this.#options.fileConcurrency ?? FILE_CONCURRENCY, queue.length) }, lane),
-      );
+      await Promise.all(Array.from({ length: Math.min(slots.size, queue.length) }, lane));
     } finally {
       signal?.removeEventListener('abort', relay);
     }

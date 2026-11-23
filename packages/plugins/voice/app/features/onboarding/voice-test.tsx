@@ -16,11 +16,7 @@ import { Mic, Play, Square, Volume2 } from 'lucide-react';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Button } from '../../shell-voice.ts';
 import { useReadAloud } from '../../hooks/use-read-aloud.ts';
-import {
-  type BrowserRecognitionProvider,
-  BrowserRecognitionSession,
-  type BrowserRecognitionError,
-} from '../../lib/stt/browser-recognition.ts';
+import type { BrowserRecognitionError } from '../../lib/stt/browser-recognition.ts';
 import { type EngineTrial, type EngineTrialUpdate, startEngineTrial } from '../../lib/stt/engine-trial.ts';
 import { ON_DEVICE_MODELS } from '../../lib/stt/model-catalog.ts';
 import type {
@@ -37,6 +33,9 @@ import { browserMic, type MicPort, type MicState } from './mic-permission.ts';
 /** The line "Hear a sample" reads. */
 export const SAMPLE_LINE = 'This is how Ferretry reads a reply out loud.';
 const SAMPLE_KEY = 'voice-step-sample';
+
+const BROWSER_VOICE_BLOCKED =
+  'Browser voice may send your audio to your browser’s maker, so it is not recorded here: pick an on-device voice to test the mic here.';
 
 const NOTHING_HEARD = 'Nothing was heard. Say a sentence a little closer to the microphone, then try again.';
 
@@ -62,15 +61,12 @@ export function testEngineOf(
   pick: EngineChoice | null,
   voice: OnDeviceVoice | null,
   install: OnDeviceInstallSnapshot | null,
-  provider: BrowserRecognitionProvider | null,
 ): TestEngine {
   if (pick === null) return { blocked: 'Pick an engine above to test it.' };
   if (pick === 'off') return { blocked: 'Dictation is off, so there is nothing to record. Pick an engine to test it.' };
-  if (pick === 'browser') {
-    if (provider === null || !provider.support.available)
-      return { blocked: provider?.support.reason ?? 'The browser’s own voice is not available here.' };
-    return { open: options => new BrowserRecognitionSession(provider, options), name: 'Browser voice' };
-  }
+  // PRIVACY: the browser's own voice is native speech recognition, which most browsers stream to their maker. A test here
+  // would send the person's first words off the device before they chose to, so only verified on-device engines record.
+  if (pick === 'browser') return { blocked: BROWSER_VOICE_BLOCKED };
   const model = ON_DEVICE_MODELS.find(entry => entry.id === pick);
   const name = model?.shortName ?? 'This engine';
   if (voice === null || !voice.support.available)
@@ -102,13 +98,12 @@ const MIC_LINE: Readonly<Record<MicState['kind'] | 'checking', string>> = {
 export interface VoiceTestProps {
   readonly pick: EngineChoice | null;
   readonly voices: OnDeviceVoices | null;
-  readonly browserProvider?: BrowserRecognitionProvider | null | undefined;
   /** Tests and shots hand their own; the page uses its own microphone. */
   readonly mic?: MicPort | undefined;
   readonly clock?: TrialClock | undefined;
 }
 
-export function VoiceTest({ pick, voices, browserProvider = null, mic, clock = pageClock }: VoiceTestProps) {
+export function VoiceTest({ pick, voices, mic, clock = pageClock }: VoiceTestProps) {
   const port = useRef<MicPort>(mic ?? browserMic());
   port.current = mic ?? port.current;
   const [micState, setMicState] = useState<MicState | null>(null);
@@ -116,7 +111,7 @@ export function VoiceTest({ pick, voices, browserProvider = null, mic, clock = p
   const trialRef = useRef<EngineTrial | null>(null);
   const voice = pick === null || pick === 'off' || pick === 'browser' ? null : (voices?.get(pick) ?? null);
   const install = useInstall(voice);
-  const engine = testEngineOf(pick, voice, install, browserProvider);
+  const engine = testEngineOf(pick, voice, install);
   const sample = useReadAloud(SAMPLE_KEY);
 
   useEffect(() => {
