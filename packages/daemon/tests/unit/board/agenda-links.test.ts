@@ -132,6 +132,33 @@ describe("the agenda's link to cards", () => {
     ]);
   });
 
+  it('should say an unchanged damaged agenda once, and again when it fails differently', async () => {
+    // Arrange — the reader hands back the same error object while the file is unchanged.
+    const warnings: string[] = [];
+    const same = new Error('invalid agenda ledger: lead/agenda.json');
+    let failure = same;
+    const reader = new AgendaCardLinks(
+      {
+        open: async () => {
+          throw failure;
+        },
+      },
+      () => MACHINE,
+      { warn: message => warnings.push(message) },
+    );
+
+    // Act
+    for (let each = 0; each < 4; each += 1) await reader.asksFor([card({ assignee: 'lead' })]);
+    failure = new Error('invalid agenda ledger: lead/agenda.json (rewritten, still damaged)');
+    await reader.asksFor([card({ assignee: 'lead' })]);
+
+    // Assert
+    should(warnings).deepEqual([
+      'could not read the agenda of lead for its cards: invalid agenda ledger: lead/agenda.json',
+      'could not read the agenda of lead for its cards: invalid agenda ledger: lead/agenda.json (rewritten, still damaged)',
+    ]);
+  });
+
   it('should read the agendas in bounded batches', async () => {
     // Arrange
     const owners = Array.from({ length: AGENDA_READ_CONCURRENCY + 3 }, (_, index) => `ferret-${index}`);

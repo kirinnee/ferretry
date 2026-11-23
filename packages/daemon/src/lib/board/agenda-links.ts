@@ -37,6 +37,9 @@ export const AGENDA_READ_CONCURRENCY = 16;
 const SELF_HOMES: AgendaHomeLookup = { of: async sessionId => sessionId };
 
 export class AgendaCardLinks implements AgendaLinkSource {
+  /** The failure last said of each session: the reader hands back the same error while a file is unchanged. */
+  private readonly said = new Map<string, unknown>();
+
   constructor(
     private readonly agendas: AgendaItemsReader,
     private readonly machineId: () => string | undefined,
@@ -81,11 +84,17 @@ export class AgendaCardLinks implements AgendaLinkSource {
   /** An agenda that cannot be read costs its asks, never the board read. */
   private async read(sessionId: string): Promise<readonly AgendaItem[]> {
     try {
-      return await this.agendas.open(sessionId);
+      const items = await this.agendas.open(sessionId);
+      this.said.delete(sessionId);
+      return items;
     } catch (error) {
-      this.diagnostics.warn(
-        `could not read the agenda of ${sessionId} for its cards: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      // Once per failure, not per board read: an unchanged damaged file fails with the same error every time.
+      if (this.said.get(sessionId) !== error) {
+        this.said.set(sessionId, error);
+        this.diagnostics.warn(
+          `could not read the agenda of ${sessionId} for its cards: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       return [];
     }
   }

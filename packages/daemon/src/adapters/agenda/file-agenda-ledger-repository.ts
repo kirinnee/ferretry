@@ -93,8 +93,12 @@ import { FileAgendaFileStore } from './file-agenda-file-store.ts';
 
 /** Raised when a durable board cannot safely be supplied to the state machine. */
 export class InvalidAgendaLedgerError extends Error {
-  constructor(readonly file: string) {
-    super(`invalid agenda ledger: ${file}`);
+  /** `reason` is what failed, so a log line says which field or file is wrong rather than only that one is. */
+  constructor(
+    readonly file: string,
+    reason?: string,
+  ) {
+    super(`invalid agenda ledger: ${file}${reason === undefined ? '' : ` (${reason})`}`);
   }
 }
 
@@ -111,9 +115,20 @@ type IdentifiedAgendaFiles = AgendaFileStore &
 interface CachedLedger {
   readonly name: string;
   readonly identity: string;
+  readonly failure?: undefined;
   /** The digest of the text it was parsed from. */
   readonly digest: string;
   readonly ledger: AgendaLedger;
+}
+
+/**
+ * One session's agenda as last found unreadable: which file, how it stood, and the failure it gave. The same
+ * error is thrown while the identity holds, so a caller can tell "the same damage again" from a new one.
+ */
+interface BrokenLedger {
+  readonly name: string;
+  readonly identity: string;
+  readonly failure: InvalidAgendaLedgerError;
 }
 
 function archiveRecords(text: string): AgendaArchiveRecord[] {
@@ -140,7 +155,7 @@ function archiveRecords(text: string): AgendaArchiveRecord[] {
  */
 export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   private readonly tails = new Map<string, Promise<void>>();
-  private readonly cache = new Map<string, CachedLedger>();
+  private readonly cache = new Map<string, CachedLedger | BrokenLedger>();
   private readonly files: IdentifiedAgendaFiles;
   readonly changeOutbox?: FileAgendaChangeOutbox;
 
@@ -198,24 +213,39 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
       if (cached !== undefined && cached.name === name && cached.identity === now) {
         this.cache.delete(sessionId);
         this.cache.set(sessionId, cached);
+        // An unchanged damaged file is damaged still: said again without reading or parsing it.
+        if (cached.failure !== undefined) throw cached.failure;
         return cached;
       }
       const read = await this.files.readIdentified(sessionId, name);
       if (read === undefined) continue;
-      const ledger = deepFreezeJson(
-        (await this.parse(sessionId, name, read.text)) as unknown as JsonValue,
-      ) as unknown as AgendaLedger;
-      this.cache.delete(sessionId);
-      for (const oldest of this.cache.keys()) {
-        if (this.cache.size < AGENDA_CACHE_LIMIT) break;
-        this.cache.delete(oldest);
+      let ledger: AgendaLedger;
+      try {
+        ledger = deepFreezeJson(
+          (await this.parse(sessionId, name, read.text)) as unknown as JsonValue,
+        ) as unknown as AgendaLedger;
+      } catch (error) {
+        if (error instanceof InvalidAgendaLedgerError) {
+          this.remember(sessionId, { name, identity: read.identity, failure: error });
+        }
+        throw error;
       }
       const found = { name, identity: read.identity, digest: digestOf(read.text), ledger };
-      this.cache.set(sessionId, found);
+      this.remember(sessionId, found);
       return found;
     }
     this.cache.delete(sessionId);
     return null;
+  }
+
+  /** Keeps what a read found against its file, dropping the one read longest ago past the limit. */
+  private remember(sessionId: string, found: CachedLedger | BrokenLedger): void {
+    this.cache.delete(sessionId);
+    for (const oldest of this.cache.keys()) {
+      if (this.cache.size < AGENDA_CACHE_LIMIT) break;
+      this.cache.delete(oldest);
+    }
+    this.cache.set(sessionId, found);
   }
 
   private async parse(sessionId: string, name: string, text: string): Promise<AgendaLedger> {
@@ -257,8 +287,11 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
       const ledger = parseAgendaLedger(raw, sessionId, archived, recorded);
       if (ledger === null) throw new Error('invalid ledger');
       return adopted === undefined ? ledger : { ...ledger, archive: adopted };
-    } catch {
-      throw new InvalidAgendaLedgerError(this.files.file(sessionId, name));
+    } catch (error) {
+      throw new InvalidAgendaLedgerError(
+        this.files.file(sessionId, name),
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
 
