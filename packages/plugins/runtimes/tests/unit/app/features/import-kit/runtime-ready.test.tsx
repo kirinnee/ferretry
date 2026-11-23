@@ -23,7 +23,7 @@ const runtime = (
   id: name,
   name,
   harness,
-  credential: { id: login },
+  credential: { id: login, store: 'host' },
   launch,
 });
 
@@ -33,14 +33,17 @@ describe('readyStateOf', () => {
       [runtime('codex', 'codex-a'), runtime('claude-code', 'claude-a'), runtime('claude-code', 'claude-b')],
       'claude-code',
     );
-    expect(state).toEqual({ kind: 'ready', names: ['claude-a', 'claude-b'] });
+    expect(state).toEqual({
+      kind: 'ready',
+      names: ['Claude · your terminal sign-in — claude-a', 'Claude · your terminal sign-in — claude-b'],
+    });
   });
   it('is blocked, with the daemon’s reason, when the only runtime cannot start', () => {
     expect(
       readyStateOf([runtime('codex', 'codex-a', { available: false, reason: 'Sign in to launch' })], 'codex'),
     ).toEqual({
       kind: 'blocked',
-      name: 'codex-a',
+      name: 'Codex · your terminal sign-in',
       reason: 'Sign in to launch',
     });
   });
@@ -51,16 +54,19 @@ describe('readyStateOf', () => {
     ];
     expect(readyStateOf(runtimes, 'codex', 'new')).toEqual({
       kind: 'blocked',
-      name: 'codex-new',
+      name: 'Codex · your terminal sign-in',
       reason: 'Sign in to launch',
     });
-    expect(readyStateOf(runtimes, 'codex', 'old')).toEqual({ kind: 'ready', names: ['codex-old'] });
+    expect(readyStateOf(runtimes, 'codex', 'old')).toEqual({ kind: 'ready', names: ['Codex · your terminal sign-in'] });
     // The login just signed in has no runtime at all: none, though the other login is ready.
     expect(readyStateOf([runtime('codex', 'codex-old', { available: true }, 'old')], 'codex', 'new')).toEqual({
       kind: 'none',
     });
     // No login known (sign-in skipped, or a reload dropped the memory): every runtime of the tool counts.
-    expect(readyStateOf(runtimes, 'codex')).toEqual({ kind: 'ready', names: ['codex-old'] });
+    expect(readyStateOf(runtimes, 'codex')).toEqual({
+      kind: 'ready',
+      names: ['Codex · your terminal sign-in — codex-old'],
+    });
   });
   it('is none when the harness has no runtime', () => {
     expect(readyStateOf([runtime('codex', 'codex-a')], 'claude-code')).toEqual({ kind: 'none' });
@@ -142,7 +148,9 @@ describe('RuntimeReadyPage', () => {
     );
     await settle();
     expect(blocked.container.querySelector('[data-runtime-ready]')?.getAttribute('data-runtime-ready')).toBe('blocked');
-    expect(blocked.container.querySelector('[data-ready-names]')?.textContent).toContain('codex-new');
+    expect(blocked.container.querySelector('[data-ready-names]')?.textContent).toContain(
+      'Runtime: Codex · your terminal sign-in. Sign in to launch',
+    );
     await blocked.unmount();
     const missing = await mount(
       createElement(RuntimeReadyPage, {

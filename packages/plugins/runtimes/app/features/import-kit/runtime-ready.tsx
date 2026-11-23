@@ -17,6 +17,7 @@ import type { PluginClient } from '@ferretry/kernel/manifest';
 import { Check, Minus } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
+import { CredentialStoreSchema, runtimeDisplayName } from '../../../contract/index.ts';
 import { StepActions, StepBody, StepLine } from './step-parts.tsx';
 
 /** The fields of a runtime this page reads (the catalog row is wider; a field not named here is not used). */
@@ -25,7 +26,10 @@ const RuntimeRowSchema = z.object({
   name: z.string().min(1),
   harness: z.string().min(1),
   /** The login the runtime is made from: the page matches the login the step just handled on this. */
-  credential: z.object({ id: z.string().min(1) }),
+  credential: z.object({ id: z.string().min(1), store: CredentialStoreSchema, label: z.string().min(1).optional() }),
+  /** The profile and the login's provider, which tell two runtimes on one login apart in words. */
+  profile: z.string().min(1).optional(),
+  models: z.object({ catalog: z.object({ label: z.string().min(1) }) }).optional(),
   launch: z.discriminatedUnion('available', [
     z.object({ available: z.literal(true) }),
     z.object({ available: z.literal(false), reason: z.string().min(1) }),
@@ -50,11 +54,12 @@ export function readyStateOf(runtimes: readonly ReadyRuntime[], harness: string,
   const mine = runtimes.filter(
     runtime => runtime.harness === harness && (login === undefined || runtime.credential.id === login),
   );
-  const names = mine.filter(runtime => runtime.launch.available).map(runtime => runtime.name);
+  // Named the way every other screen names a runtime ("Claude · your terminal sign-in"), never by its stored name.
+  const names = mine.filter(runtime => runtime.launch.available).map(runtime => runtimeDisplayName(runtime, mine));
   if (names.length > 0) return { kind: 'ready', names };
   const [first] = mine;
   if (first !== undefined && !first.launch.available)
-    return { kind: 'blocked', name: first.name, reason: first.launch.reason };
+    return { kind: 'blocked', name: runtimeDisplayName(first, mine), reason: first.launch.reason };
   return { kind: 'none' };
 }
 
