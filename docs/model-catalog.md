@@ -254,12 +254,23 @@ efforts stay the curated YAML's, and a suggestion only ADDS a row marked "new / 
 - **Only the build contacts models.dev and LiteLLM** (`https://models.dev/api.json` and LiteLLM's
   `model_prices_and_context_window.json` on GitHub raw: fixed URLs, no environment override). An owner's machine never does.
 - **Untrusted data.** Both documents go through the suggestions schema: every string and list is capped, a row that
-  does not check is dropped and named in the build log, and nothing from them reaches a default or a tier.
+  does not check is dropped and named in the build log, and nothing from them reaches a default or a tier. That
+  includes a model row past the per-provider cap (1,000) and a LiteLLM `deprecation_date` that is not a day: each is
+  left out and named, never cut silently.
+- **Bounded downloads.** Each of the two downloads is read at most **8 MiB** (several times either file today, so a
+  runaway body stops the build and a normal one never meets the cap) and is refused before it is parsed: a declared
+  length over the cap at once, a streamed body as soon as it outgrows it. models.dev over the cap is a source that is
+  down (the committed snapshot below); LiteLLM over it costs only the dates.
 - **When a source is down** (`packages/plugins/logins/scripts/suggestions-source.ts`): the build publishes the last
   committed snapshot, `daemon/data/suggestions/models-dev.json`, with a `::warning::` line. A fresh models.dev that lost
   a provider the snapshot has, or half of its models, is not believed either. LiteLLM down costs only the dates. No
   usable fetch and no valid snapshot fails the build — it never publishes an empty list, and an app deploy never
-  waits on a third party.
+  waits on a third party. A snapshot is valid only when it reads whole and **every provider we keep holds models**:
+  one provider with none is not a snapshot, so an offline build with it fails.
+- **The budget is enforced on the final file, before anything is written.** The publisher gzips the finished
+  `catalog/models.json`; over **300 KB** it publishes the committed snapshot instead (with a `::warning::` giving both
+  sizes), and when that is over too the build fails loudly. A test of the committed snapshot alone would not catch a
+  fresh fetch that grew (schema-valid rows reached 834 KB gzipped).
 - **Refreshing the snapshot** is a PR: `bun run packages/plugins/logins/scripts/suggestions-source.ts --refresh`
   rewrites it with sorted keys and two-space indentation, so the diff reads line by line.
 - **Versioning.** `version` still moves only when `daemon/data/models/` does, so a daemon takes new suggestions when a

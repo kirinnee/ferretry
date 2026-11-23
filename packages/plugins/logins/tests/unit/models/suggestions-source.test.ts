@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { builtInModelCatalogs } from '../../../daemon/lib/catalog/catalog.ts';
@@ -12,7 +13,11 @@ import {
   stableJson,
 } from '../../../daemon/lib/catalog/suggestions.ts';
 import {
+  buildPublishedFiles,
   buildSuggestions,
+  GZIP_BUDGET_BYTES,
+  MAX_DOWNLOAD_BYTES,
+  readJsonCapped,
   SUGGESTIONS_SNAPSHOT_FILE,
   type SuggestionsDeps,
 } from '../../../scripts/suggestions-source.ts';
@@ -172,6 +177,178 @@ describe('the build reads models.dev and LiteLLM from two fixed URLs, and only i
   });
 });
 
+describe('the build never believes an unbounded or empty source', () => {
+  const bodyOf = (chunks: readonly string[], headers: Record<string, string> = {}): Response =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+          controller.close();
+        },
+      }),
+      { headers },
+    );
+
+  it('should parse a download under the byte cap', async () => {
+    // Act
+    const value = await readJsonCapped('https://x.test/a', bodyOf(['{"a":', '1}']), 100);
+
+    // Assert
+    should(value).eql({ a: 1 });
+  });
+
+  it('should refuse a download whose declared length is over the cap, before reading it', async () => {
+    // Arrange
+    const response = bodyOf(['{}'], { 'content-length': '5000' });
+
+    // Act
+    const read = readJsonCapped('https://x.test/a', response, 1000);
+
+    // Assert
+    await should(read).rejectedWith(/declares 5000 bytes, over the 1000 byte cap/u);
+  });
+
+  it('should stop a body that outgrows the cap while streaming, whatever it declared', async () => {
+    // Arrange
+    const response = bodyOf(['[', '"x"'.repeat(200), ']']);
+
+    // Act
+    const read = readJsonCapped('https://x.test/a', response, 100);
+
+    // Assert
+    await should(read).rejectedWith(/is over the 100 byte cap/u);
+  });
+
+  it('should hold the real cap at 8 MiB', () => {
+    should(MAX_DOWNLOAD_BYTES).equal(8 * 1024 * 1024);
+  });
+
+  it('should publish the committed snapshot, with a warning naming the cap, when models.dev is oversized', async () => {
+    // Arrange
+    const snapshot = await buildSuggestions(deps({ modelsDev: modelsDev(4), litellm: {} }).deps);
+    const world = deps({ snapshot });
+    const oversized: SuggestionsDeps = {
+      ...world.deps,
+      getJson: url =>
+        url === MODELS_DEV_URL ? readJsonCapped(url, bodyOf([`[${'"x",'.repeat(100)}"x"]`]), 50) : Promise.resolve({}),
+    };
+
+    // Act
+    const built = await buildSuggestions(oversized);
+
+    // Assert
+    should(built).eql(snapshot);
+    should(world.log.join('\n')).match(/::warning::models\.dev could not be read.*byte cap.*snapshot of 2026-11-23/u);
+  });
+
+  it('should fail the build, offline, when the committed snapshot holds a provider with no models', async () => {
+    // Arrange
+    const whole = await buildSuggestions(deps({ modelsDev: modelsDev(4), litellm: {} }).deps);
+    const emptied = { ...whole, providers: { ...whole.providers, xai: { ...whole.providers.xai!, models: {} } } };
+    const onlyEmpty = { ...whole, providers: { xai: { name: 'xai', models: {} } } };
+
+    // Act
+    const withEmptyProvider = buildSuggestions(deps({ snapshot: emptied, down: [MODELS_DEV_URL] }).deps);
+    const withOnlyEmpty = buildSuggestions(deps({ snapshot: onlyEmpty, down: [MODELS_DEV_URL] }).deps);
+
+    // Assert
+    await should(withEmptyProvider).rejectedWith(/no valid committed snapshot/u);
+    await should(withOnlyEmpty).rejectedWith(/no valid committed snapshot/u);
+  });
+
+  it('should name the rows past the per-provider cap, and the LiteLLM dates that are not days', async () => {
+    // Arrange
+    const raw = modelsDev(2) as Record<string, { models: Record<string, unknown> }>;
+    for (let index = 0; index < 1005; index += 1) raw.xai!.models[`bulk-${index}`] = model(`B${index}`);
+    const litellm = { 'xai/xai-m0': { deprecation_date: 'next spring' }, 'xai/xai-m1': { deprecation_date: null } };
+    const world = deps({ modelsDev: raw, litellm });
+
+    // Act
+    const built = await buildSuggestions(world.deps);
+
+    // Assert
+    should(Object.keys(built.providers.xai?.models ?? {})).have.length(1000);
+    const log = world.log.join('\n');
+    should(log).match(/models\.dev: dropped xai\/bulk-999: beyond the 1000 models kept per provider/u);
+    should(log).match(/models\.dev: dropped xai\/bulk-1004: beyond the 1000 models/u);
+    should(log).match(/LiteLLM: dropped litellm\/xai\/xai-m0: the date is not a day: "next spring"/u);
+    should(log).not.match(/xai-m1/u);
+  });
+});
+
+describe('the final models.json is held to the gzip budget before anything is written', () => {
+  const gzipped = (suggestions: Suggestions): number =>
+    gzipSync(publishedModelCatalogFiles(1, builtInModelCatalogs(), suggestions)['catalog/models.json'] as string)
+      .length;
+
+  it('should publish the committed snapshot, with a warning, when the live build is over budget', async () => {
+    // Arrange
+    const snapshot = await buildSuggestions(deps({ modelsDev: modelsDev(4), litellm: {} }).deps);
+    const live = await buildSuggestions(deps({ modelsDev: modelsDev(40), litellm: {} }).deps);
+    const budget = gzipped(snapshot);
+    should(gzipped(live)).be.above(budget);
+    const world = deps({ snapshot, modelsDev: modelsDev(40), litellm: {} });
+
+    // Act
+    const files = await buildPublishedFiles(1, builtInModelCatalogs(), world.deps, budget);
+
+    // Assert
+    should(JSON.parse(files['catalog/models.json'] as string).suggestions).eql(snapshot);
+    should(world.log.join('\n')).match(
+      /::warning::the published models\.json would be \d+ bytes gzipped, over the \d+ budget/u,
+    );
+  });
+
+  it('should fail the build when the live build and the committed snapshot are both over budget', async () => {
+    // Arrange
+    const snapshot = await buildSuggestions(deps({ modelsDev: modelsDev(4), litellm: {} }).deps);
+    const world = deps({ snapshot, modelsDev: modelsDev(40), litellm: {} });
+
+    // Act
+    const built = buildPublishedFiles(1, builtInModelCatalogs(), world.deps, gzipped(snapshot) - 1);
+
+    // Assert
+    await should(built).rejectedWith(/over the \d+ budget, and the committed snapshot is \d+ bytes/u);
+  });
+
+  it('should fail the build when the live build is over budget and there is no snapshot', async () => {
+    // Arrange
+    const live = await buildSuggestions(deps({ modelsDev: modelsDev(40), litellm: {} }).deps);
+    const world = deps({ modelsDev: modelsDev(40), litellm: {} });
+
+    // Act
+    const built = buildPublishedFiles(1, builtInModelCatalogs(), world.deps, gzipped(live) - 1);
+
+    // Assert
+    await should(built).rejectedWith(/no valid committed snapshot to fall back to/u);
+  });
+
+  it('should fail the build when the committed snapshot is itself the answer and is over budget', async () => {
+    // Arrange
+    const snapshot = await buildSuggestions(deps({ modelsDev: modelsDev(4), litellm: {} }).deps);
+    const world = deps({ snapshot, down: [MODELS_DEV_URL] });
+
+    // Act
+    const built = buildPublishedFiles(1, builtInModelCatalogs(), world.deps, gzipped(snapshot) - 1);
+
+    // Assert
+    await should(built).rejectedWith(/it is the committed snapshot: trim it/u);
+  });
+
+  it('should publish the live build untouched when it fits, and hold the real budget at 300 KB', async () => {
+    // Arrange
+    const world = deps({ modelsDev: modelsDev(4), litellm: {} });
+
+    // Act
+    const files = await buildPublishedFiles(1, builtInModelCatalogs(), world.deps);
+
+    // Assert
+    should(GZIP_BUDGET_BYTES).equal(300 * 1024);
+    should(JSON.parse(files['catalog/models.json'] as string).suggestions.generated).equal('2026-11-23');
+    should(world.log).eql([]);
+  });
+});
+
 describe('the committed snapshot', () => {
   const text = readFileSync(SUGGESTIONS_SNAPSHOT_FILE, 'utf8');
 
@@ -211,7 +388,7 @@ describe('the committed snapshot', () => {
     const gzipped = Bun.gzipSync(new TextEncoder().encode(file)).length;
 
     // Assert
-    should(gzipped).be.below(300 * 1024);
+    should(gzipped).be.below(GZIP_BUDGET_BYTES);
     should(gzipped).be.above(10 * 1024);
   });
 });

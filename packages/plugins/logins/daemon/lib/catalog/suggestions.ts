@@ -219,7 +219,14 @@ export function trimModelsDev(raw: unknown): TrimmedModelsDev {
       continue;
     }
     const models: Record<string, SuggestionModel> = {};
-    for (const [modelId, row] of Object.entries(provider.models).slice(0, MAX_MODELS_PER_PROVIDER)) {
+    const rows = Object.entries(provider.models);
+    // Rows past the cap are left out, and each is named (a silent cut would look like a model that never existed).
+    for (const [modelId] of rows.slice(MAX_MODELS_PER_PROVIDER))
+      dropped.push({
+        where: `${id}/${modelId.slice(0, 80)}`,
+        problem: `beyond the ${MAX_MODELS_PER_PROVIDER} models kept per provider`,
+      });
+    for (const [modelId, row] of rows.slice(0, MAX_MODELS_PER_PROVIDER)) {
       const checked = isRecord(row) ? SuggestionModelSchema.safeParse(modelsDevModel(row)) : undefined;
       const idChecked = Id.safeParse(modelId);
       if (checked?.success === true && idChecked.success) models[modelId] = checked.data;
@@ -248,16 +255,30 @@ export function trimModelsDev(raw: unknown): TrimmedModelsDev {
   return { providers, dropped };
 }
 
-/** The dates LiteLLM states (its `deprecation_date` field), by its own key (`gemini/gemini-2.5-pro`, `gpt-5`). */
-function litellmDates(raw: unknown): ReadonlyMap<string, string> {
+/**
+ * The dates LiteLLM states (its `deprecation_date` field), by its own key (`gemini/gemini-2.5-pro`, `gpt-5`). A field
+ * that is present but is not a date is left out and named; an absent or null one is simply no date.
+ */
+function litellmDates(raw: unknown): {
+  readonly dates: ReadonlyMap<string, string>;
+  readonly dropped: readonly DroppedSuggestion[];
+} {
   const dates = new Map<string, string>();
-  if (!isRecord(raw)) return dates;
+  const dropped: DroppedSuggestion[] = [];
+  if (!isRecord(raw)) return { dates, dropped };
   for (const [key, entry] of Object.entries(raw)) {
     if (!isRecord(entry)) continue;
-    const date = Day.safeParse(entry[LITELLM_RETIRES_FIELD]);
+    const field = entry[LITELLM_RETIRES_FIELD];
+    if (field === undefined || field === null) continue;
+    const date = Day.safeParse(field);
     if (date.success) dates.set(key, date.data);
+    else
+      dropped.push({
+        where: `litellm/${key.slice(0, 80)}`,
+        problem: `the date is not a day: ${JSON.stringify(field)?.slice(0, 40) ?? 'unreadable'}`,
+      });
   }
-  return dates;
+  return { dates, dropped };
 }
 
 /**
@@ -268,8 +289,13 @@ function litellmDates(raw: unknown): ReadonlyMap<string, string> {
 export function withRetirementDates(
   providers: Readonly<Record<string, SuggestionProvider>>,
   litellm: unknown,
-): { readonly providers: Readonly<Record<string, SuggestionProvider>>; readonly added: number } {
-  const dates = litellmDates(litellm);
+): {
+  readonly providers: Readonly<Record<string, SuggestionProvider>>;
+  readonly added: number;
+  /** Each LiteLLM date that was present but not a day, left out. */
+  readonly dropped: readonly DroppedSuggestion[];
+} {
+  const { dates, dropped } = litellmDates(litellm);
   let added = 0;
   const result = Object.fromEntries(
     Object.entries(providers).map(([providerId, provider]) => {
@@ -285,7 +311,7 @@ export function withRetirementDates(
       return [providerId, { ...provider, models }];
     }),
   );
-  return { providers: result, added };
+  return { providers: result, added, dropped };
 }
 
 /** JSON with every object's keys sorted and two-space indentation: a snapshot refresh diffs line by line. */
@@ -325,13 +351,22 @@ export function readSuggestions(value: unknown): ReadSuggestions {
     return { suggestions: undefined, dropped: [{ where: 'suggestions', problem: sentence(head.error) }] };
   const dropped: DroppedSuggestion[] = [];
   const providers: Record<string, SuggestionProvider> = {};
-  for (const [id, provider] of Object.entries(value.providers).slice(0, MAX_PROVIDERS)) {
+  const entries = Object.entries(value.providers);
+  for (const [id] of entries.slice(MAX_PROVIDERS))
+    dropped.push({ where: id.slice(0, 80), problem: `beyond the ${MAX_PROVIDERS} providers kept` });
+  for (const [id, provider] of entries.slice(0, MAX_PROVIDERS)) {
     if (!Id.safeParse(id).success || !isRecord(provider) || !isRecord(provider.models)) {
       dropped.push({ where: id.slice(0, 80), problem: 'not a provider with models' });
       continue;
     }
     const models: Record<string, SuggestionModel> = {};
-    for (const [modelId, row] of Object.entries(provider.models).slice(0, MAX_MODELS_PER_PROVIDER)) {
+    const rows = Object.entries(provider.models);
+    for (const [modelId] of rows.slice(MAX_MODELS_PER_PROVIDER))
+      dropped.push({
+        where: `${id}/${modelId.slice(0, 80)}`,
+        problem: `beyond the ${MAX_MODELS_PER_PROVIDER} models kept per provider`,
+      });
+    for (const [modelId, row] of rows.slice(0, MAX_MODELS_PER_PROVIDER)) {
       const checked = Id.safeParse(modelId).success ? SuggestionModelSchema.safeParse(row) : undefined;
       if (checked?.success === true) models[modelId] = checked.data;
       else

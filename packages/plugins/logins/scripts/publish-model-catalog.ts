@@ -20,8 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { builtInModelCatalogs } from '../daemon/lib/catalog/catalog.ts';
-import { publishedModelCatalogFiles } from '../daemon/lib/catalog/published.ts';
-import { buildSuggestions, realSuggestionsDeps } from './suggestions-source.ts';
+import { buildPublishedFiles, realSuggestionsDeps } from './suggestions-source.ts';
 
 const packageRoot = resolve(import.meta.dir, '..');
 const given = process.argv[2];
@@ -55,9 +54,11 @@ function catalogVersion(): number {
 
 const version = catalogVersion();
 // The suggestions (models.dev, trimmed) ride in the same signed models.json; a build that can neither fetch them
-// nor read the committed snapshot stops here rather than publish without them (scripts/suggestions-source.ts).
-const suggestions = await buildSuggestions(realSuggestionsDeps());
-for (const [path, text] of Object.entries(publishedModelCatalogFiles(version, builtInModelCatalogs(), suggestions))) {
+// nor read the committed snapshot stops here rather than publish without them, and one whose final file is over
+// the gzip budget publishes the committed snapshot or stops too (scripts/suggestions-source.ts). Nothing is
+// written before every file is known to fit.
+const files = await buildPublishedFiles(version, builtInModelCatalogs(), realSuggestionsDeps());
+for (const [path, text] of Object.entries(files)) {
   const target = join(distDirectory, path);
   await mkdir(dirname(target), { recursive: true });
   await writeFile(target, text);

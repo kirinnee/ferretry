@@ -10,12 +10,20 @@
  *    snapshot has, or holds under half the snapshot's models for one, the build uses the LAST COMMITTED
  *    SNAPSHOT and prints a `::warning::` saying why.
  * 2. LiteLLM failing costs only the retirement dates (the snapshot's are kept when it is the fallback).
- * 3. No usable fetch AND no valid snapshot is a failed build, loudly.
+ * 3. No usable fetch AND no valid snapshot is a failed build, loudly. A snapshot is valid only when it reads whole
+ *    and every provider we keep holds models: one provider with none would publish an empty suggestion set.
+ * 4. Each download is capped at {@link MAX_DOWNLOAD_BYTES} BEFORE it is parsed, so a hostile or broken answer
+ *    cannot make the build read without limit.
+ * 5. The FINAL `catalog/models.json` must gzip under {@link GZIP_BUDGET_BYTES}. Over it, the build publishes the
+ *    committed snapshot instead (with a `::warning::`); when that is over too, the build fails.
  *
  * Both documents are untrusted data: everything goes through `suggestions.ts`, which caps, checks and drops.
  */
+import { gzipSync } from 'node:zlib';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import type { ModelCatalog } from '../daemon/lib/catalog/schema.ts';
+import { publishedModelCatalogFiles } from '../daemon/lib/catalog/published.ts';
 import {
   LITELLM_URL,
   MODELS_DEV_URL,
@@ -26,6 +34,16 @@ import {
   trimModelsDev,
   withRetirementDates,
 } from '../daemon/lib/catalog/suggestions.ts';
+
+/**
+ * The most bytes one download may hold before it is parsed. models.dev's `api.json` is a few MB and LiteLLM's price
+ * file about the same; 8 MiB leaves several times that room for growth while a runaway body stops the build at a
+ * size its memory can hold.
+ */
+export const MAX_DOWNLOAD_BYTES = 8 * 1024 * 1024;
+
+/** The published `catalog/models.json` must gzip under this (docs/model-catalog.md § Suggestions). */
+export const GZIP_BUDGET_BYTES = 300 * 1024;
 
 /** The last committed snapshot, relative to this package. */
 export const SUGGESTIONS_SNAPSHOT_FILE = resolve(
@@ -80,11 +98,18 @@ async function snapshotOf(deps: SuggestionsDeps): Promise<Suggestions | undefine
   const raw = await deps.readSnapshot().catch(() => undefined);
   if (raw === undefined) return undefined;
   const read = readSuggestions(raw);
-  return read.suggestions !== undefined &&
-    read.dropped.length === 0 &&
-    Object.keys(read.suggestions.providers).length > 0
+  return read.suggestions !== undefined && read.dropped.length === 0 && holdsEveryProvider(read.suggestions)
     ? read.suggestions
     : undefined;
+}
+
+/**
+ * A snapshot is a fallback only when it holds models for EVERY provider we keep: the same "none lost" rule the live
+ * fetch applies against it (`implausible`), so a snapshot with a provider emptied, or one missing, cannot be
+ * published as if it were whole.
+ */
+function holdsEveryProvider(snapshot: Suggestions): boolean {
+  return SUGGESTION_PROVIDERS.every(provider => count(snapshot, provider) > 0);
 }
 
 /** models.dev now, trimmed, with LiteLLM's dates; a problem sentence when it cannot be believed. */
@@ -110,8 +135,9 @@ async function liveSuggestions(
       return undefined;
     },
   );
-  const providers =
-    dates === undefined ? trimmed.providers : withRetirementDates(trimmed.providers, dates.value).providers;
+  const dated = dates === undefined ? undefined : withRetirementDates(trimmed.providers, dates.value);
+  for (const dropped of dated?.dropped ?? []) deps.log(`LiteLLM: dropped ${dropped.where}: ${dropped.problem}`);
+  const providers = dated === undefined ? trimmed.providers : dated.providers;
   const suggestions: Suggestions = {
     generated: deps.today(),
     sources: { modelsDev: MODELS_DEV_URL, ...(dates === undefined ? {} : { litellm: LITELLM_URL }) },
@@ -123,16 +149,93 @@ async function liveSuggestions(
 
 /** What the build publishes: live when believable, else the committed snapshot, else a thrown error. */
 export async function buildSuggestions(deps: SuggestionsDeps): Promise<Suggestions> {
+  return (await chooseSuggestions(deps)).suggestions;
+}
+
+/** {@link buildSuggestions}, and whether the answer is the fresh fetch or the committed snapshot. */
+async function chooseSuggestions(
+  deps: SuggestionsDeps,
+): Promise<{ readonly suggestions: Suggestions; readonly from: 'live' | 'snapshot' }> {
   const snapshot = await snapshotOf(deps);
   const live = await liveSuggestions(deps, snapshot);
-  if ('suggestions' in live) return live.suggestions;
+  if ('suggestions' in live) return { suggestions: live.suggestions, from: 'live' };
   if (snapshot === undefined)
     throw new SuggestionsUnavailableError(`${live.problem}, and there is no valid committed snapshot`);
   deps.log(`::warning::${live.problem}; publishing the committed snapshot of ${snapshot.generated}`);
-  return snapshot;
+  return { suggestions: snapshot, from: 'snapshot' };
 }
 
-/** The real world: Bun's fetch with a timeout, the committed file, the clock. */
+/** `catalog/models.json`'s size once gzipped, the figure the budget is held against. */
+const gzippedBytes = (text: string): number => gzipSync(text).length;
+
+/**
+ * The files the build writes, with the final `models.json` held to the gzip budget BEFORE anything is written. A
+ * live fetch that pushes it over falls back to the committed snapshot; a snapshot that is over too fails the build.
+ */
+export async function buildPublishedFiles(
+  version: number,
+  catalogs: Readonly<Record<string, ModelCatalog>>,
+  deps: SuggestionsDeps,
+  budget: number = GZIP_BUDGET_BYTES,
+): Promise<Readonly<Record<string, string>>> {
+  const chosen = await chooseSuggestions(deps);
+  const within = (suggestions: Suggestions): Readonly<Record<string, string>> | { readonly over: number } => {
+    const files = publishedModelCatalogFiles(version, catalogs, suggestions);
+    const size = gzippedBytes(files['catalog/models.json'] ?? '');
+    return size <= budget ? files : { over: size };
+  };
+  const first = within(chosen.suggestions);
+  if (!('over' in first)) return first;
+  const snapshot = chosen.from === 'live' ? await snapshotOf(deps) : undefined;
+  const second = snapshot === undefined ? undefined : within(snapshot);
+  if (second !== undefined && !('over' in second)) {
+    deps.log(
+      `::warning::the published models.json would be ${first.over} bytes gzipped, over the ${budget} budget; publishing the committed snapshot of ${snapshot?.generated}`,
+    );
+    return second;
+  }
+  throw new SuggestionsUnavailableError(
+    `the published models.json is ${first.over} bytes gzipped, over the ${budget} budget` +
+      (second === undefined
+        ? chosen.from === 'live'
+          ? ', and there is no valid committed snapshot to fall back to'
+          : ' (it is the committed snapshot: trim it)'
+        : `, and the committed snapshot is ${second.over} bytes`),
+  );
+}
+
+/**
+ * Read a response as JSON, but never more than `max` bytes of it: a declared length over the cap is refused before a
+ * byte is read, and a body that outgrows the cap while streaming is cancelled.
+ */
+export async function readJsonCapped(url: string, response: Response, max: number): Promise<unknown> {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > max)
+    throw new Error(`${url} declares ${declared} bytes, over the ${max} byte cap`);
+  const reader = response.body?.getReader();
+  if (reader === undefined) throw new Error(`${url} sent no body`);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`${url} is over the ${max} byte cap`);
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+}
+
+/** The real world: Bun's fetch with a timeout and a byte cap, the committed file, the clock. */
 export function realSuggestionsDeps(): SuggestionsDeps {
   return {
     getJson: async url => {
@@ -141,7 +244,7 @@ export function realSuggestionsDeps(): SuggestionsDeps {
         headers: { accept: 'application/json' },
       });
       if (!response.ok) throw new Error(`${url} answered ${response.status}`);
-      return (await response.json()) as unknown;
+      return readJsonCapped(url, response, MAX_DOWNLOAD_BYTES);
     },
     readSnapshot: async () => JSON.parse(await readFile(SUGGESTIONS_SNAPSHOT_FILE, 'utf8')) as unknown,
     today: () => new Date().toISOString().slice(0, 10),
