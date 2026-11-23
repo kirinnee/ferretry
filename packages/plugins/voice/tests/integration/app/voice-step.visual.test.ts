@@ -1128,6 +1128,7 @@ describe('the pinned Voice strip (O9)', () => {
         });
         expect(g.demoX).toBeGreaterThan(g.cardRight + 32);
         expect(g.position).toBe('sticky');
+        await standOnWords(tab);
         if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `1440-${theme}-voice.png`) });
       } finally {
         await close();
@@ -1155,6 +1156,7 @@ describe('the Voice preview fits its slot and the height guard holds (O9 round 2
           expect(fit.clipped, 'the slot clips nothing').toBe(false);
           if (width < 900)
             expect(fit.slot.bottom - fit.slot.top, 'a stacked slot is at most 140 px tall').toBeLessThanOrEqual(140.5);
+          await standOnWords(tab);
           if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${width}x844-${theme}-voice.png`) });
         } finally {
           await close();
@@ -1176,6 +1178,7 @@ describe('the Voice preview fits its slot and the height guard holds (O9 round 2
         expect(scroll.topBefore - scroll.topAfter, 'the preview scrolls away with the page').toBeGreaterThan(
           scroll.moved - 2,
         );
+        await standOnWords(tab);
         if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `1440x559-${theme}-voice-scrolled.png`) });
       } finally {
         await close();
@@ -1190,6 +1193,7 @@ describe('the Voice preview fits its slot and the height guard holds (O9 round 2
         expect(scroll.scrollable, 'the page scrolls').toBeGreaterThan(150);
         expect(scroll.position).toBe('sticky');
         expect(Math.abs(scroll.topAfter - 16), 'the preview stays 16 px from the top').toBeLessThanOrEqual(1);
+        await standOnWords(tab);
         if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `1440x900-${theme}-voice-scrolled.png`) });
       } finally {
         await close();
@@ -1197,3 +1201,12 @@ describe('the Voice preview fits its slot and the height guard holds (O9 round 2
     });
   }
 });
+
+/** Stand every animation on 4.6 s (the words are written 22%..88% into the 6 s loop), so a shot shows the transcript, not an empty line. */
+const standOnWords = (tab: Tab) =>
+  tab.evaluate(() => {
+    for (const animation of document.getAnimations()) {
+      animation.pause();
+      animation.currentTime = 4_600;
+    }
+  });

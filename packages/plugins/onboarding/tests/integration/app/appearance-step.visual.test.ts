@@ -753,7 +753,7 @@ describe('the pinned Appearance strip (O9)', () => {
 describe('the Appearance sample and the height guard (O9 round 2)', () => {
   for (const scheme of ['light', 'dark'] as const) {
     it(`does not pin the sample on a 559 px tall wide screen (${scheme})`, async () => {
-      const variant: Variant = { name: '1440x559', width: 1_440, height: 559, phone: false, scheme };
+      const variant: Variant = { name: `1440x559-${scheme}`, width: 1_440, height: 559, phone: false, scheme };
       const { tab, close } = await open(variant);
       try {
         const scroll = await demoScroll(tab);
@@ -768,7 +768,7 @@ describe('the Appearance sample and the height guard (O9 round 2)', () => {
       }
     });
     it(`keeps the sample pinned on a 900 px tall wide screen (${scheme})`, async () => {
-      const variant: Variant = { name: '1440x900', width: 1_440, height: 900, phone: false, scheme };
+      const variant: Variant = { name: `1440x900-${scheme}`, width: 1_440, height: 900, phone: false, scheme };
       const { tab, close } = await open(variant);
       try {
         const scroll = await demoScroll(tab);
@@ -776,6 +776,28 @@ describe('the Appearance sample and the height guard (O9 round 2)', () => {
         expect(scroll.position).toBe('sticky');
         expect(Math.abs(scroll.topAfter - 16), 'the sample stays 16 px from the top').toBeLessThanOrEqual(1);
         await shot(tab, variant, 'scrolled');
+      } finally {
+        await close();
+      }
+    });
+  }
+});
+
+/** O9 round 2: the stacked layout holds above a phone's width too (650 px): the strip is pinned, opaque and clean at the end of the page. */
+describe('the pinned Appearance strip at 650 px (O9 round 2)', () => {
+  for (const scheme of ['light', 'dark'] as const) {
+    it(`pins the heading and sample over an opaque strip (650 ${scheme}, scrolled to the end)`, async () => {
+      const variant: Variant = { name: `650x844-${scheme}`, width: 650, height: 844, phone: false, scheme };
+      const { tab, close } = await open(variant);
+      try {
+        const strip = await pinnedStrip(tab, 'bottom');
+        await tab.waitForTimeout(150);
+        expect(strip.scrollable, 'the page scrolls').toBeGreaterThan(200);
+        expect(strip.opaque, 'the strip is opaque').toBe(true);
+        expect(strip.pin.top, 'the strip is pinned at the top').toBeLessThanOrEqual(0.5);
+        expect(strip.headingInside, 'the heading is inside the strip').toBe(true);
+        expect(strip.behind, 'nothing of the page shows over the strip').toEqual([]);
+        await shot(tab, variant, 'pinned-bottom');
       } finally {
         await close();
       }
