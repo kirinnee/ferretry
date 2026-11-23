@@ -10,7 +10,7 @@ import { type DecidedFast, decideResume, launchFastOf, launchOptions } from './l
 import type { FerretsCore } from './core.ts';
 import { compactAt, setCompactAt } from './compact-at.ts';
 import { agentControl, effectiveLimits, revokeToken, turnUsage } from './insights.ts';
-import { repointRuntime, runtimeRecords } from './runtime-records.ts';
+import { accountOf, repointRuntime, runtimeRecords } from './runtime-records.ts';
 import { lastSnapshot, prompt, turnObserved, turns } from './turns.ts';
 import { endOfExit } from './exit-cause.ts';
 import { KeyedSerialExecutor } from './serial.ts';
@@ -2802,15 +2802,7 @@ export class FerretsService implements FerretsApi {
         'refused',
         `runtime ${runtime} signs in with its own login, not ${asked.login}, so the ferret was not started`,
       );
-    // A DERIVED runtime is its login: the name is only that login's. If the name now answers on ANOTHER login than the one
-    // this ferret was started on (that login was removed or renamed), a relaunch would silently spend a different account,
-    // so it is refused. An explicit runtime file keeps its own say: re-pointing it is the owner's act.
-    if (answer.derived === true && stored !== undefined && stored !== answer.login)
-      return failed(
-        'refused',
-        `the login ${stored} this ferret used was removed or renamed; pick a runtime to continue`,
-      );
-    return ok({ harness: answer.harness, login: answer.login });
+    return accountOf(answer, stored, reason => failed('refused', reason));
   }
 
   /** The ferret's login's environment for its harness, minus the names a login may never set. Empty with no login. */
