@@ -16,12 +16,14 @@
  */
 
 import { Loading } from '@ferretry/app/ui';
-import type {
-  AccountChange,
-  AccountChangeView,
-  MachineView,
-  RunningSession,
-  RuntimeView,
+import {
+  type AccountChange,
+  type AccountChangeView,
+  type MachineView,
+  type RunningSession,
+  type RuntimeAccounts,
+  type RuntimeView,
+  runtimeDisplayName,
 } from '../../../../contract/index.ts';
 import { MoreHorizontal, Pencil, Star, Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
@@ -206,7 +208,7 @@ function RuntimeDialog({ title, name, busy, onClose, children }: RuntimeDialogPr
         className="kt-panel relative flex max-h-[min(86dvh,640px)] w-full max-w-md flex-col gap-3 overflow-y-auto p-panel shadow-popover focus:outline-none"
         data-runtime-dialog={name}
       >
-        <h2 id={titleId} className="m-0 break-all text-ui font-semibold text-fg">
+        <h2 id={titleId} className="m-0 break-words text-ui font-semibold text-fg">
           {title}
         </h2>
         {children}
@@ -220,6 +222,8 @@ function RuntimeDialog({ title, name, busy, onClose, children }: RuntimeDialogPr
 export interface RenameRuntimeDialogProps {
   readonly runtime: RuntimeView;
   readonly runtimes: readonly RuntimeView[];
+  /** Who each login is: what tells two runtimes of one kind apart in the words a person reads. */
+  readonly accounts: RuntimeAccounts;
   readonly machineName: string;
   readonly changes: AccountChanges;
   readonly onClose: () => void;
@@ -230,6 +234,7 @@ export interface RenameRuntimeDialogProps {
 export function RenameRuntimeDialog({
   runtime,
   runtimes,
+  accounts,
   machineName,
   changes,
   onClose,
@@ -248,7 +253,12 @@ export function RenameRuntimeDialog({
   };
 
   return (
-    <RuntimeDialog title={`Rename ${runtime.name}`} name="rename" busy={changes.busy} onClose={onClose}>
+    <RuntimeDialog
+      title={`Rename ${runtimeDisplayName(runtime, runtimes, accounts)}`}
+      name="rename"
+      busy={changes.busy}
+      onClose={onClose}
+    >
       <div className="flex flex-col gap-1">
         <label htmlFor={inputId} className="text-cell font-semibold text-fg">
           New name
@@ -319,6 +329,8 @@ export function RenameRuntimeDialog({
 export interface RemoveRuntimeDialogProps {
   readonly runtime: RuntimeView;
   readonly runtimes: readonly RuntimeView[];
+  /** Who each login is: what tells two runtimes of one kind apart in the words a person reads. */
+  readonly accounts: RuntimeAccounts;
   readonly machine: MachineView | null;
   readonly machineName: string;
   readonly changes: AccountChanges;
@@ -348,6 +360,7 @@ type RemovePhase =
 export function RemoveRuntimeDialog({
   runtime,
   runtimes,
+  accounts,
   machine,
   machineName,
   changes,
@@ -357,6 +370,7 @@ export function RemoveRuntimeDialog({
   onMachineChanged,
 }: RemoveRuntimeDialogProps) {
   const [defaultMoved, setDefaultMoved] = useState(false);
+  const shown = runtimeDisplayName(runtime, runtimes, accounts);
   const blocked = blocksAsDefault(runtime, machine) && !defaultMoved;
   const [phase, setPhase] = useState<RemovePhase>({ kind: 'reading' });
   const [target, setTarget] = useState<string | null>(null);
@@ -386,6 +400,7 @@ export function RemoveRuntimeDialog({
   const running = phase.kind === 'staged' ? runningOnRuntime(phase.staged) : [];
   const targets = moveTargets(runtime, runtimes);
   const chosen = targets.find(candidate => candidate.name === target) ?? null;
+  const chosenWords = chosen === null ? null : runtimeDisplayName(chosen, runtimes, accounts);
   const busy = changes.busy || moving;
 
   /** Move every ferret on it to `destination`, one at a time. Answers the ones that did not move. */
@@ -431,11 +446,12 @@ export function RemoveRuntimeDialog({
   };
 
   return (
-    <RuntimeDialog title={`Remove ${runtime.name}?`} name="remove" busy={busy} onClose={onClose}>
+    <RuntimeDialog title={`Remove ${shown}?`} name="remove" busy={busy} onClose={onClose}>
       {blocked ? (
         <DefaultPicker
           runtime={runtime}
           runtimes={runtimes}
+          accounts={accounts}
           machine={machine}
           machineName={machineName}
           changes={changes}
@@ -446,7 +462,7 @@ export function RemoveRuntimeDialog({
           }}
         />
       ) : phase.kind === 'reading' ? (
-        <Loading compact kind="page" label={`Checking what runs on ${runtime.name}…`} />
+        <Loading compact kind="page" label={`Checking what runs on ${shown}…`} />
       ) : phase.kind === 'refused' ? (
         <>
           <p role="alert" className="m-0 text-cell leading-base text-err" data-runtime-remove-refused="">
@@ -472,6 +488,8 @@ export function RemoveRuntimeDialog({
             <RunningFerrets
               running={running}
               targets={moveFerret === undefined ? [] : targets}
+              runtimes={runtimes}
+              accounts={accounts}
               target={target}
               disabled={busy}
               onTarget={value => {
@@ -488,7 +506,7 @@ export function RemoveRuntimeDialog({
             >
               <p className="m-0 font-semibold">
                 {failures.length === 1 ? 'One ferret' : `${String(failures.length)} ferrets`} could not be moved, so{' '}
-                {runtime.name} was not removed.
+                {shown} was not removed.
               </p>
               <ul className="m-0 flex list-none flex-col gap-1 p-0">
                 {failures.map(failure => (
@@ -501,7 +519,7 @@ export function RemoveRuntimeDialog({
           )}
           {moving ? (
             <p role="status" className="m-0 text-cell text-muted" data-runtime-moving="">
-              Moving {running.length === 1 ? 'the ferret' : `${String(running.length)} ferrets`} to {chosen?.name}…
+              Moving {running.length === 1 ? 'the ferret' : `${String(running.length)} ferrets`} to {chosenWords}…
             </p>
           ) : null}
           <ChangeApplyPanel
@@ -509,7 +527,7 @@ export function RemoveRuntimeDialog({
             authority={changes.authority}
             busy={busy}
             refusal={changes.refusal}
-            submitLabel={removeLabel(runtime, running.length, chosen?.name ?? null)}
+            submitLabel={removeLabel(shown, running.length, chosenWords)}
             busyLabel={moving ? 'Moving…' : 'Removing…'}
             variant="danger"
             submitClassName={WRAPPING_SUBMIT}
@@ -528,17 +546,29 @@ export function RemoveRuntimeDialog({
 function RunningFerrets({
   running,
   targets,
+  runtimes,
+  accounts,
   target,
   disabled,
   onTarget,
 }: {
   readonly running: readonly RunningSession[];
   readonly targets: readonly RuntimeView[];
+  /** The machine's runtimes and who each login is: they name a target in the words a person reads. */
+  readonly runtimes: readonly RuntimeView[];
+  readonly accounts: RuntimeAccounts;
   readonly target: string | null;
   readonly disabled: boolean;
   readonly onTarget: (target: string | null) => void;
 }) {
   const selectId = useId();
+  const targetRuntime = targets.find(candidate => candidate.name === target);
+  const targetWords =
+    target === null
+      ? null
+      : targetRuntime === undefined
+        ? target
+        : runtimeDisplayName(targetRuntime, runtimes, accounts);
   return (
     <div className="flex flex-col gap-2">
       <ul
@@ -569,7 +599,7 @@ function RunningFerrets({
                 { value: '', label: 'Leave them running here' },
                 ...targets.map(candidate => ({
                   value: candidate.name,
-                  label: `${candidate.name} · ${HARNESS_NAMES[candidate.harness]}`,
+                  label: runtimeDisplayName(candidate, runtimes, accounts),
                 })),
               ]}
             />
@@ -577,7 +607,7 @@ function RunningFerrets({
         </div>
       )}
       <p className="m-0 text-meta leading-base text-muted" data-runtime-move-plan="">
-        {movePlanSentence(running.length, target)}
+        {movePlanSentence(running.length, targetWords)}
       </p>
     </div>
   );
@@ -586,6 +616,7 @@ function RunningFerrets({
 function DefaultPicker({
   runtime,
   runtimes,
+  accounts,
   machine,
   machineName,
   changes,
@@ -594,6 +625,7 @@ function DefaultPicker({
 }: {
   readonly runtime: RuntimeView;
   readonly runtimes: readonly RuntimeView[];
+  readonly accounts: RuntimeAccounts;
   readonly machine: MachineView | null;
   readonly machineName: string;
   readonly changes: AccountChanges;
@@ -602,6 +634,8 @@ function DefaultPicker({
 }) {
   const candidates = defaultCandidates(runtime, runtimes);
   const [picked, setPicked] = useState(candidates[0]?.name ?? '');
+  const pickedRuntime = candidates.find(candidate => candidate.name === picked);
+  const pickedWords = pickedRuntime === undefined ? picked : runtimeDisplayName(pickedRuntime, runtimes, accounts);
   const selectId = useId();
   const pick = async (): Promise<void> => {
     if (machine === null || picked === '') return;
@@ -611,7 +645,8 @@ function DefaultPicker({
   return (
     <>
       <p className="m-0 text-cell leading-base text-fg" data-runtime-remove-default="">
-        {runtime.name} is {machineName}’s default runtime for new agents. Pick another default first.
+        {runtimeDisplayName(runtime, runtimes, accounts)} is {machineName}’s default runtime for new agents. Pick
+        another default first.
       </p>
       {candidates.length === 0 ? (
         <>
@@ -641,7 +676,7 @@ function DefaultPicker({
                 }}
                 options={candidates.map(candidate => ({
                   value: candidate.name,
-                  label: `${candidate.name} · ${HARNESS_NAMES[candidate.harness]}`,
+                  label: runtimeDisplayName(candidate, runtimes, accounts),
                 }))}
               />
             </span>
@@ -651,7 +686,7 @@ function DefaultPicker({
             authority={changes.authority}
             busy={changes.busy}
             refusal={changes.refusal}
-            submitLabel={`Make ${picked} the default`}
+            submitLabel={`Make ${pickedWords} the default`}
             disabled={machine === null}
             onSubmit={() => void pick()}
           >

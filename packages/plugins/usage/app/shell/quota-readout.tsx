@@ -49,12 +49,13 @@ export function formatQuotaMoney(amount: number, currency: string): string {
 }
 
 /**
- * The money line for a credit-billed login with no window: "$12.34 left", else "$3.20 this month".
- * `null` when neither is known — and then the caller says "unknown", never "$0".
+ * The money line for a credit-billed login with no window: the spend that was read ("$3.20 this month"), else the
+ * balance left ("$12.34 left"). The spend is never replaced by the balance: they are different facts, and the one
+ * that was actually read is the one said. `null` when neither is known — and then the caller says "unknown", never "$0".
  */
 export function quotaMoneyText(quota: Pick<Quota, 'balance' | 'spendUsd'> | null | undefined): string | null {
-  if (quota?.balance !== undefined) return `${formatQuotaMoney(quota.balance.amount, quota.balance.currency)} left`;
   if (quota?.spendUsd !== undefined) return `${formatQuotaMoney(quota.spendUsd, 'USD')} this month`;
+  if (quota?.balance !== undefined) return `${formatQuotaMoney(quota.balance.amount, quota.balance.currency)} left`;
   return null;
 }
 

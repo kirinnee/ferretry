@@ -73,7 +73,7 @@ export function createStepsOpener() {
           .then(
             view => {
               const waiting = view.steps.filter(step => sideOf(step) === 'daemon' && step.state === 'pending');
-              if (where.current || waiting.length === 0) return;
+              if (where.current || view.complete || waiting.length === 0) return;
               // v4 skipped a set-up machine that has no step answers recorded (every step still `pending`).
               if (view.setUp && waiting.length === view.steps.filter(step => sideOf(step) === 'daemon').length) return;
               go.current(setupFlowHref(row.daemon, { phase: 'daemon', journey: 'add-daemon' }), { replace: true });

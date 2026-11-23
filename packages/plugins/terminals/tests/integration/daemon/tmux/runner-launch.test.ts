@@ -27,6 +27,8 @@ function launching(
     readonly noPane?: boolean;
     readonly noServer?: boolean;
     readonly exitEmpty?: 'on' | 'off';
+    /** What the server's `update-environment` already holds (default `PATH TERM`). */
+    readonly updateEnvironment?: string;
   } = {},
 ) {
   const sent: Array<readonly string[]> = [];
@@ -42,7 +44,7 @@ function launching(
         if (args[0] === 'start-server')
           return options.noServer === true
             ? refused('no server running')
-            : done(`${options.exitEmpty ?? 'on'}\nPATH TERM\n`);
+            : done(`${options.exitEmpty ?? 'on'}\n${options.updateEnvironment ?? 'PATH TERM'}\n`);
         if (args[0] === 'display-message')
           return options.noPane === true
             ? refused("can't find pane")
@@ -219,13 +221,47 @@ describe('TmuxRunner launch', () => {
       'set-option',
       '-g',
       'update-environment',
-      'PATH TERM',
+      'PATH TERM XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS',
       ';',
       'set-option',
       '-s',
       'exit-empty',
       'on',
     ]);
+  });
+
+  it("should copy the user-manager names into the new session and keep them in the server's list, but not the launch's own", async () => {
+    // A pane's limits wrapper is `systemd-run --user`: without these two names it cannot reach the user manager and
+    // exits 1 before the harness runs. A server started by an older build has neither in its global environment.
+    // Arrange
+    const world = launching();
+    const spec = { ...world.spec, env: { ...world.spec.env, names: ['FY_SESSION_TOKEN'] } as never };
+
+    // Act
+    const started = await world.runner.start(spec);
+
+    // Assert
+    should(started.ok).equal(true);
+    const script = String(world.spawned[0]?.stdin);
+    should(script).containEql(
+      "'set-option' '-g' 'update-environment' 'PATH TERM XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS FY_SESSION_TOKEN'",
+    );
+    should(script).containEql(
+      "'set-option' '-g' 'update-environment' 'PATH TERM XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS'\n",
+    );
+  });
+
+  it('should not list a user-manager name twice when the server already keeps it', async () => {
+    // Arrange
+    const world = launching({ updateEnvironment: 'PATH XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS' });
+
+    // Act
+    await world.runner.start(world.spec);
+
+    // Assert
+    should(String(world.spawned[0]?.stdin)).containEql(
+      "'set-option' '-g' 'update-environment' 'PATH XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS'\n",
+    );
   });
 
   it('should start the server and read its options in ONE tmux client, and keep the server alive until the session exists', async () => {

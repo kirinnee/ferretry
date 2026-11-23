@@ -38,12 +38,20 @@ const CLAUDE = ['claude-personal', 'claude-work', 'claude-review', 'claude-atomi
 const CODEX = ['codex-kirin', 'codex-team', 'codex-spare', 'codex-night'] as const;
 const WRAPPERS = [...CLAUDE, ...CODEX];
 
+/**
+ * Nine accounts, one terminal sign-in each, so every runtime of a kind reads alike and the ACCOUNT is the only thing that
+ * tells them apart: "Claude · your terminal sign-in — personal@studio.example". The email is what the login view shows.
+ */
+const LOGINS = WRAPPERS.map(wrapper =>
+  loginView(`login-${wrapper}`, 'ready', { email: `${wrapper.replace(/^(claude|codex)-/u, '')}@studio.example` }),
+);
+
 function Start() {
   const client = {
     ...scripted(
       {
         'GET /v1/runtimes': runtimeCatalog(...WRAPPERS.map(wrapper => runtimeView({ wrapper }))),
-        'GET /v1/logins': loginList(...WRAPPERS.map(wrapper => loginView(`login-${wrapper}`))),
+        'GET /v1/logins': loginList(...LOGINS),
       },
       calls,
     ),
@@ -90,7 +98,13 @@ function Start() {
   );
 }
 
-const defaults = WRAPPERS.map(name => runtime({ name, harness: name.startsWith('codex') ? 'codex' : 'claude-code' }));
+const defaults = WRAPPERS.map(name =>
+  runtime({
+    name,
+    harness: name.startsWith('codex') ? 'codex' : 'claude-code',
+    credential: { id: `login-${name}`, store: 'host', status: 'ready' },
+  }),
+);
 
 function Default() {
   const shown = machine({ defaultRuntime: 'claude-personal' });
@@ -98,6 +112,7 @@ function Default() {
     {
       ...READS(),
       'GET /v1/runtimes': { format: 'present', runtimes: defaults },
+      'GET /v1/logins': loginList(...LOGINS),
       'GET /v1/runtimes/machine': shown,
       'POST /v1/runtimes/proposals': stagedFrom,
       // Answers only the proposal id the scene staged (a call for any other id finds no route and fails), and records

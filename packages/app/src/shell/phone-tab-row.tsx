@@ -8,7 +8,7 @@
  */
 
 import { Plus } from 'lucide-react';
-import { type KeyboardEvent, useLayoutEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import { ContextMenu, type ContextMenuItem } from '../ui/context-menu.tsx';
 import { useInputModality } from '../ui/hooks/use-input-modality.ts';
 import { cn } from '../ui/lib/class-names.ts';
@@ -25,9 +25,22 @@ export interface PhoneTabRowProps {
   /** What "+" opens. None: no "+". */
   readonly choices: readonly NewTabChoice[];
   readonly onChoose: (choice: NewTabChoice) => void;
+  /** What the row is called for a screen reader (default: the phone's "Ferret tabs"). */
+  readonly label?: string;
+  /** Drawn at the row's far end (the wide column's hide button). */
+  readonly trailing?: ReactNode;
 }
 
-export function PhoneTabRow({ rowId, tabs, active, onSelect, choices, onChoose }: PhoneTabRowProps) {
+export function PhoneTabRow({
+  rowId,
+  tabs,
+  active,
+  onSelect,
+  choices,
+  onChoose,
+  label = 'Ferret tabs',
+  trailing,
+}: PhoneTabRowProps) {
   const row = useRef<HTMLDivElement | null>(null);
   const chips = useRef(new Map<string, HTMLButtonElement>());
   const plus = useRef<HTMLButtonElement | null>(null);
@@ -39,7 +52,9 @@ export function PhoneTabRow({ rowId, tabs, active, onSelect, choices, onChoose }
     const element = row.current;
     const chip = chips.current.get(active);
     if (element === null || chip === undefined) return;
-    const left = chip.offsetLeft - (element.clientWidth - chip.offsetWidth) / 2;
+    // Measured against the row itself: `offsetLeft` is from the nearest positioned ancestor, which beside the chat is the page.
+    const within = chip.getBoundingClientRect().left - element.getBoundingClientRect().left + element.scrollLeft;
+    const left = within - (element.clientWidth - chip.offsetWidth) / 2;
     element.scrollTo?.({ left: Math.max(0, left) });
   }, [active]);
 
@@ -63,9 +78,15 @@ export function PhoneTabRow({ rowId, tabs, active, onSelect, choices, onChoose }
       data-phone-tab-row=""
     >
       <div
-        aria-label="Ferret tabs"
+        aria-label={label}
         aria-orientation="horizontal"
-        className="flex min-w-0 items-center gap-0.5 overflow-x-auto rounded-control bg-surface-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className={cn(
+          'flex min-w-0 items-center gap-0.5 overflow-x-auto rounded-control bg-surface-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+          // Beside the chat the row is narrow and holds more tabs than fit: its ends fade, so a tab cut by the edge reads as "more this way".
+          trailing === undefined
+            ? ''
+            : 'px-2 [mask-image:linear-gradient(to_right,transparent,#000_10px,#000_calc(100%-10px),transparent)]',
+        )}
         ref={row}
         role="tablist"
       >
@@ -101,7 +122,10 @@ export function PhoneTabRow({ rowId, tabs, active, onSelect, choices, onChoose }
           aria-expanded={anchor !== null}
           aria-haspopup="menu"
           aria-label="New tab"
-          className="ml-auto flex h-7 w-7 shrink-0 max-md:h-11 max-md:w-11 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-fg"
+          className={cn(
+            trailing === undefined ? 'ml-auto' : '',
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-fg max-md:h-11 max-md:w-11',
+          )}
           data-phone-new-tab=""
           onClick={() => {
             const box = plus.current?.getBoundingClientRect();
@@ -113,6 +137,7 @@ export function PhoneTabRow({ rowId, tabs, active, onSelect, choices, onChoose }
           <Plus aria-hidden="true" size={16} />
         </button>
       ) : null}
+      {trailing === undefined ? null : <div className="ml-auto flex shrink-0 items-center">{trailing}</div>}
       <ContextMenu
         anchor={anchor ?? { x: 0, y: 0 }}
         ariaLabel="New tab"

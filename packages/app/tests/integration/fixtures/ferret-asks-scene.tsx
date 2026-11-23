@@ -6,6 +6,7 @@
  *   /d/ws/ferrets/zoe/chat      the ferret's chat
  *   ?agenda=on|off              whether the ferret works in agenda mode (the line above the composer draws only when on)
  *   ?asks=<n>                   how many open asks wait on the owner (default 1)
+ *   ?state=<state>              the ferret's state: idle (default), working, stopped
  *   ?theme=<family>-<mode>
  */
 
@@ -38,7 +39,7 @@ const summary = {
   harness: 'claude-code',
   runner: 'tmux',
   folder: '/work/project',
-  state: 'idle',
+  state: params.get('state') ?? 'idle',
   createdAt: AT,
   stateAt: AT,
   title: 'Fixture running',
@@ -129,6 +130,12 @@ const transport = new FakeTransport((request: TransportRequest): TransportAnswer
   if (path === '/v1/ferrets/zoe/agenda') return json(board);
   if (path === '/v1/agenda/open') return json({ sessions: [{ sessionId: 'zoe', items: board.items }] });
   if (path === '/v1/ferrets/zoe/processes') return json(processes);
+  if (path === '/v1/ferrets/zoe/terminals')
+    return json({
+      sessionId: 'zoe',
+      terminals: [],
+      limits: { perSession: 4, global: 12, runningGlobal: 0, idleTimeoutSeconds: 1_800, scrollbackLines: 5_000 },
+    });
   if (path === '/v1/ferrets/zoe/log-page')
     return json({ v: 1, ferret: 'zoe', log: '', start: 0, file: 'zoe.jsonl', offsets: [] });
   (window as unknown as { __unanswered: string[] }).__unanswered.push(`${request.method} ${path}`);

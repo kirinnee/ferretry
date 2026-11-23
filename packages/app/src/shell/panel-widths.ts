@@ -12,18 +12,24 @@ import { type KeyValueStore, readRecord, removeRecord, writeRecord } from '../st
  * their own default as the fallback, so no panel needs a number here beyond its allowed range.
  */
 
-export type PanelId = 'side' | 'drawer' | 'settings-nav';
+export type PanelId = 'side' | 'ferret-side' | 'drawer' | 'settings-nav';
 
 /** The allowed range of each panel, in screen pixels (the plan's: side column 280–640, drawer 220–400, settings nav 180–320). */
 export const PANEL_RANGES: Readonly<Record<PanelId, { readonly min: number; readonly max: number }>> = {
   side: { min: 280, max: 640 },
+  /** The ferret page's own side column (tabs: Console, Terminals, Browser…): wider than the list column, a terminal needs columns. */
+  'ferret-side': { min: 300, max: 720 },
   drawer: { min: 220, max: 400 },
   'settings-nav': { min: 180, max: 320 },
 };
 
+/** The ferret page's chat keeps at least this much of its row (`shell.css` `--fy-chat-min`, the same number): the column's real room. */
+const FERRET_CHAT_MIN = 320;
+
 /** The panel's element, measured when a drag starts on a panel that has not been resized yet (its stylesheet width is the start). */
 const PANEL_SELECTORS: Readonly<Record<PanelId, string>> = {
   side: '.fy-side',
+  'ferret-side': '.fy-ferret-side',
   drawer: '.fy-drawer',
   'settings-nav': '.fy-settings-nav',
 };
@@ -45,6 +51,7 @@ export function clampWidth(panel: PanelId, width: number): number {
 
 const StoredSchema = z.strictObject({
   side: z.number().finite().optional(),
+  'ferret-side': z.number().finite().optional(),
   drawer: z.number().finite().optional(),
   'settings-nav': z.number().finite().optional(),
 });
@@ -163,6 +170,17 @@ export function measurePanel(panel: PanelId): number | undefined {
   if (typeof document === 'undefined') return undefined;
   const width = document.querySelector(PANEL_SELECTORS[panel])?.getBoundingClientRect().width;
   return width === undefined || width <= 0 ? undefined : width;
+}
+
+/**
+ * The most the panel can be drawn at right now: its range, held to the room its row leaves (the ferret page's column leaves the
+ * chat `FERRET_CHAT_MIN`). Never below the range's minimum. A panel with no room limit has its range's maximum.
+ */
+export function measureMax(panel: PanelId): number {
+  const { min, max } = PANEL_RANGES[panel];
+  if (typeof document === 'undefined' || panel !== 'ferret-side') return max;
+  const row = document.querySelector(PANEL_SELECTORS[panel])?.parentElement?.clientWidth ?? 0;
+  return row <= 0 ? max : Math.max(min, Math.min(max, row - FERRET_CHAT_MIN));
 }
 
 /**

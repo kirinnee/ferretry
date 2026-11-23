@@ -25,9 +25,8 @@
  * reserved from the first frame, so nothing moves when it appears. A spinner that is feedback for an action or a
  * running activity (a running tool, Send) stays immediate.
  */
-import { type ReactNode, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { LOADING_GATE_CLASS, loadingGateStyle } from './loading-gate.ts';
-import { useLoadingHold } from './loading-hold.ts';
 
 export interface SpinnerProps {
   /** Rendered size in CSS pixels; the stroke scales with it. */
@@ -64,12 +63,10 @@ export function Spinner({ size = 14, className, wait = false, delayMs }: Spinner
   return <WaitingSpinner delayMs={delayMs}>{mark}</WaitingSpinner>;
 }
 
-/** The gate around a spinner that stands for a wait; it keeps its minimum on screen once shown (loading-hold.ts). */
+/** The gate around a spinner that stands for a wait. It leaves with its read: nothing is left drawn over what replaced it. */
 function WaitingSpinner({ delayMs, children }: { readonly delayMs: number | undefined; readonly children: ReactNode }) {
-  const root = useRef<HTMLSpanElement>(null);
-  useLoadingHold(root, { delayMs });
   return (
-    <span className={`${LOADING_GATE_CLASS} fy-spinner-wait`} ref={root} style={loadingGateStyle(delayMs)}>
+    <span className={`${LOADING_GATE_CLASS} fy-spinner-wait`} style={loadingGateStyle(delayMs)}>
       {children}
     </span>
   );

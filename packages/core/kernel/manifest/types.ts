@@ -250,6 +250,8 @@ export interface OnboardingDecl {
   readonly group?: string;
   /** True when the step's page is written against `StepHost` (it calls `ready()`/`skip()`): the shell then draws it under a loading cover. A step without it is a legacy page: no cover, Next enabled, recorded done on Next. */
   readonly stepHost?: true;
+  /** True when the step only SHOWS something (a tool's Ready page): it never holds the first run open, so adding one to a finished setup never reopens it. */
+  readonly informational?: true;
 }
 
 /**

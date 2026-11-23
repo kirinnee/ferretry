@@ -218,9 +218,11 @@ describe('a login’s page', () => {
     );
     expect(c.querySelector('[data-login-status]')?.getAttribute('data-login-status')).toBe('ready');
     expect(c.querySelectorAll('[data-login-status] [role="img"]')).toHaveLength(2);
-    expect(
-      Array.from(c.querySelectorAll('[data-login-runtime]')).map(item => item.getAttribute('data-login-runtime')),
-    ).toEqual(['claude-default', 'claude-agent', 'claude-review']);
+    // A count a person reads; the runtimes' stored names are one hover away.
+    expect(text(c, '[data-login-used-by]')).toBe('Used by 3 runtimes');
+    expect(c.querySelector('[data-login-used-by]')?.getAttribute('title')).toBe(
+      'claude-default, claude-agent, claude-review',
+    );
     await click(c.querySelector('[data-page-back]'), 'Logins');
     expect(c.querySelector('[data-login-page]')).toBeNull();
     expect(c.querySelectorAll('[data-login-row]')).toHaveLength(3);

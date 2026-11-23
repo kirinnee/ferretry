@@ -119,12 +119,12 @@ describe('the new-ferret account slot, Usage on', () => {
     const rows = optionsOpen();
     expect(rows).toHaveLength(2);
     const claude = must(
-      rows.find(row => row.textContent?.includes('claude-a')),
+      rows.find(row => row.textContent?.includes('Claude · your terminal sign-in')),
       'claude',
     );
     expect(claude.textContent).toContain('5h 42%');
     const codex = must(
-      rows.find(row => row.textContent?.includes('codex-b')),
+      rows.find(row => row.textContent?.includes('Codex · your terminal sign-in')),
       'codex',
     );
     expect(codex.textContent).toContain('needs sign-in');
@@ -141,7 +141,7 @@ describe('the new-ferret account slot, Usage on', () => {
     expect(page.chosen?.wrapper).toBe('claude-a');
     expect(page.chosen?.kind).toBe('claude-code');
     expect(Object.keys(page.chosen ?? {}).sort()).toEqual(['defaultModel', 'displayName', 'kind', 'models', 'wrapper']);
-    await choose(view.container, 'codex-b');
+    await choose(view.container, 'Codex · your terminal sign-in');
     expect(page.value).toBe('codex-b');
   });
 
@@ -261,7 +261,9 @@ describe('the move account slot', () => {
       { harness: 'claude-code' },
     );
     await openBox(view.container);
-    expect(optionsOpen().map(option => option.querySelector('[data-label]')?.textContent)).toEqual(['claude-a']);
+    expect(optionsOpen().map(option => option.querySelector('[data-label]')?.textContent)).toEqual([
+      'Claude · your terminal sign-in',
+    ]);
     expect(optionsOpen()[0]?.textContent).toContain('5h 42%');
   });
 

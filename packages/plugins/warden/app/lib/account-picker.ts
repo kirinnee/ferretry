@@ -8,7 +8,13 @@
 
 import type { LocalModelsSnapshot, ModelChoice } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { RuntimeCatalogSchema, type RuntimeView } from '@ferretry/plugin-runtimes/contract';
+import {
+  RuntimeCatalogSchema,
+  type RuntimeAccounts,
+  type RuntimeView,
+  runtimeAccountsFrom,
+  runtimeDisplayName,
+} from '@ferretry/plugin-runtimes/contract';
 import { isPluginOff } from './plugin-off.ts';
 
 /** One model a login offers, as the model field lists it. */
@@ -37,10 +43,14 @@ export interface PickerAccount {
 }
 
 /** One runtime as the picker reads it. A model set's models are offered; the harness default offers none. */
-const pickerAccount = (runtime: RuntimeView): PickerAccount => ({
+const pickerAccount = (
+  runtime: RuntimeView,
+  others: readonly RuntimeView[],
+  accounts: RuntimeAccounts,
+): PickerAccount => ({
   id: runtime.id,
   wrapper: runtime.wrapper,
-  displayName: runtime.name,
+  displayName: runtimeDisplayName(runtime, others, accounts),
   kind: runtime.harness,
   credentialId: runtime.credential.id,
   ...(runtime.models === undefined
@@ -77,9 +87,10 @@ export const readAccountPickerCatalog = async (
   client: Pick<PluginClient, 'call'>,
 ): Promise<{ readonly accounts: readonly PickerAccount[] } | 'off'> => {
   try {
-    return {
-      accounts: RuntimeCatalogSchema.parse(await client.call<unknown>('GET /v1/runtimes')).runtimes.map(pickerAccount),
-    };
+    const runtimes = RuntimeCatalogSchema.parse(await client.call<unknown>('GET /v1/runtimes')).runtimes;
+    // Who each login is tells two runtimes of one kind apart; a read that fails leaves them told apart by profile.
+    const accounts = runtimeAccountsFrom(await client.call<unknown>('GET /v1/logins').catch(() => undefined));
+    return { accounts: runtimes.map(runtime => pickerAccount(runtime, runtimes, accounts)) };
   } catch (cause) {
     if (isPluginOff(cause)) return 'off';
     throw cause;

@@ -141,7 +141,9 @@ export function createSetupTab(client: PluginClient) {
           </Button>
         </div>
       );
-    const waiting = reading.view.steps.filter(step => sideOf(step) === 'daemon' && step.state === 'pending').length;
+    const waiting = reading.view.complete
+      ? 0
+      : reading.view.steps.filter(step => sideOf(step) === 'daemon' && step.state === 'pending').length;
     return (
       <section className="min-w-0" data-onboarding-setup-tab={waiting}>
         <SettingGroup label="Setup steps">
