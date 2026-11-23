@@ -122,6 +122,78 @@ describe('the list rows', () => {
     ]);
   });
 
+  describe('a place that is not offered (work is off) survives an edit of another place', () => {
+    // Work off: Board and Agenda are not in the catalog at all, yet the saved layout still orders and hides them.
+    const offered: readonly PlaceSource[] = [
+      { id: 'ferrets.ferrets', label: 'Ferrets', aliases: ['ferrets'] },
+      { id: 'projects.projects', label: 'Projects', aliases: ['projects'] },
+      { id: 'settings', label: 'Settings' },
+    ];
+    const saved = LayoutSchema.parse({
+      ...DEFAULT_LAYOUT,
+      nav: { ...DEFAULT_LAYOUT.nav, items: ['ferrets', 'agenda', 'board', 'projects', 'settings'], hidden: ['board'] },
+    });
+    const rowsOf = () => placesOf(saved, 'nav.items', offered);
+
+    test('hiding Projects keeps Board in nav.hidden and both in their order in nav.items (item 2)', () => {
+      const [items, hidden] = changesOf('nav.items', withHidden(rowsOf(), 'projects.projects', true), {
+        layout: saved,
+        sources: offered,
+      });
+      expect(hidden?.value.split(',')).toContain('board');
+      expect(hidden?.value.split(',')).toContain('projects.projects');
+      expect(items?.value.split(',')).toEqual(['ferrets.ferrets', 'agenda', 'board', 'projects.projects', 'settings']);
+    });
+
+    test('without the layout to carry over (the old call), they are dropped: the loss this fixes', () => {
+      const [items, hidden] = changesOf('nav.items', withHidden(rowsOf(), 'projects.projects', true));
+      expect(items?.value).not.toContain('board');
+      expect(hidden?.value).not.toContain('board');
+    });
+
+    test('reordering keeps them after the place they followed; nothing is added twice', () => {
+      const rows = rowsOf();
+      const flipped = [rows[1], rows[0], ...rows.slice(2)] as typeof rows;
+      const [items] = changesOf('nav.items', flipped, { layout: saved, sources: offered });
+      expect(items?.value.split(',')).toEqual(['projects.projects', 'ferrets.ferrets', 'agenda', 'board', 'settings']);
+    });
+
+    test('with work on (a place is offered) nothing extra is carried', () => {
+      const on = LayoutSchema.parse({
+        ...DEFAULT_LAYOUT,
+        nav: { ...DEFAULT_LAYOUT.nav, items: ['ferrets', 'agenda', 'board', 'settings'], hidden: ['board'] },
+      });
+      const [items, hidden] = changesOf('nav.items', placesOf(on, 'nav.items', sources), { layout: on, sources });
+      expect(items?.value).toBe('ferrets.ferrets,agenda.agenda,board.board,settings');
+      expect(hidden?.value).toBe('board.board');
+    });
+
+    test('the phone bar that inherits the wide hidden keeps Board hidden too', () => {
+      const legacy = LayoutSchema.parse({
+        ...saved,
+        phone: { nav: { items: ['ferrets', 'board', 'settings'] } },
+      });
+      const wide = changesOf('nav.items', rowsOf(), { layout: legacy, sources: offered });
+      const kept = keepPhoneNav(legacy, 'nav.items', offered, wide);
+      expect(kept.at(-1)?.value.split(',')).toContain('board');
+    });
+
+    test('a side panel of a plugin that is off has no row, and a save keeps it in the list', () => {
+      const side = ['ferret-agenda', 'queue', 'cards-of-ferret', 'terminals'];
+      const layout = LayoutSchema.parse({ ...DEFAULT_LAYOUT, panels: { 'ferret.side': side } });
+      const absent = new Set(['ferret-agenda', 'cards-of-ferret']);
+      const panelSources = sourcesFromNames([...side, 'console']).filter(source => !absent.has(source.id));
+      const rows = placesOf(layout, 'panels.ferret.side', panelSources, absent);
+      expect(rows.map(row => row.id)).toEqual(['queue', 'terminals', 'console']);
+      const [saved] = changesOf('panels.ferret.side', withHidden(rows, 'queue', true), {
+        layout,
+        sources: panelSources,
+        absent,
+      });
+      expect(saved?.value).toBe('ferret-agenda,cards-of-ferret,terminals');
+    });
+  });
+
   test('a phone list follows the wide one until it names its own', () => {
     const wide = LayoutSchema.parse({
       ...DEFAULT_LAYOUT,

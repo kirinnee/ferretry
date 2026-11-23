@@ -35,7 +35,7 @@ export const routeDaemon = (route: Route): string | undefined =>
 export const isChatRoute = (route: Route): boolean => route.kind === 'screen' && route.params.ferret !== undefined;
 
 export function useNavTargets(daemon: string | undefined): readonly NavTarget[] {
-  const { plan, routes } = useShell();
+  const { plan, routes, offeredOn } = useShell();
   const { route } = useRouter();
   const href = (entry: NavEntry): string | undefined => {
     if (entry.kind === 'shell') {
@@ -56,7 +56,10 @@ export function useNavTargets(daemon: string | undefined): readonly NavTarget[] 
       : entry.item === 'settings'
         ? route.kind === 'device-settings' || route.kind === 'daemon-settings'
         : route.kind === 'home' || route.kind === 'daemon-home';
-  return plan.nav.entries.map(entry => ({
+  // A machine's own places leave out what THAT machine has turned off (the plan lists what any paired machine has on); a device-wide place (a `/` path) is not any one machine's.
+  const offered = (entry: NavEntry): boolean =>
+    entry.kind !== 'screen' || entry.screen.path.startsWith('/') || offeredOn(daemon, entry.screen.plugin);
+  return plan.nav.entries.filter(offered).map(entry => ({
     key: entry.kind === 'screen' ? `${entry.screen.plugin}.${entry.screen.id}` : entry.item,
     label: entry.kind === 'screen' ? entry.screen.label : entry.item === 'settings' ? 'Settings' : 'Daemons',
     to: href(entry),

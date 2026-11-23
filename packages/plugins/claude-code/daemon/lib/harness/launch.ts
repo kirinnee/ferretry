@@ -1,4 +1,4 @@
-import type { LaunchPart } from '@ferretry/core-ferrets/contract';
+import { compactionExtrasOf, type LaunchPart } from '@ferretry/core-ferrets/contract';
 import {
   CHANNEL_AGENT_INSTRUCTION,
   CLAUDE_CHANNELS_FLAG,
@@ -95,7 +95,8 @@ export function settingsDocument(inputs: Pick<HomeInputs, 'settings' | 'hooks' |
 
 /** The text of every file a launch writes into the home. */
 export function homeText(inputs: HomeInputs): HomeText {
-  const fixed = fixedLayer(inputs.permissionMode, inputs.folder);
+  // The compaction hooks carry what a plugin added to them for THIS launch (Board's task lines, while Board is on).
+  const fixed = fixedLayer(inputs.permissionMode, inputs.folder, compactionExtrasOf(inputs.parts));
   const memory = [
     ...inputs.instructions.map(entry => entry.text.trim()),
     ...inputs.parts.flatMap(part => (part.kind === 'instruction' ? [part.text.trim()] : [])),

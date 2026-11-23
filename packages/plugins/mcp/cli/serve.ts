@@ -29,6 +29,11 @@ export interface ServeContext {
   readonly channel?: boolean | undefined;
   /** This process's subscriber id, fresh per process (the daemon fences older subscribers' claims with it). */
   readonly generation?: string | undefined;
+  /**
+   * Whether a package is on, read from the daemon's plugin inventory (the one owner of on/off). Absent where a build
+   * cannot read it: every tool is then listed.
+   */
+  readonly isOn?: ((plugin: string) => Promise<boolean>) | undefined;
 }
 
 /**
@@ -48,6 +53,7 @@ export async function serveTools({
   sleep,
   channel,
   generation,
+  isOn,
 }: ServeContext): Promise<number> {
   if (stdin === undefined) {
     io.err('this build gives `mcp serve` no standard input to read.\n');
@@ -68,8 +74,14 @@ export async function serveTools({
         });
   await serveMcpOverStdio(
     new McpServer(
-      clientToolsPort(client),
-      { name: SERVER_NAME, version, instructions, channel: channel === true },
+      isOn === undefined ? clientToolsPort(client) : { ...clientToolsPort(client), isOn },
+      {
+        name: SERVER_NAME,
+        version,
+        instructions,
+        channel: channel === true,
+        ...(sleep === undefined ? {} : { sleep }),
+      },
       () => {
         // Never awaited: it ends when stopped, and a poll still waiting at the daemon must not hold the process open.
         pump?.start().catch(() => undefined);

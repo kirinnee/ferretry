@@ -9,9 +9,9 @@
 import { browserFetch } from '../../shell-voice.ts';
 import { trustedWorkerUrl } from '../../shell-voice.ts';
 import { BrowserRecognitionError, browserRecognitionErrorFrom } from './browser-recognition.ts';
-import { BundleSetInstaller } from './bundle-set.ts';
+import { runtimeAndModelInstaller } from './bundle-set.ts';
 import { modelBundle, runtimeBundle } from './model-catalog.ts';
-import { type ModelCacheStorage, type ModelStorageManager, PinnedModelStore } from './model-store.ts';
+import type { ModelCacheStorage, ModelStorageManager } from './model-store.ts';
 import { browserSessionHost, type OnDeviceHostGlobalLike, readOnDeviceSupport } from './on-device-host.ts';
 import { OnDeviceVoice } from './on-device-voice.ts';
 import { ParakeetRecognitionSession } from './parakeet-session.ts';
@@ -57,18 +57,12 @@ export function browserSherpaVoice(
   const Worker = global.Worker;
   if (!support.available || assets === null || runtime === null || Worker === undefined)
     return new OnDeviceVoice({ model, support, store: null, openSession: null });
-  const storeOptions = {
-    caches: global.caches ?? null,
-    fetch: browserFetch,
-    storage: global.navigator?.storage ?? null,
-  };
-  const store = new BundleSetInstaller({
-    parts: [
-      { installer: new PinnedModelStore({ ...storeOptions, bundle: runtime }), shared: true },
-      { installer: new PinnedModelStore({ ...storeOptions, bundle: modelBundle(model) }), shared: false },
-    ],
+  const store = runtimeAndModelInstaller(
+    runtime,
+    modelBundle(model),
+    { caches: global.caches ?? null, fetch: browserFetch, storage: global.navigator?.storage ?? null },
     sharedStillNeeded,
-  });
+  );
   // The worker script is the app's own, built beside it; Trusted Types accepts exactly that URL.
   const engine = new SherpaEngine(
     () => new Worker(trustedWorkerUrl(assets.workerUrl), { type: 'module', name: `fy-${model.id}` }),

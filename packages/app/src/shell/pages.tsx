@@ -166,13 +166,25 @@ export function DaemonSettingsPage({
   useRuntimeVersion(runtime);
   const paired = runtime.daemons.get(daemon);
   const online = runtime.online(daemon);
-  const tabs = runtime.surfaces.flatMap(entry =>
-    (entry.manifest.ui?.settings ?? []).map(setting => ({ plugin: entry.id, ...setting })),
-  );
+  const tabs = runtime
+    .listedSurfaces(daemon)
+    .flatMap(entry => (entry.manifest.ui?.settings ?? []).map(setting => ({ plugin: entry.id, ...setting })));
   tabs.sort((a, b) => a.order - b.order || a.plugin.localeCompare(b.plugin));
   // A tab is found by its plugin AND its own id; a plugin's first tab is what `settings/<plugin>` names, a bare tab id
   // names that tab, and a name nothing answers to is said so (never the first tab in its place).
-  const choice = resolveSettingsTab(tabs, tab, tabId);
+  // The list leaves out a plugin this machine has turned off, but a tab the address NAMES that is compiled still opens, and
+  // the plugin's own off guard says so ("Agenda is off; turn on work"), as for a deep link to a page: never "does not exist".
+  const listed = resolveSettingsTab(tabs, tab, tabId);
+  const choice =
+    tab === undefined || listed.kind === 'tab'
+      ? listed
+      : resolveSettingsTab(
+          runtime.surfaces.flatMap(entry =>
+            (entry.manifest.ui?.settings ?? []).map(setting => ({ plugin: entry.id, ...setting })),
+          ),
+          tab,
+          tabId,
+        );
   // A phone's bare /settings is the LIST and nothing else: no tab is marked and none is mounted behind it (a wide screen
   // opens the first tab beside the list, so it keeps one).
   const listOnly = viewport === 'phone' && tab === undefined;

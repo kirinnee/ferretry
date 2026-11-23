@@ -252,6 +252,8 @@ const makeStore = (over: Partial<ParakeetModelStoreOptions> = {}) => {
     files: FILES,
     partBytes: PART,
     now: () => NOW,
+    // These cases specify one file's resume, cancel and quota rules in file order; the files-side-by-side rule is proved in model-store-parallel.test.ts.
+    fileConcurrency: 1,
     ...over,
   });
   return { store, caches, cache: caches.cache(), server };
@@ -397,7 +399,7 @@ describe('ParakeetModelStore.install', () => {
     await store.install({ onProgress: entry => progress.push(entry) });
 
     should(server.requests.map(request => request.url)).deepEqual(FILES.map(file => file.url));
-    should(server.requests.every(request => request.range === undefined && request.signal === undefined)).be.true();
+    should(server.requests.every(request => request.range === undefined)).be.true();
 
     should(progress[0]).deepEqual({ label: 'Encoder', downloadedBytes: 0, totalBytes: TOTAL });
     should(progress.every(entry => entry.totalBytes === TOTAL)).be.true();
@@ -443,7 +445,8 @@ describe('ParakeetModelStore.install', () => {
     const { store, server } = makeStore();
     const controller = new AbortController();
     await store.install({ signal: controller.signal });
-    should(server.requests.every(request => request.signal === controller.signal)).be.true();
+    // The store hands each request a signal of its own (so one failure can stop its siblings) that follows the caller's.
+    should(server.requests.every(request => request.signal !== undefined)).be.true();
     should(server.requests.every(request => request.range === undefined)).be.true();
   });
 
@@ -454,12 +457,8 @@ describe('ParakeetModelStore.install', () => {
     const progress: ParakeetInstallProgress[] = [];
     await store.install({ onProgress: entry => progress.push(entry) });
     should(server.requests).have.length(0);
-    should(progress.map(entry => entry.downloadedBytes)).deepEqual([
-      ENCODER.file.bytes,
-      ENCODER.file.bytes + DECODER.file.bytes,
-      ENCODER.file.bytes + DECODER.file.bytes + VOCABULARY.file.bytes,
-      TOTAL,
-    ]);
+    // Everything is held already, so one report says so: the whole total, at once.
+    should(progress.map(entry => entry.downloadedBytes)).deepEqual([TOTAL]);
     should(await store.status()).have.property('state', 'installed');
   });
 
@@ -506,6 +505,7 @@ describe('ParakeetModelStore.install', () => {
       runtimeUrl: RUNTIME.file.url,
       files: FILES,
       partBytes: PART,
+      fileConcurrency: 1,
       storage,
     });
     // Exactly enough room for the vocabulary and the runtime: the two complete files are not counted again.
@@ -571,6 +571,7 @@ describe('ParakeetModelStore.install: resume', () => {
       runtimeUrl: RUNTIME.file.url,
       files: FILES,
       partBytes: PART,
+      fileConcurrency: 1,
       now: () => NOW,
     });
     const progress: ParakeetInstallProgress[] = [];

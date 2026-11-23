@@ -12,7 +12,14 @@ import {
   verb,
 } from '@ferretry/kernel/manifest';
 import { AgendaContext, AskAnswered, AsksPort, askReference, AskSources } from '@ferretry/core-asks/contract';
-import { ArchiveKeeps, FerretStarted, FerretsPort, SitrepLines, StartDecide } from '@ferretry/core-ferrets/contract';
+import {
+  ArchiveKeeps,
+  FerretStarted,
+  FerretsPort,
+  LaunchParts,
+  SitrepLines,
+  StartDecide,
+} from '@ferretry/core-ferrets/contract';
 import { ConversationPort, ReferenceCatalog, SearchSources, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import {
   BOARD_SKIPPED_AUDIT,
@@ -787,11 +794,18 @@ export default definePlugin({
       { hook: ArchiveKeeps },
       // Asks' agenda reads a ferret's focus task, the to-test lane and a task's gate ask from here (`agenda.context`).
       { hook: AgendaContext, key: 'board' },
+      // What a launch's compaction texts say of a ferret's task: Board's words, added while Board is on (`compaction` part).
+      { hook: LaunchParts },
     ],
     offers: [{ hook: CardMoving, timeoutMs: 200 }],
   },
 
-  instructions: [{ id: 'board', text: 'instructions/board.md', when: { role: 'lead' } }],
+  // A lead reads the whole rule; a helper (a sub-ferret) reads only its task lines. Both are Board's words, so with
+  // Board off (the `work` switch) a ferret is told nothing of tasks. The roles are exclusive, so one id serves both.
+  instructions: [
+    { id: 'board', text: 'instructions/board.md', when: { role: 'lead' } },
+    { id: 'board', text: 'instructions/board-helper.md', when: { role: 'helper' } },
+  ],
   doctor: ['board-store'],
   permissions: { roots: [], network: ['api.github.com'], spawn: ['gh', 'git', 'ssh'], secrets: [] },
 });

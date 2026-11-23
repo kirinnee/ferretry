@@ -15,11 +15,13 @@ import { PanelSlot, ScreenView } from './views.tsx';
  * the person opened the drawer for, and the page it covers is not shown beside it.
  */
 export function useSideHolds(daemon: string | undefined, route: Route, overlay = false): SideHolds | undefined {
-  const { plan, viewport } = useShell();
+  const { plan, viewport, offeredOn } = useShell();
   const { show, holds } = plan.side;
   if (show === 'never' || holds.kind === 'none') return undefined;
   if (show === 'wide-only' && viewport === 'phone' && !overlay) return undefined;
   if (daemon === undefined) return undefined;
+  // A screen this machine has turned off is not drawn here, though another machine has it on.
+  if (holds.kind === 'screen' && !offeredOn(daemon, holds.screen.plugin)) return undefined;
   if (holds.kind === 'screen' && needsSubject(holds.screen.path)) return undefined; // needs a subject the route lacks
   // The page IS the screen the column holds (the ferret list on /ferrets): draw it once, in the page, not again beside it.
   if (

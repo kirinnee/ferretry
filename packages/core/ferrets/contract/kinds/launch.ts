@@ -1,6 +1,7 @@
 import type { FencedPath, FerretId, InstructionEntry, SharedCredential, SharedTree } from '@ferretry/kernel/contract';
 import type { JsonValue, Result } from '@ferretry/std';
 import type { FerretRole, HarnessKey, PackId } from '../ids.ts';
+import type { CompactionExtras } from '../compaction-text.ts';
 import type { InitialAttachment, StartOptions } from '../port.ts';
 
 // ─── launch ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -107,6 +108,11 @@ export type LaunchPart =
    * nothing). The Claude harness writes it into its private settings file as `autoCompactWindow`.
    */
   | { readonly kind: 'compact'; readonly at: number }
+  /**
+   * What a plugin adds, in its own words, to what a ferret is told around a compaction (Board's task lines, while Board is
+   * on). The harness composes its compaction texts from it (`compactionExtrasOf`); absent, the texts name core's verbs only.
+   */
+  | ({ readonly kind: 'compaction' } & CompactionExtras)
   /**
    * What the login this ferret spends says about itself, as the login's own non-secret account file records it: the
    * organisation type (`claude_max`, `claude_team`, `claude_enterprise`, …), absent when it names none or cannot be read.

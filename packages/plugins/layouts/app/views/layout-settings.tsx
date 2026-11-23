@@ -1,6 +1,6 @@
 /** The `layout` Settings tab: the layout in use, its changes for every device, and this device's own. */
 
-import { useDeviceLayout, useNavCatalog } from '@ferretry/app';
+import { useAbsentPanels, useDeviceLayout, useNavCatalog } from '@ferretry/app';
 import type { PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { LayoutSettings } from '../features/layout/layout-settings.tsx';
 import { layoutsClient, type LayoutsClient } from '../lib/layouts-client.ts';
@@ -8,7 +8,14 @@ import type { DeviceLayout } from '@ferretry/app';
 
 /** Inside the shell: the installed navigation set is the fixed list the tab reorders and hides from. */
 function InShell({ client, device }: { readonly client: LayoutsClient; readonly device: DeviceLayout }) {
-  return <LayoutSettings client={client} device={device} navCatalog={useNavCatalog()} />;
+  return (
+    <LayoutSettings
+      client={client}
+      device={device}
+      navCatalog={useNavCatalog()}
+      absentPanels={useAbsentPanels('ferret.side')}
+    />
+  );
 }
 
 export function createLayoutSettings(client: PluginClient) {

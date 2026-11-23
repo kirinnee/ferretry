@@ -19,6 +19,7 @@ import {
 import type { BoardConfig } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { boardArchiveKeeps } from './adapters/archive-keeps.ts';
+import { boardCompactionParts } from './lib/compaction.ts';
 import { TASK_SOURCE } from './adapters/asks.ts';
 import { BoardReferenceCatalog } from './adapters/reference-catalog.ts';
 import { boardAgendaContext } from './adapters/agenda-context.ts';
@@ -198,6 +199,8 @@ export default implementDaemon(manifest, {
         // The session archive (Ferrets): every task's owner, assignee, drop and lane category, read afresh each pass.
         // Off until the owner names an age; a read that fails keeps every ferret live.
         'session.archive-keeps': () => [{ id: 'board', item: boardArchiveKeeps(service) }],
+        // What a launch's compaction texts say of the ferret's task (core's frame, Board's words), only while Board is on.
+        'launch.parts': () => [{ id: 'board-compaction', item: boardCompactionParts() }],
         // A turn ended (Conversation): the turn-end and gate checks of today (fyd.ts:10727-10783).
         'turn.ended': async payload => {
           await world.turnEnded(payload.ferret);

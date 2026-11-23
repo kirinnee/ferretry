@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'bun:test';
-import { interact, type Mounted, mount, must, RouterProvider, settleUntil, WithAppHooks } from '@ferretry/app/testing';
+import {
+  interact,
+  type Mounted,
+  mount,
+  must,
+  RouterProvider,
+  settleUntil,
+  ShellContext,
+  WithAppHooks,
+} from '@ferretry/app/testing';
 import { PROJECTS_INSIGHTS_HOOK } from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../../app/lib/client.ts';
 import type { FerretRow } from '../../../app/lib/ferrets.ts';
@@ -277,6 +286,38 @@ describe('the project’s board switch', () => {
     await settled(failed, c => c.querySelector('[data-project-board-switch="failed"]') !== null, 'a failed read');
     expect(failed.container.textContent).toContain('the board store is unreadable');
     await failed.unmount();
+  });
+
+  it('draws no Board section at all once the shell says this daemon has Board turned off (the work switch)', async () => {
+    const calls: Call[] = [];
+    const inShell = (boardOn: boolean) => {
+      const board = { id: 'board' };
+      const runtime = {
+        surfaces: [board],
+        listedSurfaces: () => (boardOn ? [board] : []),
+        subscribe: () => () => undefined,
+        version: () => 0,
+        appHook: () => undefined,
+      };
+      return (
+        <ShellContext.Provider value={{ runtime } as never}>{detail(client([], {}, calls))}</ShellContext.Provider>
+      );
+    };
+    const sectionsOf = (mounted: Mounted) =>
+      [...mounted.container.querySelectorAll('section[aria-label]')].map(node => node.getAttribute('aria-label'));
+
+    const off = await mount(inShell(false));
+    await shown(off);
+    expect(sectionsOf(off)).not.toContain('Board');
+    expect(off.container.querySelector('[data-project-board-switch]')).toBeNull();
+    // it did not even ask Board for the switch
+    expect(calls.some(call => call.route === SWITCH)).toBe(false);
+    await off.unmount();
+
+    const on = await mount(inShell(true));
+    await shown(on);
+    expect(sectionsOf(on)).toContain('Board');
+    await on.unmount();
   });
 
   it('links GitHub accounts to an existing project: sends the ordered list and re-renders the links', async () => {

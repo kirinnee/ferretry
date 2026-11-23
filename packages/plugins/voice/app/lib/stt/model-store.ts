@@ -21,7 +21,9 @@
  * write Cache Storage and a runtime is code: a bundle that changed on disk since it was installed is
  * refused, not loaded.
  *
- * NEVER BUFFERED WHOLE ON INSTALL. Peak memory while downloading is one part.
+ * NEVER BUFFERED WHOLE ON INSTALL. Peak memory while downloading is one part per file in flight: at most
+ * {@link FILE_CONCURRENCY} (3) files download at once across the whole install (a model and its runtime share one
+ * {@link DownloadSlots}), so at most 3 parts (96 MiB), and a file smaller than a part is held at its own size. The files are independent, so a slow start or a short file never queues behind a long one.
  *
  * Generalised from the Parakeet store, which is now this class over Parakeet's bundle
  * (`parakeet-store.ts`) with the same cache name and keys, so a Parakeet install made before the
@@ -32,6 +34,38 @@ import { isSha256State, Sha256, type Sha256State } from './sha256.ts';
 
 /** 32 MiB: a multiple of the 64-byte hash block, small enough to hold, large enough to be few. */
 export const MODEL_PART_BYTES = 32 * 1024 * 1024;
+
+/** How many files download at once across ONE install, however many bundles it holds. */
+export const FILE_CONCURRENCY = 3;
+
+/**
+ * The download budget of one install: at most `size` files in flight, shared by every store that is handed the same
+ * instance. A model and the runtime it shares are separate bundles that download together, so they share one budget
+ * (the peak memory and the connections stay what {@link FILE_CONCURRENCY} says, not that many per bundle).
+ */
+export class DownloadSlots {
+  readonly size: number;
+  #free: number;
+  readonly #waiting: (() => void)[] = [];
+
+  constructor(size: number = FILE_CONCURRENCY) {
+    this.size = size;
+    this.#free = size;
+  }
+
+  /** Run `task` once a slot is free, and give the slot back however it ends. */
+  async run<T>(task: () => Promise<T>): Promise<T> {
+    if (this.#free > 0) this.#free -= 1;
+    else await new Promise<void>(resolve => this.#waiting.push(resolve));
+    try {
+      return await task();
+    } finally {
+      const next = this.#waiting.shift();
+      if (next === undefined) this.#free += 1;
+      else next();
+    }
+  }
+}
 
 /** Decimal megabytes, the unit storage settings on phones and browsers report. */
 export const formatMegabytes = (bytes: number): string => `${Math.max(0, Math.round(bytes / 1_000_000))} MB`;
@@ -128,6 +162,10 @@ export interface PinnedModelStoreOptions {
   readonly now?: () => Date;
   /** Defaults to {@link MODEL_PART_BYTES}; tests use tiny parts over tiny files. */
   readonly partBytes?: number;
+  /** How many files download at once. Defaults to {@link FILE_CONCURRENCY}; a suite that specifies one file at a time passes 1. */
+  readonly fileConcurrency?: number;
+  /** The budget this install's files draw from. Stores that download together are handed one; otherwise each has its own. */
+  readonly slots?: DownloadSlots;
 }
 
 interface ProgressRecord {
@@ -176,16 +214,17 @@ export class PinnedModelStore implements ModelInstaller {
     const cache = await this.#open().catch(() => null);
     if (cache === null) return { state: 'absent' };
     const installed = await this.#record<InstalledRecord>(cache, this.#installedKey());
-    let downloaded = 0;
-    let complete = true;
-    for (const file of this.#bundle.files) {
-      if (await this.#isComplete(cache, file)) {
-        downloaded += file.bytes;
-        continue;
-      }
-      complete = false;
-      downloaded += (await this.#progress(cache, file))?.hash.length ?? 0;
-    }
+    // Every file is read at once: they are independent cache lookups.
+    const held = await Promise.all(
+      this.#bundle.files.map(
+        async (file): Promise<{ readonly done: boolean; readonly bytes: number }> =>
+          (await this.#isComplete(cache, file))
+            ? { done: true, bytes: file.bytes }
+            : { done: false, bytes: (await this.#progress(cache, file))?.hash.length ?? 0 },
+      ),
+    );
+    const downloaded = held.reduce((sum, file) => sum + file.bytes, 0);
+    const complete = held.every(file => file.done);
     if (complete && installed !== null && typeof installed.installedAt === 'string')
       return {
         state: 'installed',
@@ -205,29 +244,63 @@ export class PinnedModelStore implements ModelInstaller {
     const cache = await this.#open();
     const { signal, onProgress } = options;
     const total = this.totalBytes;
-    let finished = 0;
-    for (const file of this.#bundle.files) {
-      if (await this.#isComplete(cache, file)) finished += file.bytes;
-    }
+    const files = this.#bundle.files;
+    const have = await Promise.all(files.map(file => this.#isComplete(cache, file)));
+    const finished = files.reduce((sum, file, index) => sum + (have[index] === true ? file.bytes : 0), 0);
     await this.#checkRoom(total - finished);
     // Best effort: ask the browser not to evict a large download under storage pressure. A refusal
     // changes nothing here; Settings says the browser may still reclaim it.
     await this.#options.storage?.persist?.().catch(() => false);
 
-    let done = 0;
-    for (const file of this.#bundle.files) {
-      if (signal?.aborted) throw cancelled();
-      if (await this.#isComplete(cache, file)) {
-        done += file.bytes;
-        onProgress?.({ label: file.label, downloadedBytes: done, totalBytes: total });
-        continue;
+    // The files download side by side, FILE_CONCURRENCY at a time. Each file's own bytes are counted once, so progress only
+    // moves forward; its label is the first file in bundle order not yet finished (a file is finished once its install returned), so it does not flicker between files.
+    const stored = new Map<PinnedFile, number>(
+      files.map((file, index) => [file, have[index] === true ? file.bytes : 0]),
+    );
+    const finishedFiles = new Set<PinnedFile>(files.filter((_, index) => have[index] === true));
+    const report = (): void => {
+      const label = files.find(file => !finishedFiles.has(file))?.label ?? files.at(-1)?.label ?? '';
+      let downloadedBytes = 0;
+      for (const bytes of stored.values()) downloadedBytes += bytes;
+      onProgress?.({ label, downloadedBytes, totalBytes: total });
+    };
+    // One failure stops its siblings (every part they finished is kept, so Install resumes), and the first one is what is thrown.
+    const stop = new AbortController();
+    const relay = (): void => stop.abort();
+    if (signal?.aborted) throw cancelled();
+    signal?.addEventListener('abort', relay, { once: true });
+    const queue = files.filter((_, index) => have[index] !== true);
+    const slots = this.#options.slots ?? new DownloadSlots(this.#options.fileConcurrency ?? FILE_CONCURRENCY);
+    let failure: { readonly error: unknown } | null = null;
+    const lane = async (): Promise<void> => {
+      try {
+        for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
+          if (stop.signal.aborted) throw cancelled();
+          await slots.run(async () => {
+            // A sibling may have failed while this file waited for a slot.
+            if (stop.signal.aborted) throw cancelled();
+            await this.#installFile(cache, file, stop.signal, bytes => {
+              stored.set(file, bytes);
+              report();
+            });
+          });
+          stored.set(file, file.bytes);
+          finishedFiles.add(file);
+          report();
+        }
+      } catch (error) {
+        failure ??= { error };
+        stop.abort();
       }
-      const before = done;
-      await this.#installFile(cache, file, signal, bytes =>
-        onProgress?.({ label: file.label, downloadedBytes: before + bytes, totalBytes: total }),
-      );
-      done += file.bytes;
+    };
+    // Files already held are reported at once; a partly held one is reported when its turn starts.
+    if (finished > 0) report();
+    try {
+      await Promise.all(Array.from({ length: Math.min(slots.size, queue.length) }, lane));
+    } finally {
+      signal?.removeEventListener('abort', relay);
     }
+    if (failure !== null) throw (failure as { readonly error: unknown }).error;
     await this.#put(
       cache,
       this.#installedKey(),

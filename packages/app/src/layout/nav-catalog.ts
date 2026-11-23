@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useShell } from '../shell/context.tsx';
 import { navIconName } from '../shell/icons.tsx';
-import { type NavEntry, navCatalogEntries } from './engine.ts';
+import { type NavEntry, navCatalogEntries, viewsOf } from './engine.ts';
 
 /**
  * THE FIXED SET OF PLACES A NAV CAN SHOW: what the Layout tab lists to reorder and hide, so nobody types a name. It is
@@ -40,6 +40,20 @@ export function navCatalogItems(entries: readonly NavEntry[]): readonly NavCatal
       entry,
     };
   });
+}
+
+/**
+ * The panels of `slot` that are compiled in but not offered, because every paired machine has their plugin turned off:
+ * the Layout tab draws no control for them (a saved layout still names them, and a save keeps them).
+ */
+export function useAbsentPanels(slot: string): ReadonlySet<string> {
+  const { runtime, views } = useShell();
+  return useMemo(() => {
+    const offered = new Set((views.panels.get(slot) ?? []).map(panel => panel.id));
+    return new Set(
+      (viewsOf(runtime.surfaces).panels.get(slot) ?? []).map(panel => panel.id).filter(id => !offered.has(id)),
+    );
+  }, [runtime, views, slot]);
 }
 
 /** The installed nav places (screens that declare a nav entry, and Settings), label and icon and default order. */

@@ -17,6 +17,7 @@
  */
 
 import {
+  DownloadSlots,
   type ModelCacheStorage,
   type ModelFetch,
   type ModelInstaller,
@@ -60,8 +61,10 @@ export class RuntimeModelStore implements ModelInstaller {
       ...(options.now === undefined ? {} : { now: options.now }),
       ...(options.partBytes === undefined ? {} : { partBytes: options.partBytes }),
     };
-    this.#runtime = new PinnedModelStore({ ...shared, bundle: options.runtime });
-    this.#model = new PinnedModelStore({ ...shared, bundle: options.model });
+    // ONE budget for the whole install: the runtime's file and the model's files draw from the same three slots.
+    const slots = new DownloadSlots();
+    this.#runtime = new PinnedModelStore({ ...shared, slots, bundle: options.runtime });
+    this.#model = new PinnedModelStore({ ...shared, slots, bundle: options.model });
     this.#runtimeInUse = () => options.runtimeInUse();
   }
 
@@ -80,18 +83,42 @@ export class RuntimeModelStore implements ModelInstaller {
     return { state: 'partial', downloadedBytes: stored(model) + stored(runtime) };
   }
 
-  /** Download (or resume) the runtime, then the model, as one progress stream. */
+  /**
+   * Download (or resume) the runtime and the model side by side, as one progress stream. They are separate bundles with
+   * separate caches, so neither waits for the other; one failing stops the other (what it finished is kept) and its error is thrown.
+   */
   async install(options: ModelInstallOptions = {}): Promise<void> {
     const total = this.totalBytes;
-    const runtimeBytes = this.#runtime.totalBytes;
     const { signal, onProgress } = options;
-    const within = (offset: number): ModelInstallOptions => ({
-      ...(signal === undefined ? {} : { signal }),
-      onProgress: progress =>
-        onProgress?.({ label: progress.label, downloadedBytes: offset + progress.downloadedBytes, totalBytes: total }),
-    });
-    await this.#runtime.install(within(0));
-    await this.#model.install(within(runtimeBytes));
+    const stop = new AbortController();
+    const relay = (): void => stop.abort();
+    if (signal?.aborted) stop.abort();
+    signal?.addEventListener('abort', relay, { once: true });
+    const done = { runtime: 0, model: 0 };
+    const labels = { runtime: '', model: '' };
+    const part = (which: 'runtime' | 'model', store: PinnedModelStore): Promise<void> =>
+      store.install({
+        signal: stop.signal,
+        onProgress: progress => {
+          done[which] = progress.downloadedBytes;
+          labels[which] = progress.label;
+          // The model is what the person is waiting for: its file is named until it is whole, then the runtime's.
+          const label = done.model < this.#model.totalBytes ? labels.model || progress.label : progress.label;
+          onProgress?.({ label, downloadedBytes: done.runtime + done.model, totalBytes: total });
+        },
+      });
+    let failure: { readonly error: unknown } | null = null;
+    const guard = (run: Promise<void>): Promise<void> =>
+      run.catch((error: unknown) => {
+        failure ??= { error };
+        stop.abort();
+      });
+    try {
+      await Promise.all([guard(part('runtime', this.#runtime)), guard(part('model', this.#model))]);
+    } finally {
+      signal?.removeEventListener('abort', relay);
+    }
+    if (failure !== null) throw (failure as { readonly error: unknown }).error;
   }
 
   /** Delete the model, and the runtime too when nothing else installed runs on it. */

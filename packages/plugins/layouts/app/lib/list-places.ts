@@ -117,10 +117,30 @@ export function hiddenOf(layout: Layout, path: 'nav.items' | 'phone.nav.items'):
   return path === 'nav.items' ? layout.nav.hidden : (layout.phone?.nav?.hidden ?? layout.nav.hidden);
 }
 
-/** The rows of one list key, from the layout and the set of places that key may hold. */
-export function placesOf(layout: Layout, path: ListPath, sources: readonly PlaceSource[]): readonly Place[] {
+/**
+ * A place the layout names that no row stands for, because it is not drawn here (Board while work is off): a nav name no
+ * source stands for, or (any other list) a name in `absent`. Saving must carry it over, never drop it.
+ */
+function undisplayed(
+  path: ListPath,
+  name: string,
+  sources: readonly PlaceSource[],
+  absent: ReadonlySet<string>,
+): boolean {
+  return isNav(path) ? resolve(name, sources) === undefined && shellSource(name) === undefined : absent.has(name);
+}
+
+const NONE: ReadonlySet<string> = new Set();
+
+/** The rows of one list key, from the layout and the set of places that key may hold; `absent` names places not drawn here. */
+export function placesOf(
+  layout: Layout,
+  path: ListPath,
+  sources: readonly PlaceSource[],
+  absent: ReadonlySet<string> = NONE,
+): readonly Place[] {
   if (isNav(path)) return navPlaces(listOf(layout, path), hiddenOf(layout, path), sources);
-  return listedPlaces(listOf(layout, path), sources);
+  return listedPlaces(listOf(layout, path), sources).filter(row => !absent.has(row.id));
 }
 
 export interface Change {
@@ -128,15 +148,45 @@ export interface Change {
   readonly value: string;
 }
 
-/** The keys to save for these rows, as the comma lists `fy layout set` takes; one change set, so it saves whole. */
-export function changesOf(path: ListPath, rows: readonly Place[]): readonly Change[] {
-  const join = (places: readonly Place[]): string => places.map(row => row.id).join(',');
-  if (isNav(path))
-    return [
-      { path, value: join(rows) },
-      { path: hiddenPathOf(path), value: join(rows.filter(row => row.hidden)) },
-    ];
-  return [{ path, value: join(rows.filter(row => !row.hidden)) }];
+/** The layout the rows were read from and what it could show: what a save carries over of the places not shown. */
+export interface Held {
+  readonly layout: Layout;
+  readonly sources: readonly PlaceSource[];
+  /** Places of a non-nav list that are not drawn here (a panel of a plugin that is off). */
+  readonly absent?: ReadonlySet<string>;
+}
+
+/**
+ * The keys to save for these rows, as the comma lists `fy layout set` takes; one change set, so it saves whole. With
+ * `held`, a place the layout names but no row stands for (switched off, so not offered) is carried over: it keeps its
+ * place in the list (right after the row it followed) and, in a nav, stays in `hidden`, so turning it on finds it as it was.
+ */
+export function changesOf(path: ListPath, rows: readonly Place[], held?: Held): readonly Change[] {
+  const absent = held?.absent ?? NONE;
+  const items = rows.filter(row => isNav(path) || !row.hidden).map(row => row.id);
+  const hidden = rows.filter(row => row.hidden).map(row => row.id);
+  if (held !== undefined) {
+    let anchor: string | undefined;
+    for (const name of listOf(held.layout, path)) {
+      if (!undisplayed(path, name, held.sources, absent)) {
+        // A place switched off in this save (it left `items`) cannot be what the next one follows: keep the last one still there.
+        const shown = isNav(path) ? (resolve(name, held.sources)?.id ?? name) : name;
+        if (items.includes(shown)) anchor = shown;
+        continue;
+      }
+      if (items.includes(name)) continue;
+      items.splice(anchor === undefined ? 0 : items.indexOf(anchor) + 1, 0, name);
+      anchor = name;
+    }
+    if (isNav(path))
+      for (const name of hiddenOf(held.layout, path) ?? [])
+        if (undisplayed(path, name, held.sources, absent) && !hidden.includes(name)) hidden.push(name);
+  }
+  if (!isNav(path)) return [{ path, value: items.join(',') }];
+  return [
+    { path, value: items.join(',') },
+    { path: hiddenPathOf(path), value: hidden.join(',') },
+  ];
 }
 
 /**
@@ -152,8 +202,13 @@ export function keepPhoneNav(
 ): readonly Change[] {
   const phone = layout.phone?.nav;
   if (path !== 'nav.items' || phone?.items === undefined || phone.hidden !== undefined) return changes;
-  const keep = placesOf(layout, 'phone.nav.items', sources).filter(row => row.hidden);
-  return [...changes, { path: 'phone.nav.hidden', value: keep.map(row => row.id).join(',') }];
+  const keep = placesOf(layout, 'phone.nav.items', sources)
+    .filter(row => row.hidden)
+    .map(row => row.id);
+  // A place not shown here (Board while work is off) stays hidden on the phone too.
+  for (const name of hiddenOf(layout, 'phone.nav.items') ?? [])
+    if (undisplayed('phone.nav.items', name, sources, NONE) && !keep.includes(name)) keep.push(name);
+  return [...changes, { path: 'phone.nav.hidden', value: keep.join(',') }];
 }
 
 /** The rows with one place switched on or off; Settings stays on. */
