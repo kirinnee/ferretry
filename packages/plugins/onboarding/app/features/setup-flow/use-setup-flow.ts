@@ -31,7 +31,7 @@ import { forgetSetupScanAhead, readSetupScanAhead } from '@ferretry/plugin-runti
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { StepSegmentMemory } from '@ferretry/kernel/contract';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { StepState } from '../../../contract/index.ts';
 import {
   flattenFlow,
@@ -48,12 +48,14 @@ import type { SummaryStep } from '../../views/steps-screen.tsx';
 import { readLater, rememberLater } from './client-later.ts';
 import {
   advance,
+  applyPicked,
   answeredBefore,
   clearNotNeeded,
   dropPage,
   END,
   markNotNeeded,
   passedOver,
+  pickedOf,
   type Place,
   type ProgressRead,
   type RunState,
@@ -80,9 +82,6 @@ export interface FlowDeps {
 
 /** How long the other paired machines get to answer after the machine being set up has: a silent one is left out. */
 const PEER_WAIT_MS = 1500;
-
-/** The plugins whose setup pages read this machine's own Claude Code and Codex setup (the runtimes setup scan). */
-const HOST_SETUP_PLUGINS: ReadonlySet<string> = new Set(['claude-code', 'codex']);
 
 /** One step's daemon answers: at most one in flight, and the newest intent waits as the only queued one. */
 interface AnswerLane {
@@ -186,6 +185,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     trail: [],
     gone: new Set(),
     notNeeded: new Set(),
+    aside: new Set(),
     direction: 'forward',
     visit: 0,
   });
@@ -210,6 +210,21 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   runNow.current = run;
   const targetRow = rows.find(row => row.daemon === target);
   const targetReady = targetRow !== undefined;
+
+  // C59 O8-4 / O8-15: the machine's own Claude Code and Codex setup (tools, logins, runtimes, versions) is read ONCE, the moment
+  // the flow opens, beside the steps list and not after it: a machine being set up (not one a device is only pairing to) has
+  // such pages, so the read is the first thing the flow asks, and the pages then open already answered because the shared scan
+  // store takes this read for its first read on that machine. ONE effect owns that read for the whole life of the flow: the
+  // steps list (its own effect below, declared after so the scan is asked first) is retried by `attempt`, and a retry must never start another scan or drop a settled one,
+  // so nothing here depends on the steps, the pages or `attempt`. The read is forgotten when this flow closes, so a later flow
+  // never shows it.
+  useEffect(() => {
+    if (target === undefined || !targetReady || address.journey === 'pair') return;
+    const scanned = env.current.rows.find(row => row.daemon === target)?.client;
+    if (scanned === undefined) return;
+    readSetupScanAhead(scanned);
+    return () => forgetSetupScanAhead(scanned);
+  }, [target, targetReady, address.journey]);
 
   // One read of every paired machine, once the machine being set up can be reached.
   useEffect(() => {
@@ -273,20 +288,6 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   const ready = loading.kind === 'ready' ? loading : undefined;
   const pages = ready?.pages ?? [];
   const answered = ready?.answered ?? new Set<string>();
-
-  // C59 O8-4: the machine's own Claude Code and Codex setup (tools, logins, runtimes, versions) is read ONCE, as soon as the
-  // flow knows it has such pages to show, while the person is still on the first pages; those pages then open already
-  // answered, because the shared scan store takes this read for its first read on this machine instead of asking again.
-  // A LAYOUT effect, so it starts before any page's own first read (pages read in a passive effect), and the read is
-  // forgotten when this flow closes, so a later flow never shows it.
-  const readsHostSetup = pages.some(
-    page => page.phase === 'daemon' && HOST_SETUP_PLUGINS.has(page.plugin) && !answered.has(page.key),
-  );
-  useLayoutEffect(() => {
-    if (!readsHostSetup) return;
-    readSetupScanAhead(client);
-    return () => forgetSetupScanAhead(client);
-  }, [client, readsHostSetup]);
 
   /**
    * Sends one daemon answer for a step: one write in flight per step, and a newer intent replaces any queued one, so the
@@ -423,11 +424,13 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     if (run.at !== END) return;
     for (const key of run.notNeeded) {
       const step = pages.find(candidate => candidate.key === key);
-      if (step?.phase !== 'daemon' || answeredNow.current.has(key) || toldAtEnd.current.has(key)) continue;
+      // A page that holds an answer (before the run or during it) keeps it: `skipped` would replace its found / done state.
+      if (step?.phase !== 'daemon' || answered.has(key) || answeredNow.current.has(key) || toldAtEnd.current.has(key))
+        continue;
       toldAtEnd.current.add(key);
       sendDaemon(step, 'skipped');
     }
-  }, [run.at, run.notNeeded, pages, sendDaemon]);
+  }, [run.at, run.notNeeded, pages, answered, sendDaemon]);
 
   const page = pages.find(candidate => candidate.key === run.at);
   const hidden = passedOver(run);
@@ -448,6 +451,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
           hidden,
           foreseenPassedOver(pages, plugin => memory.current.get(plugin) ?? {}),
           page.key,
+          new Set(pickedOf(memory.current.get('onboarding') ?? {})?.off ?? []),
         );
   return {
     loading: loading.kind,
@@ -469,6 +473,11 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       // An answer that CHANGED may change what its plugin's other pages need, so they are asked again.
       if (Object.entries(patch).some(([key, value]) => before[key] !== value)) {
         setRun(state => clearNotNeeded(state, pages, plugin));
+        // "Which AI do you want to use?": the pages of every harness left out are not needed in this run (flow-model.ts `applyPicked`).
+        const picked = plugin === 'onboarding' ? pickedOf(memory.current.get(plugin) ?? {}) : undefined;
+        // A page that already holds an answer (before the run or during it) keeps it: only unanswered pages are passed over.
+        if (picked !== undefined)
+          setRun(state => applyPicked(state, pages, picked, new Set([...answered, ...answeredNow.current.keys()])));
         setMemoryRead(count => count + 1);
       }
     },

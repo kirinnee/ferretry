@@ -4,9 +4,9 @@
  *
  *  1. "Rename" is a small text-size control ON the "This device will be called X" line: it is no taller than the line
  *     around it, shares its baseline row, and does not make the line taller than one text line.
- *  2. "Pair this device" and "Not now" are the same size. On a phone both span the container width, stacked; on a
- *     desktop they sit on one row across the card width with "Not now" at the left end and "Pair this device" at the right.
- *  3. The machine card hugs its content: no empty band under "Details" (more than 24px).
+ *  2. "Pair this device" and "Not now" are the same size. On a phone both span the field width, stacked; on a
+ *     desktop they sit on one row across the field width with "Not now" at the left end and "Pair this device" at the right.
+ *  3. (The machine card is gone since C59 O8-1: the machine is one line; `pairing-scene.visual.test.ts` asserts there is no card.)
  *
  * C59 O3 (the Connected screen, same scene with `&offer=open`): the check is anchored on the burrow, the waving arm is drawn
  * whole (in front of the lip), the progress bar is on both pair pages, and the screen has one heading and one supporting line.
@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { expectDetailsOnFinalLine } from './details-on-final-line.ts';
 
 setDefaultTimeout(60_000);
 
@@ -164,42 +165,26 @@ describe('the pair confirm page is balanced (C59 O2)', () => {
       });
 
       if (variant.phone)
-        it('on a phone both answers span the container width, stacked', async () => {
+        it('on a phone both answers span the field width, stacked', async () => {
           const pair = await buttonBox(tab, 'Pair this device');
           const later = await buttonBox(tab, 'Not now');
-          const panel = await box(tab, '.fy-pair-scene main .kt-panel');
-          expect(Math.abs(pair.width - panel.width), 'Pair spans the card width').toBeLessThanOrEqual(1);
-          expect(Math.abs(later.width - panel.width), 'Not now spans the card width').toBeLessThanOrEqual(1);
+          const panel = await box(tab, '.fy-pair-scene main input');
+          expect(Math.abs(pair.width - panel.width), 'Pair spans the field width').toBeLessThanOrEqual(1);
+          expect(Math.abs(later.width - panel.width), 'Not now spans the field width').toBeLessThanOrEqual(1);
           expect(Math.abs(pair.left - panel.left)).toBeLessThanOrEqual(1);
           expect(Math.abs(later.left - panel.left)).toBeLessThanOrEqual(1);
           expect(Math.abs(pair.top - later.top), 'stacked, not side by side').toBeGreaterThan(20);
         });
       else
-        it('on a desktop Not now is at the left end and Pair this device at the right end of one row', async () => {
+        it('on a desktop Not now sits beside Pair this device, one group at the right end of one row', async () => {
           const pair = await buttonBox(tab, 'Pair this device');
           const later = await buttonBox(tab, 'Not now');
-          const panel = await box(tab, '.fy-pair-scene main .kt-panel');
+          const panel = await box(tab, '.fy-pair-scene main input');
           expect(Math.abs(pair.top - later.top), 'one row').toBeLessThanOrEqual(1);
-          expect(Math.abs(later.left - panel.left), 'Not now at the left edge').toBeLessThanOrEqual(1);
+          expect(pair.left - later.right, 'Not now is right beside Pair this device (one 12px gap)').toBeCloseTo(12, 0);
           expect(Math.abs(pair.right - panel.right), 'Pair this device at the right edge').toBeLessThanOrEqual(1);
           expect(later.left).toBeLessThan(pair.left);
         });
-
-      it('the machine card hugs its content: no empty band under Details', async () => {
-        const gap = await tab.evaluate(() => {
-          const panel = document.querySelector('.fy-pair-scene main .kt-panel') as HTMLElement;
-          const bottoms = Array.from(panel.querySelectorAll('*'))
-            .map(element => (element as HTMLElement).getBoundingClientRect())
-            .filter(r => r.height > 0 && r.width > 0)
-            .map(r => r.bottom);
-          const content = Math.max(...bottoms);
-          const p = panel.getBoundingClientRect();
-          const pad = Number.parseFloat(getComputedStyle(panel).paddingBottom);
-          return { panelBottom: p.bottom, contentBottom: content, pad };
-        });
-        const empty = gap.panelBottom - gap.contentBottom - gap.pad;
-        expect(empty, 'empty space under the last row, beyond the card padding').toBeLessThanOrEqual(24);
-      });
     });
   }
 });
@@ -233,7 +218,14 @@ describe('the Connected screen is balanced (C59 O3)', () => {
         // One heading, one supporting line.
         expect(await tab.locator('main h1, main h2').allInnerTexts()).toEqual(['Connected']);
         const lines = await tab.locator('[data-paired-with]').allInnerTexts();
-        expect(lines).toEqual(['Paired with kirin-workstation.']);
+        // The one supporting line carries the small "Details" link on its end (C59 O8-1), so it is one line, not a card.
+        // Exactly the one sentence and its Details link (not a prefix match: anything after the sentence would pass that).
+        expect(lines).toEqual(['Paired with kirin-workstation. Details']);
+        expect(await tab.locator('[data-pair-details] button').count(), 'the Details affordance is present').toBe(1);
+        expect(await tab.locator('[data-pair-details] button').innerText()).toBe('Details');
+        expect(await tab.locator('[data-pair-details] button').getAttribute('aria-expanded')).toBe('false');
+        // It sits on the sentence's own last line (not wrapped onto a line of its own), measured against the text, not the paragraph.
+        await expectDetailsOnFinalLine(tab, '[data-paired-with]', 'the Connected line');
         // The check sits inside the mascot's box (anchored to it, not floating off its corner), in the burrow's lower half.
         const geometry = await tab.evaluate(() => {
           const hero = (document.querySelector('.fy-pair-hero') as HTMLElement).getBoundingClientRect();

@@ -13,11 +13,30 @@ import { MachineNameSchema } from './contract/kernel.ts';
 import { definePlugin, route, settingsTab, socket, tool } from './manifest/index.ts';
 import { AgentConfigCallSchemas, AGENT_CONFIG_TOOLS } from './contract/agent-config.ts';
 
-/** `config/plugins.yaml` (§3.6): on or off per plugin. Core is always on whatever it says. */
+/**
+ * `config/plugins.yaml` (§3.6): on or off per plugin. Core is always on whatever it says. `work` is the one switch for
+ * the work surfaces (WORK_PLUGINS): absent means off.
+ */
 export const PluginsYamlSchema = z.strictObject({
+  work: z.enum(['on', 'off']).optional(),
   plugins: z.record(z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/), z.enum(['on', 'off'])).default({}),
 });
 export type PluginsYaml = z.infer<typeof PluginsYamlSchema>;
+
+/**
+ * The plugins the `work` switch owns. Loops has no plugin in 5.0 (the v4 loop engine was skipped); its slot is
+ * reserved here, so it joins the list when it exists and rides the same switch.
+ */
+export const WORK_PLUGINS: readonly string[] = ['board', 'agenda'];
+
+/**
+ * Whether `config/plugins.yaml` leaves plugin `id` on. A work plugin is on only if `work: on` AND its own line is not
+ * `off`; any other plugin is on unless its own line says `off`. A missing or unreadable file is read as an empty one.
+ */
+export function pluginsYamlSaysOn(yaml: PluginsYaml | undefined, id: string): boolean {
+  if (WORK_PLUGINS.includes(id) && yaml?.work !== 'on') return false;
+  return yaml?.plugins[id] !== 'off';
+}
 
 /**
  * Person-only and passkey-checked (§7.2): turning a plugin ON can widen what ferrets may do (a tool, an item), so it
@@ -29,9 +48,12 @@ export const PluginsConfig = defineConfig({
   axis: 'configure',
   personOnly: true,
   loosens: (before, after) =>
-    Object.entries(after.plugins)
-      .filter(([id, state]) => state === 'on' && before?.plugins[id] === 'off')
-      .map(([id]) => `turns ${id} on`)
+    (after.work === 'on' && before?.work !== 'on' ? ['turns work on (Board and Agenda start)'] : [])
+      .concat(
+        Object.entries(after.plugins)
+          .filter(([id, state]) => state === 'on' && before?.plugins[id] === 'off')
+          .map(([id]) => `turns ${id} on`),
+      )
       .concat(
         Object.keys(before?.plugins ?? {})
           .filter(id => before?.plugins[id] === 'off' && after.plugins[id] === undefined)

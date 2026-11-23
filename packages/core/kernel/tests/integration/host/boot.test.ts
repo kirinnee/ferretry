@@ -152,7 +152,53 @@ function plugins(admission: Admission, events: string[]) {
   ];
 }
 
-async function boot(home: string, admission: Admission = recordingAdmission(), events: string[] = []) {
+/**
+ * Boards and agendas are off unless `config/plugins.yaml` says `work: on`, so a suite that exercises them says it first.
+ * It goes through the owner's own door: a home is only made by a boot, so a fresh one is booted bare once; the edit is
+ * held (turning `work` on is a loosening) until confirmed, exactly as for a person. A home that exists (a test that
+ * wrote its own plugins.yaml) is left alone.
+ */
+async function workOn(home: string): Promise<void> {
+  if (
+    await stat(home).then(
+      () => true,
+      () => false,
+    )
+  )
+    return;
+  const bare = await bootRaw(home, ownerJudge(), []);
+  await turnWorkOn(bare);
+  await bare.stop();
+}
+
+/** An admission that lets the owner's config routes through, but never lets a loosening apply in the same act (it is held). */
+const ownerJudge = (): Admission =>
+  ({ ...recordingAdmission(), judgeConfigAccess: () => ({ allowed: true, mayLoosen: false }) }) as Admission;
+
+/** Writes `work: on` as the owner and confirms the hold; returns what the write answered. */
+async function turnWorkOn(host: RunningHost): Promise<{ outcome: string; confirmed: boolean }> {
+  const put = body(
+    await host.dispatch(
+      request('PUT', '/v1/config/file', { body: JSON.stringify({ path: 'plugins.yaml', text: 'work: on\n' }) }),
+    ),
+  ) as { outcome: string; etag: string };
+  if (put.outcome === 'applied') return { outcome: put.outcome, confirmed: true };
+  const done = body(
+    await host.dispatch(
+      request('POST', '/v1/config/confirm', { body: JSON.stringify({ path: 'plugins.yaml', etag: put.etag }) }),
+    ),
+  ) as { confirmed: boolean };
+  return { outcome: put.outcome, confirmed: done.confirmed };
+}
+
+async function boot(home: string, admission: Admission = recordingAdmission(), events: string[] = [], work = true) {
+  if (work) await workOn(home);
+  const host = await bootRaw(home, admission, events);
+  running.push(host);
+  return host;
+}
+
+async function bootRaw(home: string, admission: Admission, events: string[]) {
   const outcome = await bootHost({
     home,
     version: '5.0.0',
@@ -160,7 +206,6 @@ async function boot(home: string, admission: Admission = recordingAdmission(), e
     adapters: realAdapters(home, () => {}, { binary: 'fy' }),
   });
   if (outcome.kind !== 'running') throw new Error(outcome.sentence);
-  running.push(outcome.host);
   return outcome.host;
 }
 
@@ -344,6 +389,7 @@ describe('boot (§7.6)', () => {
 
   test('a plugin whose build throws is failed, its dependents too, and the rest boots', async () => {
     const home = await freshHome();
+    await workOn(home);
     const impls = plugins(recordingAdmission(), []).map(impl =>
       impl.manifest.id === 'board'
         ? implementDaemon(impl.manifest, {
@@ -428,6 +474,215 @@ describe('config/plugins.yaml (§3.6)', () => {
   });
 });
 
+describe('config/plugins.yaml `work`: the one switch for Board and Agenda (O8-14 P2)', () => {
+  /** What a daemon on `home` serves, with the sentence each refused plugin carries. */
+  async function standing(home: string, events: string[] = []) {
+    const host = await boot(home, recordingAdmission(), events, false);
+    const board = await host.dispatch(request('GET', '/v1/board'));
+    const agenda = await host.dispatch(request('GET', '/v1/agenda'));
+    return { host, board: board.status, agenda: agenda.status };
+  }
+
+  test('with `work` absent, Board and Agenda are off: routes 404, no job runs, nothing else is touched', async () => {
+    const events: string[] = [];
+    const { host, board, agenda } = await standing(await freshHome(), events);
+    expect(host.plugins.get('board')?.status).toBe('off');
+    expect(host.plugins.get('agenda')?.status).toBe('off');
+    expect(board).toBe(404);
+    expect(agenda).toBe(404);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(events).toEqual([]);
+    expect(host.plugins.get('voice')?.status).toBe('skeleton');
+    expect(host.trace).not.toContain('build:board');
+    // the inventory every client guard reads (`fy task`, `fy board`, the agenda verbs: "X is turned off") says off
+    const seen = body(await host.dispatch(request('GET', '/v1/plugins'))) as { plugins: { id: string; on: boolean }[] };
+    expect(
+      seen.plugins.filter(plugin => plugin.id === 'board' || plugin.id === 'agenda').map(plugin => plugin.on),
+    ).toEqual([false, false]);
+  });
+
+  test('`work: off` is the same as absent, and an own `on` line cannot turn a work plugin on without it', async () => {
+    const home = await freshHome();
+    await (await boot(home, recordingAdmission(), [], false)).stop();
+    running.splice(0);
+    await writeFile(`${home}/config/plugins.yaml`, 'work: off\nplugins:\n  board: on\n  agenda: on\n');
+    const { host, board } = await standing(home);
+    expect(host.plugins.get('board')?.status).toBe('off');
+    expect(host.plugins.get('agenda')?.status).toBe('off');
+    expect(board).toBe(404);
+  });
+
+  test('with `work: on`, today’s set is back: routes serve and the job runs', async () => {
+    const events: string[] = [];
+    const home = await freshHome();
+    await workOn(home);
+    const { host, board, agenda } = await standing(home, events);
+    expect(host.plugins.get('board')?.status).toBe('serving');
+    expect(host.plugins.get('agenda')?.status).toBe('serving');
+    expect(board).toBe(200);
+    expect(agenda).toBe(200);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(events).toContain('job');
+  });
+
+  test('writing `work: on` is held for the owner, and Board stays off until it is confirmed', async () => {
+    const home = await freshHome();
+    const bare = await boot(home, ownerJudge(), [], false);
+    const { outcome, confirmed } = await turnWorkOn(bare);
+    expect(outcome).toBe('pending');
+    expect(confirmed).toBe(true);
+    await bare.stop();
+    running.splice(0);
+    const { host, board } = await standing(home);
+    expect(host.plugins.get('board')?.status).toBe('serving');
+    expect(board).toBe(200);
+  });
+
+  test('a hand-edited `work: on` nobody confirmed is held: the tighter version (work off) stays in effect', async () => {
+    const home = await freshHome();
+    await (await boot(home, recordingAdmission(), [], false)).stop();
+    running.splice(0);
+    await writeFile(`${home}/config/plugins.yaml`, 'work: on\n');
+    const { host, board } = await standing(home);
+    expect(host.plugins.get('board')?.status).toBe('off');
+    expect(board).toBe(404);
+  });
+
+  describe('the last-accepted-set recovery does not bypass the work switch', () => {
+    interface AccountsApi {
+      ready(): boolean;
+    }
+    const AccountsPort = definePort<AccountsApi>('accounts');
+
+    /**
+     * A daemon on a home that carries a pre-P2 accepted graph (Board and Agenda in it) and a plugins.yaml that strands
+     * an UNRELATED plugin (Pulls needs Accounts, which the file turns off), so boot takes the recovery path.
+     */
+    async function recovering(yaml: string, confirmedWorkOn = false) {
+      const home = await freshHome();
+      // a home is only made by a boot, so it is booted bare once and then given the pre-P2 files
+      const bare = await bootRaw(home, ownerJudge(), []);
+      if (confirmedWorkOn) await turnWorkOn(bare);
+      await bare.stop();
+      await mkdir(`${home}/config`, { recursive: true });
+      await mkdir(`${home}/state/kernel`, { recursive: true });
+      await writeFile(
+        `${home}/state/kernel/plugins-accepted.json`,
+        `${JSON.stringify({ format: 1, enabled: ['accounts', 'agenda', 'board', 'gate', 'pulls', 'voice'] })}\n`,
+      );
+      await writeFile(`${home}/config/plugins.yaml`, yaml);
+      const accounts = definePlugin({
+        id: 'accounts',
+        title: 'Git Accounts',
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        provides: { accounts: AccountsPort },
+      });
+      const pulls = definePlugin({
+        id: 'pulls',
+        title: 'Pulls',
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        needs: { accounts: AccountsPort },
+        actions: {
+          routes: [
+            route('GET /v1/pulls', {
+              minimum: 'authenticated',
+              caller: 'any',
+              audit: { skip: 'test' },
+              guard: { none: 'test' },
+            }),
+          ],
+        },
+      });
+      const outcome = await bootHost({
+        home,
+        version: '5.0.0',
+        implementations: [
+          ...plugins(recordingAdmission(), []),
+          implementDaemon(accounts, { build: () => ({ provides: { accounts: { ready: () => true } } }) }),
+          implementDaemon(pulls, {
+            build: () => ({ routes: { 'GET /v1/pulls': async () => jsonResponse({ pulls: 0 }) } }),
+          }),
+        ],
+        adapters: realAdapters(home, () => {}, { binary: 'fy' }),
+      });
+      if (outcome.kind !== 'running') throw new Error(outcome.sentence);
+      running.push(outcome.host);
+      const host = outcome.host;
+      const status = async (path: string): Promise<number> => (await host.dispatch(request('GET', path))).status;
+      return {
+        host,
+        board: await status('/v1/board'),
+        agenda: await status('/v1/agenda'),
+        pulls: await status('/v1/pulls'),
+      };
+    }
+
+    test('`work` absent: Board and Agenda answer 404 while the unrelated recovery still serves what it kept', async () => {
+      const { host, board, agenda, pulls } = await recovering('plugins:\n  accounts: off\n');
+      // the recovery is on (the note names the line), and unchanged for the unrelated plugin
+      const note = (await host.doctor()).find(line => line.plugin === 'kernel' && line.detail.includes('plugins.yaml'));
+      expect(note?.state).toBe('warn');
+      // it names what the owner turned off that Pulls needs, never Board or Agenda (the work switch turned those off)
+      expect(note?.detail).toContain('Git Accounts');
+      expect(note?.detail).not.toContain('Board');
+      expect(note?.detail).not.toContain('Agenda');
+      expect(host.plugins.get('pulls')?.status).toBe('serving');
+      expect(pulls).toBe(200);
+      // the work switch still wins
+      expect(host.plugins.get('board')?.status).toBe('off');
+      expect(host.plugins.get('agenda')?.status).toBe('off');
+      expect(board).toBe(404);
+      expect(agenda).toBe(404);
+    });
+
+    test('`work: off`: the same', async () => {
+      const { host, board, agenda, pulls } = await recovering('work: off\nplugins:\n  accounts: off\n  board: on\n');
+      expect(host.plugins.get('pulls')?.status).toBe('serving');
+      expect(pulls).toBe(200);
+      expect(board).toBe(404);
+      expect(agenda).toBe(404);
+    });
+
+    test('`work: on`: the recovered set keeps Board and Agenda, as before', async () => {
+      const { board, agenda, pulls } = await recovering('work: on\nplugins:\n  accounts: off\n', true);
+      expect(pulls).toBe(200);
+      expect(board).toBe(200);
+      expect(agenda).toBe(200);
+    });
+  });
+
+  test('a work plugin is on only if `work: on` AND its own line is not off', async () => {
+    const { pluginsYamlSaysOn } = await import('../../../plugin.ts');
+    expect(pluginsYamlSaysOn(undefined, 'board')).toBe(false);
+    expect(pluginsYamlSaysOn({ plugins: {} }, 'agenda')).toBe(false);
+    expect(pluginsYamlSaysOn({ work: 'off', plugins: { board: 'on' } }, 'board')).toBe(false);
+    expect(pluginsYamlSaysOn({ work: 'on', plugins: {} }, 'board')).toBe(true);
+    expect(pluginsYamlSaysOn({ work: 'on', plugins: { board: 'off' } }, 'board')).toBe(false);
+    expect(pluginsYamlSaysOn({ work: 'on', plugins: { board: 'off' } }, 'agenda')).toBe(true);
+    // everything else keeps today's rule: on unless its own line says off
+    expect(pluginsYamlSaysOn(undefined, 'voice')).toBe(true);
+    expect(pluginsYamlSaysOn({ plugins: { voice: 'off' } }, 'voice')).toBe(false);
+  });
+
+  test('turning `work` on is a held loosening; turning it off, or leaving it, is not', async () => {
+    const { PluginsConfig } = await import('../../../plugin.ts');
+    expect(PluginsConfig.loosens(undefined, { work: 'on', plugins: {} })).toEqual([
+      'turns work on (Board and Agenda start)',
+    ]);
+    expect(PluginsConfig.loosens({ plugins: {} }, { work: 'on', plugins: {} })).toHaveLength(1);
+    expect(PluginsConfig.loosens({ work: 'off', plugins: {} }, { work: 'on', plugins: {} })).toHaveLength(1);
+    expect(PluginsConfig.loosens({ work: 'on', plugins: {} }, { work: 'on', plugins: {} })).toEqual([]);
+    expect(PluginsConfig.loosens({ work: 'on', plugins: {} }, { work: 'off', plugins: {} })).toEqual([]);
+    expect(PluginsConfig.loosens({ work: 'on', plugins: {} }, { plugins: {} })).toEqual([]);
+  });
+});
+
 describe('RR R247 HostOptions.timings on a real boot', () => {
   test('R247 the timings fyd parsed reach every daemon half as kernel.timings', async () => {
     const home = await freshHome();
@@ -468,13 +723,13 @@ describe('state/kernel/plugins-accepted.json (§2.4): the last enabled set the d
     expect(accepted.enabled).toContain('agenda');
     expect((await stat(`${home}/state/kernel/plugins-accepted.json`)).mode & 0o777).toBe(0o600);
     // Agenda needs Board: turning Board off by hand strands Agenda, so the accepted set is kept
-    await writeFile(`${home}/config/plugins.yaml`, 'plugins:\n  board: off\n');
+    await writeFile(`${home}/config/plugins.yaml`, 'work: on\nplugins:\n  board: off\n');
     const host = await boot(home);
     expect(host.plugins.get('board')?.status).toBe('serving');
     expect(host.plugins.get('agenda')?.status).toBe('serving');
     const note = (await host.doctor()).find(line => line.plugin === 'kernel' && line.detail.includes('plugins.yaml'));
     expect(note?.state).toBe('warn');
-    expect(note?.detail).toContain('line 2');
+    expect(note?.detail).toContain('line 3');
     expect(note?.detail).toContain('Board');
   });
 

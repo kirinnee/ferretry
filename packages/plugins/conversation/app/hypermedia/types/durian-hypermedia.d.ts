@@ -20,13 +20,13 @@
  */
 
 export declare const VERSION: string;
-/** The format version the parser implements (SPEC.md); 9 in v0.5.1. */
+/** The format version the parser implements (SPEC.md); 10 in v0.6.2. */
 export declare const FORMAT_VERSION: number;
 
 /** One YAML parser for the front matter and the data parts; the browser has no `Bun.YAML`. */
 export declare function setYamlParser(parse: ((text: string) => unknown) | null): void;
 
-/** The caps (`src/safety.ts`): a host may lower or raise any of them with `parse(text, { limits })`. The ten keys are the whole set. */
+/** The caps (`src/safety.ts`): a host may lower or raise any of them with `parse(text, { limits })`. The twenty-three keys are the whole set. */
 export interface Limits {
   /** the whole input, in UTF-8 bytes */
   maxInputBytes: number;
@@ -48,7 +48,31 @@ export interface Limits {
   maxMermaidChars: number;
   /** steps of any stepped part (terminal, file tree, editor, code walk, mermaid) */
   maxSteps: number;
+  /** layout work of one animation, and of every animation on the page together */
+  maxAnimWork: number;
+  maxPageAnimWork: number;
+  /** work of one part's expressions (a chart's let, x and series): steps, value slots, characters of text */
+  maxEvalSteps: number;
+  maxEvalValues: number;
+  maxEvalChars: number;
+  /** the same for the whole page */
+  maxPageEvalSteps: number;
+  maxPageEvalValues: number;
+  maxPageEvalChars: number;
+  /** aliases one YAML text may use */
+  maxYamlAliases: number;
+  /** characters of one YAML text, and of all of a page's YAML texts together */
+  maxYamlChars: number;
+  maxPageYamlChars: number;
+  /** nodes of one YAML text, and of all of a page's YAML texts together */
+  maxYamlNodes: number;
+  maxPageYamlNodes: number;
 }
+
+/** The default caps, sized for AUTHORED pages (`src/safety.ts`). Never the caps of a chat message: see {@link UNTRUSTED_LIMITS}. */
+export declare const LIMITS: Readonly<Limits>;
+/** `LIMITS` with smaller YAML and animation caps, for text nobody reviewed (a chat reply, a streamed message). */
+export declare const UNTRUSTED_LIMITS: Readonly<Limits>;
 
 export interface Problem {
   line: number;
@@ -151,10 +175,18 @@ export interface TocBlock {
   scope: 'page' | 'section';
   items: { depth: number; text: string; id: string }[];
 }
+/** An own mark or prompt prefix (`src/types.ts`): a label, a theme colour name and what it means. */
+export interface MarkDef {
+  label: string;
+  colour: string;
+  means: string;
+}
 export interface TerminalBlock extends PartBase {
   type: 'terminal';
   title: string | null;
   prompt: string;
+  /** the own prompts this terminal uses */
+  prefixes: Record<string, MarkDef>;
   steps: {
     title: string;
     lines: { k: 'cmd' | 'out'; text: string; prompt?: string; hl?: [string, string | null][] }[];
@@ -162,6 +194,8 @@ export interface TerminalBlock extends PartBase {
 }
 export interface FileTreeBlock extends PartBase {
   type: 'filetree';
+  /** the own marks this tree uses */
+  marks: Record<string, MarkDef>;
   trees: {
     title: string | null;
     rows: {
@@ -307,7 +341,6 @@ export interface Document {
   readonly path: string;
   readonly frontMatter: Readonly<Record<string, unknown>>;
   readonly title: string | null;
-  readonly banner: { kind: string; text: MdInline[] } | null;
   readonly blocks: readonly Block[];
   readonly headings: readonly { readonly depth: number; readonly text: string; readonly id: string }[];
   readonly problems: readonly Problem[];

@@ -53,6 +53,7 @@ beforeAll(async () => {
         },
       })}\n`,
     },
+    { workOn: true },
   );
 });
 
