@@ -532,6 +532,18 @@ describe('the setup flow', () => {
     await settle();
     expect(view.container.querySelector('[data-flow-end]')).not.toBeNull();
   });
+
+  it('sends a skipped device page, and the closing Settings link of a device-only run, INSIDE the machine’s Settings', async () => {
+    view = await mount(setup({ search: '?phase=client' }).tree);
+    await settle();
+    await click('Later'); // appearance: later
+    await next(); // look
+    await next(); // finish
+    await settle();
+    const hrefOf = (selector: string) => view?.container.querySelector(selector)?.getAttribute('href');
+    expect(hrefOf('[data-onboarding-later-link="onboarding"]')).toBe('/d/fy_daemon_a/settings/device');
+    expect(hrefOf('[data-onboarding-open-settings]')).toBe('/d/fy_daemon_a/settings/device');
+  });
 });
 
 describe('a page under its loading cover', () => {
