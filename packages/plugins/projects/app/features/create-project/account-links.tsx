@@ -8,9 +8,11 @@
 import { ConfirmToSee } from '@ferretry/app/ui';
 import { TriangleAlert, UserRound } from 'lucide-react';
 import { useState } from 'react';
-import { accountLinks, type ProjectInfo } from '../../../contract/index.ts';
+import { accountLinks, type ProjectInfo, type ProjectsConnectAccount } from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../lib/client.ts';
+import { setProjectAccounts } from './accounts-api.ts';
 import { AccountLinksEditor } from './account-links-editor.tsx';
+import { ConnectCard } from './connect-card.tsx';
 import { useGitAccounts } from './use-git-accounts.ts';
 
 export interface AccountLinksViewProps {
@@ -101,6 +103,8 @@ export function ProjectAccountLinks({
   client,
   project,
   edit,
+  startEditing = false,
+  connect,
 }: {
   readonly client: ProjectsClient;
   readonly project: Pick<ProjectInfo, 'accounts'>;
@@ -109,9 +113,16 @@ export function ProjectAccountLinks({
     /** The daemon accepted a new list; the caller re-reads the project so the list above re-renders. */
     readonly onSaved: () => void;
   };
+  /** Open the editor as soon as the accounts are read (a caller whose own button already said "link"). */
+  readonly startEditing?: boolean;
+  /**
+   * Offer "Connect a GitHub account" when none is connected, through Git accounts' own card (what the create flow
+   * mounts). A connected account is linked to the project at once, as the create flow does. Absent, nothing is offered.
+   */
+  readonly connect?: { readonly provided: ProjectsConnectAccount | undefined };
 }) {
-  const { accounts, error, stepUp, confirm } = useGitAccounts(client);
-  const [editing, setEditing] = useState(false);
+  const { accounts, error, stepUp, confirm, reload } = useGitAccounts(client);
+  const [editing, setEditing] = useState(startEditing);
   const canEdit = edit !== undefined && accounts !== null && accounts.length > 0;
   return (
     <div className="grid gap-xs">
@@ -141,6 +152,24 @@ export function ProjectAccountLinks({
           </div>
         )
       )}
+      {connect !== undefined && edit !== undefined && accounts !== null && accounts.length === 0 ? (
+        <div data-project-accounts-connect="">
+          <ConnectCard
+            connected={0}
+            onConnected={accountId => {
+              // The account just connected is the one meant for this project: link it without a second press.
+              void setProjectAccounts(client, edit.projectId, [...(project.accounts ?? []), accountId]).then(
+                () => {
+                  reload();
+                  edit.onSaved();
+                },
+                () => reload(),
+              );
+            }}
+            provided={connect.provided}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

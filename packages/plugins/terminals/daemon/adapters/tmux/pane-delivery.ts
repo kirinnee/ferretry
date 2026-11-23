@@ -17,6 +17,7 @@ import type { RunnerDeliveryFailure } from '@ferretry/core-ferrets/contract';
 import {
   classifySubmit,
   composerHoldsOtherText,
+  devChannelsAction,
   composerInput,
   countlessPasteOf,
   draftBlockingReadiness,
@@ -265,6 +266,30 @@ export class TmuxPaneDelivery {
       if (waited >= this.settings.startupSettleMs) return 'timed-out';
       await this.sleep(step);
     }
+  }
+
+  /**
+   * Claude Code's development-channels confirm, and ONLY it, answered at launch (`Runner.answerDevChannels`): the same
+   * readiness backoff `waitReady` uses, pressing the one key `devChannelsAction` names when that exact dialog is on
+   * screen. Every other dialog or prompt ends the watch with nothing pressed, so this never answers a question for a
+   * person; a pane that dies first rejects.
+   */
+  // read-scoped: none — it reads the pane only to find that one dialog; no pane text leaves it or is kept
+  async answerDevChannels(session: string): Promise<'answered' | 'absent'> {
+    for (const delay of retryDelays(this.settings.readinessAttempts)) {
+      const frame = await captureFrame(this.tmux, session);
+      if (!frame.alive || frame.dead)
+        throw new PaneNotReadyError(`the ferret pane exited before its prompt; tmux session ${session}`, 'exited');
+      const action = devChannelsAction(frame.visible);
+      if (action !== undefined) {
+        for (const key of action.keys) await this.tmux.sendKey(session, key);
+        await this.sleep(this.settings.dialogSettleMs);
+        return 'answered';
+      }
+      if (frame.promptReady || blockedByDialog(frame.visible)) return 'absent';
+      await this.sleep(delay);
+    }
+    return 'absent';
   }
 
   private async fill(session: string, text: string): Promise<ComposerLanding> {
