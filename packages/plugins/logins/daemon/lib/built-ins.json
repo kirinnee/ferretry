@@ -1264,6 +1264,334 @@
       },
       "id": "ollama",
       "origin": "built-in"
+    },
+    "google-gemini": {
+      "label": "Google Gemini (AI Studio)",
+      "docs": "https://ai.google.dev/gemini-api/docs/models",
+      "verified": "2026-11-23",
+      "unverified": [
+        "Google does not rank the Gemini 4 family, so each model's tier and the default follow its list price (https://ai.google.dev/gemini-api/docs/pricing); a person's own file can re-rank them.",
+        "No reasoning effort is listed: the API takes a thinking budget or level per model, which this catalog does not model yet.",
+        "Models are not priced here (the price maker list has no Google); Suggestions carry models.dev's list cost.",
+        "Ids were read on the Gemini API models page and cross-checked against models.dev (provider google), 2026-11-23."
+      ],
+      "customIds": true,
+      "gemini": {
+        "models": [
+          {
+            "id": "gemini-4-neon",
+            "label": "Gemini 4 Neon",
+            "tier": "best",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "gemini-4-carbon",
+            "label": "Gemini 4 Carbon",
+            "tier": "balanced",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": true
+          },
+          {
+            "id": "gemini-4-argon",
+            "label": "Gemini 4 Argon",
+            "tier": "balanced",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "gemini-4-hydrogen",
+            "label": "Gemini 4 Hydrogen",
+            "tier": "fast",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "gemini-3.8-flash",
+            "label": "Gemini 3.8 Flash",
+            "tier": "fast",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "gemini-3.5-flash-lite",
+            "label": "Gemini 3.5 Flash-Lite",
+            "tier": "fast",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          }
+        ]
+      },
+      "opencode": {
+        "models": [
+          {
+            "id": "gemini-4-neon",
+            "label": "Gemini 4 Neon",
+            "tier": "best",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "gemini-4-carbon",
+            "label": "Gemini 4 Carbon",
+            "tier": "balanced",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": true
+          },
+          {
+            "id": "gemini-4-argon",
+            "label": "Gemini 4 Argon",
+            "tier": "balanced",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "gemini-4-hydrogen",
+            "label": "Gemini 4 Hydrogen",
+            "tier": "fast",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "gemini-3.8-flash",
+            "label": "Gemini 3.8 Flash",
+            "tier": "fast",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "gemini-3.5-flash-lite",
+            "label": "Gemini 3.5 Flash-Lite",
+            "tier": "fast",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          }
+        ]
+      },
+      "id": "google-gemini",
+      "origin": "built-in"
+    },
+    "github-copilot": {
+      "label": "GitHub Copilot",
+      "docs": "https://docs.github.com/en/copilot/reference/ai-models/supported-models",
+      "verified": "2026-11-23",
+      "unverified": [
+        "Which of these a person can use depends on their Copilot plan and their organization's policy; Copilot's own list is the final word.",
+        "Each tier and the default follow list price; Copilot does not rank its models.",
+        "No reasoning effort is listed here (`copilot --effort` takes its own levels per model), and the models are not priced here (Copilot bills credits, not per-token list prices).",
+        "Ids were read from models.dev (provider github-copilot) and each name was found on GitHub's supported-models page, 2026-11-23; models that models.dev marks as going away are left out."
+      ],
+      "customIds": true,
+      "copilot": {
+        "models": [
+          {
+            "id": "claude-opus-5.5",
+            "label": "Claude Opus 5.5",
+            "tier": "best",
+            "context": 1000000,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "claude-sonnet-5.5",
+            "label": "Claude Sonnet 5.5",
+            "tier": "balanced",
+            "context": 1000000,
+            "reasoning": true,
+            "efforts": [],
+            "default": true
+          },
+          {
+            "id": "claude-haiku-5.5",
+            "label": "Claude Haiku 5.5",
+            "tier": "fast",
+            "context": 1000000,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "gpt-6.2-sol",
+            "label": "GPT-6.2 Sol",
+            "tier": "best",
+            "context": 1050000,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "gpt-6.1-terra",
+            "label": "GPT-6.1 Terra",
+            "tier": "balanced",
+            "context": 1050000,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "gpt-6-luna",
+            "label": "GPT-6 Luna",
+            "tier": "fast",
+            "context": 1050000,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "gemini-4-neon",
+            "label": "Gemini 4 Neon",
+            "tier": "best",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "gemini-4-hydrogen",
+            "label": "Gemini 4 Hydrogen",
+            "tier": "fast",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "grok-4.7",
+            "label": "Grok 4.7",
+            "tier": "balanced",
+            "context": 500000,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          }
+        ]
+      },
+      "id": "github-copilot",
+      "origin": "built-in"
+    },
+    "xai": {
+      "label": "xAI",
+      "docs": "https://docs.x.ai/docs/models",
+      "verified": "2026-11-23",
+      "unverified": [
+        "xAI does not rank its models, so each tier and the default follow list price and release order; a person's own file can re-rank them.",
+        "No reasoning effort is listed: xAI's reasoning controls differ by model and are not modelled here yet.",
+        "Models are not priced here (the price maker list has no xAI); Suggestions carry models.dev's list cost.",
+        "Ids were read on xAI's models page and cross-checked against models.dev (provider xai), 2026-11-23."
+      ],
+      "customIds": true,
+      "opencode": {
+        "models": [
+          {
+            "id": "grok-4.7",
+            "label": "Grok 4.7",
+            "tier": "best",
+            "context": 500000,
+            "reasoning": true,
+            "efforts": [],
+            "default": true
+          },
+          {
+            "id": "grok-4.6",
+            "label": "Grok 4.6",
+            "tier": "balanced",
+            "context": 500000,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "grok-4.5",
+            "label": "Grok 4.5",
+            "tier": "balanced",
+            "context": 500000,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "grok-4.3",
+            "label": "Grok 4.3",
+            "tier": "fast",
+            "context": 1000000,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          }
+        ]
+      },
+      "id": "xai",
+      "origin": "built-in"
+    },
+    "mistral": {
+      "label": "Mistral",
+      "docs": "https://docs.mistral.ai/getting-started/models/models_overview/",
+      "verified": "2026-11-23",
+      "unverified": [
+        "Mistral's models page names Mistral Large 4, Medium 3.5 and Small 4 but renders their API ids in the browser; the `-latest` aliases and context sizes come from models.dev (provider mistral), 2026-11-23.",
+        "mistral-large-latest is marked beta by models.dev.",
+        "Mistral does not rank its models for coding, so the tiers follow size; a person's own file can re-rank them.",
+        "No reasoning effort is listed, and the models are not priced here (the price maker list has no Mistral); Suggestions carry models.dev's list cost."
+      ],
+      "customIds": true,
+      "opencode": {
+        "models": [
+          {
+            "id": "mistral-large-latest",
+            "label": "Mistral Large (latest)",
+            "tier": "best",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "mistral-medium-latest",
+            "label": "Mistral Medium (latest)",
+            "tier": "balanced",
+            "context": 262144,
+            "reasoning": true,
+            "efforts": [],
+            "default": true
+          },
+          {
+            "id": "mistral-small-latest",
+            "label": "Mistral Small (latest)",
+            "tier": "fast",
+            "context": 262144,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          }
+        ]
+      },
+      "id": "mistral",
+      "origin": "built-in"
     }
   },
   "presets": [

@@ -15,6 +15,13 @@
  * read, and `prices` — `{ "<catalog id>": { "claude"?: { "<model id>": <price> }, "codex"?: … } }` —
  * is a key they never look at. This build puts each price back on its model as it reads the document.
  *
+ * HALVES ADDED LATER RIDE BESIDE THE CATALOGS TOO (U5). A catalog's `gemini`, `copilot` and `opencode` halves are
+ * keys a daemon older than them would refuse, so `catalogs` holds only what those daemons read — the `claude` and
+ * `codex` halves of the catalogs that have one, byte for byte as before — and `catalogsV2` holds, WHOLE, every
+ * catalog that has a newer half. A daemon that knows them reads `catalogsV2[id]` in place of `catalogs[id]`, and
+ * falls back to `catalogs[id]` when the V2 entry does not check. `suggestions` (./suggestions.ts) is a trimmed
+ * models.dev snapshot, a key no older daemon looks at.
+ *
  * `N` is the number of commits that changed `packages/fleet/models/` — it moves exactly when a catalog
  * does. Nothing here is a credential or a permission: labels, model ids and tiers.
  *
@@ -26,9 +33,12 @@ import {
   type CatalogHalf,
   type CatalogPrice,
   CatalogPriceSchema,
+  BASE_HALF_KEYS,
   type ModelCatalog,
   type ModelCatalogFile,
+  NEW_HALF_KEYS,
 } from './schema.ts';
+import { type DroppedSuggestion, readSuggestions, type Suggestions } from './suggestions.ts';
 
 /** Where the published catalog sits, relative to the hosted app's origin. */
 export const PUBLISHED_MODEL_CATALOG_FILE = 'catalog/models.json';
@@ -47,15 +57,28 @@ const PublishedModelCatalogDocumentSchema = z.object({
   version: VersionSchema,
   catalogs: z.record(CatalogIdSchema, z.unknown()),
   prices: z.record(CatalogIdSchema, z.unknown()).optional(),
+  catalogsV2: z.record(CatalogIdSchema, z.unknown()).optional(),
+  suggestions: z.unknown().optional(),
 });
 
-const HALVES = ['claude', 'codex'] as const;
+const HALVES = BASE_HALF_KEYS;
 type Half = (typeof HALVES)[number];
 
 /** One catalog's prices, by half and model id, as `prices` carries them. */
 type CatalogPrices = Partial<Record<Half, Record<string, CatalogPrice>>>;
 
-/** A catalog without its prices: the shape a daemon older than prices reads. */
+/** The shape a daemon older than the newer halves reads: no newer half. `undefined` for a catalog with no base half. */
+function baseCatalogValue(catalog: ModelCatalog): ModelCatalogFile | undefined {
+  const file = unpricedCatalogValue(catalog);
+  if (file.claude === undefined && file.codex === undefined) return undefined;
+  const base: Record<string, unknown> = { ...file };
+  for (const key of NEW_HALF_KEYS) delete base[key];
+  return base as ModelCatalogFile;
+}
+
+const hasNewHalf = (catalog: ModelCatalog): boolean => NEW_HALF_KEYS.some(key => catalog[key] !== undefined);
+
+/** A catalog without its base halves' prices (they ride in `prices`); a newer half keeps its own. */
 function unpricedCatalogValue(catalog: ModelCatalog): ModelCatalogFile {
   const file = modelCatalogFileValue(catalog);
   const strip = (half: CatalogHalf | undefined) =>
@@ -83,6 +106,7 @@ function catalogPrices(catalog: ModelCatalog): CatalogPrices | undefined {
 export function publishedModelCatalogFiles(
   version: number,
   catalogs: Readonly<Record<string, ModelCatalog>>,
+  suggestions?: Suggestions,
 ): Readonly<Record<string, string>> {
   const prices = Object.entries(catalogs).flatMap(([id, catalog]) => {
     const priced = catalogPrices(catalog);
@@ -90,8 +114,19 @@ export function publishedModelCatalogFiles(
   });
   const document = {
     version,
-    catalogs: Object.fromEntries(Object.entries(catalogs).map(([id, catalog]) => [id, unpricedCatalogValue(catalog)])),
+    catalogs: Object.fromEntries(
+      Object.entries(catalogs).flatMap(([id, catalog]) => {
+        const base = baseCatalogValue(catalog);
+        return base === undefined ? [] : [[id, base] as const];
+      }),
+    ),
     prices: Object.fromEntries(prices),
+    catalogsV2: Object.fromEntries(
+      Object.entries(catalogs).flatMap(([id, catalog]) =>
+        hasNewHalf(catalog) ? [[id, unpricedCatalogValue(catalog)] as const] : [],
+      ),
+    ),
+    ...(suggestions === undefined ? {} : { suggestions }),
   };
   return {
     [PUBLISHED_MODEL_CATALOG_FILE]: `${JSON.stringify(document)}\n`,
@@ -104,6 +139,10 @@ export interface PublishedModelCatalog {
   readonly version: number;
   readonly catalogs: Readonly<Record<string, ModelCatalog>>;
   readonly rejected: readonly { readonly id: string; readonly problem: string }[];
+  /** The trimmed models.dev snapshot, when the document carries one that checks (./suggestions.ts). */
+  readonly suggestions?: Suggestions;
+  /** Each suggestion provider or row that did not check, left out. */
+  readonly droppedSuggestions: readonly DroppedSuggestion[];
   /** Each price that did not check, left off its model — which stays in the catalog, unpriced. */
   readonly rejectedPrices: readonly { readonly id: string; readonly model: string; readonly problem: string }[];
 }
@@ -161,10 +200,31 @@ export function readPublishedModelCatalog(value: unknown): PublishedModelCatalog
   const catalogs: Record<string, ModelCatalog> = {};
   const rejected: { id: string; problem: string }[] = [];
   const rejectedPrices: { id: string; model: string; problem: string }[] = [];
-  for (const [id, raw] of Object.entries(parsed.data.catalogs)) {
-    const read = parseModelCatalog(id, raw, 'published');
+  const ids = [...new Set([...Object.keys(parsed.data.catalogs), ...Object.keys(parsed.data.catalogsV2 ?? {})])];
+  for (const id of ids) {
+    // A catalog with a newer half is read from its whole V2 entry; when that does not check, from the base one.
+    const whole = parsed.data.catalogsV2?.[id];
+    const fromWhole = whole === undefined ? undefined : parseModelCatalog(id, whole, 'published');
+    if (fromWhole?.ok === true) {
+      catalogs[id] = withPrices(fromWhole.value, parsed.data.prices?.[id], rejectedPrices);
+      continue;
+    }
+    const base = parsed.data.catalogs[id];
+    if (base === undefined) {
+      rejected.push({ id, problem: fromWhole?.ok === false ? fromWhole.problem : 'not a catalog' });
+      continue;
+    }
+    const read = parseModelCatalog(id, base, 'published');
     if (read.ok) catalogs[id] = withPrices(read.value, parsed.data.prices?.[id], rejectedPrices);
     else rejected.push({ id, problem: read.problem });
   }
-  return { version: parsed.data.version, catalogs, rejected, rejectedPrices };
+  const { suggestions, dropped } = readSuggestions(parsed.data.suggestions);
+  return {
+    version: parsed.data.version,
+    catalogs,
+    rejected,
+    rejectedPrices,
+    droppedSuggestions: dropped,
+    ...(suggestions === undefined ? {} : { suggestions }),
+  };
 }

@@ -1,0 +1,28 @@
+# Mistral AI models, for OpenCode (Mistral has no Anthropic- or Responses-compatible endpoint Claude Code or Codex can use).
+label: Mistral
+docs: https://docs.mistral.ai/getting-started/models/models_overview/
+verified: '2026-11-23'
+unverified:
+  - "Mistral's models page names Mistral Large 4, Medium 3.5 and Small 4 but renders their API ids in the browser; the `-latest` aliases and context sizes come from models.dev (provider mistral), 2026-11-23."
+  - 'mistral-large-latest is marked beta by models.dev.'
+  - "Mistral does not rank its models for coding, so the tiers follow size; a person's own file can re-rank them."
+  - "No reasoning effort is listed, and the models are not priced here (the price maker list has no Mistral); Suggestions carry models.dev's list cost."
+customIds: true
+opencode:
+  models:
+    - id: mistral-large-latest
+      label: Mistral Large (latest)
+      tier: best
+      context: 1048576
+      reasoning: true
+    - id: mistral-medium-latest
+      label: Mistral Medium (latest)
+      tier: balanced
+      context: 262144
+      reasoning: true
+      default: true
+    - id: mistral-small-latest
+      label: Mistral Small (latest)
+      tier: fast
+      context: 262144
+      reasoning: true

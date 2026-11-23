@@ -134,6 +134,12 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
     },
     {
       pkg: 'logins',
+      folder: 'scripts/suggestions-source.ts',
+      reason:
+        'the build-time reader of models.dev and LiteLLM for the published suggestions (and its --refresh); it never runs inside a daemon',
+    },
+    {
+      pkg: 'logins',
       folder: 'scripts/built-ins.ts',
       reason:
         'a developer-run generator that writes daemon/lib/built-ins.json from the shipped YAML (and its --check); it never runs inside a daemon',

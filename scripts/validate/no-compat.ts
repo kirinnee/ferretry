@@ -34,6 +34,15 @@ export const ALLOWED: ReadonlyMap<string, string> = new Map([
       'refuses by name; lead decision 2026-11-07 (DECISIONS-1 item 6)',
   ],
   [
+    'packages/plugins/logins/daemon/lib/catalog/suggestions.ts#MODELS_DEV_RETIRING_STATUS',
+    "models.dev's own `status` word for a model on its way out, read by name when the build trims the database; " +
+      "published as the catalog's own word `retiring`",
+  ],
+  [
+    'packages/plugins/logins/daemon/lib/catalog/suggestions.ts#LITELLM_RETIRES_FIELD',
+    "LiteLLM's own field name for the day a model goes away, read by name when the build adds dates; published as `retires`",
+  ],
+  [
     'packages/plugins/runtimes/daemon/lib/account/fixed-layer.ts#CODEX_HIDDEN_NOTICES',
     "Codex's own [notice] config key names, which spell 'migration'; the harness defines them, not Ferretry",
   ],
