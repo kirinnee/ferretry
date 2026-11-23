@@ -33,6 +33,13 @@ const machine = (installed: boolean | null) => {
     call: async (route: string) => {
       calls.push(route);
       if (route === 'GET /v1/logins/presets') return REAL_PROVIDER_PRESET_CATALOG;
+      if (route === 'GET /v1/onboarding')
+        return {
+          harnesses: [
+            { key: 'claude-code', label: 'Claude Code' },
+            { key: 'codex', label: 'Codex' },
+          ],
+        };
       if (route === SCAN) {
         if (installed === null) throw new Error('the scan was refused');
         return hostScan(installed);
@@ -66,7 +73,7 @@ describe('the "Found on this computer" chip', () => {
     const Panel = createAgentsPanel(client);
     view = await mount(<Panel step={step} />);
     await settle();
-    expect(chips()).toEqual(['claude']);
+    expect(chips()).toEqual(['claude-code']);
   });
 
   it('is absent when Claude is not installed here', async () => {
@@ -85,7 +92,7 @@ describe('the "Found on this computer" chip', () => {
     await view.unmount();
     view = await mount(<Panel step={step} />);
     await settle();
-    expect(chips()).toEqual(['claude']);
+    expect(chips()).toEqual(['claude-code']);
     expect(scans()).toBe(1);
   });
 

@@ -2,6 +2,7 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { onboardingRoutes } from './routes/onboarding.ts';
 import { OnboardingService } from './lib/service.ts';
+import { installedHarnesses } from './lib/harnesses.ts';
 import { machineIsSetUp } from './lib/set-up.ts';
 
 /**
@@ -14,6 +15,7 @@ export default implementDaemon(manifest, {
     const onboarding = new OnboardingService({
       entries: () => kernel.snapshot.current().onboarding,
       setUp: () => machineIsSetUp(uses.runtimes.current()),
+      harnesses: () => installedHarnesses(uses.ferrets.current()),
       state: kernel.state,
       clock: kernel.clock,
       events: kernel.events,

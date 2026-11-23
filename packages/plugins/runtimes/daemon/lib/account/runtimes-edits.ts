@@ -13,8 +13,10 @@
  *
  * Pure.
  */
+import { type HarnessKind, harnessKeyOfKind } from '../manifest.ts';
+import { builtinProfileLayers, pinnedProfileName } from './builtin-autonomous.ts';
 import type { AccountModel } from './schema.ts';
-import { harnessKeyOfKind } from '../manifest.ts';
+import { runtimeHarness } from './scope.ts';
 
 /** One file to write (a patch, created whole when the file is absent) or to remove. */
 export interface OwnedFileEdit {
@@ -177,4 +179,65 @@ export function ownedFileEdits(before: AccountModel, next: AccountModel): readon
     if (!now.has(path) && path !== 'runtimes.yaml') edits.push({ path, remove: true });
   }
   return edits;
+}
+
+/** What a change needs to know about the runtimes that exist only because they are derived (`RuntimesModel.derived`). */
+export interface DerivedAtSave {
+  readonly runtimes: ReadonlySet<string>;
+  /** The profiles that exist only because they are generated (the built-in ones and the pinned ones no file holds). */
+  readonly profiles: ReadonlySet<string>;
+  readonly pinnedModelOf: (login: string, harness: HarnessKind) => string | undefined;
+  readonly refusedFor: (login: string, harness: HarnessKind) => string | undefined;
+}
+
+/**
+ * {@link ownedFileEdits} for a model whose derived runtimes are not on disk. A derived runtime that is saved (edited, or
+ * renamed) is written WHOLE, because no file of it exists to patch, and it never keeps a reference to a GENERATED profile:
+ * that profile follows the live catalog (or is not there once nothing derives it), so the saved runtime would move on its
+ * own or dangle. It is written onto a REAL profile and model set holding the pinned model, so the file launches the model the
+ * runtime had. A derived runtime that is refused cannot be saved on its generated profile at all: `refused` says why.
+ */
+export function realisedEdits(
+  before: AccountModel,
+  next: AccountModel,
+  derived: DerivedAtSave,
+): { readonly edits: readonly OwnedFileEdit[]; readonly refused: readonly string[] } {
+  const edits = new Map(ownedFileEdits(before, next).map(edit => [edit.path, edit]));
+  const bodies = ownedFileBodies(next);
+  const refused: string[] = [];
+  for (const [name, runtime] of Object.entries(next.runtimes)) {
+    const path = `runtimes/${name}.yaml`;
+    const edit = edits.get(path);
+    const body = bodies.get(path);
+    if (edit?.patch === undefined || body === undefined) continue;
+    // A derived runtime has no file: whatever is written is its whole body.
+    const whole = derived.runtimes.has(name) ? body : { ...edit.patch };
+    const profile = typeof whole.profile === 'string' ? whole.profile : undefined;
+    if (profile === undefined || !derived.profiles.has(profile)) {
+      edits.set(path, { path, patch: whole });
+      continue;
+    }
+    const harness = runtimeHarness(next, runtime);
+    const model = harness === undefined ? undefined : derived.pinnedModelOf(runtime.credential as string, harness);
+    const why = harness === undefined ? undefined : derived.refusedFor(runtime.credential as string, harness);
+    if (why !== undefined) refused.push(`${name}: ${why}`);
+    if (harness === undefined || model === undefined) {
+      edits.set(path, { path, patch: whole });
+      continue;
+    }
+    const real = pinnedProfileName(harness, model);
+    edits.set(path, { path, patch: { ...whole, profile: real } });
+    // The real profile and model set are written unless an explicit file of that name is already there.
+    const held = before.profiles[real] !== undefined && !derived.profiles.has(real);
+    if (!held) {
+      const profilePath = `profiles/${real}.yaml`;
+      const setPath = `model-sets/${real}.yaml`;
+      edits.set(profilePath, {
+        path: profilePath,
+        patch: { contents: [...builtinProfileLayers(harness, { [harness]: model }, real)] },
+      });
+      edits.set(setPath, { path: setPath, patch: { models: [model], default: model } });
+    }
+  }
+  return { edits: [...edits.values()], refused };
 }

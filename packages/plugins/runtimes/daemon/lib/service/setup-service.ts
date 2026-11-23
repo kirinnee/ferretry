@@ -129,7 +129,7 @@ import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import type { ConfigText } from '../ports.ts';
 import { CREDENTIALS_DIRECTORY, harnessKey, harnessKind } from './foreign.ts';
-import type { ModelCatalogSources } from '../models/catalog.ts';
+import { type ModelCatalogSources, starterModelsOf } from '../models/catalog.ts';
 import { expandAssetPath } from '../paths.ts';
 import { configFileWriteRefusal } from './ports.ts';
 import {
@@ -378,6 +378,7 @@ export class FleetSetupService {
     const plan = planImport(scans, {
       ...(reading.format === 'none' ? {} : { existing: reading.model }),
       ...(await this.#recordOption()),
+      starters: starterModelsOf(await this.deps.catalog.modelCatalogs?.()),
       digest: text => this.deps.digest(text),
     });
     return {
@@ -681,6 +682,7 @@ export class FleetSetupService {
       ...(change.skip === undefined ? {} : { skip: change.skip }),
       ...(existing === undefined ? {} : { existing }),
       ...(await this.#recordOption()),
+      starters: starterModelsOf(await this.deps.catalog.modelCatalogs?.()),
       existingSecrets,
       addDuplicates: change.addDuplicates === true ? installed : [],
       tickedEnv: tickedEnvOf(change),

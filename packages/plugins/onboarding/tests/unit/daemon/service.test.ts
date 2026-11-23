@@ -123,3 +123,29 @@ describe('OnboardingService', () => {
     expect(state.writes).toBe(0);
   });
 });
+
+describe('OnboardingService harnesses', () => {
+  test('the view carries the harnesses installed on the machine, as the injected read lists them', async () => {
+    const state = new FakeProgressState();
+    const service = new OnboardingService({
+      entries: () => entries,
+      setUp: async () => false,
+      harnesses: () => [
+        { key: 'claude-code', label: 'Claude Code' },
+        { key: 'fake-third', label: 'Fake Third' },
+      ],
+      state: state.port,
+      clock: new TickingClock() as unknown as Clock,
+      events: new RecordingEvents(),
+    });
+
+    expect((await service.view()).harnesses).toEqual([
+      { key: 'claude-code', label: 'Claude Code' },
+      { key: 'fake-third', label: 'Fake Third' },
+    ]);
+  });
+
+  test('the view lists none when nothing says which are installed', async () => {
+    expect('harnesses' in (await make().service.view())).toBe(false);
+  });
+});

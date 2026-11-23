@@ -3,6 +3,7 @@
  * real disk (a temp directory standing in for `$FY_HOME/config`): the all-or-none writer, the model in effect, the
  * components other plugins provide and Runtimes' own `instructions`. Nothing here reads a real home.
  */
+import { memoryPins, TEST_MODEL_SOURCES } from '../../support/starters.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -344,6 +345,7 @@ describe('the model in effect over Runtimes’ files', () => {
     patch: Partial<Parameters<typeof runtimesConfigFiles>[0]> = {},
   ) =>
     runtimesConfigFiles({
+      pins: memoryPins(),
       config: port,
       logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
       components: () => 'unavailable',
@@ -459,6 +461,7 @@ describe('the model in effect over Runtimes’ files', () => {
         list: async () => ({ format: 1 as const, machine: 'm', logins: [glm] }),
         // Logins could not give the templates: the login stands in rather than being read as empty.
         environmentTemplates: async () => await Promise.reject(new Error('locked')),
+        modelSources: async () => TEST_MODEL_SOURCES,
       },
     });
     const loaded = await files.load();
