@@ -195,12 +195,12 @@ export interface ConversationAboveComposerProps {
 export const COMPOSER_TOOLS_SLOT = 'composer.tools' as const;
 
 /**
- * What the ferret a composer belongs to says about the account it runs on: the account's name (`agent`, the name a usage
- * feed row carries) and the usage the ferret's own monitor stamped on its state. Only these facts are handed to a
- * `composer.tools` panel; no credential is among them.
+ * What the ferret a composer belongs to says about the account it runs on: the account's name (`agent`: the ferret's LOGIN, the name a usage
+ * feed row carries; absent for a ferret with no login) and the usage the ferret's own monitor stamped on its state. Only
+ * these facts are handed to a `composer.tools` panel; no credential is among them.
  */
 export interface ComposerAccount {
-  readonly agent: string;
+  readonly agent?: string;
   readonly usage?: {
     readonly usageAuthOk?: boolean;
     readonly usage5hPercent?: number;

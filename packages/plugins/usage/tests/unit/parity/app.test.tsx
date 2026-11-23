@@ -329,7 +329,7 @@ describe('usage parity · Model pricing and the session surface', () => {
     await bare.unmount();
   });
 
-  it('the composer quota is a composer.tools panel that shows the account its ferret runs on, and says unknown otherwise', async () => {
+  it('the composer quota is a composer.tools panel that shows the account its ferret runs on, and draws nothing otherwise', async () => {
     expect(manifest.ui.panels.find(entry => entry.id === 'composer-quota')).toMatchObject({ slot: 'composer.tools' });
     const feedOf = () => ({
       at: '2026-08-01T09:00:00.000Z',
@@ -346,20 +346,20 @@ describe('usage parity · Model pricing and the session surface', () => {
     await settle();
     expect(named.container.textContent).toContain('5h 42%');
     await named.unmount();
-    // A ferret whose account the feed does not name is NOT given the account nearest its limit: its usage is unknown.
+    // A ferret whose account the feed does not name is NOT given the account nearest its limit: its usage is unknown, so nothing is drawn.
     const other = await mount(
       asElement(
         half.panels['composer-quota']({ subject: 'ferret-7', account: { agent: 'some-other-login' } } as never),
       ),
     );
     await settle();
-    expect(other.container.textContent).toContain('usage unknown');
+    expect(other.container.textContent).toBe('');
     expect(other.container.textContent).not.toContain('42%');
     await other.unmount();
-    // A ferret id alone (no account handed) is never an account name: usage unknown.
+    // A ferret id alone (no account handed) is never an account name: nothing drawn.
     const bare = await mount(asElement(half.panels['composer-quota']({ subject: 'claude-auto-work' })));
     await settle();
-    expect(bare.container.textContent).toContain('usage unknown');
+    expect(bare.container.textContent).toBe('');
     await bare.unmount();
     // The usage the ferret's own monitor stamped wins, as it did on today's session page.
     const stamped = await mount(

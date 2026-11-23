@@ -1,14 +1,13 @@
 /**
- * THE RUNTIME PICKER IS ONE COMPACT CONTROL IN THE COMPOSER'S ROW, in a real browser (ferret-page-send, items 2 and 4).
+ * THE RUNTIME PICKER IS THREE QUIET READOUTS ON THE COMPOSER'S STATUS LINE, in a real browser (O9-17, after ferret-page-send).
  *
- * The scene (`fixtures/runtime-picker-scene.tsx`) is the REAL picker panel in the composer's own row classes and the chat
- * page's column, over a fake daemon. It used to draw the model list and the reasoning list open IN the row: a column
- * taller than the window beside a one-word text box, Send below the fold, and a red error box on every composer when the
- * daemon had no runtime discovery. Now, at the sweep's two windows and a phone, light and dark:
+ * The scene (`fixtures/runtime-picker-scene.tsx`) is the REAL picker panel on the status line under the composer's own row
+ * classes and the chat page's column, over a fake daemon. At the sweep's windows and a phone, light and dark:
  *
- *  - at rest the row is one compact line: the chip, the box keeping most of the row, Send inside the window; no list and
- *    no error, and no model catalog was asked for;
- *  - a tap opens a popover that lies entirely inside the window, above the chip, with both lists;
+ *  - at rest the bar reads `<model> · <thinking> · <speed>` on ONE line under the row, the box keeps the row, Send is
+ *    inside the window; no list and no error, and no model catalog was asked for;
+ *  - a tap on any of the three opens ONE popover wholly inside the window, above that chip, with the model, thinking and
+ *    speed lists, the tapped one holding focus;
  *  - with no runtime discovery the popover says so once, quietly (no red alert).
  *
  * Set `FY_RUNTIME_PICKER_SHOTS_DIR` to keep `<window>-<mode>-<state>.png`.
@@ -106,8 +105,14 @@ const rest = async (tab: Page) =>
       formHeight: form?.height ?? NaN,
       fieldWidth: field?.width ?? NaN,
       rowWidth: row?.width ?? NaN,
-      chipRight: box('[data-runtime-chip]')?.right ?? NaN,
-      fieldLeft: box('.fy-composer-input-layer')?.left ?? NaN,
+      chipTops: [...document.querySelectorAll('[data-runtime-chip]')].map(chip =>
+        Math.round(chip.getBoundingClientRect().top),
+      ),
+      chipTexts: [...document.querySelectorAll('[data-runtime-chip]')].map(chip => chip.textContent ?? ''),
+      rowBottom: row?.bottom ?? NaN,
+      chipsRight: Math.max(
+        ...[...document.querySelectorAll('[data-runtime-chip]')].map(chip => chip.getBoundingClientRect().right),
+      ),
       menus: document.querySelectorAll('[role="menu"]').length,
       alerts: document.querySelectorAll('[role="alert"]').length,
       asked: (window as unknown as { __asked: string[] }).__asked.slice(),
@@ -117,17 +122,20 @@ const rest = async (tab: Page) =>
 for (const mode of ['light', 'dark'] as const)
   describe(`the runtime picker in the composer row (${mode})`, () => {
     for (const size of WINDOWS) {
-      it(`at ${size.name}: one compact line at rest — the box keeps the row, Send is inside, nothing is asked or said`, async () => {
+      it(`at ${size.name}: three readouts on one line at rest — the box keeps the row, Send is inside, nothing is asked or said`, async () => {
         const { tab, close } = await open(size, mode, '&discovery=0');
         try {
           await tab.waitForTimeout(300);
           await shot(tab, `${size.name}-${mode}-rest`);
           const seen = await rest(tab);
-          expect(seen.formHeight, 'one compact block, not a column taller than the window').toBeLessThan(120);
+          expect(seen.formHeight, 'one compact block, not a column taller than the window').toBeLessThan(140);
           expect(seen.sendBottom, 'Send is inside the window').toBeLessThanOrEqual(seen.window.height);
           expect(seen.sendRight, 'Send is inside the window sideways').toBeLessThanOrEqual(seen.window.width);
           expect(seen.fieldWidth, 'the box keeps most of the row').toBeGreaterThanOrEqual(seen.rowWidth * 0.4);
-          expect(seen.chipRight, 'the chip does not overlap the box').toBeLessThanOrEqual(seen.fieldLeft);
+          expect(seen.chipTexts, 'model, thinking, speed').toEqual(['claude-opus-5-5', 'high', 'Normal']);
+          expect(new Set(seen.chipTops).size, 'one calm line').toBe(1);
+          expect(seen.chipTops[0] ?? 0, 'under the row').toBeGreaterThanOrEqual(seen.rowBottom - 1);
+          expect(seen.chipsRight, 'inside the window').toBeLessThanOrEqual(seen.window.width);
           expect(seen.menus, 'no list drawn in the row').toBe(0);
           expect(seen.alerts, 'no error on a composer nobody opened the picker on').toBe(0);
           expect(seen.asked, 'no model catalog asked for').not.toContain('GET /v1/ferrets/:id/runtime-models');
@@ -136,45 +144,51 @@ for (const mode of ['light', 'dark'] as const)
         }
       });
 
-      it(`at ${size.name}: a tap opens a popover wholly inside the window, above the chip, with both lists`, async () => {
-        const { tab, close } = await open(size, mode);
-        try {
-          await tab.click('[data-runtime-chip]');
-          await tab.waitForSelector('[data-runtime-popover] [role="menu"]');
-          await tab.waitForSelector('[data-runtime-popover] [role="menuitemradio"]');
-          await shot(tab, `${size.name}-${mode}-open`);
-          const box = await tab.evaluate(() => {
-            const popover = document.querySelector('[data-runtime-popover]')?.getBoundingClientRect();
-            const chip = document.querySelector('[data-runtime-chip]')?.getBoundingClientRect();
-            return {
-              window: { width: window.innerWidth, height: window.innerHeight },
-              popover: {
-                top: popover?.top ?? NaN,
-                bottom: popover?.bottom ?? NaN,
-                left: popover?.left ?? NaN,
-                right: popover?.right ?? NaN,
-              },
-              chipTop: chip?.top ?? NaN,
-              menus: document.querySelectorAll('[data-runtime-popover] [role="menu"]').length,
-            };
-          });
-          expect(box.popover.top, 'inside the window, top').toBeGreaterThanOrEqual(0);
-          expect(box.popover.left, 'inside the window, left').toBeGreaterThanOrEqual(0);
-          expect(box.popover.right, 'inside the window, right').toBeLessThanOrEqual(box.window.width);
-          expect(box.popover.bottom, 'above the chip').toBeLessThanOrEqual(box.chipTop);
-          expect(box.menus, 'the model list and the reasoning list').toBeGreaterThanOrEqual(2);
-          await tab.keyboard.press('Escape');
-          await tab.waitForSelector('[data-runtime-popover]', { state: 'detached' });
-        } finally {
-          await close();
-        }
-      });
+      for (const which of ['model', 'effort', 'speed'] as const)
+        it(`at ${size.name}: a tap on the ${which} readout opens a popover wholly inside the window, above it, with all three lists`, async () => {
+          const { tab, close } = await open(size, mode);
+          try {
+            await tab.click(`[data-runtime-chip="${which}"]`);
+            await tab.waitForSelector('[data-runtime-popover] [role="menu"]');
+            await tab.waitForSelector('[data-runtime-popover] [role="menuitemradio"]');
+            await tab.waitForTimeout(150);
+            await shot(tab, `${size.name}-${mode}-open-${which}`);
+            const focused = await tab.evaluate(
+              () => document.activeElement?.closest('[data-runtime-list]')?.getAttribute('data-runtime-list') ?? null,
+            );
+            expect(focused, 'the tapped readout’s list holds focus').toBe(which);
+            const box = await tab.evaluate(() => {
+              const popover = document.querySelector('[data-runtime-popover]')?.getBoundingClientRect();
+              const chip = document.querySelector('[data-runtime-chip][aria-expanded="true"]')?.getBoundingClientRect();
+              return {
+                window: { width: window.innerWidth, height: window.innerHeight },
+                popover: {
+                  top: popover?.top ?? NaN,
+                  bottom: popover?.bottom ?? NaN,
+                  left: popover?.left ?? NaN,
+                  right: popover?.right ?? NaN,
+                },
+                chipTop: chip?.top ?? NaN,
+                menus: document.querySelectorAll('[data-runtime-popover] [role="menu"]').length,
+              };
+            });
+            expect(box.popover.top, 'inside the window, top').toBeGreaterThanOrEqual(0);
+            expect(box.popover.left, 'inside the window, left').toBeGreaterThanOrEqual(0);
+            expect(box.popover.right, 'inside the window, right').toBeLessThanOrEqual(box.window.width);
+            expect(box.popover.bottom, 'above the chip').toBeLessThanOrEqual(box.chipTop);
+            expect(box.menus, 'the model, thinking and speed lists').toBe(3);
+            await tab.keyboard.press('Escape');
+            await tab.waitForSelector('[data-runtime-popover]', { state: 'detached' });
+          } finally {
+            await close();
+          }
+        });
     }
 
     it('with no runtime discovery the popover says so once, quietly — no red alert', async () => {
       const { tab, close } = await open(WINDOWS[0], mode, '&discovery=0');
       try {
-        await tab.click('[data-runtime-chip]');
+        await tab.click('[data-runtime-chip="model"]');
         await tab.waitForSelector('[data-model-choices-unavailable]');
         await shot(tab, `1280x713-${mode}-no-discovery`);
         const said = await tab.evaluate(() => ({

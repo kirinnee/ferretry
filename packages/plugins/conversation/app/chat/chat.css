@@ -780,6 +780,17 @@ button.fy-receipt {
   border-color: var(--ghost-edge);
   box-shadow: var(--ghost-shadow);
 }
+/* THE ROW'S QUIET CONTROLS (attach, the mic) ARE FLAT: no resting offset shadow, and no stacked one when the keyboard or a
+   click puts focus on them (a themed button's focus state adds a hard shadow beside its ring; on a small icon it read as a
+   heavy blob). The ring stays: only the shadow goes. `:root` outranks the themes' own focus rules. */
+:root .fy-composer-row .fy-composer-icon,
+:root .fy-composer-row .kt-btn[data-variant='ghost'] {
+  box-shadow: none;
+}
+:root .fy-composer-row .fy-composer-icon:focus-visible:not(:disabled),
+:root .fy-composer-row .kt-btn[data-variant='ghost']:focus-visible:not(:disabled) {
+  box-shadow: inset 0 0 0 calc(var(--focus-width) + 1px) var(--surface);
+}
 .fy-composer-icon:hover {
   background: var(--fy-surface-2);
   color: var(--fy-fg);
@@ -1993,8 +2004,18 @@ button.fy-receipt {
 /* THE PICKER GIVES WAY FIRST. It is `shrink-0` in the row (an icon that must stay), but on the status line it is the one
    item allowed to shrink: the ring and the quota keep their size and the model name is what gets cut. */
 .fy-composer-actions .fy-runtime-picker {
+  align-items: center;
+  display: inline-flex;
   flex: 0 1 auto;
+  gap: 2px;
   min-width: 0;
+}
+/* THREE READOUTS, ONE CALM LINE: the thinking level and the speed keep their size, the model's name is what gives way. */
+.fy-composer-actions .fy-runtime-chip.kt-btn[data-runtime-chip] {
+  flex: 0 0 auto;
+}
+.fy-composer-actions .fy-runtime-chip.kt-btn[data-runtime-chip='model'] {
+  flex: 0 1 auto;
 }
 .fy-composer-actions .fy-runtime-chip.kt-btn::after {
   content: '';

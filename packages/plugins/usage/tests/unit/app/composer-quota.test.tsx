@@ -11,7 +11,7 @@ describe('the composer quota', () => {
     expect(composerQuotaPercent(-3)).toBe('0%');
     expect(composerQuotaPercent(12.6)).toBe('13%');
     expect(composerQuotaPercent(140)).toBe('100%');
-    expect(composerQuotaSpoken(null)).toBe('Account usage unknown: the daemon has no reading for this account yet.');
+    expect(composerQuotaSpoken(null)).toBe('Usage not available for this login.');
     expect(composerQuotaSpoken({ weeklyPercent: 40 })).toBe(
       'Account usage: 5-hour window unknown; weekly window 40% used.',
     );
@@ -19,17 +19,10 @@ describe('the composer quota', () => {
       'Account usage: 5-hour window 12% used; weekly window unknown.',
     );
 
-    // Nothing known: NOTHING is drawn (the words `usage unknown` are never shown raw on the status line); the spoken
-    // form still says why. No window label and no dash either.
+    // Nothing known: NOTHING is drawn: no element, so no tooltip on an empty one, and never the words `usage unknown`.
     for (const quota of [undefined, null, {}, { fiveHourPercent: Number.NaN }]) {
       const unknown = render(<ComposerQuota quota={quota} />);
-      const token = unknown.root.findByProps({ className: 'fy-composer-quota' });
-      expect(token.props['data-quota']).toBe('unknown');
-      expect(findText(token, 'usage unknown')).toHaveLength(0);
-      expect(token.findAll(node => node.props['aria-hidden'] === 'true')).toHaveLength(0);
-      expect(token.findByProps({ className: 'sr-only' }).children.join('')).toContain('Account usage unknown');
-      expect(JSON.stringify(unknown.toJSON())).not.toContain('—');
-      expect(JSON.stringify(unknown.toJSON())).not.toContain('5h');
+      expect(unknown.toJSON()).toBeNull();
     }
     const limited = render(<ComposerQuota quota={{ atLimit: true }} />);
     expect(findText(limited.root, 'at limit')).toHaveLength(1);
