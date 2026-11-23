@@ -7,7 +7,7 @@
 import { Button, PanelSlot, daemonOfClient } from '@ferretry/app';
 import type { StepHost } from './onboarding-api.ts';
 import { LoginChanged } from '@ferretry/plugin-logins/contract';
-import { StepActions, StepBody, StepLine } from '@ferretry/plugin-runtimes/import-kit';
+import { SIGNED_LOGIN_KEY, StepActions, StepBody, StepLine } from '@ferretry/plugin-runtimes/import-kit';
 import { useCallback, useEffect, useState } from 'react';
 import { type OnboardingClient, type SignInFacts, readSignIn, refusalWords } from './onboarding-api.ts';
 
@@ -51,6 +51,8 @@ export function SignInPage({ client, step }: { readonly client: OnboardingClient
       try {
         const facts = await readSignIn(client);
         if (facts.state === 'signed-in') {
+          // The login handled is kept for the Ready page, which names THAT login's runtime (run memory, never stored).
+          step.remember({ [SIGNED_LOGIN_KEY]: facts.id });
           if (first) {
             step.skip('not-needed');
             return;

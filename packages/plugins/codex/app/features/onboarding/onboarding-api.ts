@@ -145,7 +145,7 @@ const signedIn = (login: LoginView): boolean =>
   enabled(login) && (login.status.word === 'ready' || login.status.word === 'refresh_due');
 
 export type SignInFacts =
-  | { readonly state: 'signed-in'; readonly who: string }
+  | { readonly state: 'signed-in'; readonly who: string; readonly id: string }
   /** A switched-on login that needs signing in AND can be signed in from here. */
   | { readonly state: 'needs-sign-in'; readonly login: LoginView }
   /** A switched-on login whose status is still being checked: not signed in, not yet known to need it. */
@@ -157,7 +157,8 @@ export type SignInFacts =
 export function signInFacts(list: LoginList): SignInFacts {
   const codex = list.logins.filter(driveCodex);
   const ready = codex.find(signedIn);
-  if (ready !== undefined) return { state: 'signed-in', who: ready.email ?? ready.label ?? 'a Codex login' };
+  if (ready !== undefined)
+    return { state: 'signed-in', who: ready.email ?? ready.label ?? 'a Codex login', id: ready.id };
   const live = codex.filter(enabled);
   const signable = live.find(login => login.status.word === 'needs_sign_in' && login.signIn.available);
   if (signable !== undefined) return { state: 'needs-sign-in', login: signable };

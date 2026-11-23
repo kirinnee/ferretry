@@ -1,85 +1,109 @@
 /**
- * "Your projects" on the New ferret page: the panel Projects puts in Ferrets' `ferrets.new-ferret-project` slot, ABOVE the
- * Folder box. One row per registered project; a click fills the Folder field with that project's folder and marks the row.
- * It draws nothing while the registry is unread, fails or is empty, so the Folder box is never pushed down for nothing.
+ * "WHERE IT WORKS" ON THE NEW FERRET PAGE: the panel Projects puts in Ferrets' `ferrets.new-ferret-project` slot. A clear
+ * Folder | Project choice (the app's shared SegmentedChoice): Folder is the finder project setup uses (plus one-tap recent folders), Project is a searchable
+ * dropdown of the registered projects where GitHub can be linked. It opens on Project when there are projects (or the
+ * folder in the field is one), else on Folder, and reserves its height while the registry is unread so nothing jumps.
+ *
+ * The path the page SENDS is always the one the visible mode shows: each mode remembers its own last pick and gets it
+ * back when the person returns to it, and under Project a folder that is no registered project is cleared (so Create
+ * waits for a choice) rather than sent beside a trigger that says "Choose a project".
  *
  * It only proposes a folder through the slot's `onPick`; the page's own start (and the daemon's fence) decides.
  */
+import { useAppHook } from '@ferretry/app';
+import { SegmentedChoice, type SegmentedChoiceOption } from '@ferretry/app/ui';
 import { isNewFerretProjectSlotProps } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
-import { Check, FolderOpen } from 'lucide-react';
-import { useState } from 'react';
-import type { ProjectInfo } from '../../contract/index.ts';
+import { useEffect, useRef, useState } from 'react';
+import { isProjectsConnectAccount, type ProjectInfo, PROJECTS_CONNECT_ACCOUNT_HOOK } from '../../contract/index.ts';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
 import type { ProjectsClient } from '../lib/client.ts';
-import { projectLine } from '../lib/project-line.ts';
 import type { ProjectsStore } from '../lib/projects-store.ts';
 import { projectsStoreFor } from './context.ts';
+import { WhereFolder } from './new-ferret-where-folder.tsx';
+import { WhereProject } from './new-ferret-where-project.tsx';
 
-/** Rows shown before "More…". */
-const FIRST_ROWS = 5;
+type Kind = 'folder' | 'project';
 
-function ProjectRow({
-  project,
-  selected,
-  onPick,
-}: {
-  readonly project: ProjectInfo;
-  readonly selected: boolean;
-  readonly onPick: (folder: string) => void;
-}) {
-  return (
-    <li className="m-0 list-none">
-      <button
-        aria-pressed={selected}
-        className="flex min-h-[44px] w-full min-w-0 items-center gap-sm rounded-control border border-border-strong bg-surface px-control-x py-1 text-left hover:border-border aria-pressed:border-fg"
-        data-new-ferret-project-row={project.id}
-        onClick={() => onPick(project.path)}
-        title={project.path}
-        type="button"
-      >
-        <FolderOpen aria-hidden="true" className="shrink-0 text-muted" size={16} />
-        <span className="grid min-w-0 flex-1">
-          <span className="truncate text-ui font-medium text-fg">{project.name}</span>
-          <span className="truncate text-meta text-muted">{projectLine(project)}</span>
-        </span>
-        {selected ? <Check aria-hidden="true" className="shrink-0 text-fg" size={16} /> : null}
-      </button>
-    </li>
-  );
-}
+const CHOICES: readonly SegmentedChoiceOption<Kind>[] = [
+  { value: 'project', label: 'Project' },
+  { value: 'folder', label: 'Folder' },
+];
 
-function NewFerretProjects({
+/** What to show before the person chooses: the project a folder already is, else a folder, else Project if any exist. */
+const defaultKind = (value: string, projects: readonly ProjectInfo[]): Kind => {
+  if (value !== '') return projects.some(project => project.path === value) ? 'project' : 'folder';
+  return projects.length > 0 ? 'project' : 'folder';
+};
+
+function NewFerretWhere({
+  client,
   store,
+  daemon,
+  id,
   value,
+  recent,
   onPick,
 }: {
+  readonly client: ProjectsClient;
   readonly store: ProjectsStore;
+  readonly daemon: string;
+  readonly id: string;
   readonly value: string;
+  readonly recent: readonly string[];
   readonly onPick: (folder: string) => void;
 }) {
-  const { projects } = useProjectsSlice(store);
-  const [all, setAll] = useState(false);
-  if (projects === null || projects.length === 0) return null;
-  const shown = all ? projects : projects.slice(0, FIRST_ROWS);
+  const { projects, status } = useProjectsSlice(store);
+  // Git accounts' own "Connect a GitHub account" card, the one the create flow mounts; absent when that plugin is off.
+  const provided = useAppHook(daemon, PROJECTS_CONNECT_ACCOUNT_HOOK);
+  const connectAccount = isProjectsConnectAccount(provided) ? provided : undefined;
+  const [chosen, setChosen] = useState<Kind | null>(null);
+  const unread = projects === null && (status === 'idle' || status === 'loading');
+  const known = projects ?? [];
+  const kind = chosen ?? defaultKind(value, known);
+  const isProject = (path: string): boolean => known.some(project => project.path === path);
+  // What each mode showed when the person last left it, so coming back restores it.
+  const last = useRef<Record<Kind, string>>({ folder: '', project: '' });
+  const choose = (next: Kind): void => {
+    if (next === kind) return;
+    if (value !== '') last.current[kind] = value;
+    setChosen(next);
+    if (next === 'project') {
+      if (!isProject(value)) onPick(isProject(last.current.project) ? last.current.project : '');
+    } else if (last.current.folder !== '' && last.current.folder !== value) onPick(last.current.folder);
+  };
+  // Under Project the field only ever holds a registered project's folder: anything else (a Recent folder, a
+  // conversation's folder arriving later) would be sent beside a trigger that says "Choose a project".
+  useEffect(() => {
+    if (!unread && kind === 'project' && value !== '' && !isProject(value)) onPick('');
+  });
   return (
-    <section aria-label="Your projects" className="mb-2 grid gap-1.5" data-new-ferret-projects="">
-      <h3 className="m-0 text-meta font-semibold text-muted">Your projects</h3>
-      <ul className="m-0 grid gap-1.5 p-0">
-        {shown.map(project => (
-          <ProjectRow key={project.id} onPick={onPick} project={project} selected={value === project.path} />
-        ))}
-      </ul>
-      {projects.length > FIRST_ROWS ? (
-        <button
-          className="w-fit text-meta text-muted hover:text-fg"
-          onClick={() => setAll(current => !current)}
-          type="button"
-        >
-          {all ? 'Fewer' : `More… (${projects.length - FIRST_ROWS})`}
-        </button>
-      ) : null}
-    </section>
+    <div className="grid gap-2" data-new-ferret-where="">
+      <SegmentedChoice
+        data-new-ferret-where-switch=""
+        label="Where it works"
+        onChange={choose}
+        options={CHOICES}
+        value={kind}
+      />
+      {unread ? (
+        <div className="min-h-[44px] text-ui text-muted" data-new-ferret-where-reading="" role="status">
+          Reading your projects…
+        </div>
+      ) : kind === 'folder' ? (
+        <WhereFolder client={client} id={id} onPick={onPick} recent={recent} value={value} />
+      ) : (
+        <WhereProject
+          client={client}
+          connectAccount={connectAccount}
+          id={id}
+          onPick={onPick}
+          projects={known}
+          store={store}
+          value={value}
+        />
+      )}
+    </div>
   );
 }
 
@@ -88,7 +112,15 @@ export const createNewFerretProjectsPanel = (client: ProjectsClient): AppCompone
   const store = projectsStoreFor(client);
   return function NewFerretProjectsPanel(props: PanelProps) {
     return isNewFerretProjectSlotProps(props) ? (
-      <NewFerretProjects onPick={props.onPick} store={store} value={props.value} />
+      <NewFerretWhere
+        client={client}
+        daemon={props.daemon}
+        id={props.id}
+        onPick={props.onPick}
+        recent={props.recent}
+        store={store}
+        value={props.value}
+      />
     ) : null;
   };
 };

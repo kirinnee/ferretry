@@ -43,6 +43,8 @@ export interface OnboardingEntry {
   readonly group?: string;
   /** See `OnboardingDecl.stepHost`. */
   readonly stepHost?: true;
+  /** See `OnboardingDecl.informational`. */
+  readonly informational?: true;
 }
 
 /** Frozen after every build (§7.6 step 5). */

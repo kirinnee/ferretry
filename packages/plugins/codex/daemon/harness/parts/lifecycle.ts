@@ -9,7 +9,7 @@ import {
   type StartRefusal,
 } from '@ferretry/core-ferrets/contract';
 import { err, ok, type Result } from '@ferretry/std';
-import { buildCodexLaunchArgv, codexCompactPrompt } from '../../lib/index.ts';
+import { buildCodexLaunchArgv, codexCompactPrompt, codexExecChain } from '../../lib/index.ts';
 import { settingsFlags } from '../../lib/settings.ts';
 import { CODEX_LAUNCH_SETTINGS, type HarnessConfig } from '../../../contract/index.ts';
 import { CODEX_QUESTIONS_OFF, codexFixedArguments, codexPermissionArguments } from '../../lib/fixed-layer.ts';
@@ -85,12 +85,16 @@ export const lifecyclePart: HarnessPart<'start' | 'resume' | 'stop'> = ({
     await ensureHome(spec);
     const sqliteHome = await poolHistory(spec.ferret);
     const argv = await command(spec, location.path, permissionMode, sqliteHome, harnessConversation);
+    const execChain = codexExecChain(location.path);
     await rollouts.launched(spec, harnessConversation);
     await recordLaunchSettings(spec.ferret, permissionMode, spec.runtime);
     const running =
       harnessConversation === undefined
-        ? await runner.start({ ferret: spec.ferret, command: argv, cwd: spec.folder, env })
-        : await runner.resume({ ferret: spec.ferret, command: argv, cwd: spec.folder, env }, harnessConversation);
+        ? await runner.start({ ferret: spec.ferret, command: argv, cwd: spec.folder, env, execChain })
+        : await runner.resume(
+            { ferret: spec.ferret, command: argv, cwd: spec.folder, env, execChain },
+            harnessConversation,
+          );
     if (!running.ok) return running;
     // Codex mints its own conversation id after launch; Conversation finds it, so none is claimed here.
     return ok({ running: running.value, ...(harnessConversation === undefined ? {} : { harnessConversation }) });

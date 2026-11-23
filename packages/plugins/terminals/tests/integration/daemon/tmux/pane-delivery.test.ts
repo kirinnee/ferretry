@@ -989,3 +989,61 @@ describe('tmux pane delivery — text that joins a literal turn before Enter', (
     should(literals(server)).equal(1);
   });
 });
+
+describe('tmux pane delivery — the development-channels confirm at launch (answerDevChannels)', () => {
+  const devChannels = async (): Promise<string> =>
+    (
+      await readFile(join(import.meta.dir, '../../../fixtures/startup-dialogs/claude-2.1.317-dev-channels.txt'), 'utf8')
+    ).trimEnd();
+  const keys = (server: FakeTmuxServer): readonly (string | undefined)[] =>
+    server.calls.filter(call => call[0] === 'send-keys').map(call => call.at(-1));
+
+  it('should answer that confirm with its first row (one Enter) and type nothing else', async () => {
+    // Arrange — Claude draws the confirm in place of the screen, as every launch that loads Ferretry's channel does.
+    const server = new FakeTmuxServer();
+    server.modalReplacesComposer = true;
+    server.modal = await devChannels();
+    const { subject } = delivery(server);
+
+    // Act
+    const answer = await subject.answerDevChannels(SESSION);
+
+    // Assert
+    should(answer).equal('answered');
+    should(keys(server)).deepEqual(['Enter']);
+    should(server.modal).equal(undefined);
+    should(literals(server)).equal(0);
+    should(server.submitted).deepEqual([]);
+  });
+
+  it('should press nothing at any OTHER startup dialog, leaving it for a person', async () => {
+    // Arrange — the folder-trust screen: a dialog the first turn's delivery answers, but never this launch step.
+    const server = new FakeTmuxServer();
+    server.modalReplacesComposer = true;
+    server.modal = (
+      await readFile(join(import.meta.dir, '../../../fixtures/startup-dialogs/claude-2.1.281-folder-trust.txt'), 'utf8')
+    ).trimEnd();
+    const { subject } = delivery(server);
+
+    // Act
+    const answer = await subject.answerDevChannels(SESSION);
+
+    // Assert
+    should(answer).equal('absent');
+    should(keys(server)).deepEqual([]);
+    should(server.modal).not.equal(undefined);
+  });
+
+  it('should press nothing at a pane already at its prompt', async () => {
+    // Arrange
+    const server = new FakeTmuxServer();
+    const { subject } = delivery(server);
+
+    // Act
+    const answer = await subject.answerDevChannels(SESSION);
+
+    // Assert
+    should(answer).equal('absent');
+    should(keys(server)).deepEqual([]);
+  });
+});

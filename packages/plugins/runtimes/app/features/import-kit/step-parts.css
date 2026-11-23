@@ -115,3 +115,32 @@
     animation: none;
   }
 }
+
+/* "<Tool> is ready": the headline of a segment's last page. A check when a runtime can start, a quiet dash when none can. */
+.ob-ready {
+  align-items: center;
+  color: var(--fg);
+  display: flex;
+  font-size: var(--font-size-lg, 1.125rem);
+  font-weight: 600;
+  gap: 12px;
+  line-height: var(--leading-base);
+  margin: 0;
+}
+.ob-ready__mark {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  flex: none;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+.ob-ready__mark[data-mark='done'] {
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+}
+.ob-ready__mark[data-mark='none'] {
+  background: var(--surface-2);
+  color: var(--muted);
+}

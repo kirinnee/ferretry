@@ -458,6 +458,36 @@ describe('context-imports', () => {
     expect(found).toContain('other/tests/witness.test.ts:1: ../../access/daemon/step-up-provider.ts');
   });
 
+  test("only Projects' tests may reach Ferrets' New ferret page and client type, and no other Ferrets app file", async () => {
+    const f = ws([
+      {
+        id: 'projects',
+        files: {
+          'tests/page.test.ts': `import '../../../core/ferrets/app/features/new-ferret/new-ferret-page.tsx';\nimport '../../../core/ferrets/app/lib/client.ts';\n`,
+          'tests/other.test.ts': `import '../../../core/ferrets/app/lib/other.ts';\n`,
+          'app/host.ts': `import '../../../core/ferrets/app/features/new-ferret/new-ferret-page.tsx';\n`,
+        },
+      },
+      {
+        id: 'ferrets',
+        core: true,
+        files: {
+          'app/features/new-ferret/new-ferret-page.tsx': 'export {};\n',
+          'app/lib/client.ts': 'export {};\n',
+          'app/lib/other.ts': 'export {};\n',
+        },
+      },
+      { id: 'other', files: { 'tests/page.test.ts': `import '../../../core/ferrets/app/lib/client.ts';\n` } },
+    ]);
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('projects/tests/page.test.ts');
+    expect(found).toContain('projects/tests/other.test.ts:1: ../../../core/ferrets/app/lib/other.ts');
+    expect(found).toContain(
+      'projects/app/host.ts:1: ../../../core/ferrets/app/features/new-ferret/new-ferret-page.tsx',
+    );
+    expect(found).toContain('other/tests/page.test.ts:1: ../../../core/ferrets/app/lib/client.ts');
+  });
+
   test('a cli half may import its own generated verb list and no other generated file', async () => {
     const f = ws([
       {

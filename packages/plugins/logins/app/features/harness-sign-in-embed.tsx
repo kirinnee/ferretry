@@ -19,12 +19,12 @@ import { LoginSignIn } from './login-sign-in.tsx';
 export interface HarnessSignInEmbedProps {
   readonly client: LoginsClient;
   readonly harness: HarnessKind;
-  /** Told, with nothing, once the harness accepted the sign-in. */
-  readonly onSignedIn?: () => void;
+  /** Told once the harness accepted the sign-in, with the id of the login that now works. */
+  readonly onSignedIn?: (loginId?: string) => void;
   /** The first read found nothing to ask: the page lifts its loading cover. */
   readonly onShown?: () => void;
-  /** The first read found a usable login of this harness: the page may skip itself. */
-  readonly onAlreadySignedIn?: () => void;
+  /** The first read found a usable login of this harness (its id): the page may skip itself. */
+  readonly onAlreadySignedIn?: (loginId?: string) => void;
   /** A name for the login this panel makes (it keeps its id-derived name when absent). */
   readonly label?: string;
   /** Drawn above the button that makes the login, only when there is one to make (the add panel's folded name field). */
@@ -43,8 +43,9 @@ const rowsOf = (list: LoginList, harness: HarnessKind): readonly Row[] =>
   list.logins.filter(login => login.harness === harness);
 
 /** A login of this harness that works NOW: switched on, and ready (or about to refresh itself). */
-const usable = (list: LoginList, harness: HarnessKind): boolean =>
-  rowsOf(list, harness).some(login => enabled(login) && USABLE.has(login.status.word));
+const usableLogin = (list: LoginList, harness: HarnessKind): Row | undefined =>
+  rowsOf(list, harness).find(login => enabled(login) && USABLE.has(login.status.word));
+const usable = (list: LoginList, harness: HarnessKind): boolean => usableLogin(list, harness) !== undefined;
 
 /**
  * The login this panel works on: one of this harness, switched on, that needs a sign-in and can be signed in here. Right
@@ -97,21 +98,24 @@ export function HarnessSignInEmbed({
     if (told.current || (list === null && failure === null)) return;
     told.current = true;
     alreadyAtFirst.current = list !== null && usable(list, harness);
-    if (list !== null && usable(list, harness)) onAlreadySignedIn?.();
+    if (list !== null && usable(list, harness)) onAlreadySignedIn?.(usableLogin(list, harness)?.id);
     else onShown?.();
   }, [list, failure, harness, onShown, onAlreadySignedIn]);
 
   // A login that was still being checked (or was signed in by another door) turns out to work: that is "signed in", once.
   const signedTold = useRef(false);
-  const signedIn = useCallback((): void => {
-    if (signedTold.current) return;
-    signedTold.current = true;
-    onSignedIn?.();
-  }, [onSignedIn]);
+  const signedIn = useCallback(
+    (loginId?: string): void => {
+      if (signedTold.current) return;
+      signedTold.current = true;
+      onSignedIn?.(loginId);
+    },
+    [onSignedIn],
+  );
   useEffect(() => {
     // Not on the first read: a login that already worked then is "already signed in" (above), and the page moved on.
     if (!told.current || alreadyAtFirst.current || list === null || !usable(list, harness)) return;
-    signedIn();
+    signedIn(usableLogin(list, harness)?.id);
   }, [list, harness, signedIn]);
 
   const name = HARNESS_NAMES[harness];
@@ -133,7 +137,7 @@ export function HarnessSignInEmbed({
         autoStart={login.id === made}
         onSignedIn={() => {
           void reload();
-          signedIn();
+          signedIn(login.id);
         }}
       />
     );
@@ -219,9 +223,11 @@ export function harnessSignIn(
   harness: HarnessKind,
   props: Readonly<Record<string, unknown>>,
 ): ReactElement {
-  const callback = (name: string): (() => void) | undefined => {
+  const callback = (name: string): ((loginId?: string) => void) | undefined => {
     const value = props[name];
-    return typeof value === 'function' ? () => (value as () => void)() : undefined;
+    return typeof value === 'function'
+      ? (loginId?: string) => (value as (loginId?: string) => void)(loginId)
+      : undefined;
   };
   const [onSignedIn, onShown, onAlreadySignedIn] = [
     callback('onSignedIn'),

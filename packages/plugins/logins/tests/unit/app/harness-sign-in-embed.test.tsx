@@ -117,6 +117,20 @@ describe('the harness sign-in embed', () => {
     }
   });
 
+  it("O9-6 tells the page WHICH login it found usable, so the Ready page can name that login's runtime", async () => {
+    const told: (string | undefined)[] = [];
+    const view = await mount(
+      <HarnessSignInEmbed
+        client={scripted({ [LIST]: loginList(login({ id: 'work' })), [GRANTS]: OPEN })}
+        harness="claude-code"
+        onAlreadySignedIn={id => told.push(id)}
+      />,
+    );
+    await settle();
+    expect(told).toEqual(['work']);
+    await view.unmount();
+  });
+
   it('does not count a switched-off login as signed in: the page is shown, and the Add action stays', async () => {
     const told: string[] = [];
     const disabled = login({ disabled: { source: 'login' } });
