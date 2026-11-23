@@ -104,13 +104,19 @@ describe('the facts a fast switch is planned from', () => {
 describe('refusing a start that asks for fast mode the model does not have', () => {
   const choices = catalog.choices;
 
-  it('should refuse a Codex model only when the catalog says it has no fast tier', () => {
+  it('should allow a Codex model only when the catalog says it has a fast tier', () => {
     // Act / Assert
     should(fastStartRefusal('gpt-daybreak', choices)).equal('Daybreak Blue has no fast mode');
     should(fastStartRefusal('gpt-6-sol', choices)).equal(undefined);
-    should(fastStartRefusal('unsaid', choices)).equal(undefined);
-    should(fastStartRefusal('not-listed', choices)).equal(undefined);
-    should(fastStartRefusal('gpt-daybreak', [])).equal(undefined);
+    should(fastStartRefusal('unsaid', choices)).equal(
+      "Codex's model list does not say Unsaid has fast mode, so it cannot be confirmed",
+    );
+    should(fastStartRefusal('not-listed', choices)).equal(
+      "Codex's model list does not include not-listed, so its fast mode cannot be confirmed",
+    );
+    should(fastStartRefusal('gpt-daybreak', [])).equal(
+      "Codex's model list does not include gpt-daybreak, so its fast mode cannot be confirmed",
+    );
   });
 });
 
