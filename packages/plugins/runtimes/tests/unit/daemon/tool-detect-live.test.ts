@@ -7,6 +7,7 @@
  * use a real temp directory as the whole `PATH`, the real cache and the real evaluator, wired the way
  * `host-assembly.ts` wires them. No network, no real home.
  */
+import { TEST_MODEL_SOURCES } from '../../support/starters.ts';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -60,6 +61,7 @@ function daemon() {
         logins: [sampleLogin('claude-you', { store: 'ferretry' })],
       }),
       environmentTemplates: async () => [],
+      modelSources: async () => TEST_MODEL_SOURCES,
     },
     components: EMPTY_OWNERS,
     within: work => work,

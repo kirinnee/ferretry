@@ -7,6 +7,7 @@ import {
   OnboardingChanged,
   OnboardingPort,
 } from './contract/index.ts';
+import { FerretsPort } from '@ferretry/core-ferrets/contract';
 import { LoginsPort } from '@ferretry/plugin-logins/contract';
 import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
@@ -28,8 +29,9 @@ export default definePlugin({
   words: ONBOARDING_WORDS,
 
   // Runtimes is optional: it says whether the machine is set up (it has a runtime). Off, the answer is "not set up".
-  // Logins offers the provider catalog the "Which AI do you want to use?" page lists under Others.
-  uses: { runtimes: RuntimesPort, logins: LoginsPort },
+  // Logins offers the provider catalog the "Which AI do you want to use?" page lists under Others; Ferrets says which harnesses are
+  // installed (the page lists those, never a list of its own).
+  uses: { runtimes: RuntimesPort, logins: LoginsPort, ferrets: FerretsPort },
   provides: { onboarding: OnboardingPort },
 
   actions: {

@@ -31,6 +31,7 @@ import {
   stoodInLoginSentence,
 } from '../lib/account/runtimes-model.ts';
 import type { AccountModel } from '../lib/account/schema.ts';
+import { type StarterModels, starterModelsOf } from '../lib/models/catalog.ts';
 import {
   FleetCatalogRefusal,
   type FleetCatalogServiceDeps,
@@ -52,7 +53,7 @@ const runtimesFile = RUNTIMES_CONFIG as unknown as ConfigFileDef<RuntimesFile>;
  */
 export interface RuntimesConfigSources {
   readonly config: Pick<ConfigPort, 'collection' | 'file'>;
-  readonly logins: Pick<LoginsApi, 'list' | 'environmentTemplates'>;
+  readonly logins: Pick<LoginsApi, 'list' | 'environmentTemplates' | 'modelSources'>;
   /** Who provides each profile component source; read live on every load, never kept. */
   readonly components: ComponentSourceLookup;
   /** Bounds each owner's answer, so one that never answers cannot hold an evaluation (and every apply behind it). */
@@ -89,6 +90,18 @@ async function loginTemplates(
   }
 }
 
+/**
+ * The model each harness starts with: the default of the catalog its sign-in reads, asked of Logins on every evaluation.
+ * `undefined` when Logins cannot say (the built-in profiles then hold no model set until it can).
+ */
+async function loginStarters(logins: Pick<LoginsApi, 'modelSources'>): Promise<StarterModels | undefined> {
+  try {
+    return starterModelsOf(await logins.modelSources());
+  } catch {
+    return undefined;
+  }
+}
+
 export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesConfigFiles {
   let lastLogins: Awaited<ReturnType<LoginsApi['list']>>['logins'] | undefined;
 
@@ -98,9 +111,10 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
     logins: NonNullable<typeof lastLogins>,
   ): Promise<Awaited<ReturnType<ConfigFilesPort<AccountModel>['load']>>> => {
     let assembled: RuntimesModel;
-    const [components, templates] = await Promise.all([
+    const [components, templates, starters] = await Promise.all([
       readProfileComponents(sources.components, ownInstructionsSource(sources.config), sources.within),
       loginTemplates(sources.logins),
+      loginStarters(sources.logins),
     ]);
     try {
       assembled = assembleRuntimesModel({
@@ -111,6 +125,7 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
         logins,
         templates,
         components,
+        ...(starters === undefined ? {} : { starters }),
       });
     } catch (error) {
       throw inconsistent(error);

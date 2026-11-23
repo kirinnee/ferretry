@@ -9,6 +9,7 @@
  *
  * And the owner's data: a `CLAUDE.md` / `AGENTS.md` a person wrote in a runtime home is NEVER replaced by the built-in text.
  */
+import { TEST_STARTERS } from '../support/starters.ts';
 import { afterEach, describe, it } from 'bun:test';
 import { chmod, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -81,6 +82,7 @@ async function freshMachine(options: MachineOptions = {}) {
       sampleLogin('personal', { harness: 'codex', harnesses: ['codex'], store: 'ferretry' }),
     ],
     templates: new Map(),
+    starters: TEST_STARTERS,
     components:
       options.instructionsText === undefined
         ? NO_COMPONENTS

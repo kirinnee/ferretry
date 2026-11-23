@@ -3,6 +3,8 @@
  * component another plugin owns), that every load carries its OWN stand-ins (no list shared between reads), and the check
  * a setup or a clone makes before it writes.
  */
+import type { ModelCatalogSourcesView } from '@ferretry/plugin-logins/contract';
+import { TEST_MODEL_SOURCES, TEST_STARTERS } from '../../support/starters.ts';
 import { describe, expect, it } from 'bun:test';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
@@ -26,6 +28,7 @@ const BASE: Values = {
 function adapter(
   values: { current: Values } = { current: BASE },
   components: ComponentSourceLookup = () => 'unavailable',
+  modelSources: () => Promise<ModelCatalogSourcesView> = async () => TEST_MODEL_SOURCES,
 ) {
   return runtimesConfigFiles({
     config: {
@@ -40,6 +43,7 @@ function adapter(
         logins: [sampleLogin('claude-you', { store: 'ferretry' })],
       }),
       environmentTemplates: async () => [],
+      modelSources,
     },
     components,
     within: work => work,
@@ -80,6 +84,7 @@ describe('the model-in-effect adapter', () => {
       logins: {
         list: async () => ({ format: 1 as const, machine: 'm', logins: [glm] }),
         environmentTemplates: async () => templates.current,
+        modelSources: async () => TEST_MODEL_SOURCES,
       },
       components: () => 'unavailable',
       within: work => work,
@@ -91,6 +96,32 @@ describe('the model-in-effect adapter', () => {
 
     expect(modelOf(first).credentials.glm?.env).toEqual({ REGION: 'eu' });
     expect(modelOf(second).credentials.glm?.env).toEqual({ REGION: 'us' });
+  });
+
+  it('gives the built-in model set of each harness the default model of the catalog Logins states', async () => {
+    const loaded = await adapter().load();
+
+    expect(modelOf(loaded).components.modelSets['ferretry-claude']).toEqual({
+      models: [TEST_STARTERS.claude],
+      default: TEST_STARTERS.claude,
+    });
+    expect(modelOf(loaded).components.modelSets['ferretry-codex']).toEqual({
+      models: [TEST_STARTERS.codex],
+      default: TEST_STARTERS.codex,
+    });
+  });
+
+  it('still reads the model when Logins cannot state its catalogs: the built-in profiles hold no model set then', async () => {
+    const files = adapter(
+      { current: BASE },
+      () => 'unavailable',
+      async () => await Promise.reject(new Error('locked')),
+    );
+
+    const loaded = await files.load();
+
+    expect(modelOf(loaded).components.modelSets['ferretry-claude']).toBeUndefined();
+    expect(modelOf(loaded).profiles['ferretry-claude']?.layers.join(' ')).not.toContain('modelSets/');
   });
 
   it('reads nothing as standing in when every part was read', async () => {

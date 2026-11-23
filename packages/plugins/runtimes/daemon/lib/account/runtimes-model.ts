@@ -30,6 +30,7 @@ import {
   type RuntimesFile,
 } from '../../../contract/index.ts';
 import { harnessKindOfKey, type HarnessKind } from '../manifest.ts';
+import type { StarterModels } from '../models/catalog.ts';
 import { BUILTIN_COMPONENTS } from './builtin-autonomous.ts';
 import { deriveRuntimes, withDerived } from './derived-runtimes.ts';
 import {
@@ -72,6 +73,8 @@ export interface RuntimesFiles {
   readonly templates: ReadonlyMap<string, EnvironmentLoginTemplate> | undefined;
   /** The components the owning plugins provided, per kind. */
   readonly components: ComponentReading;
+  /** The model each harness starts with (the catalog default); what the built-in model sets hold. Absent: none is known. */
+  readonly starters?: StarterModels;
 }
 
 /** An environment login whose variables the model holds as a stand-in, and why (names and rules only, never a value). */

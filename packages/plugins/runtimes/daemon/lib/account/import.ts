@@ -39,7 +39,7 @@ import { importItemId, importNamedItemId } from '../../../contract/index.ts';
 import { harnessNamed } from './import-scope.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
-import { FLEET_STARTER_MODELS } from '../defaults.ts';
+import type { StarterModels } from '../models/catalog.ts';
 import type { HarnessKind } from '../manifest.ts';
 import {
   parseSettings,
@@ -291,6 +291,8 @@ export interface ImportPlan {
   readonly notes: readonly ImportNote[];
   readonly updates: readonly ImportUpdate[];
   readonly duplicates: readonly ImportDuplicate[];
+  /** The starter models the plan was made with: a merge onto a machine with no files builds its built-in profiles from them. */
+  readonly starters: StarterModels;
   /** The record to persist once this plan has been applied. */
   readonly record: ImportRecord;
 }
@@ -317,6 +319,8 @@ export interface ImportOptions {
   readonly tickedEnv?: readonly string[];
   /** Harnesses whose duplicate runtime should be created anyway ("Add another anyway"). */
   readonly addDuplicates?: readonly HarnessKind[];
+  /** The model each harness starts with when the host names none: the catalog default, from whoever holds Logins' catalogs. */
+  readonly starters?: StarterModels;
   /** A content digest. Equal inputs give equal outputs; that is all that is asked of it. */
   readonly digest: (text: string) => string;
 }
@@ -564,17 +568,21 @@ export function declaredModelIds(settings: SettingsObject): readonly string[] {
   return found;
 }
 
-/** The starter model set: the one model a harness starts with when nothing names another. */
-const starterModelSet = (harness: HarnessKind): ModelSetComponent => ({
-  models: [FLEET_STARTER_MODELS[harness]],
-  default: FLEET_STARTER_MODELS[harness],
-});
+/** The starter model set: the one model a harness starts with when nothing names another; none when no starter is known. */
+const starterModelSet = (harness: HarnessKind, starters: StarterModels): ModelSetComponent | undefined => {
+  const model = starters[harness];
+  return model === undefined ? undefined : { models: [model], default: model };
+};
 
 /** The model set a harness's settings imply: the models it names for that harness, or the starter. */
-function modelSetOf(harness: HarnessKind, settings: SettingsObject | undefined): ModelSetComponent {
+function modelSetOf(
+  harness: HarnessKind,
+  settings: SettingsObject | undefined,
+  starters: StarterModels,
+): ModelSetComponent | undefined {
   const named = declaredModelIds(settings ?? {}).filter(id => modelHarness(id) === harness);
   const [first] = named;
-  if (first === undefined) return starterModelSet(harness);
+  if (first === undefined) return starterModelSet(harness, starters);
   return { models: [...named], default: first };
 }
 
@@ -674,7 +682,8 @@ export interface HarnessHarvest {
   readonly skills: readonly HostSkill[];
   /** Skills the person left out (their names), which the import never reads again as a change. */
   readonly skillsLeft: readonly string[];
-  readonly modelSet: ModelSetComponent;
+  /** The host's models, else the starter; absent when the host names none and no starter is known. */
+  readonly modelSet?: ModelSetComponent;
   readonly secretKeys: readonly string[];
   /** GitHub token variables left out until ticked (names only): listed by the scan, never filed. */
   readonly gatedKeys: readonly string[];
@@ -726,6 +735,7 @@ export function harvest(
   secrets: ImportedSecret[],
   skip: ReadonlySet<string>,
   ticked: ReadonlySet<string>,
+  starters: StarterModels,
 ): HarnessHarvest {
   const { harness } = scan;
   const key = itemHarness(harness);
@@ -876,6 +886,7 @@ export function harvest(
     return false;
   });
 
+  const modelSet = modelSetOf(harness, modelSource, starters);
   return {
     harness,
     ...(instructions === undefined ? {} : { instructions }),
@@ -885,7 +896,7 @@ export function harvest(
     mcp,
     skills,
     skillsLeft,
-    modelSet: modelSetOf(harness, modelSource),
+    ...(modelSet === undefined ? {} : { modelSet }),
     secretKeys,
     gatedKeys: envImport?.gated ?? [],
     ...(envImport === undefined || (envImport.plain.length === 0 && envImport.minted.length === 0)
@@ -1096,13 +1107,14 @@ export function harnessCandidates(entry: HarnessHarvest): Candidate[] {
       warnings: [],
     });
   }
-  candidates.push({
-    component: { kind: 'modelSets', name: harnessNamed(entry.harness, 'models'), value: entry.modelSet },
-    files: [],
-    sources: [entry.settings?.source ?? `Ferretry's starter model for ${entry.harness}`],
-    digestText: JSON.stringify(entry.modelSet),
-    warnings: [],
-  });
+  if (entry.modelSet !== undefined)
+    candidates.push({
+      component: { kind: 'modelSets', name: harnessNamed(entry.harness, 'models'), value: entry.modelSet },
+      files: [],
+      sources: [entry.settings?.source ?? `Ferretry's starter model for ${entry.harness}`],
+      digestText: JSON.stringify(entry.modelSet),
+      warnings: [],
+    });
   return candidates;
 }
 

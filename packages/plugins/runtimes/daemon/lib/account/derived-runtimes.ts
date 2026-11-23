@@ -22,6 +22,7 @@ import type { LoginView } from '@ferretry/plugin-logins/contract';
 import type { ModelSetFile, ProfileFile, RuntimeFile } from '../../../contract/index.ts';
 import { builtinProfileLayers, starterModelSet } from './builtin-autonomous.ts';
 import { harnessKindOfKey } from '../manifest.ts';
+import { NO_STARTERS, type StarterModels } from '../models/catalog.ts';
 import { isRuntimeName } from './schema.ts';
 
 /** What the explicit files already hold, by name. */
@@ -30,6 +31,8 @@ export interface DerivedFrom {
   readonly profiles: ReadonlyMap<string, ProfileFile>;
   readonly modelSets: ReadonlyMap<string, ModelSetFile>;
   readonly logins: readonly LoginView[];
+  /** The model each harness starts with (the catalog default); what the built-in model sets hold. */
+  readonly starters?: StarterModels;
 }
 
 /** What is derived, to be added beside the explicit files (an entry already there is never in here). */
@@ -54,8 +57,11 @@ export function deriveRuntimes(from: DerivedFrom): Derived {
   for (const harness of ['claude', 'codex'] as const) {
     const wanted = defaultProfileName(harness);
     if (!from.profiles.has(wanted))
-      profiles.set(wanted, { contents: [...builtinProfileLayers(harness)] } as ProfileFile);
-    if (!from.modelSets.has(wanted)) modelSets.set(wanted, starterModelSet(harness) as ModelSetFile);
+      profiles.set(wanted, {
+        contents: [...builtinProfileLayers(harness, from.starters ?? NO_STARTERS)],
+      } as ProfileFile);
+    const starter = starterModelSet(harness, from.starters ?? NO_STARTERS);
+    if (starter !== undefined && !from.modelSets.has(wanted)) modelSets.set(wanted, starter as ModelSetFile);
   }
   const taken = new Set([...from.runtimes.values()].map(runtime => runtime.login as string));
   for (const login of from.logins) {

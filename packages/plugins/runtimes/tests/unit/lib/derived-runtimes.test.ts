@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { TEST_STARTERS } from '../../support/starters.ts';
 import type { ModelSetFile, ProfileFile, RuntimeFile } from '../../../contract/index.ts';
 import { deriveRuntimes, withDerived } from '../../../daemon/lib/account/derived-runtimes.ts';
 import { resolveDefaultRuntime } from '../../../daemon/lib/account/schema.ts';
@@ -14,6 +15,7 @@ import {
 } from '../../../daemon/lib/account/runtimes-model.ts';
 
 const none = {
+  starters: TEST_STARTERS,
   runtimes: new Map<string, RuntimeFile>(),
   profiles: new Map<string, ProfileFile>(),
   modelSets: new Map<string, ModelSetFile>(),
@@ -155,5 +157,29 @@ describe('runtimes derived from logins', () => {
     expect(assembled.model.runtimes.atomi).toMatchObject({ credential: 'atomi', profile: 'ferretry-claude' });
     expect(assembled.sources).toBe(2);
     expect(assembled.unreadable).toEqual([]);
+  });
+});
+
+describe('the built-in profiles and the starter models', () => {
+  it('hold a model set of the starter model of each harness', () => {
+    const derived = deriveRuntimes({ ...none, logins: [] });
+
+    expect(derived.modelSets.get('ferretry-claude')).toEqual({
+      models: [TEST_STARTERS.claude],
+      default: TEST_STARTERS.claude,
+    });
+    expect(derived.modelSets.get('ferretry-codex')).toEqual({
+      models: [TEST_STARTERS.codex],
+      default: TEST_STARTERS.codex,
+    });
+    expect(derived.profiles.get('ferretry-claude')?.contents).toContain('modelSets/ferretry-claude');
+  });
+
+  it('hold no model set, and no layer naming one, for a harness with no known starter', () => {
+    const derived = deriveRuntimes({ ...none, starters: { codex: TEST_STARTERS.codex }, logins: [] });
+
+    expect(derived.modelSets.has('ferretry-claude')).toBe(false);
+    expect(derived.profiles.get('ferretry-claude')?.contents).not.toContain('modelSets/ferretry-claude');
+    expect(derived.modelSets.has('ferretry-codex')).toBe(true);
   });
 });
