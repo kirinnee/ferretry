@@ -331,18 +331,14 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
 
       <div className="fy-lg-group">
         <h4 className="m-0 text-meta font-semibold uppercase text-muted">Used by</h4>
-        {login.usedBy.length === 0 ? (
-          <p className="mb-0 mt-1 text-cell text-muted">No runtime uses this login yet.</p>
-        ) : (
-          <ul className="m-0 flex list-none flex-col gap-1 p-0">
-            {login.usedBy.map(name => (
-              <li key={name} className="flex items-center gap-2 text-cell" data-login-runtime={name}>
-                <AccountStatus word={login.status.word} />
-                <span className="font-mono text-fg">{name}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        {/* A count, not the runtimes' stored names: those mean nothing to a person. The names stay one hover away. */}
+        <p
+          className="mb-0 mt-1 text-cell text-muted"
+          data-login-used-by=""
+          {...(login.usedBy.length === 0 ? {} : { title: login.usedBy.join(', ') })}
+        >
+          {login.usedBy.length === 0 ? 'No runtime uses this login yet.' : loginUse(login)}
+        </p>
       </div>
 
       <div className="fy-lg-group">

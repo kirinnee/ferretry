@@ -8,11 +8,11 @@ import { type ReactNode, useId } from 'react';
 import type { PickerAccount } from '../../../lib/account-picker.ts';
 import './warden-form.css';
 
-/** A login in the picker: its name, then the harness and the label the Runtimes tab shows for it. */
+/** A login in the picker, in the words the Runtimes tab shows for it ("Claude · your terminal sign-in"); the stored name only when the runtime is gone. */
 export const loginLabel = (agent: string, runtimes: readonly PickerAccount[]): string => {
   const runtime = runtimes.find(candidate => candidate.wrapper === agent);
   if (runtime === undefined) return agent;
-  return [agent, runtime.kind, ...(runtime.displayName === agent ? [] : [runtime.displayName])].join(' · ');
+  return runtime.displayName;
 };
 
 /** A cleared number field is `NaN` until fixed; the model reports it rather than a silent zero. */
