@@ -39,6 +39,7 @@ import {
   SecretNames,
   skillsCandidates,
 } from './import.ts';
+import { builtinDocument, builtinProfileName } from './builtin-autonomous.ts';
 import { HARNESS_DISPLAY_NAMES } from './layering.ts';
 import { componentScope, scopeFits } from './scope.ts';
 import {
@@ -310,7 +311,8 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     // Something found now, or something an earlier import found, is a Default; only model sets is a
     // Starter. Never empty: the harness's model set is always new or recorded.
     const found = anyFound || fitting.some(reference => !reference.startsWith('modelSets/'));
-    const layers = ordered(fitting);
+    // The built-in profile of the harness is the OLDEST layer, so whatever was found (or the starter model set) wins over it.
+    const layers = [`profile/${builtinProfileName(harness)}` as LayerReferenceText, ...ordered(fitting)];
     const wanted = importedRuntimeName(harness, found ? IMPORT_NAMES.defaultProfile : IMPORT_NAMES.starterProfile);
     const name = freeName(
       wanted,
@@ -321,7 +323,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     if (!found) {
       notes.push({
         harness,
-        text: 'Nothing found. A plain Starter profile with only a model set. You can add to it later.',
+        text: "Nothing found. A plain Starter profile: Ferretry's autonomous defaults and a model set. You can add to it later.",
       });
     }
   }
@@ -419,7 +421,8 @@ export function mergeImport(
   plan: ImportPlan,
   acceptedUpdates: readonly LayerReferenceText[] = [],
 ): AccountModel {
-  const base = (existing ?? parseAccountModel(EMPTY_MODEL)) as AccountModel;
+  // A machine with no files has no model to read the built-in profiles from, and an imported profile names one as its base.
+  const base = (existing ?? parseAccountModel({ ...EMPTY_MODEL, ...builtinDocument() })) as AccountModel;
   const components = Object.fromEntries(
     Object.entries(base.components).map(([kind, entries]) => [kind, { ...entries }]),
   ) as Record<ComponentKind, Record<string, unknown>>;

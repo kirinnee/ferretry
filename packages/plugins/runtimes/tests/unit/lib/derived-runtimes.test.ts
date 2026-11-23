@@ -54,7 +54,15 @@ describe('runtimes derived from logins', () => {
     expect(derived.runtimes.get('atomi')).toEqual({ login: 'atomi', profile: 'ferretry-claude' });
     expect(derived.runtimes.get('personal')).toEqual({ login: 'personal', profile: 'ferretry-codex' });
     expect([...derived.profiles.keys()].toSorted()).toEqual(['ferretry-claude', 'ferretry-codex']);
-    expect(derived.profiles.get('ferretry-claude')?.contents).toEqual(['modelSets/ferretry-claude']);
+    expect(derived.profiles.get('ferretry-claude')?.contents).toEqual([
+      'modelSets/ferretry-claude',
+      'instructions/ferretry-work-alone',
+      'settings/ferretry-claude-comfort',
+    ]);
+    expect(derived.profiles.get('ferretry-codex')?.contents).toEqual([
+      'modelSets/ferretry-codex',
+      'instructions/ferretry-work-alone',
+    ]);
     expect(derived.modelSets.get('ferretry-codex')?.models.length).toBe(1);
   });
 
