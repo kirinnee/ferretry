@@ -3,7 +3,7 @@
  * tokens were ticked. It rides in the address (`?fyimport=…`, rewritten without leaving the page, as the Board does for its
  * filters), so no new storage exists and a copied link reads the same. Names and item ids only; never a value.
  */
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { z } from 'zod';
 import { ImportItemIdSchema, type ImportItemId } from '../../../contract/index.ts';
 
@@ -34,11 +34,11 @@ const MemorySchema = z.strictObject({
 
 export interface Memory {
   readonly tool: number;
-  readonly names: Partial<Record<HarnessKey, string>>;
-  readonly left: Readonly<Record<HarnessKey, ReadonlySet<ImportItemId>>>;
-  readonly ticked: Readonly<Record<HarnessKey, ReadonlySet<string>>>;
-  readonly declined: Readonly<Record<HarnessKey, ReadonlySet<string>>>;
-  readonly ends: Partial<Record<HarnessKey, 'imported' | 'skipped'>>;
+  readonly names: Partial<Record<KnownHarnessKey, string>>;
+  readonly left: Readonly<Record<KnownHarnessKey, ReadonlySet<ImportItemId>>>;
+  readonly ticked: Readonly<Record<KnownHarnessKey, ReadonlySet<string>>>;
+  readonly declined: Readonly<Record<KnownHarnessKey, ReadonlySet<string>>>;
+  readonly ends: Partial<Record<KnownHarnessKey, 'imported' | 'skipped'>>;
   readonly finished: boolean;
 }
 

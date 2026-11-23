@@ -8,19 +8,31 @@
 
 import {
   type ConversionSummary,
-  type HarnessKey,
+  type FerretSummary,
+  isKnownHarnessKey,
+  type KnownHarnessKey,
   type MoveRefusal,
   MoveRefusedBodySchema,
 } from '../../../contract/index.ts';
 import type { MoveCallFailure } from './call-failure.ts';
 
 /** The short name the sentences use: the CLI's own. */
-export const HARNESS_SHORT: Readonly<Record<HarnessKey, string>> = { 'claude-code': 'Claude', codex: 'Codex' };
+export const HARNESS_SHORT: Readonly<Record<KnownHarnessKey, string>> = { 'claude-code': 'Claude', codex: 'Codex' };
 
 /** The product name the small print uses. */
-export const harnessProduct = (harness: HarnessKey): string => (harness === 'claude-code' ? 'Claude Code' : 'Codex');
+export const harnessProduct = (harness: KnownHarnessKey): string =>
+  harness === 'claude-code' ? 'Claude Code' : 'Codex';
 
-export const otherHarness = (harness: HarnessKey): HarnessKey => (harness === 'claude-code' ? 'codex' : 'claude-code');
+export const otherHarness = (harness: KnownHarnessKey): KnownHarnessKey =>
+  harness === 'claude-code' ? 'codex' : 'claude-code';
+
+/**
+ * A ferret the cross-harness move is about: one on Claude Code or Codex, the only two harnesses a conversation converts
+ * between today. A ferret on any other harness is not one, and the move page says so instead of guessing a target.
+ */
+export type ConvertibleSummary = FerretSummary & { readonly harness: KnownHarnessKey };
+export const isConvertible = (summary: FerretSummary): summary is ConvertibleSummary =>
+  isKnownHarnessKey(summary.harness);
 
 /** The word a recorded conversation harness (`claude`, `codex`) is said with. */
 const recordedShort = (harness: ConversionSummary['sourceHarness']): string =>

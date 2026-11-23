@@ -15,7 +15,7 @@
 import { basename } from 'node:path';
 import { z } from 'zod';
 import { malformedSecretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { CompactAtSchema } from '../../contract/index.ts';
 
 const NonEmptyString = z.string().min(1);
@@ -52,10 +52,10 @@ export const HarnessKindSchema = z.enum(['claude', 'codex']);
 export type HarnessKind = z.infer<typeof HarnessKindSchema>;
 
 /** The harness a wire or plugin key names: the plugin id `claude-code` is the CLI `claude`. */
-export const harnessKindOfKey = (key: HarnessKey): HarnessKind => (key === 'claude-code' ? 'claude' : key);
+export const harnessKindOfKey = (key: KnownHarnessKey): HarnessKind => (key === 'claude-code' ? 'claude' : key);
 
 /** The wire and plugin key of a harness: the CLI `claude` is the plugin `claude-code`. */
-export const harnessKeyOfKind = (kind: HarnessKind): HarnessKey => (kind === 'claude' ? 'claude-code' : kind);
+export const harnessKeyOfKind = (kind: HarnessKind): KnownHarnessKey => (kind === 'claude' ? 'claude-code' : kind);
 
 /**
  * The lane an account runs in. Declared, never derived from a name: an account whose wrapper is

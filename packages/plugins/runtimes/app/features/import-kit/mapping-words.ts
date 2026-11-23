@@ -2,13 +2,16 @@
  * The words the import wizard says: what each thing it found BECOMES in Ferretry, and what it leaves where it is. One place,
  * so the screen, the tests and the owner's reading of it agree.
  */
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { ImportNamedItem, ImportSingleItem } from '../../../contract/index.ts';
 
-export const HARNESS_LABEL: Readonly<Record<HarnessKey, string>> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+export const HARNESS_LABEL: Readonly<Record<KnownHarnessKey, string>> = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+};
 
 /** What one item becomes, by kind and harness. */
-export const becomes = (harness: HarnessKey, kind: ImportSingleItem | ImportNamedItem): string => {
+export const becomes = (harness: KnownHarnessKey, kind: ImportSingleItem | ImportNamedItem): string => {
   switch (kind) {
     case 'instructions':
       return 'Instructions in your Default profile';

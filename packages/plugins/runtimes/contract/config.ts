@@ -6,7 +6,7 @@
  */
 import { InstantSchema, ITEM_NAME_PATTERN, NonEmptyStringSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { KnownHarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { BrowserFirewallFailureSchema, BrowserPortsSettingSchema } from './wire/shared.ts';
 
 /**
@@ -123,7 +123,7 @@ export const RuntimeFileSchema = z.preprocess(
     login: LoginRefSchema,
     profile: ItemNameSchema,
     /** For a login that drives both harnesses: which one this runtime runs. Left out: the profile's, else the login's. */
-    harness: HarnessKeySchema.optional(),
+    harness: KnownHarnessKeySchema.optional(),
     /** The shell item this runtime enters (Q18): a ferret enters a shell only when its runtime names one. */
     shell: ItemNameSchema.optional(),
     disabled: DisabledConfigSchema.optional(),
@@ -202,7 +202,7 @@ export const InstructionsFileSchema = z.strictObject({
       text => !holdsControlCharacter(text),
       'the text holds a control character (NUL or another, besides tab and line breaks)',
     ),
-  harness: HarnessKeySchema.optional(),
+  harness: KnownHarnessKeySchema.optional(),
   clonedFrom: NonEmptyStringSchema.optional(),
   clonedFromDaemon: NonEmptyStringSchema.optional(),
   clonedFromKey: NonEmptyStringSchema.optional(),

@@ -18,7 +18,7 @@ import type { RenderAccountSlot } from './account-slot.tsx';
 import { ChangeAccount } from './change-account.tsx';
 import { moveCallFailure } from './call-failure.ts';
 import { ConvertHarness } from './convert-harness.tsx';
-import { HARNESS_SHORT, otherHarness } from './conversion-model.ts';
+import { HARNESS_SHORT, isConvertible, otherHarness } from './conversion-model.ts';
 import { askToStopJobs, moveFerret, moveToOtherHarness, readConversionPreview, readFerret } from './move-api.ts';
 
 export interface MovePageProps {
@@ -72,7 +72,8 @@ export function MovePage({ client, ferret, slot, onClose, initialMode = 'account
   );
 
   const summary = load.status === 'ready' || load.status === 'moved' ? load.summary : null;
-  const otherName = summary === null ? 'the other CLI' : HARNESS_SHORT[otherHarness(summary.harness)];
+  const otherName =
+    summary === null || !isConvertible(summary) ? 'the other CLI' : HARNESS_SHORT[otherHarness(summary.harness)];
 
   return (
     <main aria-labelledby={headingId} className="flex min-h-0 flex-1 flex-col bg-surface" data-move-page="">
@@ -142,6 +143,19 @@ export function MovePage({ client, ferret, slot, onClose, initialMode = 'account
           </p>
           <Button className="mt-3 min-h-[44px]" data-move-open="" onClick={onClose} type="button" variant="primary">
             Back to {load.summary.name}
+          </Button>
+        </section>
+      ) : !isConvertible(load.summary) ? (
+        <section
+          className="m-4 rounded-control border border-border bg-surface-2 p-4"
+          data-move-unsupported=""
+          role="status"
+        >
+          <p className="m-0 text-ui leading-base text-muted">
+            Moving a ferret between accounts or CLIs is not offered for the {load.summary.harness} harness yet.
+          </p>
+          <Button className="mt-3" onClick={onClose} type="button">
+            Back
           </Button>
         </section>
       ) : mode === 'account' ? (

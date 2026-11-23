@@ -9,7 +9,7 @@
  */
 import { daemonOfClient } from '@ferretry/app';
 import { isStepUpRefusal } from '@ferretry/app/ui';
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { type SetupScan, SetupScanSchema } from '../../../contract/index.ts';
 import type { RuntimesClient } from '../../lib/client.ts';
@@ -17,7 +17,7 @@ import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
 import { HARNESSES, type ToolModel, toolModel, versionOf } from './model.ts';
 
 const SCAN_ROUTE = 'GET /v1/runtimes/setup/scan' as const;
-const UPDATE_ROUTE: Readonly<Record<HarnessKey, string>> = {
+const UPDATE_ROUTE: Readonly<Record<KnownHarnessKey, string>> = {
   'claude-code': 'GET /v1/claude-code/update',
   codex: 'GET /v1/codex/update',
 };
@@ -31,7 +31,7 @@ export type ScanRead =
   | {
       readonly kind: 'ready';
       readonly scan: SetupScan;
-      readonly versions: Readonly<Record<HarnessKey, string | null>>;
+      readonly versions: Readonly<Record<KnownHarnessKey, string | null>>;
     };
 
 export interface ScanStore {
@@ -152,13 +152,13 @@ const peekAhead = (client: RuntimesClient, nowMs: number): Promise<MachineRead> 
 };
 
 /** The tools' models of one machine read, or null when the scan did not answer (a refusal, or a passkey it wants). */
-const modelsOf = (read: MachineRead): Readonly<Record<HarnessKey, ToolModel>> | null => {
+const modelsOf = (read: MachineRead): Readonly<Record<KnownHarnessKey, ToolModel>> | null => {
   const parsed = SetupScanSchema.safeParse(read.answer);
   if (!parsed.success) return null;
   const versions = { 'claude-code': versionOf(read.claude), codex: versionOf(read.codex) };
   return Object.fromEntries(
     HARNESSES.map(harness => [harness, toolModel(harness, parsed.data, versions[harness])]),
-  ) as Record<HarnessKey, ToolModel>;
+  ) as Record<KnownHarnessKey, ToolModel>;
 };
 
 /**
@@ -167,8 +167,8 @@ const modelsOf = (read: MachineRead): Readonly<Record<HarnessKey, ToolModel>> | 
  * touches the machine's scan store, so another page that reads the scan (the Settings import) is not disturbed and the note
  * costs no extra scan, however often the page is drawn again. Null while the read is out, and when no flow holds one.
  */
-export function useScanAhead(client: RuntimesClient): Readonly<Record<HarnessKey, ToolModel>> | null {
-  const [models, setModels] = useState<Readonly<Record<HarnessKey, ToolModel>> | null>(null);
+export function useScanAhead(client: RuntimesClient): Readonly<Record<KnownHarnessKey, ToolModel>> | null {
+  const [models, setModels] = useState<Readonly<Record<KnownHarnessKey, ToolModel>> | null>(null);
   useEffect(() => {
     let live = true;
     const ahead = peekAhead(client, Date.now());
@@ -240,7 +240,7 @@ export const scanStoreFor = (client: RuntimesClient, run: string): ScanStore => 
 export interface HarnessScan {
   readonly read: ScanRead;
   /** Both tools' models once the scan is read; null before. */
-  readonly models: Readonly<Record<HarnessKey, ToolModel>> | null;
+  readonly models: Readonly<Record<KnownHarnessKey, ToolModel>> | null;
   /** The person's own press: may ask for the passkey. */
   readonly look: () => Promise<void>;
   /** Read again quietly (after an install or a sign-in that is not a press). */
@@ -273,7 +273,7 @@ export function useScan(
       read.kind === 'ready'
         ? (Object.fromEntries(
             HARNESSES.map(harness => [harness, toolModel(harness, read.scan, read.versions[harness])]),
-          ) as Record<HarnessKey, ToolModel>)
+          ) as Record<KnownHarnessKey, ToolModel>)
         : null,
     [read],
   );
@@ -283,7 +283,7 @@ export function useScan(
 /** One tool's page: the shared scan of this `run` and that tool's model (null until read). */
 export function useHarnessScan(
   client: RuntimesClient,
-  harness: HarnessKey,
+  harness: KnownHarnessKey,
   run: string,
 ): HarnessScan & { readonly model: ToolModel | null } {
   const shared = useScan(client, { run });

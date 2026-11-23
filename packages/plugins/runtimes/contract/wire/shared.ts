@@ -8,15 +8,15 @@
  * today's wire, or loosened to a documented placeholder. Every placeholder is listed in the port's hand-over; when the
  * owner's contract lands, the port compares and (where §2.4 allows) swaps to its import.
  *
- * COPIED, not loosened: HarnessKey (Claude Code / Codex key), CredentialStore, CredentialStatusWord, Disabled,
+ * COPIED, not loosened: KnownHarnessKey (Claude Code / Codex key), CredentialStore, CredentialStatusWord, Disabled,
  * GrantRefusal, BrowserMode, BrowserFirewallFailure, BrowserPortsSetting, AutoResumeSummary, LocalModels, SecretName.
  * PLACEHOLDER (looser than today): BrowserProxySetting, CatalogProvenance, CredentialView.
  */
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { KnownHarnessKeySchema } from '@ferretry/core-ferrets/contract';
 
-export { HarnessKeySchema, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema };
+export { KnownHarnessKeySchema, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema };
 
 // ─── Logins ──────────────────────────────────────────────────────────────────────────────────────────────────────
 

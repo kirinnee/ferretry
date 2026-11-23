@@ -2,7 +2,7 @@
  * The one `setup.import` change a harness's onboarding pages end in. Pure: names only, never a value. The r9 wizard
  * and a plugin's own pages (Claude Code's, Codex's) build it here, so the same choices give the same change.
  */
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { type AccountChange, type ImportItemId, ImportItemIdSchema } from '../../../contract/index.ts';
 
 export interface ImportChangeExtras {
@@ -19,8 +19,8 @@ export interface ImportChangeExtras {
  * sends no name (a retry on a runtime that already exists).
  */
 export function buildImportChange(
-  harness: HarnessKey,
-  include: readonly HarnessKey[],
+  harness: KnownHarnessKey,
+  include: readonly KnownHarnessKey[],
   skip: Iterable<ImportItemId>,
   name: string,
   extras: ImportChangeExtras = {},

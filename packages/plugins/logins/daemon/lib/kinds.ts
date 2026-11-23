@@ -7,7 +7,7 @@
  * second time rather than trust that. `status` and `quota` are words and percentages. The daemon holds no token at all.
  */
 import type {
-  HarnessKey,
+  KnownHarnessKey,
   LoginCredentialAnswer,
   LoginField,
   LoginKind,
@@ -78,7 +78,7 @@ const FIELDS: Readonly<Record<KindKey, readonly LoginField[]>> = {
   endpoint: [URL_FIELD, KEY_FIELD],
 };
 
-const HARNESSES: Readonly<Record<KindKey, readonly HarnessKey[]>> = {
+const HARNESSES: Readonly<Record<KindKey, readonly KnownHarnessKey[]>> = {
   anthropic: [harnessKey('claude')],
   openai: [harnessKey('codex')],
   'api-key': [harnessKey('claude'), harnessKey('codex')],
@@ -145,7 +145,7 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
    */
   const claudeLaunch = async (
     login: string,
-    harness: HarnessKey,
+    harness: KnownHarnessKey,
   ): Promise<Result<Readonly<Record<string, string>>, string>> => {
     if (harness !== harnessKey('claude')) return ok({});
     const view = await viewOf(login, 'anthropic');
@@ -187,7 +187,7 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
     quota: async login => quotaOf(await viewOf(login, key)),
     ...(key === 'anthropic'
       ? {
-          launchEnvironment: async (login: string, harness: HarnessKey) => {
+          launchEnvironment: async (login: string, harness: KnownHarnessKey) => {
             try {
               return await claudeLaunch(login, harness);
             } catch {
@@ -199,7 +199,7 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
     // Only a Codex sign-in is a FILE a harness reads. Claude's reaches a ferret as environment (`env`/launch environment).
     ...(key === 'openai'
       ? {
-          credential: async (login: string, harness: HarnessKey): Promise<LoginCredentialAnswer> => {
+          credential: async (login: string, harness: KnownHarnessKey): Promise<LoginCredentialAnswer> => {
             const unavailable = (sentence: string): LoginCredentialAnswer => ({ kind: 'unavailable', sentence });
             known(login, key);
             if (harness !== harnessKey('codex')) return unavailable(`the login ${login} is spent by Codex only`);

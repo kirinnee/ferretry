@@ -3,11 +3,11 @@
  * (cross-plugin imports go through contracts only, and a login's wire shape is `LoginView`).
  */
 
-import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import { HARNESS_NAMES } from './shell-ports.ts';
 
-export type HarnessKind = HarnessKey;
+export type HarnessKind = KnownHarnessKey;
 
 export const HARNESSES: readonly HarnessKind[] = ['claude-code', 'codex'];
 

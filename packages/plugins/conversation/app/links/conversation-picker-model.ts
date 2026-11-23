@@ -8,7 +8,7 @@
 import { TERMINAL_STATUSES } from '@ferretry/app';
 import type { Instant } from '@ferretry/std';
 import type { LinkableConversation, LinkQuery } from '../../contract/index.ts';
-import type { HarnessKey } from './link-words.ts';
+import type { KnownHarnessKey } from './link-words.ts';
 
 const DAY_MS = 86_400_000;
 
@@ -79,7 +79,7 @@ export const matchesDate = (row: LinkableConversation, filter: DateFilter, now: 
   return since === undefined || Date.parse(row.lastActivityAt) >= Date.parse(since);
 };
 
-export type HarnessFilter = 'all' | HarnessKey;
+export type HarnessFilter = 'all' | KnownHarnessKey;
 
 /** The daemon-side search the Continue list sends: only the narrowing it has. */
 export const listingQuery = (
