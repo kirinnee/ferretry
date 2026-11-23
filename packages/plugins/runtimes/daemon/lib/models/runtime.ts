@@ -19,8 +19,10 @@
  * Pure.
  */
 import type { LocalModels } from '@ferretry/plugin-logins/contract';
-import type { ResolvedModelSet } from '../account/layering.ts';
+import { HARNESS_DISPLAY_NAMES, type ResolvedModelSet } from '../account/layering.ts';
+import type { Credential } from '../account/schema.ts';
 import type { HarnessKind } from '../manifest.ts';
+import { loginModelCatalog, type ModelCatalogSources } from './catalog.ts';
 import {
   type CatalogHalf,
   catalogDefault,
@@ -129,6 +131,23 @@ function withLocalModels(
     .filter(model => !known.has(model.id))
     .map(model => ({ id: model.id, label: model.label, efforts: [], available: true, local: true as const }));
   return [...fromCatalog, ...extra];
+}
+
+/**
+ * Why a runtime that holds no model cannot launch, or `undefined` when it has one. It asks `runtimeModels` the way the launch
+ * inventory does (`materialise.ts`), so the picker and a launch give ONE answer: a runtime with no model list is shown
+ * refused with this sentence, never offered as launchable.
+ */
+export function noModelReason(
+  modelSet: ResolvedModelSet | undefined,
+  harness: HarnessKind,
+  credential: Pick<Credential, 'store' | 'preset'>,
+  sources: ModelCatalogSources | undefined,
+): string | undefined {
+  const catalog = sources === undefined ? {} : loginModelCatalog(credential, harness, sources);
+  return runtimeModels({ harness, modelSet, ...catalog }).default === undefined
+    ? `No model list for ${HARNESS_DISPLAY_NAMES[harness]} yet`
+    : undefined;
 }
 
 /** The runtime's models, default and pinned variables (module doc). */

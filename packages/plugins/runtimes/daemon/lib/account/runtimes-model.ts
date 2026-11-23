@@ -75,6 +75,8 @@ export interface RuntimesFiles {
   readonly components: ComponentReading;
   /** The model each harness starts with (the catalog default); what the built-in model sets hold. Absent: none is known. */
   readonly starters?: StarterModels;
+  /** The model each derived runtime was pinned to when first seen, by runtime name (`derived-runtimes.ts`). */
+  readonly pins?: ReadonlyMap<string, string>;
 }
 
 /** An environment login whose variables the model holds as a stand-in, and why (names and rules only, never a value). */
@@ -131,6 +133,8 @@ export interface RuntimesModel {
    * removes the last runtime on such a login must stay possible.
    */
   readonly stoodInLogins: readonly StoodInLogin[];
+  /** The derived runtimes seen for the first time, with the starter model each started on: to be recorded as their pins. */
+  readonly firstSeen: ReadonlyMap<string, string>;
   /** The number of files and logins the model came from; zero is a machine nobody has set up. */
   readonly sources: number;
   /** A digest of the model, so a staged change can tell the machine moved under it. */
@@ -367,6 +371,7 @@ export function assembleRuntimesModel(explicit: RuntimesFiles): RuntimesModel {
     unreadable,
     notices,
     stoodInLogins,
+    firstSeen: derived.firstSeen,
     sources:
       explicit.runtimes.size +
       explicit.profiles.size +

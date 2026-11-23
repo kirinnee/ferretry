@@ -48,12 +48,26 @@ const modelSetItems = MODEL_SET_ITEMS as unknown as ConfigCollectionDef<ModelSet
 const runtimesFile = RUNTIMES_CONFIG as unknown as ConfigFileDef<RuntimesFile>;
 
 /**
+ * Where a derived runtime's first-seen model is kept (D4: a runtime's default model never moves by itself). Both halves
+ * are asked of the plugin's state; an unreadable one answers `undefined` / records nothing, and the runtime then simply
+ * follows the starter for that read.
+ */
+export interface StarterPins {
+  /** The pinned model by runtime name, or `undefined` when the state cannot be read. */
+  read(): Promise<ReadonlyMap<string, string> | undefined>;
+  /** Records the models of runtimes with no pin yet; a pin that is already there is never replaced. */
+  add(models: ReadonlyMap<string, string>): Promise<void>;
+}
+
+/**
  * What the evaluator reads: Runtimes' own files, the logins Logins states (and their environment templates), and the
  * components the plugins that own the other kinds provide.
  */
 export interface RuntimesConfigSources {
   readonly config: Pick<ConfigPort, 'collection' | 'file'>;
   readonly logins: Pick<LoginsApi, 'list' | 'environmentTemplates' | 'modelSources'>;
+  /** The first-seen model of each derived runtime. */
+  readonly pins: StarterPins;
   /** Who provides each profile component source; read live on every load, never kept. */
   readonly components: ComponentSourceLookup;
   /** Bounds each owner's answer, so one that never answers cannot hold an evaluation (and every apply behind it). */
@@ -111,10 +125,11 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
     logins: NonNullable<typeof lastLogins>,
   ): Promise<Awaited<ReturnType<ConfigFilesPort<AccountModel>['load']>>> => {
     let assembled: RuntimesModel;
-    const [components, templates, starters] = await Promise.all([
+    const [components, templates, starters, pins] = await Promise.all([
       readProfileComponents(sources.components, ownInstructionsSource(sources.config), sources.within),
       loginTemplates(sources.logins),
       loginStarters(sources.logins),
+      sources.pins.read(),
     ]);
     try {
       assembled = assembleRuntimesModel({
@@ -126,10 +141,14 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
         templates,
         components,
         ...(starters === undefined ? {} : { starters }),
+        ...(pins === undefined ? {} : { pins }),
       });
     } catch (error) {
       throw inconsistent(error);
     }
+    // A derived runtime is pinned the FIRST time it is seen. A pin is written before the model is answered, so no later read
+    // can see a different starter; an unreadable pin file records nothing (the runtime follows the starter for that read).
+    if (pins !== undefined && assembled.firstSeen.size > 0) await sources.pins.add(assembled.firstSeen);
     return {
       evaluation: {
         fleetFiles: assembled.sources,

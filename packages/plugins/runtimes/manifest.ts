@@ -32,6 +32,7 @@ import {
   RUNTIME_ITEMS,
   RUNTIMES_AUDIT,
   RUNTIMES_CONFIG,
+  RUNTIMES_PINS,
   RUNTIMES_READ_MODELS,
   RUNTIMES_WORDS,
   RuntimesChanged,
@@ -484,6 +485,7 @@ export default definePlugin({
   },
 
   data: {
+    state: [RUNTIMES_PINS],
     config: [RUNTIMES_CONFIG, RUNTIME_ITEMS, PROFILE_ITEMS, MODEL_SET_ITEMS, INSTRUCTION_ITEMS],
     readModels: RUNTIMES_READ_MODELS,
     publishes: [RuntimesChanged, RuntimesDefaultChanged, RuntimesLaunchFailed],

@@ -183,3 +183,42 @@ describe('the built-in profiles and the starter models', () => {
     expect(derived.modelSets.has('ferretry-codex')).toBe(true);
   });
 });
+
+describe('D4: a derived runtime keeps the model it was pinned to', () => {
+  const MOVED = { claude: 'claude-moved-default', codex: TEST_STARTERS.codex };
+  const login = sampleLogin('atomi', { store: 'ferretry' });
+
+  it('reports a runtime with no pin as first seen, on the starter, and puts it on the shared profile', () => {
+    const derived = deriveRuntimes({ ...none, logins: [login] });
+
+    expect(derived.firstSeen).toEqual(new Map([['atomi', TEST_STARTERS.claude]]));
+    expect(derived.runtimes.get('atomi')?.profile).toBe('ferretry-claude');
+  });
+
+  it('keeps a pinned runtime on its model after the starter moved, on a profile of its own', () => {
+    const pins = new Map([['atomi', TEST_STARTERS.claude]]);
+
+    const derived = deriveRuntimes({ ...none, starters: MOVED, pins, logins: [login] });
+
+    const profile = derived.runtimes.get('atomi')?.profile as string;
+    expect(profile).not.toBe('ferretry-claude');
+    expect(derived.modelSets.get(profile)).toEqual({ models: [TEST_STARTERS.claude], default: TEST_STARTERS.claude });
+    expect(derived.profiles.get(profile)?.contents).toContain(`modelSets/${profile}`);
+    expect(derived.firstSeen.size).toBe(0);
+    // The shared built-in profile follows the catalog, for the runtimes seen from now on.
+    expect(derived.modelSets.get('ferretry-claude')?.default).toBe(MOVED.claude);
+  });
+
+  it('gives a login seen after the move the new default, and a pin that still matches the starter no profile of its own', () => {
+    const derived = deriveRuntimes({
+      ...none,
+      starters: MOVED,
+      pins: new Map([['old', MOVED.claude]]),
+      logins: [sampleLogin('old', { store: 'ferretry' }), sampleLogin('fresh', { store: 'ferretry' })],
+    });
+
+    expect(derived.runtimes.get('old')?.profile).toBe('ferretry-claude');
+    expect(derived.runtimes.get('fresh')?.profile).toBe('ferretry-claude');
+    expect(derived.firstSeen).toEqual(new Map([['fresh', MOVED.claude]]));
+  });
+});

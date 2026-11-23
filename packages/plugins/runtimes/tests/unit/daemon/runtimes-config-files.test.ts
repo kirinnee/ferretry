@@ -4,12 +4,16 @@
  * a setup or a clone makes before it writes.
  */
 import type { ModelCatalogSourcesView } from '@ferretry/plugin-logins/contract';
-import { TEST_MODEL_SOURCES, TEST_STARTERS } from '../../support/starters.ts';
+import { memoryPins, modelSourcesOf, TEST_MODEL_SOURCES, TEST_STARTERS } from '../../support/starters.ts';
 import { describe, expect, it } from 'bun:test';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import type { EnvironmentLoginTemplate } from '@ferretry/plugin-logins/contract';
-import { refuseBeforeWriting, runtimesConfigFiles } from '../../../daemon/adapters/runtimes-config-files.ts';
+import {
+  refuseBeforeWriting,
+  runtimesConfigFiles,
+  type StarterPins,
+} from '../../../daemon/adapters/runtimes-config-files.ts';
 import type { ComponentSourceLookup } from '../../../daemon/adapters/profile-components.ts';
 import type { AccountModel } from '../../../daemon/lib/account/schema.ts';
 
@@ -29,8 +33,10 @@ function adapter(
   values: { current: Values } = { current: BASE },
   components: ComponentSourceLookup = () => 'unavailable',
   modelSources: () => Promise<ModelCatalogSourcesView> = async () => TEST_MODEL_SOURCES,
+  pins: StarterPins = memoryPins(),
 ) {
   return runtimesConfigFiles({
+    pins,
     config: {
       collection: (def: ConfigCollectionDef<unknown>) =>
         new Map(Object.entries(values.current[(def as unknown as { collection: string }).collection] ?? {})),
@@ -69,6 +75,7 @@ describe('the model-in-effect adapter', () => {
       current: [{ kind: 'templates', id: 'glm', harness: 'claude-code', env: { REGION: 'eu' } } as never],
     };
     const files = runtimesConfigFiles({
+      pins: memoryPins(),
       config: {
         collection: (def: ConfigCollectionDef<unknown>) =>
           new Map(
@@ -108,6 +115,92 @@ describe('the model-in-effect adapter', () => {
     expect(modelOf(loaded).components.modelSets['ferretry-codex']).toEqual({
       models: [TEST_STARTERS.codex],
       default: TEST_STARTERS.codex,
+    });
+  });
+
+  describe('D4: a derived runtime keeps the model it first started with', () => {
+    // The login has no runtime file of its own, so it is derived.
+    const DERIVED: Values = { ...BASE, runtimes: {} };
+    const MOVED = { claude: 'claude-moved-default', codex: TEST_STARTERS.codex };
+    const defaultOf = (loaded: Parameters<typeof modelOf>[0], name: string) => {
+      const model = modelOf(loaded);
+      const profile = model.runtimes[name]?.profile ?? '';
+      const layer = model.profiles[profile]?.layers.find(
+        entry => entry.startsWith('modelSets/') || entry.includes('modelSets'),
+      );
+      return layer === undefined ? undefined : model.components.modelSets[layer.split('/').pop() ?? '']?.default;
+    };
+
+    it('records the starter the first time it sees the runtime', async () => {
+      const pins = memoryPins();
+
+      await adapter({ current: DERIVED }, undefined, undefined, pins).load();
+
+      expect(Object.fromEntries(pins.held)).toEqual({ 'claude-you': TEST_STARTERS.claude });
+    });
+
+    it('leaves the runtime on its first model when the catalog default moves, and offers the new one to a NEW login', async () => {
+      const pins = memoryPins();
+      const sources = { current: TEST_MODEL_SOURCES };
+      const files = adapter({ current: DERIVED }, undefined, async () => sources.current, pins);
+      expect(defaultOf(await files.load(), 'claude-you')).toBe(TEST_STARTERS.claude);
+
+      sources.current = modelSourcesOf(MOVED as Required<typeof MOVED>);
+      const after = await files.load();
+
+      // The existing runtime did not move, though the catalog now names another default.
+      expect(defaultOf(after, 'claude-you')).toBe(TEST_STARTERS.claude);
+      expect(Object.fromEntries(pins.held)).toEqual({ 'claude-you': TEST_STARTERS.claude });
+      // The built-in profile follows the catalog, so a runtime seen for the first time starts on the new default.
+      expect(modelOf(after).components.modelSets['ferretry-claude']?.default).toBe(MOVED.claude);
+    });
+
+    it('gives a login seen only after the move the new default, and pins it there', async () => {
+      const pins = memoryPins(new Map([['claude-you', TEST_STARTERS.claude]]));
+      const files = runtimesConfigFiles({
+        pins,
+        config: {
+          collection: (def: ConfigCollectionDef<unknown>) =>
+            new Map(Object.entries(DERIVED[(def as unknown as { collection: string }).collection] ?? {})),
+          file: () => undefined,
+        } as never,
+        logins: {
+          list: async () => ({
+            format: 1 as const,
+            machine: 'm',
+            logins: [
+              sampleLogin('claude-you', { store: 'ferretry' }),
+              sampleLogin('claude-new', { store: 'ferretry' }),
+            ],
+          }),
+          environmentTemplates: async () => [],
+          modelSources: async () => modelSourcesOf(MOVED as Required<typeof MOVED>),
+        },
+        components: () => 'unavailable',
+        within: work => work,
+      });
+
+      const loaded = await files.load();
+
+      expect(defaultOf(loaded, 'claude-you')).toBe(TEST_STARTERS.claude);
+      expect(defaultOf(loaded, 'claude-new')).toBe(MOVED.claude);
+      expect(Object.fromEntries(pins.held)).toEqual({
+        'claude-you': TEST_STARTERS.claude,
+        'claude-new': MOVED.claude,
+      });
+    });
+
+    it('follows the starter for a read, and records nothing, when the pins cannot be read', async () => {
+      const recorded: string[] = [];
+      const files = adapter({ current: DERIVED }, undefined, undefined, {
+        read: async () => undefined,
+        add: async models => {
+          recorded.push(...models.keys());
+        },
+      });
+
+      expect(defaultOf(await files.load(), 'claude-you')).toBe(TEST_STARTERS.claude);
+      expect(recorded).toEqual([]);
     });
   });
 

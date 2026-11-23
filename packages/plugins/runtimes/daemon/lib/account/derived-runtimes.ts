@@ -20,7 +20,7 @@
  */
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import type { ModelSetFile, ProfileFile, RuntimeFile } from '../../../contract/index.ts';
-import { builtinProfileLayers, starterModelSet } from './builtin-autonomous.ts';
+import { builtinProfileLayers, pinnedProfileName, starterModelSet } from './builtin-autonomous.ts';
 import { harnessKindOfKey } from '../manifest.ts';
 import { NO_STARTERS, type StarterModels } from '../models/catalog.ts';
 import { isRuntimeName } from './schema.ts';
@@ -33,6 +33,12 @@ export interface DerivedFrom {
   readonly logins: readonly LoginView[];
   /** The model each harness starts with (the catalog default); what the built-in model sets hold. */
   readonly starters?: StarterModels;
+  /**
+   * The model each derived runtime was PINNED to the first time it was seen, by runtime name (the plugin's state, which
+   * the adapter reads). A runtime in here keeps that model whatever the catalog's default becomes; one that is not is
+   * seen for the first time and starts on the harness's starter (`Derived.firstSeen`).
+   */
+  readonly pins?: ReadonlyMap<string, string>;
 }
 
 /** What is derived, to be added beside the explicit files (an entry already there is never in here). */
@@ -40,6 +46,8 @@ export interface Derived {
   readonly runtimes: ReadonlyMap<string, RuntimeFile>;
   readonly profiles: ReadonlyMap<string, ProfileFile>;
   readonly modelSets: ReadonlyMap<string, ModelSetFile>;
+  /** The derived runtimes with no pin yet and the starter model each starts on: what the adapter records as their pin. */
+  readonly firstSeen: ReadonlyMap<string, string>;
 }
 
 /** The profile and model set a derived runtime of a harness uses. */
@@ -63,13 +71,28 @@ export function deriveRuntimes(from: DerivedFrom): Derived {
     const starter = starterModelSet(harness, from.starters ?? NO_STARTERS);
     if (starter !== undefined && !from.modelSets.has(wanted)) modelSets.set(wanted, starter as ModelSetFile);
   }
+  const firstSeen = new Map<string, string>();
   const taken = new Set([...from.runtimes.values()].map(runtime => runtime.login as string));
   for (const login of from.logins) {
     const id = login.id as string;
     if (!usable(login) || taken.has(id) || from.runtimes.has(id) || !isRuntimeName(id)) continue;
-    runtimes.set(id, { login: id, profile: defaultProfileName(harnessKindOfKey(login.harness)) } as RuntimeFile);
+    const harness = harnessKindOfKey(login.harness);
+    const starter = from.starters?.[harness];
+    const pin = from.pins?.get(id);
+    if (pin === undefined && starter !== undefined) firstSeen.set(id, starter);
+    // A pin the harness's starter has since left moves to a profile of its own, so the shared built-in one can follow the
+    // catalog for runtimes seen later while this one stays where it was.
+    const profile =
+      pin === undefined || pin === starter ? defaultProfileName(harness) : pinnedProfileName(harness, pin);
+    if (profile !== defaultProfileName(harness) && !from.profiles.has(profile) && pin !== undefined) {
+      profiles.set(profile, {
+        contents: [...builtinProfileLayers(harness, { [harness]: pin }, profile)],
+      } as ProfileFile);
+      modelSets.set(profile, starterModelSet(harness, { [harness]: pin }) as ModelSetFile);
+    }
+    runtimes.set(id, { login: id, profile } as RuntimeFile);
   }
-  return { runtimes, profiles, modelSets };
+  return { runtimes, profiles, modelSets, firstSeen };
 }
 
 /** The explicit entries with the derived ones beside them; an explicit entry is never replaced. */

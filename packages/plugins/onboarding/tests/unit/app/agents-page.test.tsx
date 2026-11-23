@@ -146,6 +146,15 @@ describe('Which AI do you want to use?', () => {
     expect(view?.container.querySelector('[data-agent-none]')).toBeNull();
   });
 
+  it('a machine with no installed harness says there is nothing to set up, rather than asking for a pick', async () => {
+    const { calls } = await mountPage(undefined, []);
+    expect(calls).toEqual(['ready', 'commit:hold']);
+    const note = view?.container.querySelector('[data-agent-none]')?.textContent ?? '';
+    expect(note).toContain('No AI tool is installed');
+    expect(note).not.toContain('Pick at least one');
+    await expect(held.save?.()).rejects.toThrow('No AI tool is installed');
+  });
+
   it('a catalog that cannot be read says so and offers to try again', async () => {
     let attempts = 0;
     await mountPage(async () => {

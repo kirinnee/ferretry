@@ -30,6 +30,13 @@ import type { InstructionsComponent, SettingsComponent } from './schema.ts';
 /** The built-in profile of a harness (the names O8-9 introduced): derived runtimes run on it. */
 export const builtinProfileName = (harness: HarnessKind): string => `ferretry-${harness}`;
 
+/**
+ * The profile a derived runtime PINNED to `model` uses when that model is no longer the harness's starter: the built-in
+ * layers over a model set of that one model. Named by the model, so runtimes pinned to the same model share it.
+ */
+export const pinnedProfileName = (harness: HarnessKind, model: string): string =>
+  `${builtinProfileName(harness)}-pinned-${model.replaceAll(/[\\/]/gu, '-')}`;
+
 /** The generic instructions component every built-in profile names. */
 const AUTONOMOUS_INSTRUCTIONS_NAME = 'ferretry-work-alone';
 
@@ -71,8 +78,12 @@ export const isBuiltinInstructions = (name: string, body: string | undefined): b
   name === AUTONOMOUS_INSTRUCTIONS_NAME && body === AUTONOMOUS_INSTRUCTIONS;
 
 /** The layers of each built-in profile, oldest first. */
-export const builtinProfileLayers = (harness: HarnessKind, starters: StarterModels): readonly string[] => [
-  ...(starters[harness] === undefined ? [] : [`modelSets/${builtinProfileName(harness)}`]),
+export const builtinProfileLayers = (
+  harness: HarnessKind,
+  starters: StarterModels,
+  modelSet: string = builtinProfileName(harness),
+): readonly string[] => [
+  ...(starters[harness] === undefined ? [] : [`modelSets/${modelSet}`]),
   `instructions/${AUTONOMOUS_INSTRUCTIONS_NAME}`,
   ...(harness === 'claude' ? [`settings/${CLAUDE_COMFORT_NAME}`] : []),
 ];

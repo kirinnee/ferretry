@@ -277,6 +277,11 @@ export function AgentsPage({
   // Next needs at least one AI: an empty pick would skip every harness without a word. Later (which never runs this) is the
   // plain way to leave the question for another time.
   const empty = harnessRead.kind === 'ready' && isEmptyPick(pick, providers, installed);
+  // A machine whose registry lists no harness has nothing to tick, so it is told that, not asked to pick.
+  const nothingInstalled = harnessRead.kind === 'ready' && installed.length === 0;
+  const emptyWords = nothingInstalled
+    ? 'No AI tool is installed on this machine, so there is nothing to set up here yet. Choose Later.'
+    : 'Pick at least one AI to set up, or choose Later.';
   const holding = useRef(false);
   useEffect(() => {
     if (!empty && !holding.current) return;
@@ -284,11 +289,11 @@ export function AgentsPage({
     host.current?.commit(
       empty
         ? async () => {
-            throw new Error('Pick at least one AI to set up, or choose Later.');
+            throw new Error(emptyWords);
           }
         : null,
     );
-  }, [empty]);
+  }, [empty, emptyWords]);
   if (harnessRead.kind !== 'ready')
     return harnessRead.kind === 'reading' ? (
       <p className="m-0 text-cell text-muted" role="status" data-agent-harnesses-reading="">
@@ -307,7 +312,7 @@ export function AgentsPage({
       <AgentsChoices installed={installed} pick={pick} onPick={setChosen} read={read} onRetry={load} found={found} />
       {empty ? (
         <p className="m-0 mt-3 text-cell text-muted" role="status" data-agent-none="">
-          Pick at least one AI to set up, or choose Later.
+          {emptyWords}
         </p>
       ) : null}
     </>

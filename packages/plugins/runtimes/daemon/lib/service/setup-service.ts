@@ -128,7 +128,7 @@ import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import type { ConfigText } from '../ports.ts';
 import { CREDENTIALS_DIRECTORY, harnessKey, harnessKind } from './foreign.ts';
-import { type ModelCatalogSources, NO_STARTERS, type StarterModels, starterModelsOf } from '../models/catalog.ts';
+import { type ModelCatalogSources, starterModelsOf } from '../models/catalog.ts';
 import { expandAssetPath } from '../paths.ts';
 import { configFileWriteRefusal } from './ports.ts';
 import {
@@ -377,7 +377,7 @@ export class FleetSetupService {
     const plan = planImport(scans, {
       ...(reading.format === 'none' ? {} : { existing: reading.model }),
       ...(await this.#recordOption()),
-      starters: await this.#starters(),
+      starters: starterModelsOf(await this.deps.catalog.modelCatalogs?.()),
       digest: text => this.deps.digest(text),
     });
     return {
@@ -681,7 +681,7 @@ export class FleetSetupService {
       ...(change.skip === undefined ? {} : { skip: change.skip }),
       ...(existing === undefined ? {} : { existing }),
       ...(await this.#recordOption()),
-      starters: await this.#starters(),
+      starters: starterModelsOf(await this.deps.catalog.modelCatalogs?.()),
       existingSecrets,
       addDuplicates: change.addDuplicates === true ? installed : [],
       tickedEnv: tickedEnvOf(change),
@@ -1452,12 +1452,6 @@ export class FleetSetupService {
   }
 
   /** The catalogs an apply reads (docs/model-catalog.md), or nothing on a machine wired without them. */
-  /** The model each harness starts with: the default of the catalog its sign-in reads, as Logins states it now. */
-  async #starters(): Promise<StarterModels> {
-    const sources = await this.deps.catalog.modelCatalogs?.();
-    return sources === undefined ? NO_STARTERS : starterModelsOf(sources);
-  }
-
   async #modelCatalogs(): Promise<{ readonly modelCatalogs?: ModelCatalogSources }> {
     const sources = await this.deps.catalog.modelCatalogs?.();
     return sources === undefined ? {} : { modelCatalogs: sources };

@@ -82,7 +82,8 @@ export type StarterModels = Readonly<Partial<Record<HarnessKind, string>>>;
 /** No starter for any harness: what a reader that only needs profile NAMES passes. */
 export const NO_STARTERS: StarterModels = {};
 
-export function starterModelsOf(sources: Pick<ModelCatalogSources, 'catalogs'>): StarterModels {
+export function starterModelsOf(sources: Pick<ModelCatalogSources, 'catalogs'> | undefined): StarterModels {
+  if (sources === undefined) return NO_STARTERS;
   const starters: Partial<Record<HarnessKind, string>> = {};
   for (const harness of ['claude', 'codex'] as const) {
     const half = sources.catalogs[SIGN_IN_MODEL_CATALOGS[harness]]?.[harness];
