@@ -66,7 +66,6 @@ import {
   type ProfileDraftRequest,
   type ProfileDraftView,
   type RunningSession,
-  isSupportedHarnessKey,
   type RuntimeCatalog,
 } from '../../../contract/index.ts';
 import { cap, type CallerGovernance } from '@ferretry/core-gate/contract';
@@ -101,8 +100,13 @@ import {
   type LoginRuntimePreview,
   type LoginsApi,
 } from '@ferretry/plugin-logins/contract';
-import { loginChangeOf, modelAfterLoginChange, movedSentence, REFUSAL_CODES } from './login-changes.ts';
-import { UnsupportedHarnessError } from '../harness-kind.ts';
+import {
+  loginChangeOf,
+  loginRuntimePreview,
+  modelAfterLoginChange,
+  movedSentence,
+  REFUSAL_CODES,
+} from './login-changes.ts';
 import type { RuntimeConfigWriter } from './ports.ts';
 import {
   type AccountChangeFacts,
@@ -527,16 +531,7 @@ export class FleetCatalogService {
     if (onIt.size === 0) return [];
     const candidate = modelAfterLoginChange(reading.model, change);
     const catalog = runtimeCatalog(candidate, await this.#facts({ ...reading, model: candidate }));
-    return catalog.runtimes
-      .filter(runtime => onIt.has(runtime.name))
-      .map(runtime => ({
-        name: runtime.name,
-        // Logins previews only the harnesses it can read: a runtime on any other shows no harness, and its launch says why.
-        ...(isSupportedHarnessKey(runtime.harness) ? { harness: runtime.harness } : {}),
-        launch: runtime.launch.available
-          ? { available: true }
-          : { available: false, ...(runtime.launch.reason === undefined ? {} : { reason: runtime.launch.reason }) },
-      }));
+    return catalog.runtimes.filter(runtime => onIt.has(runtime.name)).map(loginRuntimePreview);
   }
 
   /** `GET /v1/fleet/machine`, with what this caller may do to it. */
@@ -1255,9 +1250,6 @@ export class FleetCatalogService {
       return await work();
     } catch (error) {
       if (error instanceof LoginChangeError) throw new FleetCatalogRefusal(REFUSAL_CODES[error.code], error.message);
-      // A login for a harness Runtimes has no behaviour for is refused by name, never staged as one of the two it knows.
-      if (error instanceof UnsupportedHarnessError)
-        throw new FleetCatalogRefusal('fleet_change_refused', error.message);
       throw error;
     }
   }

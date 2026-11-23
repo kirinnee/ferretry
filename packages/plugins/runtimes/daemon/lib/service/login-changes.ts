@@ -6,11 +6,11 @@
  *
  * Pure.
  */
-import type { LoginChange, LoginChangeError } from '@ferretry/plugin-logins/contract';
+import { LoginChangeError, type LoginChange, type LoginRuntimePreview } from '@ferretry/plugin-logins/contract';
 import type { AccountModel } from '../account/schema.ts';
-import type { CatalogRefusalCode } from '../../../contract/index.ts';
+import { type CatalogRefusalCode, isSupportedHarnessKey, type RuntimeView } from '../../../contract/index.ts';
 import { listed } from './catalog.ts';
-import { harnessKeyOfKind, harnessKindOfKey } from '../harness-kind.ts';
+import { harnessKeyOfKind, harnessKindOfKey, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { LoginAccountChange, LoginRemoval } from './mutations.ts';
 
 /**
@@ -28,6 +28,25 @@ export function movedSentence(change: LoginRemoval): string {
   return parts.join('; ');
 }
 
+/** The key Logins takes for a harness: a harness Runtimes has no behaviour for is refused by name, never staged as one of two. */
+const shippedKey = (key: string) => {
+  try {
+    return harnessKeyOfKind(harnessKindOfKey(key));
+  } catch (error) {
+    if (error instanceof UnsupportedHarnessError) throw new LoginChangeError('login_change_refused', error.message);
+    throw error;
+  }
+};
+
+/** A runtime on a login a change touches, as Logins previews it: a harness it cannot read shows none, and its launch says why. */
+export const loginRuntimePreview = (runtime: RuntimeView): LoginRuntimePreview => ({
+  name: runtime.name,
+  ...(isSupportedHarnessKey(runtime.harness) ? { harness: runtime.harness } : {}),
+  launch: runtime.launch.available
+    ? { available: true }
+    : { available: false, ...(runtime.launch.reason === undefined ? {} : { reason: runtime.launch.reason }) },
+});
+
 /** The Logins change a `credential.*` change stands for. */
 export function loginChangeOf(change: LoginAccountChange): LoginChange {
   switch (change.kind) {
@@ -35,7 +54,7 @@ export function loginChangeOf(change: LoginAccountChange): LoginChange {
       return {
         kind: 'login.add',
         id: change.id,
-        harness: harnessKeyOfKind(harnessKindOfKey(change.harness)),
+        harness: shippedKey(change.harness),
         ...(change.label === undefined ? {} : { label: change.label }),
         ...(change.store === undefined ? {} : { store: change.store }),
         ...(change.preset === undefined ? {} : { preset: change.preset }),

@@ -212,6 +212,18 @@ describe('credential changes go to Logins', () => {
     should(w.logins.staged).have.length(1);
   });
 
+  it('should refuse a login for a harness Runtimes has no behaviour for, by name, and stage nothing', async () => {
+    const w = world();
+    const change = { kind: 'credential.add', id: 'third', harness: 'fake-third', store: 'environment' } as const;
+
+    should(() => loginChangeOf(change as never)).throw('fake-third is not supported here');
+    await w.catalog.propose(change as never).then(
+      () => should.fail(undefined, undefined, 'the proposal must be refused'),
+      error => should(String(error.message)).equal('fake-third is not supported here'),
+    );
+    should(w.logins.staged).have.length(0);
+  });
+
   it('should answer a sign-out preview from what Logins says signing out does', async () => {
     const w = world();
 
