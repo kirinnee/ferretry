@@ -22,8 +22,51 @@
   box-sizing: border-box;
 }
 
+/* ---- THE app's scrollbar, ONE place (O9-7) -------------------------------------------------------------------------------
+   Every scroll area — the page, panes, modals, lists, code blocks, tables, the xterm viewport — is thin and takes its colours from
+   the palette: the thumb is the palette's `--muted`, so light, dark and every palette pack follow with no per-palette rule. The tokens
+   are written on `:root` AND on a swatch so a look preview recolours its own. The standard properties are what Chromium and current
+   Safari/Firefox read; the `::-webkit-scrollbar` rules below are for older Safari (Chromium ignores them once `scrollbar-color` is set).
+   A component that must hide its own strip (a tab row) names `scrollbar-width: none` itself; nothing else restyles a scrollbar.
+   `scrollbar-gutter: stable` on the page keeps the content from jumping when a long list first needs to scroll. */
+:root,
+[data-swatch] {
+  --scrollbar-thumb: color-mix(in srgb, var(--muted) 55%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--muted) 80%, transparent);
+  --scrollbar-track: transparent;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  /* theme-literal-ok: a transparent inset that insets the thumb inside the track; not a drawn stroke */
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--radius-dot);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
 html {
   -webkit-text-size-adjust: 100%;
+  scrollbar-gutter: stable;
 }
 
 body {

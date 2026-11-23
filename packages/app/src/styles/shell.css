@@ -566,8 +566,6 @@
   /* A list longer than the window scrolls inside itself with a thin themed scrollbar. No painted fade: a `var(--bg)` cover is
      white over a tinted page and read as a bar behind the first heading. Keyboard focus on a link scrolls it natively. */
   overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
 }
 .fy-tabs--grouped {
   flex-direction: column;

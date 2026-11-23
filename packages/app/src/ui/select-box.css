@@ -99,8 +99,6 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--gap-xs);
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
 }
 .fy-sb__list:focus {
   outline: none;
