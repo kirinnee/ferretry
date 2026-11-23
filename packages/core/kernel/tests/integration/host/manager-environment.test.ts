@@ -1,4 +1,4 @@
-/** XX systemctl / systemd-run children reach the user manager (XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS) and nothing else. */
+/** XX systemctl / systemd-run / tmux children reach the user manager (XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS) and nothing else. */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -38,14 +38,22 @@ describe('XX the user-manager environment', () => {
     expect(childEnvironments(FULL).managerEnv).toEqual(managerEnvironment(FULL));
   });
 
-  test('systemctl and systemd-run (by name or path) get it; git/gh keep the tool env; the rest get only the base', () => {
+  test('systemctl, systemd-run and tmux (by name or path) get it; git/gh keep the tool env; the rest get only the base', () => {
     const base = { PATH: '/usr/bin', HOME: '/home/fy' };
     const tools = toolEnvironment(FULL);
     const managers = managerEnvironment(FULL);
-    for (const program of ['systemctl', '/usr/bin/systemctl', 'systemd-run', '/run/current-system/sw/bin/systemd-run'])
+    // tmux: a limited pane's first program is `systemd-run --user`, and a pane sees only what its tmux server and client hold.
+    for (const program of [
+      'systemctl',
+      '/usr/bin/systemctl',
+      'systemd-run',
+      '/run/current-system/sw/bin/systemd-run',
+      'tmux',
+      '/nix/store/x-tmux-3.5/bin/tmux',
+    ])
       expect(childEnvironment(program, base, tools, {}, managers)).toEqual({ ...base, ...managers });
     expect(childEnvironment('git', base, tools, {}, managers)).toEqual({ ...base, ...tools });
-    for (const other of ['ssh', 'sh', 'ps', 'systemctl-evil', '/opt/systemd-run-x/run'])
+    for (const other of ['ssh', 'sh', 'ps', 'systemctl-evil', '/opt/systemd-run-x/run', 'tmux-evil'])
       expect(childEnvironment(other, base, tools, {}, managers)).toEqual(base);
   });
 

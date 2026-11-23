@@ -8,6 +8,7 @@ import type { DeviceLayoutStore } from '../layout/device-layout.ts';
 import type { Layout } from '../layout/layout.ts';
 import {
   DEVICE_SETTINGS_HREF,
+  deviceSettingsHref,
   daemonHomeHref,
   daemonSettingsHref,
   needsSubject,
@@ -97,7 +98,7 @@ export function placeSource(input: PlaceSourceInput): CommandBarSource {
         keywords: [...OPEN_SETTINGS.entry.keywords, 'plugins'],
         order: SHELL_ORDER,
       });
-      go('device-settings', 'This device’s settings', DEVICE_SETTINGS_HREF, {
+      go('device-settings', 'This device’s settings', deviceSettingsHref(input.daemon), {
         description: 'Appearance, density and what this device remembers',
         keywords: ['theme', 'appearance', 'density', 'settings', 'preferences'],
         resting: true,

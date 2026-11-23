@@ -715,11 +715,11 @@ export interface ServiceResumeOptions extends Omit<ResumeOptions, 'actor'> {
 const NO_LONGER_OWED = 'it is no longer owed this resume: it was stopped, resumed or ended by something else first';
 
 /**
- * What a relaunch typed ahead of its turn when the conversation it was to resume is not in the ferret's home (the
- * harness proved it absent), so it started a new one: the agent is told it remembers nothing from before. Fixed text.
+ * A relaunch's conversation is proved absent, so a new one was started: fixed text naming BOTH causes, which the daemon
+ * cannot tell apart (Claude's `--session-id` is recorded before a word is written, so a pane that died at once left none).
  */
 export const CONVERSATION_NOT_FOUND =
-  'Your earlier conversation could not be resumed: it is not on this machine (a ferret moved from Ferretry 4, for one, leaves its old chats behind), so this is a NEW conversation and you remember nothing from before it. Your assigned task is turn-001.md in the same folder as the turn file below: read it and the turns after it before you go on.';
+  'Your earlier conversation could not be resumed: this machine has no transcript of it (the earlier launch may have ended before anything was said in it, or the ferret was moved from Ferretry 4 and left its old chats behind), so this is a NEW conversation and you remember nothing from before it. Your assigned task is turn-001.md in the same folder as the turn file below: read it and the turns after it before you go on.';
 
 /**
  * What a relaunch typed ahead of its turn when it had NO conversation to resume: the machine never recorded which one was

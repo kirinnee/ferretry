@@ -95,12 +95,28 @@ describe('the daemon Settings page', () => {
     ]);
   });
 
-  test('reaches This device from Settings, at the address that survives a reload', async () => {
+  test('reaches This device from Settings, at an address INSIDE the machine’s Settings', async () => {
     const app = await bootApp({ surfaces: [demoEntry], machines: ['d1'], path: '/d/d1/settings' });
     view = app.view;
     await settle();
     const link = [...view.container.querySelectorAll('a')].find(a => a.textContent === 'This device');
-    expect(link?.getAttribute('href')).toBe('/settings');
+    expect(link?.getAttribute('href')).toBe('/d/d1/settings/device');
+  });
+
+  test('selecting This device keeps the settings route: same list, the section opened in the panel, no page change', async () => {
+    const app = await bootApp({ surfaces: [demoEntry], machines: ['d1'], path: '/d/d1/settings' });
+    view = app.view;
+    await settle();
+    const link = [...view.container.querySelectorAll('a')].find(a => a.textContent === 'This device') as HTMLElement;
+    await interact(async () => link.click());
+    await settle();
+    expect(window.location.pathname).toBe('/d/d1/settings/device');
+    // Still the Settings page: its list is on screen and the panel is titled by the section, not a separate page.
+    expect(view.container.querySelector('nav[aria-label="Plugin settings"]')).not.toBeNull();
+    expect(view.container.querySelector('.fy-settings-title')?.textContent).toBe('This device');
+    expect(view.container.querySelector('.fy-settings-page [data-layout-in-use]')).not.toBeNull();
+    expect(link.getAttribute('aria-current')).toBe('page');
+    expect(link.className).toContain('fy-tab--active');
   });
 
   test('This device points back at the daemon’s Settings when one is paired', async () => {

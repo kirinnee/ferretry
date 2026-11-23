@@ -58,10 +58,7 @@ const found = (view: ReturnType<typeof render>, predicate: (node: ReactTestInsta
 const byId = (view: ReturnType<typeof render>, id: string): ReactTestInstance =>
   found(view, node => typeof node.type === 'string' && node.props.id === id);
 const choice = (view: ReturnType<typeof render>, text: string): ReactTestInstance =>
-  found(
-    view,
-    node => node.type === 'button' && node.props['aria-pressed'] !== undefined && node.children.join('') === text,
-  );
+  found(view, node => node.type === 'button' && node.props.role === 'radio' && node.children.join('') === text);
 const NEW = 'New conversation';
 const CONTINUE = 'Continue a conversation';
 const typeInto = (view: ReturnType<typeof render>, id: string, value: string): void =>
@@ -70,13 +67,13 @@ const typeInto = (view: ReturnType<typeof render>, id: string, value: string): v
 describe('the New ferret page and the continue slot', () => {
   it('opens on a "New conversation | Continue a conversation" switch at the top, and Continue shows the list in place', () => {
     const view = page();
-    expect(choice(view, NEW).props['aria-pressed']).toBe(true);
-    expect(choice(view, CONTINUE).props['aria-pressed']).toBe(false);
+    expect(choice(view, NEW).props['aria-checked']).toBe(true);
+    expect(choice(view, CONTINUE).props['aria-checked']).toBe(false);
     expect(view.root.findAllByProps({ 'data-continue-list': '' })).toHaveLength(0);
     run(() => choice(view, CONTINUE).props.onClick());
     expect(view.root.findAllByProps({ 'data-continue-list': '' })).toHaveLength(1);
-    expect(choice(view, CONTINUE).props['aria-pressed']).toBe(true);
-    expect(choice(view, NEW).props['aria-pressed']).toBe(false);
+    expect(choice(view, CONTINUE).props['aria-checked']).toBe(true);
+    expect(choice(view, NEW).props['aria-checked']).toBe(false);
     // The form is still there: fresh and continue are ONE page.
     expect(byId(view, 'fy-new-ferret-prompt')).toBeTruthy();
     // And back: the list goes, nothing is folded behind a disclosure.
@@ -104,7 +101,7 @@ describe('the New ferret page and the continue slot', () => {
       </WithSlotPanels>,
     );
     expect(view.root.findAllByProps({ 'data-continue-list': '' })).toHaveLength(1);
-    expect(choice(view, CONTINUE).props['aria-pressed']).toBe(true);
+    expect(choice(view, CONTINUE).props['aria-checked']).toBe(true);
   });
 
   it('draws no switch at all when nothing contributes a list', () => {
@@ -190,5 +187,33 @@ describe('the New ferret page and the continue slot', () => {
     expect(body).toMatchObject({ folder: '/work/web', runtime: 'claude-auto' });
     expect(body).not.toHaveProperty('harnessConversation');
     expect(body).not.toHaveProperty('harness');
+  });
+
+  it('Continue with no pick leaves Create disabled with a hint, and its handler starts nothing', async () => {
+    const calls: Call[] = [];
+    const view = page(calls, []);
+    run(() => choice(view, CONTINUE).props.onClick());
+    typeInto(view, 'fy-new-ferret-runtime', 'claude-auto');
+    typeInto(view, 'fy-new-ferret-folder', '/work/web');
+    typeInto(view, 'fy-new-ferret-prompt', 'Go');
+    const create = found(view, node => node.type === 'button' && node.children.join('') === 'Create ferret');
+    expect(create.props.disabled).toBe(true);
+    expect(JSON.stringify(view.toJSON())).toContain('Pick a conversation to continue.');
+    await runAsync(async () => create.props.onClick());
+    expect(calls.find(call => call.route === 'POST /v1/ferrets')).toBeUndefined();
+    // A pick frees it (the pick's harness clears the runtime, so it is typed again).
+    run(() => view.root.findByProps({ 'data-row': 'c-77' }).props.onClick());
+    typeInto(view, 'fy-new-ferret-runtime', 'codex-main');
+    expect(
+      found(view, node => node.type === 'button' && node.children.join('') === 'Create ferret').props.disabled,
+    ).toBe(false);
+  });
+
+  it('New → Continue → New with no pick keeps the Folder', () => {
+    const view = page();
+    typeInto(view, 'fy-new-ferret-folder', '/work/typed');
+    run(() => choice(view, CONTINUE).props.onClick());
+    run(() => choice(view, NEW).props.onClick());
+    expect(byId(view, 'fy-new-ferret-folder').props.value).toBe('/work/typed');
   });
 });
