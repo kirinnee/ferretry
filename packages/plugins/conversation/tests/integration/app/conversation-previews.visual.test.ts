@@ -179,7 +179,7 @@ describe('Conversation tab previews', () => {
         const { tab, problems, close } = await open(viewport, scheme);
         try {
           const frames = tab.locator('[data-setting-preview]');
-          expect(await frames.count()).toBe(4);
+          expect(await frames.count()).toBe(3);
           for (const box of await frames.evaluateAll(nodes =>
             nodes.map(node => {
               const { width, height } = node.getBoundingClientRect();
@@ -368,7 +368,7 @@ describe('Conversation tab previews', () => {
           const states = await tab
             .locator('[data-setting-preview]')
             .evaluateAll(nodes => nodes.map(node => node.getAttribute('data-sp-state')));
-          expect(states).toEqual(['still', 'still', 'still', 'still']);
+          expect(states).toEqual(['still', 'still', 'still']);
           expect(await tab.locator('.fy-sp__layer--before').count()).toBe(0);
           expect(await tab.evaluate(() => document.getAnimations().length)).toBe(0);
           expect(await tab.locator('[data-cvp-motion="still"]').count()).toBe(1);

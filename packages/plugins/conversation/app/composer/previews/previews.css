@@ -444,3 +444,80 @@
     animation-play-state: paused;
   }
 }
+
+/* ============================================================================
+   Button layout samples (dock-layout-sample.tsx): the REAL phone composer (chat.css draws `.fy-composer` by its
+   `data-composer-layout` / `data-composer-dock-layout` attributes), drawn in a 300 x 112 `ChoiceSample` box. The composer is
+   centred in the box and never reaches its edge, so a taller layout (stacked) and a slimmer one (one row) share one frame.
+   Auto draws its two looks (empty, typed) one above the other and, when its card is chosen, plays once: the typed one arrives.
+   Every keyframe set ends on the resting style. Theme tokens only.
+   ========================================================================== */
+.fy-dls {
+  display: block;
+  height: 100%;
+  position: relative;
+  width: 100%;
+}
+.fy-dls__layer {
+  align-items: center;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 0 16px;
+  position: absolute;
+}
+.fy-dls__composer {
+  width: 100%;
+}
+.fy-dls__field {
+  align-self: center;
+  color: var(--fg);
+  font-size: 13px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.fy-dls__hint {
+  color: var(--faint);
+}
+/* Auto: two pictures, one above the other (side by side while empty, then stacked once typed), each at 0.55 so both fit the box with room. */
+.fy-dls--auto {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  justify-content: center;
+  padding: 0 16px;
+}
+.fy-dls__half {
+  width: 100%;
+  zoom: 0.55;
+}
+.fy-dls__then {
+  color: var(--faint);
+  flex: none;
+}
+@keyframes fy-dls-arrive {
+  0%,
+  15% {
+    opacity: 0.1;
+    translate: 0 6px;
+  }
+  60%,
+  100% {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-cc__card[data-pulse='true'] .fy-dls__half--typed {
+    animation: fy-dls-arrive 900ms ease-out;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-dls__half--typed {
+    animation: none;
+  }
+}
+:root[data-motion='reduced'] .fy-dls__half--typed {
+  animation: none;
+}
