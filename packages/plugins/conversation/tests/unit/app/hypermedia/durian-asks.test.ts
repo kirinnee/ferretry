@@ -1,5 +1,5 @@
 /**
- * r12 H1 — THE UPSTREAM ASKS (C1-upstream-ask.md items 1–8 and 10; 9 is the licence) VERIFIED AGAINST THE PINNED v0.5.1,
+ * r12 H1 — THE UPSTREAM ASKS (C1-upstream-ask.md items 1–8 and 10; 9 is the licence) VERIFIED AGAINST THE PINNED v0.6.2 (first v0.5.1, re-run on each pin),
  * one assert each, before any later unit relies on them. Items 1–5 are rendered for real (react-dom/server) through the
  * renderer's own entry; 6–8 are read off the installed source and the bundle test's strict graph; the heading-slug rule
  * is Durian's against GitHub's.
@@ -46,7 +46,7 @@ const render = (props: Record<string, unknown>): string => {
   );
 };
 
-describe('C1 asks against durian-hypermedia v0.5.1', () => {
+describe('C1 asks against durian-hypermedia v0.6.2', () => {
   it('ask 1: a Code slot draws a fenced block, given lang, text and meta', () => {
     const html = render({
       slots: {
@@ -115,7 +115,7 @@ describe('C1 asks against durian-hypermedia v0.5.1', () => {
   });
 
   it('ask 10: a tagged release with a CHANGELOG entry (and ask 9, the licence, is MIT)', () => {
-    expect(source('CHANGELOG.md')).toMatch(/^## 0\.5\.1/mu);
+    expect(source('CHANGELOG.md')).toMatch(/^## 0\.6\.2/mu);
     expect(source('LICENSE')).toContain('MIT License');
   });
 

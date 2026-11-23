@@ -17,7 +17,7 @@ const root = dirname(
   createRequire(join(import.meta.dir, '../../../../package.json')).resolve('durian-hypermedia/package.json'),
 );
 
-/** Every cap Durian v0.5.1 has: adding or dropping a key in `Limits` breaks this object's type. */
+/** Every cap Durian v0.6.2 has: adding or dropping a key in `Limits` breaks this object's type. */
 const CAPS = {
   maxInputBytes: true,
   maxBlocks: true,
@@ -25,10 +25,23 @@ const CAPS = {
   maxAnimEntities: true,
   maxAnimSteps: true,
   maxAnimChars: true,
+  maxAnimWork: true,
+  maxPageAnimWork: true,
   maxChartPoints: true,
   maxItems: true,
   maxMermaidChars: true,
   maxSteps: true,
+  maxEvalSteps: true,
+  maxEvalValues: true,
+  maxEvalChars: true,
+  maxPageEvalSteps: true,
+  maxPageEvalValues: true,
+  maxPageEvalChars: true,
+  maxYamlAliases: true,
+  maxYamlChars: true,
+  maxPageYamlChars: true,
+  maxYamlNodes: true,
+  maxPageYamlNodes: true,
 } as const satisfies Record<keyof Limits, true>;
 
 describe('the Durian declarations are exact (types)', () => {
@@ -60,12 +73,12 @@ describe('the Durian declarations are exact (types)', () => {
   });
 });
 
-describe('the Durian declarations match the installed v0.5.1 (runtime)', () => {
+describe('the Durian declarations match the installed v0.6.2 (runtime)', () => {
   it('declares exactly the caps `src/safety.ts` has', () => {
     const source = readFileSync(join(root, 'src/safety.ts'), 'utf8');
     const block = /export interface Limits \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? '';
     const real = [...block.matchAll(/^\s+(\w+):\s*number;/gm)].map(m => m[1] ?? '').sort();
-    expect(real.length).toBe(10);
+    expect(real.length).toBe(23);
     expect(Object.keys(CAPS).sort()).toEqual(real);
   });
 
