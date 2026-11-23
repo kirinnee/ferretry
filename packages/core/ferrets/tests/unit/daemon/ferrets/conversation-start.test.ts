@@ -131,6 +131,29 @@ test('a start that names a conversation with no conversation index on the host i
   expect(runner.starts).toBe(0);
 });
 
+test('a stage owner that throws refuses the start in one plain sentence: nothing is launched', async () => {
+  const runner = new FakeRunner();
+  const harness = new FakeHarness().honestHistory();
+  const h = await host([], {
+    harness,
+    runner,
+    plugins: [
+      fakeStageOwner({
+        stage: async () => {
+          throw new Error('the index is unreadable');
+        },
+      }),
+    ],
+  });
+  const refused = await h.request('POST', '/v1/ferrets', {
+    headers: { 'x-fy-request-id': 'stage-throws' },
+    body: { folder: '/work/a', harnessConversation: ORIGINAL },
+  });
+  expect(refused.status).toBe(409);
+  expect(refused.json<{ error: string }>().error).toContain('the conversation could not be staged');
+  expect(runner.starts).toBe(0);
+});
+
 test('only the OWNER’s start stages a host transcript: a ferret naming one pulls nothing into the pool and is refused', async () => {
   const asked: string[] = [];
   const runner = new FakeRunner();
