@@ -3346,6 +3346,9 @@ export class WardenSweepService {
       boards.push(board);
       nodes.push(session);
     }
+    // A node that left the fleet is forgotten, so the set never outgrows the fleet.
+    const present = new Set(read.map(({ session }) => session.config.id));
+    for (const said of this.blindNodesSaid) if (!present.has(said)) this.blindNodesSaid.delete(said);
 
     // Where each ferret's notification sits: a sub-ferret's is on its agenda home, so the plan looks for it there.
     const homes = new Map<string, string>();

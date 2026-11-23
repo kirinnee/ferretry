@@ -159,6 +159,33 @@ describe("the agenda's link to cards", () => {
     ]);
   });
 
+  it('should say a first failure even when the rejection is undefined, and once more when the agenda recovers and fails again', async () => {
+    // Arrange
+    const warnings: string[] = [];
+    let outcome: 'fail' | 'ok' = 'fail';
+    const reader = new AgendaCardLinks(
+      {
+        open: async () => {
+          if (outcome === 'fail') throw undefined;
+          return [];
+        },
+      },
+      () => MACHINE,
+      { warn: message => warnings.push(message) },
+    );
+
+    // Act
+    await reader.asksFor([card({ assignee: 'lead' })]);
+    await reader.asksFor([card({ assignee: 'lead' })]);
+    outcome = 'ok';
+    await reader.asksFor([card({ assignee: 'lead' })]);
+    outcome = 'fail';
+    await reader.asksFor([card({ assignee: 'lead' })]);
+
+    // Assert
+    should(warnings).have.length(2);
+  });
+
   it('should read the agendas in bounded batches', async () => {
     // Arrange
     const owners = Array.from({ length: AGENDA_READ_CONCURRENCY + 3 }, (_, index) => `ferret-${index}`);

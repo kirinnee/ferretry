@@ -374,6 +374,35 @@ describe('FileAgendaLedgerRepository', () => {
     should((failures[0] as Error).message).containEql('invalid ledger');
   });
 
+  it('should read a damaged board again once only its committed history is restored', async () => {
+    // Arrange — a legacy ledger whose cursor commits history that is missing, read (and failed) by a warm repository.
+    const { repository } = await createRepository();
+    const file = repository.file('session-1');
+    const directory = dirname(file);
+    await mkdir(directory, { recursive: true });
+    const record = {
+      kind: 'owner-history',
+      id: 'A1',
+      entry: { at: '2026-11-03T08:00:00Z', kind: 'replied', note: 'owner words' },
+    };
+    const text = `${JSON.stringify(record)}\n`;
+    const { version: _version, ...older } = emptyAgendaLedger('session-1', '2026-11-03T08:00:00Z');
+    await writeFile(file, JSON.stringify({ ...older, archive: { bytes: Buffer.byteLength(text), count: 1 } }));
+    await repository.read('session-1').then(
+      () => {
+        throw new Error('expected the board with no history to reject');
+      },
+      error => should(error).be.instanceOf(InvalidAgendaLedgerError),
+    );
+
+    // Act — only the history file comes back; the ledger itself is untouched.
+    await writeFile(join(directory, AGENDA_ARCHIVE_FILE), text);
+
+    // Assert
+    should((await repository.read('session-1'))?.archive).deepEqual({ bytes: Buffer.byteLength(text), count: 1 });
+    should(await repository.readArchive('session-1')).deepEqual([record]);
+  });
+
   it('should reject invalid session paths before touching the filesystem', async () => {
     // Arrange
     const { home, repository } = await createRepository();

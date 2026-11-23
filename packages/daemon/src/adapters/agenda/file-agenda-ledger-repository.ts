@@ -128,6 +128,8 @@ interface CachedLedger {
 interface BrokenLedger {
   readonly name: string;
   readonly identity: string;
+  /** The history file and its pending mark as they stood when it failed: a repair of either can make it readable. */
+  readonly sidecars: string;
   readonly failure: InvalidAgendaLedgerError;
 }
 
@@ -214,9 +216,11 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
         this.cache.delete(sessionId);
         this.cache.set(sessionId, cached);
         // An unchanged damaged file is damaged still: said again without reading or parsing it.
-        if (cached.failure !== undefined) throw cached.failure;
-        return cached;
+        if (cached.failure === undefined) return cached;
+        if (cached.sidecars === (await this.sidecarsOf(sessionId))) throw cached.failure;
+        // Its history changed since: the ledger is read again, as a fresh repository would.
       }
+      const sidecars = await this.sidecarsOf(sessionId);
       const read = await this.files.readIdentified(sessionId, name);
       if (read === undefined) continue;
       let ledger: AgendaLedger;
@@ -226,7 +230,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
         ) as unknown as AgendaLedger;
       } catch (error) {
         if (error instanceof InvalidAgendaLedgerError) {
-          this.remember(sessionId, { name, identity: read.identity, failure: error });
+          this.remember(sessionId, { name, identity: read.identity, sidecars, failure: error });
         }
         throw error;
       }
@@ -236,6 +240,12 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     }
     this.cache.delete(sessionId);
     return null;
+  }
+
+  /** How the history file and its pending mark stand: what a ledger whose history is missing or short depends on. */
+  private async sidecarsOf(sessionId: string): Promise<string> {
+    const stand = async (name: string): Promise<string> => (await this.files.identity(sessionId, name)) ?? 'absent';
+    return `${await stand(AGENDA_ARCHIVE_FILE)}|${await stand(`${AGENDA_ARCHIVE_FILE}.pending`)}`;
   }
 
   /** Keeps what a read found against its file, dropping the one read longest ago past the limit. */
