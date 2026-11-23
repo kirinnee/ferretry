@@ -490,23 +490,26 @@ const grants = {
   hostLocal: false,
   steppedUp: false,
 };
-const transport = new FakeTransport((request: TransportRequest): TransportAnswer => {
-  // `?work=off`: the daemon's work switch is off, so its inventory says Board and Agenda are `off`.
-  if (request.path === '/v1/plugins')
-    return json(
-      inventoryOf(surfaces, params.get('work') === 'off' ? { agenda: { on: false }, board: { on: false } } : {}),
-    );
-  if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
-  if (request.path === '/v1/grants') return json(grants);
-  // `?host=unnamed`: the machine has no `host.yaml` name, so it goes by its host name (the "Name this machine" offer); `?host=named` has one.
-  if (request.path === '/v1/config/file' && HOST_STATE !== null)
-    return json(
-      HOST_STATE === 'named'
-        ? { exists: true, text: 'name: "workshop"\n', etag: 'e1' }
-        : { exists: false, text: '', etag: 'e0' },
-    );
-  return json({ ok: true });
-});
+// `?work=off`: the daemon's work switch is off, so its inventory says Board and Agenda are `off`. `?work=split` pairs a
+// SECOND machine (`ws2`) that has the switch ON while `ws` has it off: each machine's own nav answers for itself.
+const WORK = params.get('work');
+const workIsOff = (machine: string): boolean => WORK === 'off' || (WORK === 'split' && machine === 'ws');
+const transportOf = (machine: string) =>
+  new FakeTransport((request: TransportRequest): TransportAnswer => {
+    if (request.path === '/v1/plugins')
+      return json(inventoryOf(surfaces, workIsOff(machine) ? { agenda: { on: false }, board: { on: false } } : {}));
+    if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
+    if (request.path === '/v1/grants') return json(grants);
+    // `?host=unnamed`: the machine has no `host.yaml` name, so it goes by its host name (the "Name this machine" offer); `?host=named` has one.
+    if (request.path === '/v1/config/file' && HOST_STATE !== null)
+      return json(
+        HOST_STATE === 'named'
+          ? { exists: true, text: 'name: "workshop"\n', etag: 'e1' }
+          : { exists: false, text: '', etag: 'e0' },
+      );
+    return json({ ok: true });
+  });
+const transports = new Map<string, FakeTransport>();
 const handler: PasskeyHandler = {
   need: () => undefined,
   confirm: async () => true,
@@ -518,11 +521,17 @@ const handler: PasskeyHandler = {
 const provision = { handler, Prompts: () => null } as unknown as PasskeyProvision;
 const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
 list.add({ daemon: 'ws', machine: 'workshop-host', deviceId: 'dev', address: 'http://127.0.0.1:40245' });
+if (WORK === 'split')
+  list.add({ daemon: 'ws2', machine: 'studio-host', deviceId: 'dev', address: 'http://127.0.0.1:40246' });
 const runtime = new ShellRuntime({
   appVersion: '5.0.0',
   surfaces,
   daemons: list,
-  connect: async () => transport,
+  connect: async paired => {
+    const held = transports.get(paired.daemon) ?? transportOf(paired.daemon);
+    transports.set(paired.daemon, held);
+    return held;
+  },
   passkey: () => provision,
   daemonless: {
     views: registeredDaemonless(surfaces, {} as DaemonlessPorts).views,

@@ -62,7 +62,13 @@ const VIEWPORTS = [
 const THEMES = ['studio-light', 'studio-dark'] as const;
 
 /** The whole page's text, plus every accessible name and title on it (a hidden label would still be a trace). */
-const traces = async (path: string, viewport: (typeof VIEWPORTS)[number], theme: string, work: 'on' | 'off') => {
+const traces = async (
+  path: string,
+  viewport: (typeof VIEWPORTS)[number],
+  theme: string,
+  work: 'on' | 'off' | 'split',
+  finder = false,
+) => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     colorScheme: theme.endsWith('dark') ? 'dark' : 'light',
@@ -85,9 +91,18 @@ const traces = async (path: string, viewport: (typeof VIEWPORTS)[number], theme:
     await tab.waitForSelector('.fy-drawer--overlay');
     await tab.waitForTimeout(300);
   }
+  // The destination finder (Ctrl+K), opened over the page: what it lists is part of what the page offers.
+  if (finder) {
+    await tab.keyboard.press('Control+k');
+    await tab.waitForSelector('[role="dialog"]');
+    await tab.waitForTimeout(300);
+  }
   if (shotsDir !== '')
     await tab.screenshot({
-      path: join(shotsDir, `${viewport.name}-${theme}-${path.split('/').at(-1)}-${work}.png`),
+      path: join(
+        shotsDir,
+        `${viewport.name}-${theme}-${path.split('/').slice(2).join('-')}-${work}${finder ? '-find' : ''}.png`,
+      ),
     });
   const found = await tab.evaluate(() => {
     const words: string[] = [document.body.textContent ?? '', document.title];
@@ -118,4 +133,30 @@ describe('the work switch off: no trace of Board or Agenda in the nav or Setting
           expect(on).toMatch(/agenda/i);
         });
       }
+});
+
+// Two paired machines: `ws` has the work switch OFF, `ws2` has it ON. What each machine offers is its own: `ws` draws no
+// trace although `ws2` has Board and Agenda on, and `ws2` draws both (the nav, the Settings list and the finder).
+describe('two machines, one off and one on: each machine offers its own', () => {
+  for (const viewport of VIEWPORTS)
+    for (const theme of THEMES)
+      for (const page of ['ferrets', 'settings']) {
+        it(`${viewport.name} ${theme} ${page}: ws (off) leaves neither, ws2 (on) shows both`, async () => {
+          const off = await traces(`/d/ws/${page}`, viewport, theme, 'split');
+          expect(off.match(TRACE), `a trace on the OFF machine: ${off.match(TRACE)?.[0]}`).toBeNull();
+          const on = await traces(`/d/ws2/${page}`, viewport, theme, 'split');
+          expect(on).toMatch(/board/i);
+          expect(on).toMatch(/agenda/i);
+        });
+      }
+
+  for (const theme of THEMES)
+    it(`1280 ${theme}: the finder on ws (off) lists neither, on ws2 (on) both`, async () => {
+      const wide = VIEWPORTS[0];
+      const off = await traces('/d/ws/ferrets', wide, theme, 'split', true);
+      expect(off.match(TRACE), `a trace in the finder on the OFF machine: ${off.match(TRACE)?.[0]}`).toBeNull();
+      const on = await traces('/d/ws2/ferrets', wide, theme, 'split', true);
+      expect(on).toMatch(/board/i);
+      expect(on).toMatch(/agenda/i);
+    });
 });
