@@ -1,5 +1,6 @@
 import { ChevronRight } from 'lucide-react';
 import { useId, useLayoutEffect, useRef } from 'react';
+import { useAskBeforeLeaving } from '../compose/unsaved-guard.tsx';
 import { daemonSettingsHref, DEVICE_SETTINGS_HREF } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { SelectBox, type SelectOption } from '../ui/select-box.tsx';
@@ -43,6 +44,7 @@ export function SettingsNav({
 }) {
   const listRef = useRef<HTMLElement>(null);
   const router = useRouter();
+  const leave = useAskBeforeLeaving();
   const pickerId = useId();
   // The list beside the panel scrolls inside itself: bring the current tab into view by the scroller's own scroll and never the
   // page's (`scrollIntoView` would move every ancestor too). Above the panel (a mid-width window) there is no list to scroll, only
@@ -110,7 +112,7 @@ export function SettingsNav({
           id={pickerId}
           className="fy-settings-picker__select"
           label="Settings page"
-          onChange={href => router.navigate(href)}
+          onChange={href => leave(() => router.navigate(href))}
           options={pickerOptions}
           value={active === undefined ? DEVICE_SETTINGS_HREF : hrefOf(active)}
         />

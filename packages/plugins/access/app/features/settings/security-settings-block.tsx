@@ -32,7 +32,7 @@ import {
   widensSecurity,
   widensWithPasskey,
 } from '@ferretry/core-gate/contract';
-import { SettingGroup, SettingRow, SettingSaveBar, Segmented } from '@ferretry/app';
+import { SettingGroup, SettingRow, SettingSaveBar, SettingStatus, Segmented } from '@ferretry/app';
 import { useEffect, useId, useState } from 'react';
 import type { DaemonConnection } from '../../shell-grants.ts';
 import { AccessTab, LabelledSwitch, Notice, StateBlock } from './access-kit.tsx';
@@ -186,15 +186,23 @@ function NumberRow({ field, view, draft, busy, onDraft }: NumberRowProps) {
   );
 }
 
+/** The sentence a switch row shows under itself: it is now on or off, or why it did not change. */
+interface SwitchStatus {
+  readonly tone: 'ok' | 'err';
+  readonly text: string;
+}
+
 interface SwitchRowProps {
   readonly field: SecuritySwitchField;
   readonly view: SecuritySettingsView;
   readonly busy: boolean;
+  /** What the last change to THIS switch came to, said in its own row (never elsewhere on the page). */
+  readonly status: SwitchStatus | null;
   readonly onSave: (value: boolean) => void;
 }
 
 /** A switch. Turning it on tightens; turning it off loosens, so it is dead without `mayWiden`. */
-function SwitchRow({ field, view, busy, onSave }: SwitchRowProps) {
+function SwitchRow({ field, view, busy, status, onSave }: SwitchRowProps) {
   const copy = SECURITY_SETTING_COPY[field];
   const on = view.settings[field];
   const dead = on && !view.mayWiden;
@@ -227,6 +235,14 @@ function SwitchRow({ field, view, busy, onSave }: SwitchRowProps) {
           </Notice>
         </div>
       ) : null}
+      {status === null ? null : (
+        <SettingStatus
+          tone={status.tone}
+          marks={status.tone === 'err' ? { 'data-security-failure-settings': '' } : { 'data-security-notice': '' }}
+        >
+          {status.text}
+        </SettingStatus>
+      )}
     </SettingRow>
   );
 }
@@ -246,7 +262,10 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
   const [loaded, setLoaded] = useState<Loaded>({ kind: 'loading' });
   const [drafts, setDrafts] = useState<Readonly<Partial<Record<NumericSecuritySetting, string>>>>({});
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
+  /** What the last instant switch change came to, kept with the switch it belongs to so its own row can say it. */
+  const [switchStatus, setSwitchStatus] = useState<(SwitchStatus & { readonly field: SecuritySwitchField }) | null>(
+    null,
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const [formFailure, setFormFailure] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -257,7 +276,7 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
     setDrafts({});
     setFormFailure(null);
     setSaved(false);
-    setFailure(null);
+    setSwitchStatus(null);
     setNotice(null);
     void createClient(connection)
       .then(async client => ({ client, view: await fetchSecuritySettings(client) }))
@@ -302,7 +321,7 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
     from: 'switch' | 'form',
   ): Promise<void> => {
     setBusy(true);
-    setFailure(null);
+    setSwitchStatus(null);
     setFormFailure(null);
     setNotice(null);
     setSaved(false);
@@ -320,21 +339,21 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
             : 'off'
           : describeSettingValue(field as NumericSecuritySetting, value);
       };
-      setNotice(
-        [
-          ...fields.map(field => `${SECURITY_SETTING_COPY[field].label}: now ${now(field)}.`),
-          devicesExpiringSentence(change.devicesExpiring),
-        ]
-          .filter((sentence): sentence is string => sentence !== null)
-          .join(' '),
-      );
+      const sentence = [
+        ...fields.map(field => `${SECURITY_SETTING_COPY[field].label}: now ${now(field)}.`),
+        devicesExpiringSentence(change.devicesExpiring),
+      ]
+        .filter((sentence): sentence is string => sentence !== null)
+        .join(' ');
+      if (from === 'switch') setSwitchStatus({ field: fields[0] as SecuritySwitchField, tone: 'ok', text: sentence });
+      else setNotice(sentence);
       if (from === 'form') setSaved(true);
     } catch (reason) {
       const field = fields[0] ?? 'unlockOnOpen';
       const asked = (patch as Readonly<Record<string, string | number | boolean>>)[field];
       const sentence = securityFailureSentence(reason, view.widenCommand, { field, value: asked ?? '' });
       if (from === 'form') setFormFailure(sentence);
-      else setFailure(sentence);
+      else setSwitchStatus({ field: field as SecuritySwitchField, tone: 'err', text: sentence });
     }
     setBusy(false);
   };
@@ -365,6 +384,7 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
               field={field}
               view={view}
               busy={busy}
+              status={switchStatus?.field === field ? switchStatus : null}
               onSave={value => void save({ [field]: value }, [field], 'switch')}
             />
           ))}
@@ -413,11 +433,6 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
         {notice === null ? null : (
           <Notice tone="info" role="status" marks={{ 'data-security-notice': '' }}>
             {notice}
-          </Notice>
-        )}
-        {failure === null ? null : (
-          <Notice tone="err" role="alert" marks={{ 'data-security-failure-settings': '' }}>
-            {failure}
           </Notice>
         )}
       </div>

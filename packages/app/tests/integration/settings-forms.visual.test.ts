@@ -150,8 +150,21 @@ const measure = () => {
   };
 };
 
-const open = async (width: number, height: number, plugin: string, tab: string) => {
+/**
+ * `seed` steers the fake machine from `localStorage` (see `fixtures/sweep/answers-forms.ts`). It is written only where nothing is kept
+ * yet, so a reload reads back what a Save wrote instead of the seed.
+ */
+const open = async (
+  width: number,
+  height: number,
+  plugin: string,
+  tab: string,
+  seed: Readonly<Record<string, string>> = {},
+) => {
   const context = await browser.newContext({ viewport: { width, height }, colorScheme: scheme });
+  await context.addInitScript(entries => {
+    for (const [key, value] of entries) if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
+  }, Object.entries(seed));
   const origin = server?.url.origin ?? '';
   await context.route('**/*', async route =>
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
@@ -163,6 +176,11 @@ const open = async (width: number, height: number, plugin: string, tab: string) 
   await page.waitForSelector('.fy-settings-page', { timeout: 20_000 });
   await page.waitForTimeout(1_200);
   return { page, problems, close: async () => await context.close() };
+};
+
+/** An after-shot of what the page shows now (kept only when `FY_SETTINGS_FORMS_SHOTS_DIR` is set). */
+const shot = async (page: Page, name: string): Promise<void> => {
+  if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, `${name}-${scheme}.png`) });
 };
 
 const writes = async (page: Page, prefix: string): Promise<number> =>
@@ -214,7 +232,7 @@ describe('Settings forms: one save model, said out loud', () => {
     }
   }
 
-  it('Security: typing a value and leaving the field writes nothing; Save writes once; a locked switch stays locked and says why', async () => {
+  it('Security: typing a value and leaving the field writes nothing; Save lands, and the saved value is read back after a reload; a locked switch stays locked and says why', async () => {
     const { page, close } = await open(1_280, 1_000, 'access', 'security');
     try {
       const input = page.locator('[data-security-input="deviceKeyRotationDays"]');
@@ -227,8 +245,21 @@ describe('Settings forms: one save model, said out loud', () => {
       await page.waitForTimeout(300);
       expect(await writes(page, 'PATCH '), 'leaving the field saved nothing').toBe(0);
       await bar.getByRole('button', { name: /^Save/ }).click();
-      await page.waitForTimeout(600);
+      // The fake machine answers with a VALID write: the proof is the saved state, not that a request left.
+      await page.waitForSelector('[data-setting-savebar][data-state="saved"]', { timeout: 5_000 });
       expect(await writes(page, 'PATCH /v1/security'), 'Save wrote once').toBe(1);
+      expect(await input.inputValue(), 'the saved value stays in the box').toBe('14');
+      // The persisted value: a reload reads what the machine kept, and nothing is left unsaved.
+      await page.reload();
+      await page.waitForSelector('[data-security-input="deviceKeyRotationDays"]', { timeout: 20_000 });
+      await page.waitForTimeout(600);
+      expect(await page.locator('[data-security-input="deviceKeyRotationDays"]').inputValue(), 'it persisted').toBe(
+        '14',
+      );
+      expect(
+        await page.locator('[data-setting-savebar]').first().getAttribute('data-state'),
+        'clean after reload',
+      ).toBe('clean');
       // The machine's passkey-at-the-machine rule: the switch that would loosen security is disabled here, with the reason beside it.
       const locked = page.locator('[data-security-switch="unlockOnOpen"] [role=switch]');
       expect(await locked.isDisabled(), 'a locked switch cannot be pressed from here').toBe(true);
@@ -236,6 +267,140 @@ describe('Settings forms: one save model, said out loud', () => {
         await page.locator('[data-security-note="unlockOnOpen"]').innerText(),
         'the reason is on the page, beside the control',
       ).toContain('fy daemon security set');
+    } finally {
+      await close();
+    }
+  });
+
+  // ITEM 1: Back on a phone must not drop what was typed without a word. Done once, in the shared kit; asserted on every form page.
+  const TYPED = {
+    'access/security': async (page: Page) =>
+      await page.locator('[data-security-input="deviceKeyRotationDays"]').fill('14'),
+    'warden/warden': async (page: Page) => {
+      const field = page.locator('.fy-settings-page input[type=number]:not([disabled])').first();
+      await field.fill(String(Number(await field.inputValue()) + 1));
+    },
+    'usage/budgets': async (page: Page) => await page.locator('[data-budget-input="dailyTrigger"]').first().fill('7'),
+  } as const;
+  for (const [key, type] of Object.entries(TYPED)) {
+    const [plugin, tab] = key.split('/') as [string, string];
+    it(`390: ${key}: Back with an unsaved change asks first; Keep editing keeps it; Discard leaves`, async () => {
+      const { page, close } = await open(390, 844, plugin, tab);
+      try {
+        await page.locator('[data-setting-savebar]').first().waitFor();
+        await type(page);
+        const dialog = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+        await page.locator('.fy-settings-back').click();
+        await dialog.waitFor({ timeout: 3_000 });
+        await shot(page, `390-guard-${plugin}-${tab}`);
+        await dialog.getByRole('button', { name: 'Keep editing' }).click();
+        await dialog.waitFor({ state: 'detached', timeout: 3_000 });
+        expect(new URL(page.url()).pathname, 'Keep editing stays on the page').toBe(`/d/ws/settings/${plugin}/${tab}`);
+        expect(
+          await page.locator('[data-setting-savebar]').first().getAttribute('data-state'),
+          'what was typed is still there',
+        ).toBe('dirty');
+        await page.locator('.fy-settings-back').click();
+        await dialog.getByRole('button', { name: 'Discard' }).click();
+        await page.waitForFunction(() => location.pathname === '/d/ws/settings', null, { timeout: 5_000 });
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  it('390: Back from a form with nothing unsaved leaves at once, with no question', async () => {
+    const { page, close } = await open(390, 844, 'access', 'security');
+    try {
+      await page.locator('.fy-settings-back').click();
+      await page.waitForFunction(() => location.pathname === '/d/ws/settings', null, { timeout: 5_000 });
+      expect(await page.getByRole('dialog').count(), 'no question for a clean form').toBe(0);
+    } finally {
+      await close();
+    }
+  });
+
+  // ITEM 2: a Save in flight takes no more typing, so the answer that replaces the draft cannot erase an edit.
+  it('1280: Warden: while a Save is in flight every field is off, and what the machine kept is what shows after', async () => {
+    const { page, close } = await open(1_280, 1_000, 'warden', 'warden');
+    try {
+      const bar = page.locator('[data-setting-savebar]').first();
+      await bar.waitFor();
+      const field = page.locator('.fy-settings-page input[type=number]:not([disabled])').first();
+      const before = Number(await field.inputValue());
+      await field.fill(String(before + 1));
+      await page.evaluate(() => (globalThis as unknown as { __fyHoldWrites: () => void }).__fyHoldWrites());
+      await bar.getByRole('button', { name: /^Save/ }).click();
+      await page.waitForSelector('[data-setting-savebar][data-state="saving"]', { timeout: 3_000 });
+      // The form is the Warden card: every control in it (inputs, selects, the on/off boxes) must be off, by name when one is not.
+      const enabled = await page.evaluate(() =>
+        [
+          ...document.querySelectorAll<HTMLInputElement>(
+            '[data-testid="warden-config-card"] input, [data-testid="warden-config-card"] select, [data-testid="warden-config-card"] textarea, [data-testid="warden-config-card"] [role=switch]',
+          ),
+        ]
+          .filter(control => !control.disabled && !control.closest('fieldset:disabled'))
+          .map(control => control.getAttribute('aria-label') ?? control.id ?? control.tagName),
+      );
+      expect(enabled, 'a field that can still be typed in while the Save is in flight').toEqual([]);
+      await page.evaluate(() => (globalThis as unknown as { __fyReleaseWrites: () => void }).__fyReleaseWrites());
+      await page.waitForSelector('[data-setting-savebar][data-state="saved"]', { timeout: 5_000 });
+      expect(await field.inputValue(), 'the saved value is on screen').toBe(String(before + 1));
+      expect(await field.isEnabled(), 'the fields are back on').toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  // ITEM 3: an instant switch that did not change says why NEXT TO the switch, in view on a phone.
+  for (const viewport of VIEWPORTS) {
+    it(`${viewport.name}: Security: a refused instant switch says so in its own row, inside the viewport`, async () => {
+      const { page, close } = await open(viewport.width, viewport.height, 'access', 'security', {
+        'fyFake.security': JSON.stringify({ unlockOnOpen: false }),
+        'fyFake.refuseSecurity': '1',
+      });
+      try {
+        await page.locator('[data-security-switch="unlockOnOpen"] [role=switch]').click();
+        const status = page.locator('[data-security-failure-settings]');
+        await status.waitFor({ timeout: 5_000 });
+        await shot(page, `${viewport.name}-switch-refused`);
+        const box = await status.boundingBox();
+        const height = page.viewportSize()?.height ?? 0;
+        expect(box, 'the sentence is drawn').not.toBeNull();
+        expect(box?.y ?? -1, 'its top is inside the viewport').toBeGreaterThanOrEqual(0);
+        expect((box?.y ?? 0) + (box?.height ?? 0), `its bottom is inside the ${height}px viewport`).toBeLessThanOrEqual(
+          height,
+        );
+        expect(
+          await status.evaluate(node => node.closest('[data-setting-row]')?.getAttribute('data-setting-row') ?? ''),
+          'it sits in the row of the switch that failed',
+        ).toBe('Unlock with a passkey on opening');
+        expect(
+          await status.evaluate(node => node.closest('[data-setting-group]')?.getAttribute('data-setting-group')),
+          'inside the Prompts group, not below the Limits',
+        ).toBe('Prompts');
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  // The same guard at a desktop width, through the settings list (the Back link is a phone's way out; the list is the desktop's).
+  it('1280: Security: leaving through the settings list with an unsaved change asks first', async () => {
+    const { page, close } = await open(1_280, 1_000, 'access', 'security');
+    try {
+      await page.locator('[data-security-input="deviceKeyRotationDays"]').fill('14');
+      const dialog = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+      await page.locator('a.fy-settings-device').click();
+      await dialog.waitFor({ timeout: 3_000 });
+      await shot(page, '1280-guard-access-security');
+      await dialog.getByRole('button', { name: 'Keep editing' }).click();
+      expect(new URL(page.url()).pathname, 'Keep editing stays').toBe('/d/ws/settings/access/security');
+      await page.locator('a.fy-settings-device').click();
+      await dialog.getByRole('button', { name: 'Discard' }).click();
+      await page.waitForFunction(() => location.pathname !== '/d/ws/settings/access/security', null, {
+        timeout: 5_000,
+      });
     } finally {
       await close();
     }
