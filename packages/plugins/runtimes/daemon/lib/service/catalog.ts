@@ -76,7 +76,7 @@ import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
 import { WITHHELD_WORDS_TEXT } from '../../../contract/index.ts';
 import { claudeFastSupport, harnessKey, scopeKey } from './foreign.ts';
 import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.ts';
-import { runtimeModels } from '../models/runtime.ts';
+import { noModelReason, runtimeModels } from '../models/runtime.ts';
 import { runtimeDisabledView } from './disabled-view.ts';
 import { resolvedEntries } from './resolved-view.ts';
 import {
@@ -1402,7 +1402,7 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): Runtim
               : status === 'needs_sign_in'
                 ? 'Sign in to launch'
                 : stack.available.available
-                  ? fixed.refusal
+                  ? (fixed.refusal ?? noModelReason(resolved?.modelSet, harness, credential, facts.modelCatalogs))
                   : stack.available.reason;
         // A runtime whose apply never landed has no id yet; its name stands in, and it cannot have
         // a session for any other id to name.

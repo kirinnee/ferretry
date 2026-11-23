@@ -6,6 +6,7 @@ import type { Clock, EventsPort, OnboardingEntry, StatePort } from '@ferretry/ke
 import {
   ONBOARDING_PROGRESS,
   OnboardingChanged,
+  type HarnessView,
   type OnboardingApi,
   type OnboardingView,
   type Progress,
@@ -20,6 +21,8 @@ export interface OnboardingServiceDeps {
   readonly entries: () => readonly OnboardingEntry[];
   /** Whether this machine has a runtime (Runtimes' `list` is not empty); false when Runtimes is off or unreadable. */
   readonly setUp: () => Promise<boolean>;
+  /** The harnesses installed on this machine; none when Ferrets is off. */
+  readonly harnesses?: () => readonly HarnessView[];
   readonly state: StatePort;
   readonly clock: Clock;
   readonly events: EventsPort;
@@ -37,7 +40,7 @@ export class OnboardingService implements OnboardingApi {
   constructor(private readonly deps: OnboardingServiceDeps) {}
 
   async view(): Promise<OnboardingView> {
-    return viewOf(this.deps.entries(), await this.#progress(), await this.deps.setUp());
+    return viewOf(this.deps.entries(), await this.#progress(), await this.deps.setUp(), this.deps.harnesses?.() ?? []);
   }
 
   async answer(plugin: string, step: string, answer: StepAnswerRequest): Promise<StepView | undefined> {

@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { TEST_STARTERS } from '../../support/starters.ts';
 import type { ProfileFile } from '../../../contract/index.ts';
 import {
   AUTONOMOUS_INSTRUCTIONS,
@@ -27,6 +28,7 @@ const files = (overrides: Partial<RuntimesFiles> = {}): RuntimesFiles => ({
   logins: [sampleLogin('atomi', { store: 'ferretry' })],
   templates: new Map(),
   components: NO_COMPONENTS,
+  starters: TEST_STARTERS,
   ...overrides,
 });
 
@@ -108,7 +110,7 @@ describe('the built-in autonomous profiles', () => {
 
   it('should sit UNDER an imported setup, so the owner’s own words come last and win', () => {
     // Arrange — a machine with no files and nothing found: the Starter names the built-in profile as its oldest layer.
-    const plan = planImport([], { digest: text => text });
+    const plan = planImport([], { digest: text => text, starters: TEST_STARTERS });
 
     // Act — an empty plan has nothing to merge; a Claude host with nothing in it makes the Starter.
     expect(plan.profiles).toEqual({});
@@ -116,7 +118,11 @@ describe('the built-in autonomous profiles', () => {
       ...plan,
       profiles: { 'claude-starter': { layers: ['profile/ferretry-claude', 'modelSets/claude-models'] } },
       components: [
-        { kind: 'modelSets', name: 'claude-models', value: { models: ['claude-opus-5'], default: 'claude-opus-5' } },
+        {
+          kind: 'modelSets',
+          name: 'claude-models',
+          value: { models: [TEST_STARTERS.claude], default: TEST_STARTERS.claude },
+        },
       ],
       runtimes: {},
     } as unknown as typeof plan);

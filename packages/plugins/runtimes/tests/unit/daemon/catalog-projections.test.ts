@@ -675,8 +675,12 @@ describe('runtimeCatalog', () => {
       },
     });
 
+    const withModels: Partial<CatalogFacts> = {
+      modelCatalogs: { catalogs: builtInModelCatalogs(), presets: builtInPresets() },
+    };
+
     // Assert
-    should(runtime('claude-default').launch).eql({ available: true });
+    should(runtime('claude-default', withModels).launch).eql({ available: true });
     should(runtime('codex-run').launch).eql({ available: false, reason: 'Install Codex to launch' });
     should(runtime('claude-default', { credentialStatus: { 'claude-a': 'needs_sign_in' } }).launch).eql({
       available: false,
@@ -686,6 +690,15 @@ describe('runtimeCatalog', () => {
       available: false,
       reason: 'This profile has no layers yet.',
     });
+  });
+
+  it('should refuse, with the reason, a runtime that holds no model, as the launch inventory does', () => {
+    // Without a catalog and with no model set, nothing names a model: the picker must not offer a launch the manifest
+    // publishes as unavailable.
+    const refused = runtime('claude-default');
+
+    should(refused.launch).eql({ available: false, reason: 'No model list for Claude Code yet' });
+    should(runtime('claude-default', { modelCatalogs: { catalogs: {}, presets: [] } }).launch).eql(refused.launch);
   });
 
   it('should refuse a runtime when the installed Claude does not accept Auto mode', () => {

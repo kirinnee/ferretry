@@ -231,6 +231,8 @@ interface Machine {
   readonly id: string;
   readonly name: string;
   readonly steps: ReturnType<typeof fakeDaemon>['steps'];
+  /** The harnesses the daemon's registry says are installed (`GET /v1/onboarding` `harnesses`). */
+  readonly harnesses?: readonly { readonly key: string; readonly label: string }[];
 }
 
 function setup(options: {
@@ -276,7 +278,12 @@ function setup(options: {
           if (options.hangReads?.has(machine.id) === true) return new Promise(() => undefined);
           if (options.refuseReads?.has(machine.id) === true) throw new Error('unreachable');
           await options.holdSteps;
-          return { steps: machine.steps, complete: false, setUp: false };
+          return {
+            steps: machine.steps,
+            harnesses: (machine as Machine).harnesses ?? [],
+            complete: false,
+            setUp: false,
+          };
         }
         arrived.push({ step: request?.params?.stepId ?? '', state: request?.body?.state ?? '' });
         await options.gate?.(request?.body?.state ?? '', request?.params?.stepId ?? '');
@@ -1149,6 +1156,10 @@ describe('"Which AI do you want to use?" decides which harness segments the run 
   const machine = (states: Readonly<Record<string, 'done' | 'found'>> = {}): Machine => ({
     id: A,
     name: 'Studio',
+    harnesses: [
+      { key: 'claude-code', label: 'Claude Code' },
+      { key: 'codex', label: 'Codex' },
+    ],
     steps: [
       ['onboarding', 'agents', 2],
       ['onboarding', 'name', 5],
@@ -1175,7 +1186,7 @@ describe('"Which AI do you want to use?" decides which harness segments the run 
     view = await mount(run.tree);
     await settle();
     expect(pageKey()).toBe('onboarding.agents');
-    expect(box('claude')?.checked).toBe(true);
+    expect(box('claude-code')?.checked).toBe(true);
     await next();
     await settle();
     expect(pageKey()).toBe('onboarding.name');
@@ -1208,7 +1219,7 @@ describe('"Which AI do you want to use?" decides which harness segments the run 
     await press('[data-step-back]');
     await settle();
     expect(pageKey()).toBe('onboarding.agents');
-    await interact(() => box('claude')?.click());
+    await interact(() => box('claude-code')?.click());
     await next();
     await settle();
     expect(pageKey()).toBe('onboarding.name');
@@ -1223,8 +1234,8 @@ describe('"Which AI do you want to use?" decides which harness segments the run 
     view = await mount(run.tree);
     await settle();
     expect(pageKey()).toBe('onboarding.agents');
-    expect(box('claude')?.checked).toBe(true);
-    await interact(() => box('claude')?.click());
+    expect(box('claude-code')?.checked).toBe(true);
+    await interact(() => box('claude-code')?.click());
     await interact(() => box('codex')?.click());
     await next();
     await settle();
@@ -1256,7 +1267,7 @@ describe('"Which AI do you want to use?" decides which harness segments the run 
     const found = setup({ machines: [machine({ 'claude-code.installed': 'found' })] });
     view = await mount(found.tree);
     await settle();
-    await interact(() => box('claude')?.click());
+    await interact(() => box('claude-code')?.click());
     await interact(() => box('codex')?.click());
     await next();
     await next();
@@ -1284,7 +1295,7 @@ describe('"Which AI do you want to use?" decides which harness segments the run 
     await press('[data-step-back]');
     await settle();
     expect(pageKey()).toBe('onboarding.agents');
-    await interact(() => box('claude')?.click());
+    await interact(() => box('claude-code')?.click());
     await interact(() => box('codex')?.click());
     await next();
     await next();
@@ -1300,7 +1311,7 @@ describe('"Which AI do you want to use?" decides which harness segments the run 
     const run = setup({ machines: [machine()] });
     view = await mount(run.tree);
     await settle();
-    await interact(() => box('claude')?.click());
+    await interact(() => box('claude-code')?.click());
     expect(view?.container.querySelector('[data-agent-none]')).not.toBeNull();
     await next();
     await settle();
@@ -1394,6 +1405,7 @@ describe('the AI picker reads only the scan the flow started (O8-15 B2)', () => 
   const pickerThenReader = (): Machine => ({
     id: A,
     name: 'Studio',
+    harnesses: [{ key: 'claude-code', label: 'Claude Code' }],
     steps: [
       ['onboarding', 'agents', 2],
       ['fake-pack', 'scan-reader', 20],
@@ -1437,7 +1449,7 @@ describe('the AI picker reads only the scan the flow started (O8-15 B2)', () => 
     const run = setup({ machines: [pickerThenReader()], scan: 'finds' });
     view = await mount(run.tree);
     await settle();
-    expect(chips()).toEqual(['claude']);
+    expect(chips()).toEqual(['claude-code']);
     expect(run.scans).toHaveLength(1);
     await next();
     await settle();
@@ -1445,7 +1457,7 @@ describe('the AI picker reads only the scan the flow started (O8-15 B2)', () => 
     expect(withReader).toBeGreaterThan(1);
     await press('[data-step-back]');
     await settle();
-    expect(chips()).toEqual(['claude']);
+    expect(chips()).toEqual(['claude-code']);
     expect(run.scans).toHaveLength(withReader);
   });
 });

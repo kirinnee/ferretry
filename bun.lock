@@ -545,6 +545,7 @@
       "version": "5.0.0",
       "dependencies": {
         "@ferretry/app": "workspace:*",
+        "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-logins": "workspace:*",

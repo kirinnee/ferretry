@@ -1,36 +1,41 @@
 /**
- * "WHICH AI DO YOU WANT TO USE?" (the first page of setup). A short checklist: Claude (ticked), Codex, Gemini (shown, "Coming"), and
- * Others, which opens the providers the CATALOG lists; each ticked provider then asks "Which harness runs it?" with only the
- * supported harnesses that can run it. Choosing writes nothing: a tick is memory of this run (the flow hides the pages of every
+ * "WHICH AI DO YOU WANT TO USE?" (the first page of setup). A short checklist of the harnesses INSTALLED on the machine (Claude Code
+ * first and ticked; the list comes from the daemon's registry, never from here), a "Coming" row for an AI no installed harness runs
+ * yet, and Others, which opens the providers the CATALOG lists; each ticked provider then asks "Which harness runs it?" with only the
+ * installed harnesses that can run it. Choosing writes nothing: a tick is memory of this run (the flow hides the pages of every
  * harness that was not picked), and the footer's Next answers the page. The page draws no title, progress or footer: the flow owns them.
  */
 import type { StepHost } from '@ferretry/kernel/contract';
 import { Badge } from '@ferretry/app';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
-  AI_CHOICES,
   type Found,
+  type Harness,
   type Pick,
   type Provider,
-  SUPPORTED_HARNESSES,
+  comingFor,
   isEmptyPick,
+  listedHarnesses,
   memoryOfPick,
   pickFromMemory,
   withHarness,
   withProvider,
+  withTicked,
 } from './agents-model.ts';
 
 const ROW =
   'kt-panel flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel hover:border-accent has-[input:disabled]:cursor-default has-[input:disabled]:opacity-80 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus';
 const BOX = 'mt-1 h-4 w-4 shrink-0 accent-[var(--accent)]';
 
-/** What the catalog read came to: still reading, failed, or the providers. */
-type ProviderRead =
+/** What a read came to: still reading, failed, or the answer. */
+type Read<T> =
   | { readonly kind: 'reading' }
   | { readonly kind: 'failed' }
-  | { readonly kind: 'ready'; readonly providers: readonly Provider[] };
+  | { readonly kind: 'ready'; readonly value: T };
+type ProviderRead = Read<readonly Provider[]>;
 
-const harnessLabel = (key: string): string => SUPPORTED_HARNESSES.find(harness => harness.plugin === key)?.label ?? key;
+const harnessLabel = (installed: readonly Harness[], key: string): string =>
+  installed.find(harness => harness.key === key)?.label ?? key;
 
 function Row({
   label,
@@ -88,10 +93,12 @@ function Row({
 
 /** One ticked provider's "Which harness runs it?". */
 function HarnessChoice({
+  installed,
   provider,
   harness,
   onChoose,
 }: {
+  readonly installed: readonly Harness[];
   readonly provider: Provider;
   readonly harness: string | undefined;
   readonly onChoose: (key: string) => void;
@@ -110,7 +117,7 @@ function HarnessChoice({
             checked={harness === key}
             onChange={() => onChoose(key)}
           />
-          {harnessLabel(key)}
+          {harnessLabel(installed, key)}
         </label>
       ))}
     </fieldset>
@@ -119,12 +126,14 @@ function HarnessChoice({
 
 /** The page over the pick and the catalog read it is handed (the real page hands the run's). */
 function AgentsChoices({
+  installed,
   pick,
   onPick,
   read,
   onRetry,
   found,
 }: {
+  readonly installed: readonly Harness[];
   readonly pick: Pick;
   readonly onPick: (next: Pick) => void;
   readonly read: ProviderRead;
@@ -132,20 +141,29 @@ function AgentsChoices({
   readonly found: Readonly<Record<string, Found>>;
 }): ReactNode {
   const [othersOpen, setOthersOpen] = useState(() => Object.keys(pick.others).length > 0);
-  const listed = AI_CHOICES;
   return (
     <div className="flex min-w-0 flex-col gap-3" data-onboarding-step-body="agents">
-      {listed.map(choice => (
+      {listedHarnesses(installed).map(harness => (
+        <Row
+          key={harness.key}
+          name={harness.key}
+          label={harness.label}
+          line={`Run your ferrets on ${harness.label}.`}
+          checked={pick.ticked.includes(harness.key)}
+          {...(found[harness.key] === undefined ? {} : { found: found[harness.key] as Found })}
+          onChange={on => onPick(withTicked(pick, harness.key, on))}
+        />
+      ))}
+      {comingFor(installed).map(choice => (
         <Row
           key={choice.id}
           name={choice.id}
           label={choice.title}
           line={choice.line}
-          checked={choice.id === 'gemini' ? false : pick[choice.id]}
-          disabled={choice.coming !== undefined}
-          {...(choice.coming === undefined ? {} : { badge: choice.coming })}
-          {...(found[choice.id] === undefined ? {} : { found: found[choice.id] as Found })}
-          onChange={on => (choice.id === 'gemini' ? undefined : onPick({ ...pick, [choice.id]: on }))}
+          checked={false}
+          disabled
+          badge={choice.coming}
+          onChange={() => undefined}
         />
       ))}
       <Row
@@ -172,17 +190,18 @@ function AgentsChoices({
                 </button>
               </p>
             ) : (
-              read.providers.map(provider => (
+              read.value.map(provider => (
                 <Row
                   key={provider.id}
                   name={`provider-${provider.id}`}
                   label={provider.label}
-                  line={`Runs in ${provider.harnesses.map(harnessLabel).join(' or ')}.`}
+                  line={`Runs in ${provider.harnesses.map(key => harnessLabel(installed, key)).join(' or ')}.`}
                   checked={pick.others[provider.id] !== undefined}
                   onChange={on => onPick(withProvider(pick, provider, on))}
                 >
                   {pick.others[provider.id] === undefined ? null : (
                     <HarnessChoice
+                      installed={installed}
                       provider={provider}
                       harness={pick.others[provider.id]}
                       onChoose={key => onPick(withHarness(pick, provider, key))}
@@ -199,45 +218,70 @@ function AgentsChoices({
 }
 
 const NO_PROVIDERS: readonly Provider[] = [];
+const NO_HARNESSES: readonly Harness[] = [];
 const NO_FOUND: Readonly<Record<string, Found>> = {};
 
-/** The real page: reads the catalog once (a retry reads again), and keeps the pick in the run's memory. */
+/** The page over the installed harnesses: reads them, then the catalog beside them, and keeps the pick in the run's memory. */
 export function AgentsPage({
   step,
+  readHarnesses,
   readProviders,
   found = NO_FOUND,
 }: {
   readonly step: StepHost | undefined;
-  readonly readProviders: () => Promise<readonly Provider[]>;
-  /** The harnesses found on this computer, by catalog key (claude, codex). */
+  /** The harnesses installed on the machine (the daemon's registry). */
+  readonly readHarnesses: () => Promise<readonly Harness[]>;
+  readonly readProviders: (installed: readonly Harness[]) => Promise<readonly Provider[]>;
+  /** The harnesses found on this computer, by harness key. */
   readonly found?: Readonly<Record<string, Found>>;
 }): ReactNode {
-  const [pick, setPick] = useState<Pick>(() => pickFromMemory(step?.segment ?? {}));
+  const [harnessRead, setHarnessRead] = useState<Read<readonly Harness[]>>({ kind: 'reading' });
+  const installed = harnessRead.kind === 'ready' ? harnessRead.value : NO_HARNESSES;
+  const [chosen, setChosen] = useState<Pick | undefined>(undefined);
+  const pick = chosen ?? pickFromMemory(step?.segment ?? {}, installed);
   const [read, setRead] = useState<ProviderRead>({ kind: 'reading' });
   const host = useRef(step);
   host.current = step;
-  const providers = read.kind === 'ready' ? read.providers : NO_PROVIDERS;
+  const providers = read.kind === 'ready' ? read.value : NO_PROVIDERS;
+  const listHarnesses = useRef(readHarnesses);
+  listHarnesses.current = readHarnesses;
   const look = useRef(readProviders);
   look.current = readProviders;
   const load = useCallback((): void => {
+    setHarnessRead({ kind: 'reading' });
     setRead({ kind: 'reading' });
-    look.current().then(
-      list => setRead({ kind: 'ready', providers: list }),
-      () => setRead({ kind: 'failed' }),
+    listHarnesses.current().then(
+      list => {
+        setHarnessRead({ kind: 'ready', value: list });
+        // The page can draw now: what is installed is known. The catalog is read beside it, and only the Others list waits for it.
+        host.current?.ready();
+        look.current(list).then(
+          providerList => setRead({ kind: 'ready', value: providerList }),
+          () => setRead({ kind: 'failed' }),
+        );
+      },
+      () => {
+        setHarnessRead({ kind: 'failed' });
+        host.current?.ready();
+      },
     );
   }, []);
-  // The page draws at once: the catalog is read beside it, and only the Others list waits for it.
   useEffect(() => {
-    host.current?.ready();
     load();
   }, [load]);
-  // The run's memory follows the pick (the flow hides the pages of every harness left out); nothing is written.
+  // The run's memory follows the pick (the flow hides the pages of every harness left out); nothing is written. Until the
+  // installed harnesses are known there is nothing to follow.
   useEffect(() => {
-    host.current?.remember(memoryOfPick(pick, providers));
-  }, [pick, providers]);
-  // Next needs at least one AI: an empty pick would skip both harnesses without a word. Later (which never runs this) is the
+    if (harnessRead.kind === 'ready') host.current?.remember(memoryOfPick(pick, providers, harnessRead.value));
+  }, [pick, providers, harnessRead]);
+  // Next needs at least one AI: an empty pick would skip every harness without a word. Later (which never runs this) is the
   // plain way to leave the question for another time.
-  const empty = isEmptyPick(pick, providers);
+  const empty = harnessRead.kind === 'ready' && isEmptyPick(pick, providers, installed);
+  // A machine whose registry lists no harness has nothing to tick, so it is told that, not asked to pick.
+  const nothingInstalled = harnessRead.kind === 'ready' && installed.length === 0;
+  const emptyWords = nothingInstalled
+    ? 'No AI tool is installed on this machine, so there is nothing to set up here yet. Choose Later.'
+    : 'Pick at least one AI to set up, or choose Later.';
   const holding = useRef(false);
   useEffect(() => {
     if (!empty && !holding.current) return;
@@ -245,17 +289,30 @@ export function AgentsPage({
     host.current?.commit(
       empty
         ? async () => {
-            throw new Error('Pick at least one AI to set up, or choose Later.');
+            throw new Error(emptyWords);
           }
         : null,
     );
-  }, [empty]);
+  }, [empty, emptyWords]);
+  if (harnessRead.kind !== 'ready')
+    return harnessRead.kind === 'reading' ? (
+      <p className="m-0 text-cell text-muted" role="status" data-agent-harnesses-reading="">
+        Looking at what is installed on this machine…
+      </p>
+    ) : (
+      <p className="m-0 text-cell text-warn" role="alert" data-agent-harnesses-failed="">
+        Could not read what is installed on this machine.{' '}
+        <button type="button" className="underline" onClick={load}>
+          Try again
+        </button>
+      </p>
+    );
   return (
     <>
-      <AgentsChoices pick={pick} onPick={setPick} read={read} onRetry={load} found={found} />
+      <AgentsChoices installed={installed} pick={pick} onPick={setChosen} read={read} onRetry={load} found={found} />
       {empty ? (
         <p className="m-0 mt-3 text-cell text-muted" role="status" data-agent-none="">
-          Pick at least one AI to set up, or choose Later.
+          {emptyWords}
         </p>
       ) : null}
     </>

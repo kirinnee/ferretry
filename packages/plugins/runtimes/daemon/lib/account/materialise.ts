@@ -325,6 +325,8 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     const wrapper = joinPath(layout.binDirectory, name);
     const reasons: string[] = [];
     reasons.push(...(runtimeDisable(model, name, now, binary, input.budgetHolds)?.clauses ?? []));
+    // A derived runtime whose pinned model is gone, or whose pins nobody could read, is refused by name: never moved to the live default.
+    if (runtime.refused !== undefined) reasons.push(runtime.refused);
 
     const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths, harness, loginStores);
     if ('unavailable' in store)

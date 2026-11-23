@@ -1,6 +1,6 @@
 /**
- * THE "WHICH AI DO YOU WANT TO USE?" STEP (C59 O8-15) in a real browser over fake data (`fixtures/agents-step-scene.tsx`): Claude is
- * the first row and ticked, Gemini is shown and cannot be ticked, Others opens the providers the (fake) catalog lists and a ticked
+ * THE "WHICH AI DO YOU WANT TO USE?" STEP (C59 O8-15, runtimes U1) in a real browser over fake data (`fixtures/agents-step-scene.tsx`): the
+ * installed harnesses the registry lists (Claude Code first and ticked), Google (Antigravity CLI) is shown and cannot be ticked, Others opens the providers the (fake) catalog lists and a ticked
  * provider asks which harness runs it, with no sideways scroll and every row at least 44px tall to touch.
  *
  * Set `FY_AGENTS_STEP_SHOTS_DIR` to keep `<viewport>-<scheme>-<case>.png`.
@@ -80,7 +80,7 @@ const open = async (variant: Variant, query = '') => {
   const problems: string[] = [];
   tab.on('pageerror', error => problems.push(error.message));
   await tab.goto(`${origin}/?theme=studio-${variant.scheme}${query}`);
-  await tab.waitForSelector('[data-agent-row="claude"]');
+  await tab.waitForSelector('[data-agent-row="claude-code"]');
   await tab.waitForTimeout(400);
   return { tab, problems, close: async () => await context.close() };
 };
@@ -102,15 +102,16 @@ const measure = async (tab: Page) =>
 
 for (const variant of VARIANTS)
   describe(`the picker, ${variant.name}`, () => {
-    it('lists Claude first and ticked, Gemini disabled, with no sideways scroll; Others opens the catalog and asks the harness', async () => {
+    it('lists Claude Code first and ticked, Google disabled, with no sideways scroll; Others opens the catalog and asks the harness', async () => {
       const { tab, problems, close } = await open(variant);
       try {
         const before = await measure(tab);
-        expect(before.rows.map(row => row.row)).toEqual(['claude', 'codex', 'gemini', 'others']);
-        expect(before.rows.find(row => row.row === 'claude')?.checked).toBe(true);
-        expect(before.rows.find(row => row.row === 'gemini')?.disabled).toBe(true);
+        expect(before.rows.map(row => row.row)).toEqual(['claude-code', 'codex', 'google', 'others']);
+        expect(before.rows.find(row => row.row === 'claude-code')?.checked).toBe(true);
+        expect(before.rows.find(row => row.row === 'codex')?.checked).toBe(false);
+        expect(before.rows.find(row => row.row === 'google')?.disabled).toBe(true);
         // The scan the flow started when it opened found Claude on this computer (the fake machine has no Codex).
-        await tab.waitForSelector('[data-agent-row="claude"] [data-agent-found]');
+        await tab.waitForSelector('[data-agent-row="claude-code"] [data-agent-found]');
         expect(await tab.locator('[data-agent-found]').count()).toBe(1);
         // ONE scan for the machine: the chip reads the shared read, it never starts one of its own.
         expect(await tab.evaluate(() => (window as unknown as { __scanCalls: number }).__scanCalls)).toBe(1);
@@ -197,7 +198,7 @@ describe('the picker reads only the flow-owned scan, a failed one included', () 
       expect(await calls()).toBe(2);
       // Back to the picker with no retry: it remounts and reads the flow's read, so no third scan.
       await tab.locator('[data-scene-to-picker]').click();
-      await tab.waitForSelector('[data-agent-row="claude"]');
+      await tab.waitForSelector('[data-agent-row="claude-code"]');
       await tab.waitForTimeout(500);
       expect(await tab.locator('[data-agent-found]').count()).toBe(0);
       expect(await calls()).toBe(2);
@@ -220,4 +221,23 @@ describe('the fixture reads as the page does', () => {
       await close();
     }
   });
+});
+
+describe("the list is the registry's", () => {
+  for (const variant of VARIANTS)
+    it(`lists a third registered harness after Claude Code (Claude Code still first and the only one ticked), ${variant.name}`, async () => {
+      const { tab, problems, close } = await open(variant, '&third=1');
+      try {
+        const rows = await measure(tab);
+        expect(rows.rows.map(row => row.row)).toEqual(['claude-code', 'fake-third', 'codex', 'google', 'others']);
+        expect(rows.rows.filter(row => row.checked).map(row => row.row)).toEqual(['claude-code']);
+        expect(await tab.locator('[data-agent-row="fake-third"]').textContent()).toContain('Fake Third');
+        expect(rows.overflow).toBeLessThanOrEqual(0);
+        for (const row of rows.rows) expect(row.height, `${row.row} is a 44px target`).toBeGreaterThanOrEqual(44);
+        await shot(tab, variant, 'third-harness');
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
 });

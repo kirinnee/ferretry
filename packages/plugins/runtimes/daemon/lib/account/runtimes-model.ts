@@ -31,8 +31,10 @@ import {
 } from '../../../contract/index.ts';
 import { supportedKindOfKey, unsupportedHarnessSentence } from '../harness-kind.ts';
 import { harnessKindOfKey, type HarnessKind } from '../manifest.ts';
+import type { ModelCatalogSources, StarterModels } from '../models/catalog.ts';
+import { launchModelsOf } from '../models/runtime.ts';
 import { BUILTIN_COMPONENTS } from './builtin-autonomous.ts';
-import { deriveRuntimes, withDerived } from './derived-runtimes.ts';
+import { deriveRuntimes, pinKey, pinRefusal, withDerived } from './derived-runtimes.ts';
 import {
   type AccountModel,
   AccountModelSchema,
@@ -75,6 +77,14 @@ export interface RuntimesFiles {
   readonly templates: ReadonlyMap<string, EnvironmentLoginTemplate> | undefined;
   /** The components the owning plugins provided, per kind. */
   readonly components: ComponentReading;
+  /** The model each harness starts with (the catalog default); what the built-in model sets hold. Absent: none is known. */
+  readonly starters?: StarterModels;
+  /** The catalogs and presets Logins holds: what each login's own default model is read through (`derived-runtimes.ts`). */
+  readonly catalogs?: ModelCatalogSources;
+  /** The model each (login, harness) was pinned to when first seen, by `pinKey` (`derived-runtimes.ts`). */
+  readonly pins?: ReadonlyMap<string, string>;
+  /** Set when the pin state exists and could not be read (the file it names): every derived runtime is then refused. */
+  readonly pinsUnreadable?: string;
   /** The harnesses installed here (`derived-runtimes.ts`); absent when the caller does not know. */
   readonly installed?: readonly HarnessKind[] | undefined;
 }
@@ -133,6 +143,20 @@ export interface RuntimesModel {
    * removes the last runtime on such a login must stay possible.
    */
   readonly stoodInLogins: readonly StoodInLogin[];
+  /** The (login, harness) pairs seen for the first time, with the model each launches with: to be recorded as their pins. */
+  readonly firstSeen: ReadonlyMap<string, string>;
+  /**
+   * What exists only because it is derived (no file holds it), for a change that saves one: such a runtime is written whole,
+   * and a generated profile it names is replaced by a real one holding the pinned model (`pinnedModelOf`).
+   */
+  readonly derived: {
+    readonly runtimes: ReadonlySet<string>;
+    readonly profiles: ReadonlySet<string>;
+    /** The model a runtime of this login and harness is pinned to (or would be pinned to now). */
+    readonly pinnedModelOf: (login: string, harness: HarnessKind) => string | undefined;
+    /** Why a runtime of this login and harness may not launch on its pin (a saved copy of a derived runtime included), if it may not. */
+    readonly refusedFor: (login: string, harness: HarnessKind) => string | undefined;
+  };
   /** The number of files and logins the model came from; zero is a machine nobody has set up. */
   readonly sources: number;
   /** A digest of the model, so a staged change can tell the machine moved under it. */
@@ -266,7 +290,18 @@ const builtIn = (kind: ProfileComponentKind): Readonly<Record<string, unknown>> 
  */
 export function assembleRuntimesModel(explicit: RuntimesFiles): RuntimesModel {
   // A ready login with no runtime of its own has one derived beside the files (`derived-runtimes.ts`); the files win.
-  const derived = deriveRuntimes(explicit);
+  const loginOf = new Map(explicit.logins.map(login => [login.id as string, login]));
+  const launch =
+    explicit.catalogs === undefined
+      ? undefined
+      : (login: LoginView, harness: HarnessKind) =>
+          launchModelsOf(
+            credentialOf(login, explicit.templates?.get(login.id as string)).credential,
+            harness,
+            explicit.catalogs,
+            explicit.starters?.[harness],
+          );
+  const derived = deriveRuntimes({ ...explicit, ...(launch === undefined ? {} : { launch }) });
   const files: RuntimesFiles = {
     ...explicit,
     runtimes: withDerived(explicit.runtimes, derived.runtimes),
@@ -385,7 +420,12 @@ export function assembleRuntimesModel(explicit: RuntimesFiles): RuntimesModel {
         },
       ]),
     ),
-    runtimes: Object.fromEntries([...present].map(([name, file]) => [name, runtimeOf(file)])),
+    runtimes: Object.fromEntries(
+      [...present].map(([name, file]) => [
+        name,
+        { ...runtimeOf(file), ...(derived.refused.has(name) ? { refused: derived.refused.get(name) } : {}) },
+      ]),
+    ),
   };
   const model = AccountModelSchema.parse(document);
   return {
@@ -394,6 +434,29 @@ export function assembleRuntimesModel(explicit: RuntimesFiles): RuntimesModel {
     unreadable,
     notices,
     stoodInLogins,
+    firstSeen: derived.firstSeen,
+    derived: {
+      runtimes: new Set(derived.runtimes.keys()),
+      profiles: new Set(derived.profiles.keys()),
+      pinnedModelOf: (login, harness) => {
+        const view = loginOf.get(login);
+        return (
+          explicit.pins?.get(pinKey(login, harness)) ??
+          (view === undefined
+            ? explicit.starters?.[harness]
+            : (launch?.(view, harness).model ?? explicit.starters?.[harness]))
+        );
+      },
+      refusedFor: (login, harness) => {
+        const view = loginOf.get(login);
+        return pinRefusal(
+          login,
+          explicit.pins?.get(pinKey(login, harness)),
+          view === undefined ? undefined : launch?.(view, harness).offered,
+          explicit.pinsUnreadable,
+        );
+      },
+    },
     sources:
       explicit.runtimes.size +
       explicit.profiles.size +
