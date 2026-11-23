@@ -220,6 +220,21 @@ function parsePaneFacts(line: string): PaneFacts | undefined {
  * Whether the pane read now is still the exact pane a binding was made for: live, same session, process, birth and
  * foreground program, with a cursor row to compare. The row itself may differ; the write's own guard compares it.
  */
+/**
+ * The same pane, process and session as `original`, alive, now running ANOTHER program: what a launch looks like while
+ * its wrappers exec one into the next at one pid (`tmux` → `systemd-run` → `ionice` → … → the harness).
+ */
+function sameLaunch(current: PaneFacts, original: PaneFacts): boolean {
+  return (
+    !current.dead &&
+    current.session === original.session &&
+    current.pid === original.pid &&
+    current.created === original.created &&
+    current.command !== undefined &&
+    current.cursorRow !== undefined
+  );
+}
+
 function sameBinding(current: PaneFacts, original: PaneFacts): boolean {
   return (
     !current.dead &&
@@ -907,7 +922,14 @@ export class TmuxRunner implements Runner {
     const guard = this.options.delivery;
     // No act runner bound: nothing may write here (fail closed), said as the kernel's own code for it.
     if (guard === undefined) throw new PaneHeldError('holds_unavailable');
-    const command = original.command;
+    // The binding's program is the one the pane runs when the FIRST key is sent, not when the binding was made: a first
+    // turn is bound while the launch's wrappers are still exec'ing at the pane's one pid (`systemd-run --user --scope`
+    // takes ~60 ms to reach the harness), and a program pinned then made the harness's own first frame read as a pane
+    // that was no longer live, so every limited ferret's first turn failed untyped. Until a write is attempted, a read
+    // at the same pane, pid and session adopts the program it finds; from the first write on it is fixed, and every
+    // write is still compared against it by the server in the write itself.
+    let binding = original;
+    let wrote = false;
     let observed = original;
     let typings = 0;
     let refused: RefusalCode | undefined;
@@ -915,7 +937,7 @@ export class TmuxRunner implements Runner {
     /** After the server's guard refused a write: `moved` when only the cursor row differs from the bound pane. */
     const whyRefused = async (): Promise<BindingBlock> => {
       const now = await this.facts(handle, true).catch(() => undefined);
-      return now !== undefined && sameBinding(now, original) ? 'moved' : 'gone';
+      return now !== undefined && sameBinding(now, binding) ? 'moved' : 'gone';
     };
     // Reuse today's delivery unchanged. Its commands use a validated session name, but every target is rebound to
     // this exact live handle, so a changed active pane or a replacement session cannot receive the message.
@@ -926,7 +948,9 @@ export class TmuxRunner implements Runner {
           // Cleanup must still work after a disappearing pane or a refused paste.
           if (args[0] === 'delete-buffer') return await this.options.tmux.execute(args, stdin);
           const current = await this.facts(handle, true);
-          if (current === undefined || !sameBinding(current, original)) {
+          if (!writing && !wrote && current !== undefined && sameLaunch(current, binding)) binding = current;
+          if (writing) wrote = true;
+          if (current === undefined || !sameBinding(current, binding)) {
             if (writing) blocked ??= 'gone';
             return { code: 1, stdout: '', stderr: 'the ferret pane is no longer live' };
           }
@@ -942,7 +966,7 @@ export class TmuxRunner implements Runner {
             handle,
             {
               panePid: original.pid,
-              command,
+              command: binding.command ?? '',
               cursorRow: observed.cursorRow ?? -1,
               session: original.session,
               sessionCreated: original.created,

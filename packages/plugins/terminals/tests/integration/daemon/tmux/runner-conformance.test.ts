@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'bun:test';
 import type { RunnerHandle } from '@ferretry/core-ferrets/contract';
 import { emptyChildEnvironment, fenced, ferretId, runnerConformance } from '@ferretry/core-ferrets/contract/testing';
 import type { InputHolds } from '@ferretry/kernel/contract';
@@ -13,7 +14,12 @@ interface WorldPane {
   readonly pid: number;
   readonly session: string;
   readonly created: number;
-  readonly command: string;
+  /** What `#{pane_current_command}` answers: a launch's wrappers exec one into the next at this one pid. */
+  command: string;
+  /** Programs the next facts reads answer before `command`, one per read (a launch still exec'ing its wrappers). */
+  readonly launching: string[];
+  /** Called once before the first guarded write lands (a harness that execs another program under the cursor). */
+  beforeFirstWrite?: () => void;
   readonly server: FakeTmuxServer;
 }
 
@@ -40,6 +46,7 @@ function tmuxWorld() {
       session,
       created: 1_000 + next,
       command,
+      launching: [],
       server: new FakeTmuxServer(),
     };
     panes.set(pane.id, pane);
@@ -56,11 +63,11 @@ function tmuxWorld() {
     (server.working ? 1 : 0) +
     server.composer.split('\n').length -
     1;
-  const live = (pane: WorldPane): Record<string, string> => ({
+  const live = (pane: WorldPane, read = false): Record<string, string> => ({
     pane_id: pane.id,
     pane_pid: String(pane.pid),
     pane_dead: pane.server.dead ? '1' : '0',
-    pane_current_command: pane.command,
+    pane_current_command: (read ? pane.launching.shift() : undefined) ?? pane.command,
     cursor_y: String(cursorRow(pane)),
     session_name: pane.session,
     session_created: String(pane.created),
@@ -79,12 +86,15 @@ function tmuxWorld() {
       return done();
     }
     if (command === 'display-message' && args.at(-1)?.startsWith('#{pane_id}|')) {
-      const facts = live(pane);
+      const facts = live(pane, true);
       return done(
         `${facts.pane_id}|${facts.pane_pid}|${facts.pane_dead}|${facts.session_name}|${facts.session_created}|${facts.pane_current_command}|${facts.cursor_y}\n`,
       );
     }
     if (command === 'if-shell') {
+      const first = pane.beforeFirstWrite;
+      pane.beforeFirstWrite = undefined;
+      first?.();
       const comparisons = [...(args[4] ?? '').matchAll(/#\{==:#\{(\w+)\},([^}]*)\}/gu)];
       const facts = live(pane);
       if (comparisons.length === 0 || !comparisons.every(([, key = '', value]) => facts[key] === value))
@@ -138,6 +148,7 @@ function tmuxWorld() {
   };
   return {
     runner,
+    paneOf,
     spec: { ferret: ferretId('f1'), command: ['harness'], cwd: fenced('/work'), env: emptyChildEnvironment() },
     // A ferret pane a previous daemon started: it is in the server, and this runner never launched it.
     adoptable: async () => add('fy-f0', 'harness').id as RunnerHandle,
@@ -155,3 +166,42 @@ function tmuxWorld() {
 }
 
 runnerConformance('TmuxRunner (in-memory tmux server)', tmuxWorld);
+
+describe("TmuxRunner first turn at a pane still exec'ing its launch wrappers", () => {
+  it('should type the first turn when the program goes tmux → systemd-run → the harness at one pid after it bound', async () => {
+    // The P0 on a host with a user manager: `systemd-run --user --scope` takes ~60 ms to exec the harness, so the
+    // delivery's first reads saw `systemd-run` and pinned it; the harness's own frame then read as a pane no longer live.
+    // Arrange
+    const world = tmuxWorld();
+    const started = await world.runner.start(world.spec);
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.launching.push('tmux', 'systemd-run', 'ionice', 'env');
+
+    // Act
+    const delivered = await world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    expect(delivered).toBeDefined();
+    expect(pane.launching).toEqual([]);
+    expect(pane.server.submitted).toEqual(['Reply with the single word OK.']);
+  });
+
+  it('should still refuse a write once the pane runs another program after the first key', async () => {
+    // Arrange — the harness execs something else under the cursor between the delivery's first write and the next.
+    const world = tmuxWorld();
+    const started = await world.runner.start(world.spec);
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.beforeFirstWrite = () => {
+      pane.command = 'vim';
+    };
+
+    // Act
+    const delivered = world.runner.deliver(started.value.handle, { text: 'Reply with the single word OK.' });
+
+    // Assert
+    await expect(delivered).rejects.toThrow();
+    expect(pane.server.submitted).toEqual([]);
+  });
+});
