@@ -33,6 +33,13 @@ Every new ferret launches as `systemd-run --user --scope` inside its own
 wrapped as `ionice -c2 -n7 -- <cmd>`. Supervision (the Warden and what it started) is never wrapped, and the
 daemon is never launched through the wrapper.
 
+The wrapper runs INSIDE the pane, so the pane must be able to reach the user manager: the daemon gives every
+`tmux` client it starts exactly two names from its own environment, `XDG_RUNTIME_DIR` and
+`DBUS_SESSION_BUS_ADDRESS` (the same two `systemctl` and `systemd-run` get, and nothing else), and a ferret's
+launch copies both into its new session, so a tmux server an older build started without them still works.
+Without them `systemd-run` printed "Failed to connect to bus: No medium found" and every limited pane exited 1
+before its harness ran, while the daemon's own scope probe passed.
+
 | Where           | Setting         | Default                          |
 | --------------- | --------------- | -------------------------------- |
 | the fleet slice | `CPUWeight`     | 50 (voice 200; daemon: its unit) |
