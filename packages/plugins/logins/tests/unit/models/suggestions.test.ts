@@ -109,6 +109,18 @@ describe('trimModelsDev (models.dev is untrusted data)', () => {
     should(none.providers).eql({});
     should(none.dropped[0]?.problem).match(/not a map/u);
   });
+
+  it('should drop a provider that is not a map with models, naming it', () => {
+    // Act
+    const { providers, dropped } = trimModelsDev({ xai: 'text', mistral: { name: 'Mistral' } });
+
+    // Assert
+    should(providers).eql({});
+    should(dropped.filter(entry => ['xai', 'mistral'].includes(entry.where)).map(entry => entry.problem)).eql([
+      'the provider is not a map with models',
+      'the provider is not a map with models',
+    ]);
+  });
 });
 
 describe('withRetirementDates (LiteLLM)', () => {
@@ -179,6 +191,18 @@ describe('readSuggestions (what a daemon makes of the published value)', () => {
     should(Object.keys(read.suggestions?.providers.xai?.models ?? {})).eql(['a']);
     should(read.suggestions?.providers['Bad Provider']).be.undefined();
     should(read.dropped.map(entry => entry.where).sort()).eql(['Bad Provider', 'xai/broken']);
+  });
+
+  it('should leave out a provider whose own fields do not check, naming it', () => {
+    // Arrange
+    const value = { ...published(), providers: { ...published().providers, odd: { name: '', models: {} } } };
+
+    // Act
+    const read = readSuggestions(value);
+
+    // Assert
+    should(read.suggestions?.providers.odd).be.undefined();
+    should(read.dropped.map(entry => entry.where)).eql(['odd']);
   });
 });
 
