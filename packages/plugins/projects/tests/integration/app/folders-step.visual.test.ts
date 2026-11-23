@@ -56,7 +56,7 @@ afterAll(async () => {
 });
 
 const VIEWPORTS = [
-  { name: '1280', width: 1_280, height: 900, phone: false },
+  { name: '1440', width: 1_440, height: 900, phone: false },
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 
@@ -123,6 +123,43 @@ describe('the setup flow ends in project setup', () => {
           await tab.getByRole('button', { name: 'Add this folder' }).click();
           await tab.click('[data-explorer-entry="atlas"]');
           await tab.waitForFunction(() => document.querySelector('[data-explorer-state="ready"]') !== null);
+          await tab.waitForSelector('[data-explorer-up]');
+          await shot('1b-inside-atlas');
+
+          // O9-4: the toolbar is ONE row (every control shares a line, none wraps), Up sits in the path row with Go inside the
+          // path field, and "Add this folder" is the only primary button in the explorer.
+          const layout = await tab.evaluate(() => {
+            const box = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
+            const bar = document.querySelector('[data-explorer-toolbar]');
+            const kids = [...(bar?.querySelectorAll('button, label, fieldset') ?? [])].map(e =>
+              e.getBoundingClientRect(),
+            );
+            const field = box('[data-explorer-path-box] input');
+            const go = box('[data-explorer-path-box] button[type="submit"]');
+            const up = box('[data-explorer-up]');
+            const barBox = bar?.getBoundingClientRect();
+            return {
+              rowTops: new Set(kids.map(r => Math.round(r.top + r.height / 2))).size,
+              barRight: barBox?.right ?? 0,
+              lastRight: Math.max(...kids.map(r => r.right)),
+              goInside: go !== undefined && field !== undefined && go.left >= field.left && go.right <= field.right,
+              upBeforeField:
+                up !== undefined &&
+                field !== undefined &&
+                up.right <= field.left &&
+                Math.abs(up.top + up.height / 2 - (field.top + field.height / 2)) < 2,
+              primaries: document.querySelectorAll('[data-explorer-state] [data-variant="primary"]').length,
+              upHeight: up?.height ?? 0,
+              barHeight: barBox?.height ?? 0,
+              viewport: window.innerWidth,
+            };
+          });
+          expect(layout.rowTops, 'the toolbar controls share one line').toBe(1);
+          expect(layout.lastRight, 'nothing pokes out of the toolbar').toBeLessThanOrEqual(layout.barRight + 0.5);
+          expect(layout.goInside, 'Go sits inside the path field').toBe(true);
+          expect(layout.upBeforeField, 'Up sits in the path row, before the field').toBe(true);
+          expect(layout.primaries, 'Add this folder is the single primary action').toBe(1);
+          expect(layout.lastRight, 'the toolbar fits the viewport').toBeLessThanOrEqual(layout.viewport);
           await tab.getByRole('button', { name: 'Add this folder' }).click();
           await tab.waitForFunction(() => document.querySelectorAll('[data-projects-step-picks] li').length === 2);
           await shot('2-two-folders');

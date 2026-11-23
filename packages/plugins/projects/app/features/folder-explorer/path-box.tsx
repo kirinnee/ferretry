@@ -5,7 +5,8 @@
  * The box only ASKS. The daemon decides whether the path may be opened (the fence stays there), so a refusal comes back
  * as the daemon's own sentence, drawn under the field while the old listing stays where it is.
  */
-import { useId, useState } from 'react';
+import { Button } from '@ferretry/app/ui';
+import { type ReactNode, useId, useState } from 'react';
 
 export interface PathBoxProps {
   /** The open folder, spelled the way the box shows it (`~`, `~/work`). */
@@ -15,9 +16,11 @@ export interface PathBoxProps {
   readonly onGo: (typed: string) => void;
   /** Escape: the box goes back to `current`, and a refusal is cleared by the caller. */
   readonly onRestore: () => void;
+  /** What sits before the field in the same row (the explorer's Up button). */
+  readonly lead?: ReactNode;
 }
 
-export function PathBox({ current, refusal, onGo, onRestore }: PathBoxProps) {
+export function PathBox({ current, refusal, onGo, onRestore, lead }: PathBoxProps) {
   const errorId = useId();
   // An edit belongs to the folder it was typed in: the moment another folder is open (a committed navigation) the edit
   // is dropped for good, so coming back to the first folder shows that folder, not the old typing.
@@ -40,33 +43,36 @@ export function PathBox({ current, refusal, onGo, onRestore }: PathBoxProps) {
         else if (typed !== current || refusal !== null) onGo(typed);
       }}
     >
-      <div className="flex items-stretch gap-xs">
-        <input
-          type="text"
-          className="kt-input mono min-h-control min-w-0 flex-1"
-          aria-label="Folder path"
-          aria-invalid={refusal === null ? undefined : true}
-          aria-describedby={refusal === null ? undefined : errorId}
-          value={text}
-          autoComplete="off"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          onChange={event => setEdit(event.target.value)}
-          onKeyDown={event => {
-            if (event.key !== 'Escape') return;
-            // Escape inside a dialog closes it; here it only undoes the typing.
-            if (text !== current || refusal !== null) {
-              event.preventDefault();
-              event.stopPropagation();
-              setEdit(null);
-              onRestore();
-            }
-          }}
-        />
-        <button type="submit" className="kt-btn min-h-control min-w-[4.5rem] shrink-0">
-          Go
-        </button>
+      <div className="flex items-center gap-xs">
+        {lead}
+        <div className="relative min-w-0 flex-1">
+          <input
+            type="text"
+            className="kt-input mono min-h-control w-full min-w-0 pe-14"
+            aria-label="Folder path"
+            aria-invalid={refusal === null ? undefined : true}
+            aria-describedby={refusal === null ? undefined : errorId}
+            value={text}
+            autoComplete="off"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            onChange={event => setEdit(event.target.value)}
+            onKeyDown={event => {
+              if (event.key !== 'Escape') return;
+              // Escape inside a dialog closes it; here it only undoes the typing.
+              if (text !== current || refusal !== null) {
+                event.preventDefault();
+                event.stopPropagation();
+                setEdit(null);
+                onRestore();
+              }
+            }}
+          />
+          <Button type="submit" size="sm" className="absolute end-0 top-0 !h-full rounded-s-none border-y-0 border-e-0">
+            Go
+          </Button>
+        </div>
       </div>
       {refusal !== null && (
         <p id={errorId} className="m-0 text-meta text-err" role="alert" data-explorer-path-error="">
