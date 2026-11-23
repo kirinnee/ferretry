@@ -142,18 +142,23 @@ export function FirstPasskeyOffer({
     );
   const minutes = registrationMinutes(state.view.registrationClosesAt, now());
   return (
-    <div data-first-passkey-offer="" className="flex w-full min-w-0 flex-col gap-3">
+    <div data-first-passkey-offer="" className="mt-3 flex w-full min-w-0 flex-col gap-3">
       {/* WHY, in one plain line: what a passkey is for. Then WHEN: no bare countdown, what happens if it is skipped. */}
-      <p className="m-0 text-balance text-center text-ui leading-base text-fg" data-first-passkey-why="">
+      <p className="m-0 text-balance text-center text-ui leading-base text-fg sm:text-left" data-first-passkey-why="">
         Add a passkey so this device can approve risky actions with your fingerprint or face.
       </p>
-      <p className="m-0 text-balance text-center text-meta leading-base text-muted" data-first-passkey-when="">
+      <p
+        className="m-0 text-balance text-center text-meta leading-base text-muted sm:text-left"
+        data-first-passkey-when=""
+      >
         {minutes === null
           ? ''
           : `This quick option stays open for about ${minutes <= 1 ? 'a minute' : `${minutes} minutes`}. `}
         Skip it and you can add a passkey later in Settings.
       </p>
+      {/* The hint is a hint, not a label of the buttons: a clear gap (one row of its own) separates it from the answers. */}
       <ActionRow
+        className="mt-3"
         secondary={actions}
         primary={
           <button

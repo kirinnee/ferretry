@@ -193,7 +193,7 @@ async function inPage(
   );
   const tab = await context.newPage();
   try {
-    await tab.goto(`${origin}/?theme=studio-light&${query}`);
+    await tab.goto(`${origin}/?${query.includes('theme=') ? '' : 'theme=studio-light&'}${query}`);
     await tab.locator(ready).first().waitFor({ state: 'visible' });
     await act?.(tab);
     await tab.waitForTimeout(250);
@@ -352,4 +352,82 @@ describe('the Logins tab keeps the settings rules', () => {
       expect(boxes[0]?.height).toBe(boxes[1]?.height);
     });
   });
+});
+
+describe('C59 O8-1 review: the shared answer row fits the PANEL it is in, not the window', () => {
+  // The Codex link sign-in inside a Settings panel at a 1280 window (the panel is 604px): its "Start over" + "Cancel" row is two
+  // 12rem answers (396px with the gap) in a column NARROWER than that, so a row that groups at the right edge used to overflow
+  // to the left and the panel's own clipping cut "Start over".
+  for (const theme of THEMES)
+    it(`the Codex link sign-in in a 604px panel at 1280 (${theme}): every action is whole, inside its row and the panel`, async () => {
+      await inPage(
+        { width: 1_280, height: 900 },
+        `theme=${theme}&view=needs-codex&panel=604`,
+        '[data-login-sign-in="start"]',
+        async tab => {
+          await tab
+            .getByRole('button', { name: /Sign in to Codex/u })
+            .first()
+            .click();
+          await tab.locator('[data-login-sign-in="awaiting-callback"] [data-sign-in-start-over]').waitFor({
+            state: 'visible',
+          });
+          await tab.evaluate(async () => await document.fonts.ready);
+          const facts = await tab.evaluate(() => {
+            const visibleSlice = (el: HTMLElement): { width: number; visible: number } => {
+              const own = el.getBoundingClientRect();
+              let left = own.left;
+              let right = own.right;
+              for (let up = el.parentElement; up !== null; up = up.parentElement) {
+                if (getComputedStyle(up).overflowX === 'visible') continue;
+                const box = up.getBoundingClientRect();
+                left = Math.max(left, box.left);
+                right = Math.min(right, box.right);
+              }
+              return { width: own.width, visible: Math.max(0, right - left) };
+            };
+            const rows = [...document.querySelectorAll<HTMLElement>('[data-login-sign-in] [data-action-row]')];
+            return {
+              rows: rows.map(row => {
+                const rowBox = row.getBoundingClientRect();
+                return {
+                  width: rowBox.width,
+                  buttons: [...row.querySelectorAll<HTMLElement>('.kt-btn')].map(button => {
+                    const box = button.getBoundingClientRect();
+                    return {
+                      label: button.textContent?.trim() ?? '',
+                      leftOfRow: box.left - rowBox.left,
+                      rightOfRow: rowBox.right - box.right,
+                      ...visibleSlice(button),
+                    };
+                  }),
+                };
+              }),
+            };
+          });
+          const labels = facts.rows.flatMap(row => row.buttons.map(button => button.label));
+          expect(
+            labels.some(label => label.includes('Start over')),
+            `Start over is drawn (${labels.join(' | ')})`,
+          ).toBe(true);
+          expect(labels.some(label => label.includes('Cancel'))).toBe(true);
+          for (const row of facts.rows)
+            for (const button of row.buttons) {
+              const named = `"${button.label}" (row ${Math.round(row.width)}px wide)`;
+              expect(button.visible, `${named} is not clipped by anything around it`).toBeGreaterThanOrEqual(
+                button.width - 0.5,
+              );
+              expect(button.leftOfRow, `${named} starts inside its row`).toBeGreaterThanOrEqual(-0.5);
+              expect(button.rightOfRow, `${named} ends inside its row`).toBeGreaterThanOrEqual(-0.5);
+            }
+          if (shotsDir !== '') {
+            // The whole answer area on screen: the shot is what the owner looks at.
+            await tab.locator('[data-sign-in-start-over]').scrollIntoViewIfNeeded();
+            await tab.mouse.wheel(0, 300);
+            await tab.waitForTimeout(150);
+            await tab.screenshot({ path: join(shotsDir, `1280-${theme}-codex-link-panel604.png`) });
+          }
+        },
+      );
+    });
 });

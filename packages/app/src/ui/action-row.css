@@ -1,7 +1,7 @@
 /* THE ANSWER ROW (`action-row.tsx`): layout only, no colour, so every style family keeps its own buttons.
    Phone: stacked, each answer the full container width, the way on first. The component puts the answers in the DOM in the
    order they are drawn (phone: primary, secondary; desktop: secondary, primary), so Tab and a screen reader follow the
-   picture: nothing here reverses a direction. Desktop: one row, space-between, both answers one width. */
+   picture: nothing here reverses a direction. Desktop: one row, the answers side by side at the container's right edge, both one width. */
 .fy-action-row {
   display: flex;
   flex-direction: column;
@@ -17,19 +17,34 @@
   padding-block: 0.75rem;
   white-space: nowrap;
 }
+/* THE ROW FITS ITS CONTAINER, NOT THE WINDOW. A panel in a wide window can be narrow (a Settings panel at a 1280 window holds
+   this row in a 309px column), so the side-by-side group is chosen by the row's OWN width: the row is its own size container
+   and its answers go side by side only when both fit (2 x 12rem and the 12px gap, rounded up to 25rem). Narrower, they wrap
+   and are the phone's: one per line, each the container's full width, in the same DOM order (so Tab still follows the picture). */
+.fy-action-row {
+  container-type: inline-size;
+}
 @media (min-width: 640px) {
   .fy-action-row {
     flex-direction: row;
+    flex-wrap: wrap;
     /* Stretch, so the two answers are one height even when one carries an icon (a centred row let a taller button sit off the other's top). */
     align-items: stretch;
-    justify-content: space-between;
+    /* C59 O8-2: ONE GROUP at the container's right edge (the way out beside the way on), not one answer on each edge: the
+       Linear / Stripe onboarding pattern. Two buttons 396px apart read as two unrelated halves of a wide page; side by side
+       they read as one question with its two answers. A lone answer (primary or secondary) is the same group of one. */
+    justify-content: flex-end;
   }
+  /* A container too narrow for the group: each answer takes its own line, the full width (flex-basis 100% forces the wrap). */
   .fy-action-row > .kt-btn {
-    inline-size: 12rem;
-    flex: 0 0 auto;
+    inline-size: 100%;
+    flex: 1 0 100%;
   }
-  .fy-action-row:not(.fy-action-row--start) > :only-child {
-    margin-inline-start: auto;
+  @container (min-width: 25rem) {
+    .fy-action-row > .kt-btn {
+      inline-size: 12rem;
+      flex: 0 0 auto;
+    }
   }
 }
 
