@@ -2,7 +2,7 @@ import type { AppComponent, PanelProps, SettingsProps } from '@ferretry/kernel/m
 import { implementApp } from '@ferretry/kernel/manifest';
 import { forSubject, provideToShell } from '@ferretry/app';
 import manifest from '../manifest.ts';
-import type { LiveRuntimesClient, RuntimesClient } from './lib/client.ts';
+import type { LiveRuntimesClient } from './lib/client.ts';
 import { lazyComponent } from './lazy.ts';
 import { MACHINES_SECTION } from './features/fleet/shell/machine-route.ts';
 
@@ -36,11 +36,11 @@ const startPanel = (client: LiveRuntimesClient): AppComponent<PanelProps> =>
     ),
   );
 
-const pickerView = (client: RuntimesClient): AppComponent<PanelProps> =>
+const pickerView = (client: LiveRuntimesClient): AppComponent<PanelProps> =>
   lazyComponent<PanelProps>(async () =>
-    ((await loadView('runtime-picker')).createRuntimePicker as (client: RuntimesClient) => AppComponent<PanelProps>)(
-      client,
-    ),
+    (
+      (await loadView('runtime-picker')).createRuntimePicker as (client: LiveRuntimesClient) => AppComponent<PanelProps>
+    )(client),
   );
 
 /** The import wizard (Settings › Import): its module loads when the tab is first drawn. */

@@ -158,11 +158,10 @@ export interface SessionChatPageProps {
 
 /**
  * The account a ferret runs on, as the composer's tools may read it: its name and the usage its monitor stamped. None while
- * the runtime is not known (a ferret the chat could not read).
+ * the login is not known (a ferret the chat could not read, or one with no login).
  */
 const composerAccountOf = (session: ChatSession): ComposerAccount | undefined => {
-  const agent = session.config.agent;
-  if (agent === undefined) return undefined;
+  const login = session.config.login;
   const { state } = session;
   const usage = {
     ...(state.usageAuthOk === undefined ? {} : { usageAuthOk: state.usageAuthOk }),
@@ -172,7 +171,8 @@ const composerAccountOf = (session: ChatSession): ComposerAccount | undefined =>
     ...(state.usage5hResetAt === undefined ? {} : { usage5hResetAt: state.usage5hResetAt }),
     ...(state.usageWeeklyResetAt === undefined ? {} : { usageWeeklyResetAt: state.usageWeeklyResetAt }),
   };
-  return { agent, ...(Object.keys(usage).length === 0 ? {} : { usage }) };
+  if (login === undefined && Object.keys(usage).length === 0) return undefined;
+  return { ...(login === undefined ? {} : { agent: login }), ...(Object.keys(usage).length === 0 ? {} : { usage }) };
 };
 
 /** A ferret as its words name it: the callsign, else the task's name, else the id (today's `sessionDisplayName`). */
