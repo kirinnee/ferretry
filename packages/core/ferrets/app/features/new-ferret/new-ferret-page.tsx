@@ -368,6 +368,7 @@ export function NewFerretPage({
                 daemon={daemon}
                 props={
                   {
+                    daemon,
                     value: draft.folder,
                     id: fieldId('folder'),
                     recent: folders.folders?.map(folder => folder.path) ?? [],

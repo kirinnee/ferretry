@@ -7,13 +7,19 @@
  *   ?view=new      the slot host     ?view=project  the project page of /fake/p1
  *   ?projects=<n>  how many projects the fake daemon registers (default 2)
  *   ?recent=<n>    how many recent folders the host hands the panel (default 3)
+ *   ?accounts=<n>  how many GitHub accounts the fake daemon has connected (default 1)
  *   ?theme=<family>-<mode>
  */
+import { WithAppHooks } from '@ferretry/app/testing/settings-shell';
 import { RouterProvider } from '@ferretry/app/testing/router';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ProjectInfoSchema } from '../../../../contract/index.ts';
+import {
+  ProjectInfoSchema,
+  PROJECTS_CONNECT_ACCOUNT_HOOK,
+  type ProjectsConnectAccountProps,
+} from '../../../../contract/index.ts';
 import type { ProjectsClient } from '../../../../app/lib/client.ts';
 import { createNewFerretProjectsPanel } from '../../../../app/views/new-ferret-projects.tsx';
 import { ProjectDetailPage } from '../../../../app/views/project-detail.tsx';
@@ -22,6 +28,7 @@ const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const view = params.get('view') ?? 'new';
 const count = Number(params.get('projects') ?? '2');
+const ACCOUNTS = Number(params.get('accounts') ?? '1');
 const RECENT = ['/fake/work/api', '/fake/work/web-redesign', '/fake/scratch', '/fake/work/docs'].slice(
   0,
   Number(params.get('recent') ?? '3'),
@@ -55,7 +62,8 @@ const client = {
     calls.push({ route, headers: init?.headers, body: init?.body });
     if (route === 'GET /v1/projects') return PROJECTS as Answer;
     if (route === 'GET /v1/ferrets') return [] as Answer;
-    if (route === 'GET /v1/git-accounts') return [{ id: 'acct-1', login: 'fake-octo', keys: {} }] as Answer;
+    if (route === 'GET /v1/git-accounts')
+      return [{ id: 'acct-1', login: 'fake-octo', keys: {} }].slice(0, ACCOUNTS) as Answer;
     if (route === 'GET /v1/projects/folders')
       return {
         path: '/fake/work',
@@ -77,7 +85,22 @@ const client = {
   },
 } as unknown as ProjectsClient;
 
+/**
+ * A STAND-IN for Git accounts' connect card (another plugin's, reached only through its contract hook): its idle button,
+ * in the position and size the real one has. The real card's consent words and code are Git accounts' own to shoot.
+ */
+const connectProvider = {
+  panel: ({ connected }: ProjectsConnectAccountProps) => (
+    <div>
+      <button className="kt-btn min-h-[44px]" data-fake-connect-card="" type="button">
+        {connected === 0 ? 'Connect a GitHub account' : 'Connect another GitHub account'}
+      </button>
+    </div>
+  ),
+};
+
 const ProjectsPanel = createNewFerretProjectsPanel(client) as (props: {
+  readonly daemon: string;
   readonly value: string;
   readonly id: string;
   readonly recent: readonly string[];
@@ -92,7 +115,7 @@ function FolderHost() {
       <label className="mb-1.5 block text-ui font-semibold text-fg" htmlFor="fy-new-ferret-folder">
         Where it works
       </label>
-      <ProjectsPanel id="fy-new-ferret-folder" onPick={setFolder} recent={RECENT} value={folder} />
+      <ProjectsPanel daemon="fake" id="fy-new-ferret-folder" onPick={setFolder} recent={RECENT} value={folder} />
       <output className="mt-3 block text-meta text-muted" data-chosen-folder={folder}>
         Folder in the form: {folder === '' ? 'none' : folder}
       </output>
@@ -109,7 +132,9 @@ if (root !== null)
           <ProjectDetailPage client={client} daemon="fake" projectId={id(1)} />
         </RouterProvider>
       ) : (
-        <FolderHost />
+        <WithAppHooks provided={{ [PROJECTS_CONNECT_ACCOUNT_HOOK]: connectProvider }}>
+          <FolderHost />
+        </WithAppHooks>
       )}
     </div>,
   );

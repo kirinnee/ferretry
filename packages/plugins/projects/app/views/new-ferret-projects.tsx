@@ -6,10 +6,11 @@
  *
  * It only proposes a folder through the slot's `onPick`; the page's own start (and the daemon's fence) decides.
  */
+import { useAppHook } from '@ferretry/app';
 import { isNewFerretProjectSlotProps } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { useState } from 'react';
-import type { ProjectInfo } from '../../contract/index.ts';
+import { isProjectsConnectAccount, type ProjectInfo, PROJECTS_CONNECT_ACCOUNT_HOOK } from '../../contract/index.ts';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
 import type { ProjectsClient } from '../lib/client.ts';
 import type { ProjectsStore } from '../lib/projects-store.ts';
@@ -33,6 +34,7 @@ const defaultKind = (value: string, projects: readonly ProjectInfo[]): Kind => {
 function NewFerretWhere({
   client,
   store,
+  daemon,
   id,
   value,
   recent,
@@ -40,12 +42,16 @@ function NewFerretWhere({
 }: {
   readonly client: ProjectsClient;
   readonly store: ProjectsStore;
+  readonly daemon: string;
   readonly id: string;
   readonly value: string;
   readonly recent: readonly string[];
   readonly onPick: (folder: string) => void;
 }) {
   const { projects, status } = useProjectsSlice(store);
+  // Git accounts' own "Connect a GitHub account" card, the one the create flow mounts; absent when that plugin is off.
+  const provided = useAppHook(daemon, PROJECTS_CONNECT_ACCOUNT_HOOK);
+  const connectAccount = isProjectsConnectAccount(provided) ? provided : undefined;
   const [chosen, setChosen] = useState<Kind | null>(null);
   const unread = projects === null && (status === 'idle' || status === 'loading');
   const known = projects ?? [];
@@ -81,7 +87,15 @@ function NewFerretWhere({
       ) : kind === 'folder' ? (
         <WhereFolder client={client} id={id} onPick={onPick} recent={recent} value={value} />
       ) : (
-        <WhereProject client={client} id={id} onPick={onPick} projects={known} store={store} value={value} />
+        <WhereProject
+          client={client}
+          connectAccount={connectAccount}
+          id={id}
+          onPick={onPick}
+          projects={known}
+          store={store}
+          value={value}
+        />
       )}
     </div>
   );
@@ -94,6 +108,7 @@ export const createNewFerretProjectsPanel = (client: ProjectsClient): AppCompone
     return isNewFerretProjectSlotProps(props) ? (
       <NewFerretWhere
         client={client}
+        daemon={props.daemon}
         id={props.id}
         onPick={props.onPick}
         recent={props.recent}

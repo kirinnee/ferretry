@@ -3,6 +3,8 @@ export const NEW_FERRET_PROJECT_SLOT = 'ferrets.new-ferret-project' as const;
 
 /** What the new-ferret page hands the "where it works" panel. */
 export interface NewFerretProjectSlotProps {
+  /** The daemon this page is on: the panel reads what other plugins provide there (connecting a GitHub account). */
+  readonly daemon: string;
   /** The folder the page holds now. */
   readonly value: string;
   /** The element id the page's own "Where it works" label points at: the panel puts it on its main control. */
@@ -17,6 +19,7 @@ export function isNewFerretProjectSlotProps(props: unknown): props is NewFerretP
   if (typeof props !== 'object' || props === null) return false;
   const candidate = props as Record<string, unknown>;
   return (
+    typeof candidate.daemon === 'string' &&
     typeof candidate.value === 'string' &&
     typeof candidate.id === 'string' &&
     Array.isArray(candidate.recent) &&

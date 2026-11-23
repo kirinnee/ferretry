@@ -180,6 +180,19 @@ describe('New ferret: where it works (Folder | Project)', () => {
           await shot('project-link-github');
         }));
 
+      it(`Project: with no GitHub account connected, Link GitHub offers the existing connect card (${viewport.name}, ${scheme})`, () =>
+        withTab(viewport, scheme, async (tab, open, shot) => {
+          await open('view=new&projects=2&accounts=0', '[data-where-project-trigger]');
+          await tab.locator('[data-where-project-trigger]').click();
+          await tab.locator('[data-where-link-github]').nth(1).click();
+          await tab.waitForSelector('[data-where-link-panel] [data-fake-connect-card]');
+          expect(await tab.locator('[data-fake-connect-card]').textContent()).toBe('Connect a GitHub account');
+          expect(await chosen(tab), 'connecting does not pick the project').toBe('');
+          await noSideways(tab);
+          await tab.waitForTimeout(450);
+          await shot('project-connect-github');
+        }));
+
       it(`Folder: recent folders are one-tap, and Browse opens the project-setup finder (${viewport.name}, ${scheme})`, () =>
         withTab(viewport, scheme, async (tab, open, shot) => {
           await open('view=new&projects=2&recent=3', '[data-where-project-trigger]');

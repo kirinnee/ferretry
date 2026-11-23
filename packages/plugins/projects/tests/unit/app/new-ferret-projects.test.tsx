@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { ReactNode } from 'react';
-import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
-import { ProjectInfoSchema } from '../../../contract/index.ts';
+import { interact, type Mounted, mount, must, settleUntil, WithAppHooks } from '@ferretry/app/testing';
+import {
+  type ProjectsConnectAccountProps,
+  ProjectInfoSchema,
+  PROJECTS_CONNECT_ACCOUNT_HOOK,
+} from '../../../contract/index.ts';
 import { createNewFerretProjectsPanel } from '../../../app/views/new-ferret-projects.tsx';
 import { startFerretHref } from '../../../app/lib/start-href.ts';
 import { projectLine } from '../../../app/lib/project-line.ts';
-import { clickEvent, PROJECT, scripted } from './support/client.ts';
+import { type Call, clickEvent, PROJECT, scripted } from './support/client.ts';
 
 const SECOND = ProjectInfoSchema.parse({
   id: '33333333-3333-4333-8333-333333333333',
@@ -28,15 +32,22 @@ const draw = async (
   onPick: (folder: string) => void = () => undefined,
   recent: readonly string[] = [],
   routes: Readonly<Record<string, unknown>> = {},
+  hooks: Readonly<Record<string, unknown>> = {},
+  calls: Call[] = [],
 ) => {
   // A slot panel is handed the slot's props (`value`, `id`, `recent`, `onPick`), which PanelProps does not name.
-  const Panel = createNewFerretProjectsPanel(scripted({ 'GET /v1/projects': projects, ...routes })) as (props: {
+  const Panel = createNewFerretProjectsPanel(scripted({ 'GET /v1/projects': projects, ...routes }, calls)) as (props: {
+    readonly daemon: string;
     readonly value: string;
     readonly id: string;
     readonly recent: readonly string[];
     readonly onPick: (folder: string) => void;
   }) => ReactNode;
-  open = await mount(<Panel id="fy-where" onPick={onPick} recent={recent} value={value} />);
+  open = await mount(
+    <WithAppHooks provided={hooks}>
+      <Panel daemon="d" id="fy-where" onPick={onPick} recent={recent} value={value} />
+    </WithAppHooks>,
+  );
   return open;
 };
 
@@ -151,6 +162,56 @@ describe('the New ferret where-it-works panel', () => {
     await interact(() => link.dispatchEvent(clickEvent()));
     expect(q(view, '[data-where-link-panel]')).not.toBeNull();
     expect(picked).toEqual([]);
+  });
+
+  it('Link GitHub with no account connected offers Git accounts’ own connect card, and a connected account is linked at once', async () => {
+    const calls: Call[] = [];
+    const connectProvider = {
+      panel: ({ connected, onConnected }: ProjectsConnectAccountProps) => (
+        <button data-fake-connect="" onClick={() => onConnected('acct-9')} type="button">
+          {connected === 0 ? 'Connect a GitHub account' : 'Connect another'}
+        </button>
+      ),
+    };
+    const view = await draw(
+      [PROJECT],
+      '',
+      () => undefined,
+      [],
+      {
+        'GET /v1/git-accounts': [],
+        'PUT /v1/projects/:id/accounts': (call: Call) => ({
+          ...PROJECT,
+          accounts: (call.body as { accounts: string[] }).accounts,
+        }),
+      },
+      { [PROJECTS_CONNECT_ACCOUNT_HOOK]: connectProvider },
+      calls,
+    );
+    await settleUntil(() => q(view, '[data-where-project-trigger]') !== null, 'the project dropdown', interact);
+    await interact(() => trigger(view).dispatchEvent(clickEvent()));
+    await interact(() =>
+      must(q<HTMLButtonElement>(view, '[data-where-link-github]'), 'Link GitHub').dispatchEvent(clickEvent()),
+    );
+    await settleUntil(() => q(view, '[data-fake-connect]') !== null, 'the connect card', interact);
+    expect(q(view, '[data-fake-connect]')?.textContent).toBe('Connect a GitHub account');
+    await interact(() =>
+      must(q<HTMLButtonElement>(view, '[data-fake-connect]'), 'connect').dispatchEvent(clickEvent()),
+    );
+    await settleUntil(() => calls.some(call => call.route === 'PUT /v1/projects/:id/accounts'), 'the link', interact);
+    expect(calls.find(call => call.route === 'PUT /v1/projects/:id/accounts')?.body).toMatchObject({
+      accounts: ['acct-9'],
+    });
+  });
+
+  it('says so when Git accounts is off and no account is connected', async () => {
+    const view = await draw([PROJECT], '', () => undefined, [], { 'GET /v1/git-accounts': [] });
+    await settleUntil(() => q(view, '[data-where-project-trigger]') !== null, 'the project dropdown', interact);
+    await interact(() => trigger(view).dispatchEvent(clickEvent()));
+    await interact(() =>
+      must(q<HTMLButtonElement>(view, '[data-where-link-github]'), 'Link GitHub').dispatchEvent(clickEvent()),
+    );
+    await settleUntil(() => q(view, '[data-connect-account="unavailable"]') !== null, 'the unavailable line', interact);
   });
 
   it('says so when there are no projects to choose, in the Project choice', async () => {

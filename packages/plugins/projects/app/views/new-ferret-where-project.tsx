@@ -5,7 +5,7 @@
  */
 import { Check, ChevronDown, FolderOpen } from 'lucide-react';
 import { useState } from 'react';
-import type { ProjectInfo } from '../../contract/index.ts';
+import type { ProjectInfo, ProjectsConnectAccount } from '../../contract/index.ts';
 import { ProjectAccountLinks } from '../features/create-project/account-links.tsx';
 import type { ProjectsClient } from '../lib/client.ts';
 import { projectLine } from '../lib/project-line.ts';
@@ -21,12 +21,14 @@ export interface WhereProjectProps {
   readonly client: ProjectsClient;
   readonly store: ProjectsStore;
   readonly projects: readonly ProjectInfo[];
+  /** Git accounts' connect card on this machine, when it has one (the same one the create flow mounts). */
+  readonly connectAccount: ProjectsConnectAccount | undefined;
   readonly id: string;
   readonly value: string;
   readonly onPick: (folder: string) => void;
 }
 
-export function WhereProject({ client, store, projects, id, value, onPick }: WhereProjectProps) {
+export function WhereProject({ client, store, projects, connectAccount, id, value, onPick }: WhereProjectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [linking, setLinking] = useState<string | null>(null);
@@ -114,6 +116,7 @@ export function WhereProject({ client, store, projects, id, value, onPick }: Whe
                           <div className="mt-1" data-where-link-panel={project.id}>
                             <ProjectAccountLinks
                               client={client}
+                              connect={{ provided: connectAccount }}
                               edit={{ projectId: project.id, onSaved: () => void store.refresh().catch(() => {}) }}
                               project={project}
                               startEditing={!linked}
