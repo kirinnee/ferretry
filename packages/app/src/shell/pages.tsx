@@ -3,21 +3,19 @@ import { daemonHomeHref, daemonSettingsHref, DEVICE_SETTINGS_HREF, HOME_HREF } f
 import { destinationPath, useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import { firstRunEntry, ONBOARDING_SCREEN, PAIR_SCREEN } from './first-run.ts';
-import { SettingGroup } from '../compose/setting-row.tsx';
 import { UnsavedChangesGuard, useAskBeforeLeaving } from '../compose/unsaved-guard.tsx';
-import { CachedDataSetting } from './device-cached-data.tsx';
-import { DeviceAppearance } from './device-appearance.tsx';
-import { DevicePanels } from './device-panels.tsx';
+import { DeviceSettingsBody } from './device-settings-page.tsx';
 import { Link } from './link.tsx';
 import { SettingsNav } from './settings-nav.tsx';
 import { PanelTitleContext } from '../compose/panel-title.ts';
-import { resolveSettingsTab, SCOPE_WORDS, scopeOf } from './settings-tab.ts';
+import { DEVICE_TAB, resolveSettingsTab, SCOPE_WORDS, scopeOf } from './settings-tab.ts';
 import { Loading } from '../ui/loading.tsx';
 import { ResizeHandle } from '../ui/resize-handle.tsx';
 import { PanelSlot, PluginView, ShellLine } from './views.tsx';
 import { useEffect, useRef, type MouseEvent } from 'react';
 
 export { Link };
+export { DeviceSettingsPage } from './device-settings-page.tsx';
 
 /**
  * Home: every paired daemon, grouped by machine (§5.1). With a selected, still-paired daemon the app OPENS that machine
@@ -193,12 +191,20 @@ export function DaemonSettingsPage({
   // A phone's bare /settings is the LIST and nothing else: no tab is marked and none is mounted behind it (a wide screen
   // opens the first tab beside the list, so it keeps one).
   const listOnly = viewport === 'phone' && tab === undefined;
-  const active = choice.kind === 'tab' && !listOnly ? choice.tab : undefined;
+  // This device's own section is the shell's, not a plugin's: it takes the panel when the address names it.
+  const deviceOpen = tab === DEVICE_TAB && tabId === undefined;
+  const active = choice.kind === 'tab' && !listOnly && !deviceOpen ? choice.tab : undefined;
   // A tab the address NAMES (a click on its link, or a deep link) takes focus (a screen reader says its name) and the
   // page opens at ITS TOP: the panel sits beside the list now, so there is nothing to scroll past. A bare /settings
   // steals no focus, and a Back/Forward/reload whose scroll was saved is the scroll memory's to put back.
   const pageRef = useRef<HTMLDivElement>(null);
-  const named = tab === undefined ? undefined : active === undefined ? undefined : `${active.plugin}/${active.id}`;
+  const named = deviceOpen
+    ? DEVICE_TAB
+    : tab === undefined
+      ? undefined
+      : active === undefined
+        ? undefined
+        : `${active.plugin}/${active.id}`;
   useEffect(() => {
     const page = pageRef.current;
     if (named === undefined || page === null || scroll.page(entryKey) !== null) return;
@@ -235,10 +241,16 @@ export function DaemonSettingsPage({
             machine={paired === undefined ? 'This machine' : daemonTitle(paired)}
             tabs={tabs}
             active={active}
+            deviceActive={deviceOpen}
             named={named !== undefined}
           />
           {viewport === 'phone' ? null : <ResizeHandle panel="settings-nav" edge="end" label="settings list" />}
-          {choice.kind === 'none' ? (
+          {deviceOpen ? (
+            <section ref={pageRef} className="fy-settings-page" aria-label="This device" tabIndex={-1}>
+              <h2 className="fy-settings-title">This device</h2>
+              <DeviceSettingsBody />
+            </section>
+          ) : choice.kind === 'none' ? (
             <ShellLine>No plugin on this daemon has settings.</ShellLine>
           ) : choice.kind === 'missing' ? (
             <ShellLine>{`There is no settings tab called "${choice.name}" on this daemon. Pick one from the list.`}</ShellLine>
@@ -260,43 +272,6 @@ export function DaemonSettingsPage({
         </div>
       </section>
     </UnsavedChangesGuard>
-  );
-}
-
-/** This device's settings (§5.2): theme, mode, text size, motion; saved in this browser, never on a daemon. */
-export function DeviceSettingsPage() {
-  const { layout, scroll, runtime } = useShell();
-  useRuntimeVersion(runtime);
-  const daemons = runtime.daemons.groups().flatMap(group => group.daemons);
-  return (
-    <section className="fy-page">
-      <h1>This device</h1>
-      {/* The way back: each paired daemon keeps its own settings (what it runs, who may reach it), apart from these. */}
-      {daemons.length === 0 ? null : (
-        <ul className="fy-settings-daemons" aria-label="Daemon settings">
-          {daemons.map(daemon => (
-            <li key={daemon.daemon}>
-              <Link to={daemonSettingsHref(daemon.daemon)}>{`Settings for ${daemonTitle(daemon)}`}</Link>
-            </li>
-          ))}
-        </ul>
-      )}
-      <DeviceAppearance />
-      {/* Panels plugins declare in device.settings (S4, M3): no machine needed, by order. */}
-      <DevicePanels slot="device.settings" />
-      <SettingGroup label="Storage">
-        <CachedDataSetting onClear={async () => scroll.clear()} />
-      </SettingGroup>
-      {/* Which layout is in use is a fact of its own, said quietly under the groups, not as a bare line of page text. */}
-      <p className="m-0 px-1 pt-3 text-meta text-muted" data-layout-in-use="">
-        Layout in use: <code>{layout.layout.id}</code>
-        {layout.kind === 'refused' ? (
-          <span className="text-warn" role="status">
-            {` — the layout "${layout.refused}" was refused: ${layout.issues[0]?.message ?? 'a name it holds is not installed'}`}
-          </span>
-        ) : null}
-      </p>
-    </section>
   );
 }
 
