@@ -133,6 +133,8 @@ export interface PinnedModelStoreOptions {
   readonly now?: () => Date;
   /** Defaults to {@link MODEL_PART_BYTES}; tests use tiny parts over tiny files. */
   readonly partBytes?: number;
+  /** How many files download at once. Defaults to {@link FILE_CONCURRENCY}; a suite that specifies one file at a time passes 1. */
+  readonly fileConcurrency?: number;
 }
 
 interface ProgressRecord {
@@ -220,12 +222,13 @@ export class PinnedModelStore implements ModelInstaller {
     await this.#options.storage?.persist?.().catch(() => false);
 
     // The files download side by side, FILE_CONCURRENCY at a time. Each file's own bytes are counted once, so progress only
-    // moves forward; its label is the first file in bundle order still unfinished, so it does not flicker between files.
+    // moves forward; its label is the first file in bundle order not yet finished (a file is finished once its install returned), so it does not flicker between files.
     const stored = new Map<PinnedFile, number>(
       files.map((file, index) => [file, have[index] === true ? file.bytes : 0]),
     );
+    const finishedFiles = new Set<PinnedFile>(files.filter((_, index) => have[index] === true));
     const report = (): void => {
-      const label = files.find(file => (stored.get(file) ?? 0) < file.bytes)?.label ?? files.at(-1)?.label ?? '';
+      const label = files.find(file => !finishedFiles.has(file))?.label ?? files.at(-1)?.label ?? '';
       let downloadedBytes = 0;
       for (const bytes of stored.values()) downloadedBytes += bytes;
       onProgress?.({ label, downloadedBytes, totalBytes: total });
@@ -246,6 +249,7 @@ export class PinnedModelStore implements ModelInstaller {
             report();
           });
           stored.set(file, file.bytes);
+          finishedFiles.add(file);
           report();
         }
       } catch (error) {
@@ -253,9 +257,12 @@ export class PinnedModelStore implements ModelInstaller {
         stop.abort();
       }
     };
-    report();
+    // Files already held are reported at once; a partly held one is reported when its turn starts.
+    if (finished > 0) report();
     try {
-      await Promise.all(Array.from({ length: Math.min(FILE_CONCURRENCY, queue.length) }, lane));
+      await Promise.all(
+        Array.from({ length: Math.min(this.#options.fileConcurrency ?? FILE_CONCURRENCY, queue.length) }, lane),
+      );
     } finally {
       signal?.removeEventListener('abort', relay);
     }
