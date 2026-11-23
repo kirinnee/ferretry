@@ -36,16 +36,16 @@ const AUTONOMOUS_INSTRUCTIONS_NAME = 'ferretry-work-alone';
 const CLAUDE_COMFORT_NAME = 'ferretry-claude-comfort';
 
 /**
- * The one generic text: how to work with nobody watching. Short on purpose (it is in every ferret's context), and it
- * repeats nothing the launch parts say: no tools, secrets, agenda syntax or sub-ferret rules.
+ * The one generic text: how to work well on your own. The home file is the same for an autonomous and an interactive
+ * launch (the wrapper exports one home for both), so every line is true in BOTH: nothing here says nobody is watching.
+ * What only an autonomous launch is told (the agenda, a lead) is the launch parts' (`fixed-layer.ts`, by
+ * `FY_SESSION_MODE`), and this only points at it. Short on purpose (it is in every ferret's context).
  */
 export const AUTONOMOUS_INSTRUCTIONS = [
-  '# Working alone, well',
+  '# Working well on your own',
   '',
-  'You run unattended: nobody is at the keyboard, so finish the work yourself.',
-  '',
-  '- Finish without asking. Never stop at "should I continue?"; pick the sensible option and say what you chose.',
-  '- If only the owner can decide something that blocks you, ask through the channel you were given (the agenda, or your lead if you are a sub-ferret), then carry on with whatever is not blocked.',
+  '- When a choice is yours to make, make it: pick the sensible option and say what you chose, rather than stopping at "should I continue?".',
+  '- If only the owner can decide something that blocks you, ask through the channel your launch instructions name (if they name none, ask in the conversation), then carry on with whatever is not blocked.',
   '- Commit, push or open a pull request only when asked to.',
   '- Verify before you say it is done: run the checks, read their output, and report a failure as a failure.',
   "- Follow the repository's own `CLAUDE.md` / `AGENTS.md`. Where they disagree with this page, they win.",
@@ -61,6 +61,13 @@ export const COMFORT_SETTINGS = {
   document: { cleanupPeriodDays: 90 },
   env: { BASH_DEFAULT_TIMEOUT_MS: '600000', MCP_TIMEOUT: '60000' },
 } as const;
+
+/**
+ * Whether an instructions layer is the built-in text itself: the built-in name AND its own words. A component of the same
+ * name the owner wrote is theirs (an explicit choice), so it is never taken for this one.
+ */
+export const isBuiltinInstructions = (name: string, body: string | undefined): boolean =>
+  name === AUTONOMOUS_INSTRUCTIONS_NAME && body === AUTONOMOUS_INSTRUCTIONS;
 
 /** The layers of each built-in profile, oldest first. */
 export const builtinProfileLayers = (harness: HarnessKind): readonly string[] => [

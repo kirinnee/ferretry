@@ -9,6 +9,7 @@ import {
   AUTONOMOUS_INSTRUCTIONS,
   BUILTIN_COMPONENTS,
   COMFORT_SETTINGS,
+  isBuiltinInstructions,
 } from '../../../daemon/lib/account/builtin-autonomous.ts';
 import { mergeImport, planImport } from '../../../daemon/lib/account/import-plan.ts';
 import { resolveProfile } from '../../../daemon/lib/account/layering.ts';
@@ -128,5 +129,19 @@ describe('the built-in autonomous profiles', () => {
     const { resolved: profile } = resolved;
     expect(profile.applied.at(-1)?.name).toBe('claude-models');
     expect(profile.instructions.map(each => each.component.text)).toEqual([AUTONOMOUS_INSTRUCTIONS]);
+  });
+});
+
+describe('what counts as the built-in text', () => {
+  it('should be the built-in name with its own words only, never an owner’s component of the same name', () => {
+    expect(isBuiltinInstructions('ferretry-work-alone', AUTONOMOUS_INSTRUCTIONS)).toBe(true);
+    expect(isBuiltinInstructions('ferretry-work-alone', 'Mine.\n')).toBe(false);
+    expect(isBuiltinInstructions('main', AUTONOMOUS_INSTRUCTIONS)).toBe(false);
+    expect(isBuiltinInstructions('ferretry-work-alone', undefined)).toBe(false);
+  });
+
+  it('should read the same in an autonomous and an interactive launch', () => {
+    // The wrapper exports one home for both modes, so the file may not say nobody is watching, nor repeat the launch parts' routing.
+    expect(AUTONOMOUS_INSTRUCTIONS).not.toMatch(/unattended|nobody|no one|agenda|sub-ferret|lead\b/iu);
   });
 });
