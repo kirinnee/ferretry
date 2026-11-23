@@ -91,3 +91,6 @@ export function splitTabsByScope<T extends { readonly scope?: SettingsScope }>(
     machine: tabs.filter(tab => scopeOf(tab) === 'machine'),
   };
 }
+
+/** The address name of THIS DEVICE's own section inside a machine's Settings: `/d/<daemon>/settings/device`. The shell owns it; no plugin's tab answers to it. */
+export const DEVICE_TAB = 'device';

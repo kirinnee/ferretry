@@ -3,9 +3,10 @@
  * machine whose tabs are the real declarations of every shipped plugin; no daemon.
  *
  *  - SETTINGS lists its tabs under titled groups (v4 parity), and reaches This device from the page itself;
- *  - THIS DEVICE links back to the daemon's Settings;
+ *  - THIS DEVICE is a section INSIDE a machine's Settings (`/d/<daemon>/settings/device`, the same list and layout), and the
+ *    bare `/settings` page links back to the daemon's Settings;
  *
- * Set `FY_SETTINGS_SHELL_SHOTS_DIR` to keep `<viewport>-<case>.png` (desktop 1280 and phone 390, light and dark).
+ * Set `FY_SETTINGS_SHELL_SHOTS_DIR` to keep `<viewport>-<case>.png` (desktop 1440 and phone 390, light and dark).
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -65,8 +66,8 @@ afterAll(async () => {
 });
 
 const VARIANTS = [
-  { name: '1280-light', width: 1_280, height: 800, phone: false, scheme: 'light' },
-  { name: '1280-dark', width: 1_280, height: 800, phone: false, scheme: 'dark' },
+  { name: '1440-light', width: 1_440, height: 800, phone: false, scheme: 'light' },
+  { name: '1440-dark', width: 1_440, height: 800, phone: false, scheme: 'dark' },
   { name: '390-light', width: 390, height: 844, phone: true, scheme: 'light' },
   { name: '390-dark', width: 390, height: 844, phone: true, scheme: 'dark' },
 ] as const;
@@ -136,10 +137,29 @@ describe('Settings shell', () => {
           'and not in the machine block',
         ).toBe(0);
         expect(await tab.getByRole('link', { name: 'This device', exact: true }).getAttribute('href')).toBe(
-          '/settings',
+          '/d/ws/settings/device',
         );
         await tall(tab, variant, 2_300);
         await shotOf(tab, variant, 'settings-groups');
+      } finally {
+        await close();
+      }
+    });
+
+    it(`${variant.name}: selecting This device stays inside Settings and opens that section there`, async () => {
+      const { tab, close } = await open(variant, '/d/ws/settings', 'nav[aria-label="Plugin settings"]');
+      try {
+        // A phone lists first and opens a section on its own page; a wide screen has the list beside the panel already.
+        await tab.getByRole('link', { name: 'This device', exact: true }).click();
+        await tab.waitForSelector('.fy-settings-title');
+        expect(new URL(tab.url()).pathname).toBe('/d/ws/settings/device');
+        expect(await tab.locator('.fy-settings-title').innerText()).toBe('This device');
+        expect(await tab.locator('.fy-settings-page [data-layout-in-use]').count()).toBe(1);
+        if (!variant.phone) expect(await tab.locator('nav[aria-label="Plugin settings"]').isVisible()).toBe(true);
+        await shotOf(tab, variant, 'this-device-in-settings');
+        await tab.goBack();
+        await tab.waitForSelector('nav[aria-label="Plugin settings"]');
+        expect(new URL(tab.url()).pathname).toBe('/d/ws/settings');
       } finally {
         await close();
       }
