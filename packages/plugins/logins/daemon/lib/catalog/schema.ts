@@ -225,8 +225,11 @@ const CatalogHalfSchema = z
 export type CatalogHalf = z.infer<typeof CatalogHalfSchema>;
 
 /** The halves a daemon older than U5 reads, and the ones added since: each is one harness's models. */
-export const BASE_HALF_KEYS = ['claude', 'codex'] as const;
+const BASE_HALF_SHAPE = { claude: CatalogHalfSchema.optional(), codex: CatalogHalfSchema.optional() };
+export type BaseHalfKey = keyof typeof BASE_HALF_SHAPE;
+export const BASE_HALF_KEYS = Object.keys(BASE_HALF_SHAPE) as readonly BaseHalfKey[];
 export const NEW_HALF_KEYS = ['gemini', 'copilot', 'opencode'] as const;
+export type NewHalfKey = (typeof NEW_HALF_KEYS)[number];
 const HALF_KEYS = [...BASE_HALF_KEYS, ...NEW_HALF_KEYS] as const;
 const HARNESS_NAMES = { codex: 'Codex', gemini: 'Gemini', copilot: 'Copilot', opencode: 'OpenCode' } as const;
 
@@ -244,8 +247,7 @@ export const ModelCatalogFileSchema = z
     customIds: z.boolean().default(false),
     /** Where a picker may also read the models a local server reports it has. */
     detect: z.enum(['ollama']).optional(),
-    claude: CatalogHalfSchema.optional(),
-    codex: CatalogHalfSchema.optional(),
+    ...BASE_HALF_SHAPE,
     /**
      * The halves of harnesses added after `claude` and `codex` (U5). A daemon older than them reads a
      * catalog with a strict schema, so these never ride in `catalogs` of the published document: they
