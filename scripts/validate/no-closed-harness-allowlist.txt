@@ -165,7 +165,6 @@ packages/plugins/runtimes/app/views/account-picker-panels.tsx::known=3  # part 1
 packages/plugins/runtimes/cli/lib/fleet/account-commands.ts::branch=3  # part 1b
 packages/plugins/runtimes/cli/lib/fleet/account-commands.ts::known=2  # part 1b
 packages/plugins/runtimes/cli/lib/fleet/account-render.ts::known=2  # part 1b
-packages/plugins/runtimes/contract/config.ts::known=3  # part 1b
 packages/plugins/runtimes/contract/harness-fallback.ts::literal=1  # part 1b
 packages/plugins/runtimes/contract/homes.ts::known=2  # part 1b
 packages/plugins/runtimes/contract/index.ts::known=2  # part 1b

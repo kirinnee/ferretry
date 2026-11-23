@@ -6,7 +6,6 @@
  */
 import { InstantSchema, ITEM_NAME_PATTERN, NonEmptyStringSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { KnownHarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { BrowserFirewallFailureSchema, BrowserPortsSettingSchema } from './wire/shared.ts';
 
 /**
@@ -26,6 +25,14 @@ export const LoginRefSchema = z
   .string()
   .max(64)
   .regex(/^[a-z0-9][a-z0-9-]*$/u, 'a login id uses only lowercase letters, digits and dashes');
+
+/**
+ * A `harness:` word in a runtime or instructions file, as written. ANY non-empty word parses: a typo (`gemni`) must LOAD, so
+ * that one file is set aside by name with the shared refusal sentence (`unsupportedHarnessSentence`) and no earlier copy
+ * of it stays in effect. Rejecting the word here made the kernel keep the file's last good version, so a runtime edited
+ * to a typo went on launching on its old harness. Which words Runtimes has behaviour for is `harness-kind.ts`'s to say.
+ */
+export const HarnessWordSchema = NonEmptyStringSchema;
 
 /** A component's or profile's name: one path segment. */
 export const ItemNameSchema = z
@@ -123,7 +130,7 @@ export const RuntimeFileSchema = z.preprocess(
     login: LoginRefSchema,
     profile: ItemNameSchema,
     /** For a login that drives both harnesses: which one this runtime runs. Left out: the profile's, else the login's. */
-    harness: KnownHarnessKeySchema.optional(),
+    harness: HarnessWordSchema.optional(),
     /** The shell item this runtime enters (Q18): a ferret enters a shell only when its runtime names one. */
     shell: ItemNameSchema.optional(),
     disabled: DisabledConfigSchema.optional(),
@@ -202,7 +209,7 @@ export const InstructionsFileSchema = z.strictObject({
       text => !holdsControlCharacter(text),
       'the text holds a control character (NUL or another, besides tab and line breaks)',
     ),
-  harness: KnownHarnessKeySchema.optional(),
+  harness: HarnessWordSchema.optional(),
   clonedFrom: NonEmptyStringSchema.optional(),
   clonedFromDaemon: NonEmptyStringSchema.optional(),
   clonedFromKey: NonEmptyStringSchema.optional(),

@@ -344,3 +344,43 @@ describe('a file naming a harness Runtimes has no behaviour for (runtimes plan U
     );
   });
 });
+
+describe('a component another plugin owns that does not check (runtimes plan U4b)', () => {
+  const reading = (rejected: ReadonlyMap<string, string>) => ({
+    ...NO_COMPONENTS,
+    instructions: {
+      state: 'read' as const,
+      components: new Map<string, unknown>([['good', { text: 'be kind' }]]),
+      rejected,
+    },
+  });
+  const REJECTED = new Map([['odd', '"odd" is not a valid instructions component (gemni is not supported here)']]);
+
+  it('names an unused one in the notices and holds nothing back', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        profiles: new Map([['default', profile(['modelSets/heavy', 'instructions/good'])]]),
+        components: reading(REJECTED),
+      }),
+    );
+
+    expect(assembled.unreadable).toEqual([]);
+    expect(assembled.model.components.instructions.good).toBeDefined();
+    expect(assembled.notices).toEqual([
+      'the instructions component "odd" is not a valid instructions component (gemni is not supported here), so it is not used',
+    ]);
+  });
+
+  it('stands in for a used one and says it, naming that component only', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        profiles: new Map([['default', profile(['modelSets/heavy', 'instructions/good', 'instructions/odd'])]]),
+        components: reading(REJECTED),
+      }),
+    );
+
+    expect(assembled.unreadable).toEqual([
+      'the instructions component "odd" is set aside: "odd" is not a valid instructions component (gemni is not supported here)',
+    ]);
+  });
+});

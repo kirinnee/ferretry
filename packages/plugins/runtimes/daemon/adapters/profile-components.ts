@@ -121,6 +121,9 @@ async function readKind(
   const sources = SOURCES[kind];
   if (sources.length === 0) return unread('no part of Ferretry provides these components yet');
   const components = new Map<string, unknown>();
+  // A component that does not check (a typo in its `harness`, say) is set aside BY NAME with the rule it broke: it never
+  // takes the good components of its kind down with it.
+  const rejected = new Map<string, string>();
   const providers = new Map<string, string>();
   let partial: string | undefined;
   for (const source of sources) {
@@ -150,7 +153,10 @@ async function readKind(
         // Removed between `list` and `read`: gone.
         if (document === undefined) continue;
         const checked = parseForeignComponent(kind, harnessOf(document, source));
-        if (!checked.ok) return unread(`"${name}" is not a valid ${kind} component (${checked.issues.join('; ')})`);
+        if (!checked.ok) {
+          rejected.set(name, `"${name}" is not a valid ${kind} component (${checked.issues.join('; ')})`);
+          continue;
+        }
         const other = providers.get(name);
         if (other !== undefined) return unread(`two parts of Ferretry give a ${kind} component named "${name}"`);
         providers.set(name, source.hook?.name ?? 'runtimes');
@@ -161,7 +167,12 @@ async function readKind(
       return unread('the part of Ferretry that owns them did not answer');
     }
   }
-  return partial === undefined ? { state: 'read', components } : { state: 'read', components, partial };
+  return {
+    state: 'read',
+    components,
+    ...(partial === undefined ? {} : { partial }),
+    ...(rejected.size === 0 ? {} : { rejected }),
+  };
 }
 
 /** Every kind of component, read now: the owners' through the hooks, and Runtimes' own (`instructions`) directly. */

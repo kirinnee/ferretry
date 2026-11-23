@@ -53,6 +53,8 @@ export type KindReading =
        * gave is real, and a layer that names a component none of them has is unread, for this reason, not a gap in the files.
        */
       readonly partial?: string;
+      /** Components the owner gave that do not check, by name, with the rule they broke: set aside one by one, never the kind. */
+      readonly rejected?: ReadonlyMap<string, string>;
     }
   /** No source answered (none exists, it is off, it threw, or it gave something invalid): why, in a sentence of names and rules. */
   | { readonly state: 'unread'; readonly reason: string };
@@ -307,10 +309,19 @@ export function assembleRuntimesModel(explicit: RuntimesFiles): RuntimesModel {
       // The owner's components, as it projected them. A name a layer uses that the owner does not have is a real gap in
       // the machine's files, which the cross-reference rules below refuse by name.
       components[kind] = { ...builtIn(kind), ...Object.fromEntries(reading.components) };
+      // A component that did not check is set aside by name; a layer that USES it stands in for it and is unread for it.
+      for (const [name, why] of [...(reading.rejected ?? [])].toSorted(([left], [right]) =>
+        left.localeCompare(right),
+      )) {
+        refusedNotices.push(`the ${kind} component ${why}, so it is not used`);
+        if (!names.has(name) || reading.components.has(name) || Object.hasOwn(builtIn(kind), name)) continue;
+        components[kind][name] = standIn(kind);
+        unreadable.push(`the ${kind} component "${name}" is set aside: ${why}`);
+      }
       if (reading.partial === undefined) continue;
       // ...unless a part of the kind is not running: then the name may be one of ITS components, which stands in.
       for (const name of [...names].toSorted((left, right) => left.localeCompare(right))) {
-        if (reading.components.has(name) || Object.hasOwn(builtIn(kind), name)) continue;
+        if (reading.components.has(name) || reading.rejected?.has(name) || Object.hasOwn(builtIn(kind), name)) continue;
         components[kind][name] = standIn(kind);
         unreadable.push(
           `the ${kind} component "${name}" could not be read from the part of Ferretry that owns it: ${reading.partial}`,

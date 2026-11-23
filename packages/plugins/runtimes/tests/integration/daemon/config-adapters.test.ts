@@ -286,10 +286,10 @@ describe('the components other plugins provide', () => {
     expect(reading.skills).toEqual({ state: 'unread', reason: 'the part of Ferretry that owns them is not running' });
   });
 
-  it('does not read a kind that holds an invalid component, or two components of one name', async () => {
+  it('sets an invalid component aside by name and keeps its good siblings, but does not read a kind with two components of one name', async () => {
     const lookup = lookupOf(
       new Map<ProvideHook<string, 'components', ProfileComponentSource>, ProfileComponentSource>([
-        [ProfileMcpSource, provider({ bad: { command: '' } })],
+        [ProfileMcpSource, provider({ bad: { command: '' }, good: { command: 'good-mcp' } })],
         [ProfileClaudeSettingsSource, provider({ dup: { document: { a: 1 } } })],
         [ProfileCodexSettingsSource, provider({ dup: { document: { b: 2 } } })],
       ]),
@@ -297,8 +297,11 @@ describe('the components other plugins provide', () => {
 
     const reading = await readProfileComponents(lookup, own, within);
 
-    expect(reading.mcp).toMatchObject({ state: 'unread' });
-    expect((reading.mcp as { reason: string }).reason).toMatch(/^"bad" is not a valid mcp component \(/u);
+    expect(reading.mcp).toMatchObject({ state: 'read' });
+    expect([...componentsOf(reading.mcp).keys()]).toEqual(['good']);
+    const rejected = (reading.mcp as { rejected?: ReadonlyMap<string, string> }).rejected;
+    expect([...(rejected?.keys() ?? [])]).toEqual(['bad']);
+    expect(rejected?.get('bad')).toMatch(/^"bad" is not a valid mcp component \(/u);
     expect(reading.settings).toEqual({
       state: 'unread',
       reason: 'two parts of Ferretry give a settings component named "dup"',

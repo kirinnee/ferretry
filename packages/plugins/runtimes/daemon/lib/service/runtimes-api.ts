@@ -129,7 +129,9 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
   ): Read => {
     const id = RuntimeIdSchema.parse(name);
     const login = logins.get(file.login);
-    const harness = file.harness ?? login?.harness;
+    // A file may name ANY word (a typo loads, so it is refused by name below and not kept from an older copy). The summary's
+    // wire type is still the two shipped keys until the contract opens (part 1b); an unsupported word never launches.
+    const harness = (file.harness ?? login?.harness) as RuntimeSummary['harness'] | undefined;
     if (harness === undefined) {
       return {
         refusal: {
@@ -245,7 +247,12 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
         return { ok: false, refusal: 'no_profile', sentence: `Profile ${file.profile} does not exist` };
       }
       if (!summary.launch.available) {
-        return { ok: false, refusal: 'not_signed_in', sentence: summary.launch.reason };
+        // A harness Runtimes has no behaviour for is one FILE's fault: say which.
+        const sentence =
+          supportedKindOfKey(summary.harness) === undefined
+            ? `config/runtimes/${wanted}.yaml: ${summary.launch.reason}`
+            : summary.launch.reason;
+        return { ok: false, refusal: 'not_signed_in', sentence };
       }
       return { ok: true, runtime: summary, ...(deps.runtimes().has(wanted) ? {} : { derived: true as const }) };
     },
