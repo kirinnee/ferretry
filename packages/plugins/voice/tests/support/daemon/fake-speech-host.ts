@@ -1,7 +1,7 @@
 /**
  * A FAKE NATIVE SPEECH HOST for the tests: the same stdin/stdout frames as `daemon/worker/speech-host.ts`, with the
- * behaviours a real native library can have, chosen by the text it is asked to speak (a sealed child has no environment to
- * carry a script in): `SEGV` and `ABORT` kill this process with that signal in the middle of a call (what a fault inside
+ * behaviours a real native library can have, chosen by the text it is asked to speak (or, for a transcribe, by 7 samples) (a sealed child has no environment to
+ * carry a script in): (`SEGV` and `ABORT`) kill this process with that signal in the middle of a call (what a fault inside
  * onnxruntime does), `HANG` never answers, `NOISE` writes bytes that are not a frame, `EXIT` exits with a code. Anything
  * else is spoken. Its pid is in every answer so a test can see which child answered.
  */
@@ -21,6 +21,7 @@ for await (const chunk of Bun.stdin.stream()) {
         say({ id: request.id, ok: true, kind: 'load', loadMs: 5, memoryMb: 1, pid: process.pid });
         break;
       case 'transcribe':
+        if (request.samples?.length === 7) process.kill(process.pid, 'SIGSEGV');
         say({
           id: request.id,
           ok: true,

@@ -5,7 +5,9 @@ import { fixedClock } from '@ferretry/kernel/testing';
 import { startChildThread } from '../../../daemon/adapters/child-speech-thread.ts';
 import { nativeHostCommand } from '../../../daemon/adapters/worker-speech-thread.ts';
 import type { EngineFile } from '../../../daemon/lib/engine/catalog.ts';
-import type { EnginePathsPort, ReplyThread } from '../../../daemon/lib/engine/ports.ts';
+import { SpeechEngine } from '../../../daemon/lib/engine/engine.ts';
+import type { EnginePathsPort, ReplyThread, SpeechThread } from '../../../daemon/lib/engine/ports.ts';
+import { LOAD_ROLES } from '../../../daemon/lib/engine/protocol.ts';
 import type { ReplyCall } from '../../../daemon/lib/reply/protocol.ts';
 import { encodeFrame, MAX_FRAME_BYTES } from '../../../daemon/lib/native/frames.ts';
 import { NATIVE_ADDON_ROLE, type NativeTarget } from '../../../daemon/lib/native/catalog.ts';
@@ -281,4 +283,73 @@ describe('the real host program', () => {
     expect(failure.message).toMatch(/could not probe/u);
     await thread.terminate();
   }, 30_000);
+});
+
+// ─── the speech engine over a real host ─────────────────────────────────────────────────────────────────────────────
+
+const SPEECH_CATALOG = LOAD_ROLES.map(role => pin(role));
+
+class SpeechFiles extends Files {
+  constructor() {
+    super();
+    for (const file of [...SPEECH_CATALOG, ...TARGET.files]) this.held.set(file.role, body(file.role));
+  }
+}
+
+const wasmSpeech = (): SpeechThread => ({
+  call: async request =>
+    request.kind === 'load'
+      ? ({ id: 1, ok: true, kind: 'load', loadMs: 1, memoryMb: 1 } as never)
+      : ({ id: 1, ok: true, kind: 'transcribe', text: 'wasm heard', decodeMs: 1 } as never),
+  terminate: async () => undefined,
+  onEnd: () => undefined,
+});
+
+function speechOverHost() {
+  const started: string[] = [];
+  const engine = new SpeechEngine({
+    http: { request: async () => new Response('no', { status: 404 }) },
+    files: new SpeechFiles(),
+    machine: () => 'Studio Mac',
+    clock: fixedClock(),
+    start: kind => {
+      started.push(kind);
+      return kind === 'native'
+        ? (startChildThread({ spawn: spawns, clock: fixedClock(), command, words: 'speech engine' }) as SpeechThread)
+        : wasmSpeech();
+    },
+    availableMemory: () => undefined,
+    log: { info: () => undefined, warn: () => undefined },
+    catalog: SPEECH_CATALOG,
+    native: { target: TARGET, threads: () => 4, platform: 'test-x64' },
+  });
+  return { engine, started };
+}
+
+describe('the speech engine over a native host that crashes', () => {
+  test('a crash mid-decode fails that decode cleanly, says it stopped, and the next decode starts a new host', async () => {
+    const { engine, started } = speechOverHost();
+    expect((await engine.transcribe(new Float32Array(5))).text).toBe('heard 5');
+    await expect(engine.transcribe(new Float32Array(7))).rejects.toThrow(/stopped: it crashed \(SIGSEGV\)/u);
+    expect((await engine.view()).runtime?.sentence).toMatch(
+      /stopped on Studio Mac: it crashed \(SIGSEGV\)\. It starts again/u,
+    );
+    expect((await engine.transcribe(new Float32Array(5))).text).toBe('heard 5');
+    expect((await engine.view()).runtime?.sentence).not.toMatch(/stopped on/u);
+    expect(started).toEqual(['native', 'native']);
+    await engine.unload();
+  });
+
+  test('three stops in a row give the native engine up for WebAssembly, with the reason said', async () => {
+    const { engine, started } = speechOverHost();
+    for (let attempt = 0; attempt < 3; attempt += 1)
+      await expect(engine.transcribe(new Float32Array(7))).rejects.toThrow(/stopped/u);
+    expect((await engine.transcribe(new Float32Array(5))).text).toBe('wasm heard');
+    expect(started).toEqual(['native', 'native', 'native', 'wasm']);
+    const view = await engine.view();
+    expect(view.runtime?.kind).toBe('wasm');
+    expect(view.runtime?.sentence).toMatch(/it stopped 3 times in a row; the last time it crashed \(SIGSEGV\)/u);
+    await engine.remove();
+    expect((await engine.view()).runtime).toBeUndefined();
+  });
 });

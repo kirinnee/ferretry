@@ -62,3 +62,25 @@ describe('frames', () => {
     expect(() => new FrameReader().push(lying)).toThrow(/pointed outside/u);
   });
 });
+
+describe('frames of raw bytes', () => {
+  test('a Uint8Array (a model byte-run that is not a whole ArrayBuffer) comes back as a Uint8Array of the same bytes', () => {
+    const whole = new Uint8Array([9, 8, 7, 6, 5]);
+    const [frame] = new FrameReader().push(encodeFrame({ bytes: whole.subarray(1, 4) }));
+    const back = (frame as { message: { bytes: Uint8Array } }).message.bytes;
+    expect(back).toBeInstanceOf(Uint8Array);
+    expect([...back]).toEqual([8, 7, 6]);
+  });
+});
+
+describe('a frame whose header is not JSON', () => {
+  test('is refused as unreadable, not guessed at', () => {
+    const header = new TextEncoder().encode('{nope');
+    const frame = new Uint8Array(12 + header.length);
+    frame.set([0x46, 0x59, 0x53, 0x48]);
+    new DataView(frame.buffer).setUint32(4, 4 + header.length);
+    new DataView(frame.buffer).setUint32(8, header.length);
+    frame.set(header, 12);
+    expect(() => new FrameReader().push(frame)).toThrow(/could not be read/u);
+  });
+});
