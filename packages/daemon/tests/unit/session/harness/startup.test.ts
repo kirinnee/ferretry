@@ -156,6 +156,16 @@ describe('the plan for a start’s reasoning level', () => {
     }
   });
 
+  it('refuses a Claude level Claude does not take, as the typed /effort did, instead of recording one the session lacks', () => {
+    for (const level of ['zigzag', 'ultra', 'minimal']) {
+      expect(planStartupEffort('claude', 'claude-opus-5-5', level, undefined)).toEqual({
+        kind: 'refused',
+        cause: 'invalid',
+        reason: 'effort must be one of low, medium, high, xhigh, max',
+      });
+    }
+  });
+
   it('refuses a non-blank level that is not a reasoning level, instead of starting without it', () => {
     for (const level of ['x_high', '9', 'two words']) {
       for (const harness of ['codex', 'claude'] as const) {

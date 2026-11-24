@@ -2,6 +2,7 @@ import type { RuntimeModelChoice } from '@ferretry/protocol';
 import type { HarnessKind } from '../../core/inventory.ts';
 import { reasoningLevel } from './launch-effort.ts';
 import { harnessQuirks } from './quirks.ts';
+import { RUNTIME_EFFORT_LEVELS } from './runtime-switch.ts';
 
 /**
  * The model selection every new harness invocation receives on its launch argv.
@@ -39,8 +40,8 @@ export function startupModelArguments(model: string): readonly string[] {
  *   - `/effort` now SAVES the level as the login's default for every later session ("saved as your
  *     default for new sessions"), so one ferret's start silently changed the effort of every session
  *     started on that login after it. `--effort` is "for the current session" and writes nothing.
- * A level Claude does not know is warned about and ignored by its own CLI, as `/effort` did, so it needs
- * no catalog check here.
+ * A level Claude does not know is warned about and ignored by its own CLI, so Ferretry refuses it itself
+ * (`planStartupEffort`, against `RUNTIME_EFFORT_LEVELS`, as `/effort` was); it needs no catalog read.
  *
  * That is a NEW session's start (`fy new`, the app's New ferret). A FORK still applies its target's model
  * and effort through the startup runtime hook (`forkStartupRuntimeRequest`), and a live session's level is
@@ -116,7 +117,7 @@ export type StartupEffortPlan =
  * `catalog` is what the caller read for a Codex level — the login's models, or the `Error` its probe threw —
  * and is only consulted when `startupEffort` says the level `checksCatalog`. No level plans nothing; a Codex
  * level is checked against the catalog (`codexStartupEffortRefusal`) and then rides the argv; a Claude level
- * rides the argv unchecked.
+ * must be one of `RUNTIME_EFFORT_LEVELS` and then rides the argv.
  */
 export function planStartupEffort(
   harness: HarnessKind,
@@ -133,7 +134,17 @@ export function planStartupEffort(
       ? { kind: 'planned' }
       : { kind: 'refused', cause: 'invalid', reason: `${asked} is not a reasoning level` };
   }
-  if (!carried.checksCatalog) return { kind: 'planned', argvEffort: carried.effort };
+  if (!carried.checksCatalog) {
+    // Claude's own CLI warns about an unknown level and starts on its default, so Ferretry would record a level
+    // the session does not have. Refuse it as the typed `/effort` path did (`planRuntimeSwitch`).
+    return RUNTIME_EFFORT_LEVELS.includes(carried.effort)
+      ? { kind: 'planned', argvEffort: carried.effort }
+      : {
+          kind: 'refused',
+          cause: 'invalid',
+          reason: `effort must be one of ${RUNTIME_EFFORT_LEVELS.join(', ')}`,
+        };
+  }
   const reason = codexStartupEffortRefusal(model, carried.effort, catalog);
   if (reason === undefined) return { kind: 'planned', argvEffort: carried.effort };
   return {
