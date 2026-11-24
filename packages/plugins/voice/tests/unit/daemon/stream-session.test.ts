@@ -335,23 +335,22 @@ describe('the voice stream: when it sends, and when it must not', () => {
 });
 
 describe('the voice stream: an engine that cannot keep up fails out loud', () => {
-  test('a decode that never answers (interim or final) fails the turn as engine_timeout, and the next turn starts clean', async () => {
-    let first = true;
+  test('a FINAL decode that never answers fails the turn as engine_timeout, and the next turn starts clean', async () => {
+    let hung = true; // every decode of the first turn (interim, early and final) hangs; only the final one can lose the turn
     const r = await rig({
       engine: {
         transcribe: async samples =>
-          first
-            ? await new Promise(() => {
-                first = false;
-              })
+          hung
+            ? await new Promise(() => undefined)
             : { text: `again ${samples.length}`, decodeMs: 1, realTimeFactor: 0 },
       },
     });
     r.start(test_);
     await r.talk(1_500);
     await r.talk(2_500, { loud: true });
-    await r.talk(7_000); // the interim decode hangs; five seconds later the turn is lost, out loud
+    await r.talk(15_000); // the interim decode hangs (skipped after its 5 s budget); the final one then hangs too and the turn is lost, out loud
     expect(r.snapshot().last).toMatchObject({ outcome: 'failed', code: 'engine_timeout' });
+    hung = false;
     await r.talk(1_200);
     await r.talk(2_500, { loud: true });
     await r.talk(3_000);
@@ -517,7 +516,7 @@ describe('the voice stream: edges', () => {
     for (let turn = 0; turn < 3; turn += 1) {
       await r.talk(1_500);
       await r.talk(2_500, { loud: true });
-      await r.talk(7_000);
+      await r.talk(12_000);
     }
     expect(r.snapshots().some(snapshot => snapshot.error?.code === 'engine_overloaded')).toBe(true);
     expect(r.closes.at(-1)).toEqual(STREAM_CLOSES.overloaded);
@@ -773,5 +772,80 @@ describe('the voice stream: the final decode starts in the pause, not at its end
     await r.talk(3_000);
     expect(r.transcribed).toHaveLength(before + 1);
     expect(r.sent).toHaveLength(1);
+  });
+});
+
+describe('the voice stream: interim decodes are best-effort on a busy machine (engine_behind)', () => {
+  /** A busy box: every decode takes `ms` of the stream's own clock, and no two decodes run at once. */
+  const busy = (ms: number) => {
+    const state = { running: 0, overlapped: 0, started: 0 };
+    return {
+      state,
+      engine: (clock: { after: (delay: never, fn: () => void) => () => void }): Partial<StreamParts['engine']> => ({
+        transcribe: async samples => {
+          state.started += 1;
+          state.running += 1;
+          if (state.running > 1) state.overlapped += 1;
+          await new Promise<void>(resolve => clock.after(ms as never, resolve));
+          state.running -= 1;
+          return { text: `heard ${samples.length}`, decodeMs: ms, realTimeFactor: 1 };
+        },
+      }),
+    };
+  };
+  const slowRig = async (ms: number, options: { send?: StreamParts['send'] } = {}) => {
+    const load = busy(ms);
+    // The engine needs the rig's clock, which the rig makes: a late-bound clock hands it over.
+    let clock: { after: (delay: never, fn: () => void) => () => void } | undefined;
+    const r = await rig({
+      ...options,
+      engine: load.engine({ after: (delay, fn) => (clock as NonNullable<typeof clock>).after(delay, fn) }),
+    });
+    clock = r.clock as never;
+    return { r, load };
+  };
+
+  test('RED→GREEN: an interim decode that takes 3 s does not lose the turn: it is sent once', async () => {
+    const { r } = await slowRig(3_000);
+    r.start(chat);
+    await r.talk(1_500);
+    await r.talk(4_000, { loud: true }); // an interim decode starts after 1.2 s of speech and takes 3 s
+    await r.talk(8_000);
+    expect(
+      r.snapshots().some(item => item.last?.code === 'engine_behind' || item.error?.code === 'engine_behind'),
+    ).toBe(false);
+    expect(r.sent).toHaveLength(1);
+    expect(r.sent[0]).toMatchObject({ sendId: 'abc123:1' });
+    expect(r.snapshot().last).toEqual({ turn: 1, outcome: 'sent', sendId: 'abc123:1' });
+  });
+
+  test('interim decodes are never queued: one at a time, and the engine is left alone as long as it was kept busy', async () => {
+    const { r, load } = await slowRig(3_000);
+    r.start(test_);
+    await r.talk(1_500);
+    await r.talk(4_800, { loud: true });
+    expect(load.state.overlapped).toBe(0);
+    // Back to back, a 3 s engine would be asked 4 times in the 4.8 s of speech plus 3 s of decode; it is asked twice at most.
+    expect(load.state.started).toBeLessThanOrEqual(2);
+  });
+
+  test('the pause is still heard while an interim decode runs: the turn ends at the pause, not later', async () => {
+    const { r } = await slowRig(3_000);
+    r.start(chat);
+    await r.talk(1_500);
+    await r.talk(2_000, { loud: true });
+    await r.talk(9_000); // the interim decode (3 s) is still running at the pause; everything after is scanned in full
+    expect(r.sent).toHaveLength(1);
+    expect(r.snapshot().last).toMatchObject({ turn: 1, outcome: 'sent' });
+  });
+
+  test('a turn is lost only when the FINAL decode cannot finish within its own deadline', async () => {
+    const { r } = await slowRig(30_000);
+    r.start(test_);
+    await r.talk(1_500);
+    await r.talk(2_500, { loud: true });
+    await r.talk(12_000);
+    expect(r.snapshot().last).toMatchObject({ outcome: 'failed', code: 'engine_timeout' });
+    expect(r.sent).toEqual([]);
   });
 });

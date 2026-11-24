@@ -423,7 +423,9 @@ closes an open stream at once** (4401). `contract/stream.ts` is the wire; `daemo
   the pause uses that result when no voice came back (voice that did outdates it, and the whole turn is decoded again).
   Measured on the real engine, `clip-5s`, last word → sent: **3.28 s before, 2.4–2.6 s after** (0.5 s trigger: 2.88 s). The
   floor is the decode itself (about 1.7 s for 5 s), which the offline engine cannot hide the way the browser's
-  `beginFinish()` hides a streaming one. A longer turn is decoded at the pause as before. The message is sent **as soon as it is ready**, as the person's own
+  `beginFinish()` hides a streaming one. **On a busy machine** (the real engine and the stream pinned to 2 CPUs shared with 4
+  busy loops, `clip-5s`, 12 runs each): **0 of 12 turns sent before, 12 of 12 after** (before, every run lost the turn as
+  `engine_behind`: an interim decode over 2 s counted as unseen audio); last word → sent was about 3.3 s there. A longer turn is decoded at the pause as before. The message is sent **as soon as it is ready**, as the person's own
   message through Conversation's send, prefixed `(voice) `, with the stable id `<streamId>:<turn>`. A turn is handed over
   once; a refused or failed send is reported, never repeated by the stream.
 - **A dead phone never sends.** The send waits for an echo of a nonce the machine issued **after** it heard the pause. A
@@ -432,10 +434,12 @@ closes an open stream at once** (4401). `contract/stream.ts` is the wire; `daemo
   nothing. A stream with no unit for 5 s is closed (4408).
 - **Words while you speak.** The engine has no streaming decode, so a turn of at most 5 s is re-decoded about every 1.2 s
   (5 s of speech decodes in about 1.9 s, above); a longer turn keeps its last words until the final decode. Past that the
-  final decode has 5 s plus half the audio's length. A decode that began in the pause keeps the VAD from looking for a
-  moment; the audio it missed is scanned in full afterwards, so no voice is skipped.
-- **Fails out loud.** More than 2 s of unseen audio (`engine_behind`) or a decode over its budget (`engine_timeout`) loses
-  that turn, with a sentence; three lost turns in a row end the stream (`engine_overloaded`, 4450). Not enough memory to
+  final decode has 5 s plus half the audio's length. **Interim words and the early decode are best-effort**: while one
+  runs the VAD cannot look, so the audio that arrived meanwhile is scanned in full afterwards (no voice is skipped, the
+  pause is still heard) and is not counted as unseen; the engine is then left alone for as long as that decode took (a
+  busy engine skips interim words, it never queues them); one that runs over its budget is dropped, not a lost turn.
+- **Fails out loud.** More than 2 s of audio the VAD itself has not had (`engine_behind`) or a FINAL decode over its
+  budget (`engine_timeout`) loses that turn, with a sentence; three lost turns in a row end the stream (`engine_overloaded`, 4450). Not enough memory to
   load speech ends it at once (`voice_no_memory`). Audio is never silently skipped inside a turn. Only the engine's
   public API is used: the load generation and the idle unload are the engine's own, and a load superseded by an unload is
   asked again once.
