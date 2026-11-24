@@ -1,6 +1,6 @@
 /**
  * THE DOT ON A FERRET'S ROW for a page its agent opened where the owner was not looking: another ferret's page was on screen,
- * or a sign-in card was open on the phone, so the Browser panel did not jump (`PanelReveal`, `panel-reveal.ts` in the app).
+ * or a sign-in card was open on the phone, so the Browser panel did not jump (`panel-reveal.ts` in the app).
  * It clears when the owner brings that ferret's Browser panel on screen. Drawn through `ferrets.list-row-mark`.
  */
 

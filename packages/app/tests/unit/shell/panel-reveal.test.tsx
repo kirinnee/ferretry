@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { useEffect } from 'react';
 import { defineEvent } from '@ferretry/kernel/contract';
 import { implementApp, type PanelIntent, type PanelProps } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
-import { provideToShell } from '../../../src/connect/provides.ts';
+import { type BackgroundViewProps, provideToShell } from '../../../src/connect/provides.ts';
 import { storedOverrides } from '../../../src/layout/device-layout.ts';
 import { FerretWorkspace } from '../../../src/shell/ferret-workspace.tsx';
-import { CARD_MODAL_ATTRIBUTE, revealDecision, usePanelRevealMark } from '../../../src/shell/panel-reveal.ts';
+import {
+  announcePanelReveal,
+  CARD_MODAL_ATTRIBUTE,
+  revealDecision,
+  usePanelRevealMark,
+} from '../../../src/shell/panel-reveal.ts';
 import { sidePaneOpen } from '../../../src/shell/side-pane-open.ts';
 import { APP_STORAGE } from '../../../src/storage/names.ts';
 import { memoryStore, writeRecord } from '../../../src/storage/records.ts';
@@ -13,9 +19,9 @@ import { interact, type Mounted } from '../../support/dom.ts';
 import { bootApp, entryOf, manifestOf, settle } from './frame-fixtures.tsx';
 
 /**
- * A PAGE THE AGENT OPENS SHOWS AT ONCE (`PanelReveal`): the Browser panel declares `reveal: { on, when: 'opened' }`; the ferret
- * page's workspace hears the event. The ferret on screen switches to that panel with a `show-page` intent for the page; any
- * other ferret, and a phone with a sign-in card modal open, only get a mark.
+ * A PAGE THE AGENT OPENS SHOWS AT ONCE: the plugin's app-wide listener (`shell.background`) hears its event and announces it
+ * (`announcePanelReveal`). The ferret page's workspace on screen switches to that panel with a `show-page` intent for the
+ * page; any other ferret, a page with no workspace at all, and a phone with a sign-in card modal open, only get a mark.
  */
 
 const PageChanged = defineEvent(
@@ -29,6 +35,19 @@ const PageChanged = defineEvent(
 
 /** The intents the stand-in Browser panel was handed, newest last. */
 const intents: PanelIntent[] = [];
+
+/** The plugin's listener: runs for the machine on every page, whatever is drawn. */
+function Listener({ daemon, client }: BackgroundViewProps) {
+  useEffect(
+    () =>
+      client.subscribe(PageChanged, event => {
+        if (event.change === 'opened')
+          announcePanelReveal({ daemon, ferret: event.ferret, panel: 'ferretpage.browser', page: event.page });
+      }),
+    [daemon, client],
+  );
+  return null;
+}
 
 function Browser({ intent }: PanelProps) {
   if (intent !== undefined && !intents.some(seen => seen.id === intent.id)) intents.push(intent);
@@ -51,10 +70,13 @@ function Chat() {
 
 const manifest = manifestOf('ferretpage', {
   ui: {
-    screens: [{ id: 'page', path: 'page', nav: { label: 'Page', order: 1 } }],
+    screens: [
+      { id: 'page', path: 'page', nav: { label: 'Page', order: 1 } },
+      { id: 'list', path: 'list', nav: { label: 'List', order: 2 } },
+    ],
     panels: [
       { id: 'terminals', slot: 'ferret.side', order: 10 },
-      { id: 'browser', slot: 'ferret.side', order: 20, reveal: { on: PageChanged, when: 'opened' } },
+      { id: 'browser', slot: 'ferret.side', order: 20 },
     ],
   },
   data: { publishes: [PageChanged] },
@@ -64,11 +86,17 @@ const plugin = entryOf(
   provideToShell(
     implementApp(manifest, {
       build: () => ({
-        screens: { page: () => <FerretWorkspace chat={<Chat />} daemon="d1" subject="zoe" /> },
+        screens: {
+          page: () => <FerretWorkspace chat={<Chat />} daemon="d1" subject="zoe" />,
+          // A page with no ferret workspace on it (the ferrets list): the rows are all there is.
+          list: () => <Chat />,
+        },
         panels: { terminals: () => <p data-testid="note">note</p>, browser: Browser },
       }),
     }),
-    {},
+    {
+      background: { 'page-opened': Listener },
+    },
   ),
 );
 
@@ -220,5 +248,28 @@ describe('on the phone', () => {
     await interact(() => page.querySelector<HTMLButtonElement>('[data-phone-chip="ferretpage.browser"]')?.click());
     await settle();
     expect(page.querySelector('[data-testid="mark-zoe"]')).toBeNull();
+  });
+});
+
+describe('on a page with no ferret workspace (the ferrets list)', () => {
+  const bootList = async () => {
+    const app = await bootApp({
+      surfaces: [plugin],
+      machines: ['d1'],
+      path: '/d/d1/list',
+      storage: layout(),
+    });
+    view = app.view;
+    return app;
+  };
+
+  test('a page the agent opens still gives its ferret the dot, with no chat open to hear it', async () => {
+    const app = await bootList();
+    const page = app.view.container;
+    expect(page.querySelector('[data-ferret-side]')).toBeNull();
+    expect(page.querySelector('[data-testid="mark-zoe"]')).toBeNull();
+    await hear(app, 'zoe', 'p7');
+    expect(page.querySelector('[data-testid="mark-zoe"]')).not.toBeNull();
+    expect(intents).toEqual([]);
   });
 });

@@ -170,8 +170,8 @@ export {
 } from './shell/ferret-workspace-actions.tsx';
 /** @public A panel acts on its host's one-shot request (`PanelIntent`), once per request id and only for the action it owns (§5.2). */
 export { usePanelIntent } from './shell/panel-intent.ts';
-/** @public The dot on a ferret's row for a page a panel asked to show where the owner was not looking (`PanelReveal`, §5.2). */
-export { usePanelRevealMark } from './shell/panel-reveal.ts';
+/** @public A plugin's app-wide listener says a panel wants to be shown; the ferret's page shows it, or its row gets the dot (`panel-reveal.ts`, §5.2). */
+export { announcePanelReveal, usePanelRevealMark } from './shell/panel-reveal.ts';
 export { forSubject } from './shell/for-subject.ts';
 /** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar (§5.1). */
 export {

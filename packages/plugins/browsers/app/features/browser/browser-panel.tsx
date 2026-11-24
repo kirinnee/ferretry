@@ -55,8 +55,16 @@ export function BrowserPanel({ daemon, sessionId, dependencies, loginStore, inte
 
   const newPage = useCallback((): void => void pages.act({ action: 'new-page' }), [pages]);
   usePanelIntent(intent, 'new-page', newPage);
-  // The agent opened a page and the workspace brought this panel on screen: select that page (`PanelReveal`).
-  usePanelIntent(intent, 'show-page', () => intent?.target === undefined || pages.activatePage(intent.target));
+  // The agent opened a page and the workspace brought this panel on screen: the surface goes to the real browser and selects
+  // that page for this viewer. Read from the intent itself, so a panel that mounts WITH the request (the column was never
+  // opened) still acts on it.
+  const showPage = useMemo(
+    () =>
+      intent?.action === 'show-page' && intent.target !== undefined
+        ? { request: intent.id, pageId: intent.target }
+        : undefined,
+    [intent],
+  );
 
   return (
     <div
@@ -95,6 +103,7 @@ export function BrowserPanel({ daemon, sessionId, dependencies, loginStore, inte
           ),
         }}
         {...(dependencies === undefined ? {} : { dependencies })}
+        {...(showPage === undefined ? {} : { showPage })}
         loginStatus={login.status}
         {...(login.open === undefined ? {} : { onOpenLoginWindow: login.open })}
         {...(login.close === undefined ? {} : { onCloseLoginWindow: login.close })}

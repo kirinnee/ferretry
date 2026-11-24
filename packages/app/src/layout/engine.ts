@@ -1,4 +1,3 @@
-import type { PanelReveal } from '@ferretry/kernel/manifest';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
 import type { InstalledViews, ResolvedLayout } from './layout.ts';
 import { SHELL_ITEMS } from './slots.ts';
@@ -26,8 +25,6 @@ export interface PanelRef {
   readonly id: string;
   readonly slot: string;
   readonly order: number;
-  /** When the plugin asks for this panel to be shown (`PanelDecl.reveal`). */
-  readonly reveal?: PanelReveal;
 }
 
 export interface Views {
@@ -58,13 +55,7 @@ export function viewsOf(surfaces: readonly SurfaceEntry[]): Views {
     }
     for (const panel of ui?.panels ?? []) {
       const list = panels.get(panel.slot) ?? [];
-      list.push({
-        plugin: entry.id,
-        id: panel.id,
-        slot: panel.slot,
-        order: panel.order,
-        ...(panel.reveal === undefined ? {} : { reveal: panel.reveal }),
-      });
+      list.push({ plugin: entry.id, id: panel.id, slot: panel.slot, order: panel.order });
       panels.set(panel.slot, list);
     }
   }

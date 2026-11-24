@@ -1,9 +1,11 @@
 /**
- * A PAGE THE AGENT OPENS SHOWS AT ONCE, in a real browser, over fake data (`PanelReveal`): the REAL app over the REAL generated
- * plugins (`fixtures/ferret-asks-scene.tsx`). The fake daemon sends `browsers.page-changed` the way Browsers' daemon does.
+ * A PAGE THE AGENT OPENS SHOWS AT ONCE, in a real browser, over fake data: the REAL app over the REAL generated plugins
+ *   (`fixtures/ferret-asks-scene.tsx`). The fake daemon sends `browsers.page-changed` the way Browsers' daemon does, and Browsers'
+ *   app-wide listener (`shell.background`) hears it on every page.
  *
  *  - at a desk the column is on the Console; the agent opens a page and the Browser tab is on show;
  *  - another ferret's page does not move it;
+ *  - on the ferrets list, where no chat is open, the ferret's row gets the dot, and it clears once that ferret's Browser panel is seen;
  *  - on a phone the Browser chip comes on screen, except while a sign-in card modal is open (`data-fy-input-modal="open"`).
  *
  * Set `FY_REVEAL_SHOTS_DIR` to keep `<viewport>-<mode>-<case>.png`.
@@ -74,7 +76,7 @@ type Mode = 'light' | 'dark';
 const MODES: readonly Mode[] = ['light', 'dark'];
 const ASIDE = '[data-ferret-side]';
 
-const open = async (viewport: Viewport, mode: Mode) => {
+const open = async (viewport: Viewport, mode: Mode, path = 'ferrets/zoe/chat') => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     colorScheme: mode,
@@ -90,13 +92,21 @@ const open = async (viewport: Viewport, mode: Mode) => {
   tab.setDefaultTimeout(15_000);
   const problems: string[] = [];
   tab.on('pageerror', error => problems.push(error.message));
-  await tab.goto(`${origin}/d/ws/ferrets/zoe/chat?theme=studio-${mode}&agenda=off&asks=0`);
+  await tab.goto(`${origin}/d/ws/${path}?theme=studio-${mode}&agenda=off&asks=0`);
+  const list = path === 'ferrets';
   try {
-    await tab.waitForSelector(viewport.phone ? '[data-phone-chip]' : '[data-side-toggle]', { timeout: 20_000 });
+    // The fake ferret is the agent's, not the owner's: it is listed under "All".
+    if (list) await tab.getByText('All', { exact: true }).first().click();
+    await tab.waitForSelector(
+      list ? '[data-sbar-row="zoe"]' : viewport.phone ? '[data-phone-chip]' : '[data-side-toggle]',
+      {
+        timeout: 20_000,
+      },
+    );
   } catch (error) {
     throw new Error(`the scene did not draw: ${String(error)}\n${problems.join('\n')}`);
   }
-  if (!viewport.phone) {
+  if (!viewport.phone && !list) {
     await tab.locator('[data-side-toggle]:visible').click();
     await tab.waitForSelector(`${ASIDE} [role="tab"]`);
   }
@@ -177,4 +187,33 @@ describe('a page the agent opens, on a phone', () => {
       }
     });
   }
+});
+
+const MARK = '[data-browser-opened-mark]';
+
+describe('a page the agent opens, on the ferrets list (no chat open)', () => {
+  for (const viewport of [DESK, PHONE])
+    for (const mode of MODES) {
+      it(`${viewport.name} ${mode}: the ferret's row gets the dot, and it clears once its Browser panel is seen`, async () => {
+        const { tab, problems, close } = await open(viewport, mode, 'ferrets');
+        try {
+          expect(await tab.locator(MARK).count()).toBe(0);
+          await shot(tab, viewport, mode, 'list-before');
+          await opened(tab, 'zoe', 'p3');
+          await tab.locator(MARK).first().waitFor({ state: 'visible' });
+          await shot(tab, viewport, mode, 'list-dot');
+          // Looking at that ferret's Browser panel is what clears it.
+          await tab.locator('[data-sbar-session="zoe"]').click();
+          if (viewport.phone) await tab.locator('[data-phone-chip="browsers.browser"]').click();
+          else {
+            await tab.locator('[data-side-toggle]:visible').click();
+            await tab.getByRole('tab', { name: /browser/i }).click();
+          }
+          await tab.waitForFunction(m => document.querySelector(m) === null, MARK, { timeout: 10_000 });
+          expect(problems).toEqual([]);
+        } finally {
+          await close();
+        }
+      });
+    }
 });
