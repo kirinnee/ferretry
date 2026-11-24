@@ -1,3 +1,4 @@
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { describe, expect, test } from 'bun:test';
 import type { Needer } from '@ferretry/kernel/manifest';
 import { testHost } from '@ferretry/kernel/testing';
@@ -21,7 +22,11 @@ const files = {
 
 describe('the real Logins passes the same conformance suite as the fake', () => {
   test('list, get, quota, presets and models answer on the contract with sign-ins that cannot be read', async () => {
-    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: files });
+    const host = await testHost({
+      plugins: [daemon],
+      fakes: { gate: new FakeGate(), vault: emptyVault() },
+      config: files,
+    });
     try {
       const api = host.provided(LoginsPort);
       const result = await loginsConformance(() => api);
@@ -36,7 +41,11 @@ describe('the real Logins passes the same conformance suite as the fake', () => 
 
 describe('the real Logins served through the host', () => {
   test('the list, the presets and the models answer on their paths, and a sign-in for a login nobody named is refused', async () => {
-    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: files });
+    const host = await testHost({
+      plugins: [daemon],
+      fakes: { gate: new FakeGate(), vault: emptyVault() },
+      config: files,
+    });
     try {
       const list = await host.request('GET', '/v1/logins');
       const presets = await host.request('GET', '/v1/logins/presets');
@@ -57,7 +66,11 @@ describe('the real Logins served through the host', () => {
 
 describe('the Logins port changes through the same service as the routes', () => {
   test('a change staged through the port is the one the route reads, and a refusal is the same code on both', async () => {
-    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: files });
+    const host = await testHost({
+      plugins: [daemon],
+      fakes: { gate: new FakeGate(), vault: emptyVault() },
+      config: files,
+    });
     try {
       const api = host.provided(LoginChangesPort);
       const staged = await api.stage({ kind: 'login.label', id: 'team', label: 'Team' });
@@ -93,7 +106,11 @@ const plain = (block: Record<string, string>) => Object.entries(block).map(([nam
 
 describe('the Logins port that takes an imported harness environment', () => {
   test('writes plain text and a minted reference to the login file in effect, keeps what is there, and writes no raw secret', async () => {
-    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: files });
+    const host = await testHost({
+      plugins: [daemon],
+      fakes: { gate: new FakeGate(), vault: emptyVault() },
+      config: files,
+    });
     try {
       const api = host.provided(LoginEnvImportPort, RUNTIMES);
       const base = {
@@ -128,7 +145,11 @@ describe('the Logins port that takes an imported harness environment', () => {
   });
 
   test('adds to a login Logins just created for the apply, so a fresh machine gets its login and its env', async () => {
-    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: { logins: {} } });
+    const host = await testHost({
+      plugins: [daemon],
+      fakes: { gate: new FakeGate(), vault: emptyVault() },
+      config: { logins: {} },
+    });
     try {
       const changes = host.provided(LoginChangesPort);
       const view = await changes.stage({ kind: 'login.add', id: 'claude-you', harness: 'claude-code', store: 'host' });
@@ -151,7 +172,11 @@ describe('the Logins port that takes an imported harness environment', () => {
   });
 
   test('is a working door for Runtimes alone: every other plugin is refused and nothing is written', async () => {
-    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: files });
+    const host = await testHost({
+      plugins: [daemon],
+      fakes: { gate: new FakeGate(), vault: emptyVault() },
+      config: files,
+    });
     try {
       for (const needer of [OTHER, undefined]) {
         const api =
@@ -175,7 +200,11 @@ describe('the Logins port that takes an imported harness environment', () => {
   });
 
   test('asks the caller live: no fleet.configure refuses, and no secrets.configure refuses a bound reference only', async () => {
-    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: files });
+    const host = await testHost({
+      plugins: [daemon],
+      fakes: { gate: new FakeGate(), vault: emptyVault() },
+      config: files,
+    });
     try {
       const api = host.provided(LoginEnvImportPort, RUNTIMES);
       const mint = [{ name: 'ANTHROPIC_API_KEY', secretName: 'ANTHROPIC_API_KEY' }];
@@ -192,7 +221,11 @@ describe('the Logins port that takes an imported harness environment', () => {
   });
 
   test('holds a secret reference for the owner when the caller is not the owner, and then refuses to add to the login with the held edit', async () => {
-    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: files });
+    const host = await testHost({
+      plugins: [daemon],
+      fakes: { gate: new FakeGate(), vault: emptyVault() },
+      config: files,
+    });
     try {
       const api = host.provided(LoginEnvImportPort, RUNTIMES);
       const answer = await api.import({

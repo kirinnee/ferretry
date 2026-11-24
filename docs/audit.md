@@ -145,7 +145,9 @@ are also `security.changed`: each lets new code run on the machine ([updating.md
 writes `secrets.used` itself, once for every send that put the key on a request. The subject is the secret's name
 (`JEV_API_KEY`). The detail holds the plugin, the host and the outcome's kind (`completion`, `status`, `timeout`,
 `network`, …) and nothing else: never the key, the request or the reply. The actor is this computer, with the daemon
-as the cause, because the machine spent it on the plugin's behalf. A send the kernel refused before it opened the
+as the cause, because the machine spent it on the plugin's behalf. The Logins plugin writes the same record itself for
+each keyed read of a login's model list (`secrets.used`, subject the secret's name, detail the plugin, the login id,
+the host and the outcome's kind), because the Vault's `authorizeFetch` does not. A send the kernel refused before it opened the
 Vault (not declared, not named, a host it may not reach) put nothing on a request and writes nothing.
 
 **Standing sign-in rules** ([secrets.md](secrets.md#standing-sign-in-rules)) write `security.changed` themselves.

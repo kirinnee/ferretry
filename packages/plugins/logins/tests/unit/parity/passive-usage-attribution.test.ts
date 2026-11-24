@@ -1,3 +1,4 @@
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { expect, test } from 'bun:test';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { testHost } from '@ferretry/kernel/testing';
@@ -44,7 +45,7 @@ async function rig(text: string, login: string, stateAt: string, mtimeMs: number
   });
   const host = await testHost({
     plugins: [daemon],
-    fakes: { vault: emptyVault() },
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
     uses: { ferrets },
     config: { logins: { a: { harness: 'codex', store: 'ferretry' }, b: { harness: 'codex', store: 'ferretry' } } },
     fetch: async () => {

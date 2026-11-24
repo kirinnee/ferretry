@@ -1,3 +1,4 @@
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { AuthorizedOutcome, OutboundHttpRequest, VaultApi } from '@ferretry/core-vault/contract';
 import { definePlugin, implementDaemon, type Permissions } from '@ferretry/kernel/manifest';
@@ -87,7 +88,7 @@ async function world() {
       implementDaemon(needer('usage', USAGE), { build: () => ({}) }),
       implementDaemon(needer('runtimes', RUNTIMES), { build: () => ({}) }),
     ],
-    fakes: { vault },
+    fakes: { gate: new FakeGate(), vault },
     config: { logins },
     fetch: async () => {
       throw new Error('offline');

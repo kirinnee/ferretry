@@ -3,6 +3,7 @@
  * `fy config`, an agent's config tool — publishes `logins.changed` naming the login and how it moved, so whoever reads
  * the logins reads them again. A set that leaves every value as it was (a comment-only edit) publishes nothing.
  */
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { describe, expect, test } from 'bun:test';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { LoginChanged } from '../../../contract/index.ts';
@@ -13,7 +14,11 @@ const work = { harness: 'claude-code', store: 'host' };
 const home = { harness: 'codex', store: 'host' };
 
 async function watching(logins: Record<string, unknown>) {
-  const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: { logins } });
+  const host = await testHost({
+    plugins: [daemon],
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
+    config: { logins },
+  });
   await host.settle();
   const before = host.published.length;
   const changed = () => host.published.slice(before).filter(entry => entry.event === LoginChanged.name);
