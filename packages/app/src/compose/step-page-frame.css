@@ -104,8 +104,16 @@
   min-width: 0;
   overflow: hidden;
 }
-.fy-spf__demo:empty {
+/* THE BOX IS RESERVED FROM THE FIRST FRAME (O9-15). A page that is going to draw a demo says so by rendering `<StepDemo>`, whose zero-size mark
+   (`data-step-demo-mark`, not inside a `hidden` page: a page behind its loading cover draws no column) is in the page's first commit; the demo itself portals in one render later (and a lazy scene a little after
+   that). Until then the column is an empty box of about the size it will be, and the two-column grid is already in place, so the choices
+   never re-lay out and the body never drops when the picture arrives. A page with no demo (no mark, nothing in the column) draws no
+   column. */
+.fy-spf__page:not(:has([data-step-demo-mark]:not([hidden] *))) .fy-spf__demo:empty {
   display: none;
+}
+.fy-spf__demo:empty {
+  min-block-size: 122px;
 }
 /* ON A PHONE a PINNED demo (`<StepDemo pinned>`: Appearance, Voice) keeps the heading and the demo on screen while the body scrolls
    under them. The pin is OPAQUE (the page's own fill) and runs the page's FULL width, gutters included (it bleeds out over the page's
@@ -113,16 +121,21 @@
    over every card (a card's own layer, a kit's hard shadow). A soft shadow under it reads as the body passing under. A screen under
    560px tall (a phone on its side) pins nothing: the strip and the footer would leave no room for the choices. */
 @container (max-width: 899.98px) {
+  /* A PINNED demo (Appearance, Voice) is ONE height whatever it shows: a style or an engine changes what is drawn inside the box, never
+     the box, so the strip and the choices under it do not move when a pick plays its picture. */
+  .fy-spf__page:has([data-step-demo-pinned-mark]:not([hidden] *)) .fy-spf__demo {
+    min-block-size: 122px;
+  }
   /* A KEY (Tab, Home, End, an arrow) scrolls a control into view; without a margin it came to rest UNDER the pin or the pinned footer.
      The bottom margin is the footer (a row of 44px buttons that may wrap at Larger text, its padding, the safe area, a gap); the top
      one (below) is the pin's whole reach (padding, a heading of up to three lines, the 140px demo, gaps; it grows with the text size). */
-  .fy-spf__page:has([data-step-demo-pinned])
+  .fy-spf__page:has([data-step-demo-pinned-mark]:not([hidden] *))
     .fy-spf__body
     :is(input, button, a, select, textarea, summary, [tabindex], .fy-cc__card) {
     scroll-margin-block-end: calc(104px + env(safe-area-inset-bottom, 0px));
   }
   @media (min-height: 560px) {
-    .fy-spf__pin:has([data-step-demo-pinned]) {
+    .fy-spf__page:where(:has([data-step-demo-pinned-mark]:not([hidden] *))) .fy-spf__pin {
       background: var(--bg);
       box-shadow: 0 8px 14px -8px var(--shadow-lg-2);
       inset-block-start: 0;
@@ -131,7 +144,7 @@
       position: sticky;
       z-index: 6;
     }
-    .fy-spf__page:has([data-step-demo-pinned])
+    .fy-spf__page:has([data-step-demo-pinned-mark]:not([hidden] *))
       .fy-spf__body
       :is(input, button, a, select, textarea, summary, [tabindex], .fy-cc__card) {
       scroll-margin-block-start: calc(240px + 60px * var(--fy-text-scale, 1));
@@ -141,7 +154,7 @@
 @container (min-width: 900px) {
   /* Beside the choices: the page is a grid (progress and heading across, then the choices 44% and the demo, sticky). The pin is
      just a name for the heading and the demo, so it draws no box of its own. A page with no demo keeps the single column. */
-  .fy-spf__page:has(.fy-spf__demo:not(:empty)) {
+  .fy-spf__page:is(:has(.fy-spf__demo:not(:empty)), :has([data-step-demo-mark]:not([hidden] *))) {
     column-gap: 40px;
     display: grid;
     grid-template-columns: clamp(360px, 44%, 480px) minmax(320px, 1fr);
@@ -150,14 +163,17 @@
     max-width: 1080px;
     row-gap: 20px;
   }
-  .fy-spf__page:has(> .fy-sp-progress):has(.fy-spf__demo:not(:empty)) {
+  .fy-spf__page:has(> .fy-sp-progress):is(
+    :has(.fy-spf__demo:not(:empty)),
+    :has([data-step-demo-mark]:not([hidden] *))
+  ) {
     grid-template-rows: auto auto 1fr;
   }
-  .fy-spf__page:has(.fy-spf__demo:not(:empty)) > .fy-sp-progress,
-  .fy-spf__page:has(.fy-spf__demo:not(:empty)) .fy-spf__head {
+  .fy-spf__page:is(:has(.fy-spf__demo:not(:empty)), :has([data-step-demo-mark]:not([hidden] *))) > .fy-sp-progress,
+  .fy-spf__page:is(:has(.fy-spf__demo:not(:empty)), :has([data-step-demo-mark]:not([hidden] *))) .fy-spf__head {
     grid-column: 1 / -1;
   }
-  .fy-spf__page:has(.fy-spf__demo:not(:empty)) .fy-spf__main {
+  .fy-spf__page:is(:has(.fy-spf__demo:not(:empty)), :has([data-step-demo-mark]:not([hidden] *))) .fy-spf__main {
     grid-column: 1;
   }
   .fy-spf__pin {
@@ -170,6 +186,13 @@
     min-height: 160px;
     min-inline-size: 320px;
     order: 1; /* after the choices in the grid, so both sit on one row */
+  }
+  .fy-spf__page:has([data-step-demo-pinned-mark]:not([hidden] *)) .fy-spf__demo {
+    min-height: 410px; /* the tallest picture a pinned page draws: a pick changes the drawing, never the box */
+  }
+  /* Still empty: the height a picture has once it arrives (the smallest of the onboarding pictures), so the column does not grow under the person. */
+  .fy-spf__demo:empty {
+    min-height: 340px;
   }
   /* Sticky only on a screen tall enough to keep it AND the choices in view: under 560px tall (a wide phone on its side, a short
      window) the demo scrolls away with the page, the same guard the stacked layout has. */
@@ -205,7 +228,7 @@
 }
 @container (min-width: 900px) {
   /* The actions end where the (wider) page's content ends. */
-  .fy-spf:has(.fy-spf__demo:not(:empty)) .fy-spf__actions {
+  .fy-spf:is(:has(.fy-spf__demo:not(:empty)), :has([data-step-demo-mark]:not([hidden] *))) .fy-spf__actions {
     max-width: 1080px;
   }
 }
