@@ -163,6 +163,9 @@ describe('Voice mode panel', () => {
           expect(await tab.locator('[data-voice-mode-status]').innerText()).toContain('Talk any time to interrupt');
           expect(await overflow(tab)).toBeLessThanOrEqual(0);
           await shot(tab, 'on-speaking');
+          // The detector judges speech against the room's own quietest level, so the room is heard quiet for a second first
+          // (a microphone that is loud from its very first unit is steady noise, not a person starting to talk).
+          await tab.waitForFunction(() => (window as unknown as { __fake: Fake }).__fake.units >= 25);
           // The person starts talking: the loud units reach the page like the microphone's.
           await tab.evaluate(() => {
             (window as unknown as { __loud: boolean }).__loud = true;
