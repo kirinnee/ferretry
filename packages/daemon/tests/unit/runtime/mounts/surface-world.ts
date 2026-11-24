@@ -611,6 +611,22 @@ export const subsystems = (): MountedSubsystems => ({
   sharedCatalogs: { catalogs: {} as SharedCatalogSubsystem['catalogs'] },
   catalogMembers: { members: {} as CatalogMemberSubsystem['members'] },
   catalogLinks: { links: {} as CatalogLinkSubsystem['links'] },
+  connector: {
+    availability: () => ({ enabled: false, disabledReason: 'not exercised by the surface inventory' }),
+    acts: {
+      pending: async () => [],
+      grants: async () => [],
+      approve: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+      deny: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+      revoke: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+    },
+  },
   warden: new FakeWarden(),
   transcriptImages: new MemoryTranscript([]).reader(),
   sessionReads: new OperatorReadService(

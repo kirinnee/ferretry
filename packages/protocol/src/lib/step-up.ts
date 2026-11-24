@@ -83,6 +83,7 @@ export const StepUpActSchema = z.enum([
   'approve-sign-in-rule',
   'resume-cut-off',
   'approve-paste-rule',
+  'approve-connector',
 ]);
 export type StepUpAct = z.infer<typeof StepUpActSchema>;
 
@@ -466,6 +467,14 @@ export const STEP_UP_ACTS = {
    * The passkey prompt lists the daemon's rows of what the rule allows. Removing a rule never asks.
    */
   approvePasteRule: 'approve-paste-rule',
+  /**
+   * Approving a Claude CONNECTOR sign-in (docs/mcp-connector.md): the grant it mints lets that client read and drive
+   * this fleet through the nine connector tools until it is revoked, from anywhere on the internet. A governed device
+   * proves a passkey for this act alone — a `catalog-install` or `add-device` proof never buys a connector. The
+   * machine's own `fy connector approve` is skipped like every other access-adding act (it is not in
+   * {@link STEP_UP_ACTS_EVERY_CALLER}); denying and revoking never ask.
+   */
+  approveConnector: 'approve-connector',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**
