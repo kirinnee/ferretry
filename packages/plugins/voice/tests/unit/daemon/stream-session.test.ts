@@ -697,6 +697,17 @@ describe('the voice stream: one chat per FERRET, however it is named (review 248
     expect(r.closes).toHaveLength(1);
   });
 
+  test('a resolver that fails is a name no single ferret goes by', async () => {
+    const r = await rig({
+      resolveFerret: async () => {
+        throw new Error('ferrets are not answering');
+      },
+    });
+    r.start(chat);
+    await settle();
+    expect(r.snapshot().error).toMatchObject({ code: 'ferret_unknown' });
+  });
+
   test('a stream that ended while the name was being resolved does not keep the ferret', async () => {
     const registry = new StreamRegistry();
     let answer: (id: string) => void = () => undefined;

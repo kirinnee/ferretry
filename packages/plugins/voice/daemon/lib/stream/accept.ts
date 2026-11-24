@@ -55,8 +55,24 @@ export function sentAuditDraft(actor: AuditDraft['actor'], ferretId: string): Au
   };
 }
 
+/**
+ * What one sent message leaves in the audit log. A record that could not be written is said (one line, names only) and
+ * never stops the stream: an audit write never decides an outcome.
+ */
+export function sentRecorder(
+  deps: Pick<VoiceStreamDeps, 'audit' | 'log'>,
+  actor: AuditDraft['actor'],
+  streamId: string,
+): (ferretId: string) => void {
+  return ferretId => {
+    deps
+      .audit(sentAuditDraft(actor, ferretId))
+      .catch(() => deps.log.info('voice.stream.audit_failed', { stream: streamId }));
+  };
+}
+
 /** Who the audit log names for this caller, as it names the same caller on a typed send. */
-function auditActorOf(call: {
+export function auditActorOf(call: {
   readonly credential?: { readonly tokenClass: string; readonly principal?: { readonly holder: string } };
 }): AuditDraft['actor'] {
   const credential = call.credential;
@@ -101,11 +117,7 @@ export function voiceStreamAccept(deps: VoiceStreamDeps): SocketAccept {
         mayChat: () =>
           governance?.decide(FLEET_USE).allowed === true && (!governance.governed || deps.fleetUseGranted()),
         resolveFerret: deps.resolveFerret,
-        recordSent: ferretId => {
-          deps
-            .audit(sentAuditDraft(auditActor, ferretId))
-            .catch(() => deps.log.info('voice.stream.audit_failed', { stream: streamId }));
-        },
+        recordSent: sentRecorder(deps, auditActor, streamId),
         claimFerret: ferret => registry.claimFerret(ferret),
         onEnd: slot.release,
         log: deps.log,

@@ -14,7 +14,7 @@ import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { fixedClock } from '@ferretry/kernel/testing';
 import voice from '../../../daemon/index.ts';
-import { sentAuditDraft, voiceStreamAccept } from '../../../daemon/lib/stream/accept.ts';
+import { auditActorOf, sentAuditDraft, sentRecorder, voiceStreamAccept } from '../../../daemon/lib/stream/accept.ts';
 import { StreamRegistry } from '../../../daemon/lib/stream/registry.ts';
 import manifest from '../../../manifest.ts';
 
@@ -207,5 +207,33 @@ describe('voice chat needs fleet.use as well as voice.use (review 2481, blocking
       detail: { action: 'send', status: 200 },
     });
     expect(JSON.stringify(draft)).not.toContain('voice)');
+  });
+
+  test("the audit actor is the device that spoke, or this computer for the host's own token", () => {
+    const device = { credential: { tokenClass: 'device', principal: { holder: 'phone' } } };
+    expect(auditActorOf(device)).toEqual({ kind: 'device', deviceId: 'phone' });
+    expect(auditActorOf({ credential: { tokenClass: 'admin' } })).toEqual({ kind: 'host' });
+    expect(auditActorOf({})).toEqual({ kind: 'host' });
+  });
+
+  test('a sent message is recorded once; a record that cannot be written is said and does not throw', async () => {
+    const written: unknown[] = [];
+    const said: string[] = [];
+    const log = { info: (message: string) => void said.push(message) };
+    sentRecorder({ audit: async draft => void written.push(draft), log }, { kind: 'host' }, 's1')('fer-1');
+    await Promise.resolve();
+    expect(written).toHaveLength(1);
+    sentRecorder(
+      {
+        audit: async () => {
+          throw new Error('the log is full');
+        },
+        log,
+      },
+      { kind: 'host' },
+      's1',
+    )('fer-1');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(said).toEqual(['voice.stream.audit_failed']);
   });
 });
