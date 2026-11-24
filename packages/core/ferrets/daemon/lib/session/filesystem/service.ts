@@ -16,6 +16,7 @@ import type {
   PinnedOpenOptions,
   PinnedRoot,
   PinnedTarget,
+  ReadTarget,
   SessionChangesView,
   SessionGit,
   SessionRootPinner,
@@ -317,6 +318,11 @@ export class SessionFilesystem {
       readonly raw?: boolean;
       /** Asked after every gate and before the read: which span of the file to read (none: all of it). */
       readonly span?: SpanChooser;
+      /**
+       * Asked with the descriptor's own `fstat` AFTER the span was read, and it may refuse by throwing. A caller that
+       * keyed a verdict on the open-time stat uses it to prove the bytes it just read are still that object's.
+       */
+      readonly afterRead?: (file: ReadTarget) => void;
       /** @internal Test-only barrier; see {@link AfterValidationHook}. */
       readonly afterValidation?: AfterValidationHook;
       readonly fence?: SessionReadFence;
@@ -335,6 +341,7 @@ export class SessionFilesystem {
         : await this.readWorking(pinned, rel, maxBytes, options.afterValidation, options.base64, options.fence, {
             ...(options.raw === true ? { raw: true } : {}),
             ...(options.span === undefined ? {} : { span: options.span }),
+            ...(options.afterRead === undefined ? {} : { afterRead: options.afterRead }),
           });
     } finally {
       await pinned.close();
@@ -503,7 +510,11 @@ export class SessionFilesystem {
     afterValidation: AfterValidationHook | undefined,
     base64 = false,
     fence?: SessionReadFence,
-    delivery: { readonly raw?: boolean; readonly span?: SpanChooser } = {},
+    delivery: {
+      readonly raw?: boolean;
+      readonly span?: SpanChooser;
+      readonly afterRead?: (file: ReadTarget) => void;
+    } = {},
   ): Promise<FsFileView> {
     // Evaluate policy before the walk and again after it. Retaining both verdicts is what prevents a
     // rename or replacement from evaluating the gate on one tree while the pinned descriptor supplies
@@ -537,6 +548,7 @@ export class SessionFilesystem {
           ? undefined
           : await delivery.span({ identity, size: metadata.size, mtime: metadata.mtime });
       const bytes = await opened.read(maxBytes, span);
+      if (delivery.afterRead !== undefined) delivery.afterRead(await opened.restat());
       if (bytes === undefined) return { ...view, tooLarge: true };
       if (delivery.raw === true) return { ...view, bytes };
       if (base64) return { ...view, base64: Buffer.from(bytes).toString('base64') };

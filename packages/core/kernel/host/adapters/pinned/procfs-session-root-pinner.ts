@@ -14,6 +14,7 @@ import {
   type PinOptions,
   type PinnedRoot,
   type ByteWindow,
+  type PinnedStat,
   type PinnedTarget,
   type SessionRootPinner,
   unsupportedPlatform,
@@ -134,6 +135,11 @@ class ProcfsPinnedTarget implements PinnedTarget {
       read += bytesRead;
     }
     return read === bytes.byteLength ? bytes : bytes.subarray(0, read);
+  }
+
+  async restat(): Promise<PinnedStat> {
+    const now = await this.handle.stat({ bigint: true });
+    return { identity: componentIdentity(now), size: Number(now.size), mtime: now.mtime.toISOString() };
   }
 
   /**

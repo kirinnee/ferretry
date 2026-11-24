@@ -25,6 +25,7 @@ import {
   type PinnedOpenOptions,
   type PinnedRoot,
   type ByteWindow,
+  type ReadTarget,
   type PinnedTarget,
   rootIsDenied,
   type SessionRootPinner,
@@ -274,6 +275,11 @@ class PosixPinnedTarget implements PinnedTarget {
       done += bytesRead;
     }
     return done === bytes.byteLength ? bytes : bytes.subarray(0, done);
+  }
+
+  async restat(): Promise<ReadTarget> {
+    const now = this.directory.fs.fstat(this.fd);
+    return { identity: componentIdentity(now), size: Number(now.size), mtime: now.mtime.toISOString() };
   }
 
   /**

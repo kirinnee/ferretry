@@ -452,6 +452,13 @@ rather than reading the file beside it. **A range is never served from a file wh
 refused**: a refused file is refused again for every range without being read, and a failed scan is retried by the next
 request, never assumed clean. The gates (ignore, denylist, fence, hard links, descriptor walk) still run on every request.
 
+**The key is checked again after the read.** The verdict's key is the descriptor's stat at open, but the range is read later
+(the vault opens in between, and a waiter sits through another request's whole scan), so a same-size write in that gap
+would otherwise be served from the old clean verdict. After the windowed read the route stats the **same descriptor**
+again (`PinnedTarget.restat`) and serves the bytes only if device, inode, size, mtime and ctime still equal the key; if
+not, the verdict is dropped, nothing is served (`409 changed`) and the next request scans the file as it is. ctime is set
+by the kernel and a write moves it, so this closes the gap down to one clock tick (the declared residue below).
+
 One consequence: agenda actions are gated by **who acts** (the human or a ferret), never by a capability.
 `POST /v1/agenda/clear-agents` is owner-only on that axis — an agent credential gets 403 — and has no grant.
 `GET /v1/agenda/open` (every conversation's open and parked items, [agenda.md](agenda.md#the-roll-up-every-conversation-and-a-count-that-is-the-list)) is the same: `operator`, `caller: 'person'`, no capability.
@@ -1119,7 +1126,7 @@ command says so at the moment somebody might be tempted to do that instead.
   holds the daemon's event loop for about 0.35 s once, and about 280 MiB more memory while it does, then never again until
   the file or the vault changes ([a file is scanned once](#media-scan-once)). It is not yet cut into pieces that yield the
   loop between them. A verdict is keyed on the file's device, inode, size, mtime and ctime, so a rewrite inside one clock
-  tick of the scan's own `fstat` that keeps the size and mtime is not seen; a file that changes between two pieces is
+  tick of the open `fstat` (or of the re-check after the read) that keeps the size and mtime is not seen; a file that changes between two pieces is
   read as it is each time, and the app checks the pieces add up to the size the JSON read named.
 - **A file plays only once it has all arrived.** The app joins the pieces into one `blob:`; there is no
   progressive play, and a 32 MiB file over a slow relay is a wait with a quiet placeholder.

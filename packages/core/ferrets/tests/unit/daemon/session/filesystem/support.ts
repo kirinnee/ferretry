@@ -14,6 +14,7 @@ import {
   type PinnedOpenOptions,
   type PinnedRoot,
   type PinnedTarget,
+  type ReadTarget,
   type RenderedDiff,
   type SessionChangesView,
   type SessionFileList,
@@ -94,6 +95,11 @@ class FakePinnedTarget implements PinnedTarget {
     const served = window === undefined ? this.bytes : this.bytes.subarray(window.start, window.start + window.length);
     this.reads.push({ bytes: served.byteLength, window });
     return served;
+  }
+
+  async restat(): Promise<ReadTarget> {
+    const identity = this.identities.at(-1) as ComponentIdentity;
+    return { identity, size: this.metadata.size, mtime: this.metadata.mtime };
   }
 
   /**

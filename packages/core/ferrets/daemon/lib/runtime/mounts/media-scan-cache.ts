@@ -10,7 +10,7 @@ import type { ReadTarget } from '../../session/filesystem/index.ts';
  *
  *  - THE FILE: device, inode, size, mtime and ctime of the descriptor the bytes come from (`ReadTarget`). A rewrite in
  *    place moves ctime and mtime; a replacement moves the inode; either is a different key, so it is scanned again.
- *    (Declared residue: a rewrite inside one clock tick of the scan's own `fstat` leaves the same ctime.)
+ *    (Declared residue: a rewrite inside one clock tick of the open `fstat` leaves the same ctime; the key is re-checked on the same descriptor after the read.)
  *  - THE VAULT: a keyed digest of every value the read would mask (`RedactionScope.fingerprint`). Any value stored,
  *    rotated, removed, typed or expired changes it, so EVERY verdict made under the old set stops matching. A verdict is
  *    never trusted on the key alone, and a redactor that cannot give a digest keeps nothing.
@@ -88,6 +88,11 @@ export class MediaScanCache {
         resolveScan(verdict);
       },
     };
+  }
+
+  /** Forgets the verdict for a file found changed under it, so the next request judges what is there now. */
+  drop(key: string): void {
+    this.verdicts.delete(key);
   }
 
   private keep(key: string, verdict: MediaVerdict): void {

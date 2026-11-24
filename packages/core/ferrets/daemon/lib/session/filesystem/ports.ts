@@ -176,6 +176,8 @@ export interface PinnedTarget {
    * the size cap still judges the whole file.
    */
   read(maxBytes: number, window?: ByteWindow): Promise<Uint8Array | undefined>;
+  /** A fresh `fstat` of the SAME open descriptor: what a verdict keyed on the open-time stat must still match after a read. */
+  restat(): Promise<ReadTarget>;
   /**
    * One level of an already-open directory, streamed and stopped one entry past `maxEntries`.
    *

@@ -196,6 +196,13 @@ export interface ByteWindow {
   readonly length: number;
 }
 
+/** What one `fstat` of an open regular file says: its leaf identity (device, inode, ctime), size and mtime. */
+export interface PinnedStat {
+  readonly identity: ComponentIdentity;
+  readonly size: number;
+  readonly mtime: string;
+}
+
 /**
  * An object opened through the pinned walk, held OPEN.
  *
@@ -220,6 +227,12 @@ export interface PinnedTarget {
    * the size cap still judges the whole file.
    */
   read(maxBytes: number, window?: ByteWindow): Promise<Uint8Array | undefined>;
+  /**
+   * A fresh `fstat` of the SAME open descriptor, in the shape a verdict is keyed on. Asked after a read to prove the
+   * object still has the identity, size, mtime and ctime it was judged under; ctime is set by the kernel, so a write
+   * that landed in between has moved it (down to one clock tick).
+   */
+  restat(): Promise<PinnedStat>;
   /**
    * One level of an already-open directory, streamed and stopped one entry past `maxEntries`.
    *

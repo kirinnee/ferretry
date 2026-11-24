@@ -297,6 +297,8 @@ async function media(
   let asked: { readonly range: MediaRange; readonly size: number } | undefined;
   let owed: ((verdict: MediaVerdict | undefined) => void) | undefined;
   let held = false;
+  // The key the verdict (kept or owed) is about: the descriptor's stat at open, before the range was read.
+  let keyed: string | undefined;
   let view: Awaited<ReturnType<SessionFilesystem['readFile']>>;
   try {
     view = await deps.media(id).readFile(cwd, name, {
@@ -311,6 +313,7 @@ async function media(
         // A redactor that cannot say what it masks cannot say a verdict still holds: read and scan every time.
         if (fingerprint === undefined) return undefined;
         const key = MediaScanCache.keyOf(file);
+        keyed = key;
         for (;;) {
           const claim = scans.claim(key, fingerprint);
           if (claim.kind === 'verdict') {
@@ -325,6 +328,16 @@ async function media(
           owed = claim.settle;
           return undefined;
         }
+      },
+      // Asked with the SAME descriptor's stat once the bytes are read. The key was taken at open and the range is read
+      // later (the vault opens in between, and a waiter sits through another request's whole scan), so a write that
+      // landed in that gap is invisible to the key alone. ctime is set by the kernel and a write moves it, so the
+      // bytes in hand are served only if the file still has the stat the verdict is about. Otherwise the verdict is
+      // dropped and nothing is served (the next request scans the file as it is now).
+      afterRead: file => {
+        if (keyed === undefined || MediaScanCache.keyOf(file) === keyed) return;
+        scans.drop(keyed);
+        throw new ApiError(409, 'the file changed while it was being read, so ask again', 'changed');
       },
       ...(fence === undefined ? {} : { fence }),
     });
