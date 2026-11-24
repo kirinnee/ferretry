@@ -93,7 +93,7 @@ const CHOOSE = { importMode: 'choose' } as const;
 describe('the declared steps', () => {
   test('every Codex step is written against the host, so each declares stepHost', () => {
     const steps: readonly { id: string; stepHost?: boolean }[] = manifest.onboarding ?? [];
-    expect(steps.length).toBe(12);
+    expect(steps.length).toBe(11);
     expect(steps.every(step => step.stepHost === true)).toBe(true);
   });
 });
