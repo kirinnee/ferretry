@@ -719,7 +719,10 @@ export default definePlugin({
 
   ui: {
     panels: [
-      panel('ferret.side', { id: 'browser', order: 30 }),
+      // A page the agent opens shows at once (the ferret page's workspace reveals it; `PanelReveal`).
+      panel('ferret.side', { id: 'browser', order: 30, reveal: { on: PageChanged, when: 'opened' } }),
+      // The row's "a page opened where you were not looking" dot (`panel-reveal.ts`).
+      panel('ferrets.list-row-mark', { id: 'page-opened', order: 30 }),
       // Settings › This device › Open links in (S-0519): where a tap on an external link opens.
       panel('device.settings', { id: 'open-links-in', order: 25 }),
     ],

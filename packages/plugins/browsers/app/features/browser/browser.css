@@ -292,3 +292,18 @@
     min-width: 32px;
   }
 }
+
+/* A page the agent opened where the owner was not looking: a dot and two words on the ferret's row. */
+.fy-browser-opened-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-size: var(--text-2xs);
+}
+.fy-browser-opened-mark__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}

@@ -3,6 +3,7 @@ import { implementApp } from '@ferretry/kernel/manifest';
 import { createElement } from 'react';
 import manifest from '../manifest.ts';
 import { BrowserPanel } from './features/browser/browser-panel.tsx';
+import { PageOpenedMark } from './features/browser/page-opened-mark.tsx';
 import { BrowserTab } from './features/settings/browser-tab.tsx';
 import { OpenLinksInPanel } from './features/settings/open-links-in-panel.tsx';
 import { browserLoginPort, DaemonBrowserLoginStore } from './lib/browser-login.ts';
@@ -27,6 +28,9 @@ export default provideToShell(
         panels: {
           // Drawn from `shell.deviceSettings` (no daemon), never from a machine's half.
           'open-links-in': () => null,
+          // `ferrets.list-row-mark`: the row of the ferret whose page opened where the owner was not looking.
+          'page-opened': ({ subject }) =>
+            subject === undefined ? null : createElement(PageOpenedMark, { daemon: daemon.daemonId, ferret: subject }),
           browser: ({ subject, intent }) =>
             subject === undefined
               ? null

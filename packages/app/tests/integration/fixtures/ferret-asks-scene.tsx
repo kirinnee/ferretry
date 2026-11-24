@@ -141,6 +141,9 @@ const transport = new FakeTransport((request: TransportRequest): TransportAnswer
   (window as unknown as { __unanswered: string[] }).__unanswered.push(`${request.method} ${path}`);
   return json({ ok: true });
 });
+/** A test reaches the fake daemon's event feed from the page (`ferret-page-reveal.visual.test.ts`). */
+(window as unknown as { __emit: (name: string, payload: unknown) => void }).__emit = (name, payload) =>
+  transport.emit({ name, payload });
 const handler: PasskeyHandler = {
   need: () => undefined,
   confirm: async () => true,

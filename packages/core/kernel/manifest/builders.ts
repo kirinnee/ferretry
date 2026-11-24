@@ -8,6 +8,7 @@ import type {
   Manifest,
   MemberRouteDecl,
   PanelDecl,
+  PanelReveal,
   RendererDecl,
   RouteDecl,
   ScreenDecl,
@@ -54,9 +55,14 @@ export function screen<const Id extends string>(id: Id, options: Omit<ScreenDecl
 
 export function panel<const Id extends string>(
   slot: SlotName,
-  options: { readonly id: Id; readonly order: number },
+  options: { readonly id: Id; readonly order: number; readonly reveal?: PanelReveal },
 ): PanelDecl<Id> {
-  return Object.freeze({ slot, id: options.id, order: options.order });
+  return Object.freeze({
+    slot,
+    id: options.id,
+    order: options.order,
+    ...(options.reveal === undefined ? {} : { reveal: options.reveal }),
+  });
 }
 
 export function settingsTab<const Id extends string>(

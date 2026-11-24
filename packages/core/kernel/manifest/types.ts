@@ -148,10 +148,21 @@ export interface ScreenDecl<Id extends string = string> {
   readonly chrome?: 'none';
 }
 
+/**
+ * WHEN A PANEL ASKS TO BE BROUGHT ON SCREEN: the plugin's own event, and the `change` of it that does. The ferret page's workspace
+ * hears it and, only when the ferret it names is the one on screen, shows the panel and hands it a `PanelIntent` (`show-page`,
+ * `target` = the event's `page`); for any other ferret it only marks that ferret. The event names its `ferret` and `change`.
+ */
+export interface PanelReveal {
+  readonly on: EventDef<string, { readonly ferret: string; readonly page?: string; readonly change: string }>;
+  readonly when: string;
+}
+
 export interface PanelDecl<Id extends string = string> {
   readonly id: Id;
   readonly slot: SlotName;
   readonly order: number;
+  readonly reveal?: PanelReveal;
 }
 
 export interface SettingsTabDecl<Id extends string = string> {

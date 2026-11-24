@@ -33,7 +33,7 @@ export interface BrowserPanelProps {
    * "Open browser login window" button and draws the status banner; without it, neither.
    */
   readonly loginStore?: DaemonBrowserLoginStore;
-  /** What the host just asked of this panel: "new-page" opens a page (the phone's "+ New browser"). */
+  /** What the host just asked of this panel: "new-page" opens a page (the phone's "+ New browser"); "show-page" selects `target`. */
   readonly intent?: PanelIntent;
 }
 
@@ -55,6 +55,8 @@ export function BrowserPanel({ daemon, sessionId, dependencies, loginStore, inte
 
   const newPage = useCallback((): void => void pages.act({ action: 'new-page' }), [pages]);
   usePanelIntent(intent, 'new-page', newPage);
+  // The agent opened a page and the workspace brought this panel on screen: select that page (`PanelReveal`).
+  usePanelIntent(intent, 'show-page', () => intent?.target === undefined || pages.activatePage(intent.target));
 
   return (
     <div
