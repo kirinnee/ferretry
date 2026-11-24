@@ -185,6 +185,41 @@ mean lizzette (Build MCP Connector)?` More than one match lists them and asks wh
   redactor first; if it cannot run, the text is `[output withheld]`.
 - **No shell.** No tool runs a command. Control is only through ferrets.
 
+### How the tools are built (`packages/daemon/src/{lib,adapters}/connector/mcp/`)
+
+- **Order of gates** on `POST /mcp`: path → method (`GET`/`DELETE` are `405`, `Allow: POST`) → `Origin` (any
+  `Origin` header not in the injected allow-list, default empty, is `403`) → bearer (`401` from the OAuth part's
+  builder, nothing else runs) → `application/json` → body ≤ 1 MiB → JSON (no batches) → rate limit → the SDK
+  (stateless, `enableJsonResponse`, a fresh server and transport per request, protocol `2025-11-25`). Write tools
+  are registered only for a token with `fleet:write`; calling one without it is a tool error saying the
+  connection is read-only.
+- **The operator's daemon-wide grants are read before EVERY tool call** (`demands.ts`, one table). Undetermined
+  grants refuse with "This machine cannot say what remote callers may do right now, so the connector is
+  refusing."; `fleet.use` off refuses with "The machine owner has turned off remote fleet access (fleet.use)."
+  `tools/list` still lists the tools — the refusal is per call. Every tool demands `fleet.use`; the table also
+  demands whatever the routes it calls declare, and today none declares one (the output tool reads the scrubbed
+  transcript through `/logs`, which is not `terminal.use`; a start with a registered project and no harness
+  flags is an ordinary act).
+- **Rate limit is HTTP-level**: `429` with `Retry-After`, 60 `tools/call`s a minute per grant, 10 of them write
+  tools. `initialize` and `tools/list` are free. (A tool-level error would be read aloud as one more sentence and
+  would not tell the client to back off.)
+- **Naming** (`names.ts`): normalised (case, spaces, hyphens, leading `:`, doubled letters, `ph`/`ck`/`y`
+  folded) and matched in tiers — exact, then unique prefix/substring (3+ characters), which may act; a close
+  edit distance only ever SUGGESTS ("Did you mean …?"), because the next sentence may be "stop it". Ambiguity is a
+  question. Live ferrets are searched first; a stopped one only when no live one matches.
+- **Routes the tools call**: `GET /v1/sessions`, `GET /v1/sessions/:id/logs`, `POST /v1/sessions/:id/send`,
+  `POST /v1/sessions/:id/stop`, `POST /v1/restarts` (`scope: ids`), `GET /v1/projects`,
+  `POST /v1/sessions` (`mode: auto`, `cwd` = a REGISTERED project's path — never a caller's string),
+  `GET /v1/agenda/open` and `POST /v1/sessions/:id/agenda` (`action: resolve`). `ConnectorApiCall` gained an
+  optional `headers` map for `x-fy-request-id`, which send, start and restart require; the listener wiring must
+  forward exactly those and nothing else.
+- **Redaction**: every returned text passes the daemon's stored-secret redactor AND a credential-shape redactor
+  (`fys_`/`fyc_`, `sk-ant-`, `sk-`, GitHub, AWS, Slack, Google, JWTs, `Bearer`/`Basic`, PEM private keys,
+  `password=`-style assignments (value only), URL userinfo). If either throws the text is `[output withheld]`.
+- **Calls log**: write calls only, args redacted and message/answer/task cut to 500 characters, appended with
+  `O_APPEND | O_NOFOLLOW`, `0600`, rotated to `calls.1.jsonl` at 1 MiB. A refused write (scope or grants) is in
+  the calls log with outcome `refused` but not in the security log.
+
 ## Turning it on (the owner, at the machine)
 
 The daemon never runs the tunnel itself. You run `cloudflared` (or any HTTPS reverse proxy) in front of the

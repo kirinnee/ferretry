@@ -127,6 +127,12 @@ export interface ConnectorApiCall {
   readonly path: string;
   readonly query?: Readonly<Record<string, string>>;
   readonly body?: unknown;
+  /**
+   * Extra request headers, lower-cased names. ADDED by the MCP part: the daemon's start and restart routes
+   * refuse a POST without `x-fy-request-id` (their retry contract), so a tool must be able to say one.
+   * The listener wiring must pass these through to the dispatcher and let no other header through.
+   */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export interface ConnectorApiAnswer {
