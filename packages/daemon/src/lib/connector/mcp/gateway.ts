@@ -170,9 +170,6 @@ export class FleetGateway {
     response?: AgendaResponse,
     note?: string,
   ): Promise<void> {
-    const path = isMachineAgendaId(sessionId)
-      ? '/v1/machine/agenda'
-      : `/v1/sessions/${encodeURIComponent(sessionId)}/agenda`;
     const body = AgendaActionRequestSchema.parse({
       action: 'resolve',
       id,
@@ -180,7 +177,16 @@ export class FleetGateway {
       ...(response === undefined ? {} : { response }),
       ...(note === undefined ? {} : { note }),
     });
-    await this.json({ method: 'POST', path, body }, AgendaListSnapshotSchema);
+    await this.json({ method: 'POST', path: agendaPath(sessionId), body }, AgendaListSnapshotSchema);
+  }
+
+  /**
+   * Put one open agenda item away until `until` (an ISO instant still ahead), through the same route and action the
+   * app's Snooze uses. The daemon's own timer brings it back then, fresh; nothing here runs a second clock.
+   */
+  async snoozeAgenda(sessionId: string, id: string, until: string): Promise<void> {
+    const body = AgendaActionRequestSchema.parse({ action: 'snooze', id, until });
+    await this.json({ method: 'POST', path: agendaPath(sessionId), body }, AgendaListSnapshotSchema);
   }
 
   private async json<T>(call: ConnectorApiCall, schema: z.ZodType<T>): Promise<T> {
@@ -208,6 +214,10 @@ export class FleetGateway {
     throw refusalOf(answer);
   }
 }
+
+/** The agenda route of the board that holds an item: the machine ledger has its own reserved id and route. */
+const agendaPath = (sessionId: string): string =>
+  isMachineAgendaId(sessionId) ? '/v1/machine/agenda' : `/v1/sessions/${encodeURIComponent(sessionId)}/agenda`;
 
 /** The daemon's own sentence and code when it sent them; otherwise a plain sentence by status. */
 function refusalOf(answer: ConnectorApiAnswer): ToolFailure {

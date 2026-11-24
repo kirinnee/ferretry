@@ -1,9 +1,11 @@
 /**
- * The nine tools, as data: what each is called, who may call it, what it says to a voice assistant and what it
+ * The eleven tools, as data: what each is called, who may call it, what it says to a voice assistant and what it
  * does through the daemon's own API. The MCP adapter (`adapters/connector/mcp`) registers these with the SDK;
  * nothing here knows about HTTP or the SDK, so the whole behaviour is unit-tested with a fake dispatch.
  *
- * RESULTS ARE SHORT PLAIN TEXT, because they are often read aloud: no JSON, no tables, one idea per line.
+ * RESULTS ARE SHORT PLAIN TEXT, because they are often read aloud: no JSON, no tables, one idea per line. The one
+ * exception is `get_attention`, which reads an agenda item in FULL for Claude to work from: it returns the item's
+ * Markdown as the ferret wrote it (tables included), under a size cap.
  * Every text that came from a ferret or the daemon is passed through {@link ConnectorTextGuard} by
  * {@link ConnectorToolbox.execute} — the tools themselves never decide what is safe to say.
  *
@@ -12,12 +14,34 @@
  * session id or its short id (the first segment of the id), matched by `names.ts`.
  */
 
-import type { AgendaItem, AgendaKind, AgendaResponse, SessionView } from '@ferretry/protocol';
+import {
+  type AgendaItem,
+  type AgendaKind,
+  type AgendaResponse,
+  agendaWakeAt,
+  type SessionView,
+} from '@ferretry/protocol';
 import { formatTaskRef } from '@ferretry/protocol/board-refs';
 import { z } from 'zod';
 import type { ConnectorAccess, ConnectorAuditSink, ConnectorScope, ConnectorToolOutcome } from '../ports.ts';
 import { type ConnectorToolName, daemonGrantRefusal } from './demands.ts';
+import {
+  ATTENTION_READ_CAP,
+  type AttentionSection,
+  attentionSections,
+  findSection,
+  renderSection,
+  renderWhole,
+} from './agenda-read.ts';
 import { ago, clip, oneLine, tailText } from './format.ts';
+import {
+  inWords,
+  pacificWords,
+  parseSnoozeDuration,
+  parseSnoozeUntil,
+  SNOOZE_MAX_MS,
+  SNOOZE_MIN_MS,
+} from './snooze-time.ts';
 import { type FleetGateway, type OpenAgendaItem, ToolFailure } from './gateway.ts';
 import { matchExact, matchName, titleVariants } from './names.ts';
 import type { ConnectorCallsLog, DaemonGrantsSource } from './ports.ts';
@@ -192,6 +216,31 @@ function askerOf(item: AgendaItem, byId: ReadonlyMap<string, SessionView>): stri
   if (item.raisedBy === 'daemon') return 'Ferretry';
   const session = byId.get(item.raisedBySession);
   return session === undefined ? (item.raisedByName ?? 'a ferret') : callsignOf(session);
+}
+
+/**
+ * The items that carry `id`, narrowed to one ferret's when the caller names one. Shared by every tool that takes an
+ * item id, so `get_attention` and `answer_attention` find the same item from the same words. A ferret the caller
+ * NAMES is always honoured: when it has no such item the answer is a refusal, never another ferret's item that
+ * happens to carry the same id. `parked` items count only when `withParked` (reading may see them; answering may not).
+ */
+async function itemsNamed(
+  env: ToolEnvironment,
+  items: readonly OpenAgendaItem[],
+  id: string,
+  ferret: string | undefined,
+  withParked: boolean,
+): Promise<OpenAgendaItem[]> {
+  const found = items.filter(entry => entry.item.id === id && (withParked || entry.item.parked === undefined));
+  if (ferret === undefined) return found;
+  const wanted = await resolveFerret(env.gateway, ferret, 'act');
+  const mine = found.filter(
+    entry =>
+      entry.sessionId === wanted.config.id ||
+      (entry.item.raisedBy === 'agent' && entry.item.raisedBySession === wanted.config.id),
+  );
+  if (mine.length === 0) throw new ToolFailure(`${callsignOf(wanted)} has no open item ${id}.`);
+  return mine;
 }
 
 function optionsOf(item: AgendaItem): readonly string[] {
@@ -397,23 +446,268 @@ const getFerretOutput: ConnectorToolSpec<{ ferret: typeof ferretArg; lines: z.Zo
   },
 };
 
-const listAttention: ConnectorToolSpec<Record<string, never>> = {
+/** True while an item is put away: snoozed, and not yet due. A snoozed item whose time has come is listed, even before the daemon's minute timer has woken it. */
+const isAsleep = (item: AgendaItem, now: number): boolean => {
+  const wake = agendaWakeAt(item);
+  return item.parked?.reason === 'snoozed' && wake !== null && Date.parse(wake) > now;
+};
+
+const listAttention: ConnectorToolSpec<{ snoozed: z.ZodOptional<z.ZodBoolean> }> = {
   name: 'list_attention',
   title: 'List open questions',
   description:
-    'List the open agenda items, the questions and approvals ferrets are waiting on the owner for: id (like A12), who asks, title and the question. Use before answering one.',
+    'List the open agenda items, the questions and approvals ferrets are waiting on the owner for: id (like A12), who asks, title and the question. This is only the summary line of each: to read one in full (its options, its context and every tab, tables included), call get_attention with its id. An item the owner snoozed (snooze_attention) is hidden until its time and listed again after; pass snoozed: true to see the ones still asleep too. Use before answering one.',
   scope: 'fleet:read',
   annotations: READ,
-  input: {},
-  run: async (_args, env) => {
+  input: {
+    snoozed: z
+      .boolean()
+      .optional()
+      .describe('Also list the items snoozed until later, marked with when they come back.'),
+  },
+  run: async ({ snoozed }, env) => {
     const [items, sessions] = await Promise.all([env.gateway.openAgenda(), env.gateway.sessions()]);
     const byId = new Map(sessions.map(view => [view.config.id, view]));
-    const open = items.filter(({ item }) => item.parked === undefined && item.kind !== 'input');
-    if (open.length === 0) return { text: 'Nothing is waiting on you.' };
+    const now = env.now();
+    const listable = items.filter(({ item }) => item.kind !== 'input');
+    const open = listable.filter(
+      ({ item }) => item.parked === undefined || (item.parked.reason === 'snoozed' && !isAsleep(item, now)),
+    );
+    const asleep = snoozed === true ? listable.filter(({ item }) => isAsleep(item, now)) : [];
+    if (open.length === 0 && asleep.length === 0) return { text: 'Nothing is waiting on you.' };
     const shown = open.slice(0, ATTENTION_CAP);
     const lines = shown.map(({ item }) => attentionLine(item, byId));
     const more = open.length > shown.length ? [`…and ${open.length - shown.length} more.`] : [];
-    return { text: [`${open.length} waiting on you:`, ...lines, ...more].join('\n') };
+    const sleeping = asleep.slice(0, ATTENTION_CAP).map(({ item }) => {
+      const wake = agendaWakeAt(item);
+      return `${attentionLine(item, byId)} (snoozed until ${wake === null ? 'later' : pacificWords(Date.parse(wake))})`;
+    });
+    return {
+      text: [
+        open.length === 0 ? 'Nothing is waiting on you right now.' : `${open.length} waiting on you:`,
+        ...lines,
+        ...more,
+        ...(sleeping.length === 0 ? [] : [`${asleep.length} snoozed:`, ...sleeping]),
+      ].join('\n'),
+    };
+  },
+};
+
+/** Every open or parked item as the name matcher sees it: its id, then its title and summary. */
+const attentionKeys = (entry: OpenAgendaItem) => ({
+  exact: [],
+  names: [entry.item.id, ...(entry.item.title === undefined ? [] : [entry.item.title]), entry.item.subject],
+});
+
+const describeItem = (entry: OpenAgendaItem): string =>
+  `!${entry.item.id} (${clip(oneLine(entry.item.title ?? entry.item.subject), 60)})`;
+
+/** The sentence for an item that is not there: the ids it is near, else the ids that are open, so the next call can be right. */
+function noSuchItem(query: string, readable: readonly OpenAgendaItem[], lead: string): ToolFailure {
+  if (readable.length === 0) return new ToolFailure(`${lead} Nothing is waiting on you.`);
+  const result = matchName(query, readable, attentionKeys);
+  const near = result.kind === 'one' ? [result.item] : result.kind === 'many' ? result.items : result.suggestions;
+  if (near.length > 0)
+    return new ToolFailure(`${lead} Did you mean ${near.slice(0, 3).map(describeItem).join(', or ')}?`);
+  const open = readable.slice(0, 8).map(entry => `!${entry.item.id}`);
+  return new ToolFailure(
+    `${lead} Open items: ${open.join(', ')}${readable.length > open.length ? `, and ${readable.length - open.length} more` : ''}.`,
+  );
+}
+
+/**
+ * The ONE item a caller means by `item` (and `ferret`): an id as list_attention prints it, or a title that only one
+ * item has. Shared by every tool that takes an item to READ or put away, so they find the same item from the same words.
+ * A value to type (`input`) is never found, as list_attention never lists it: only the owner types it, in the app.
+ */
+async function pickAttention(
+  env: ToolEnvironment,
+  items: readonly OpenAgendaItem[],
+  byId: ReadonlyMap<string, SessionView>,
+  item: string,
+  ferret: string | undefined,
+): Promise<OpenAgendaItem> {
+  const readable = items.filter(({ item: each }) => each.kind !== 'input');
+  const id = parseAttentionRef(item);
+  if (id === undefined) {
+    const result = matchName(item, readable, attentionKeys);
+    if (result.kind === 'many')
+      throw new ToolFailure(
+        `More than one item matches "${oneLine(item)}": ${result.items.slice(0, 5).map(describeItem).join('; ')}. Which one?`,
+      );
+    if (result.kind === 'none')
+      throw noSuchItem(
+        item,
+        readable,
+        `"${oneLine(item)}" is not an item id (they look like A12) and no title matches it.`,
+      );
+    return result.item;
+  }
+  const found = await itemsNamed(env, readable, id, ferret, true);
+  if (found.length === 0) throw noSuchItem(id, readable, `There is no open item ${id}.`);
+  if (found.length > 1)
+    throw new ToolFailure(
+      `Item ${id} is open for more than one ferret (${found.map(entry => askerOf(entry.item, byId)).join(' and ')}). Which ferret asked?`,
+    );
+  return found[0] as OpenAgendaItem;
+}
+
+const getAttention: ConnectorToolSpec<{
+  item: z.ZodString;
+  ferret: z.ZodOptional<z.ZodString>;
+  tab: z.ZodOptional<z.ZodString>;
+  from: z.ZodOptional<z.ZodNumber>;
+}> = {
+  name: 'get_attention',
+  title: 'Read one agenda item in full',
+  description: `Read ONE agenda item in full, read-only: its title, who raised it and its state, the question, the options with their explanations and the recommendation, the steps, the links, the owner's earlier replies, the context, and EVERY tab by name with its full content (Markdown, tables included). Give the item id as list_attention shows it (A12, !A12 or 12). The answer is capped at ${ATTENTION_READ_CAP} characters; when a section had to be cut it says which, and you call this again with tab set to that section's name (and from, a character offset, to continue a long one). Secrets are masked.`,
+  scope: 'fleet:read',
+  annotations: READ,
+  input: {
+    item: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .describe(
+        'The item id, like A12, !A12 or 12, as list_attention shows it. A title also works when it is unambiguous.',
+      ),
+    ferret: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe('Only when two ferrets have an item with the same id: which one asked.'),
+    tab: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe(
+        'Read just this section in full (still capped): "Overview", "Replies", "Context", "Detail" or a tab name.',
+      ),
+    from: z
+      .number()
+      .int()
+      .min(0)
+      .max(100_000_000)
+      .optional()
+      .describe('With tab: the character to start from, to continue a section that was cut.'),
+  },
+  run: async ({ item, ferret, tab, from }, env) => {
+    if (from !== undefined && tab === undefined)
+      throw new ToolFailure('"from" goes with "tab": which section do you want to continue?');
+    const [items, sessions] = await Promise.all([env.gateway.openAgenda(), env.gateway.sessions()]);
+    const byId = new Map(sessions.map(view => [view.config.id, view]));
+    const target = await pickAttention(env, items, byId, item, ferret);
+    const owner = byId.get(target.sessionId);
+    const asker = askerOf(target.item, byId);
+    const raw = attentionSections(target.item, {
+      asker,
+      ferret: owner === undefined ? undefined : callsignOf(owner),
+      appOnly: needsTheApp(target.item),
+      now: env.now(),
+    });
+    // Cleaned BEFORE anything is cut, so a credential is never cut in half and left half-visible.
+    const sections: AttentionSection[] = await Promise.all(
+      raw.map(async section => ({
+        id: section.id,
+        name: oneLine(await env.clean(section.name)),
+        text: await env.clean(section.text),
+      })),
+    );
+    const heading = await env.clean(
+      `!${target.item.id} — ${clip(oneLine(target.item.title ?? target.item.subject), 120)} — from ${asker}`,
+    );
+    if (tab === undefined) return { text: renderWhole(heading, sections).text };
+    const section = findSection(sections, tab);
+    if (section === undefined)
+      throw new ToolFailure(
+        `Item ${target.item.id} has no section "${oneLine(tab)}". Its sections: ${sections.map(each => each.name).join('; ')}.`,
+      );
+    return { text: renderSection(heading, section, from ?? 0) };
+  },
+};
+
+const snoozeAttention: ConnectorToolSpec<{
+  item: z.ZodString;
+  until: z.ZodOptional<z.ZodString>;
+  duration: z.ZodOptional<z.ZodString>;
+  ferret: z.ZodOptional<z.ZodString>;
+}> = {
+  name: 'snooze_attention',
+  title: 'Snooze an open question',
+  description: `Hide one open agenda item until a later time, as the app's Snooze does: list_attention stops showing it, and the daemon lists it again, fresh, at that time. Give the item id (A12, !A12 or 12, as list_attention shows it) and EITHER until (an ISO time; a time with no zone is Pacific time; "tomorrow 9am" and "17:00" also work) OR duration (like 90m, 2h or 1d). It must be at least a minute and at most ${Math.round(SNOOZE_MAX_MS / 86_400_000)} days ahead. The answer says the wake time in Pacific time. It does not answer or close the item.`,
+  scope: 'fleet:write',
+  annotations: { ...WRITE, idempotentHint: true },
+  input: {
+    item: z.string().trim().min(1).max(200).describe('The item id, like A12, as list_attention shows it.'),
+    until: z
+      .string()
+      .trim()
+      .min(1)
+      .max(60)
+      .optional()
+      .describe(
+        'When it comes back: an ISO time (no zone means Pacific time), "tomorrow 9am" or "17:00". Not with duration.',
+      ),
+    duration: z
+      .string()
+      .trim()
+      .min(1)
+      .max(40)
+      .optional()
+      .describe('How long to hide it: 90m, 2h, 1d or 1d 2h. Not with until.'),
+    ferret: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe('Only when two ferrets have an item with the same id: which one asked.'),
+  },
+  run: async ({ item, until, duration, ferret }, env) => {
+    if ((until === undefined) === (duration === undefined))
+      throw new ToolFailure(
+        'Say how long to snooze it with exactly one of until (a time) or duration (a wait like 2h): I need one, and not both.',
+      );
+    const now = env.now();
+    const parsed = until !== undefined ? parseSnoozeUntil(until, now) : parseSnoozeDuration(duration as string, now);
+    if (!parsed.ok) throw new ToolFailure(parsed.problem);
+    if (parsed.at < now + SNOOZE_MIN_MS)
+      throw new ToolFailure(
+        `That is ${parsed.at <= now ? 'not in the future' : 'less than a minute ahead'}: it would be ${pacificWords(parsed.at)}. Pick a time at least a minute from now.`,
+      );
+    if (parsed.at > now + SNOOZE_MAX_MS)
+      throw new ToolFailure(
+        `That is more than ${Math.round(SNOOZE_MAX_MS / 86_400_000)} days away (${pacificWords(parsed.at)}). The latest I can snooze to is ${pacificWords(now + SNOOZE_MAX_MS)}.`,
+      );
+    const [items, sessions] = await Promise.all([env.gateway.openAgenda(), env.gateway.sessions()]);
+    const byId = new Map(sessions.map(view => [view.config.id, view]));
+    const target = await pickAttention(env, items, byId, item, ferret);
+    const id = target.item.id;
+    const named = `!${id} (${clip(oneLine(target.item.title ?? target.item.subject), 60)})`;
+    if (target.item.parked?.reason === 'replied')
+      throw new ToolFailure(`${named} is waiting on its ferret, not on you, so there is nothing to snooze.`, {
+        sessionId: target.sessionId,
+      });
+    const wasAsleep = isAsleep(target.item, now) ? agendaWakeAt(target.item) : null;
+    const wake = new Date(parsed.at).toISOString();
+    try {
+      await env.gateway.snoozeAgenda(target.sessionId, id, wake);
+    } catch (error) {
+      throw error instanceof ToolFailure ? error.aimedAt(target.sessionId) : error;
+    }
+    const before =
+      wasAsleep === null || wasAsleep === undefined
+        ? ''
+        : ` It was snoozed until ${pacificWords(Date.parse(wasAsleep))}; this replaces that.`;
+    return {
+      text: `Snoozed ${named} until ${pacificWords(parsed.at)} (${inWords(now, parsed.at)}). It will not show in list_attention until then, and comes back on the owner's list at that time.${before}`,
+      sessionId: target.sessionId,
+    };
   },
 };
 
@@ -467,18 +761,7 @@ const answerAttention: ConnectorToolSpec<{
     if (id === undefined) throw new ToolFailure(`"${oneLine(item)}" is not an item id. Ids look like A12.`);
     const [items, sessions] = await Promise.all([env.gateway.openAgenda(), env.gateway.sessions()]);
     const byId = new Map(sessions.map(view => [view.config.id, view]));
-    let found = items.filter(entry => entry.item.id === id && entry.item.parked === undefined);
-    if (ferret !== undefined) {
-      // A ferret the caller NAMES is always honoured: when it has no such item the answer is a refusal, never
-      // another ferret's item that happens to carry the same id.
-      const wanted = await resolveFerret(env.gateway, ferret, 'act');
-      found = found.filter(
-        entry =>
-          entry.sessionId === wanted.config.id ||
-          (entry.item.raisedBy === 'agent' && entry.item.raisedBySession === wanted.config.id),
-      );
-      if (found.length === 0) throw new ToolFailure(`${callsignOf(wanted)} has no open item ${id}.`);
-    }
+    const found = await itemsNamed(env, items, id, ferret, false);
     if (found.length === 0) throw new ToolFailure(`There is no open item ${id}. Ask me to list what is waiting.`);
     if (found.length > 1) {
       const askers = found.map(entry => askerOf(entry.item, byId)).join(' and ');
@@ -629,8 +912,10 @@ export const CONNECTOR_TOOLS: readonly ConnectorToolSpec[] = [
   getFerret,
   getFerretOutput,
   listAttention,
+  getAttention,
   sendToFerret,
   answerAttention,
+  snoozeAttention,
   restartFerret,
   stopFerret,
   spawnFerret,
@@ -655,7 +940,7 @@ export interface ToolResult {
 }
 
 /**
- * Everything around a tool body that is the same for all nine: the operator's grants, the token's scope,
+ * everything around a tool body that is the same for all of them: the operator's grants, the token's scope,
  * redaction of what goes out, and the record of what a write did. The order is deliberate — nothing touches the
  * daemon before both gates have passed, and nothing leaves before it has been cleaned.
  */

@@ -9,7 +9,7 @@ not against the code.
 **The daemon can expose ONE remote MCP endpoint (`<publicUrl>/mcp`) on its own loopback-only listener, behind
 a public HTTPS tunnel the owner runs, protected by an OAuth 2.1 authorization server the daemon itself runs;
 a sign-in is approved by the owner inside the paired Ferretry app with a passkey, and every tool acts through
-the daemon's own API with exactly the nine tools below.**
+the daemon's own API with exactly the eleven tools below.**
 
 It is **off by default**. Turning it on is an edit to `<FY_HOME>/config/daemon.json` on the host — a phone cannot
 turn it on.
@@ -184,25 +184,90 @@ authorization server metadata names the endpoints above, `code_challenge_methods
 
 ## Scopes and tools
 
-- `fleet:read` — the four read tools. `fleet:write` — the five write tools. A token without `fleet:write` is
+- `fleet:read` — the five read tools. `fleet:write` — the six write tools. A token without `fleet:write` is
   never offered the write tools in `tools/list`, and a call to one is a tool error saying so.
 - Every tool that takes a ferret takes `ferret`: its call sign, its session id or short id, or its task name —
   case-insensitive, ignoring spaces, hyphens and a leading `:`. Nothing matching is a tool error that lists
   up to three close matches (names come from speech recognition), e.g. `No ferret called "lizet". Did you
 mean lizzette (Build MCP Connector)?` More than one match lists them and asks which.
-- Results are SHORT PLAIN TEXT, because they are often read aloud. No JSON blobs.
+- Results are SHORT PLAIN TEXT, because they are often read aloud. No JSON blobs. The one exception is
+  `get_attention`, which exists to hand Claude a whole agenda item to work from: see below.
 
-| tool                | scope | annotations  | does                                                                        |
-| ------------------- | ----- | ------------ | --------------------------------------------------------------------------- |
-| `list_ferrets`      | read  | readOnly     | live ferrets: call sign, task name, state, last activity                    |
-| `get_ferret`        | read  | readOnly     | one ferret: state, current task, recent-activity summary, last error        |
-| `get_ferret_output` | read  | readOnly     | tail of recent output; `lines` default 40, hard cap 200 lines / 8 000 chars |
-| `list_attention`    | read  | readOnly     | open agenda items (`!A12`): who asks, title, question                       |
-| `send_to_ferret`    | write | not readOnly | send a message to a ferret, exactly as the app's composer does              |
-| `answer_attention`  | write | not readOnly | answer one open agenda item                                                 |
-| `restart_ferret`    | write | destructive  | restart a ferret, as the app's Restart does                                 |
-| `stop_ferret`       | write | destructive  | stop a ferret, as `fy stop` does                                            |
-| `spawn_ferret`      | write | not readOnly | start a new ferret with a task description, as `fy new` does                |
+| tool                | scope | annotations  | does                                                                                          |
+| ------------------- | ----- | ------------ | --------------------------------------------------------------------------------------------- |
+| `list_ferrets`      | read  | readOnly     | live ferrets: call sign, task name, state, last activity                                      |
+| `get_ferret`        | read  | readOnly     | one ferret: state, current task, recent-activity summary, last error                          |
+| `get_ferret_output` | read  | readOnly     | tail of recent output; `lines` default 40, hard cap 200 lines / 8 000 chars                   |
+| `list_attention`    | read  | readOnly     | open agenda items (`!A12`): who asks, title, question; `snoozed: true` adds the sleeping ones |
+| `get_attention`     | read  | readOnly     | ONE agenda item in full: options, context, every tab; 24 000 chars, see below                 |
+| `send_to_ferret`    | write | not readOnly | send a message to a ferret, exactly as the app's composer does                                |
+| `answer_attention`  | write | not readOnly | answer one open agenda item                                                                   |
+| `snooze_attention`  | write | not readOnly | hide one open agenda item until a time (Pacific by default), as Snooze does                   |
+| `restart_ferret`    | write | destructive  | restart a ferret, as the app's Restart does                                                   |
+| `stop_ferret`       | write | destructive  | stop a ferret, as `fy stop` does                                                              |
+| `spawn_ferret`      | write | not readOnly | start a new ferret with a task description, as `fy new` does                                  |
+
+### `get_attention` — one agenda item, in full
+
+The agenda is the main channel between the owner and Claude, and `list_attention` shows only a summary line. `get_attention`
+reads ONE item completely, so Claude can work from what the ferret wrote.
+
+- **Input**: `item` — the id as `list_attention` prints it (`A12`, `!A12`, `12`, `a 12`); a title also works when exactly one
+  item has it. `ferret` — only when two ferrets have an item with the same id (the same rule, and the same sentence,
+  as `answer_attention`). `tab` — one section by name in any case or by id. `from` — with `tab`, the character to start at.
+- **Output** (Markdown-ish text, an item's own Markdown kept exactly as written, so a table stays a table): a heading
+  `!A12 — Title — from Lizzette`, the list of sections, then each section under `## Name`:
+  **Overview** (title, summary, who raised it and on whose agenda, state, kind, waiting since, whether only the app can
+  answer it, the question, the options with their one-line description and longer explanation, the recommendation,
+  numbered questions, form fields, premise, impact, urgency, steps with their ticks, links with their meaning, terms,
+  a card ask's how-to-test), **Replies** (the owner's latest answer, then the conversation — the newest 20 entries — or,
+  on an item from before conversations were kept, what its history recorded), **Context**, then **every tab** in the order
+  the app draws them (the main tab "Where we are now" with the ferret's answer, what is decided and what is still open;
+  "The full picture"; the ferret's own tabs), then **Detail** (the from-zero explanation). An empty section is left out.
+  A section that would share a name with one of the item's own tabs is called "… (item)".
+- **Read, not answer.** Parked (snoozed or resting) items can be read though `list_attention` hides them; an
+  `input` item (a value only the owner types) is never shown, as it is never listed. Scope `fleet:read`; it makes
+  only the two reads `list_attention` makes (`GET /v1/agenda/open`, `GET /v1/sessions`), through the same gateway.
+- **The cap**: the whole answer is at most **24 000 characters**. That is room for a typical item whole (a few
+  thousand characters of overview, a few tabs) while staying well inside what a model can take in one tool result
+  next to the conversation; items run to 560 000, so it is a cap, not a promise. The room is shared by
+  _water-filling_: a section shorter than its share is whole, longer ones each show their start, and the answer
+  says `Clipped to fit one answer. Cut: <names>` with, under each cut section, how to read it whole. A first long tab
+  therefore never pushes the later tabs out.
+- **Nothing is out of reach**: `tab` returns that one section, capped the same way; when it is longer than the cap the
+  answer ends with the `from` offset that continues it, so a 200 000-character tab is read in a few calls.
+- **Secrets**: every section — and each section's NAME and the heading — goes through the connector's one redaction
+  door BEFORE it is cut (stored-secret values, live host tokens, credential shapes), so a credential is never cut in
+  half and left half-visible; a section that cannot be cleaned is `[output withheld]` while the others still show.
+- **Unknown id**: a plain sentence plus the close matches, as ferret names get ("There is no open item A22. Did you
+  mean !A21 (Other thing)?"), else the open ids, else "Nothing is waiting on you."
+- **Audit**: like the other read tools — a read writes nothing to the calls log or the security log (those record what
+  a tool CHANGED). A call refused at the gate is refused in words before it reaches the tool.
+
+### `snooze_attention` — put one item away until later
+
+Hides one open agenda item until a time and lists it again afterwards — the daemon's OWN snooze, not a second one.
+
+- **Mechanism**: `POST /v1/sessions/:id/agenda` (or `/v1/machine/agenda` for a machine notice) with `{ action: 'snooze', id, until }`,
+  exactly what the app's Snooze sends. The item gets `parked: { reason: 'snoozed', until }`; `list_attention` stops listing
+  it, and the daemon's minute timer (`agenda/waker.ts`) wakes it at `until`, fresh (`waitingSince` = then), so it reads as new.
+  `list_attention` also lists a snoozed item whose time has come before the timer has run, so it is never late by the
+  timer's minute. `list_attention` with `snoozed: true` also lists the sleeping ones, marked "(snoozed until …)".
+- **Governance**: the same as the other write tools. The snooze action asks no passkey step-up and no capability beyond
+  `fleet.use` (the daemon's route declares none), so the connector reaches it as the owner's own act, stamped remote and
+  governed like every connector call. Scope `fleet:write`; it is in the calls log and the security log (`connector.tool`,
+  with the ferret's session id) like `answer_attention`. It never answers, closes or edits the item.
+- **Input**: `item` (the same forms and the same lookup as `get_attention`: `A12`, `!A12`, `12`, a unique title; `ferret`
+  when two ferrets share an id) and EXACTLY ONE of:
+  - `until` — an ISO time with a zone (`2026-11-25T09:00:00Z`) or without (**read as Pacific, `America/Los_Angeles`**,
+    daylight saving included), a date alone (9:00 AM Pacific), a clock time (`17:00`, `5pm`: the next one) or
+    `today`/`tomorrow` with a clock time (`tomorrow 9am`);
+  - `duration` — `90m`, `2h`, `1d`, `1w`, together (`1d 2h`), an optional leading "in".
+    Anything else is refused with the forms on offer, never guessed.
+- **Bounds**: at least one minute and at most **30 days** ahead (a snooze is "not now", not "never"; the daemon itself only
+  needs "still ahead"). An item that waits on its ferret (`parked: replied`) is refused ("not on you, nothing to snooze"); a
+  notice is refused by the daemon in its own words; an already snoozed item may be snoozed again and the answer says so.
+- **Answer**: "Snoozed !A12 (Title) until Wed, Nov 25, 9:00 AM PST (in 29 h)." — the wake time in Pacific, always.
 
 ## What a tool may do, and how
 
@@ -214,7 +279,7 @@ mean lizzette (Build MCP Connector)?` More than one match lists them and asks wh
   passkey step-up (confirming a held configuration change, restoring a cut-off ferret, any widen) is refused. There is no second control path:
   validation, ledgers, journalling and every route's own checks apply.
 - **Why the owner's authority, and what bounds it.** A connector grant is approved by the owner with a passkey
-  (or at the machine), so it acts for the owner — but ONLY through the nine tools, whose arguments are fixed
+  (or at the machine), so it acts for the owner — but ONLY through the eleven tools, whose arguments are fixed
   schemas: no tool takes a path, a command, a URL, an environment variable or a raw route.
 - **The operator's daemon-wide grants narrow it** (docs/grants.md: a grant only ever narrows). Before every tool
   call the connector reads the machine's enforced daemon-wide grants: every tool needs `fleet.use`, and each also
@@ -294,7 +359,7 @@ mean lizzette (Build MCP Connector)?` More than one match lists them and asks wh
 - **Redaction**: every returned text passes the daemon's stored-secret redactor AND a credential-shape redactor
   (`fys_`/`fyc_`, `sk-ant-`, `sk-`, GitHub, AWS, Slack, Google, JWTs, `Bearer`/`Basic`, PEM private keys,
   `password=`-style assignments (value only), URL userinfo). If either throws the text is `[output withheld]`.
-- **Calls log**: write calls only, args redacted and message/answer/task cut to 500 characters, appended with
+- **Calls log**: write calls only (reads, `get_attention` included, are not recorded), args redacted and message/answer/task cut to 500 characters, appended with
   `O_APPEND | O_NOFOLLOW`, `0600`, rotated to `calls.1.jsonl` at 1 MiB. Each line, and each `connector.tool`
   security-log event, says HOW the call ended: `ok` (`succeeded`), `error` (`failed`: the daemon or the tool
   could not do it) or `refused` (`refused`: the tool or the daemon said not this, e.g. an item that needs the
