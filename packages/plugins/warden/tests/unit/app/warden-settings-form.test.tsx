@@ -301,7 +301,7 @@ describe('WardenSettingsForm', () => {
     run(() => renderer.unmount());
   });
 
-  it('should offer each login as its name, then its harness and the label the Runtimes tab shows', () => {
+  it('should offer each login by the label the Runtimes tab shows, and by its stored name only when the runtime is gone', () => {
     // Arrange
     const runtime = (wrapper: string, displayName: string, kind: PickerAccount['kind']): PickerAccount => ({
       id: '0b6f6b5e-5d7c-4f4e-9d0a-1d1f2a3b4c5d',
@@ -332,10 +332,10 @@ describe('WardenSettingsForm', () => {
       option.label,
     ]);
 
-    // Assert: the stored value is the name; the words beside it are for the person choosing.
+    // Assert: the stored value is the name; the words shown are for the person choosing.
     expect(options.slice(1)).toEqual([
-      ['claude-default', 'claude-default · claude · Personal Claude'],
-      ['codex-review', 'codex-review · codex'],
+      ['claude-default', 'Personal Claude'],
+      ['codex-review', 'codex-review'],
       ['claude-bare', 'claude-bare'],
     ]);
     run(() => renderer.unmount());

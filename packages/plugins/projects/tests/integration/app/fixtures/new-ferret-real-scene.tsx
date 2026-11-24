@@ -5,6 +5,7 @@
  */
 import { NEW_FERRET_PROJECT_SLOT } from '@ferretry/core-ferrets/contract';
 import { WithSlotPanels } from '@ferretry/app/testing/settings-shell';
+import { applyTheme } from './explorer-toolbar.ts';
 import { createRoot } from 'react-dom/client';
 import type { FerretsClient } from '../../../../../../core/ferrets/app/lib/client.ts';
 import { NewFerretPage } from '../../../../../../core/ferrets/app/features/new-ferret/new-ferret-page.tsx';
@@ -13,7 +14,7 @@ import type { ProjectsClient } from '../../../../app/lib/client.ts';
 import { createNewFerretProjectsPanel } from '../../../../app/views/new-ferret-projects.tsx';
 
 const params = new URLSearchParams(window.location.search);
-document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+applyTheme(params);
 
 const PROJECTS = ['site', 'api'].map((name, index) =>
   ProjectInfoSchema.parse({
@@ -43,13 +44,31 @@ win.__navigated = [];
 const client = {
   call: async <Answer,>(
     route: string,
-    init?: { headers?: Record<string, string>; body?: unknown },
+    init?: { headers?: Record<string, string>; body?: unknown; query?: Record<string, string> },
   ): Promise<Answer> => {
     calls.push({ route, headers: init?.headers, body: init?.body });
     if (route === 'GET /v1/projects') return PROJECTS as Answer;
     if (route === 'GET /v1/ferrets') return FERRETS as Answer;
     if (route === 'POST /v1/ferrets') return { id: 'new-ferret' } as Answer;
     if (route === 'GET /v1/git-accounts') return [] as Answer;
+    if (route === 'GET /v1/projects/folders') {
+      // The folder finder's listing: a small fake home, enough for the explorer's toolbar to draw.
+      const home = '/fake';
+      const path = init?.query?.path ?? home;
+      const folder = (name: string) => ({
+        name,
+        kind: 'folder',
+        isRepo: false,
+        hidden: false,
+        modifiedAt: '2026-08-01T10:00:00.000Z',
+      });
+      return {
+        path,
+        crumbs: [{ name: '~', path: home }],
+        entries: ['atlas', 'harbour', 'notes', 'scratch'].map(folder),
+        truncated: false,
+      } as Answer;
+    }
     throw new Error(`no route ${route}`);
   },
 };

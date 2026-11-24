@@ -17,6 +17,7 @@ import { createElement, type FunctionComponent } from 'react';
 import { ferretSummary } from '@ferretry/core-ferrets/contract/testing';
 import { createRuntimePicker } from '../../../app/views/runtime-picker.tsx';
 import type { LiveRuntimesClient, RuntimesClient } from '../../../app/lib/client.ts';
+import { runtimeCatalog, runtimeView } from './support/picker.ts';
 
 const CATALOG = {
   harness: 'claude-code',
@@ -38,14 +39,17 @@ const daemon = (
   ferret: Record<string, unknown> = {},
   catalog: unknown = CATALOG,
 ): { readonly client: RuntimesClient; readonly asked: Asked[] } => {
+  const roster = runtimeCatalog(runtimeView({ wrapper: 'claude-you' }));
   const asked: Asked[] = [];
   const client = {
     call: async (route: string, input?: { readonly body?: unknown }) => {
       asked.push({ route, ...(input?.body === undefined ? {} : { body: input.body }) });
+      if (route === 'GET /v1/runtimes') return roster;
       if (route === 'GET /v1/ferrets/:ferretId')
         return ferretSummary({
           id: 's-1',
           harness: 'claude-code',
+          runtime: 'claude-you',
           model: 'claude-sonnet-5',
           state: 'idle',
           effort: 'high',
@@ -147,6 +151,19 @@ describe('the runtime picker in the composer row', () => {
     await settle();
     expect(popover()).toBeNull();
     expect(chip.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('says in plain words which runtime the ferret runs on, never its stored name', async () => {
+    const root = await draw(daemon(true).client);
+    await interact(() => must(root.querySelector<HTMLElement>('[data-runtime-chip="model"]'), 'the chip').click());
+    await settleUntil(
+      () => popover()?.querySelector('[data-runtime-runs-on]') != null,
+      () => `the popover named the runtime; drew: ${popover()?.textContent ?? ''}`,
+      interact,
+    );
+    expect(popover()?.querySelector('[data-runtime-runs-on]')?.textContent).toBe(
+      'Runs on Claude · your terminal sign-in',
+    );
   });
 
   it('closes on a tap outside the popover', async () => {

@@ -26,6 +26,7 @@ const row = (name: string, available = true) => ({
   id: name,
   name,
   harness: tool,
+  credential: { id: name, store: 'host' },
   launch: available ? { available: true } : { available: false, reason: 'Sign in to launch.' },
 });
 

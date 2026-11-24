@@ -16,6 +16,8 @@ import type { PanelProps } from '@ferretry/kernel/manifest';
 import { type FunctionComponent, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { RuntimesClient } from '../../../../app/lib/client.ts';
+import { RuntimeCatalogSchema } from '../../../../contract/index.ts';
+import { runtime } from '../../../unit/app/features/fleet/account-support.ts';
 import { createRuntimePicker } from '../../../../app/views/runtime-picker.tsx';
 
 const params = new URLSearchParams(window.location.search);
@@ -57,6 +59,12 @@ const CATALOG = {
   ],
 };
 
+// The runtime the ferret runs on, so the popover can say "Runs on Claude · your terminal sign-in" instead of a stored name.
+const ROSTER = RuntimeCatalogSchema.parse({
+  format: 'present',
+  runtimes: [runtime({ name: 'claude-you', credential: { id: 'claude-you', store: 'host', status: 'ready' } })],
+});
+
 const client = {
   call: async (route: string) => {
     asked.push(route);
@@ -66,6 +74,7 @@ const client = {
         name: 'zoe',
         role: 'lead',
         harness: 'claude-code',
+        runtime: 'claude-you',
         runner: 'tmux',
         folder: '/work/project',
         state: 'idle',
@@ -74,6 +83,7 @@ const client = {
         createdAt: '2026-11-01T00:00:00.000Z',
         stateAt: '2026-11-01T00:00:00.000Z',
       };
+    if (route === 'GET /v1/runtimes') return ROSTER;
     if (route === 'GET /v1/ferrets/:id/runtime-models') {
       if (discovery) return CATALOG;
       throw new Error('Runtime model discovery is not connected to Ferrets yet.');
