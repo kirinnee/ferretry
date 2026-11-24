@@ -47,7 +47,12 @@ import {
   type WebSocket,
 } from 'playwright-core';
 import { CDP_PIPE_ENDPOINT, CDP_PIPE_FROM_CHROME_FD, CDP_PIPE_TO_CHROME_FD, CdpPipeTransport } from './cdp-pipe.ts';
-import { recogniseBrowserChallenge } from '../challenges/recognise.ts';
+import {
+  BLANK_BODY_CHARS,
+  isChallengedSubresource,
+  recogniseBrowserChallenge,
+  SubresourceChallenges,
+} from '../challenges/recognise.ts';
 import { ContextClipboardHelper, readClipboardOf } from './clipboard-read.ts';
 import { type CopyablePage, readCopyElement } from './copy-read.ts';
 import { DownloadStage } from './download-stage.ts';
@@ -140,6 +145,8 @@ let global: Promise<unknown> = Promise.resolve();
 const dialogs = new PageDialogs();
 const consoles = new Map<string, ConsoleLog>();
 const networks = new Map<string, NetworkLog>();
+/** Script and stylesheet loads answered with a challenge, per page, for the page's current document. */
+const subresourceChallenges = new Map<string, SubresourceChallenges>();
 const emulations = new Map<string, PageEmulation>();
 /** Which DevTools session owns each frame the input bridge has looked at, per page. */
 const inputSessions = new Map<string, InputFrameSessions>();
@@ -293,6 +300,36 @@ function watch(page: Page, key: string): void {
     guarded(response => logOf(networks, key, () => new NetworkLog()).responded(response.request(), response)),
   );
   page.on(
+    'response',
+    guarded(response => {
+      const request = response.request();
+      const answer = { type: request.resourceType(), status: response.status(), headers: response.headers() };
+      if (isChallengedSubresource(answer))
+        logOf(subresourceChallenges, key, () => new SubresourceChallenges()).observe(
+          request.url(),
+          page.mainFrame().url(),
+        );
+    }),
+  );
+  // The record belongs to the COMMITTED document: a navigation only says what it asks for, and the record is cleared
+  // when the main frame commits it — never for one that does not (an HTTP 204) or a same-document change.
+  page.on(
+    'request',
+    guarded(request => {
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame())
+        logOf(subresourceChallenges, key, () => new SubresourceChallenges()).navigating(
+          request.url(),
+          request.redirectedFrom() !== null,
+        );
+    }),
+  );
+  page.on(
+    'framenavigated',
+    guarded(frame => {
+      if (frame === page.mainFrame()) subresourceChallenges.get(key)?.committed(frame.url());
+    }),
+  );
+  page.on(
     'requestfinished',
     guarded(
       request =>
@@ -418,6 +455,7 @@ function registerPage(page: Page): void {
     dialogs.drop(id);
     consoles.delete(id);
     networks.delete(id);
+    subresourceChallenges.delete(id);
     emulations.delete(id);
     pairingHints.delete(id);
     inputSessions.get(id)?.release();
@@ -522,14 +560,28 @@ async function targetId(page: Page): Promise<string> {
   return await id;
 }
 
+/** Whether the page shows no (or almost no) visible text. Unknown (not blank) when it cannot be read in time. */
+async function bodyIsBlank(page: Page): Promise<boolean> {
+  try {
+    const text = await within(TITLE_WAIT_MS, page.innerText('body', { timeout: TITLE_WAIT_MS }));
+    return text.trim().length <= BLANK_BODY_CHARS;
+  } catch {
+    return false;
+  }
+}
+
 /** Whether the page appears to be asking for a human check — read from what the browser already knows
- *  about it (address, title, frame addresses), running nothing inside the page. */
+ *  about it (address, title, frame addresses, challenged sub-requests). Only when a script or stylesheet was
+ *  challenged does it also ask the page whether it shows any text. */
 async function challengeOf(page: Page): Promise<{ challenge?: { provider: string } }> {
   try {
+    const challenged = subresourceChallenges.get(pageId(page))?.urls() ?? [];
     const challenge = recogniseBrowserChallenge({
       url: safeUrl(page),
       title: await safeTitle(page),
       frameUrls: page.frames().map(each => each.url()),
+      challengedSubresources: challenged,
+      ...(challenged.length === 0 ? {} : { blankBody: await bodyIsBlank(page) }),
     });
     return challenge === undefined ? {} : { challenge };
   } catch {
