@@ -95,6 +95,8 @@ export async function world(
       where[id] = disk.folder;
       // The scope a send's file writer holds: the ferret's `attachments` folder alone, on the same real home.
       made[`${id}/attachments`] = (await diskSessionsRoot(parent, `${id}/attachments`)).root;
+      // And the one a plugin's made file is written through: the ferret's `media` folder alone.
+      made[`${id}/media`] = (await diskSessionsRoot(parent, `${id}/media`)).root;
     }
     handles = made;
     folders = where;

@@ -20,7 +20,7 @@ fal:
 limits:
   dailyUsd: 5 # all creative tools together; refused past it
   askAboveUsd: 1 # one call dearer than this asks the owner first
-timeZone: America/Los_Angeles # where "a day" ends; default UTC
+timeZone: America/Los_Angeles # where "a day" ends; default: this machine's own zone
 ```
 
 Without `fal.key` the tool answers "creative tools are off" and nothing leaves the machine. Raising either limit, or
@@ -30,13 +30,13 @@ changing `timeZone`, loosens spend, so the edit is held for the owner ([config-f
 
 `generate_image(prompt, model?, size?)`: one picture. `model` is `flux-schnell` (default), `flux-dev` or `flux-pro`;
 `size` is one of fal's named shapes, each at or just over one megapixel (default `landscape_4_3`, 1024×768). The
-answer says what it cost, where the file is, and the block that shows it in chat.
+answer is **one piece to paste**: a cost line (`flux-schnell · $0.002 · $0.05 of $5 today`) and the `fy-render` block
+that shows the picture, under "Put these lines in your reply:".
 
-**The file reaches the chat in two steps, said in the answer.** A plugin cannot write a ferret's media folder (the
-`sessions` root is Ferrets' alone), so the picture is handed over through the one seam that gives a ferret files, its
-`attachments/` folder, and the answer tells the ferret to copy it into `$FY_MEDIA_DIR` and paste the block. A Ferrets
-seam that writes the media folder would remove the copy. The chat shows an image of at most 1 MiB
-([fy-render.md](fy-render.md)); a larger one is handed over by path with no block.
+**The picture reaches the chat with no step by the ferret.** Ferrets' `deliverMedia` seam (the harness seam beside
+`deliverFiles`) writes it into the ferret's own `media/` folder (`FY_MEDIA_DIR`, `0700` folder, `0600` file, through a
+handle scoped to that folder alone), and the block names it `src: media:<name>`. The chat shows an image of at most
+1 MiB ([fy-render.md](fy-render.md)); a larger one is kept in the media folder and the answer gives only the cost line.
 
 ## What it costs, and where each price came from
 
@@ -54,19 +54,21 @@ not shown is not spent. The answer says which one priced the call (`fal's price`
 | `flux-pro`     | `fal-ai/flux-pro/v1.1` | $0.04 / MP  | [fal.ai/models/fal-ai/flux-pro/v1.1](https://fal.ai/models/fal-ai/flux-pro/v1.1/llms.txt) |
 
 A megapixel rate is proportional to the picture's area. A per-image rate on a picture over one megapixel is priced as
-that many megapixels, so the estimate is never below a per-megapixel bill. fal bills only what it made: a failed run
-costs nothing and is not recorded. The source lives beside each price in `contract/pricing.ts`.
+that many megapixels, so the estimate is never below a per-megapixel bill. A price fal gives in any currency but USD is
+refused. The source lives beside each price in `contract/pricing.ts`.
 
 ## The limits
 
 In this order, for every call:
 
 1. **Daily cap** (`limits.dailyUsd`, default **$5**, all creative tools together). A call that would pass it is
-   refused, with the sum so far, and nothing is asked. A day ends at midnight in `timeZone`.
+   refused, with the sum so far, and nothing is asked. A day ends at midnight in `timeZone` (absent: the
+   machine's own zone, as Usage counts its days).
 2. **Ask over one call's limit** (`limits.askAboveUsd`, default **$1**). A dearer call raises an ask on the ferret's
    agenda, in the existing Asks path (source `create-spend`, a `permission` ask, blocking), and **sends nothing**. The
    ferret is told to call again with exactly the same request once the owner answers. The owner's **Approve** lets
-   that one call through and is then spent; the same words asked again ask again. **Reject** refuses it. If the
+   that one call through and is then spent; the same words asked again ask again. An approval holds for the price it was
+   asked at: if the price is higher when the ferret calls again, it asks again. **Reject** refuses it. If the
    agenda cannot take the ask, nothing is sent.
 3. Otherwise the call goes.
 
@@ -76,8 +78,10 @@ Calls run one at a time, so two ferrets asking together cannot both pass the sam
 
 `state/create/ledger.jsonl` (`0600`, private: no ferret reads it through any root) keeps one line per spend: time, day,
 tool, model, ferret, cost in micro-dollars, whether fal or the table priced it, and a digest of the request. **Never**
-the prompt, a key, or anything fal sent. The spend is written the moment fal answers with a picture, before the
-picture is downloaded, so money spent is always recorded.
+the prompt, a key, or anything fal sent. **The spend is reserved before the run**, so a call that may have been billed
+is always counted. It is given back (a second line, `refund: true`, that cancels the first; the ledger is only ever
+appended to) only when fal definitely billed nothing: the request never left, fal refused it, or it answered 401, 403,
+429 or another 4xx. A timeout, a dropped connection, a 5xx or an answer that cannot be read stays counted.
 
 ## Where the key goes, and where it does not
 
@@ -92,7 +96,9 @@ picture is downloaded, so money spent is always recorded.
 
 ## Declared gaps
 
-- **Two-step display** (above): no direct write to the media folder.
+- **The day's zone is Create's own key or the host's.** Usage's `usage.yaml` `timeZone` is not read: Create does not
+  depend on Usage, so `create.yaml` `timeZone` names the zone, and absent it the day follows the machine's own zone
+  (what Usage does when it has none).
 - **Estimates, not invoices.** fal returns no cost with a run, so the ledger holds the price that was shown. Its own
   usage page is the authority for the bill.
 - **A real run has not been made.** Everything here was built and tested against a fake fal; the first real picture

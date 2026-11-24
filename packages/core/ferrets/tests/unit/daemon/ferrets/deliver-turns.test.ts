@@ -1780,3 +1780,70 @@ describe('codex-resume-id: the conversation a Codex-like launch provably wrote i
     expect(w.history.some(event => event.type === 'session.conversation_recorded')).toBe(false);
   });
 });
+
+describe('FerretHarness.deliverMedia hands a plugin’s made file to the ferret’s own media folder', () => {
+  const bytes = (text: string) => new TextEncoder().encode(text);
+
+  test('each file lands 0600 in the ferret’s own media/ folder (0700), and the names come back as `src: media:` takes them', async () => {
+    const w = await world();
+    const id = await started(w);
+    const harness = (await w.service.harness(id as never))!;
+
+    const names = await harness.deliverMedia!([
+      { name: 'one.jpg', contents: bytes('FIXTURE-ONE') },
+      { name: 'two.png', contents: bytes('FIXTURE-TWO') },
+    ]);
+
+    expect(names).toEqual(['one.jpg', 'two.png']);
+    expect(await readFile(`${w.folderOf(id)}/media/one.jpg`, 'utf8')).toBe('FIXTURE-ONE');
+    expect((await stat(`${w.folderOf(id)}/media/one.jpg`)).mode & 0o777).toBe(0o600);
+    expect((await stat(`${w.folderOf(id)}/media`)).mode & 0o777).toBe(0o700);
+    // it is the media folder, not the attachments one
+    await expect(readdir(`${w.folderOf(id)}/attachments`)).rejects.toThrow();
+  });
+
+  test('a name that is not a bare file name (or a folder, which media does not take) writes NOTHING', async () => {
+    const w = await world();
+    const id = await started(w);
+    const harness = (await w.service.harness(id as never))!;
+
+    for (const file of [
+      { name: '../escape.png' },
+      { name: 'a/b.png' },
+      { name: '..' },
+      { name: '' },
+      { name: 'fine.png', folder: 'sub' },
+    ])
+      await expect(
+        harness.deliverMedia!([
+          { name: 'ok.png', contents: bytes('FIXTURE') },
+          { ...file, contents: bytes('FIXTURE') },
+        ]),
+      ).rejects.toThrow();
+
+    await expect(readdir(`${w.folderOf(id)}/media`)).rejects.toThrow();
+    expect(await readdir(w.folderOf(id))).not.toContain('escape.png');
+  });
+
+  test('a media folder that is a link refuses with nothing written', async () => {
+    const w = await world();
+    const id = await started(w);
+    await mkdir(`${w.folderOf(id)}/turns`, { recursive: true });
+    await symlink(`${w.folderOf(id)}/turns`, `${w.folderOf(id)}/media`);
+    const harness = (await w.service.harness(id as never))!;
+
+    await expect(harness.deliverMedia!([{ name: 'x.png', contents: bytes('FIXTURE') }])).rejects.toThrow();
+    expect(await readdir(`${w.folderOf(id)}/turns`)).not.toContain('x.png');
+  });
+
+  test('a daemon whose session files are unbound offers no media writer', async () => {
+    const w = await world();
+    const id = await started(w);
+    const bare = new FerretsService(w.registry, w.tokens, {
+      ...(w.service as unknown as { ports: FerretsPorts }).ports,
+      session: undefined,
+    });
+
+    expect((await bare.harness(id as never))!.deliverMedia).toBeUndefined();
+  });
+});

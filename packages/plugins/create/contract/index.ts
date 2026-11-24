@@ -47,9 +47,11 @@ export const CreateConfigSchema = z.strictObject({
   timeZone: z
     .string()
     .refine(isTimeZone, { message: 'write "timeZone" as an IANA time zone, such as America/Los_Angeles or UTC' })
-    .default('UTC'),
+    .optional(),
 });
 export type CreateConfig = z.infer<typeof CreateConfigSchema>;
+/** The config with the zone a day is counted in settled: the file's `timeZone`, else the host's own (as Usage's days are). */
+export type ResolvedCreateConfig = CreateConfig & { readonly timeZone: string };
 
 /** A higher limit, or another zone (which moves where a day ends), spends more than the owner agreed to: it is held. */
 export function createLoosens(before: CreateConfig | undefined, after: CreateConfig): readonly string[] {
@@ -86,6 +88,11 @@ export const SpendRecordSchema = z.strictObject({
   priced: z.enum(['fal', 'table']),
   /** The request's digest, so an owner's approval is spent once and only on the request it was given for. */
   request: z.string().regex(/^[0-9a-f]{16}$/u),
+  /**
+   * Set on the line that gives back a spend reserved before a run fal definitely did not bill (a refusal, a 4xx): it
+   * repeats the reserved line and cancels it in every sum. The ledger is only ever appended to.
+   */
+  refund: z.literal(true).optional(),
 });
 export type SpendRecord = z.infer<typeof SpendRecordSchema>;
 

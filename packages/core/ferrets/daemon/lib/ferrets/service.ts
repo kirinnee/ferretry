@@ -400,6 +400,12 @@ export interface FerretSessionPort {
    */
   attach?(ferret: FerretId, files: readonly OpeningFile[]): Promise<void>;
   /**
+   * Additive (a plugin's made picture): writes bare-named files into the ferret's own `media/` folder (`FY_MEDIA_DIR`), the
+   * folder the chat shows `src: media:<name>` from. Made `0700`; each file `0600` through a temporary name, exactly as
+   * {@link attach} does for `attachments/`. Answers nothing; a name that is not a bare name writes nothing.
+   */
+  media?(ferret: FerretId, files: readonly OpeningFile[]): Promise<void>;
+  /**
    * The effect ledger's admission of the ONE first turn a start may type (today's `turn-1` effect, keyed beneath the
    * ferret and fingerprinted by its assigned task), asked by the runner immediately before its first write into the
    * pane: `perform` types it, `settled` is a replay that types nothing, `conflict` or `unsettled` refuses. Bound

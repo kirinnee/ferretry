@@ -1,27 +1,36 @@
 import { ferretOf } from '@ferretry/core-gate/contract';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
-import { CreateConfigFile, CreateConfigSchema, CreateSpendRefSchema } from '../contract/index.ts';
+import {
+  CreateConfigFile,
+  CreateConfigSchema,
+  CreateSpendRefSchema,
+  type ResolvedCreateConfig,
+} from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { generateImageTool, type DeliverPicture } from './lib/generate-image.ts';
 import { SpendLedger } from './lib/spend.ts';
+
+const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /**
  * Create (daemon half): the agent tools that make media for a ferret that cannot, spending the owner's own key
  * through the kernel (it places `FAL_KEY`; this plugin never holds it) under a daily cap and an ask over a limit.
  *
- * DECLARED GAP: a plugin cannot write a ferret's MEDIA folder (the `sessions` root is Ferrets' alone), so a picture
- * is handed to the ferret through the one seam that exists for handing a ferret files, its `attachments/` folder,
- * and the tool tells the ferret to `cp` it into `$FY_MEDIA_DIR` for the chat to show it. A Ferrets seam that writes
- * the media folder directly would remove that step.
+ * THE PICTURE reaches the chat with no step by the ferret: Ferrets' `deliverMedia` seam writes it into the ferret's own
+ * `media/` folder (`FY_MEDIA_DIR`), and the answer is one block to paste (`src: media:<name>`) under a cost line.
  */
 export default implementDaemon(manifest, {
   build({ kernel, needs }) {
-    const config = () => kernel.config.file(CreateConfigFile) ?? CreateConfigSchema.parse({});
+    // A day is counted in the file's `timeZone`, else the host's own: the rule Usage's days follow.
+    const config = (): ResolvedCreateConfig => {
+      const file = kernel.config.file(CreateConfigFile) ?? CreateConfigSchema.parse({});
+      return { ...file, timeZone: file.timeZone ?? hostTimeZone() };
+    };
     const deliver: DeliverPicture = async (ferret, name, bytes) => {
       const harness = await needs.ferrets.harness?.(ferret as FerretId, ferret as FerretId).catch(() => undefined);
-      if (harness?.deliverFiles === undefined) return undefined;
-      const [where] = await harness.deliverFiles([{ name, folder: 'create', contents: bytes }]).catch(() => []);
+      if (harness?.deliverMedia === undefined) return undefined;
+      const [where] = await harness.deliverMedia([{ name, contents: bytes }]).catch(() => []);
       return where;
     };
     const generateImage = generateImageTool({

@@ -9,9 +9,9 @@ import { type AskDraft, type AsksApi, type EntryId, EntryIdSchema, type SourceKe
 import type { StatePort } from '@ferretry/kernel/contract';
 import {
   CREATE_SPEND_SOURCE,
-  type CreateConfig,
   type GenerateImageInput,
   type MicroUsd,
+  type ResolvedCreateConfig,
   SPEND_LEDGER,
   type SpendRecord,
   usdWords,
@@ -55,14 +55,26 @@ export class SpendLedger {
 
   async facts(day: string, request: string): Promise<SpendFacts> {
     const { records } = await this.state.tail(SPEND_LEDGER, { maxBytes: LEDGER_WINDOW_BYTES });
+    // A refund repeats the line it gives back and counts against it, so every sum below is net of refunds.
+    const sign = (record: SpendRecord): 1 | -1 => (record.refund === true ? -1 : 1);
     return {
-      spentToday: records.filter(record => record.day === day).reduce((sum, record) => sum + record.microUsd, 0),
-      earlierSpends: records.filter(record => record.request === request).length,
+      spentToday: records
+        .filter(record => record.day === day)
+        .reduce((sum, record) => sum + sign(record) * record.microUsd, 0),
+      earlierSpends: records
+        .filter(record => record.request === request)
+        .reduce((sum, record) => sum + sign(record), 0),
     };
   }
 
+  /** Reserves a spend BEFORE the run: money that may be billed is counted from the moment it is risked. */
   async record(entry: SpendRecord): Promise<void> {
     await this.state.append(SPEND_LEDGER, entry);
+  }
+
+  /** Gives a reservation back, after a run fal definitely did not bill. Appends; never rewrites the ledger. */
+  async refund(entry: SpendRecord): Promise<void> {
+    await this.state.append(SPEND_LEDGER, { ...entry, refund: true });
   }
 }
 
@@ -72,7 +84,7 @@ export type SpendVerdict =
   | { readonly kind: 'refuse'; readonly sentence: string };
 
 /** The two limits, in order: the day's cap is a wall (nothing is asked), the per-call threshold is a question. */
-export function judgeSpend(cost: MicroUsd, facts: SpendFacts, config: CreateConfig): SpendVerdict {
+export function judgeSpend(cost: MicroUsd, facts: SpendFacts, config: ResolvedCreateConfig): SpendVerdict {
   const cap = Math.round(config.limits.dailyUsd * MICRO);
   if (facts.spentToday + cost > cap)
     return {
@@ -106,12 +118,14 @@ export interface AskDetails {
 const PROMPT_SHOWN = 400;
 
 /**
- * The owner's say on one dear call. The ask is raised once per (request, how many times it was paid for), so a ferret
- * that asks again finds the same ask, an answered ask is spent by the one call it approved, and the same words asked
- * for a second time ask a second time.
+ * The owner's say on one dear call. The ask is raised once per (request, how many times it was paid for, the price
+ * asked), so a ferret that asks again finds the same ask, an answered ask is spent by the one call it approved, the same
+ * words asked for a second time ask a second time, and an approval holds only up to the price it was given for: a live
+ * price above it asks again, one at or below it goes through.
  */
 export async function approvalFor(asks: SpendAsks, details: AskDetails): Promise<Approval> {
-  const entry = EntryIdSchema.safeParse(`${details.request}-${details.earlierSpends}`);
+  const prefix = `${details.request}-${details.earlierSpends}-`;
+  const entry = EntryIdSchema.safeParse(`${prefix}${details.cost}`);
   if (!entry.success) return { kind: 'unavailable', sentence: 'the approval could not be named, so nothing was sent' };
   const shown = details.prompt.length > PROMPT_SHOWN ? `${details.prompt.slice(0, PROMPT_SHOWN - 1)}…` : details.prompt;
   const draft: AskDraft = {
@@ -129,14 +143,20 @@ export async function approvalFor(asks: SpendAsks, details: AskDetails): Promise
     blocking: true,
   };
   try {
-    const raised = await asks.raise(draft);
-    const answered = (await asks.answers({ source: SOURCE, entry: entry.data as EntryId })).filter(
-      answer => answer.ferret === raised.ferret && answer.ask === raised.id,
+    const all = await asks.answers({ source: SOURCE });
+    // An approval of this request, at this count, for AT LEAST the price now asked.
+    const covered = all.some(
+      answer =>
+        answer.ferret === details.ferret &&
+        answer.effect === 'approve' &&
+        answer.entry.startsWith(prefix) &&
+        Number(answer.entry.slice(prefix.length)) >= details.cost,
     );
-    const last = answered.at(-1);
+    if (covered) return { kind: 'approved' };
+    const raised = await asks.raise(draft);
+    const last = all.filter(answer => answer.ferret === raised.ferret && answer.ask === raised.id).at(-1);
     if (last === undefined) return { kind: 'waiting', ask: raised.id };
-    if (last.effect === 'approve') return { kind: 'approved' };
-    return { kind: 'declined' };
+    return last.effect === 'approve' ? { kind: 'approved' } : { kind: 'declined' };
   } catch (error) {
     return {
       kind: 'unavailable',

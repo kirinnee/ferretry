@@ -24,10 +24,17 @@ const PRICE_TIMEOUT_MS = 10_000;
 const RUN_TIMEOUT_MS = 90_000;
 
 /** Why a fal call did not give an answer, in the owner's words: a code for a branch, a sentence to say. */
-export type FalFailure =
+export type FalFailure = (
   | { readonly code: 'no_key'; readonly sentence: string }
   | { readonly code: 'rejected'; readonly sentence: string }
-  | { readonly code: 'unavailable'; readonly sentence: string };
+  | { readonly code: 'unavailable'; readonly sentence: string }
+) & {
+  /**
+   * True only when fal DEFINITELY billed nothing: the request never left (refused, no vault) or fal refused it (401,
+   * 403, 429, any other 4xx). A timeout, a dropped connection, a 5xx or an answer that cannot be read may have been billed.
+   */
+  readonly noCharge?: true;
+};
 
 const NO_KEY =
   'creative tools are off: no fal key. The owner adds one with `fy secret set FAL_KEY`, then names it in create.yaml as `fal: { key: ${secret:FAL_KEY} }`.';
@@ -39,19 +46,32 @@ function answerOf(outcome: OutboundSecretOutcome): { readonly payload: unknown }
       return { payload: outcome.payload };
     case 'refused':
       return outcome.refused === 'destination' || outcome.refused === 'placement'
-        ? { code: 'unavailable', sentence: 'the request to fal was refused before it was sent' }
-        : { code: 'no_key', sentence: NO_KEY };
+        ? { code: 'unavailable', sentence: 'the request to fal was refused before it was sent', noCharge: true }
+        : { code: 'no_key', sentence: NO_KEY, noCharge: true };
     case 'vault_damaged':
       return {
         code: 'unavailable',
         sentence: 'the secret store could not be opened, so the fal key could not be used',
+        noCharge: true,
       };
     case 'status':
       if (outcome.status === 401 || outcome.status === 403)
-        return { code: 'rejected', sentence: 'fal refused the key (is it valid, and is there credit on the account?)' };
+        return {
+          code: 'rejected',
+          sentence: 'fal refused the key (is it valid, and is there credit on the account?)',
+          noCharge: true,
+        };
       if (outcome.status === 429)
-        return { code: 'unavailable', sentence: 'fal says too many requests; try again in a minute' };
-      return { code: 'unavailable', sentence: `fal answered ${outcome.status}` };
+        return {
+          code: 'unavailable',
+          sentence: 'fal says too many requests; try again in a minute',
+          noCharge: true,
+        };
+      return {
+        code: 'unavailable',
+        sentence: `fal answered ${outcome.status}`,
+        ...(outcome.status >= 400 && outcome.status < 500 ? { noCharge: true as const } : {}),
+      };
     case 'timeout':
       return { code: 'unavailable', sentence: 'fal did not answer in time' };
     case 'network':
@@ -64,7 +84,12 @@ function answerOf(outcome: OutboundSecretOutcome): { readonly payload: unknown }
 
 const PriceReplySchema = z.object({
   prices: z.array(
-    z.object({ endpoint_id: z.string(), unit_price: z.number().nonnegative(), unit: z.string().max(40) }),
+    z.object({
+      endpoint_id: z.string(),
+      unit_price: z.number().nonnegative(),
+      unit: z.string().max(40),
+      currency: z.string().max(16).optional(),
+    }),
   ),
 });
 
@@ -86,7 +111,11 @@ export async function readPrice(secrets: SecretsPort, endpoint: string): Promise
   if ('code' in answer) return answer.code === 'unavailable' ? undefined : answer;
   const parsed = PriceReplySchema.safeParse(answer.payload);
   const row = parsed.success ? parsed.data.prices.find(price => price.endpoint_id === endpoint) : undefined;
-  return row === undefined ? undefined : { unitPrice: row.unit_price, unit: row.unit };
+  if (row === undefined) return undefined;
+  // A rate in any other currency is not dollars: refused rather than read as dollars.
+  if (row.currency !== undefined && row.currency.trim().toUpperCase() !== 'USD')
+    return { code: 'rejected', sentence: 'fal priced this in a currency other than USD, so nothing was sent' };
+  return { unitPrice: row.unit_price, unit: row.unit };
 }
 
 const RunReplySchema = z.object({

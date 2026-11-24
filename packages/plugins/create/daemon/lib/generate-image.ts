@@ -5,20 +5,23 @@
  *   1. no key named in create.yaml → say so; nothing leaves the machine.
  *   2. price the call BEFORE sending (fal's price endpoint, else the table); a price in a unit we cannot read refuses.
  *   3. the daily cap refuses; a call over the ask threshold raises an ask and waits for the owner (nothing is sent).
- *   4. only then fal is called, and the spend is written to the ledger the moment fal answers with a picture, before
- *      the picture is even downloaded: money spent is money recorded, whatever happens next.
+ *   4. the spend is RESERVED in the ledger before fal is called, and given back only when fal definitely billed nothing
+ *      (refused, 401/403/429, any other 4xx). A timeout, a dropped connection, a 5xx or an unreadable answer may have
+ *      been billed, so it stays counted: money that may be spent is money recorded, whatever happens next.
+ *   5. the picture is fetched and handed to the ferret's media folder; the answer is one piece to paste, cost first.
  *
  * The whole call runs one at a time, so two ferrets asking together cannot both pass the same day's cap.
  */
 import { createHash } from 'node:crypto';
 import type { FetchPort, SecretsPort } from '@ferretry/kernel/contract';
 import {
-  type CreateConfig,
   DEFAULT_IMAGE_MODEL,
   GenerateImageInputSchema,
   IMAGE_MODELS,
   MAX_CHAT_IMAGE_BYTES,
   priceImage,
+  type ResolvedCreateConfig,
+  type SpendRecord,
   usdWords,
 } from '../../contract/index.ts';
 import { type FalFailure, isFailure, readPrice, runImage } from './fal.ts';
@@ -29,13 +32,13 @@ export interface ToolAnswer {
   readonly isError?: boolean;
 }
 
-/** Hands a made picture to a ferret and says where it is, or `undefined` when it could not be placed. */
+/** Hands a made picture to a ferret's media folder and answers its media-relative name, or `undefined` when it could not be placed. */
 export type DeliverPicture = (ferret: string, name: string, bytes: Uint8Array) => Promise<string | undefined>;
 
 export interface GenerateImageDeps {
   readonly secrets: SecretsPort;
   readonly fetch: FetchPort;
-  readonly config: () => CreateConfig;
+  readonly config: () => ResolvedCreateConfig;
   readonly ledger: SpendLedger;
   readonly asks: SpendAsks;
   readonly now: () => Date;
@@ -105,9 +108,6 @@ const altOf = (prompt: string): string => {
 
 const kib = (bytes: number): string => `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
-/** A shell word: single quotes, so a path with a space or a quote still copies. */
-const quoted = (text: string): string => `'${text.replace(/'/gu, `'\\''`)}'`;
-
 export function generateImageTool(deps: GenerateImageDeps) {
   // One call at a time: a chain, so a failure never blocks the next call.
   let running: Promise<unknown> = Promise.resolve();
@@ -162,10 +162,8 @@ async function generate(deps: GenerateImageDeps, ferret: string, rawInput: unkno
       };
   }
 
-  // 4. send, then record the spend the moment a picture exists.
-  const made = await runImage(deps.secrets, model.endpoint, input.prompt, input.size);
-  if (isFailure(made)) return failed(made);
-  await deps.ledger.record({
+  // 4. reserve the spend, then send. Only a definite no-charge gives the reservation back.
+  const reservation: SpendRecord = {
     at: deps.now().toISOString(),
     day,
     tool: 'generate_image',
@@ -174,9 +172,22 @@ async function generate(deps: GenerateImageDeps, ferret: string, rawInput: unkno
     microUsd: cost,
     priced: priced.from,
     request,
-  });
+  };
+  await deps.ledger.record(reservation);
+  const made = await runImage(deps.secrets, model.endpoint, input.prompt, input.size);
+  if (isFailure(made)) {
+    if (made.noCharge === true) {
+      await deps.ledger.refund(reservation);
+      return failed(made);
+    }
+    return refusal(
+      `Not made: ${made.sentence}. fal may have billed it, so ${usdWords(cost)} still counts toward today's limit.`,
+    );
+  }
   const spentToday = facts.spentToday + cost;
-  const paid = `${usdWords(cost)} (${priced.from === 'fal' ? 'fal’s price' : 'the listed price'}; ${usdWords(spentToday)} of ${usdWords(Math.round(config.limits.dailyUsd * 1_000_000))} spent today)`;
+  const dailyCap = usdWords(Math.round(config.limits.dailyUsd * 1_000_000));
+  const costLine = `${model.id} · ${usdWords(cost)} · ${usdWords(spentToday)} of ${dailyCap} today`;
+  const paid = `${usdWords(cost)} (${priced.from === 'fal' ? 'fal’s price' : 'the listed price'}; ${usdWords(spentToday)} of ${dailyCap} spent today)`;
 
   const got = await download(deps.fetch, made.url);
   if (typeof got === 'string')
@@ -188,27 +199,26 @@ async function generate(deps: GenerateImageDeps, ferret: string, rawInput: unkno
   if (where === undefined)
     return refusal(`The picture was made and paid for (${paid}), but it could not be saved for you. It was not kept.`);
 
+  // ONE piece to paste: the cost line, then the block. No ferret step stands between the picture and the chat.
   const shown =
     got.bytes.byteLength <= MAX_CHAT_IMAGE_BYTES
       ? [
-          'To show it in the chat, copy it into your media folder, then put this block in your reply:',
-          `cp ${quoted(where)} "$FY_MEDIA_DIR/${name}"`,
+          'Put these lines in your reply:',
+          costLine,
           '```fy-render',
           'type: image',
           `alt: ${altOf(input.prompt)}`,
-          `src: media:${name}`,
+          `src: media:${where}`,
           '---',
           '```',
         ]
       : [
-          `It is ${kib(got.bytes.byteLength)}, over the 1 MB the chat shows, so give the person its path instead of a block.`,
+          `It is ${kib(got.bytes.byteLength)}, over the 1 MB the chat shows, so there is no picture block. Put this line in your reply:`,
+          costLine,
+          `The file is in your media folder as ${where}.`,
         ];
   return {
-    text: [
-      `Made one picture with ${model.id} for ${paid}.`,
-      `Saved: ${where} (${kib(got.bytes.byteLength)})`,
-      ...shown,
-    ].join('\n'),
+    text: [`Made one picture with ${model.id} for ${paid}.`, ...shown].join('\n'),
   };
 }
 

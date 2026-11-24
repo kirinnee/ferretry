@@ -19,6 +19,10 @@ class FakeFal {
   price: { unit_price: number; unit: string } | undefined = { unit_price: 0.003, unit: 'megapixels' };
   priceStatus = 200;
   runStatus = 200;
+  /** When set, the run itself never answers: the connection drops (a timeout or a network error to the kernel). */
+  runDrops = false;
+  /** The currency fal's price endpoint names. */
+  currency = 'USD';
   picture: Uint8Array = PNG;
   pictureUrl = CDN;
   pictureType = 'image/jpeg';
@@ -38,10 +42,11 @@ class FakeFal {
       if (this.priceStatus !== 200) return new Response('no', { status: this.priceStatus });
       const endpoint = url.searchParams.get('endpoint_id');
       return Response.json({
-        prices: this.price === undefined ? [] : [{ endpoint_id: endpoint, currency: 'USD', ...this.price }],
+        prices: this.price === undefined ? [] : [{ endpoint_id: endpoint, currency: this.currency, ...this.price }],
       });
     }
     if (url.host === 'fal.run') {
+      if (this.runDrops) throw new Error('connection dropped');
       if (this.runStatus !== 200) return new Response('no', { status: this.runStatus });
       return Response.json({ images: [{ url: this.pictureUrl, content_type: this.pictureType }], seed: 1 });
     }
@@ -93,10 +98,10 @@ async function world(
       options.deliver === 'nowhere'
         ? undefined
         : {
-            deliverFiles: async (files: readonly { name: string; folder?: string; contents: Uint8Array }[]) =>
+            deliverMedia: async (files: readonly { name: string; folder?: string; contents: Uint8Array }[]) =>
               files.map(file => {
                 delivered.push({ ferret, name: file.name, bytes: file.contents.byteLength });
-                return `/home/x/state/ferrets/sessions/${ferret}/attachments/${file.folder}/${file.name}`;
+                return file.name;
               }),
           },
   };
@@ -139,6 +144,10 @@ const ledgerLines = (w: World): readonly Record<string, unknown>[] =>
     .filter(line => line.trim() !== '')
     .map(line => JSON.parse(line));
 
+/** What the ledger adds up to: reservations less refunds. */
+const net = (w: World): number =>
+  ledgerLines(w).reduce((sum, line) => sum + (line.refund === true ? -1 : 1) * (line.microUsd as number), 0);
+
 const spent = (microUsd: number, day: 'today' | 'yesterday' = 'today') => ({
   at: '2026-11-24T08:00:00.000Z',
   day,
@@ -168,8 +177,12 @@ describe('generate_image: a picture, priced first, recorded, and handed over', (
     // 1024 × 768 = 0.786 MP at $0.003
     expect(answer.text).toContain('flux-schnell for $0.0024');
     expect(answer.text).toContain('fal’s price');
-    expect(answer.text).toContain('```fy-render\ntype: image\nalt: a fox in snow\nsrc: media:create-flux-schnell-');
-    expect(answer.text).toContain('"$FY_MEDIA_DIR/create-flux-schnell-');
+    // ONE piece to paste: the cost line, then the block that names the picture in the media folder. No ferret step.
+    expect(answer.text).toContain(
+      'Put these lines in your reply:\nflux-schnell · $0.0024 · $0.0024 of $5.00 today\n```fy-render\ntype: image\nalt: a fox in snow\nsrc: media:create-flux-schnell-',
+    );
+    expect(answer.text).not.toContain('cp ');
+    expect(answer.text).not.toContain('FY_MEDIA_DIR');
     expect(w.delivered).toHaveLength(1);
     expect(ledgerLines(w)).toMatchObject([
       { tool: 'generate_image', model: 'flux-schnell', ferret: 'test-ferret', microUsd: 2360, priced: 'fal' },
@@ -241,11 +254,46 @@ describe('generate_image: a picture, priced first, recorded, and handed over', (
     expect(w.fal.runs()).toBe(0);
   });
 
-  test('a failed run is not recorded: fal bills only what it made', async () => {
+  test('the spend is reserved BEFORE the run, and only a definite no-charge gives it back', async () => {
+    // fal refused it (401, 403, 429 or another 4xx): nothing was billed, so the day's sum is back to zero
+    for (const status of [401, 403, 422, 429]) {
+      const w = await world();
+      w.fal.runStatus = status;
+      const answer = await ask(w);
+      expect(answer.isError).toBe(true);
+      expect(ledgerLines(w)).toMatchObject([{ microUsd: 2360 }, { microUsd: 2360, refund: true }]);
+      expect(net(w)).toBe(0);
+    }
+    // a 5xx, a connection that drops, or a timeout may have been billed: it stays counted
+    for (const arrange of [(fal: FakeFal) => (fal.runStatus = 502), (fal: FakeFal) => (fal.runDrops = true)]) {
+      const w = await world();
+      arrange(w.fal);
+      const answer = await ask(w);
+      expect(answer.isError).toBe(true);
+      expect(answer.text).toContain('still counts toward today');
+      expect(ledgerLines(w)).toHaveLength(1);
+      expect(net(w)).toBe(2360);
+    }
+  });
+
+  test('a run that timed out counts toward the cap: the next call is refused', async () => {
+    const w = await world({ limits: { dailyUsd: 0.004 } });
+    w.fal.runDrops = true;
+    expect((await ask(w)).isError).toBe(true);
+    w.fal.runDrops = false;
+    const next = await ask(w, { prompt: 'a bear' });
+    expect(next.isError).toBe(true);
+    expect(next.text).toContain('daily limit');
+    expect(w.fal.runs()).toBe(1);
+  });
+
+  test('a price fal gives in another currency is refused: nothing is sent', async () => {
     const w = await world();
-    w.fal.runStatus = 500;
+    w.fal.currency = 'EUR';
     const answer = await ask(w);
     expect(answer.isError).toBe(true);
+    expect(answer.text).toContain('currency other than USD');
+    expect(w.fal.runs()).toBe(0);
     expect(ledgerLines(w)).toHaveLength(0);
   });
 
@@ -303,6 +351,7 @@ describe('generate_image: a picture, priced first, recorded, and handed over', (
     w.fal.picture = new Uint8Array(1024 * 1024 + 1);
     const answer = await ask(w);
     expect(answer.text).toContain('over the 1 MB the chat shows');
+    expect(answer.text).toContain('flux-schnell · $0.0024');
     expect(answer.text).not.toContain('fy-render');
     expect(w.delivered).toHaveLength(1);
   });
@@ -363,6 +412,26 @@ describe('a call over the one-call limit asks the owner first, through Asks', ()
     expect(again.text).toContain('Not sent yet');
     expect(w.fal.runs()).toBe(1);
     expect(await w.asks.open({})).toHaveLength(1);
+  });
+
+  test('an approval holds for the price it was asked at: a dearer call asks again, a cheaper one goes', async () => {
+    const w = await world({ limits: { askAboveUsd: 0.01 } });
+    w.fal.price = { unit_price: 0.04, unit: 'megapixels' };
+    await ask(w, dear);
+    const [first] = await w.asks.open({});
+    w.asks.answerAs({ ferret: 'test-ferret', id: first!.id }, 'approve');
+    // fal's live price has since gone UP: the approval was for the old price, so the owner is asked again
+    w.fal.price = { unit_price: 0.08, unit: 'megapixels' };
+    const dearer = await ask(w, dear);
+    expect(dearer.text).toContain('Not sent yet');
+    expect(w.fal.runs()).toBe(0);
+    // a NEW ask, for the new price (the approved one is answered, so it is no longer open)
+    expect(await w.asks.open({})).toHaveLength(1);
+    // back at the approved price (or below it) the first approval still lets the call through
+    w.fal.price = { unit_price: 0.04, unit: 'megapixels' };
+    const made = await ask(w, dear);
+    expect(made.text).toContain('Made one picture');
+    expect(w.fal.runs()).toBe(1);
   });
 
   test('a rejection refuses, spends nothing, and says what to do instead', async () => {

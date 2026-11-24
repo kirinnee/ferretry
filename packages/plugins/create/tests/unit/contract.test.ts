@@ -4,8 +4,8 @@ import { CreateConfigSchema, createLoosens } from '../../contract/index.ts';
 const config = (patch: Record<string, unknown> = {}) => CreateConfigSchema.parse(patch);
 
 describe('create.yaml', () => {
-  test('the defaults are the owner’s decision: $5 a day, ask over $1', () => {
-    expect(config()).toEqual({ fal: {}, limits: { dailyUsd: 5, askAboveUsd: 1 }, timeZone: 'UTC' });
+  test('the defaults are the owner’s decision: $5 a day, ask over $1, and no zone of its own (the host’s)', () => {
+    expect(config()).toEqual({ fal: {}, limits: { dailyUsd: 5, askAboveUsd: 1 } });
   });
 
   test('only the one reference may name the key; a raw key or another secret is refused', () => {

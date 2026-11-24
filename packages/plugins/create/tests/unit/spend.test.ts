@@ -3,7 +3,7 @@ import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { CreateConfigSchema } from '../../contract/index.ts';
 import { approvalFor, dayOf, judgeSpend, requestDigest } from '../../daemon/lib/spend.ts';
 
-const config = CreateConfigSchema.parse({});
+const config = { ...CreateConfigSchema.parse({}), timeZone: 'UTC' };
 const facts = (spentToday: number) => ({ spentToday, earlierSpends: 0 });
 
 describe('judgeSpend: the day’s cap is a wall, the one-call limit is a question', () => {
@@ -65,6 +65,19 @@ describe('approvalFor goes through Asks, and only the owner’s answer approves'
     expect(await approvalFor(asks, details)).toEqual({ kind: 'approved' });
     // a paid-for request is a NEW question the next time: the entry carries how many times it was spent
     expect((await approvalFor(asks, { ...details, earlierSpends: 1 })).kind).toBe('waiting');
+  });
+  test('an approval holds up to the price it was asked at: a higher price asks again, an equal or lower one does not', async () => {
+    const asks = new FakeAsks();
+    await approvalFor(asks, details);
+    const [open] = await asks.open({});
+    // the price is part of the entry the ask is keyed by
+    expect(String(open?.entry)).toBe('abcdef0123456789-0-1200000');
+    asks.answerAs({ ferret: 'f1', id: open!.id }, 'approve');
+    expect(await approvalFor(asks, { ...details, cost: 1_100_000 })).toEqual({ kind: 'approved' });
+    const dearer = await approvalFor(asks, { ...details, cost: 1_300_000 });
+    expect(dearer.kind).toBe('waiting');
+    expect(await asks.open({})).toHaveLength(1);
+    expect(String((await asks.open({}))[0]?.entry)).toBe('abcdef0123456789-0-1300000');
   });
   test('reject declines, and so does a dismissal', async () => {
     const asks = new FakeAsks();
