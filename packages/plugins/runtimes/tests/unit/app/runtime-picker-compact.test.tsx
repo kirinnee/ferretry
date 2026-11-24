@@ -122,7 +122,7 @@ describe('the runtime picker in the composer row', () => {
   it('says a plain word, never a guess, for a value the ferret has not reported', async () => {
     const root = await draw(daemon(true, { model: undefined, effort: undefined }).client);
     const chips = [...root.querySelectorAll<HTMLElement>('[data-runtime-chip]')];
-    expect(chips.map(chip => chip.textContent)).toEqual(['Model', 'Thinking', 'Normal']);
+    expect(chips.map(chip => chip.textContent)).toEqual(['Default', 'Default', 'Normal']);
   });
 
   it('reads fast mode when the ferret was launched in it', async () => {

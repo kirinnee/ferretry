@@ -281,6 +281,16 @@ describe('the open side column is a row of tabs over ONE panel, with a draggable
     expect(onShow(page)).toEqual(['ferretpage.note']);
   });
 
+  test('the side column’s tabs wrap onto a second line instead of being clipped at its edge', async () => {
+    const page = await open();
+    await interact(() => toggle(page).click());
+    await settle();
+    const strip = page.querySelector('[data-phone-tab-row] [role="tablist"]');
+    expect(strip?.className).toContain('flex-wrap');
+    expect(strip?.className).not.toContain('mask-image');
+    expect(strip?.className).not.toContain('overflow-x-auto');
+  });
+
   test('the toggle is inside the tab row while open and on the slim rail while closed — never both', async () => {
     const page = await open();
     expect(page.querySelector('[data-side-rail] [data-side-toggle]')).not.toBeNull();

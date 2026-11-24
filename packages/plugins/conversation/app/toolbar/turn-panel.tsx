@@ -14,7 +14,11 @@
 
 import { useChatCompacting, useChatTurn } from '../chat/chat-turn-context.ts';
 
-const WORDS = { working: 'Working', 'your-turn': 'Your turn', 'needs-input': 'Needs you' } as const;
+/**
+ * "Your turn" is not drawn here: the ferret's own status mark, one panel to the left, already says it for an idle ferret, and a
+ * second copy beside Stop read as two different facts. This panel adds what the mark cannot: that it is working, or needs you.
+ */
+const WORDS = { working: 'Working', 'needs-input': 'Needs you' } as const;
 
 export function TurnPanel({ subject }: { readonly subject?: string }) {
   const turn = useChatTurn(subject);
@@ -26,6 +30,7 @@ export function TurnPanel({ subject }: { readonly subject?: string }) {
         Compacting
       </span>
     );
+  if (turn === 'your-turn') return null;
   return (
     <span className="text-meta text-muted" data-ferret-turn={turn}>
       {WORDS[turn]}

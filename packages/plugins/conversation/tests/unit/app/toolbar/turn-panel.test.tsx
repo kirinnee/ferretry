@@ -12,7 +12,7 @@ afterEach(async () => {
 const turnOf = (root: HTMLElement) => root.querySelector<HTMLElement>('[data-ferret-turn]');
 
 describe('whose turn it is, in the ferret toolbar', () => {
-  it('says the chat’s own reading in words: working, your turn, needs you', async () => {
+  it('says the chat’s own reading in words: working, needs you — and not “Your turn”, which the status mark beside it already says', async () => {
     mounted = await mount(
       <ChatTurnContext.Provider value={{ ferret: 'ferret-hadi', turnState: 'working' }}>
         <TurnPanel subject="ferret-hadi" />
@@ -25,7 +25,8 @@ describe('whose turn it is, in the ferret toolbar', () => {
         <TurnPanel subject="ferret-hadi" />
       </ChatTurnContext.Provider>,
     );
-    expect(turnOf(mounted.container)?.textContent).toBe('Your turn');
+    // The ferret's status mark (an idle ferret) says "your turn" beside this panel, so the word is drawn once, not twice.
+    expect(turnOf(mounted.container)).toBeNull();
 
     await mounted.render(
       <ChatTurnContext.Provider value={{ ferret: 'ferret-hadi', turnState: 'needs-input' }}>

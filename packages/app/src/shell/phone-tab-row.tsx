@@ -81,11 +81,12 @@ export function PhoneTabRow({
         aria-label={label}
         aria-orientation="horizontal"
         className={cn(
-          'flex min-w-0 items-center gap-0.5 overflow-x-auto rounded-control bg-surface-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
-          // Beside the chat the row is narrow and holds more tabs than fit: its ends fade, so a tab cut by the edge reads as "more this way".
+          'flex min-w-0 items-center gap-0.5 rounded-control bg-surface-2',
+          // The phone's row is one line that scrolls sideways. Beside the chat the row is narrow and holds more tabs than
+          // fit: they wrap onto a second line, so none is cut by the edge or hides behind a fade.
           trailing === undefined
-            ? ''
-            : 'px-2 [mask-image:linear-gradient(to_right,transparent,#000_10px,#000_calc(100%-10px),transparent)]',
+            ? 'overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+            : 'flex-wrap px-2 py-0.5',
         )}
         ref={row}
         role="tablist"

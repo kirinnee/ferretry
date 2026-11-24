@@ -333,15 +333,17 @@ describe('terminal snapshot view', () => {
       }
     });
 
-    it('opens at full size on a desktop, where the toggle can still fit it', async () => {
+    it('fits the widest line on a desktop too, so no text is cut at the right edge, and the toggle is not hidden there', async () => {
       setHidden(false);
       const view = await mount(
         <TerminalSnapshotView daemon={daemon} scope={scope} now={() => 0} readSnapshot={async () => PANE} />,
       );
       try {
-        expect(pre(view.container).style.fontSize).toBe('');
-        await interact(() => toggle(view.container).click());
         expect(pre(view.container).style.fontSize).not.toBe('');
+        expect(toggle(view.container).getAttribute('aria-pressed')).toBe('true');
+        expect(toggle(view.container).className).not.toContain('md:hidden');
+        await interact(() => toggle(view.container).click());
+        expect(pre(view.container).style.fontSize).toBe('');
       } finally {
         await view.unmount();
       }
