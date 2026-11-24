@@ -14,7 +14,8 @@
  * insights, settings, this device), the ferret page's side panel opening and closing, and the onboarding pages the owner
  * walked (Which AI, Name, Appearance, Layout, Voice) with a style and a palette picked on Appearance and an engine on Voice.
  *
- *   FY_LAYOUT_SHIFT_LOG=1   print every measured act and its shift (also written when a run is green)
+ *   FY_LAYOUT_SHIFT_LOG=1         print every measured act and its shift
+ *   FY_LAYOUT_SHIFT_SHOTS_DIR     keep `<width>-<light|dark>-<page>.png` of each onboarding page (fake data only)
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
@@ -26,6 +27,7 @@ setDefaultTimeout(240_000);
 const appScene = new URL('./fixtures/mobile-scene.tsx', import.meta.url).pathname;
 const onboardingScene = new URL('./fixtures/onboarding-e2e-scene.tsx', import.meta.url).pathname;
 const logIt = process.env.FY_LAYOUT_SHIFT_LOG === '1';
+const shotsDir = process.env.FY_LAYOUT_SHIFT_SHOTS_DIR ?? '';
 
 /** Layout shift tolerated per act. A shift of one 16px line on a phone screen is ~0.003, so this is "nothing moved". */
 const BUDGET = 0.001;
@@ -314,6 +316,8 @@ describe('the onboarding pages animate inside their own boxes', () => {
           await arrive(tab, 'onboarding.agents');
           await tab.waitForTimeout(600);
           for (const [index, key] of pages.entries()) {
+            if (shotsDir !== '')
+              await tab.screenshot({ path: `${shotsDir}/${viewport.name}-${dark ? 'dark' : 'light'}-${key}.png` });
             // Each page's own acts first: the choices a person makes here are what plays the page's animation.
             if (key === 'onboarding.appearance') {
               const cards = tab.locator('.fy-cc__card, label:has(input[type="radio"])');
