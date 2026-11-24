@@ -503,7 +503,7 @@ export interface RuntimeChoiceItem {
   readonly pending?: boolean;
   /** A short tag beside the name, such as `Default`. */
   readonly badge?: string;
-  /** The raw value, when it differs from the name a reader is shown. */
+  /** The raw value, when it differs from the name a reader is shown: the row's tooltip, never drawn. */
   readonly detail?: string;
   /** The catalog's own one-line description, when it has one. */
   readonly description?: string;
@@ -624,7 +624,7 @@ export function RuntimeChoiceMenu({ ariaLabel, items, disabled, presentation = '
             onFocus={() => setActiveKey(item.key)}
             role="menuitemradio"
             tabIndex={item.key === stop ? 0 : -1}
-            title={item.description}
+            title={[item.description, item.detail].filter(Boolean).join(' · ') || undefined}
             type="button"
           >
             <span aria-hidden="true" className="flex w-4 shrink-0 justify-center text-accent">
@@ -634,9 +634,6 @@ export function RuntimeChoiceMenu({ ariaLabel, items, disabled, presentation = '
               <span className="flex min-w-0 items-center gap-sm">
                 <span className="truncate font-semibold text-ui">{item.label}</span>
                 {item.badge ? <span className="kt-label shrink-0">{item.badge}</span> : null}
-                {item.detail ? (
-                  <span className="mono ml-auto min-w-0 truncate text-meta text-muted">{item.detail}</span>
-                ) : null}
               </span>
               {item.description ? (
                 <span className="block truncate text-meta text-muted leading-base">{item.description}</span>
@@ -743,6 +740,7 @@ export function RuntimeModelChoices({
               pending: choice.value === submittingModel,
               ...(group.heading === undefined ? {} : { group: group.heading }),
               ...(!current && choice.isDefault ? { badge: 'Default' } : {}),
+              // The raw id is on demand (the row's tooltip), never drawn beside the name a reader chose by.
               ...(choice.label === choice.value ? {} : { detail: choice.value }),
               ...(description ? { description } : {}),
               onSelect: () => onChoose(choice),
@@ -1247,7 +1245,9 @@ export function RuntimeSpeedControls({
         ? 'Not offered: the model list is unavailable'
         : catalog === null
           ? 'Checking whether this model has Fast…'
-          : 'Not offered: this model is not in the list';
+          : running === undefined
+            ? 'Not offered: the model is not known yet'
+            : 'Not offered: this model is not in the list';
 
   async function choose(next: boolean) {
     if (!canControl || terminal || promptRefused || submitting !== null || (next && supported !== true)) return;

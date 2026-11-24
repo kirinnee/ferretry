@@ -43,7 +43,7 @@ export const runtimeControlApi = (client: RuntimesClient): RuntimeControlApi => 
  * `FerretSummarySchema`: top-level `id`/`harness`/`model`, and `state` is one of four words). Today's whole session
  * document (`{ config, state }`) is not served by any 5.0 route.
  *
- * A field the summary does not carry (the model the pane OBSERVED, its prompt, the launch flags) is ABSENT, never
+ * A field the summary does not carry (its prompt, the launch flags) is ABSENT, never
  * invented: the pickers already read each as "not known".
  */
 const runtimeSessionViewOf = (summary: FerretSummary): RuntimeSessionView => ({
@@ -55,7 +55,11 @@ const runtimeSessionViewOf = (summary: FerretSummary): RuntimeSessionView => ({
     launchReasoningEffort: summary.effort,
     launchFast: summary.fast,
   },
-  state: stateOf(summary),
+  // The model the harness REPORTED running (the summary's `observedModel`) is the one in force, ahead of what was launched.
+  state: {
+    ...stateOf(summary),
+    ...(summary.observedModel === undefined ? {} : { observedModel: summary.observedModel }),
+  },
 });
 
 /** Ferrets' four states in the pickers' words: a live ferret is `running`, its turn decided by the daemon's turn watch. */
