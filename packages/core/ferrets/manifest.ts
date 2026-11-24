@@ -66,7 +66,7 @@ export default definePlugin({
   ui: {
     screens: [
       screen('ferrets', { path: 'ferrets', nav: { label: 'Ferrets', icon: 'list', order: 5 } }),
-      screen('new-ferret', { path: 'new' }),
+      screen('new-ferret', { path: 'new', title: 'New ferret' }),
       screen('move', { path: 'ferrets/:ferret/move' }),
     ],
     panels: [

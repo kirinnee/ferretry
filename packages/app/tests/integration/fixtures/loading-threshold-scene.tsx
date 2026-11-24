@@ -2,7 +2,7 @@
  * The browser entry for the 300 ms loader threshold, over the REAL loaders and the real stylesheet.
  *
  *   ?theme=<family>-<mode>   ?motion=reduced  sets Settings › Motion to Reduced
- *   ?scene=page|held|bar|cache|spinner|sheet&ms=<n>   starts a wait at mount and ends it after n ms (page: Loading kind="page"
+ *   ?scene=page|held|bar|barpage|cache|spinner|sheet&ms=<n>   starts a wait at mount and ends it after n ms (page: Loading kind="page"
  *                                          mounted straight off the read; held: the same under useHeldLoading; bar: useBackgroundLoad + the one bar; cache: the
  *                                          "Updating…" pill; spinner: <Spinner wait />; sheet: the page wait inside the real BottomSheet, whose
  *                                          transform makes a position:fixed descendant relative to the sheet, not the viewport)
@@ -55,6 +55,23 @@ const BarWait = () => {
   return <LoadingBarHost />;
 };
 
+/** A background read whose page loader mounts 400 ms in, while the bar is already drawn: the one-indicator rule (L203). */
+const BarThenPage = () => {
+  const waiting = useFakeRead();
+  useBackgroundLoad(waiting);
+  const [page, setPage] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setPage(true), 400);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <>
+      <LoadingBarHost />
+      {page && waiting ? <Loading kind="page" label="Reading the thing…" /> : null}
+    </>
+  );
+};
+
 const CacheWait = () => (useFakeRead() ? <CacheUpdating /> : <p data-done="">Done</p>);
 
 const SpinnerWait = () => (useFakeRead() ? <Spinner size={20} wait /> : <p data-done="">Done</p>);
@@ -73,6 +90,7 @@ const SCENES = {
   page: PageWait,
   held: HeldWait,
   bar: BarWait,
+  barpage: BarThenPage,
   cache: CacheWait,
   spinner: SpinnerWait,
   sheet: SheetWait,
@@ -87,12 +105,15 @@ interface Sample {
   frames: number;
   /** The most leftover copies of a loader any single frame held: always 0 (nothing is left over what replaced a loader). */
   ghosts: number;
+  /** Frames in which the top bar AND a page loader were both painted: always 0 (one indicator at a time). */
+  both: number;
 }
 const sample: Sample = {
   firstVisible: null,
   lastVisible: null,
   frames: 0,
   ghosts: 0,
+  both: 0,
 };
 (window as unknown as { __loader: Sample }).__loader = sample;
 
@@ -101,6 +122,16 @@ const tick = (): void => {
   const at = performance.now() - began;
   sample.frames += 1;
   sample.ghosts = Math.max(sample.ghosts, document.querySelectorAll('[data-loading-ghost], .fy-loading-ghost').length);
+  const painted = (element: Element): boolean => {
+    for (let node: Element | null = element; node !== null; node = node.parentElement)
+      if (Number(getComputedStyle(node).opacity) <= 0.01) return false;
+    return true;
+  };
+  if (
+    [...document.querySelectorAll('[data-loading="bar"]')].some(painted) &&
+    [...document.querySelectorAll('[data-loading="page"]')].some(painted)
+  )
+    sample.both += 1;
   const seen = [...document.querySelectorAll<HTMLElement>(LOADER)].some(element => {
     // The element AND every ancestor up to the root must be painted: the gate may sit on a wrapper.
     for (let node: HTMLElement | null = element; node !== null; node = node.parentElement)

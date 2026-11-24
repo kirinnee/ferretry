@@ -186,5 +186,11 @@ export function useAnyBackgroundLoad(): boolean {
 /** The shell's one top bar: drawn while any view says it is busy, nothing otherwise. Mount it once. */
 export function LoadingBarHost() {
   const held = useHeldLoading(useAnyBackgroundLoad());
-  return held ? <TopBar /> : null;
+  // The hold keeps a bar steady while its read goes quiet, but a page loader that has started IS the one indicator now: the bar goes at once.
+  const pageUp = useSyncExternalStore(
+    subscribe,
+    () => pages > 0,
+    () => false,
+  );
+  return held && !pageUp ? <TopBar /> : null;
 }

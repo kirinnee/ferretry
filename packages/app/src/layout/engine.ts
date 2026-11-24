@@ -45,7 +45,7 @@ export function viewsOf(surfaces: readonly SurfaceEntry[]): Views {
         plugin: entry.id,
         id: screen.id,
         path: screen.path,
-        label: screen.nav?.label ?? entry.title,
+        label: screen.nav?.label ?? screen.title ?? entry.title,
         ...(screen.nav?.icon === undefined ? {} : { icon: screen.nav.icon }),
         ...(screen.nav === undefined ? {} : { navOrder: screen.nav.order }),
         ...(screen.chrome === undefined ? {} : { chrome: screen.chrome }),

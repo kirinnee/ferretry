@@ -143,6 +143,8 @@ export interface ScreenDecl<Id extends string = string> {
   readonly path: string;
   /** On purpose, the screen belongs to no daemon (a share link's landing page, first-run setup). Absolute paths only. */
   readonly daemonless?: true;
+  /** What the screen is called where the shell names the page (the phone's title bar, the command bar) when it is not a nav place: the plugin's title when left off. */
+  readonly title?: string;
   readonly nav?: { readonly label: string; readonly icon?: string; readonly order: number };
   /** `none`: the screen is drawn WITHOUT the shell's chrome (no drawer, bottom nav, side column, title bar or command bar); first-run setup. */
   readonly chrome?: 'none';

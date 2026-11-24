@@ -71,6 +71,8 @@ interface Sample {
   readonly frames: number;
   /** The most leftover copies of a loader (`[data-loading-ghost]`) any single frame held: always 0. */
   readonly ghosts: number;
+  /** Frames in which the top bar and a page loader were both painted: always 0. */
+  readonly both: number;
 }
 
 /** Runs one fake read of `ms` and returns what a person would have seen, frame by frame. */
@@ -155,6 +157,14 @@ describe('a wait that outlasts 300 ms shows from about 300 ms', () => {
       expect(seen.ghosts).toBe(0);
     });
   }
+});
+
+describe('one indicator at a time (L203)', () => {
+  it('the top bar leaves the moment a page loader starts: no frame paints both', async () => {
+    const seen = await run('barpage', 1_500, { theme: 'studio-dark' });
+    expect(seen.firstVisible, 'the bar was shown first').not.toBeNull();
+    expect(seen.both).toBe(0);
+  });
 });
 
 describe.skipIf(shotsDir === '')('the loader before and after the threshold (kept shots)', () => {

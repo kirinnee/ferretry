@@ -140,7 +140,8 @@ export function routeTable(screens: Iterable<ScreenRef>): RouteTable {
             ...(tabId === undefined ? {} : { tabId }),
           };
         }
-        const found = find(false, rest);
+        // The v4 per-daemon Inbox is the Agenda now: its old address (and the `?from=` filter it carried) opens the Agenda.
+        const found = find(false, rest.length === 1 && rest[0] === 'inbox' ? ['agenda'] : rest);
         return found === undefined ? { kind: 'not-found', path: pathname } : { kind: 'screen', daemon, ...found };
       }
       const found = find(true, parts);
