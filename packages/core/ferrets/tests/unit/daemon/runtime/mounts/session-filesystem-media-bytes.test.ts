@@ -32,7 +32,16 @@ const agent: FileBrowserDeps['reach'] = async context => ({
 });
 
 /** `size` bytes whose value at position `n` is `n % 251`, so a wrong slice cannot look right. */
-const patterned = (size: number): Uint8Array => Uint8Array.from({ length: size }, (_unused, at) => at % 251);
+const PATTERN_PERIOD = 251;
+const patterned = (size: number): Uint8Array => {
+  // One period written by hand, then doubled by native copies (a multiple of the period each time): a 32 MiB file
+  // costs a few copies, where a per-byte callback took longer than the test timeout on a loaded runner.
+  const bytes = new Uint8Array(size);
+  const period = Math.min(size, PATTERN_PERIOD);
+  for (let at = 0; at < period; at += 1) bytes[at] = at;
+  for (let filled = period; filled < size; filled *= 2) bytes.copyWithin(filled, 0, Math.min(filled, size - filled));
+  return bytes;
+};
 const file = (bytes: Uint8Array, overrides: Partial<FakeNode> = {}): FakeNode => ({
   bytes,
   type: 'file',
