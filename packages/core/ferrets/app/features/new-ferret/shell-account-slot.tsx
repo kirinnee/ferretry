@@ -27,8 +27,11 @@ export function ShellAccountSlot({ daemon, slot, fallback }: AccountSlotProps): 
     const next = holdsPicker(root.current, NEW_FERRET_ACCOUNT_SLOT);
     if (next !== picker) setPicker(next);
   });
+  // ONE reserved block from the first paint (O9-15): the loading bar, the roster's box with its wrapped status and quota rows,
+  // the typed fallback and the "no runtime" notice all draw INSIDE it, so the roster arriving moves nothing below Runtime.
+  // Sized for the tallest resolved readout the fake machine gives (a phone wraps the runtime's words and its quota warning).
   return (
-    <div ref={root}>
+    <div className="min-h-[11.25rem] sm:min-h-[6.5rem]" data-runtime-slot="" ref={root}>
       <PanelSlot daemon={daemon} props={{ ...slot }} slot={NEW_FERRET_ACCOUNT_SLOT} />
       {picker ? null : fallback}
     </div>
