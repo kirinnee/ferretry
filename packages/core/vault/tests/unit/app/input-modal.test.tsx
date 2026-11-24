@@ -241,6 +241,7 @@ describe('the modal’s rules', () => {
   });
 
   it('reads only a well-formed ask from a routed address', () => {
+    expect(askFromUrl('//[')).toBeUndefined();
     expect(askFromUrl('/d/m/ferrets/f/chat?ask=A3')).toBe('A3');
     expect(askFromUrl('/d/m/ferrets/f/chat?ask=%3Cscript%3E')).toBeUndefined();
     expect(askFromUrl('/d/m/ferrets/f/chat')).toBeUndefined();
@@ -272,5 +273,63 @@ describe('the vault’s shell hooks', () => {
     await half.shell.notificationOpened?.(context, { url: '/d/m/ferrets/f/chat' });
     await half.shell.notificationOpened?.(context, { url: '/d/m/ferrets/f/chat?ask=nope' });
     expect(tappedAsks.take('m')).toBeUndefined();
+  });
+});
+
+describe('putting the modal off', () => {
+  it('"Not now" closes it for every card waiting, and a card raised later still comes up', async () => {
+    setSystemTime(new Date(NOW));
+    const { client, raise } = rig([secretCard(), codeCard({ id: id('c'), agendaItemId: 'A9', raisedAt: ago(20_000) })]);
+    const mounted = await mount(<InputModalHost client={client} daemon="m" />);
+    try {
+      await settle();
+      expect(shownId()).toBe(id('c'));
+      await click(document.body.querySelector('[aria-label="Not now"]'));
+      await settle();
+      expect(shownId()).toBeNull();
+      expect(document.documentElement.hasAttribute(INPUT_MODAL_ATTRIBUTE)).toBe(false);
+      await interact(() => raise(codeCard({ id: id('d'), agendaItemId: 'A10', raisedAt: ago(1_000) })));
+      await settle();
+      expect(shownId()).toBe(id('d'));
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('draws nothing from a read that finishes after the modal is gone', async () => {
+    let release: (() => void) | undefined;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const client = {
+      call: async () => {
+        await held;
+        return { requests: [secretCard()] };
+      },
+      subscribe: () => () => undefined,
+    } as never;
+    const mounted = await mount(<InputModalHost client={client} daemon="m" />);
+    await mounted.unmount();
+    release?.();
+    await settle();
+    expect(shownId()).toBeNull();
+  });
+});
+
+describe('a machine that cannot be read', () => {
+  it('shows nothing and does not throw; the next read tries again', async () => {
+    const client = {
+      call: async () => {
+        throw new Error('could not reach this machine');
+      },
+      subscribe: () => () => undefined,
+    } as never;
+    const mounted = await mount(<InputModalHost client={client} daemon="m" />);
+    try {
+      await settle();
+      expect(shownId()).toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
   });
 });
