@@ -111,6 +111,21 @@ describe('the reply player', () => {
     expect(state.closes).toBe(1);
   });
 
+  test('without a context of its own it uses the browser’s', () => {
+    const real = (globalThis as { AudioContext?: unknown }).AudioContext;
+    const { context } = fakeContext();
+    (globalThis as { AudioContext?: unknown }).AudioContext = function () {
+      return context;
+    };
+    try {
+      const player = createReplyPlayer();
+      player.play(new Int16Array(10));
+      expect(player.remainingMs()).toBeGreaterThan(0);
+    } finally {
+      (globalThis as { AudioContext?: unknown }).AudioContext = real;
+    }
+  });
+
   test('a context that refuses to resume does not break playing', async () => {
     const { context } = fakeContext();
     context.resume = async () => {

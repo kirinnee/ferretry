@@ -1,18 +1,22 @@
 import { describe, expect, test } from 'bun:test';
 import type { ReplyState } from '../../../contract/index.ts';
 import { createReplySpeaker, type ReplyVoiceSource } from '../../../app/lib/stream/reply-speaker.ts';
-import type { SpeakerPort, SpeakRequest } from '../../../app/lib/voice-chat/ports.ts';
+import type { SpeakerEvent, SpeakerPort, SpeakRequest } from '../../../app/lib/voice-chat/ports.ts';
 
 function rig(state: ReplyState | undefined, options: { stream?: boolean; sends?: boolean } = {}) {
   const device: SpeakRequest[] = [];
   const machine: string[] = [];
   const sources: ReplyVoiceSource[] = [];
+  const onEvents: ((event: SpeakerEvent) => void)[] = [];
   let ids = 0;
   const port: SpeakerPort = {
     supported: true,
     voices: () => [],
     unlock: () => undefined,
-    speak: request => void device.push(request),
+    speak: (request, onEvent) => {
+      device.push(request);
+      onEvents.push(onEvent);
+    },
     stop: () => undefined,
   };
   const speaker = createReplySpeaker({
@@ -31,7 +35,7 @@ function rig(state: ReplyState | undefined, options: { stream?: boolean; sends?:
     onSource: source => void sources.push(source),
     language: 'en-US',
   });
-  return { speaker, device, machine, sources };
+  return { speaker, device, machine, sources, onEvents };
 }
 
 describe('the reply speaker', () => {
@@ -72,6 +76,12 @@ describe('the reply speaker', () => {
     // An event for a line nobody asked for is ignored.
     r.speaker.onSpeech({ id: 99, event: 'failed' });
     expect(r.device).toEqual([]);
+  });
+
+  test('what the device says about its own reading is not needed, and is safely ignored', () => {
+    const r = rig('absent');
+    r.speaker.say('Hi.');
+    expect(() => r.onEvents[0]?.({ type: 'end' })).not.toThrow();
   });
 
   test('works without a language', () => {

@@ -297,24 +297,27 @@ describe('the voice stream: the reply voice', () => {
   test('it makes no more sound than can wait to be sent: a full backlog pauses the next line until some has gone', async () => {
     const r = await rig();
     await r.run(400);
-    // 300 characters = 30 s = the whole backlog allowance, so the next line waits.
-    r.speak(0, `${'a'.repeat(279)}.`);
-    r.speak(1, `${'b'.repeat(79)}.`);
+    // Each line is 28 s of sound. Two make 56 s, past the 30 s allowance, so the third waits for some to be sent.
+    const line = `${'a'.repeat(279)}.`;
+    r.speak(0, line);
+    r.speak(1, line);
+    r.speak(2, line);
     await r.run(1_000);
-    expect(r.fake.spoken.length).toBeGreaterThanOrEqual(1);
-    const before = r.fake.spoken.length;
-    await r.run(3_000);
-    // Not before about a second of it has been sent down.
-    expect(r.fake.spoken.length).toBeGreaterThanOrEqual(before);
-    await r.run(40_000);
-    expect(r.fake.spoken).toEqual([`${'a'.repeat(279)}.`, `${'b'.repeat(79)}.`]);
+    expect(r.fake.spoken).toEqual([line, line]);
+    // 56 s of sound is waiting and it plays out at real time: after 20 s there are 36 s left, still past the allowance.
+    await r.run(20_000);
+    expect(r.fake.spoken).toEqual([line, line]);
+    // After 30 s more only 6 s is left, so the third line is made.
+    await r.run(10_000);
+    expect(r.fake.spoken).toEqual([line, line, line]);
+    await r.run(60_000);
     expect(
       r
         .audio()
         .filter(unit => unit.snapshot.audio?.last === true)
         .map(unit => unit.snapshot.audio?.id),
-    ).toEqual([0, 1]);
-  });
+    ).toEqual([0, 1, 2]);
+  }, 60_000);
 
   test('a stream that ends while a line is being made drops it without a word, and sends nothing after the end', async () => {
     let release: (() => void) | undefined;
