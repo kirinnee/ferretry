@@ -38,12 +38,14 @@ async function machine() {
   const port = files.port('browsers');
   should((await port.write(DEF, undefined, '# the shared browser\nmode: headless\n')).kind).equal('written');
   const recorded: AuditDraft[] = [];
+  const failures: unknown[] = [];
   auditStealthSwitch({
     read: () => port.file(DEF)?.stealth ?? 'off',
     watch: listener => port.watch(DEF, listener),
     record: async draft => void recorded.push(draft),
+    failed: error => void failures.push(error),
   });
-  return { files, port, recorded };
+  return { files, port, recorded, failures };
 }
 
 describe('browsers stealth switch — held when it comes on, immediate when it goes off', () => {

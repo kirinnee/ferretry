@@ -36,11 +36,10 @@ const SCENES = [
     },
   },
   {
-    scene: 'stealth',
+    scene: 'stealth-held',
     name: 'browser-stealth-held',
     visible: [SWITCH],
     inspect: async (page: Page) => {
-      await page.click(SWITCH);
       await page.waitForSelector('[data-setup-note="browser-stealth-held"]', { state: 'visible' });
       expect(await page.getAttribute(SWITCH, 'aria-checked')).toBe('false');
     },

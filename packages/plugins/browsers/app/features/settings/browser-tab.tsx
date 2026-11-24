@@ -40,6 +40,10 @@ type Reading =
   | { readonly kind: 'shown'; readonly document: BrowsersDocument }
   | { readonly kind: 'unavailable'; readonly sentence: string };
 
+/** The switch in effect: an `on` the daemon holds for the owner is not in effect yet, so it reads off. */
+const stealthInEffect = (document: BrowsersDocument): StealthSwitch =>
+  document.held && document.config.stealth === 'on' ? 'off' : document.config.stealth;
+
 export function BrowserTab({ client }: { readonly client: CallClient }) {
   // Which machine this tab is for, and whether it answers: the view's place (shell contract S1).
   const place = useViewPlace();
@@ -104,8 +108,9 @@ export function BrowserTab({ client }: { readonly client: CallClient }) {
             save={(mode: BrowserMode) => save({ mode })}
           />
           <BrowserStealthSection
-            key={reading.document.config.stealth}
-            stealth={reading.document.config.stealth}
+            key={stealthInEffect(reading.document)}
+            stealth={stealthInEffect(reading.document)}
+            held={reading.document.held && reading.document.config.stealth === 'on'}
             save={(stealth: StealthSwitch) => save({ stealth })}
           />
           <BrowserProxySection

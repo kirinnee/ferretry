@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { AuditDetailSchema, AuditRecordSchema } from '@ferretry/core-gate/contract';
 import { AUDIT, StealthAuditDetailSchemas } from '../../../contract/index.ts';
+import { auditStealthSwitch } from '../../../daemon/stealth-audit.ts';
 
 const SECRETS = [
   '${secret:CAPSOLVER_KEY}',
@@ -90,5 +91,27 @@ describe('stealth audit records hold no secret', () => {
         const schema = StealthAuditDetailSchemas[name];
         expect(schema.safeParse({ ...valid[name], [field]: secret }).success).toBe(false);
       }
+  });
+});
+
+describe('the stealth switch audit', () => {
+  test('hears a record that could not be written instead of leaving an unhandled rejection', async () => {
+    let value: 'off' | 'on' = 'off';
+    let wake: () => void = () => undefined;
+    const heard: unknown[] = [];
+    auditStealthSwitch({
+      read: () => value,
+      watch: listener => {
+        wake = listener;
+        return () => undefined;
+      },
+      record: () => Promise.reject(new Error('the audit log is full')),
+      failed: error => void heard.push(error),
+    });
+    value = 'on';
+    wake();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(heard.map(error => (error as Error).message)).toEqual(['the audit log is full']);
   });
 });

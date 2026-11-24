@@ -329,6 +329,10 @@ export function buildBrowsers(
     read: () => config()?.stealth ?? 'off',
     watch: listener => kernel.config.watch(manifest.data.config[0] as ConfigFileDef<BrowsersConfig>, listener),
     record: async draft => await ctx.needs.gate.audit(draft),
+    failed: error =>
+      kernel.log.error('the stealth switch audit record was not written', {
+        reason: error instanceof Error ? error.message : 'unknown',
+      }),
   });
 
   kernel.lifecycle.onStop(async () => {

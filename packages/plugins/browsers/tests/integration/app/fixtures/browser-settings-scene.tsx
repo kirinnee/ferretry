@@ -1,5 +1,5 @@
 /**
- * The browser entry for the Browser scene=mode|stealth|stealth-on|proxy|tab's visual tests (browser-mode, browser-proxy, browser-tab): the REAL tab, sections,
+ * The browser entry for the Browser scene=mode|stealth|stealth-held|stealth-on|proxy|tab's visual tests (browser-mode, browser-proxy, browser-tab): the REAL tab, sections,
  * status line and banners over a scripted client — no daemon, no network. Every name, address and secret name is fake.
  *
  *   ?theme=<family>-<mode>&scene=mode|proxy|tab|status|firewall|invalid|proxy-test
@@ -91,7 +91,6 @@ const FIREWALL_VIEWS: readonly BrowserStateView[] = [
 /** Only `changes` is read while nothing is pending: the state a settled section shows. */
 const OPEN = { kind: 'open' } as const;
 const saved = async () => ({ kind: 'saved' }) as const;
-const held = async () => ({ kind: 'pending', sentence: 'Saved, but not in effect until you confirm it.' }) as const;
 
 const status = {
   sessionId: 'session-a',
@@ -183,10 +182,13 @@ const body = (): React.ReactNode => {
         </>
       );
     case 'stealth':
-      // Off, and the owner turning it on: the daemon holds the loosening, so the page says it waits.
-      return <BrowserStealthSection stealth="off" save={held} />;
+      // Off, nothing waiting.
+      return <BrowserStealthSection stealth="off" held={false} save={saved} />;
+    case 'stealth-held':
+      // The file holds an on the owner has not confirmed: the value in effect is off, and the page says it waits.
+      return <BrowserStealthSection stealth="off" held save={saved} />;
     case 'stealth-on':
-      return <BrowserStealthSection stealth="on" save={saved} />;
+      return <BrowserStealthSection stealth="on" held={false} save={saved} />;
     case 'proxy':
       return (
         <>

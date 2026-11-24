@@ -7,6 +7,8 @@ export interface StealthSwitchAuditPorts {
   /** Hears the version in effect move (`kernel.config.watch`). */
   readonly watch: (listener: () => void) => () => void;
   readonly record: (draft: AuditDraft) => Promise<void>;
+  /** Hears a record that could not be written, so a failed audit write is said, not an unhandled rejection. */
+  readonly failed: (error: unknown) => void;
 }
 
 /**
@@ -21,6 +23,8 @@ export function auditStealthSwitch(ports: StealthSwitchAuditPorts): () => void {
     if (now === last) return;
     const detail = StealthAuditDetailSchemas.switched.parse({ from: last, to: now });
     last = now;
-    void ports.record({ event: AUDIT.stealthSwitched, actor: { kind: 'host' }, outcome: 'succeeded', detail });
+    ports
+      .record({ event: AUDIT.stealthSwitched, actor: { kind: 'host' }, outcome: 'succeeded', detail })
+      .catch(ports.failed);
   });
 }
