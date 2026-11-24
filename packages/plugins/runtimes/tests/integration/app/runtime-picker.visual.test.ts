@@ -6,7 +6,7 @@
  *
  *  - at rest the bar reads `<model> · <thinking> · <speed>` on ONE line under the row, the box keeps the row, Send is
  *    inside the window; no list and no error, and no model catalog was asked for;
- *  - a tap on any of the three opens ONE popover wholly inside the window, above that chip, with the model, thinking and
+ *  - a tap on any of the three opens ONE popover (a bottom sheet on a phone) wholly inside the window, above that chip, with the model, thinking and
  *    speed lists, the tapped one holding focus;
  *  - with no runtime discovery the popover says so once, quietly (no red alert).
  *
@@ -145,13 +145,13 @@ for (const mode of ['light', 'dark'] as const)
       });
 
       for (const which of ['model', 'effort', 'speed'] as const)
-        it(`at ${size.name}: a tap on the ${which} readout opens a popover wholly inside the window, above it, with all three lists`, async () => {
+        it(`at ${size.name}: a tap on the ${which} readout opens a popover (a phone: the sheet) wholly inside the window, above it (a phone: docked to the bottom), with all three lists`, async () => {
           const { tab, close } = await open(size, mode);
           try {
             await tab.click(`[data-runtime-chip="${which}"]`);
             await tab.waitForSelector('[data-runtime-popover] [role="menu"]');
             await tab.waitForSelector('[data-runtime-popover] [role="menuitemradio"]');
-            await tab.waitForTimeout(150);
+            await tab.waitForTimeout(size.phone ? 450 : 150);
             await shot(tab, `${size.name}-${mode}-open-${which}`);
             const focused = await tab.evaluate(
               () => document.activeElement?.closest('[data-runtime-list]')?.getAttribute('data-runtime-list') ?? null,
@@ -175,7 +175,11 @@ for (const mode of ['light', 'dark'] as const)
             expect(box.popover.top, 'inside the window, top').toBeGreaterThanOrEqual(0);
             expect(box.popover.left, 'inside the window, left').toBeGreaterThanOrEqual(0);
             expect(box.popover.right, 'inside the window, right').toBeLessThanOrEqual(box.window.width);
-            expect(box.popover.bottom, 'above the chip').toBeLessThanOrEqual(box.chipTop);
+            if (size.phone)
+              expect(box.popover.bottom, 'the sheet is docked to the bottom edge').toBeLessThanOrEqual(
+                box.window.height + 1,
+              );
+            else expect(box.popover.bottom, 'above the chip').toBeLessThanOrEqual(box.chipTop);
             expect(box.menus, 'the model, thinking and speed lists').toBe(3);
             await tab.keyboard.press('Escape');
             await tab.waitForSelector('[data-runtime-popover]', { state: 'detached' });
@@ -284,6 +288,124 @@ for (const mode of ['light', 'dark'] as const)
           expect(items.find(item => item.text.includes('Fast'))?.disabled, 'Fast is not offered on a guess').toBe(true);
           expect(items.find(item => item.text.includes('Fast'))?.text).toContain('the model list is unavailable');
           expect(items.find(item => item.text.includes('Normal'))?.disabled).toBe(false);
+        } finally {
+          await close();
+        }
+      });
+
+    // L226 + L247a + L279 (end-list B4): an UNPINNED ferret (no launch model) the harness reports running Opus. The bar names
+    // that model, the model list ticks it, and Fast is offered exactly as chat decides — all from the one observed model.
+    for (const size of WINDOWS)
+      it(`at ${size.name}: an unpinned ferret the harness reports on Opus names it, ticks it, and offers Fast`, async () => {
+        const { tab, close } = await open(size, mode, '&model=none&observed=claude-opus-5-5');
+        try {
+          const seen = await rest(tab);
+          expect(seen.chipTexts, 'the bar names the model in force, never "Default"').toEqual([
+            'claude-opus-5-5',
+            'high',
+            'Normal',
+          ]);
+          await tab.click('[data-runtime-chip="model"]');
+          await tab.waitForSelector('[data-runtime-list="model"] [role="menuitemradio"]');
+          await tab.waitForTimeout(450);
+          await shot(tab, `${size.name}-${mode}-observed-model`);
+          const ticked = await tab.evaluate(() =>
+            [...document.querySelectorAll('[data-runtime-list="model"] [role="menuitemradio"]')]
+              .filter(item => item.getAttribute('aria-checked') === 'true')
+              .map(item => item.textContent ?? ''),
+          );
+          expect(ticked.length, 'exactly one model is ticked').toBe(1);
+          expect(ticked[0], 'the one in force').toContain('Opus 5.5');
+          const fast = await tab.evaluate(() => {
+            const item = [...document.querySelectorAll<HTMLButtonElement>('[data-runtime-list="speed"] button')].find(
+              button => button.textContent?.includes('Fast'),
+            );
+            return { disabled: item?.disabled, text: item?.textContent ?? '' };
+          });
+          expect(fast.disabled, `Fast is offered for a model that has it (${fast.text})`).toBe(false);
+        } finally {
+          await close();
+        }
+      });
+
+    // L247b: three different reasons Fast is not offered, each in its own sentence.
+    for (const [name, extra, sentence] of [
+      ['the model is not known', '&model=none', 'the model is not known'],
+      ['the model is not in the list', '&model=claude-unlisted-9', 'this model is not in the list'],
+      ['the model has no fast mode', '&model=claude-sonnet-5-5', 'has no fast mode'],
+    ] as const)
+      it(`says why Fast is not offered when ${name}`, async () => {
+        const { tab, close } = await open(WINDOWS[0], mode, extra);
+        try {
+          await tab.click('[data-runtime-chip="speed"]');
+          await tab.waitForFunction(
+            expected => document.querySelector('[data-runtime-list="speed"]')?.textContent?.includes(expected),
+            sentence,
+          );
+          const text = await tab.evaluate(
+            () => document.querySelector('[data-runtime-list="speed"]')?.textContent ?? '',
+          );
+          expect(text).toContain(sentence);
+          for (const other of ['the model is not known', 'this model is not in the list', 'has no fast mode'])
+            if (other !== sentence) expect(text, `only its own reason, not "${other}"`).not.toContain(other);
+        } finally {
+          await close();
+        }
+      });
+
+    // L260: the model menu shows the friendly name; the raw id is the tooltip only.
+    it('shows the model by its name and keeps the raw id as a tooltip only', async () => {
+      const { tab, close } = await open(WINDOWS[0], mode);
+      try {
+        await tab.click('[data-runtime-chip="model"]');
+        await tab.waitForSelector('[data-runtime-list="model"] [role="menuitemradio"]');
+        const menu = await tab.evaluate(() => {
+          const list = document.querySelector('[data-runtime-list="model"]');
+          const item = [...(list?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])].find(button =>
+            button.textContent?.includes('Opus 5.5'),
+          );
+          return { text: list?.textContent ?? '', title: item?.title ?? '' };
+        });
+        expect(menu.text).toContain('Opus 5.5');
+        expect(menu.text, 'no raw id drawn in the list').not.toContain('claude-opus-5-5');
+        expect(menu.title, 'the id is on demand').toContain('claude-opus-5-5');
+      } finally {
+        await close();
+      }
+    });
+
+    // E47b: a phone gets a bottom sheet (v4's shape), a wider window keeps the popover.
+    for (const size of WINDOWS)
+      it(`at ${size.name}: opens ${size.phone ? 'a bottom sheet' : 'the popover'}, with all three lists`, async () => {
+        const { tab, close } = await open(size, mode);
+        try {
+          await tab.click('[data-runtime-chip="model"]');
+          await tab.waitForSelector('[data-runtime-popover] [role="menuitemradio"]');
+          await tab.waitForTimeout(400);
+          await shot(tab, `${size.name}-${mode}-presentation`);
+          const seen = await tab.evaluate(() => {
+            const sheet = document.querySelector('[data-bottom-sheet] [role="dialog"]')?.getBoundingClientRect();
+            return {
+              sheets: document.querySelectorAll('[data-bottom-sheet]').length,
+              sheetBottom: sheet?.bottom ?? NaN,
+              sheetLeft: sheet?.left ?? NaN,
+              sheetRight: sheet?.right ?? NaN,
+              windowHeight: window.innerHeight,
+              windowWidth: window.innerWidth,
+              menus: document.querySelectorAll('[data-runtime-popover] [role="menu"]').length,
+              dialogs: document.querySelectorAll('[role="dialog"]').length,
+            };
+          });
+          expect(seen.menus, 'the model, thinking and speed lists').toBe(3);
+          expect(seen.dialogs, 'one dialog, not two nested').toBe(1);
+          if (size.phone) {
+            expect(seen.sheets, 'a bottom sheet').toBe(1);
+            expect(Math.abs(seen.sheetBottom - seen.windowHeight), 'docked to the bottom edge').toBeLessThanOrEqual(2);
+            expect(seen.sheetLeft, 'inside the window').toBeGreaterThanOrEqual(0);
+            expect(seen.sheetRight, 'inside the window').toBeLessThanOrEqual(seen.windowWidth);
+          } else expect(seen.sheets, 'no sheet on a wide window').toBe(0);
+          await tab.keyboard.press('Escape');
+          await tab.waitForSelector('[data-runtime-popover]', { state: 'detached' });
         } finally {
           await close();
         }

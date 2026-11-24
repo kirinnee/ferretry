@@ -7,7 +7,8 @@
  *
  *   ?compact=1       the phone's composer layout
  *   ?discovery=0     a daemon whose runtime discovery is not connected (the catalog read fails)
- *   ?model=<id>      the model the ferret runs (default: Opus 5.5; Sonnet and Haiku have no fast mode)
+ *   ?model=<id>      the model the ferret was LAUNCHED on (default: Opus 5.5; Sonnet and Haiku have no fast mode); `none` is an unpinned ferret
+ *   ?observed=<id>   the model the harness REPORTED running (the summary's `observedModel`)
  *   ?theme=<family>-<mode>
  *
  * `window.__asked` is every route the picker called, in order.
@@ -24,7 +25,9 @@ const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const compact = params.get('compact') === '1';
 const discovery = params.get('discovery') !== '0';
-const model = params.get('model') ?? 'claude-opus-5-5';
+const launched = params.get('model') ?? 'claude-opus-5-5';
+const model = launched === 'none' ? undefined : launched;
+const observed = params.get('observed') ?? undefined;
 
 const FERRET = 'mvzoe001-5e7d0b1e';
 const asked: string[] = [];
@@ -78,7 +81,8 @@ const client = {
         runner: 'tmux',
         folder: '/work/project',
         state: 'idle',
-        model,
+        ...(model === undefined ? {} : { model }),
+        ...(observed === undefined ? {} : { observedModel: observed }),
         effort: 'high',
         createdAt: '2026-11-01T00:00:00.000Z',
         stateAt: '2026-11-01T00:00:00.000Z',

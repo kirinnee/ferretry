@@ -68,6 +68,16 @@ describe('readRuntimeSessionView', () => {
     expect(launchedModel(view.config)).toBe('gpt-5.6');
   });
 
+  it('carries the model the harness reported as the one in force, ahead of the launch model and for an unpinned ferret', () => {
+    const pinned = parseRuntimeSessionView({ ...FERRET, observedModel: 'gpt-6' });
+    expect(pinned.state.observedModel).toBe('gpt-6');
+    expect(pinned.config.model, 'the launch model stays what was asked for').toBe('gpt-5.6');
+    const unpinned = parseRuntimeSessionView({ ...ferretSummary({ id: 's-2' }), observedModel: 'claude-opus-5-5' });
+    expect(unpinned.state.observedModel).toBe('claude-opus-5-5');
+    expect(unpinned.config.model).toBeUndefined();
+    expect('observedModel' in parseRuntimeSessionView(ferretSummary({ id: 's-3' })).state).toBe(false);
+  });
+
   it('says a live ferret is running with the turn the daemon decided, and a stopped one is stopped', () => {
     expect(parseRuntimeSessionView(ferretSummary({ id: 's-1', state: 'working' })).state).toEqual({
       status: 'running',
