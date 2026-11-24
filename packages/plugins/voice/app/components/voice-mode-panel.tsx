@@ -27,7 +27,6 @@ import type { StreamSnapshot, StreamState } from '../../contract/index.ts';
 import { useReadAloudController } from '../hooks/use-read-aloud.ts';
 import { browserMic } from '../lib/stream/mic-source.ts';
 import { type MicSource, openVoiceStream, type VoiceStreamHandle } from '../lib/stream/voice-stream.ts';
-import { IDLE } from '../lib/voice-chat/read-aloud.ts';
 import { useVoiceMode, type VoiceModeStore } from '../lib/voice-mode/voice-mode-store.ts';
 import { Button, type VoicePluginClient } from '../shell-voice.ts';
 
@@ -129,11 +128,8 @@ function VoiceModeSession({ ferretId, machine, store, client, createMic, turn }:
   const applied = useRef(false);
 
   const reader = useReadAloudController();
-  const reading = useSyncExternalStore(
-    reader.subscribe,
-    () => reader.getState().status === 'reading',
-    () => IDLE.status === 'reading',
-  );
+  const isReading = (): boolean => reader.getState().status === 'reading';
+  const reading = useSyncExternalStore(reader.subscribe, isReading, isReading);
   const muted = userMuted || reading;
 
   useEffect(() => {

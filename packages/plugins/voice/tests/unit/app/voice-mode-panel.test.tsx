@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { PluginSocket, PluginSocketListeners } from '@ferretry/kernel/manifest';
 import type { ReactElement } from 'react';
+import { renderToString } from 'react-dom/server';
 import { type StreamSnapshot, UNIT_SAMPLES, decodeUplinkUnit, encodeDownlinkUnit } from '../../../contract/index.ts';
 import { VoiceModeSlot } from '../../../app/components/voice-mode-panel.tsx';
 import { ReadAloudProvider } from '../../../app/hooks/use-read-aloud.ts';
@@ -243,6 +244,20 @@ describe('voice mode in front of the composer', () => {
     expect(text('[data-voice-mode-notice]')).toContain('desk stopped hearing this device');
   });
 
+  test.each([
+    [4429, 'desk is already serving voice chats.'],
+    [4450, 'desk could not keep up, so voice mode ended.'],
+    [4401, 'This device may no longer use voice on this machine.'],
+    [4403, 'Voice mode also needs permission to talk to ferrets on this machine.'],
+    [1011, 'Lost desk (closed 1011). Voice mode ended.'],
+  ])('a close with code %i and no sentence of its own is said in words', async (code, sentence) => {
+    const r = rig();
+    mounted = await mount(tree(r));
+    await start(r);
+    await interact(() => r.listeners().onClose('closed', code));
+    expect(text('[data-voice-mode-notice]')).toContain(sentence);
+  });
+
   test('a microphone that is refused ends voice mode with what to do', async () => {
     const r = rig();
     const refused: MicSource = {
@@ -285,5 +300,15 @@ describe('voice mode in front of the composer', () => {
     mounted = null;
     expect(r.store.get('ferret-1').active).toBe(false);
     expect(r.micStops()).toBe(1);
+  });
+});
+
+describe('voice mode on a server render', () => {
+  test('a page drawn on the server (no microphone, no stream) shows the composer, never the panel', () => {
+    const r = rig();
+    r.store.start('ferret-1', 'desk');
+    const html = renderToString(tree(r));
+    expect(html).toContain('data-composer');
+    expect(html).not.toContain('data-voice-mode="on"');
   });
 });
