@@ -1,7 +1,8 @@
 /**
- * THE SECURITY SETTINGS' sticky Save bar never covers a row at the end of the page: the content ends with room equal to
- * the bar's height (`fixtures/security-settings-scene.tsx`), in a real browser on a phone and a desktop, light and dark,
- * over fake data. Set `FY_SECURITY_SHOTS_DIR` to keep `<viewport>-<scheme>-<where>.png`.
+ * THE SECURITY SETTINGS' Save bar covers nothing at any scroll position (C59 O11 R6: it rode over a row in the first view at 1440 and
+ * floated above the scroll area's padding). It is in flow at the end of its form, so at every scroll position no row of the page
+ * overlaps it, and at the end of the page it rests directly under the last row (`fixtures/security-settings-scene.tsx`), in a real
+ * browser on a phone and a desktop, light and dark, over fake data. Set `FY_SECURITY_SHOTS_DIR` to keep `<viewport>-<scheme>-<where>.png`.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -54,14 +55,15 @@ afterAll(async () => {
 });
 
 const VIEWPORTS = [
-  { name: '1440', width: 1_440, height: 420, phone: false },
+  { name: '1440', width: 1_440, height: 900, phone: false },
+  { name: '1440-short', width: 1_440, height: 420, phone: false },
   { name: '390', width: 390, height: 420, phone: true },
 ] as const;
 
 describe('the Security settings Save bar', () => {
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const)
-      it(`leaves the last row clear of the bar at the end of the page (${viewport.name}, ${scheme})`, async () => {
+      it(`covers no row at any scroll position (${viewport.name}, ${scheme})`, async () => {
         const context = await browser.newContext({
           viewport: { width: viewport.width, height: viewport.height },
           colorScheme: scheme,
@@ -77,32 +79,45 @@ describe('the Security settings Save bar', () => {
         try {
           await tab.goto(`${origin}/?theme=studio-${scheme}`);
           await tab.waitForSelector('[data-security-save]', { timeout: 15_000 });
-          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-top.png`) });
-          // Part-way down, with the Limits form entered: the bar is stuck at the foot and covers whatever scrolls under it.
-          await tab.evaluate(() => {
-            const group = document.querySelector('[data-setting-saves="on-save"]') as HTMLElement | null;
-            document.querySelector('[data-scene-scroll]')?.scrollTo(0, (group?.offsetTop ?? 0) - 40);
+          // The bar overlaps nothing at any scroll position: walk the page in steps and, at each, test the bar against every row.
+          const overlaps = await tab.evaluate(async () => {
+            const scroller = document.querySelector('[data-scene-scroll]') as HTMLElement;
+            const found: string[] = [];
+            const check = (at: number): void => {
+              const bar = (document.querySelector('[data-setting-savebar]') as HTMLElement).getBoundingClientRect();
+              for (const row of document.querySelectorAll('[data-security-settings] ul > li')) {
+                const box = row.getBoundingClientRect();
+                const across = Math.min(bar.bottom, box.bottom) - Math.max(bar.top, box.top);
+                if (across > 1) found.push(`${at}: ${(row.textContent ?? '').slice(0, 30)} (${Math.round(across)}px)`);
+              }
+            };
+            for (let at = 0; at <= scroller.scrollHeight; at += 60) {
+              scroller.scrollTo(0, at);
+              await new Promise(resolve => requestAnimationFrame(() => resolve(null)));
+              check(at);
+            }
+            return found;
           });
-          await tab.waitForTimeout(150);
-          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-mid.png`) });
-          await tab.evaluate(() => {
+          expect(overlaps).toEqual([]);
+          const bar = await tab.evaluate(() => {
             const scroller = document.querySelector('[data-scene-scroll]');
             scroller?.scrollTo(0, scroller.scrollHeight);
+            const box = (document.querySelector('[data-setting-savebar]') as HTMLElement).getBoundingClientRect();
+            const rows = [...document.querySelectorAll('[data-security-settings] ul > li')];
+            const last = rows.at(-1)?.getBoundingClientRect();
+            return {
+              position: getComputedStyle(document.querySelector('[data-setting-savebar]') as HTMLElement).position,
+              gap: box.top - (last?.bottom ?? 0),
+            };
           });
-          await tab.waitForTimeout(150);
-          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-end.png`) });
-          // The foot of the last row, against the top of the bar: the bar rests where it sticks, and the row above it ends clear.
-          const gap = await tab.evaluate(() => {
-            const bar = document.querySelector('[data-setting-savebar]')?.getBoundingClientRect();
-            const rows = [...document.querySelectorAll('[data-security-settings] ul > li')].map(row =>
-              row.getBoundingClientRect(),
-            );
-            const last = rows.at(-1);
-            return bar === undefined || last === undefined ? null : { gap: bar.top - last.bottom, bar: bar.height };
-          });
-          expect(gap).not.toBeNull();
-          // Room equal to the bar's own height (a rounding pixel either way).
-          expect(Math.abs((gap?.gap ?? 0) - (gap?.bar ?? 0))).toBeLessThanOrEqual(1.5);
+          expect(bar.position).toBe('static');
+          // Directly under the last row, with no room reserved between them.
+          expect(Math.abs(bar.gap)).toBeLessThanOrEqual(1.5);
+          if (shotsDir !== '') {
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-end.png`) });
+            await tab.evaluate(() => document.querySelector('[data-scene-scroll]')?.scrollTo(0, 0));
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-top.png`) });
+          }
         } finally {
           await context.close();
         }
