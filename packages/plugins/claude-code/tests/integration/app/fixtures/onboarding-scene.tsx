@@ -4,7 +4,7 @@
  * rule 8). Nothing reads a network. Every name, path and command below is made up. The daemon records what reached it on
  * `window.__fake` (every PUT of the config file, with its YAML), so the visual test can prove what Next wrote.
  *
- *   ?page=installed|installed-manual|sign-in|import-choice|conversations|permission|permission-auto
+ *   ?page=installed|installed-manual|sign-in|import-choice|conversations
  *        |kind-settings|kind-model-set|kind-instructions|kind-skills|kind-mcp
  *   ?theme=<family>-<mode>   ?save=fail (the first PUT is refused)
  *   ?reread=withheld (the read AFTER a refused PUT is withheld, the one after that readable again)
@@ -27,7 +27,6 @@ import {
   SkillsPage,
 } from '../../../../app/features/onboarding/import/kind-page.tsx';
 import { SignInPage } from '../../../../app/features/onboarding/sign-in-page.tsx';
-import { PermissionPage } from '../../../../app/features/onboarding/permission-page.tsx';
 import { importRoutes, scanOf } from '../../../fixtures/onboarding/scan.ts';
 
 const params = new URLSearchParams(window.location.search);
@@ -41,8 +40,6 @@ const TITLES: Record<string, string> = {
   'sign-in': 'Sign in to Claude',
   'import-choice': 'What to bring over',
   conversations: 'Conversations',
-  permission: 'Permissions',
-  'permission-auto': 'Permissions',
   'kind-settings': 'Settings',
   'kind-model-set': 'Models',
   'kind-instructions': 'CLAUDE.md',
@@ -77,7 +74,6 @@ let withheldServed = false;
 (window as unknown as { __fake: Fake }).__fake = fake;
 
 const FILE = 'binary: /fake/bin/claude\npermissionMode: skip\nhostHistory: true\n';
-const AUTO_FILE = 'binary: /fake/bin/claude\npermissionMode: auto\nhostHistory: true\n';
 let etag = 1;
 const kindRoutes = page.startsWith('kind-') ? importRoutes(scanOf()) : {};
 const table: Record<string, (request?: { body?: unknown }) => unknown> = {
@@ -105,7 +101,7 @@ const table: Record<string, (request?: { body?: unknown }) => unknown> = {
     if (withheld) withheldServed = true;
     return {
       path: 'harness-claude-code.yaml',
-      text: withheld ? WITHHELD : (fake.puts.at(-1)?.text ?? (page === 'permission-auto' ? AUTO_FILE : FILE)),
+      text: withheld ? WITHHELD : (fake.puts.at(-1)?.text ?? FILE),
       etag: `e${String(etag)}`,
       exists: true,
       state:
@@ -238,10 +234,8 @@ function Host() {
         const Kind = KIND_PAGES[page as keyof typeof KIND_PAGES];
         return <Kind client={client} step={step} />;
       })()
-    ) : page === 'conversations' ? (
-      <ConversationsPage client={client} step={step} />
     ) : (
-      <PermissionPage client={client} step={step} />
+      <ConversationsPage client={client} step={step} />
     );
   return (
     <div style={{ height: '100vh', overflow: 'auto' }}>

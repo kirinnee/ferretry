@@ -484,7 +484,7 @@ describe('the setup flow', () => {
     expect(view.container.querySelector('[data-living-background]')).not.toBeNull();
   });
 
-  it('a page that skips itself draws nothing and the progress total shrinks', async () => {
+  it('a page that skips itself draws nothing and the progress total stays: the passed page is still counted', async () => {
     view = await mount(setup({}).tree);
     await settle();
     await next();
@@ -492,7 +492,7 @@ describe('the setup flow', () => {
     await next(); // welcome -> choose, which sees mode "everything" and skips
     await settle();
     expect(pageKey()).toBe('fake-pack.finish');
-    expect(progressText()).toBe('Fake Pack · page 3 of 5');
+    expect(progressText()).toBe('Fake Pack · page 4 of 6');
     // Back never lands on the skipped page.
     await press('[data-step-back]');
     expect(pageKey()).toBe('fake-pack.welcome');
@@ -993,7 +993,7 @@ describe('a page that is not needed for this run (contract rule 7)', () => {
   const chooseMode = (label: string) => click(label);
   const textOf = (): string => view?.container.textContent ?? '';
 
-  it('Everything is ONE page: the next page is the run page, and the passed-over pages count for nothing', async () => {
+  it('Everything is ONE page: the next page is the run page, and the passed-over pages stay counted (the total never moves)', async () => {
     const run = setup({ machines: [importLike()] });
     view = await mount(run.tree);
     await settle();
@@ -1002,7 +1002,7 @@ describe('a page that is not needed for this run (contract rule 7)', () => {
     await next();
     await settle();
     expect(pageKey()).toBe('fake-pack.run');
-    expect(progressText()).toBe('Fake Pack · page 2 of 2');
+    expect(progressText()).toBe('Fake Pack · page 4 of 4');
     // Back goes to the last page actually shown: not alpha or beta, which drew nothing.
     await press('[data-step-back]');
     expect(pageKey()).toBe('fake-pack.pick');

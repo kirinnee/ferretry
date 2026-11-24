@@ -122,12 +122,14 @@ describe('the feature, its routes and its settings entry', () => {
       'first-run-stepper',
       'agents-step',
       'name-step',
+      'permissions-step',
       'appearance-step',
     ]);
     expect((manifest.ui?.panels ?? []).map(panel => `${panel.slot}.${panel.id}`)).toEqual([
       'daemon.status.first-run-stepper',
       'onboarding.step.agents-step',
       'onboarding.step.name-step',
+      'onboarding.step.permissions-step',
       'onboarding.step.appearance-step',
     ]);
     // The flow, the daemon-less first run and its hand-off link are drawn alone: no drawer, bars or side column.
@@ -145,6 +147,7 @@ describe('the feature, its routes and its settings entry', () => {
     expect(manifest.onboarding).toEqual([
       expect.objectContaining({ id: 'agents' }),
       expect.objectContaining({ id: 'name' }),
+      expect.objectContaining({ id: 'permissions' }),
       expect.objectContaining({ id: 'appearance', side: 'client' }),
     ]);
   });

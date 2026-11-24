@@ -37,7 +37,7 @@ describe('app parity', () => {
   });
 
   test('S14 the Claude segment pages are contributed to the onboarding.step slot, beside the two cards', () => {
-    const steps = ['onboarding-installed', 'onboarding-sign-in', 'onboarding-import-choice', 'onboarding-permission'];
+    const steps = ['onboarding-installed', 'onboarding-sign-in', 'onboarding-import-choice', 'onboarding-ready'];
     for (const id of steps) expect(manifest.ui?.panels?.find(panel => panel.id === id)?.slot).toBe('onboarding.step');
     expect(Object.keys(half?.panels ?? {})).toEqual(expect.arrayContaining(steps));
   });

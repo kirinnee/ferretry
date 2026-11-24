@@ -69,6 +69,7 @@ import {
   retreat,
   startRun,
 } from './flow-model.ts';
+import { defaultPick, segmentsOf } from '../agents/agents-model.ts';
 import { foreseenPassedOver, undecidedPages } from './foresight.ts';
 import { readFlowAddress } from './flow-href.ts';
 
@@ -488,15 +489,15 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
           ready.flow,
           pages,
           answered,
-          hidden,
-          // The pages not counted ahead: the ones the answers foresee passing over, the ones not decided yet (a harness before
-          // "Which AI" is answered, an import mode not chosen) and the ones of a harness the person left out.
+          // The pages the answers leave out of the count: the ones they foresee passing over, the ones of a harness the default
+          // pick (before "Which AI" is answered) or the person's pick leaves out. A page that passes itself over while the run goes
+          // on is NOT here: it stays counted, so the total moves only when an answer changes.
           new Set([
             ...foreseenPassedOver(pages, memoryOf),
             ...undecidedPages(
               pages,
-              memoryOf,
               new Set(ready.flow.harnesses.map(harness => harness.key)),
+              new Set(segmentsOf(defaultPick(ready.flow.harnesses), [], ready.flow.harnesses).on),
               picked === undefined &&
                 pages.some(candidate => candidate.key === AGENTS_KEY && !answered.has(candidate.key)),
             ),
@@ -505,7 +506,6 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
               .map(candidate => candidate.key),
           ]),
           page.key,
-          live.trail,
         );
   return {
     loading: loading.kind,

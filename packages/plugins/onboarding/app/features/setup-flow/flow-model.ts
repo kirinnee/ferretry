@@ -203,8 +203,8 @@ const idsOf = (list: unknown): readonly string[] =>
 
 /** What the picker left in Onboarding's run memory (`agentsOn` / `agentsOff`), or `undefined` when nothing was picked in this run. */
 export function pickedOf(memory: Readonly<Record<string, unknown>>): Picked | undefined {
-  if (typeof memory['agentsOn'] !== 'string' || typeof memory['agentsOff'] !== 'string') return undefined;
-  return { on: idsOf(memory['agentsOn']), off: idsOf(memory['agentsOff']) };
+  if (typeof memory.agentsOn !== 'string' || typeof memory.agentsOff !== 'string') return undefined;
+  return { on: idsOf(memory.agentsOn), off: idsOf(memory.agentsOff) };
 }
 
 /**
@@ -244,9 +244,9 @@ export interface ProgressRead {
   readonly segments: readonly { readonly id: string; readonly label: string }[];
   /** The id of the segment (page) on screen: the key of the page. */
   readonly current: string;
-  /** The place of the page on screen among the pages counted so far. */
+  /** The place of the page on screen among the pages counted. */
   readonly step: number;
-  /** The pages counted so far (the ones walked, this one, and the ones known to come). */
+  /** The pages counted: every page the answers so far imply (see `progressOf`). */
   readonly of: number;
   /** Every segment is one page, so the words say "page n of m" (see `StepProgress`). */
   readonly pages: true;
@@ -255,12 +255,14 @@ export interface ProgressRead {
 /**
  * The counter for the page on screen: ONE reading for the words and the bar. The bar has one segment per counted page, so
  * "page n of m" is the lit segment's place among m segments, and the two can never disagree.
- *   - n is the pages the person walked through (the trail, minus any that passed themselves over) plus this one: going
- *     forward it is always one more than before, and only Back lowers it.
- *   - m is n plus the pages known to come: the ones after this page that are not answered, not passed over and not in
- *     `unknown` (the pages the answers so far foresee passing over, plus the pages whose need the person has not decided yet:
- *     a harness not picked yet, an import mode not chosen yet). So m never falls below n; a later answer that adds pages
- *     grows it, and a page that learns it is not needed is simply never counted.
+ *   - m is the FULL set of pages the answers so far imply, in flow order: every page that is not answered before the run, not
+ *     in `excluded` (the pages the answers foresee passing over, the pages of a harness not picked) and not an offer. A page
+ *     that passes itself over WHILE the run goes on (Shells with none, MCP with no servers, an install already there) is still
+ *     counted: its segment is simply passed (lit as done, never landed on), so walking forward never changes m.
+ *   - n is the lit page's place in that list: going forward it only grows (a passed page makes it jump over its segment), and
+ *     only Back lowers it.
+ *   - m changes ONLY when the person changes an answer that adds or removes pages (ticking Codex in "Which AI", choosing what to
+ *     bring over). Until "Which AI" is answered the pick that is ticked by default is counted.
  *   - an OFFER page (see `isOffer`) never counts, unless it is the page on screen: it is held out to a run that goes on anyway.
  * The page on screen always counts.
  */
@@ -268,31 +270,11 @@ export function progressOf(
   flow: Flow,
   pages: readonly FlowStep[],
   answered: ReadonlySet<string>,
-  passed: ReadonlySet<string>,
-  unknown: ReadonlySet<string>,
+  excluded: ReadonlySet<string>,
   at: string,
-  trail: readonly string[],
 ): ProgressRead | undefined {
   const here = pages.find(page => page.key === at);
   if (here === undefined) return undefined;
-  const byKey = new Map(pages.map(page => [page.key, page] as const));
-  const walked = trail
-    .map(key => byKey.get(key))
-    .filter(
-      (page): page is FlowStep => page !== undefined && page.key !== at && !passed.has(page.key) && !isOffer(page.key),
-    );
-  const seen = new Set(walked.map(page => page.key));
-  const index = pages.indexOf(here);
-  const ahead = pages
-    .slice(index + 1)
-    .filter(
-      page =>
-        !seen.has(page.key) &&
-        !answered.has(page.key) &&
-        !passed.has(page.key) &&
-        !unknown.has(page.key) &&
-        !isOffer(page.key),
-    );
   const labels = new Map<string, string>();
   for (const segment of flow.daemon) labels.set(segment.plugin, segment.group);
   for (const segment of flow.client)
@@ -301,11 +283,13 @@ export function progressOf(
     page.phase === 'client' && !OWN_DEVICE_SEGMENT.has(page.plugin)
       ? DEVICE_LABEL
       : (labels.get(page.plugin) ?? page.plugin);
-  const counted = [...walked, here, ...ahead];
+  const counted = pages.filter(
+    page => page.key === here.key || (!answered.has(page.key) && !excluded.has(page.key) && !isOffer(page.key)),
+  );
   return {
     segments: counted.map(page => ({ id: page.key, label: labelOf(page) })),
     current: here.key,
-    step: walked.length + 1,
+    step: counted.indexOf(here) + 1,
     of: counted.length,
     pages: true,
   };

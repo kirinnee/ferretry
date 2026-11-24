@@ -11,6 +11,7 @@ export { createStepperPanel } from '../features/stepper/stepper-panel.tsx';
 export { createSetupFlow } from '../features/setup-flow/setup-flow.tsx';
 export { createAppearancePanel, createNamePanel } from '../features/setup-flow/shell-pages-panels.tsx';
 export { createAgentsPanel } from '../features/agents/agents-panel.tsx';
+export { createPermissionsPanel } from '../features/permissions/permissions-panel.tsx';
 
 import type { DaemonlessPorts, DaemonlessScreenProps } from '@ferretry/app';
 import { ActionRow, browserClipboardWriter, Button } from '@ferretry/app/ui';

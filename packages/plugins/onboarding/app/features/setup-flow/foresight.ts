@@ -5,6 +5,8 @@
  * five import pages are not needed one visit at a time and "1 of 9" would become "2 of 4" a click later. The counter reads
  * this instead: from the plugin's segment memory (the answers already given in this run) it names the pages that WILL pass
  * themselves over, so the page count is right from the page where the answer is given, and moves only when an answer changes.
+ * A page that passes itself over for a reason only the page can know (no shells, no MCP servers) is NOT forecast here: it stays
+ * in the count as a passed page, which keeps the total from moving while the person walks forward.
  *
  * It is a counter's forecast, never a decision: a page still decides for itself when it mounts, and a page that is foreseen
  * but then shown is simply counted again (`progressOf` always counts the page on screen).
@@ -25,6 +27,9 @@ interface Forecast {
   readonly steps: readonly string[];
 }
 
+/** What the "what to bring over" page has ticked when nothing was chosen yet (`importModeOf`'s caller defaults to it). */
+const DEFAULT_IMPORT_MODE = 'everything';
+
 const CHECKLIST_PAGES = ['import-settings', 'import-model-set', 'import-instructions', 'import-skills', 'import-mcp'];
 
 const FORECASTS: readonly Forecast[] = [
@@ -32,7 +37,10 @@ const FORECASTS: readonly Forecast[] = [
   { key: 'importMode', values: ['fresh'], steps: ['import-run'] },
 ];
 
-/** The keys of the pages the answers given so far will pass over. */
+/**
+ * The keys of the pages the answers given so far will pass over. An import mode not chosen yet counts as the page's own default
+ * ("Import everything"), so choosing it moves nothing and the total changes only when the person picks another mode.
+ */
 export function foreseenPassedOver(
   pages: readonly FlowStep[],
   memoryOf: (plugin: string) => StepSegmentMemory,
@@ -43,7 +51,8 @@ export function foreseenPassedOver(
     const memory = memoryOf(page.plugin);
     const passes = FORECASTS.some(rule => {
       const said = memory[rule.key];
-      return typeof said === 'string' && rule.values.includes(said) && rule.steps.includes(page.id);
+      const mode = typeof said === 'string' ? said : DEFAULT_IMPORT_MODE;
+      return rule.values.includes(mode) && rule.steps.includes(page.id);
     });
     if (passes) keys.add(page.key);
   }
@@ -51,24 +60,19 @@ export function foreseenPassedOver(
 }
 
 /**
- * The pages whose need the answers so far do not decide yet, which the counter leaves out until they are: a page that depends on
- * an answer not given (the import checklist before the import mode is chosen), and a harness's pages before "Which AI" is
- * answered. Counting them would show a total that shrinks the moment the answer comes, so the total grows when they turn out
- * to be needed instead. A page on screen always counts (`progressOf`).
+ * The pages of a harness the picker would leave out, until "Which AI" is answered: the pick ticked by default (`defaultOn`) is
+ * counted, so the total changes when the person ticks another harness, never when they just press Next. A page on screen
+ * always counts (`progressOf`).
  */
 export function undecidedPages(
   pages: readonly FlowStep[],
-  memoryOf: (plugin: string) => StepSegmentMemory,
   harnesses: ReadonlySet<string>,
+  defaultOn: ReadonlySet<string>,
   pickPending: boolean,
 ): ReadonlySet<string> {
   const keys = new Set<string>();
-  for (const page of pages) {
-    if (page.phase !== 'daemon') continue;
-    if (pickPending && harnesses.has(page.plugin)) keys.add(page.key);
-    const memory = memoryOf(page.plugin);
-    for (const rule of FORECASTS)
-      if (typeof memory[rule.key] !== 'string' && rule.steps.includes(page.id)) keys.add(page.key);
-  }
+  if (!pickPending) return keys;
+  for (const page of pages)
+    if (page.phase === 'daemon' && harnesses.has(page.plugin) && !defaultOn.has(page.plugin)) keys.add(page.key);
   return keys;
 }

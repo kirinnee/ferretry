@@ -8,7 +8,6 @@ import {
   END,
   markNotNeeded,
   pagesOf,
-  passedOver,
   progressOf,
   retreat,
   startRun,
@@ -118,11 +117,11 @@ describe('the progress counter: ONE reading for the words and the bar', () => {
   const flow = flowOf();
   const pages = pagesOf(flow);
   const none = new Set<string>();
-  const read = (at: string, trail: readonly string[], extra: { passed?: Set<string>; unknown?: Set<string> } = {}) =>
-    progressOf(flow, pages, none, extra.passed ?? none, extra.unknown ?? none, at, trail);
+  const read = (at: string, excluded: Set<string> = none, answered: Set<string> = none) =>
+    progressOf(flow, pages, answered, excluded, at);
 
   test('one segment per counted page: the bar is as long as the total and its lit segment is the place', () => {
-    const state = read('fake-pack.choose', ['onboarding.name', 'fake-pack.welcome']);
+    const state = read('fake-pack.choose');
     expect([state?.step, state?.of]).toEqual([3, 6]);
     expect(state?.segments).toHaveLength(6);
     expect(state?.segments[(state?.step ?? 0) - 1]?.id).toBe(state?.current);
@@ -136,46 +135,37 @@ describe('the progress counter: ONE reading for the words and the bar', () => {
     ]);
   });
 
-  test('walking forward the counter only goes up and never falls below the page on screen', () => {
+  test('walking forward the total never moves and the place only goes up, even over pages that pass themselves over', () => {
     let state = startRun(pages, none);
     const reads: [number, number][] = [];
     for (let guard = 0; state.at !== END && guard < 20; guard += 1) {
-      const now = progressOf(flow, pages, none, passedOver(state), none, state.at, state.trail);
+      const now = progressOf(flow, pages, none, none, state.at);
       reads.push([now?.step ?? 0, now?.of ?? 0]);
+      // The page that is next declares itself not needed on mount: it is passed, and the total stays where it was.
       state = advance(state, pages, none);
+      if (state.at === 'fake-pack.choose') state = markNotNeeded(state, pages, none, 'fake-pack.choose');
     }
     expect(reads).toEqual([
       [1, 6],
       [2, 6],
-      [3, 6],
       [4, 6],
       [5, 6],
       [6, 6],
     ]);
   });
 
-  test('a page that passes over is never counted: the total shrinks but never below the page on screen', () => {
-    const passed = new Set(['fake-pack.choose']);
-    const state = read('fake-pack.finish', ['onboarding.name', 'fake-pack.welcome'], { passed });
-    expect([state?.step, state?.of]).toEqual([3, 5]);
+  test('the total changes only when an answer adds or removes pages', () => {
+    const passes = new Set(['fake-pack.choose', 'fake-pack.finish']);
+    expect(read('fake-pack.welcome')).toMatchObject({ step: 2, of: 6 });
+    expect(read('fake-pack.welcome', passes)).toMatchObject({ step: 2, of: 4 });
   });
 
-  test('pages not decided yet are left out of the total, and the total grows when they turn out to be needed', () => {
-    const unknown = new Set(['fake-pack.choose', 'fake-pack.finish']);
-    expect(read('fake-pack.welcome', ['onboarding.name'], { unknown })).toMatchObject({ step: 2, of: 4 });
-    expect(read('fake-pack.welcome', ['onboarding.name'])).toMatchObject({ step: 2, of: 6 });
-  });
-
-  test('the page on screen always counts, even when it was foreseen to pass over', () => {
-    const unknown = new Set(['fake-pack.choose']);
-    expect(read('fake-pack.choose', ['onboarding.name', 'fake-pack.welcome'], { unknown })).toMatchObject({
-      step: 3,
-      of: 6,
-    });
+  test('the page on screen always counts, even when the answers leave it out', () => {
+    expect(read('fake-pack.choose', new Set(['fake-pack.choose']))).toMatchObject({ step: 3, of: 6 });
   });
 
   test('an answered-before page is not counted', () => {
-    const state = progressOf(flow, pages, new Set(['onboarding.name']), none, none, 'fake-pack.welcome', []);
+    const state = read('fake-pack.welcome', none, new Set(['onboarding.name']));
     expect([state?.step, state?.of]).toEqual([1, 5]);
   });
 
@@ -186,43 +176,13 @@ describe('the progress counter: ONE reading for the words and the bar', () => {
       { key: 'projects.github', plugin: 'projects', id: 'github', phase: 'client' },
     ] as never;
     const last = pagesOf(offered).at(-1)?.key ?? '';
-    expect(
-      progressOf(
-        offered,
-        withOffer,
-        none,
-        none,
-        none,
-        last,
-        pagesOf(offered)
-          .slice(0, -1)
-          .map(page => page.key),
-      ),
-    ).toMatchObject({
-      step: 6,
-      of: 6,
-    });
-    expect(
-      progressOf(
-        offered,
-        withOffer,
-        none,
-        none,
-        none,
-        'projects.github',
-        pagesOf(offered).map(page => page.key),
-      ),
-    ).toMatchObject({
-      step: 7,
-      of: 7,
-    });
+    expect(progressOf(offered, withOffer, none, none, last)).toMatchObject({ step: 6, of: 6 });
+    expect(progressOf(offered, withOffer, none, none, 'projects.github')).toMatchObject({ step: 7, of: 7 });
   });
 
   test('Back lowers the place by one and nothing else', () => {
-    const forward = read('fake-pack.finish', ['onboarding.name', 'fake-pack.welcome', 'fake-pack.choose']);
-    const back = read('fake-pack.choose', ['onboarding.name', 'fake-pack.welcome']);
-    expect([forward?.step, forward?.of]).toEqual([4, 6]);
-    expect([back?.step, back?.of]).toEqual([3, 6]);
+    expect(read('fake-pack.finish')).toMatchObject({ step: 4, of: 6 });
+    expect(read('fake-pack.choose')).toMatchObject({ step: 3, of: 6 });
   });
 });
 
@@ -243,15 +203,16 @@ describe('the pages the answers given so far pass over', () => {
   const named = (mode: string | undefined) => (plugin: string) =>
     plugin === 'claude-code' && mode !== undefined ? { importMode: mode } : {};
 
-  test('before the import mode is chosen the checklist and the run page are undecided; a chosen mode decides them', () => {
-    expect([...undecidedPages(claude(...ids), named(undefined), new Set(), false)].length).toBe(6);
-    expect(undecidedPages(claude(...ids), named('custom'), new Set(), false).size).toBe(0);
+  test('no import mode chosen yet counts as the page default, Import everything: the checklist is passed, the run page is not', () => {
+    expect(foreseenPassedOver(claude(...ids), named(undefined)).size).toBe(5);
+    expect(foreseenPassedOver(claude(...ids), named('custom')).size).toBe(0);
   });
 
-  test("a harness's pages are undecided until Which AI is answered", () => {
-    const harnesses = new Set(['claude-code']);
-    expect(undecidedPages(claude(...ids), named('custom'), harnesses, true).size).toBe(ids.length);
-    expect(undecidedPages(claude(...ids), named('custom'), harnesses, false).size).toBe(0);
+  test("a harness's pages the default pick leaves out are undecided until Which AI is answered", () => {
+    const harnesses = new Set(['claude-code', 'codex']);
+    expect(undecidedPages(claude(...ids), harnesses, new Set(['claude-code']), true).size).toBe(0);
+    expect(undecidedPages(claude(...ids), harnesses, new Set(['codex']), true).size).toBe(ids.length);
+    expect(undecidedPages(claude(...ids), harnesses, new Set(['codex']), false).size).toBe(0);
   });
 
   test('Import everything passes over the five checklist pages and keeps the run page', () => {
@@ -268,9 +229,8 @@ describe('the pages the answers given so far pass over', () => {
     expect(foreseenPassedOver(claude(...ids), named('fresh')).size).toBe(6);
   });
 
-  test('Choose what to import, or no answer yet (a reload), passes over nothing', () => {
+  test('Choose what to import passes over nothing', () => {
     expect(foreseenPassedOver(claude(...ids), named('choose')).size).toBe(0);
-    expect(foreseenPassedOver(claude(...ids), named(undefined)).size).toBe(0);
   });
 
   test('another plugin that says nothing about an import mode is never touched, and a client page never is', () => {
@@ -322,7 +282,7 @@ describe('a page that is not needed for this run', () => {
     expect(retreat(state).at).toBe('fake-pack.welcome');
   });
 
-  test('is not counted by the progress bar, and Back from the page after it lands on the last page actually shown', () => {
+  test('stays in the count as a passed page, and Back from the page after it lands on the last page actually shown', () => {
     const state = markNotNeeded(
       at(startRun(pages, none), 'fake-pack.choose', ['fake-pack.welcome']),
       pages,
@@ -330,20 +290,8 @@ describe('a page that is not needed for this run', () => {
       'fake-pack.choose',
     );
     const flow = flowOf();
-    expect(
-      progressOf(
-        flow,
-        pages,
-        none,
-        new Set([...state.gone, ...state.notNeeded]),
-        none,
-        'fake-pack.finish',
-        state.trail,
-      ),
-    ).toMatchObject({
-      step: 2,
-      of: 4,
-    });
+    expect(progressOf(flow, pages, none, none, 'fake-pack.finish')).toMatchObject({ step: 4, of: 6 });
+    expect(retreat(state).at).toBe('fake-pack.welcome');
   });
 
   test('a page reached by Back that is no longer needed sends the person on back, or forward when nothing is before it', () => {

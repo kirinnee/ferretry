@@ -45,7 +45,6 @@ const CLAUDE = [
   ['import-mcp', 'MCP servers', 27],
   ['conversations', 'Conversations', 28],
   ['import-run', 'Bring it over', 29],
-  ['permission', 'Permissions', 30],
   ['ready', 'Your runtime', 31],
 ] as const;
 const CODEX = [
@@ -59,7 +58,6 @@ const CODEX = [
   ['import-mcp', 'MCP servers', 47],
   ['conversations', 'Conversations', 48],
   ['import-run', 'Bring it over', 49],
-  ['permission', 'Permissions', 50],
   ['ready', 'Your runtime', 51],
 ] as const;
 
@@ -70,6 +68,7 @@ const stepsOf = (plugin: string, rows: readonly (readonly [string, string, numbe
 const COMMON: readonly FakeStep[] = [
   { plugin: 'onboarding', id: 'agents', title: 'Which AI do you want to use?', order: 2, group: 'This machine' },
   { plugin: 'onboarding', id: 'name', title: 'Name this machine', order: 5, group: 'This machine' },
+  { plugin: 'onboarding', id: 'permissions', title: 'Permissions', order: 6, group: 'This machine' },
   { plugin: 'onboarding', id: 'appearance', title: 'Appearance', order: 1, side: 'client', group: 'This device' },
   { plugin: 'layouts', id: 'layout', title: 'Layout', order: 2, side: 'client' },
   ...stepsOf('claude-code', CLAUDE, 'Claude Code'),

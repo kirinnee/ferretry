@@ -39,7 +39,6 @@ describe('the Claude segment of the first run (r10 O7)', () => {
       'import-mcp',
       'conversations',
       'import-run',
-      'permission',
       'ready',
     ]);
     expect(steps.map(step => step.order)).toEqual([...steps.map(step => step.order)].sort((a, b) => a - b));
@@ -57,7 +56,6 @@ describe('the Claude segment of the first run (r10 O7)', () => {
       'claude-code.onboarding-import-mcp',
       'claude-code.onboarding-conversations',
       'claude-code.onboarding-import-run',
-      'claude-code.onboarding-permission',
       'claude-code.onboarding-ready',
     ]);
   });

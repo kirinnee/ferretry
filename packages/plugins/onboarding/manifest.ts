@@ -120,6 +120,8 @@ export default definePlugin({
       // The first page of setup: which AI the person wants (the flow hides the pages of every harness not picked).
       panel('onboarding.step', { id: 'agents-step', order: 2 }),
       panel('onboarding.step', { id: 'name-step', order: 5 }),
+      // One Permissions page for every harness the person picked (Claude Code and Codex together).
+      panel('onboarding.step', { id: 'permissions-step', order: 6 }),
       panel('onboarding.step', { id: 'appearance-step', order: 1 }),
     ],
   },
@@ -127,6 +129,7 @@ export default definePlugin({
   onboarding: [
     { id: 'agents', title: 'Which AI do you want to use?', order: 2, group: 'This machine', stepHost: true },
     { id: 'name', title: 'Name this machine', order: 5, group: 'This machine', stepHost: true },
+    { id: 'permissions', title: 'Permissions', order: 6, group: 'This machine', stepHost: true },
     { id: 'appearance', title: 'Appearance', order: 1, side: 'client', group: 'This device', stepHost: true },
   ],
 
