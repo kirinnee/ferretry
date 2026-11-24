@@ -63,7 +63,7 @@ export function inputRequestService(
     /** Who is told how a request ended; absent: nobody. */
     readonly notifier?: InputRequestServiceDependencies['notifier'];
     /** Called each time the journal is written (a request or a hold), before it answers. */
-    readonly journalled?: (event: unknown) => void;
+    readonly journalled?: (event: unknown) => unknown;
     /** Called with the arguments of every audit record the service writes (record, saved, stored). */
     readonly audited?: (entry: unknown) => void;
     /** The target port itself, in place of the fake terminal: lets a test put the real adapter in front of it. */
@@ -111,7 +111,7 @@ export function inputRequestService(
     journal: {
       publish: async (_session, event) => {
         events.push(event);
-        options.journalled?.(event);
+        await options.journalled?.(event);
       },
       history: async () => [],
       quarantine: async (_session, event) => void options.journalled?.(event),

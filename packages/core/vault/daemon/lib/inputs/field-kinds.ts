@@ -9,7 +9,9 @@ import type { InputSensitivity, PageFieldFacts } from '../../../contract/index.t
  *   when anything says password ({@link passwordSignalled}), whatever else the field says, and never for a field that
  *   says it is something else (a zip or promo code, a field with another `autocomplete`, a long free-text box).
  * - `card`: a card number, expiry or security code (`autocomplete` cc-number, cc-exp, cc-csc, or a name, id or label that
- *   says so, the ferret's label too). A `secret`. A card word wins over a code word ("security code" on a card is a CVC).
+ *   says so, the ferret's label too: CVV, CVC, CSC, "card security code"). A `secret`. A card word wins over a code word
+ *   ("security code" on a card is a CVC). A bare "security code" is a card's only when another field beside it is a card
+ *   field by its own words: on its own it is just a secret-sounding word, as before.
  *
  * A `type=password` input is neither: the callers decide what a password-typed field is.
  */
@@ -20,6 +22,10 @@ type Field = PageFieldFacts['field'];
 const CARD_AUTOCOMPLETE = /(?:^|\s)cc-(?:number|exp|exp-month|exp-year|csc)(?:\s|$)/iu;
 const CARD_WORDS =
   /card[\s._-]*(?:number|num|no)\b|cardnumber|cc[\s._-]*(?:num|number|exp|expiry|csc|cvc|cvv)|cvc|cvv|csc|cvn|expir(?:y|ation|es)|exp[\s._-]*(?:date|month|year)/iu;
+/** "Card security code", "card verification value": the card's own words for the CVC, with "card" in them. */
+const CARD_SECURITY_WORDS = /card[\s._-]*(?:security|verification)[\s._-]*(?:code|number|no|value)/iu;
+/** "Security code" with no "card" in it: a card's only beside a card field. */
+const SECURITY_CODE = /security[\s._-]*(?:code|number|no)\b/iu;
 const CODE_AUTOCOMPLETE = /(?:^|\s)one-time-code(?:\s|$)/iu;
 /** A page field that says password, in any of the words a page uses. */
 const PASSWORD_SIGNAL = /pass|pwd|ssn|security[\s._-]*code|cv[vc]|csc|mpin|pincode|pinnumber/iu;
@@ -48,11 +54,26 @@ const LONGEST_CODE_BY_WORDS = 10;
 const words = (field: Field, ...more: readonly (string | undefined)[]): string[] =>
   [field.name, field.id, ...more].filter((word): word is string => word !== undefined);
 
-/** Whether the page's own words for a field (its `label`, when the browser read one), plus the ferret's label for the card words, put it among codes or card fields. */
-export function pageFieldKind(field: Field, ferretLabel?: string): PageFieldKind | undefined {
+/** Whether a field says it is a card field by its OWN words alone (never its neighbours'). */
+function cardByItself(field: Field, ferretLabel?: string): boolean {
+  if (field.autocomplete !== undefined && CARD_AUTOCOMPLETE.test(field.autocomplete)) return true;
+  return words(field, field.label, ferretLabel).some(word => CARD_WORDS.test(word) || CARD_SECURITY_WORDS.test(word));
+}
+
+/**
+ * Whether the page's own words for a field (its `label`, when the browser read one), plus the ferret's label for the card
+ * words, put it among codes or card fields. `siblings` are the other fields on the page: a bare "security code" is a card's
+ * only when one of them is a card field.
+ */
+export function pageFieldKind(
+  field: Field,
+  ferretLabel?: string,
+  siblings: readonly Field[] = [],
+): PageFieldKind | undefined {
   // The card words may read the ferret's label too: they only ever RAISE a field to a secret.
-  if (field.autocomplete !== undefined && CARD_AUTOCOMPLETE.test(field.autocomplete)) return 'card';
-  if (words(field, field.label, ferretLabel).some(word => CARD_WORDS.test(word))) return 'card';
+  if (cardByItself(field, ferretLabel)) return 'card';
+  const beside = siblings.some(each => each !== field && cardByItself(each));
+  if (beside && words(field, field.label, ferretLabel).some(word => SECURITY_CODE.test(word))) return 'card';
   if (field.type?.toLowerCase() === 'password' || /password/iu.test(field.autocomplete ?? '')) return undefined;
   if (passwordSignalled(field, ferretLabel) || !CODE_TYPES.test(field.type ?? '')) return undefined;
   if (field.autocomplete !== undefined && CODE_AUTOCOMPLETE.test(field.autocomplete)) return 'code';
@@ -78,10 +99,41 @@ export function passwordSignalled(field: Field, ferretLabel?: string): boolean {
   });
 }
 
+/** What a field is called on the card when the agent gave it no label: the daemon's own words, never the agent's. */
+export const FIELD_LABELS: Readonly<Record<InputSensitivity, string>> = {
+  secret: 'Password',
+  private: 'Private value',
+  code: 'Code',
+  plain: 'Value',
+};
+
+const foundOn = (
+  facts: { readonly kind: string; readonly fields?: readonly PageFieldFacts[] },
+  id: string,
+): PageFieldFacts | undefined => (facts.kind === 'page' ? facts.fields?.find(each => each.fieldId === id) : undefined);
+
 /**
- * THE DAEMON'S PICK for a field on a page, over the agent's: a card field is a `secret`; a one-time code is a `code`,
- * whatever the agent called it (a code is not a password, so a saved password is never offered for it); anything else
- * stays as the agent asked. A label the daemon gave (`labels`, by sensitivity) says nothing of the agent's and follows
+ * Whether a field may NOT be filled from a saved LOGIN password, as an offer or at delivery: it is a `secret` and the page
+ * says it is a card field or a one-time code. A login's password goes into a password box, never a card number or a code
+ * box. SEPARATE from the field's sensitivity: the agent's secret stays a secret (masked) either way.
+ */
+export function barredFromLoginPassword(
+  facts: { readonly kind: string; readonly fields?: readonly PageFieldFacts[] },
+  field: { readonly id: string; readonly label: string; readonly sensitivity: InputSensitivity },
+): boolean {
+  if (field.sensitivity !== 'secret') return false;
+  const found = foundOn(facts, field.id);
+  if (found === undefined) return false;
+  const given = field.label === FIELD_LABELS[field.sensitivity];
+  const siblings = (facts.fields ?? []).map(each => each.field);
+  return pageFieldKind(found.field, given ? undefined : field.label, siblings) !== undefined;
+}
+
+/**
+ * THE DAEMON'S PICK for a field on a page, over the agent's. It may only RAISE a field's sensitivity, never lower what
+ * the agent asked: a card field is a `secret`; a one-time code is a `code` ONLY when the agent called it plain (a `secret`
+ * or `private` ask stays, masked as asked; a saved password is kept from it by {@link barredFromLoginPassword}); anything
+ * else stays as the agent asked. A label the daemon gave (`labels`, by sensitivity) says nothing of the agent's and follows
  * the pick; one the agent wrote is read as its word and kept. A target that is not a page, or a field the facts do not
  * name, changes nothing.
  */
@@ -92,10 +144,12 @@ export function pickedOnPage<
   field: F,
   labels: Readonly<Record<InputSensitivity, string>>,
 ): F {
-  const found = facts.kind === 'page' ? facts.fields?.find(each => each.fieldId === field.id) : undefined;
+  const found = foundOn(facts, field.id);
   const given = field.label === labels[field.sensitivity];
-  const kind = found === undefined ? undefined : pageFieldKind(found.field, given ? undefined : field.label);
-  const sensitivity = kind === 'card' ? 'secret' : kind === 'code' ? 'code' : field.sensitivity;
+  const siblings = (facts.fields ?? []).map(each => each.field);
+  const kind = found === undefined ? undefined : pageFieldKind(found.field, given ? undefined : field.label, siblings);
+  const sensitivity =
+    kind === 'card' ? 'secret' : kind === 'code' && field.sensitivity === 'plain' ? 'code' : field.sensitivity;
   return sensitivity === field.sensitivity
     ? field
     : { ...field, sensitivity, ...(given ? { label: labels[sensitivity] } : {}) };

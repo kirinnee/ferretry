@@ -73,7 +73,7 @@ import { GRANT_MISS_CONTEXT_LINE, grantStops, mergeScriptedOrigins, scriptedSinc
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
-import { pickedOnPage } from './field-kinds.ts';
+import { barredFromLoginPassword, FIELD_LABELS, pickedOnPage } from './field-kinds.ts';
 import { lockFor, lookAlike, matchable, passwordTarget, spellsPassword } from './lock.ts';
 import { type LoginDelivery, type LoginObserver } from './login-observer.ts';
 import type {
@@ -159,13 +159,6 @@ const TITLES = {
   plain: 'Needs an answer',
 } as const;
 const LOGIN_TITLE = 'Needs a login';
-/** What a field is called on the card when the agent gave it no label. */
-const FIELD_LABELS: Readonly<Record<InputSensitivity, string>> = {
-  secret: 'Password',
-  private: 'Private value',
-  code: 'Code',
-  plain: 'Value',
-};
 /** The longest a chain is counted: a login is a few steps, not a loop. */
 const MAX_STEP = 16;
 
@@ -898,7 +891,10 @@ export class InputRequestService {
       sessionId,
       facts,
       matchKey: targetMatchKey(facts, this.deps.hostName ?? ''),
-      fields,
+      // A secret the page says is a payment or code field is no sign-in's password: the matcher never covers a `private` value.
+      fields: fields.map(field =>
+        barredFromLoginPassword(facts, field) ? { ...field, sensitivity: 'private' as const } : field,
+      ),
       listing,
       keys,
       // Any page script the ferret EVER ran in this session: stricter than "on this document".
@@ -1117,7 +1113,7 @@ export class InputRequestService {
     const { logins } = this.deps;
     if (logins === undefined || held.request.state !== 'pending') return undefined;
     const listing = await logins.listing().catch((): SavedListing => NO_ACCOUNTS);
-    return savedForFields(held.request.fields, held.matchKey, listing, {
+    return savedForFields(loginFields(held), held.matchKey, listing, {
       ...(await this.choiceOf(held.request.sessionId)),
       hint: held.hint,
       codesHere: codesHere(held.request.observed, held.request.fields),
@@ -2141,6 +2137,11 @@ export class InputRequestService {
     const { request } = held;
     if (this.deps.logins === undefined)
       throw new InputRequestError('bad_request', 'this daemon keeps no accounts; send without saving');
+    if (loginFields(held).some(field => field.barred))
+      throw new InputRequestError(
+        'bad_request',
+        'a payment or code field is not kept as a login password; send without saving',
+      );
     const roles = savedRolesOf(request.fields);
     if (roles === undefined)
       throw new InputRequestError(
@@ -2211,7 +2212,7 @@ export class InputRequestService {
         `there is no account ${save.entry} to update: save it as a new account. Nothing was typed`,
       );
     // Only the account this card offers to update, decided again now from the store and the page (never any handle).
-    const offered = savedForFields(held.request.fields, held.matchKey, listing, {
+    const offered = savedForFields(loginFields(held), held.matchKey, listing, {
       ...(await this.choiceOf(held.request.sessionId)),
       ...(held.typedUsername === undefined ? {} : { typedUsername: held.typedUsername }),
     }).update;
@@ -2319,7 +2320,7 @@ export class InputRequestService {
     if (signIn !== undefined && listing.signIns.find(each => each.id === signIn)?.account !== entry)
       throw new InputRequestError('bad_request', `that sign-in is not one of ${entry}; nothing was typed`);
     // At least one: an `entry` with every field typed was already refused (`typedValues`).
-    const filled = held.request.fields.filter(field => !typed.has(field.id));
+    const filled = loginFields(held).filter(field => !typed.has(field.id));
     const offer = savedForFields(filled, held.matchKey, listing, {
       ...(await this.choiceOf(held.request.sessionId)),
       hint: held.hint,
@@ -2672,9 +2673,11 @@ export class InputRequestService {
           : state === 'refused'
             ? 'refused'
             : 'cancelled';
-    for (const wake of held.waiters) wake(); // the wait ends first: the journal, audit, card and notice never add to it
-    held.waiters.clear();
+    // The final outcome is DURABLE before anyone is told it: a restart then finds the true outcome, never `delivering`
+    // (which a restore reads as refused). Only the audit, the card and the notice follow the wake.
     await this.journalQuietly(request, kind, reason, options.submitted);
+    for (const wake of held.waiters) wake();
+    held.waiters.clear();
     await this.record(request, `input.${kind}`, by ?? { kind: 'daemon' }, {
       ...this.auditOf(seen),
       ...(reason === undefined ? {} : { reason }),
@@ -2944,6 +2947,15 @@ function observedAs(
     const secret = { ...field, sensitivity: 'secret' as const };
     return { ...secret, risk: { level: AMBER_AT_LEAST[riskOf(secret, facts).level], reason: UPGRADED_FLAG } };
   });
+}
+
+/** A held card's fields as the saved-login view reads them: each secret the page says is a card or code field is barred. */
+function loginFields(held: Held): readonly (InputRequestField & { readonly barred: boolean })[] {
+  const facts = held.request.observed;
+  return held.request.fields.map(field => ({
+    ...field,
+    barred: facts !== undefined && barredFromLoginPassword(facts, field),
+  }));
 }
 
 /**

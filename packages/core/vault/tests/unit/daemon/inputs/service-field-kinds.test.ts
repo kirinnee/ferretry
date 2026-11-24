@@ -2,11 +2,14 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { InputRaise, InputTargetFacts } from '../../../../contract/index.ts';
 import { account, page, pageField, SESSION, site } from './grant-fixtures.ts';
-import { world } from './world.ts';
+import { padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
+import { OWNER, world } from './world.ts';
 
 /**
- * What the daemon makes of the agent's pick for a page field, from what the page says the field is: a one-time code is
- * a code (so no saved password is offered for it), a card field is a secret. The page and the accounts are fakes.
+ * What the daemon makes of the agent's pick for a page field, from what the page says the field is: it may only RAISE it.
+ * A plain one-time-code field is a code; a card field is a secret; an explicit secret or private ask is never lowered
+ * (it stays masked), and a saved login password is never offered or typed into a code or card field. The page and the
+ * accounts are fakes.
  */
 
 const raise = (sensitivity: 'secret' | 'plain' | 'private' | 'code', label?: string): InputRaise => ({
@@ -33,23 +36,54 @@ const withPassword = (facts: InputTargetFacts) => ({
 const OTP = { name: 'otp', autocomplete: 'one-time-code', inputmode: 'numeric', maxlength: '6' };
 
 describe('the card for a page field the page says is a one-time code', () => {
-  for (const asked of ['secret', 'plain', 'private'] as const) {
-    it(`should be a code card, with no saved password offered, when the agent asked for a ${asked}`, async () => {
-      const w = world(withPassword(facing(OTP)));
-
-      await w.service.raise(SESSION, raise(asked));
-      const request = await w.pending();
-
-      should(request.fields[0]?.sensitivity).equal('code');
-      should(request.fields[0]?.label).equal('Code');
-      should(request.saved?.offers.filter(offer => offer.fills === 'password')).eql([]);
-    });
-  }
-
-  it('should keep a label the agent wrote', async () => {
+  it('should be a code card, with no saved password offered, when the agent asked for a plain value', async () => {
     const w = world(withPassword(facing(OTP)));
 
-    await w.service.raise(SESSION, raise('secret', 'Text message code'));
+    await w.service.raise(SESSION, raise('plain'));
+    const request = await w.pending();
+
+    should(request.fields[0]?.sensitivity).equal('code');
+    should(request.fields[0]?.label).equal('Code');
+    should(request.saved?.offers.filter(offer => offer.fills === 'password')).eql([]);
+  });
+
+  const LOOKS_LIKE_A_CODE: readonly [string, NonNullable<Parameters<typeof pageField>[2]>][] = [
+    ['one-time-code, numeric, maxlength 6', OTP],
+    ['a numeric keypad of maxlength 6 and nothing else', { inputmode: 'numeric', maxlength: '6' }],
+    ['a field named accessCode', { name: 'accessCode', maxlength: '6' }],
+  ];
+  for (const asked of ['secret', 'private'] as const)
+    for (const [what, attrs] of LOOKS_LIKE_A_CODE)
+      it(`should stay ${asked} (never lowered to a code) on ${what}, with no saved login password offered`, async () => {
+        const w = world(withPassword(facing(attrs)));
+
+        await w.service.raise(SESSION, raise(asked));
+        const request = await w.pending();
+
+        should(request.fields[0]?.sensitivity).equal(asked);
+        should(request.saved?.offers.filter(offer => offer.fills === 'password')).eql([]);
+      });
+
+  it('should mask a secret on a code-looking field from every read once it is delivered', async () => {
+    const w = world(withPassword(facing(OTP)));
+    await w.service.raise(SESSION, raise('secret'));
+    const request = await w.pending();
+
+    await w.service.deliver(
+      SESSION,
+      request.id,
+      w.send(request, { fields: [{ field: 'code', padded: padInputValue('482913-UNIQUE') }] }),
+      OWNER,
+    );
+
+    should(w.writes[0]?.values).eql(['482913-UNIQUE']);
+    should(w.values.scrub(SESSION, 'the code was 482913-UNIQUE')).not.containEql('482913-UNIQUE');
+  });
+
+  it('should keep a label the agent wrote, on the code card a plain ask becomes', async () => {
+    const w = world(withPassword(facing(OTP)));
+
+    await w.service.raise(SESSION, raise('plain', 'Text message code'));
 
     const request = await w.pending();
     should(request.fields[0]).match({ label: 'Text message code', sensitivity: 'code' });
@@ -97,4 +131,62 @@ describe('the card for a page field the page says is a card number, expiry or se
       should(request.fields[0]?.sensitivity).equal('secret');
     });
   }
+
+  it('should read "Card security code" as a card field when the page labels it so', async () => {
+    const w = world(withPassword(facing({ name: 'f_9', label: 'Card security code', maxlength: '4' })));
+
+    await w.service.raise(SESSION, raise('plain'));
+
+    should((await w.pending()).fields[0]?.sensitivity).equal('secret');
+  });
+
+  it('should never offer a saved LOGIN password for a card number the agent asked as a secret', async () => {
+    const w = world(withPassword(facing({ name: 'cardnumber', autocomplete: 'cc-number', inputmode: 'numeric' })));
+
+    await w.service.raise(SESSION, raise('secret'));
+    const request = await w.pending();
+
+    should(request.fields[0]?.sensitivity).equal('secret');
+    should(request.saved?.offers).eql([]);
+    should(request.saved?.saves).be.undefined();
+  });
+
+  it('should refuse to keep a typed card number as a saved login password, with nothing typed', async () => {
+    const w = world(withPassword(facing({ name: 'cardnumber', autocomplete: 'cc-number', inputmode: 'numeric' })));
+    await w.service.raise(SESSION, raise('secret'));
+    const request = await w.pending();
+
+    const refused = await w.service
+      .deliver(
+        SESSION,
+        request.id,
+        w.send(request, {
+          fields: [{ field: 'code', padded: padInputValue('4111111111111111') }],
+          save: { entry: 'GITHUB', label: 'GitHub' },
+        }),
+        OWNER,
+      )
+      .then(
+        () => undefined,
+        (error: unknown) => error as Error,
+      );
+
+    should(refused?.message).containEql('payment or code field');
+    should(w.writes).eql([]);
+  });
+
+  it('should refuse to type a saved login password into a card number, with nothing typed', async () => {
+    const w = world(withPassword(facing({ name: 'cardnumber', autocomplete: 'cc-number', inputmode: 'numeric' })));
+    await w.service.raise(SESSION, raise('secret'));
+    const request = await w.pending();
+
+    const refused = await w.service.deliver(SESSION, request.id, w.send(request, { entry: 'GITHUB' }), OWNER).then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+
+    should(refused).not.be.undefined();
+    should(w.writes).eql([]);
+    should(w.fills).eql([]);
+  });
 });

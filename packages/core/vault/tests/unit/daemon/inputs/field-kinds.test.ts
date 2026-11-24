@@ -1,7 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { PageFieldFacts } from '../../../../contract/index.ts';
-import { pageFieldKind, passwordSignalled, pickedOnPage } from '../../../../daemon/lib/inputs/field-kinds.ts';
+import {
+  barredFromLoginPassword,
+  pageFieldKind,
+  passwordSignalled,
+  pickedOnPage,
+} from '../../../../daemon/lib/inputs/field-kinds.ts';
 
 type Field = PageFieldFacts['field'];
 const input = (over: Partial<Field> = {}): Field => ({ tag: 'input', type: 'text', ...over });
@@ -264,15 +269,29 @@ describe('pickedOnPage: the daemon’s pick over the agent’s', () => {
   const facts = (field: Field) => ({ kind: 'page', fields: [{ fieldId: 'f', field }] as unknown as PageFieldFacts[] });
   const otp = input({ name: 'otp', autocomplete: 'one-time-code', inputmode: 'numeric', maxlength: '6' });
 
-  it('should make an OTP field a code whatever the agent called it, with the daemon’s own label following', () => {
-    for (const sensitivity of ['secret', 'private', 'plain', 'code'] as const) {
+  it('should raise a plain OTP field to a code, with the daemon’s own label following, and keep a code a code', () => {
+    for (const sensitivity of ['plain', 'code'] as const) {
       const picked = pickedOnPage(facts(otp), { id: 'f', label: LABELS[sensitivity], sensitivity }, LABELS);
       should(picked).eql({ id: 'f', label: 'Code', sensitivity: 'code' });
     }
   });
 
+  it('should NEVER lower an explicit secret or private ask on a field that looks like a code', () => {
+    const shapes = [
+      otp,
+      input({ inputmode: 'numeric', maxlength: '6' }),
+      input({ name: 'accessCode', maxlength: '6' }),
+      input({ name: 'f', autocomplete: 'one-time-code' }),
+    ];
+    for (const shape of shapes)
+      for (const sensitivity of ['secret', 'private'] as const) {
+        const field = { id: 'f', label: LABELS[sensitivity], sensitivity };
+        should(pickedOnPage(facts(shape), field, LABELS)).equal(field);
+      }
+  });
+
   it('should keep a label the agent wrote', () => {
-    const picked = pickedOnPage(facts(otp), { id: 'f', label: 'Text message code', sensitivity: 'secret' }, LABELS);
+    const picked = pickedOnPage(facts(otp), { id: 'f', label: 'Text message code', sensitivity: 'plain' }, LABELS);
     should(picked).eql({ id: 'f', label: 'Text message code', sensitivity: 'code' });
   });
 
@@ -290,9 +309,79 @@ describe('pickedOnPage: the daemon’s pick over the agent’s', () => {
     should(picked.sensitivity).equal('secret');
   });
 
+  it('should raise every sensitivity on a card field to a secret', () => {
+    const card = input({ autocomplete: 'cc-number' });
+    for (const sensitivity of ['plain', 'code', 'private', 'secret'] as const)
+      should(pickedOnPage(facts(card), { id: 'f', label: 'x', sensitivity }, LABELS).sensitivity).equal('secret');
+  });
+
   it('should leave a terminal and an unknown field as the agent asked', () => {
     const field = { id: 'f', label: 'Password', sensitivity: 'secret' as const };
     should(pickedOnPage({ kind: 'terminal' }, field, LABELS)).equal(field);
     should(pickedOnPage(facts(otp), { ...field, id: 'other' }, LABELS).sensitivity).equal('secret');
+  });
+});
+
+describe('card security-code labels', () => {
+  const ROWS: readonly [string, Field, readonly Field[], string][] = [
+    ['"Card security code" label', input({ name: 'f_9', label: 'Card security code' }), [], 'card'],
+    ['"Card verification value" label', input({ name: 'f_9', label: 'Card verification value' }), [], 'card'],
+    ['CVV', input({ name: 'f_9', label: 'CVV' }), [], 'card'],
+    ['CVC', input({ name: 'f_9', label: 'CVC' }), [], 'card'],
+    ['CSC', input({ name: 'f_9', label: 'CSC' }), [], 'card'],
+    ['name cardSecurityCode', input({ name: 'cardSecurityCode' }), [], 'card'],
+    [
+      '"Security code" beside a card number',
+      input({ name: 'f_9', label: 'Security code' }),
+      [input({ autocomplete: 'cc-number' })],
+      'card',
+    ],
+    [
+      '"Security code" beside a card expiry by label',
+      input({ name: 'f_9', label: 'Security code' }),
+      [input({ name: 'e', label: 'Expiry date' })],
+      'card',
+    ],
+    [
+      'a generic "Security code" with no card field beside it',
+      input({ name: 'f_9', label: 'Security code' }),
+      [],
+      'none',
+    ],
+    [
+      'a generic "Security code" beside only a username',
+      input({ name: 'f_9', label: 'Security code' }),
+      [input({ name: 'user' })],
+      'none',
+    ],
+  ];
+  for (const [what, field, siblings, kind] of ROWS)
+    it(`should read ${what} as ${kind}`, () => {
+      should(pageFieldKind(field, undefined, [field, ...siblings]) ?? 'none').equal(kind);
+    });
+});
+
+describe('barredFromLoginPassword: a saved login password never goes into a card or code field', () => {
+  type Sens = 'secret' | 'plain' | 'code' | 'private';
+  const on = (field: Field, label = 'Password', sensitivity: Sens = 'secret') => ({
+    facts: { kind: 'page', fields: [{ fieldId: 'f', field }] as unknown as PageFieldFacts[] },
+    field: { id: 'f', label, sensitivity },
+  });
+  const barred = (shape: ReturnType<typeof on>) => barredFromLoginPassword(shape.facts, shape.field);
+
+  it('should bar a secret on a card number, a CVC and a code field', () => {
+    should(barred(on(input({ autocomplete: 'cc-number' })))).be.true();
+    should(barred(on(input({ name: 'f_9', label: 'Card security code' })))).be.true();
+    should(barred(on(input({ autocomplete: 'one-time-code' })))).be.true();
+    should(barred(on(input({ inputmode: 'numeric', maxlength: '6' })))).be.true();
+  });
+
+  it('should not bar a real password field, a non-secret, or a terminal', () => {
+    should(barred(on(input({ type: 'password', name: 'password' })))).be.false();
+    should(barred(on(input({ name: 'field1', maxlength: '40' })))).be.false();
+    should(barred(on(input({ autocomplete: 'cc-number' }), 'Value', 'plain'))).be.false();
+    should(
+      barredFromLoginPassword({ kind: 'terminal' }, { id: 'f', label: 'Password', sensitivity: 'secret' }),
+    ).be.false();
   });
 });
