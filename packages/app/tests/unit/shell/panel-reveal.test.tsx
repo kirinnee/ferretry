@@ -89,9 +89,17 @@ const layout = () => {
 };
 
 let view: Mounted | null = null;
-const wideWidth = window.innerWidth;
+/** happy-dom's own viewport switch: assigning `window.innerWidth` would break `setViewport` for every later file in the process. */
+const setViewport = (width: number, height: number): void =>
+  (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport(
+    {
+      width,
+      height,
+    },
+  );
+const wide = { width: window.innerWidth, height: window.innerHeight };
 afterEach(async () => {
-  window.innerWidth = wideWidth;
+  setViewport(wide.width, wide.height);
   await view?.unmount();
   view = null;
   sidePaneOpen.set(false);
@@ -101,7 +109,7 @@ afterEach(async () => {
 
 const boot = async (viewport?: 'phone') => {
   // The workspace picks the phone's chips from the window's width, not from the shell's media query.
-  if (viewport === 'phone') window.innerWidth = 390;
+  if (viewport === 'phone') setViewport(390, 844);
   const app = await bootApp({
     surfaces: [plugin],
     machines: ['d1'],
