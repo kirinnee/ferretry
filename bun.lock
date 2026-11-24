@@ -850,6 +850,7 @@
         "react": "^19.0.0",
         "remark-gfm": "^4.0.1",
         "remark-parse": "^11.0.0",
+        "sherpa-onnx": "2.0.3",
         "unified": "^11.0.0",
         "zod": "4.4.3",
       },
@@ -2226,6 +2227,8 @@
     "shebang-command": ["shebang-command@2.0.0", "", { "dependencies": { "shebang-regex": "^3.0.0" } }, "sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA=="],
 
     "shebang-regex": ["shebang-regex@3.0.0", "", {}, "sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A=="],
+
+    "sherpa-onnx": ["sherpa-onnx@2.0.3", "", {}, "sha512-Tt3XNk58RwSleBw5oX5SOqsuT04uQcOb2OxpxynjJE0oRGpUUjLlIegRygJVhnsLtGRKpEtkacsOnNrjj5txyA=="],
 
     "should": ["should@13.2.3", "", { "dependencies": { "should-equal": "^2.0.0", "should-format": "^3.0.3", "should-type": "^1.4.0", "should-type-adaptors": "^1.0.1", "should-util": "^1.0.0" } }, "sha512-ggLesLtu2xp+ZxI+ysJTmNjh2U0TsC+rQ/pfED9bUZZ4DKefP27D+7YJVVTvKsmjLpIi9jAa7itwDGkDDmt1GQ=="],
 

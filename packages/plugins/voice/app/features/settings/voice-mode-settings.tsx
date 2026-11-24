@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { VoiceEngineView } from '../../../contract/index.ts';
 import { type DaemonConnection, SettingGroup, SettingRow } from '../../shell-voice.ts';
 import { useDaemonClient } from '../../lib/voice-store.tsx';
+import { type HearItProps, ReplyVoiceRow, type ReplyVoiceState, useReplyVoice } from './reply-voice.tsx';
 import { TalkToTest, type TalkToTestProps } from './talk-to-test.tsx';
 import { installVoiceEngine, readVoiceEngine, removeVoiceEngine, type VoiceEngineClient } from './voice-engine-api.ts';
 import './voice-settings.css';
@@ -56,13 +57,15 @@ function StateChip({ view }: { readonly view: VoiceEngineView }) {
 interface VoiceModePanelProps {
   readonly view: VoiceEngineView;
   readonly talk?: Pick<TalkToTestProps, 'client' | 'createMic'> | undefined;
+  readonly hear?: Omit<HearItProps, 'machine'> | undefined;
   readonly busy: boolean;
   readonly error: string | null;
   readonly onInstall: () => void;
   readonly onRemove: () => void;
+  readonly reply: ReplyVoiceState;
 }
 
-function VoiceModePanel({ view, talk, busy, error, onInstall, onRemove }: VoiceModePanelProps) {
+function VoiceModePanel({ view, talk, hear, reply, busy, error, onInstall, onRemove }: VoiceModePanelProps) {
   const percent = view.sizeBytes === 0 ? 0 : Math.min(100, Math.round((view.doneBytes / view.sizeBytes) * 100));
   return (
     <SettingGroup label="Voice mode">
@@ -138,6 +141,7 @@ function VoiceModePanel({ view, talk, busy, error, onInstall, onRemove }: VoiceM
         </div>
       </SettingRow>
       {view.state === 'ready' && <TalkToTest machine={view.machine} {...talk} />}
+      <ReplyVoiceRow state={reply} speechReady={view.state === 'ready'} hear={hear} />
     </SettingGroup>
   );
 }
@@ -151,11 +155,14 @@ export function VoiceModeSettings({
   connection,
   createClient: injected,
   talk,
+  hear,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: VoiceEngineClientFactory | undefined;
   /** A suite's own socket and microphone for Talk to test; the page uses the shell's client and the real microphone. */
   readonly talk?: Pick<TalkToTestProps, 'client' | 'createMic'> | undefined;
+  /** A suite's own sound and socket for the reply voice's "Hear it". */
+  readonly hear?: Omit<HearItProps, 'machine'> | undefined;
 }) {
   const routed = useDaemonClient();
   const createClient = injected ?? routed;
@@ -163,6 +170,7 @@ export function VoiceModeSettings({
   const [view, setView] = useState<VoiceEngineView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const reply = useReplyVoice(client);
 
   useEffect(() => {
     let current = true;
@@ -239,6 +247,8 @@ export function VoiceModeSettings({
     <VoiceModePanel
       view={view}
       talk={talk}
+      hear={hear}
+      reply={reply}
       busy={busy}
       error={error}
       onInstall={() => void act(installVoiceEngine)}

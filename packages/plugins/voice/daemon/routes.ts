@@ -13,7 +13,7 @@ import {
   type SttEnhancementResult,
   SttEnhancementError,
 } from '../contract/index.ts';
-import { type VoiceEngineApi, VoiceEngineError } from '../contract/index.ts';
+import { type ReplyVoiceApi, type VoiceEngineApi, VoiceEngineError } from '../contract/index.ts';
 import { enhancementErrorStatus, enhancementErrorView } from './lib/stt/enhancement.ts';
 
 /**
@@ -65,10 +65,14 @@ export function voiceRoutes(
   enhancement: SttEnhancementSubsystem,
   speedups: SpeedupsSubsystem,
   engine: Pick<VoiceEngineApi, 'view' | 'install' | 'remove'>,
+  reply: Pick<ReplyVoiceApi, 'view' | 'install' | 'remove'>,
 ): {
   readonly 'GET /v1/voice/engine': RouteHandler;
   readonly 'POST /v1/voice/engine/install': RouteHandler;
   readonly 'DELETE /v1/voice/engine': RouteHandler;
+  readonly 'GET /v1/voice/reply-voice': RouteHandler;
+  readonly 'POST /v1/voice/reply-voice/install': RouteHandler;
+  readonly 'DELETE /v1/voice/reply-voice': RouteHandler;
   readonly 'POST /v1/stt/enhance': RouteHandler;
   readonly 'GET /v1/speedups': RouteHandler;
   readonly 'POST /v1/speedups/:provider/test': RouteHandler;
@@ -80,6 +84,16 @@ export function voiceRoutes(
     'DELETE /v1/voice/engine': async () => {
       try {
         return jsonResponse(await engine.remove());
+      } catch (error) {
+        if (error instanceof VoiceEngineError) throw new ApiError(409, error.message, error.code);
+        throw error;
+      }
+    },
+    'GET /v1/voice/reply-voice': async () => jsonResponse(await reply.view()),
+    'POST /v1/voice/reply-voice/install': async () => jsonResponse(await reply.install(), 202),
+    'DELETE /v1/voice/reply-voice': async () => {
+      try {
+        return jsonResponse(await reply.remove());
       } catch (error) {
         if (error instanceof VoiceEngineError) throw new ApiError(409, error.message, error.code);
         throw error;
