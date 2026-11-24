@@ -19,6 +19,8 @@ const TOTAL = CATALOG.length * BODY.byteLength;
 
 class Files implements EngineFilesPort {
   readonly held = new Map<string, Uint8Array>();
+  /** Hand back a window into a larger buffer, as a state read may. */
+  windowed = false;
   free: number | undefined = undefined;
   async freeBytes() {
     return this.free;
@@ -27,7 +29,11 @@ class Files implements EngineFilesPort {
     return this.held.get(file.role)?.byteLength;
   }
   async read(file: { role: string }) {
-    return this.held.get(file.role)?.slice();
+    const bytes = this.held.get(file.role);
+    if (bytes === undefined || !this.windowed) return bytes?.slice();
+    const larger = new Uint8Array(bytes.byteLength + 2);
+    larger.set(bytes, 1);
+    return larger.subarray(1, 1 + bytes.byteLength);
   }
   async write(file: { role: string }, bytes: Uint8Array) {
     this.held.set(file.role, bytes);
@@ -45,6 +51,7 @@ class FakeThread implements SpeechThread {
     private readonly text = 'hello there',
     private readonly loadGate?: Promise<void>,
     private readonly failDecode = false,
+    private readonly failLoad = false,
   ) {}
   async call(request: SpeechCall) {
     this.calls.push(request.kind);
@@ -52,6 +59,7 @@ class FakeThread implements SpeechThread {
     switch (request.kind) {
       case 'load':
         await this.loadGate;
+        if (this.failLoad) throw new Error('the models would not load');
         return { id: 1, ok: true as const, kind: 'load' as const, loadMs: 1500, memoryMb: 819 };
       case 'transcribe':
         if (this.failDecode) throw new Error('decode crashed');
@@ -76,6 +84,7 @@ function build(
     tamper?: boolean;
     freeDisk?: number;
     failDecode?: boolean;
+    failLoad?: boolean;
   } = {},
 ) {
   const files = new Files();
@@ -104,7 +113,7 @@ function build(
       },
     },
     start: () => {
-      const thread = new FakeThread('hello there', hold.gate, options.failDecode === true);
+      const thread = new FakeThread('hello there', hold.gate, options.failDecode === true, options.failLoad === true);
       threads.push(thread);
       return thread;
     },
@@ -268,6 +277,26 @@ describe('the speech engine: use', () => {
     await busy.engine.install();
     await expect(busy.engine.remove()).rejects.toBeInstanceOf(VoiceEngineError);
     await busy.engine.settled();
+  });
+});
+
+describe('the speech engine: loading', () => {
+  test('a worker that cannot load the models is ended, and the caller is told load_failed', async () => {
+    const built = build({ failLoad: true });
+    for (const file of CATALOG) built.files.held.set(file.role, BODY);
+    await expect(built.engine.transcribe(new Float32Array(16_000))).rejects.toMatchObject({ code: 'load_failed' });
+    expect(built.threads).toHaveLength(1);
+    expect(built.threads[0]?.terminated).toBe(true);
+    expect(built.logged).toContain('voice.engine.load_error');
+    expect((await built.engine.view()).loaded).toBe(false);
+  });
+
+  test('bytes read as a window into a larger buffer are copied out before they are handed to the worker', async () => {
+    const built = build();
+    for (const file of CATALOG) built.files.held.set(file.role, BODY);
+    built.files.windowed = true;
+    expect((await built.engine.transcribe(new Float32Array(16_000))).text).toBe('hello there');
+    expect((await built.engine.view()).loaded).toBe(true);
   });
 });
 

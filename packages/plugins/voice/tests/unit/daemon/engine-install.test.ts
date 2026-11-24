@@ -187,6 +187,22 @@ describe('installFiles', () => {
     expect(counted).toBe(GOOD.byteLength);
   });
 
+  test('a connection that drops part way is download_failed, and nothing is written', async () => {
+    const files = new Files();
+    const dropped = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(GOOD.slice(0, 3));
+          controller.error(new Error('connection reset'));
+        },
+      }),
+    );
+    await expect(
+      installFiles({ request: async () => dropped }, files, () => undefined, [pin('encoder', GOOD)]),
+    ).rejects.toMatchObject({ code: 'download_failed', message: expect.stringContaining('part way') });
+    expect(files.held.size).toBe(0);
+  });
+
   test('a write that fails is write_failed', async () => {
     const files = new Files();
     files.write = async () => {
