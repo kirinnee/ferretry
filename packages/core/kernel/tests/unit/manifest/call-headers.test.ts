@@ -36,3 +36,29 @@ describe('the headers a plugin half may set', () => {
     should(allowedCallHeaders(undefined)).be.undefined();
   });
 });
+
+describe('the range a half may ask for', () => {
+  it('should keep one bytes range of two whole numbers', () => {
+    should(allowedCallHeaders({ range: 'bytes=0-4194303' })).deepEqual({ range: 'bytes=0-4194303' });
+    should(allowedCallHeaders({ 'x-fy-request-id': 'r', range: 'bytes=10-20' })).deepEqual({
+      'x-fy-request-id': 'r',
+      range: 'bytes=10-20',
+    });
+  });
+
+  it('should drop every other shape, so a half cannot ask for several ranges, an open one or another unit', () => {
+    for (const bad of [
+      'bytes=0-',
+      'bytes=-5',
+      'bytes=0-9,20-29',
+      'items=0-9',
+      'bytes=a-b',
+      '',
+      'bytes=0-9 ',
+      'bytes=1234567890123-1',
+    ]) {
+      should(allowedCallHeaders({ range: bad })).be.undefined();
+    }
+    should(allowedCallHeaders({ range: 5 } as unknown as PluginCallHeaders)).be.undefined();
+  });
+});

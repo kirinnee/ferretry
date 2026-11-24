@@ -183,6 +183,41 @@ describe('reading a ferret’s files', () => {
   });
 });
 
+describe('reading a ferret’s media bytes (fs/media)', () => {
+  test('S47 an agent is refused another ferret’s media folder before anything is opened', async () => {
+    const h = await host([record('lead'), record('stranger')]);
+    const refused = await h.request('GET', '/v1/ferrets/stranger/fs/media', {
+      ...as('lead'),
+      query: { name: 'clip.mp4' },
+      headers: { ...as('lead').headers, range: 'bytes=0-9' },
+    });
+    expect(refused.status).toBe(403);
+    expect(refused.json<{ code: string }>().code).toBe('not_own_session');
+  });
+
+  test('S47 a helper cannot reach its lead’s media, and a lead reaches its own through the pinned walk only', async () => {
+    const h = await host([record('lead'), record('helper', 'lead')]);
+    const up = await h.request('GET', '/v1/ferrets/lead/fs/media', { ...as('helper'), query: { name: 'clip.mp4' } });
+    expect(up.status).toBe(403);
+    // The test host's pinner refuses, as a platform with no descriptor walk does: never an ordinary folder read.
+    const own = await h.request('GET', '/v1/ferrets/helper/fs/media', { ...as('lead'), query: { name: 'clip.mp4' } });
+    expect(own.status).toBe(501);
+    expect(own.body).not.toContain('clip');
+  });
+
+  test('a name that is a path, or a type that is not media, is refused at the route, for a person too', async () => {
+    const h = await host([record('lead')]);
+    for (const name of ['../clip.mp4', 'sub/clip.mp4', '/etc/passwd', '..']) {
+      const refused = await h.request('GET', '/v1/ferrets/lead/fs/media', { query: { name } });
+      expect(refused.status).toBe(400);
+      expect(refused.json<{ code: string }>().code).toBe('invalid_path');
+    }
+    const page = await h.request('GET', '/v1/ferrets/lead/fs/media', { query: { name: 'index.html' } });
+    expect(page.status).toBe(415);
+    expect(page.json<{ code: string }>().code).toBe('unsupported_type');
+  });
+});
+
 describe('lineage', () => {
   test('G43 a ferret may touch only its own; a lead also its helpers’ (Ferrets’ side of the fixture)', async () => {
     const h = await host([
