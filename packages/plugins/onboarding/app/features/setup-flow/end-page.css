@@ -138,16 +138,23 @@
   gap: 8px;
 }
 .fy-end__actions {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 12px;
+  /* One column as wide as the longer label: the two share ONE width and neither is the row's full width. */
+  grid-template-columns: minmax(0, max-content);
+  justify-content: start;
 }
+/* Q6 (owner ruling C-6): content-sized with a minimum, on a phone too, never the row's full width; one line. */
 .fy-end__actions button {
-  inline-size: 100%;
+  inline-size: auto;
+  max-inline-size: 100%;
   min-block-size: 44px;
+  min-inline-size: min(var(--fy-end-action), 100%);
+  white-space: nowrap;
 }
 @container (min-width: 720px) {
   .fy-end__actions {
+    display: flex;
     flex-direction: row;
     flex-wrap: wrap;
   }

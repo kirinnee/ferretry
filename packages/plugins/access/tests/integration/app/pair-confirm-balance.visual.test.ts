@@ -165,12 +165,15 @@ describe('the pair confirm page is balanced (C59 O2)', () => {
       });
 
       if (variant.phone)
-        it('on a phone both answers span the field width, stacked', async () => {
+        it('on a phone both answers are content-sized (not the field width), stacked', async () => {
           const pair = await buttonBox(tab, 'Pair this device');
           const later = await buttonBox(tab, 'Not now');
           const panel = await box(tab, '.fy-pair-scene main input');
-          expect(Math.abs(pair.width - panel.width), 'Pair spans the field width').toBeLessThanOrEqual(1);
-          expect(Math.abs(later.width - panel.width), 'Not now spans the field width').toBeLessThanOrEqual(1);
+          // Q6 (ruling C-6): content-sized with a 12rem minimum, narrower than the field, one line, a 44 px target.
+          expect(pair.width, 'Pair is narrower than the field').toBeLessThan(panel.width - 40);
+          expect(later.width, 'Not now is narrower than the field').toBeLessThan(panel.width - 40);
+          expect(pair.width, 'Pair keeps the 12rem minimum').toBeGreaterThanOrEqual(191);
+          expect(pair.height, 'Pair is a 44 px target on one line').toBeLessThan(60);
           expect(Math.abs(pair.left - panel.left)).toBeLessThanOrEqual(1);
           expect(Math.abs(later.left - panel.left)).toBeLessThanOrEqual(1);
           expect(Math.abs(pair.top - later.top), 'stacked, not side by side').toBeGreaterThan(20);

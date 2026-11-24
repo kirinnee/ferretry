@@ -383,7 +383,10 @@ describe('The pair page: mascot and night sky', () => {
           const add = must(await tab.getByRole('button', { name: 'Add a passkey now' }).boundingBox(), 'add');
           const later = must(await tab.getByRole('button', { name: 'Not now' }).boundingBox(), 'later');
           for (const box of [add, later]) expect(box.height, 'at least 44 px tall').toBeGreaterThanOrEqual(43.5);
-          expect(Math.abs(add.width - later.width), 'same size').toBeLessThanOrEqual(1);
+          // Q6 (ruling C-6): content-sized with a 12rem minimum; on a desktop the two share the minimum, on a phone neither is the card's width.
+          expect(add.width, 'Add a passkey now keeps the minimum').toBeGreaterThanOrEqual(191);
+          expect(later.width, 'Not now keeps the minimum').toBeGreaterThanOrEqual(191);
+          if (!variant.phone) expect(Math.abs(add.width - later.width), 'same size').toBeLessThanOrEqual(1);
           const row = must(await offer.boundingBox(), 'offer');
           // C59 O8-3: the dimmed hint is clearly apart from the buttons (not one 12px gap, the same as between its own lines).
           const hint = must(await tab.locator('[data-first-passkey-when]').boundingBox(), 'the hint');
@@ -393,7 +396,7 @@ describe('The pair page: mascot and night sky', () => {
             'a clear gap between the hint and the buttons',
           ).toBeGreaterThanOrEqual(20);
           if (variant.phone) {
-            expect(Math.abs(add.width - row.width), 'phone: full width').toBeLessThanOrEqual(1);
+            expect(add.width, 'phone: content-sized, not the card width (Q6)').toBeLessThan(row.width - 40);
             expect(add.y, 'phone: stacked, the way on above').toBeLessThan(later.y);
           } else {
             expect(Math.abs(add.y - later.y), 'desktop: one row').toBeLessThanOrEqual(1);
@@ -478,10 +481,8 @@ describe('The pair page: mascot and night sky', () => {
         // C59 audit: the shared answer row: the field's width on a phone, a 12 rem button at the right end on a desktop.
         if (variant.phone) {
           const field = must(await tab.locator('input[aria-label="Pairing link"]').boundingBox(), 'the field');
-          expect(
-            Math.abs(submit.width - field.width),
-            'phone: Use this link is the full field width',
-          ).toBeLessThanOrEqual(1);
+          // Q6 (ruling C-6): content-sized (12rem minimum), NOT the field's full width, on a phone too.
+          expect(submit.width, 'phone: Use this link is narrower than the field').toBeLessThan(field.width - 40);
         } else expect(submit.width, 'the submit is not a full-width bar').toBeLessThan(variant.width * 0.6);
         expect(submit.width, 'r11-1b G4: Use this link is at least 136 px wide').toBeGreaterThanOrEqual(135.5);
         // The paste path is mounted WITH a return path, so Back is on it: exactly one, 136 px wide and 44 tall.
