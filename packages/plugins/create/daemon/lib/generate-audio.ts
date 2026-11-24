@@ -14,7 +14,6 @@ import {
   GenerateMusicInputSchema,
   GenerateSfxInputSchema,
   GenerateSpeechInputSchema,
-  type LiveRate,
   MAX_CHAT_MEDIA_BYTES,
   MUSIC_ENDPOINT,
   priceMusic,
@@ -24,12 +23,13 @@ import {
   SPEECH_MODELS,
 } from '../../contract/index.ts';
 import { ELEVENLABS, runSpeech } from './elevenlabs.ts';
-import { FAL, isFailure, readPrice, runMusic, runSfx } from './fal.ts';
+import { FAL, runMusic, runSfx } from './fal.ts';
 import {
   altOf,
   type DeliverMedia,
   download,
   failed,
+  falRate,
   kib,
   type Paid,
   paidCall,
@@ -84,16 +84,6 @@ async function present(
 }
 
 const hashed = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex').slice(0, 8);
-
-/** fal's own rate for an endpoint (`live`, absent when fal gave none), or the answer that ends the call. */
-type Rate =
-  | { readonly kind: 'rate'; readonly live: LiveRate | undefined }
-  | { readonly kind: 'end'; readonly answer: ToolAnswer };
-
-async function falRate(secrets: SecretsPort, endpoint: string): Promise<Rate> {
-  const live = await readPrice(secrets, endpoint);
-  return live !== undefined && isFailure(live) ? { kind: 'end', answer: failed(live) } : { kind: 'rate', live };
-}
 
 function generateSpeechTool(deps: GenerateAudioDeps) {
   return (ferret: string, rawInput: unknown): Promise<ToolAnswer> =>

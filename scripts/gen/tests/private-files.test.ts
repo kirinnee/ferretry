@@ -186,6 +186,7 @@ const SWEEP: readonly Entry[] = [
   ['mcp', 'oauth-secrets.json', false],
   ['conversation', 'message-token.key', false],
   ['create', 'ledger.jsonl', false],
+  ['create', 'jobs.jsonl', false],
   ['accounts', 'login-secrets.json', false],
   ['accounts', 'accounts.json', false],
   ['git-accounts', 'keys.json', false],

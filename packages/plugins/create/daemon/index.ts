@@ -10,6 +10,7 @@ import {
 import manifest from '../manifest.ts';
 import { generateAudioTools } from './lib/generate-audio.ts';
 import { generateImageTool } from './lib/generate-image.ts';
+import { generateVideoTools } from './lib/generate-video.ts';
 import { type DeliverMedia, serialQueue, type ToolAnswer } from './lib/paid-call.ts';
 import { SpendLedger } from './lib/spend.ts';
 
@@ -46,6 +47,7 @@ export default implementDaemon(manifest, {
       deliver,
       serial: serialQueue(),
     };
+    const video = generateVideoTools({ ...deps, state: kernel.state });
     const generateImage = generateImageTool(deps);
     const audio = generateAudioTools(deps);
     /** A tool is a ferret's: the owner's own call has no ferret to hand the file to. */
@@ -66,6 +68,8 @@ export default implementDaemon(manifest, {
         generate_speech: forFerret(audio.generate_speech),
         generate_sfx: forFerret(audio.generate_sfx),
         generate_music: forFerret(audio.generate_music),
+        generate_video: forFerret(video.generate_video),
+        generation_status: forFerret(video.generation_status),
       },
       hooks: {
         'ask.sources:create-spend': { schema: CreateSpendRefSchema, title: 'Spend on a creative tool', form: false },
