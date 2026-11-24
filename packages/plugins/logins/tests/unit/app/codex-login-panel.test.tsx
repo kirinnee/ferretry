@@ -227,7 +227,7 @@ describe('CodexLoginPanel with a link', () => {
     expect(texts(view)).toContain(CODEX_LINK_URL);
     expect(texts(view)).toContain('won’t load');
     expect(texts(view)).toContain('http://localhost');
-    expect(view.root.findAllByType('textarea')).toHaveLength(1);
+    expect(view.root.findAllByType('input')).toHaveLength(1);
     expect(view.root.findAllByProps({ 'data-codex-login-device-unavailable': '' })).toHaveLength(0);
   });
 
