@@ -415,7 +415,11 @@ closes an open stream at once** (4401). `contract/stream.ts` is the wire; `daemo
   (`sent`, `heard`, `dropped`, `cancelled`, `failed`). A refusal is one unit with a fixed sentence, then the close.
 - **The pause and the send (owner decision O1: no countdown).** Silero VAD finds the voice; a silence of 1.5 s (styles
   `quick` 1.0 s, `thinker` 2.5 s — **guesses**, tuned from unit 5's numbers) ends the turn, or 120 s whatever the voice
-  is doing. The final decode starts at once and the message is sent **as soon as it is ready**, as the person's own
+  is doing. The final decode starts **0.3 s after the last word**, not at the pause: a turn of at most 5 s is decoded in the pause, and
+  the pause uses that result when no voice came back (voice that did outdates it, and the whole turn is decoded again).
+  Measured on the real engine, `clip-5s`, last word → sent: **3.28 s before, 2.4–2.6 s after** (0.5 s trigger: 2.88 s). The
+  floor is the decode itself (about 1.7 s for 5 s), which the offline engine cannot hide the way the browser's
+  `beginFinish()` hides a streaming one. A longer turn is decoded at the pause as before. The message is sent **as soon as it is ready**, as the person's own
   message through Conversation's send, prefixed `(voice) `, with the stable id `<streamId>:<turn>`. A turn is handed over
   once; a refused or failed send is reported, never repeated by the stream.
 - **A dead phone never sends.** The send waits for an echo of a nonce the machine issued **after** it heard the pause. A
@@ -424,7 +428,8 @@ closes an open stream at once** (4401). `contract/stream.ts` is the wire; `daemo
   nothing. A stream with no unit for 5 s is closed (4408).
 - **Words while you speak.** The engine has no streaming decode, so a turn of at most 5 s is re-decoded about every 1.2 s
   (5 s of speech decodes in about 1.9 s, above); a longer turn keeps its last words until the final decode. Past that the
-  final decode has 5 s plus half the audio's length.
+  final decode has 5 s plus half the audio's length. A decode that began in the pause keeps the VAD from looking for a
+  moment; the audio it missed is scanned in full afterwards, so no voice is skipped.
 - **Fails out loud.** More than 2 s of unseen audio (`engine_behind`) or a decode over its budget (`engine_timeout`) loses
   that turn, with a sentence; three lost turns in a row end the stream (`engine_overloaded`, 4450). Not enough memory to
   load speech ends it at once (`voice_no_memory`). Audio is never silently skipped inside a turn. Only the engine's

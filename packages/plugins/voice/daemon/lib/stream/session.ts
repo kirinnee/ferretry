@@ -93,6 +93,12 @@ const BEHIND = 2 * SECOND;
 /** Interim words are re-decoded this often, and only while the turn is short enough to decode in about two seconds (5 s → 1.76 s). */
 const INTERIM_EVERY = Math.round(1.2 * SECOND);
 const INTERIM_MAX = 5 * SECOND;
+/**
+ * The final decode starts this long after the last word, not at the pause: if the voice has not come back by the pause
+ * the turn is already decoded and only the proof of the phone is left to wait for. A decode that voice then outdates is
+ * thrown away. Only turns short enough to interim-decode start early (a longer decode would leave audio unseen).
+ */
+const EARLY_SILENCE = Math.round(0.3 * SECOND);
 /** Audio that arrives while no turn is open is kept this long, so a late speech start is not clipped. */
 const IDLE_KEEP = Math.round(1.5 * SECOND);
 /** The most unheard audio kept while a turn is being finished. */
@@ -148,6 +154,10 @@ export class VoiceStream implements SocketHandler {
   private lastSpeechEnd = 0;
   private seenLength = 0;
   private interimAt = 0;
+  /** The decode of this turn that began in the pause, valid only while no voice has come back (same `cut`). */
+  private early: { turn: number; cut: number; text: string } | undefined;
+  /** Where the audio the VAD has not looked at starts, after an early decode kept it from looking: it is scanned from here. */
+  private scanFrom: number | undefined;
   private pauseSamples = 0;
   private words: { turn: number; rev: number; text: string; offset: number; final: boolean } | undefined;
   private last: TurnOutcome | undefined;
@@ -333,6 +343,7 @@ export class VoiceStream implements SocketHandler {
     this.turnStart = Math.max(0, first.start - LEAD_IN);
     this.lastSpeechEnd = spans[spans.length - 1]?.end ?? first.end;
     this.interimAt = 0;
+    this.early = undefined;
     this.words = undefined;
     this.last = undefined;
     this.phase = 'hearing';
@@ -341,8 +352,11 @@ export class VoiceStream implements SocketHandler {
   /** A turn is open: find the end of the voice, and show interim words while the turn is short. */
   private async hear(): Promise<void> {
     const at = this.samples.length;
-    if (at - this.seenLength > BEHIND) return this.failTurn('engine_behind');
-    const from = Math.max(this.turnStart, at - (this.pauseSamples + SECOND));
+    // After an early decode the unseen audio is expected, and is scanned in full, so no voice in it is skipped.
+    const resume = this.scanFrom;
+    this.scanFrom = undefined;
+    if (resume === undefined && at - this.seenLength > BEHIND) return this.failTurn('engine_behind');
+    const from = Math.max(this.turnStart, Math.min(at - (this.pauseSamples + SECOND), resume ?? at));
     const spans = await this.call(() => this.parts.engine.detectSpeech(this.samples.slice(from, at)));
     this.seenLength = at;
     const last = spans[spans.length - 1];
@@ -354,6 +368,19 @@ export class VoiceStream implements SocketHandler {
       return;
     }
     const spoken = this.lastSpeechEnd - this.turnStart;
+    const cut = this.lastSpeechEnd + LEAD_IN;
+    if (spoken <= INTERIM_MAX && silence >= EARLY_SILENCE && !this.isEarly(cut)) {
+      const heard = await this.decodeWithin(
+        this.samples.slice(this.turnStart, cut),
+        this.finalBudget(cut - this.turnStart),
+      );
+      if (this.phase !== 'hearing') return;
+      this.early = { turn: this.turn, cut, text: heard.text };
+      this.scanFrom = this.seenLength;
+      this.interimAt = spoken;
+      this.setWords(heard.text, false);
+      return;
+    }
     if (spoken <= INTERIM_MAX && spoken - this.interimAt >= INTERIM_EVERY) {
       const heard = await this.decodeWithin(this.samples.slice(this.turnStart, this.lastSpeechEnd), FINAL_BASE_MS);
       this.interimAt = spoken;
@@ -368,8 +395,10 @@ export class VoiceStream implements SocketHandler {
     this.samples.dropBefore(cut);
     if (this.samples.length > BACKLOG_KEEP) this.samples.dropBefore(this.samples.length - BACKLOG_KEEP);
     this.seenLength = 0;
-    const seconds = audio.length / SECOND;
-    const heard = await this.decodeWithin(audio, FINAL_BASE_MS + (seconds * 1000) / 2);
+    // The decode that began in the pause is this turn's final decode when no voice came back since (same cut).
+    const early = this.isEarly(cut) ? this.early : undefined;
+    this.early = undefined;
+    const heard = early ?? (await this.decodeWithin(audio, this.finalBudget(audio.length)));
     // A phone that died or pressed End during the decode must not send.
     if (this.ended) return;
     // Noise the model wrote as punctuation (".") is not words either.
@@ -387,6 +416,14 @@ export class VoiceStream implements SocketHandler {
       return this.settle({ turn, outcome: 'cancelled', code: 'phone_silent' });
     }
     await this.deliver(text, turn);
+  }
+
+  private isEarly(cut: number): boolean {
+    return this.early?.turn === this.turn && this.early.cut === cut;
+  }
+
+  private finalBudget(samples: number): number {
+    return FINAL_BASE_MS + ((samples / SECOND) * 1000) / 2;
   }
 
   private async deliver(text: string, turn: number): Promise<void> {
