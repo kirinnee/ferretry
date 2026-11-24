@@ -82,6 +82,47 @@ describe.each(PINNERS)('a file or folder opened through the pin, %s', (_label, p
     });
   });
 
+  test('read with a window serves only that span, clamped to the file, and the cap still judges the whole file', async () => {
+    const { root } = await tree('read-window');
+    await withPin(pinner(), root, async pinned => {
+      const file = await pinned.open('src/b.ts'); // 'bravo!'
+      const text = async (start: number, length: number, cap = 100): Promise<string | undefined> => {
+        const bytes = await file.read(cap, { start, length });
+        return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+      };
+      expect(await text(1, 3)).toBe('rav');
+      expect(await text(4, 100)).toBe('o!');
+      expect(await text(6, 10)).toBe('');
+      expect(await text(99, 10)).toBe('');
+      expect(await text(0, 0)).toBe('');
+      // The cap is about the file, not the span: a one-byte span of a six-byte file is still refused under a cap of five.
+      expect(await text(0, 1, 5)).toBeUndefined();
+      await file.close();
+    });
+  });
+
+  test('restat is a fresh fstat of the same descriptor: the same file at the same size, a new ctime after an in-place write', async () => {
+    const { root } = await tree('restat');
+    await withPin(pinner(), root, async pinned => {
+      const file = await pinned.open('src/b.ts'); // 'bravo!'
+      const at = file.identities.at(-1);
+      const before = await file.restat();
+      expect(before.identity.dev).toBe(at?.dev as bigint);
+      expect(before.identity.ino).toBe(at?.ino as bigint);
+      expect(before.identity.ctimeNs).toBe(at?.ctimeNs as bigint);
+      expect(before.size).toBe(file.metadata.size);
+      expect(before.mtime).toBe(file.metadata.mtime);
+      // Same size, written in place: the inode and size are as they were, the kernel-set ctime is not.
+      await new Promise(resolve => setTimeout(resolve, 20));
+      await writeFile(path.join(root, 'src', 'b.ts'), 'BRAVO!');
+      const after = await file.restat();
+      expect(after.identity.ino).toBe(before.identity.ino);
+      expect(after.size).toBe(before.size);
+      expect(after.identity.ctimeNs).toBeGreaterThan(before.identity.ctimeNs);
+      await file.close();
+    });
+  });
+
   test('read serves what exists when the file was cut short under the open descriptor', async () => {
     const { root } = await tree('read-short');
     await withPin(pinner(), root, async pinned => {

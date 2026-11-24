@@ -100,7 +100,7 @@ export function fileHoldsValue(bytes: Uint8Array, scope: RedactionScope): boolea
 /**
  * Whether ANY of {@link coverage}'s three looks covers anything, decided line by line with string comparisons instead of
  * one cell per unit: the same answer as `coverage(text, scope).includes(true)`, without the row of booleans, so it
- * stays cheap on a media file of tens of mebibytes (the streamed media route asks it once per piece it serves).
+ * stays cheap on a media file of tens of mebibytes (the streamed media route asks it once per file, and keeps the answer).
  */
 function covers(text: string, scope: RedactionScope): boolean {
   const lines = text.split('\n').map((line, at, all) => (at < all.length - 1 ? `${line}\n` : line));

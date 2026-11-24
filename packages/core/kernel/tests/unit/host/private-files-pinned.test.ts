@@ -147,6 +147,7 @@ function splitPinner(inner: SessionRootPinner, devices: Devices): SessionRootPin
       canonical: target.canonical,
       identities: [...target.identities.slice(0, -1), moved],
       read: max => target.read(max),
+      restat: () => target.restat(),
       list: (max, budget) => target.list(max, budget),
       close: () => target.close(),
     };

@@ -19,6 +19,7 @@
  * requests and no state on this object.
  */
 
+import { createHmac, randomBytes } from 'node:crypto';
 import { secretMask, type SecretName } from '../../../contract/index.ts';
 import { mergeRanges, type TextRange } from './policy.ts';
 
@@ -57,6 +58,8 @@ export interface Scrub {
   data(value: unknown, additional?: readonly MaskValue[]): unknown;
   /** WHERE `text` holds a known value: merged ranges of UTF-16 offsets, never the value. For masking by position. */
   cover(text: string, additional?: readonly MaskValue[]): readonly TextRange[];
+  /** A keyed digest of every value this scrub masks, for keeping a verdict while the set is unchanged. Never a value. */
+  fingerprint(additional?: readonly MaskValue[]): string;
 }
 
 /** Daemon-only entries for one masking pass; duplicate names preserve both sides of a rotation. */
@@ -162,6 +165,7 @@ export function scrubValues(values: () => ReadonlyMap<string, string>): Scrub {
     data: (value, additional) => data(value, all(additional)),
     cover: (text, additional) =>
       mergeRanges(matches(text, all(additional), false).map(({ start, end }) => ({ start, end }))),
+    fingerprint: additional => fingerprintOf(all(additional)),
   };
 }
 
@@ -231,4 +235,21 @@ function cutValue(text: string, values: readonly MaskValue[]): Match | undefined
   return longest === undefined
     ? undefined
     : { start: body.length - longest.length, end: text.length, entry: longest.entry };
+}
+
+/** Fresh for every process, so a digest means nothing outside the daemon that made it and cannot be tabulated. */
+const FINGERPRINT_KEY = randomBytes(32);
+
+/**
+ * A keyed digest of the DISTINCT non-empty values, order and names aside (only the bytes a read would match matter), each
+ * length-prefixed so two sets cannot spell the same stream. Equal exactly when the set of values is equal, which is the
+ * one thing a caller keeping a verdict about some bytes needs to know. It is not a value and goes nowhere but memory.
+ */
+function fingerprintOf(entries: readonly MaskValue[]): string {
+  const hmac = createHmac('sha256', FINGERPRINT_KEY);
+  for (const value of [...new Set(entries.map(entry => entry.value).filter(value => value !== ''))].sort()) {
+    hmac.update(`${Buffer.byteLength(value)}:`);
+    hmac.update(value);
+  }
+  return hmac.digest('hex');
 }

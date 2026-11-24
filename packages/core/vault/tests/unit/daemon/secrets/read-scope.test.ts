@@ -31,6 +31,52 @@ import { counted, dense, PIN, source } from './read-scope-fixtures.ts';
 
 const TOKEN = 'sk-live-0123456789';
 
+describe('the read-scoped redaction: what a verdict about some bytes may rest on', () => {
+  const fingerprintOf = async (values: Record<string, string>): Promise<string | undefined> =>
+    await new VaultRedaction(source(values)).read(scope => scope.fingerprint?.());
+
+  it('should name the same set of values the same way, whatever their names or order', async () => {
+    // Arrange + Act
+    const one = await fingerprintOf({ A: 'first-value-0123', B: 'second-value-4567' });
+    const again = await fingerprintOf({ B: 'second-value-4567', A: 'first-value-0123' });
+    const renamed = await fingerprintOf({ X: 'first-value-0123', Y: 'second-value-4567' });
+
+    // Assert
+    should(one).be.a.String();
+    should(again).eql(one);
+    should(renamed).eql(one);
+  });
+
+  it('should name a different set differently: a value added, removed, or changed by one character', async () => {
+    // Arrange
+    const base = await fingerprintOf({ A: 'first-value-0123' });
+
+    // Act + Assert
+    should(await fingerprintOf({ A: 'first-value-0123', B: 'second-value-4567' })).not.eql(base);
+    should(await fingerprintOf({})).not.eql(base);
+    should(await fingerprintOf({ A: 'first-value-0124' })).not.eql(base);
+    // two values are not the one value spelled with the other's text in between
+    should(await fingerprintOf({ A: 'ab', B: 'c' })).not.eql(await fingerprintOf({ A: 'a', B: 'bc' }));
+  });
+
+  it('should hold no value in what it names, and refuse once the read that made it has ended', async () => {
+    // Arrange
+    const redaction = new VaultRedaction(source({ TOKEN }));
+    let scope: Parameters<Parameters<VaultRedaction['read']>[0]>[0] | undefined;
+
+    // Act
+    const digest = await redaction.read(opened => {
+      scope = opened;
+      return opened.fingerprint?.();
+    });
+
+    // Assert
+    should(digest).be.a.String();
+    should(digest as string).not.containEql(TOKEN);
+    should(() => scope?.fingerprint?.()).throw();
+  });
+});
+
 describe('the read-scoped redaction', () => {
   it('S15 S18 an operator read is masked: a known value reads as [redacted:NAME]', async () => {
     // Arrange
