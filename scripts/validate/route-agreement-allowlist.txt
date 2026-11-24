@@ -130,3 +130,7 @@ unreached PATCH /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalog
 unreached POST /v1/renders # CORRECT: daemon-first slice (F959 slice 2); `fy render save` dials it in slice 3
 unreached GET /v1/renders/:id/meta # CORRECT: daemon-first slice (F959 slice 2); the app reference resolver dials it in slice 4
 unreached GET /v1/renders/:id # CORRECT: daemon-first slice (F959 slice 2); the app render embed dials it in slice 4
+unserved GET /v1/connector # TEMPORARY: the app's Connectors panel (part D) lands before the daemon routes (part C); delete these four lines when the branches meet
+unserved POST /v1/connector/requests/*/approve # TEMPORARY: see GET /v1/connector above
+unserved POST /v1/connector/requests/*/deny # TEMPORARY: see GET /v1/connector above
+unserved POST /v1/connector/grants/*/revoke # TEMPORARY: see GET /v1/connector above

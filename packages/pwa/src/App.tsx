@@ -125,6 +125,8 @@ import {
 import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
 import { performanceSettingsTab } from './features/settings/performance-settings.tsx';
 import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
+import { connectorSettingsTab } from './features/connector/connector-settings.tsx';
+import { useConnectorDeepLink } from './features/connector/connector-deep-link.ts';
 import { securityLogSettingsTab } from './features/settings/security-log-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
@@ -2073,6 +2075,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       pricingSettingsTab(createDaemonClient),
       // Optional provider keys sit with the machine's other spend: pricing, then the keys that spend.
       speedupsSettingsTab(createDaemonClient),
+      connectorSettingsTab(createDaemonClient),
       securityLogSettingsTab(createDaemonClient),
       terminalSlotsSettingsTab(createDaemonClient),
       configFilesSettingsTab(createDaemonClient),
@@ -2596,6 +2599,12 @@ export function AppShell() {
   useConfigChangeFeed(store, connection);
   // A notification tap routes here in the app instead of the worker reloading the window.
   useNotificationOpen(notificationOpenSource(), window.location.origin, navigate);
+  // The daemon's waiting page links here with `?connector=<daemonId>`: open that machine's Connectors panel.
+  const connectorLinkName = useCallback(
+    (record: DaemonConnectionRecord) => distinctDaemonName(record, connectionSnapshot.connections),
+    [connectionSnapshot.connections],
+  );
+  useConnectorDeepLink(connectionSnapshot.connections, connectorLinkName, navigate);
   /*
    * ONE SESSION LIST ACROSS EVERY MACHINE, unless the reader chose the machine on screen alone. Each
    * machine's list is read through its own pairing — its own device key — at a slower beat for the

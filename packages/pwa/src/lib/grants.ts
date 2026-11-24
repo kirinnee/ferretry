@@ -105,7 +105,8 @@ const USE_ACTS: Readonly<Record<DaemonCapability, string>> = {
  * 2026-10-14). Named exactly, because "add or manage a paired device" is too vague a thing to confirm
  * when what the person is approving is another device getting into this machine.
  */
-const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']>, string>> = {
+// TODO(lead): 'approve-connector' joins StepUpActSchema in Part C; the union below collapses to the schema then.
+const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']> | 'approve-connector', string>> = {
   'add-device': 'add a device',
   'widen-device': 'give another device more access',
   'enable-agent-control': 'let agents control that again',
@@ -122,6 +123,7 @@ const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']>, string>> = 
     "let Ferretry sign in for the ferrets a rule names with an account's password, until the rule ends",
   'resume-cut-off': 'bring back a ferret you cut off',
   'approve-paste-rule': 'let Ferretry paste a sealed copy for ferrets without asking, under this one paste rule',
+  'approve-connector': 'let Claude read and control your ferrets through the connector',
 };
 
 /**

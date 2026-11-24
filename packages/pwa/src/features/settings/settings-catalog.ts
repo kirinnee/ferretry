@@ -780,6 +780,15 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     keywords: ['warden', 'failover', 'round robin', 'fallback', 'ai login', 'quota', 'token', 'wrapper', 'supervision'],
   },
   {
+    // "Claude", "MCP" and "connector" are what somebody types when they want to give Claude access to their fleet.
+    id: 'connector',
+    label: 'Claude connector',
+    description:
+      'The address to add in Claude as a custom connector, approving a Claude sign-in with your passkey, and revoking a connected app. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#connector`,
+    keywords: ['claude', 'connector', 'mcp', 'oauth', 'sign in', 'approve', 'match code', 'revoke', 'app'],
+  },
+  {
     // Words for the passkey panel: what a person types after a prompt asks them to "confirm it's you".
     id: 'security',
     label: 'Security',
