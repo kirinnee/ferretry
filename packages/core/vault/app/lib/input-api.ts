@@ -18,6 +18,7 @@ import {
 } from '../../contract/index.ts';
 import type { VaultClient } from '../shell.tsx';
 
+const LIST_ALL_ROUTE = 'GET /v1/input-requests';
 const LIST_ROUTE = 'GET /v1/ferrets/:ferretId/input-requests';
 const DELIVER_ROUTE = 'POST /v1/ferrets/:ferretId/input-requests/:requestId/deliver';
 const SHOT_ROUTE = 'GET /v1/ferrets/:ferretId/input-requests/:requestId/shot';
@@ -30,9 +31,16 @@ export type ListedRequest =
 
 /** A ferret's open requests; each is read on its own, so one card this build cannot parse never fails the others. */
 export async function listInputRequests(client: VaultClient, ferretId: string): Promise<readonly ListedRequest[]> {
-  const { requests } = z
-    .looseObject({ requests: z.array(z.unknown()) })
-    .parse(await client.call(LIST_ROUTE, { params: { ferretId } }));
+  return readListed(await client.call(LIST_ROUTE, { params: { ferretId } }));
+}
+
+/** Every open request on the machine, for the modal that shows them when the app opens. A quiet read: it asks for nothing. */
+export async function listAllInputRequests(client: VaultClient): Promise<readonly ListedRequest[]> {
+  return readListed(await client.call(LIST_ALL_ROUTE, { quiet: true }));
+}
+
+function readListed(answer: unknown): readonly ListedRequest[] {
+  const { requests } = z.looseObject({ requests: z.array(z.unknown()) }).parse(answer);
   return requests.map((each): ListedRequest => {
     const parsed = InputRequestSchema.safeParse(each);
     if (parsed.success) return { kind: 'open', request: parsed.data };
@@ -66,4 +74,15 @@ export async function readInputShot(client: VaultClient, request: Ids): Promise<
   return InputShotSchema.parse(
     await client.call(SHOT_ROUTE, { params: { ferretId: request.sessionId, requestId: request.id } }),
   );
+}
+
+const OBSERVE_ROUTE = 'POST /v1/ferrets/:ferretId/input-requests/:requestId/observe';
+
+/**
+ * Asks the machine to look at one request's target again, so a card that has sat open is redrawn from what the target
+ * shows now (the daemon holds only the facts it last saw). Types nothing and returns nothing: the caller reads the list
+ * again for the redrawn card. A machine that cannot answer leaves the card as it was.
+ */
+export async function observeInput(client: VaultClient, request: Ids): Promise<void> {
+  await client.call(OBSERVE_ROUTE, { params: { ferretId: request.sessionId, requestId: request.id }, body: {} });
 }
