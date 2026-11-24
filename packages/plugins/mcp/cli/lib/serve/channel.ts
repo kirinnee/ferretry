@@ -28,10 +28,11 @@
  * It runs ONLY when the launch said Claude was given the channel flag (`FERRETRY_CHANNEL`, set in the same `--mcp-config`
  * the flag rides with): a server polling for a channel Claude never loaded would make the daemon think it was listening.
  *
- * A FAILURE NEVER STOPS IT, EXCEPT A REVOKED CREDENTIAL. A poll that fails (the daemon restarting, a refused call, a 5xx)
- * backs off, capped, and tries again; a message whose claim failed or was refused is not written. But a 401 is the
- * daemon saying this ferret's pane credential is no longer good (it ended, or was restarted, and the token rotated): no
- * retry can ever change that answer, so the pump says so once and stops, and the server ends with it (`serve.ts`).
+ * A FAILURE NEVER STOPS IT, EXCEPT A CREDENTIAL THE DAEMON REFUSES TWICE. A poll that fails (the daemon restarting, a
+ * refused call, a 5xx) backs off, capped, and tries again; a message whose claim failed or was refused is not written.
+ * A 401 is the daemon saying it does not know this ferret's pane credential (it ended, or was restarted, and the token rotated), but one 401 is not proof: a daemon still booting has not loaded its tokens. So the first 401 waits for the
+ * daemon to answer its liveness route, asks again, and only a second 401 from a daemon that said it was healthy stops
+ * the pump, says so once, and ends the server with it (`serve.ts`).
  */
 import { z } from 'zod';
 
@@ -74,9 +75,13 @@ export class ChannelRefusal extends Error {
   }
 }
 
-/** Said once, on the way out, when the daemon answers 401: the same sentence for a poll and a claim. */
+/**
+ * Said once, on the way out, when a healthy daemon refuses the credential twice: the same sentence for a poll and a
+ * claim. It says what was seen, not why: the daemon answers 401 for an ended ferret, a rotated token and a token state
+ * it cannot read safely alike.
+ */
 export const CREDENTIAL_REVOKED_SENTENCE =
-  'this ferret’s credential was revoked (it ended or was restarted); channel stopped — restart the ferret';
+  'the daemon no longer accepts this ferret’s credential (it ended, was restarted, or the daemon cannot confirm it); channel stopped — restart the ferret';
 
 const credentialRevoked = (error: unknown): boolean => error instanceof ChannelRefusal && error.status === 401;
 
@@ -128,6 +133,11 @@ export interface ChannelSeams {
   readonly sleep: (ms: number) => Promise<void>;
   /** Said when a poll or a claim failed (the daemon's own sentence); never throws. */
   readonly onError?: (message: string) => void;
+  /**
+   * Whether the daemon answers its liveness route (`GET /healthz`). Asked after a first 401, before the second try; a
+   * build that gives none treats the daemon as healthy once the back-off has passed.
+   */
+  readonly healthy?: () => Promise<boolean>;
   /** A MONOTONIC clock in milliseconds (default `performance.now`): only ever differenced, never compared with the daemon's. */
   readonly now?: () => number;
 }
@@ -137,6 +147,8 @@ export class ChannelPump {
   private running = false;
   private stopped = false;
   private revoked = false;
+  /** A 401 was answered, the daemon has since said it is healthy, and nothing else has happened: the next 401 is final. */
+  private doubted = false;
 
   constructor(
     private readonly port: ChannelPort,
@@ -154,6 +166,22 @@ export class ChannelPump {
       await this.loop();
     }
     return this.revoked ? 'credential_revoked' : 'stopped';
+  }
+
+  /**
+   * A 401 arrived. The first only raises a doubt: back off, wait for a healthy daemon, and the caller asks again. A 401
+   * straight after that is the answer, so the credential is revoked. Resolves true when it was.
+   */
+  private async refused(): Promise<boolean> {
+    if (this.doubted) {
+      this.revoke();
+      return true;
+    }
+    await this.seams.sleep(CHANNEL_BACKOFF_START_MS);
+    while (!this.stopped && this.seams.healthy !== undefined && !(await this.seams.healthy().catch(() => false)))
+      await this.seams.sleep(CHANNEL_BACKOFF_START_MS);
+    this.doubted = !this.stopped;
+    return false;
   }
 
   /** Ends the loop for good because the daemon no longer knows this ferret's credential; says so once. */
@@ -179,6 +207,7 @@ export class ChannelPump {
     const sentAt = now();
     try {
       const answer = await this.port.claim(this.seams.generation, message.sendId);
+      this.doubted = false;
       if (!answer.claimed) return false;
       const waited = now() - sentAt;
       if (waited <= answer.writeBudgetMs) return true;
@@ -187,8 +216,13 @@ export class ChannelPump {
       );
       return false;
     } catch (error) {
-      if (credentialRevoked(error)) this.revoke();
-      else this.seams.onError?.(`channel claim failed: ${error instanceof Error ? error.message : String(error)}`);
+      if (credentialRevoked(error)) {
+        // Asked again in place, once the daemon is healthy: a second 401 is final, so a doubt never outlives this claim.
+        if (await this.refused()) return false;
+        return !this.stopped && (await this.claimed(message));
+      }
+      this.doubted = false;
+      this.seams.onError?.(`channel claim failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }
@@ -200,13 +234,18 @@ export class ChannelPump {
       try {
         messages = await this.port.poll(this.seams.generation, CHANNEL_POLL_WAIT_MS);
       } catch (error) {
-        if (credentialRevoked(error)) return this.revoke();
+        if (credentialRevoked(error)) {
+          if (await this.refused()) return;
+          continue;
+        }
+        this.doubted = false;
         this.seams.onError?.(`channel poll failed: ${error instanceof Error ? error.message : String(error)}`);
         await this.seams.sleep(backoff);
         backoff = Math.min(backoff * 2, CHANNEL_BACKOFF_MAX_MS);
         continue;
       }
       backoff = CHANNEL_BACKOFF_START_MS;
+      this.doubted = false;
       if (this.stopped || messages.length === 0) continue;
       for (const message of messages) {
         if (this.stopped) break;

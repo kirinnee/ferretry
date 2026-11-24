@@ -656,29 +656,88 @@ describe('serveTools — the channel end to end', () => {
 describe('a revoked credential ends the channel', () => {
   const refusal = (status: number) => new ChannelRefusal(`the daemon answered HTTP ${String(status)}`, status);
 
-  it('should stop the pump at the FIRST 401, say it once, and not back off', async () => {
-    const polls: number[] = [];
+  it('should stop only at a SECOND 401 after the daemon said it was healthy, saying it once', async () => {
+    const events: string[] = [];
     const slept: number[] = [];
     const errors: string[] = [];
     const pump = new ChannelPump(
       {
         poll: async () => {
-          polls.push(polls.length);
+          events.push('poll');
           throw refusal(401);
         },
         claim: async () => ({ claimed: false, writeBudgetMs: 0 }),
       },
       () => undefined,
-      { ...seams, sleep: async ms => void slept.push(ms), onError: text => errors.push(text) },
+      {
+        ...seams,
+        sleep: async ms => void slept.push(ms),
+        healthy: async () => {
+          events.push('healthy');
+          return true;
+        },
+        onError: text => errors.push(text),
+      },
     );
     should(await pump.start()).equal('credential_revoked');
-    should(polls).have.length(1);
-    should(slept).eql([]);
+    should(events).eql(['poll', 'healthy', 'poll']);
+    should(slept).eql([CHANNEL_BACKOFF_START_MS]);
     should(errors).eql([CREDENTIAL_REVOKED_SENTENCE]);
-    should(CREDENTIAL_REVOKED_SENTENCE).containEql('revoked').and.containEql('restart the ferret');
+    should(CREDENTIAL_REVOKED_SENTENCE).containEql('no longer accepts').and.containEql('restart the ferret');
+    should(CREDENTIAL_REVOKED_SENTENCE).not.containEql('revoked');
   });
 
-  it('should stop at a 401 on a CLAIM too, writing nothing', async () => {
+  it('should keep running when a 401 is followed by a 200 (a daemon that was still booting)', async () => {
+    const holder: { current?: ChannelPump } = {};
+    const errors: string[] = [];
+    const events: string[] = [];
+    const { port } = scripted(holder, [refusal(401), [message], refusal(401), [message]], { events });
+    const pump = new ChannelPump(port, () => undefined, {
+      ...seams,
+      healthy: async () => {
+        events.push('healthy');
+        return true;
+      },
+      onError: text => errors.push(text),
+    });
+    holder.current = pump;
+    should(await pump.start()).equal('stopped');
+    // Each 401 was answered by a healthy daemon and then a good poll: the doubt never carried over to the second one.
+    should(errors).eql([]);
+    should(events.filter(event => event === 'healthy')).have.length(2);
+  });
+
+  it('should wait for the daemon to be healthy before it asks again, and not count the wait as a refusal', async () => {
+    const holder: { current?: ChannelPump } = {};
+    let answers = 0;
+    const probes: number[] = [];
+    const slept: number[] = [];
+    const { port, polls } = scripted(holder, [refusal(401), [message]]);
+    const pump = new ChannelPump(port, () => undefined, {
+      ...seams,
+      sleep: async ms => void slept.push(ms),
+      healthy: async () => {
+        probes.push(polls.length);
+        answers += 1;
+        return answers >= 3;
+      },
+    });
+    holder.current = pump;
+    should(await pump.start()).equal('stopped');
+    should(probes).eql([1, 1, 1]);
+    should(polls.length).equal(3);
+    should(slept.length).equal(3);
+  });
+
+  it('should treat a 401, a failure, then a 401 as two doubts, not a revocation', async () => {
+    const holder: { current?: ChannelPump } = {};
+    const { port } = scripted(holder, [refusal(401), new Error('ECONNRESET'), refusal(401), [message]]);
+    const pump = new ChannelPump(port, () => undefined, { ...seams, healthy: async () => true });
+    holder.current = pump;
+    should(await pump.start()).equal('stopped');
+  });
+
+  it('should stop at a repeated 401 on a CLAIM too, writing nothing', async () => {
     const written: string[] = [];
     const errors: string[] = [];
     let polls = 0;
@@ -693,7 +752,7 @@ describe('a revoked credential ends the channel', () => {
         },
       },
       line => written.push(line),
-      { ...seams, onError: text => errors.push(text) },
+      { ...seams, healthy: async () => true, onError: text => errors.push(text) },
     );
     should(await pump.start()).equal('credential_revoked');
     should(polls).equal(1);
@@ -730,7 +789,7 @@ describe('a revoked credential ends the channel', () => {
     should(plain).not.be.instanceOf(ChannelRefusal);
   });
 
-  it('should end the SERVER with exit 1 within one poll, though standard input stays open, saying it once', async () => {
+  it('should end the SERVER with exit 1 after the second 401, though standard input stays open, saying it once', async () => {
     const out: string[] = [];
     const err: string[] = [];
     let polls = 0;
@@ -766,7 +825,7 @@ describe('a revoked credential ends the channel', () => {
       new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 2_000)),
     ]);
     should(code).equal(1);
-    should(polls).equal(1);
+    should(polls).equal(2);
     should(err.join('')).equal(`${CREDENTIAL_REVOKED_SENTENCE}\n`);
     should(inputReleased).equal(false);
   });

@@ -22,6 +22,11 @@ export interface ServeContext {
    */
   readonly sleep?: ((ms: number) => Promise<void>) | undefined;
   /**
+   * Whether the daemon answers its liveness route. The channel pump asks it after a first 401 (a booting daemon has not
+   * loaded its tokens) and stops only on a second 401 from a daemon that said it was healthy. Absent: healthy.
+   */
+  readonly healthy?: (() => Promise<boolean>) | undefined;
+  /**
    * Whether the launch gave Claude the channel flag: `FERRETRY_CHANNEL` is set ONLY in the `--mcp-config` of a launch whose
    * argv carries `--dangerously-load-development-channels`. The channel pump runs only then; without it the server is a
    * plain tools server and never polls, so the daemon never takes it for a listening channel.
@@ -66,6 +71,7 @@ export async function serveTools({
   version,
   instructions,
   sleep,
+  healthy,
   channel,
   generation,
   isOn,
@@ -83,6 +89,7 @@ export async function serveTools({
       : new ChannelPump(clientChannelPort(client), write, {
           generation: generation ?? crypto.randomUUID(),
           sleep,
+          ...(healthy === undefined ? {} : { healthy }),
           onError: message => {
             io.err(`${message}\n`);
           },

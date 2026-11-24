@@ -16,6 +16,7 @@ import { isAbsolute } from 'node:path';
 import root from '../../../package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
 import { daemonAddressing, openFerretConnection, restartWaiting } from '../src/adapters/daemon/ferret-connection.ts';
+import { RunRecordDaemonHealth } from '../src/adapters/daemon/health.ts';
 import { ConsoleIo } from '../src/adapters/terminal/console-io.ts';
 import { serveHalf, toolDoor } from '../src/generated/slim.ts';
 import type { ClientDeps } from '../src/lib/client.ts';
@@ -29,6 +30,12 @@ import { lazyClient } from '../src/lib/lazy-client.ts';
 
 /** The plugin whose half this is: the id the guard checks first, with the tool's own owner. */
 const SERVE_PLUGIN = 'mcp';
+
+/** Ends the process at once with `code`, once what was said on the error channel has been written. */
+async function exitNow(code: number): Promise<never> {
+  await new Promise<void>(resolve => process.stderr.write('', () => resolve()));
+  process.exit(code);
+}
 
 /** Runs `fy mcp serve`; `argv` is `process.argv`. Returns the exit code. */
 export async function execute(argv: readonly string[]): Promise<number> {
@@ -83,7 +90,8 @@ export async function execute(argv: readonly string[]): Promise<number> {
       return opened;
     };
     const serveTools = await serveHalf.load();
-    return await serveTools({
+    const liveness = new RunRecordDaemonHealth(addressing.baseUrl);
+    const code = await serveTools({
       client: lazyClient(deps, SERVE_PLUGIN, surfaces, paned),
       io,
       stdin: () => Bun.stdin.stream(),
@@ -91,10 +99,16 @@ export async function execute(argv: readonly string[]): Promise<number> {
       instructions: await serveHalf.instructions(),
       // The channel pump backs off with this wait, and runs ONLY when the launch gave Claude the channel flag.
       sleep: async ms => await Bun.sleep(ms),
+      // After a first 401 the channel pump waits for `/healthz` before it asks again: a daemon still booting is not a revoked credential.
+      healthy: async () => (await liveness.probe()) !== undefined,
       channel: environment[await serveHalf.channelEnv()] === '1',
       // Which tools to list: the held plugin inventory says whether a package (Board, under the work switch) is on.
       isOn: async plugin => (await (await deps()).inventory.current()).plugins.some(p => p.id === plugin && p.on),
     });
+    // A non-zero end is the credential the daemon refused: the process ends NOW. Returning is not enough, because the
+    // read of standard input Claude holds open would keep it alive until Claude closed it.
+    if (code !== 0) await exitNow(code);
+    return code;
   } catch (error) {
     return reportFailure(error, io, binary);
   }
