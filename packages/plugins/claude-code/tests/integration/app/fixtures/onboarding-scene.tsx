@@ -9,6 +9,7 @@
  *   ?theme=<family>-<mode>   ?save=fail (the first PUT is refused)
  *   ?reread=withheld (the read AFTER a refused PUT is withheld, the one after that readable again)
  *   ?read=pending (the file carries a change held for the owner)   ?read=pending-once (held at the first read only: the owner confirmed it)   ?signin=chooser (the sign-in slot draws a harness chooser)
+ *   ?signin=real (the REAL SignInPage, outside a shell so its slot is empty and it draws its "not available" line; the host locks the whole footer on `busy(label)` as the shell does)
  */
 import { StepPageFrame } from '@ferretry/app';
 import type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
@@ -25,6 +26,7 @@ import {
   SettingsPage,
   SkillsPage,
 } from '../../../../app/features/onboarding/import/kind-page.tsx';
+import { SignInPage } from '../../../../app/features/onboarding/sign-in-page.tsx';
 import { PermissionPage } from '../../../../app/features/onboarding/permission-page.tsx';
 import { importRoutes, scanOf } from '../../../fixtures/onboarding/scan.ts';
 
@@ -178,6 +180,8 @@ function Host() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The label of a `busy(label)` the page raised: the shell locks Back, Later and Next whole while it stands (rule 8). */
+  const [held, setHeld] = useState<string | null>(null);
   const [moved, setMoved] = useState(false);
   const hostRef = useRef<StepHost | null>(null);
   hostRef.current ??= {
@@ -194,7 +198,7 @@ function Host() {
     done: () => {
       fake.done += 1;
     },
-    busy: () => undefined,
+    busy: label => setHeld(label),
     next: () => undefined,
     back: () => undefined,
   };
@@ -223,6 +227,8 @@ function Host() {
   const body =
     page === 'installed' || page === 'installed-manual' ? (
       <InstalledPage client={client} step={step} />
+    ) : page === 'sign-in' && params.get('signin') === 'real' ? (
+      <SignInPage client={client} step={step} />
     ) : page === 'sign-in' ? (
       signIn
     ) : page === 'import-choice' ? (
@@ -241,9 +247,9 @@ function Host() {
     <div style={{ height: '100vh', overflow: 'auto' }}>
       <StepPageFrame
         title={TITLES[page] ?? 'Claude Code'}
-        back={{ onClick: () => undefined }}
-        later={{ onClick: () => undefined }}
-        next={{ label: 'Next', disabled: page !== 'sign-in' && !ready, busy, onClick: press }}
+        back={{ disabled: held !== null, onClick: () => undefined }}
+        later={{ disabled: held !== null, onClick: () => undefined }}
+        next={{ label: 'Next', disabled: (page !== 'sign-in' && !ready) || held !== null, busy, onClick: press }}
         {...(error === null
           ? {}
           : {

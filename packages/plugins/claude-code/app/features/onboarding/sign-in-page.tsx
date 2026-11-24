@@ -13,6 +13,8 @@ import type { ClaudeCodeClient } from '../../lib/client.ts';
 import type { StepPageProps } from './props.ts';
 
 const HOLD = 'Sign in to Claude to continue';
+/** Next's save while nobody is signed in (rule 8): it refuses, so Next stays and says why; Back and Later stay live. */
+const refuseUntilSignedIn = (): Promise<void> => Promise.reject(new Error(`${HOLD}, or press Later.`));
 
 export function SignInPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
   const placed = useSlotHasPanels(CLAUDE_CODE_SIGN_IN_SLOT);
@@ -22,11 +24,11 @@ export function SignInPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
 
   useEffect(() => {
     // No panel to ask: show the page (it says where to sign in) instead of leaving it under the loading cover, and hold
-    // Next: nobody has signed in, and the shell records the default on Next as done (O1 rule 5). Later and Skip stay.
+    // Next: nobody has signed in, and the shell records the default on Next as done (O1 rule 5): a refusing save, never busy(), so Back and Later stay live.
     if (available || told.current) return;
     told.current = true;
     step?.ready();
-    step?.busy(HOLD);
+    step?.commit(refuseUntilSignedIn);
   }, [available, step]);
 
   return (
@@ -37,11 +39,11 @@ export function SignInPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
           daemon={daemon}
           slot={CLAUDE_CODE_SIGN_IN_SLOT}
           props={{
-            // The panel is up and nobody is signed in: hold Next (the shell records the default on Next, O1 rule 5) until
-            // the sign-in has really succeeded. Later and Skip stay available.
+            // The panel is up and nobody is signed in: hold Next with a refusing save (the shell records the default on Next, O1 rule 5) until
+            // the sign-in has really succeeded. Back and Later stay live.
             onShown: () => {
               step?.ready();
-              step?.busy(HOLD);
+              step?.commit(refuseUntilSignedIn);
             },
             // The login handled is kept for the Ready page, which names THAT login's runtime (run memory, never stored).
             onAlreadySignedIn: (loginId?: string) => {
@@ -50,7 +52,7 @@ export function SignInPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
             },
             onSignedIn: (loginId?: string) => {
               if (loginId !== undefined) step?.remember({ [SIGNED_LOGIN_KEY]: loginId });
-              step?.busy(null);
+              step?.commit(null);
               step?.done();
             },
           }}
