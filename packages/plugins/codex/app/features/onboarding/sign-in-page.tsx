@@ -112,7 +112,6 @@ export function SignInPage({ client, step }: { readonly client: OnboardingClient
   return (
     <StepBody step="codex.sign-in" label="Sign in to Codex" data-codex-step="sign-in">
       {INTRO}
-      {facts.state === 'no-login' ? <StepLine>No Codex login can be signed in here yet.</StepLine> : null}
       {daemon === undefined ? null : (
         <PanelSlot
           daemon={daemon}

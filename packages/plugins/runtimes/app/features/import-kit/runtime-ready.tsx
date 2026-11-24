@@ -4,7 +4,9 @@
  * here: a runtime is DERIVED from a ready login at read time (`GET /v1/runtimes`), so this page only reads it, afresh on
  * every visit (the sign-in and the import just before it are what made it).
  *
- *   - ready: at least one runtime of this harness can start now: it is named, with the way to use it.
+ *   - ready: at least one runtime of this harness can start now: it is named, with the way to use it. A runtime on the
+ *     person's own terminal sign-in (`store: host`) is never called "ready": Ferretry cannot see that sign-in, so the page says
+ *     it USES it, and, when the sign-in step was skipped, to sign in in a terminal before starting a ferret.
  *   - blocked: a runtime exists but cannot start: the daemon's own reason, and where to fix it.
  *   - none: no runtime exists: the sign-in was skipped or did not finish, and where to add one later.
  *   - a read that fails says so with Try again; Next still goes on (Later is never held).
@@ -40,7 +42,7 @@ export type ReadyRuntime = z.infer<typeof RuntimeRowSchema>;
 
 /** What one tool ended with. */
 export type ReadyState =
-  | { readonly kind: 'ready'; readonly names: readonly string[] }
+  | { readonly kind: 'ready'; readonly names: readonly string[]; readonly terminal: boolean }
   | { readonly kind: 'blocked'; readonly name: string; readonly reason: string }
   | { readonly kind: 'none' };
 
@@ -55,8 +57,10 @@ export function readyStateOf(runtimes: readonly ReadyRuntime[], harness: string,
     runtime => runtime.harness === harness && (login === undefined || runtime.credential.id === login),
   );
   // Named the way every other screen names a runtime ("Claude · your terminal sign-in"), never by its stored name.
-  const names = mine.filter(runtime => runtime.launch.available).map(runtime => runtimeDisplayName(runtime, mine));
-  if (names.length > 0) return { kind: 'ready', names };
+  const startable = mine.filter(runtime => runtime.launch.available);
+  const names = startable.map(runtime => runtimeDisplayName(runtime, mine));
+  if (names.length > 0)
+    return { kind: 'ready', names, terminal: startable.every(runtime => runtime.credential.store === 'host') };
   const [first] = mine;
   if (first !== undefined && !first.launch.available)
     return { kind: 'blocked', name: runtimeDisplayName(first, mine), reason: first.launch.reason };
@@ -125,7 +129,8 @@ export function RuntimeReadyPage({
       </StepBody>
     );
   const { state } = read;
-  const good = state.kind === 'ready';
+  // A terminal sign-in Ferretry never saw is a check only when this run's sign-in step handled it.
+  const good = state.kind === 'ready' && (!state.terminal || login !== undefined);
   const Mark = good ? Check : Minus;
   return (
     <StepBody step={`${harness}.ready`} data-runtime-ready={state.kind}>
@@ -135,7 +140,9 @@ export function RuntimeReadyPage({
         </span>
         <span>
           {state.kind === 'ready'
-            ? `${label} is ready`
+            ? state.terminal
+              ? `${label} uses your terminal sign-in`
+              : `${label} is ready`
             : state.kind === 'blocked'
               ? `${label} has a runtime, but it cannot start yet`
               : `No runtime was made for ${label}`}
@@ -146,6 +153,9 @@ export function RuntimeReadyPage({
           <StepLine data-ready-names="">
             {state.names.length === 1 ? `Runtime: ${state.names[0] ?? ''}.` : `Runtimes: ${state.names.join(', ')}.`}
           </StepLine>
+          {state.terminal && login === undefined ? (
+            <StepLine data-ready-terminal="">{`Sign in to ${label} in a terminal before you start a ferret.`}</StepLine>
+          ) : null}
           <StepLine>Pick it when you start a ferret.</StepLine>
         </>
       ) : state.kind === 'blocked' ? (

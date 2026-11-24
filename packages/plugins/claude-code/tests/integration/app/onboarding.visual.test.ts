@@ -74,9 +74,9 @@ const VIEWPORTS = [
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 const THEMES = ['studio-light', 'studio-dark'] as const;
-const CARD_PAGES = ['import-choice', 'conversations', 'permission'] as const;
+const CARD_PAGES = ['import-choice', 'permission'] as const;
 const KIND_PAGES = ['kind-settings', 'kind-model-set', 'kind-instructions', 'kind-skills', 'kind-mcp'] as const;
-const DEMO_PAGES = [...CARD_PAGES, 'installed', ...KIND_PAGES] as const;
+const DEMO_PAGES = [...CARD_PAGES, 'conversations', 'installed', ...KIND_PAGES] as const;
 const FOOTER = ['Back', 'Later', 'Next'] as const;
 
 type Tab = Awaited<ReturnType<Awaited<ReturnType<typeof sharedChromium>>['newPage']>>;
@@ -182,7 +182,7 @@ describe('the Claude pages: stacked cards, the demo on the right, few words', ()
               if (cards.length > 0) {
                 expect(demo.x).toBeGreaterThan((cards[0]?.right ?? 0) + 32);
                 expect(Math.abs(demo.y - (cards[0]?.y ?? 0))).toBeLessThanOrEqual(8);
-              } else if (page.startsWith('kind-')) {
+              } else if (page.startsWith('kind-') || page === 'conversations') {
                 expect(demo.x, 'the demo is right of the checklist').toBeGreaterThan(geometry.step.right + 16);
                 expect(Math.abs(demo.y - geometry.step.y)).toBeLessThanOrEqual(8);
               }
@@ -191,7 +191,8 @@ describe('the Claude pages: stacked cards, the demo on the right, few words', ()
               expect(demo.h).toBeLessThanOrEqual(140);
               expect(demo.clipped, 'nothing of the demo is cut off by the 140px limit').toBe(0);
               if (cards.length > 0) expect(demo.bottom).toBeLessThanOrEqual((cards[0]?.y ?? 0) + 1);
-              else if (page.startsWith('kind-')) expect(demo.bottom).toBeLessThanOrEqual(geometry.step.y + 1);
+              else if (page.startsWith('kind-') || page === 'conversations')
+                expect(demo.bottom).toBeLessThanOrEqual(geometry.step.y + 1);
               // The three footer buttons share the row inside the screen (equal thirds).
               expect(Math.min(...buttons.map(b => b.w))).toBeGreaterThan(80);
             }
@@ -342,18 +343,16 @@ describe('the permission page: only Next writes, and only permissionMode', () =>
   });
 });
 
-describe('the conversations page: Next saves hostHistory, nothing else', () => {
-  it('Don’t show them + Next writes one put changing hostHistory only (1280)', async () => {
+describe('the conversations page: no choice, Next writes nothing', () => {
+  it('draws one sentence and a generic demo, no card and no button; Next goes on without a write (1280)', async () => {
     const { tab, close } = await open(VIEWPORTS[0], 'studio-light', '&page=conversations');
     try {
       expect(await tab.locator('[data-step-page] .fy-spf__body button').count()).toBe(0);
-      await tab.locator('[data-choice="off"]').click();
-      expect((await fakeOf(tab)).puts.length).toBe(0);
+      expect(await tab.locator('[data-choice], input[type="radio"]').count()).toBe(0);
+      expect(await tab.locator('[data-conversations-one-way]').count()).toBe(1);
       await tab.locator('[data-step-next]').click();
       await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
-      const { puts } = await fakeOf(tab);
-      expect(puts.length).toBe(1);
-      expect(lineDiff(ORIGINAL, puts[0]?.text ?? '')).toEqual(['hostHistory: false']);
+      expect((await fakeOf(tab)).puts.length).toBe(0);
     } finally {
       await close();
     }

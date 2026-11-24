@@ -94,14 +94,6 @@ const click = async (container: ParentNode, selector: string): Promise<void> => 
   await interact(() => element.click());
 };
 
-const type = async (input: HTMLInputElement, value: string): Promise<void> => {
-  await interact(() => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-};
-
 const loginBox = (container: ParentNode): HTMLElement =>
   must(container.querySelector<HTMLElement>('[data-add-runtime-credential-select]'), 'login select');
 
@@ -195,17 +187,11 @@ const STAGED_ROUTES = (data: MachineData = DATA) => ({
 const proposed = (calls: readonly Call[]): unknown[] =>
   calls.filter(call => call.route === PROPOSE).map(call => call.body);
 
-const nameInput = (container: ParentNode): HTMLInputElement =>
-  must(container.querySelector<HTMLInputElement>('#add-runtime-name'), 'name input');
-
-/** The stored id the runtime will get, said on the "id" line under Name (blank Name: named after its login). */
-const idOf = (container: ParentNode): string => text(container, '[data-add-runtime-id] .font-mono');
-
 const submit = (container: ParentNode): HTMLButtonElement =>
   must([...container.querySelectorAll<HTMLButtonElement>('[data-change-submit]')].at(-1), 'submit');
 
 describe('Add runtime: the page', () => {
-  it('is one short form: a way back, Login, Profile and Name already filled in, and Create', async () => {
+  it('is one short form: a way back, Login and Profile already filled in, and Create', async () => {
     const finishes: (string | null)[] = [];
     const view = await mountHost({ finishes });
     expect(text(view.container, 'h3')).toBe('Advanced: add a runtime');
@@ -215,17 +201,15 @@ describe('Add runtime: the page', () => {
       [...view.container.querySelectorAll('[data-add-runtime-part]')].map(part =>
         part.getAttribute('data-add-runtime-part'),
       ),
-    ).toEqual(['login', 'name', 'login-more', 'profile']);
-    // Only Login and Name show first: the rest (new login, sign-in, Profile) sits under one "More".
+    ).toEqual(['login', 'login-more', 'profile']);
+    // Only Login shows first: the rest (new login, sign-in, Profile) sits under one "More".
     const more = must(view.container.querySelector<HTMLDetailsElement>('[data-add-runtime-more]'), 'More');
     expect(more.open).toBe(false);
     expect(more.querySelector('summary')?.textContent).toBe('More');
-    expect(more.querySelector('#add-runtime-name')).toBeNull();
     expect(more.querySelector('[data-add-runtime-profile-select]')).not.toBeNull();
     expect(view.container.querySelectorAll('[data-add-runtime-more]')).toHaveLength(1);
     expect(loginShown(view.container)).toBe('Claude · your terminal sign-in (personal)');
     expect(profileShown(view.container)).toBe('Claude hooks');
-    expect(idOf(view.container)).toBe('claude-claude-hooks');
     expect(submit(view.container).textContent).toBe('Create runtime');
     expect(submit(view.container).disabled).toBe(false);
     await click(view.container, '[data-page-back]');
@@ -234,26 +218,20 @@ describe('Add runtime: the page', () => {
 
   it('waits while the machine is offline, even with everything chosen', async () => {
     const view = await mountHost({ online: false });
-    expect(idOf(view.container)).toBe('claude-claude-hooks');
     expect(submit(view.container).disabled).toBe(true);
   });
 });
 
 describe('Add runtime: plain names (Q8a)', () => {
-  it('no stored login or runtime id reads as a name; ids stay on their "id" line', async () => {
+  it('no stored login or runtime id reads as a name, and no id is drawn at all', async () => {
     const view = await mountHost();
     const root = view.container;
     const ids = ['claude-personal', 'claude-work', 'codex', 'claude-review'];
-    const outsideIdLines = (): string =>
-      [...root.querySelectorAll('[data-add-runtime-id]')].reduce(
-        (text, line) => text.replace(line.textContent ?? '', ''),
-        root.textContent ?? '',
-      );
     const visible = [loginShown(root), profileShown(root), ...(await loginsOf(root)), ...(await profilesOf(root))];
     for (const id of ids) for (const shown of visible) expect(shown).not.toContain(id);
-    // The name box asks for no id: its placeholder is the login in plain words, and the id is on the id line.
-    expect(nameInput(root).placeholder).toBe('Claude · your terminal sign-in (personal)');
-    expect(outsideIdLines()).not.toContain('claude-claude-hooks');
+    // There is no name box to ask for an id: the id the runtime gets is never drawn.
+    expect(root.textContent).not.toContain('claude-claude-hooks');
+    expect(root.querySelector('[data-add-runtime-id]')).toBeNull();
     await pickProfile(root, 'Review');
     await click(root, '[data-duplicate-ok]');
     expect(text(root, '[data-add-runtime-duplicate]')).not.toContain('claude-review');
@@ -304,9 +282,7 @@ describe('Add runtime: Login', () => {
     const view = await mountHost();
     await pickProfile(view.container, 'Review');
     await click(view.container, '[data-duplicate-ok]');
-    expect(idOf(view.container)).toBe('claude-review-2');
     await pickLogin(view.container, 'codex');
-    expect(idOf(view.container).startsWith('codex-')).toBe(true);
     expect(
       must(
         view.container.querySelector<HTMLInputElement>('[data-duplicate-ok]') ?? document.createElement('input'),
@@ -469,10 +445,8 @@ describe('Add runtime: Profile', () => {
     await pick(view.container, 'claude-personal');
     expect(await profilesOf(view.container)).toEqual(['Default', 'Claude hooks', 'Agent work', 'Review']);
     expect(profileShown(view.container)).toBe('Claude hooks');
-    expect(idOf(view.container)).toBe('claude-claude-hooks');
     expect(submit(view.container).disabled).toBe(false);
     await pickProfile(view.container, 'Agent work');
-    expect(idOf(view.container)).toBe('claude-agent-work');
   });
 
   it('links to Profiles for building or changing one', async () => {
@@ -528,7 +502,6 @@ describe('Add runtime: Profile', () => {
 
     await click(view.container, '[data-duplicate-ok]');
     expect(must(view.container.querySelector<HTMLInputElement>('[data-duplicate-ok]'), 'checkbox').checked).toBe(true);
-    expect(idOf(view.container)).toBe('claude-review-2');
     expect(submit(view.container).disabled).toBe(false);
 
     await pickProfile(view.container, 'Default');
@@ -548,51 +521,14 @@ describe('Add runtime: Name and Create', () => {
     return view;
   };
 
-  it('shows the suggested name', async () => {
+  it('O9-5 has no Name field: the id the runtime is stored under is made for it and never typed or shown', async () => {
     const view = await ready();
-    expect(idOf(view.container)).toBe('claude-claude-hooks');
+    expect(view.container.querySelector('#add-runtime-name')).toBeNull();
+    expect(view.container.querySelector('[data-add-runtime-part="name"]')).toBeNull();
+    expect(view.container.querySelector('[data-add-runtime-id]')).toBeNull();
     expect(view.container.querySelector('[data-runtime-name-problem]')).toBeNull();
-    expect(text(view.container, '[data-add-runtime-part="name"]')).toContain('Leave blank to name it after its login.');
-    await type(nameInput(view.container), 'my-own');
-    expect(text(view.container, '[data-add-runtime-part="name"]')).toContain(
-      'Letters, digits and dashes. You type this to launch it.',
-    );
-    expect(idOf(view.container)).toBe('my-own');
+    expect(view.container.textContent).not.toContain('claude-claude-hooks');
     expect(submit(view.container).disabled).toBe(false);
-  });
-
-  it('E16: an invalid name says why, offers one that works, and cannot be created until fixed', async () => {
-    const view = await ready();
-    await type(nameInput(view.container), 'bad name!');
-    expect(text(view.container, '[data-runtime-name-problem]')).toContain('Use only letters, digits and dashes.');
-    expect(nameInput(view.container).getAttribute('aria-invalid')).toBe('true');
-    expect(submit(view.container).disabled).toBe(true);
-    expect(text(view.container, '[data-runtime-name-suggestion]')).toBe('Use bad-name');
-    await click(view.container, '[data-runtime-name-suggestion]');
-    expect(nameInput(view.container).value).toBe('bad-name');
-    expect(view.container.querySelector('[data-runtime-name-problem]')).toBeNull();
-    expect(submit(view.container).disabled).toBe(false);
-  });
-
-  it('E16: a name already taken offers the next free one', async () => {
-    const view = await ready();
-    await type(nameInput(view.container), 'claude-default');
-    expect(text(view.container, '[data-runtime-name-problem]')).toContain(
-      'claude-default is already a runtime on studio-mac.',
-    );
-    expect(text(view.container, '[data-runtime-name-suggestion]')).toBe('Use claude-default-2');
-    await click(view.container, '[data-runtime-name-suggestion]');
-    expect(nameInput(view.container).value).toBe('claude-default-2');
-  });
-
-  it('a blank name is named after its login (the id is made for it); spaces typed around a name are trimmed', async () => {
-    const view = await ready();
-    await type(nameInput(view.container), '');
-    expect(view.container.querySelector('[data-runtime-name-problem]')).toBeNull();
-    expect(idOf(view.container)).toBe('claude-claude-hooks');
-    expect(submit(view.container).disabled).toBe(false);
-    await type(nameInput(view.container), '  spaced  ');
-    expect(nameInput(view.container).value).toBe('spaced');
   });
 
   it('creates the runtime with exactly what was chosen, re-reads, and shows the made panel', async () => {
@@ -638,20 +574,19 @@ describe('Add runtime: Name and Create', () => {
     expect(finishes).toEqual([null, 'claude-claude-hooks', null]);
   });
 
-  it('sends add-another when asked for, and a typed name', async () => {
+  it('sends add-another when asked for', async () => {
     const calls: Call[] = [];
     const view = await mountHost({ calls, routes: STAGED_ROUTES() });
     await pickLogin(view.container, 'claude-personal');
     await pickProfile(view.container, 'Review');
     await click(view.container, '[data-duplicate-ok]');
-    await type(nameInput(view.container), 'my-review');
     await click(view.container, '[data-change-submit]');
     await waitFor(view.container, '[data-add-runtime-done]');
     expect(proposed(calls)).toEqual([
       {
         change: {
           kind: 'runtime.put',
-          name: 'my-review',
+          name: 'claude-review-2',
           credential: 'claude-personal',
           profile: 'Review',
           create: true,
@@ -660,7 +595,7 @@ describe('Add runtime: Name and Create', () => {
       },
     ]);
     // The re-read did not list it, so the panel still reads without its details.
-    expect(text(view.container, '[data-add-runtime-done]')).toContain('my-review is ready to launch');
+    expect(text(view.container, '[data-add-runtime-done]')).toContain('claude-review-2 is ready to launch');
     expect(text(view.container, '[data-add-runtime-done]')).not.toContain('profile');
   });
 
@@ -679,8 +614,11 @@ describe('Add runtime: Name and Create', () => {
     await interact(() => submit(view.container).click());
     await waitFor(view.container, '[data-add-runtime-done]');
     expect(text(view.container, '[data-add-runtime-done]')).toContain(
-      'Claude hooks profile. Sign in before you launch.',
+      'Claude hooks profile. Sign in to its login before you launch it.',
     );
+    // One true thing: added, and not yet launchable. Never "ready" and "sign in first" in one line.
+    expect(text(view.container, '[data-add-runtime-done]')).toContain('is added');
+    expect(text(view.container, '[data-add-runtime-done]')).not.toContain('ready');
   });
 
   it('R3-M1: a rolled-back apply names the file that stayed, and the form does not say the runtime is made', async () => {
@@ -698,7 +636,6 @@ describe('Add runtime: Name and Create', () => {
     expect(alert.textContent).toContain('put that file back as it was, or delete it if it did not exist before');
     expect(alert.textContent).not.toContain('remove that file');
     expect(view.container.querySelector('[data-add-runtime-done]')).toBeNull();
-    expect(idOf(view.container)).toBe('claude-claude-hooks');
     expect(reloads).toEqual([]);
   });
 
@@ -747,7 +684,6 @@ describe('Add runtime: Name and Create', () => {
     await waitFor(view.container, '[data-change-refusal]');
     expect(text(view.container, '[data-change-refusal]')).toBe('This change conflicts with the setup on this machine.');
     expect(view.container.querySelector('[data-add-runtime-done]')).toBeNull();
-    expect(idOf(view.container)).toBe('claude-claude-hooks');
     expect(reloads).toEqual([]);
     refuse = false;
     await click(view.container, '[data-change-submit]');
@@ -799,7 +735,6 @@ describe('Add runtime: a login that drives both CLIs', () => {
     expect(text(view.container, '[data-add-runtime-runs]')).not.toContain('until you choose');
     expect(await profilesOf(view.container)).toEqual(['Default', 'Codex work']);
     await pickProfile(view.container, 'Codex work');
-    expect(idOf(view.container)).toBe('codex-codex-work');
     await click(view.container, '[data-add-runtime-runs-option="claude-code"] input');
     expect(await profilesOf(view.container)).toEqual(['Default']);
   });

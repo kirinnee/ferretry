@@ -194,4 +194,13 @@ describe('how a runtime is named for a person (O9-5)', () => {
     expect(profileDisplayName('Review')).toBe('Review');
     expect(profileDisplayName('ferretry-codexy')).toBe('ferretry-codexy');
   });
+
+  it('names the profiles an import makes in words, never as claude-default', () => {
+    expect(profileDisplayName('claude-default')).toBe('Your Claude setup');
+    expect(profileDisplayName('codex-default')).toBe('Your Codex setup');
+    expect(profileDisplayName('codex-default-2')).toBe('Your Codex setup (2)');
+    expect(profileDisplayName('claude-starter')).toBe('Claude starter');
+    // Only the two words an import uses: a profile the owner made with a similar name stays as typed.
+    expect(profileDisplayName('claude-review')).toBe('claude-review');
+  });
 });

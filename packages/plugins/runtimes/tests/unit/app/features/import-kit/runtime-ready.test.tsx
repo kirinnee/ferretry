@@ -19,11 +19,12 @@ const runtime = (
   name: string,
   launch: ReadyRuntime['launch'] = { available: true },
   login = `login-of-${name}`,
+  store: 'host' | 'ferretry' = 'host',
 ): ReadyRuntime => ({
   id: name,
   name,
   harness,
-  credential: { id: login, store: 'host' },
+  credential: { id: login, store },
   launch,
 });
 
@@ -36,6 +37,7 @@ describe('readyStateOf', () => {
     expect(state).toEqual({
       kind: 'ready',
       names: ['Claude · your terminal sign-in — claude-a', 'Claude · your terminal sign-in — claude-b'],
+      terminal: true,
     });
   });
   it('is blocked, with the daemon’s reason, when the only runtime cannot start', () => {
@@ -57,7 +59,11 @@ describe('readyStateOf', () => {
       name: 'Codex · your terminal sign-in',
       reason: 'Sign in to launch',
     });
-    expect(readyStateOf(runtimes, 'codex', 'old')).toEqual({ kind: 'ready', names: ['Codex · your terminal sign-in'] });
+    expect(readyStateOf(runtimes, 'codex', 'old')).toEqual({
+      kind: 'ready',
+      names: ['Codex · your terminal sign-in'],
+      terminal: true,
+    });
     // The login just signed in has no runtime at all: none, though the other login is ready.
     expect(readyStateOf([runtime('codex', 'codex-old', { available: true }, 'old')], 'codex', 'new')).toEqual({
       kind: 'none',
@@ -66,6 +72,13 @@ describe('readyStateOf', () => {
     expect(readyStateOf(runtimes, 'codex')).toEqual({
       kind: 'ready',
       names: ['Codex · your terminal sign-in — codex-old'],
+      terminal: true,
+    });
+    // A sign-in Ferretry keeps itself is not a terminal one.
+    expect(readyStateOf([runtime('codex', 'codex-own', { available: true }, 'own', 'ferretry')], 'codex')).toEqual({
+      kind: 'ready',
+      names: ['Codex · ChatGPT sign-in'],
+      terminal: false,
     });
   });
   it('is none when the harness has no runtime', () => {
@@ -117,16 +130,56 @@ const clientOf = (answers: (() => unknown)[]) => {
 };
 
 describe('RuntimeReadyPage', () => {
+  it('F6 never calls a terminal sign-in "ready": it says the tool uses it, and, when sign-in was skipped, to sign in first', async () => {
+    const harness = stepHarness();
+    const { client } = clientOf([() => ({ runtimes: [runtime('claude-code', 'claude-a')] })]);
+    const view = await mount(
+      createElement(RuntimeReadyPage, { client, harness: 'claude-code', label: 'Claude Code', step: harness.host }),
+    );
+    await settle();
+    expect(view.container.querySelector('[data-ready-headline]')?.textContent).toBe(
+      'Claude Code uses your terminal sign-in',
+    );
+    expect(view.container.querySelector('[data-ready-names]')?.textContent).toBe(
+      'Runtime: Claude · your terminal sign-in.',
+    );
+    expect(view.container.querySelector('[data-ready-terminal]')?.textContent).toBe(
+      'Sign in to Claude Code in a terminal before you start a ferret.',
+    );
+    expect(view.container.textContent).not.toContain('is ready');
+    await view.unmount();
+    // The sign-in step handled this login: no warning, still never "ready".
+    const handled = await mount(
+      createElement(RuntimeReadyPage, {
+        client: clientOf([() => ({ runtimes: [runtime('claude-code', 'claude-a', { available: true }, 'me')] })])
+          .client,
+        harness: 'claude-code',
+        label: 'Claude Code',
+        step: stepHarness({ signedLogin: 'me' }).host,
+      }),
+    );
+    await settle();
+    expect(handled.container.querySelector('[data-ready-headline]')?.textContent).toBe(
+      'Claude Code uses your terminal sign-in',
+    );
+    expect(handled.container.querySelector('[data-ready-terminal]')).toBeNull();
+    await handled.unmount();
+  });
+
   it('says the tool is ready and names its runtime; the shell is told it is ready', async () => {
     const harness = stepHarness();
-    const { client } = clientOf([() => ({ runtimes: [runtime('claude-code', 'Claude (atomi)')] })]);
+    const { client } = clientOf([
+      () => ({ runtimes: [runtime('claude-code', 'claude-a', { available: true }, 'own', 'ferretry')] }),
+    ]);
     const view = await mount(
       createElement(RuntimeReadyPage, { client, harness: 'claude-code', label: 'Claude Code', step: harness.host }),
     );
     await settle();
     expect(view.container.querySelector('[data-runtime-ready]')?.getAttribute('data-runtime-ready')).toBe('ready');
     expect(view.container.querySelector('[data-ready-headline]')?.textContent).toBe('Claude Code is ready');
-    expect(view.container.querySelector('[data-ready-names]')?.textContent).toBe('Runtime: Claude (atomi).');
+    expect(view.container.querySelector('[data-ready-names]')?.textContent).toBe(
+      'Runtime: Claude · Claude.ai sign-in.',
+    );
     expect(harness.decision).toBe('shown');
     await view.unmount();
   });
@@ -198,7 +251,7 @@ describe('RuntimeReadyPage', () => {
     const harness = stepHarness();
     const { client, reads } = clientOf([
       () => new Error('unreachable'),
-      () => ({ runtimes: [runtime('codex', 'codex-a')] }),
+      () => ({ runtimes: [runtime('codex', 'codex-a', { available: true }, 'own', 'ferretry')] }),
     ]);
     const view = await mount(
       createElement(RuntimeReadyPage, { client, harness: 'codex', label: 'Codex', step: harness.host }),

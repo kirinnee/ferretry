@@ -3,14 +3,18 @@
  * start fresh. The answer is this plugin's segment memory (`importMode`), which the import pages read to decide whether
  * to show. Nothing is imported here: that happens once, at `import-run`.
  *
+ * The demo beside the cards shows what the run's scan REALLY found (read quietly, never asking for the passkey here); until it is
+ * read it shows generic example words, so an empty machine never looks like it has things to bring.
+ *
  * The memory lasts only this run (no browser storage), so after a reload the segment has no `importMode` while this step is
  * already answered. The import pages do NOT bring this page back: a kind page then shows its checklist exactly as in Customize
  * (every item ticked as Import everything would bring it), and the run page proposes what the pages answered.
  */
 import { ChoiceCards, StepDemo } from '@ferretry/app';
 import { ImportDemo } from './demos.tsx';
-import { StepBody, StepLine } from '@ferretry/plugin-runtimes/import-kit';
-import type { StepHost } from './onboarding-api.ts';
+import { IMPORT_KINDS, kindFound, StepBody, StepLine } from '@ferretry/plugin-runtimes/import-kit';
+import { useRunScan } from './import/use-run-scan.ts';
+import type { OnboardingClient, StepHost } from './onboarding-api.ts';
 import { useEffect, useRef, useState } from 'react';
 
 const IMPORT_MODES = ['everything', 'choose', 'fresh'] as const;
@@ -36,7 +40,9 @@ const importModeOf = (step: StepHost): ImportMode => {
   return IMPORT_MODES.find(mode => mode === said) ?? 'everything';
 };
 
-export function ImportChoicePage({ step }: { readonly step: StepHost }) {
+export function ImportChoicePage({ client, step }: { readonly client: OnboardingClient; readonly step: StepHost }) {
+  const { model } = useRunScan(client, step);
+  const found = model === null ? null : IMPORT_KINDS.filter(kind => kindFound(model, kind));
   const [mode, setMode] = useState<ImportMode>(() => importModeOf(step));
   const opened = useRef(false);
   useEffect(() => {
@@ -62,7 +68,7 @@ export function ImportChoicePage({ step }: { readonly step: StepHost }) {
       />
       <StepLine>Bring your Codex setup here? Hooks are never imported.</StepLine>
       <StepDemo>
-        <ImportDemo mode={mode} />
+        <ImportDemo mode={mode} found={found} />
       </StepDemo>
     </StepBody>
   );

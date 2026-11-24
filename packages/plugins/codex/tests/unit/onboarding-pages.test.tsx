@@ -255,7 +255,7 @@ describe('sign-in', () => {
     const harness = stepHarness();
     const { container } = await mount('sign-in', harness, () => list(sampleLogin('claude-main')));
     expect(harness.decision).toBe('shown');
-    expect(container.textContent).toContain('No Codex login');
+    expect(container.textContent).not.toContain('can be signed in here yet');
   });
 
   test('a login that needs signing in is shown, never skipped', async () => {
@@ -270,7 +270,7 @@ describe('sign-in', () => {
     const harness = stepHarness();
     const { container } = await mount('sign-in', harness, () => list(codexLogin('ready', { disabled: true })));
     expect(harness.decision).toBe('shown');
-    expect(container.textContent).toContain('No Codex login');
+    expect(container.textContent).not.toContain('can be signed in here yet');
   });
 
   test('a login that is still being checked is not signed in: it says so and offers to check again', async () => {
@@ -293,7 +293,7 @@ describe('sign-in', () => {
       list(codexLogin('needs_sign_in', { canSignIn: false })),
     );
     expect(harness.decision).toBe('shown');
-    expect(container.textContent).toContain('No Codex login');
+    expect(container.textContent).not.toContain('can be signed in here yet');
   });
 
   test('the add-login panel is mounted LOCKED to Codex (subject harness:codex), never the open chooser', () => {

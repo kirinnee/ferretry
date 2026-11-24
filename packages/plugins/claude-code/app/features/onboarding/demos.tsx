@@ -81,22 +81,20 @@ export const KindDemo = ({ kind }: { readonly kind: keyof typeof BECOMES }) => (
   </div>
 );
 
-/** The terminal's conversations, listed in Ferretry or left where they are. */
-export const ConversationsDemo = ({ show }: { readonly show: boolean }) => (
-  <div
-    className="cc-demo"
-    data-demo={show ? 'conversations-on' : 'conversations-off'}
-    role="img"
-    aria-label="Conversations"
-  >
-    <p className="cc-demo__head">{show ? 'Conversations in Ferretry' : 'Conversations stay in the terminal'}</p>
-    {['Fix the login bug', 'Plan the release'].map((title, index) => (
-      <p key={title} className="cc-demo__row" data-brought={show} style={{ '--cc-i': index } as CSSProperties}>
+/** How the terminal's conversations reach Ferretry: read, one way. Generic words on purpose: it never shows a made-up conversation as found. */
+export const ConversationsDemo = () => (
+  <div className="cc-demo" data-demo="conversations" role="img" aria-label="An example of conversations read one way">
+    <p className="cc-demo__head">Your terminal conversations → Ferretry</p>
+    {['A conversation'].map((title, index) => (
+      <p key={title} className="cc-demo__row" data-brought="true" style={{ '--cc-i': index } as CSSProperties}>
         <span>{title}</span>
         <span className="cc-demo__mark" aria-hidden="true">
-          {show ? '✓' : '·'}
+          →
         </span>
       </p>
     ))}
+    <p className="cc-demo__note" data-demo-example="">
+      An example, not your conversations. Read only.
+    </p>
   </div>
 );

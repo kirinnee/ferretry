@@ -11,7 +11,8 @@
  */
 import { describe, expect, it } from 'bun:test';
 import type { ClaudeLoginFlow } from '../../../contract/index.ts';
-import { ClaudeLoginPanel, LONG_LINK, SignInLink } from '../../../app/features/claude-login-panel.tsx';
+import { ClaudeLoginPanel } from '../../../app/features/claude-login-panel.tsx';
+import { LONG_LINK, SignInLink } from '../../../app/features/sign-in-restart.tsx';
 import { interact, mount as mountDom, must } from '../support/dom.ts';
 import { CLAUDE_URL, claudeFlow } from './support/harness-login.ts';
 

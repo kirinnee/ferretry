@@ -12,7 +12,13 @@
 
 import { Loading } from '@ferretry/app/ui';
 import { daemonHomeHref } from '@ferretry/app';
-import { type MachineView, type RuntimeView, runtimeAccounts, runtimeDisplayName } from '../../../../contract/index.ts';
+import {
+  type MachineView,
+  type RuntimeView,
+  profileDisplayName,
+  runtimeAccounts,
+  runtimeDisplayName,
+} from '../../../../contract/index.ts';
 import { ChevronLeft, ChevronRight, Lock, Plus, TriangleAlert } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { cn } from '../../../ui.ts';
@@ -273,7 +279,7 @@ function RuntimePage({
           data-runtime-profile={runtime.profile}
         >
           <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate text-row font-semibold text-fg">{runtime.profile}</span>
+            <span className="truncate text-row font-semibold text-fg">{profileDisplayName(runtime.profile)}</span>
             <span className="text-cell text-muted">{runtimeProfileLine(runtime, profile)}</span>
           </span>
           <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
@@ -425,7 +431,7 @@ function RuntimeRow({
 }) {
   const showMakeDefault =
     onMakeDefault !== undefined && runtime.disabled === undefined && !isDefaultRuntime(machine, runtime);
-  const detailsLine = `${loginLine(runtime, data)} · ${runtime.profile} profile · ${runtimeDefaultModel(runtime)}`;
+  const detailsLine = `${loginLine(runtime, data)} · ${profileDisplayName(runtime.profile)} profile · ${runtimeDefaultModel(runtime)}`;
   return (
     <div className="flex flex-col gap-1">
       <div
@@ -487,8 +493,8 @@ function RuntimeRow({
                 title={detailsLine}
                 data-runtime-details=""
               >
-                <span className="font-mono">{loginLine(runtime, data)}</span> · {runtime.profile} profile ·{' '}
-                {runtimeDefaultModel(runtime)}
+                <span className="font-mono">{loginLine(runtime, data)}</span> · {profileDisplayName(runtime.profile)}{' '}
+                profile · {runtimeDefaultModel(runtime)}
               </span>
               {details}
             </>
