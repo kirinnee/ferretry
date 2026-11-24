@@ -101,6 +101,23 @@ describe('RuntimeSelect', () => {
     await view.unmount();
   });
 
+  it('says once that the first read is over', async () => {
+    const state: Harness = { value: '', chosen: null };
+    let settled = 0;
+    const onSettled = (): void => {
+      settled += 1;
+    };
+    const store = storeOf('claude-a');
+    const element = () => <RuntimeSelect {...host(store, state).props} onSettled={onSettled} />;
+    const view = await mount(element());
+    await settle();
+    await view.render(element());
+    await settle();
+    // However many times the roster is drawn again, the first read is over once.
+    expect(settled).toBe(1);
+    await view.unmount();
+  });
+
   it('takes the offer back while the roster is read again, and while that read failed: a cached list is never settled', async () => {
     const state: Harness = { value: '', chosen: null };
     const told: (readonly string[] | null)[] = [];
