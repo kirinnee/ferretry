@@ -47,7 +47,7 @@ export default implementDaemon(manifest, {
     const engineLog = kernel.log.child('engine');
     const engine = new SpeechEngine({
       http: { request: async (url, init) => await kernel.fetch.request(url, init) },
-      files: new StateEngineFiles(kernel.state),
+      files: new StateEngineFiles(kernel.state, kernel.hostFacts),
       clock: kernel.clock,
       machine: () => kernel.identity.daemonName,
       start: () => startSpeechThread(kernel.workers),

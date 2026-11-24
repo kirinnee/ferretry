@@ -101,7 +101,7 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 `mayTrustDirectLoopback`) is now about the **place**, never the owner: it admits only `privilegedOnly` routes
 — a local terminal attach — through `arrivedPrivileged`, and grants nothing.
 
-## Eight capabilities, two axes
+## Nine capabilities, two axes
 
 | capability   | what it covers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -113,6 +113,7 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 | `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `sharing`    | making catalogs of skills and MCP setups, freezing items into them, listing one item in many catalogs, choosing the default catalog, one-tap Add into it and its Undo, seeing what changed between versions, publishing a new version of an item, making a kept version current and retiring one, and exporting a signed file ([catalogs.md](catalogs.md#the-publisher-side)); a ferret reads only the current version of an item, older versions and their changes are the owner's; no new passkey act |
+| `voice`      | the machine speech engine: reading what is installed (**use**), and installing or removing it, a download of about 700 MB onto this machine's disk (**configure**) — `GET`/`POST`/`DELETE /v1/voice/engine` (owner decision O3; [voice.md](voice.md))                                                                                                                                                                                                                                                   |
 
 **Leaving a ferret alone is `warden.configure`.** `POST /v1/warden/leave` keeps the Warden off one flagged
 or cleared ferret for an hour, four, or until its status changes ([config-files.md](config-files.md#the-warden)).
@@ -600,6 +601,14 @@ once and `fy daemon config history` says why; a write whose record failed is sai
 read; a journal over 8 MiB, or a line or a file that will not read, repairs nothing and says so. A device that
 held less than everything is never widened by this. It can be turned on in the app (Settings › Devices) by a
 device that has Sharing and may manage devices, or at the machine with `fy device grant <device> sharing --use`.
+
+### Capability nine was added: `voice`
+
+`voice` is narrowable on its own and is on by default on both axes, like every other capability, so adding it loosens
+nothing. The engine's routes used to ride on `fleet`; they no longer do, so narrowing `fleet` does not stop a
+device installing the speech files and narrowing `voice` does not stop it using the fleet. `voice.configure` (Install,
+Remove) is a step-up act like every `configure`; `voice.use` (the read) is not. It is not a superset of anything: the
+engine decodes audio a caller hands the daemon's own code and reaches no files, secrets or terminals.
 
 Each instance above cites a command. **Verify a cited command exists before adding one**, and verify it a
 second way: `rg -n --fixed-strings "fy daemon adopt"`. Not `rg -r` — that is `--replace`, so

@@ -7,6 +7,11 @@ export interface EngineFilesPort {
   read(file: Pick<EngineFile, 'role'>): Promise<Uint8Array | undefined>;
   write(file: Pick<EngineFile, 'role'>, bytes: Uint8Array): Promise<void>;
   remove(file: Pick<EngineFile, 'role'>): Promise<void>;
+  /**
+   * Bytes free where the files are kept (the nearest folder that exists, so a first install is asked too).
+   * `undefined` when the machine cannot say: no check is made.
+   */
+  freeBytes(): Promise<number | undefined>;
 }
 
 /** `kernel.fetch.request`: the manifest's hosts only, and no redirect is followed for you. */

@@ -72,6 +72,7 @@ const NEEDS_STEP_UP: Readonly<Record<DaemonCapability, Readonly<Record<Capabilit
   pairing: { use: true, configure: true },
   secrets: { use: true, configure: true },
   sharing: { use: true, configure: true },
+  voice: { use: false, configure: true },
 };
 
 /** The grant document states a matrix row can find a capability in. */
@@ -378,6 +379,7 @@ describe('what a refused caller is told', () => {
       'device pairing',
       'the secret store',
       'catalog sharing',
+      'speech and voice',
     ]);
     should(describeDemand('fleet', 'configure')).equal('fleet.configure');
   });

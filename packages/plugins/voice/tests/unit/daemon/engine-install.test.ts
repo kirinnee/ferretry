@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { ENGINE_HOSTS, VoiceEngineError } from '../../../contract/index.ts';
 import { ENGINE_FILES, type EngineFile } from '../../../daemon/lib/engine/catalog.ts';
-import { download, installFiles } from '../../../daemon/lib/engine/installer.ts';
+import { StateEngineFiles } from '../../../daemon/adapters/state-engine-files.ts';
+import type { StatePort } from '@ferretry/kernel/contract';
+import { DISK_MARGIN_BYTES, download, installFiles } from '../../../daemon/lib/engine/installer.ts';
 import type { EngineFilesPort, HttpPort } from '../../../daemon/lib/engine/ports.ts';
 import { SHERPA_RUNTIME } from '../../../app/lib/stt/sherpa-models.ts';
 
@@ -27,6 +29,10 @@ const stream = (bytes: Uint8Array, chunk = 3): Response =>
 
 class Files implements EngineFilesPort {
   readonly held = new Map<string, Uint8Array>();
+  free: number | undefined = undefined;
+  async freeBytes() {
+    return this.free;
+  }
   async size(file: { role: string }) {
     return this.held.get(file.role)?.byteLength;
   }
@@ -189,5 +195,72 @@ describe('installFiles', () => {
     await expect(
       installFiles({ request: async () => stream(GOOD) }, files, () => undefined, [pin('encoder', GOOD)]),
     ).rejects.toMatchObject({ code: 'write_failed' });
+  });
+
+  test('too little free disk is no_disk with a plain sentence, and nothing is downloaded or written', async () => {
+    const files = new Files();
+    const file = pin('encoder', GOOD);
+    files.free = 300_000_000;
+    let asked = 0;
+    const http: HttpPort = {
+      request: async () => {
+        asked += 1;
+        return stream(GOOD);
+      },
+    };
+    const refused = await installFiles(http, files, () => undefined, [file]).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(VoiceEngineError);
+    expect(refused).toMatchObject({ code: 'no_disk' });
+    // It says how much is needed and how much is free, in sizes a person reads.
+    expect((refused as Error).message).toBe(
+      'There is not enough free disk space for speech. It needs 1.0 GB free (0 MB to download plus 1.0 GB to spare) and this machine has 300 MB free.',
+    );
+    expect(asked).toBe(0);
+    expect(files.held.size).toBe(0);
+  });
+
+  test('exactly enough free disk installs; only the MISSING files count toward the room needed', async () => {
+    const files = new Files();
+    const have = pin('encoder', new Uint8Array(8));
+    const need = pin('tokens', GOOD);
+    files.held.set('encoder', new Uint8Array(have.bytes));
+    // The present file needs no room; the missing one needs its own size plus the margin, to the byte.
+    files.free = need.bytes + DISK_MARGIN_BYTES;
+    await installFiles({ request: async () => stream(GOOD) }, files, () => undefined, [have, need]);
+    expect(files.held.has('tokens')).toBe(true);
+  });
+
+  test('a machine that cannot say how much is free is not blocked', async () => {
+    const files = new Files();
+    files.free = undefined;
+    await installFiles({ request: async () => stream(GOOD) }, files, () => undefined, [pin('encoder', GOOD)]);
+    expect(files.held.has('encoder')).toBe(true);
+  });
+});
+
+describe('the engine files adapter reports free disk', () => {
+  const state = (path: string) => ({ pathOf: () => path }) as unknown as StatePort;
+
+  test('asks the nearest folder that exists (a first install has no models folder yet)', async () => {
+    const asked: string[] = [];
+    const files = new StateEngineFiles(state('/home/x/state/voice/models/parakeet/encoder'), {
+      diskFreeBytes: async folder => {
+        asked.push(folder);
+        return folder === '/home/x/state/voice' ? 4_096_000 : undefined;
+      },
+    });
+    expect(await files.freeBytes()).toBe(4_096_000);
+    expect(asked).toEqual(['/home/x/state/voice/models/parakeet', '/home/x/state/voice/models', '/home/x/state/voice']);
+  });
+
+  test('a host that cannot say, or refuses, is "cannot say", never a refusal', async () => {
+    const silent = new StateEngineFiles(state('/a/b/encoder'), { diskFreeBytes: async () => undefined });
+    expect(await silent.freeBytes()).toBeUndefined();
+    const refusing = new StateEngineFiles(state('/a/b/encoder'), {
+      diskFreeBytes: async () => {
+        throw new Error('did not declare permissions.hostFacts');
+      },
+    });
+    expect(await refusing.freeBytes()).toBeUndefined();
   });
 });

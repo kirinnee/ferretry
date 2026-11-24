@@ -44,6 +44,9 @@ class MemoryFiles implements EngineFilesPort {
   async remove(file: { role: string }) {
     this.held.delete(file.role);
   }
+  async freeBytes() {
+    return undefined;
+  }
 }
 
 describe.skipIf(FILES === undefined)('the machine speech engine, with the real models', () => {

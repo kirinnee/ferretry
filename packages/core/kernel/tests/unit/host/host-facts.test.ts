@@ -1,5 +1,6 @@
 /** TT kernel.hostFacts: narrow /proc and /sys reads, only for a manifest that declares them. */
 import { describe, expect, test } from 'bun:test';
+import { tmpdir } from 'node:os';
 import { nodeHostFacts, undeclaredHostFacts } from '../../../host/adapters/host-facts.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { testHost } from '../../../testing/index.ts';
@@ -28,6 +29,14 @@ describe('TT kernel.hostFacts', () => {
 
   test('the working folder of a process that is not there is undefined, not a fault', async () => {
     expect(await nowhere.procWorkingDirectory(4242)).toBeUndefined();
+  });
+
+  test('diskFreeBytes answers a number for a folder that is there, undefined for one that is not, and refuses a relative path', async () => {
+    const free = await nowhere.diskFreeBytes(tmpdir());
+    expect(typeof free).toBe('number');
+    expect(free).toBeGreaterThan(0);
+    expect(await nowhere.diskFreeBytes('/nonexistent-folder-for-statfs')).toBeUndefined();
+    await expect(nowhere.diskFreeBytes('relative/folder')).rejects.toBeInstanceOf(RangeError);
   });
 
   test('darwin has no procfs: the answer is undefined without a read, a bad pid still refuses', async () => {

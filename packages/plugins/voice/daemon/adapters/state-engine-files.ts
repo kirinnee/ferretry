@@ -1,4 +1,5 @@
-import type { StatePort } from '@ferretry/kernel/contract';
+import { dirname } from 'node:path';
+import type { HostFactsPort, StatePort } from '@ferretry/kernel/contract';
 import { MODELS_STATE } from '../../contract/index.ts';
 import { ENGINE_DIR, type EngineFile } from '../lib/engine/catalog.ts';
 import type { EngineFilesPort } from '../lib/engine/ports.ts';
@@ -8,7 +9,10 @@ import type { EngineFilesPort } from '../lib/engine/ports.ts';
  * AFTER its hash was checked, so a file that is present at its pinned size is a verified one.
  */
 export class StateEngineFiles implements EngineFilesPort {
-  constructor(private readonly state: StatePort) {}
+  constructor(
+    private readonly state: StatePort,
+    private readonly host: Pick<HostFactsPort, 'diskFreeBytes'>,
+  ) {}
 
   private name(file: Pick<EngineFile, 'role'>): string {
     return `${ENGINE_DIR}/${file.role}`;
@@ -29,5 +33,24 @@ export class StateEngineFiles implements EngineFilesPort {
 
   async remove(file: Pick<EngineFile, 'role'>): Promise<void> {
     await this.state.remove(MODELS_STATE, this.name(file));
+  }
+
+  /**
+   * What the disk holding the models folder has free. The nearest folder above it that exists is asked (a first
+   * install has none yet). A host that cannot say, or refuses, is "cannot say": Install is not blocked on a guess.
+   */
+  async freeBytes(): Promise<number | undefined> {
+    let folder = dirname(this.state.pathOf(MODELS_STATE, `${ENGINE_DIR}/encoder`));
+    try {
+      for (;;) {
+        const free = await this.host.diskFreeBytes(folder);
+        if (free !== undefined) return free;
+        const parent = dirname(folder);
+        if (parent === folder) return undefined;
+        folder = parent;
+      }
+    } catch {
+      return undefined;
+    }
   }
 }

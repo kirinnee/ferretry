@@ -2,9 +2,9 @@
  * `kernel.hostFacts` on the real machine: each method builds its one path from checked parts (today's Terminals
  * reads, copied: the same files, `utf8`, the same throw on a missing one) and reads nothing else.
  */
-import { readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
+import { readdir, readFile, readlink, realpath, stat, statfs } from 'node:fs/promises';
 import { availableParallelism, totalmem } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import type { CgroupFile, HostFactsPort, HostLaunchGuard, ProcPidFile, ProcSystemFile } from '../../contract/ports.ts';
 import { UNDECIDED_LAUNCH_GUARD } from './launch-guard.ts';
 
@@ -120,6 +120,16 @@ export function nodeHostFacts(
       const scheduler = own ?? (await readFile(join(node, 'queue', 'scheduler'), 'utf8').catch(() => ''));
       return { device: basename(node), scheduler };
     },
+    diskFreeBytes: async folder => {
+      if (!isAbsolute(folder)) throw new RangeError('diskFreeBytes takes an absolute folder');
+      try {
+        const { bsize, bavail } = await statfs(folder);
+        return bsize * bavail;
+      } catch (cause) {
+        if (NO_ANSWER.has((cause as NodeJS.ErrnoException).code ?? '')) return undefined;
+        throw cause;
+      }
+    },
     launchGuard: roots.launchGuard ?? UNDECIDED_LAUNCH_GUARD,
   };
   return Object.freeze(port);
@@ -147,6 +157,7 @@ export function undeclaredHostFacts(plugin: string, base: HostFactsPort): HostFa
     cgroupFile: refuse,
     cgroupChildren: refuse,
     blockScheduler: refuse,
+    diskFreeBytes: refuse,
     launchGuard: () => {
       throw new Error(`${plugin} did not declare permissions.hostFacts, so it reads no launch-guard fact.`);
     },

@@ -12,7 +12,7 @@ describe('access wire', () => {
   test('a device list is strict: no key material can ride along', () => {
     const none = { use: false, configure: false };
     const mayWiden = Object.fromEntries(
-      ['fleet', 'terminal', 'browser', 'filesystem', 'warden', 'pairing', 'secrets', 'sharing'].map(name => [
+      ['fleet', 'terminal', 'browser', 'filesystem', 'warden', 'pairing', 'secrets', 'sharing', 'voice'].map(name => [
         name,
         none,
       ]),

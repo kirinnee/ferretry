@@ -312,12 +312,19 @@ calls them yet: the audio stream (unit 4), the panel (5) and the reply voice (6)
   is checked against its pinned size and **SHA-256** before it is written, so one that differs by a bit is refused
   (`hash_mismatch`) and nothing of it is kept. A file already on disk at its pinned size is not downloaded again.
   There is no partial-download resume yet: a failure restarts the file it stopped in. Install ends by loading the
-  models and decoding a second of silence, so **Ready means it ran**, not only that it is saved. `fy` and the app read
-  the state from `GET /v1/voice/engine`; `DELETE /v1/voice/engine` unloads and deletes. Grants: a read is
-  `fleet.use`, install and remove are a person's `fleet.configure` (owner decision O3 default: no new capability).
+  models and decoding a second of silence, so **Ready means it ran**, not only that it is saved; the models are then
+  unloaded again, so an install does not leave about 1.8 GB resident. `fy` and the app read
+  the state from `GET /v1/voice/engine`; `DELETE /v1/voice/engine` unloads and deletes. Before it downloads anything Install asks the disk under `state/voice/models/`, and refuses with
+  `no_disk` (and a sentence that says how much is needed and how much is free) unless the files still MISSING plus
+  1 GB are free; a write that fails leaves no temporary file behind. Grants (owner decision O3): the routes belong to
+  their own `voice` capability — a read is `voice.use`, install and remove are a person's `voice.configure` — so
+  narrowing `fleet` does not govern them.
 - **Memory.** The models load on the first call and the thread ends **10 idle minutes** after the last one, which
   returns its memory. A load is refused (`no_memory`) when the machine's available memory is under the files plus
   1.5 GB.
+  The worker is a thread **inside the daemon process**, not a child: a process-level out-of-memory kill takes the daemon
+  down with it, and the free-memory check reads the machine's free memory (`os.freemem()`), which ignores a cgroup
+  `MemoryMax` the daemon may be running under.
 - **The port.** Other plugins use `VoiceApi.engine`: `transcribe(samples)` (16 kHz mono, one whole take; returns the
   text and the real-time factor) and `detectSpeech(samples)` (spans in samples). No route takes audio.
 

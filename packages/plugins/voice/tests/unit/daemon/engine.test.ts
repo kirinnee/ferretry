@@ -19,6 +19,10 @@ const TOTAL = CATALOG.length * BODY.byteLength;
 
 class Files implements EngineFilesPort {
   readonly held = new Map<string, Uint8Array>();
+  free: number | undefined = undefined;
+  async freeBytes() {
+    return this.free;
+  }
   async size(file: { role: string }) {
     return this.held.get(file.role)?.byteLength;
   }
@@ -37,14 +41,20 @@ class FakeThread implements SpeechThread {
   readonly calls: SpeechCall['kind'][] = [];
   terminated = false;
   private ended: (() => void)[] = [];
-  constructor(private readonly text = 'hello there') {}
+  constructor(
+    private readonly text = 'hello there',
+    private readonly loadGate?: Promise<void>,
+    private readonly failDecode = false,
+  ) {}
   async call(request: SpeechCall) {
     this.calls.push(request.kind);
     if (this.terminated) throw new Error('stopped');
     switch (request.kind) {
       case 'load':
+        await this.loadGate;
         return { id: 1, ok: true as const, kind: 'load' as const, loadMs: 1500, memoryMb: 819 };
       case 'transcribe':
+        if (this.failDecode) throw new Error('decode crashed');
         return { id: 1, ok: true as const, kind: 'transcribe' as const, text: this.text, decodeMs: 1000 };
       case 'detect':
         return { id: 1, ok: true as const, kind: 'detect' as const, spans: [{ start: 100, end: 900 }] };
@@ -59,8 +69,19 @@ class FakeThread implements SpeechThread {
   }
 }
 
-function build(options: { fetchStatus?: number; memory?: number | undefined; tamper?: boolean } = {}) {
+function build(
+  options: {
+    fetchStatus?: number;
+    memory?: number | undefined;
+    tamper?: boolean;
+    freeDisk?: number;
+    failDecode?: boolean;
+  } = {},
+) {
   const files = new Files();
+  files.free = options.freeDisk;
+  // While `hold.gate` is set, every load waits on it: a test releases it to let a load land.
+  const hold: { gate?: Promise<void>; release?: () => void } = {};
   const threads: FakeThread[] = [];
   const timers: { delay: number; fn: () => void; cancelled: boolean }[] = [];
   const logged: string[] = [];
@@ -83,7 +104,7 @@ function build(options: { fetchStatus?: number; memory?: number | undefined; tam
       },
     },
     start: () => {
-      const thread = new FakeThread();
+      const thread = new FakeThread('hello there', hold.gate, options.failDecode === true);
       threads.push(thread);
       return thread;
     },
@@ -91,7 +112,7 @@ function build(options: { fetchStatus?: number; memory?: number | undefined; tam
     log: { info: message => void logged.push(message), warn: message => void logged.push(message) },
     catalog: CATALOG,
   });
-  return { engine, files, threads, timers, logged };
+  return { engine, files, threads, timers, logged, hold };
 }
 
 describe('the speech engine: install', () => {
@@ -108,9 +129,34 @@ describe('the speech engine: install', () => {
     expect(started.state).toBe('installing');
     await engine.settled();
     const ready = await engine.view();
-    expect(ready).toMatchObject({ state: 'ready', doneBytes: TOTAL, loaded: true });
+    // The proof is not a use: the models are unloaded again at once, so nothing stays resident.
+    expect(ready).toMatchObject({ state: 'ready', doneBytes: TOTAL, loaded: false });
     expect(ready.selfTest).toEqual({ loadMs: 1500, decodeMs: 1000, memoryMb: 819 });
     expect(threads[0]?.calls).toEqual(['load', 'transcribe']);
+    expect(threads[0]?.terminated).toBe(true);
+  });
+
+  test('a self-test that fails also leaves nothing loaded', async () => {
+    const { engine, threads } = build({ failDecode: true });
+    await engine.install();
+    await engine.settled();
+    expect((await engine.view()).state).toBe('failed');
+    expect(threads).toHaveLength(1);
+    expect(threads[0]?.terminated).toBe(true);
+    expect((await engine.view()).loaded).toBe(false);
+  });
+
+  test('too little free disk fails with no_disk and the installer’s own sentence; nothing is downloaded', async () => {
+    const { engine, files, threads } = build({ freeDisk: 5_000 });
+    await engine.install();
+    await engine.settled();
+    const view = await engine.view();
+    expect(view.state).toBe('failed');
+    expect(view.failure?.code).toBe('no_disk');
+    expect(view.failure?.sentence).toContain('free disk space');
+    expect(view.failure?.sentence).toContain('this machine has 0 MB free');
+    expect(files.held.size).toBe(0);
+    expect(threads).toHaveLength(0);
   });
 
   test('a second press while installing starts nothing new', async () => {
@@ -152,12 +198,13 @@ describe('the speech engine: use', () => {
 
   test('transcribes with the real-time factor, loading once however many calls', async () => {
     const { engine, threads } = await ready();
+    expect(threads).toHaveLength(1);
     const one = await engine.transcribe(new Float32Array(32_000));
     expect(one.text).toBe('hello there');
     expect(one.realTimeFactor).toBeCloseTo(0.5, 5);
     await engine.transcribe(new Float32Array(16_000));
-    expect(threads).toHaveLength(1);
-    expect(threads[0]?.calls.filter(kind => kind === 'load')).toHaveLength(1);
+    expect(threads).toHaveLength(2);
+    expect(threads[1]?.calls.filter(kind => kind === 'load')).toHaveLength(1);
   });
 
   test('finds the voice', async () => {
@@ -167,19 +214,21 @@ describe('the speech engine: use', () => {
 
   test('is unloaded ten idle minutes after the last use, and loads again on the next', async () => {
     const { engine, timers, threads } = await ready();
+    await engine.transcribe(new Float32Array(16_000));
     const last = timers.filter(timer => !timer.cancelled).at(-1);
     expect(last?.delay).toBe(IDLE_UNLOAD);
     last?.fn();
     await Promise.resolve();
-    expect(threads[0]?.terminated).toBe(true);
+    expect(threads[1]?.terminated).toBe(true);
     expect((await engine.view()).loaded).toBe(false);
     await engine.transcribe(new Float32Array(16_000));
-    expect(threads).toHaveLength(2);
+    expect(threads).toHaveLength(3);
     expect((await engine.view()).loaded).toBe(true);
   });
 
   test('every use re-arms the idle timer, so a busy engine is never unloaded', async () => {
     const { engine, timers } = await ready();
+    await engine.transcribe(new Float32Array(16_000));
     const before = timers.filter(timer => !timer.cancelled).length;
     await engine.transcribe(new Float32Array(16_000));
     expect(timers.filter(timer => !timer.cancelled)).toHaveLength(before);
@@ -188,10 +237,11 @@ describe('the speech engine: use', () => {
 
   test('a worker that dies is forgotten, so the next call starts a fresh one', async () => {
     const { engine, threads } = await ready();
-    await threads[0]?.terminate();
+    await engine.transcribe(new Float32Array(16_000));
+    await threads[1]?.terminate();
     expect((await engine.view()).loaded).toBe(false);
     await engine.transcribe(new Float32Array(16_000));
-    expect(threads).toHaveLength(2);
+    expect(threads).toHaveLength(3);
   });
 
   test('refuses to load without the memory for it, and says so', async () => {
@@ -209,14 +259,72 @@ describe('the speech engine: use', () => {
 
   test('remove unloads, deletes every file, and refuses while installing', async () => {
     const { engine, files, threads } = await ready();
+    await engine.transcribe(new Float32Array(16_000));
     const view = await engine.remove();
     expect(view).toMatchObject({ state: 'not_installed', doneBytes: 0, loaded: false });
     expect(files.held.size).toBe(0);
-    expect(threads[0]?.terminated).toBe(true);
+    expect(threads[1]?.terminated).toBe(true);
     const busy = build();
     await busy.engine.install();
     await expect(busy.engine.remove()).rejects.toBeInstanceOf(VoiceEngineError);
     await busy.engine.settled();
+  });
+});
+
+describe('the speech engine: a load that is overtaken', () => {
+  /** An installed engine whose NEXT loads wait until `release()`. */
+  async function held() {
+    const built = build();
+    await built.engine.install();
+    await built.engine.settled();
+    built.hold.gate = new Promise<void>(resolve => {
+      built.hold.release = resolve;
+    });
+    return built;
+  }
+  const flush = async () => {
+    for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+  };
+
+  test('unload during a load: the loading worker ends itself, nothing is published, and the caller is told', async () => {
+    const { engine, threads, hold } = await held();
+    const call = engine.transcribe(new Float32Array(16_000)).catch((error: unknown) => error);
+    await flush();
+    expect(threads).toHaveLength(2);
+    await engine.unload();
+    hold.release?.();
+    expect(await call).toMatchObject({ code: 'not_ready' });
+    expect(threads[1]?.terminated).toBe(true);
+    expect(threads[1]?.calls).toEqual(['load']);
+    expect((await engine.view()).loaded).toBe(false);
+  });
+
+  test('Remove during a load leaves no worker behind and the files stay deleted', async () => {
+    const { engine, files, threads, hold } = await held();
+    const call = engine.transcribe(new Float32Array(16_000)).catch((error: unknown) => error);
+    await flush();
+    expect(threads).toHaveLength(2);
+    await engine.remove();
+    hold.release?.();
+    await call;
+    expect(threads.every(thread => thread.terminated)).toBe(true);
+    expect(files.held.size).toBe(0);
+    expect((await engine.view()).loaded).toBe(false);
+  });
+
+  test('a call made after the unload starts ONE fresh load; the overtaken one cannot hide or replace it', async () => {
+    const { engine, threads, hold } = await held();
+    const first = engine.transcribe(new Float32Array(16_000)).catch((error: unknown) => error);
+    await flush();
+    await engine.unload();
+    const second = engine.transcribe(new Float32Array(16_000));
+    await flush();
+    expect(threads).toHaveLength(3);
+    hold.release?.();
+    expect(await first).toMatchObject({ code: 'not_ready' });
+    expect((await second).text).toBe('hello there');
+    expect(threads.map(thread => thread.terminated)).toEqual([true, true, false]);
+    expect((await engine.view()).loaded).toBe(true);
   });
 });
 

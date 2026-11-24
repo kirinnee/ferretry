@@ -606,16 +606,24 @@ export function nodeFs(
     writeAtomic: async (path, data, mode = 0o600) => {
       await mkdir(dirname(path), { recursive: true, mode: 0o700 });
       const temp = `${path}.${randomSuffix()}.tmp`;
+      // The exclusive create is what made this temp name ours: a create that LOST (EEXIST) is outside the try and
+      // removes nothing. Any failure after it (a full disk, a write error, a rename that cannot land) removes the
+      // temp, so a failed write leaves no partial file, and the real name is never touched.
       const handle = await open(temp, 'wx', mode);
       try {
-        // exactly the asked bits: the mode `open` was given is filtered by the umask
-        await handle.chmod(mode);
-        await handle.writeFile(data);
-        await handle.sync();
-      } finally {
-        await handle.close();
+        try {
+          // exactly the asked bits: the mode `open` was given is filtered by the umask
+          await handle.chmod(mode);
+          await handle.writeFile(data);
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        await rename(temp, path);
+      } catch (error) {
+        await unlink(temp).catch(() => undefined);
+        throw error;
       }
-      await rename(temp, path);
     },
     symlink: async (target, path) => {
       await symlink(target, path);

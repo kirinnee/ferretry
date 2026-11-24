@@ -18,6 +18,7 @@ export const VoiceEngineFailureCodeSchema = z.enum([
   'download_failed',
   'hash_mismatch',
   'write_failed',
+  'no_disk',
   'no_memory',
   'load_failed',
 ]);

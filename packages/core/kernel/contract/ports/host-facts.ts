@@ -79,6 +79,12 @@ export interface HostFactsPort {
    * disk's `queue/scheduler`): the device's name and the file's text.
    */
   blockScheduler(major: number, minor: number): Promise<{ readonly device: string; readonly scheduler: string }>;
+  /**
+   * `statfs` of ONE absolute folder: the bytes a writer who is not the superuser could still put on the disk that
+   * holds it. A free path by design, and the one fact it gives is a number: it opens, lists and reads nothing. `undefined`
+   * when the folder is not there (a first install has no models folder yet) or the host cannot say.
+   */
+  diskFreeBytes(folder: string): Promise<number | undefined>;
   /** The launch-guard fact (see {@link HostLaunchGuard}); like every host fact, refused to a plugin without `permissions.hostFacts`. */
   launchGuard(): HostLaunchGuard;
 }

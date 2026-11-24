@@ -70,9 +70,19 @@ export async function download(
   return bytes;
 }
 
+/** Room left on the disk after the files are saved, so Install never fills it. */
+export const DISK_MARGIN_BYTES = 1_000_000_000;
+
+/** "1.7 GB" / "340 MB": sizes a person reads. */
+function sized(bytes: number): string {
+  return bytes >= 1_000_000_000 ? `${(bytes / 1_000_000_000).toFixed(1)} GB` : `${Math.round(bytes / 1_000_000)} MB`;
+}
+
 /**
  * Installs every missing file, one at a time (peak memory is the largest file, 652 MB), writing each only after it
- * verified. A file already present at its pinned size is kept: it was verified when written. `onBytes` is called with
+ * verified. A file already present at its pinned size is kept: it was verified when written. Before anything is
+ * downloaded the models folder must have room for the MISSING files plus {@link DISK_MARGIN_BYTES}, or the install
+ * refuses with `no_disk` and a sentence that says how much is needed and how much is free. `onBytes` is called with
  * each chunk's size for the progress bar.
  */
 export async function installFiles(
@@ -81,11 +91,20 @@ export async function installFiles(
   onBytes: (received: number) => void,
   catalog: readonly EngineFile[] = ENGINE_FILES,
 ): Promise<void> {
+  const missing: EngineFile[] = [];
   for (const file of catalog) {
-    if ((await files.size(file)) === file.bytes) {
-      onBytes(file.bytes);
-      continue;
-    }
+    if ((await files.size(file)) === file.bytes) onBytes(file.bytes);
+    else missing.push(file);
+  }
+  if (missing.length === 0) return;
+  const downloadBytes = missing.reduce((sum, file) => sum + file.bytes, 0);
+  const free = await files.freeBytes();
+  if (free !== undefined && free < downloadBytes + DISK_MARGIN_BYTES)
+    throw new VoiceEngineError(
+      'no_disk',
+      `There is not enough free disk space for speech. It needs ${sized(downloadBytes + DISK_MARGIN_BYTES)} free (${sized(downloadBytes)} to download plus ${sized(DISK_MARGIN_BYTES)} to spare) and this machine has ${sized(free)} free.`,
+    );
+  for (const file of missing) {
     const bytes = await download(http, file, onBytes);
     try {
       await files.write(file, bytes);

@@ -56,7 +56,7 @@ export default definePlugin({
       route('GET /v1/voice/engine', {
         minimum: 'operator',
         caller: 'any',
-        capability: cap('fleet', 'use'),
+        capability: cap('voice', 'use'),
         noStore: true,
         audit: { skip: 'a read of an install state, sizes and counters' },
         guard: { none: 'a state, byte counts and one fixed sentence; no audio and no transcript' },
@@ -64,7 +64,7 @@ export default definePlugin({
       route('POST /v1/voice/engine/install', {
         minimum: 'operator',
         caller: 'person',
-        capability: cap('fleet', 'configure'),
+        capability: cap('voice', 'configure'),
         noStore: true,
         // Public model files, hash-checked; no secret is sent and none is returned.
         audit: { skip: 'downloads pinned public speech files onto this machine; carries no secret and no audio' },
@@ -73,7 +73,7 @@ export default definePlugin({
       route('DELETE /v1/voice/engine', {
         minimum: 'operator',
         caller: 'person',
-        capability: cap('fleet', 'configure'),
+        capability: cap('voice', 'configure'),
         noStore: true,
         audit: { skip: 'deletes the downloaded speech files from this machine; carries no secret and no audio' },
         guard: { none: 'a state, byte counts and one fixed sentence; no audio and no transcript' },
@@ -165,5 +165,7 @@ export default definePlugin({
     // Keys ride only on requests the Vault's outbound holder builds; the hosts are the provider table's.
     network: [CLEANUP_PROVIDERS.groq.host, CLEANUP_PROVIDERS.cerebras.host, 'api.typesafe.ai', ...ENGINE_HOSTS],
     secrets: ['GROQ_API_KEY', 'CEREBRAS_API_KEY', 'JEV_API_KEY'],
+    // Only `diskFreeBytes`: Install asks how much room the models folder has before it downloads 700 MB.
+    hostFacts: true,
   },
 });

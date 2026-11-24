@@ -62,6 +62,7 @@ const CAPABILITY_NOUNS: Readonly<Record<CapabilityName, string>> = {
   pairing: 'device pairing',
   secrets: 'the secret store',
   sharing: 'catalog sharing',
+  voice: 'speech and voice',
 };
 
 export const capabilityNoun = (capability: CapabilityName): string => CAPABILITY_NOUNS[capability];
@@ -76,6 +77,7 @@ const CAPABILITY_LABELS: Readonly<Record<CapabilityName, string>> = {
   pairing: 'Device pairing',
   secrets: 'Secrets',
   sharing: 'Sharing',
+  voice: 'Voice',
 };
 
 export const capabilityLabel = (capability: CapabilityName): string => CAPABILITY_LABELS[capability];
@@ -96,6 +98,7 @@ const USE_ACTS: Readonly<Record<CapabilityName, string>> = {
   pairing: 'add or manage a paired device',
   secrets: 'run a command with a stored secret',
   sharing: 'manage or export a shared catalog',
+  voice: 'use speech on this machine',
 };
 
 /**
@@ -156,6 +159,8 @@ const CAPABILITY_REACH: Readonly<Record<CapabilityName, string>> = {
     'Runs a command with a stored secret in its environment — code on this machine; and sets or deletes stored secrets.',
   sharing:
     'Making catalogs of this machine’s skills and MCP setups and exporting them as signed files, which makes this machine vouch for what they hold. Sharing with named people comes in a later update.',
+  voice:
+    'Installing and removing the speech engine on this machine (a download of about 700 MB), and turning speech into text and finding voice in audio with it.',
 };
 
 export const capabilityReach = (capability: CapabilityName): string => CAPABILITY_REACH[capability];
@@ -349,6 +354,8 @@ const CAPABILITY_WEIGHTS: Readonly<Record<CapabilityName, AccessWeight>> = {
   // Publishes this machine's own skills and MCP setups to people outside it, signed as this machine. What it
   // hands over is material the owner chose, not control of the host, so it weighs less than pairing.
   sharing: 'moderate',
+  // Downloads a large pinned model onto the host disk and holds about 2 GB of memory while it runs, but reaches nothing else.
+  voice: 'narrow',
 };
 
 export const capabilityWeight = (capability: CapabilityName): AccessWeight => CAPABILITY_WEIGHTS[capability];

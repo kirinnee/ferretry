@@ -37,10 +37,14 @@ export interface EngineParts {
   readonly catalog?: readonly EngineFile[];
 }
 
+const SUPERSEDED = 'Speech was stopped while it was loading.';
+
 const SENTENCES: Record<VoiceEngineFailureCode, string> = {
   download_failed: 'The speech files could not be downloaded. Check this machine’s internet and try again.',
   hash_mismatch: 'A downloaded speech file was not the file this version expects, so nothing was kept. Try again.',
   write_failed: 'The speech files could not be saved on this machine. Check its free disk space and try again.',
+  // The installer words this one itself (it knows the sizes); this is only the fallback.
+  no_disk: 'This machine does not have enough free disk space for the speech files.',
   no_memory: 'This machine does not have enough free memory to load speech right now.',
   load_failed: 'The speech files are saved but the engine could not start with them.',
 };
@@ -58,6 +62,8 @@ export class SpeechEngine implements VoiceEngineApi {
   private thread: SpeechThread | undefined;
   private loading: Promise<SpeechThread> | undefined;
   private cancelIdle: (() => void) | undefined;
+  /** Bumped by every {@link unload}: a load that began before it is superseded and ends its own thread. */
+  private generation = 0;
 
   constructor(private readonly parts: EngineParts) {}
 
@@ -110,7 +116,10 @@ export class SpeechEngine implements VoiceEngineApi {
         .then(async () => await this.proveItLoads())
         .catch((error: unknown) => {
           const code = error instanceof VoiceEngineError && error.code !== 'not_ready' ? error.code : 'download_failed';
-          this.failure = { code, sentence: SENTENCES[code] };
+          this.failure = {
+            code,
+            sentence: code === 'no_disk' && error instanceof Error ? error.message : SENTENCES[code],
+          };
           this.parts.log.warn('voice.engine.install_failed', { code });
         })
         .finally(() => {
@@ -126,14 +135,22 @@ export class SpeechEngine implements VoiceEngineApi {
     await this.installing;
   }
 
-  /** Install ends by loading once and decoding a second of silence: "Ready" means it ran, not only that it is saved. */
+  /**
+   * Install ends by loading once and decoding a second of silence: "Ready" means it ran, not only that it is saved.
+   * The models are then UNLOADED again, pass or fail: the proof is not a use, so nothing stays resident (about 1.8 GB)
+   * for ten idle minutes. The first real call loads them again.
+   */
   private async proveItLoads(): Promise<void> {
-    const loadedAt = await this.ensureLoaded();
-    const silence = new Float32Array(SPEECH_SAMPLE_RATE);
-    const reply = await loadedAt.thread.call({ kind: 'transcribe', samples: silence }, [silence.buffer]);
-    if (reply.kind !== 'transcribe') throw new VoiceEngineError('load_failed', SENTENCES.load_failed);
-    this.selfTest = { loadMs: loadedAt.loadMs, decodeMs: reply.decodeMs, memoryMb: loadedAt.memoryMb };
-    this.parts.log.info('voice.engine.ready', { ...this.selfTest });
+    try {
+      const loadedAt = await this.ensureLoaded();
+      const silence = new Float32Array(SPEECH_SAMPLE_RATE);
+      const reply = await loadedAt.thread.call({ kind: 'transcribe', samples: silence }, [silence.buffer]);
+      if (reply.kind !== 'transcribe') throw new VoiceEngineError('load_failed', SENTENCES.load_failed);
+      this.selfTest = { loadMs: loadedAt.loadMs, decodeMs: reply.decodeMs, memoryMb: loadedAt.memoryMb };
+      this.parts.log.info('voice.engine.ready', { ...this.selfTest });
+    } finally {
+      await this.unload();
+    }
   }
 
   async remove(): Promise<VoiceEngineView> {
@@ -174,8 +191,12 @@ export class SpeechEngine implements VoiceEngineApi {
     }
   }
 
-  /** Ends the worker now, freeing its memory. A later call loads again. */
+  /**
+   * Ends the worker now, freeing its memory. A later call loads again. A load still in flight is SUPERSEDED: it ends
+   * its own thread when it lands and never publishes it, so no worker is left behind and no second load is started here.
+   */
   async unload(): Promise<void> {
+    this.generation += 1;
     this.cancelIdle?.();
     this.cancelIdle = undefined;
     const thread = this.thread;
@@ -200,10 +221,13 @@ export class SpeechEngine implements VoiceEngineApi {
       this.touch();
       return this.loadedAt;
     }
-    if (this.loading === undefined)
-      this.loading = this.load().finally(() => {
-        this.loading = undefined;
+    if (this.loading === undefined) {
+      const run: Promise<SpeechThread> = this.load().finally(() => {
+        // Only the load that is still current clears it: a superseded one finishing must not hide a newer one.
+        if (this.loading === run) this.loading = undefined;
       });
+      this.loading = run;
+    }
     await this.loading;
     this.touch();
     if (this.loadedAt === undefined) throw new VoiceEngineError('load_failed', SENTENCES.load_failed);
@@ -211,6 +235,7 @@ export class SpeechEngine implements VoiceEngineApi {
   }
 
   private async load(): Promise<SpeechThread> {
+    const generation = this.generation;
     const available = this.parts.availableMemory();
     if (
       available !== undefined &&
@@ -228,6 +253,7 @@ export class SpeechEngine implements VoiceEngineApi {
           ? (bytes.buffer as ArrayBuffer)
           : (bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
     }
+    if (generation !== this.generation) throw new VoiceEngineError('not_ready', SUPERSEDED);
     const thread = this.parts.start();
     thread.onEnd(() => {
       if (this.thread === thread) {
@@ -239,11 +265,17 @@ export class SpeechEngine implements VoiceEngineApi {
     try {
       const reply = await thread.call({ kind: 'load', files }, Object.values(files));
       if (reply.kind !== 'load') throw new Error('unexpected reply');
+      if (generation !== this.generation) {
+        // Unloaded or removed while this was loading: this thread was never published, so it ends here.
+        await thread.terminate();
+        throw new VoiceEngineError('not_ready', SUPERSEDED);
+      }
       this.thread = thread;
       this.loadedAt = { thread, loadMs: reply.loadMs, memoryMb: reply.memoryMb };
       this.parts.log.info('voice.engine.loaded', { loadMs: Math.round(reply.loadMs), memoryMb: reply.memoryMb });
       return thread;
     } catch (error) {
+      if (error instanceof VoiceEngineError && error.code === 'not_ready') throw error;
       await thread.terminate();
       this.parts.log.warn('voice.engine.load_error', {
         reason: String((error as Error)?.message ?? error).slice(0, 400),

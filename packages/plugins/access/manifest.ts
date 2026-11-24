@@ -228,7 +228,7 @@ export default definePlugin({
           { name: 'device', help: 'a device id, or a device name when exactly one device has that name' },
           {
             name: 'capability',
-            help: 'the capability: fleet, terminal, browser, filesystem, warden, pairing, secrets or sharing',
+            help: 'the capability: fleet, terminal, browser, filesystem, warden, pairing, secrets, sharing or voice',
           },
         ],
         options: [

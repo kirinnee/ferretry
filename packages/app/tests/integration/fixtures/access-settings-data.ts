@@ -1,5 +1,5 @@
 /** Fixed FAKE answers of one fake machine for the Access settings scene (no real device, key, login or pairing code). */
-/** The gate's eight capabilities (`core/gate/contract/policy.ts`), spelled here because the app package never imports a plugin. */
+/** The gate's nine capabilities (`core/gate/contract/policy.ts`), spelled here because the app package never imports a plugin. */
 const CAPABILITY_NAMES = [
   'fleet',
   'terminal',
@@ -9,6 +9,7 @@ const CAPABILITY_NAMES = [
   'pairing',
   'secrets',
   'sharing',
+  'voice',
 ] as const;
 
 export const stateOf = (search: string): string => new URLSearchParams(search).get('state') ?? 'default';

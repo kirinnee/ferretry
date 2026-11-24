@@ -1100,10 +1100,9 @@ const MACHINE_VIEW = {
 // ─── devices (Settings › Devices: the paired-device list; `Liftoff Browser` is the one this phone is) ───────────
 const capabilityGrants = (narrow: (capability: string) => { use: boolean; configure: boolean }) =>
   Object.fromEntries(
-    ['fleet', 'terminal', 'browser', 'filesystem', 'warden', 'pairing', 'secrets', 'sharing'].map(capability => [
-      capability,
-      narrow(capability),
-    ]),
+    ['fleet', 'terminal', 'browser', 'filesystem', 'warden', 'pairing', 'secrets', 'sharing', 'voice'].map(
+      capability => [capability, narrow(capability)],
+    ),
   );
 const FULL_DEVICE_GRANTS = capabilityGrants(() => ({ use: true, configure: true }));
 const LIMITED_DEVICE_GRANTS = capabilityGrants(capability => ({ use: capability === 'fleet', configure: false }));

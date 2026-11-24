@@ -448,20 +448,20 @@ describe('AddDeviceCard capabilities', () => {
   const switchFor = (renderer: ReactTestRenderer, id: string, capability: string, axis: string) =>
     switchIn(marked(renderer, 'data-device-grant', `${id}:${capability}.${axis}`)[0]);
 
-  it('puts eight capabilities by two axes behind a disclosure on every device, closed by default', () => {
-    // Sixteen switches per device would bury the list at 390px, so the rows stay a summary line.
+  it('puts nine capabilities by two axes behind a disclosure on every device, closed by default', () => {
+    // Eighteen switches per device would bury the list at 390px, so the rows stay a summary line.
     // Arrange, Act
     const renderer = card({ view: view({ devices: [device(), IPAD] }) });
 
     // Assert
     should(marked(renderer, 'data-device-capabilities')).have.length(2);
     should(marked(renderer, 'data-device-capabilities')[0]?.props.open).equal(false);
-    should(marked(renderer, 'data-device-capability')).have.length(16);
-    should(marked(renderer, 'data-device-grant')).have.length(32);
+    should(marked(renderer, 'data-device-capability')).have.length(18);
+    should(marked(renderer, 'data-device-grant')).have.length(36);
     for (const capability of CAPABILITY_NAMES)
       should(marked(renderer, 'data-device-capability', capability)).have.length(2);
     // The summary says how much this device holds without opening anything.
-    expect(text(renderer)).toContain('1 of 8');
+    expect(text(renderer)).toContain('1 of 9');
     expect(text(renderer)).toContain('Secrets');
   });
 

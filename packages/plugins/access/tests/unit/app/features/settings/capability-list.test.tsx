@@ -266,7 +266,7 @@ describe('how much each capability hands over', () => {
     expect(capabilityWeight('filesystem')).toBe('broad');
   });
 
-  it('lists the secret store as a seventh row with its own label and the dangerous tier, then catalog sharing', () => {
+  it('lists the secret store as a seventh row with its own label and the dangerous tier, then catalog sharing, then voice', () => {
     // Arrange, Act
     const renderer = render(
       <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed />,
@@ -274,7 +274,7 @@ describe('how much each capability hands over', () => {
 
     // Assert
     const rows = marked(renderer, 'data-capability-row');
-    expect(rows).toHaveLength(8);
+    expect(rows).toHaveLength(9);
     expect(rows[6]?.props['data-capability-row']).toBe('secrets');
     expect(text(renderer)).toContain('Secrets');
     expect(text(renderer)).toContain('code on this machine');
@@ -283,6 +283,9 @@ describe('how much each capability hands over', () => {
     expect(text(renderer)).toContain('Sharing');
     expect(text(renderer)).toContain('exporting them as signed files');
     expect(rowWeights(renderer)[7]).toBe('moderate');
+    expect(rows[8]?.props['data-capability-row']).toBe('voice');
+    expect(text(renderer)).toContain('Voice');
+    expect(rowWeights(renderer)[8]).toBe('narrow');
   });
 
   it('says which axis THIS device’s own grant withholds, only on a row where that is true', () => {

@@ -39,6 +39,7 @@ describe('undeclaredHostFacts', () => {
     await expect(facts.procFdReach(1, '0')).rejects.toThrow('permissions.hostFacts');
     await expect(facts.procWorkingDirectory(1)).rejects.toThrow('permissions.hostFacts');
     await expect(facts.blockScheduler(8, 1)).rejects.toThrow('permissions.hostFacts');
+    await expect(facts.diskFreeBytes('/tmp')).rejects.toThrow('permissions.hostFacts');
     expect(() => facts.launchGuard()).toThrow(
       'acme did not declare permissions.hostFacts, so it reads no launch-guard fact.',
     );
