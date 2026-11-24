@@ -722,3 +722,56 @@ describe('the voice stream: one chat per FERRET, however it is named (review 248
     expect(registry.claimFerret('fer-1')).toBeDefined();
   });
 });
+
+describe('the voice stream: the final decode starts in the pause, not at its end (voice latency)', () => {
+  test('RED→GREEN: the turn is decoded 0.3 s after the last word, and the send at the pause reuses that decode', async () => {
+    const r = await rig();
+    r.start(chat);
+    await r.talk(1_500);
+    await r.talk(2_500, { loud: true });
+    await r.talk(600); // 0.6 s of silence: well before the 1.5 s pause
+    const early = r.transcribed.length;
+    expect(r.snapshots().some(item => item.words !== undefined && !item.words.final)).toBe(true);
+    expect(r.sent).toEqual([]);
+    await r.talk(3_000);
+    expect(r.transcribed).toHaveLength(early); // the pause decoded nothing more
+    expect(r.sent).toHaveLength(1);
+    expect(r.sent[0]).toMatchObject({ sendId: 'abc123:1' });
+    expect(r.snapshot().last).toEqual({ turn: 1, outcome: 'sent', sendId: 'abc123:1' });
+  });
+
+  test('RED→GREEN: voice that comes back after 0.6 s outdates the early decode; the whole turn is decoded and sent once', async () => {
+    const r = await rig();
+    r.start(chat);
+    await r.talk(1_500);
+    await r.talk(1_500, { loud: true });
+    await r.talk(600); // an early decode of 1.5 s of speech starts…
+    await r.talk(2_500, { loud: true }); // …and the person goes on
+    await r.talk(3_000);
+    expect(r.sent).toHaveLength(1);
+    const words = (r.sent[0]?.message ?? '').split(' ').length - 1; // "(voice)" is not a word
+    expect(words).toBeGreaterThan(3); // the 1.5 s early decode says 3 words; the whole turn (4 s) says 8
+  });
+
+  test('an early decode is not proof of the phone: a phone that died at the pause still sends nothing', async () => {
+    const r = await rig();
+    r.start(chat);
+    await r.talk(1_500);
+    await r.talk(2_500, { loud: true });
+    await r.talk(600);
+    await r.talk(3_000, { dead: true });
+    expect(r.sent).toEqual([]);
+    expect(r.snapshot().last).toMatchObject({ outcome: 'cancelled', code: 'phone_silent' });
+  });
+
+  test('a turn longer than the interim limit is still decoded once, at the pause', async () => {
+    const r = await rig();
+    r.start(chat);
+    await r.talk(1_500);
+    await r.talk(7_000, { loud: true });
+    const before = r.transcribed.length;
+    await r.talk(3_000);
+    expect(r.transcribed).toHaveLength(before + 1);
+    expect(r.sent).toHaveLength(1);
+  });
+});
