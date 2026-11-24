@@ -79,6 +79,24 @@ describe('observeInputFields', () => {
     should(password?.field).eql({ tag: 'input', type: 'password', autocomplete: 'current-password', name: 'pw' });
   });
 
+  it('looks at a field all the same when its label cannot be read: it just has none', async () => {
+    const { world } = loginWorld();
+    world.session('page-target').failOn = (method, params) =>
+      method === 'Runtime.callFunctionOn' && String(params.functionDeclaration).includes('aria-label')
+        ? new Error('the world is gone')
+        : undefined;
+
+    const facts = await observed(world, ['#user']);
+
+    should(facts.fields[0]?.field).eql({
+      tag: 'input',
+      type: 'text',
+      autocomplete: 'username',
+      name: 'username',
+      id: 'user',
+    });
+  });
+
   it('I110 asks the handle which node it holds, never the page, and disposes every handle', async () => {
     const { world } = loginWorld();
     await observed(world, ['#user', '#pw']);
