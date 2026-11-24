@@ -437,10 +437,12 @@ const inspect = async (
   expect(read.streaks, `${key}: shooting stars`).toBeGreaterThanOrEqual(3);
   expect(read.streakMoving, `${key}: a shooting star moves`).toBe('fy-lb-shoot');
   expect(read.next, `${key}: a Next button`).toBe(1);
-  // `held`: a sign-in page holds Next until the person has signed in (nothing is recorded over a sign-in that did not happen).
-  expect(read.nextOff, `${key}: Next is ${opts.held === true ? 'held until signed in' : 'on'}`).toBe(
-    opts.held === true,
-  );
+  // `held`: a sign-in page REFUSES Next until the person has signed in (nothing is recorded over a sign-in that did not happen).
+  // The button itself stays enabled on every page; the refusal is asserted where the page is walked (see the sign-in step).
+  expect(
+    read.nextOff,
+    `${key}: Next is enabled${opts.held === true ? ' (it refuses until signed in, it is not disabled)' : ''}`,
+  ).toBe(false);
   expect(read.back, `${key}: Back ${opts.first === true ? 'is absent on the first page' : 'is there'}`).toBe(
     opts.first === true ? 0 : 1,
   );
@@ -525,9 +527,10 @@ const stagePage = async (tab: Page, variant: Variant, key: string): Promise<void
 };
 
 /**
- * Collects a pairing button of the wrong shape (read by the gap below, not asserted here): on a phone it is FULL width,
- * at least 0.9 of the page's content width (its `<main>` minus padding, not its action row's), and its `answers` action-row
- * answers are STACKED one under another (the owner's words, since #2296); on a desktop it is under half the page width.
+ * Collects a pairing button of the wrong shape (read by the gap below, not asserted here): on a phone it is NOT full width
+ * (Q6, owner ruling C-6: content-sized with a minimum; under 0.9 of the page's content width, its `<main>` minus padding, not
+ * its action row's) and its `answers` action-row answers are STACKED one under another (the owner's words, since #2296); on a
+ * desktop it is under half the page width.
  * Either way it is at least 44px tall, and a button, page or row that cannot be measured is collected as a failure.
  */
 const measureButton = async (
@@ -570,7 +573,7 @@ const measureButton = async (
     return;
   }
   const phone = variant.width < 600;
-  const wrongWidth = phone ? measured.width < 0.9 * measured.content : measured.width >= 0.5 * variant.width;
+  const wrongWidth = phone ? measured.width >= 0.9 * measured.content : measured.width >= 0.5 * variant.width;
   const notStacked = phone && (measured.answers !== measured.expected || !measured.stacked);
   if (wrongWidth || notStacked || measured.height < 44)
     seen.badButtons.push(
@@ -765,10 +768,11 @@ const endPage = async (tab: Page, variant: Variant, key: string): Promise<void> 
       };
     });
     expect(read.h, `${key}: ${read.label} is a 44px target`).toBeGreaterThanOrEqual(43.5);
-    // A phone's two ways to start fill their row on purpose (the owner asked for fixed, even widths); a desktop's never do.
+    // Q6: neither a phone's nor a desktop's two ways to start are full width (the owner: "dont make the button take the full width").
     expect(read.w, `${key}: ${read.label} fits the screen`).toBeLessThanOrEqual(variant.width);
-    if (variant.width >= 600)
-      expect(read.w, `${key}: ${read.label} is not full width`).toBeLessThan(0.5 * variant.width);
+    expect(read.w, `${key}: ${read.label} is not full width`).toBeLessThan(
+      (variant.width >= 600 ? 0.5 : 0.8) * variant.width,
+    );
     expect(read.border, `${key}: ${read.label} is a real (bordered) secondary button`).toBeGreaterThan(0);
     expect(read.variant, `${key}: ${read.label} is not a ghost or text button`).not.toBe('ghost');
     expect(read.underline, `${key}: ${read.label} is not underlined text`).toBe('none');
@@ -1139,12 +1143,40 @@ describe('the first run, end to end', () => {
         expect((await daemonOf(tab, A)).runtimesMade, 'the machine starts with no runtime').toEqual([]);
         await inspect(tab, variant, 'claude-code.sign-in', { held: true, centered: true });
         await shot(tab, variant, 'claude-code.sign-in');
+        // Next is NOT disabled here: pressing it shows the refusal on the page, stays on the sign-in and records nothing, while
+        // Back and Later stay live (O10 Q2, https://github.com/kirinnee/ferretry/pull/2413).
+        await tab.locator('[data-step-next]').click();
+        await tab.locator('[data-flow-commit-error]').waitFor({ state: 'visible' });
+        expect(
+          await tab.locator('[data-flow-commit-error]').innerText(),
+          'Next refuses with the reason until Claude is signed in',
+        ).toContain('Sign in to Claude to continue');
+        expect(await keyOf(tab), 'the refusal leaves the flow on the sign-in').toBe('claude-code.sign-in');
+        expect(
+          await tab
+            .locator('[data-step-footer] button')
+            .evaluateAll(buttons => buttons.map(button => (button as HTMLButtonElement).disabled)),
+          'Back, Later and Next are all enabled after the refusal',
+        ).toEqual([false, false, false]);
+        expect(
+          (await daemonOf(tab, A)).states['claude-code.sign-in'],
+          'a refused Next records nothing',
+        ).toBeUndefined();
         await tab.locator('[data-harness-sign-in="claude-code"] button', { hasText: 'Sign in to Claude Code' }).click();
         await tab.locator('[data-claude-login-code] input').fill('FAKE-CODE-0001');
         await tab.getByRole('button', { name: 'Finish sign-in' }).click();
-        await tab.waitForFunction(() => !(document.querySelector('[data-step-next]') as HTMLButtonElement).disabled);
+        // Next is enabled before AND after the sign-in, so the sign-in's end is the machine holding its one runtime.
+        await tab.waitForFunction(
+          machine =>
+            (window as unknown as { __fake: { daemon: (id: string) => { runtimesMade: unknown[] } } }).__fake.daemon(
+              machine,
+            ).runtimesMade.length > 0,
+          A,
+        );
         expect((await daemonOf(tab, A)).runtimesMade, 'the sign-in made Claude its one runtime').toHaveLength(1);
-        // The sign-in page HOLDS Next (a spinner on it) until the person is signed in: a hold, not an answer's wait, so what the
+        // Signed in: the page stops refusing, so the refusal it showed is gone.
+        await tab.locator('[data-flow-commit-error]').waitFor({ state: 'detached' });
+        // The sign-in page REFUSES Next until the person is signed in: the press above is not an answer's wait, so what the
         // sampler saw there is not what "the Next spinner never flashes" is about. It counts again from the next press on.
         await tab.waitForFunction(() => document.querySelector('[data-step-next] .fy-spinner') === null);
         await tab.waitForTimeout(200);
@@ -2131,7 +2163,7 @@ describe('the gaps the gate found, now closed', () => {
       expect(seen.footerOffScreen).toEqual([]);
     },
   );
-  it('the pairing page buttons are full width on a phone, under half the page on a desktop, and 44px tall', () => {
+  it('the pairing page buttons are content-sized (not full width) on a phone, under half the page on a desktop, and 44px tall', () => {
     expect(seen.badButtons).toEqual([]);
   });
   it('the pairing page reached from the first run has no sidebar or app chrome', () => {

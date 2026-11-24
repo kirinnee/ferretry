@@ -40,6 +40,18 @@ const Row = () => (
     <div data-sample="lone-secondary">
       <ActionRow secondary={<Button data-b="secondary">Check again</Button>} />
     </div>
+    <div data-sample="long" className="flex flex-col gap-3">
+      <ActionRow
+        primary={
+          <Button variant="primary" data-b="primary">
+            <span aria-hidden="true">↓</span>
+            Sign in to Codex
+          </Button>
+        }
+      />
+      <ActionRow primary={<Button variant="primary">Import</Button>} />
+      <ActionRow primary={<Button variant="primary">Connect another GitHub account</Button>} />
+    </div>
   </div>
 );
 

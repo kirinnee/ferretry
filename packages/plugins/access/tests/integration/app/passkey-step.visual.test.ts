@@ -141,8 +141,11 @@ describe('the access.passkey step, in a real browser', () => {
         );
         // C59 O3 / O8-2: the shared answer row: a phone stacks them full width (the way on above), a desktop puts Not now
         // and Add a passkey side by side as one group at the right end of one row.
-        expect(later2.width, 'one width').toBeCloseTo(add.width, 0);
         expect(add.width, 'width of 136 px or more').toBeGreaterThanOrEqual(136);
+        expect(later2.width, 'Not now keeps the minimum too').toBeGreaterThanOrEqual(136);
+        // Q6 (ruling C-6): content-sized, never the column's full width, on a phone too.
+        expect(add.width, 'Add a passkey is not full width').toBeLessThan(variant.width - 80);
+        expect(later2.width, 'Not now is not full width').toBeLessThan(variant.width - 80);
         if (variant.phone) {
           // C59 follow-up (f7487677f5): the keyboard order IS the visual order, so the row swaps the two buttons in the DOM
           // (Add first, then Not now) and stacks them as a plain column; a CSS `column-reverse` would draw one order and
@@ -158,6 +161,7 @@ describe('the access.passkey step, in a real browser', () => {
           expect(later2.y, 'Not now is under Add').toBeGreaterThan(add.y + add.height - 1);
           expect(later2.y - (add.y + add.height), 'the gap is 12 px').toBeCloseTo(12, 0);
         } else {
+          expect(later2.width, 'one width').toBeCloseTo(add.width, 0);
           expect(flow.direction, 'a desktop puts them in a row').toBe('row');
           expect(Math.abs(later2.y - add.y), 'one row').toBeLessThanOrEqual(1);
           expect(later2.x, 'Not now is left of Add').toBeLessThan(add.x);

@@ -191,33 +191,43 @@ describe('the Projects list reads as cards', () => {
             expect(card.hitStart, 'Start is still the button').toBe(true);
             expect(card.startName).toBe('Start a ferret here');
             expect(card.startHeight, 'a touch target').toBeGreaterThanOrEqual(44);
-            if (!viewport.phone) expect(Math.abs(card.startWidth - 136), 'fixed 136px').toBeLessThanOrEqual(1);
+            // Q6 (ruling C-6): content-sized with a 136px minimum on every screen, never stretched, the label on ONE line.
+            expect(card.startWidth, 'Start grows to its label, never narrower than 136px').toBeGreaterThanOrEqual(135);
             expect(card.startRight, 'inside the card').toBeLessThanOrEqual(card.right);
           }
-          if (viewport.phone) {
-            // Equal halves on a phone, each label on ONE line, the row filling the card (no dead space on the right).
+          {
+            // Q6: every label on ONE line at 390 and 1440, and on a phone the buttons are NOT stretched to the card.
             const row = await tab.evaluate(() =>
               [...document.querySelectorAll('[data-project-card]')].map(card => {
                 const buttons = [...card.querySelectorAll('.kt-btn')];
                 const boxes = buttons.map(button => button.getBoundingClientRect());
-                const label = buttons.at(-1);
-                const range = document.createRange();
-                if (label !== undefined) range.selectNodeContents(label);
-                const lineHeight = Number.parseFloat(getComputedStyle(label as Element).lineHeight) || 18;
+                const lines = buttons.map(label => {
+                  const range = document.createRange();
+                  range.selectNodeContents(label);
+                  const lineHeight = Number.parseFloat(getComputedStyle(label).lineHeight) || 18;
+                  return Math.round(range.getBoundingClientRect().height / lineHeight);
+                });
+                const inner = card.getBoundingClientRect();
                 return {
                   widths: boxes.map(box => box.width),
-                  rightGap: card.getBoundingClientRect().right - (boxes.at(-1)?.right ?? 0),
-                  labelLines: Math.round(range.getBoundingClientRect().height / lineHeight),
+                  rightGap: inner.right - (boxes.at(-1)?.right ?? 0),
+                  cardWidth: inner.width,
+                  labelLines: lines,
                 };
               }),
             );
             console.info(
-              `[s9] 390 ${scheme}: action widths ${row.map(r => r.widths.map(w => w.toFixed(0)).join('+')).join(' | ')}, right gap ${row.map(r => r.rightGap.toFixed(0)).join('/')}, label lines ${row.map(r => r.labelLines).join('/')}`,
+              `[s9] ${viewport.name} ${scheme}: action widths ${row.map(r => r.widths.map(w => w.toFixed(0)).join('+')).join(' | ')}, right gap ${row.map(r => r.rightGap.toFixed(0)).join('/')}, label lines ${row.map(r => r.labelLines.join('+')).join(' | ')}`,
             );
             for (const card of row) {
-              expect(Math.abs((card.widths[0] ?? 0) - (card.widths[1] ?? 1)), 'equal halves').toBeLessThanOrEqual(1);
-              expect(card.rightGap, 'the row fills the card (padding only)').toBeLessThanOrEqual(16);
-              expect(card.labelLines, 'Start a ferret here is one line').toBe(1);
+              for (const lines of card.labelLines) expect(lines, 'every label is one line').toBe(1);
+              for (const width of card.widths)
+                expect(width, 'Open and Start keep the 136px minimum').toBeGreaterThanOrEqual(135);
+              if (viewport.phone) {
+                for (const width of card.widths)
+                  expect(width, 'content-sized: narrower than the card').toBeLessThan(card.cardWidth - 28 - 20);
+                expect(card.rightGap, 'the actions are not stretched to the card edge').toBeGreaterThan(16);
+              }
             }
           }
           // The meta line: the repository when known, the active ferret count when there is one; the path is a tooltip only.

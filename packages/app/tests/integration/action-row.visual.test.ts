@@ -9,7 +9,7 @@
  *     narrow third), and on a desktop Back is grouped with Later and Next at the right end (C59 O8-2).
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
@@ -18,6 +18,8 @@ import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
 setDefaultTimeout(60_000);
 
 const packageRoot = import.meta.dir;
+/** Set `FY_ACTION_ROW_SHOTS_DIR` to keep `<variant>-row.png` of the answer rows (fake data only). */
+const shotsDir = process.env.FY_ACTION_ROW_SHOTS_DIR ?? '';
 let browser: Browser;
 let directory = '';
 let server: ReturnType<typeof Bun.serve> | undefined;
@@ -115,7 +117,10 @@ describe('C59 the shared answer row', () => {
         expect(Math.abs(secondary.h - primary.h), 'one height').toBeLessThanOrEqual(1);
         expect(primary.h, 'a 44 px target').toBeGreaterThanOrEqual(43.5);
         if (variant.phone) {
-          expect(Math.abs(primary.w - container.w), 'phone: full width').toBeLessThanOrEqual(1);
+          // Q6 (ruling C-6): content-sized with a minimum, NEVER the container's full width, 44 px tall, the way on above.
+          expect(primary.w, 'phone: narrower than the column').toBeLessThan(container.w - 40);
+          expect(Math.abs(primary.w - 192), 'phone: the 12rem minimum').toBeLessThanOrEqual(1);
+          expect(primary.x - container.x, 'phone: at the start edge').toBeLessThanOrEqual(1);
           expect(primary.y, 'phone: the way on is above').toBeLessThan(secondary.y);
         } else {
           expect(Math.abs(primary.y - secondary.y), 'desktop: one row').toBeLessThanOrEqual(1);
@@ -133,13 +138,10 @@ describe('C59 the shared answer row', () => {
         if (lonePrimary === undefined || loneContainer === undefined || loneSecondary === undefined)
           throw new Error('lone rows');
         if (variant.phone) {
-          expect(Math.abs(lonePrimary.w - loneContainer.w), 'phone: a lone primary is full width').toBeLessThanOrEqual(
-            1,
+          expect(lonePrimary.w, 'phone: a lone primary is narrower than the column').toBeLessThan(loneContainer.w - 40);
+          expect(loneSecondary.w, 'phone: a lone secondary is narrower than the column').toBeLessThan(
+            loneContainer.w - 40,
           );
-          expect(
-            Math.abs(loneSecondary.w - loneContainer.w),
-            'phone: a lone secondary is full width',
-          ).toBeLessThanOrEqual(1);
         } else {
           expect(
             Math.abs(lonePrimary.right - loneContainer.right),
@@ -172,7 +174,7 @@ describe('C59 the shared answer row', () => {
             expect(button.right, `${named}: ends inside the container`).toBeLessThanOrEqual(container.right + 0.5);
             expect(button.h, `${named}: a 44 px target`).toBeGreaterThanOrEqual(43.5);
           }
-          const sideBySide = room >= 400 && !variant.phone;
+          const sideBySide = room >= 396 && !variant.phone;
           if (sideBySide) {
             expect(Math.abs(primary.y - secondary.y), `${named}: one row`).toBeLessThanOrEqual(1);
             expect(Math.abs(primary.right - container.right), `${named}: group at the right end`).toBeLessThanOrEqual(
@@ -181,9 +183,16 @@ describe('C59 the shared answer row', () => {
             expect(Math.abs(primary.x - (secondary.right + 12)), `${named}: one group`).toBeLessThanOrEqual(1);
             expect(Math.abs(primary.w - 192), `${named}: 12rem`).toBeLessThanOrEqual(1);
           } else {
-            // Too narrow for the group (or a phone): one per line, each the container's full width.
-            expect(Math.abs(primary.w - room), `${named}: the way on is full width`).toBeLessThanOrEqual(1);
-            expect(Math.abs(secondary.w - room), `${named}: the way out is full width`).toBeLessThanOrEqual(1);
+            // Too narrow for the group (or a phone): one per line, each at its own width (12rem, or the container when that is narrower).
+            const own = Math.min(192, room);
+            expect(
+              Math.abs(primary.w - own),
+              `${named}: the way on is content-sized, not full width`,
+            ).toBeLessThanOrEqual(1);
+            expect(
+              Math.abs(secondary.w - own),
+              `${named}: the way out is content-sized, not full width`,
+            ).toBeLessThanOrEqual(1);
             expect(Math.abs(primary.y - secondary.y), `${named}: stacked`).toBeGreaterThan(20);
             // Tab follows the picture: the DOM order is the drawn order, so the first in the DOM is the upper one.
             const order = await tab.evaluate(
@@ -198,6 +207,42 @@ describe('C59 the shared answer row', () => {
           await tab.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
           'nothing scrolls sideways',
         ).toBeLessThanOrEqual(0);
+      } finally {
+        await close();
+      }
+    });
+
+    it(`${variant.name}: Q6 answers with an icon or a long label are content-sized, one line, never full width on a phone`, async () => {
+      const { tab, close } = await open(variant, 'row');
+      try {
+        if (shotsDir !== '') {
+          await mkdir(shotsDir, { recursive: true });
+          await tab.screenshot({ path: join(shotsDir, `${variant.name}-row.png`), fullPage: true });
+        }
+        const [container] = await boxes(tab, '[data-sample="long"]');
+        const found = await tab.evaluate(() =>
+          [...document.querySelectorAll('[data-sample="long"] button')].map(button => {
+            // The label's own text: how many distinct line tops its glyph boxes have.
+            const tops = new Set<number>();
+            const walker = document.createTreeWalker(button, NodeFilter.SHOW_TEXT);
+            for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+              if ((node.textContent ?? '').trim() === '') continue;
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              for (const rect of range.getClientRects()) tops.add(Math.round(rect.top / 4));
+            }
+            const lines = tops.size;
+            const box = button.getBoundingClientRect();
+            return { label: button.textContent?.trim() ?? '', w: box.width, h: box.height, lines };
+          }),
+        );
+        if (container === undefined) throw new Error('long sample');
+        expect(found).toHaveLength(3);
+        for (const button of found) {
+          expect(button.lines, `${button.label} is one line`).toBe(1);
+          expect(button.h, `${button.label} is a 44 px target`).toBeGreaterThanOrEqual(43.5);
+          expect(button.w, `${button.label} is narrower than the column`).toBeLessThan(container.w - 40);
+        }
       } finally {
         await close();
       }

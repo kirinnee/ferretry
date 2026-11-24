@@ -1,17 +1,24 @@
 /* THE ANSWER ROW (`action-row.tsx`): layout only, no colour, so every style family keeps its own buttons.
-   Phone: stacked, each answer the full container width, the way on first. The component puts the answers in the DOM in the
+   Q6 (owner ruling C-6, "dont make the button take the full width"): an answer is CONTENT-SIZED with a sensible minimum
+   (12rem), on a phone too, never stretched to the container; a long label grows its button, and the label stays on one line.
+   Phone: stacked, the way on first, each answer at its own width at the start edge. The component puts the answers in the DOM in the
    order they are drawn (phone: primary, secondary; desktop: secondary, primary), so Tab and a screen reader follow the
-   picture: nothing here reverses a direction. Desktop: one row, the answers side by side at the container's right edge, both one width. */
+   picture: nothing here reverses a direction. Desktop: one row, the answers side by side at the container's right edge. */
 .fy-action-row {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 12px;
   inline-size: 100%;
   min-inline-size: 0;
 }
 .fy-action-row > .kt-btn {
   box-sizing: border-box;
-  inline-size: 100%;
+  flex: 0 0 auto;
+  inline-size: auto;
+  /* Never wider than the column, never narrower than 12rem (or the column when that is narrower still). */
+  max-inline-size: 100%;
+  min-inline-size: min(12rem, 100%);
   height: auto;
   min-block-size: 44px;
   padding-block: 0.75rem;
@@ -19,8 +26,8 @@
 }
 /* THE ROW FITS ITS CONTAINER, NOT THE WINDOW. A panel in a wide window can be narrow (a Settings panel at a 1280 window holds
    this row in a 309px column), so the side-by-side group is chosen by the row's OWN width: the row is its own size container
-   and its answers go side by side only when both fit (2 x 12rem and the 12px gap, rounded up to 25rem). Narrower, they wrap
-   and are the phone's: one per line, each the container's full width, in the same DOM order (so Tab still follows the picture). */
+   and its answers go side by side only when both fit (2 x 12rem and the 12px gap, 24.75rem). Narrower, they wrap
+   and are the phone's: one per line, each at its own width, in the same DOM order (so Tab still follows the picture). */
 .fy-action-row {
   container-type: inline-size;
 }
@@ -35,15 +42,11 @@
        they read as one question with its two answers. A lone answer (primary or secondary) is the same group of one. */
     justify-content: flex-end;
   }
-  /* A container too narrow for the group: each answer takes its own line, the full width (flex-basis 100% forces the wrap). */
-  .fy-action-row > .kt-btn {
-    inline-size: 100%;
-    flex: 1 0 100%;
-  }
-  @container (min-width: 25rem) {
+  /* A container too narrow for the group: the row wraps, each answer on its own line at the phone's start edge (an auto end
+     margin pushes it left; the row itself cannot be queried, only what is inside it). */
+  @container (max-width: 24.74rem) {
     .fy-action-row > .kt-btn {
-      inline-size: 12rem;
-      flex: 0 0 auto;
+      margin-inline-end: auto;
     }
   }
 }

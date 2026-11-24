@@ -103,27 +103,19 @@
   pointer-events: none; /* the wrapper's gaps and empty area belong to the card face (the link); only the controls catch clicks */
   position: relative;
 }
-.fy-pc__actions .kt-btn {
+:root .fy-pc__actions .kt-btn {
+  /* `:root` so the coarse-pointer 44px floor on every link (`:root a[href]`, design-system.css) cannot win over the minimum below. */
   height: auto;
   pointer-events: auto;
-  inline-size: 8.5rem;
+  /* Q6 (ruling C-6): content-sized with a sensible minimum, on a phone too (never stretched to the card). The label stays on
+     ONE line at every width, so the button grows to its words; when two do not fit, the row wraps a button as a whole. */
+  inline-size: auto;
   justify-content: center;
   min-block-size: 44px;
+  min-inline-size: 8.5rem;
   padding-inline: 0.75rem;
   text-align: center;
-  text-wrap: balance;
-  white-space: normal;
-}
-/* A phone: the two actions share the row in equal halves, so each label sits on ONE line and nothing is left dead. */
-@media (max-width: 599px) {
-  .fy-pc__actions {
-    display: grid;
-    grid-auto-columns: minmax(0, 1fr);
-    grid-auto-flow: column;
-  }
-  .fy-pc__actions .kt-btn {
-    inline-size: auto;
-  }
+  white-space: nowrap;
 }
 /* One column, wide enough: the actions move to the right of the text. Two columns keep them underneath. */
 @media (min-width: 600px) and (max-width: 899px) {
