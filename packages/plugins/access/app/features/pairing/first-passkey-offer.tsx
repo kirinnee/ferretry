@@ -22,6 +22,7 @@ import { holdInlinePasskeyOffer } from '../../lib/inline-passkey-offer.ts';
 import { addPasskeyCeremony, browserCredentials } from '../../lib/step-up-ceremony.ts';
 import { fetchPasskeys, type StepUpClient } from '../../lib/step-up-client.ts';
 import type { DaemonConnection } from '../../shell-grants.ts';
+import { UnlockAfterAdd } from './unlock-after-add.tsx';
 
 /** What this offer needs to reach the machine it just paired with. */
 export type FirstPasskeyClientFactory = (connection: DaemonConnection) => Promise<StepUpClient>;
@@ -47,6 +48,8 @@ export interface FirstPasskeyOfferProps {
    * daemon-less `/pair` page) waits for this so it never navigates away from a button the person could still press.
    */
   readonly onSettled?: (outcome: FirstPasskeyOutcome) => void;
+  /** Told whether an unlock is the next step on this card (after "Passkey added"), so a host's own "Continue" can stand back from it. */
+  readonly onUnlockPending?: (pending: boolean) => void;
   /** Drawn beside the add button while the offer shows (the host's "Not now"), so the two answers sit in one row. */
   readonly actions?: ReactNode;
 }
@@ -72,14 +75,19 @@ export function FirstPasskeyOffer({
   deadlineMs = MACHINE_READ_DEADLINE_MS,
   schedule,
   onSettled,
+  onUnlockPending,
   actions,
 }: FirstPasskeyOfferProps) {
   const [state, setState] = useState<State>({ kind: 'hidden' });
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // After "Passkey added" the card keeps its machine held while an unlock is the next step: nothing pops over it unasked.
+  const [unlockPending, setUnlockPending] = useState(true);
   // The latest listener, read when an answer arrives: a host passing a fresh closure each render must not restart the read.
   const settled = useRef(onSettled);
   settled.current = onSettled;
+  const pendingListener = useRef(onUnlockPending);
+  pendingListener.current = onUnlockPending;
 
   // Read as a value, so the effect depends on the answer and not on the seam's identity.
   const canRun = supported();
@@ -113,8 +121,10 @@ export function FirstPasskeyOffer({
   }, [canRun, connection, createClient, deadlineMs, schedule]);
 
   // While the button shows, this machine's prompts hold back: the same offer must not pop up over it, unasked.
-  const offered = state.kind === 'offered';
-  useEffect(() => (offered ? holdInlinePasskeyOffer(connection.daemonId) : undefined), [offered, connection.daemonId]);
+  const unlockNext = state.kind === 'added' && unlockPending;
+  useEffect(() => pendingListener.current?.(unlockNext), [unlockNext]);
+  const holding = state.kind === 'offered' || (state.kind === 'added' && unlockPending);
+  useEffect(() => (holding ? holdInlinePasskeyOffer(connection.daemonId) : undefined), [holding, connection.daemonId]);
 
   const add = useCallback(async () => {
     if (state.kind !== 'offered') return;
@@ -136,21 +146,20 @@ export function FirstPasskeyOffer({
   if (state.kind === 'hidden') return null;
   if (state.kind === 'added')
     return (
-      <p role="status" data-first-passkey-added="" className="m-0 text-ui leading-base text-ok">
-        Passkey added. This device can confirm changes on this machine.
-      </p>
+      <UnlockAfterAdd
+        connection={connection}
+        onNeeded={needed => setUnlockPending(needed)}
+        onUnlocked={() => setUnlockPending(false)}
+      />
     );
   const minutes = registrationMinutes(state.view.registrationClosesAt, now());
   return (
     <div data-first-passkey-offer="" className="mt-3 flex w-full min-w-0 flex-col gap-3">
       {/* WHY, in one plain line: what a passkey is for. Then WHEN: no bare countdown, what happens if it is skipped. */}
-      <p className="m-0 text-balance text-center text-ui leading-base text-fg sm:text-left" data-first-passkey-why="">
+      <p className="m-0 text-balance text-ui leading-base text-fg" data-first-passkey-why="">
         Add a passkey so this device can approve risky actions with your fingerprint or face.
       </p>
-      <p
-        className="m-0 text-balance text-center text-meta leading-base text-muted sm:text-left"
-        data-first-passkey-when=""
-      >
+      <p className="m-0 text-balance text-meta leading-base text-muted" data-first-passkey-when="">
         {minutes === null
           ? ''
           : `This quick option stays open for about ${minutes <= 1 ? 'a minute' : `${minutes} minutes`}. `}

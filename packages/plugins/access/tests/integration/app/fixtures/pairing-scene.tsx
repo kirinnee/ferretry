@@ -7,6 +7,8 @@
  *   &arrival=link|cold|broken   a pairing link (default), a cold open, or a link whose redemption fails
  *   &offer=open                the machine says the first-passkey window is open (7 minutes left): the success screen offers
  *                              "Add a passkey now" and waits for "Not now"
+ *   &unlock=1                  the machine unlocks on opening: its unlock gate (the REAL `StepUpGate` and unlock `StepUpDialog`) gets a request refused for
+ *                              want of an unlock right after pairing, as the real one does (S-11); a press on its prompt counts in `window.__pairScene.unlocked`
  *   &daemon=<url>              the address the link carries (default a loopback one): a named host prefills "Name this machine", an IP does not
  *   &same=1                    the page runs on the daemon's own machine (`sameMachine`): the line is the direct one, with its address
  *   &scan=camera              a browser that can scan (an idle camera), so the cold page shows all three ways in
@@ -20,6 +22,13 @@
 import { createRoot } from 'react-dom/client';
 import { FerretMascot } from '../../../../app/index.ts';
 import { EndMascotPanel } from '../../../../app/features/onboarding/end-mascot-panel.tsx';
+import { StepUpDialog, UNLOCK_COPY } from '../../../../app/features/step-up/step-up-dialog.tsx';
+import {
+  inlinePasskeyOffered,
+  onInlinePasskeyOffer,
+  provideInlineUnlock,
+} from '../../../../app/lib/inline-passkey-offer.ts';
+import { StepUpGate } from '../../../../app/lib/step-up-gate.ts';
 import { PairingScreen } from '../../../../app/features/pairing/pairing-screen.tsx';
 import type { StepUpClient } from '../../../../app/lib/step-up-client.ts';
 import { daemonConnection } from '../../../../app/shell-pairing.ts';
@@ -85,6 +94,24 @@ const fakeCredentials = {
 };
 const offering = params.get('offer') === 'open';
 
+// THE UNLOCK GATE (S-11): the machine just paired with answers the app's first read `401 unlock_required`, so the gate has a
+// background request waiting for it. Held while a card is offering or finishing the first passkey; the unlock itself takes a moment.
+const unlockScene = params.get('unlock') === '1';
+const unlocks = { count: 0 };
+(window as unknown as { __pairScene: Record<string, unknown> }).__pairScene.unlocked = unlocks;
+const unlockGate = new StepUpGate({
+  ceremony: async () => {
+    await new Promise(resolve => setTimeout(resolve, 150));
+    unlocks.count += 1;
+  },
+  describe: () => 'The passkey confirmation did not finish. Try again.',
+  held: inlinePasskeyOffered,
+});
+if (unlockScene) {
+  onInlinePasskeyOffer(() => unlockGate.recheck());
+  provideInlineUnlock({ needed: async () => true, run: async daemon => await unlockGate.confirmInline(daemon) });
+}
+
 const root = document.getElementById('root');
 if (root === null) throw new Error('the scene page has no #root');
 if (params.get('scene') === 'export') {
@@ -101,47 +128,61 @@ if (params.get('scene') === 'export') {
   );
 } else
   createRoot(root).render(
-    <PairingScreen
-      connections={[]}
-      selectedDaemonId={null}
-      arrival={arrival === 'cold' ? { kind: 'none' } : { kind: 'seed', seed: SEED }}
-      sameMachine={params.get('same') === '1'}
-      {...(params.get('scan') === 'camera'
-        ? { scanHost: { supported: true, scan: async () => await new Promise<string>(() => {}) } }
-        : {})}
-      defaultName={() => 'Chrome on Linux · 4f2a'}
-      onPair={async (_seed, deviceName, machineName) => {
-        pairScene.sent.push({ deviceName, ...(machineName === undefined ? {} : { machineName }) });
-        await new Promise(resolve => setTimeout(resolve, 300));
-        if (arrival === 'broken') throw new Error('Nothing reached that daemon.');
-        pairedAs = deviceName;
-        daemonName = machineName ?? HOST_NAME;
-        return {
-          machine: daemonName,
-          via: 'relay' as const,
-          connection: daemonConnection({
-            daemonId: SEED.daemonId,
-            baseUrl: SEED.daemonUrl,
-            deviceId: 'fy_device_id_fake',
-          }),
-        };
-      }}
-      {...(offering
-        ? {
-            passkeyClient: async () => openWindow,
-            passkeyOffer: {
-              now: () => OFFER_NOW,
-              supported: () => true,
-              origin: () => 'https://ferretry.example',
-              credentials: () => fakeCredentials,
-            },
-            onContinue: () => {},
-          }
-        : {})}
-      {...(params.get('back') === '1'
-        ? { onClose: () => document.documentElement.setAttribute('data-went-back', '') }
-        : {})}
-      onRemove={() => {}}
-      onSelect={() => {}}
-    />,
+    <>
+      {unlockScene ? <StepUpDialog gate={unlockGate} copy={UNLOCK_COPY} machineName={() => 'QA Box'} /> : null}
+      <PairingScreen
+        connections={[]}
+        selectedDaemonId={null}
+        arrival={arrival === 'cold' ? { kind: 'none' } : { kind: 'seed', seed: SEED }}
+        sameMachine={params.get('same') === '1'}
+        {...(params.get('scan') === 'camera'
+          ? { scanHost: { supported: true, scan: async () => await new Promise<string>(() => {}) } }
+          : {})}
+        defaultName={() => 'Chrome on Linux · 4f2a'}
+        onPair={async (_seed, deviceName, machineName) => {
+          pairScene.sent.push({ deviceName, ...(machineName === undefined ? {} : { machineName }) });
+          await new Promise(resolve => setTimeout(resolve, 300));
+          if (arrival === 'broken') throw new Error('Nothing reached that daemon.');
+          pairedAs = deviceName;
+          if (unlockScene)
+            setTimeout(
+              () =>
+                void unlockGate.require(
+                  daemonConnection({ daemonId: SEED.daemonId, baseUrl: SEED.daemonUrl, deviceId: 'fy_device_id_fake' }),
+                  undefined,
+                  'background',
+                ),
+              0,
+            );
+          if (unlockScene) unlockGate.focus(SEED.daemonId as never);
+          daemonName = machineName ?? HOST_NAME;
+          return {
+            machine: daemonName,
+            via: 'relay' as const,
+            connection: daemonConnection({
+              daemonId: SEED.daemonId,
+              baseUrl: SEED.daemonUrl,
+              deviceId: 'fy_device_id_fake',
+            }),
+          };
+        }}
+        {...(offering
+          ? {
+              passkeyClient: async () => openWindow,
+              passkeyOffer: {
+                now: () => OFFER_NOW,
+                supported: () => true,
+                origin: () => 'https://ferretry.example',
+                credentials: () => fakeCredentials,
+              },
+              onContinue: () => {},
+            }
+          : {})}
+        {...(params.get('back') === '1'
+          ? { onClose: () => document.documentElement.setAttribute('data-went-back', '') }
+          : {})}
+        onRemove={() => {}}
+        onSelect={() => {}}
+      />
+    </>,
   );

@@ -14,7 +14,8 @@
  * collides with the shell's own gesture. A centred dialog with a scrim has nothing to collide with.
  */
 
-import { browserClipboardWriter, CopyButton } from '@ferretry/app/ui';
+import { Button } from '@ferretry/app';
+import { ActionRow, browserClipboardWriter, CopyButton } from '@ferretry/app/ui';
 import { Fingerprint, ShieldCheck } from 'lucide-react';
 import { useId, useRef, useSyncExternalStore } from 'react';
 import { useDialogFocus } from '../../shell-grants.ts';
@@ -274,34 +275,32 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
             {prompt.failure}
           </p>
         )}
-        {/* Stacked on a phone, side by side from `sm:` up — a caps label in a half-width button clips. */}
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-          <button
-            type="button"
-            className="kt-btn min-h-[44px] flex-1 justify-center"
-            data-variant="primary"
-            data-step-up-confirm=""
-            {...(setup ? { 'data-step-up-first-passkey': '' } : {})}
-            disabled={prompt.busy}
-            onClick={() => void gate.confirm()}
-          >
-            <Fingerprint size={15} aria-hidden="true" />
-            {prompt.busy
-              ? 'Waiting for your passkey…'
-              : setup || ownerCommand !== undefined
-                ? FIRST_PASSKEY_CONFIRM
-                : copy.confirm}
-          </button>
-          <button
-            type="button"
-            className="kt-btn min-h-[44px] flex-1 justify-center"
-            data-variant="ghost"
-            disabled={prompt.busy}
-            onClick={dismiss}
-          >
-            Cancel
-          </button>
-        </div>
+        {/* The shared answer row: content-sized, never the full width of the sheet (C-6), the way on first on a phone. */}
+        <ActionRow
+          className="mt-3"
+          primary={
+            <Button
+              type="button"
+              variant="primary"
+              data-step-up-confirm=""
+              {...(setup ? { 'data-step-up-first-passkey': '' } : {})}
+              disabled={prompt.busy}
+              onClick={() => void gate.confirm()}
+            >
+              <Fingerprint size={15} aria-hidden="true" />
+              {prompt.busy
+                ? 'Waiting for your passkey…'
+                : setup || ownerCommand !== undefined
+                  ? FIRST_PASSKEY_CONFIRM
+                  : copy.confirm}
+            </Button>
+          }
+          secondary={
+            <Button type="button" variant="ghost" disabled={prompt.busy} onClick={dismiss}>
+              Cancel
+            </Button>
+          }
+        />
       </div>
     </div>
   );

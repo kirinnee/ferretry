@@ -271,6 +271,21 @@ export class StepUpGate {
     this.#settle(prompt.daemon.daemonId, true);
   }
 
+  /**
+   * The ceremony for a machine, run from a card the person is already pressing on (the "Unlock" that follows "Passkey
+   * added"), with no prompt: every request waiting on this machine is answered when it succeeds. Resolves to the sentence
+   * to show when it did not finish, or nothing when it did.
+   */
+  async confirmInline(daemon: DaemonConnection): Promise<string | undefined> {
+    try {
+      await this.deps.ceremony(daemon);
+    } catch (reason) {
+      return this.deps.describe(reason);
+    }
+    this.#settle(daemon.daemonId, true);
+    return undefined;
+  }
+
   /** The prompt's cancel: every request waiting on this machine returns its refusal. */
   dismiss(): void {
     const prompt = this.#prompt;

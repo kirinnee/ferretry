@@ -519,7 +519,10 @@ build is a signature by a passkey this daemon already holds. So for rule (b):
 **A registration is never a step-up.** It used to grant one, on the reasoning that the authenticator had
 just verified the person; but a registration proves nothing about the person (above), so a first-window
 registration from page code was a step-up with no real user verification. Now an act straight after
-registering asks for a step-up like any other act.
+registering asks for a step-up like any other act. On a machine that unlocks on opening, that means one more touch right
+after "Passkey added": the app draws it as the NEXT STEP on the same card ("Touch it once more to unlock this device",
+its own button, the card holding its machine so no second modal pops over it), never as a surprise prompt that reads as a
+loop. The daemon rule is unchanged; only the words and the place of the prompt are.
 
 **Declared: the two windows have nothing to bind to.** Rules (a) and (c) carry no `confirm`, because the
 device holds no usable passkey yet. Page code present in the page during the ten minutes after pairing, or

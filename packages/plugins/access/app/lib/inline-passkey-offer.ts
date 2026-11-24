@@ -10,6 +10,8 @@
  * One count per machine: two cards for one machine release independently. Holds nothing secret.
  */
 
+import type { DaemonConnection } from '../shell-grants.ts';
+
 const held = new Map<string, number>();
 const listeners = new Set<() => void>();
 
@@ -40,3 +42,32 @@ export function onInlinePasskeyOffer(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
+
+/**
+ * THE UNLOCK THAT FOLLOWS "PASSKEY ADDED", ON THE SAME CARD (S-11).
+ *
+ * A registration is never an unlock (the daemon's rule, `docs/design/zero-trust.md`), so a machine that unlocks on opening
+ * still wants one touch after the first passkey is added. That used to arrive as a second modal over a card that had just
+ * said "Passkey added", which reads as the passkey loop. The shell hands the card this instead: the card keeps holding its
+ * machine, says the unlock is the next step, and runs it from its own button through the unlock gate (so every request
+ * waiting on the machine is answered). Nothing here holds a credential.
+ */
+interface InlineUnlock {
+  /** Whether this machine will ask this device to unlock on opening; a read that fails says yes (the unlock is harmless). */
+  readonly needed: (connection: DaemonConnection) => Promise<boolean>;
+  /** Runs the unlock ceremony; resolves to the sentence to show when it did not finish, or nothing when it did. */
+  readonly run: (connection: DaemonConnection) => Promise<string | undefined>;
+}
+
+let inlineUnlock: InlineUnlock | undefined;
+
+/** Registers the shell's unlock for cards; returns the function that withdraws it. */
+export function provideInlineUnlock(provider: InlineUnlock): () => void {
+  inlineUnlock = provider;
+  return () => {
+    if (inlineUnlock === provider) inlineUnlock = undefined;
+  };
+}
+
+/** The shell's unlock for a card, or nothing when no shell is mounted (a bare page draws no unlock step). */
+export const currentInlineUnlock = (): InlineUnlock | undefined => inlineUnlock;

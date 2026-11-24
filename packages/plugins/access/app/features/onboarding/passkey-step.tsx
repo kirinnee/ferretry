@@ -34,6 +34,7 @@ import { addPasskeyCeremony, browserCredentials } from '../../lib/step-up-ceremo
 import { fetchPasskeys, type StepUpClient } from '../../lib/step-up-client.ts';
 import type { DaemonConnection } from '../../shell-grants.ts';
 import { firstWindowOpen, type FirstPasskeyClientFactory } from '../pairing/first-passkey-offer.tsx';
+import { UnlockAfterAdd } from '../pairing/unlock-after-add.tsx';
 
 export interface PasskeyStepProps {
   /** Set only when the setup flow draws the page as a step; absent, the page draws nothing. */
@@ -73,6 +74,8 @@ export function PasskeyStep({
   // Read synchronously, so two presses inside one event turn cannot both start the ceremony.
   const running = useRef(false);
   const [added, setAdded] = useState(false);
+  // After "Passkey added", an unlock may be the next step on this same card; the machine stays held until it is done.
+  const [unlockPending, setUnlockPending] = useState(true);
   const [failure, setFailure] = useState<string | null>(null);
 
   const canRun = supported();
@@ -107,7 +110,7 @@ export function PasskeyStep({
   }, [canRun, connection, createClient, deadlineMs, schedule, step]);
 
   // While the buttons show, this machine's own prompts hold back: the same offer must not pop up over them, unasked.
-  const holdsMachine = offer !== null && connection !== undefined;
+  const holdsMachine = offer !== null && connection !== undefined && !(added && !unlockPending);
   const daemonId = connection?.daemonId;
   useEffect(
     () => (holdsMachine && daemonId !== undefined ? holdInlinePasskeyOffer(daemonId) : undefined),
@@ -182,9 +185,13 @@ export function PasskeyStep({
         </p>
       )}
       {added ? (
-        <p role="status" data-passkey-step-added="" className="m-0 text-ui leading-base text-ok">
-          Passkey added. This device can confirm changes on this machine.
-        </p>
+        <div data-passkey-step-added="">
+          <UnlockAfterAdd
+            connection={connection}
+            onNeeded={needed => setUnlockPending(needed)}
+            onUnlocked={() => setUnlockPending(false)}
+          />
+        </div>
       ) : null}
       {failure === null ? null : (
         <p role="alert" data-passkey-step-failure="" className="m-0 text-ui leading-base text-err">

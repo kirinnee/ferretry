@@ -42,7 +42,7 @@ import { ACCESS_ROUTE_KEYS } from './daemon-scope.tsx';
 import { routeRequestClient } from './lib/route-request.ts';
 import { PairPhoneHost } from './pair-phone-host.tsx';
 import { holdPasskeyReach } from './pair-passkey.ts';
-import { inlinePasskeyOffered, onInlinePasskeyOffer } from './lib/inline-passkey-offer.ts';
+import { inlinePasskeyOffered, onInlinePasskeyOffer, provideInlineUnlock } from './lib/inline-passkey-offer.ts';
 import {
   fetchSecuritySettings,
   stepUpStaysSentence,
@@ -155,6 +155,18 @@ export function accessPasskey(ports: PasskeyPorts): PasskeyProvision {
   onInlinePasskeyOffer(() => {
     stepUp.recheck();
     unlockGate.recheck();
+  });
+  // The card that has just added the first passkey runs the unlock itself, as the next step on the same card (S-11), through
+  // this gate so every request waiting on the machine is answered; a machine that does not unlock on opening needs none.
+  provideInlineUnlock({
+    needed: async connection => {
+      try {
+        return (await fetchSecuritySettings(await client(connection))).settings.unlockOnOpen;
+      } catch {
+        return true;
+      }
+    },
+    run: connection => unlockGate.confirmInline(connection),
   });
 
   const handler: PasskeyHandler = {
