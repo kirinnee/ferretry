@@ -307,7 +307,7 @@ describe('the connector gateway', () => {
     for (const call of seen) {
       expect(call.init?.method).toBe('POST');
       expect(call.init?.body).toBe('{}');
-      expect(Object.keys(call.init?.headers as Record<string, string>)).toEqual(['content-type']);
+      expect(call.init?.headers).toEqual({ 'content-type': 'application/json', 'x-ferretry-client': 'cli' });
     }
   });
 });

@@ -7,11 +7,13 @@ import {
   type ConnectorStatus,
   ConnectorStatusSchema,
 } from '@ferretry/protocol';
+import { FY_CLIENT_HEADER, FY_CLIENT_NAME } from '../session/connection.ts';
 import type { ConnectorApiClient, IConnectorGateway } from './ports.ts';
 
 /** The connector routes' root; the acts hang beneath it (docs/mcp-connector.md). */
 export const CONNECTOR_PATH = '/v1/connector';
-const JSON_HEADERS = { 'content-type': 'application/json' } as const;
+/** `x-ferretry-client: cli`, so the security log says this computer's `fy` acted (`admin-cli`), never the app. */
+const JSON_HEADERS = { 'content-type': 'application/json', [FY_CLIENT_HEADER]: FY_CLIENT_NAME } as const;
 /** Every act's body is empty on purpose: who acts is the daemon's server-derived actor, what is acted on is the path. */
 const EMPTY_BODY = JSON.stringify(ConnectorActRequestSchema.parse({}));
 
