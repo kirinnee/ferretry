@@ -114,6 +114,23 @@ describe('Runtimes tab list', () => {
     await view.unmount();
   });
 
+  it('L268 says in words on the row that an enabled runtime needs sign-in, and draws no word for one that is ready', async () => {
+    const stuck = runtime({
+      name: 'codex-work',
+      harness: 'codex',
+      credential: { id: 'codex-work', store: 'ferretry', status: 'needs_sign_in' },
+    });
+    const view = await open({ routes: reads([stuck, runtime({ name: 'claude-default' })]) });
+    const word = view.container.querySelector<HTMLElement>(
+      '[data-runtime-row="codex-work"] [data-status-shape] > span:not([aria-hidden])',
+    );
+    expect(word?.textContent).toBe('Needs sign-in');
+    expect(word?.classList.contains('sr-only')).toBe(false);
+    const ready = view.container.querySelector<HTMLElement>('[data-runtime-row="claude-default"] [data-status-shape]');
+    expect(ready?.querySelector('.sr-only')?.textContent).toBe('Uses your terminal sign-in');
+    await view.unmount();
+  });
+
   it('says "1 runtime" for one, and names a login the machine no longer lists as unknown', async () => {
     const orphan = runtime({
       name: 'orphan',

@@ -14,7 +14,7 @@
  *
  * The page names the tool by the label its plugin hands it (never a list of its own), so a third harness needs no edit here.
  */
-import { Button } from '@ferretry/app';
+import { Button, StepDemo } from '@ferretry/app';
 import type { StepHost } from '@ferretry/kernel/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { Check, Minus } from 'lucide-react';
@@ -83,6 +83,47 @@ export const SIGNED_LOGIN_KEY = 'signedLogin';
 
 const SIGN_IN_LATER = 'Sign in any time in Settings › Logins, and a runtime appears by itself.';
 
+/**
+ * The picture in the frame's second track (a wide window leaves it empty without one): the runtime picker a ferret starts
+ * from, with this tool's answer in it: a tick and the runtime's name when one can start, a dash and why not when one cannot,
+ * a dashed empty row when none was made. Decorative (`aria-hidden`): the words are on the page itself.
+ */
+function ReadyPreview({
+  state,
+  label,
+  good,
+}: {
+  readonly state: ReadyState;
+  readonly label: string;
+  readonly good: boolean;
+}): ReactNode {
+  const Mark = good ? Check : Minus;
+  // One row, whatever the count: the frame's box holds a short picture (a stacked one is cut at 140px), and the page lists them all.
+  const row =
+    state.kind === 'ready'
+      ? {
+          name:
+            state.names.length > 1
+              ? `${state.names[0] ?? ''} · +${String(state.names.length - 1)} more`
+              : (state.names[0] ?? ''),
+          state: good ? 'on' : 'off',
+        }
+      : state.kind === 'blocked'
+        ? { name: state.name, state: 'off' }
+        : { name: `No ${label} runtime yet`, state: 'none' };
+  return (
+    <StepDemo>
+      <div className="ob-ready-demo" aria-hidden="true" data-ready-demo={state.kind}>
+        <p className="ob-ready-demo__head">Start a ferret on</p>
+        <p className="ob-ready-demo__row" data-state={row.state}>
+          {row.state === 'none' ? null : <Mark size={16} strokeWidth={3} className="shrink-0" />}
+          <span>{row.name}</span>
+        </p>
+      </div>
+    </StepDemo>
+  );
+}
+
 export function RuntimeReadyPage({
   client,
   harness,
@@ -144,6 +185,7 @@ export function RuntimeReadyPage({
   const Mark = good ? Check : Minus;
   return (
     <StepBody step={`${harness}.ready`} data-runtime-ready={state.kind}>
+      <ReadyPreview state={state} label={label} good={good} />
       <p className="ob-ready" role="status" data-ready-headline="">
         <span className="ob-ready__mark" data-mark={good ? 'done' : 'none'} aria-hidden="true">
           <Mark size={16} strokeWidth={3} />
@@ -175,6 +217,7 @@ export function RuntimeReadyPage({
         noSignIn ? (
           <>
             <StepLine data-ready-names="">{`Runtime: ${state.name}.`}</StepLine>
+            <StepLine data-ready-reason="">{state.reason}</StepLine>
             <StepLine data-ready-terminal="">{`Sign in to ${label} in a terminal before you start a ferret.`}</StepLine>
           </>
         ) : (

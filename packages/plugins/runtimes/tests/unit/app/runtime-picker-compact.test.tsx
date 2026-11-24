@@ -94,8 +94,8 @@ const settle = async (): Promise<void> => {
 const popover = (): HTMLElement | null => document.querySelector<HTMLElement>('[data-runtime-popover]');
 
 describe('the runtime picker in the composer row', () => {
-  it('is three readouts and nothing else at rest: no list, no catalog request, no error', async () => {
-    const { client, asked } = daemon(false);
+  it('is three readouts and nothing else at rest: no list, no error (the catalog is read quietly, only to name the model)', async () => {
+    const { client } = daemon(false);
     const root = await draw(client);
     await settle();
 
@@ -104,19 +104,24 @@ describe('the runtime picker in the composer row', () => {
     expect(root.querySelector('[role="alert"]')).toBeNull();
     expect(root.textContent).not.toContain('unavailable');
     expect(popover()).toBeNull();
-    expect(asked.map(call => call.route)).not.toContain('GET /v1/ferrets/:id/runtime-models');
   });
 
   it('shows the model, the thinking level and the speed on the bar, each a button that opens a dialog', async () => {
     const root = await draw(daemon(true).client);
     const chips = [...root.querySelectorAll<HTMLElement>('[data-runtime-chip]')];
-    expect(chips.map(chip => chip.textContent)).toEqual(['claude-sonnet-5', 'high', 'Normal']);
+    await settleUntil(
+      () => chips[0]?.textContent === 'Sonnet 5',
+      () => `the chip named the model; drew: ${chips[0]?.textContent ?? ''}`,
+      interact,
+    );
+    expect(chips.map(chip => chip.textContent)).toEqual(['Sonnet 5', 'high', 'Normal']);
+    expect(chips[0]?.title).toContain('claude-sonnet-5');
     expect(chips.map(chip => chip.getAttribute('data-runtime-chip'))).toEqual(['model', 'effort', 'speed']);
     for (const chip of chips) {
       expect(chip.getAttribute('aria-haspopup')).toBe('dialog');
       expect(chip.getAttribute('aria-expanded')).toBe('false');
     }
-    expect(chips[0]?.getAttribute('aria-label')).toBe('Change the model — claude-sonnet-5 · high');
+    expect(chips[0]?.getAttribute('aria-label')).toBe('Change the model — Sonnet 5 · high');
   });
 
   it('says a plain word, never a guess, for a value the ferret has not reported', async () => {
