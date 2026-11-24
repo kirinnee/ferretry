@@ -204,8 +204,15 @@ describe('a page the agent opens, on the ferrets list (no chat open)', () => {
           await shot(tab, viewport, mode, 'list-dot');
           // Looking at that ferret's Browser panel is what clears it.
           await tab.locator('[data-sbar-session="zoe"]').click();
-          if (viewport.phone) await tab.locator('[data-phone-chip="browsers.browser"]').click();
-          else {
+          if (viewport.phone) {
+            // The row shows whole chips only: Browser is its chip when it fits, else an entry of "More tabs".
+            const chip = tab.locator('[data-phone-chip="browsers.browser"]');
+            if ((await chip.count()) > 0) await chip.click();
+            else {
+              await tab.locator('[data-phone-more]').click();
+              await tab.locator('[role="menuitem"][data-menu-key="browsers.browser"]').click();
+            }
+          } else {
             await tab.locator('[data-side-toggle]:visible').click();
             await tab.getByRole('tab', { name: /browser/i }).click();
           }

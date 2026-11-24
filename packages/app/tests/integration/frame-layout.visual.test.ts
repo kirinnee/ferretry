@@ -572,6 +572,15 @@ describe('the drawer and the body stay put while a tall page scrolls', () => {
 describe('the ferret page on a phone (390)', () => {
   const PHONE = VIEWPORTS[1];
   const READY = '[data-phone-tab-row] [data-phone-chip]';
+  /** The row shows whole chips only, so a tab past the row's room is chosen from "More tabs" (O11 R7); either way it becomes the chip on show. */
+  const pick = async (tab: Page, key: string): Promise<void> => {
+    const chip = tab.locator(`[data-phone-tab-row] [data-phone-chip="${key}"]`);
+    if ((await chip.count()) > 0) await chip.click();
+    else {
+      await tab.click('[data-phone-more]');
+      await tab.click(`[role="menuitem"][data-menu-key="${key}"]`);
+    }
+  };
   const CHIPS = [
     ['Chat', 'chat'],
     ['Console', 'stubs.console'],
@@ -584,9 +593,16 @@ describe('the ferret page on a phone (390)', () => {
   it('offers v4’s chips in v4’s order: Chat, Console, Processes, Terminals, Browser, Files', async () => {
     const { tab, close } = await open(PHONE, '/d/ws/ferrets/zoe', READY);
     try {
-      const labels = await tab.locator('[data-phone-tab-row] [role="tab"]').allInnerTexts();
-      expect(labels.slice(0, 6)).toEqual(CHIPS.map(([label]) => label));
-      expect(labels.length, 'one chip per panel the default layout places, and Chat').toBe(16);
+      const shown = await tab.locator('[data-phone-tab-row] [role="tab"]').allInnerTexts();
+      await tab.click('[data-phone-more]');
+      const more = (await tab.locator('[role="menuitem"]').allInnerTexts()).map(text => text.trim());
+      const labels = [...shown, ...more];
+      expect(labels.slice(0, 6), 'the chips that fit, then "More tabs", in v4’s order').toEqual(
+        CHIPS.map(([label]) => label),
+      );
+      expect(labels.length, 'one tab per panel the default layout places, and Chat').toBe(16);
+      expect(more.length, 'what does not fit whole is in the menu, not cut').toBeGreaterThan(0);
+      await tab.keyboard.press('Escape');
       await shotOf(tab, '390-ferret-chip-chat');
     } finally {
       await close();
@@ -597,7 +613,7 @@ describe('the ferret page on a phone (390)', () => {
     const { tab, close } = await open(PHONE, '/d/ws/ferrets/zoe', READY);
     try {
       for (const [label, key] of CHIPS.slice(1)) {
-        await tab.click(`[data-phone-chip="${key}"]`);
+        await pick(tab, key);
         expect(await tab.getAttribute(`[data-phone-chip="${key}"]`, 'aria-selected'), `${label} is selected`).toBe(
           'true',
         );
@@ -618,11 +634,10 @@ describe('the ferret page on a phone (390)', () => {
     }
   });
 
-  it('every other panel the layout places is reachable too (the whole row scrolls)', async () => {
+  it('every other panel the layout places is reachable too (from "More tabs")', async () => {
     const { tab, close } = await open(PHONE, '/d/ws/ferrets/zoe', READY);
     try {
-      await tab.locator('[data-phone-chip="stubs.insights"]').scrollIntoViewIfNeeded();
-      await tab.click('[data-phone-chip="stubs.insights"]');
+      await pick(tab, 'stubs.insights');
       expect((await hitsItself(tab, '[data-side-panel="insights"]')).hit).toBe(true);
     } finally {
       await close();
@@ -632,8 +647,7 @@ describe('the ferret page on a phone (390)', () => {
   it('S-0075 a press in the Instructions list brings Files on screen: the workspace moves the chip, alone and full width', async () => {
     const { tab, close } = await open(PHONE, '/d/ws/ferrets/zoe', READY);
     try {
-      await tab.locator('[data-phone-chip="stubs.instructions"]').scrollIntoViewIfNeeded();
-      await tab.click('[data-phone-chip="stubs.instructions"]');
+      await pick(tab, 'stubs.instructions');
       expect(await tab.getAttribute('[data-phone-chip="stubs.instructions"]', 'aria-selected')).toBe('true');
       expect(await tab.locator('[data-side-panel="files"]:visible').count(), 'Files is behind Instructions').toBe(0);
       await tab.click('[data-open-in-files]');
@@ -641,7 +655,10 @@ describe('the ferret page on a phone (390)', () => {
         await tab.getAttribute('[data-phone-chip="stubs.files"]', 'aria-selected'),
         'Files is the chip on show',
       ).toBe('true');
-      expect(await tab.getAttribute('[data-phone-chip="stubs.instructions"]', 'aria-selected')).toBe('false');
+      expect(
+        await tab.locator('[data-phone-chip="stubs.instructions"][aria-selected="true"]').count(),
+        'Instructions is no longer the one on show',
+      ).toBe(0);
       expect((await hitsItself(tab, '[data-side-panel="files"]')).hit, 'Files is on screen and takes a tap').toBe(true);
       expect(await tab.locator('[data-side-panel]:visible').count(), 'one panel at a time').toBe(1);
     } finally {

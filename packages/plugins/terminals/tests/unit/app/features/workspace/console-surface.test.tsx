@@ -245,7 +245,7 @@ describe('the Console surface', () => {
     expect(named.container.textContent).toContain('send Hadi a turn');
     const field = must(named.container.querySelector<HTMLInputElement>('[data-console-input]'), 'the field');
     expect(field.getAttribute('aria-label')).toBe('Type into Hadi’s Console');
-    expect(field.placeholder).toContain('keys go to Hadi’s pane');
+    expect(field.placeholder).toContain('Keys go to Hadi’s pane');
     const unnamed = await mount(
       <ConsoleSurface
         connection={daemon}

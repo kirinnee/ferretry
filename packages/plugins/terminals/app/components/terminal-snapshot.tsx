@@ -15,7 +15,8 @@
  * ON EVERY SCREEN two more things hold. The pane FITS ITS WIDTH by default when that keeps the text at 10px or more — the text
  * is sized so the widest captured line fits (`fitFontPx`), instead of being cut at the right edge
  * behind a sideways scroll; a narrower pane opens in Scroll at full size — with a Fit / Scroll toggle in the header for the reader who wants 12px
- * and a scrollbar. And the header is one short row: the terminal glyph and a "live" dot, its words
+ * and a scrollbar (a host that asks for `wrapLines`, the Console, gets a third way: the lines WRAP at the pane's edge, which is the
+ * default there when fitting would be unreadable, so no word is ever cut off at the right). And the header is one short row: the terminal glyph and a "live" dot, its words
  * kept for screen readers and the tooltip.
  *
  * What changed for Ferretry: the read is bound to one paired daemon. The
@@ -63,7 +64,12 @@ export interface TerminalSnapshotViewProps {
   fontFamily?: string;
   /** The reader is a live capture rather than the stored frame, so the header says "live", not "cached". */
   live?: boolean;
+  /** Offer Wrap (long lines break at the pane's edge) and open in it where Fit would shrink the text: for a narrow side pane. */
+  wrapLines?: boolean;
 }
+
+/** How the pane's text meets its edge. */
+type PaneMode = 'fit' | 'wrap' | 'scroll';
 
 export const TerminalSnapshotView = ({
   daemon,
@@ -74,6 +80,7 @@ export const TerminalSnapshotView = ({
   refreshKey = 0,
   fontFamily,
   live = false,
+  wrapLines = false,
 }: TerminalSnapshotViewProps) => {
   const [text, setText] = useState('');
   // `stale` only ever turns true after a successful snapshot, so the initial
@@ -161,10 +168,15 @@ export const TerminalSnapshotView = ({
   // FIT TO WIDTH: the default while the fitted text stays readable (>= 10px; a side pane or phone that would shrink it further opens in Scroll at full size), the reader's choice after one tap. The pane's width is measured
   // and re-measured as it resizes (rotation, the keyboard); a browser without ResizeObserver keeps the
   // first measurement.
-  const [fitChoice, setFitChoice] = useState<boolean | null>(null);
+  const [modeChoice, setModeChoice] = useState<PaneMode | null>(null);
   const [paneWidth, setPaneWidth] = useState(0);
   const textWidth = paneWidth - PANE_PADDING_X_PX;
-  const fit = fitChoice ?? fitIsReadable(paneColumns(text), textWidth);
+  const fitted = fitIsReadable(paneColumns(text), textWidth);
+  const mode: PaneMode = modeChoice ?? (fitted ? 'fit' : wrapLines ? 'wrap' : 'scroll');
+  const fit = mode === 'fit';
+  const wrap = mode === 'wrap';
+  /** What one tap on the toggle moves to: Fit and Scroll swap; where lines may wrap, Fit goes to Wrap, then Scroll, then Fit. */
+  const nextMode: PaneMode = wrapLines ? (fit ? 'wrap' : wrap ? 'scroll' : 'fit') : fit ? 'scroll' : 'fit';
   useEffect(() => {
     const viewport = viewportRef.current;
     if (viewport === null) return;
@@ -227,17 +239,19 @@ export const TerminalSnapshotView = ({
         <button
           type="button"
           aria-pressed={fit}
-          aria-label="Fit the pane to the screen width"
+          aria-label={wrapLines ? 'How long lines meet the pane edge' : 'Fit the pane to the screen width'}
           className="mono h-6 rounded-sm border border-border-soft px-2 text-[11px] text-muted hover:text-fg"
           data-terminal-fit=""
-          onClick={() => setFitChoice(!fit)}
+          onClick={() => setModeChoice(nextMode)}
           title={
             fit
-              ? 'Fitted to the screen — tap to scroll sideways at full size'
-              : 'Full size — tap to fit the screen width'
+              ? `Fitted to the screen — tap to ${wrapLines ? 'wrap long lines' : 'scroll sideways at full size'}`
+              : wrap
+                ? 'Long lines wrap — tap to scroll sideways at full size'
+                : 'Full size — tap to fit the screen width'
           }
         >
-          {fit ? 'Fit' : 'Scroll'}
+          {fit ? 'Fit' : wrap ? 'Wrap' : 'Scroll'}
         </button>
       </div>
       <div className="relative flex min-h-0 flex-1 flex-col">
@@ -247,9 +261,11 @@ export const TerminalSnapshotView = ({
           className="min-h-0 flex-1 overflow-auto bg-code-bg text-fg-soft"
           data-testid="terminal-snapshot-scroller"
         >
-          <div className="min-w-max" ref={contentRef}>
+          <div className={wrap ? 'min-w-0' : 'min-w-max'} ref={contentRef}>
             <pre
-              className="mono m-0 min-w-max whitespace-pre px-3 py-2 text-[12px] leading-[1.5]"
+              className={`mono m-0 px-3 py-2 text-[12px] leading-[1.5] ${
+                wrap ? 'min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'min-w-max whitespace-pre'
+              }`}
               data-terminal-fit-px={fontSize}
               style={preStyle}
             >

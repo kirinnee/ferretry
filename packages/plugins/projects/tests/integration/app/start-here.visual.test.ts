@@ -229,7 +229,7 @@ describe('New ferret: where it works (Folder | Project)', () => {
 describe('the project page', () => {
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const)
-      it(`starts a ferret here with one fixed-width button and no form of its own (${viewport.name}, ${scheme})`, () =>
+      it(`starts a ferret here with one one-line button and no form of its own (${viewport.name}, ${scheme})`, () =>
         withTab(viewport, scheme, async (tab, open, shot) => {
           await open('view=project&projects=2', '[data-project-detail]');
           await shot('project-page');
@@ -244,8 +244,15 @@ describe('the project page', () => {
           );
           expect(box, 'the button is drawn').not.toBeNull();
           const at = box as NonNullable<typeof box>;
-          if (!viewport.phone) expect(Math.abs(at.width - 136), 'fixed 136px width').toBeLessThanOrEqual(1);
-          else expect(at.x + at.width, 'inside the viewport').toBeLessThanOrEqual(row);
+          // O11 R8 (S-68): the label is ONE line at 390 as well as 1440; the button grows to its label (a fixed width wrapped it).
+          expect(at.x + at.width, 'inside the viewport').toBeLessThanOrEqual(row);
+          const lines = await buttons.evaluate(button => {
+            const range = document.createRange();
+            range.selectNodeContents(button);
+            return new Set([...range.getClientRects()].map(line => Math.round(line.top))).size;
+          });
+          expect(lines, 'Start a ferret here is one line').toBe(1);
+          expect(at.height, 'one line tall, not two').toBeLessThan(60);
           expect(at.height).toBeGreaterThanOrEqual(44);
           // The label sits INSIDE the button with room on both sides (it once ran to the right edge at 390).
           const gaps = await buttons.evaluate(button => {

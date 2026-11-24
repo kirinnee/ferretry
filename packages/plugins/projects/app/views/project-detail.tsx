@@ -112,8 +112,8 @@ function ProjectDetailView({
           </button>
           <div className="grid shrink-0 justify-items-start gap-1">
             <button
-              className="kt-btn min-h-[44px] w-[8.5rem] max-w-full justify-center text-balance text-center leading-tight"
-              style={{ paddingInline: '0.75rem', whiteSpace: 'normal', height: 'auto' }}
+              className="kt-btn min-h-[44px] max-w-full justify-center"
+              style={{ height: 'auto' }}
               data-project-start=""
               data-variant="primary"
               type="button"
