@@ -86,7 +86,7 @@ verbs: the owner's Browsers switch, its own browser only, a page that is its own
 
 ## Captchas and "checking your browser" pages
 
-With stealth off (the default) Ferretry **never solves, skips or works around** a captcha or a bot check; the switch under [Stealth](#stealth) has no solver behind it yet. What it does:
+With stealth off (the default) Ferretry **never solves, skips or works around** a captcha or a bot check. With stealth in effect and a solver set up, it solves the token checks a solver can answer (see [The captcha solver](#the-captcha-solver)); everything else stays with you. What it does:
 
 1. **Recognises** a page that appears to be asking for one, from what the browser already knows about the
    page — its address, title and frame addresses — without running anything inside it: Cloudflare's
@@ -97,10 +97,32 @@ With stealth off (the default) Ferretry **never solves, skips or works around** 
 2. **Tells the person.** The browser pane shows a strip over that page: it appears to be asking you to
    prove you're a person; take the page over, solve it yourself, then hand it back.
 3. **Tells the agent to stop.** An agent whose act lands on such a page is told it appears to be a human
-   check, that it must not try to solve or get around it, and to ask its owner to take the page over.
+   check, that it must not try to solve or get around it, and to ask its owner to take the page over. Where the
+   solver below is running it is told instead that the browser is solving the check: wait, read the page again,
+   and if it still shows the check, ask its owner.
 
 The recognition is a hint, not a verdict: a check in a shape it has not seen is not flagged, and a page
 that merely embeds a widget can be.
+
+### The captcha solver
+
+Where stealth is in effect (the switch on and the identity not opted out), a page that shows a **Cloudflare Turnstile,
+reCAPTCHA v2 or v3, or hCaptcha** box is solved by [CapSolver](https://www.capsolver.com) for the owner. DataDome, Arkose and
+HUMAN are not token checks a solver sells, and a picture puzzle is the agent's to try first; both stay with you.
+
+- **Set up.** Store the key with `fy secret set CAPSOLVER_API_KEY`, then name it in `config/browsers.yaml`:
+  `captcha: { apiKey: '${secret:CAPSOLVER_API_KEY}' }`. Naming the key is a loosening and waits for you to confirm it. The
+  daemon resolves the key at the moment of a solve and sends it to CapSolver in the request body; it is never in an
+  argument, an environment, a route, the audit log or a log line, and the worker gets only the token. A missing key is a plain
+  sentence to the agent and the takeover as before.
+- **How.** The recogniser flags the page; the daemon reads the widget's kind, site key and action in the page, asks the
+  solver (through the browser's own proxy when it has one without a login), and the worker puts the token in the widget's
+  response field and calls its callback. The agent is told to wait; the banner and your takeover stay if it fails.
+- **The cap.** $5 a month, kept in `captcha-spend.json`: a solve's list price is counted before the task is sent and given
+  back if it fails. Past the cap the solver refuses in one sentence until the 1st and says so once in the audit log
+  (`browser.captcha.cap-reached`).
+- **Declared gaps.** A proxy with a `${secret:…}` login is not handed to the solver (the Vault gives Browsers no proxy
+  credential to pass), so such a solve is proxyless; Turnstile is sold proxyless only.
 
 ## Stealth
 
@@ -134,7 +156,8 @@ identities:
     (`ipinfo.io`, asked with the same sign-in as the proxy test, once per launch) and set as the browser's `TZ`, `--lang` and
     `--accept-lang`, so the page's clock and `navigator.languages` match where it appears to be. Only a country the daemon has a
     language for sets one; an answer it cannot read, or no proxy at all, leaves the machine's own zone and language.
-  - Still to come, each on its own: a patched engine, a stable fingerprint per identity, a proxy per identity, a captcha solver.
+  - **The captcha solver** (above) solves the token checks the recogniser flags.
+  - Still to come, each on its own: a patched engine, a stable fingerprint per identity, a proxy per identity.
 - **The audit log** ([audit.md](audit.md)) records metadata only: `browser.stealth.switched` (from, to) when the switch
   really changes — a held `on` leaves no record until it is confirmed — and, as the layers arrive,
   `browser.stealth.session`, `browser.captcha.solve` and `browser.captcha.cap-reached` (identity key, never an

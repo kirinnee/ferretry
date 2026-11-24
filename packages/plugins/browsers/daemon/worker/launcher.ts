@@ -335,6 +335,9 @@ class LeasedBrowser implements BrowserAutomation {
     this.clipboardShared ? true : await this.worker.clearClipboard();
   inputDocument: BrowserAutomation['inputDocument'] = pageId => this.worker.inputDocument(pageId);
   pushNumberRead: NonNullable<BrowserAutomation['pushNumberRead']> = pageId => this.worker.pushNumberRead(pageId);
+  captchaProbe: NonNullable<BrowserAutomation['captchaProbe']> = pageId => this.worker.captchaProbe(pageId);
+  captchaInject: NonNullable<BrowserAutomation['captchaInject']> = (pageId, answer) =>
+    this.worker.captchaInject(pageId, answer);
   inputText = (pageId: string): Promise<string> => this.worker.inputText(pageId);
   inputProbe: NonNullable<BrowserAutomation['inputProbe']> = (pageId, expected, fieldIds, dummy) =>
     this.worker.inputProbe(pageId, expected, fieldIds, dummy);

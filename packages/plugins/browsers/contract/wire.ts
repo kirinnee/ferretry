@@ -5,6 +5,7 @@
  * `agent-tools.ts`) are copied by the port with the code that answers them. Page text never appears here: it
  * leaves only through an act (`kernel.act`) under `Redaction.read` and the final check (§7.3).
  */
+import { defineState } from '@ferretry/kernel/contract';
 import { InstantSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { SECRET_REFERENCE_SOURCE } from '@ferretry/core-vault/contract';
@@ -242,10 +243,38 @@ export function stealthOn(config: Pick<BrowsersConfig, 'stealth' | 'identities'>
   return config.stealth === 'on' && (identity === undefined || config.identities?.[identity]?.stealth !== false);
 }
 
+/** The one secret the captcha solver's key is kept under: the manifest declares it, `browsers.yaml` names it, the Vault holds it. */
+export const CAPTCHA_SECRET_NAME = 'CAPSOLVER_API_KEY';
+/** The most the solver may spend in one calendar month, in millionths of a dollar (owner decision D-3: $5). */
+export const CAPTCHA_MONTHLY_CAP_MICROS = 5_000_000;
+
+/** The solver the owner switched on: its key is only ever the `${secret:CAPSOLVER_API_KEY}` reference, never a value. */
+export const BrowserCaptchaSettingSchema = z.strictObject({
+  apiKey: z.literal(`\${secret:${CAPTCHA_SECRET_NAME}}`),
+});
+export type BrowserCaptchaSetting = z.infer<typeof BrowserCaptchaSettingSchema>;
+
+/** What the solver has spent this month (`captcha-spend.json`): a calendar month (`2026-11`, UTC) and millionths of a dollar. */
+export const CaptchaSpendSchema = z.strictObject({
+  month: z.string().regex(/^\d{4}-\d{2}$/u),
+  micros: NonNegativeIntegerSchema,
+});
+export type CaptchaSpend = z.infer<typeof CaptchaSpendSchema>;
+/** The state file that keeps it (declared in the manifest; the solver reads and writes it through `kernel.state`). */
+export const CAPTCHA_SPEND_FILE = defineState({
+  name: 'captcha-spend',
+  path: 'captcha-spend.json',
+  store: 'json',
+  format: 1,
+  schema: CaptchaSpendSchema,
+});
+
 /** How the agent browser runs and where it egresses. Credentials only as `${secret:NAME}`; no edit widens authority. */
 export const BrowsersConfigSchema = z.strictObject({
   mode: BrowserModeSchema.default('headless'),
   proxy: BrowserProxySettingSchema.optional(),
+  /** The captcha solver, used only where stealth is in effect. Naming its key is held for the owner (it spends money). */
+  captcha: BrowserCaptchaSettingSchema.optional(),
   /** The ONE stealth switch: `on` opts in every identity on this machine (except one that opted out). Off → on is held for the owner. */
   stealth: StealthSwitchSchema.default('off'),
   identities: z.record(z.string().regex(BROWSER_IDENTITY_KEY_PATTERN), BrowserIdentitySettingSchema).optional(),

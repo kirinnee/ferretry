@@ -1,4 +1,5 @@
 import type { PageFacts } from '@ferretry/core-vault/contract';
+import type { CaptchaAnswer, CaptchaWidget } from '../../challenges/solver-page.ts';
 import type { ElementTarget } from './element.ts';
 import type { NavigationEvidence } from './navigation-evidence.ts';
 
@@ -154,6 +155,13 @@ export interface BrowserInputFieldsPort {
    * points at. Absent: this browser cannot read one, and no card shows one.
    */
   pushNumberRead?(pageId: string): Promise<BrowserPushNumberRead>;
+  /**
+   * The solvable check the page shows (`probeCaptcha`): its kind, site key, action and the page's address. Never page
+   * content beyond the widget's own markers. `undefined` when there is none (D7).
+   */
+  captchaProbe?(pageId: string): Promise<(CaptchaWidget & { readonly pageUrl: string }) | undefined>;
+  /** Hands the solver's token to the page's widget (`injectCaptchaToken`): only whether the page took it comes back. */
+  captchaInject?(pageId: string, answer: CaptchaAnswer): Promise<boolean>;
   inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation>;
   /**
    * The fields `expected` describes, found again in the page as it is now. Each field: the node the card showed, if
@@ -211,4 +219,6 @@ export const BROWSER_INPUT_WORKER_METHODS = {
   arm: 'inputArm',
   clear: 'inputClear',
   pushNumber: 'pushNumberRead',
+  captchaProbe: 'captchaProbe',
+  captchaInject: 'captchaInject',
 } as const;

@@ -14,6 +14,7 @@ import {
   type BrowserInputValue,
   type BrowserPushNumberRead,
 } from './contracts.ts';
+import { CAPTCHA_KINDS, type CaptchaAnswer, type CaptchaWidget } from '../../challenges/solver-page.ts';
 import { parseNavigationEvidence } from './navigation-evidence.ts';
 
 /**
@@ -119,6 +120,30 @@ export function workerInputFields(request: WorkerRequest): Required<BrowserInput
     async pushNumberRead(pageId: string): Promise<BrowserPushNumberRead> {
       const raw = await request(BROWSER_INPUT_WORKER_METHODS.pushNumber, { pageId });
       return parsePushNumberRead((raw as { read?: unknown } | null)?.read);
+    },
+
+    /** The solvable check the page shows, believed only in its exact shape (a site key, an action, an http(s) address). */
+    async captchaProbe(pageId: string): Promise<(CaptchaWidget & { readonly pageUrl: string }) | undefined> {
+      const raw = await request(BROWSER_INPUT_WORKER_METHODS.captchaProbe, { pageId });
+      const found = (raw as { widget?: Record<string, unknown> | null } | null)?.widget;
+      if (found === undefined || found === null) return undefined;
+      const { kind, siteKey, action, pageUrl } = found;
+      if (!(CAPTCHA_KINDS as readonly unknown[]).includes(kind) || typeof siteKey !== 'string') return undefined;
+      if (!/^[\w-]{8,200}$/u.test(siteKey) || typeof pageUrl !== 'string' || !/^https?:\/\//u.test(pageUrl))
+        return undefined;
+      if (pageUrl.length > 4096) return undefined;
+      const named = typeof action === 'string' && /^[\w .:-]{1,100}$/u.test(action) ? { action } : {};
+      return { kind: kind as CaptchaWidget['kind'], siteKey, pageUrl, ...named };
+    },
+
+    /** Whether the page took the token: the answer is one flag, and the token is never echoed back. */
+    async captchaInject(pageId: string, answer: CaptchaAnswer): Promise<boolean> {
+      const raw = await request(BROWSER_INPUT_WORKER_METHODS.captchaInject, {
+        pageId,
+        kind: answer.kind,
+        token: answer.token,
+      });
+      return (raw as { taken?: unknown } | null)?.taken === true;
     },
 
     async inputDocument(pageId: string): Promise<BrowserInputDocument> {

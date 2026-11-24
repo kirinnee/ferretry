@@ -28,6 +28,7 @@ import {
   type BrowserInputValue,
   type BrowserPushNumberRead,
 } from '../target/lib/contracts.ts';
+import type { CaptchaAnswer, CaptchaWidget } from '../challenges/solver-page.ts';
 import { workerInputFields } from '../target/lib/worker-port.ts';
 import { type BrowserAutomation, type BrowserPageActed } from '../pages/automation.ts';
 import {
@@ -467,6 +468,14 @@ export class BrowserWorkerClient implements BrowserAutomation {
 
   pushNumberRead(pageId: string): Promise<BrowserPushNumberRead> {
     return this.inputs.pushNumberRead(pageId);
+  }
+
+  captchaProbe(pageId: string): Promise<(CaptchaWidget & { readonly pageUrl: string }) | undefined> {
+    return this.inputs.captchaProbe(pageId);
+  }
+
+  captchaInject(pageId: string, answer: CaptchaAnswer): Promise<boolean> {
+    return this.inputs.captchaInject(pageId, answer);
   }
 
   inputDocument(pageId: string): Promise<BrowserInputDocument> {
