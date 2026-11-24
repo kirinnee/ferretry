@@ -252,7 +252,9 @@ describe('FINDING 1: every frame leaves through one boundary, however its socket
     const viewer = heldViewerHost(
       kernel as never,
       host as never,
-      agent ? { mayType: false, delivery: sealedDelivery(gate) } : { mayType: true },
+      agent
+        ? { caller: 'ferret:f1', mayType: false, delivery: sealedDelivery(gate) }
+        : { caller: 'admin', mayType: true },
     );
     const frames: unknown[] = [];
     const ended: { code: number; reason: string }[] = [];

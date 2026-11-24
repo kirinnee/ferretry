@@ -7,6 +7,7 @@
  */
 import { StepPageFrame } from '@ferretry/app';
 import type { StepHost } from '@ferretry/kernel/contract';
+import { applyTheme } from './explorer-toolbar.ts';
 import { createRoot } from 'react-dom/client';
 import { explorerViewPreference } from '../../../../app/features/folder-explorer/explorer-view-preference.ts';
 import type { ProjectsClient } from '../../../../app/lib/client.ts';
@@ -14,7 +15,7 @@ import { FoldersStep } from '../../../../app/views/folders-step.tsx';
 import { ProjectInfoSchema } from '../../../../contract/index.ts';
 
 const params = new URLSearchParams(window.location.search);
-document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+applyTheme(params);
 const view = params.get('view');
 if (view === 'card' || view === 'list') explorerViewPreference.write(view);
 

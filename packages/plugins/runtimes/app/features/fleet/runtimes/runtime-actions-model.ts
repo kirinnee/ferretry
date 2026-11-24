@@ -73,11 +73,11 @@ export const runningOnRuntime = (staged: AccountChangeView): readonly RunningSes
 
 const ferrets = (count: number): string => `${String(count)} ${count === 1 ? 'ferret' : 'ferrets'}`;
 
-/** The confirm button: exactly what pressing it does. */
-export const removeLabel = (runtime: RuntimeView, moving: number, target: string | null): string =>
+/** The confirm button: exactly what pressing it does. Both runtimes are named in the words a person reads. */
+export const removeLabel = (runtimeWords: string, moving: number, target: string | null): string =>
   target === null || moving === 0
-    ? `Remove ${runtime.name}`
-    : `Move ${ferrets(moving)} to ${target} and remove ${runtime.name}`;
+    ? `Remove ${runtimeWords}`
+    : `Move ${ferrets(moving)} to ${target} and remove ${runtimeWords}`;
 
 /** One line under the list of ferrets, for the choice the person made about them. */
 export const movePlanSentence = (moving: number, target: string | null): string =>

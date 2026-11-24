@@ -129,6 +129,34 @@ const listing = async (tab: Page) =>
     };
   });
 
+/**
+ * The closed box at rest: what it shows, and whether the part that tells two accounts apart is READ (laid out inside the
+ * box, wrapped onto a second line if need be) and not cut by an ellipsis or a clip, which is what a phone's narrow box
+ * did when the account came last in the words.
+ */
+const closedBox = async (tab: Page, box: string) =>
+  await tab.evaluate(selector => {
+    const trigger = document.querySelector<HTMLElement>(selector);
+    const value = trigger?.querySelector<HTMLElement>('.fy-sb__value');
+    if (trigger === null || trigger === undefined || value === null || value === undefined) return null;
+    const at = trigger.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(value);
+    const text = range.getBoundingClientRect();
+    return {
+      text: value.textContent ?? '',
+      ellipsis: value.scrollWidth > value.clientWidth + 1 || value.scrollHeight > value.clientHeight + 1,
+      inside: text.left >= at.left - 1 && text.right <= at.right + 1 && text.bottom <= at.bottom + 1,
+    };
+  }, box);
+
+const expectAccountRead = async (tab: Page, box: string, words: string): Promise<void> => {
+  const shown = await closedBox(tab, box);
+  expect(shown?.text, 'the closed box says which account').toBe(words);
+  expect(shown?.ellipsis, 'nothing of it is cut off').toBe(false);
+  expect(shown?.inside, 'all of it lies inside the box').toBe(true);
+};
+
 const requestsTo = (path: string): Received[] => received.filter(request => request.path === path);
 
 const shoot = async (tab: Page, viewport: string, theme: string, name: string): Promise<void> => {
@@ -149,7 +177,7 @@ describe('the runtimes plugin picks from lists with the app’s select box', () 
           expect(await tab.locator('select').count(), 'no native select on the page').toBe(0);
           expect(await tab.locator('input[type="radio"]').count(), 'no radio buttons either').toBe(0);
           // The first usable runtime is already chosen, as before.
-          expect(await tab.textContent(box)).toContain('claude-personal');
+          await expectAccountRead(tab, box, 'Claude · your terminal sign-in — personal@studio.example');
           // The page's own label still names the field it points at.
           expect(await tab.getAttribute(box, 'id')).toBe('runtime-field');
           expect(await tab.getAttribute(box, 'aria-label'), 'announced as the visible label says').toBe('Runtime');
@@ -173,11 +201,11 @@ describe('the runtimes plugin picks from lists with the app’s select box', () 
           await shoot(tab, viewport.name, theme, 'runtime-open');
           await tab.keyboard.type('night');
           await tab.waitForFunction(() => document.querySelectorAll('[role="option"]').length === 1);
-          expect((await listing(tab)).options).toEqual(['codex-night']);
+          expect((await listing(tab)).options).toEqual(['Codex · your terminal sign-in — night@studio.example']);
           await shoot(tab, viewport.name, theme, 'runtime-filtered');
           await tab.keyboard.press('Enter');
           await tab.waitForFunction(() => document.querySelector('[role="option"]') === null);
-          expect(await tab.textContent(box)).toContain('codex-night');
+          await expectAccountRead(tab, box, 'Codex · your terminal sign-in — night@studio.example');
           expect(await tab.textContent('[data-chosen]'), 'the page learned which runtime was chosen').toContain(
             'model:',
           );
@@ -221,7 +249,7 @@ describe('the runtimes plugin picks from lists with the app’s select box', () 
           const box = '[data-default-runtime-select] [role="combobox"]';
           await tab.waitForSelector(box);
           expect(await tab.locator('select').count(), 'no native select on the page').toBe(0);
-          expect(await tab.textContent(box)).toContain('claude-personal');
+          await expectAccountRead(tab, box, 'Claude · your terminal sign-in — personal@studio.example');
           await tab.click(box);
           await tab.waitForSelector('[role="option"]');
           const open = await listing(tab);
@@ -240,10 +268,10 @@ describe('the runtimes plugin picks from lists with the app’s select box', () 
           await shoot(tab, viewport.name, theme, 'default-open');
           await tab.keyboard.type('team');
           await tab.waitForFunction(() => document.querySelectorAll('[role="option"]').length === 1);
-          expect((await listing(tab)).options).toEqual(['codex-team']);
+          expect((await listing(tab)).options).toEqual(['Codex · your terminal sign-in — team@studio.example']);
           await tab.keyboard.press('Enter');
           await tab.waitForFunction(() => document.querySelector('[role="option"]') === null);
-          expect(await tab.textContent(box)).toContain('codex-team');
+          await expectAccountRead(tab, box, 'Codex · your terminal sign-in — team@studio.example');
           const sent = async () =>
             await tab.evaluate(() =>
               (
@@ -296,7 +324,10 @@ describe('the runtimes plugin picks from lists with the app’s select box', () 
             'the daemon answered the apply with a committed outcome',
           ).toEqual([{ proposalId: 'fy_fprop_abcdefghijklmnopqrstuv', outcome: 'applied' }]);
           await tab.waitForFunction(
-            selector => document.querySelector(selector)?.textContent?.includes('claude-personal') === true,
+            selector =>
+              document
+                .querySelector(selector)
+                ?.textContent?.includes('Claude · your terminal sign-in — personal@studio.example') === true,
             box,
           );
           await shoot(tab, viewport.name, theme, 'default-saved');

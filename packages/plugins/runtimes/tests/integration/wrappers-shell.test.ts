@@ -467,7 +467,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       'terminal_request_input',
       'input_wait',
       'you never receive it',
-      'terminal_send is blocked',
+      'terminal_send is blocked until answered (not for a code).',
       '2FA',
       'captcha',
       'passkey or hardware-key tap',
@@ -486,6 +486,8 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       'account_hint',
     ])
       should(AGENT_TOOLS_INSTRUCTION).containEql(phrase);
+    // No lock after an answer: the ferret reads the surface at once, so the prompt never promises a hold.
+    should(AGENT_TOOLS_INSTRUCTION).not.containEql('unreadable');
   });
 });
 

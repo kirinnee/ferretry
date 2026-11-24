@@ -1,4 +1,3 @@
-import { durationWords } from '@ferretry/std';
 import { z } from 'zod';
 import {
   AgendaIdSchema,
@@ -82,8 +81,6 @@ export type InputLockReason = z.infer<typeof InputHoldReasonSchema>;
 /** How long a card's hold lasts and why (the contract's `InputHoldSchema`). */
 export type InputLock = z.infer<typeof InputHoldSchema>;
 
-/** The lock's length in the owner's and the ferret's words ("two minutes"), from {@link INPUT_QUARANTINE_SECONDS}. */
-export const INPUT_QUARANTINE_WORDS = durationWords(INPUT_QUARANTINE_SECONDS);
 /**
  * ONE SENTENCE EACH for what the ferret can read (C41): a plain value, and a one-time code (not secret either, but
  * neutral). The daemon's flag on a field and the app's and CLI's words are these; a client that tells one only once

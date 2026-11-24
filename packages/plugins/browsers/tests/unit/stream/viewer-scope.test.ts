@@ -40,7 +40,7 @@ describe('revocation while kernel.act is pending', () => {
     const host = {
       attachViewer: async (_session: string, onFrame: (frame: BrowserScreencastFrame) => void) => {
         deliver = onFrame;
-        return { detach: () => undefined };
+        return { viewerId: 'v1', detach: () => undefined };
       },
     };
     const release: (() => void)[] = [];
@@ -51,6 +51,7 @@ describe('revocation while kernel.act is pending', () => {
       },
     };
     const viewer = heldViewerHost(kernel as never, host as never, {
+      caller: 'ferret:f1',
       mayType: false,
       delivery: allOf([scopeDelivery(scope, 'f1')]),
     });
@@ -166,7 +167,7 @@ describe('revocation while a frame is retained for a congested socket', () => {
     const host: BrowserViewerHost = {
       attachViewer: async (_s, frame) => {
         onFrame = frame;
-        return { detach: () => undefined };
+        return { viewerId: 'v1', detach: () => undefined };
       },
       dispatchHumanInput: async () => undefined,
     };
