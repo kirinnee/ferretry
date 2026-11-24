@@ -117,7 +117,7 @@ describe('C59 follow-up: the Voice sticky footer is above every engine control (
         await tab.goto(`${origin}/?theme=${theme}&phone=1&view=voice`);
         await tab.locator('.fy-engine-card').first().waitFor({ state: 'visible' });
         await tab.getByText('Show every engine').click();
-        await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 10);
+        await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 11);
         const result = await tab.evaluate(sweep);
         expect(result.steps, 'the page scrolled').toBeGreaterThan(3);
         expect(result.overlaps, 'an engine control went under the footer at least once').toBeGreaterThan(0);

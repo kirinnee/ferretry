@@ -21,7 +21,7 @@ export interface TransportRequest {
 export interface TransportAnswer {
   readonly status: number;
   readonly headers: Readonly<Record<string, string>>;
-  /** The parsed JSON body, or the text when the answer is not JSON. */
+  /** The parsed JSON body, the text when the answer is not JSON, or the bytes of a served file (a `Uint8Array`). */
   readonly body: unknown;
 }
 

@@ -4,10 +4,12 @@
  * box (a secure context, which on-device speech needs). To measure multi-thread WebAssembly start the
  * server with `FY_DEV_ISOLATED=1` (docs/voice.md › Speed). Not part of the shipped bundle.
  */
+import googleRuntimeUrl from '@mediapipe/tasks-audio/audio_wasm_module_internal.wasm?url';
 import sherpaRuntimeUrl from 'sherpa-runtime-wasm?url';
 import voskRuntimeUrl from '@lichess-org/vosk-browser/dist/vosk.wasm?url';
 import runtimeUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 import workerUrl from '../../../../app/worker/parakeet-worker.ts?worker&url';
+import googleWorkerUrl from '../../../../app/worker/google-worker.ts?worker&url';
 import sherpaWorkerUrl from '../../../../app/worker/sherpa-worker.ts?worker&url';
 import voskWorkerUrl from '../../../../app/worker/vosk-worker.ts?worker&url';
 import whisperWorkerUrl from '../../../../app/worker/whisper-worker.ts?worker&url';
@@ -40,12 +42,15 @@ run.addEventListener('click', async () => {
       {
         parakeet: { workerUrl, runtimeUrl },
         sherpa: { workerUrl: sherpaWorkerUrl, runtimeUrl: sherpaRuntimeUrl },
+        google: { workerUrl: googleWorkerUrl, runtimeUrl: googleRuntimeUrl },
         vosk: { workerUrl: voskWorkerUrl, runtimeUrl: voskRuntimeUrl },
         whisper: { workerUrl: whisperWorkerUrl, runtimeUrl },
       },
       {
         engines: ON_DEVICE_MODEL_IDS.filter(id =>
-          ['parakeet', 'parakeet-tdt-110m', 'whisper-base-en', 'vosk-small-en'].includes(id),
+          ['parakeet', 'parakeet-tdt-110m', 'whisper-base-en', 'vosk-small-en', 'google-audio-transcriber'].includes(
+            id,
+          ),
         ),
         paths: element<HTMLInputElement>('threads').checked ? ['wasm-single', 'wasm-threads'] : ['wasm-single'],
         warmRuns: 3,

@@ -166,14 +166,14 @@ describe('the engine cards', () => {
           await tab.waitForSelector('.fy-engine-card');
           if (view === 'all') {
             await tab.getByText('Show every engine').click();
-            await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 10);
+            await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 11);
           }
           if (view === 'downloading') await tab.waitForSelector('[role="progressbar"]');
           const heights = await tab
             .locator('.fy-engine-card')
             .evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().height)));
           expect(heights.filter(height => height !== 108 && height !== 58)).toEqual([]);
-          if (view === 'all') expect(heights.length).toBe(10);
+          if (view === 'all') expect(heights.length).toBe(11);
           if (shotsDir !== '') await shoot(tab, join(shotsDir, `after-${view}-${viewport.name}-${mode}.png`));
           await context.close();
         }

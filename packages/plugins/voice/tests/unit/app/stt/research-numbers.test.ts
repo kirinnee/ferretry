@@ -13,10 +13,18 @@ describe('the research numbers', () => {
   it('are on every on-device engine, from the one benchmark', () => {
     for (const model of ON_DEVICE_MODELS) {
       should(Object.values(RESEARCH)).containEql(model.measured);
+      // The Google live transcriber was measured later, with its own where and its own sentences (below).
+      if (model.id === 'google-audio-transcriber') continue;
       should(model.measured?.where).startWith('research benchmark');
       should(model.measured?.accuracy).match(/WER on everyday speech; .* on technical speech, \d+ of 33 key terms$/u);
       should(model.measured?.speed).match(/from Stop to text; .* of memory$/u);
     }
+  });
+
+  it('say how the Google live transcriber was measured, and what was not', () => {
+    should(RESEARCH.googleAudioTranscriber.where).containEql('quarter of one core');
+    should(RESEARCH.googleAudioTranscriber.accuracy).containEql('the 33 key terms were not run');
+    should(RESEARCH.googleAudioTranscriber.speed).startWith('8.2 s from Stop to text');
   });
 
   it('say the Zipformer is weak on technical terms and Parakeet 110M quick on a phone', () => {

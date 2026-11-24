@@ -33,6 +33,7 @@
 import { Download, ExternalLink, FileText, FileWarning } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { ExternalLink as ExternalAnchor } from '@ferretry/app/ui';
+import { MAX_MEDIA_BYTES } from '@ferretry/core-ferrets/contract';
 import {
   FY_RENDER_LIMITS,
   type FyRenderImageMime,
@@ -130,7 +131,9 @@ const fallbackSentence = (block: FyRenderMediaBlock, reason: FyRenderMediaFallba
     case 'too-large':
       return block.src.kind === 'https'
         ? `This ${what} is larger than the ${megabytes(FY_RENDER_LIMITS.httpsImageBytes)} an image link can be shown at.`
-        : `${where} is larger than the ${megabytes(FY_RENDER_LIMITS.workspaceMediaBytes)} a workspace file can be shown at.`;
+        : block.src.kind === 'media'
+          ? `${where} is larger than the ${megabytes(MAX_MEDIA_BYTES)} a media file can be shown at.`
+          : `${where} is larger than the ${megabytes(FY_RENDER_LIMITS.workspaceMediaBytes)} a workspace file can be shown at.`;
     case 'unsupported':
       return `This ${what} is in a format that cannot be shown here.`;
     case 'unavailable':
@@ -170,7 +173,8 @@ export function FyRenderMedia({ block, readWorkspaceMedia, onShape }: FyRenderMe
       if (mime === null) return fallback('unsupported', `No ${block.type} type is known for ${path}`);
       const read = await readWorkspaceMedia(path, controller.signal, folder);
       if (!read.ok) return fallback(read.reason, null, read.rule);
-      if (read.bytes.byteLength > FY_RENDER_LIMITS.workspaceMediaBytes) return fallback('too-large');
+      const cap = folder === 'media' ? MAX_MEDIA_BYTES : FY_RENDER_LIMITS.workspaceMediaBytes;
+      if (read.bytes.byteLength > cap) return fallback('too-large');
       if (block.type === 'image') {
         const refusal = fyRenderRasterRefusal(read.bytes, mime as FyRenderImageMime);
         if (refusal !== null) return fallback('unsupported', refusal);

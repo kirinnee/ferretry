@@ -64,6 +64,7 @@ export {
 } from './session/session-client.ts';
 export {
   type AmendedRotation,
+  answerBody,
   type CarrierDial,
   type CarrierSocketEvents,
   type CarrierWalkSocket,

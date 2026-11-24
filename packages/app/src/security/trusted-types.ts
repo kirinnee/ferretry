@@ -72,12 +72,12 @@ const WORKER_SCRIPT = new RegExp(
 );
 
 /**
- * The speech workers (`src/worker/parakeet-worker.ts`, `sherpa-worker.ts`, `vosk-worker.ts`,
+ * The speech workers (`src/worker/parakeet-worker.ts`, `sherpa-worker.ts`, `google-worker.ts`, `vosk-worker.ts`,
  * `whisper-worker.ts`): Vite's content-hashed build output, or the address its dev server serves the
  * same module at. Nothing else under `/assets/` is a worker.
  */
 const SPEECH_WORKER_SCRIPT =
-  /^(?:\/assets\/(?:parakeet|sherpa|vosk|whisper)-worker-[A-Za-z0-9_-]+\.js|\/src\/worker\/(?:parakeet|sherpa|vosk|whisper)-worker\.ts\?worker_file&type=module)$/u;
+  /^(?:\/assets\/(?:parakeet|sherpa|google|vosk|whisper)-worker-[A-Za-z0-9_-]+\.js|\/src\/worker\/(?:parakeet|sherpa|google|vosk|whisper)-worker\.ts\?worker_file&type=module)$/u;
 
 /** Whether a URL is one of the app's own SPEECH worker scripts (not the service worker). */
 export const isSpeechWorkerScriptUrl = (url: string): boolean => SPEECH_WORKER_SCRIPT.test(url);

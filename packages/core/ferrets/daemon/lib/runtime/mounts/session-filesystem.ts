@@ -2,6 +2,7 @@ import {
   ApiError,
   type ApiResponse,
   type CallContext,
+  headerValue,
   jsonResponse,
   queryValue,
   type Redaction,
@@ -9,6 +10,7 @@ import {
   type RouteHandler,
   textResponse,
 } from '@ferretry/kernel/contract';
+import { bareMediaName, MAX_MEDIA_BYTES, mediaAnswer, mediaTypeOf } from '../../../../contract/media-bytes.ts';
 import { SESSION_FILE_INDEX_VERSION, type SessionFileIndexResponse } from '../../protocol/session-search.ts';
 import {
   FsError,
@@ -247,6 +249,70 @@ function fileResponse(view: FsFileView, scope: RedactionScope, agent: boolean): 
 }
 
 /**
+ * ONE FILE OF THE FERRET'S MEDIA FOLDER, AS RAW BYTES, IN PIECES (`docs/fy-render.md` rule 11, `docs/grants.md`).
+ *
+ * The read is `fs/file?scope=media`'s — the media folder's own pinned walk, the same gates, the same agent fence, the
+ * same `filesystem` _use_ grant — with a cap of {@link MAX_MEDIA_BYTES} instead of one mebibyte and the bytes sent as
+ * they are instead of base64 in JSON. What is stricter than the JSON read: the request names a BARE FILE NAME (`name`,
+ * never a path), a name the type allowlist does not know is refused (`415`), and a file holding a vault value is
+ * refused to everyone (`403 holds_secret`) because masking bytes would hand back something that is not the file.
+ *
+ * `Range` is RFC 9110 for one range: `206` with `Content-Range`, `416` with `Content-Range: bytes *\/size` for a start
+ * past the end, an open or oversized range clamped to one piece. No `Range` at all is a `200` only for a file that fits
+ * one piece; a larger one is `413 range_required`, never a body one session cannot carry.
+ */
+// read-scoped: none — gates and file reads only; the bytes leave through mediaResponse(scope), never from here
+async function media(
+  _workingTree: SessionFilesystem,
+  deps: FileBrowserDeps,
+  context: RouteContext,
+): Promise<ApiResponse> {
+  const { id, cwd, fence } = await deps.reach(context);
+  const name = bareMediaName(queryValue(context.request, 'name'));
+  if (name === undefined) throw new ApiError(400, 'query parameter "name" must be one bare file name', 'invalid_path');
+  const type = mediaTypeOf(name);
+  if (type === undefined) throw new ApiError(415, `${name} is not a file type this route serves`, 'unsupported_type');
+  if (deps.media === undefined) throw new ApiError(404, 'this daemon keeps no session media folder', 'not_found');
+  let view: Awaited<ReturnType<SessionFilesystem['readFile']>>;
+  try {
+    view = await deps.media(id).readFile(cwd, name, {
+      base64: true,
+      maxBytes: MAX_MEDIA_BYTES,
+      ...(fence === undefined ? {} : { fence }),
+    });
+  } catch (error) {
+    return refuse(error);
+  }
+  if (view.denied === true || view.ignored === true)
+    throw new ApiError(
+      403,
+      `${name} is not served by the repository secrets policy`,
+      view.denied === true ? 'denied' : 'ignored',
+      undefined,
+      view.rule === undefined ? undefined : { rule: view.rule },
+    );
+  if (view.tooLarge === true)
+    throw new ApiError(413, `${name} is over the ${MAX_MEDIA_BYTES}-byte limit this route serves`, 'too_large');
+  if (view.base64 === undefined) throw new ApiError(404, `no file ${name}`, 'not_found');
+  const bytes = Buffer.from(view.base64, 'base64');
+  const range = headerValue(context.request, 'range');
+  // The vault opens HERE and only here (after every gate); a vault that cannot open serves no bytes (fail closed).
+  return await deps.redaction.read(scope => mediaResponse(bytes, type, range, name, scope));
+}
+
+/** The one place media bytes leave the daemon: refused whole if the read's scope covers a value in them. */
+function mediaResponse(
+  bytes: Uint8Array,
+  type: string,
+  rangeHeader: string | undefined,
+  name: string,
+  scope: RedactionScope,
+): ApiResponse {
+  if (fileHoldsValue(bytes, scope)) throw holdsSecret(name);
+  return mediaAnswer(bytes, type, rangeHeader, name);
+}
+
+/**
  * `admin` scope on all four: a warden supervises sessions and has no business reading the human's source
  * tree, and this surface is an arbitrary-file-read primitive wearing a viewer costume.
  *
@@ -284,6 +350,7 @@ export interface FileBrowserDeps {
 /** The four route keys, as `manifest.ts` declares them (today's `/v1/sessions/:sessionId/fs…`, renamed). */
 const FILE_BROWSER_ROUTE_KEYS = [
   'GET /v1/ferrets/:ferretId/fs/file',
+  'GET /v1/ferrets/:ferretId/fs/media',
   'GET /v1/ferrets/:ferretId/fs/index',
   'GET /v1/ferrets/:ferretId/fs/changes',
   'GET /v1/ferrets/:ferretId/fs/diff',
@@ -317,6 +384,7 @@ export function sessionFilesystemRoutes(deps: FileBrowserDeps): { readonly [K in
     };
   return {
     'GET /v1/ferrets/:ferretId/fs/file': bound(file),
+    'GET /v1/ferrets/:ferretId/fs/media': bound(media),
     'GET /v1/ferrets/:ferretId/fs/index': bound(index),
     'GET /v1/ferrets/:ferretId/fs/changes': bound(changes),
     'GET /v1/ferrets/:ferretId/fs/diff': bound(diff),

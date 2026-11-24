@@ -14,6 +14,16 @@ export default fragment({
       audit: { skip: 'a file read records nothing, as today' },
       guard: 'secrets',
     }),
+    // A ferret's MEDIA file as raw bytes, in ranges (docs/fy-render.md rule 11): the same `filesystem` use grant as the
+    // JSON read it lifts the 1 MiB cap of, and no new capability (docs/grants.md).
+    route('GET /v1/ferrets/:ferretId/fs/media', {
+      minimum: 'operator',
+      caller: 'any',
+      noStore: true,
+      capability: { capability: CAPABILITIES.filesystem, axis: 'use' },
+      audit: { skip: 'a media read records nothing, as a file read does not' },
+      guard: 'secrets',
+    }),
     // The file browser (today's `mounts/session-filesystem.ts`). They answer 503 until the kernel's root walk lands.
     // R-0152
     route('GET /v1/ferrets/:ferretId/fs/index', {

@@ -228,6 +228,21 @@ describe('isDeferredReleaseFile', () => {
   });
 });
 
+describe('isDeferredReleaseFile for the MediaPipe runtime', () => {
+  it('defers the Google transcriber’s runtime binary, and nothing else of MediaPipe’s', () => {
+    should(isDeferredReleaseFile('assets/audio_wasm_module_internal-DLjbsNtP.wasm')).be.true();
+    // The loader is the app's own script and the worker must start offline, so neither is deferred.
+    for (const path of [
+      'assets/audio_wasm_module_internal-xlLdt2Nm.js',
+      'assets/google-worker-BTR2B3u1.js',
+      'assets/audio_wasm_module_internal-.wasm',
+      'audio_wasm_module_internal-DLjbsNtP.wasm',
+      'assets/audio_wasm_module_internal-a.b.wasm',
+    ])
+      should(isDeferredReleaseFile(path)).be.false();
+  });
+});
+
 describe('releasePathForRequest with a directory rewrite target', () => {
   const files = { 'index.html': HASH, 'app/index.html': HASH };
 

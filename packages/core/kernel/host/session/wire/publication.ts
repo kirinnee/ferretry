@@ -11,6 +11,7 @@ class ResponsePublication {
   readonly body: string;
   declare readonly headers: ReadonlyMap<string, string>;
   declare readonly gzip?: Uint8Array;
+  declare readonly bytes?: Uint8Array;
   readonly endsSession?: true;
 
   constructor(response: ApiResponse) {
@@ -21,6 +22,8 @@ class ResponsePublication {
     Object.defineProperty(this, 'headers', { enumerable: true, get: () => new Map(this.#headers) });
     const gzip = response.gzip === undefined ? undefined : new Uint8Array(response.gzip);
     if (gzip !== undefined) Object.defineProperty(this, 'gzip', { enumerable: true, get: () => gzip.slice() });
+    const bytes = response.bytes === undefined ? undefined : new Uint8Array(response.bytes);
+    if (bytes !== undefined) Object.defineProperty(this, 'bytes', { enumerable: true, get: () => bytes.slice() });
     Object.freeze(this);
   }
 }

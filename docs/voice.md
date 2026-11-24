@@ -287,6 +287,68 @@ than the worker's own script.
 cd packages/pwa && bunx vite build && bun harness/vosk-smoke.ts
 ```
 
+## Google live words on this device (AudioTranscriber)
+
+An extra dictation engine, tile **Google live words** in Settings › Voice (`google-audio-transcriber`): Google AI Edge's
+[AudioTranscriber](https://developers.google.com/edge/mediapipe/solutions/audio/audio_transcriber) running **NVIDIA Parakeet
+TDT 0.6B v3** as one `.litertlm` file, on MediaPipe's WebAssembly runtime, in a worker. Words appear **while you speak**
+(settled phrases first, the phrase being heard greyed, corrected as you go), with punctuation and capitals from the model, in 25
+European languages. Audio stays on the device; nothing but the model download uses the network.
+
+- **Where it comes from (official upstream only, each pinned and hashed like every other model here;
+  `lib/stt/google-transcriber-model.ts`).**
+  - The model: `litert-community/parakeet-tdt-0.6b-v3` on Hugging Face (Google's `litert-community` organisation), file
+    `parakeet_tdt_0.6b_v3_5s_i8_stateful.litertlm`, at commit `cd95f7bb97fd`: **614,588,752 bytes**, SHA-256
+    `66c5a74c…eeb3504` (Hugging Face's own `x-linked-size` / `x-linked-etag`, re-computed from the bytes).
+  - The runtime: `@mediapipe/tasks-audio` **1.2.3** on npm (Google, Apache-2.0), its `audio_wasm_module_internal.wasm`: **21,979,681
+    bytes**, SHA-256 `49effd46…c850a`. Self-hosted: the build emits it under `/assets/`, the signed release lists it and **defers**
+    it (`isDeferredReleaseFile`), and only this engine's Install downloads it. Its JavaScript loader is part of the app's build.
+  - A unit test re-hashes the installed package, so a version bump that forgets the pin fails.
+- **Licence.** The model is **CC-BY-4.0** (the Hugging Face model page's `license: cc-by-4.0`; base `nvidia/parakeet-tdt-0.6b-v3`): credit
+  to NVIDIA for the model and to Google AI Edge for the conversion, said on the tile (behind the "i"). The runtime is Apache-2.0.
+- **Install, hashing and Remove** are the shared on-device ones (`bundle-set.ts`): the runtime and the model download side by
+  side, 636.6 MB in all; every byte is hashed as it arrives and again on every read; a flipped bit is refused (`integrity`) and
+  nothing of it stays; Remove deletes both caches (the runtime stays only while another MediaPipe model needs it — none does).
+- **The worker never fetches.** `app/worker/google-worker.ts` hands Emscripten the verified runtime bytes through its own
+  `Module.instantiateWasm` hook (MediaPipe's loader keeps a `Module` set before the task is created) — a `blob:` URL would be
+  refused by `connect-src` — and hands the task the verified model bytes. It runs the **CPU delegate** the model page
+  recommends; the GPU delegate is not offered until it has been measured. The page's policy needed one change: the worker
+  script name (`google-worker-<hash>.js`) joins the speech workers Trusted Types accepts.
+- **How words arrive** (`lib/stt/google-worker-core.ts`): the transcriber works in 5 s windows that advance 2.5 s. Each advance
+  answers the oldest 2.5 s as a **final** segment (never changes) and the 5 s ahead as an **interim** one (replaced by the next
+  answer). The page side is the sherpa engine's protocol and streaming session, unchanged.
+
+### Measured, and what that says (2026-11-24)
+
+`tests/realworld/google-transcriber.realworld.test.ts` (real Chrome, the **built** app's real `_headers` policy, a fake microphone
+playing `clip-5s.wav`, the shipped voice's own Install and dictation session). 32-core Linux x64, load average ~8.
+
+| What                                                    | Full speed            | Browser held to a quarter of one core |
+| ------------------------------------------------------- | --------------------- | ------------------------------------- |
+| Install (636.6 MB, hashed)                              | 8 s                   | 36–39 s                               |
+| First take: Stop → text, **includes loading the model** | 9 s                   | 41–43 s                               |
+| Warm take, 5 s clip: Stop → text                        | **1.2 s**             | **8.2 s**                             |
+| First live words                                        | 3.9 s into the take   | none within the 5 s take              |
+| Clip transcribed                                        | word for word, 0% WER | word for word, 0% WER                 |
+| Memory, whole browser, model loaded                     | 3.0 GB                | 3.0 GB                                |
+
+- **The load is slow because the bytes are hashed again on every read** (the doctrine: nothing stored is trusted): about 7 s
+  of the 9 s (the model alone builds in 1.9 s when handed its bytes, in a plain page). The worker lives until the engine is unloaded, so only the first take of a session pays.
+- **It is a laptop engine.** At a quarter of one core, the nearest this box has to the research's 4× CPU slowdown (Chrome's
+  `Emulation.setCPUThrottlingRate` is refused for workers — "only supported for pages" — and this engine runs in one), it needed 8.2 s
+  after Stop (Parakeet 0.6B on ONNX Runtime: 7.1 s at 4×, a different and gentler throttle) and drew no live words in 5 s. The tile
+  says so: Speed 8.2 s, Size 637 MB, "A laptop."
+- **Accuracy is not scored on the 33 key terms**: that technical set is not in this repository, so the tile draws no Accuracy bar.
+  What is known: the bench clip came out right, word for word, like Parakeet 0.6B on ONNX Runtime; the weights are the same; Google
+  reports 5.07–5.15% average WER over a 5-set English streaming test (280 utterances), within 0.17 points of the unquantised model.
+- **A phone is not measured.** The one-click page (`tests/realworld/dev/speed-bench/`, `bunx vite` in `packages/app`) lists this engine
+  too, for a phone on `adb reverse`; no phone was available for this change. The model needs a 615 MB download and ~3 GB of
+  browser memory, so some phones will refuse it — the tile shows its size and measured speed before anything downloads.
+
+Run it yourself (manual, never in CI): build the app, then
+`FY_VOICE_APP_DIST=<dist> FY_VOICE_GOOGLE_MODEL=<the .litertlm> CHROME_PATH=<chrome> bun test tests/realworld/google-transcriber.realworld.test.ts`
+in `packages/plugins/voice`; prefix it with `FY_VOICE_LIMITED=1 systemd-run --user --scope -p CPUQuota=25%` for the quarter-core column.
+
 ## Phone/browser voice
 
 The browser's own `SpeechRecognition` (`lib/stt/browser-recognition.ts`). Nothing to download, live

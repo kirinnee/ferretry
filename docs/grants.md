@@ -404,6 +404,33 @@ see saved `svg` and `html` pictures it could not see as `media:` files. That is 
 `html` fence in the transcript already has: the ferret chose to publish it into the conversation. The store holds
 only these two text kinds; a future store of media would need this decision made again.
 
+<a id="media-bytes"></a>
+
+**The media byte route is `filesystem` _use_, and no new capability.** `GET /v1/ferrets/:ferretId/fs/media?name=<file>`
+serves one file of a ferret's MEDIA folder (`media:<file>` in an `fy-render` block) as raw bytes, in ranges, so a clip or
+a song over the JSON read's mebibyte can be played ([fy-render.md](fy-render.md) rule 11). It is the same read as
+`fs/file?scope=media` with a larger cap and a different body, so it asks the same question of the same grant:
+`operator`, `caller: 'any'`, `filesystem` _use_, `noStore`, audit skipped (a read records nothing, as the file read does
+not), `guard: 'secrets'`. A device whose `filesystem` use is denied is refused with the same `403` before any byte is
+read; there is nothing in this route a `fleet` or `terminal` grant could stand in for, and a new capability would only
+make one fact two switches. The review, one row per risk:
+
+| Risk                                            | What stops it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A device reads media of a ferret it may not see | The route resolves the ferret by the same `reach` the file browser uses: an agent credential reads its own ferret's folder and its helpers' (`agentMayReach`, `403 not_own_ferret` otherwise) and never inside the state home; a person (a paired device, the owner) reads the media of any ferret the daemon holds, exactly as it already reads that ferret's files. Per-ferret visibility is not a device grant here or anywhere else; the route claims nothing beyond the file browser's. |
+| A name that escapes the folder                  | The request names `name`, one bare file, never a path: a `/`, a `\`, a NUL, `.`, `..`, an empty or over-255-character name is `400 invalid_path` before any walk. The folder is chosen by the route from the ferret id (`mediaRoot`), never by the caller. Then the same pinned, no-follow descriptor walk as every file read: a link leaving the folder is `403 escapes_root`; an agent is refused a hard-linked file.                                                                      |
+| A file that is not media is served as a page    | The `Content-Type` is read from the extension out of a fixed table (`MEDIA_TYPES` in `core/ferrets/contract/media-bytes.ts`: the `fy-render` image, video, audio and pdf extensions) and nowhere else; any other extension, SVG and HTML included, is `415 unsupported_type` before a walk. Every answer carries `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox` and `Cross-Origin-Resource-Policy: same-origin`.                                  |
+| A secret inside a media file                    | The file is scanned as the JSON read scans it (the vault's read scope, text and bytes alike). It is refused whole to everyone — `403 holds_secret` — because a masked copy of binary bytes is not the file and would be shown as it; the JSON read masks for a person and refuses an agent. The vault opens after every gate, so a refused name never opens it, and one that cannot open serves nothing.                                                                                     |
+| A hidden or ignored file                        | The ignore gate, the protected-secrets denylist and the hard-link fence are the file read's, unchanged: `403 denied` or `403 ignored`, with the `rule` that refused it.                                                                                                                                                                                                                                                                                                                      |
+| A body no session can carry                     | A file over `MAX_MEDIA_BYTES` (32 MiB) is `413 too_large`; an answer is at most `MEDIA_CHUNK_BYTES` (4 MiB, an open or oversized range is clamped to it) and a larger file asked for with no `Range` is `413 range_required`. The session wire's own 32 MiB bound on a body (§14) is never reached.                                                                                                                                                                                          |
+| Bad `Range`                                     | RFC 9110 for one range: `206` with `Content-Range`; `416` with `Content-Range: bytes */<size>` for a start at or past the end, a zero suffix or any range of an empty file; a header it does not understand (another unit, several ranges, `last < first`) is ignored, as the RFC allows, and answered as no range.                                                                                                                                                                          |
+
+What it does NOT do, stated: it is not an HTTP URL a `<video>` can point at — a device has no bearer value to put in one
+(zero-trust) — so the app reads the pieces over its sealed session and plays a `blob:`; a file is loaded whole before it
+plays (a 32 MiB file is eight requests), and each request reads and scans the whole file again (a verdict cache is
+a declared gap, [below](#declared-gaps)). `GET` only; `HEAD` is not routed. The working tree keeps its mebibyte: only the
+media folder has this route.
+
 One consequence: agenda actions are gated by **who acts** (the human or a ferret), never by a capability.
 `POST /v1/agenda/clear-agents` is owner-only on that axis — an agent credential gets 403 — and has no grant.
 `GET /v1/agenda/open` (every conversation's open and parked items, [agenda.md](agenda.md#the-roll-up-every-conversation-and-a-count-that-is-the-list)) is the same: `operator`, `caller: 'person'`, no capability.
@@ -1067,6 +1094,14 @@ command says so at the moment somebody might be tempted to do that instead.
 
 ## Declared GAPs
 
+- **The media byte route reads and scans the whole file for every piece it serves**
+  ([above](#media-bytes)). A 32 MiB file is eight requests of one full read and one vault scan each (about a second
+  apiece on this box with a fake scope; the real vault's cost is not measured). Nothing is cached, because a cached
+  "holds no secret" verdict would outlive a secret stored a moment later; a short, vault-versioned verdict cache is
+  the fix and is not built. A file that changes between two pieces is read as it is each time; the app checks the
+  pieces add up to the size the JSON read named and shows "could not be read" when they do not.
+- **A file plays only once it has all arrived.** The app joins the pieces into one `blob:`; there is no
+  progressive play, and a 32 MiB file over a slow relay is a wait with a quiet placeholder.
 - **An SSH tunnel to the daemon port is a governed caller**, like any browser: it is a loopback peer, and a
   loopback peer proves nothing about the owner. Only the admin token does.
 - **The host's command line is ungoverned, so an unattended, unlocked host is unprotected.** Anybody at that

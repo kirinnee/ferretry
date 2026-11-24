@@ -27,6 +27,7 @@ export * from './last-words.ts';
 export * from './kinds.ts';
 export * from './launch-origin.ts';
 export * from './live-read.ts';
+export * from './media-bytes.ts';
 export * from './transcript-bytes.ts';
 export * from './port.ts';
 export * from './records.ts';

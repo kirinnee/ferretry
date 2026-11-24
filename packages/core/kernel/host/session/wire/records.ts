@@ -614,6 +614,9 @@ const RES_MORE_ENVELOPE = encodeDaemonRecord({ t: 'res-more', id: MAX_REQUEST_ID
  * session list uncapped must not start refusing it. Past {@link MAX_TUNNEL_BODY_BYTES} the answer is a
  * `502` naming the size — never a truncated body a client would parse and believe.
  *
+ * An answer that is a served file (`response.bytes`) travels the same way without `content-encoding`: its bytes in
+ * unpadded base64url under `content-transfer-encoding: base64url` alone, so the size rules apply to the base64url text.
+ *
  * An answer the dispatcher compressed (`response.gzip`) travels as its gzip bytes in unpadded base64url
  * under `content-encoding: gzip` and `content-transfer-encoding: base64url`, so the size rules above
  * apply to what is actually sent. The compression happened before this, and the channel seals what it is
@@ -622,6 +625,8 @@ const RES_MORE_ENVELOPE = encodeDaemonRecord({ t: 'res-more', id: MAX_REQUEST_ID
 export function responseRecords(id: number, answer: ApiResponse): readonly DaemonRecord[] {
   const response = finalised(answer);
   const compressed = response.gzip !== undefined;
+  // A binary body (a served file) is the other user of the base64url transfer, with no `content-encoding`.
+  const binary = !compressed && response.bytes !== undefined;
   const headers = {
     ...Object.fromEntries(response.headers),
     ...(compressed
@@ -629,9 +634,15 @@ export function responseRecords(id: number, answer: ApiResponse): readonly Daemo
           [TUNNEL_CONTENT_ENCODING_HEADER]: TUNNEL_GZIP_ENCODING,
           [TUNNEL_TRANSFER_ENCODING_HEADER]: TUNNEL_BASE64URL_TRANSFER,
         }
-      : {}),
+      : binary
+        ? { [TUNNEL_TRANSFER_ENCODING_HEADER]: TUNNEL_BASE64URL_TRANSFER }
+        : {}),
   };
-  const wireBody = response.gzip === undefined ? response.body : toBase64Url(response.gzip);
+  const wireBody = compressed
+    ? toBase64Url(response.gzip as Uint8Array)
+    : binary
+      ? toBase64Url(response.bytes as Uint8Array)
+      : response.body;
   const whole: DaemonRecord = { t: 'res', id, status: response.status, headers, body: wireBody };
   if (encodeDaemonRecord(whole).byteLength <= MAX_PLAINTEXT_BYTES) return [whole];
   const bodyBytes = utf8Bytes(wireBody).byteLength;
