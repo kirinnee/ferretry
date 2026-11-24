@@ -242,13 +242,13 @@ const body =
   page === 'installed' ? (
     <InstalledPage client={client} step={step} />
   ) : page === 'conversations' ? (
-    <ConversationsPage client={client} step={step} />
+    <ConversationsPage step={step} />
   ) : page === 'sign-in' || page === 'sign-in-checking' || page === 'sign-in-link' ? (
     <WithSlotPanels slots={{ settings: loginsPanels }}>
       <SignInPage client={client} step={step} />
     </WithSlotPanels>
   ) : page === 'import-choice' ? (
-    <ImportChoicePage step={step} />
+    <ImportChoicePage client={client} step={step} />
   ) : (
     <PermissionPage client={client} step={step} />
   );

@@ -103,7 +103,7 @@ const step: StepHost = {
 const kind = KIND_OF_STEP[`import-${page}`];
 const body =
   page === 'conversations' ? (
-    <ConversationsPage client={client} step={step} />
+    <ConversationsPage step={step} />
   ) : page.startsWith('run') ? (
     <ImportRunPage client={client} step={step} />
   ) : kind !== undefined ? (
