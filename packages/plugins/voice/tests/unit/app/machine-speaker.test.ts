@@ -275,3 +275,19 @@ describe('the machine speaker on its own clock', () => {
     expect(events.at(-1)).toEqual({ type: 'end' });
   });
 });
+
+describe('the machine speaker when the stream has ended', () => {
+  test('a stream that takes no line (it is over) is "unavailable", so the device reads it', () => {
+    const events: SpeakerEvent[] = [];
+    const active: boolean[] = [];
+    const speaker = createMachineSpeaker({
+      stream: () => ({ speak: () => [], hush: () => undefined }),
+      replyState: () => 'ready',
+      player: { remainingMs: () => 0 },
+      onActive: on => void active.push(on),
+    });
+    speaker.speak({ segments: ['Hello.'], rate: 1, voice: null, language: 'en-US' }, event => void events.push(event));
+    expect(events).toEqual([{ type: 'error', reason: 'unavailable' }]);
+    expect(active).toEqual([]);
+  });
+});
