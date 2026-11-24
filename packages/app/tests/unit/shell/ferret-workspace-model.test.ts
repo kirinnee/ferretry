@@ -3,6 +3,7 @@ import { DEFAULT_LAYOUT } from '@ferretry/plugin-layouts/contract';
 import {
   addressNamesFile,
   CHAT_TAB,
+  fitTabs,
   newTabChoices,
   nextTab,
   panelKey,
@@ -180,5 +181,42 @@ describe('the wide side column’s tabs', () => {
     expect(sideTabOrFirst(tabs, second)).toBe(second);
     expect(sideTabOrFirst(tabs, 'gone.panel')).toBe(tabs[0]?.key ?? '');
     expect(sideTabOrFirst([], 'x')).toBe('');
+  });
+});
+
+describe('fitTabs: a phone row shows whole tabs and puts the rest behind More', () => {
+  const tabs = ['chat', 'console', 'processes', 'terminals', 'browser'].map(key => ({ key, label: key }));
+  // Every tab is 80 wide, two apart; the "More" button is 44.
+  const widths = new Map(tabs.map(tab => [tab.key, 80]));
+  const geometry = (room: number) => ({ room, gap: 2, more: 44 });
+  const keys = (list: readonly { readonly key: string }[]): string[] => list.map(tab => tab.key);
+
+  test('shows every tab, and no More, when they all fit (the button needs no room then)', () => {
+    // 5 x 80 + 4 x 2 = 408 fits a room of 408 - 46 + 46.
+    const fit = fitTabs(tabs, widths, 'chat', geometry(362));
+    expect(keys(fit.shown)).toEqual(keys(tabs));
+    expect(fit.hidden).toEqual([]);
+  });
+
+  test('keeps the tabs that fit, in order, and hides the rest', () => {
+    // room 250: 80 + 2 + 80 + 2 + 80 = 244 fits three; a fourth would need 326.
+    const fit = fitTabs(tabs, widths, 'chat', geometry(250));
+    expect(keys(fit.shown)).toEqual(['chat', 'console', 'processes']);
+    expect(keys(fit.hidden)).toEqual(['terminals', 'browser']);
+  });
+
+  test('the tab on show always takes a place, in place of the last one that fits', () => {
+    const fit = fitTabs(tabs, widths, 'browser', geometry(250));
+    expect(keys(fit.shown)).toEqual(['chat', 'console', 'browser']);
+    expect(keys(fit.hidden)).toEqual(['processes', 'terminals']);
+  });
+
+  test('never hides the first tab, however little room there is', () => {
+    const fit = fitTabs(tabs, widths, 'chat', geometry(10));
+    expect(keys(fit.shown)).toEqual(['chat']);
+  });
+
+  test('a row that is not measured yet shows every tab', () => {
+    expect(fitTabs(tabs, new Map(), 'chat', geometry(0)).hidden).toEqual([]);
   });
 });

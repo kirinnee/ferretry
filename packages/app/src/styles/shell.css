@@ -363,25 +363,28 @@
   min-height: 0;
   border-left: var(--border-width) solid var(--border);
 }
-/* THE CHAT FLOOR: the row that holds the chat and the column is a size container. Where it cannot hold the column's minimum (300)
-   AND the chat's (320) the column does not squeeze the chat: it overlays it from the right edge, as the phone's drawer does, and
-   its divider goes (there is no edge to drag). 620 = 300 + 320. */
-.fy-ferret-row {
-  position: relative;
+/* THE CHAT FLOOR: the frame around the row that holds the chat and the column is a size container. Where it cannot hold the column's minimum (300)
+   AND the chat's (320) the column does not squeeze the chat and does NOT lie over it either (it hid the composer and its Send
+   button): the row turns into a stack, the chat above and the column BELOW it, the chat keeping its composer whole and the column
+   taking the lower share of the height. Its divider goes (there is no side edge to drag). 620 = 300 + 320. */
+.fy-ferret-frame {
   container-type: inline-size;
   container-name: ferret-row;
 }
+.fy-ferret-row {
+  position: relative;
+}
 @container ferret-row (max-width: 619.98px) {
+  .fy-ferret-row {
+    flex-direction: column;
+  }
   .fy-ferret-side {
-    position: absolute;
-    inset-block: 0;
-    inset-inline-end: 0;
-    z-index: 6;
-    width: min(var(--fy-w-ferret-side, 400px), 100%);
+    flex: 0 0 min(var(--fy-ferret-side-stacked, 46%), 60dvh);
+    width: 100%;
     min-width: 0;
     max-width: 100%;
-    background: var(--surface);
-    box-shadow: -8px 0 24px rgb(0 0 0 / 0.18);
+    border-left: 0;
+    border-top: var(--border-width) solid var(--border);
   }
   .fy-resize--ferret-side {
     display: none;

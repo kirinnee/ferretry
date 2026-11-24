@@ -101,6 +101,37 @@ export function newTabChoices(panels: readonly PanelRef[]): readonly NewTabChoic
 export const tabOrChat = (tabs: readonly PhoneTab[], key: string): string =>
   tabs.some(tab => tab.key === key) ? key : CHAT_TAB;
 
+/**
+ * WHICH TABS A ROW OF A GIVEN WIDTH CAN SHOW WHOLE. A phone's row is one line and never shows half a label: the tabs that fit
+ * stay (in order), the rest go behind a "More" button, and the tab on show is always among those drawn, taking the place of the
+ * last one that fits (so choosing a tab from "More" puts it in the row). `widths` are the tabs' own widths, `gap` the space between
+ * two, `room` the width the row has once the button (`more`, with its own gap) is reserved. A row not measured yet (`room` of 0
+ * or less) shows every tab, and the first tab is never hidden.
+ */
+export function fitTabs(
+  tabs: readonly PhoneTab[],
+  widths: ReadonlyMap<string, number>,
+  active: string,
+  { room, gap, more }: { readonly room: number; readonly gap: number; readonly more: number },
+): { readonly shown: readonly PhoneTab[]; readonly hidden: readonly PhoneTab[] } {
+  const widthOf = (tab: PhoneTab): number => widths.get(tab.key) ?? 0;
+  const span = (list: readonly PhoneTab[]): number =>
+    list.reduce((sum, tab) => sum + widthOf(tab), 0) + gap * Math.max(0, list.length - 1);
+  if (room <= 0 || span(tabs) <= room + more + gap) return { shown: tabs, hidden: [] };
+  const budget = room;
+  const chosen: PhoneTab[] = [];
+  for (const tab of tabs) {
+    if (chosen.length > 0 && span([...chosen, tab]) > budget) break;
+    chosen.push(tab);
+  }
+  const current = tabs.find(tab => tab.key === active);
+  if (current !== undefined && !chosen.includes(current)) {
+    while (chosen.length > 1 && span([...chosen, current]) > budget) chosen.pop();
+    chosen.push(current);
+  }
+  return { shown: chosen, hidden: tabs.filter(tab => !chosen.includes(tab)) };
+}
+
 /** WAI-ARIA tab keys over the chips. No wrap: the row has two real ends. */
 export function nextTab(tabs: readonly PhoneTab[], current: string, key: string): string | null {
   const index = tabs.findIndex(tab => tab.key === current);

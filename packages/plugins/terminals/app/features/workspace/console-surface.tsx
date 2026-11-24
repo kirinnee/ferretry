@@ -176,6 +176,7 @@ export function ConsoleSurface({
         daemon={connection}
         live
         readSnapshot={reader}
+        wrapLines
         refreshKey={refreshKey}
         scope={scope}
         {...(font === undefined ? {} : { fontFamily: font })}
@@ -200,7 +201,7 @@ export function ConsoleSurface({
           }}
           onInput={onInput}
           onKeyDown={onKeyDown}
-          placeholder={`Type here — keys go to ${whose} pane as you press them`}
+          placeholder={`Keys go to ${whose} pane`}
           ref={inputRef}
           spellCheck={false}
           type="text"

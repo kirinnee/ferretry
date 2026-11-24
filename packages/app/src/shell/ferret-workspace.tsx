@@ -177,41 +177,43 @@ export function FerretWorkspace({ daemon, subject, chat, canControl = true }: Fe
         showPanel={reveal}
         shows={shows}
       >
-        <div className="fy-ferret-row flex min-h-0 min-w-0 flex-1">
-          {chat}
-          {panels.length === 0 ? null : open ? (
-            <ResizeHandle edge="start" label="side panel" panel="ferret-side" />
-          ) : null}
-          {panels.length > 0 && (mounted || open) ? (
-            <aside
-              aria-label="Ferret side panel"
-              className="fy-ferret-side"
-              data-ferret-side=""
-              id={sideId}
-              style={open ? undefined : { display: 'none' }}
-            >
-              <PhoneTabRow
-                active={activeTab}
-                choices={newTabChoices(panels)}
-                label="Side panel tabs"
-                onChoose={choose}
-                onSelect={setChosenTab}
-                rowId={rowId}
-                tabs={tabs}
-                trailing={<SideToggle controls={sideId} daemon={daemon} open={true} subject={subject} />}
-              />
-              <PanelSlot
-                daemon={daemon}
-                phone={{ active: activeTab, labelledBy: key => phoneChipId(rowId, key) }}
-                slot={SIDE}
-                subject={subject}
-                {...(intent === undefined ? {} : { props: { intent } })}
-              />
-            </aside>
-          ) : null}
-          {panels.length === 0 || open ? null : (
-            <SideToggle controls={sideId} daemon={daemon} open={false} subject={subject} />
-          )}
+        <div className="fy-ferret-frame flex min-h-0 min-w-0 flex-1">
+          <div className="fy-ferret-row flex min-h-0 min-w-0 flex-1">
+            {chat}
+            {panels.length === 0 ? null : open ? (
+              <ResizeHandle edge="start" label="side panel" panel="ferret-side" />
+            ) : null}
+            {panels.length > 0 && (mounted || open) ? (
+              <aside
+                aria-label="Ferret side panel"
+                className="fy-ferret-side"
+                data-ferret-side=""
+                id={sideId}
+                style={open ? undefined : { display: 'none' }}
+              >
+                <PhoneTabRow
+                  active={activeTab}
+                  choices={newTabChoices(panels)}
+                  label="Side panel tabs"
+                  onChoose={choose}
+                  onSelect={setChosenTab}
+                  rowId={rowId}
+                  tabs={tabs}
+                  trailing={<SideToggle controls={sideId} daemon={daemon} open={true} subject={subject} />}
+                />
+                <PanelSlot
+                  daemon={daemon}
+                  phone={{ active: activeTab, labelledBy: key => phoneChipId(rowId, key) }}
+                  slot={SIDE}
+                  subject={subject}
+                  {...(intent === undefined ? {} : { props: { intent } })}
+                />
+              </aside>
+            ) : null}
+            {panels.length === 0 || open ? null : (
+              <SideToggle controls={sideId} daemon={daemon} open={false} subject={subject} />
+            )}
+          </div>
         </div>
       </FerretWorkspaceActionsProvider>
     );

@@ -335,6 +335,16 @@ describe('the ferret page’s side panel at a desk', () => {
   }
 });
 
+/** A phone's tab: its chip when the row has room for it, else the entry in "More tabs" (the row never shows half a label). */
+const tapTab = async (tab: Page, label: string): Promise<void> => {
+  const chip = tab.locator('[data-phone-chip]', { hasText: label });
+  if ((await chip.count()) > 0) await chip.tap();
+  else {
+    await tab.locator('[data-phone-more]').tap();
+    await tab.locator('[role="menuitem"]', { hasText: label }).tap();
+  }
+};
+
 describe('the ferret page on a phone keeps its chips', () => {
   for (const mode of MODES) {
     it(`${mode}: Chat, then the Terminal and the Browser chips each show one panel full width`, async () => {
@@ -342,10 +352,10 @@ describe('the ferret page on a phone keeps its chips', () => {
       try {
         expect(await tab.locator(ASIDE).count(), 'no side column on a phone').toBe(0);
         await shot(tab, PHONE, mode, 'chat');
-        await tab.locator('[data-phone-chip]', { hasText: 'Terminals' }).tap();
+        await tapTab(tab, 'Terminals');
         await tab.waitForSelector('[data-panel="terminals.terminals"][data-phone-shown]');
         await shot(tab, PHONE, mode, 'terminal');
-        await tab.locator('[data-phone-chip]', { hasText: 'Browser' }).tap();
+        await tapTab(tab, 'Browser');
         await tab.waitForSelector('[data-panel="browsers.browser"][data-phone-shown]');
         await shot(tab, PHONE, mode, 'browser');
         expect(await tab.locator('[data-panel][data-phone-shown]').count(), 'one panel at a time').toBe(1);
@@ -469,4 +479,116 @@ describe('the divider uses the drawn width, not the saved one', () => {
       await close();
     }
   });
+});
+
+/**
+ * THE FERRET PAGE CLIPS NO WORD AND KEEPS ITS COMPOSER (O11 R7, O9-12): the owner's line is "clips no text, not crammed".
+ *  - the Console at a desk shows every character of the pane and of its input's hint, with no sideways scrolling to find them;
+ *  - the phone's tab row never shows half a label: a tab is whole or it is in the "More" menu, and Browser and Files can be reached;
+ *  - where the row cannot hold the column beside a 320px chat (768, 800) the column sits BELOW the chat, so the composer and its
+ *    Send button stay on screen and clickable.
+ */
+describe('the ferret page clips no text and keeps its composer', () => {
+  /** How wide the Console's input hint is drawn, against the room the input has for it. */
+  const hintFit = async (tab: Page) =>
+    await tab.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>('[data-console-input]');
+      if (input === null) throw new Error('no console input');
+      const style = getComputedStyle(input);
+      const canvas = document.createElement('canvas').getContext('2d');
+      if (canvas === null) throw new Error('no canvas');
+      canvas.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      return { hint: canvas.measureText(input.placeholder).width, room: input.clientWidth - padding };
+    });
+
+  for (const mode of MODES)
+    it(`${mode}: the Console at 1440 shows its whole pane and its whole hint`, async () => {
+      const { tab, close } = await open(DESK, mode);
+      try {
+        await openColumn(tab);
+
+        await tab.waitForFunction(() => document.querySelector('pre')?.textContent?.includes('turn-001.md') === true);
+        const sideways = await tab.evaluate(() => {
+          const scroller = document.querySelector<HTMLElement>('[data-testid="terminal-snapshot-scroller"]');
+          return scroller === null ? -1 : scroller.scrollWidth - scroller.clientWidth;
+        });
+        expect(sideways, 'no line of the pane runs past its right edge').toBeLessThanOrEqual(1);
+        const { hint, room } = await hintFit(tab);
+        expect(hint, 'the input hint fits the field').toBeLessThanOrEqual(room);
+        await shot(tab, DESK, mode, 'r7-console');
+      } finally {
+        await close();
+      }
+    });
+
+  for (const mode of MODES)
+    it(`${mode}: the phone's tab row shows whole labels only, and Browser and Files are one tap away`, async () => {
+      const { tab, close } = await open(PHONE, mode);
+      try {
+        const half = await tab.evaluate(() => {
+          const row = document.querySelector('[data-phone-tab-row] [role="tablist"]');
+          if (row === null) throw new Error('no tab row');
+          const edge = row.getBoundingClientRect();
+          return [...row.querySelectorAll<HTMLElement>('[data-phone-chip]')]
+            .filter(chip => {
+              const box = chip.getBoundingClientRect();
+              return box.left < edge.left - 0.5 || box.right > edge.right + 0.5;
+            })
+            .map(chip => chip.textContent);
+        });
+        expect(half, 'no chip is cut by the row edge').toEqual([]);
+        await shot(tab, PHONE, mode, 'r7-tabs');
+        await tab.locator('[data-phone-more]').tap();
+        const reachable = await tab.locator('[role="menuitem"]').allInnerTexts();
+        expect(reachable.join('|')).toContain('Browser');
+        expect(reachable.join('|')).toContain('Files');
+        await shot(tab, PHONE, mode, 'r7-tabs-more');
+        await tab.locator('[role="menuitem"]', { hasText: 'Browser' }).tap();
+        await tab.waitForSelector('[data-panel="browsers.browser"][data-phone-shown]');
+        expect(
+          await tab.locator('[data-phone-chip="browsers.browser"]').count(),
+          'a tab chosen from More takes a place in the row',
+        ).toBe(1);
+        await shot(tab, PHONE, mode, 'r7-tabs-browser');
+      } finally {
+        await close();
+      }
+    });
+
+  for (const viewport of [TABLET, MIDDLE])
+    for (const mode of MODES)
+      it(`${viewport.name} ${mode}: with the column open the composer is whole and Send can be pressed`, async () => {
+        const { tab, close } = await open(viewport, mode);
+        try {
+          await openColumn(tab);
+          await tab.locator('[data-composer-send]').waitFor();
+          const covered = await tab.evaluate(
+            ([aside]) => {
+              const send = document.querySelector<HTMLElement>('[data-composer-send]');
+              const side = document.querySelector(aside as string);
+              if (send === null || side === null) throw new Error('no composer or column');
+              const box = send.getBoundingClientRect();
+              const column = side.getBoundingClientRect();
+              const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+              return {
+                overlaps:
+                  box.right > column.left &&
+                  box.left < column.right &&
+                  box.bottom > column.top &&
+                  box.top < column.bottom,
+                reachable: hit !== null && send.contains(hit),
+                inside: box.right <= window.innerWidth && box.bottom <= window.innerHeight,
+              };
+            },
+            [ASIDE],
+          );
+          expect(covered.inside, 'Send is on screen').toBe(true);
+          expect(covered.overlaps, 'the column does not lie over Send').toBe(false);
+          expect(covered.reachable, 'what is drawn at Send is Send').toBe(true);
+          await shot(tab, viewport, mode, 'r7-composer');
+        } finally {
+          await close();
+        }
+      });
 });
