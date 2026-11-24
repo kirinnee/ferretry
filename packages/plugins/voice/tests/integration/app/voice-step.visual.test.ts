@@ -29,12 +29,15 @@ import {
   sharedChromium,
   walkFocusRings,
 } from '@ferretry/app/testing/browser';
+import { ON_DEVICE_MODELS } from '../../../app/lib/stt/model-catalog.ts';
 
 setDefaultTimeout(60_000);
 
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_VOICE_STEP_SHOTS_DIR ?? '';
 const FAKE_KEY = 'gsk-fake-key-0123456789abcdef';
+/** Every engine card under "Show every engine": each catalog model, then the browser's card and the off card the grid adds. */
+const ENGINE_CARDS = ON_DEVICE_MODELS.length + 2;
 
 let browser: Awaited<ReturnType<typeof sharedChromium>>;
 let directory = '';
@@ -490,7 +493,7 @@ describe('the Voice first-run page', () => {
     const { tab, close } = await open(VIEWPORTS[0], 'studio-light', VOICE, CARD);
     try {
       await tab.getByText('Show every engine').click();
-      await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 11);
+      await tab.waitForFunction(n => document.querySelectorAll('.fy-engine-card').length === n, ENGINE_CARDS);
       expect(
         await tab
           .locator('.fy-voice-step button:not(.fy-engine-mini):not(.fy-engine-info):not([data-test-action])')
@@ -619,7 +622,7 @@ describe('r11-1b G3: the Voice and Speed-ups buttons and their focus ring', () =
             expect(Math.abs(button.w - (installs[0]?.w ?? 0))).toBeLessThanOrEqual(1);
           }
           await tab.getByText('Show every engine').click();
-          await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 11);
+          await tab.waitForFunction(n => document.querySelectorAll('.fy-engine-card').length === n, ENGINE_CARDS);
           const all = (await bodyButtons(tab, '.fy-voice-step .fy-engine-card')).filter(button =>
             /^(Install|Resume)/.test(button.label),
           );
@@ -702,17 +705,18 @@ describe('r11-1b G3: the Voice and Speed-ups buttons and their focus ring', () =
               // r11-1c C2: the same walk AFTER "Show every engine" is open, plus every engine card by the arrow keys (the cards are
               // one radio group: one Tab stop). The last cards' rings used to be cut at the bottom of the frame (5.4 px).
               await tab.getByText('Show every engine').click();
-              await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 11);
+              await tab.waitForFunction(n => document.querySelectorAll('.fy-engine-card').length === n, ENGINE_CARDS);
               const open = await walkFocusRings(tab, 150);
               expect(open.violations).toEqual([]);
               // The ring is drawn INSIDE the card, so no scroll can ever cut it: every case below is measured where the browser left
               // the focus (nothing scrolled by the probe), and the walk by the arrows must reach every engine, each a different one.
               const arrows = await arrowWalkRings(tab, 'input.fy-engine-radio', 'data-engine');
-              expect(arrows.ids.length).toBe(10);
-              expect(new Set(arrows.ids).size, `ArrowDown reached ten different engines: ${arrows.ids.join(',')}`).toBe(
-                10,
-              );
-              expect(arrows.stops.length, 'every engine card was measured').toBe(10);
+              expect(arrows.ids.length).toBe(ENGINE_CARDS);
+              expect(
+                new Set(arrows.ids).size,
+                `ArrowDown reached every engine card, each a different one: ${arrows.ids.join(',')}`,
+              ).toBe(ENGINE_CARDS);
+              expect(arrows.stops.length, 'every engine card was measured').toBe(ENGINE_CARDS);
               // The two cases a scroll cannot be trusted with: a card 2 px under the frame top, pressed then Shift; and a card the frame
               // has left partly out of view, focused with preventScroll under keyboard modality.
               const edge = await edgeRings(tab, '.fy-engine-card', 'input.fy-engine-radio');
@@ -769,11 +773,11 @@ describe('r11-1b G3: the Voice and Speed-ups buttons and their focus ring', () =
               }
               // All three cases in one object, so a failure names every case that broke.
               expect({
-                'ArrowDown walk (10 cards)': arrows.violations,
+                [`ArrowDown walk (${ENGINE_CARDS} cards)`]: arrows.violations,
                 'press + Shift, card 2 px from the top': edge.nearTop.stop?.violations,
                 'preventScroll focus, card partly hidden': edge.partlyHidden.stop?.violations,
               }).toEqual({
-                'ArrowDown walk (10 cards)': [],
+                [`ArrowDown walk (${ENGINE_CARDS} cards)`]: [],
                 'press + Shift, card 2 px from the top': [],
                 'preventScroll focus, card partly hidden': [],
               });

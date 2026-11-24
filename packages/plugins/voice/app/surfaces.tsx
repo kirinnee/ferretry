@@ -179,7 +179,7 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
   // First run's two client steps (Onboarding's steps screen hands each its host as `props.step`).
   const VoiceStepPanel = (props: PanelProps) => (
     <Boundary>
-      <VoiceStepContainer step={props.step} />
+      <VoiceStepContainer step={props.step} daemon={THIS_DAEMON} />
     </Boundary>
   );
   const SpeedupsStepPanel = (props: PanelProps) => (

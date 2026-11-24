@@ -59,7 +59,7 @@ function StateChip({ view }: { readonly view: VoiceEngineView }) {
 
 interface VoiceModePanelProps {
   readonly view: VoiceEngineView;
-  readonly talk?: Pick<TalkToTestProps, 'client' | 'createMic'> | undefined;
+  readonly talk?: Pick<TalkToTestProps, 'client' | 'createMic' | 'limitMs'> | undefined;
   readonly hear?: Omit<HearItProps, 'machine'> | undefined;
   readonly busy: boolean;
   readonly error: string | null;
@@ -240,7 +240,7 @@ export function VoiceModeSettings({
   readonly connection: DaemonConnection;
   readonly createClient?: VoiceEngineClientFactory | undefined;
   /** A suite's own socket and microphone for Talk to test; the page uses the shell's client and the real microphone. */
-  readonly talk?: Pick<TalkToTestProps, 'client' | 'createMic'> | undefined;
+  readonly talk?: Pick<TalkToTestProps, 'client' | 'createMic' | 'limitMs'> | undefined;
   /** A suite's own sound and socket for the reply voice's "Hear it". */
   readonly hear?: Omit<HearItProps, 'machine'> | undefined;
 }) {
