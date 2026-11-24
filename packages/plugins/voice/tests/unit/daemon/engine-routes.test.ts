@@ -136,7 +136,7 @@ describe('Install checks the disk through the host', () => {
       plugins: [voice],
       fakes: { vault: new FakeVault(), gate: new FakeGate(), ferrets: new FakeFerrets() },
       fetch: refused,
-      hostFacts: { diskFreeBytes: async () => free } as unknown as HostFactsPort,
+      hostFacts: { platform: process.platform, cpus: 4, diskFreeBytes: async () => free } as unknown as HostFactsPort,
     });
 
   async function installed(free: number | undefined) {

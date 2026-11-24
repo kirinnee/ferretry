@@ -18,7 +18,11 @@ async function host(fetch: (url: URL) => Response | Promise<Response> = refused)
     plugins: [voice],
     fakes: { vault: new FakeVault(), gate: new FakeGate(), ferrets: new FakeFerrets() },
     fetch,
-    hostFacts: { diskFreeBytes: async () => undefined } as unknown as HostFactsPort,
+    hostFacts: {
+      platform: process.platform,
+      cpus: 4,
+      diskFreeBytes: async () => undefined,
+    } as unknown as HostFactsPort,
   });
 }
 
