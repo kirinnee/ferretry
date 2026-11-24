@@ -131,7 +131,7 @@ describe('/mcp — the real SDK round trip', () => {
       should(listed(destructive).annotations).containEql({ readOnlyHint: false, destructiveHint: true });
     for (const write of ['send_to_ferret', 'answer_attention', 'spawn_ferret'])
       should(listed(write).annotations).containEql({ readOnlyHint: false, destructiveHint: false });
-    should(listed('get_ferret_output').inputSchema.properties.lines?.maximum).equal(200);
+    should(listed('get_ferret_output').inputSchema.properties.lines?.maximum).equal(100_000);
     should(listed('send_to_ferret').inputSchema.properties.message?.maxLength).equal(8000);
   });
 
@@ -153,7 +153,7 @@ describe('/mcp — the real SDK round trip', () => {
 
   it('refuses an invalid argument as a protocol error, never reaching the daemon', async () => {
     const r = rig();
-    const reply = await tool(r, 'get_ferret_output', { ferret: 'x', lines: 5000 });
+    const reply = await tool(r, 'get_ferret_output', { ferret: 'x', lines: 0 });
     should(reply.isError || (reply.raw as RpcFailure).error !== undefined).be.true();
     should(r.dispatch.calls.length).equal(0);
   });

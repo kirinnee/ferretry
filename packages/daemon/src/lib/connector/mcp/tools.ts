@@ -378,13 +378,14 @@ const getFerretOutput: ConnectorToolSpec<{ ferret: typeof ferretArg; lines: z.Zo
       .number()
       .int()
       .min(1)
-      .max(OUTPUT_MAX_LINES)
+      // Bounded, but not at the cap: a model that asks for 500 lines gets the last OUTPUT_MAX_LINES, not an error.
+      .max(100_000)
       .optional()
-      .describe(`How many lines, default ${OUTPUT_DEFAULT_LINES}.`),
+      .describe(`How many lines, default ${OUTPUT_DEFAULT_LINES}, at most ${OUTPUT_MAX_LINES}.`),
   },
   run: async ({ ferret, lines }, env) => {
     const view = await resolveFerret(env.gateway, ferret);
-    const wanted = lines ?? OUTPUT_DEFAULT_LINES;
+    const wanted = Math.min(lines ?? OUTPUT_DEFAULT_LINES, OUTPUT_MAX_LINES);
     // Cleaned BEFORE the tail is taken, so a credential is never cut in half and left half-visible.
     const text = await env.clean(await env.gateway.logs(view.config.id));
     const tail = tailText(text, wanted, OUTPUT_MAX_CHARS);

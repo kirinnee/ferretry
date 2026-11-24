@@ -130,6 +130,17 @@ describe('get_ferret_output caps', () => {
     should(lines[1]).equal('line 461');
   });
 
+  it('clamps a request for more than 200 lines to the last 200, instead of refusing it', async () => {
+    const r = rig();
+    r.dispatch.on(sessionsRoute()).on(call => (call.path.endsWith('/logs') ? text(manyLines) : undefined));
+    const reply = await tool(r, 'get_ferret_output', { ferret: 'lizzette', lines: 500 });
+    should(reply.isError).not.be.true();
+    const lines = reply.text.split('\n');
+    should(lines[0]).containEql('this is the last 200 lines.');
+    should(lines.slice(1).length).equal(200);
+    should(lines[lines.length - 1]).equal('line 500');
+  });
+
   it('honours lines up to 200 and the 8000-character hard cap, keeping the newest text', async () => {
     const wide = Array.from({ length: 300 }, (_, n) => `row ${n + 1} ${'x'.repeat(90)}`).join('\n');
     const r = rig();
