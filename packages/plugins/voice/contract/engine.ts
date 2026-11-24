@@ -24,6 +24,26 @@ export const VoiceEngineFailureCodeSchema = z.enum([
 ]);
 export type VoiceEngineFailureCode = z.infer<typeof VoiceEngineFailureCodeSchema>;
 
+/**
+ * WHICH ENGINE RUNS THE FILES, in words a person reads (owner decision O2: WebAssembly first, native when measured too
+ * slow; the measurement is in `docs/design/voice-modes.md`). `native` is sherpa-onnx's own compiled library, fetched at Install like
+ * the models; `wasm` is the slower built-in engine, kept as the fallback for a machine with no native build or whose
+ * native library would not start. Never anything spoken or heard: a kind, a thread count and one fixed sentence.
+ */
+export const VoiceRuntimeSchema = z.strictObject({
+  kind: z.enum(['native', 'wasm']),
+  /** The threads the engine decodes with (1 for the built-in engine, which has no more to give). */
+  threads: z.number().int().positive(),
+  /** One plain sentence: what runs, and when it is the slower one, why. */
+  sentence: z.string().min(1).max(400),
+  /**
+   * Present when this machine runs the slower engine only because it was installed that way (no native engine was ever
+   * tried): the bytes Install would download to switch. Absent when native is running or has already failed here.
+   */
+  upgradeBytes: z.number().int().positive().optional(),
+});
+export type VoiceRuntime = z.infer<typeof VoiceRuntimeSchema>;
+
 /** One self-test: the model loaded and decoded one second of silence. */
 export const VoiceEngineSelfTestSchema = z.strictObject({
   loadMs: NonNegativeFiniteSchema,
@@ -47,6 +67,8 @@ export const VoiceEngineViewSchema = z.strictObject({
   loaded: z.boolean(),
   failure: z.strictObject({ code: VoiceEngineFailureCodeSchema, sentence: z.string().min(1).max(400) }).optional(),
   selfTest: VoiceEngineSelfTestSchema.optional(),
+  /** Which engine runs the models; present once they are installed. */
+  runtime: VoiceRuntimeSchema.optional(),
 });
 export type VoiceEngineView = z.infer<typeof VoiceEngineViewSchema>;
 

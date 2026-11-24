@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { VoiceEngineError } from '../../../contract/index.ts';
 import type { EngineFile } from '../../../daemon/lib/engine/catalog.ts';
 import { IDLE_UNLOAD, LOAD_HEADROOM_BYTES, SpeechEngine } from '../../../daemon/lib/engine/engine.ts';
-import type { EngineFilesPort, SpeechThread } from '../../../daemon/lib/engine/ports.ts';
+import type { EnginePathsPort, SpeechThread } from '../../../daemon/lib/engine/ports.ts';
 import { LOAD_ROLES, type SpeechCall } from '../../../daemon/lib/engine/protocol.ts';
 import { spansFromProbabilities, VAD_CHUNK } from '../../../daemon/lib/engine/spans.ts';
 
@@ -17,11 +17,14 @@ const CATALOG: readonly EngineFile[] = LOAD_ROLES.map(role => ({
 }));
 const TOTAL = CATALOG.length * BODY.byteLength;
 
-class Files implements EngineFilesPort {
+class Files implements EnginePathsPort {
   readonly held = new Map<string, Uint8Array>();
   /** Hand back a window into a larger buffer, as a state read may. */
   windowed = false;
   free: number | undefined = undefined;
+  pathOf(file: { role: string }) {
+    return `/state/voice/models/parakeet/${file.role}`;
+  }
   async freeBytes() {
     return this.free;
   }
@@ -66,6 +69,10 @@ class FakeThread implements SpeechThread {
         return { id: 1, ok: true as const, kind: 'transcribe' as const, text: this.text, decodeMs: 1000 };
       case 'detect':
         return { id: 1, ok: true as const, kind: 'detect' as const, spans: [{ start: 100, end: 900 }] };
+      case 'probe':
+        return { id: 1, ok: true as const, kind: 'probe' as const, version: '2.0.3' };
+      case 'release':
+        return { id: 1, ok: true as const, kind: 'release' as const };
     }
   }
   async terminate() {

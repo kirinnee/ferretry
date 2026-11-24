@@ -264,6 +264,59 @@ voice-worker` with Bun's advanced IPC — not a source path, which a compiled in
 - **`fyd --check`** gets a `voice` line: not installed / installed, version, last self-test (decode one
   bundled synthetic clip), and whether it is hard-capped on this host.
 
+### 2.3.1 Built: the native engine, and what it measured
+
+Owner decision O2 was "WebAssembly first, native only if measured too slow". It was: the reply voice on WebAssembly took
+5.6 s to speak six words (it ran at 2.8× the time the speech lasts, where anything under 1× plays without gaps), so
+every reply had gaps. The native engine described above is now built for both engines (`packages/plugins/voice/daemon/lib/native/`):
+
+- **What is fetched, and when.** At Install, like the models: the three files of sherpa-onnx's official npm platform package
+  (`sherpa-onnx-<platform>-<arch>`, exact version `2.0.3`, the one the WebAssembly engine pins) from the npm CDN, each checked
+  against a pinned size and SHA-256 (linux-x64, linux-arm64, darwin-arm64; every other platform runs WebAssembly and says so).
+  They live in the engine's own folder under `state/voice/models/`, are removed with it, and are hashed AGAIN (size and SHA-256 of the addon and both
+  shared libraries, about 0.1 s next to a 1.4–2 s model load) immediately before EVERY native load, not once per process. **Nothing of them is in the release.** The compiled `fyd` loads the addon by absolute
+  path (`process.dlopen`); `fyd --check` prints a `voice` line that loads it from that binary.
+- **Native first, WebAssembly as the fallback.** Install fetches the library alone and loads it in a worker BEFORE the big
+  model is downloaded, so a machine that cannot run it (no `libstdc++`, a wrong architecture) learns that in seconds and
+  fetches the WebAssembly files instead; it then proves the engine by speaking or decoding once, and falls back the same way
+  if that fails. A refused hash or a failed download is NOT turned into the slower engine: it is shown. Settings says which
+  engine runs, in words, with the reason when it is the slower one, and offers "Switch to the fast engine" to a machine
+  that was installed on WebAssembly.
+- **The reply voice** speaks with the fp32 Kokoro model (326 MB): natively the int8 file is 1.7–3.3× slower on the measured CPU.
+  **Parakeet** decodes with the native recognizer; **Silero stays on onnxruntime-web** (20 s of audio: 195 ms there, 107 ms in
+  sherpa's detector, which also does not expose the per-chunk probabilities the pause decision reads).
+- **Threads:** four at most, never more than the cores less one (`nativeThreads`).
+- **A worker that is only terminated keeps its native models** (Bun frees a handle in a finalizer that needs the collector
+  to run on a later turn of the loop): every load and unload added 0.5–0.7 GB. Unloading a native engine first asks its
+  worker to drop the handles and collect (`collectNative`), then ends the thread; memory is flat across cycles.
+
+Measured on the build box (AWS Xeon Platinum 8488C, 32 vCPU, shared, `nice 10`, load 8–15), same clip and same lines before and after:
+
+|                                                  | WebAssembly (before)        | native (after)                                 |
+| ------------------------------------------------ | --------------------------- | ---------------------------------------------- |
+| Kokoro, 6-word test line, speak time             | 4449 ms (2.74× the speech)  | 462 ms (0.29×)                                 |
+| Kokoro, 12-word line                             | 9.4 s (2.77×)               | 1.0 s (0.28–0.34×)                             |
+| Kokoro, first sound through the voice stream     | 3993 ms                     | 406 ms                                         |
+| Parakeet, 5 s clip                               | 1935 ms                     | 300 ms (4 threads), 730 ms (1)                 |
+| last word → message sent (stream test, 5 s clip) | 3402 / 3439 ms              | 1480 / 1681 ms                                 |
+| memory while loaded (RSS growth)                 | reply 512 MB, speech 1.8 GB | reply ~0.4–0.7 GB, speech ~1.0 GB              |
+| download                                         | reply 164 MB, speech 699 MB | reply 394 MB, speech 719 MB (library included) |
+
+### Declared gaps of the native engine
+
+- **The addon runs IN the daemon process.** The worker is a Bun Worker thread and the library enters through `process.dlopen`,
+  so a native crash (a fault inside sherpa-onnx or onnxruntime, or an out-of-memory kill) takes the whole `fyd` with it, not
+  just the voice; `fyd --check` also `dlopen`s it, in the check process. Moving the engine to a child process is the later
+  real fix; until then WebAssembly (a worker that can only throw) is the engine with no such reach.
+- **Hash then load is not atomic.** The files are verified and then loaded a moment later by the loader itself, so a process
+  that can write the folder between the two could still swap a library in. Declared, not closed: any program running as the
+  same user can already read the vault (docs/secrets.md), so this adds no reach a same-user agent did not hold.
+- **Install is not an audited act yet.** It puts native code into the daemon, and no audit kind fits it; the route declares
+  that in its `audit.skip` text rather than recording it.
+
+What is NOT measured: Apple silicon and linux-arm64 (the pins are the published files' own hashes, loaded by the same
+code, but neither was run), and a heavily loaded machine. The numbers come from `tests/realworld/` with `FY_*_ENGINE=wasm|native`.
+
 ### 2.4 CPU, GPU and memory on the machine
 
 - **CPU, Linux x64 and arm64, macOS arm64:** ONNX Runtime's CPU provider, int8, SIMD (AVX2/AVX-512 on

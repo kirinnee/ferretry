@@ -1,7 +1,7 @@
 // Realworld: downloads the real Kokoro files (165 MB, public, SHA-256 checked) and speaks through the real worker.
 import { describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { availableParallelism, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SocketDownstream } from '@ferretry/kernel/contract';
 import { bunWorkers } from '../../../../core/kernel/host/adapters/process.ts';
@@ -14,6 +14,7 @@ import {
   encodeUplinkUnit,
 } from '../../contract/index.ts';
 import { startReplyThread } from '../../daemon/adapters/worker-speech-thread.ts';
+import { nativeTargetFor, nativeThreads, type NativeParts } from '../../daemon/lib/native/catalog.ts';
 import { REPLY_FILES } from '../../daemon/lib/reply/catalog.ts';
 import { ReplyVoiceEngine } from '../../daemon/lib/reply/engine.ts';
 import type { EnginePathsPort } from '../../daemon/lib/engine/ports.ts';
@@ -27,11 +28,19 @@ import { VoiceStream } from '../../daemon/lib/stream/session.ts';
  *    (audible level, a length a person would take to say it); then the same line asked for over a stream arrives as
  *    audio units in real time. The first-sound time and the real-time factor are printed for the PR and the docs.
  *
- * It downloads about 164 MB from huggingface.co and cdn.jsdelivr.net, so it runs only when asked: FY_REPLY_VOICE_REAL=1.
- * FY_REPLY_VOICE_DIR names a folder to keep the files in between runs (it is created if missing).
+ * It downloads about 380 MB (the native engine and the fp32 model; 164 MB with FY_REPLY_ENGINE=wasm) from huggingface.co
+ * and cdn.jsdelivr.net, so it runs only when asked: FY_REPLY_VOICE_REAL=1. FY_REPLY_VOICE_DIR names a folder to keep the files
+ * in between runs (it is created if missing). On a Nix shell without libstdc++ the native library cannot start and the engine
+ * (correctly) says so and runs WebAssembly: put the compiler's lib folder on LD_LIBRARY_PATH to measure the native one.
  */
 const ASKED = process.env.FY_REPLY_VOICE_REAL === '1';
 const LINE = 'I found the bug, it was a missing await, and I have fixed it.';
+/** `FY_REPLY_ENGINE=wasm` measures the fallback; anything else the native engine this machine can run (WebAssembly where none). */
+const NATIVE: NativeParts = {
+  target: process.env.FY_REPLY_ENGINE === 'wasm' ? undefined : nativeTargetFor(process.platform, process.arch),
+  threads: () => nativeThreads(availableParallelism()),
+  platform: `${process.platform}-${process.arch}`,
+};
 
 class DiskFiles implements EnginePathsPort {
   constructor(private readonly dir: string) {}
@@ -85,8 +94,9 @@ describe.skipIf(!ASKED)('the reply voice, with the real model', () => {
     const kept = process.env.FY_REPLY_VOICE_DIR;
     const dir = kept ?? (await mkdtemp(join(tmpdir(), 'ferretry-reply-voice-')));
     const log = (message: string, fields?: unknown) => console.log(message, fields ?? '');
-    const make = (catalog: typeof REPLY_FILES, files: DiskFiles) =>
+    const make = (catalog: typeof REPLY_FILES, files: DiskFiles, native: NativeParts = NATIVE) =>
       new ReplyVoiceEngine({
+        native,
         http: { request: async (url, init) => await fetch(url, init) },
         files,
         clock: { after: () => () => undefined },
@@ -114,6 +124,26 @@ describe.skipIf(!ASKED)('the reply voice, with the real model', () => {
       expect(await redFiles.size({ role: 'tokens' })).toBeUndefined();
       await rm(wrongDir, { recursive: true, force: true });
 
+      // RED, native: the library's pinned hash is wrong, so the download is refused, nothing of it is kept, and the install
+      // does not quietly run WebAssembly instead (a file that is not the pinned one is the person's to see).
+      if (NATIVE.target !== undefined) {
+        const wrongNative = await mkdtemp(join(tmpdir(), 'ferretry-reply-voice-red-native-'));
+        const nativeFiles = new DiskFiles(wrongNative);
+        const [addon, ...libraries] = NATIVE.target.files;
+        const forged = {
+          ...NATIVE.target,
+          files: [{ ...(addon as NonNullable<typeof addon>), sha256: '0'.repeat(64) }, ...libraries],
+        };
+        const redNative = make(REPLY_FILES, nativeFiles, { ...NATIVE, target: forged });
+        await redNative.install();
+        await redNative.settled();
+        const refusedNative = await redNative.view();
+        expect(refusedNative.state).toBe('failed');
+        expect(refusedNative.failure?.code).toBe('hash_mismatch');
+        expect(await nativeFiles.size(addon as NonNullable<typeof addon>)).toBeUndefined();
+        await rm(wrongNative, { recursive: true, force: true });
+      }
+
       // GREEN: the real files, installed, loaded and spoken.
       const files = new DiskFiles(dir);
       const engine = make(REPLY_FILES, files);
@@ -121,7 +151,8 @@ describe.skipIf(!ASKED)('the reply voice, with the real model', () => {
       await engine.settled();
       const ready = await engine.view();
       expect(ready.state).toBe('ready');
-      console.log('self-test', ready.selfTest);
+      console.log('self-test', ready.selfTest, 'runtime', ready.runtime);
+      expect(ready.runtime?.kind).toBe(NATIVE.target === undefined ? 'wasm' : 'native');
 
       const runs = [];
       for (let run = 0; run < 3; run += 1) runs.push(await engine.speak(LINE));

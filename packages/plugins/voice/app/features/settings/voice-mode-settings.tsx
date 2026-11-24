@@ -8,7 +8,7 @@
  * It names what leaves the browser (nothing now: Install only asks the machine to download public files) and what it
  * costs the machine (disk while installed, memory only while in use), because the person decides that.
  */
-import { AlertTriangle, Check, Download, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, Download, Trash2, Zap } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { VoiceEngineView } from '../../../contract/index.ts';
 import { useDeviceVoiceSettingsStore, useLiveVoiceSettings } from '../../hooks/use-live-voice-settings.ts';
@@ -123,8 +123,8 @@ function VoiceModePanel({
               and is turned into words there.
             </p>
             <p className="m-0">
-              Installing downloads {megabytes(view.sizeBytes)} once, and uses about 1.8 GB of memory only while you are
-              talking: it lets go of it after 10 idle minutes.
+              Installing downloads {megabytes(view.sizeBytes)} once, and uses up to about 1.8 GB of memory only while
+              you are talking: it lets go of it after 10 idle minutes.
             </p>
           </div>
         }
@@ -156,6 +156,18 @@ function VoiceModePanel({
                 : `Installed on ${view.machine}. It loaded in ${seconds(view.selfTest.loadMs)} on its last start.`}
             </p>
           )}
+          {view.state === 'ready' && view.runtime !== undefined && (
+            <p
+              className="fy-vs-note"
+              data-tone={view.runtime.kind === 'native' ? 'ok' : undefined}
+              data-voice-runtime={view.runtime.kind}
+            >
+              {view.runtime.kind === 'native' && (
+                <Zap size={14} aria-hidden="true" className="mr-1 inline align-text-bottom" />
+              )}
+              {view.runtime.sentence}
+            </p>
+          )}
           {view.state === 'failed' && view.failure !== undefined && (
             <p role="alert" className="fy-vs-note" data-tone="warn" data-voice-engine-failure={view.failure.code}>
               <AlertTriangle size={14} aria-hidden="true" className="mr-1 inline align-text-bottom" />
@@ -167,6 +179,18 @@ function VoiceModePanel({
               <button type="button" className="kt-btn" data-variant="primary" disabled={busy} onClick={onInstall}>
                 <Download size={14} aria-hidden="true" />{' '}
                 {view.state === 'failed' ? 'Try again' : `Install on ${view.machine} (${megabytes(view.sizeBytes)})`}
+              </button>
+            )}
+            {view.state === 'ready' && view.runtime?.upgradeBytes !== undefined && (
+              <button
+                type="button"
+                className="kt-btn"
+                data-variant="primary"
+                data-voice-upgrade=""
+                disabled={busy}
+                onClick={onInstall}
+              >
+                <Zap size={14} aria-hidden="true" /> Switch to the fast engine ({megabytes(view.runtime.upgradeBytes)})
               </button>
             )}
             {(view.state === 'ready' || (view.state === 'failed' && view.doneBytes > 0)) && (

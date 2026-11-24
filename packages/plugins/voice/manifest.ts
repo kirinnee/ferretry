@@ -42,6 +42,8 @@ export default definePlugin({
 
   // The machine speech engine's worker thread (voice mode): `fyd --check` starts it, so a binary without it is seen at once.
   workers: ['speech', 'reply'],
+  // `fyd --check` loads the native speech engine (once Install has fetched it) from this binary: the `voice` line.
+  selftest: ['voice'],
 
   // Gate to record the messages the stream sends; Ferrets to say which ferret a name means (as a typed send does).
   needs: { vault: VaultPort, gate: GatePort, ferrets: FerretsPort },
@@ -72,8 +74,10 @@ export default definePlugin({
         caller: 'person',
         capability: cap('voice', 'configure'),
         noStore: true,
-        // Public model files, hash-checked; no secret is sent and none is returned.
-        audit: { skip: 'downloads pinned public speech files onto this machine; carries no secret and no audio' },
+        // Public model files and one native library (the install puts native CODE in the daemon), all pinned and hash-checked; no secret is sent and none is returned.
+        audit: {
+          skip: 'downloads pinned files onto this machine, INCLUDING a compiled native library the daemon later loads into its own process (hash-checked before every load); no audit kind records it yet (declared gap, docs/design/voice-modes.md §2.3.1); carries no secret and no audio',
+        },
         guard: { none: 'a state, byte counts and one fixed sentence; no audio and no transcript' },
       }),
       route('DELETE /v1/voice/engine', {
@@ -98,7 +102,9 @@ export default definePlugin({
         caller: 'person',
         capability: cap('voice', 'configure'),
         noStore: true,
-        audit: { skip: 'downloads pinned public voice files onto this machine; carries no secret and no audio' },
+        audit: {
+          skip: 'downloads pinned files onto this machine, INCLUDING a compiled native library the daemon later loads into its own process (hash-checked before every load); no audit kind records it yet (declared gap, docs/design/voice-modes.md §2.3.1); carries no secret and no audio',
+        },
         guard: { none: 'a state, byte counts and one fixed sentence; no audio and no text that was spoken' },
       }),
       route('DELETE /v1/voice/reply-voice', {

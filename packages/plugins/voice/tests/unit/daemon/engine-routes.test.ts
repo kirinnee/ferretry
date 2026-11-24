@@ -8,6 +8,7 @@ import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { ENGINE_HOSTS, VoiceEngineViewSchema } from '../../../contract/index.ts';
 import voice from '../../../daemon/index.ts';
 import { ENGINE_FILES } from '../../../daemon/lib/engine/catalog.ts';
+import { nativeTargetFor } from '../../../daemon/lib/native/catalog.ts';
 import manifest from '../../../manifest.ts';
 
 const refused = (url: URL): Response => new Response(`no ${url.pathname}`, { status: 503 });
@@ -52,7 +53,16 @@ describe('the machine speech engine routes', () => {
     expect(response.status).toBe(200);
     const view = VoiceEngineViewSchema.parse(response.json());
     expect(view).toMatchObject({ state: 'not_installed', doneBytes: 0, loaded: false });
-    expect(view.sizeBytes).toBe(ENGINE_FILES.reduce((sum, file) => sum + file.bytes, 0));
+    // What Install downloads on THIS machine: the native engine's library beside the models where there is one (the
+    // WebAssembly runtime is then not fetched), the whole WebAssembly set where there is not.
+    const target = nativeTargetFor(process.platform, process.arch);
+    const wasm = ENGINE_FILES.reduce((total, file) => total + file.bytes, 0);
+    expect(view.sizeBytes).toBe(
+      target === undefined
+        ? wasm
+        : ENGINE_FILES.filter(file => file.role !== 'sherpa-wasm').reduce((total, file) => total + file.bytes, 0) +
+            target.files.reduce((total, file) => total + file.bytes, 0),
+    );
     expect(view.sizeBytes).toBeGreaterThan(680_000_000);
   });
 
@@ -126,7 +136,7 @@ describe('Install checks the disk through the host', () => {
       plugins: [voice],
       fakes: { vault: new FakeVault(), gate: new FakeGate(), ferrets: new FakeFerrets() },
       fetch: refused,
-      hostFacts: { diskFreeBytes: async () => free } as unknown as HostFactsPort,
+      hostFacts: { platform: process.platform, cpus: 4, diskFreeBytes: async () => free } as unknown as HostFactsPort,
     });
 
   async function installed(free: number | undefined) {

@@ -4,7 +4,7 @@
  * read by this device's own voice. "Hear it" speaks one sentence through the real path (stream, machine, sound) and says
  * how long the first sound took, so what the person hears and what it cost are the same test.
  */
-import { AlertTriangle, Check, Download, Trash2, Volume2 } from 'lucide-react';
+import { AlertTriangle, Check, Download, Trash2, Volume2, Zap } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReplyVoiceView } from '../../../contract/index.ts';
 import type { ReplyState } from '../../../contract/index.ts';
@@ -307,7 +307,7 @@ export function ReplyVoiceRow({ state, speechReady, hear, provider = 'kokoro' }:
           </p>
           <p className="m-0">
             Without it, this device&apos;s own voice reads the replies. Installing downloads {megabytes(view.sizeBytes)}{' '}
-            once; it uses about 0.5 GB of memory only while it is speaking.
+            once; it uses up to about 0.8 GB of memory only while it is speaking.
           </p>
         </div>
       }
@@ -339,6 +339,18 @@ export function ReplyVoiceRow({ state, speechReady, hear, provider = 'kokoro' }:
               : `Installed on ${view.machine}. On its last test it spoke ${seconds(view.selfTest.audioMs)} of speech in ${seconds(view.selfTest.speakMs)} (${view.selfTest.realTimeFactor.toFixed(1)}× the time it lasts).`}
           </p>
         )}
+        {view.state === 'ready' && view.runtime !== undefined && (
+          <p
+            className="fy-vs-note"
+            data-tone={view.runtime.kind === 'native' ? 'ok' : undefined}
+            data-voice-runtime={view.runtime.kind}
+          >
+            {view.runtime.kind === 'native' && (
+              <Zap size={14} aria-hidden="true" className="mr-1 inline align-text-bottom" />
+            )}
+            {view.runtime.sentence}
+          </p>
+        )}
         {view.state === 'failed' && view.failure !== undefined && (
           <p role="alert" className="fy-vs-note" data-tone="warn" data-voice-reply-failure={view.failure.code}>
             <AlertTriangle size={14} aria-hidden="true" className="mr-1 inline align-text-bottom" />
@@ -350,6 +362,18 @@ export function ReplyVoiceRow({ state, speechReady, hear, provider = 'kokoro' }:
             <button type="button" className="kt-btn" data-variant="primary" disabled={busy} onClick={state.install}>
               <Download size={14} aria-hidden="true" />{' '}
               {view.state === 'failed' ? 'Try again' : `Install on ${view.machine} (${megabytes(view.sizeBytes)})`}
+            </button>
+          )}
+          {view.state === 'ready' && view.runtime?.upgradeBytes !== undefined && (
+            <button
+              type="button"
+              className="kt-btn"
+              data-variant="primary"
+              data-voice-upgrade=""
+              disabled={busy}
+              onClick={state.install}
+            >
+              <Zap size={14} aria-hidden="true" /> Switch to the fast engine ({megabytes(view.runtime.upgradeBytes)})
             </button>
           )}
           {(view.state === 'ready' || (view.state === 'failed' && view.doneBytes > 0)) && (

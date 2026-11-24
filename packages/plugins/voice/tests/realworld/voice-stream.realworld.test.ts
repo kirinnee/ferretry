@@ -7,8 +7,8 @@ import { bunWorkers } from '../../../../core/kernel/host/adapters/process.ts';
 import { UNIT_SAMPLES, decodeDownlinkUnit, encodeUplinkUnit, type StreamSnapshot } from '../../contract/index.ts';
 import { startSpeechThread } from '../../daemon/adapters/worker-speech-thread.ts';
 import { SpeechEngine } from '../../daemon/lib/engine/engine.ts';
-import type { EngineFilesPort } from '../../daemon/lib/engine/ports.ts';
 import { VoiceStream } from '../../daemon/lib/stream/session.ts';
+import { DiskFiles, nativeFor } from './disk-files.ts';
 
 /**
  * The red/green proof of the voice stream with the REAL engine: a real clip is streamed in real time, in 40 ms units, the
@@ -27,25 +27,6 @@ function pcmOf(wav: Uint8Array): Int16Array {
   return Int16Array.from({ length: (wav.byteLength - at) >> 1 }, (_, index) => view.getInt16(at + index * 2, true));
 }
 
-class MemoryFiles implements EngineFilesPort {
-  private readonly held = new Map<string, Uint8Array>();
-  async size(file: { role: string }) {
-    return this.held.get(file.role)?.byteLength;
-  }
-  async read(file: { role: string }) {
-    return this.held.get(file.role)?.slice();
-  }
-  async write(file: { role: string }, bytes: Uint8Array) {
-    this.held.set(file.role, bytes);
-  }
-  async remove(file: { role: string }) {
-    this.held.delete(file.role);
-  }
-  async freeBytes() {
-    return undefined;
-  }
-}
-
 const realClock = {
   nowMs: () => performance.now(),
   every: (interval: number, fn: () => void) => {
@@ -62,7 +43,8 @@ describe.skipIf(!ASKED)('the voice stream with the real speech engine', () => {
   test('a real clip streamed in real time: live words, then the final words, then ONE send at the pause', async () => {
     const engine = new SpeechEngine({
       http: { request: async url => await fetch(url, { redirect: 'manual' }) },
-      files: new MemoryFiles(),
+      files: new DiskFiles(process.env.FY_VOICE_ENGINE_DIR ?? '/tmp/claude-1000/vc-native-bench/real/speech'),
+      native: nativeFor(process.env.FY_STT_ENGINE),
       clock: { after: (delay, fn) => realClock.after(delay as number, fn) },
       machine: () => 'this box',
       start: () => startSpeechThread(bunWorkers()),

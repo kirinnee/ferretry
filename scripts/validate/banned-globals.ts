@@ -287,6 +287,12 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
       reason:
         'the single host-fs seam for owner-named executables, output files, working-directory checks (stat of any cwd path) and login shells outside FY_HOME, and the /proc and /sys reads; it also reaches this process pid and uid, process.kill (signals), the CPU and memory counts, userInfo and process.platform; its one environment read is SHELL (lead ruling, DECISIONS-2 #21)',
     },
+    {
+      pkg: 'voice',
+      folder: 'daemon/adapters/native-selftest.ts',
+      reason:
+        'the `voice` line of `fyd --check`: it stats and hashes the saved native engine files under the plugin state folder it is handed as TEXT (no port opens a file by path) and names this binary platform (process.platform), read-only, writing nothing, so that the check proves the engine loads from the COMPILED binary',
+    },
   ];
 
 /** A `.ts`/`.tsx` entry is one file, matched exactly; any other entry is a folder, matched by prefix. */

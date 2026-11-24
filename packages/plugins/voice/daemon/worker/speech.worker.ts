@@ -2,14 +2,19 @@
  * THE SPEECH WORKER — the machine half of voice mode. One thread per daemon, started on the first use and ended after
  * ten idle minutes (`daemon/lib/engine/engine.ts`), so its memory is the OS's again the moment it is not needed.
  *
- * Two WebAssembly programs run here, both single-threaded:
- *  - sherpa-onnx (`@sherpaw/asr`, the same runtime the app ships) decodes Parakeet TDT 0.6B v3 (int8);
- *  - onnxruntime-web runs Silero VAD v5, because sherpa's WebAssembly build has no voice-detector entry point.
+ * Parakeet TDT 0.6B v3 (int8) is decoded by one of two engines, whichever the main thread asks for:
+ *  - NATIVE: sherpa-onnx's own compiled library, loaded by path from the folder Install put it in (`native-addon.ts`),
+ *    on several threads, reading the three graphs from their own paths. About six times faster than the other;
+ *  - WebAssembly (`@sherpaw/asr`, the same runtime the app ships), one thread: the fallback for a machine with no native
+ *    build or whose native library would not start.
+ * Silero VAD v5 runs on onnxruntime-web in both: it costs about 10 ms per second of audio, a native one would save a
+ * tenth of that, and its per-chunk probabilities (which the pause decision reads) are not exposed by sherpa's detector.
  *
- * NO FILES, NO NETWORK. Every byte arrives from the main thread as a transferred ArrayBuffer (it read them from
- * its own state folder, after checking each against its pinned hash). The sherpa glue is handed its binary instead of
- * fetching it, and the model files go into the module's in-memory file system and are deleted from it as soon as
- * the graphs are built, which halves the resident memory (the graphs keep their own copy).
+ * NO NETWORK. The WebAssembly path takes every byte from the main thread as a transferred ArrayBuffer (it read them from
+ * its own state folder, after checking each against its pinned hash): the sherpa glue is handed its binary instead of
+ * fetching it, and the model files go into the module's in-memory file system and are deleted from it as soon as the
+ * graphs are built, which halves the resident memory (the graphs keep their own copy). The native path is sent paths
+ * (the main thread verified the library against its pinned hashes first) and only the small Silero files as bytes.
  */
 import { pathToFileURL } from 'node:url';
 import { OfflineRecognizer } from '@sherpaw/asr';
@@ -19,8 +24,9 @@ import * as ort from 'onnxruntime-web/wasm';
 import ORT_LOADER_PATH from 'onnxruntime-web/ort-wasm-simd-threaded.mjs' with { type: 'file' };
 // The Emscripten loader of @sherpaw/asr 0.3.0, which its exports map does not name (same file `app/vite-voice.ts` aliases).
 import initSherpaUntyped from './sherpa-glue.js';
-import { type LoadRole, type SpeechReply, type SpeechRequest, SPEECH_SAMPLE_RATE } from '../lib/engine/protocol.ts';
+import { type SpeechReply, type SpeechRequest, SPEECH_SAMPLE_RATE } from '../lib/engine/protocol.ts';
 import { spansFromProbabilities, VAD_CHUNK } from '../lib/engine/spans.ts';
+import { collectNative, type Handle, loadAddon, type NativeAddon, track } from './native-addon.ts';
 
 interface SherpaModule {
   FS_createPath(parent: string, path: string, canRead: boolean, canWrite: boolean): void;
@@ -49,7 +55,10 @@ const FEATURE_DIM = 128; // Parakeet v3's mel bins (the 110M model uses 80)
 const CONTEXT = 64; // Silero v5 wants the previous 64 samples in front of each chunk
 const MEMORY_UNIT = 1_048_576;
 
-let recognizer: OfflineRecognizer | undefined;
+/** Whichever engine is loaded: both turn 16 kHz samples into words, and say how many ms they took. */
+type Decode = (samples: Float32Array) => string;
+
+let decode: Decode | undefined;
 let vad: ort.InferenceSession | undefined;
 
 declare const self: {
@@ -61,8 +70,17 @@ let heapBytes = 0;
 /** The sherpa module's own memory. A worker thread shares its process's resident size, so that figure would say nothing about the speech engine. */
 const memoryMb = (): number => Math.round(heapBytes / MEMORY_UNIT);
 
-async function load(files: Readonly<Record<LoadRole, ArrayBuffer>>): Promise<number> {
+/** Silero, on onnxruntime-web, from the two small files both engines are sent. */
+async function loadVad(ortWasm: ArrayBuffer, vadModel: ArrayBuffer): Promise<void> {
+  ort.env.wasm.numThreads = 1;
+  ort.env.wasm.wasmBinary = new Uint8Array(ortWasm);
+  ort.env.wasm.wasmPaths = { mjs: pathToFileURL(ORT_LOADER_PATH).href };
+  vad = await ort.InferenceSession.create(new Uint8Array(vadModel), { executionProviders: ['wasm'] });
+}
+
+async function loadWasm(request: Extract<SpeechRequest, { kind: 'load'; engine: 'wasm' }>): Promise<number> {
   const started = performance.now();
+  const files = request.files;
   const module = await initSherpa({
     wasmBinary: new Uint8Array(files['sherpa-wasm']),
     locateFile: (file: string) => file,
@@ -77,9 +95,9 @@ async function load(files: Readonly<Record<LoadRole, ArrayBuffer>>): Promise<num
     tokens: 'tokens.txt',
   };
   for (const [role, name] of Object.entries(names))
-    module.FS_createDataFile(MODEL_DIR, name, new Uint8Array(files[role as LoadRole]), true, false, true);
+    module.FS_createDataFile(MODEL_DIR, name, new Uint8Array(files[role as keyof typeof names]), true, false, true);
   const path = (name: string): string => `${MODEL_DIR}/${name}`;
-  recognizer = new OfflineRecognizer(
+  const recognizer = new OfflineRecognizer(
     {
       featConfig: { sampleRate: SPEECH_SAMPLE_RATE, featureDim: FEATURE_DIM },
       modelConfig: {
@@ -97,26 +115,55 @@ async function load(files: Readonly<Record<LoadRole, ArrayBuffer>>): Promise<num
   heapBytes = module.HEAPU8.length;
   // The graphs are built: the file copies in the in-memory file system are dead weight now.
   for (const name of Object.values(names)) module.FS_unlink(path(name));
+  decode = samples => {
+    const stream = recognizer.createStream();
+    try {
+      stream.acceptWaveform(SPEECH_SAMPLE_RATE, samples);
+      recognizer.decode(stream);
+      return String(recognizer.getResult(stream).text ?? '');
+    } finally {
+      stream.free();
+    }
+  };
+  await loadVad(files['ort-wasm'], files.vad);
+  return performance.now() - started;
+}
 
-  ort.env.wasm.numThreads = 1;
-  ort.env.wasm.wasmBinary = new Uint8Array(files['ort-wasm']);
-  ort.env.wasm.wasmPaths = { mjs: pathToFileURL(ORT_LOADER_PATH).href };
-  vad = await ort.InferenceSession.create(new Uint8Array(files.vad), { executionProviders: ['wasm'] });
+async function loadNative(request: Extract<SpeechRequest, { kind: 'load'; engine: 'native' }>): Promise<number> {
+  const started = performance.now();
+  const before = process.memoryUsage().rss;
+  const addon: NativeAddon = loadAddon(request.addon);
+  const recognizer: Handle = track(
+    addon.createOfflineRecognizer({
+      featConfig: { sampleRate: SPEECH_SAMPLE_RATE, featureDim: FEATURE_DIM },
+      modelConfig: {
+        transducer: { encoder: request.paths.encoder, decoder: request.paths.decoder, joiner: request.paths.joiner },
+        modelType: 'nemo_transducer',
+        tokens: request.paths.tokens,
+        numThreads: request.threads,
+        provider: 'cpu',
+        debug: 0,
+      },
+      decodingMethod: 'greedy_search',
+    }),
+  );
+  decode = samples => {
+    const stream = addon.createOfflineStream(recognizer);
+    addon.acceptWaveformOffline(stream, { sampleRate: SPEECH_SAMPLE_RATE, samples });
+    addon.decodeOfflineStream(recognizer, stream);
+    return String((JSON.parse(addon.getOfflineStreamResultAsJson(stream)) as { text?: unknown }).text ?? '');
+  };
+  await loadVad(request.files['ort-wasm'], request.files.vad);
+  // The native engine's memory is the process's growth while it loaded (a worker shares its process's resident size).
+  heapBytes = Math.max(0, process.memoryUsage().rss - before);
   return performance.now() - started;
 }
 
 function transcribe(samples: Float32Array): { text: string; decodeMs: number } {
-  if (recognizer === undefined) throw new Error('the speech models are not loaded');
+  if (decode === undefined) throw new Error('the speech models are not loaded');
   const started = performance.now();
-  const stream = recognizer.createStream();
-  try {
-    stream.acceptWaveform(SPEECH_SAMPLE_RATE, samples);
-    recognizer.decode(stream);
-    const text = String(recognizer.getResult(stream).text ?? '').trim();
-    return { text, decodeMs: performance.now() - started };
-  } finally {
-    stream.free();
-  }
+  const text = decode(samples).trim();
+  return { text, decodeMs: performance.now() - started };
 }
 
 async function detect(samples: Float32Array): Promise<readonly { start: number; end: number }[]> {
@@ -144,9 +191,15 @@ async function detect(samples: Float32Array): Promise<readonly { start: number; 
 async function answer(request: SpeechRequest): Promise<SpeechReply> {
   switch (request.kind) {
     case 'load': {
-      const loadMs = await load(request.files);
+      const loadMs = request.engine === 'native' ? await loadNative(request) : await loadWasm(request);
       return { id: request.id, ok: true, kind: 'load', loadMs, memoryMb: memoryMb() };
     }
+    case 'probe':
+      return { id: request.id, ok: true, kind: 'probe', version: String(loadAddon(request.addon).version) };
+    case 'release':
+      decode = undefined;
+      await collectNative();
+      return { id: request.id, ok: true, kind: 'release' };
     case 'transcribe':
       return { id: request.id, ok: true, kind: 'transcribe', ...transcribe(request.samples) };
     case 'detect':
@@ -169,8 +222,8 @@ self.onmessage = event => {
       self.postMessage({
         id: request.id,
         ok: false,
-        // Only a load says why: its error names a file or a runtime, never audio. A decode's could hold what was said.
-        sentence: `The speech engine could not ${request.kind}${request.kind === 'load' ? `: ${String((error as Error)?.message ?? error).slice(0, 300)}` : ''}.`,
+        // Only a load or a probe says why: its error names a file or a runtime, never audio. A decode's could hold what was said.
+        sentence: `The speech engine could not ${request.kind}${request.kind === 'load' || request.kind === 'probe' ? `: ${String((error as Error)?.message ?? error).slice(0, 300)}` : ''}.`,
       }),
   );
 };

@@ -61,6 +61,10 @@ class FakeThread implements ReplyThread {
         await this.loadGate;
         if (this.failLoad) throw new Error('the voice would not load');
         return { id: 1, ok: true as const, kind: 'load' as const, loadMs: 1700, memoryMb: 512 };
+      case 'probe':
+        return { id: 1, ok: true as const, kind: 'probe' as const, version: '2.0.3' };
+      case 'release':
+        return { id: 1, ok: true as const, kind: 'release' as const };
       case 'speak':
         if (this.failSpeak) throw new Error('speak crashed');
         // 16,000 samples = one second of sound, made in 3 s.
