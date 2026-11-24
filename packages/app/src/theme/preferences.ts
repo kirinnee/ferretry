@@ -19,7 +19,9 @@
  * in the current shape on the next change.
  *
  * STYLE → PALETTE. Picking a style also sets that style's `defaultPalette`, unless `keepPalette` is on ("Don't change my
- * colours when I change style"). Picking a palette never touches the style.
+ * colours when I change style"). Picking a palette never touches the style, and turns `keepPalette` on: a style's default
+ * colours apply only until the person picks a palette, and a chosen palette is never overridden by a later style change
+ * (ruling C-5). The switch off hands the colours back to the style.
  *
  * PRE-PAINT AGREEMENT. `public/pre-paint.js` resolves the same preference before first paint, so there is no flash
  * of the wrong theme. It and this module MUST agree on the key, the record shape, the accepted values and the
@@ -271,8 +273,9 @@ export class ThemePreferenceStore {
     return this.#commit(withFamily({ ...this.snapshot(), keepPalette }), true);
   }
 
+  /** An explicit pick: the palette is the person's from now on, so a later style change keeps it. */
   setPalette(palette: PaletteId): ThemePreference {
-    return this.#commit(withFamily({ ...this.snapshot(), palette }), true);
+    return this.#commit(withFamily({ ...this.snapshot(), palette, keepPalette: true }), true);
   }
 
   setMode(mode: ThemeMode): ThemePreference {

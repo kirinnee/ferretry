@@ -79,8 +79,14 @@ afterAll(async () => {
 const origin = (): string => server?.url.origin ?? '';
 
 /** The Appearance page with a device that already stored `seed`. */
-const openSettings = async (seed: Record<string, unknown>) => {
-  const context = await browser.newContext({ viewport: { width: 1_280, height: 3_200 } });
+const openSettings = async (
+  seed: Record<string, unknown>,
+  view: { width: number; height: number; colorScheme?: 'light' | 'dark' } = { width: 1_280, height: 3_200 },
+) => {
+  const context = await browser.newContext({
+    viewport: { width: view.width, height: view.height },
+    colorScheme: view.colorScheme,
+  });
   await context.route('**/*', async route =>
     new URL(route.request().url()).origin === origin() ? await route.continue() : await route.abort(),
   );
@@ -120,6 +126,34 @@ describe('picking a style brings its default palette, unless the device keeps it
       await keeping.close();
     }
   });
+
+  // Ruling C-5 (O10 Q4): the style's default applies only until the owner picks a palette; a chosen one is never overridden.
+  for (const view of [
+    { name: '1440-light', width: 1_440, height: 3_200, colorScheme: 'light' },
+    { name: '1440-dark', width: 1_440, height: 3_200, colorScheme: 'dark' },
+    { name: '390-light', width: 390, height: 3_200, colorScheme: 'light' },
+    { name: '390-dark', width: 390, height: 3_200, colorScheme: 'dark' },
+  ] as const)
+    it(`Neo → Terminal (picked) → Geist keeps Terminal in Settings (${view.name})`, async () => {
+      const page = await openSettings({ ...INDIGO_STUDIO, mode: view.colorScheme }, view);
+      try {
+        await page.tab.locator('[data-choice="neo"]').click();
+        expect(await root(page.tab)).toEqual({ style: 'neo', palette: 'neo' });
+        await page.tab.locator('[data-palette-chip="hacker"]').click();
+        expect(await root(page.tab)).toEqual({ style: 'neo', palette: 'hacker' });
+        await page.tab.locator('[data-choice="geist"]').click();
+        expect(await root(page.tab)).toEqual({ style: 'geist', palette: 'hacker' });
+        const dir = process.env.FY_Q4_SHOTS_DIR;
+        if (dir) {
+          await page.tab.locator('[data-choice="geist"]').scrollIntoViewIfNeeded();
+          await page.tab.screenshot({ path: `${dir}/${view.name}-q4-settings-style-geist.png` });
+          await page.tab.locator('[data-palette-chip="hacker"]').scrollIntoViewIfNeeded();
+          await page.tab.screenshot({ path: `${dir}/${view.name}-q4-settings-palette-terminal-kept.png` });
+        }
+      } finally {
+        await page.close();
+      }
+    });
 
   // Owner C1 (!A581) then !A605: no removed palette's name, and no "was …", renders anywhere; every live palette shows its proper name.
   it('no old palette name renders on the Appearance page, in text, labels or tooltips', async () => {
