@@ -73,6 +73,7 @@ import { GRANT_MISS_CONTEXT_LINE, grantStops, mergeScriptedOrigins, scriptedSinc
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
+import { pickedOnPage } from './field-kinds.ts';
 import { lockFor, lookAlike, matchable, passwordTarget, spellsPassword } from './lock.ts';
 import { type LoginDelivery, type LoginObserver } from './login-observer.ts';
 import type {
@@ -2663,6 +2664,8 @@ export class InputRequestService {
           : state === 'refused'
             ? 'refused'
             : 'cancelled';
+    for (const wake of held.waiters) wake(); // the wait ends first: the journal, audit, card and notice never add to it
+    held.waiters.clear();
     await this.journalQuietly(request, kind, reason, options.submitted);
     await this.record(request, `input.${kind}`, by ?? { kind: 'daemon' }, {
       ...this.auditOf(seen),
@@ -2695,8 +2698,6 @@ export class InputRequestService {
         request.agendaItemId,
         tellOf(request, state, reason, options.uncertain === true, options.unsettled === true),
       );
-    for (const wake of held.waiters) wake();
-    held.waiters.clear();
   }
 
   private byCard(sessionId: string, id: AgendaId): Held | undefined {
@@ -2912,10 +2913,9 @@ const AMBER_AT_LEAST: Readonly<Record<InputRisk['level'], InputRisk['level']>> =
 };
 
 /**
- * The fields as the daemon handles them, each with its flag. A `code` field whose target the daemon saw is a password
- * (`passwordTarget`) is handled as a `secret` from then on (`upgraded`, never undone): hidden on the card, locked,
- * masked, blocking the ferret's typing and journalled as `secret`. Its flag says so, at least amber, because the
- * ferret called a password a code.
+ * The fields as the daemon handles them, each with its flag. A page's own word for a field (`pickedOnPage`: a code, a card)
+ * beats the ferret's pick. A `code` field whose target is a password (`passwordTarget`) is a `secret` from then on
+ * (`upgraded`, never undone): hidden, locked, masked, blocking the ferret's typing, journalled as `secret`, flagged amber.
  */
 function observedAs(
   fields: readonly InputRequestField[],
@@ -2925,9 +2925,9 @@ function observedAs(
   /** The daemon saw a code program this account cannot replace in the foreground (`ObserveResult.codeProgram`). */
   codeProgram: boolean,
 ): InputRequestField[] {
-  return fields.map(field => {
-    // The ferret's own words (its prompt, the field's label or id) may only ever RAISE a code to a secret.
-    // Matched as normalised text, and a look-alike spelling counts, as for the pane's own words (lock.ts).
+  return fields.map(raised => {
+    const field = pickedOnPage(facts, raised, FIELD_LABELS);
+    // The ferret's own words (prompt, label, id) only ever RAISE a code to a secret; look-alike spellings count (lock.ts).
     const said = [prompt, field.label, field.id].some(
       word => PASSWORD_WORDS.test(matchable(word)) || spellsPassword(word) || lookAlike(word),
     );

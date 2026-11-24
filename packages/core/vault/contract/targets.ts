@@ -88,6 +88,10 @@ const PageFieldSchema = z.strictObject({
   name: boundedLine(128).optional(),
   id: boundedLine(128).optional(),
   inputmode: boundedLine(32).optional(),
+  /** The `maxlength` attribute as written (a number's digits): a one-time code is 4 to 8 long. */
+  maxlength: boundedLine(8).optional(),
+  /** The label the page shows the field under, as the browser read it: the page's own word for what it asks. */
+  label: boundedLine(128).optional(),
 });
 
 export const PageFieldFactsSchema = z.strictObject({
