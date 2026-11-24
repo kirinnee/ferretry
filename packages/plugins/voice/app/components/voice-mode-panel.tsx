@@ -16,18 +16,36 @@
  * open a stream ends voice mode, gives the composer back and leaves one sentence above it; a machine that is LOST hands the
  * loop to the phone's own engine (`voice-mode-phone.tsx`, drawn by the page through `renderPhone`) with a banner that says why.
  *
- * THE MICROPHONE IS MUTED WHILE A REPLY IS READ ALOUD. Until barge-in (a later unit) the device's own voice is the only
- * reader of replies, and a microphone open under it would hear it and send it back as the person's own words. Muted is
- * zero samples on the wire (the stream's contract), not a flag the machine is trusted to honour.
+ * THE REPLY IS SPOKEN BY THE MACHINE, ELSE BY THIS DEVICE. While the panel is on, the page's read-aloud controller speaks
+ * through the machine's reply voice (Kokoro, over this same stream; {@link createMachineSpeaker}), and falls back to the
+ * device's own voice when the machine has none or could not begin. Which replies are read, and when, is Auto-read's own rule
+ * (`forced` while voice mode is on): the reading it starts is the one heard here.
+ *
+ * BARGE-IN. The microphone stays open while the MACHINE's voice speaks (echo cancellation is on in the browser's own
+ * capture). Talking over it, for `BARGE_IN_MS` (300 ms), stops the sound at once and tells the machine to drop the rest; the
+ * machine hears the same words and sends them after the pause as usual, so the person just carries on talking.
+ *
+ * THE MICROPHONE IS MUTED WHILE THE DEVICE'S OWN VOICE READS. A speech-synthesis voice is not part of the page's audio
+ * graph, so nothing proves the browser can take it out of the microphone, and an open microphone under it would send the
+ * reply back as the person's own words. Muted is zero samples on the wire (the stream's contract), not a flag the machine
+ * is trusted to honour.
  */
 import { Mic, MicOff, Square } from 'lucide-react';
 import './voice-mode.css';
 import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ConversationComposerProps } from '@ferretry/plugin-conversation/contract';
-import type { StreamSnapshot, StreamState } from '../../contract/index.ts';
+import type { ReplyState, StreamSnapshot, StreamState } from '../../contract/index.ts';
 import { useReadAloudController } from '../hooks/use-read-aloud.ts';
 import { browserMic } from '../lib/stream/mic-source.ts';
-import { type MicSource, openVoiceStream, type VoiceStreamHandle } from '../lib/stream/voice-stream.ts';
+import { createReplyPlayer } from '../lib/stream/reply-player.ts';
+import {
+  type MicSource,
+  openVoiceStream,
+  type ReplyPlayer,
+  type VoiceStreamHandle,
+} from '../lib/stream/voice-stream.ts';
+import { createBargeInDetector } from '../lib/voice-mode/barge-in.ts';
+import { createMachineSpeaker } from '../lib/voice-mode/machine-speaker.ts';
 import { lostBanner, shouldFallBack } from '../lib/voice-mode/phone-loop.ts';
 import { useVoiceMode, type VoiceModeStore } from '../lib/voice-mode/voice-mode-store.ts';
 import { Button, type VoicePluginClient } from '../shell-voice.ts';
@@ -75,6 +93,8 @@ export interface VoiceModeSlotProps {
   readonly fallback: ReactNode;
   /** A suite supplies a microphone; the page uses the browser's. */
   readonly createMic?: () => MicSource;
+  /** A suite supplies a sound output for the machine's voice; the page uses the one its button made inside the tap. */
+  readonly createPlayer?: () => ReplyPlayer;
   /**
    * The panel's phone-engine half (the fallback): the page's own draws it inside the voice stores it needs. Without one, a
    * machine that is lost ends voice mode as it always did.
@@ -98,6 +118,7 @@ export function VoiceModeSlot({
   turn,
   fallback,
   createMic = browserMic,
+  createPlayer = createReplyPlayer,
   renderPhone,
 }: VoiceModeSlotProps) {
   const state = useVoiceMode(store, ferretId);
@@ -120,8 +141,10 @@ export function VoiceModeSlot({
           canFallBack={renderPhone !== undefined}
           client={client}
           createMic={createMic}
+          createPlayer={createPlayer}
           ferretId={ferretId}
           machine={state.machine}
+          player={state.player}
           store={store}
           turn={turn}
         />
@@ -143,12 +166,25 @@ interface SessionProps {
   readonly store: VoiceModeStore;
   readonly client: Pick<VoicePluginClient, 'socket'>;
   readonly createMic: () => MicSource;
+  readonly createPlayer: () => ReplyPlayer;
+  /** The sound output the button made inside the tap, when it could. */
+  readonly player: ReplyPlayer | undefined;
   readonly turn: Turn | undefined;
   /** Whether a lost machine hands the loop to the phone's own engine (the page supplies one). */
   readonly canFallBack: boolean;
 }
 
-function VoiceModeSession({ ferretId, machine, store, client, createMic, turn, canFallBack }: SessionProps) {
+function VoiceModeSession({
+  ferretId,
+  machine,
+  store,
+  client,
+  createMic,
+  createPlayer,
+  player: given,
+  turn,
+  canFallBack,
+}: SessionProps) {
   const [state, setState] = useState<StreamState>('loading');
   const [heard, setHeard] = useState<Heard | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -159,7 +195,24 @@ function VoiceModeSession({ ferretId, machine, store, client, createMic, turn, c
   const reader = useReadAloudController();
   const isReading = (): boolean => reader.getState().status === 'reading';
   const reading = useSyncExternalStore(reader.subscribe, isReading, isReading);
-  const muted = userMuted || reading;
+  /** The machine's voice is the one reading (not the device's): only then is the microphone left open under it. */
+  const [machineVoice, setMachineVoice] = useState(false);
+  const [interrupted, setInterrupted] = useState(false);
+  const muted = userMuted || (reading && !machineVoice);
+  const live = useRef({ reading, machineVoice });
+  live.current = { reading, machineVoice };
+
+  // The sound output: the one made inside the tap, else one now (a browser without audio has none, and the device reads).
+  const [player] = useState<ReplyPlayer | undefined>(() => {
+    if (given !== undefined) return given;
+    try {
+      return createPlayer();
+    } catch {
+      return undefined;
+    }
+  });
+  useEffect(() => () => player?.close(), [player]);
+  const replyState = useRef<ReplyState | undefined>(undefined);
 
   useEffect(() => {
     if (client.socket === undefined) {
@@ -168,42 +221,83 @@ function VoiceModeSession({ ferretId, machine, store, client, createMic, turn, c
     }
     let disposed = false;
     let turnNumber = 0;
-    const opened = openVoiceStream(client, { t: 'start', v: 1, purpose: 'chat', ferretId }, createMic(), {
-      onSnapshot: (snapshot: StreamSnapshot) => {
-        if (disposed) return;
-        setState(snapshot.state);
-        if (snapshot.turn !== turnNumber) {
-          turnNumber = snapshot.turn;
-          setHeard(null);
-        }
-        if (snapshot.last !== undefined) setOutcome(OUTCOME_SENTENCE[snapshot.last.outcome] ?? null);
+    const detector = createBargeInDetector();
+    const speaker =
+      player === undefined
+        ? undefined
+        : createMachineSpeaker({
+            stream: () => handle.current ?? undefined,
+            replyState: () => replyState.current,
+            player,
+            onActive: active => {
+              if (!disposed) setMachineVoice(active);
+            },
+          });
+    if (speaker !== undefined) reader.attach(speaker);
+    const opened = openVoiceStream(
+      client,
+      { t: 'start', v: 1, purpose: 'chat', ferretId, ...(player === undefined ? {} : { reply: 'machine' as const }) },
+      createMic(),
+      {
+        onReply: state => {
+          replyState.current = state;
+        },
+        onSpeech: line => speaker?.onSpeech(line),
+        onSnapshot: (snapshot: StreamSnapshot) => {
+          if (disposed) return;
+          setState(snapshot.state);
+          if (snapshot.turn !== turnNumber) {
+            turnNumber = snapshot.turn;
+            setHeard(null);
+          }
+          if (snapshot.last !== undefined) setOutcome(OUTCOME_SENTENCE[snapshot.last.outcome] ?? null);
+        },
+        onWords: words => {
+          if (!disposed) setHeard({ text: words.text, final: words.final });
+        },
+        onEnded: ended => {
+          if (disposed) return;
+          handle.current = null;
+          // A machine that could not keep going hands the loop to this phone's own engine, and says so; a person's End or a
+          // refused permission is not a failure to route round.
+          if (canFallBack && shouldFallBack(ended))
+            store.fallBack(ferretId, lostBanner(machine, ended.code, ended.sentence));
+          else if (ended.sentence !== undefined) store.end(ferretId, ended.sentence);
+          else if (ended.code !== 1000 && ended.code !== undefined)
+            store.end(ferretId, refusalSentence(ended.code, machine));
+          else store.end(ferretId);
+        },
+        onMicFailed: () => {
+          if (!disposed)
+            store.end(ferretId, 'The microphone could not be opened. Allow it for this site and try again.');
+        },
       },
-      onWords: words => {
-        if (!disposed) setHeard({ text: words.text, final: words.final });
+      {
+        ...(player === undefined ? {} : { player }),
+        // Talking over the machine's voice stops it; the device's own voice is never talked over (the microphone is muted).
+        onMicUnit: pcm => {
+          const { reading: on, machineVoice: machineOn } = live.current;
+          const armed = on && machineOn;
+          if (!detector.push(pcm, armed)) return;
+          reader.stop();
+          setInterrupted(true);
+        },
       },
-      onEnded: ended => {
-        if (disposed) return;
-        handle.current = null;
-        // A machine that could not keep going hands the loop to this phone's own engine, and says so; a person's End or a
-        // refused permission is not a failure to route round.
-        if (canFallBack && shouldFallBack(ended))
-          store.fallBack(ferretId, lostBanner(machine, ended.code, ended.sentence));
-        else if (ended.sentence !== undefined) store.end(ferretId, ended.sentence);
-        else if (ended.code !== 1000 && ended.code !== undefined)
-          store.end(ferretId, refusalSentence(ended.code, machine));
-        else store.end(ferretId);
-      },
-      onMicFailed: () => {
-        if (!disposed) store.end(ferretId, 'The microphone could not be opened. Allow it for this site and try again.');
-      },
-    });
+    );
     handle.current = opened;
     return () => {
       disposed = true;
       handle.current = null;
+      if (speaker !== undefined) reader.attach(null);
+      setMachineVoice(false);
       opened.stop();
     };
-  }, [canFallBack, client, createMic, ferretId, machine, store]);
+  }, [canFallBack, client, createMic, ferretId, machine, player, reader, store]);
+
+  // A new reading starts a clean slate for the "stopped" note.
+  useEffect(() => {
+    if (reading) setInterrupted(false);
+  }, [reading]);
 
   // The machine is told once per change; the first unit of a stream starts unmuted.
   useEffect(() => {
@@ -216,17 +310,22 @@ function VoiceModeSession({ ferretId, machine, store, client, createMic, turn, c
   const working = turn?.live === true && turn.state === 'working' && !muted;
   const shown: StreamState = muted ? 'muted' : state;
   const status = reading
-    ? 'Reading the reply. Your microphone is off until it is done.'
-    : working && (state === 'listening' || state === 'hearing')
-      ? 'Working… you can keep talking.'
-      : STATE_SENTENCE[shown](machine);
+    ? machineVoice
+      ? 'Speaking. Talk any time to interrupt.'
+      : 'Reading the reply. Your microphone is off until it is done.'
+    : interrupted
+      ? 'Stopped. Go ahead, I am listening.'
+      : working && (state === 'listening' || state === 'hearing')
+        ? 'Working… you can keep talking.'
+        : STATE_SENTENCE[shown](machine);
 
   return (
     <section
       aria-label="Voice mode"
       className="fy-voice-mode"
       data-engine="machine"
-      data-state={reading ? 'muted' : working ? 'working' : shown}
+      data-reply-voice={reading ? (machineVoice ? 'machine' : 'device') : 'none'}
+      data-state={reading && !machineVoice ? 'muted' : working ? 'working' : shown}
       data-voice-mode="on"
     >
       <p aria-live="polite" className="fy-voice-mode__status" data-voice-mode-status="" role="status">

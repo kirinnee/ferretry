@@ -12,6 +12,7 @@ import {
   VoiceEngineError,
   decodeDownlinkUnit,
   decodeReplyDownlinkUnit,
+  encodeHushFrame,
   encodeSpeakFrame,
   encodeUplinkUnit,
 } from '../../../contract/index.ts';
@@ -109,6 +110,7 @@ async function rig(
       return ended;
     },
     speak: (id: number, text: string) => stream.fromClient(encodeSpeakFrame({ t: 'speak', id, text })),
+    hush: () => stream.fromClient(encodeHushFrame()),
     /** The phone: one 40 ms silent unit per call for `ms`, echoing the newest nonce. */
     async run(ms: number) {
       for (let at = 0; at < ms; at += 40) {
@@ -337,6 +339,59 @@ describe('the voice stream: the reply voice', () => {
     await settle();
     expect(r.frames).toHaveLength(sent);
     expect(r.ended).toBe(1);
+  });
+
+  test('a hush (barge-in) drops the lines not yet spoken and the sound not yet sent, and says nothing about it', async () => {
+    const r = await rig();
+    await r.run(400);
+    r.speak(0, 'A long first line to speak.');
+    r.speak(1, 'Second.');
+    r.speak(2, 'Third.');
+    await r.run(600);
+    const before = r.audio().length;
+    expect(before).toBeGreaterThan(0);
+    r.hush();
+    await r.run(3_000);
+    // Not one more slot of sound, and no failure announced for the lines that were dropped.
+    expect(r.audio()).toHaveLength(before);
+    expect(r.units().some(unit => unit.snapshot.audio?.failed !== undefined)).toBe(false);
+    expect(r.closes).toEqual([]);
+    // The stream is still good: the next line is spoken as usual.
+    r.speak(3, 'Back again.');
+    await r.run(2_000);
+    expect(
+      r
+        .audio()
+        .slice(before)
+        .some(unit => unit.snapshot.audio?.id === 3 && unit.snapshot.audio.last),
+    ).toBe(true);
+  });
+
+  test('a hush while a line is being made throws that line away when it is done, and the lines queued behind it are never made', async () => {
+    let release: (() => void) | undefined;
+    const r = await rig({
+      fake: {
+        gate: new Promise<void>(resolve => {
+          release = resolve;
+        }),
+      },
+    });
+    await r.run(400);
+    r.speak(0, 'Hello there.');
+    r.speak(1, 'Queued behind it.');
+    await r.run(200);
+    r.hush();
+    release?.();
+    await r.run(1_000);
+    expect(r.fake.spoken).toEqual(['Hello there.']);
+    expect(r.audio()).toHaveLength(0);
+    expect(r.units().some(unit => unit.snapshot.audio?.failed !== undefined)).toBe(false);
+  });
+
+  test('a hush on a stream that did not ask for the reply voice is a protocol error', async () => {
+    const r = await rig({ start: { t: 'start', v: 1, purpose: 'test' } });
+    r.hush();
+    expect(r.closes).toEqual([STREAM_CLOSES.protocol]);
   });
 
   test('a frame of the wrong size, or not a speak frame, ends the stream as a protocol error', async () => {
