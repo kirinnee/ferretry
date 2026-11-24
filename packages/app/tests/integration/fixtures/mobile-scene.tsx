@@ -5,6 +5,7 @@
  *
  *   /d/ws/ferrets/zoe       a ferret's page     /d/ws/agenda   /d/ws/board   /d/ws/projects   /d/ws/insights
  *   /d/ws/settings[/<plugin>/<tab>]            /settings (this device)      /pair (the pairing page)
+ *   ?holdRuntimes=<ms>      GET /v1/runtimes answers that many ms late (a machine that is slow to say what can run)
  *   ?theme=<family>-<mode>      ?style=<id>&palette=<id>&mode=light|dark (open wearing a look)      ?longProject=1 (one project named by a single long word)
  *
  * `window.__fakeRequests` lists every path the page asked for that the fake daemon has no answer for (a probe aid).
@@ -33,8 +34,18 @@ const surfaces = generated.surfaces;
 const unanswered: string[] = [];
 (window as unknown as { __fakeRequests: string[] }).__fakeRequests = unanswered;
 
-const transport = new FakeTransport((request: TransportRequest): TransportAnswer => {
+const holdRuntimesMs = Number(params.get('holdRuntimes') ?? 0);
+
+const transport = new FakeTransport((request: TransportRequest): TransportAnswer | Promise<TransportAnswer> => {
   if (request.path === '/v1/plugins') return json(inventoryOf(surfaces));
+  // `?holdRuntimes=<ms>`: the roster of runtimes arrives late, so a page that waits for it is on screen while it does.
+  if (holdRuntimesMs > 0 && request.method === 'GET' && request.path === '/v1/runtimes')
+    return new Promise(resolve =>
+      window.setTimeout(
+        () => resolve(answerFor(request) ?? json({ code: 'not_found', error: 'no answer' }, 404)),
+        holdRuntimesMs,
+      ),
+    );
   // `?unlock=1`: the machine asks for a passkey on opening, so the app's real unlock prompt is on screen.
   if (params.get('unlock') === '1' && request.path !== '/v1/health' && !request.path.startsWith('/v1/access'))
     return json({ code: 'unlock_required', error: 'this machine asks for a passkey' }, 401);
