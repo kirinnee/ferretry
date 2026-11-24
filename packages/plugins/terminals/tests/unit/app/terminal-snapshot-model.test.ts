@@ -11,6 +11,7 @@ import {
   readPaneSnapshot,
   SNAPSHOT_ROUTE,
   snapshotQuery,
+  trimBlankTail,
 } from '../../../app/components/terminal-snapshot-model.ts';
 import { daemonConnection, daemonSessionScope } from '../../../app/shell.ts';
 import { DaemonCallError } from '@ferretry/app';
@@ -135,5 +136,18 @@ describe('when Fit is the default', () => {
     expect(fitIsReadable(57, 342)).toBe(false);
     expect(fitIsReadable(0, 342)).toBe(true); // nothing to fit
     expect(fitIsReadable(80, 0)).toBe(true); // not measured yet
+  });
+});
+
+describe('the blank rows under a live capture', () => {
+  it('end the text at its last row with something on it', () => {
+    expect(trimBlankTail('one\ntwo\n\n  \n\n')).toBe('one\ntwo');
+    expect(trimBlankTail('one\n\ntwo   \n\n')).toBe('one\n\ntwo   ');
+    expect(trimBlankTail('one')).toBe('one');
+  });
+
+  it('leave a pane with nothing on any row as it came', () => {
+    expect(trimBlankTail('')).toBe('');
+    expect(trimBlankTail('\n \n\n')).toBe('\n \n\n');
   });
 });
