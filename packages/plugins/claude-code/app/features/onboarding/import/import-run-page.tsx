@@ -14,9 +14,8 @@
  *     found" is still a SELECTIVE import: it leaves out whatever the kind pages shown after the reload had unticked.
  * The page lists every item with a tick and a fold (`import-items.tsx`, C59 O5): a tick the person changes HERE joins the ones the kind
  * pages left out, and only the ticked items are brought: the same `skip` list the request already carries.
- * Back and Later are never held. Next is not held either (the contract has no way to hold Next alone): before Import is
- * pressed the page says that Next leaves the import for later, so a Next press never records "done" over an import the
- * page did not name.
+ * Back and Later are never held. Next is held (`holdNext`, contract rule 9) while the page waits for Import, so the footer is
+ * Back, Later and the page's own Import: no second way to leave without importing.
  */
 import { Button, ChoiceCards, type ChoiceOption } from '@ferretry/app';
 import { ActionRow } from '@ferretry/app/ui';
@@ -27,7 +26,6 @@ import {
   IMPORT_KINDS,
   type ImportKind,
   kindItemIds,
-  NEXT_LEAVES,
   nameProblem,
   RuntimeNameField,
   useApplyImport,
@@ -86,13 +84,22 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
     step.ready();
   }, [read.kind, model, mode, step]);
 
-  if (mode === 'fresh') return null;
-  if (read.kind === 'idle' || read.kind === 'reading') return null;
-
   // After a reload the person's one-by-one choices are gone, but the kind pages shown since then remembered theirs: "what was
   // found" is the selective import over those, never a blind "everything".
   const plan: 'everything' | 'choose' | 'nothing' | null =
-    mode === undefined ? (asked === 'everything' ? 'choose' : asked) : mode;
+    mode === 'fresh' ? null : mode === undefined ? (asked === 'everything' ? 'choose' : asked) : mode;
+  // While the import waits for its own button, the footer draws no Next: Import and Later are the only exits.
+  const awaitingImport =
+    read.kind === 'ready' && model?.installed === true && end === null && (plan === 'everything' || plan === 'choose');
+  useEffect(() => {
+    if (!awaitingImport) return;
+    step?.holdNext?.(true);
+    return () => step?.holdNext?.(false);
+  }, [awaitingImport, step]);
+
+  if (mode === 'fresh') return null;
+  if (read.kind === 'idle' || read.kind === 'reading') return null;
+
   const everything = plan === 'everything';
   const left = picked ?? (everything ? new Set<ImportItemId>() : allLeft(step?.segment ?? {}));
   const skip = skipOf(left);
@@ -186,9 +193,6 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
           {plan === 'everything' || plan === 'choose' ? (
             <ImportItems model={model} skip={skip} working={working} onToggle={toggle} />
           ) : null}
-          <p className="cc-step__line" data-import-next="">
-            {NEXT_LEAVES}
-          </p>
           {named && plan !== 'nothing' ? (
             <RuntimeNameField value={name} invalid={invalid !== null} disabled={working} onChange={setTyped} />
           ) : null}

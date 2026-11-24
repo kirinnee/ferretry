@@ -359,7 +359,7 @@ const inspect = async (
   tab: Page,
   variant: Variant,
   key: string,
-  opts: { first?: boolean; held?: boolean; later?: string } = {},
+  opts: { first?: boolean; held?: boolean; later?: string; noNext?: boolean } = {},
 ): Promise<void> => {
   const read = await tab.evaluate(chrome => {
     const rect = (el: Element) => el.getBoundingClientRect();
@@ -436,13 +436,18 @@ const inspect = async (
   expect(read.breathing, `${key}: the grid breathes`).toBe('fy-lb-breathe');
   expect(read.streaks, `${key}: shooting stars`).toBeGreaterThanOrEqual(3);
   expect(read.streakMoving, `${key}: a shooting star moves`).toBe('fy-lb-shoot');
-  expect(read.next, `${key}: a Next button`).toBe(1);
+  // `noNext`: the page waits for its OWN button (an import not yet pressed, GitHub with nothing connected): the footer is Back and Later only.
+  expect(
+    read.next,
+    opts.noNext === true ? `${key}: no Next while the page waits for its own answer` : `${key}: a Next button`,
+  ).toBe(opts.noNext === true ? 0 : 1);
   // `held`: a sign-in page REFUSES Next until the person has signed in (nothing is recorded over a sign-in that did not happen).
   // The button itself stays enabled on every page; the refusal is asserted where the page is walked (see the sign-in step).
-  expect(
-    read.nextOff,
-    `${key}: Next is enabled${opts.held === true ? ' (it refuses until signed in, it is not disabled)' : ''}`,
-  ).toBe(false);
+  if (opts.noNext !== true)
+    expect(
+      read.nextOff,
+      `${key}: Next is enabled${opts.held === true ? ' (it refuses until signed in, it is not disabled)' : ''}`,
+    ).toBe(false);
   expect(read.back, `${key}: Back ${opts.first === true ? 'is absent on the first page' : 'is there'}`).toBe(
     opts.first === true ? 0 : 1,
   );
@@ -466,7 +471,11 @@ const inspect = async (
   expect(
     row.map(button => button.label),
     `${key}: the footer row is Back · Later · Next`,
-  ).toEqual(opts.first === true ? [opts.later ?? 'Later', 'Next'] : ['Back', opts.later ?? 'Later', 'Next']);
+  ).toEqual([
+    ...(opts.first === true ? [] : ['Back']),
+    opts.later ?? 'Later',
+    ...(opts.noNext === true ? [] : ['Next']),
+  ]);
   expect(
     Math.max(...row.map(button => button.y)) - Math.min(...row.map(button => button.y)),
     `${key}: one row`,
@@ -1296,7 +1305,9 @@ describe('the first run, end to end', () => {
         // The import page: name the runtime and import; the machine gets a proposal and applies it.
         await reach(tab, 'claude-code.import-run');
         walked.push('claude-code.import-run');
-        await inspect(tab, variant, 'claude-code.import-run');
+        // L270: the import waits for its own button, so the footer is Back and Later: never Next + Later + Import.
+        await inspect(tab, variant, 'claude-code.import-run', { noNext: true });
+        expect(await tab.getByRole('button', { name: 'Import', exact: true }).count(), 'the one Import button').toBe(1);
         await shot(tab, variant, 'claude-code.import-run');
         await tab.getByRole('button', { name: 'Import', exact: true }).click();
         await tab.waitForFunction(
@@ -1356,8 +1367,14 @@ describe('the first run, end to end', () => {
           if (!key.startsWith('codex.')) break;
           codexPages += 1;
           walked.push(key);
-          await inspect(tab, variant, key);
+          // L270: Codex's import waits for its own button too: no footer Next until it has been pressed.
+          const importing = key === 'codex.import-run';
+          await inspect(tab, variant, key, importing ? { noNext: true } : {});
           await shot(tab, variant, key);
+          if (importing) {
+            await tab.getByRole('button', { name: 'Import', exact: true }).click();
+            await tab.locator('[data-step-next]').waitFor();
+          }
           // The Codex segment ENDS on its Ready page: the runtime Codex's own sign-in made, with its name and status.
           if (key === 'codex.ready') await expectReady(tab, A, 'Codex', 1);
           await tab.locator('[data-step-next]').click();
@@ -1964,7 +1981,8 @@ describe('the Connect GitHub step of the setup flow', () => {
             await reach(tab, 'layouts.layout');
             await next(tab, 'projects.github');
           }
-          await inspect(tab, variant, 'projects.github', { later: 'Skip for now' });
+          // L271: with nothing connected the footer is Back and Skip for now (no Next); a connected account brings Next back.
+          await inspect(tab, variant, 'projects.github', { later: 'Skip for now', ...(fresh ? {} : { noNext: true }) });
 
           if (fresh) {
             expect(await writesOf(), 'the folder was registered').toContain('POST /v1/projects');
@@ -2053,6 +2071,7 @@ describe('the Connect GitHub step of the setup flow', () => {
               for (const secret of ['token', 'ghp_', 'gho_'])
                 expect(connected.toLowerCase(), `no ${secret} on the page`).not.toContain(secret);
               await snap('2-connected');
+              expect(await tab.locator('[data-step-next]').count(), 'a connected account brings Next back').toBe(1);
               await next(tab, 'end');
               expect(Object.keys(await ledgerOf(tab)), 'Next puts Connect GitHub on the device ledger').toContain(
                 'projects.github',

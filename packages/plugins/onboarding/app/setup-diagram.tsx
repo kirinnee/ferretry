@@ -34,14 +34,14 @@ interface DiagramState {
 
 const STATE: Record<OnboardingStepId, DiagramState> = {
   install: {
-    machine: 'installing fy',
+    machine: 'Installing Ferretry',
     browser: 'waiting',
     lit: { machine: true, browser: false, link: false },
     linked: false,
     label: 'Your machine, where Ferretry is being installed, is not yet linked to this browser.',
   },
   daemon: {
-    machine: 'fyd running',
+    machine: 'Daemon running',
     browser: 'waiting',
     lit: { machine: true, browser: false, link: false },
     linked: false,
@@ -54,7 +54,7 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
    * "you are already here" before the reader has read a word of it.
    */
   local: {
-    machine: 'fyd running',
+    machine: 'Daemon running',
     browser: 'same machine',
     lit: { machine: true, browser: true, link: true },
     linked: true,

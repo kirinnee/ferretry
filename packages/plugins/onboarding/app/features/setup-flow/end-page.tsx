@@ -23,6 +23,7 @@ import { ONBOARDING_END_SLOT } from '../../../contract/index.ts';
 import type { Unsaved } from './use-setup-flow.ts';
 import { type ReactNode, useMemo } from 'react';
 import type { SummaryStep } from '../../views/steps-screen.tsx';
+import type { RuntimesRead } from './runtimes-made.ts';
 import { leftToFinish, SetupSummary } from './setup-summary.tsx';
 import { addProjectHref, continueConversationHref, projectAction } from '../stepper/project-action.ts';
 
@@ -53,6 +54,7 @@ export function EndPage({
   onBack,
   summary,
   unsaved = [],
+  runtimesRead = 'made',
   onRetry,
   picture,
 }: {
@@ -64,6 +66,8 @@ export function EndPage({
   /** Answers the machine did not take: each is named, with its own Try again. */
   readonly unsaved?: readonly Unsaved[];
   readonly onRetry?: (key: string) => void;
+  /** Where the machine's runtime check stands: until it has answered (or when it could not), the heading claims nothing. */
+  readonly runtimesRead?: RuntimesRead;
   /** Stands in for the `onboarding.end` slot's picture (a browser scene has no shell); `null` is no picture. */
   readonly picture?: ReactNode;
 }): ReactNode {
@@ -78,11 +82,19 @@ export function EndPage({
     );
   }, [daemon, opens, router, screenHref]);
   const left = useMemo(() => leftToFinish(summary), [summary]);
+  // The runtime check decides "ready": while it is out (steps pending) or when it failed, the page says only that it is done.
+  const failedRead = runtimesRead === 'unread' && summary.some(step => step.plugin === 'runtimes');
+  const unsure = summary.some(step => step.state === 'pending') || failedRead;
+  const heading = unsure
+    ? { title: 'Done', line: failedRead ? "Could not check this machine's runtimes." : 'Checking this machine…' }
+    : left.length === 0
+      ? { title: "You're set up", line: 'Your machine is ready.' }
+      : { title: 'Setup is partly done', line: `Still to finish: ${left.join(', ')}.` };
   const home = (): void => router?.navigate(opens?.href ?? daemonHomeHref(daemon));
   return (
     <StepPageFrame
-      title={left.length === 0 ? "You're set up" : 'Setup is partly done'}
-      line={left.length === 0 ? 'Your machine is ready.' : `Still to finish: ${left.join(', ')}.`}
+      title={heading.title}
+      line={heading.line}
       {...(onBack === undefined ? {} : { back: { onClick: onBack } })}
       next={{ label: opens?.label ?? 'Open this machine', onClick: home }}
     >

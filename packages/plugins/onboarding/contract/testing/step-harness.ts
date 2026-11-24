@@ -55,6 +55,7 @@ export function stepHarness(options: StepHarnessOptions = {}): StepHarness {
       commit = save;
       calls.push({ kind: 'commit' });
     },
+    holdNext: held => void calls.push({ kind: 'holdNext', held }),
     next: () => void calls.push({ kind: 'next' }),
     back: () => void calls.push({ kind: 'back' }),
   };

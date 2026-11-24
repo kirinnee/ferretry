@@ -250,7 +250,8 @@ describe('import-run', () => {
     expect(container.querySelector('[data-import-count]')?.textContent).toMatch(
       /^Bringing \d+ items?\. Hooks are never imported\.$/u,
     );
-    expect(container.querySelector('[data-import-next]')?.textContent).toContain('Next leaves the import for later');
+    // Next is held while the page waits for its own Import (contract rule 9): Import and the footer's Later are the only exits.
+    expect(harness.calls.filter(call => call.kind === 'holdNext').at(-1)).toEqual({ kind: 'holdNext', held: true });
     // One action: leaving is the flow footer's Later / Next, so the page draws no second "skip" button.
     expect([...container.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Import']);
     expect(calls.some(call => call.route === 'POST /v1/runtimes/proposals')).toBe(false);
@@ -263,6 +264,7 @@ describe('import-run', () => {
     expect(busyLabels(harness)).toEqual(['Importing…', null]);
     expect(harness.count('done')).toBe(1);
     expect(container.querySelector('[data-import-results]')?.textContent).toContain('mcp/notes.yaml');
+    expect(harness.calls.filter(call => call.kind === 'holdNext').at(-1)).toEqual({ kind: 'holdNext', held: false });
     void CHANGE_ID;
   });
 

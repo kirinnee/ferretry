@@ -141,9 +141,10 @@ export function createSetupTab(client: PluginClient) {
           </Button>
         </div>
       );
-    const waiting = reading.view.complete
-      ? 0
-      : reading.view.steps.filter(step => sideOf(step) === 'daemon' && step.state === 'pending').length;
+    const daemonSteps = reading.view.steps.filter(step => sideOf(step) === 'daemon');
+    const pending = daemonSteps.filter(step => step.state === 'pending').length;
+    // A machine that is already set up but has no step answers recorded (every step `pending`) is not "waiting" (as the opener).
+    const waiting = reading.view.complete || (reading.view.setUp && pending === daemonSteps.length) ? 0 : pending;
     return (
       <section className="min-w-0" data-onboarding-setup-tab={waiting}>
         <SettingGroup label="Setup steps">
