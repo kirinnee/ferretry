@@ -174,18 +174,70 @@ authorization server metadata names the endpoints above, `code_challenge_methods
   validation, ledgers, journalling and every route's own checks apply.
 - **Why the owner's authority, and what bounds it.** A connector grant is approved by the owner with a passkey
   (or at the machine), so it acts for the owner — but ONLY through the nine tools, whose arguments are fixed
-  schemas: no tool takes a path, a command, a URL, an environment variable or a raw route. Device grants
-  (docs/grants.md) govern paired devices and do not apply; the connector's own switch, scopes and revocation do.
-  **GAP**: the operator's daemon-wide narrowing of `fleet.use` does not narrow the connector.
+  schemas: no tool takes a path, a command, a URL, an environment variable or a raw route.
+- **The operator's daemon-wide grants narrow it** (docs/grants.md: a grant only ever narrows). Before every tool
+  call the connector reads the machine's enforced daemon-wide grants: every tool needs `fleet.use`, and each also
+  needs every capability and axis that the routes it calls declare. A narrowed grant refuses the call and names the
+  capability; a grant document the daemon cannot read refuses every call. A paired device's OWN grant record does
+  not apply — the connector is not a device — and its own switch, scopes and revocation narrow it further.
 - **No secrets.** No tool returns a secret, an environment, a credential or a token. Every text a tool returns
   that came from a ferret (output, summaries, errors, agenda questions) passes the daemon's fail-closed secret
   redactor first; if it cannot run, the text is `[output withheld]`.
 - **No shell.** No tool runs a command. Control is only through ferrets.
 
+## Turning it on (the owner, at the machine)
+
+The daemon never runs the tunnel itself. You run `cloudflared` (or any HTTPS reverse proxy) in front of the
+connector listener. `fy.example.com` below stands for the hostname you choose.
+
+1. Create a named Cloudflare tunnel for the hostname (one time; `login` opens a browser to pick the zone):
+
+   ```sh
+   cloudflared tunnel login
+   cloudflared tunnel create ferretry-mcp
+   cloudflared tunnel route dns ferretry-mcp fy.example.com
+   ```
+
+2. Point it at the connector listener and nothing else — `~/.cloudflared/ferretry-mcp.yml`:
+
+   ```yaml
+   tunnel: ferretry-mcp
+   credentials-file: /home/<you>/.cloudflared/<tunnel-id>.json
+   ingress:
+     - hostname: fy.example.com
+       service: http://127.0.0.1:7461
+     - service: http_status:404
+   ```
+
+   Run it as a user service: `cloudflared tunnel --config ~/.cloudflared/ferretry-mcp.yml run` (a systemd user unit
+   or launchd agent with `Restart=always`).
+
+3. Turn the connector on in `<FY_HOME>/config/daemon.json` and restart the daemon (`fy daemon restart`):
+
+   ```json
+   "connector": { "enabled": true, "publicUrl": "https://fy.example.com" }
+   ```
+
+   Check it: `fy connector` prints the MCP URL, and
+   `curl -si https://fy.example.com/mcp -X POST` answers `401` with a `WWW-Authenticate` header.
+
+4. In Claude: Settings › Connectors › Add custom connector, URL `https://fy.example.com/mcp`, then Connect. A
+   Ferretry page opens with a match code. Open Ferretry on any paired device (the page links to it), check the code
+   matches, and tap Approve (passkey). The Claude page continues by itself. At the machine, `fy connector approve
+   <code>` does the same.
+
+5. Revoke any time: the app's Connectors panel, or `fy connector revoke <grant>`. To turn it off, set `enabled` to
+   `false` (or stop the tunnel) and restart the daemon.
+
+A quick tunnel (`cloudflared tunnel --url http://127.0.0.1:7461`) works for a trial, but its `trycloudflare.com`
+address changes on every run, and `publicUrl` must match it exactly — so a connector added with one stops working
+when the tunnel restarts.
+
 ## Not in this version
 
 Voice inside Ferretry; more than one owner / team permissions; Client ID Metadata Documents; a daemon-managed
-tunnel (the owner runs `cloudflared` — see "Morning steps" in the PR); per-tool consent.
+tunnel (the owner runs `cloudflared` — see "Turning it on"); per-tool consent; restricting `/mcp` and `/oauth/token` to
+Anthropic's published address range.
 
 ## Sources
 
