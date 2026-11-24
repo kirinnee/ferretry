@@ -73,7 +73,7 @@
  * else, exactly as Claude's code goes to stdin and nowhere else.
  */
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
-import type { HarnessKind } from '../shared/harness.ts';
+import { byHarness, type HarnessKind, isHarness, isKind } from '../shared/harness.ts';
 import { sanitizeHarnessEnv } from '../shared/harness-env.ts';
 import type {
   HarnessLoginFlow,
@@ -256,18 +256,54 @@ const CODEX_PUBLISHED: ReadonlySet<CodexLoginStage['stage']> = new Set([
  * A stage that only a person bringing a value back can finish. A Codex device code is not one: the
  * child finishes at the provider by itself, read or not.
  */
-const needsReader = (stage: FlowStage): boolean =>
-  stage.harness === 'claude' ? stage.stage.stage === 'awaiting-code' : stage.stage.stage === 'awaiting-callback';
+const needsReader = (stage: FlowStage): boolean => {
+  switch (stage.harness) {
+    case 'claude':
+      return stage.stage.stage === 'awaiting-code';
+    case 'codex':
+      return stage.stage.stage === 'awaiting-callback';
+  }
+};
 
-const published = (stage: FlowStage): boolean =>
-  stage.harness === 'claude' ? stage.stage.stage === 'awaiting-code' : CODEX_PUBLISHED.has(stage.stage.stage);
+const published = (stage: FlowStage): boolean => {
+  switch (stage.harness) {
+    case 'claude':
+      return stage.stage.stage === 'awaiting-code';
+    case 'codex':
+      return CODEX_PUBLISHED.has(stage.stage.stage);
+  }
+};
+
+/** The same flow, completed: each harness's own "complete" stage. */
+const completed = (stage: FlowStage): FlowStage => {
+  switch (stage.harness) {
+    case 'claude':
+      return { harness: 'claude', stage: { stage: 'complete' } };
+    case 'codex':
+      return { harness: 'codex', stage: { stage: 'complete' } };
+  }
+};
+
+/** The same flow, ended by `failed`, in each harness's own stage. */
+const endedWith = (stage: FlowStage, failed: ClaudeLoginFailure | CodexLoginFailure): FlowStage => {
+  switch (stage.harness) {
+    case 'claude':
+      return { harness: 'claude', stage: failed };
+    case 'codex':
+      return { harness: 'codex', stage: failed };
+  }
+};
 
 const instant = (milliseconds: number): Instant => instantFromEpochMs(Math.trunc(milliseconds));
 
 /** What to run for this flow's current stage. A Codex flow in `linking` runs the link sign-in. */
 const argvFor = (stage: FlowStage): readonly string[] => {
-  if (stage.harness === 'claude') return CLAUDE_LOGIN_ARGV;
-  return stage.stage.stage === 'linking' ? CODEX_LINK_LOGIN_ARGV : CODEX_LOGIN_ARGV;
+  switch (stage.harness) {
+    case 'claude':
+      return CLAUDE_LOGIN_ARGV;
+    case 'codex':
+      return stage.stage.stage === 'linking' ? CODEX_LINK_LOGIN_ARGV : CODEX_LOGIN_ARGV;
+  }
 };
 
 export class HarnessLoginService {
@@ -312,7 +348,7 @@ export class HarnessLoginService {
       throw error;
     }
     if (target.kind === 'refused') throw new HarnessLoginRefusal('fleet_login_unavailable', target.reason);
-    if (target.harness === 'claude' && request.method !== undefined) {
+    if (isKind(target.harness, 'claude') && request.method !== undefined) {
       throw new HarnessLoginRefusal(
         'fleet_login_unavailable',
         'Claude Code has one way to sign in; choosing a device code or a link applies to Codex only',
@@ -337,7 +373,7 @@ export class HarnessLoginService {
     const record = this.#require(flowId);
     if ('method' in request && request.method === 'recheck') return await this.#recheck(record);
     const stage = record.stage;
-    if (stage.harness === 'codex') return await this.#submitCodex(record, stage.stage, request);
+    if (isHarness(stage, 'codex')) return await this.#submitCodex(record, stage.stage, request);
     if ('method' in request) {
       return { outcome: 'refused', reason: 'Claude Code has one way to sign in, so there is nothing to switch to' };
     }
@@ -384,10 +420,7 @@ export class HarnessLoginService {
     );
     if (check.signedIn) {
       record.recheck = undefined;
-      record.stage =
-        record.stage.harness === 'claude'
-          ? { harness: 'claude', stage: { stage: 'complete' } }
-          : { harness: 'codex', stage: { stage: 'complete' } };
+      record.stage = completed(record.stage);
       this.options.onSignedIn?.(record.loginId);
       return { outcome: 'accepted', flow: this.#projection(record) };
     }
@@ -395,10 +428,7 @@ export class HarnessLoginService {
     // A flow offering a recheck is always a failed one — the offer is made only as it ends — so this keeps
     // its ending and replaces only the finding, with what this read saw.
     const failed = record.stage.stage as ClaudeLoginFailure;
-    record.stage =
-      record.stage.harness === 'claude'
-        ? { harness: 'claude', stage: { ...failed, reason } }
-        : { harness: 'codex', stage: { ...failed, reason } };
+    record.stage = endedWith(record.stage, { ...failed, reason });
     return { outcome: 'refused', reason };
   }
 
@@ -420,7 +450,7 @@ export class HarnessLoginService {
     if (outcome === 'delivered') return { outcome: 'accepted', flow: this.#projection(record) };
     if (outcome === 'refused') {
       // Codex said it was not waiting for this and kept waiting, so the screen goes back to the paste box.
-      if (record.stage.harness === 'codex' && record.stage.stage.stage === 'finishing')
+      if (isHarness(record.stage, 'codex') && record.stage.stage.stage === 'finishing')
         record.stage = { harness: 'codex', stage };
       return {
         outcome: 'refused',
@@ -527,7 +557,7 @@ export class HarnessLoginService {
     // here can reject into an unhandled rejection.
     void this.#run(target, record, {
       replaced: previous === undefined ? [] : [previous],
-      clearPorts: restart && target.harness === 'codex',
+      clearPorts: restart && isKind(target.harness, 'codex'),
     });
     return this.#projection(record);
   }
@@ -550,7 +580,7 @@ export class HarnessLoginService {
       if (!isLeftoverCodexLogin(holder, this.options.portHolders.ownUid)) kept.push({ holder, verdict: 'not-codex' });
       else if (!(await this.options.portHolders.stop(holder.pid))) kept.push({ holder, verdict: 'could-not-stop' });
     }
-    const linking = record.stage.harness === 'codex' && record.stage.stage.stage === 'linking';
+    const linking = isHarness(record.stage, 'codex') && record.stage.stage.stage === 'linking';
     if (!linking || !ports.every(port => kept.some(entry => entry.holder.port === port))) return;
     this.#endWith(record, {
       stage: 'failed',
@@ -569,10 +599,10 @@ export class HarnessLoginService {
       identityKey: loginId,
       startedAt,
       expiresAt: startedAt + window,
-      stage:
-        harness === 'claude'
-          ? { harness: 'claude', stage: CLAUDE_LOGIN_START }
-          : { harness: 'codex', stage: link ? CODEX_LINK_START : CODEX_LOGIN_START },
+      stage: byHarness<FlowStage>(harness, {
+        claude: () => ({ harness: 'claude', stage: CLAUDE_LOGIN_START }),
+        codex: () => ({ harness: 'codex', stage: link ? CODEX_LINK_START : CODEX_LOGIN_START }),
+      }),
       child: undefined,
       disarm: undefined,
       spawned: false,
@@ -588,10 +618,10 @@ export class HarnessLoginService {
       this.#expire(record);
     });
     this.#armIdle(record);
-    if (harness === 'claude')
+    if (isKind(harness, 'claude'))
       record.disarmLink = this.options.timer.after(HARNESS_LOGIN_LINK_SECONDS * 1_000, () => {
         record.disarmLink = undefined;
-        if (record.stage.harness !== 'claude' || record.stage.stage.stage !== 'starting') return;
+        if (!isHarness(record.stage, 'claude') || record.stage.stage.stage !== 'starting') return;
         this.#end(
           record,
           `Claude Code started but printed no sign-in link within ${String(HARNESS_LOGIN_LINK_SECONDS)} seconds, so this sign-in cannot be finished from a browser`,
@@ -655,7 +685,7 @@ export class HarnessLoginService {
         return;
       }
       await target.prepare();
-      record.sharedHost = target.harness === 'codex' && (await this.options.sharedHost?.()) === true;
+      record.sharedHost = isKind(target.harness, 'codex') && (await this.options.sharedHost?.()) === true;
       if (settled(record.stage)) return;
       let code: number;
       do {
@@ -706,7 +736,7 @@ export class HarnessLoginService {
   /** Feed one raw output line to this harness's own recogniser. Unclassified lines are dropped. */
   #observe(record: FlowRecord, line: string): void {
     const stage = record.stage;
-    if (stage.harness === 'claude') {
+    if (isHarness(stage, 'claude')) {
       record.stage = { harness: 'claude', stage: observeClaudeLine(stage.stage, line) };
       return;
     }
@@ -728,10 +758,7 @@ export class HarnessLoginService {
     record.disarmIdle = undefined;
     record.disarmLink?.();
     record.disarmLink = undefined;
-    record.stage =
-      record.stage.harness === 'claude'
-        ? { harness: 'claude', stage: { stage: 'complete' } }
-        : { harness: 'codex', stage: { stage: 'complete' } };
+    record.stage = completed(record.stage);
     this.options.onSignedIn?.(record.loginId);
   }
 
@@ -755,8 +782,7 @@ export class HarnessLoginService {
     record.disarmLink = undefined;
     record.child?.kill();
     record.child = undefined;
-    record.stage =
-      record.stage.harness === 'claude' ? { harness: 'claude', stage: failed } : { harness: 'codex', stage: failed };
+    record.stage = endedWith(record.stage, failed);
   }
 
   /**
@@ -774,7 +800,12 @@ export class HarnessLoginService {
     stage: FlowStage,
     cause: 'window' | { readonly exit: number },
   ): ClaudeLoginFailure | CodexLoginFailure | undefined {
-    return stage.harness === 'claude' ? claudeEnding(stage.stage, cause) : codexEnding(stage.stage, cause);
+    switch (stage.harness) {
+      case 'claude':
+        return claudeEnding(stage.stage, cause);
+      case 'codex':
+        return codexEnding(stage.stage, cause);
+    }
   }
 
   /**
@@ -805,7 +836,15 @@ export class HarnessLoginService {
       expiresAt: instant(record.expiresAt),
     };
     const stage = record.stage;
-    const flow = stage.harness === 'claude' ? claudeProjection(base, stage.stage) : codexProjection(base, stage.stage);
+    let flow: HarnessLoginFlow;
+    switch (stage.harness) {
+      case 'claude':
+        flow = claudeProjection(base, stage.stage);
+        break;
+      case 'codex':
+        flow = codexProjection(base, stage.stage);
+        break;
+    }
     return flow.state === 'failed' && record.recheck !== undefined ? { ...flow, recheck: true } : flow;
   }
 

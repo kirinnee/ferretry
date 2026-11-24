@@ -6,7 +6,7 @@
  * under — so the whole catalogue may travel to any caller with `fleet.use`.
  */
 import { catalogModelValue, type ModelCatalog } from '../catalog/schema.ts';
-import { type HarnessKind, harnessKey } from '../shared/harness.ts';
+import { type HarnessKind, harnessKey, supportedKinds } from '../shared/harness.ts';
 import { type PresetTest, type ProviderPreset, presetHarnesses } from '../presets/schema.ts';
 import { presetCatalog } from '../presets/catalog.ts';
 // Parsed when `built-ins.json` is written, never at boot: `../built-ins.ts` says why.
@@ -48,7 +48,7 @@ function variableHalves(preset: ProviderPreset, name: string): { harnesses: Retu
   return { harnesses: usable.filter(harness => preset.halves[harness]?.env[name] !== undefined).map(harnessKey) };
 }
 
-const HALF_ORDER: readonly HarnessKind[] = ['claude', 'codex'];
+const HALF_ORDER: readonly HarnessKind[] = supportedKinds();
 
 /**
  * Each half and whether it is offered: a half is offered when the preset is and the half itself says no

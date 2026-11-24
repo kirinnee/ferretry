@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { harnessName, isHarnessKey } from '../../contract/harness-words.ts';
 import type { HarnessLoginCodexMethod, HarnessLoginFlow, LoginView } from '../../contract/index.ts';
 import { refusalSentence, type LoginsClient } from '../lib/client.ts';
 import type { LoginPanelWording } from '../lib/harness-login-model.ts';
@@ -29,7 +30,7 @@ import {
   submitLoginSignInCode,
   switchLoginSignInToLink,
 } from '../lib/harness-login-api.ts';
-import { finishSignInLabel, HARNESS_NAMES, loginName, signedInSentence, signInCoverage } from '../lib/logins-view.ts';
+import { finishSignInLabel, loginName, signedInSentence, signInCoverage } from '../lib/logins-view.ts';
 import { Button, ChangeApplyPanel, useChangeAuthority } from '../ui.ts';
 import { ClaudeLoginPanel } from './claude-login-panel.tsx';
 import { CodexLoginPanel } from './codex-login-panel.tsx';
@@ -61,7 +62,7 @@ const waiting = (flow: HarnessLoginFlow | null): boolean => flow !== null && WAI
 
 /** A Codex flow that is on its link sign-in, which its endings and its next start follow. */
 const onLink = (flow: HarnessLoginFlow | null): boolean =>
-  flow?.harness === 'codex' && (flow.state === 'awaiting-callback' || flow.state === 'finishing');
+  flow !== null && isHarnessKey(flow, 'codex') && (flow.state === 'awaiting-callback' || flow.state === 'finishing');
 
 export function LoginSignIn({
   login,
@@ -112,7 +113,7 @@ export function LoginSignIn({
     try {
       const request = {
         loginId: login.id,
-        ...(login.harness === 'codex' && chosen === 'link' ? { method: chosen } : {}),
+        ...(isHarnessKey(login, 'codex') && chosen === 'link' ? { method: chosen } : {}),
       } as Parameters<typeof startLoginSignIn>[1];
       finished(over ? await restartLoginSignIn(client, request, running) : await startLoginSignIn(client, request));
     } catch (error) {
@@ -205,8 +206,8 @@ export function LoginSignIn({
       </p>
     );
 
-  const name = HARNESS_NAMES[login.harness];
-  const linkStart = login.harness === 'codex' && method === 'link';
+  const name = harnessName(login.harness);
+  const linkStart = isHarnessKey(login, 'codex') && method === 'link';
   if (flow === null)
     return (
       <section className="fy-lg-group" data-login-sign-in="start">
@@ -223,7 +224,7 @@ export function LoginSignIn({
           submitLabel={linkStart ? `Sign in to ${name} with a link` : `Sign in to ${name}`}
           onSubmit={() => void start(false)}
         />
-        {login.harness === 'codex' ? (
+        {isHarnessKey(login, 'codex') ? (
           <div data-login-sign-in-method={method}>
             <p className="m-0 text-meta leading-base text-muted">
               {linkStart ? 'You’ll paste back the address the browser ends on.' : 'You’ll type a code at the provider.'}
@@ -259,7 +260,7 @@ export function LoginSignIn({
   };
   return (
     <div data-login-sign-in={flow.state}>
-      {flow.harness === 'claude-code' ? (
+      {isHarnessKey(flow, 'claude-code') ? (
         <ClaudeLoginPanel key={flow.flowId} {...common} flow={flow} onSubmitCode={code => void submit(code)} />
       ) : (
         <CodexLoginPanel

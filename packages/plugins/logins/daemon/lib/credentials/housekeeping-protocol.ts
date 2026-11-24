@@ -13,11 +13,12 @@
  * Type-only: the protocol costs the worker nothing at run time.
  */
 import type { ActiveUsageRead } from './credential-status.ts';
+import type { HarnessKind } from '../shared/harness.ts';
 
 /** One piece of work: the free usage read of one sign-in. */
 export interface ActiveUsageJob {
   readonly kind: 'credential.active';
-  readonly harness: 'claude' | 'codex';
+  readonly harness: HarnessKind;
   /** The sign-in file, relative to the `credentials` root. Never absolute: the grant refuses a path outside the root. */
   readonly file: string;
   /** The daemon's clock, read on main: a worker has no clock of its own to read. */

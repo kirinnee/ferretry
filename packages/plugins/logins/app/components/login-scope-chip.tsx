@@ -4,10 +4,10 @@
  * picked for a Claude Code runtime by mistake.
  */
 
-import { type HarnessKind, LOGIN_SCOPE_WORDS, scopeOfHarnesses } from '../lib/logins-view.ts';
+import { type HarnessKind, loginScopeWords, scopeOfHarnesses } from '../lib/logins-view.ts';
 import { Badge } from '../ui.ts';
 
 export function LoginScopeChip({ harnesses }: { readonly harnesses: readonly HarnessKind[] }) {
   const scope = scopeOfHarnesses(harnesses);
-  return <Badge data-login-scope={scope}>{LOGIN_SCOPE_WORDS[scope]}</Badge>;
+  return <Badge data-login-scope={scope}>{loginScopeWords(scope)}</Badge>;
 }

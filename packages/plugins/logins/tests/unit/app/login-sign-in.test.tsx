@@ -115,6 +115,16 @@ const open = async (routes: Record<string, unknown>, props: OpenProps = {}) => {
 const only = (calls: readonly Call[], key: string): Call[] => calls.filter(call => call.route === key);
 
 describe('LoginSignIn', () => {
+  it('draws neither harness’s panel for a flow of a harness the wire refuses, and says the copy does not understand', async () => {
+    const { view } = await open({ [LOGIN]: { ...claudeFlow('awaiting-code'), harness: 'gemni' } });
+
+    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+
+    expect(view.container.querySelector('[data-change-refusal]')?.textContent).toContain('doesn’t understand');
+    expect(view.container.querySelector('input[type="password"]')).toBeNull();
+    await view.unmount();
+  });
+
   it('says why a sign-in does not apply, and offers none', async () => {
     const env = login({
       id: 'claude-env',

@@ -1,4 +1,5 @@
 import type { LoginChange, LoginChangeOutcome, LoginChangeView, LoginRuntimePreview } from '../../contract/index.ts';
+import { harnessName } from '../../contract/harness-words.ts';
 import { requireMayApply } from './authority.ts';
 import { type LoginsCommandDeps, LoginsCommandError } from './ports.ts';
 
@@ -47,12 +48,10 @@ export function parseReason(text: string | undefined): string | undefined {
   return reason;
 }
 
-const HARNESS_LABEL = { 'claude-code': 'Claude Code', codex: 'Codex' } as const;
-
 /** One runtime as v4 worded it: `alpha (Claude Code) — ready to launch`, or the reason it cannot. */
 function runtimeWords(runtime: LoginRuntimePreview): string {
   if (runtime.launch === undefined) return runtime.name;
-  const kind = runtime.harness === undefined ? undefined : HARNESS_LABEL[runtime.harness];
+  const kind = runtime.harness === undefined ? undefined : harnessName(runtime.harness);
   const status = runtime.launch.available ? 'ready to launch' : (runtime.launch.reason ?? 'cannot launch');
   return `${runtime.name}${kind === undefined ? '' : ` (${kind})`} — ${status}`;
 }

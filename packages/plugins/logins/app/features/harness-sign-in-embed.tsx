@@ -12,7 +12,8 @@ import type { LoginList } from '../../contract/index.ts';
 import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { useLoginChanges } from '../lib/login-changes.ts';
 import { readLogins } from '../lib/logins-api.ts';
-import { HARNESS_NAMES, type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
+import { harnessName } from '../../contract/harness-words.ts';
+import { type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
 import { ActionRow, Button, ChangeApplyPanel } from '../ui.ts';
 import { LoginSignIn } from './login-sign-in.tsx';
 
@@ -118,7 +119,7 @@ export function HarnessSignInEmbed({
     signedIn(usableLogin(list, harness)?.id);
   }, [list, harness, signedIn]);
 
-  const name = HARNESS_NAMES[harness];
+  const name = harnessName(harness);
   if (failure !== null)
     return (
       <p role="alert" className="m-0 text-cell leading-base text-warn">

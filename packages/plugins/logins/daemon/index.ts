@@ -66,7 +66,7 @@ import { signInRoutes } from './lib/routes/sign-in.ts';
 import { HOSTED_APP_ORIGIN, HOSTED_APP_RELEASE_KEY } from './lib/shared/hosted.ts';
 import { endpointFiles, loginFiles, modelFiles } from './lib/config.ts';
 import { sanitizeHarnessEnv } from './lib/shared/harness-env.ts';
-import type { HarnessKind } from './lib/shared/harness.ts';
+import { type HarnessKind, isKind } from './lib/shared/harness.ts';
 
 /** How often the Codex passive reading looks for a rollout that moved: an unchanged one costs a stat. */
 const CODEX_PASSIVE_USAGE_INTERVAL_MS = 30_000;
@@ -258,7 +258,7 @@ export function buildLoginsDaemon() {
       const codexPassive = new CodexPassiveReading({
         logins: async () =>
           (await catalog.entries()).entries.flatMap(entry =>
-            entry.credential.harness === 'codex'
+            isKind(entry.credential.harness, 'codex')
               ? [{ subject: { id: entry.id, resolution: entry.resolution }, usedBy: entry.usedBy }]
               : [],
           ),
@@ -266,7 +266,7 @@ export function buildLoginsDaemon() {
           const ferrets = uses.ferrets.current();
           if (ferrets === undefined) return [];
           return (await ferrets.list()).flatMap(ferret =>
-            ferret.harness === 'codex' && ferret.state !== 'stopped'
+            isKind(ferret.harness, 'codex') && ferret.state !== 'stopped'
               ? [
                   {
                     id: ferret.id,
@@ -277,7 +277,7 @@ export function buildLoginsDaemon() {
                     // The ferret as it is now, asked again once its transcript was read (a move may have come between).
                     current: async () => {
                       const now = await ferrets.get(ferret.id);
-                      return now === undefined || now.harness !== 'codex' || now.state === 'stopped'
+                      return now === undefined || !isKind(now.harness, 'codex') || now.state === 'stopped'
                         ? undefined
                         : {
                             ...(now.runtime === undefined ? {} : { runtime: now.runtime }),

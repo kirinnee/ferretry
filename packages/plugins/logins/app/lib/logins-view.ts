@@ -10,19 +10,15 @@
  * - **Signing in says how many runtimes it changes.**
  */
 
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import { harnessCommandWord, harnessName, harnessWords, supportedHarnessKeys } from '../../contract/harness-words.ts';
 import type { LoginList, LoginUsageWindow, LoginView } from '../../contract/index.ts';
 import { timeUntil } from './harness-login-model.ts';
 
-export type HarnessKind = KnownHarnessKey;
+export type HarnessKind = HarnessKey;
 
-export const HARNESSES: readonly HarnessKind[] = ['claude-code', 'codex'];
-
-/** A harness's name as a person reads it. */
-export const HARNESS_NAMES: Readonly<Record<HarnessKind, string>> = { 'claude-code': 'Claude Code', codex: 'Codex' };
-
-/** The command a person types in their own terminal. */
-const HARNESS_COMMANDS: Readonly<Record<HarnessKind, string>> = { 'claude-code': 'claude', codex: 'codex' };
+/** The harnesses Logins has behaviour for, Claude Code first. */
+export const HARNESSES: readonly HarnessKind[] = supportedHarnessKeys();
 
 /** Every CLI a login drives, Claude Code first: both for an environment login with a `claude-code:` and a `codex:` half. */
 export const loginHarnesses = (login: LoginView): readonly HarnessKind[] => login.harnesses;
@@ -31,19 +27,23 @@ export const loginHarnesses = (login: LoginView): readonly HarnessKind[] => logi
 export type LoginScope = HarnessKind | 'both';
 
 /** Which CLIs a list of harnesses covers, as one scope. An empty list cannot happen; it reads as Claude. */
-export const scopeOfHarnesses = (harnesses: readonly HarnessKind[]): LoginScope =>
-  harnesses.includes('claude-code') && harnesses.includes('codex') ? 'both' : (harnesses[0] ?? 'claude-code');
+export const scopeOfHarnesses = (harnesses: readonly HarnessKind[]): LoginScope => {
+  if (supportedHarnessKeys().every(key => harnesses.includes(key))) return 'both';
+  const [first] = supportedHarnessKeys();
+  return harnesses[0] ?? first ?? 'both';
+};
 
-/** The scope chip's words. */
-export const LOGIN_SCOPE_WORDS: Readonly<Record<LoginScope, string>> = {
-  'claude-code': 'Claude only',
-  codex: 'Codex only',
-  both: 'Claude + Codex',
+/** The scope chip's words: "Claude only", "Codex only", or every harness's short name joined for `both`. */
+export const loginScopeWords = (scope: LoginScope): string => {
+  if (scope === 'both')
+    return supportedHarnessKeys()
+      .map(key => harnessWords(key)?.short ?? key)
+      .join(' + ');
+  return `${harnessWords(scope)?.short ?? scope} only`;
 };
 
 /** "Claude Code", or "Claude Code + Codex" for a login that drives both. */
-const harnessesName = (harnesses: readonly HarnessKind[]): string =>
-  harnesses.map(harness => HARNESS_NAMES[harness]).join(' + ');
+const harnessesName = (harnesses: readonly HarnessKind[]): string => harnesses.map(harnessName).join(' + ');
 
 export const plural = (count: number, one: string, many = `${one}s`): string =>
   `${String(count)} ${count === 1 ? one : many}`;
@@ -61,7 +61,7 @@ export const loginUse = (login: LoginView): string =>
 
 /** "Shared with claude in your terminal" for a login kept in the person's own store. */
 export const terminalBadge = (login: LoginView): string | null =>
-  login.sharedWithTerminal ? `Shared with ${HARNESS_COMMANDS[login.harness]} in your terminal` : null;
+  login.sharedWithTerminal ? `Shared with ${harnessCommandWord(login.harness)} in your terminal` : null;
 
 /** "Copied slot from studio-mac" for an empty slot a clone made. */
 export const slotBadge = (login: LoginView): string | null =>
@@ -130,10 +130,10 @@ export interface LoginGroup {
  * that drive both. An empty group is left out.
  */
 export const loginGroups = (list: LoginList): readonly LoginGroup[] =>
-  (['claude-code', 'codex', 'both'] as const)
+  ([...HARNESSES, 'both'] as readonly LoginScope[])
     .map(scope => ({
       scope,
-      title: scope === 'both' ? harnessesName(HARNESSES) : HARNESS_NAMES[scope],
+      title: scope === 'both' ? harnessesName(HARNESSES) : harnessName(scope),
       logins: list.logins.filter(login => scopeOfHarnesses(loginHarnesses(login)) === scope),
     }))
     .filter(group => group.logins.length > 0);
@@ -179,10 +179,7 @@ const slug = (value: string): string =>
 
 /** The id a new login gets: `<harness>-<label>`, or `<harness>-login`, with `-2`, `-3`… added until it is free. */
 export function suggestLoginId(harness: HarnessKind, label: string | undefined, taken: ReadonlySet<string>): string {
-  const base = `${harness === 'claude-code' ? 'claude' : 'codex'}-${slug(label ?? '') || 'login'}`.slice(
-    0,
-    LOGIN_ID_LIMIT - 3,
-  );
+  const base = `${harnessCommandWord(harness)}-${slug(label ?? '') || 'login'}`.slice(0, LOGIN_ID_LIMIT - 3);
   if (!taken.has(base)) return base;
   for (let n = 2; ; n += 1) {
     const candidate = `${base}-${String(n)}`;

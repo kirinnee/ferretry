@@ -3,6 +3,7 @@
  * the sign-in panel. The page hands each plain callbacks; a panel answers with a login's id or a bare "signed in", and
  * no code, address or token ever reaches the page.
  */
+import { THIRD_HARNESS_KEY } from '@ferretry/core-ferrets/contract/testing';
 import { describe, expect, it } from 'bun:test';
 import { AddLoginPanel } from '../../../app/features/add-login-panel.tsx';
 import { addRuntimeLoginPanel, addRuntimeSignInPanel } from '../../../app/features/add-runtime-slots.tsx';
@@ -125,7 +126,7 @@ describe('the sign-in slot panel', () => {
   });
 
   it('says which tool to name instead of starting anything when the harness is not one it signs in', () => {
-    for (const harness of [undefined, 'other', 3]) {
+    for (const harness of [undefined, 'other', 3, THIRD_HARNESS_KEY]) {
       const element = addRuntimeSignInPanel(scripted({}), { subject: 'claude-work', harness });
       expect(element.type).toBe('p');
       expect(element.props).toMatchObject({

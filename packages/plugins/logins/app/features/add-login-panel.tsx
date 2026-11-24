@@ -22,7 +22,8 @@ import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { useLoginChanges } from '../lib/login-changes.ts';
 import { lockedSummary } from '../lib/locked-summary.ts';
 import { readLogins, readPresets } from '../lib/logins-api.ts';
-import { HARNESS_NAMES, HARNESSES, type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
+import { harnessKeyOfCommand, harnessName } from '../../contract/harness-words.ts';
+import { HARNESSES, type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
 import { type Prefill, withheldSentence } from '../lib/paste-model.ts';
 import { isSecretReference, nonReferenceSlots, SECRET_VALUE_SENTENCE } from '../lib/secret-slot.ts';
 import { Button, ChangeApplyPanel } from '../ui.ts';
@@ -33,14 +34,13 @@ import { ProviderGrid, usableHarnesses } from './provider-grid.tsx';
 import { QuickKeyForm, quickKeyVariable } from './quick-key-form.tsx';
 
 /** The panel subjects that lock the panel to one tool: a page names the tool in the subject it mounts the panel with. */
-const HARNESS_SUBJECTS: Readonly<Record<string, HarnessKind>> = {
-  'harness:codex': 'codex',
-  'harness:claude': 'claude-code',
-};
+const HARNESS_SUBJECT_PREFIX = 'harness:';
 
 /** The tool a panel subject locks the panel to; `undefined` for any other subject (Settings has none: the full chooser). */
 export const harnessOfSubject = (subject: string | undefined): HarnessKind | undefined =>
-  subject !== undefined && Object.hasOwn(HARNESS_SUBJECTS, subject) ? HARNESS_SUBJECTS[subject] : undefined;
+  subject?.startsWith(HARNESS_SUBJECT_PREFIX) === true
+    ? harnessKeyOfCommand(subject.slice(HARNESS_SUBJECT_PREFIX.length))
+    : undefined;
 
 /**
  * A provider as ONE tool sees it: only that tool's half and only the variables that half reads, so a provider shared by
@@ -271,7 +271,7 @@ function SignInForm({ client, onAdded }: { readonly client: LoginsClient; readon
         busy={changes.busy}
         busyLabel="Adding…"
         refusal={changes.refusal}
-        submitLabel={`Add a ${HARNESS_NAMES[harness]} login`}
+        submitLabel={`Add a ${harnessName(harness)} login`}
         onSubmit={() => void add()}
         answerRow
       />

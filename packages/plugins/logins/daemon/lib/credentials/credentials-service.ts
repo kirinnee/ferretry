@@ -60,7 +60,7 @@ import {
 } from '../shared/store-inspection.ts';
 import { credentialHarnesses } from '../shared/halves.ts';
 import type { FleetUsageWindow } from './usage.ts';
-import { type HarnessKind, harnessKey } from '../shared/harness.ts';
+import { type HarnessKind, harnessKey, isHarness, isKind } from '../shared/harness.ts';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
 import type { ProviderPreset } from '../presets/schema.ts';
 import {
@@ -219,16 +219,23 @@ export class FleetCredentialCatalog {
   emailSource(entry: CredentialEntry): CredentialEmailSource | undefined {
     const resolution = stored(entry.resolution);
     if (resolution === undefined) return undefined;
-    if (resolution.harness === 'codex') return { harness: 'codex', resolution };
-    if (resolution.ownedDirectory !== undefined) {
-      return {
-        harness: 'claude',
-        accountFile: join(resolution.ownedDirectory, CREDENTIAL_SIGN_IN_DIRECTORY, CLAUDE_ACCOUNT_FILE),
-      };
+    switch (resolution.harness) {
+      case 'codex':
+        return { harness: 'codex', resolution };
+      case 'claude': {
+        if (resolution.ownedDirectory !== undefined) {
+          return {
+            harness: 'claude',
+            accountFile: join(resolution.ownedDirectory, CREDENTIAL_SIGN_IN_DIRECTORY, CLAUDE_ACCOUNT_FILE),
+          };
+        }
+        // The person's own account file is under their home: a build that cannot name it has no file to point at.
+        const userHome = this.deps.paths?.userHome;
+        return userHome === undefined
+          ? undefined
+          : { harness: 'claude', accountFile: join(userHome, CLAUDE_ACCOUNT_FILE) };
+      }
     }
-    // The person's own account file is under their home: a build that cannot name it has no file to point at.
-    const userHome = this.deps.paths?.userHome;
-    return userHome === undefined ? undefined : { harness: 'claude', accountFile: join(userHome, CLAUDE_ACCOUNT_FILE) };
   }
 
   /**
@@ -322,13 +329,18 @@ function credentialLaunch(resolution: StoredCredentialResolution): {
   readonly arguments: readonly string[];
   readonly directories: readonly string[];
 } {
-  if (resolution.harness === 'claude') return claudeLaunch(resolution);
-  const home = dirname(resolution.canonicalFile);
-  return {
-    environment: { CODEX_HOME: home },
-    arguments: ['-c', `${CODEX_CREDENTIAL_STORE_KEY}="${CODEX_CREDENTIAL_STORE_FILE}"`],
-    directories: resolution.ownedDirectory === undefined ? [] : [resolution.ownedDirectory],
-  };
+  switch (resolution.harness) {
+    case 'claude':
+      return claudeLaunch(resolution);
+    case 'codex': {
+      const home = dirname(resolution.canonicalFile);
+      return {
+        environment: { CODEX_HOME: home },
+        arguments: ['-c', `${CODEX_CREDENTIAL_STORE_KEY}="${CODEX_CREDENTIAL_STORE_FILE}"`],
+        directories: resolution.ownedDirectory === undefined ? [] : [resolution.ownedDirectory],
+      };
+    }
+  }
 }
 
 function claudeLaunch(resolution: ClaudeStoreResolution): {
@@ -705,10 +717,10 @@ export class FleetCredentialsService {
   async launchStore(id: string): Promise<LaunchStore> {
     const entry = await this.deps.catalog.entry(id);
     const { resolution } = entry;
-    if (resolution.store === 'host' && resolution.harness === 'claude')
+    if (resolution.store === 'host' && isKind(resolution.harness, 'claude'))
       return { kind: 'host', variables: { [CLAUDE_SECURE_STORAGE_VARIABLE]: HOST_CLAUDE_SECURE_STORAGE } };
     const owned = stored(resolution);
-    if (owned?.harness !== 'claude' || owned.store !== 'ferretry') return { kind: 'none' };
+    if (owned === undefined || !isHarness(owned, 'claude') || owned.store !== 'ferretry') return { kind: 'none' };
     const target = this.deps.catalog.signInTarget(entry);
     const usable = target.kind === 'store' && (await target.check()).signedIn;
     return { kind: 'owned', variables: credentialLaunchEnvironment(owned), usable };
@@ -727,16 +739,22 @@ export class FleetCredentialsService {
       const { id, resolution } = entry;
       const owned = stored(resolution);
       if (owned === undefined) continue;
-      if (owned.harness === 'claude') {
-        const source = this.deps.catalog.emailSource(entry);
-        const organizationType =
-          source === undefined ? undefined : await this.deps.organizationType?.(source).catch(() => undefined);
-        out.push({
-          id,
-          variables: credentialLaunchEnvironment(owned),
-          ...(organizationType === undefined ? {} : { organizationType }),
-        });
-      } else if (owned.store === 'ferretry') out.push({ id, variables: {}, signInFile: owned.canonicalFile });
+      switch (owned.harness) {
+        case 'claude': {
+          const source = this.deps.catalog.emailSource(entry);
+          const organizationType =
+            source === undefined ? undefined : await this.deps.organizationType?.(source).catch(() => undefined);
+          out.push({
+            id,
+            variables: credentialLaunchEnvironment(owned),
+            ...(organizationType === undefined ? {} : { organizationType }),
+          });
+          break;
+        }
+        case 'codex':
+          if (owned.store === 'ferretry') out.push({ id, variables: {}, signInFile: owned.canonicalFile });
+          break;
+      }
     }
     return out;
   }

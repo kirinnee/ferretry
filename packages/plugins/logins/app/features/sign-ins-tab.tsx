@@ -15,12 +15,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { LOGIN_METER_SLOT, type LoginView } from '../../contract/index.ts';
 import { AccountStatus, ProviderQuota } from '../components/account-status.tsx';
 import { LoginScopeChip } from '../components/login-scope-chip.tsx';
+import { harnessName } from '../../contract/harness-words.ts';
 import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { OLLAMA_PRESET_ID } from '../lib/local-models.ts';
 import { checkLogin, readLogins } from '../lib/logins-api.ts';
 import {
   hasSharedEmails,
-  HARNESS_NAMES,
   loginEmail,
   loginExplanation,
   loginGroups,
@@ -246,7 +246,7 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
         </Button>
         <h3 className="m-0 mt-2 font-display text-title font-semibold tracking-display text-fg">
           {loginHarnesses(login)
-            .map(harness => HARNESS_NAMES[harness])
+            .map(harness => harnessName(harness))
             .join(' + ')}{' '}
           login
         </h3>
@@ -260,7 +260,7 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
         <AccountStatus word={word} showLabel className="text-row font-semibold text-fg" />
         <p className="m-0 text-cell leading-base text-muted">
           {checking ? (
-            <Loading kind="bar" label={`Checking with ${HARNESS_NAMES[login.harness]}…`} />
+            <Loading kind="bar" label={`Checking with ${harnessName(login.harness)}…`} />
           ) : (
             loginExplanation(login)
           )}

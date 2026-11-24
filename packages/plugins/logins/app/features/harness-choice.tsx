@@ -2,13 +2,9 @@
  * Which CLI a login is for: a row of cards that only STAGES the answer (nothing is written until the form's own button
  * is pressed), so an arrow key that moves the choice changes nothing on the machine.
  */
-import { HARNESS_NAMES, type HarnessKind } from '../lib/logins-view.ts';
+import { harnessWords } from '../../contract/harness-words.ts';
+import { type HarnessKind } from '../lib/logins-view.ts';
 import { ChoiceCards } from '../ui.ts';
-
-const LINES: Readonly<Record<HarnessKind, string>> = {
-  'claude-code': 'Anthropic’s coding agent',
-  codex: 'OpenAI’s coding agent',
-};
 
 export function HarnessChoice({
   label,
@@ -28,7 +24,11 @@ export function HarnessChoice({
       label={label}
       value={value}
       disabled={disabled}
-      options={harnesses.map(name => ({ id: name, title: HARNESS_NAMES[name], line: LINES[name] }))}
+      options={harnesses.map(name => ({
+        id: name,
+        title: harnessWords(name)?.name ?? name,
+        line: harnessWords(name)?.blurb ?? '',
+      }))}
       onChange={next => onChange(next as HarnessKind)}
     />
   );

@@ -22,6 +22,7 @@ import {
   type LocalCredentialFacts,
 } from '../../lib/credentials/credential-status.ts';
 import { resolveCredentialStore, type StoredCredentialResolution } from '../../lib/credentials/credentials.ts';
+import { byHarness, isHarness } from '../../lib/shared/harness.ts';
 import type { FleetTokenRefreshPort } from '../../lib/credentials/token-refresh.ts';
 import { PassiveUsageRecordSchema, type PassiveUsageRecord } from '../../lib/credentials/usage.ts';
 import { classifyCredential, type CredentialMaterial } from '../../lib/shared/identity.ts';
@@ -109,7 +110,10 @@ export class OwnedLoginStore {
           return {
             harness: credential.harness,
             store: 'host',
-            unavailable: credential.harness === 'claude' ? HOST_CLAUDE_TERMINAL : HOST_STORE_PENDING,
+            unavailable: byHarness(credential.harness, {
+              claude: () => HOST_CLAUDE_TERMINAL,
+              codex: () => HOST_STORE_PENDING,
+            }),
           };
         // A login is one directory, never a path supplied by a configuration name.
         if (id.length === 0 || id === '.' || id === '..' || /[/\\\0]/u.test(id))
@@ -138,7 +142,12 @@ export class OwnedLoginStore {
     if (resolution.store !== 'ferretry' || resolution.ownedDirectory === undefined)
       throw new Error('only an owned login store may be read');
     this.#path(resolution.ownedDirectory);
-    return this.#path(resolution.harness === 'claude' ? resolution.credentialFile : resolution.canonicalFile);
+    switch (resolution.harness) {
+      case 'claude':
+        return this.#path(resolution.credentialFile);
+      case 'codex':
+        return this.#path(resolution.canonicalFile);
+    }
   }
 
   // Today's readFileMaterial + readClaudeStoreFile + checkedFile, with every filesystem operation on the root.
@@ -186,7 +195,7 @@ export class OwnedLoginStore {
 
   /** Today's CredentialEmailReader: Codex's claims, or Claude's account file, kept only while its stamp holds. */
   async email(source: CredentialEmailSource): Promise<string | undefined> {
-    if (source.harness === 'codex') {
+    if (isHarness(source, 'codex')) {
       const facts = await this.local(source.resolution).catch(() => undefined);
       return facts?.codex?.state === 'tokens' ? facts.codex.email : undefined;
     }
@@ -211,7 +220,7 @@ export class OwnedLoginStore {
    * Codex has none. Not kept: it is read once per publish.
    */
   async organizationType(source: CredentialEmailSource): Promise<string | undefined> {
-    if (source.harness === 'codex') return undefined;
+    if (isHarness(source, 'codex')) return undefined;
     try {
       const root = asRecord(JSON.parse(await this.root.readText(this.#path(source.accountFile))) as unknown);
       return nonEmpty(asRecord(root?.oauthAccount)?.organizationType);

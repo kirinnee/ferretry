@@ -9,6 +9,7 @@
 
 import type { ReactElement } from 'react';
 import { createElement } from 'react';
+import { isSupportedHarnessKey } from '../../contract/harness-words.ts';
 import type { LoginsClient } from '../lib/client.ts';
 import { AddLoginPanel } from './add-login-panel.tsx';
 import { LoginSignInPanel } from './login-sign-in-panel.tsx';
@@ -32,7 +33,7 @@ export function addRuntimeSignInPanel(client: LoginsClient, props: Readonly<Reco
   const onSignedIn = callback<[]>(props, 'onSignedIn');
   const subject = typeof props['subject'] === 'string' ? props['subject'] : undefined;
   const harness = props['harness'];
-  if (harness !== 'claude-code' && harness !== 'codex')
+  if (typeof harness !== 'string' || !isSupportedHarnessKey(harness))
     return createElement(
       'p',
       { className: 'm-0 text-cell leading-base text-muted', 'data-login-sign-in-panel': 'none' },

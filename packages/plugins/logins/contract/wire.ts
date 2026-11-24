@@ -6,7 +6,7 @@
  * CHANGES FROM TODAY, all renames or clean-slate cuts:
  * - the word is **login**, not credential: `FleetCredential*` is `Login*`, `credentialId` is `loginId`, the path
  *   parameter is `:loginId`;
- * - the harness key is the harness plugin's id (`claude` → `claude-code`), via `KnownHarnessKeySchema`;
+ * - the harness key is the harness plugin's id (`claude` → `claude-code`), via `HarnessKeyOnWireSchema`, which refuses a key Logins has no behaviour for;
  * - `LoginListSchema.format` is `1` (every stored or served format starts at 1);
  * - small foreign pieces are inlined here instead of imported: `LoginIdSchema` (today `LoginIdSchema`),
  *   the secret-name reference is a plain non-empty string, `InstantSchema`/`NonEmptyStringSchema`/
@@ -15,11 +15,11 @@
  */
 import { type Brand, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { KnownHarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { malformedSecretReference } from '@ferretry/core-vault/contract';
+import { HarnessKeyOnWireSchema } from './harness-words.ts';
 import { nameLooksLikeKey, storedEnvironmentIssue } from './secret-shape.ts';
 
-const HarnessKindSchema = KnownHarnessKeySchema;
+const HarnessKindSchema = HarnessKeyOnWireSchema;
 const NonEmpty = z.string().min(1);
 
 /**
