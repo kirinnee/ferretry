@@ -286,6 +286,7 @@ export class SessionFiles {
         return named.value;
       },
       attach: async (ferret, files) => await this.writeAttachments(parseSessionId(ferret), files),
+      media: async (ferret, files) => await this.writeMedia(parseSessionId(ferret), files),
     };
   }
 
@@ -489,6 +490,29 @@ export class SessionFiles {
           : undefined;
       const path = relative === undefined ? undefined : root.resolve(relative);
       if (path === undefined || !path.ok) throw new Error('an attachment of this ferret could not be named');
+      return { path: path.value, contents: file.contents };
+    });
+    await new OwnFolder(this.root(id)).ensure();
+    await new OwnFolder(root).ensure();
+    await this.requirePrivateAnchor(root);
+    for (const { path, contents } of named)
+      await root.publish(path, typeof contents === 'string' ? new TextEncoder().encode(contents) : contents, {
+        mode: 0o600,
+      });
+  }
+
+  /**
+   * Files a plugin made, written into the ferret's own `media/` folder THROUGH A HANDLE SCOPED TO THAT FOLDER ALONE
+   * (`mediaRoot`), the same way {@link writeAttachments} writes `attachments/`: the folder is made a real `0700`
+   * directory, a link anywhere above it or a folder that is not private refuses before the first file, and each file is
+   * published durably and `0600` through a temporary name. Media is flat: a name that is not bare writes nothing.
+   */
+  private async writeMedia(id: SessionId, files: readonly OpeningFile[]): Promise<void> {
+    const root = this.mediaRoot(id);
+    const named = files.map(file => {
+      const bare = /^[^/\\\0]+$/u.test(file.name) && file.name !== '.' && file.name !== '..';
+      const path = bare && file.folder === undefined ? root.resolve(file.name) : undefined;
+      if (path === undefined || !path.ok) throw new Error('a media file of this ferret could not be named');
       return { path: path.value, contents: file.contents };
     });
     await new OwnFolder(this.root(id)).ensure();

@@ -149,6 +149,7 @@ export async function openHarness(
   };
   const attachmentsFolder = ports.session?.attachmentsFolder?.bind(ports.session);
   const attach = ports.session?.attach?.bind(ports.session);
+  const media = ports.session?.media?.bind(ports.session);
   return {
     deliver: async (delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>> => {
       const found = pane();
@@ -309,6 +310,16 @@ export async function openHarness(
             return files.map(file =>
               posix.join(folder, ...(file.folder === undefined ? [] : [file.folder]), file.name),
             );
+          },
+        }),
+    // The same file write into THIS ferret's own `media/` folder (`FY_MEDIA_DIR`): the answer is each name as
+    // `src: media:<name>` takes it.
+    ...(media === undefined
+      ? {}
+      : {
+          deliverMedia: async (files: readonly HarnessFile[]): Promise<readonly string[]> => {
+            await media(ferret, files);
+            return files.map(file => file.name);
           },
         }),
     // ── the structured-question acts (additive). The writes are the runner's own guarded ones (not wrapped in a second

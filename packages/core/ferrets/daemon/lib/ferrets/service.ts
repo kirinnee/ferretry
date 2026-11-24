@@ -389,16 +389,16 @@ export interface FerretSessionPort {
   assign?(ferret: FerretId, prompt: string): Promise<string>;
   /**
    * Additive (`start -f`, today's `initialAttachments`): the absolute path of THIS ferret's own `attachments/` folder
-   * (one of `FERRET_READABLE_FOLDERS`), where the attachment owner plans the opening message's files. Names the path only;
-   * the folder is made by {@link attach}. Unbound: a start that carries attachments is refused.
+   * (one of `FERRET_READABLE_FOLDERS`), where the opening message's files are planned. Names the path only; {@link attach}
+   * makes it. Unbound: a start that carries attachments is refused.
    */
   attachmentsFolder?(ferret: FerretId): Promise<string>;
   /**
-   * Additive: writes the planned files into the ferret's own `attachments/` folder (made `0700`; each file `0600`, through a
-   * temporary name), after `prepare` and before `assign`, so the task document never names a file that is not there. A
-   * `name` is a bare file name; one that names a path is refused.
+   * Additive: writes the planned files into the ferret's `attachments/` folder (`0700`, files `0600`) before `assign`; a bare `name`.
    */
   attach?(ferret: FerretId, files: readonly OpeningFile[]): Promise<void>;
+  /** Additive: a plugin's made files into the ferret's own `media/` folder (`FY_MEDIA_DIR`), written as {@link attach} writes. */
+  media?(ferret: FerretId, files: readonly OpeningFile[]): Promise<void>;
   /**
    * The effect ledger's admission of the ONE first turn a start may type (today's `turn-1` effect, keyed beneath the
    * ferret and fingerprinted by its assigned task), asked by the runner immediately before its first write into the

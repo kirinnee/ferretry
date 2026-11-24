@@ -170,6 +170,14 @@ export interface FerretHarness {
    */
   deliverFiles?(files: readonly HarnessFile[]): Promise<readonly string[]>;
   /**
+   * Additive (a plugin's made picture): the same hand-over as {@link deliverFiles}, into THIS ferret's own `media/` folder
+   * (`FY_MEDIA_DIR`) instead, so what the chat shows with `src: media:<name>` is there with no step by the ferret. Same
+   * rules: a handle scoped to that folder alone, `0700` folder, `0600` files, a bare name or nothing is written (a
+   * `folder` is not taken: media is flat). Answers each file's name as `src: media:<name>` takes it, in order. Rejects when
+   * a file cannot be written; absent when this daemon cannot write session files.
+   */
+  deliverMedia?(files: readonly HarnessFile[]): Promise<readonly string[]>;
+  /**
    * The seam's own ferret's transcript through its harness, already masked (rejects with 503 while the harness is off).
    * It is bound to that ferret and names no other.
    */

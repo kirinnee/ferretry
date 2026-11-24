@@ -185,6 +185,7 @@ const SWEEP: readonly Entry[] = [
   ['access', 'pairing-redirects', true],
   ['mcp', 'oauth-secrets.json', false],
   ['conversation', 'message-token.key', false],
+  ['create', 'ledger.jsonl', false],
   ['accounts', 'login-secrets.json', false],
   ['accounts', 'accounts.json', false],
   ['git-accounts', 'keys.json', false],
