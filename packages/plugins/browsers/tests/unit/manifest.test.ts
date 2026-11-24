@@ -61,12 +61,14 @@ describe('browsers manifest', () => {
       expect(loosens({ mode: 'headless', stealth: 'on' }, { mode: 'window', stealth: 'on' })).toEqual([]);
       expect(loosens(undefined, { mode: 'headless', stealth: 'off' })).toEqual([]);
     });
-    test('an identity opting out is a tightening; dropping the opt-out while stealth is on is held', () => {
+    const identitySentence = 'an identity that opted out of stealth now passes bot checks and solves captchas too';
+    test('an identity opting out is a tightening; dropping the opt-out while stealth is on is held, under its own sentence', () => {
       const optedOut = { mode: 'headless', stealth: 'on', identities: { work: { stealth: false } } };
       expect(loosens({ mode: 'headless', stealth: 'on' }, optedOut)).toEqual([]);
-      expect(loosens(optedOut, { mode: 'headless', stealth: 'on' })).toEqual([stealthSentence]);
+      // Not the machine switch's sentence: the Browser tab reads that one as "the switch itself is waiting".
+      expect(loosens(optedOut, { mode: 'headless', stealth: 'on' })).toEqual([identitySentence]);
       expect(loosens(optedOut, { mode: 'headless', stealth: 'on', identities: { work: {} } })).toEqual([
-        stealthSentence,
+        identitySentence,
       ]);
       // Off overall, an identity entry changes nothing.
       expect(loosens(optedOut, { mode: 'headless', stealth: 'off' })).toEqual([]);

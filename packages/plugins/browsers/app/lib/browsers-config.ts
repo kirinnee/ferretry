@@ -18,6 +18,7 @@ import {
   BrowsersConfigSchema,
   type BrowsersConfig,
 } from '../../contract/index.ts';
+import { STEALTH_LOOSENING } from '../../contract/config-loosens.ts';
 import type { CallClient } from './clients.ts';
 
 const BROWSERS_FILE = 'browsers.yaml';
@@ -46,6 +47,25 @@ export interface BrowsersDocument {
   readonly etag: string;
   /** The disk text waits for the owner's confirmation (the kernel's `pending`), so it is not yet what is in effect. */
   readonly held: boolean;
+  /**
+   * What waits is the machine-wide stealth `on` itself, so the switch in effect is still off. A file held for another
+   * key (the proxy) while stealth is already on in effect is `held` but NOT this: the switch reads on.
+   */
+  readonly stealthHeld: boolean;
+}
+
+const PendingStatusSchema = z.looseObject({
+  pending: z.array(z.looseObject({ path: NonEmpty, changes: z.array(z.string()) })),
+});
+
+/** Whether the daemon holds the stealth `on` for the owner, from what it says is waiting (an unreadable answer counts as held: off is the safe reading). */
+async function stealthWaits(client: CallClient): Promise<boolean> {
+  try {
+    const status = PendingStatusSchema.parse(await client.call('GET /v1/config/status', {}));
+    return status.pending.some(held => held.path === BROWSERS_FILE && held.changes.includes(STEALTH_LOOSENING));
+  } catch {
+    return true;
+  }
 }
 
 /** The saved browser settings and the digest they were read at. A file that does not parse is not guessed at. */
@@ -54,11 +74,14 @@ export async function readBrowsersConfig(client: CallClient): Promise<BrowsersDo
   const read = readConfigText(file.text);
   if (!read.ok)
     throw new Error(`browsers.yaml cannot be read: ${read.errors[0]?.message ?? 'the text cannot be read as YAML'}`);
+  const config = BrowsersConfigSchema.parse(read.read.value ?? {});
+  const held = file.state === 'pending';
   return {
-    config: BrowsersConfigSchema.parse(read.read.value ?? {}),
+    config,
     text: file.text,
     etag: file.etag,
-    held: file.state === 'pending',
+    held,
+    stealthHeld: held && config.stealth === 'on' && (await stealthWaits(client)),
   };
 }
 

@@ -4,6 +4,7 @@ import type { BrowserMode, BrowserProxyStatus } from '../../contract/index.ts';
 import type { ResolvedBrowserPorts } from '../proxy/wire/ports.ts';
 import {
   agentBrowserArguments,
+  type StealthLaunch,
   BrowserControlError,
   type BrowserProfilePort,
   browserEnvironment,
@@ -65,6 +66,13 @@ export interface SessionBrowserModeOptions {
   readonly mode?: () => Promise<BrowserMode>;
   /** The private display a Linux `window` browser draws into. */
   readonly display?: BrowserDisplayPort;
+  /**
+   * Whether this launch is a STEALTH identity's (the machine switch on and the identity not opted out), read at every
+   * launch like the mode, and the hygiene it gets ({@link StealthLaunch}), given the proxy the launch resolved so its
+   * exit can set the zone and language. `undefined` is every other launch, which is unchanged. An unreadable answer is
+   * `undefined` too: hiding automation is never the fallback.
+   */
+  readonly stealth?: (proxy: ResolvedBrowserProxy | undefined) => Promise<StealthLaunch | undefined>;
   /**
    * The proxy the shared browser goes through, read at every launch like the mode. Unlike the mode, a proxy
    * that cannot be resolved REFUSES the launch: starting without it would send traffic its owner asked to route
@@ -137,7 +145,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     });
     // The display is a precondition too: a Linux real window with no Xvfb refuses here, before any lease.
     const platform = this.modes.platform ?? host.platform;
-    const mode = await this.mode();
+    const configuredMode = await this.mode();
     const transport = (await this.modes.transport?.().catch(() => undefined)) ?? defaultCdpTransport();
     // Refused before anything is leased or spawned, and never quietly swapped for the port: GAP (kernel spawn).
     if (transport === 'pipe') throw new BrowserControlError('launch_failed', PIPE_TRANSPORT_REFUSAL);
@@ -149,6 +157,9 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       if (refusal !== undefined) throw new BrowserControlError('launch_failed', refusal);
     }
     const proxy = await this.modes.proxy?.();
+    const stealth = await this.modes.stealth?.(proxy).catch(() => undefined);
+    // A stealth identity is always a real window, whatever Browser mode says: a headless Chrome is the first thing a bot check reads.
+    const mode: BrowserMode = stealth === undefined ? configuredMode : 'window';
     const version = await chromeVersion(this.ports.spawn, executable);
     const display = mode === 'window' && platform === 'linux' ? await this.privateDisplay() : undefined;
     const lease = await this.profile.acquire({ sessionId: AGENT_BROWSER_HOLDER });
@@ -173,6 +184,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         // person watching — any of them at once.
         ...agentBrowserArguments(executable, lease.profile, cdp, viewport, platform, mode, {
           ...(userAgent === undefined ? {} : { userAgent }),
+          ...(stealth === undefined ? {} : { stealth }),
           ...(proxy === undefined
             ? {}
             : {
@@ -188,13 +200,16 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       chrome = chromeChild(
         this.ports.spawn.start(program, args, {
           // The window's cookie rides with its display: a Chrome without it is refused by the private X server.
-          env: defined(
-            browserEnvironment(
+          env: defined({
+            ...browserEnvironment(
               display,
               this.environment,
               display === undefined ? undefined : this.modes.display?.authority(),
             ),
-          ),
+            // Chrome takes its zone from the process: the identity's own, where its proxy exit named one.
+            ...(stealth?.timezone === undefined ? {} : { TZ: stealth.timezone }),
+            ...(stealth?.locale === undefined ? {} : { LANGUAGE: stealth.locale.replace('-', '_') }),
+          }),
         }),
       );
       // Stderr is kept for the launch diagnostic; stdout (ignored today) is drained so it can never fill.
@@ -211,6 +226,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
           clock: this.ports.clock,
           endpoint,
           environment: this.environment,
+          ...(stealth === undefined ? {} : { stealth: true }),
           readyTimeoutMs: WORKER_ATTACH_TIMEOUT_MS,
           ...(this.modes.stageDirectory === undefined ? {} : { stageDirectory: this.modes.stageDirectory }),
         });

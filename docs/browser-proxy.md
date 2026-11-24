@@ -125,3 +125,6 @@ starting the agent browser.
   and the proxy it started with).
 - **The test endpoint** is `api64.ipify.org`, reached over TLS through the proxy. A proxy that cannot reach it
   fails the test even if it is fine for other sites.
+- **The location endpoint** is `ipinfo.io`, reached the same way, and asked only when a stealth browser starts behind a
+  proxy ([browser-mode.md](browser-mode.md#stealth)): it answers the country and time zone of the exit address, which set the
+  browser's zone and language. It sees the exit address, which every site the browser visits sees too, and nothing else.

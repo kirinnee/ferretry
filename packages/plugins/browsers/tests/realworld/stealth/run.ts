@@ -16,7 +16,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BrowserMode } from '../../../contract/index.ts';
 import { BrowserSessionService } from '../../../daemon/pages/service.ts';
 import { XvfbDisplay } from '../../../daemon/worker/control/adapters/login-runtime.ts';
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
@@ -27,11 +26,14 @@ import { CAPTURE_SOURCE, withChallenge } from '../../support/stealth/capture.ts'
 import { CHECKS, type Check, allowedHost } from '../../support/stealth/checks.ts';
 import { type Observation, renderTable, scorecard } from '../../support/stealth/scorecard.ts';
 
+/** The two Browser modes, and `stealth`: the hygiene layer on (Browser mode stays headless, so the layer's own real window is what is scored). */
+type Layer = 'headless' | 'window' | 'stealth';
+
 const SESSION = 's1';
 const POLL_MS = 2_000;
 
 interface Options {
-  readonly modes: readonly BrowserMode[];
+  readonly modes: readonly Layer[];
   readonly runs: number;
   readonly only: readonly string[];
   readonly label: string;
@@ -52,8 +54,8 @@ function parseOptions(argv: readonly string[]): Options {
   const known = ['modes', 'runs', 'only', 'label', 'out', 'save-raw', 'settle'];
   for (const name of flags.keys()) if (!known.includes(name)) throw new Error(`unknown option --${name}`);
   const modes = (flags.get('modes') ?? 'headless,window').split(',').map(mode => {
-    if (mode !== 'headless' && mode !== 'window')
-      throw new Error(`--modes takes headless and/or window, not "${mode}"`);
+    if (mode !== 'headless' && mode !== 'window' && mode !== 'stealth')
+      throw new Error(`--modes takes headless, window and/or stealth, not "${mode}"`);
     return mode;
   });
   const runs = Number(flags.get('runs') ?? '3');
@@ -76,11 +78,9 @@ const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
 const xvfb = Bun.which('Xvfb');
 
 /** One throwaway browser in `mode`, torn down by `close`. */
-async function startBrowser(
-  mode: BrowserMode,
-): Promise<{ browser: BrowserSessionService; close: () => Promise<void> }> {
-  if (chrome === null || (mode === 'window' && xvfb === null))
-    throw new Error('the suite needs a real Chrome on PATH, and Xvfb for window mode (the dev shell has both)');
+async function startBrowser(mode: Layer): Promise<{ browser: BrowserSessionService; close: () => Promise<void> }> {
+  if (chrome === null || (mode !== 'headless' && xvfb === null))
+    throw new Error('the suite needs a real Chrome on PATH, and Xvfb for window and stealth (the dev shell has both)');
   const root = await mkdtemp(join(tmpdir(), 'ferretry-stealth-'));
   const display = new XvfbDisplay({
     processes: loginProcesses(),
@@ -97,7 +97,9 @@ async function startBrowser(
       { FY_CHROME_BIN: chrome, PATH: process.env.PATH, HOME: root, FONTCONFIG_FILE: process.env.FONTCONFIG_FILE },
       undefined,
       {
-        mode: async () => mode,
+        mode: async () => (mode === 'window' ? 'window' : 'headless'),
+        // No proxy here, so the layer has no exit to take a zone or language from: it keeps the machine's own.
+        ...(mode === 'stealth' ? { stealth: async () => ({}) } : {}),
         display,
         platform: 'linux',
         transport: async () => 'port',
@@ -161,7 +163,7 @@ if (process.platform === 'linux' && process.env.FONTCONFIG_FILE === undefined)
     'note: FONTCONFIG_FILE is not set; on a box with no system fonts (a nix shell) Chrome dies on some pages. Point it at a fonts.conf.',
   );
 const checks = options.only.length === 0 ? CHECKS : CHECKS.filter(check => options.only.includes(check.id));
-const observations: { mode: BrowserMode; run: number; observation: Observation }[] = [];
+const observations: { mode: Layer; run: number; observation: Observation }[] = [];
 if (options.saveRaw !== undefined) await mkdir(options.saveRaw, { recursive: true });
 
 for (const mode of options.modes) {

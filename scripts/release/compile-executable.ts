@@ -7,7 +7,8 @@
  *   bun scripts/release/compile-executable.ts --entry <file> --outfile <file> [--target <bun-target>]
  *                                             [--define KEY=VALUE ...]
  *
- * TWO REWRITES OF PLAYWRIGHT'S BUNDLE make the compiled browser worker work at all:
+ * TWO REWRITES OF PLAYWRIGHT'S BUNDLE make the compiled browser worker work at all (and of patchright-core's, its stealth
+ * fork of the same release, which carries the same two anchors):
  *
  * 1. Its CDP WebSocket. Playwright's bundled copy of the `ws` client upgrades the connection through
  *    `node:http`, and under Bun 1.3 that upgrade never completes: the 101 reply arrives as an ordinary
@@ -65,15 +66,15 @@ interface Rewrite {
   readonly to: string;
 }
 
-const PLAYWRIGHT_LIB = /playwright-core[\\/]lib[\\/][^\\/]+\.js$/;
+const PLAYWRIGHT_LIB = /(?:playwright|patchright)-core[\\/]lib[\\/][^\\/]+\.js$/;
 const REWRITES: readonly Rewrite[] = [
   {
-    file: /playwright-core[\\/]lib[\\/]utilsBundle\.js$/,
+    file: /(?:playwright|patchright)-core[\\/]lib[\\/]utilsBundle\.js$/,
     from: /var ws = wrapper_default;/g,
     to: 'var ws = require("ws");',
   },
   {
-    file: /playwright-core[\\/]lib[\\/]coreBundle\.js$/,
+    file: /(?:playwright|patchright)-core[\\/]lib[\\/]coreBundle\.js$/,
     from: /require\(import_path\d*\.default\.join\(packageRoot, "(package|browsers)\.json"\)\)/g,
     to: 'require("../$1.json")',
   },

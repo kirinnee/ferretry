@@ -40,9 +40,9 @@ type Reading =
   | { readonly kind: 'shown'; readonly document: BrowsersDocument }
   | { readonly kind: 'unavailable'; readonly sentence: string };
 
-/** The switch in effect: an `on` the daemon holds for the owner is not in effect yet, so it reads off. */
+/** The switch in effect: an `on` the daemon holds for the owner is not in effect yet, so it reads off. A file held for some other key (the proxy) says nothing against an `on` already in effect. */
 const stealthInEffect = (document: BrowsersDocument): StealthSwitch =>
-  document.held && document.config.stealth === 'on' ? 'off' : document.config.stealth;
+  document.stealthHeld ? 'off' : document.config.stealth;
 
 export function BrowserTab({ client }: { readonly client: CallClient }) {
   // Which machine this tab is for, and whether it answers: the view's place (shell contract S1).
@@ -110,7 +110,7 @@ export function BrowserTab({ client }: { readonly client: CallClient }) {
           <BrowserStealthSection
             key={stealthInEffect(reading.document)}
             stealth={stealthInEffect(reading.document)}
-            held={reading.document.held && reading.document.config.stealth === 'on'}
+            held={reading.document.stealthHeld}
             save={(stealth: StealthSwitch) => save({ stealth })}
           />
           <BrowserProxySection

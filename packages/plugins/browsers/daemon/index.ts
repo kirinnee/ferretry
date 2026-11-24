@@ -1,14 +1,20 @@
 import type { ConfigFileDef, FerretId } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { type DaemonContext, type DaemonHalf, implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
-import { type BrowsersApi, type BrowsersConfig, type BrowserStreamHello, PageChanged } from '../contract/index.ts';
+import {
+  type BrowsersApi,
+  type BrowsersConfig,
+  type BrowserStreamHello,
+  PageChanged,
+  stealthOn,
+} from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { withAddressRuleKernel, withAddressRuleTools } from './address-rule.ts';
 import { protectionWindows } from './protection/windows.ts';
 import { type BrowserSessionLauncher, BrowserSessionService } from './pages/service.ts';
 import { type BrowserStreamOpener, type FerretBrowserGuard, pageRoutes, streamSocket } from './pages/routes.ts';
 import { BrowsersReferenceMenu } from './pages/reference-menu.ts';
-import { BrowserProxyTester, resolveBrowserProxy } from './proxy/index.ts';
+import { BrowserProxyTester, proxyEndpoint, resolveBrowserProxy } from './proxy/index.ts';
 import { TunnelProxyProbe } from './proxy/adapters/probe.ts';
 import { proxyRoutes } from './proxy/routes.ts';
 import { KernelFrameClock } from './stream/frame-clock.ts';
@@ -40,6 +46,7 @@ import { ProcListenerProver } from './worker/control/adapters/listener-prover.ts
 import { NodeBrowserLoginRuntime, XvfbDisplay } from './worker/control/adapters/login-runtime.ts';
 import { loopbackFirewallDoctor } from './proxy/firewall/doctor.ts';
 import { BrowserProfileStore } from './worker/control/adapters/profile-store.ts';
+import { stealthLaunchFor } from './worker/control/policy.ts';
 import type { StartWorker } from './worker/client.ts';
 import { NodeSessionBrowserLauncher } from './worker/launcher.ts';
 import { workerCommand } from './worker/program.ts';
@@ -130,6 +137,8 @@ export function buildBrowsers(
     procFds: async pid => await hostFacts.procFds(pid),
     procFdLink: async (pid, fd) => await hostFacts.procFdLink(pid, fd),
   });
+  // One probe for the proxy test and for the exit a stealth identity's zone and language are read from.
+  const proxyProbe = new TunnelProxyProbe({ clock: kernel.clock });
   const launcher =
     seams.launcher ??
     new NodeSessionBrowserLauncher(
@@ -146,6 +155,19 @@ export function buildBrowsers(
         proxy: async () => {
           const setting = config()?.proxy;
           return setting === undefined ? undefined : resolveBrowserProxy(setting, new Map());
+        },
+        // Stealth (docs/browser-mode.md): the machine switch in EFFECT (a held `on` is not read) is on. The identity here is the
+        // machine's one agent browser; its zone and language come from where its proxy exits, and a direct launch keeps the machine's own.
+        stealth: async proxy => {
+          const current = config();
+          if (current === undefined || !stealthOn(current)) return undefined;
+          if (proxy === undefined) return {};
+          return stealthLaunchFor(
+            await proxyProbe.locate({
+              endpoint: proxyEndpoint(proxy.setting.url),
+              ...(proxy.credentials === undefined ? {} : { credentials: proxy.credentials }),
+            }),
+          );
         },
         display,
         listenerProver,
@@ -266,7 +288,7 @@ export function buildBrowsers(
     saved: async () => config()?.proxy,
     // GAP: as above, no Vault port reads a proxy credential for Browsers; a proxy with credentials tests as `secret`.
     secrets: async () => new Map(),
-    probe: new TunnelProxyProbe({ clock: kernel.clock }),
+    probe: proxyProbe,
     now: () => kernel.clock.nowMs(),
   });
 

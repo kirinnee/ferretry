@@ -40,7 +40,7 @@ import {
   type Browser,
   type BrowserContext,
   type CDPSession,
-  chromium,
+  chromium as stockChromium,
   type ElementHandle,
   type Locator,
   type Page,
@@ -94,6 +94,17 @@ import { type PointerPage, performPointerAct, pointerActParam } from '../pages/p
 import type { PushNumberPage } from '../challenges/push-number-read.ts';
 
 const endpoint = process.argv[2];
+/** This worker drives a stealth identity's Chrome (`STEALTH_WORKER_ENVIRONMENT` in `client.ts`): patchright-core, with no `Runtime.enable`. */
+const STEALTH = process.env.FY_BROWSER_STEALTH === '1';
+/** What a stealth page's console log says first: the page's console cannot be read without the DevTools domain a page can detect. */
+export const STEALTH_CONSOLE_NOTE =
+  'the page console is not captured in a stealth browser: reading it needs the DevTools Runtime domain, which sites detect';
+/** A page's console log; a stealth one opens with the note, so an empty log is not mistaken for a quiet page. */
+function newConsoleLog(): ConsoleLog {
+  const log = new ConsoleLog();
+  if (STEALTH) log.add('warning', STEALTH_CONSOLE_NOTE);
+  return log;
+}
 /** Where downloads and PDFs are staged for the daemon; without it the worker stages nothing. */
 const stageDirectory = process.argv[3];
 const downloads = new DownloadStage({
@@ -284,12 +295,12 @@ function watch(page: Page, key: string): void {
   page.on(
     'console',
     guarded(message =>
-      logOf(consoles, key, () => new ConsoleLog()).add(message.type(), message.text(), message.location()),
+      logOf(consoles, key, () => newConsoleLog()).add(message.type(), message.text(), message.location()),
     ),
   );
   page.on(
     'pageerror',
-    guarded(error => logOf(consoles, key, () => new ConsoleLog()).add('error', error.message)),
+    guarded(error => logOf(consoles, key, () => newConsoleLog()).add('error', error.message)),
   );
   page.on(
     'request',
@@ -779,7 +790,7 @@ async function lifecycle(params: Readonly<Record<string, unknown>>): Promise<Rec
       pageKey: key,
       page: page as unknown as WaitablePage,
       dialogs,
-      messages: logOf(consoles, key, () => new ConsoleLog()),
+      messages: logOf(consoles, key, () => newConsoleLog()),
       network: logOf(networks, key, () => new NetworkLog()),
       emulation: logOf(emulations, key, () => new PageEmulation()),
       targets: {
@@ -1225,6 +1236,12 @@ export async function startBrowserWorker(): Promise<void> {
     return;
   }
   try {
+    // A stealth identity's Chrome is driven through patchright-core, the SAME Playwright release (1.62.1,
+    // PLAYWRIGHT_REACHED_VERSION) with the `Runtime.enable` leak removed: it stays out of the stock path, so every other
+    // launch drives exactly what it did. The two share one API and one internal layout, which `fields.ts` reaches into.
+    const chromium: typeof stockChromium = STEALTH
+      ? ((await import('patchright-core')).chromium as unknown as typeof stockChromium)
+      : stockChromium;
     browser =
       endpoint === CDP_PIPE_ENDPOINT
         ? await chromium.connectOverCDP(chromePipe(), { timeout: CONNECT_TIMEOUT_MS })

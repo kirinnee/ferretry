@@ -4,6 +4,7 @@ import { interact, mount, must, WithViewPlace } from '@ferretry/app/testing';
 import browsersManifest from '../../../../manifest.ts';
 import { BROWSER_USER_AGENT_WORDS, BrowserTab } from '../../../../app/features/settings/browser-tab.tsx';
 import { STEALTH_HELD_NOTE, STEALTH_TERMS_NOTE } from '../../../../app/features/settings/browser-stealth-section.tsx';
+import { STEALTH_LOOSENING } from '../../../../contract/config-loosens.ts';
 import { PROXY_ERROR_WORDS } from '../../../../app/features/settings/browser-proxy-test-result.tsx';
 import { BROWSER_OFFLINE_WORDS, browserStateSentence } from '../../../../app/features/settings/browser-state-line.tsx';
 import type { RecordedCall } from '../../../support/app/client.ts';
@@ -11,6 +12,7 @@ import { recordingClient } from '../../../support/app/client.ts';
 
 const CONFIG_GET = 'GET /v1/config/file';
 const CONFIG_PUT = 'PUT /v1/config/file';
+const CONFIG_STATUS = 'GET /v1/config/status';
 const STATE = 'GET /v1/browser/state';
 const PROXY_TEST = 'POST /v1/browser/proxy/test';
 const GRANTS = 'GET /v1/grants';
@@ -56,6 +58,8 @@ interface Script {
   readonly readsBackWhatWasWritten?: boolean;
   /** The file is already waiting for the owner when the tab opens (a held edit from before). */
   readonly heldAtLoad?: boolean;
+  /** What the kernel says waits for the owner in browsers.yaml (its `pending[].changes`); the stealth `on` unless said otherwise. */
+  readonly waiting?: readonly string[] | Error;
 }
 
 const tab = async (script: Script = {}, place?: ViewPlace) => {
@@ -69,6 +73,15 @@ const tab = async (script: Script = {}, place?: ViewPlace) => {
         state = 'pending';
       }
       return script.put ?? applied();
+    }
+    if (route === CONFIG_STATUS) {
+      if (script.waiting instanceof Error) return script.waiting;
+      return {
+        directory: '/x',
+        files: [],
+        issues: [],
+        pending: [{ path: 'browsers.yaml', etag: 'e', changes: script.waiting ?? [STEALTH_LOOSENING] }],
+      };
     }
     if (route === STATE) return script.state ?? { state: 'stopped' };
     if (route === GRANTS) return script.grants ?? OPEN;
@@ -427,6 +440,43 @@ describe('the Stealth switch on the Browser tab', () => {
 
   it('shows the held note and the switch off on a fresh load of a file holding an unconfirmed on, from the daemon alone', async () => {
     const { view } = await tab({ text: 'mode: headless\nstealth: on\n', heldAtLoad: true });
+    expect(stealthSwitch(view.container).getAttribute('aria-checked')).toBe('false');
+    expect(text(view.container, '[data-setup-note="browser-stealth-held"]')).toBe(STEALTH_HELD_NOTE);
+    await view.unmount();
+  });
+
+  it('reads ON, with no waiting note, when the file is held for another key while stealth is already on in effect', async () => {
+    // The file says stealth: on and is pending — but what waits is the proxy, so the switch is on in effect.
+    const { view } = await tab({
+      text: 'mode: headless\nstealth: on\nproxy:\n  url: http://127.0.0.1:8080\n',
+      heldAtLoad: true,
+      waiting: ['the agent browser now sends its traffic through the proxy at http://127.0.0.1:8080'],
+    });
+    expect(stealthSwitch(view.container).getAttribute('aria-checked')).toBe('true');
+    expect(view.container.querySelector('[data-setup-note="browser-stealth-held"]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('reads OFF with the waiting note when the stealth on waits beside another held key', async () => {
+    const { view } = await tab({
+      text: 'mode: headless\nstealth: on\n',
+      heldAtLoad: true,
+      waiting: [
+        'the agent browser now sends its traffic through the proxy at http://127.0.0.1:8080',
+        STEALTH_LOOSENING,
+      ],
+    });
+    expect(stealthSwitch(view.container).getAttribute('aria-checked')).toBe('false');
+    expect(text(view.container, '[data-setup-note="browser-stealth-held"]')).toBe(STEALTH_HELD_NOTE);
+    await view.unmount();
+  });
+
+  it('reads OFF, the safe side, when the daemon cannot say what waits', async () => {
+    const { view } = await tab({
+      text: 'mode: headless\nstealth: on\n',
+      heldAtLoad: true,
+      waiting: new Error('no status'),
+    });
     expect(stealthSwitch(view.container).getAttribute('aria-checked')).toBe('false');
     expect(text(view.container, '[data-setup-note="browser-stealth-held"]')).toBe(STEALTH_HELD_NOTE);
     await view.unmount();

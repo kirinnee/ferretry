@@ -203,7 +203,7 @@ export const AUDIT_KINDS: { readonly [K in AuditKindName]: AuditKindRef<K> } = O
 ) as { readonly [K in AuditKindName]: AuditKindRef<K> };
 
 /** The kinds kept past rotation (today's `AUDIT_KEPT_EVENTS`). */
-export const AUDIT_KEPT_KINDS: readonly AuditKindName[] = [
+export const AUDIT_KEPT_KINDS: readonly (AuditKindName | 'browser.stealth.switched')[] = [
   'device.paired',
   'device.revoked',
   'device.expired',
@@ -232,6 +232,7 @@ export const AUDIT_KEPT_KINDS: readonly AuditKindName[] = [
   'catalog.link.changed',
   'security.changed',
   'warden.configured',
+  'browser.stealth.switched', // a plugin's kind (browsers): a security-setting change, kept past rotation
 ];
 
 // ─── step-up acts (closed lists) ──────────────────────────────────────────────────────────────────────────────────

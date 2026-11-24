@@ -8,6 +8,8 @@ import {
   BrowserControlError,
   browserEnvironment,
   CHROME_EXECUTABLE_NAMES,
+  STEALTH_BLINK_SWITCH,
+  stealthLaunchFor,
   browserLoginChromeArguments,
   chromeExecutableCandidates,
   chromeInstallCommand,
@@ -312,6 +314,62 @@ describe('browser control policy', () => {
     }
     should(launches.linuxWindow).containEql('--ozone-platform=x11');
     should(launches.macWindow).not.containEql('--ozone-platform=x11');
+  });
+
+  it('should NEVER hide automation for a launch that is not a stealth identity’s, in any mode, platform or extras', () => {
+    const viewport = { width: 1280, height: 800 };
+    const extras = [{}, { userAgent: 'Mozilla/5.0' }, { proxy: { server: 'http://127.0.0.1:1', bypass: ['<local>'] } }];
+    for (const platform of ['linux', 'darwin'] as const) {
+      for (const mode of ['headless', 'window'] as const) {
+        for (const extra of extras) {
+          const argv = agentBrowserArguments('/chrome', '/profile', PORT, viewport, platform, mode, extra);
+          should(argv).not.containEql(STEALTH_BLINK_SWITCH);
+          should(argv.filter(argument => /^--(?:lang|accept-lang)=/u.test(argument))).deepEqual([]);
+        }
+      }
+    }
+    // The login window a person drives never hides it either.
+    should(browserLoginChromeArguments('/chrome', '/profile', 'linux')).not.containEql(STEALTH_BLINK_SWITCH);
+  });
+
+  it('should ALWAYS launch a stealth identity as a real window that hides automation, whatever Browser mode says', () => {
+    const viewport = { width: 1280, height: 800 };
+    for (const platform of ['linux', 'darwin'] as const) {
+      for (const mode of ['headless', 'window'] as const) {
+        const argv = agentBrowserArguments('/chrome', '/profile', PORT, viewport, platform, mode, {
+          userAgent: 'Mozilla/5.0 (HeadlessSafe)',
+          stealth: {},
+        });
+        should(argv).containEql(STEALTH_BLINK_SWITCH);
+        should(argv.some(argument => argument.startsWith('--headless'))).be.false();
+        // It is a window that keeps painting, and a headless Chrome's user-agent fix has nothing to fix.
+        should(argv).containEql('--disable-renderer-backgrounding');
+        should(argv.some(argument => argument.startsWith('--user-agent='))).be.false();
+        should(argv.includes('--ozone-platform=x11')).equal(platform === 'linux');
+        // The announcing switch is still never passed, and the DevTools transport is the same loopback port.
+        should(argv.filter(argument => /^--enable-automation/u.test(argument))).deepEqual([]);
+        should(argv).containEql('--remote-debugging-port=9222');
+        // With no exit to match, the language is the machine's own.
+        should(argv.filter(argument => /^--(?:lang|accept-lang)=/u.test(argument))).deepEqual([]);
+      }
+    }
+  });
+
+  it('should give a stealth identity the language of its proxy exit, and its zone only as the process’s own TZ', () => {
+    const argv = agentBrowserArguments('/chrome', '/profile', PORT, { width: 1280, height: 800 }, 'linux', 'headless', {
+      stealth: stealthLaunchFor({ country: 'DE', timezone: 'Europe/Berlin' }),
+    });
+
+    should(argv).containEql('--lang=de-DE');
+    should(argv).containEql('--accept-lang=de-DE,de');
+    should(argv.filter(argument => argument.includes('Berlin') || argument.startsWith('--timezone'))).deepEqual([]);
+    should(stealthLaunchFor({ country: 'DE', timezone: 'Europe/Berlin' })).deepEqual({
+      timezone: 'Europe/Berlin',
+      locale: 'de-DE',
+    });
+    // A country the table does not name keeps the machine's language, and no exit keeps both.
+    should(stealthLaunchFor({ country: 'ZZ', timezone: 'Pacific/Fiji' })).deepEqual({ timezone: 'Pacific/Fiji' });
+    should(stealthLaunchFor(undefined)).deepEqual({});
   });
 
   it('should name what installs Xvfb, or say to install it, when a Linux real window has no display', () => {
