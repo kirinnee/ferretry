@@ -1,5 +1,6 @@
 /** @ferretry/plugin-voice/contract/testing — the contract's fake and conformance suite (§7.8). */
 import { describe, expect, test } from 'bun:test';
+import type { VoiceEngineApi, VoiceEngineView } from '../engine.ts';
 import { SttEnhancementError } from '../errors.ts';
 import { VoiceConfigSchema } from '../config.ts';
 import type { VoiceApi } from '../port.ts';
@@ -11,6 +12,32 @@ const PROVIDERS = [
   { provider: 'groq', label: 'Groq', secretName: 'GROQ_API_KEY' },
   { provider: 'cerebras', label: 'Cerebras', secretName: 'CEREBRAS_API_KEY' },
 ] as const;
+
+/** In-memory engine: install is instant, transcription answers a fixed sentence, no voice is ever found. */
+function fakeEngine(): VoiceEngineApi {
+  let installed = false;
+  const view = (): VoiceEngineView => ({
+    state: installed ? 'ready' : 'not_installed',
+    machine: 'test-daemon',
+    label: 'Fake speech engine',
+    sizeBytes: 700_000_000,
+    doneBytes: installed ? 700_000_000 : 0,
+    loaded: false,
+  });
+  return {
+    view: async () => view(),
+    install: async () => {
+      installed = true;
+      return view();
+    },
+    remove: async () => {
+      installed = false;
+      return view();
+    },
+    transcribe: async () => ({ text: 'fake words', decodeMs: 0, realTimeFactor: 0 }),
+    detectSpeech: async () => [],
+  };
+}
 
 /** In-memory `VoiceApi`: keys set by name, a Test that proves a set key, an enhancer that keeps the words as spoken. */
 export function fakeVoice(options: { readonly keys?: readonly string[] } = {}): VoiceApi {
@@ -61,6 +88,7 @@ export function fakeVoice(options: { readonly keys?: readonly string[] } = {}): 
       tested.set(provider, result);
       return result;
     },
+    engine: fakeEngine(),
     settings: () => VoiceConfigSchema.parse({}),
   };
 }

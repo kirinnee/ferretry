@@ -3,6 +3,7 @@ import { VaultPort } from '@ferretry/core-vault/contract';
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import {
   CLEANUP_PROVIDERS,
+  ENGINE_HOSTS,
   MODELS_STATE,
   SPEEDUP_TESTS_STATE,
   VOICE_CONFIG,
@@ -34,6 +35,9 @@ export default definePlugin({
   kinds: ['view', 'command'],
   words: [{ word: 'dictate', means: 'speak a message', insteadOf: ['STT'] }],
 
+  // The machine speech engine's worker thread (voice mode): `fyd --check` starts it, so a binary without it is seen at once.
+  workers: ['speech'],
+
   needs: { vault: VaultPort },
   // Conversation is optional: Read aloud is drawn in its transcript, and with Conversation off there is no transcript.
   uses: { logins: LoginsPort, conversation: ConversationPort },
@@ -48,6 +52,31 @@ export default definePlugin({
           skip: 'not recorded today (no rule in lib/audit/routes.ts); the payload is dictated speech and is never logged',
         },
         guard: { none: 'the dictated transcript and its repaired copy; no pane, page or vault text' },
+      }),
+      route('GET /v1/voice/engine', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('voice', 'use'),
+        noStore: true,
+        audit: { skip: 'a read of an install state, sizes and counters' },
+        guard: { none: 'a state, byte counts and one fixed sentence; no audio and no transcript' },
+      }),
+      route('POST /v1/voice/engine/install', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('voice', 'configure'),
+        noStore: true,
+        // Public model files, hash-checked; no secret is sent and none is returned.
+        audit: { skip: 'downloads pinned public speech files onto this machine; carries no secret and no audio' },
+        guard: { none: 'a state, byte counts and one fixed sentence; no audio and no transcript' },
+      }),
+      route('DELETE /v1/voice/engine', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('voice', 'configure'),
+        noStore: true,
+        audit: { skip: 'deletes the downloaded speech files from this machine; carries no secret and no audio' },
+        guard: { none: 'a state, byte counts and one fixed sentence; no audio and no transcript' },
       }),
       route('GET /v1/speedups', {
         minimum: 'operator',
@@ -139,7 +168,9 @@ export default definePlugin({
 
   permissions: {
     // Keys ride only on requests the Vault's outbound holder builds; the hosts are the provider table's.
-    network: [CLEANUP_PROVIDERS.groq.host, CLEANUP_PROVIDERS.cerebras.host, 'api.typesafe.ai'],
+    network: [CLEANUP_PROVIDERS.groq.host, CLEANUP_PROVIDERS.cerebras.host, 'api.typesafe.ai', ...ENGINE_HOSTS],
     secrets: ['GROQ_API_KEY', 'CEREBRAS_API_KEY', 'JEV_API_KEY'],
+    // Only `diskFreeBytes`: Install asks how much room the models folder has before it downloads 700 MB.
+    hostFacts: true,
   },
 });

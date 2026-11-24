@@ -26,6 +26,7 @@ export const CAPABILITY_NAMES = [
   'pairing',
   'secrets',
   'sharing',
+  'voice',
 ] as const;
 export type CapabilityName = (typeof CAPABILITY_NAMES)[number];
 export type Axis = 'use' | 'configure';

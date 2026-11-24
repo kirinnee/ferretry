@@ -1,5 +1,6 @@
 import { definePort } from '@ferretry/kernel/contract';
 import type { VoiceConfig } from './config.ts';
+import type { VoiceEngineApi } from './engine.ts';
 import type { SttEnhancementResult } from './stt.ts';
 import type { SpeedupProvider, SpeedupsView, SpeedupTestResult } from './speedups.ts';
 
@@ -15,6 +16,8 @@ export interface VoiceApi {
   speedups(): Promise<SpeedupsView>;
   /** Spends the provider's key once, the cheapest way it can be spent, and remembers the answer. */
   testSpeedup(provider: SpeedupProvider): Promise<SpeedupTestResult>;
+  /** The machine speech engine (voice mode): what is installed, and the speech-to-text and voice detection it runs. */
+  readonly engine: VoiceEngineApi;
   /** The cleanup settings in effect (`voice.yaml`). */
   settings(): VoiceConfig;
 }

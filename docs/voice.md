@@ -295,6 +295,59 @@ installed iPhone/iPad Home Screen app cannot use it. **First-run onboarding neve
 "Test your audio" step (`features/onboarding/voice-test.tsx`) only records with a verified on-device engine, so
 choosing Browser voice there sends no audio anywhere and Record says to pick an on-device voice.
 
+## Voice mode: the machine's speech engine
+
+**Built (voice mode unit 3):** the machine can install, load and run the speech models voice mode needs. Nothing
+calls them yet: the audio stream (unit 4), the panel (5) and the reply voice (6) come next, so Settings › Voice ›
+**Voice mode** only installs, shows the state and removes.
+
+- **What runs where.** Owner decision O2: the sherpa-onnx **WebAssembly** runtime first (the same `@sherpaw/asr` the
+  app ships), in one **worker thread** of the daemon (`daemon/worker/speech.worker.ts`), never in the daemon's own
+  event loop. Parakeet TDT 0.6B v3 (int8, multilingual) decodes. **Silero VAD v5** finds the voice, run by
+  onnxruntime-web in the same thread, because sherpa's WebAssembly build has no voice-detector entry point. No native
+  library, no `nix-ld` gap, nothing embedded in `fyd` beyond the worker's JavaScript.
+- **Install** (`POST /v1/voice/engine/install`, answers 202; Settings › Voice › Voice mode) downloads seven pinned
+  files, **698,905,830 bytes** in all, into `state/voice/models/parakeet-tdt-0.6b-v3/`: Parakeet's three graphs and
+  vocabulary and Silero (Hugging Face, by commit), and the two WebAssembly runtimes (jsDelivr, by version). Each file
+  is checked against its pinned size and **SHA-256** before it is written, so one that differs by a bit is refused
+  (`hash_mismatch`) and nothing of it is kept. A file already on disk at its pinned size is not downloaded again.
+  There is no partial-download resume yet: a failure restarts the file it stopped in. Install ends by loading the
+  models and decoding a second of silence, so **Ready means it ran**, not only that it is saved; the models are then
+  unloaded again, so an install does not leave about 1.8 GB resident. `fy` and the app read
+  the state from `GET /v1/voice/engine`; `DELETE /v1/voice/engine` unloads and deletes. Before it downloads anything Install asks the disk under `state/voice/models/`, and refuses with
+  `no_disk` (and a sentence that says how much is needed and how much is free) unless the files still MISSING plus
+  1 GB are free; a write that fails leaves no temporary file behind. Grants (owner decision O3): the routes belong to
+  their own `voice` capability — a read is `voice.use`, install and remove are a person's `voice.configure` — so
+  narrowing `fleet` does not govern them.
+- **Memory.** The models load on the first call and the thread ends **10 idle minutes** after the last one, which
+  returns its memory. A load is refused (`no_memory`) when the machine's available memory is under the files plus
+  1.5 GB.
+  The worker is a thread **inside the daemon process**, not a child: a process-level out-of-memory kill takes the daemon
+  down with it, and the free-memory check reads the machine's free memory (`os.freemem()`), which ignores a cgroup
+  `MemoryMax` the daemon may be running under.
+- **The port.** Other plugins use `VoiceApi.engine`: `transcribe(samples)` (16 kHz mono, one whole take; returns the
+  text and the real-time factor) and `detectSpeech(samples)` (spans in samples). No route takes audio.
+
+**Measured here (2026-11-24; 32-core Linux x64, load average about 8, run under `nice`; one WebAssembly thread):**
+
+| What                                                    | Measured                                             |
+| ------------------------------------------------------- | ---------------------------------------------------- |
+| Install, real download from Hugging Face + jsDelivr     | 699 MB in under 10 s (daemon, whole install)         |
+| Load the models in the worker                           | 1.8 s (1.77–1.94 over five loads)                    |
+| Decode `clip-5s.wav` (5.0 s), Parakeet v3               | 1.86–2.10 s: **real-time factor 0.37–0.42**          |
+| Decode a real 5.8 s recording (`en.wav`)                | 2.08–2.12 s: real-time factor 0.36–0.37              |
+| Silero VAD over `clip-5s.wav`                           | 0.44 ms per 32 ms chunk: real-time factor 0.014      |
+| Daemon resident memory, idle → models loaded → unloaded | 272 MB → **1.83 GB** → 281 MB                        |
+| The sherpa module's own heap once loaded                | 819 MB (the in-memory copies of the files are freed) |
+
+The real-time factor matches the browser's single-thread number for the same model (`docs/voice.md` › Speed: 1.76 s
+for 5 s), so the machine is **not faster per decode**; its gain is that a pass never competes with a page. Native
+sherpa-onnx with several threads is the next step **only if** the first-audio target later needs it (plan risk 1).
+
+Proof: `packages/plugins/voice/tests/realworld/speech-engine.realworld.test.ts` runs the engine's own entry (install →
+load → decode) against the real files, first with one flipped bit (refused) and then the pinned bytes
+(`FY_VOICE_ENGINE_FILES` names a folder holding the files by role; without it the test skips).
+
 ## Speed: which path each engine runs on
 
 **Short version.** On-device speech runs on single-thread WebAssembly today, and the app picks that for
@@ -918,12 +971,9 @@ pause plus the countdown plus STT and clean-up, an estimated 3.4–5.5 s at the 
 - **Live voice** (listen, notice the pause, send after a visible countdown, read the reply aloud):
   nothing of it exists (its end-of-turn detector was dropped by the owner, !A525 — see
   [Pause detection](#pause-detection-the-end-of-a-spoken-turn)). There is no Live button, bar or loop.
-- **Parakeet on your machine** (kteam's daemon engine, sherpa-onnx `parakeet-tdt-0.6b-v2-int8`):
-  downloaded once to the daemon, usable by every paired device, audio crossing only the end-to-end
-  channel to your own machine. It needs a native sherpa-onnx addon inside the compiled `fyd` binary (per
-  platform, and inside the Nix build's pinned dependency hash), a 460 MB archive download and
-  extraction on the daemon, an audio route plus its PWA dial and a `grants` capability for it. That is
-  its own change, not part of this one.
+- **Voice mode on your machine** (hands-free chat): the machine's speech engine is installed and measured (see
+  [Voice mode: the machine's speech engine](#voice-mode-the-machines-speech-engine)); the audio stream to it, the
+  panel, the reply voice and barge-in are not built.
 - ~~A machine-wide default chosen during onboarding~~ — done: New machine setup's Voice step renders
   `VoiceEngineChoice` and saves the choice as `voice.yaml`'s `defaultEngine`; a device that has not picked an
   engine dictates with it until it picks its own. Settings › Dictation still shows the device's own choice

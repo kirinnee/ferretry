@@ -171,6 +171,7 @@ const CAPABILITY_GRANT_FIELDS = {
   pairing: grantSchemaFor('pairing'),
   secrets: grantSchemaFor('secrets'),
   sharing: grantSchemaFor('sharing'),
+  voice: grantSchemaFor('voice'),
 } as const satisfies CapabilityGrantFields;
 
 /** The `grants` block of `gate.yaml` (today's `CapabilityGrantsDocumentSchema`): strict, unknown keys refused. */

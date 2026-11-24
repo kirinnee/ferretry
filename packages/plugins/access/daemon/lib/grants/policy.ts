@@ -44,6 +44,7 @@ export const DEFAULT_CAPABILITY_GRANTS: CapabilityGrants = {
   pairing: { use: true, configure: true },
   secrets: { use: true, configure: true },
   sharing: { use: true, configure: true },
+  voice: { use: true, configure: true },
 };
 
 /**
@@ -89,6 +90,7 @@ const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {
   pairing: 'device pairing',
   secrets: 'the secret store',
   sharing: 'catalog sharing',
+  voice: 'speech and voice',
 };
 
 /** The capability as an operator reads it, for a report row or a refusal. */

@@ -7,6 +7,10 @@ import { JevProbe } from './lib/speedups/jev-probe.ts';
 import { SpeedupsService } from './lib/speedups/service.ts';
 import { type CleanupSettings, DEFAULT_CLEANUP_SETTINGS } from './lib/stt/enhancement.ts';
 import { SttEnhancementService } from './lib/stt/enhancer.ts';
+import { freemem } from 'node:os';
+import { StateEngineFiles } from './adapters/state-engine-files.ts';
+import { startSpeechThread, SPEECH_WORKER_URL } from './adapters/worker-speech-thread.ts';
+import { SpeechEngine } from './lib/engine/engine.ts';
 import { voiceRoutes } from './routes.ts';
 
 /**
@@ -18,6 +22,8 @@ import { voiceRoutes } from './routes.ts';
  * transcript could ride in.
  */
 export default implementDaemon(manifest, {
+  // The machine speech engine's thread: `fyd --check` starts and stops it, and a compiled binary embeds it.
+  workers: { speech: SPEECH_WORKER_URL },
   build(ctx) {
     const { kernel } = ctx;
     const { vault } = ctx.needs;
@@ -38,13 +44,29 @@ export default implementDaemon(manifest, {
       guard: new JevProbe(authorizer),
     });
 
+    const engineLog = kernel.log.child('engine');
+    const engine = new SpeechEngine({
+      http: { request: async (url, init) => await kernel.fetch.request(url, init) },
+      files: new StateEngineFiles(kernel.state, kernel.hostFacts),
+      clock: kernel.clock,
+      machine: () => kernel.identity.daemonName,
+      start: () => startSpeechThread(kernel.workers),
+      availableMemory: () => freemem(),
+      log: {
+        info: (message, fields) => engineLog.info(message, fields),
+        warn: (message, fields) => engineLog.warn(message, fields),
+      },
+    });
+    kernel.lifecycle.onStop(() => void engine.unload());
+
     const voice: VoiceApi = {
+      engine,
       enhance: async input => await enhancement.enhance(input),
       speedups: async () => await speedups.view(),
       testSpeedup: async provider => await speedups.test(provider),
       settings: () => kernel.config.file(VOICE_CONFIG) ?? { postProcessing: DEFAULT_CLEANUP_SETTINGS },
     };
 
-    return { routes: voiceRoutes(enhancement, speedups), provides: { voice } };
+    return { routes: voiceRoutes(enhancement, speedups, engine), provides: { voice } };
   },
 });

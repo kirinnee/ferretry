@@ -20,6 +20,7 @@ export const CAPABILITY_NAMES = [
   'pairing',
   'secrets',
   'sharing',
+  'voice',
 ] as const;
 export type CapabilityName = (typeof CAPABILITY_NAMES)[number];
 
@@ -39,6 +40,7 @@ export const CAPABILITIES = {
   pairing: capability('pairing'),
   secrets: capability('secrets'),
   sharing: capability('sharing'),
+  voice: capability('voice'),
 } as const satisfies { readonly [K in CapabilityName]: CapabilityRef<K> };
 
 export const CapabilityNameSchema = z.enum(CAPABILITY_NAMES);
@@ -102,6 +104,7 @@ export const CAPABILITY_NOUNS: Readonly<Record<CapabilityName, string>> = {
   pairing: 'device pairing',
   secrets: 'the secret store',
   sharing: 'catalog sharing',
+  voice: 'speech and voice',
 };
 
 /** The `use` capabilities that ask a step-up when governed (today's `STEP_UP_USE_CAPABILITIES`). */

@@ -153,7 +153,7 @@ export default definePlugin({
         args: [
           {
             name: 'capability',
-            help: 'the capability: fleet, terminal, browser, filesystem, warden, pairing, secrets or sharing',
+            help: 'the capability: fleet, terminal, browser, filesystem, warden, pairing, secrets, sharing or voice',
           },
         ],
         options: [

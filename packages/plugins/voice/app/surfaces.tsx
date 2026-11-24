@@ -11,6 +11,7 @@ import { DictationControl } from './components/dictation-control.tsx';
 import { ReadAloudControl } from './components/read-aloud.tsx';
 import { DictationDebugSettings } from './features/settings/dictation-debug-settings.tsx';
 import { DictationSettings } from './features/settings/dictation-settings.tsx';
+import { VoiceModeSettings } from './features/settings/voice-mode-settings.tsx';
 import { SpeedupKeysSettings } from './features/settings/speedup-keys-settings.tsx';
 import { VoiceCleanupSettings } from './features/settings/voice-cleanup-settings.tsx';
 import { TranscriptionLogSettings } from './features/settings/transcription-log-settings.tsx';
@@ -101,16 +102,15 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
   }) {
     const dictation = useSttSettings(sttStore);
     return (
-      <>
-        <div className="fy-vs">
-          <DictationSettings {...dictation} daemon={THIS_DAEMON} />
-          <SpeedupKeysSettings />
-          <SettingGroup label="Privacy and debugging">
-            <TranscriptionLogSettings />
-            <DictationDebugSettings />
-          </SettingGroup>
-        </div>
-      </>
+      <div className="fy-vs">
+        <DictationSettings {...dictation} daemon={THIS_DAEMON} />
+        <VoiceModeSettings connection={THIS_DAEMON} />
+        <SpeedupKeysSettings />
+        <SettingGroup label="Privacy and debugging">
+          <TranscriptionLogSettings />
+          <DictationDebugSettings />
+        </SettingGroup>
+      </div>
     );
   }
 
