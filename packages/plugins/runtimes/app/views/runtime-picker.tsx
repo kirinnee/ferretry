@@ -8,9 +8,11 @@
  * speed list beside them. A value the ferret has not reported reads as the plain word `Default` (it runs on the harness's own choice; the tooltip names the field), never a guess.
  * The composer draws this panel on its status line, under the row (Conversation's `STATUS_PANELS`), because anything it
  * drew in the row would take the text box's room. The popover is a portal with fixed placement, so nothing it holds can
- * make the composer taller, and it asks for the model catalog only once opened.
+ * make the composer taller, and it asks for the model catalog only once opened. On a phone the same lists open in the app's
+ * bottom sheet instead (v4's shape): a floating popover over a phone's keyboard-sized composer has no room to be read or tapped.
  */
 
+import { BottomSheet, useLayoutMode } from '@ferretry/app/ui';
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { Brain, Zap } from 'lucide-react';
@@ -77,6 +79,7 @@ export const createRuntimePicker = (client: LiveRuntimesClient): AppComponent<Pa
       effort: useRef<HTMLDivElement | null>(null),
       speed: useRef<HTMLDivElement | null>(null),
     };
+    const phone = useLayoutMode() === 'drawer';
     const open = section !== null;
     useEffect(() => {
       if (subject === undefined) return;
@@ -269,6 +272,86 @@ export const createRuntimePicker = (client: LiveRuntimesClient): AppComponent<Pa
     const focusFor = (key: Section) => section === key;
     // The thinking level the effort list checks is the one the bar names, so the two always agree.
     const effortProps = parts.effort === undefined ? {} : { claudeEffort: parts.effort };
+    // The same three lists in both shells: the popover above the composer, or on a phone the app's bottom sheet.
+    const choices = (
+      <>
+        {runsOn === null ? null : (
+          <p className="m-0 px-cell-x pb-2 text-meta leading-base text-muted" data-runtime-runs-on="">
+            Runs on <span className="font-semibold text-fg">{runsOn}</span>
+          </p>
+        )}
+        <div data-runtime-list="model" ref={lists.model}>
+          <div className="kt-label px-cell-x pb-0.5">Model</div>
+          <RuntimeMenuFocusContext.Provider value={focusFor('model')}>
+            <RuntimeModelControls {...common} open presentation="popover" view={current} />
+          </RuntimeMenuFocusContext.Provider>
+        </div>
+        <div data-runtime-list="effort" ref={lists.effort}>
+          <div className="kt-label mt-2 px-cell-x pb-0.5">Thinking</div>
+          <RuntimeMenuFocusContext.Provider value={focusFor('effort')}>
+            <RuntimeEffortControls {...common} {...effortProps} presentation="popover" view={current} />
+          </RuntimeMenuFocusContext.Provider>
+        </div>
+        <div data-runtime-list="speed" ref={lists.speed}>
+          <div className="kt-label mt-2 px-cell-x pb-0.5">Speed</div>
+          <RuntimeMenuFocusContext.Provider value={focusFor('speed')}>
+            <RuntimeSpeedControls
+              {...common}
+              fast={fast}
+              onFastSent={next => {
+                setSent(was => ({ ...was, fast: next }));
+                refreshNow.current();
+              }}
+              presentation="popover"
+              view={current}
+            />
+          </RuntimeMenuFocusContext.Provider>
+        </div>
+      </>
+    );
+    const popover = (
+      <div
+        aria-label="Model, thinking and speed"
+        className="kt-popover fixed z-50 overflow-y-auto p-2"
+        data-runtime-popover=""
+        ref={panel}
+        role="dialog"
+        tabIndex={-1}
+        style={
+          placement === null
+            ? undefined
+            : {
+                bottom: placement.bottom,
+                left: placement.left,
+                maxHeight: placement.maxHeight,
+                width: placement.width,
+              }
+        }
+      >
+        {choices}
+      </div>
+    );
+    const sheet = (
+      <BottomSheet
+        ariaLabel="Model, thinking and speed"
+        closeLabel="Close"
+        id="runtime-picker-sheet"
+        maxHeight="min(90dvh, calc(var(--app-h, 100dvh) - var(--gap-sm)))"
+        onClose={() => close(true)}
+        open
+        panelClassName="mx-auto max-w-[720px]"
+      >
+        <div
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-panel"
+          data-runtime-popover=""
+          data-runtime-sheet=""
+          ref={panel}
+          tabIndex={-1}
+        >
+          {choices}
+        </div>
+      </BottomSheet>
+    );
     return (
       <div className="fy-runtime-picker shrink-0" data-runtime-picker={subject}>
         {chips.map(entry => (
@@ -291,58 +374,7 @@ export const createRuntimePicker = (client: LiveRuntimesClient): AppComponent<Pa
             <span>{entry.text}</span>
           </button>
         ))}
-        {open && placement !== null
-          ? createPortal(
-              <div
-                aria-label="Model, thinking and speed"
-                className="kt-popover fixed z-50 overflow-y-auto p-2"
-                data-runtime-popover=""
-                ref={panel}
-                role="dialog"
-                tabIndex={-1}
-                style={{
-                  bottom: placement.bottom,
-                  left: placement.left,
-                  maxHeight: placement.maxHeight,
-                  width: placement.width,
-                }}
-              >
-                {runsOn === null ? null : (
-                  <p className="m-0 px-cell-x pb-2 text-meta leading-base text-muted" data-runtime-runs-on="">
-                    Runs on <span className="font-semibold text-fg">{runsOn}</span>
-                  </p>
-                )}
-                <div data-runtime-list="model" ref={lists.model}>
-                  <div className="kt-label px-cell-x pb-0.5">Model</div>
-                  <RuntimeMenuFocusContext.Provider value={focusFor('model')}>
-                    <RuntimeModelControls {...common} open presentation="popover" view={current} />
-                  </RuntimeMenuFocusContext.Provider>
-                </div>
-                <div data-runtime-list="effort" ref={lists.effort}>
-                  <div className="kt-label mt-2 px-cell-x pb-0.5">Thinking</div>
-                  <RuntimeMenuFocusContext.Provider value={focusFor('effort')}>
-                    <RuntimeEffortControls {...common} {...effortProps} presentation="popover" view={current} />
-                  </RuntimeMenuFocusContext.Provider>
-                </div>
-                <div data-runtime-list="speed" ref={lists.speed}>
-                  <div className="kt-label mt-2 px-cell-x pb-0.5">Speed</div>
-                  <RuntimeMenuFocusContext.Provider value={focusFor('speed')}>
-                    <RuntimeSpeedControls
-                      {...common}
-                      fast={fast}
-                      onFastSent={next => {
-                        setSent(was => ({ ...was, fast: next }));
-                        refreshNow.current();
-                      }}
-                      presentation="popover"
-                      view={current}
-                    />
-                  </RuntimeMenuFocusContext.Provider>
-                </div>
-              </div>,
-              document.body,
-            )
-          : null}
+        {open && placement !== null ? createPortal(phone ? sheet : popover, document.body) : null}
       </div>
     );
   };

@@ -238,6 +238,12 @@ export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handl
   label: z.string().min(1).optional(),
   transcript: TranscriptViewSchema.optional(),
   model: z.string().min(1).optional(),
+  /**
+   * The model the harness last REPORTED running (its own transcript), as `GET /v1/ferrets/:ferretId` reads it from the
+   * state document: present for an unpinned ferret too, where `model` is absent, and after a switch inside the pane.
+   * Never on the list, which does not open the document.
+   */
+  observedModel: z.string().min(1).optional(),
   /** The startup reasoning choice it was launched with (opaque: the runtime validated it). */
   effort: z.string().min(1).optional(),
   /** Whether it was launched in the harness's fast mode. */
