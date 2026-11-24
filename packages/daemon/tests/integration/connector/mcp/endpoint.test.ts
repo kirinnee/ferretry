@@ -151,6 +151,19 @@ describe('/mcp — the real SDK round trip', () => {
     should(r.audit.events.length).equal(0);
   });
 
+  it('answers an unsupported MCP-Protocol-Version with a 400 before refusing a read-only token a write tool', async () => {
+    const r = rig();
+    r.state.access = READ_ACCESS;
+    const reply = await tool(r, 'stop_ferret', { ferret: 'lizzette' }, { protocolVersion: '1999-01-01' });
+    should(reply.status).equal(400);
+    should(JSON.stringify(reply.raw)).containEql('Unsupported protocol version: 1999-01-01');
+    should(r.dispatch.calls.length).equal(0);
+    should(r.calls.records.length).equal(0);
+    const supported = await tool(r, 'stop_ferret', { ferret: 'lizzette' }, { protocolVersion: '2025-11-25' });
+    should(supported.status).equal(200);
+    should(supported.text).containEql('only look');
+  });
+
   it('refuses an invalid argument as a protocol error, never reaching the daemon', async () => {
     const r = rig();
     const reply = await tool(r, 'get_ferret_output', { ferret: 'x', lines: 0 });
