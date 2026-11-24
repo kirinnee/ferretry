@@ -51,6 +51,31 @@ const draw = async (
   return open;
 };
 
+/** Draws the panel with an `onSettled` the page would hand it, over a registry read the test controls. */
+const drawSettling = async (read: () => Promise<unknown>, told: string[]) => {
+  const Panel = createNewFerretProjectsPanel(scripted({ 'GET /v1/projects': read }, [])) as (props: {
+    readonly daemon: string;
+    readonly value: string;
+    readonly id: string;
+    readonly recent: readonly string[];
+    readonly onPick: (folder: string) => void;
+    readonly onSettled: () => void;
+  }) => ReactNode;
+  open = await mount(
+    <WithAppHooks provided={{}}>
+      <Panel
+        daemon="d"
+        id="fy-where"
+        onPick={() => undefined}
+        onSettled={() => told.push('settled')}
+        recent={[]}
+        value=""
+      />
+    </WithAppHooks>,
+  );
+  return open;
+};
+
 const q = <T extends Element>(view: Mounted, selector: string): T | null => view.container.querySelector<T>(selector);
 const switchButton = (view: Mounted, text: string): HTMLButtonElement =>
   must(
@@ -68,6 +93,31 @@ const trigger = (view: Mounted): HTMLButtonElement =>
   must(q<HTMLButtonElement>(view, '[data-where-project-trigger]'), 'trigger');
 
 describe('the New ferret where-it-works panel', () => {
+  it('tells the page once its first read of the registry is over, and not while it is on its way', async () => {
+    const told: string[] = [];
+    let answer: (projects: unknown) => void = () => undefined;
+    const view = await drawSettling(
+      () =>
+        new Promise(resolve => {
+          answer = resolve;
+        }),
+      told,
+    );
+    expect(q(view, '[data-new-ferret-where-reading]')).not.toBeNull();
+    expect(told).toEqual([]);
+    await interact(async () => answer([PROJECT]));
+    await settleUntil(() => told.length > 0, 'the registry read', interact);
+    expect(told).toEqual(['settled']);
+  });
+
+  it('also tells the page when that read failed, so a broken registry never holds the form back', async () => {
+    const told: string[] = [];
+    const view = await drawSettling(async () => Promise.reject(new Error('registry down')), told);
+    await settleUntil(() => told.length > 0, 'the failed read', interact);
+    expect(told).toEqual(['settled']);
+    expect(q(view, '[data-new-ferret-where-reading]')).toBeNull();
+  });
+
   it('opens on Project when projects exist, and its dropdown lists them and picks the one pressed', async () => {
     const picked: string[] = [];
     const view = await draw([PROJECT, SECOND], '', folder => picked.push(folder));

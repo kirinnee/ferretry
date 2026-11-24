@@ -78,6 +78,8 @@ export interface RuntimeSelectProps {
   readonly onChosen: (chosen: ChosenRuntime | null) => void;
   /** Told the wrappers that can run a session now (`null` until the roster is read), whenever they change. */
   readonly onOffered?: (wrappers: readonly string[] | null) => void;
+  /** Told once the roster's first read has finished, answered or failed (never while it is still on its way). */
+  readonly onSettled?: () => void;
   /** Drawn INSTEAD of the buttons when the roster was read and nothing can run a session. */
   readonly noAccounts: ReactNode;
   /** A Launch button's runtime, used only when offered and usable. */
@@ -187,6 +189,7 @@ export function RuntimeSelect({
   onValueChange,
   onChosen,
   onOffered,
+  onSettled,
   noAccounts,
   preferred,
   harness,
@@ -232,6 +235,11 @@ export function RuntimeSelect({
   useEffect(() => {
     onOffered?.(usableKey === null ? null : (JSON.parse(usableKey) as string[]));
   }, [usableKey, onOffered]);
+
+  const read = slice.status === 'ready' || slice.status === 'error';
+  useEffect(() => {
+    if (read) onSettled?.();
+  }, [read, onSettled]);
 
   if (offered === null) {
     if (slice.status !== 'error') {

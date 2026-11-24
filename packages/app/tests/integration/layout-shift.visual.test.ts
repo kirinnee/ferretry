@@ -119,6 +119,8 @@ const open = async (
   dark: boolean,
   origin: string,
   path: string,
+  /** More script to run before the page's own (a sampler for one page). */
+  extraInit = '',
 ): Promise<{ tab: Page; context: BrowserContext; problems: string[] }> => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
@@ -127,7 +129,7 @@ const open = async (
     hasTouch: viewport.phone,
     isMobile: viewport.phone,
   });
-  await context.addInitScript(RECORDER);
+  await context.addInitScript(RECORDER + extraInit);
   const tab = await context.newPage();
   tab.setDefaultTimeout(30_000);
   const problems: string[] = [];
@@ -319,8 +321,8 @@ describe('the ferret page side panel', () => {
         },
       );
 });
-// ─── New ferret, while the machine is slow to say what can run ───────────────────────────────────────────────────
-/** The controls BELOW the Runtime field: none of them may move when the roster of runtimes arrives. */
+// ─── New ferret, while the machine is slow to say what can run and what is registered ────────────────────────────
+/** The controls BELOW the Runtime field: none of them may move once the form is drawn, whatever arrives after it. */
 const BELOW_RUNTIME = [
   ['folder field', '#fy-new-ferret-folder'],
   ['model override', '#fy-new-ferret-model'],
@@ -329,7 +331,40 @@ const BELOW_RUNTIME = [
   ['opening prompt', 'textarea'],
   ['create', 'button:text:Create ferret'],
 ] as const;
-const HOLD_MS = 650;
+const HOLD_RUNTIMES_MS = 650;
+const HOLD_PROJECTS_MS = 1_300;
+
+/** Every frame on which what the page shows CHANGES: the form's state, the page loaders, and which of Project | Folder is on. */
+const NEW_FERRET_SAMPLER = `
+  window.__newFerret = [];
+  const sample = () => {
+    const form = document.querySelector('[data-new-ferret-form]');
+    const on = document.querySelector('[data-new-ferret-where-switch] [aria-checked="true"]');
+    const state = {
+      form: form ? form.getAttribute('data-new-ferret-form') : 'absent',
+      visible: !!form && form.getBoundingClientRect().height > 0,
+      loaders: document.querySelectorAll('[data-loading="page"]').length,
+      reading: !!document.querySelector('[data-new-ferret-where-reading]'),
+      where: on ? on.getAttribute('data-segment') : 'none',
+    };
+    const said = JSON.stringify(state);
+    const last = window.__newFerret.at(-1);
+    if (!last || last.said !== said) window.__newFerret.push({ at: performance.now(), said, state });
+    requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+`;
+
+interface NewFerretFrame {
+  readonly at: number;
+  readonly state: {
+    readonly form: string;
+    readonly visible: boolean;
+    readonly loaders: number;
+    readonly reading: boolean;
+    readonly where: string;
+  };
+}
 
 const tops = async (tab: Page): Promise<Record<string, number | null>> =>
   await tab.evaluate(
@@ -350,43 +385,74 @@ const tops = async (tab: Page): Promise<Record<string, number | null>> =>
     BELOW_RUNTIME.map(([name, selector]): [string, string] => [name, selector]),
   );
 
-describe('New ferret keeps every control below Runtime still while the roster of runtimes arrives', () => {
+describe('New ferret draws once, after the runtimes and the projects were read', () => {
   for (const viewport of VIEWPORTS)
     for (const dark of [false, true])
-      journey(`runtimes held ${HOLD_MS} ms at ${viewport.name}, ${dark ? 'dark' : 'light'}`, async () => {
-        const { tab, context, problems } = await open(viewport, dark, origins.app, `/d/ws/new?holdRuntimes=${HOLD_MS}`);
-        try {
-          // The loading frame: the page is drawn and the roster has not answered.
-          await tab.locator('textarea').waitFor({ state: 'attached', timeout: 30_000 });
-          const loading = await tops(tab);
-          if (shotsDir !== '')
-            await tab.screenshot({
-              path: `${shotsDir}/${viewport.name}-${dark ? 'dark' : 'light'}-new-ferret-loading.png`,
-              fullPage: true,
-            });
-          expect(await tab.locator('[data-runtime-select]').count(), 'the roster must still be on its way').toBe(0);
-          await clear(tab);
-          await tab.locator('[data-runtime-select]').waitFor({ state: 'attached', timeout: 30_000 });
-          await tab.waitForTimeout(SETTLE_MS);
-          const resolved = await tops(tab);
-          if (shotsDir !== '')
-            await tab.screenshot({
-              path: `${shotsDir}/${viewport.name}-${dark ? 'dark' : 'light'}-new-ferret-resolved.png`,
-              fullPage: true,
-            });
-          for (const [name] of BELOW_RUNTIME) {
-            if (loading[name] === null || resolved[name] === null) found.push(`${name} ${viewport.name}: not drawn`);
-            else if (Math.abs((resolved[name] as number) - (loading[name] as number)) > BOX_TOLERANCE)
-              found.push(`${name} ${viewport.name}: y ${loading[name]} while loading -> ${resolved[name]} resolved`);
+      journey(
+        `runtimes held ${HOLD_RUNTIMES_MS} ms and projects held ${HOLD_PROJECTS_MS} ms at ${viewport.name}, ${dark ? 'dark' : 'light'}`,
+        async () => {
+          const { tab, context, problems } = await open(
+            viewport,
+            dark,
+            origins.app,
+            `/d/ws/new?holdRuntimes=${HOLD_RUNTIMES_MS}&holdProjects=${HOLD_PROJECTS_MS}`,
+            NEW_FERRET_SAMPLER,
+          );
+          const name = `${viewport.name}-${dark ? 'dark' : 'light'}`;
+          try {
+            // The loading frame: ONE centred loader, no form, while the roster and the registry have not answered.
+            await tab.locator('[data-new-ferret-form="reading"]').waitFor({ state: 'attached', timeout: 30_000 });
+            await tab.locator('[data-loading="page"]').waitFor({ state: 'visible', timeout: 30_000 });
+            // The loader waits its one 300 ms threshold (and its fade) before it shows: let it be seen for the shot.
+            await tab.waitForTimeout(500);
+            if (shotsDir !== '')
+              await tab.screenshot({ path: `${shotsDir}/${name}-new-ferret-loading.png`, fullPage: true });
+            expect(await tab.locator('[data-loading="page"]').count(), 'one loader, not two').toBe(1);
+            expect(await tab.locator('[data-runtime-select]').count(), 'the roster must still be on its way').toBe(0);
+            await tab.locator('[data-new-ferret-form="drawn"]').waitFor({ state: 'visible', timeout: 30_000 });
+            await clear(tab);
+            const first = await tops(tab);
+            await tab.waitForTimeout(SETTLE_MS);
+            const resolved = await tops(tab);
+            if (shotsDir !== '')
+              await tab.screenshot({ path: `${shotsDir}/${name}-new-ferret-resolved.png`, fullPage: true });
+            for (const [what] of BELOW_RUNTIME) {
+              if (first[what] === null || resolved[what] === null) found.push(`${what} ${viewport.name}: not drawn`);
+              else if (Math.abs((resolved[what] as number) - (first[what] as number)) > BOX_TOLERANCE)
+                found.push(`${what} ${viewport.name}: y ${first[what]} when drawn -> ${resolved[what]} settled`);
+            }
+            const reading = await read(tab);
+            if (reading.total > BUDGET)
+              found.push(`New ferret ${viewport.name}: layout shift ${reading.total.toFixed(4)}\n    ${said(reading)}`);
+
+            // What the page showed, frame by frame: nothing of the form until both reads answered, then the right default, once.
+            const frames = await tab.evaluate(
+              () => (window as unknown as { __newFerret: NewFerretFrame[] }).__newFerret,
+            );
+            const drawn = frames.findIndex(frame => frame.state.visible);
+            if (drawn < 0) found.push('the form was never drawn');
+            else {
+              const firstDrawn = frames[drawn] as NewFerretFrame;
+              if (firstDrawn.at < HOLD_PROJECTS_MS)
+                found.push(`the form was drawn at ${Math.round(firstDrawn.at)} ms, before the projects answered`);
+              for (const frame of frames.slice(0, drawn))
+                if (frame.state.loaders > 1) found.push(`${frame.state.loaders} loaders at ${Math.round(frame.at)} ms`);
+              for (const frame of frames.slice(drawn)) {
+                if (frame.state.where !== 'project')
+                  found.push(
+                    `"Where it works" showed ${frame.state.where} at ${Math.round(frame.at)} ms (Project is the default here)`,
+                  );
+                if (frame.state.reading) found.push(`"Reading your projects…" drawn at ${Math.round(frame.at)} ms`);
+                if (frame.state.loaders > 0)
+                  found.push(`a loader stayed up beside the form at ${Math.round(frame.at)} ms`);
+              }
+            }
+            expect(problems, 'the page threw').toEqual([]);
+          } finally {
+            await context.close();
           }
-          const reading = await read(tab);
-          if (reading.total > BUDGET)
-            found.push(`New ferret ${viewport.name}: layout shift ${reading.total.toFixed(4)}\n    ${said(reading)}`);
-          expect(problems, 'the page threw').toEqual([]);
-        } finally {
-          await context.close();
-        }
-      });
+        },
+      );
 });
 // ─── the onboarding pages ────────────────────────────────────────────────────────────────────────────────────────
 /** Everything but the pages this test walks is switched off, so the first run is agents, name, appearance, layout, voice. */

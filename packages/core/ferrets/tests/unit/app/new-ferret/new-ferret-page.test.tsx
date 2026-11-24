@@ -489,9 +489,9 @@ describe('NewFerretPage › the offered runtime slot', () => {
     );
   });
 
-  it('opens the daemon’s Sign-ins settings, where a login is added, from the no-runtime notice', () => {
+  it('opens the daemon’s Logins settings, where a login is added, from the no-runtime notice', () => {
     const harness = page({ panel: slot => <StubPicker account={CODEX} noAccounts slot={slot} /> });
     run(() => button(harness.view, 'Add a login').props.onClick());
-    expect(harness.navigated).toEqual(['/d/daemon%2Fa/settings/logins/sign-ins']);
+    expect(harness.navigated).toEqual(['/d/daemon%2Fa/settings/logins/logins']);
   });
 });

@@ -54,6 +54,11 @@ interface AccountSlotProps {
    * asks; a panel that cannot say simply never calls it. Optional: a page that does not care leaves it out.
    */
   readonly onOffered?: (wrappers: readonly string[] | null) => void;
+  /**
+   * Told once, when the roster's first read has finished, answered or failed. The page draws nothing of the form before
+   * every field has said so, so the first thing drawn is the real one. Optional: a page that does not wait leaves it out.
+   */
+  readonly onSettled?: () => void;
   /** The id the typed fallback input takes, so the page's own label keeps pointing at it. */
   readonly fallbackId: string;
   /** The element naming this field, for the radio group. */
@@ -87,6 +92,7 @@ function hasAccountSlotProps(props: unknown): props is AccountSlotProps {
     typeof candidate.onValueChange === 'function' &&
     typeof candidate.onChosen === 'function' &&
     (candidate.onOffered === undefined || typeof candidate.onOffered === 'function') &&
+    (candidate.onSettled === undefined || typeof candidate.onSettled === 'function') &&
     typeof candidate.fallbackId === 'string' &&
     typeof candidate.labelId === 'string' &&
     typeof candidate.fallbackPlaceholder === 'string'

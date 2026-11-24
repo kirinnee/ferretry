@@ -13,6 +13,12 @@ export interface NewFerretProjectSlotProps {
   readonly recent: readonly string[];
   /** Fills the page's folder (a project's folder, a folder from the finder, or a recent one). */
   readonly onPick: (folder: string) => void;
+  /**
+   * Told once, when the panel has read what it needs to choose its first view (the registered projects), answered or
+   * failed. The page draws nothing of the form before every field has said so, so a default the panel picks from that
+   * read is picked once and never flips. Optional: a page that does not wait leaves it out.
+   */
+  readonly onSettled?: () => void;
 }
 
 export function isNewFerretProjectSlotProps(props: unknown): props is NewFerretProjectSlotProps {
@@ -23,7 +29,8 @@ export function isNewFerretProjectSlotProps(props: unknown): props is NewFerretP
     typeof candidate.value === 'string' &&
     typeof candidate.id === 'string' &&
     Array.isArray(candidate.recent) &&
-    typeof candidate.onPick === 'function'
+    typeof candidate.onPick === 'function' &&
+    (candidate.onSettled === undefined || typeof candidate.onSettled === 'function')
   );
 }
 

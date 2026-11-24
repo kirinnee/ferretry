@@ -44,6 +44,7 @@ function NewFerretWhere({
   value,
   recent,
   onPick,
+  onSettled,
 }: {
   readonly client: ProjectsClient;
   readonly store: ProjectsStore;
@@ -52,6 +53,7 @@ function NewFerretWhere({
   readonly value: string;
   readonly recent: readonly string[];
   readonly onPick: (folder: string) => void;
+  readonly onSettled: (() => void) | undefined;
 }) {
   const { projects, status } = useProjectsSlice(store);
   // Git accounts' own "Connect a GitHub account" card, the one the create flow mounts; absent when that plugin is off.
@@ -60,6 +62,12 @@ function NewFerretWhere({
   const [chosen, setChosen] = useState<Kind | null>(null);
   const unread = projects === null && (status === 'idle' || status === 'loading');
   const known = projects ?? [];
+  // The registry's first read is what the default view is chosen from; the page waits for this before it draws anything.
+  const told = useRef(onSettled);
+  told.current = onSettled;
+  useEffect(() => {
+    if (!unread) told.current?.();
+  }, [unread]);
   const kind = chosen ?? defaultKind(value, known);
   const isProject = (path: string): boolean => known.some(project => project.path === path);
   // What each mode showed when the person last left it, so coming back restores it.
@@ -117,6 +125,7 @@ export const createNewFerretProjectsPanel = (client: ProjectsClient): AppCompone
         daemon={props.daemon}
         id={props.id}
         onPick={props.onPick}
+        onSettled={props.onSettled}
         recent={props.recent}
         store={store}
         value={props.value}

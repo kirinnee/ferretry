@@ -17,6 +17,7 @@ import {
   registeredScreen,
   WithSlotPanels,
 } from '@ferretry/app/testing/settings-shell';
+import { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { LinkableConversation } from '../../../../contract/index.ts';
 
@@ -111,6 +112,8 @@ noteClientDaemon(client, 'fake');
 /** Stands in for Runtimes' picker: a plain box that remembers which harness the page limited the field to. */
 const runtimeBox = (props: Record<string, unknown>) => {
   win.__harness = props.harness as string | undefined;
+  // The page draws nothing of the form until the runtime field says its read is over; a stand-in has nothing to read.
+  useEffect(() => (props.onSettled as (() => void) | undefined)?.(), [props.onSettled]);
   return (
     <input
       className="kt-input w-full font-mono"
