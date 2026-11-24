@@ -18,6 +18,7 @@ import {
 } from '../../contract/index.ts';
 import type { VaultClient } from '../shell.tsx';
 
+const LIST_ALL_ROUTE = 'GET /v1/input-requests';
 const LIST_ROUTE = 'GET /v1/ferrets/:ferretId/input-requests';
 const DELIVER_ROUTE = 'POST /v1/ferrets/:ferretId/input-requests/:requestId/deliver';
 const SHOT_ROUTE = 'GET /v1/ferrets/:ferretId/input-requests/:requestId/shot';
@@ -30,9 +31,16 @@ export type ListedRequest =
 
 /** A ferret's open requests; each is read on its own, so one card this build cannot parse never fails the others. */
 export async function listInputRequests(client: VaultClient, ferretId: string): Promise<readonly ListedRequest[]> {
-  const { requests } = z
-    .looseObject({ requests: z.array(z.unknown()) })
-    .parse(await client.call(LIST_ROUTE, { params: { ferretId } }));
+  return readListed(await client.call(LIST_ROUTE, { params: { ferretId } }));
+}
+
+/** Every open request on the machine, for the modal that shows them when the app opens. A quiet read: it asks for nothing. */
+export async function listAllInputRequests(client: VaultClient): Promise<readonly ListedRequest[]> {
+  return readListed(await client.call(LIST_ALL_ROUTE, { quiet: true }));
+}
+
+function readListed(answer: unknown): readonly ListedRequest[] {
+  const { requests } = z.looseObject({ requests: z.array(z.unknown()) }).parse(answer);
   return requests.map((each): ListedRequest => {
     const parsed = InputRequestSchema.safeParse(each);
     if (parsed.success) return { kind: 'open', request: parsed.data };
