@@ -39,8 +39,13 @@ export const HARNESS_SCOPE_WORDS: Readonly<Record<HarnessScope, string>> = {
   codex: 'Codex only',
 };
 
-/** What one staged change would do, for the person deciding whether to apply it. */
-export function renderChangeView(view: AccountChangeView): string {
+/**
+ * What one staged change would do, for the person deciding whether to apply it.
+ *
+ * `runtimes: false` leaves out the "Runtimes after this change" list: a change that applies straight after its preview
+ * says that list only once it has applied (see `renderRuntimesAfter`), never before a change that may still be refused.
+ */
+export function renderChangeView(view: AccountChangeView, options: { readonly runtimes?: boolean } = {}): string {
   const lines = [view.summary, ...indent(view.consequences.map(sentence => `• ${sentence}`))];
   const preview = view.preview;
   if (preview.kind === 'apply') {
@@ -50,16 +55,7 @@ export function renderChangeView(view: AccountChangeView): string {
     const prepared = preview.operations.length;
     if (prepared > 0)
       lines.push(`Prepares ${count(prepared, 'file or folder', 'files and folders')} for the runtimes.`);
-    if (preview.runtimes.length > 0) {
-      lines.push(
-        'Runtimes after this change:',
-        ...indent(
-          preview.runtimes.map(runtime => {
-            return `${runtime.name} (${harnessName(runtime.harness)}) — ${unavailable(runtime.launch) ?? 'ready to launch'}`;
-          }),
-        ),
-      );
-    }
+    if (options.runtimes !== false) lines.push(...runtimesAfterLines(preview));
     const running = preview.runningSessions ?? [];
     if (running.length > 0) {
       lines.push(
@@ -76,6 +72,25 @@ export function renderChangeView(view: AccountChangeView): string {
     lines.push(preview.description);
   }
   return lines.join('\n');
+}
+
+/** The runtimes a previewed change leaves behind, as lines (none for a preview that lists none). */
+function runtimesAfterLines(preview: Extract<AccountChangeView['preview'], { kind: 'apply' }>): string[] {
+  if (preview.runtimes.length === 0) return [];
+  return [
+    'Runtimes after this change:',
+    ...indent(
+      preview.runtimes.map(runtime => {
+        return `${runtime.name} (${harnessName(runtime.harness)}) — ${unavailable(runtime.launch) ?? 'ready to launch'}`;
+      }),
+    ),
+  ];
+}
+
+/** The runtimes a change left behind, said after it applied; nothing for a preview that is not an apply or lists none. */
+export function renderRuntimesAfter(view: AccountChangeView): string | undefined {
+  const lines = view.preview.kind === 'apply' ? runtimesAfterLines(view.preview) : [];
+  return lines.length === 0 ? undefined : lines.join('\n');
 }
 
 /** How an applied change ended, and whether a script should trust it as done. */

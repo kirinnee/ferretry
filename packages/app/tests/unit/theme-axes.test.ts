@@ -279,8 +279,26 @@ describe('the style → palette direction', () => {
     expect(themes.snapshot()).toMatchObject({ style: 'neo', palette: 'neo' });
     themes.setPalette('vintage');
     expect(themes.snapshot()).toMatchObject({ style: 'neo', palette: 'vintage' });
+  });
+
+  it('a style default applies only until a palette is picked; a picked palette survives every later style change (C-5)', () => {
+    const store = memoryStore();
+    const themes = new ThemePreferenceStore(store);
+    themes.setStyle('neo');
+    expect(themes.snapshot().palette).toBe(defaultPaletteOf('neo'));
     themes.setStyle('genz');
-    expect(themes.snapshot()).toMatchObject({ style: 'genz', palette: defaultPaletteOf('genz') });
+    expect(themes.snapshot().palette).toBe(defaultPaletteOf('genz'));
+    // The owner's pick: Terminal (hacker), then a different style.
+    themes.setPalette('hacker');
+    themes.setStyle('geist');
+    expect(themes.snapshot()).toMatchObject({ style: 'geist', palette: 'hacker' });
+    themes.setStyle('neo');
+    expect(themes.snapshot()).toMatchObject({ style: 'neo', palette: 'hacker' });
+    expect(new ThemePreferenceStore(store).snapshot()).toMatchObject({ style: 'neo', palette: 'hacker' });
+    // Turning the keep switch off hands the colours back to the style.
+    themes.setKeepPalette(false);
+    themes.setStyle('geist');
+    expect(themes.snapshot()).toMatchObject({ style: 'geist', palette: defaultPaletteOf('geist') });
   });
 
   it('with keepPalette on, a style change leaves the colours alone, and the flag is stored', () => {

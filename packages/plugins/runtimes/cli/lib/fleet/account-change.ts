@@ -1,7 +1,7 @@
 import type { AccountChange, AccountChangeOutcome } from '../../../contract/index.ts';
 import { requireMayApply } from './account-authority.ts';
 import type { AccountCommandDeps, AccountWriteOptions } from './account-ports.ts';
-import { renderChangeOutcome, renderChangeView } from './account-render.ts';
+import { renderChangeOutcome, renderChangeView, renderRuntimesAfter } from './account-render.ts';
 
 /** One change as a command asks for it. */
 export interface ChangeRequest {
@@ -54,7 +54,9 @@ export async function runChange(
   await requireMayApply(deps);
   const view = await deps.gateway.stage(request.change);
   const json = request.options.json === true;
-  if (!json) deps.out.report(renderChangeView(view));
+  // A change that applies straight away says the runtimes it leaves only once it has applied: before that it may still be refused.
+  const sayAfter = !json && !request.options.dryRun && !request.destructive;
+  if (!json) deps.out.report(renderChangeView(view, { runtimes: !sayAfter }));
   if (request.options.dryRun) {
     if (json) deps.out.report(JSON.stringify({ change: view }, null, 2));
     else deps.out.report('Dry run: nothing was changed.');
@@ -64,8 +66,11 @@ export async function runChange(
   const outcome = await deps.gateway.apply(view.id);
   const rendered = renderChangeOutcome(outcome);
   if (json) deps.out.report(JSON.stringify({ change: view, outcome }, null, 2));
-  else if (rendered.ok) deps.out.success(rendered.text);
-  else deps.out.error(rendered.text);
+  else if (rendered.ok) {
+    deps.out.success(rendered.text);
+    const after = sayAfter ? renderRuntimesAfter(view) : undefined;
+    if (after !== undefined) deps.out.report(after);
+  } else deps.out.error(rendered.text);
   if (!rendered.ok) deps.out.setExitCode(1);
   return outcome;
 }

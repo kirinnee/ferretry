@@ -82,9 +82,11 @@ export function writeAllConfigWriter(
           throw new ConfigWriteConflict(outcome.path);
         case 'refused':
           throw new ConfigWriteInvalid(
-            `${outcome.document?.path ?? 'the change'} was refused (${outcome.reason}): ${outcome.issues
-              .map(issue => issue.message)
-              .join('; ')}`,
+            outcome.reason === 'bad_name'
+              ? `${outcome.document?.path ?? 'the change'}/${outcome.document?.name ?? ''} was refused: a name uses only letters, digits and single dashes; nothing was changed`
+              : `${outcome.document?.path ?? 'the change'} was refused (${outcome.reason}): ${outcome.issues
+                  .map(issue => issue.message)
+                  .join('; ')}`,
           );
       }
     },
