@@ -83,7 +83,7 @@ export const daemonConnection = (input: {
 // ─── the plugin client ────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The only client capability this half uses. */
-export type VoicePluginClient = Pick<PluginClient, 'call'>;
+export type VoicePluginClient = Pick<PluginClient, 'call' | 'socket'>;
 
 /** The refusal the shell's generated client throws (`DaemonCallError` in `@ferretry/app`): a status, a code, a sentence. */
 interface CallRefusal {
@@ -123,6 +123,9 @@ const ROUTES: readonly {
   readonly names: readonly string[];
 }[] = [
   ['POST', '/v1/stt/enhance'],
+  ['GET', '/v1/voice/engine'],
+  ['POST', '/v1/voice/engine/install'],
+  ['DELETE', '/v1/voice/engine'],
   ['GET', '/v1/speedups'],
   ['POST', '/v1/speedups/:provider/test'],
   ['POST', '/v1/secrets'],

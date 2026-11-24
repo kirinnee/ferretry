@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { VoiceEngineView } from '../../../contract/index.ts';
 import { type DaemonConnection, SettingGroup, SettingRow } from '../../shell-voice.ts';
 import { useDaemonClient } from '../../lib/voice-store.tsx';
+import { TalkToTest, type TalkToTestProps } from './talk-to-test.tsx';
 import { installVoiceEngine, readVoiceEngine, removeVoiceEngine, type VoiceEngineClient } from './voice-engine-api.ts';
 import './voice-settings.css';
 
@@ -54,13 +55,14 @@ function StateChip({ view }: { readonly view: VoiceEngineView }) {
 
 interface VoiceModePanelProps {
   readonly view: VoiceEngineView;
+  readonly talk?: Pick<TalkToTestProps, 'client' | 'createMic'> | undefined;
   readonly busy: boolean;
   readonly error: string | null;
   readonly onInstall: () => void;
   readonly onRemove: () => void;
 }
 
-function VoiceModePanel({ view, busy, error, onInstall, onRemove }: VoiceModePanelProps) {
+function VoiceModePanel({ view, talk, busy, error, onInstall, onRemove }: VoiceModePanelProps) {
   const percent = view.sizeBytes === 0 ? 0 : Math.min(100, Math.round((view.doneBytes / view.sizeBytes) * 100));
   return (
     <SettingGroup label="Voice mode">
@@ -135,6 +137,7 @@ function VoiceModePanel({ view, busy, error, onInstall, onRemove }: VoiceModePan
           )}
         </div>
       </SettingRow>
+      {view.state === 'ready' && <TalkToTest machine={view.machine} {...talk} />}
     </SettingGroup>
   );
 }
@@ -147,9 +150,12 @@ export type VoiceEngineClientFactory = (connection: DaemonConnection) => Promise
 export function VoiceModeSettings({
   connection,
   createClient: injected,
+  talk,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: VoiceEngineClientFactory | undefined;
+  /** A suite's own socket and microphone for Talk to test; the page uses the shell's client and the real microphone. */
+  readonly talk?: Pick<TalkToTestProps, 'client' | 'createMic'> | undefined;
 }) {
   const routed = useDaemonClient();
   const createClient = injected ?? routed;
@@ -232,6 +238,7 @@ export function VoiceModeSettings({
   return (
     <VoiceModePanel
       view={view}
+      talk={talk}
       busy={busy}
       error={error}
       onInstall={() => void act(installVoiceEngine)}

@@ -1,6 +1,6 @@
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
-import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, panel, route, settingsTab, socket, verb } from '@ferretry/kernel/manifest';
 import {
   CLEANUP_PROVIDERS,
   ENGINE_HOSTS,
@@ -94,6 +94,22 @@ export default definePlugin({
         // A Test spends one provider key on the operator's account; the secret's NAME is the subject.
         audit: audit('secrets.used'),
         guard: { none: 'a code and one fixed sentence; never the provider body' },
+      }),
+    ],
+    sockets: [
+      // The voice stream (§14, unit 4): the microphone up, the words down, and the machine sends each finished turn to the
+      // ferret itself. A person's own device only: a ferret's session credential is not a grant caller, so `caller: 'person'`
+      // is what keeps it from streaming audio to this machine or sending as the person.
+      socket('GET /v1/voice/stream', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('voice', 'use'),
+        audit: {
+          skip: 'a stream is opened, not an act: each turn it sends is an ordinary send and is recorded as one',
+        },
+        guard: {
+          none: "audio in and fixed-shape snapshots out; the words are the speaker's own, from no pane, page or vault",
+        },
       }),
     ],
     cli: [
