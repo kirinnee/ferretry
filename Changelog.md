@@ -1,3 +1,27 @@
+## [4.292.0](https://github.com/kirinnee/ferretry/compare/v4.291.23...v4.292.0) (2026-11-24)
+
+### Features
+
+* **connector:** Claude connector panel in the app ([43724f9](https://github.com/kirinnee/ferretry/commit/43724f9670247afb437c769359d9a992fb728401))
+* **connector:** implement owner-approved OAuth authority ([6e7446c](https://github.com/kirinnee/ferretry/commit/6e7446c39ea68d69d21a24bb73b2e71b8b792ff3))
+* **connector:** listener surface, in-process dispatch, config block and connector actor ([78e2ccf](https://github.com/kirinnee/ferretry/commit/78e2ccf61e54a80d1dbdb7cf788756348d7cb24d))
+* **connector:** owner routes, approve-connector step-up and fy connector ([e8a87a0](https://github.com/kirinnee/ferretry/commit/e8a87a013898f39cb6a337f10e7c37c1a792d662))
+* **connector:** security-log events and the connected-app actor ([97813ee](https://github.com/kirinnee/ferretry/commit/97813ee34c4e11b441d4b15a784eecabd6659f6e))
+* **connector:** serve /mcp on the connector listener, forwarding only the request id ([6b4c2a6](https://github.com/kirinnee/ferretry/commit/6b4c2a6983ce9f9bbd627b257d43b5eeaa776d96))
+* **connector:** the /mcp endpoint and the nine tools ([c683a52](https://github.com/kirinnee/ferretry/commit/c683a52951b122ea1cb48860358cc0932da1fbd2))
+* **connector:** wire the connector module, owner routes and listener into the daemon ([ee71147](https://github.com/kirinnee/ferretry/commit/ee71147212eec99bb38abf5e19326dc5501b3cd0))
+
+### Fixes
+
+* **connector:** attribute connector acts in the security log, mask live host tokens, say the truth about shell and restart ([2074b47](https://github.com/kirinnee/ferretry/commit/2074b47739af32e94a9b2ad391be81074f7a628c))
+* **connector:** attribute fy connector acts to this computer's fy ([0639620](https://github.com/kirinnee/ferretry/commit/0639620dada415f45a1fbc3caea2c2d9ab291a92))
+* **connector:** clamp an over-long output request to the cap instead of refusing it ([4f0a82b](https://github.com/kirinnee/ferretry/commit/4f0a82bf9fad84249cf18402d2f68d986f1d3b6d))
+* **connector:** isolate OAuth abuse limits per source and keep public reads off the write queue ([70818d9](https://github.com/kirinnee/ferretry/commit/70818d94835dd99245e75f09ecbfd760687e0b3d))
+* **connector:** keep global ceilings, bound refresh digests, allow a lost-response retry ([a05b82c](https://github.com/kirinnee/ferretry/commit/a05b82c8b59fbc959ac098d154d7b57bc829c975))
+* **connector:** say the connector is on only once its listener is bound ([c353283](https://github.com/kirinnee/ferretry/commit/c3532835bc861823f5349c889151c9f72d711bd5))
+* **connector:** the tools refuse owner-only items, honour a named ferret, find the same ferret on retry and record how a write ended ([22a39a2](https://github.com/kirinnee/ferretry/commit/22a39a279af6c996377d7420d3f1c330b0d6aee0))
+* **connector:** tools arrive governed, so passkey-gated acts and grants apply at the boundary ([c4399aa](https://github.com/kirinnee/ferretry/commit/c4399aa23f6bd0d832288c7ad86797baab961e75))
+
 ## [4.291.23](https://github.com/kirinnee/ferretry/compare/v4.291.22...v4.291.23) (2026-11-24)
 
 ### Fixes
