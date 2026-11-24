@@ -1,8 +1,9 @@
 /**
- * WHETHER THE MACHINE HAS A RUNTIME, for the closing summary. The Runtimes row of the summary is the "Start fresh or copy"
+ * WHETHER THE MACHINE HAS A RUNTIME THAT CAN START, for the closing summary. The Runtimes row of the summary is the "Start fresh or copy"
  * page (`runtimes.start`), and that page is answered by choosing, whatever came of it: a tool whose sign-in was left for
  * later ends with "No runtime was made", and the row must not tick then. So the end of the run asks the machine's own
- * runtime list (the same read the "<Tool> is ready" pages make) and a machine with none shows the row as left for later.
+ * runtime list (the same read the "<Tool> is ready" pages make) and a machine with none, or none that can start (every
+ * one answers `launch.available: false`), shows the row as left for later.
  * A read that fails changes nothing: the summary then says only what the pages answered.
  */
 import type { PluginClient } from '@ferretry/kernel/manifest';
@@ -13,10 +14,10 @@ import type { SummaryStep } from '../../views/steps-screen.tsx';
 /** The plugin whose pages make the Runtimes row. */
 const RUNTIMES_PLUGIN = 'runtimes';
 
-/** reading: asked, not answered · made: at least one runtime · none: no runtime · unread: the read failed. */
+/** reading: asked, not answered · made: at least one runtime can start · none: no runtime can start · unread: the read failed. */
 export type RuntimesRead = 'reading' | 'made' | 'none' | 'unread';
 
-const RuntimeListSchema = z.object({ runtimes: z.array(z.unknown()) });
+const RuntimeListSchema = z.object({ runtimes: z.array(z.object({ launch: z.object({ available: z.boolean() }) })) });
 
 /** Reads the machine's runtimes once `active` (the run reached its end); asked again for a new run. */
 export function useRuntimesRead(client: Pick<PluginClient, 'call'> | undefined, active: boolean): RuntimesRead {
@@ -30,7 +31,14 @@ export function useRuntimesRead(client: Pick<PluginClient, 'call'> | undefined, 
     client.call('GET /v1/runtimes', { quiet: true }).then(
       answer => {
         const parsed = RuntimeListSchema.safeParse(answer);
-        if (live) setRead(parsed.success ? (parsed.data.runtimes.length > 0 ? 'made' : 'none') : 'unread');
+        if (live)
+          setRead(
+            parsed.success
+              ? parsed.data.runtimes.some(runtime => runtime.launch.available)
+                ? 'made'
+                : 'none'
+              : 'unread',
+          );
       },
       () => live && setRead('unread'),
     );

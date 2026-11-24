@@ -11,6 +11,8 @@ import {
   progressOf,
   retreat,
   startRun,
+  UNFINISHED_KEY,
+  withUnfinished,
 } from '../../../app/features/setup-flow/flow-model.ts';
 import { readFlowAddress, setupFlowHref } from '../../../app/features/setup-flow/flow-href.ts';
 import { foreseenPassedOver, undecidedPages } from '../../../app/features/setup-flow/foresight.ts';
@@ -110,6 +112,34 @@ describe('moving through the run', () => {
     // ... and is passed by when the run gets there.
     const at = advance(advance(advance(dropped, pages, none), pages, none), pages, none);
     expect(at.at).toBe('onboarding.appearance');
+  });
+});
+
+describe('the closing page ticks only what is really done', () => {
+  const step = (plugin: string, state: 'done' | 'found' | 'later') => ({
+    plugin,
+    id: plugin,
+    title: plugin,
+    group: plugin,
+    state,
+    phase: 'daemon' as const,
+  });
+  const memory = (unfinished: Record<string, boolean>) => (plugin: string) =>
+    plugin in unfinished ? { [UNFINISHED_KEY]: unfinished[plugin] } : {};
+
+  test('a step answered done by a plugin that says it is unfinished is left for later', () => {
+    const summary = [step('lessons', 'done'), step('shells', 'done'), step('warden', 'done'), step('mcp', 'found')];
+    expect(withUnfinished(summary, memory({ lessons: true, shells: true, warden: false })).map(s => s.state)).toEqual([
+      'later',
+      'later',
+      'done',
+      'found',
+    ]);
+  });
+
+  test('a plugin that never spoke changes nothing', () => {
+    const summary = [step('lessons', 'done')];
+    expect(withUnfinished(summary, () => ({}))).toEqual(summary);
   });
 });
 

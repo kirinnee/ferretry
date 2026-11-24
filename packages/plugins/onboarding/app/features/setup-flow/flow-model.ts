@@ -14,6 +14,7 @@
  * The position is a step KEY (`<plugin>.<step>`), never an index, so a step list that changes under a run cannot move it.
  */
 import { askableSteps, type Flow, type FlowStep } from '../../lib/index.ts';
+import type { SummaryStep } from '../../views/steps-screen.tsx';
 
 /** The place after the last page. */
 export const END = 'end' as const;
@@ -233,6 +234,22 @@ export function applyPicked(
     next.size === was.size && [...next].every(key => was.has(key));
   return sameOf(marks, state.notNeeded) && sameOf(aside, state.aside) ? state : { ...state, notNeeded: marks, aside };
 }
+
+/**
+ * The segment-memory key a page sets (`step.remember({ unfinished: true })`) when it was shown and the person moved on with
+ * nothing decided there (Lessons with neither card picked, Shells without nix): its step stays "left for later" on the
+ * closing page instead of ticking, and a page that is settled sets it back to `false`. Memory is per plugin and this run only.
+ */
+export const UNFINISHED_KEY = 'unfinished';
+
+/** The summary as the pages' own memory leaves it: a step answered `done` by a plugin that says it is unfinished is left for later. */
+export const withUnfinished = (
+  summary: readonly SummaryStep[],
+  memoryOf: (plugin: string) => Readonly<Record<string, unknown>>,
+): readonly SummaryStep[] =>
+  summary.map(step =>
+    step.state === 'done' && memoryOf(step.plugin)[UNFINISHED_KEY] === true ? { ...step, state: 'later' } : step,
+  );
 
 /** The bar's label for every client page: they read as one stage, "This device". */
 const DEVICE_LABEL = 'This device';

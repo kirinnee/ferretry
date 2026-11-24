@@ -13,12 +13,16 @@ ensureDom();
 type Call = 'ready' | 'skip' | 'notNeeded' | 'done' | 'busy' | 'remember' | 'next' | 'back';
 function stepHarness() {
   const calls: { kind: Call; why?: string }[] = [];
+  const memory: StepSegmentMemory[] = [];
   const segment: StepSegmentMemory = {};
   const host: StepHost = {
     phase: 'daemon',
     appliesTo: [],
     segment,
-    remember: () => void calls.push({ kind: 'remember' }),
+    remember: patch => {
+      memory.push(patch);
+      calls.push({ kind: 'remember' });
+    },
     ready: () => void calls.push({ kind: 'ready' }),
     skip: why => void calls.push({ kind: 'skip', why }),
     notNeeded: () => void calls.push({ kind: 'notNeeded' }),
@@ -31,6 +35,7 @@ function stepHarness() {
   const skipped = () => calls.find(call => call.kind === 'skip');
   return {
     host,
+    memory,
     count: (kind: Call) => calls.filter(call => call.kind === kind).length,
     get decision() {
       if (skipped() !== undefined) return 'skipped';
@@ -87,6 +92,17 @@ describe('the Shells step', () => {
     expect(body).toContain('Install nix, then look again.');
   });
 
+  it('says it is unfinished when it is shown (nix missing, or the check failed) and settled when nix is there', async () => {
+    const missing = await open(async () => ABSENT);
+    expect(missing.harness.memory).toEqual([{ unfinished: true }]);
+    const failed = await open(async () => {
+      throw new Error('offline');
+    });
+    expect(failed.harness.memory).toEqual([{ unfinished: true }]);
+    const present = await open(async () => PRESENT);
+    expect(present.harness.memory).toEqual([{ unfinished: false }]);
+  });
+
   it('draws only its body: no frame, title, progress, Back, Next or Later, and never moves the flow', async () => {
     const { harness, view } = await open(async () => ABSENT);
     expect(view.container.querySelector('[data-step-page]')).toBeNull();
@@ -98,7 +114,7 @@ describe('the Shells step', () => {
     expect(harness.count('next')).toBe(0);
     expect(harness.count('back')).toBe(0);
     expect(harness.count('done')).toBe(0);
-    expect(harness.count('remember')).toBe(0);
+    expect(harness.count('remember')).toBe(1);
   });
 
   it('a failed check shows "Couldn’t check", does not claim ferrets use host tools, and never blocks', async () => {

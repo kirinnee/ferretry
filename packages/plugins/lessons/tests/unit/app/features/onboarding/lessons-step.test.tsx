@@ -32,6 +32,11 @@ describe('first-run › Lessons step', () => {
     expect(harness.count('done')).toBe(0);
     expect(harness.hasCommit).toBe(false);
     expect(patches(daemon)).toEqual([]);
+    // Nothing is picked, so the picture claims neither outcome and the page says it is unfinished (the closing page reads it).
+    expect(view.container.querySelector('[data-lessons-demo]')?.getAttribute('data-kept')).toBe('none');
+    expect(view.container.querySelector('[data-lessons-rule]')).toBeNull();
+    expect(textOf(view.container)).toContain('Nothing chosen yet');
+    expect(harness.host.segment).toEqual({ unfinished: true });
     await view.unmount();
   });
 
@@ -58,6 +63,8 @@ describe('first-run › Lessons step', () => {
     await click(card(view.container, 'off'));
     await waitFor(() => card(view.container, 'off').dataset.selected === 'true', 'selected');
     expect(harness.hasCommit).toBe(true);
+    // A pick answers the page: it is no longer unfinished.
+    expect(harness.host.segment).toEqual({ unfinished: false });
     expect(patches(daemon)).toEqual([]);
     expect(harness.count('busy')).toBe(0);
     expect(harness.count('done')).toBe(0);
@@ -84,8 +91,14 @@ describe('first-run › Lessons step', () => {
     const daemon = fakeLessonsDaemon();
     const view = await mount(<LessonsStep connection={daemon.connection} />);
     await waitFor(() => view.container.querySelectorAll('[data-choice]').length === 2, 'cards');
-    // Outside a frame the demo draws inline; at rest it shows the filed rule.
-    expect(view.container.querySelector('[data-lessons-demo]')?.getAttribute('data-kept')).toBe('true');
+    // Outside a frame the demo draws inline; before a pick it shows nothing chosen.
+    expect(view.container.querySelector('[data-lessons-demo]')?.getAttribute('data-kept')).toBe('none');
+    await click(card(view.container, 'on'));
+    await waitFor(
+      () => view.container.querySelector('[data-lessons-demo]')?.getAttribute('data-kept') === 'true',
+      'on',
+    );
+    expect(view.container.querySelector('[data-lessons-rule]')).not.toBeNull();
     await click(card(view.container, 'off'));
     await waitFor(
       () => view.container.querySelector('[data-lessons-demo]')?.getAttribute('data-kept') === 'false',

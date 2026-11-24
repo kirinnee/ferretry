@@ -3,7 +3,9 @@
  * nothing to ask, so the page skips itself (`not-needed`) before anything is drawn. Without nix it says what ferrets use
  * instead and where to get it. The shell owns the frame (title, progress, Back / Next, Later), so the page draws none of
  * them and never calls `next()`: nothing here is a decision, and a deferral is the shell's to record. A failed check
- * proves nothing about nix, so it says "Couldn't check" and offers a retry.
+ * proves nothing about nix, so it says "Couldn't check" and offers a retry. A page that is shown has nothing set up behind it, so
+ * it says it is unfinished (`remember({ unfinished: true })`, read by the closing page, which then leaves Shells for later
+ * instead of ticking it); a page that skips itself (nix is there) says it is not.
  */
 import type { StepHost } from '@ferretry/kernel/contract';
 import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
@@ -42,8 +44,13 @@ export function ShellsStep({ step, check }: ShellsStepProps) {
   const view = found === undefined ? undefined : shellsStepView(found);
   const decision = view === undefined ? undefined : view.kind;
   useEffect(() => {
-    if (decision === 'hide') step.skip('not-needed');
-    else if (decision === 'show') step.ready();
+    if (decision === 'hide') {
+      step.remember({ unfinished: false });
+      step.skip('not-needed');
+    } else if (decision === 'show') {
+      step.remember({ unfinished: true });
+      step.ready();
+    }
   }, [decision, step]);
   if (view === undefined || view.kind === 'hide') return null;
   return (
