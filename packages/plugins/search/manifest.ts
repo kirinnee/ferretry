@@ -11,13 +11,15 @@ import {
 
 /**
  * Search (§2.3): `web_search` for ferrets whose runtime has no search tool of its own (an open-weight model behind
- * Claude Code, say). The owner picks ONE of six providers and adds their own key; **it is off until a key is named**,
- * and the tool then answers "No search provider set up: Settings › Web search".
+ * Claude Code, say). There is no default provider: the owner lists any of six, each with their own key, in the order
+ * they want them tried, and a search falls through to the next on a failure (never on a valid empty answer).
+ * **It is off until a provider is listed**, and the tool then answers "No search provider set up: Settings › Web search".
  *
  * Keys are Vault secrets by NAME, placed on the request by the kernel and only to the provider's one host (the table
- * in `contract/providers.ts` is both lists below). `search.yaml` names the picked provider's key as `${secret:NAME}`;
- * an agent's write that adds that line is held for the owner. Searches are capped per day (`dailyCap`, default 200),
- * its own cap and outside the creative-tools spend cap.
+ * in `contract/providers.ts` is both lists below). `search.yaml` names each listed provider's key as `${secret:NAME}`;
+ * an agent's write that adds one of those lines is held for the owner. Searches are capped per day (`dailyCap`,
+ * default 200) over ALL the providers, a fall-through counting as a call: its own cap, outside the creative-tools
+ * spend cap.
  */
 export default definePlugin({
   id: 'search',
@@ -66,7 +68,7 @@ export default definePlugin({
         audit: { skip: 'the kernel records each key use as secrets.used; the daily ledger counts the calls' },
         guard: { none: 'a provider’s search results (titles, links, short snippets); no pane, page or vault text' },
         summary:
-          'Search the web. For runtimes without a search tool of their own; if you have one, use it instead. Returns titles, links and short snippets; off until the owner sets a provider in Settings › Web search.',
+          'Search the web. For runtimes without a search tool of their own; if you have one, use it instead. Returns titles, links and short snippets, and says which provider answered; off until the owner sets a provider in Settings › Web search.',
         input: WebSearchInputSchema,
       }),
     ],

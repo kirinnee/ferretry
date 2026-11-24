@@ -2,7 +2,8 @@
  * SETTINGS › WEB SEARCH in a real browser, inside the real Settings shell (`fixtures/search-scene.tsx`).
  * Proof, on the DOM and computed geometry, at 390 and 1440 wide, light and dark: nothing sticks out sideways, every
  * control is a 44 px target, a pasted key goes to the Vault route once and is then in no DOM, storage or console line,
- * Save names the provider (never a value), Test is the person's own press, and a held setup says it is waiting.
+ * Add sends the whole ordered list (names, never a value), Up / Down / Remove send the new order and are reachable by
+ * keyboard, Test is the person's own press on ONE provider, and a held setup says it is waiting.
  * Set `FY_SEARCH_SHOTS_DIR` to keep `<viewport>-<scheme>-<step>.png`.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
@@ -117,33 +118,41 @@ const fakeOf = async (page: Page) =>
   (await page.evaluate(() => (window as unknown as { __fake: unknown }).__fake)) as {
     puts: { name: string; length: number }[];
     setups: unknown[];
-    tests: number;
+    tests: string[];
   };
+
+/** The listed providers, top to bottom, as the screen shows them. */
+const order = async (page: Page): Promise<string[]> =>
+  await page
+    .locator('[data-search-provider]')
+    .evaluateAll(rows => rows.map(row => row.getAttribute('data-search-provider') ?? ''));
+
+const SMALLEST = (viewport: Viewport) => (viewport.phone ? 43.5 : 27.5);
 
 describe('Settings › Web search', () => {
   for (const viewport of VIEWPORTS) {
     for (const scheme of ['light', 'dark'] as const) {
-      it(`off, pick, save a key, test (${viewport.name}, ${scheme})`, async () => {
+      it(`off, add a provider with its key, add a second, test one (${viewport.name}, ${scheme})`, async () => {
         const { page, problems, logs, close } = await open(viewport, scheme, '&state=off');
         try {
-          await page.getByText('None picked: web search is off').waitFor();
+          await page.getByText('None set up: web search is off').waitFor();
           await shoot(page, viewport, scheme, '1-off');
 
-          // Pick Serper from the list.
+          // Add Serper with its key.
           await page.getByRole('combobox', { name: 'Search provider' }).click();
           await page.locator('[role="option"]', { hasText: 'Serper' }).click();
           await page.getByText('About $1 per 1,000 searches.').waitFor();
           const field = page.locator('input[type=password]');
           await field.waitFor({ state: 'visible' });
-          expect(await geometry(page, viewport.phone ? 43.5 : 27.5)).toEqual({ scrollX: 0, past: [], short: [] });
+          expect(await geometry(page, SMALLEST(viewport))).toEqual({ scrollX: 0, past: [], short: [] });
           await shoot(page, viewport, scheme, '2-picked');
 
           await field.fill(FAKE_KEY);
-          await page.getByRole('button', { name: 'Save key' }).click();
-          await page.locator('[data-search-named]').waitFor({ state: 'visible' });
+          await page.getByRole('button', { name: 'Add with this key' }).click();
+          await page.locator('[data-search-provider="serper"]').waitFor({ state: 'visible' });
           const saved = await fakeOf(page);
           expect(saved.puts).toEqual([{ name: 'SERPER_API_KEY', length: FAKE_KEY.length }]);
-          expect(saved.setups).toEqual([{ provider: 'serper' }]);
+          expect(saved.setups).toEqual([{ providers: ['serper'] }]);
           const where = await page.evaluate(key => {
             const stores = [localStorage, sessionStorage].map(store => JSON.stringify({ ...store }));
             return {
@@ -156,13 +165,70 @@ describe('Settings › Web search', () => {
           expect(where).toEqual({ html: false, text: false, stores: false, value: false });
           expect(logs.some(line => line.includes(FAKE_KEY))).toBe(false);
 
-          // Test is the person's own press, one call.
-          await page.getByRole('button', { name: 'Test' }).click();
-          await page.locator('[data-search-last-test]').waitFor({ state: 'visible' });
-          expect((await fakeOf(page)).tests).toBe(1);
+          // Add Brave with no pasted key (its key is already stored): joins the end of the list.
+          await page.getByRole('combobox', { name: 'Search provider' }).click();
+          await page.locator('[role="option"]', { hasText: 'Brave' }).click();
+          await page.getByRole('button', { name: 'Add provider' }).click();
+          await page.locator('[data-search-provider="brave"]').waitFor({ state: 'visible' });
+          expect(await order(page)).toEqual(['serper', 'brave']);
+          expect((await fakeOf(page)).setups.at(-1)).toEqual({ providers: ['serper', 'brave'] });
+
+          // Test is the person's own press, one call, on that provider alone.
+          await page.getByRole('button', { name: 'Test Serper' }).click();
+          await page.locator('[data-search-provider="serper"] [data-search-last-test]').waitFor({ state: 'visible' });
+          expect((await fakeOf(page)).tests).toEqual(['serper']);
           await page.getByText('1 of 200 searches used today').waitFor();
-          expect(await geometry(page, viewport.phone ? 43.5 : 27.5)).toEqual({ scrollX: 0, past: [], short: [] });
+          expect(await geometry(page, SMALLEST(viewport))).toEqual({ scrollX: 0, past: [], short: [] });
           await shoot(page, viewport, scheme, '3-tested');
+          expect(problems).toEqual([]);
+        } finally {
+          await close();
+        }
+      });
+
+      it(`several providers: order, reorder by keyboard, remove, a failed Test (${viewport.name}, ${scheme})`, async () => {
+        const { page, problems, close } = await open(viewport, scheme, '&state=ready');
+        try {
+          await page.locator('[data-search-provider="exa"]').waitFor();
+          expect(await order(page)).toEqual(['serper', 'brave', 'exa']);
+          await page.getByText('Failed. The provider is rate limiting or busy right now.').waitFor();
+          expect(await geometry(page, SMALLEST(viewport))).toEqual({ scrollX: 0, past: [], short: [] });
+          await shoot(page, viewport, scheme, '4-ready');
+
+          // Replacing one provider's key stores the new key under its own name and changes no list.
+          await page.getByRole('button', { name: 'Replace the Brave Search key' }).click();
+          await shoot(page, viewport, scheme, '4b-replacing');
+          await page.locator('input[type=password]').fill(FAKE_KEY);
+          await page.getByRole('button', { name: 'Save key' }).click();
+          await page.locator('input[type=password]').waitFor({ state: 'detached' });
+          expect((await fakeOf(page)).puts).toEqual([{ name: 'BRAVE_API_KEY', length: FAKE_KEY.length }]);
+          expect((await fakeOf(page)).setups).toEqual([]);
+
+          // The first cannot go up and the last cannot go down.
+          expect(await page.getByRole('button', { name: 'Move Serper up' }).isDisabled()).toBe(true);
+          expect(await page.getByRole('button', { name: 'Move Exa down' }).isDisabled()).toBe(true);
+
+          // Move Exa up with the KEYBOARD alone: focus the button, press Enter.
+          await page.getByRole('button', { name: 'Move Exa up' }).focus();
+          await page.keyboard.press('Enter');
+          await page.waitForFunction(
+            () =>
+              document.querySelectorAll('[data-search-provider]')[1]?.getAttribute('data-search-provider') === 'exa',
+          );
+          expect(await order(page)).toEqual(['serper', 'exa', 'brave']);
+          expect((await fakeOf(page)).setups.at(-1)).toEqual({ providers: ['serper', 'exa', 'brave'] });
+
+          // Move Serper down, then remove Brave.
+          await page.getByRole('button', { name: 'Move Serper down' }).click();
+          await page.waitForFunction(
+            () => document.querySelector('[data-search-provider]')?.getAttribute('data-search-provider') === 'exa',
+          );
+          expect(await order(page)).toEqual(['exa', 'serper', 'brave']);
+          await page.getByRole('button', { name: 'Remove Brave' }).click();
+          await page.waitForFunction(() => document.querySelectorAll('[data-search-provider]').length === 2);
+          expect(await order(page)).toEqual(['exa', 'serper']);
+          expect((await fakeOf(page)).setups.at(-1)).toEqual({ providers: ['exa', 'serper'] });
+          await shoot(page, viewport, scheme, '5-reordered');
           expect(problems).toEqual([]);
         } finally {
           await close();
@@ -171,13 +237,29 @@ describe('Settings › Web search', () => {
     }
   }
 
-  it('a machine already set up shows the key as in use and the day’s count', async () => {
+  it('a machine already set up shows each provider’s place and the day’s count', async () => {
     const viewport = VIEWPORTS[1];
     const { page, close } = await open(viewport, 'light', '&state=ready');
     try {
-      await page.locator('[data-search-named]').waitFor({ state: 'visible' });
+      await page.getByText('Tried first').waitFor();
       await page.getByText('37 of 200 searches used today').waitFor();
-      await shoot(page, viewport, 'light', '4-ready');
+    } finally {
+      await close();
+    }
+  });
+
+  it('adding a provider is held for the owner when this device cannot confirm it, and the screen says it is waiting', async () => {
+    const viewport = VIEWPORTS[1];
+    const { page, close } = await open(viewport, 'dark', '&state=ready&held=1');
+    try {
+      await page.getByRole('combobox', { name: 'Search provider' }).click();
+      await page.locator('[role="option"]', { hasText: 'Tavily' }).click();
+      await page.getByRole('button', { name: 'Add provider' }).click();
+      await page.locator('[data-search-held]').waitFor({ state: 'visible' });
+      expect(await page.locator('[data-search-held]').innerText()).toContain('TAVILY_API_KEY');
+      expect((await fakeOf(page)).setups).toEqual([{ providers: ['serper', 'brave', 'exa', 'tavily'] }]);
+      expect(await order(page)).toEqual(['serper', 'brave', 'exa']);
+      await shoot(page, viewport, 'dark', '6-held');
     } finally {
       await close();
     }
@@ -192,7 +274,6 @@ describe('Settings › Web search', () => {
       await page.locator('[data-search-held]').waitFor({ state: 'visible' });
       expect(await page.locator('[data-search-held]').innerText()).toContain('from 200 to 500');
       expect((await fakeOf(page)).setups).toEqual([{ dailyCap: 500 }]);
-      await shoot(page, viewport, 'dark', '5-held');
     } finally {
       await close();
     }

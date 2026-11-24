@@ -29,6 +29,11 @@ import { SEARCH_ADAPTERS } from './providers.ts';
 /**
  * The search service: one search, one Test, one settings read and one setup, over the kernel's ports.
  *
+ * THE PROVIDERS ARE AN ORDERED LIST. A search goes to the first and falls through to the next on a failure (the
+ * network, a 5xx, a refused key, a rate limit or quota, a reply it cannot read) and NEVER on a valid empty answer,
+ * which is an answer. The reply says which provider gave it. Every attempt that left the machine counts against the ONE
+ * daily cap, a fall-through included, so a failing first provider cannot double the day's spend.
+ *
  * THE CAP IS COUNTED BEFORE THE SEND. `reserve` takes one call from today's ledger inside the state file's own
  * serialization chain, so two ferrets searching at once can never both take the last call, and a crash between the
  * count and the answer never gives a free one. A call the kernel refused before anything left the machine (no key
@@ -38,13 +43,36 @@ import { SEARCH_ADAPTERS } from './providers.ts';
  * provider's reply.
  */
 
-type Ledger = { day: string; calls: number; lastTest?: SearchTestResult };
+type Ledger = { day: string; calls: number; tests: SearchTestResult[] };
 
-/** Why a search did not return results: the Test's vocabulary, plus the three the tool alone can meet. */
+/** Why ONE attempt did not return results: the Test's vocabulary, plus the two the tool alone can meet. */
 type Failure = SearchTestCode | 'cap' | 'ledger_damaged';
 
+/** A provider that was tried and did not answer, with why, in the order tried. */
+export interface SearchAttempt {
+  readonly provider: SearchProviderId;
+  readonly code: SearchTestCode;
+}
+
 export type SearchOutcome =
-  | { readonly kind: 'results'; readonly provider: SearchProviderId; readonly hits: readonly SearchHit[] }
+  | {
+      readonly kind: 'results';
+      /** The provider that answered; `skipped` are the ones before it that did not. */
+      readonly provider: SearchProviderId;
+      readonly hits: readonly SearchHit[];
+      readonly skipped: readonly SearchAttempt[];
+    }
+  /** No provider is listed: web search is off. */
+  | { readonly kind: 'off' }
+  /** Every provider tried failed, or the day ran out (`stopped: 'cap'`) or its counter broke before the rest were tried. */
+  | {
+      readonly kind: 'failed';
+      readonly tried: readonly SearchAttempt[];
+      readonly stopped?: 'cap' | 'ledger_damaged';
+    };
+
+type Attempt =
+  | { readonly kind: 'results'; readonly hits: readonly SearchHit[] }
   | { readonly kind: 'failed'; readonly failure: Failure };
 
 export interface SearchParts {
@@ -72,6 +100,41 @@ export const SEARCH_MESSAGES: Readonly<Record<SearchTestCode, string>> = {
   malformed: 'The provider answered with something unexpected.',
   vault_damaged: 'This machine’s secret store cannot be read, so the key could not be used.',
 };
+
+/** What each code is, as a short clause that follows a provider's name: "Serper (the key was refused)". */
+const SEARCH_REASONS: Readonly<Record<SearchTestCode, string>> = {
+  ok: 'answered',
+  not_set: 'no key is stored for it',
+  rejected: 'the key was refused',
+  rate_limited: 'rate limited or busy',
+  timeout: 'did not answer in time',
+  unreachable: 'could not be reached',
+  provider_error: 'returned an error',
+  malformed: 'sent a reply that could not be read',
+  vault_damaged: 'the secret store could not be read',
+};
+
+/**
+ * What a ferret is told when no provider answered: ONE plain sentence naming each provider tried and why, in the order
+ * tried. Fixed words and provider labels only; never a provider body.
+ */
+export function failedSentence(failed: Extract<SearchOutcome, { kind: 'failed' }>, dailyCap: number): string {
+  const { tried, stopped } = failed;
+  if (tried.length === 0 && stopped === 'cap')
+    return `The daily web search limit (${String(dailyCap)} a day on this machine) is used up. It starts again tomorrow; the owner can raise it in Settings › Web search.`;
+  if (tried.length === 0) return 'Web search is paused: its daily counter could not be read.';
+  if (stopped === undefined && tried.every(attempt => attempt.code === 'not_set')) return SEARCH_MESSAGES.not_set;
+  const named = tried
+    .map(attempt => `${SEARCH_PROVIDERS[attempt.provider].label} (${SEARCH_REASONS[attempt.code]})`)
+    .join('; ');
+  const rest =
+    stopped === 'cap'
+      ? ` The daily limit (${String(dailyCap)} a day) was then used up, so the rest were not tried.`
+      : stopped === 'ledger_damaged'
+        ? ' Its daily counter could not be read, so the rest were not tried.'
+        : '';
+  return `Web search failed on every provider tried: ${named}.${rest} The owner can check them in Settings › Web search.`;
+}
 
 /** The calendar day on THIS machine's clock (`2026-11-24`): a day of searches is the machine's own day. */
 function dayOf(ms: number): string {
@@ -103,9 +166,7 @@ const leftNothing = (outcome: OutboundSecretOutcome): boolean =>
 
 /** Today's ledger, or a fresh one when the stored day is not today. */
 const today = (current: Ledger | undefined, day: string): Ledger =>
-  current?.day === day
-    ? current
-    : { day, calls: 0, ...(current?.lastTest === undefined ? {} : { lastTest: current.lastTest }) };
+  current?.day === day ? current : { day, calls: 0, tests: current?.tests ?? [] };
 
 export class SearchService {
   constructor(private readonly parts: SearchParts) {}
@@ -114,17 +175,30 @@ export class SearchService {
     return this.parts.config.file(SEARCH_CONFIG) ?? DEFAULT_SEARCH_CONFIG;
   }
 
-  /** One lookup for a ferret. Counts against the cap and refuses past it. */
+  /** One lookup for a ferret: the providers in order, the first that answers wins. Every attempt counts against the cap and none is made past it. */
   async lookup(input: WebSearchInput): Promise<SearchOutcome> {
-    return await this.attempt(input.query, input.count ?? SEARCH_DEFAULT_RESULTS, true);
+    const count = input.count ?? SEARCH_DEFAULT_RESULTS;
+    const { providers } = this.config();
+    if (providers.length === 0) return { kind: 'off' };
+    const skipped: SearchAttempt[] = [];
+    for (const { provider } of providers) {
+      const answer = await this.attempt(provider, input.query, count, true);
+      if (answer.kind === 'results') return { kind: 'results', provider, hits: answer.hits, skipped };
+      if (answer.failure === 'cap' || answer.failure === 'ledger_damaged')
+        return { kind: 'failed', tried: skipped, stopped: answer.failure };
+      skipped.push({ provider, code: answer.failure });
+    }
+    return { kind: 'failed', tried: skipped };
   }
 
-  /** The owner's Test: one real search of a fixed word, or `undefined` while no provider is picked. Counted, but never refused for the cap: it is their own act. */
-  async test(): Promise<SearchTestResult | undefined> {
-    const provider = this.config().provider;
-    if (provider === undefined) return undefined;
+  /**
+   * The owner's Test of ONE listed provider: one real search of a fixed word, with no fall-through, or `undefined`
+   * while that provider is not in the list. Counted, but never refused for the cap: it is their own act.
+   */
+  async test(provider: SearchProviderId): Promise<SearchTestResult | undefined> {
+    if (!this.config().providers.some(entry => entry.provider === provider)) return undefined;
     const started = this.parts.clock.nowMs();
-    const outcome = await this.attempt(TEST_QUERY, 1, false);
+    const outcome = await this.attempt(provider, TEST_QUERY, 1, false);
     const code: SearchTestCode =
       outcome.kind === 'results'
         ? 'ok'
@@ -140,37 +214,40 @@ export class SearchService {
     const current = ledger.ok ? ledger.value : undefined;
     const status = this.parts.config.fileState(SEARCH_CONFIG);
     return {
-      ...(config.provider === undefined ? {} : { provider: config.provider }),
-      keyNamed: config.provider !== undefined && config.key === searchKeyReference(config.provider),
+      providers: config.providers.map(({ provider }) => {
+        const lastTest = current?.tests.find(test => test.provider === provider);
+        return { provider, ...(lastTest === undefined ? {} : { lastTest }) };
+      }),
       dailyCap: config.dailyCap,
       usedToday: current?.day === dayOf(this.parts.clock.nowMs()) ? current.calls : 0,
       held: status.state === 'held' ? [...status.sentences] : [],
-      ...(current?.lastTest === undefined || current.lastTest.provider !== config.provider
-        ? {}
-        : { lastTest: current.lastTest }),
     };
   }
 
   /**
-   * The caller's own setup: name the provider's key (`key: ${secret:NAME}`) and/or set the cap, as ONE write of the
-   * file. In effect when the caller is the owner; otherwise held for the owner and answered as sentences.
+   * The caller's own setup: the whole ordered provider list, each naming its key (`key: ${secret:NAME}`), and/or the
+   * cap, as ONE write of the file. In effect when the caller is the owner; otherwise held for the owner and answered as sentences.
    */
   async setup(request: SearchSetupRequest): Promise<SearchSetupResult> {
     const patch = {
-      ...(request.provider === undefined
+      ...(request.providers === undefined
         ? {}
-        : { provider: request.provider, key: searchKeyReference(request.provider) }),
+        : { providers: request.providers.map(provider => ({ provider, key: searchKeyReference(provider) })) }),
       ...(request.dailyCap === undefined ? {} : { dailyCap: request.dailyCap }),
     };
     const result = await this.parts.config.writeAsCaller(SEARCH_CONFIG, undefined, { patch });
     return setupOutcome(result);
   }
 
-  private async attempt(query: string, count: number, enforceCap: boolean): Promise<SearchOutcome> {
+  /** One send to one provider. Takes a call from the day first and says why not when it cannot. */
+  private async attempt(
+    provider: SearchProviderId,
+    query: string,
+    count: number,
+    enforceCap: boolean,
+  ): Promise<Attempt> {
     const config = this.config();
-    const provider = config.provider;
-    if (provider === undefined || config.key !== searchKeyReference(provider))
-      return { kind: 'failed', failure: 'not_set' };
+    if (!config.providers.some(entry => entry.provider === provider)) return { kind: 'failed', failure: 'not_set' };
 
     const reserved = await this.reserve(config.dailyCap, enforceCap);
     if (reserved !== 'taken') return { kind: 'failed', failure: reserved };
@@ -196,7 +273,7 @@ export class SearchService {
     const hits = adapter.read(sent.payload);
     return hits === undefined
       ? { kind: 'failed', failure: 'malformed' }
-      : { kind: 'results', provider, hits: hits.slice(0, count) };
+      : { kind: 'results', hits: hits.slice(0, count) };
   }
 
   /** Takes one call from today's ledger, or says why not. Atomic: the state file's own chain orders callers. */
@@ -236,10 +313,10 @@ export class SearchService {
 
   private async remember(result: SearchTestResult): Promise<SearchTestResult> {
     const day = dayOf(this.parts.clock.nowMs());
-    await this.parts.state.update(
-      SEARCH_LEDGER_STATE,
-      (current): Ledger => ({ ...today(current, day), lastTest: result }),
-    );
+    await this.parts.state.update(SEARCH_LEDGER_STATE, (current): Ledger => {
+      const base = today(current, day);
+      return { ...base, tests: [...base.tests.filter(test => test.provider !== result.provider), result] };
+    });
     return result;
   }
 }
