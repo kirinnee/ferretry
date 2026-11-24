@@ -105,3 +105,10 @@ export const fitFontPx = (columns: number, widthPx: number): number => {
   const fitted = Math.floor((widthPx / (columns * MONO_ADVANCE_EM)) * 10) / 10;
   return Math.min(FIT_MAX_FONT_PX, Math.max(FIT_MIN_FONT_PX, fitted));
 };
+
+/** Fit is only the default while the fitted text stays at least this big; a narrower pane opens in Scroll at full size. */
+const FIT_DEFAULT_MIN_FONT_PX = 10;
+
+/** Whether fitting `columns` into `widthPx` keeps the text readable, so Fit may be the pane's default. */
+export const fitIsReadable = (columns: number, widthPx: number): boolean =>
+  fitFontPx(columns, widthPx) >= FIT_DEFAULT_MIN_FONT_PX;

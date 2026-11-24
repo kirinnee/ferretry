@@ -29,6 +29,7 @@ import {
   kindItemIds,
   NEXT_LEAVES,
   nameProblem,
+  RuntimeNameField,
   useApplyImport,
   useHarnessScan,
 } from '@ferretry/plugin-runtimes/import-kit';
@@ -189,21 +190,11 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
             {NEXT_LEAVES}
           </p>
           {named && plan !== 'nothing' ? (
-            <label className="cc-field">
-              Runtime name
-              <input
-                type="text"
-                className="cc-input"
-                value={name}
-                aria-invalid={invalid !== null}
-                data-runtime-name=""
-                onChange={event => setTyped(event.currentTarget.value)}
-              />
-            </label>
+            <RuntimeNameField value={name} invalid={invalid !== null} disabled={working} onChange={setTyped} />
           ) : null}
           {model.duplicateOf === null ? null : (
             <p className="cc-step__line" data-duplicate-note="">
-              {`A runtime named ${model.duplicateOf} already uses this setup, so no second one is added.`}
+              A runtime already uses this setup, so no second one is added.
             </p>
           )}
           {invalid === null ? null : (

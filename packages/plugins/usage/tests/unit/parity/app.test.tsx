@@ -329,6 +329,40 @@ describe('usage parity · Model pricing and the session surface', () => {
     await bare.unmount();
   });
 
+  it('the composer quota draws nothing until the feed first answers, then says what it found', async () => {
+    let answer: (feed: unknown) => void = () => undefined;
+    const first = new Promise(resolve => {
+      answer = resolve;
+    });
+    const { half } = halfOver({ 'GET /v1/usage': () => first });
+    const view = await mount(
+      asElement(
+        half.panels['composer-quota']({ subject: 'ferret-7', account: { agent: 'some-other-login' } } as never),
+      ),
+    );
+    await settle();
+    // The first read is still loading: no "No usage data" flash, no quota box at all.
+    expect(view.container.textContent).toBe('');
+    expect(view.container.querySelector('.fy-composer-quota')).toBeNull();
+    answer({ at: '2026-08-01T09:00:00.000Z', stale: false, accounts: [] });
+    await settle();
+    // It answered and does not name this account: now it is true to say so.
+    expect(view.container.textContent).toContain('No usage data');
+    await view.unmount();
+    // A usage reading the ferret's own monitor stamped is already an answer, even while the feed loads.
+    const stamped = await mount(
+      asElement(
+        half.panels['composer-quota']({
+          subject: 'ferret-7',
+          account: { agent: 'some-other-login', usage: { usage5hPercent: 7, usageWeeklyPercent: 3 } },
+        } as never),
+      ),
+    );
+    await settle();
+    expect(stamped.container.textContent).toContain('5h 7%');
+    await stamped.unmount();
+  });
+
   it('the composer quota is a composer.tools panel that shows the account its ferret runs on, and says so in words otherwise', async () => {
     expect(manifest.ui.panels.find(entry => entry.id === 'composer-quota')).toMatchObject({ slot: 'composer.tools' });
     const feedOf = () => ({

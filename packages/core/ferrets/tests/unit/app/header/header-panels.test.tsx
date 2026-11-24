@@ -3,7 +3,7 @@ import type { PanelProps } from '@ferretry/kernel/manifest';
 import type { ComponentType } from 'react';
 import { RouterProvider } from '@ferretry/app/testing';
 import { ActionsPanel } from '../../../../app/features/header/actions-panel.tsx';
-import { FerretLifecycle } from '../../../../app/features/header/status-panel.tsx';
+import { FerretLifecycle, FerretStatus } from '../../../../app/features/header/status-panel.tsx';
 import { movePath } from '../../../../app/features/header/header-paths.ts';
 import { createActionsPanel, createNamePanel, createStatusPanel } from '../../../../app/views/header.tsx';
 import type { LiveFerretsClient } from '../../../../app/lib/client.ts';
@@ -95,6 +95,22 @@ describe('the name and status panels', () => {
     expect(root.querySelector('.fy-ferret-status__word')?.textContent).toBe('working');
     expect(root.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('active — working');
     expect(h.calls.every(call => call.route === GET)).toBe(true);
+  });
+
+  it('on a phone draw the "Your turn" word once, and leave every other word to screen readers', async () => {
+    const wordOf = (root: ParentNode): Element | null => root.querySelector('[data-ferret-status] > span:last-child');
+    const idle = harness(ferretSummary('a1', { state: 'idle' }));
+    mounted = await mount(<FerretStatus compact={true} ferret={idle.ferret} />);
+    expect(wordOf(mounted.container)?.textContent).toBe('your turn');
+    expect(wordOf(mounted.container)?.className).toBe('fy-ferret-status__word');
+    expect(mounted.container.textContent?.match(/your turn/g)).toHaveLength(1);
+    await mounted.unmount();
+    const working = harness(ferretSummary('a1', { state: 'working' }));
+    mounted = await mount(<FerretStatus compact={true} ferret={working.ferret} />);
+    expect(wordOf(mounted.container)?.className).toBe('sr-only');
+    await mounted.unmount();
+    mounted = await mount(<FerretStatus compact={false} ferret={working.ferret} />);
+    expect(wordOf(mounted.container)?.className).toBe('fy-ferret-status__word');
   });
 
   it('say how to start and stop beside the state: Resume when stopped, Stop (asked twice) when running', async () => {
