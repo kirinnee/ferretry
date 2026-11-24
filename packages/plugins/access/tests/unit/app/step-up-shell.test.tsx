@@ -295,6 +295,32 @@ describe('G105 one prompt, one ceremony', () => {
       await view.unmount();
     }
   });
+
+  it('O12 S4 should say an import’s refusal is confirmed for that one change, not for a window of changes', async () => {
+    const { provision } = harness();
+    const view = await mount(<provision.Prompts />);
+    try {
+      // The daemon's own refusal of an import without a fresh proof (`openLooseningAct`), read as the shell reads it.
+      const need = must(
+        passkeyNeed({
+          status: 403,
+          body: {
+            error: 'to import from this device, confirm with a passkey',
+            code: 'grant_step_up_required',
+            demand: { capability: 'fleet', axis: 'configure', act: 'loosen-config' },
+          },
+        }),
+        'the passkey need',
+      );
+      await interact(() => void provision.handler.confirm(ONE, need, 'explicit'));
+      await settle();
+      const scope = must(view.container.querySelector('[data-step-up-scope]'), 'the scope note').textContent ?? '';
+      expect(scope).toBe('This confirms this one change. The next change like it asks for your passkey again.');
+      expect(scope).not.toContain('covers changes on this machine');
+    } finally {
+      await view.unmount();
+    }
+  });
 });
 
 describe('asking before a press', () => {
