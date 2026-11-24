@@ -477,9 +477,10 @@ Hands-free chat with the ferret whose page you are on. **Voice mode** is a butto
 under an agenda item's reply box). Voice's own code is `app/components/voice-mode-panel.tsx`, `voice-mode-button.tsx` and
 `app/lib/voice-mode/voice-mode-store.ts`.
 
-- **Pressing it** first reads `GET /v1/voice/engine`. Speech not installed, still installing, or a machine that cannot be
-  reached leaves the composer where it is and says why in one sentence above it (with where to install: Settings › Voice ›
-  Voice mode). It never installs by itself: that download is the person's press, with its size shown.
+- **Pressing it** first reads `GET /v1/voice/engine`. Speech not installed or still installing leaves the composer where it
+  is and says why in one sentence above it (with where to install: Settings › Voice › Voice mode). It never installs by
+  itself: that download is the person's press, with its size shown. A machine that cannot be reached starts voice mode on the
+  phone's own engine instead ([Phone fallback](#phone-fallback-the-phones-own-engine)).
 - **The composer is hidden, never dropped.** The panel renders the chat's composer in the same place with `display: none`,
   so the draft, caret and attachments are the very ones that come back on **End**. Nothing is sent from the draft.
 - **One `chat` stream** (`purpose: 'chat'`, this ferret) opens as soon as voice mode is on, and every stream rule above holds:
@@ -494,8 +495,9 @@ under an agenda item's reply box). Voice's own code is `app/components/voice-mod
   (unit 1). Until barge-in exists the microphone under the speaker would hear the reply and the machine would send it back as
   the person's own words, so the panel mutes (zero samples) while a reading goes on and unmutes after. The panel says so.
 - **It ends, and says why.** **End voice mode** tells the machine, closes the stream, stops the microphone and gives the
-  composer back. A refusal (the machine's own sentence, or one for its close code), a lost machine, a refused microphone, or a
-  browser that cannot open a stream also give the composer back and leave one sentence above it until dismissed. Leaving the
+  composer back. A refused permission (the machine's own sentence, or one for its close code: 4401 voice, 4403 fleet), a
+  refused microphone, or a browser that cannot open a stream also give the composer back and leave one sentence above it until
+  dismissed. A machine that fails for any other reason does not end it: the loop moves to the phone. Leaving the
   chat, or a question taking the composer's place, ends it; it never restarts by itself on return.
 - **Measured here (2026-11-24, real Chrome, real engine).** Chrome's fake microphone plays `clip-5s.wav` ("Please fix the
   login redirect and run the tests again", with 1 s of silence before it) into the shipped `browserMic`; the panel's stream
@@ -511,8 +513,51 @@ under an agenda item's reply box). Voice's own code is `app/components/voice-mod
   sends nothing (it never sends a lost turn). The panel is honest about it; whether the rule should wait for the decode is the
   stream's to decide (unit 4's latency follow-up).
 - **Declared gaps.** No barge-in (unit 7), and the panel does not yet ask the machine's reply voice (unit 6, built: [The reply voice](#the-reply-voice-kokoro-on-the-machine)) to speak: the device voice reads, the microphone is muted
-  meanwhile. No phone-fallback engine (unit 8): a machine that cannot be reached means voice mode ends, not a different engine.
-  A keyboard shortcut and a palette entry for it are not built.
+  meanwhile. A keyboard shortcut and a palette entry for it are not built.
+
+### Phone fallback: the phone's own engine
+
+**Built (voice mode unit 8).** Voice mode runs on the machine; the phone's own engine is only ever the fallback (owner
+decision 2026-11-23). The same panel, the same two buttons and the same hidden composer carry on, with a banner at the top
+of the panel (`data-voice-mode-banner`, `data-engine="phone"`) that says why for as long as it is there. There are three ways in, and
+nothing else starts it:
+
+1. **The machine cannot be reached when Voice mode is pressed** (`GET /v1/voice/engine` fails): "Your machine cannot be
+   reached, so voice mode runs on this phone's own speech."
+2. **The machine's stream ends for any reason but a refused permission or a person's End** (the route dies mid-chat, a close
+   with no code, `4408` it stopped hearing the phone, `4429` busy, `4450` too slow, `1011` speech failed, a protocol
+   error). The loop moves to the phone and the banner says why, in the machine's own sentence when it gave one. A refused
+   permission (`4401`, `4403`) is **not** routed round: the owner said this device may not, and the phone would be doing it
+   anyway.
+3. **The person chose "Keep audio on this phone"** (Settings › Voice › Voice mode; `voiceModeOnPhone` in this browser's
+   live-voice settings, off by default). The machine is then not asked at all, and the banner says that is why.
+
+What the phone's engine is: the dictation engine the person already chose (Settings › Voice: Parakeet on this device, the
+browser's voice, the others), driven by `useDictation` as a person would drive it, into an empty draft that is never shown
+(`afterDictation: 'insert'`; the transcription log and debug ring are not written: voice mode is not a dictation the person
+asked to keep). The phone watches its own microphone level for the pause (`lib/voice-mode/phone-loop.ts`: speech heard, then
+**1.5 s** of quiet, the machine's own pause, so the rhythm is the same), or, for an engine that lends no microphone tap (the
+browser's voice), the words standing still for as long. Then it stops the take and **sends it itself**, through the ordinary
+`POST /v1/ferrets/:ferretId/send`, as `(voice) <words>` with a send id of its own (`phone-<uuid>:<n>`) in both the body and
+`x-fy-request-id`: a send that fails is tried once more with the **same** id, so a lost answer never sends twice, and one that
+still fails says "Not sent: <the route's sentence>" and keeps listening. Sends go out one at a time, in the order spoken. The
+send needs `fleet.use`, as a typed send does. Replies are read by the device's voice (Voice mode turns Auto-read on), and the
+microphone is off while one is read (the take is stopped, then restarted a moment after: no reply can be heard and sent back as
+the person's words). Mute stops the take too.
+
+If the engine cannot listen at all (no dictation engine chosen yet, the microphone refused, the engine unavailable), voice mode
+**ends** with the engine's own sentence and the composer comes back: nothing else would ever send.
+
+**Declared gaps.** The fallback is one way: the phone does not go back to the machine by itself (End, then Voice mode again, asks
+the machine first). A machine that is wholly unreachable cannot take the phone's sends either: the panel says "Not sent" for each.
+The phone engine has no live words unless the chosen engine gives them (the browser's voice does; Parakeet does with
+"Live words"). Real-device proof (a phone's own Parakeet in a real chat) is the owner's: the harness below scripts the engine.
+
+**Measured here (2026-11-24, real Chrome).** `tests/integration/app/voice-mode-panel.visual.test.ts`: the machine's stream is
+dropped 600 ms into a chat (`1006`); the panel moves to the phone engine (banner "Lost Studio Mac, so voice mode carries on
+with this phone's own speech."), the machine's microphone is released, a scripted engine hears one sentence, the pause is found
+from the microphone level and `(voice) Please check the build` is sent once. A machine unreachable on press starts on the phone
+with no stream opened. At 390 and 1440 px, light and dark: no sideways scroll, 44 px controls.
 
 ### The reply voice (Kokoro, on the machine)
 
@@ -545,7 +590,7 @@ Without it voice mode still listens, and the device's own voice reads the reply,
 - **Playing it.** `createReplyPlayer` schedules each 200 ms piece to start where the last one ends (a gapless queue on one
   WebAudio context created inside the tap that starts voice mode, because iOS lets sound start only from a gesture), and a
   piece that arrives late leaves the gap the machine itself left. The speaker is one voice: **`af_heart`** (speaker 3); a
-  picker is unit 10's, with ElevenLabs.
+  second reply voice, ElevenLabs, is [below](#elevenlabs-as-the-reply-voice-unit-10).
 - **Hear it.** Settings › Voice › Voice mode › Reply voice has **Hear it**: it opens a real stream with `reply: 'machine'`
   and a **silent** microphone (the room's sound never leaves the page), sends one sentence, plays what comes back, and says
   how long the first sound took. It is the whole path, so what a person hears and what it costs are the same test.
@@ -578,6 +623,47 @@ Proof: `packages/plugins/voice/tests/realworld/reply-voice.realworld.test.ts` (`
 `FY_REPLY_VOICE_DIR` to keep the files between runs) refuses a file with a wrong pinned hash, then installs the real files,
 loads Kokoro in its worker, speaks a line (audible level, a length a person would take to say it) and asks for the same line
 over a real `VoiceStream`, measuring the first sound.
+
+### ElevenLabs as the reply voice (unit 10)
+
+**Built:** an optional second reply voice. Kokoro stays the default; ElevenLabs is **off until the owner chooses it**, adds
+`ELEVENLABS_API_KEY` and picks a voice. Settings › Voice › Voice mode › **Reply voice source** holds the choice (On this
+machine | ElevenLabs), the key row (the Speed-ups one: write-only, Test is a free read of `/v1/models`), **Load my voices**,
+the voice picker, the day's use, and its own **Hear it**.
+
+- **The key stays in the Vault's outbound holder, and the holder answers only JSON** (owner decision O4: no widening for raw
+  audio; [secrets.md](secrets.md)). So a line is ONE `POST https://api.elevenlabs.io/v1/text-to-speech/<voice>/with-timestamps
+?output_format=pcm_16000` through `authorizeFetch` with the `xi-api-key` placement. The answer is JSON whose `audio_base64`
+  is 16 kHz PCM16: **already the stream's own sample rate, so there is no decoder and no resampling** (the same endpoint Create's
+  `generate_speech` uses, which asks for MP3). A reply that is not JSON (raw audio, or one that echoes the key) is the holder's
+  `unreadable`: **no sound, the device's voice reads the line**, and the failure is logged as a code, never the text.
+- **Where the choice lives.** `voice.yaml` › `replyVoice` (`provider: kokoro | elevenlabs`, `elevenlabs: { voiceId, voiceName,
+model, dailyChars }`). It is read **at each line**, so a change is heard from the next one with no stream reopened. **No key
+  lives in the file**: a key-shaped field is refused by the schema, and a voice id must be 8–40 letters or digits before it is
+  put in a URL path.
+- **What loosens is held for the owner** (docs/config-files.md rule 2): moving the lines to ElevenLabs (they leave this machine
+  and are billed per character), a different model, and a higher `dailyChars`. The page says "Saved, but not in effect until you
+  confirm it" and keeps speaking in Kokoro (and keeps Kokoro's Hear it) until then.
+- **What leaves the machine:** the text of each `<voice>` line, to ElevenLabs. Never audio, never the chat. Nothing is sent
+  unless the provider is `elevenlabs`, a key is in the store and a voice is chosen; otherwise the stream says `absent` and the
+  device reads.
+- **Spend: a daily character cap.** Characters are **counted before the call** and kept in `state/voice/reply-spend.json`
+  (a day and a count, never a word; the machine's own calendar day). Default **20,000 characters** a day; **about 20 minutes of
+  speech, roughly $0.7 on the fast model (a guess from ElevenLabs' $0.036/min list price, 2026-11-23)**. Past it a line is refused
+  without a call and the device reads it. Characters are given back only when the call **definitely billed nothing** (no key,
+  401, 403, 429, any 4xx); a timeout, a dropped connection, a 5xx or an unreadable answer stays counted, as Create's ledger does.
+  Lines are made one at a time, so two cannot both pass the same cap. This is a separate counter from Create's $5/day.
+- **Routes** (`/v1/voice/reply-voice/elevenlabs`): `GET` (voice.use) answers the chosen voice, the model, whether a key
+  **name** exists, and today's count: free, the key is not opened. `GET …/voices` (a **person's** `secrets.use`, audited as
+  `secrets.used`, so no ferret or warden can spend the key unattended) reads the account's first 100 voices through the holder and
+  keeps only id, name and kind; a row whose id is not a plain id is dropped.
+- **Declared gaps.** **No real call has been made** (no key yet): the endpoint, the `pcm_16000` format on `/with-timestamps`
+  and the `/v2/voices` shape are read from ElevenLabs' documentation and proved only against a fake server; the owner's first
+  real line ("one line spoken, about $0.01") is the proof still owed, and a miss would change only the request or the reply
+  parser. The first sound's latency is **not measured** (one round trip per piece, plus ElevenLabs' own time). Only the first
+  100 voices are listed. A voice's preview and settings (stability, speed) are not offered. The per-line key use is not written
+  to the audit log (a line a minute would drown it): counts and milliseconds only go to the daemon log. The model and the daily
+  limit are edited in `voice.yaml`, not on the page.
 
 ## Speed: which path each engine runs on
 

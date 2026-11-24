@@ -4,9 +4,9 @@ import { createVoiceModeStore } from '../../../app/lib/voice-mode/voice-mode-sto
 describe('which ferrets are in voice mode', () => {
   test('a ferret starts off, and starting names the machine', () => {
     const store = createVoiceModeStore();
-    expect(store.get('f1')).toEqual({ active: false, machine: '', notice: null });
+    expect(store.get('f1')).toEqual({ active: false, engine: 'machine', machine: '', banner: null, notice: null });
     store.start('f1', 'desk');
-    expect(store.get('f1')).toEqual({ active: true, machine: 'desk', notice: null });
+    expect(store.get('f1')).toEqual({ active: true, engine: 'machine', machine: 'desk', banner: null, notice: null });
     expect(store.get('f2').active).toBe(false);
   });
 
@@ -14,7 +14,13 @@ describe('which ferrets are in voice mode', () => {
     const store = createVoiceModeStore();
     store.start('f1', 'desk');
     store.end('f1', 'Lost desk.');
-    expect(store.get('f1')).toEqual({ active: false, machine: 'desk', notice: 'Lost desk.' });
+    expect(store.get('f1')).toEqual({
+      active: false,
+      engine: 'machine',
+      machine: 'desk',
+      banner: null,
+      notice: 'Lost desk.',
+    });
     store.dismiss('f1');
     expect(store.get('f1').notice).toBeNull();
     store.end('f1', 'again');
@@ -51,5 +57,57 @@ describe('which ferrets are in voice mode', () => {
     off();
     store.end('f1');
     expect(woken).toBe(1);
+  });
+});
+
+describe('the phone engine, the fallback', () => {
+  test('starting on the phone names why, and a start on the machine has no banner', () => {
+    const store = createVoiceModeStore();
+    store.start('f1', 'desk', 'You chose to keep audio on this phone.');
+    expect(store.get('f1')).toEqual({
+      active: true,
+      engine: 'phone',
+      machine: 'desk',
+      banner: 'You chose to keep audio on this phone.',
+      notice: null,
+    });
+    store.end('f1');
+    store.start('f1', 'desk');
+    expect(store.get('f1').banner).toBeNull();
+  });
+
+  test('a lost machine hands a running voice mode to the phone with the reason, once', () => {
+    const store = createVoiceModeStore();
+    let woken = 0;
+    store.subscribe(() => {
+      woken += 1;
+    });
+    store.start('f1', 'desk');
+    store.fallBack('f1', 'Lost desk.');
+    expect(store.get('f1')).toEqual({
+      active: true,
+      engine: 'phone',
+      machine: 'desk',
+      banner: 'Lost desk.',
+      notice: null,
+    });
+    store.fallBack('f1', 'Another reason.'); // already on the phone: the first reason stands
+    expect(store.get('f1').banner).toBe('Lost desk.');
+    expect(woken).toBe(2);
+  });
+
+  test('a ferret that is not in voice mode has nothing to fall back from, and ending clears the banner', () => {
+    const store = createVoiceModeStore();
+    store.fallBack('f1', 'Lost desk.');
+    expect(store.get('f1').active).toBe(false);
+    store.start('f1', 'desk', 'why');
+    store.end('f1', 'The microphone could not be opened.');
+    expect(store.get('f1')).toEqual({
+      active: false,
+      engine: 'machine',
+      machine: 'desk',
+      banner: null,
+      notice: 'The microphone could not be opened.',
+    });
   });
 });

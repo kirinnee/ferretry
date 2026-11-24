@@ -11,4 +11,5 @@ export * from './state.ts';
 export * from './stt.ts';
 export * from './engine.ts';
 export * from './reply-voice.ts';
+export * from './reply-elevenlabs.ts';
 export * from './stream.ts';

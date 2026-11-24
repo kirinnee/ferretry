@@ -105,6 +105,8 @@ export function useReplyVoice(client: VoiceEngineClient | null): ReplyVoiceState
 
 export interface HearItProps {
   readonly machine: string;
+  /** Who makes the sound when it is not the machine itself (ElevenLabs); said in the result. */
+  readonly maker?: string | undefined;
   /** A suite supplies a client with a fake socket; the page uses the shell's. */
   readonly client?: Pick<VoicePluginClient, 'socket'>;
   /** A suite's own sound and clock; the page uses the browser's. */
@@ -125,8 +127,9 @@ type Hearing =
  * Speaks one sentence the way a reply is spoken: in the machine's reply voice through the same stream a chat uses, or in
  * this device's own voice when the machine has none ready (and says which it was). It is the reply speaker's first real user.
  */
-function HearIt({
+export function HearIt({
   machine,
+  maker,
   client: injected,
   createPlayer = createReplyPlayer,
   createMic = silentMic,
@@ -238,8 +241,12 @@ function HearIt({
       {(hearing.step === 'speaking' || (hearing.step === 'done' && hearing.voice === 'machine')) &&
         hearing.firstSoundMs !== null && (
           <p className="fy-vs-note" role="status" data-voice-first-sound={hearing.firstSoundMs}>
-            {hearing.step === 'done' ? 'Spoken by ' + machine + '. ' : ''}The first sound came{' '}
-            {seconds(hearing.firstSoundMs)} after the line was sent.
+            {hearing.step === 'done'
+              ? maker === undefined
+                ? `Spoken by ${machine}. `
+                : `Spoken by ${maker}, through ${machine}. `
+              : ''}
+            The first sound came {seconds(hearing.firstSoundMs)} after the line was sent.
           </p>
         )}
       {hearing.step === 'done' && hearing.voice === 'device' && (
@@ -259,12 +266,14 @@ function HearIt({
 
 export interface ReplyVoiceRowProps {
   readonly state: ReplyVoiceState;
+  /** The reply voice the machine speaks with: while it is ElevenLabs, Hear it belongs to that row and is not offered here. */
+  readonly provider?: 'kokoro' | 'elevenlabs' | undefined;
   /** Whether speech to text is installed too: only then can a stream open to speak the sample. */
   readonly speechReady: boolean;
   readonly hear?: Omit<HearItProps, 'machine'> | undefined;
 }
 
-export function ReplyVoiceRow({ state, speechReady, hear }: ReplyVoiceRowProps) {
+export function ReplyVoiceRow({ state, speechReady, hear, provider = 'kokoro' }: ReplyVoiceRowProps) {
   const { view, busy, error } = state;
   if (view === null) return null;
   const percent = view.sizeBytes === 0 ? 0 : Math.min(100, Math.round((view.doneBytes / view.sizeBytes) * 100));
@@ -374,7 +383,11 @@ export function ReplyVoiceRow({ state, speechReady, hear }: ReplyVoiceRowProps) 
           )}
         </div>
         {view.state === 'ready' &&
-          (speechReady ? (
+          (provider === 'elevenlabs' ? (
+            <p className="fy-vs-note" data-voice-hear-elsewhere="">
+              ElevenLabs reads the replies now, so Hear it is under Reply voice source.
+            </p>
+          ) : speechReady ? (
             <HearIt machine={view.machine} {...hear} />
           ) : (
             <p className="fy-vs-note">Install speech on {view.machine} above to hear it.</p>

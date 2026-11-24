@@ -180,13 +180,18 @@ export class SpeedupsService {
       const failure = await this.parts.guard.decide();
       return failure === undefined ? 'ok' : TRIAGE_TEST_CODES[failure];
     }
-    const outcome = await this.parts.authorizer.send(entry.secretName, entry.hosts, {
-      method: 'GET',
-      url: entry.probe.url,
-      headers: { accept: 'application/json' },
-      timeoutMs: SPEEDUP_TEST_TIMEOUT_MS,
-      maxResponseBytes: MODEL_LIST_MAX_BYTES,
-    });
+    const outcome = await this.parts.authorizer.send(
+      entry.secretName,
+      entry.hosts,
+      {
+        method: 'GET',
+        url: entry.probe.url,
+        headers: { accept: 'application/json' },
+        timeoutMs: SPEEDUP_TEST_TIMEOUT_MS,
+        maxResponseBytes: MODEL_LIST_MAX_BYTES,
+      },
+      entry.placement,
+    );
     return modelListCode(outcome);
   }
 }

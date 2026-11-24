@@ -22,7 +22,7 @@ const view = (patch: Partial<VoiceEngineView> = {}): VoiceEngineView => ({
   ...patch,
 });
 
-const press = async (answer: () => Promise<unknown>) => {
+const press = async (answer: () => Promise<unknown>, options: { readonly keepOnPhone?: boolean } = {}) => {
   const calls: string[] = [];
   const store = createVoiceModeStore();
   const client = {
@@ -32,7 +32,14 @@ const press = async (answer: () => Promise<unknown>) => {
     },
     socket: undefined,
   };
-  mounted = await mount(<VoiceModeButton client={client as never} ferretId="ferret-1" store={store} />);
+  mounted = await mount(
+    <VoiceModeButton
+      client={client as never}
+      ferretId="ferret-1"
+      keepOnPhone={options.keepOnPhone ?? false}
+      store={store}
+    />,
+  );
   const button = mounted.container.querySelector('[data-voice-mode-start]') as HTMLButtonElement;
   await interact(() => button.click());
   await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
@@ -43,7 +50,13 @@ describe('the Voice mode button', () => {
   test('a machine whose speech is ready: one read of its state, then voice mode starts naming the machine', async () => {
     const { calls, store, button } = await press(async () => view());
     expect(calls).toEqual(['GET /v1/voice/engine']);
-    expect(store.get('ferret-1')).toEqual({ active: true, machine: 'desk', notice: null });
+    expect(store.get('ferret-1')).toEqual({
+      active: true,
+      engine: 'machine',
+      machine: 'desk',
+      banner: null,
+      notice: null,
+    });
     expect(button.disabled).toBe(true);
   });
 
@@ -61,14 +74,28 @@ describe('the Voice mode button', () => {
     expect(store.get('ferret-1').notice).toContain('still installing on desk');
   });
 
-  test('a machine that cannot be reached leaves the composer and says so', async () => {
+  test('a machine that cannot be reached starts voice mode on the phone, with a banner that says why', async () => {
     const { store } = await press(async () => {
       throw new Error('offline');
     });
     expect(store.get('ferret-1')).toEqual({
-      active: false,
+      active: true,
+      engine: 'phone',
       machine: '',
-      notice: 'Voice mode runs on your machine, and it cannot be reached right now.',
+      banner: "Your machine cannot be reached, so voice mode runs on this phone's own speech.",
+      notice: null,
+    });
+  });
+
+  test('keeping audio on this phone never asks the machine, and says that is why', async () => {
+    const { calls, store } = await press(async () => view(), { keepOnPhone: true });
+    expect(calls).toEqual([]);
+    expect(store.get('ferret-1')).toEqual({
+      active: true,
+      engine: 'phone',
+      machine: '',
+      banner: 'You chose to keep audio on this phone, so voice mode runs on its own speech.',
+      notice: null,
     });
   });
 });

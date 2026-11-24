@@ -12,7 +12,7 @@ import {
   StreamProtocolError,
   type ReplyAudio,
   type ReplyState,
-  type ReplyVoiceApi,
+  type ReplySpeakerApi,
   type StreamSnapshot,
   type StreamStart,
   StreamStartSchema,
@@ -97,7 +97,7 @@ export interface StreamParts {
    * The machine's reply voice. `undefined` only where there is none to ask (a suite): a stream that asks for it is then told
    * `absent`. A stream that does not ask for it never touches this.
    */
-  readonly reply?: Pick<ReplyVoiceApi, 'view' | 'warm' | 'speak'> | undefined;
+  readonly reply?: ReplySpeakerApi | undefined;
   /** Called once when the stream is over, whatever ended it. */
   readonly onEnd: () => void;
   readonly log: { info(message: string, fields?: Record<string, string | number | boolean>): void };

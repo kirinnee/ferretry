@@ -6,16 +6,17 @@ import { SecretNameSchema } from '@ferretry/core-vault/contract';
  * Speed-ups: the optional third-party keys that make a daemon faster or cheaper, and the read that
  * says whether each one is set and when it last worked.
  *
- * THREE PROVIDERS, CLOSED SET. Jev (TypeSafe AI's System One decision model) is the Warden's triage
+ * FOUR PROVIDERS, CLOSED SET. Jev (TypeSafe AI's System One decision model) is the Warden's triage
  * guard; Groq and Cerebras are fast chat models used ONLY to clean up a dictated transcript after the
- * browser has recognised it. Neither receives audio: speech recognition stays in the browser.
+ * browser has recognised it. Neither receives audio: speech recognition stays in the browser. ElevenLabs is the
+ * optional reply voice (`reply-elevenlabs.ts`): it receives the text of a ferret's spoken lines and never any audio.
  *
  * NO VALUE TRAVELS ON THIS WIRE. A key goes IN through the ordinary secret route (`POST /v1/secrets`)
  * under the name {@link SpeedupStatus.secretName} carries, and the daemon spends it through its one
  * outbound holder. Everything below is a name, a boolean, an instant or a sentence a person reads.
  */
 
-export const SpeedupProviderSchema = z.enum(['jev', 'groq', 'cerebras']);
+export const SpeedupProviderSchema = z.enum(['jev', 'groq', 'cerebras', 'elevenlabs']);
 export type SpeedupProvider = z.infer<typeof SpeedupProviderSchema>;
 
 /**

@@ -136,8 +136,114 @@ const replyView = () => ({
     : {}),
 });
 
+// ─── ElevenLabs as the reply voice (`&source=kokoro|elevenlabs`, `&key=set|unset`, `&voice=none|george`, `&hold=1`) ─────
+// `hold=1` is the machine holding the move to ElevenLabs for the owner to confirm (a pending write). Every call is recorded.
+const GEORGE = 'JBFqnCBsd6RMkjVDRZzb';
+const eleven = {
+  source: (params.get('source') ?? 'kokoro') as 'kokoro' | 'elevenlabs',
+  keySet: params.get('key') === 'set',
+  voiceId: params.get('voice') === 'george' ? GEORGE : (undefined as string | undefined),
+  voiceName: params.get('voice') === 'george' ? 'George' : (undefined as string | undefined),
+  used: Number(params.get('used') ?? 1_240),
+  loads: 0,
+  writes: [] as string[],
+  secrets: 0,
+  tests: 0,
+};
+(window as unknown as { __eleven: typeof eleven }).__eleven = eleven;
+const voiceYaml = (): string =>
+  eleven.source === 'kokoro'
+    ? ''
+    : `replyVoice:\n  provider: elevenlabs\n${
+        eleven.voiceId === undefined
+          ? ''
+          : `  elevenlabs:\n    voiceId: ${eleven.voiceId}\n    voiceName: ${eleven.voiceName}\n`
+      }`;
+const speedupsView = () => ({
+  vault: 'ok',
+  providers: [
+    {
+      provider: 'elevenlabs',
+      label: 'ElevenLabs',
+      purpose:
+        'An optional voice for voice mode: a ferret’s spoken lines are read in a natural ElevenLabs voice of your choice.',
+      costNote: 'Billed by ElevenLabs per character spoken.',
+      privacyNote: 'The text of each spoken line is sent to ElevenLabs.',
+      keyUrl: 'https://elevenlabs.io/app/settings/api-keys',
+      testNote: 'Test lists the models your key can use. It is free and speaks nothing.',
+      secretName: 'ELEVENLABS_API_KEY',
+      set: eleven.keySet,
+      ...(eleven.keySet ? { secretUpdatedAt: '2026-11-24T12:00:00.000Z' } : {}),
+      testStale: false,
+    },
+  ],
+});
+const elevenClient = (path: string, init?: RequestInit): unknown | undefined => {
+  if (path.startsWith('/v1/config/file')) {
+    if (init?.method === 'PUT') {
+      const text = (JSON.parse(String(init.body)) as { text: string }).text;
+      eleven.writes.push(text);
+      const wantsEleven = /provider: elevenlabs/u.test(text);
+      if (wantsEleven) eleven.source = 'elevenlabs';
+      else eleven.source = 'kokoro';
+      const match = /voiceId: (\w+)\n\s+voiceName: (.+)/u.exec(text);
+      if (match !== null) {
+        eleven.voiceId = match[1];
+        eleven.voiceName = match[2];
+      }
+      return params.get('hold') === '1' && wantsEleven
+        ? {
+            outcome: 'pending',
+            pending: {
+              changes: ['a ferret’s spoken lines now go to ElevenLabs to be read aloud, billed per character'],
+            },
+          }
+        : { outcome: 'applied' };
+    }
+    return { text: voiceYaml(), etag: `etag-${eleven.writes.length}` };
+  }
+  if (path === '/v1/voice/reply-voice/elevenlabs/voices') {
+    eleven.loads += 1;
+    return {
+      voices: [
+        { id: GEORGE, name: 'George', category: 'premade' },
+        { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah', category: 'premade' },
+        { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam (my clone)', category: 'cloned' },
+      ],
+    };
+  }
+  if (path === '/v1/voice/reply-voice/elevenlabs')
+    return {
+      usage: { day: '2026-11-24', usedChars: eleven.used, dailyChars: 20_000 },
+      keySet: eleven.keySet,
+      ...(eleven.voiceId === undefined ? {} : { voiceId: eleven.voiceId }),
+      model: 'eleven_flash_v2_5',
+    };
+  if (path.startsWith('/v1/speedups/elevenlabs/test')) {
+    eleven.tests += 1;
+    return {
+      provider: 'elevenlabs',
+      secretName: 'ELEVENLABS_API_KEY',
+      ok: true,
+      code: 'ok',
+      message: 'The key works.',
+      latencyMs: 180,
+      at: '2026-11-24T12:01:00.000Z',
+    };
+  }
+  if (path === '/v1/speedups') return speedupsView();
+  if (path === '/v1/secrets') {
+    eleven.secrets += 1;
+    eleven.keySet = true;
+    return {};
+  }
+  return undefined;
+};
+
 const client = {
   request: async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) => {
+    const elevenAnswer = elevenClient(path, init);
+    if (elevenAnswer !== undefined) return schema.parse(elevenAnswer);
     if (path.startsWith('/v1/voice/reply-voice')) {
       if (init?.method === 'POST') {
         fake.replyInstalls += 1;
