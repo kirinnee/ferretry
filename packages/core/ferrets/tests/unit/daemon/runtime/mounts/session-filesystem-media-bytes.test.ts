@@ -430,6 +430,7 @@ describe('the media byte route: who may read it, and secrets', () => {
 
     // Assert
     should(opensBefore).eql(0);
-    should(redaction.opens).eql(1);
+    // Two opens for a file nobody has judged yet: one to learn which vault the verdict is about, one for the scan itself.
+    should(redaction.opens).eql(2);
   });
 });

@@ -10,9 +10,19 @@ import {
   type RouteHandler,
   textResponse,
 } from '@ferretry/kernel/contract';
-import { bareMediaName, MAX_MEDIA_BYTES, mediaAnswer, mediaTypeOf } from '../../../../contract/media-bytes.ts';
+import {
+  bareMediaName,
+  MAX_MEDIA_BYTES,
+  MEDIA_CHUNK_BYTES,
+  mediaAnswer,
+  type MediaRange,
+  mediaRangeAnswer,
+  mediaTypeOf,
+  parseMediaRange,
+} from '../../../../contract/media-bytes.ts';
 import { SESSION_FILE_INDEX_VERSION, type SessionFileIndexResponse } from '../../protocol/session-search.ts';
 import {
+  type ByteWindow,
   FsError,
   MAX_FILE_BYTES,
   type FsDiffView,
@@ -25,6 +35,7 @@ import {
   type SessionReadFence,
 } from '../../session/filesystem/index.ts';
 import { FS_ERROR_STATUS } from '../../ferrets/folder-listing.ts';
+import { type MediaVerdict, MediaScanCache } from './media-scan-cache.ts';
 
 type RouteContext = CallContext;
 
@@ -188,9 +199,15 @@ function sidesHoldValue(view: FsDiffView, scope: RedactionScope): boolean {
 /**
  * An agent is never handed a file that holds a vault value, masked or not: a masked copy looks like ordinary content
  * and an agent could write it back over the real file. ONE sentence for any count of values; it names the path only.
+ * `everyone` is for a route that refuses the file to a person too (`fs/media`: masking bytes would hand back something
+ * that is not the file), where saying "an agent" would tell the person it was meant for someone else.
  */
-function holdsSecret(path: string): ApiError {
-  return new ApiError(403, `${path} holds a private value, so it is not served to an agent.`, 'holds_secret');
+function holdsSecret(path: string, everyone = false): ApiError {
+  return new ApiError(
+    403,
+    `${path} holds a private value, so it is not served${everyone ? '' : ' to an agent'}.`,
+    'holds_secret',
+  );
 }
 
 /**
@@ -261,11 +278,12 @@ function fileResponse(view: FsFileView, scope: RedactionScope, agent: boolean): 
  * past the end, an open or oversized range clamped to one piece. No `Range` at all is a `200` only for a file that fits
  * one piece; a larger one is `413 range_required`, never a body one session cannot carry.
  */
-// read-scoped: none — gates and file reads only; the bytes leave through mediaResponse(scope), never from here
+// read-scoped: none — gates and file reads only; the bytes leave through mediaAnswer, after the secrets verdict below
 async function media(
   _workingTree: SessionFilesystem,
   deps: FileBrowserDeps,
   context: RouteContext,
+  scans: MediaScanCache,
 ): Promise<ApiResponse> {
   const { id, cwd, fence } = await deps.reach(context);
   const name = bareMediaName(queryValue(context.request, 'name'));
@@ -273,43 +291,95 @@ async function media(
   const type = mediaTypeOf(name);
   if (type === undefined) throw new ApiError(415, `${name} is not a file type this route serves`, 'unsupported_type');
   if (deps.media === undefined) throw new ApiError(404, 'this daemon keeps no session media folder', 'not_found');
+  const rangeHeader = headerValue(context.request, 'range');
+  // What the span chooser decided, for the answer built after the read: the range asked, the file's size, and whether
+  // this request owes the whole-file scan (nobody has a verdict yet) and so reads every byte.
+  let asked: { readonly range: MediaRange; readonly size: number } | undefined;
+  let owed: ((verdict: MediaVerdict | undefined) => void) | undefined;
+  let held = false;
   let view: Awaited<ReturnType<SessionFilesystem['readFile']>>;
   try {
     view = await deps.media(id).readFile(cwd, name, {
-      base64: true,
+      raw: true,
       maxBytes: MAX_MEDIA_BYTES,
+      // Asked once every gate has passed and before a byte is read, with the identity of the very file about to be read.
+      span: async file => {
+        const range = parseMediaRange(rangeHeader, file.size);
+        asked = { range, size: file.size };
+        // The vault opens HERE for the first time (after every gate); one that cannot open serves no bytes (fail closed).
+        const fingerprint = await deps.redaction.read(scope => scope.fingerprint?.());
+        // A redactor that cannot say what it masks cannot say a verdict still holds: read and scan every time.
+        if (fingerprint === undefined) return undefined;
+        const key = MediaScanCache.keyOf(file);
+        for (;;) {
+          const claim = scans.claim(key, fingerprint);
+          if (claim.kind === 'verdict') {
+            if (claim.secret) throw holdsSecret(name, true);
+            held = true;
+            return windowOf(range, file.size, name);
+          }
+          if (claim.kind === 'wait') {
+            await claim.until;
+            continue;
+          }
+          owed = claim.settle;
+          return undefined;
+        }
+      },
       ...(fence === undefined ? {} : { fence }),
     });
   } catch (error) {
+    owed?.(undefined);
     return refuse(error);
   }
-  if (view.denied === true || view.ignored === true)
-    throw new ApiError(
-      403,
-      `${name} is not served by the repository secrets policy`,
-      view.denied === true ? 'denied' : 'ignored',
-      undefined,
-      view.rule === undefined ? undefined : { rule: view.rule },
-    );
-  if (view.tooLarge === true)
-    throw new ApiError(413, `${name} is over the ${MAX_MEDIA_BYTES}-byte limit this route serves`, 'too_large');
-  if (view.base64 === undefined) throw new ApiError(404, `no file ${name}`, 'not_found');
-  const bytes = Buffer.from(view.base64, 'base64');
-  const range = headerValue(context.request, 'range');
-  // The vault opens HERE and only here (after every gate); a vault that cannot open serves no bytes (fail closed).
-  return await deps.redaction.read(scope => mediaResponse(bytes, type, range, name, scope));
+  try {
+    if (view.denied === true || view.ignored === true)
+      throw new ApiError(
+        403,
+        `${name} is not served by the repository secrets policy`,
+        view.denied === true ? 'denied' : 'ignored',
+        undefined,
+        view.rule === undefined ? undefined : { rule: view.rule },
+      );
+    if (view.tooLarge === true)
+      throw new ApiError(413, `${name} is over the ${MAX_MEDIA_BYTES}-byte limit this route serves`, 'too_large');
+    const bytes = view.bytes;
+    if (bytes === undefined) throw new ApiError(404, `no file ${name}`, 'not_found');
+    if (held && asked !== undefined) {
+      // A verdict was already held: these are the range's bytes alone, and they answer as the whole file would have.
+      assertPiece(asked, bytes);
+      return mediaRangeAnswer(asked.range, asked.size, bytes, type, name);
+    }
+    // Every byte of the file is here and no verdict covers it: scan it ONCE, keep what was found, then answer.
+    return await deps.redaction.read(scope => {
+      const secret = fileHoldsValue(bytes, scope);
+      const fingerprint = scope.fingerprint?.();
+      owed?.(fingerprint === undefined ? undefined : { secret, fingerprint });
+      owed = undefined;
+      if (secret) throw holdsSecret(name, true);
+      return mediaAnswer(bytes, type, rangeHeader, name);
+    });
+  } finally {
+    // A request that leaves without a verdict (a refusal, a throw) hands the scan back so a waiter takes it over.
+    owed?.(undefined);
+  }
 }
 
-/** The one place media bytes leave the daemon: refused whole if the read's scope covers a value in them. */
-function mediaResponse(
-  bytes: Uint8Array,
-  type: string,
-  rangeHeader: string | undefined,
-  name: string,
-  scope: RedactionScope,
-): ApiResponse {
-  if (fileHoldsValue(bytes, scope)) throw holdsSecret(name);
-  return mediaAnswer(bytes, type, rangeHeader, name);
+/** The span of the file a range needs, and `undefined` when it needs all of it (a small file asked for whole). */
+function windowOf(range: MediaRange, size: number, name: string): ByteWindow | undefined {
+  if (range.kind === 'part') return { start: range.start, length: range.end - range.start + 1 };
+  if (range.kind === 'unsatisfiable') return { start: 0, length: 0 };
+  if (size > MEDIA_CHUNK_BYTES)
+    throw new ApiError(413, `${name} is read in ranges of at most ${MEDIA_CHUNK_BYTES} bytes`, 'range_required');
+  return undefined;
+}
+
+/** The piece read is the length the range named: a file cut short under the read is refused, never served short. */
+function assertPiece(asked: { readonly range: MediaRange; readonly size: number }, bytes: Uint8Array): void {
+  const { range, size } = asked;
+  const expected = range.kind === 'part' ? range.end - range.start + 1 : range.kind === 'unsatisfiable' ? 0 : size;
+  if (bytes.byteLength !== expected)
+    throw new ApiError(409, 'the file changed while it was being read, so ask again', 'changed');
 }
 
 /**
@@ -372,6 +442,8 @@ function notBuilt(): never {
  * gitignore policy and agent home fence. RootHandle.stat/readText cannot prove these checks.
  */
 export function sessionFilesystemRoutes(deps: FileBrowserDeps): { readonly [K in FileBrowserRouteKey]: RouteHandler } {
+  // One verdict memory for this mount: a media file is scanned for vault values once, not once per piece it is served in.
+  const scans = new MediaScanCache();
   const bound =
     (handler: (filesystem: SessionFilesystem, deps: FileBrowserDeps, context: RouteContext) => Promise<ApiResponse>) =>
     async (context: RouteContext): Promise<ApiResponse> => {
@@ -384,7 +456,9 @@ export function sessionFilesystemRoutes(deps: FileBrowserDeps): { readonly [K in
     };
   return {
     'GET /v1/ferrets/:ferretId/fs/file': bound(file),
-    'GET /v1/ferrets/:ferretId/fs/media': bound(media),
+    'GET /v1/ferrets/:ferretId/fs/media': bound((filesystem, bounded, context) =>
+      media(filesystem, bounded, context, scans),
+    ),
     'GET /v1/ferrets/:ferretId/fs/index': bound(index),
     'GET /v1/ferrets/:ferretId/fs/changes': bound(changes),
     'GET /v1/ferrets/:ferretId/fs/diff': bound(diff),

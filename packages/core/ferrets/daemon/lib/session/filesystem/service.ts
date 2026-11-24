@@ -19,6 +19,7 @@ import type {
   SessionChangesView,
   SessionGit,
   SessionRootPinner,
+  SpanChooser,
 } from './ports.ts';
 import {
   type FsDiffView,
@@ -312,6 +313,10 @@ export class SessionFilesystem {
       /** Return the bounded, policy-gated bytes as base64 rather than decoding them as text. */
       readonly base64?: boolean;
       readonly maxBytes?: number;
+      /** Return the gated bytes as they are, on the view's `bytes`, with no base64 or text coat. */
+      readonly raw?: boolean;
+      /** Asked after every gate and before the read: which span of the file to read (none: all of it). */
+      readonly span?: SpanChooser;
       /** @internal Test-only barrier; see {@link AfterValidationHook}. */
       readonly afterValidation?: AfterValidationHook;
       readonly fence?: SessionReadFence;
@@ -327,7 +332,10 @@ export class SessionFilesystem {
       if (fenced !== undefined) throw fenced;
       return options.rev === 'head'
         ? await this.readHead(pinned, rel, maxBytes, options.base64)
-        : await this.readWorking(pinned, rel, maxBytes, options.afterValidation, options.base64, options.fence);
+        : await this.readWorking(pinned, rel, maxBytes, options.afterValidation, options.base64, options.fence, {
+            ...(options.raw === true ? { raw: true } : {}),
+            ...(options.span === undefined ? {} : { span: options.span }),
+          });
     } finally {
       await pinned.close();
     }
@@ -495,6 +503,7 @@ export class SessionFilesystem {
     afterValidation: AfterValidationHook | undefined,
     base64 = false,
     fence?: SessionReadFence,
+    delivery: { readonly raw?: boolean; readonly span?: SpanChooser } = {},
   ): Promise<FsFileView> {
     // Evaluate policy before the walk and again after it. Retaining both verdicts is what prevents a
     // rename or replacement from evaluating the gate on one tree while the pinned descriptor supplies
@@ -521,8 +530,15 @@ export class SessionFilesystem {
       const view: FsFileView = { path: rel, size: metadata.size, mtime: metadata.mtime };
       if (metadata.size > maxBytes) return { ...view, tooLarge: true };
 
-      const bytes = await opened.read(maxBytes);
+      // Every refusal has run. What is left is how much to read: the caller may take one span of a large file.
+      const identity = opened.identities.at(-1);
+      const span =
+        delivery.span === undefined || identity === undefined
+          ? undefined
+          : await delivery.span({ identity, size: metadata.size, mtime: metadata.mtime });
+      const bytes = await opened.read(maxBytes, span);
       if (bytes === undefined) return { ...view, tooLarge: true };
+      if (delivery.raw === true) return { ...view, bytes };
       if (base64) return { ...view, base64: Buffer.from(bytes).toString('base64') };
       if (looksBinary(bytes)) return { ...view, binary: true };
       return { ...view, content: new TextDecoder().decode(bytes) };

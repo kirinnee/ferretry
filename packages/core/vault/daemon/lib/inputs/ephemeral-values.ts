@@ -150,6 +150,7 @@ export class EphemeralValues {
       text: (text, cut = false, additional) => scrub.text(text, cut, entries(additional)),
       data: (value, additional) => scrub.data(value, entries(additional)),
       cover: (text, additional) => scrub.cover(text, entries(additional)),
+      fingerprint: additional => scrub.fingerprint(entries(additional)),
     };
   }
 

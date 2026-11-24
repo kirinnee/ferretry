@@ -1,6 +1,7 @@
 import { posix } from 'node:path';
 import type { PinOptions } from '@ferretry/kernel/contract';
 import {
+  type ByteWindow,
   type ComponentIdentity,
   type DiffSide,
   FsError,
@@ -75,6 +76,8 @@ function identitiesFor(rel: string): readonly ComponentIdentity[] {
 class FakePinnedTarget implements PinnedTarget {
   closed = false;
   readonly readCalls: number[] = [];
+  /** Every read this target served: how many bytes it handed back and whether it was asked for a span. */
+  readonly reads: { readonly bytes: number; readonly window: ByteWindow | undefined }[] = [];
 
   constructor(
     readonly metadata: PinnedTarget['metadata'],
@@ -85,9 +88,12 @@ class FakePinnedTarget implements PinnedTarget {
     private readonly listError?: Error,
   ) {}
 
-  async read(maxBytes: number): Promise<Uint8Array | undefined> {
+  async read(maxBytes: number, window?: ByteWindow): Promise<Uint8Array | undefined> {
     this.readCalls.push(maxBytes);
-    return this.metadata.size > maxBytes ? undefined : this.bytes;
+    if (this.metadata.size > maxBytes) return undefined;
+    const served = window === undefined ? this.bytes : this.bytes.subarray(window.start, window.start + window.length);
+    this.reads.push({ bytes: served.byteLength, window });
+    return served;
   }
 
   /**

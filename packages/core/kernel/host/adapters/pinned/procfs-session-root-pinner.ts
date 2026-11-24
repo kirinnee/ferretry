@@ -13,6 +13,7 @@ import {
   type PinnedOpenOptions,
   type PinOptions,
   type PinnedRoot,
+  type ByteWindow,
   type PinnedTarget,
   type SessionRootPinner,
   unsupportedPlatform,
@@ -121,13 +122,14 @@ class ProcfsPinnedTarget implements PinnedTarget {
    * Taking the handle rather than a path is the whole point: `stat` then `readFile` checks one path and
    * reads another, and everything in between can be replaced with a symlink pointing anywhere.
    */
-  async read(maxBytes: number): Promise<Uint8Array | undefined> {
+  async read(maxBytes: number, window?: ByteWindow): Promise<Uint8Array | undefined> {
     const size = this.metadata.size;
     if (size > maxBytes) return undefined;
-    const bytes = new Uint8Array(size);
+    const start = window === undefined ? 0 : Math.min(window.start, size);
+    const bytes = new Uint8Array(window === undefined ? size : Math.min(window.length, size - start));
     let read = 0;
     while (read < bytes.byteLength) {
-      const { bytesRead } = await this.handle.read(bytes, read, bytes.byteLength - read, read);
+      const { bytesRead } = await this.handle.read(bytes, read, bytes.byteLength - read, start + read);
       if (bytesRead === 0) break; // truncated under us; serve what exists
       read += bytesRead;
     }

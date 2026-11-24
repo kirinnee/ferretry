@@ -190,6 +190,12 @@ export interface SpawnBudget extends WorkBudget {
   remainingMs(): number;
 }
 
+/** A span of a file: `length` bytes from `start`. */
+export interface ByteWindow {
+  readonly start: number;
+  readonly length: number;
+}
+
 /**
  * An object opened through the pinned walk, held OPEN.
  *
@@ -208,8 +214,12 @@ export interface PinnedTarget {
   readonly canonical: string;
   /** The identity of every component of the walk, root first and leaf last. */
   readonly identities: readonly ComponentIdentity[];
-  /** Bytes of an already-open regular file, or `undefined` when it exceeds `maxBytes`. */
-  read(maxBytes: number): Promise<Uint8Array | undefined>;
+  /**
+   * Bytes of an already-open regular file, or `undefined` when the FILE exceeds `maxBytes`. With a `window` only that
+   * span is read (clamped to the file), so a caller who needs one piece of a large file does not pay for all of it;
+   * the size cap still judges the whole file.
+   */
+  read(maxBytes: number, window?: ByteWindow): Promise<Uint8Array | undefined>;
   /**
    * One level of an already-open directory, streamed and stopped one entry past `maxEntries`.
    *
