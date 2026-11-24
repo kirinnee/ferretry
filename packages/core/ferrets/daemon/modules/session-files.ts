@@ -187,7 +187,9 @@ export class SessionFiles {
     this.stamper = new SessionProvenanceStamper(deps.clock);
     // STRICT, unlike `provenance.read` (which answers "no stamp" for the session's OWN damaged document, as today's
     // recorder does): a damaged or vanished ancestor throws, so a start is refused and a resume writes nothing.
-    this.ancestry = new StorageSessionAncestry(deps.storage, deps.fleet);
+    this.ancestry = new StorageSessionAncestry(deps.storage, deps.fleet, (id, reason) =>
+      deps.log.warn(`${reason}: it is skipped, and a start that descends from it is refused`, { ferret: id }),
+    );
     this.recorder = new SessionProvenanceRecorder(this.stamper, this.provenance, this.ancestry);
     this.environment = {
       read: async id => await this.environmentStore(id).read(id),
