@@ -9,6 +9,8 @@ import type { Word } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import {
   DEFAULT_IMAGE_MODEL,
+  DEFAULT_VIDEO_ASPECT,
+  DEFAULT_VIDEO_MODEL,
   DEFAULT_IMAGE_SIZE,
   DEFAULT_MUSIC_SECONDS,
   DEFAULT_SFX_SECONDS,
@@ -22,12 +24,19 @@ import {
   MIN_MUSIC_SECONDS,
   MIN_SFX_SECONDS,
   SpeechModelIdSchema,
+  VideoAspectSchema,
+  VideoModelIdSchema,
+  VideoResolutionSchema,
 } from './pricing.ts';
 
 export * from './pricing.ts';
 
 export const CREATE_WORDS: readonly Word[] = [
   { word: 'creative tool', means: 'an agent tool that makes an image, sound or video by calling a paid service' },
+  {
+    word: 'video job',
+    means: 'a clip being made in fal’s queue: paid for when it is sent, and fetched later with generation_status',
+  },
   { word: 'voiceover', means: 'speech read aloud from a ferret’s text by ElevenLabs, saved as one audio file' },
 ];
 
@@ -96,7 +105,13 @@ export const CreateConfigDef = CreateConfigFile as ConfigDef;
 // ─── the ledger (state/create/ledger.jsonl) ──────────────────────────────────────────────────────────────────────
 
 /** The tools that spend: one ledger and one daily cap hold them all. */
-export const SPEND_TOOLS = ['generate_image', 'generate_speech', 'generate_sfx', 'generate_music'] as const;
+export const SPEND_TOOLS = [
+  'generate_image',
+  'generate_speech',
+  'generate_sfx',
+  'generate_music',
+  'generate_video',
+] as const;
 export const SpendToolSchema = z.enum(SPEND_TOOLS);
 export type SpendTool = z.infer<typeof SpendToolSchema>;
 
@@ -169,6 +184,94 @@ export const GenerateMusicInputSchema = z.strictObject({
   instrumental: z.boolean().default(false),
 });
 export type GenerateMusicInput = z.infer<typeof GenerateMusicInputSchema>;
+
+/** A clip: a description, the model, its length and shape, and whether it has sound (which doubles the price). */
+export const GenerateVideoInputSchema = z.strictObject({
+  prompt: z.string().trim().min(1).max(MAX_PROMPT_CHARS),
+  model: VideoModelIdSchema.default(DEFAULT_VIDEO_MODEL),
+  /** Absent: the model's own default length. The lengths each model takes are in `VIDEO_MODELS`. */
+  seconds: z.number().int().positive().optional(),
+  aspect: VideoAspectSchema.default(DEFAULT_VIDEO_ASPECT),
+  /** Veo only: Kling's resolution is fixed. */
+  resolution: VideoResolutionSchema.optional(),
+  /** Sound is OFF unless asked for: it doubles the price. */
+  audio: z.boolean().default(false),
+});
+export type GenerateVideoInput = z.infer<typeof GenerateVideoInputSchema>;
+
+/** The job a clip was queued as: what `generate_video` answered and `generation_status` takes. */
+export const JOB_ID_PATTERN = /^vid_[0-9a-f]{12}$/u;
+export const GenerationStatusInputSchema = z.strictObject({
+  job: z.string().regex(JOB_ID_PATTERN, 'job is the id generate_video answered, like vid_0123456789ab'),
+});
+export type GenerationStatusInput = z.infer<typeof GenerationStatusInputSchema>;
+
+// ─── the video jobs (state/create/jobs.jsonl) ────────────────────────────────────────────────────────────────────
+
+/** fal's queue addresses for one request: https on `queue.fal.run` and nowhere else (the kernel only places the key there). */
+export const FAL_QUEUE_HOST = 'queue.fal.run';
+export const isFalQueueUrl = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === 'https:' && parsed.host === FAL_QUEUE_HOST && parsed.username === '' && parsed.password === ''
+    );
+  } catch {
+    return false;
+  }
+};
+const QueueUrlSchema = z
+  .string()
+  .max(2048)
+  .refine(isFalQueueUrl, { message: 'a queue address is https on queue.fal.run' });
+
+/**
+ * What is kept of a queued clip so a restart loses nothing and charges nothing twice. The file is only ever appended
+ * to: a job is its `submitted` line plus at most ONE `finished` line. Never a key, never fal's answer, never the
+ * prompt (the one-line `alt` the chat block needs is kept; the file is private to the owner).
+ */
+export const JobRecordSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('submitted'),
+    job: z.string().regex(JOB_ID_PATTERN),
+    at: z.iso.datetime(),
+    day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+    ferret: z.string().min(1).max(128),
+    model: z.string().min(1).max(64),
+    request: z.string().regex(/^[0-9a-f]{16}$/u),
+    microUsd: z.number().int().nonnegative(),
+    priced: z.enum(['fal', 'table']),
+    falRequest: z.string().min(1).max(128),
+    statusUrl: QueueUrlSchema,
+    resultUrl: QueueUrlSchema,
+    /** The cost line and the sentence for "paid for", as they were when it was paid. */
+    costLine: z.string().max(400),
+    paid: z.string().max(400),
+    alt: z.string().max(200),
+    label: z.string().max(200),
+  }),
+  z.strictObject({
+    kind: z.literal('finished'),
+    job: z.string().regex(JOB_ID_PATTERN),
+    at: z.iso.datetime(),
+    /** `delivered`: the file is in the media folder. `refunded`: fal failed it and billed nothing. `counted`: it failed or was lost and may have been billed. */
+    outcome: z.enum(['delivered', 'refunded', 'counted']),
+    /** What to tell the ferret on any later call: the media name (delivered) or the sentence (the others). */
+    where: z.string().max(300).optional(),
+    bytes: z.number().int().nonnegative().optional(),
+    sentence: z.string().max(400).optional(),
+  }),
+]);
+export type JobRecord = z.infer<typeof JobRecordSchema>;
+
+export const VIDEO_JOBS = defineState({
+  name: 'jobs',
+  path: 'jobs.jsonl',
+  store: 'jsonl',
+  format: 1,
+  schema: JobRecordSchema,
+  mode: 0o600,
+});
 
 /** What Chat shows inline: the media folder's own image bound (docs/fy-render.md rule 11). */
 export const MAX_CHAT_IMAGE_BYTES = 1024 * 1024;

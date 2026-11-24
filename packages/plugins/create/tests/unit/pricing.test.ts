@@ -10,7 +10,9 @@ import {
   priceSpeech,
   SFX_TABLE,
   SPEECH_MODELS,
+  priceVideo,
   usdWords,
+  VIDEO_MODELS,
 } from '../../contract/index.ts';
 
 describe('usdWords rounds up, so it never shows less than a call costs', () => {
@@ -123,5 +125,37 @@ describe('priceMusic', () => {
   });
   test('an image is never priced by a time unit', () => {
     expect(priceImage(IMAGE_MODELS['flux-schnell'], 'square', { unitPrice: 0.5, unit: 'minutes' }).ok).toBe(false);
+  });
+});
+
+describe('video is priced by the second, and never under what fal bills', () => {
+  const kling = VIDEO_MODELS.kling;
+  const veo = VIDEO_MODELS['veo-fast'];
+  test('the table prices Kling and Veo, sound off and on, with the page each was read from', () => {
+    for (const model of Object.values(VIDEO_MODELS)) expect(model.source).toMatch(/^https:\/\/fal\.ai\/models\//u);
+    expect(priceVideo(kling, 5, false)).toEqual({ ok: true, microUsd: 350_000, from: 'table' });
+    expect(priceVideo(kling, 10, true)).toEqual({ ok: true, microUsd: 1_400_000, from: 'table' });
+    expect(priceVideo(veo, 8, false)).toEqual({ ok: true, microUsd: 800_000, from: 'table' });
+    expect(priceVideo(veo, 8, true)).toEqual({ ok: true, microUsd: 1_200_000, from: 'table' });
+  });
+  test('fal’s live per-second rate wins only when it is higher than the table’s for the choice made', () => {
+    expect(priceVideo(kling, 5, true, { unitPrice: 0.2, unit: 'seconds' })).toEqual({
+      ok: true,
+      microUsd: 1_000_000,
+      from: 'fal',
+    });
+    expect(priceVideo(kling, 5, true, { unitPrice: 0.07, unit: 'second' })).toEqual({
+      ok: true,
+      microUsd: 700_000,
+      from: 'table',
+    });
+  });
+  test('a live rate in another unit is refused, never guessed', () => {
+    const priced = priceVideo(kling, 5, false, { unitPrice: 0.7, unit: 'video' });
+    expect(priced.ok).toBe(false);
+  });
+  test('every length a model takes is priced, and only those', () => {
+    expect(kling.seconds).toEqual([5, 10]);
+    expect(veo.seconds).toEqual([4, 6, 8]);
   });
 });

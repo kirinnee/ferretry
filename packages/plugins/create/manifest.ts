@@ -12,14 +12,18 @@ import {
   GenerateMusicInputSchema,
   GenerateSfxInputSchema,
   GenerateSpeechInputSchema,
+  GenerateVideoInputSchema,
+  GenerationStatusInputSchema,
   CREATE_GUARD,
+  VIDEO_JOBS,
   SPEND_LEDGER,
 } from './contract/index.ts';
 
 /**
  * Create (&F6407): creative tools for agents that cannot make media themselves: the price table, the spend ledger, the
  * daily cap and the ask over a limit, with `generate_image`, `generate_sfx` and `generate_music` through fal and
- * `generate_speech` through ElevenLabs. Video and a longer-lived media route are the units after it.
+ * `generate_speech` through ElevenLabs, and `generate_video` + `generation_status` through fal's queue (a clip takes
+ * minutes: it is paid for when queued, kept on disk as a job, and fetched by the second call).
  *
  * THE KEYS. `FAL_KEY` and `ELEVENLABS_API_KEY` are Vault secrets named only by this plugin's own `create.yaml`
  * (`fal.key`, `elevenlabs.key`, added by the owner), and the kernel places each on the request
@@ -85,16 +89,36 @@ export default definePlugin({
         summary:
           'Make a short piece of music (3–60 s) from a description with fal. fal bills it by the whole minute; it is priced before it is sent, and over the owner’s one-call limit it asks them first.',
       }),
+      tool('generate_video', {
+        minimum: 'authenticated',
+        caller: 'any',
+        capability: cap('fleet', 'use'),
+        audit: CREATE_AUDIT,
+        guard: CREATE_GUARD,
+        input: GenerateVideoInputSchema,
+        summary:
+          'Queue one short video clip with fal (Kling 2.6 Pro by default, or Veo 3.1 Fast). It is priced before it is sent and paid for when queued; over the owner’s one-call limit it asks them first. It answers a job id: fetch the clip a few minutes later with generation_status.',
+      }),
+      tool('generation_status', {
+        minimum: 'authenticated',
+        caller: 'any',
+        capability: cap('fleet', 'use'),
+        audit: CREATE_AUDIT,
+        guard: CREATE_GUARD,
+        input: GenerationStatusInputSchema,
+        summary:
+          'Check a queued video job from generate_video. While it is being made, it says so; when it is ready it saves the clip and answers the lines that show it in chat. Checking never charges; a job fal fails with no output is refunded.',
+      }),
     ],
   },
 
   data: {
-    state: [SPEND_LEDGER],
+    state: [SPEND_LEDGER, VIDEO_JOBS],
     config: [CreateConfigDef],
   },
 
   // What was spent is the owner's to read, never a ferret's to edit.
-  privacy: { private: ['ledger.jsonl'] },
+  privacy: { private: ['ledger.jsonl', 'jobs.jsonl'] },
 
   hooks: {
     takes: [{ hook: AskSources, key: CREATE_SPEND_SOURCE as SourceKey, schema: CreateSpendRefSchema }],
@@ -102,7 +126,7 @@ export default definePlugin({
 
   permissions: {
     // A key is only ever placed on the exact hosts; the CDN is a wildcard, which the kernel never lets a key reach.
-    network: ['fal.run', 'api.fal.ai', 'api.elevenlabs.io', '*.fal.media'],
+    network: ['fal.run', 'queue.fal.run', 'api.fal.ai', 'api.elevenlabs.io', '*.fal.media'],
     secrets: ['FAL_KEY', 'ELEVENLABS_API_KEY'],
   },
 });

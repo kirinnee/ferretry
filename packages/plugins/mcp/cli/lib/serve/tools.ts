@@ -1017,6 +1017,41 @@ const CREATE_TOOLS: readonly McpToolDefinition[] = [
       ['prompt'],
     ),
   },
+  {
+    name: 'generate_video',
+    plugin: 'create',
+    description:
+      'Queue one short video clip with fal (Kling 2.6 Pro, or Veo 3.1 Fast), on the owner’s key and budget. It is priced first and paid for when queued; a call over the owner’s one-call limit asks them and sends nothing until they approve. It answers a job id at once: the clip takes a few minutes, so fetch it with generation_status. Do not call it again for the same clip: that is charged again.',
+    inputSchema: object(
+      {
+        prompt: { type: 'string', minLength: 1, maxLength: 2_000, description: 'What the clip shows.' },
+        model: {
+          type: 'string',
+          enum: ['kling', 'veo-fast'],
+          description: 'kling (default; 5 or 10 s) or veo-fast (4, 6 or 8 s; 720p or 1080p).',
+        },
+        seconds: { type: 'integer', description: 'Length: kling 5 or 10 (default 5); veo-fast 4, 6 or 8 (default 8).' },
+        aspect: {
+          type: 'string',
+          enum: ['16:9', '9:16', '1:1'],
+          description: 'Shape; default 16:9 (veo-fast has no 1:1).',
+        },
+        resolution: { type: 'string', enum: ['720p', '1080p'], description: 'veo-fast only; default 720p.' },
+        audio: { type: 'boolean', description: 'True for generated sound: it doubles the price. Default false.' },
+      },
+      ['prompt'],
+    ),
+  },
+  {
+    name: 'generation_status',
+    plugin: 'create',
+    description:
+      'Check a video job that generate_video queued. While it is being made it says so; when it is ready it saves the clip and answers the lines that show it in chat. Checking is free and can be repeated; a job fal fails with no output is refunded.',
+    inputSchema: object(
+      { job: { type: 'string', pattern: '^vid_[0-9a-f]{12}$', description: 'The job id generate_video answered.' } },
+      ['job'],
+    ),
+  },
 ];
 
 /** Every tool this server lists, in the order a model reads them. */
