@@ -38,6 +38,7 @@ import {
   requestDigest,
   type Serial,
   type ToolAnswer,
+  unfetched,
 } from './paid-call.ts';
 
 export interface GenerateAudioDeps extends PaidDeps {
@@ -220,10 +221,7 @@ async function finish(
   prefix: string,
 ): Promise<ToolAnswer> {
   const got = await download(deps.fetch, paid.value.url, SOUND_TYPES, 'sound');
-  if (typeof got === 'string')
-    return refusal(
-      `The ${noun} was made and paid for (${paid.paid}), but ${got}. Nothing more was spent; try the same request again and it will be charged again.`,
-    );
+  if ('why' in got) return unfetched(noun, paid.paid, got);
   return await present(
     deps,
     ferret,

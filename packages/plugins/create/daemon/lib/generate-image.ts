@@ -29,6 +29,7 @@ import {
   requestDigest,
   type Serial,
   type ToolAnswer,
+  unfetched,
 } from './paid-call.ts';
 
 export interface GenerateImageDeps extends PaidDeps {
@@ -84,10 +85,7 @@ async function generate(deps: GenerateImageDeps, ferret: string, rawInput: unkno
   if (!paid.ok) return paid.answer;
 
   const got = await download(deps.fetch, paid.value.url, PICTURE_TYPES, 'picture');
-  if (typeof got === 'string')
-    return refusal(
-      `The picture was made and paid for (${paid.paid}), but ${got}. Nothing more was spent; try the same request again and it will be charged again.`,
-    );
+  if ('why' in got) return unfetched('picture', paid.paid, got);
   const name = `create-${model.id}-${createHash('sha256').update(got.bytes).digest('hex').slice(0, 8)}.${EXTENSION[got.type] ?? 'jpg'}`;
   const where = await deps.deliver(ferret, name, got.bytes);
   if (where === undefined)

@@ -86,10 +86,12 @@ describe('priceSpeech', () => {
 });
 
 describe('priceSfx', () => {
-  test('a per-second rate is exact for the length asked, rounded up', () => {
+  test('a per-second rate is billed by the whole second, so a part-second is never under', () => {
     expect(priceSfx(5)).toEqual({ ok: true, microUsd: 10_000, from: 'table' });
-    expect(priceSfx(0.5)).toEqual({ ok: true, microUsd: 1_000, from: 'table' });
     expect(priceSfx(5, { unitPrice: 0.0031, unit: 'seconds' })).toEqual({ ok: true, microUsd: 15_500, from: 'fal' });
+    expect(priceSfx(0.5)).toEqual({ ok: true, microUsd: 2_000, from: 'table' });
+    expect(priceSfx(4.2)).toEqual({ ok: true, microUsd: 10_000, from: 'table' });
+    expect(priceSfx(4.2, { unitPrice: 0.0031, unit: 'seconds' })).toEqual({ ok: true, microUsd: 15_500, from: 'fal' });
   });
   test('a per-minute live rate is read as whole minutes, never under', () => {
     expect(priceSfx(3, { unitPrice: 0.12, unit: 'minute' })).toEqual({ ok: true, microUsd: 120_000, from: 'fal' });
