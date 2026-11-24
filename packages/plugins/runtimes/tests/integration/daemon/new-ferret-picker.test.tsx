@@ -16,7 +16,7 @@ import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/te
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { type DaemonImplementation } from '@ferretry/kernel/manifest';
 import { testHost } from '@ferretry/kernel/testing';
-import { LoginListSchema } from '@ferretry/plugin-logins/contract';
+import { LoginListSchema, ModelCatalogSourcesSchema } from '@ferretry/plugin-logins/contract';
 import {
   fakeLoginChanges,
   fakeLoginEnvImport,
@@ -46,6 +46,27 @@ const CONFIG = {
   'model-sets': { heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
 };
 
+// A runtime with no model list is refused (PR 2375), and a runtime derived from a login takes its models from that login's
+// catalog. Logins' answer here is the Claude slice a signed-in Claude login reads, so `claude-two` has a model to launch with.
+const MODEL_SOURCES = ModelCatalogSourcesSchema.parse({
+  catalogs: {
+    anthropic: {
+      id: 'anthropic',
+      origin: 'built-in',
+      label: 'Anthropic',
+      docs: 'https://example.invalid/anthropic',
+      verified: '2027-01-01',
+      claude: {
+        models: [
+          { id: 'claude-opus-5-5', label: 'Opus 5.5', tier: 'best', default: true, efforts: ['high'] },
+          { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', tier: 'balanced', efforts: [] },
+        ],
+      },
+    },
+  },
+  presets: [],
+});
+
 async function world() {
   const fleet = await fleetWorld();
   const logins = fakeLogins([
@@ -53,6 +74,7 @@ async function world() {
     sampleLogin('claude-two', { store: 'ferretry' }),
     sampleLogin('claude-down', { store: 'ferretry', status: NEEDS_SIGN_IN }),
   ]);
+  logins.setModelSources(MODEL_SOURCES);
   const host = await testHost({
     // The harness the machine "has", so a runtime reads as launchable (nothing is ever executed).
     executables: ['/usr/local/bin/claude', '/usr/local/bin/codex'],
@@ -129,7 +151,8 @@ describe('the New ferret runtime picker over a real daemon', () => {
       expect(value).toBe('claude-default');
       expect(chosen).not.toBeNull();
       expect((chosen as ChosenFerretAccount | null)?.wrapper).toBe('claude-default');
-      expect(mounted.container.textContent).toContain('claude-default');
+      // The picker names a runtime in plain words (harness, how it signs in, profile), not by its id.
+      expect(mounted.container.textContent).toContain('Claude · Claude.ai sign-in — default profile');
       expect(mounted.container.textContent).toContain('ready');
       expect(mounted.container.textContent).not.toContain('can run ferrets yet');
       await mounted.unmount();
