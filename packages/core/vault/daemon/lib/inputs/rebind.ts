@@ -56,3 +56,40 @@ export function mayRebind(binding: string, facts: InputTargetFacts): boolean {
   if (bindingOf(facts) !== binding) return false;
   return facts.kind !== 'page' || facts.fields.every(field => field.visible);
 }
+
+/** How far a field's box may have moved or grown, per axis in pixels, and still be the field the owner was shown. */
+export const REPLACED_FIELD_TOLERANCE_PX = 32;
+
+/**
+ * Whether a page's field the card showed was re-rendered as ONE element that is provably the same field, so the value is
+ * typed into it at once instead of the owner being asked to send again (a React-style page replaces its input as the
+ * owner reads the card). It is the strictest reading of "the same target":
+ *
+ * - the SAME binding (`mayRebind`: page, origin, security, every field's frame origin, tag and attributes, all visible);
+ * - the SAME document (a navigation makes another, however alike its fields look) and the same frame for every field;
+ * - no challenge that was not there before, and no field that is covered now but was not;
+ * - every field NEAR where it was: its box's origin and its size each within {@link REPLACED_FIELD_TOLERANCE_PX}.
+ *
+ * Two look-alikes never get here: the browser's re-find answers `ambiguous` for them, which is redrawn. Anything this
+ * refuses is redrawn for the owner, so a wrong guess costs a second send and never a value in the wrong element.
+ */
+export function replacedAsShown(binding: string, shown: InputTargetFacts | undefined, now: InputTargetFacts): boolean {
+  if (shown?.kind !== 'page' || now.kind !== 'page' || !mayRebind(binding, now)) return false;
+  if (shown.pageId !== now.pageId || shown.navigationId !== now.navigationId) return false;
+  if (JSON.stringify(shown.challenge ?? null) !== JSON.stringify(now.challenge ?? null)) return false;
+  if (shown.fields.length !== now.fields.length) return false;
+  const near = (a: number, b: number): boolean => Math.abs(a - b) <= REPLACED_FIELD_TOLERANCE_PX;
+  return shown.fields.every((field, index) => {
+    const next = now.fields[index];
+    return (
+      next !== undefined &&
+      next.fieldId === field.fieldId &&
+      next.frameId === field.frameId &&
+      (next.covered !== true || field.covered === true) &&
+      near(next.box.x, field.box.x) &&
+      near(next.box.y, field.box.y) &&
+      near(next.box.w, field.box.w) &&
+      near(next.box.h, field.box.h)
+    );
+  });
+}

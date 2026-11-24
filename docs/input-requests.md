@@ -277,18 +277,26 @@ decides. A field inside a frame is found again only through the pointer. A termi
 What it finds is then compared on its **binding**, the part of the facts that names the target itself
 (`lib/input-requests/rebind.ts`):
 
-| Target     | Must be the same                                                                                                   | May change                                          |
-| ---------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
-| a page     | the page, its origin and https, every field's frame origin, tag, `type`, `name`, `id`, `autocomplete`, `inputmode` | the node, frame id, box, cover, document, challenge |
-| a terminal | the pane, the program (pid, group, name, argv), echo, the prompt line, whether it asks for secrets                 | the cursor row                                      |
-| a secret   | its name                                                                                                           | whether it already holds a value                    |
+| Target     | Must be the same                                                                                                                | May change                                          |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| a page     | the page, its origin and https, every field's frame origin, tag, `type`, `name`, `id`, `autocomplete`, `inputmode`, `maxlength` | the node, frame id, box, cover, document, challenge |
+| a terminal | the pane, the program (pid, group, name, argv), echo, the prompt line, whether it asks for secrets                              | the cursor row                                      |
+| a secret   | its name                                                                                                                        | whether it already holds a value                    |
 
 - **The same target, exactly as shown**: it is typed into (a stale ref that finds the same node, say).
+- **A page field re-rendered as ONE element that is provably the same field** is typed into **at once**, with no
+  second Send: a React-style page swaps its input while the owner reads the input, often with the old text still in
+  it. The proof is strict (`replacedAsShown` in `rebind.ts`): the same binding, the same document and frames, the
+  same label the page shows the field under (read by the browser from `aria-label`, `aria-labelledby` or the
+  `<label>`, and recorded with the `maxlength`), no challenge that was not there, nothing covering a field that was
+  clear, and every field **near** where it was (its box's origin and size each within 32 px). The browser found it
+  as the only visible look-alike; the write selects what the field holds, so a stale value is replaced, not
+  appended to. Several look-alikes, or a replacement farther away than that, fall through to the redraw below.
 - **The same target, something else changed**: the input is **redrawn** — a new picture taken before anything
   is typed, a new digest, the risk worked out again — the request stays pending, nothing is typed and **nothing
   is counted**. Send answers 409 `target_rebound` and the input says "The page changed. Check the picture and
   send again." (a terminal: "The terminal redrew its prompt."). The owner always approves the target the value
-  goes into: a re-bind never types. It is audited as `input.rebound`. A page input redrawn onto ANOTHER document
+  goes into: a re-bind itself never types. It is audited as `input.rebound`. A page input redrawn onto ANOTHER document
   than the one it was raised on (a reload, or a navigation within the same origin) is flagged amber: "The page
   loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the
   one you meant." The input shows the origin, not the address. A field whose own flag is red (a plain value) keeps

@@ -205,7 +205,15 @@ const ACTIVE_ELEMENT = `(() => {
 /** The longest the page's title may take when it is read for the challenge hint. */
 const TITLE_WAIT_MS = 750;
 
-const FIELD_LIMITS = { type: 32, autocomplete: 64, name: 128, id: 128, inputmode: 32 } as const;
+/**
+ * The label the page shows a field under, read in the trusted world: its `aria-label`, else the text of what its
+ * `aria-labelledby` names, else its `<label>`s. Only read, never trusted: it is compared with itself across two looks
+ * and, in the card's classifier, can only raise a field's care.
+ */
+const FIELD_LABEL =
+  'function () { const t = (s) => String(s || "").replace(/\\s+/g, " ").trim(); const a = t(this.getAttribute("aria-label")); if (a) return a; const by = this.getAttribute("aria-labelledby"); if (by) { const x = t(by.split(/\\s+/).map((id) => { const e = this.ownerDocument.getElementById(id); return e ? e.textContent : ""; }).join(" ")); if (x) return x; } const ls = this.labels; if (ls && ls.length) { const x = t(Array.from(ls).map((l) => l.textContent).join(" ")); if (x) return x; } return ""; }';
+const FIELD_LIMITS = { type: 32, autocomplete: 64, name: 128, id: 128, inputmode: 32, maxlength: 8 } as const;
+const LABEL_LIMIT = 128;
 const TAG_LIMIT = 32;
 const ORIGIN_LIMIT = 256;
 const FRAME_ID_LIMIT = 128;
@@ -256,9 +264,10 @@ const oneLine = (value: string, maximum: number): string => value.replace(/[\p{C
 /**
  * The fields of a node as DevTools describes it: its tag and the few attributes the card shows, cut to the
  * protocol's bounds and left out when empty. The same function reads the node at the look and at the write, so
- * a cut value compares equal to itself.
+ * a cut value compares equal to itself. The label is not an attribute of the node: the caller reads it (`FIELD_LABEL`)
+ * and hands it in, and it is kept cut and on one line like the rest.
  */
-export function inputFieldAttributes(node: unknown): FieldAttributes {
+export function inputFieldAttributes(node: unknown, label?: string): FieldAttributes {
   const described = (node ?? {}) as { readonly nodeName?: unknown; readonly attributes?: unknown };
   const raw = Array.isArray(described.attributes) ? (described.attributes as readonly unknown[]) : [];
   const attribute = (name: string): string | undefined => {
@@ -283,12 +292,16 @@ export function inputFieldAttributes(node: unknown): FieldAttributes {
     ...kept('name'),
     ...kept('id'),
     ...kept('inputmode'),
+    ...kept('maxlength'),
+    ...(label === undefined || oneLine(label, LABEL_LIMIT).trim() === ''
+      ? {}
+      : { label: oneLine(label, LABEL_LIMIT).trim() }),
   };
 }
 
 const sameAttributes = (left: FieldAttributes, right: FieldAttributes): boolean =>
   left.tag === right.tag &&
-  (['type', 'autocomplete', 'name', 'id', 'inputmode'] as const).every(key => left[key] === right[key]);
+  (['type', 'autocomplete', 'name', 'id', 'inputmode', 'maxlength'] as const).every(key => left[key] === right[key]);
 
 const objectOf = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
@@ -643,13 +656,32 @@ async function observeLocated(
       frameOrigin: originOfUrl(frame.url()),
       frameId,
       backendNodeId,
-      field: inputFieldAttributes(node),
+      field: inputFieldAttributes(node, await labelOf(session, backendNodeId)),
       box,
       visible,
       ...(covered ? { covered: true } : {}),
     };
   } finally {
     await handle.dispose().catch(() => undefined);
+  }
+}
+
+/** The label a field is shown under, read in the trusted world; `undefined` when it cannot be read or there is none. */
+async function labelOf(session: InputCdpSession, backendNodeId: number): Promise<string | undefined> {
+  try {
+    const trusted = await new IsolatedWorlds().resolve(session, backendNodeId);
+    const value = objectOf(
+      objectOf(
+        await ask(session, 'Runtime.callFunctionOn', {
+          objectId: trusted.objectId,
+          functionDeclaration: FIELD_LABEL,
+          returnByValue: true,
+        }),
+      ).result,
+    ).value;
+    return typeof value === 'string' ? value : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -724,7 +756,10 @@ export function inputFieldSelector(field: FieldAttributes): string {
 
 /** A candidate is the field the card showed: the same frame origin, tag and attributes, and the owner can see it. */
 const isSameField = (want: PageFieldFacts, got: PageFieldFacts): boolean =>
-  got.visible && got.frameOrigin === want.frameOrigin && sameAttributes(got.field, want.field);
+  got.visible &&
+  got.frameOrigin === want.frameOrigin &&
+  sameAttributes(got.field, want.field) &&
+  got.field.label === want.field.label;
 
 /** The same node: a field fact names one node by its target and backend node id. */
 const sameNodeAs = (left: PageFieldFacts, right: PageFieldFacts): boolean =>

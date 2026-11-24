@@ -98,7 +98,7 @@ import type {
   TypeResult,
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
-import { bindingOf, mayRebind } from './rebind.ts';
+import { bindingOf, mayRebind, replacedAsShown } from './rebind.ts';
 import {
   codeCardKeys,
   type SavedListing,
@@ -2504,6 +2504,14 @@ export class InputRequestService {
   ): Promise<Extract<ObserveResult, { readonly ok: true }>> {
     const again = await this.refound(held, looked);
     if (again.ok && digestFacts(again.facts) === held.request.observedDigest) return again;
+    // A page that re-rendered the field as the owner read the card: the ONE provably same element is typed into at once.
+    if (
+      !underGrant &&
+      again.ok &&
+      held.binding !== undefined &&
+      replacedAsShown(held.binding, held.request.observed, again.facts)
+    )
+      return again;
     if (underGrant) throw new GrantUnchecked();
     return await this.redrawOrRefuse(held, again, looked.ok ? 'target_changed' : 'target_gone');
   }

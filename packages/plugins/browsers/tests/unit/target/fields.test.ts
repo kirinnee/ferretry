@@ -346,6 +346,25 @@ describe('inputFieldAttributes', () => {
   it('answers a tag for a node that has none', () => {
     should(inputFieldAttributes({}).tag).equal('unknown');
   });
+
+  it('records the maxlength as written and the label the caller read, each cut and on one line', () => {
+    const node = { nodeName: 'INPUT', attributes: ['maxlength', '6'] };
+    should(inputFieldAttributes(node, 'Verification\ncode')).eql({
+      tag: 'input',
+      maxlength: '6',
+      label: 'Verificationcode',
+    });
+    should(inputFieldAttributes(node, 'l'.repeat(300)).label).equal('l'.repeat(128));
+    should(inputFieldAttributes({ nodeName: 'INPUT', attributes: ['maxlength', '1234567890'] }).maxlength).equal(
+      '12345678',
+    );
+  });
+
+  it('leaves out an empty label, a blank one and a missing one', () => {
+    should(inputFieldAttributes({ nodeName: 'INPUT', attributes: [] }, '')).eql({ tag: 'input' });
+    should(inputFieldAttributes({ nodeName: 'INPUT', attributes: [] }, '   ')).eql({ tag: 'input' });
+    should(inputFieldAttributes({ nodeName: 'INPUT', attributes: [] }, undefined)).eql({ tag: 'input' });
+  });
 });
 
 describe('originOfUrl and isSecureUrl', () => {
@@ -1476,6 +1495,8 @@ describe('refindInputFields (#B100)', () => {
     );
     should(inputFieldSelector({ tag: 'input', name: 'n'.repeat(128) })).equal(`css=input[name^="${'n'.repeat(128)}"]`);
     should(inputFieldSelector({ tag: 'unknown tag' })).equal('css=*');
+    // The maxlength is an attribute and is matched; the label is not one, so it is compared after the match instead.
+    should(inputFieldSelector({ tag: 'input', maxlength: '6', label: 'Code' })).equal('css=input[maxlength="6"]');
   });
 });
 
