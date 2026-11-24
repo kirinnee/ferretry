@@ -13,6 +13,7 @@ import {
   optionsOpen,
   shownBy,
 } from '../../../../support/select-box.ts';
+import { HARNESSES } from '../../../../../../app/lib/logins-view.ts';
 import { interact, type Mounted, mount as mountView, must } from '../../../../support/dom.ts';
 import {
   APPLIED,
@@ -100,14 +101,12 @@ const loginBox = (container: ParentNode): HTMLElement =>
 const profileBox = (container: ParentNode): HTMLElement =>
   must(container.querySelector<HTMLElement>('[data-add-runtime-profile-select]'), 'profile select');
 
-/** Picks a login by its stored id: the list names logins in plain words and carries the id on its "id" line. */
-const pickLogin = async (container: ParentNode, id: string): Promise<void> => {
+/** Picks a login by its stored id: the list names logins in plain words and shows no id, so the id is found in the list's own order (Claude's logins, then Codex's). */
+const pickLogin = async (container: ParentNode, id: string, data: MachineData = DATA): Promise<void> => {
   const host = loginBox(container);
   await openBox(host);
-  const option = must(
-    optionsOpen().find(candidate => candidate.textContent?.includes(`id ${id}`) === true),
-    `the login ${id}`,
-  );
+  const ordered = HARNESSES.flatMap(harness => data.credentials.logins.filter(login => login.harness === harness));
+  const option = must(optionsOpen()[ordered.findIndex(login => login.id === id)], `the login ${id}`);
   await interact(() => option.click());
 };
 
@@ -253,8 +252,8 @@ describe('Add runtime: Login', () => {
       optionsOpen().find(option => labelOf(option).startsWith('Claude · your terminal sign-in'))?.textContent ?? '';
     await closeBox(loginBox(view.container));
     expect(personal).toContain('personal');
-    expect(personal).toContain('id claude-personal');
-    expect(text(view.container, '[data-add-runtime-login-sub]')).toContain('Ready');
+    expect(personal).not.toContain('id claude-personal');
+    expect(text(view.container, '[data-add-runtime-login-sub]')).toContain('Uses your terminal sign-in');
     await pickLogin(view.container, 'claude-work');
     expect(text(view.container, '[data-add-runtime-login-sub]')).toContain('Refresh due');
     expect(view.container.querySelector('[data-add-runtime-no-logins]')).toBeNull();
@@ -299,7 +298,7 @@ describe('Add runtime: Login', () => {
     expect(view.container.querySelector('[data-add-runtime-sign-in]')?.getAttribute('href')).toBe(
       `${SIGN_INS}/claude-work`,
     );
-    await pickLogin(view.container, 'claude-personal');
+    await pickLogin(view.container, 'claude-personal', SIGN_IN_NEEDED);
     expect(view.container.querySelector('[data-add-runtime-needs-sign-in]')).toBeNull();
   });
 });
@@ -402,7 +401,7 @@ describe('Add runtime: a login added and signed in right here', () => {
   it('E13: a picked login that needs sign-in draws Logins’ sign-in panel for it, and a finished one re-reads', async () => {
     const reloads: string[] = [];
     const view = await mountHost({ data: SIGN_IN_NEEDED, slots: PLACED, reloads });
-    await pickLogin(view.container, 'claude-work');
+    await pickLogin(view.container, 'claude-work', SIGN_IN_NEEDED);
     expect(text(view.container, '[data-add-runtime-needs-sign-in]')).toContain(
       'This login needs sign-in before you launch.',
     );
@@ -421,7 +420,7 @@ describe('Add runtime: a login added and signed in right here', () => {
   it('with no panel placed in a slot each falls back to the link to Logins’ Sign-ins tab', async () => {
     const view = await mountHost({ data: SIGN_IN_NEEDED, slots: { [ADD_RUNTIME_LOGIN_SLOT]: [] } });
     expect(view.container.querySelector('[data-add-row="login"]')?.getAttribute('href')).toBe(SIGN_INS);
-    await pickLogin(view.container, 'claude-work');
+    await pickLogin(view.container, 'claude-work', SIGN_IN_NEEDED);
     expect(view.container.querySelector('[data-add-runtime-sign-in]')?.getAttribute('href')).toBe(
       `${SIGN_INS}/claude-work`,
     );
@@ -609,7 +608,7 @@ describe('Add runtime: Name and Create', () => {
       }),
     );
     const view = await mountHost({ data: SIGN_IN_NEEDED, after, routes: STAGED_ROUTES(after) });
-    await pickLogin(view.container, 'claude-work');
+    await pickLogin(view.container, 'claude-work', SIGN_IN_NEEDED);
     await pickProfile(view.container, 'Claude hooks');
     await interact(() => submit(view.container).click());
     await waitFor(view.container, '[data-add-runtime-done]');
@@ -717,15 +716,15 @@ describe('Add runtime: a login that drives both CLIs', () => {
     const view = await mountHost({ data: DUAL_DATA, machine: NOT_INSTALLED_CODEX });
     expect(await loginsOf(view.container)).toEqual(['Claude · your terminal sign-in (personal)', 'Claude · API key']);
     await openBox(loginBox(view.container));
-    expect(optionsOpen().find(option => labelOf(option) === 'Claude · API key')?.textContent).toContain('id deepseek');
+    expect(optionsOpen().find(option => labelOf(option) === 'Claude · API key')?.textContent).toBe('Claude · API key');
     await closeBox(loginBox(view.container));
-    await pickLogin(view.container, 'deepseek');
+    await pickLogin(view.container, 'deepseek', DUAL_DATA);
     expect(text(view.container, '[data-add-runtime-login-sub]')).toContain('Codex isn’t installed here');
   });
 
   it('Runs sits under More options and follows the CLI chosen: only profiles that fit it are offered', async () => {
     const view = await mountHost({ data: DUAL_DATA });
-    await pickLogin(view.container, 'deepseek');
+    await pickLogin(view.container, 'deepseek', DUAL_DATA);
     expect(view.container.querySelector('[data-add-runtime-more]')).not.toBeNull();
     expect(runsAt(view.container)).toBe('claude-code');
     expect(text(view.container, '[data-add-runtime-runs]')).toContain('Claude Code until you choose');
@@ -751,7 +750,7 @@ describe('Add runtime: a login that drives both CLIs', () => {
       }),
     );
     const view = await mountHost({ data: DUAL_DATA, after, calls, routes: STAGED_ROUTES(after) });
-    await pickLogin(view.container, 'deepseek');
+    await pickLogin(view.container, 'deepseek', DUAL_DATA);
     await click(view.container, '[data-add-runtime-runs-option="codex"] input');
     await pickProfile(view.container, 'Codex work');
     await click(view.container, '[data-change-submit]');
@@ -774,5 +773,33 @@ describe('Add runtime: a login that drives both CLIs', () => {
   it('offers no Runs choice for a login that drives one CLI', async () => {
     const view = await mountHost();
     expect(view.container.querySelector('[data-add-runtime-runs]')).toBeNull();
+  });
+});
+
+describe('Add runtime: model words (O12 S2)', () => {
+  it('says which model the profile starts on by its catalog label, and never prints a login id', async () => {
+    const runtimes = DATA.runtimes.runtimes.map(item =>
+      item.credential.id === 'claude-personal' && item.harness === 'claude-code'
+        ? {
+            ...item,
+            models: {
+              catalog: {
+                id: 'anthropic',
+                label: 'Anthropic',
+                origin: 'built-in' as const,
+                customIds: false,
+                docs: 'https://example.test',
+              },
+              choices: [{ id: 'Sonnet 5.5', label: 'Sonnet 5.5 (catalog)', efforts: [], available: true }],
+            },
+          }
+        : item,
+    );
+    const view = await mountHost({
+      data: { ...DATA, runtimes: { ...DATA.runtimes, runtimes } as MachineData['runtimes'] },
+    });
+    await pickProfile(view.container, 'Default');
+    expect(text(view.container, '[data-add-runtime-model]')).toBe('Starts on Sonnet 5.5 (catalog)');
+    expect(view.container.textContent).not.toContain('id claude-personal');
   });
 });

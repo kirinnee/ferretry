@@ -6,8 +6,9 @@
  *
  *   - ready: at least one runtime of this harness can start now: it is named, with the way to use it. A runtime on the
  *     person's own terminal sign-in (`store: host`) is never called "ready": Ferretry cannot see that sign-in, so the page says
- *     it USES it, and, when the sign-in step was skipped, to sign in in a terminal before starting a ferret.
- *   - blocked: a runtime exists but cannot start: the daemon's own reason, and where to fix it.
+ *     it USES it. When the sign-in step handled nothing, or the runtime cannot start, it says once that no sign-in was found
+ *     and to sign in in a terminal before starting a ferret (the same words on both pages).
+ *   - blocked: a runtime exists but cannot start: the daemon's own reason, and where to fix it (a terminal sign-in: see above).
  *   - none: no runtime exists: the sign-in was skipped or did not finish, and where to add one later.
  *   - a read that fails says so with Try again; Next still goes on (Later is never held).
  *
@@ -43,7 +44,7 @@ export type ReadyRuntime = z.infer<typeof RuntimeRowSchema>;
 /** What one tool ended with. */
 export type ReadyState =
   | { readonly kind: 'ready'; readonly names: readonly string[]; readonly terminal: boolean }
-  | { readonly kind: 'blocked'; readonly name: string; readonly reason: string }
+  | { readonly kind: 'blocked'; readonly name: string; readonly reason: string; readonly terminal: boolean }
   | { readonly kind: 'none' };
 
 /**
@@ -63,7 +64,12 @@ export function readyStateOf(runtimes: readonly ReadyRuntime[], harness: string,
     return { kind: 'ready', names, terminal: startable.every(runtime => runtime.credential.store === 'host') };
   const [first] = mine;
   if (first !== undefined && !first.launch.available)
-    return { kind: 'blocked', name: runtimeDisplayName(first, mine), reason: first.launch.reason };
+    return {
+      kind: 'blocked',
+      name: runtimeDisplayName(first, mine),
+      reason: first.launch.reason,
+      terminal: first.credential.store === 'host',
+    };
   return { kind: 'none' };
 }
 
@@ -129,6 +135,10 @@ export function RuntimeReadyPage({
       </StepBody>
     );
   const { state } = read;
+  // One wording for "no sign-in found" on the two pages that can reach it: Claude's (the sign-in step handled nothing) and a
+  // Codex one that cannot start. Said once, with the one thing to do.
+  const noSignIn =
+    (state.kind === 'ready' && state.terminal && login === undefined) || (state.kind === 'blocked' && state.terminal);
   // A terminal sign-in Ferretry never saw is a check only when this run's sign-in step handled it.
   const good = state.kind === 'ready' && (!state.terminal || login !== undefined);
   const Mark = good ? Check : Minus;
@@ -139,13 +149,15 @@ export function RuntimeReadyPage({
           <Mark size={16} strokeWidth={3} />
         </span>
         <span>
-          {state.kind === 'ready'
-            ? state.terminal
-              ? `${label} uses your terminal sign-in`
-              : `${label} is ready`
-            : state.kind === 'blocked'
-              ? `${label} has a runtime, but it cannot start yet`
-              : `No runtime was made for ${label}`}
+          {noSignIn
+            ? `No ${label} sign-in was found on this machine`
+            : state.kind === 'ready'
+              ? state.terminal
+                ? `${label} uses your terminal sign-in`
+                : `${label} is ready`
+              : state.kind === 'blocked'
+                ? `${label} has a runtime, but it cannot start yet`
+                : `No runtime was made for ${label}`}
         </span>
       </p>
       {state.kind === 'ready' ? (
@@ -153,16 +165,24 @@ export function RuntimeReadyPage({
           <StepLine data-ready-names="">
             {state.names.length === 1 ? `Runtime: ${state.names[0] ?? ''}.` : `Runtimes: ${state.names.join(', ')}.`}
           </StepLine>
-          {state.terminal && login === undefined ? (
+          {noSignIn ? (
             <StepLine data-ready-terminal="">{`Sign in to ${label} in a terminal before you start a ferret.`}</StepLine>
-          ) : null}
-          <StepLine>Pick it when you start a ferret.</StepLine>
+          ) : (
+            <StepLine>Pick it when you start a ferret.</StepLine>
+          )}
         </>
       ) : state.kind === 'blocked' ? (
-        <>
-          <StepLine data-ready-names="">{`Runtime: ${state.name}. ${state.reason}`}</StepLine>
-          <StepLine>Fix it in Settings › Logins, and it can start.</StepLine>
-        </>
+        noSignIn ? (
+          <>
+            <StepLine data-ready-names="">{`Runtime: ${state.name}.`}</StepLine>
+            <StepLine data-ready-terminal="">{`Sign in to ${label} in a terminal before you start a ferret.`}</StepLine>
+          </>
+        ) : (
+          <>
+            <StepLine data-ready-names="">{`Runtime: ${state.name}. ${state.reason}`}</StepLine>
+            <StepLine>Fix it in Settings › Logins, and it can start.</StepLine>
+          </>
+        )
       ) : (
         <>
           <StepLine>{`Signing in to ${label} was skipped or did not finish, so nothing can start on it yet.`}</StepLine>

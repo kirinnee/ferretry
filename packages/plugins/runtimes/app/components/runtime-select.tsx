@@ -31,6 +31,7 @@ import type { PickerAccount } from '../lib/account-picker-catalog.ts';
 import type { AccountPickerStore } from '../lib/account-picker-store.ts';
 import { quotaParts } from '../lib/quota-text.ts';
 import { supportedHarnessKeys } from '../../contract/harness-words.ts';
+import { modelDisplayName } from '../../contract/index.ts';
 import { Button, cn } from '../ui.ts';
 import {
   type AccountPickerOption,
@@ -115,13 +116,16 @@ export const WRAPPING_SELECT =
 
 /** What a runtime runs on, in the words a person picks by: its login's catalog, then its default model. The stored name is not one of them: the row's name already tells runtimes apart. */
 const runtimeHint = (account: AccountPickerOption): string => {
-  const hint = [account.modelCatalog?.label, account.defaultModel].filter(part => part != null);
+  const hint = [
+    account.modelCatalog?.label,
+    account.defaultModel === null ? null : modelDisplayName(account.defaultModel, account.models),
+  ].filter(part => part != null);
   return hint.length === 0 ? 'default model' : hint.join(' · ');
 };
 
 /** One runtime as a list row: its name, then the words a person picks by (what it runs on, its quota, its health, why it is off). */
 const optionOf = (account: AccountPickerOption, now: number): SelectOption => {
-  const health = account.health === null ? null : accountHealthView(account.health, now);
+  const health = account.health === null ? null : accountHealthView(account.health, now, account.credentialStore);
   const parts = [
     runtimeHint(account),
     ...quotaParts(account.quota, now).map(part => part.text),
@@ -138,7 +142,7 @@ const optionOf = (account: AccountPickerOption, now: number): SelectOption => {
 
 /** What the chosen runtime's login and quota say, in their tones, under the box. Draws nothing when neither fact is known. */
 function ChosenReadout({ account, now }: { readonly account: AccountPickerOption; readonly now: number }): ReactNode {
-  const health = account.health === null ? null : accountHealthView(account.health, now);
+  const health = account.health === null ? null : accountHealthView(account.health, now, account.credentialStore);
   const quota = quotaParts(account.quota, now);
   if (quota.length === 0 && health === null) return null;
   return (

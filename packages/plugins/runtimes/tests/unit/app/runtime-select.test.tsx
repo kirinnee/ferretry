@@ -204,3 +204,34 @@ describe('RuntimeSelect', () => {
     await view.unmount();
   });
 });
+
+describe('RuntimeSelect words (O12 S2)', () => {
+  it('names the default model by its catalog label and never calls a terminal sign-in ready', async () => {
+    const state: Harness = { value: '', chosen: null };
+    const store = new AccountPickerStore({
+      catalog: async () => ({
+        accounts: [
+          pickerAccount({
+            wrapper: 'claude-a',
+            defaultModel: 'claude-opus-5-5',
+            credentialStore: 'host',
+            models: [{ id: 'claude-opus-5-5', available: true, label: 'Opus 5.5' }],
+          }),
+        ],
+      }),
+      health: async () => ({ health: healthMap(pickerHealth('login-claude-a')), error: null }),
+      checkHealth: async () => ({ health: new Map(), error: null }),
+    });
+    const view = await mount(host(store, state));
+    await settle();
+    await view.render(host(store, state));
+    await settle();
+    await openBox(view.container);
+    const row = must(optionsOpen()[0], 'the runtime row').textContent ?? '';
+    expect(row).toContain('Opus 5.5');
+    expect(row).toContain('uses your terminal sign-in');
+    expect(row).not.toContain('claude-opus-5-5');
+    expect(row).not.toContain('ready');
+    await view.unmount();
+  });
+});

@@ -17,6 +17,7 @@
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { type LoginStatus, LoginListSchema, LoginViewSchema } from '@ferretry/plugin-logins/contract';
 import {
+  type CredentialStore,
   type LocalModels,
   RuntimeCatalogSchema,
   type RuntimeAccounts,
@@ -41,6 +42,8 @@ export interface PickerAccount {
   readonly kind: HarnessKey;
   /** The login it uses, which is what its health is read from. */
   readonly credentialId: string;
+  /** Where the login's sign-in lives; a terminal (`host`) one Ferretry cannot see is never called "ready". */
+  readonly credentialStore?: CredentialStore;
   /** `null` = the harness's own default. */
   readonly defaultModel: string | null;
   readonly models: readonly PickerModel[];
@@ -89,6 +92,7 @@ export const pickerAccount = (
   displayName: runtimeDisplayName(runtime, others, accounts),
   kind: runtime.harness,
   credentialId: runtime.credential.id,
+  credentialStore: runtime.credential.store,
   ...(runtime.models === undefined
     ? {
         defaultModel: runtime.modelSet.source === 'model-set' ? (runtime.modelSet.default ?? null) : null,
