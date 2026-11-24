@@ -20,6 +20,7 @@ import {
   WordsAssembler,
   decodeDownlinkUnit,
   decodeReplyDownlinkUnit,
+  encodeHushFrame,
   encodeSpeakFrame,
   encodeUplinkUnit,
   fitSpeakText,
@@ -79,6 +80,11 @@ export interface VoiceStreamOptions {
   readonly player?: ReplyPlayer;
   /** Milliseconds, monotonic. A suite supplies its own. */
   readonly now?: () => number;
+  /**
+   * Told every unit of the microphone as it is SENT (zeros while muted), so barge-in hears exactly what the machine hears
+   * and nothing a muted person said. It must not keep the unit: it is the same buffer the stream sends.
+   */
+  readonly onMicUnit?: (pcm: Int16Array) => void;
 }
 
 export interface VoiceStreamHandle {
@@ -87,6 +93,11 @@ export interface VoiceStreamHandle {
    * own with its own id, in order; the ids and their words are returned so the caller can read a failed one itself.
    */
   speak(text: string): readonly { readonly id: number; readonly text: string }[];
+  /**
+   * Stops the reply voice at once (barge-in): the sound already queued here is silenced, the machine is told to drop the
+   * lines it has not spoken, and the sound of every line sent so far is ignored if it still arrives.
+   */
+  hush(): void;
   /** Leaves on purpose: tells the machine, then closes. */
   stop(): void;
   setMuted(muted: boolean): void;
@@ -113,6 +124,8 @@ export function openVoiceStream(
   const assembler = new UnitAssembler(wantsReply ? REPLY_DOWNLINK_UNIT_BYTES : DOWNLINK_UNIT_BYTES);
   const sentAt = new Map<number, number>();
   const began = new Set<number>();
+  /** Sound of a line numbered below this is from before a hush and is never played. */
+  let hushedBelow = 0;
   let nextLine = 0;
   let replyState: ReplyState | undefined;
   const words = new WordsAssembler();
@@ -123,6 +136,7 @@ export function openVoiceStream(
   let sentence: string | undefined;
 
   const hear = (audio: NonNullable<StreamSnapshot['audio']>, pcm: Int16Array | undefined): void => {
+    if (audio.id < hushedBelow) return;
     if (pcm !== undefined && pcm.length > 0) {
       options.player?.play(pcm);
       if (!began.has(audio.id)) {
@@ -158,7 +172,9 @@ export function openVoiceStream(
           .start(pcm => {
             if (ended || pcm.length !== UNIT_SAMPLES) return;
             // Muted time is zero samples by contract: the microphone's audio never leaves the device while muted.
-            socket.send(encodeUplinkUnit({ pcm: muted ? new Int16Array(UNIT_SAMPLES) : pcm, control, echo }));
+            const sending = muted ? new Int16Array(UNIT_SAMPLES) : pcm;
+            socket.send(encodeUplinkUnit({ pcm: sending, control, echo }));
+            options.onMicUnit?.(sending);
             // A control rides ONE unit; the next is plain audio again.
             if (control === 'unmuted' || control === 'muted') control = 'none';
           })
@@ -210,6 +226,14 @@ export function openVoiceStream(
         lines.push({ id, text: piece });
       }
       return lines;
+    },
+    hush: () => {
+      if (ended) return;
+      options.player?.stop();
+      hushedBelow = nextLine;
+      sentAt.clear();
+      began.clear();
+      if (wantsReply) socket.send(encodeHushFrame());
     },
     stop: () => {
       if (ended) return;

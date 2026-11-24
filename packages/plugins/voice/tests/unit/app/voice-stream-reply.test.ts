@@ -5,6 +5,7 @@ import {
   SPEAK_FRAME_BYTES,
   STREAM_CLOSES,
   type StreamSnapshot,
+  decodeLineFrame,
   decodeSpeakFrame,
   encodeReplyDownlinkUnit,
   encodeDownlinkUnit,
@@ -175,6 +176,89 @@ describe('the browser end of the reply voice', () => {
     r.handle.stop();
     expect(r.stops()).toBe(1);
     expect(r.handle.speak('late')).toEqual([]);
+  });
+});
+
+describe('hush (barge-in) on the browser end', () => {
+  test('silences the sound at once, tells the machine in one fixed-size frame, and ignores the sound of lines sent before it', () => {
+    const r = rig();
+    r.listeners().onOpen?.();
+    r.handle.speak('First.');
+    r.handle.speak('Second.');
+    r.listeners().onFrame?.(
+      unit({ reply: 'ready', audio: { id: 0, samples: 100, last: false } }, new Int16Array(100).fill(5)),
+    );
+    expect(r.played).toHaveLength(1);
+    r.handle.hush();
+    expect(r.stops()).toBe(1);
+    const frames = r.sent.filter(
+      (frame): frame is string => typeof frame === 'string' && frame.length === SPEAK_FRAME_BYTES,
+    );
+    expect(decodeLineFrame(frames.at(-1) ?? '')).toEqual({ t: 'hush' });
+    // Sound already on the wire for lines 0 and 1 is dropped, with no event for it.
+    const events = r.events.lines.length;
+    r.listeners().onFrame?.(
+      unit({ reply: 'ready', audio: { id: 0, samples: 100, last: true } }, new Int16Array(100).fill(5)),
+    );
+    r.listeners().onFrame?.(
+      unit({ reply: 'ready', audio: { id: 1, samples: 100, last: true } }, new Int16Array(100).fill(5)),
+    );
+    expect(r.played).toHaveLength(1);
+    expect(r.events.lines).toHaveLength(events);
+    // A line sent after the hush is heard as usual.
+    const next = r.handle.speak('After.');
+    expect(next).toEqual([{ id: 2, text: 'After.' }]);
+    r.listeners().onFrame?.(
+      unit({ reply: 'ready', audio: { id: 2, samples: 100, last: true } }, new Int16Array(100).fill(5)),
+    );
+    expect(r.played).toHaveLength(2);
+  });
+
+  test('a stream that did not ask for the reply voice sends nothing for a hush', () => {
+    const r = rig({ reply: false });
+    r.listeners().onOpen?.();
+    const before = r.sent.length;
+    r.handle.hush();
+    expect(r.sent).toHaveLength(before);
+  });
+});
+
+describe('what barge-in hears of the microphone', () => {
+  test('every unit as it is sent, and zeros while muted', async () => {
+    const sent: (string | Uint8Array)[] = [];
+    let listeners!: PluginSocketListeners;
+    let feed!: (pcm: Int16Array) => void;
+    const heard: Int16Array[] = [];
+    const client = {
+      socket: (_route: string, _params: unknown, given: PluginSocketListeners) => {
+        listeners = given;
+        return { send: (frame: string | Uint8Array) => void sent.push(frame), close: () => undefined } as PluginSocket;
+      },
+    };
+    const mic: MicSource = {
+      start: async next => {
+        feed = next;
+      },
+      stop: () => undefined,
+    };
+    const handle = openVoiceStream(
+      client,
+      { t: 'start', v: 1, purpose: 'chat', ferretId: 'f' },
+      mic,
+      {
+        onSnapshot: () => undefined,
+        onWords: () => undefined,
+        onEnded: () => undefined,
+        onMicFailed: () => undefined,
+      },
+      { onMicUnit: pcm => void heard.push(pcm) },
+    );
+    listeners.onOpen?.();
+    await Promise.resolve();
+    feed(new Int16Array(640).fill(9));
+    handle.setMuted(true);
+    feed(new Int16Array(640).fill(9));
+    expect(heard.map(pcm => pcm[0])).toEqual([9, 0]);
   });
 });
 

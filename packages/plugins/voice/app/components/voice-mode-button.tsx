@@ -8,10 +8,15 @@
  * THE PHONE'S OWN ENGINE is only ever the fallback: a machine that cannot be reached on press starts voice mode on the
  * phone with a banner that says so, and so does the person's choice to keep audio on this phone (Settings › Voice › Voice
  * mode), which is the one case the machine is not asked at all.
+ *
+ * The sound output is made HERE, before anything is awaited: a browser (iOS above all) lets sound start only inside a tap,
+ * and the panel that plays the machine's reply voice starts later. It is handed to the panel through the store.
  */
 import { AudioLines } from 'lucide-react';
 import { useState } from 'react';
 import { readVoiceEngine } from '../features/settings/voice-engine-api.ts';
+import { createReplyPlayer } from '../lib/stream/reply-player.ts';
+import type { ReplyPlayer } from '../lib/stream/voice-stream.ts';
 import { keptOnPhoneBanner, unreachableBanner } from '../lib/voice-mode/phone-loop.ts';
 import { useVoiceMode, type VoiceModeStore } from '../lib/voice-mode/voice-mode-store.ts';
 import { apiClientOver, Button, type VoicePluginClient } from '../shell-voice.ts';
@@ -22,9 +27,26 @@ export interface VoiceModeButtonProps {
   readonly client: VoicePluginClient;
   /** This device's choice to keep audio on the phone: voice mode then never asks the machine. */
   readonly keepOnPhone?: boolean;
+  /** A suite supplies its own sound output; the page uses the browser's. */
+  readonly createPlayer?: () => ReplyPlayer;
 }
 
-export function VoiceModeButton({ ferretId, store, client, keepOnPhone = false }: VoiceModeButtonProps) {
+/** A browser without audio has no player: the device's own voice reads and nothing else changes. */
+function tryPlayer(create: () => ReplyPlayer): ReplyPlayer | undefined {
+  try {
+    return create();
+  } catch {
+    return undefined;
+  }
+}
+
+export function VoiceModeButton({
+  ferretId,
+  store,
+  client,
+  keepOnPhone = false,
+  createPlayer = createReplyPlayer,
+}: VoiceModeButtonProps) {
   const state = useVoiceMode(store, ferretId);
   const [checking, setChecking] = useState(false);
   const press = async (): Promise<void> => {
@@ -34,10 +56,14 @@ export function VoiceModeButton({ ferretId, store, client, keepOnPhone = false }
       return;
     }
     setChecking(true);
+    const player = tryPlayer(createPlayer);
+    let taken = false;
     try {
       const view = await readVoiceEngine(apiClientOver(client));
-      if (view.state === 'ready') store.start(ferretId, view.machine);
-      else
+      if (view.state === 'ready') {
+        store.start(ferretId, view.machine, undefined, player);
+        taken = true;
+      } else
         store.end(
           ferretId,
           view.state === 'installing'
@@ -47,6 +73,7 @@ export function VoiceModeButton({ ferretId, store, client, keepOnPhone = false }
     } catch {
       store.start(ferretId, '', unreachableBanner('Your machine'));
     } finally {
+      if (!taken) player?.close();
       setChecking(false);
     }
   };

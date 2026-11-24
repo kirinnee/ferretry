@@ -10,7 +10,7 @@
  * say ends in the `failed` / no-op state, never an exception.
  */
 
-import type { SpeakerPort, SpeakerVoice } from './ports.ts';
+import type { SpeakerEvent, SpeakerPort, SpeakerVoice, SpeakRequest } from './ports.ts';
 import { readingCapForSeconds, speakableSegments } from './speakable.ts';
 import { chooseVoice, clampSpeechRate, DEFAULT_SPEECH_RATE, voiceNote } from './voice-choice.ts';
 
@@ -68,6 +68,12 @@ export interface ReadAloudController {
   previewVoiceNote(voiceId?: string | null): string | null;
   /** Stop and forget the message (and its sentences): the conversation it belonged to has been left. */
   dismiss(): void;
+  /**
+   * Voice mode's own voice (the machine's reply voice): while one is attached, every reading is spoken by it, with no device
+   * voice needed. A reading it cannot begin (`unavailable`) is read by the device's own voice instead, exactly as it would
+   * have been without it. A reading under way when this changes is stopped. `null` detaches.
+   */
+  attach(voice: SpeakerPort | null): void;
 }
 
 export const IDLE: ReadAloudState = {
@@ -81,6 +87,11 @@ export const IDLE: ReadAloudState = {
 
 export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
   const { speaker } = deps;
+  /** Voice mode's voice, while voice mode is on. */
+  let attached: SpeakerPort | null = null;
+  /** The voice a reading is on right now (the machine's, or the device's after a fallback). */
+  let voiceOn: SpeakerPort | null = null;
+  const speaking = (): SpeakerPort => voiceOn ?? attached ?? speaker;
   let state: ReadAloudState = IDLE;
   let token = 0;
   const listeners = new Set<() => void>();
@@ -105,7 +116,9 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
   };
 
   return {
-    supported: speaker.supported,
+    get supported() {
+      return attached !== null || speaker.supported;
+    },
     voices: () => {
       try {
         return speaker.voices();
@@ -129,45 +142,84 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
       });
       const segments = reading.segments.map(segment => segment.text);
       if (segments.length === 0) {
-        speaker.stop();
+        speaking().stop();
         set({ ...IDLE, key });
         return;
       }
       const { voice, language } = pickVoice(options.voiceId);
-      if (voice === null) {
+      const machine = attached;
+      if (voice === null && machine === null) {
         // No voice that stays on the device and none picked: say so, and never hand the text to the browser's default.
-        speaker.stop();
+        speaking().stop();
         set({ ...IDLE, status: 'unavailable', key, segments, truncated: reading.truncated });
         return;
       }
-      set({ status: 'reading', key, segments, current: 0, truncated: reading.truncated, voiceNote: voiceNote(voice) });
+      // The machine's voice keeps the text on the machine the person owns, so it carries no warning; the device's does as it did.
+      set({
+        status: 'reading',
+        key,
+        segments,
+        current: 0,
+        truncated: reading.truncated,
+        voiceNote: machine === null ? voiceNote(voice) : null,
+      });
       const live = (): boolean => mine === token;
+      const request: SpeakRequest = { segments, rate, voice, language };
+      const handle = (viaMachine: boolean) => (event: SpeakerEvent) => {
+        if (!live()) return;
+        switch (event.type) {
+          case 'segment':
+            set({ ...state, current: event.index });
+            return;
+          case 'end':
+            set({ ...state, status: 'finished' });
+            return;
+          case 'stopped':
+            set({ ...state, status: 'stopped' });
+            return;
+          case 'error':
+            if (viaMachine && event.reason === 'unavailable') {
+              // The machine could not begin: the device reads the same words, or says it has no voice for them.
+              if (voice === null) set({ ...IDLE, status: 'unavailable', key, segments, truncated: reading.truncated });
+              else {
+                set({ ...state, voiceNote: voiceNote(voice) });
+                begin(speaker, handle(false));
+              }
+              return;
+            }
+            set({ ...state, status: 'failed' });
+            return;
+        }
+      };
+      const begin = (port: SpeakerPort, onEvent: (event: SpeakerEvent) => void): void => {
+        voiceOn = port;
+        try {
+          port.speak(request, onEvent);
+        } catch {
+          if (live()) set({ ...state, status: 'failed' });
+        }
+      };
+      // A reading on the other voice (the device's, after a fallback) must not talk under this one.
+      if (voiceOn !== null && voiceOn !== (machine ?? speaker)) voiceOn.stop();
+      begin(machine ?? speaker, handle(machine !== null));
+    },
+    attach: voice => {
+      if (attached === voice) return;
+      const before = attached;
+      attached = voice;
       try {
-        speaker.speak({ segments, rate, voice, language }, event => {
-          if (!live()) return;
-          switch (event.type) {
-            case 'segment':
-              set({ ...state, current: event.index });
-              return;
-            case 'end':
-              set({ ...state, status: 'finished' });
-              return;
-            case 'stopped':
-              set({ ...state, status: 'stopped' });
-              return;
-            case 'error':
-              set({ ...state, status: 'failed' });
-              return;
-          }
-        });
-      } catch {
-        if (live()) set({ ...state, status: 'failed' });
+        speaking().stop();
+        before?.stop();
+        if (voice !== null) speaker.stop();
+        voiceOn = null;
+      } finally {
+        if (state.status === 'reading') set({ ...state, status: 'stopped' });
       }
     },
     dismiss: () => {
       token += 1;
       try {
-        speaker.stop();
+        speaking().stop();
       } finally {
         if (state !== IDLE) set(IDLE);
       }
@@ -176,7 +228,7 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
       if (state.status !== 'reading') return;
       // The speaker answers with `stopped`; if it cannot, the state still has to say so.
       try {
-        speaker.stop();
+        speaking().stop();
       } finally {
         if (state.status === 'reading') set({ ...state, status: 'stopped' });
       }
