@@ -1,0 +1,299 @@
+{
+  "replaced": {
+    "shown": {
+      "kind": "page",
+      "pageId": "pg-2",
+      "origin": "http://127.0.0.1:4000",
+      "secure": true,
+      "navigationId": "D58431880C1D171FE5D52B11CD6C179C",
+      "fields": [
+        {
+          "fieldId": "code",
+          "frameOrigin": "http://127.0.0.1:4000",
+          "frameId": "A347A679851852898D08331BF601F795",
+          "ownerFrame": "A347A679851852898D08331BF601F795",
+          "ownerLoader": "D58431880C1D171FE5D52B11CD6C179C",
+          "backendNodeId": 4,
+          "field": {
+            "tag": "input",
+            "type": "text",
+            "autocomplete": "one-time-code",
+            "name": "otp",
+            "id": "code",
+            "inputmode": "numeric",
+            "maxlength": "6",
+            "label": "Verification code",
+            "formId": "f",
+            "formAction": "http://127.0.0.1:4000/"
+          },
+          "box": {
+            "x": 20,
+            "y": 40,
+            "w": 160,
+            "h": 28
+          },
+          "visible": true
+        }
+      ]
+    },
+    "found": {
+      "kind": "page",
+      "pageId": "pg-2",
+      "origin": "http://127.0.0.1:4000",
+      "secure": true,
+      "navigationId": "D58431880C1D171FE5D52B11CD6C179C",
+      "fields": [
+        {
+          "fieldId": "code",
+          "frameOrigin": "http://127.0.0.1:4000",
+          "frameId": "A347A679851852898D08331BF601F795",
+          "ownerFrame": "A347A679851852898D08331BF601F795",
+          "ownerLoader": "D58431880C1D171FE5D52B11CD6C179C",
+          "backendNodeId": 15,
+          "field": {
+            "tag": "input",
+            "type": "text",
+            "autocomplete": "one-time-code",
+            "name": "otp",
+            "id": "code",
+            "inputmode": "numeric",
+            "maxlength": "6",
+            "label": "Verification code",
+            "formId": "f",
+            "formAction": "http://127.0.0.1:4000/"
+          },
+          "box": {
+            "x": 20,
+            "y": 40,
+            "w": 160,
+            "h": 28
+          },
+          "visible": true
+        }
+      ]
+    }
+  },
+  "ambiguous": {
+    "shown": {
+      "kind": "page",
+      "pageId": "pg-3",
+      "origin": "http://127.0.0.1:4000",
+      "secure": true,
+      "navigationId": "0E69F3B4605BB5EDA01862D953CB207E",
+      "fields": [
+        {
+          "fieldId": "code",
+          "frameOrigin": "http://127.0.0.1:4000",
+          "frameId": "0D46F9EC29891FD6176056A32EA4772F",
+          "ownerFrame": "0D46F9EC29891FD6176056A32EA4772F",
+          "ownerLoader": "0E69F3B4605BB5EDA01862D953CB207E",
+          "backendNodeId": 4,
+          "field": {
+            "tag": "input",
+            "type": "text",
+            "autocomplete": "one-time-code",
+            "name": "otp",
+            "id": "code",
+            "inputmode": "numeric",
+            "maxlength": "6",
+            "label": "Verification code",
+            "formId": "f",
+            "formAction": "http://127.0.0.1:4000/"
+          },
+          "box": {
+            "x": 20,
+            "y": 40,
+            "w": 160,
+            "h": 28
+          },
+          "visible": true
+        }
+      ]
+    },
+    "found": {
+      "kind": "page",
+      "pageId": "pg-3",
+      "origin": "http://127.0.0.1:4000",
+      "secure": true,
+      "navigationId": "0E69F3B4605BB5EDA01862D953CB207E",
+      "fields": [
+        {
+          "fieldId": "code",
+          "frameOrigin": "http://127.0.0.1:4000",
+          "frameId": "0D46F9EC29891FD6176056A32EA4772F",
+          "ownerFrame": "0D46F9EC29891FD6176056A32EA4772F",
+          "ownerLoader": "0E69F3B4605BB5EDA01862D953CB207E",
+          "backendNodeId": 16,
+          "field": {
+            "tag": "input",
+            "type": "text",
+            "autocomplete": "one-time-code",
+            "name": "otp",
+            "id": "code",
+            "inputmode": "numeric",
+            "maxlength": "6",
+            "label": "Verification code",
+            "formId": "f",
+            "formAction": "http://127.0.0.1:4000/"
+          },
+          "box": {
+            "x": 20,
+            "y": 40,
+            "w": 160,
+            "h": 28
+          },
+          "visible": true
+        }
+      ]
+    },
+    "ambiguous": true
+  },
+  "relabelled": {
+    "shown": {
+      "kind": "page",
+      "pageId": "pg-4",
+      "origin": "http://127.0.0.1:4000",
+      "secure": true,
+      "navigationId": "6E9E0B364FDAE38C6FD8BF1455B9BD01",
+      "fields": [
+        {
+          "fieldId": "code",
+          "frameOrigin": "http://127.0.0.1:4000",
+          "frameId": "CC60A44A167AF0499D41F906D8D75C47",
+          "ownerFrame": "CC60A44A167AF0499D41F906D8D75C47",
+          "ownerLoader": "6E9E0B364FDAE38C6FD8BF1455B9BD01",
+          "backendNodeId": 4,
+          "field": {
+            "tag": "input",
+            "type": "text",
+            "autocomplete": "one-time-code",
+            "name": "otp",
+            "id": "code",
+            "inputmode": "numeric",
+            "maxlength": "6",
+            "label": "Verification code",
+            "formId": "f",
+            "formAction": "http://127.0.0.1:4000/"
+          },
+          "box": {
+            "x": 20,
+            "y": 40,
+            "w": 160,
+            "h": 28
+          },
+          "visible": true
+        }
+      ]
+    },
+    "found": {
+      "kind": "page",
+      "pageId": "pg-4",
+      "origin": "http://127.0.0.1:4000",
+      "secure": true,
+      "navigationId": "6E9E0B364FDAE38C6FD8BF1455B9BD01",
+      "fields": [
+        {
+          "fieldId": "code",
+          "frameOrigin": "http://127.0.0.1:4000",
+          "frameId": "CC60A44A167AF0499D41F906D8D75C47",
+          "ownerFrame": "CC60A44A167AF0499D41F906D8D75C47",
+          "ownerLoader": "6E9E0B364FDAE38C6FD8BF1455B9BD01",
+          "backendNodeId": 16,
+          "field": {
+            "tag": "input",
+            "type": "text",
+            "autocomplete": "one-time-code",
+            "name": "otp",
+            "id": "code",
+            "inputmode": "numeric",
+            "maxlength": "6",
+            "label": "Card number",
+            "formId": "f",
+            "formAction": "http://127.0.0.1:4000/"
+          },
+          "box": {
+            "x": 20,
+            "y": 40,
+            "w": 160,
+            "h": 28
+          },
+          "visible": true
+        }
+      ]
+    }
+  },
+  "repointed": {
+    "shown": {
+      "kind": "page",
+      "pageId": "pg-5",
+      "origin": "http://127.0.0.1:4000",
+      "secure": true,
+      "navigationId": "725565778E0B4B9E5D13BE795E97E969",
+      "fields": [
+        {
+          "fieldId": "code",
+          "frameOrigin": "http://127.0.0.1:4000",
+          "frameId": "215A30908098FFD7A766A5649D52D998",
+          "ownerFrame": "215A30908098FFD7A766A5649D52D998",
+          "ownerLoader": "725565778E0B4B9E5D13BE795E97E969",
+          "backendNodeId": 4,
+          "field": {
+            "tag": "input",
+            "type": "text",
+            "autocomplete": "one-time-code",
+            "name": "otp",
+            "id": "code",
+            "inputmode": "numeric",
+            "maxlength": "6",
+            "label": "Verification code",
+            "formId": "f",
+            "formAction": "http://127.0.0.1:4000/"
+          },
+          "box": {
+            "x": 20,
+            "y": 40,
+            "w": 160,
+            "h": 28
+          },
+          "visible": true
+        }
+      ]
+    },
+    "found": {
+      "kind": "page",
+      "pageId": "pg-5",
+      "origin": "http://127.0.0.1:4000",
+      "secure": true,
+      "navigationId": "725565778E0B4B9E5D13BE795E97E969",
+      "fields": [
+        {
+          "fieldId": "code",
+          "frameOrigin": "http://127.0.0.1:4000",
+          "frameId": "215A30908098FFD7A766A5649D52D998",
+          "ownerFrame": "215A30908098FFD7A766A5649D52D998",
+          "ownerLoader": "725565778E0B4B9E5D13BE795E97E969",
+          "backendNodeId": 4,
+          "field": {
+            "tag": "input",
+            "type": "text",
+            "autocomplete": "one-time-code",
+            "name": "otp",
+            "id": "code",
+            "inputmode": "numeric",
+            "maxlength": "6",
+            "label": "Verification code",
+            "formId": "f",
+            "formAction": "https://evil.example/collect"
+          },
+          "box": {
+            "x": 20,
+            "y": 40,
+            "w": 160,
+            "h": 28
+          },
+          "visible": true
+        }
+      ]
+    }
+  }
+}

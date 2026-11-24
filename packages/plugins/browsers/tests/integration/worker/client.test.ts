@@ -660,7 +660,9 @@ describe('browser worker client — the input bridge', () => {
     should(text).equal('Welcome back');
     should(refound.ok && refound.facts.fields[0]?.backendNodeId).equal(9);
     should(refoundMissing).deepEqual({ ok: false, missing: 'password' });
-    should(refoundAmbiguous).deepEqual({ ok: false, ambiguous: 'password' });
+    // Several look-alikes arrive as ONE candidate to show, flagged: never a gone target, never something to type into.
+    should(refoundAmbiguous.ok && refoundAmbiguous.ambiguous).equal(true);
+    should(refoundAmbiguous.ok && refoundAmbiguous.facts.fields[0]?.backendNodeId).equal(9);
     should([probed, echoes, odd, refused]).deepEqual(['hidden', 'shown', 'aborted', 'aborted']);
     should(shot).deepEqual({ pngBase64: 'iVBORw0KGgo=', clip: { x: 0, y: 0, w: 10, h: 10 } });
     should(typed).equal('typed');

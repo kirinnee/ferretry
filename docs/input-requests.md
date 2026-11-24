@@ -286,12 +286,26 @@ What it finds is then compared on its **binding**, the part of the facts that na
 - **The same target, exactly as shown**: it is typed into (a stale ref that finds the same node, say).
 - **A page field re-rendered as ONE element that is provably the same field** is typed into **at once**, with no
   second Send: a React-style page swaps its input while the owner reads the input, often with the old text still in
-  it. The proof is strict (`replacedAsShown` in `rebind.ts`): the same binding, the same document and frames, the
-  same label the page shows the field under (read by the browser from `aria-label`, `aria-labelledby` or the
-  `<label>`, and recorded with the `maxlength`), no challenge that was not there, nothing covering a field that was
-  clear, and every field **near** where it was (its box's origin and size each within 32 px). The browser found it
-  as the only visible look-alike; the write selects what the field holds, so a stale value is replaced, not
-  appended to. Several look-alikes, or a replacement farther away than that, fall through to the redraw below.
+  it. The proof is strict (`replacedAsShown` in `rebind.ts`) and **a wrong recipient is a leak**, so anything it cannot
+  prove is the owner's again, never typed and never counted. Every one of these must be the same:
+  the binding; the document and the frame; **the DevTools frame the field's document is in and that frame's loader**
+  (read from the Page frame tree, not the target id: a field moved into a same-origin sibling frame, or in a frame whose
+  document was replaced, is another field); **every fact the browser read about the field** — its attributes, the label
+  the page shows it under (`aria-label`, `aria-labelledby` or the `<label>`), **the form that owns it and where that
+  form sends what is typed** (the form's id, name and resolved action as origin and path, or the `formaction` of its
+  default submit button: a form re-pointed at another action receives the value elsewhere); and nothing the browser
+  **could not read** (an unreadable fact is `unread`, which is not the same as an empty one, and is never proved). No
+  challenge that was not there, nothing covering a field that was clear, and every field **near** where it was (its box's
+  origin and size each within 32 px). The browser sends it only when the field is the ONE visible look-alike (or the
+  node the owner approved, which is still there); the write selects what the field holds, so a stale value is replaced,
+  not appended to. **The write reads all of it again**: right before the insert the browser reads the node's attributes,
+  label, form, frame and loader afresh and types nothing if any differs from what the input was drawn from.
+- **Several look-alikes** (the approved node is gone and more than one visible element is the field, more than eight are,
+  or the page changed while it was searched) are **never typed into, whatever the agent's pointer names**: the pointer
+  only chooses which one the redrawn input shows. The browser answers with that candidate's facts flagged `ambiguous`,
+  and the input is redrawn like any other change — nothing is counted. A change in a field's label or form is likewise a
+  redraw, classified again from what is seen now (a label that became a payment number makes the field a secret on the
+  redrawn input), because they are what a field is proved by, not what names it.
 - **The same target, something else changed**: the input is **redrawn** — a new picture taken before anything
   is typed, a new digest, the risk worked out again — the request stays pending, nothing is typed and **nothing
   is counted**. Send answers 409 `target_rebound` and the input says "The page changed. Check the picture and

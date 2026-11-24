@@ -236,7 +236,13 @@ function inputReply(id, method, params) {
       page === 'missing'
         ? { observation: { ok: false, missing: 'password' } }
         : page === 'ambiguous'
-          ? { observation: { ok: false, ambiguous: 'password' } }
+          ? {
+              observation: {
+                ok: true,
+                ambiguous: true,
+                facts: { ...facts, fields: [{ ...facts.fields[0], backendNodeId: 9 }] },
+              },
+            }
           : page === 'garbled'
             ? { observation: { ok: true, facts: { kind: 'page' } } }
             : { observation: { ok: true, facts: { ...facts, fields: [{ ...facts.fields[0], backendNodeId: 9 }] } } },

@@ -45,6 +45,8 @@ export type ObserveResult =
        * replace: the only way an echo-off prompt may stay a one-time code. The daemon's own, never on the wire.
        */
       readonly codeProgram?: true;
+      /** A re-find only: several elements could be the field, so these facts are what the card SHOWS and are never typed into. */
+      readonly ambiguous?: true;
       /**
        * A program every process of the foreground group runs, proved ONLY through the owner's own Nix profile, and
        * one no root-controlled folder holds and no password or code program. The daemon's own, never on the wire:

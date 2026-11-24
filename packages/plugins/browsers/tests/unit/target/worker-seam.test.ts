@@ -287,12 +287,39 @@ describe('the daemon side of the page input seam', () => {
   test('an observation says what is missing or ambiguous, and anything else is refused without quoting it', async () => {
     const missing = await port({ observation: { ok: false, missing: 'm'.repeat(100) } }).fields.inputObserve('p', []);
     expect(missing).toEqual({ ok: false, missing: 'm'.repeat(64) });
-    const ambiguous = await port({ observation: { ok: false, ambiguous: 'a'.repeat(100) } }).fields.inputRefind(
+    const seen = {
+      kind: 'page' as const,
+      pageId: 'p',
+      origin: 'https://example.com',
+      secure: true,
+      navigationId: 'n',
+      fields: [
+        {
+          fieldId: 'a',
+          frameOrigin: 'https://example.com',
+          frameId: 'f',
+          ownerFrame: 'F',
+          ownerLoader: 'L',
+          backendNodeId: 1,
+          field: { tag: 'input', formAction: 'https://example.com/session' },
+          box: { x: 0, y: 0, w: 1, h: 1 },
+          visible: true,
+        },
+      ],
+    };
+    // Several look-alikes are an observation to SHOW, flagged; only a plain `true` is believed.
+    const ambiguous = await port({ observation: { ok: true, facts: seen, ambiguous: true } }).fields.inputRefind(
       'p',
       facts,
       [],
     );
-    expect(ambiguous).toEqual({ ok: false, ambiguous: 'a'.repeat(64) });
+    expect(ambiguous).toEqual({ ok: true, facts: seen, ambiguous: true });
+    const plain = await port({ observation: { ok: true, facts: seen, ambiguous: 'yes' } }).fields.inputRefind(
+      'p',
+      facts,
+      [],
+    );
+    expect(plain).toEqual({ ok: true, facts: seen });
     for (const bad of [
       null,
       {},

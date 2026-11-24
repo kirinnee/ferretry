@@ -40,10 +40,9 @@ function parseObservation(raw: unknown): BrowserInputObservation {
   const observation = (raw as { observation?: unknown } | null)?.observation as Record<string, unknown> | undefined;
   if (observation?.ok === false && typeof observation.missing === 'string')
     return { ok: false, missing: observation.missing.slice(0, 64) };
-  if (observation?.ok === false && typeof observation.ambiguous === 'string')
-    return { ok: false, ambiguous: observation.ambiguous.slice(0, 64) };
   const facts = InputTargetFactsSchema.safeParse(observation?.facts);
-  if (observation?.ok === true && facts.success && facts.data.kind === 'page') return { ok: true, facts: facts.data };
+  if (observation?.ok === true && facts.success && facts.data.kind === 'page')
+    return { ok: true, facts: facts.data, ...(observation.ambiguous === true ? { ambiguous: true as const } : {}) };
   throw new InputAnswerRefused('the browser described the fields in a form Ferretry does not accept');
 }
 

@@ -2504,11 +2504,15 @@ export class InputRequestService {
     underGrant = false,
   ): Promise<Extract<ObserveResult, { readonly ok: true }>> {
     const again = await this.refound(held, looked);
-    if (again.ok && digestFacts(again.facts) === held.request.observedDigest) return again;
-    // A page that re-rendered the field as the owner read the card: the ONE provably same element is typed into at once.
+    // Several look-alikes (`ambiguous`): the facts are what the card SHOWS, never what is typed into. The owner decides.
+    const alone = again.ok && again.ambiguous !== true;
+    if (alone && digestFacts(again.facts) === held.request.observedDigest) return again;
+    // A page that re-rendered the field as the owner read the card: the ONE element PROVED the same (its label, form, frame and
+    // document included) is typed into at once. A fact that differs is another kind of field maybe (a label that became a card's),
+    // so the card is redrawn and classified again from what is seen now (`rebind`), and the owner approves what it says.
     if (
       !underGrant &&
-      again.ok &&
+      alone &&
       held.binding !== undefined &&
       replacedAsShown(held.binding, held.request.observed, again.facts)
     )

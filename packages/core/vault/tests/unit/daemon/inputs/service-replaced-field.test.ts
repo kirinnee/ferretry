@@ -24,37 +24,45 @@ const ATTRS: Record<string, string> = {
   inputmode: 'numeric',
   maxlength: '6',
   label: 'Code',
+  formId: 'verify',
+  formName: 'verify-form',
+  formAction: 'https://github.com/sessions/two-factor',
 };
+/** Where the browser proved the field's document is: the DevTools frame and that frame's loader. */
+const PROVED = { ownerFrame: 'FRAME-1', ownerLoader: 'LOADER-1' };
 const VALUE = '123456';
 
 const shown = (): InputTargetFacts =>
-  page({}, [pageField('code', { backendNodeId: 7, box: { x: 100, y: 200, w: 120, h: 32 } }, ATTRS)]);
+  page({}, [pageField('code', { backendNodeId: 7, box: { x: 100, y: 200, w: 120, h: 32 }, ...PROVED }, ATTRS)]);
 
 /** The page as it is after the swap: `over` says what else differs from the card. */
 const swapped = (
   box: Partial<{ x: number; y: number; w: number; h: number }> = {},
   field: Partial<ReturnType<typeof pageField>> = {},
   facts: Parameters<typeof page>[0] = {},
-  attrs: Record<string, string> = {},
+  attrs: Record<string, string | undefined> = {},
 ): InputTargetFacts =>
   page(facts, [
     pageField(
       'code',
-      { backendNodeId: 99, box: { x: 100, y: 200, w: 120, h: 32, ...box }, ...field },
-      { ...ATTRS, ...attrs },
+      { backendNodeId: 99, box: { x: 100, y: 200, w: 120, h: 32, ...box }, ...PROVED, ...field },
+      Object.fromEntries(Object.entries({ ...ATTRS, ...attrs }).filter(([, value]) => value !== undefined)),
     ),
   ]);
 
 /** A world whose page shows `shown()` at the raise and `after` once the card is up (the look and the re-find agree). */
-async function sent(after: () => InputTargetFacts) {
+async function sent(after: () => InputTargetFacts, ambiguous = false) {
   let now = shown();
+  let stale = false;
   const w = world({
-    facts: () => now,
-    refind: () => ({ ok: true, facts: now, names: ['page-1'] }),
+    // The agent's pointer is stale once the page was re-rendered, so only the re-find sees the page when `ambiguous`.
+    observe: () => (stale ? { ok: false, reason: 'target_gone' } : { ok: true, facts: now, names: ['page-1'] }),
+    refind: () => ({ ok: true, facts: now, names: ['page-1'], ...(ambiguous ? { ambiguous: true as const } : {}) }),
   });
   await w.service.raise(SESSION, RAISE);
   const request = await w.pending();
   now = after();
+  stale = ambiguous;
   const body = { ...w.send(request), padded: padInputValue(VALUE) };
   return { w, request, deliver: () => w.service.deliver(SESSION, request.id, body, OWNER) };
 }
@@ -155,6 +163,76 @@ describe('a field the page re-rendered under the card', () => {
   });
 });
 
+/** A redraw is a rebound card with nothing typed and nothing counted: no `input.refused` is ever audited for it. */
+const redrawn = async (w: Awaited<ReturnType<typeof sent>>['w'], deliver: () => Promise<unknown>): Promise<void> => {
+  const error = await refusal(deliver());
+  should((error as { reason?: string }).reason).equal('target_rebound');
+  should(w.writes.length).equal(0);
+  should(w.audits.map(entry => entry.event)).containEql('input.rebound');
+  should(w.audits.map(entry => entry.event)).not.containEql('input.refused');
+};
+
+describe('a re-found field is typed into only on proof: anything unproved goes back to the owner', () => {
+  it('should redraw, typing nothing, when the same-looking field now sits in a form that sends to another action', async () => {
+    const { w, deliver } = await sent(() => swapped({}, {}, {}, { formAction: 'https://evil.example/collect' }));
+
+    await redrawn(w, deliver);
+  });
+
+  it('should redraw when another form now owns the field (a new id or name), or none does', async () => {
+    for (const change of [
+      { formId: 'other' },
+      { formName: 'other' },
+      { formId: undefined, formName: undefined, formAction: undefined },
+    ]) {
+      const { w, deliver } = await sent(() => swapped({}, {}, {}, change));
+
+      await redrawn(w, deliver);
+    }
+  });
+
+  it('should redraw, classified again, when the label became a card label: nothing is typed under the old kind', async () => {
+    const { w, request, deliver } = await sent(() => swapped({}, {}, {}, { label: 'Card number' }));
+
+    await redrawn(w, deliver);
+
+    const card = (await w.pending()) ?? request;
+    should(card.fields[0]?.sensitivity).equal('secret');
+  });
+
+  it('should redraw when the field is in another DevTools frame or another document of the frame, however alike', async () => {
+    for (const moved of [{ ownerFrame: 'FRAME-2' }, { ownerLoader: 'LOADER-2' }]) {
+      const { w, deliver } = await sent(() => swapped({}, moved));
+
+      await redrawn(w, deliver);
+    }
+  });
+
+  it('should redraw when the frame or the document of either sighting was not proved', async () => {
+    for (const unproved of [{ ownerFrame: undefined }, { ownerLoader: undefined }, { unread: true as const }]) {
+      const { w, deliver } = await sent(() => swapped({}, unproved));
+
+      await redrawn(w, deliver);
+    }
+  });
+
+  it('should redraw and count nothing for several look-alikes, again and again, never typing into one', async () => {
+    const { w } = await sent(() => swapped({ x: 101 }), true);
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const request = await w.pending();
+      const error = await refusal(
+        w.service.deliver(SESSION, request.id, { ...w.send(request), padded: padInputValue(VALUE) }, OWNER),
+      );
+      should((error as { reason?: string }).reason).equal('target_rebound');
+    }
+
+    should(w.writes.length).equal(0);
+    should(w.audits.map(entry => entry.event)).not.containEql('input.refused');
+    should((await w.pending()).state).equal('pending');
+  });
+});
+
 describe('replacedAsShown', () => {
   const binding = bindingOf(shown());
 
@@ -166,6 +244,9 @@ describe('replacedAsShown', () => {
     should(replacedAsShown(binding, shown(), swapped({}, { visible: false }))).be.false();
     should(replacedAsShown(binding, shown(), swapped({}, {}, {}, { maxlength: '8' }))).be.false();
     should(replacedAsShown(binding, shown(), swapped({}, {}, {}, { label: 'Password' }))).be.false();
+    should(replacedAsShown(binding, shown(), swapped({}, {}, {}, { formAction: 'https://evil.example/x' }))).be.false();
+    should(replacedAsShown(binding, shown(), swapped({}, { ownerFrame: 'FRAME-2' }))).be.false();
+    should(replacedAsShown(binding, shown(), swapped({}, { unread: true }))).be.false();
     should(replacedAsShown(binding, undefined, swapped())).be.false();
   });
 
