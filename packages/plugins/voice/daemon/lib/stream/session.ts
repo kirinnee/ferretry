@@ -1,0 +1,578 @@
+import type { Clock, SocketDownstream, SocketEnded, SocketFrame, SocketHandler } from '@ferretry/kernel/contract';
+import { milliseconds } from '@ferretry/std';
+import {
+  DOWNLINK_JSON_MAX_BYTES,
+  PAUSE_STYLES,
+  PROOF_WINDOW_MS,
+  SILENT_PHONE_MS,
+  STREAM_CLOSES,
+  STREAM_MAX_MS,
+  StreamProtocolError,
+  type StreamSnapshot,
+  type StreamStart,
+  StreamStartSchema,
+  type StreamState,
+  TICK_MS,
+  TURN_MAX_MS,
+  type TurnOutcome,
+  UNIT_MS,
+  UPLINK_UNIT_BYTES,
+  UnitAssembler,
+  WORDS_MAX_CHARS,
+  type VoiceEngineApi,
+  VoiceEngineError,
+  decodeUplinkUnit,
+  encodeDownlinkUnit,
+  snapshotBytes,
+} from '../../../contract/index.ts';
+import { SampleBuffer, SECOND } from './samples.ts';
+
+/** Sentences a person reads, one per refusal code. None carries a transcript. */
+const SENTENCES: Readonly<Record<string, string>> = {
+  engine_behind: 'This machine is too busy to keep up, so that turn was lost. Say it again.',
+  engine_timeout: 'This machine took too long to turn that into words, so that turn was lost. Say it again.',
+  engine_overloaded: 'This machine is overloaded: three turns in a row were lost.',
+  voice_no_memory: 'This machine does not have enough free memory to load speech right now.',
+  voice_not_ready: 'Speech is not installed on this machine yet.',
+  voice_busy: 'Another voice chat already holds this ferret.',
+  voice_unavailable: 'Voice chat cannot send messages on this machine right now.',
+  engine_failed: 'Speech could not start on this machine.',
+  send_refused: 'The machine could not hand that message to the ferret.',
+  phone_silent: 'The device stopped answering, so that message was not sent.',
+  no_words: 'No words were heard.',
+  fleet_not_granted:
+    'This device may not use the agent fleet, so voice chat cannot send to a ferret. Voice chat needs both the voice and the fleet permissions.',
+  ferret_unknown: 'No single ferret goes by that name on this machine.',
+};
+/** The close each refusal ends the stream with; any other refusal is a failure on the machine. */
+const CLOSE_FOR: Readonly<Record<string, { readonly code: number; readonly reason: string }>> = {
+  engine_overloaded: STREAM_CLOSES.overloaded,
+  voice_busy: STREAM_CLOSES.busy,
+  fleet_not_granted: STREAM_CLOSES.forbidden,
+};
+const sentenceOf = (code: string): string => SENTENCES[code] ?? 'Something went wrong on the machine.';
+
+/** What the stream needs from the rest of the daemon. Everything outside the audio is a port, so each is faked in tests. */
+export interface StreamParts {
+  /** The engine's PUBLIC API only: it loads on first use and unloads itself when idle. */
+  readonly engine: Pick<VoiceEngineApi, 'transcribe' | 'detectSpeech'>;
+  readonly clock: Pick<Clock, 'nowMs' | 'every' | 'after'>;
+  readonly downstream: SocketDownstream;
+  /** Names this stream inside every send id (`<streamId>:<turn>`). */
+  readonly streamId: string;
+  /** 16 lowercase hex characters, unguessable. */
+  readonly nonce: () => string;
+  /** `undefined` when Conversation is not loaded: a chat stream is then refused. */
+  readonly send:
+    | ((
+        ferretId: string,
+        message: string,
+        sendId: string,
+      ) => Promise<{ readonly ok: true } | { readonly ok: false; readonly code: string }>)
+    | undefined;
+  /**
+   * Whether this caller may use the agent fleet RIGHT NOW (`fleet.use`, the grant a typed send needs). Voice chat sends to
+   * a ferret, so it needs this as well as `voice.use`; asked at the start and again before every send.
+   */
+  readonly mayChat: () => boolean;
+  /** The ferret a name or an id means (the same rule a typed send's path uses); `undefined` when none or several do. */
+  readonly resolveFerret: (reference: string) => Promise<string | undefined>;
+  /** Writes the audit record a typed send leaves, once per message handed over. */
+  readonly recordSent: (ferretId: string) => void;
+  /** Takes the one voice chat a ferret may have; `undefined` when another stream holds it. Returns the release. */
+  readonly claimFerret: (ferretId: string) => (() => void) | undefined;
+  /** Called once when the stream is over, whatever ended it. */
+  readonly onEnd: () => void;
+  readonly log: { info(message: string, fields?: Record<string, string | number | boolean>): void };
+}
+
+/** Speech that is shorter than this is not a turn (the engine's own spans already drop anything under 256 ms). */
+const LEAD_IN = Math.round(0.3 * SECOND);
+/** Audio the engine may owe a stream before it must say "too busy" (design §3.1). */
+const BEHIND = 2 * SECOND;
+/** Interim words are re-decoded this often, and only while the turn is short enough to decode in about two seconds (5 s → 1.76 s). */
+const INTERIM_EVERY = Math.round(1.2 * SECOND);
+const INTERIM_MAX = 5 * SECOND;
+/** Audio that arrives while no turn is open is kept this long, so a late speech start is not clipped. */
+const IDLE_KEEP = Math.round(1.5 * SECOND);
+/** The most unheard audio kept while a turn is being finished. */
+const BACKLOG_KEEP = 5 * SECOND;
+const FINAL_BASE_MS = 5_000;
+const NO_START_MS = 5_000;
+/** Units allowed in any 5 s: the nominal 125, with a quarter of headroom (design §3.1). */
+const RATE_WINDOW_MS = 5_000;
+const RATE_LIMIT = Math.floor((RATE_WINDOW_MS / UNIT_MS) * 1.25);
+const OVERLOAD_AFTER = 3;
+const ISSUED_KEPT = 32;
+/** The most audio ever held: a whole turn plus the backlog; a stuck engine call cannot grow it further. */
+const SAMPLES_CAP = Math.round((TURN_MAX_MS / 1000) * SECOND) + BACKLOG_KEEP;
+/** A backed-up socket (the browser stopped reading) ends the stream rather than growing without bound. */
+const MAX_BUFFERED = 64 * 1024;
+
+type Phase = 'loading' | 'idle' | 'hearing' | 'working';
+
+/**
+ * One open voice stream: the uplink's audio in, the downlink's snapshots out, and the one decision the machine makes on
+ * its own, which is when a turn ends and whether to send it.
+ *
+ * WHY IT IS SAFE TO SEND WITHOUT ASKING (owner decision O1: no countdown): a turn is sent only after an echo of a nonce
+ * the machine issued AFTER it heard the pause. A phone that died, lost its network or went into a tunnel cannot echo it,
+ * so the turn is cancelled and nothing is sent. The kernel re-checks the device's `voice.use` on every uplink frame and
+ * closes the stream the moment it is narrowed, so a device that lost the grant never reaches the send either.
+ */
+export class VoiceStream implements SocketHandler {
+  private readonly assembler = new UnitAssembler(UPLINK_UNIT_BYTES);
+  private readonly samples = new SampleBuffer();
+  private readonly cancels: (() => void)[] = [];
+  private readonly issued = new Map<string, number>();
+  private readonly arrivals: number[] = [];
+  private readonly sentTurns = new Set<number>();
+
+  private start: StreamStart | undefined;
+  private releaseFerret: (() => void) | undefined;
+  private ferretId: string | undefined;
+  private phase: Phase = 'loading';
+  private muted = false;
+  private ended = false;
+  private stepping = false;
+  private fatal: { code: string; message: string } | undefined;
+  private openedAt = 0;
+  private lastUnitAt = 0;
+
+  private emitSeq = 0;
+  private echoSeq = -1;
+  private wakeProof: (() => void) | undefined;
+
+  private turn = 0;
+  private turnStart = 0;
+  private lastSpeechEnd = 0;
+  private seenLength = 0;
+  private interimAt = 0;
+  private pauseSamples = 0;
+  private words: { turn: number; rev: number; text: string; offset: number; final: boolean } | undefined;
+  private last: TurnOutcome | undefined;
+  private failures = 0;
+
+  constructor(private readonly parts: StreamParts) {}
+
+  async open(): Promise<void> {
+    const now = this.parts.clock.nowMs();
+    this.openedAt = now;
+    this.lastUnitAt = now;
+    this.cancels.push(this.parts.clock.every(milliseconds(TICK_MS), () => this.tick()));
+    this.cancels.push(this.parts.clock.after(milliseconds(STREAM_MAX_MS), () => this.endWith(STREAM_CLOSES.ended)));
+    // The snapshot a client reads first, before it has said anything: it also carries the first nonce.
+    this.emit();
+  }
+
+  fromClient(frame: SocketFrame): void {
+    if (this.ended) return;
+    try {
+      if (typeof frame === 'string') this.onText(frame);
+      else this.onBytes(frame);
+    } catch (error) {
+      if (error instanceof StreamProtocolError) this.endWith(STREAM_CLOSES.protocol);
+      else throw error;
+    }
+  }
+
+  close(_ended?: SocketEnded): void {
+    this.finish();
+  }
+
+  // ─── uplink ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  private onText(text: string): void {
+    if (this.start !== undefined) throw new StreamProtocolError('a stream says what it is for once');
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new StreamProtocolError('the start record is not JSON');
+    }
+    const start = StreamStartSchema.safeParse(parsed);
+    if (!start.success) throw new StreamProtocolError('the start record is not one the stream defines');
+    this.start = start.data;
+    this.pauseSamples = Math.round((PAUSE_STYLES[start.data.style ?? 'normal'] / 1000) * SECOND);
+    if (start.data.purpose === 'chat') {
+      if (this.parts.send === undefined) {
+        this.refuse('voice_unavailable');
+        return;
+      }
+      if (!this.parts.mayChat()) {
+        this.refuse('fleet_not_granted');
+        return;
+      }
+      void this.beginChat(start.data.ferretId);
+      return;
+    }
+    this.begin(start.data.purpose);
+  }
+
+  /** A chat stream is for ONE ferret: its id (an id and its callsign are the same ferret) is the one claimed. */
+  private async beginChat(reference: string): Promise<void> {
+    let id: string | undefined;
+    try {
+      id = await this.parts.resolveFerret(reference);
+    } catch {
+      id = undefined;
+    }
+    if (this.ended) return;
+    if (id === undefined) return this.refuse('ferret_unknown');
+    this.releaseFerret = this.parts.claimFerret(id);
+    if (this.releaseFerret === undefined) return this.refuse('voice_busy');
+    this.ferretId = id;
+    this.begin('chat');
+  }
+
+  private begin(purpose: string): void {
+    this.parts.log.info('voice.stream.start', { purpose, stream: this.parts.streamId });
+    void this.warmUp();
+  }
+
+  private onBytes(frame: Exclude<SocketFrame, string>): void {
+    if (this.start === undefined) throw new StreamProtocolError('the start record comes first');
+    const bytes =
+      frame instanceof ArrayBuffer
+        ? new Uint8Array(frame)
+        : new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength);
+    for (const unit of this.assembler.push(bytes)) {
+      if (this.ended) return;
+      this.onUnit(unit);
+    }
+  }
+
+  private onUnit(bytes: Uint8Array): void {
+    const now = this.parts.clock.nowMs();
+    this.arrivals.push(now);
+    while (this.arrivals.length > 0 && (this.arrivals[0] ?? now) <= now - RATE_WINDOW_MS) this.arrivals.shift();
+    if (this.arrivals.length > RATE_LIMIT) {
+      this.endWith(STREAM_CLOSES.tooFast);
+      return;
+    }
+    this.lastUnitAt = now;
+    const unit = decodeUplinkUnit(bytes);
+    if (unit.echo !== undefined) {
+      const seq = this.issued.get(unit.echo);
+      if (seq !== undefined && seq > this.echoSeq) {
+        this.echoSeq = seq;
+        this.wakeProof?.();
+      }
+    }
+    if (unit.control === 'end') {
+      this.endWith(STREAM_CLOSES.ended);
+      return;
+    }
+    if (unit.control === 'muted') this.muted = true;
+    if (unit.control === 'unmuted') this.muted = false;
+    // Muted time is zero samples by contract, so it is dropped here rather than listened to.
+    // The buffer is capped, so a stuck engine call cannot grow memory without bound: the excess is dropped.
+    if (!this.muted && unit.control !== 'muted') {
+      const room = SAMPLES_CAP - this.samples.length;
+      if (room >= unit.pcm.length) this.samples.append(unit.pcm);
+      else if (room > 0) this.samples.append(unit.pcm.subarray(0, room));
+    }
+  }
+
+  // ─── the loop ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+  private tick(): void {
+    if (this.ended) return;
+    const now = this.parts.clock.nowMs();
+    if (this.start === undefined && now - this.openedAt > NO_START_MS) {
+      this.endWith(STREAM_CLOSES.protocol);
+      return;
+    }
+    if (this.start !== undefined && now - this.lastUnitAt > SILENT_PHONE_MS) {
+      this.endWith(STREAM_CLOSES.silentPhone);
+      return;
+    }
+    this.emit();
+    if (!this.ended && this.phase !== 'loading') void this.step();
+  }
+
+  private async warmUp(): Promise<void> {
+    try {
+      // One half second of silence loads the models now, so the first word is not what pays for the load.
+      await this.call(() => this.parts.engine.detectSpeech(new Float32Array(SECOND / 2)));
+      if (this.ended) return;
+      this.phase = 'idle';
+    } catch (error) {
+      this.refuse(this.codeOf(error));
+    }
+  }
+
+  private async step(): Promise<void> {
+    if (this.stepping) return;
+    this.stepping = true;
+    try {
+      if (this.muted) return;
+      if (this.phase === 'idle') await this.listen();
+      else if (this.phase === 'hearing') await this.hear();
+    } catch (error) {
+      this.failTurn(this.codeOf(error));
+    } finally {
+      this.stepping = false;
+    }
+  }
+
+  /** No turn is open: look at what has arrived for a voice. */
+  private async listen(): Promise<void> {
+    const length = this.samples.length;
+    if (length > BACKLOG_KEEP) this.samples.dropBefore(length - BACKLOG_KEEP);
+    const at = this.samples.length;
+    if (at < SECOND / 4) return;
+    const spans = await this.call(() => this.parts.engine.detectSpeech(this.samples.slice(0, at)));
+    this.seenLength = at;
+    const first = spans[0];
+    if (first === undefined) {
+      if (this.samples.length > IDLE_KEEP) this.samples.dropBefore(this.samples.length - IDLE_KEEP);
+      return;
+    }
+    this.turn += 1;
+    this.turnStart = Math.max(0, first.start - LEAD_IN);
+    this.lastSpeechEnd = spans[spans.length - 1]?.end ?? first.end;
+    this.interimAt = 0;
+    this.words = undefined;
+    this.last = undefined;
+    this.phase = 'hearing';
+  }
+
+  /** A turn is open: find the end of the voice, and show interim words while the turn is short. */
+  private async hear(): Promise<void> {
+    const at = this.samples.length;
+    if (at - this.seenLength > BEHIND) return this.failTurn('engine_behind');
+    const from = Math.max(this.turnStart, at - (this.pauseSamples + SECOND));
+    const spans = await this.call(() => this.parts.engine.detectSpeech(this.samples.slice(from, at)));
+    this.seenLength = at;
+    const last = spans[spans.length - 1];
+    if (last !== undefined) this.lastSpeechEnd = Math.max(this.lastSpeechEnd, from + last.end);
+    const silence = at - this.lastSpeechEnd;
+    const length = at - this.turnStart;
+    if (silence >= this.pauseSamples || length >= (TURN_MAX_MS / 1000) * SECOND) {
+      await this.finishTurn(Math.min(at, this.lastSpeechEnd + LEAD_IN));
+      return;
+    }
+    const spoken = this.lastSpeechEnd - this.turnStart;
+    if (spoken <= INTERIM_MAX && spoken - this.interimAt >= INTERIM_EVERY) {
+      const heard = await this.decodeWithin(this.samples.slice(this.turnStart, this.lastSpeechEnd), FINAL_BASE_MS);
+      this.interimAt = spoken;
+      if (this.phase === 'hearing') this.setWords(heard.text, false);
+    }
+  }
+
+  private async finishTurn(cut: number): Promise<void> {
+    this.phase = 'working';
+    const turn = this.turn;
+    const audio = this.samples.slice(this.turnStart, cut);
+    this.samples.dropBefore(cut);
+    if (this.samples.length > BACKLOG_KEEP) this.samples.dropBefore(this.samples.length - BACKLOG_KEEP);
+    this.seenLength = 0;
+    const seconds = audio.length / SECOND;
+    const heard = await this.decodeWithin(audio, FINAL_BASE_MS + (seconds * 1000) / 2);
+    // A phone that died or pressed End during the decode must not send.
+    if (this.ended) return;
+    // Noise the model wrote as punctuation (".") is not words either.
+    const text = heard.text.trim().slice(0, WORDS_MAX_CHARS);
+    if (!/[\p{L}\p{N}]/u.test(text)) return this.settle({ turn, outcome: 'dropped', code: 'no_words' });
+    // Only an echo of a nonce issued after the decode, just before the send, proves the phone is still there.
+    const pausedAfter = this.emitSeq;
+    this.setWords(text, true);
+    const start = this.start;
+    if (start === undefined || start.purpose === 'test') return this.settle({ turn, outcome: 'heard' });
+    const proved = await this.proof(pausedAfter);
+    if (this.ended) return;
+    if (!proved) {
+      this.parts.log.info('voice.stream.cancelled', { stream: this.parts.streamId, turn, code: 'phone_silent' });
+      return this.settle({ turn, outcome: 'cancelled', code: 'phone_silent' });
+    }
+    await this.deliver(text, turn);
+  }
+
+  private async deliver(text: string, turn: number): Promise<void> {
+    // A turn is handed over once. The send id is stable, so even a repeat of this very call would be ONE message.
+    const ferretId = this.ferretId;
+    if (this.ended || ferretId === undefined || this.sentTurns.has(turn) || this.parts.send === undefined) return;
+    // A grant can narrow while the stream is open: it is asked again for every message.
+    if (!this.parts.mayChat()) return this.settle({ turn, outcome: 'failed', code: 'fleet_not_granted' });
+    this.sentTurns.add(turn);
+    const sendId = `${this.parts.streamId}:${turn}`;
+    let result: Awaited<ReturnType<NonNullable<StreamParts['send']>>>;
+    try {
+      result = await this.parts.send(ferretId, `(voice) ${text}`, sendId);
+    } catch {
+      result = { ok: false, code: 'send_refused' };
+    }
+    if (!result.ok) return this.settle({ turn, outcome: 'failed', code: result.code });
+    this.parts.recordSent(ferretId);
+    this.parts.log.info('voice.stream.sent', { stream: this.parts.streamId, turn });
+    this.settle({ turn, outcome: 'sent', sendId });
+  }
+
+  /** Waits for an echo of a nonce issued after the pause, for at most {@link PROOF_WINDOW_MS}. */
+  private async proof(after: number): Promise<boolean> {
+    if (this.echoSeq > after) return true;
+    return await new Promise<boolean>(resolve => {
+      const done = (value: boolean): void => {
+        cancel();
+        this.wakeProof = undefined;
+        resolve(value);
+      };
+      const cancel = this.parts.clock.after(milliseconds(PROOF_WINDOW_MS), () => done(this.echoSeq > after));
+      this.wakeProof = () => {
+        if (this.echoSeq > after) done(true);
+      };
+    });
+  }
+
+  private async decodeWithin(audio: Float32Array, budgetMs: number): Promise<{ readonly text: string }> {
+    let timer: (() => void) | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = this.parts.clock.after(milliseconds(budgetMs), () => reject(new StreamTimeout()));
+    });
+    try {
+      return await Promise.race([this.call(() => this.parts.engine.transcribe(audio)), late]);
+    } finally {
+      timer?.();
+    }
+  }
+
+  /** A load that was superseded (the engine unloaded while this stream waited) is asked again once. */
+  private async call<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (error) {
+      if (error instanceof VoiceEngineError && error.code === 'not_ready' && !this.ended) return await work();
+      throw error;
+    }
+  }
+
+  private settle(outcome: TurnOutcome): void {
+    this.last = outcome;
+    this.failures = 0;
+    this.phase = 'idle';
+  }
+
+  private failTurn(code: string): void {
+    if (this.ended) return;
+    // A engine that cannot load or has no memory ends the stream: every turn would fail the same way.
+    if (code === 'voice_no_memory' || code === 'voice_not_ready' || code === 'engine_failed') {
+      this.refuse(code);
+      return;
+    }
+    this.failures += 1;
+    this.words = undefined;
+    this.samples.dropBefore(this.samples.length);
+    this.seenLength = 0;
+    this.last = { turn: this.turn, outcome: 'failed', code };
+    this.phase = 'idle';
+    this.parts.log.info('voice.stream.turn_failed', { stream: this.parts.streamId, turn: this.turn, code });
+    if (this.failures >= OVERLOAD_AFTER) this.refuse('engine_overloaded');
+  }
+
+  private codeOf(error: unknown): string {
+    if (error instanceof StreamTimeout) return 'engine_timeout';
+    if (error instanceof VoiceEngineError) {
+      if (error.code === 'no_memory') return 'voice_no_memory';
+      if (error.code === 'not_ready') return 'voice_not_ready';
+      return 'engine_failed';
+    }
+    return 'engine_failed';
+  }
+
+  // ─── downlink ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+  private state(): StreamState {
+    if (this.phase === 'loading') return 'loading';
+    if (this.muted) return 'muted';
+    return this.phase === 'idle' ? 'listening' : this.phase;
+  }
+
+  private setWords(text: string, final: boolean): void {
+    const rev = (this.words?.rev ?? -1) + 1;
+    if (this.words?.text === text && this.words.final === final) return;
+    this.words = { turn: this.turn, rev, text: text.slice(0, WORDS_MAX_CHARS), offset: 0, final };
+  }
+
+  /** One unit: always parseable alone, always carrying a fresh nonce, with the next piece of the words that fits. */
+  private emit(): void {
+    if (this.ended) return;
+    if (this.parts.downstream.bufferedBytes() > MAX_BUFFERED) {
+      this.endWith(STREAM_CLOSES.overloaded);
+      return;
+    }
+    const nonce = this.parts.nonce();
+    this.issued.set(nonce, this.emitSeq);
+    this.emitSeq += 1;
+    if (this.issued.size > ISSUED_KEPT) this.issued.delete(this.issued.keys().next().value as string);
+    const base: StreamSnapshot = {
+      v: 1,
+      state: this.state(),
+      nonce,
+      turn: this.turn,
+      ...(this.last === undefined ? {} : { last: this.last }),
+      ...(this.fatal === undefined ? {} : { error: this.fatal }),
+    };
+    const snapshot = this.withWords(base);
+    this.parts.downstream.send(encodeDownlinkUnit(snapshot));
+  }
+
+  private withWords(base: StreamSnapshot): StreamSnapshot {
+    const words = this.words;
+    if (words === undefined || words.offset >= words.text.length) return base;
+    const fits = (length: number): StreamSnapshot => ({
+      ...base,
+      words: {
+        turn: words.turn,
+        rev: words.rev,
+        offset: words.offset,
+        total: words.text.length,
+        text: words.text.slice(words.offset, words.offset + length),
+        final: words.final,
+      },
+    });
+    let low = 0;
+    let high = words.text.length - words.offset;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      if (snapshotBytes(fits(middle)) <= DOWNLINK_JSON_MAX_BYTES) low = middle;
+      else high = middle - 1;
+    }
+    // Never cut a surrogate pair in half: the other half would not be valid text on its own.
+    const edge = words.text.charCodeAt(words.offset + low - 1);
+    if (low > 1 && edge >= 0xd800 && edge <= 0xdbff) low -= 1;
+    if (low === 0) return base;
+    const chunk = fits(low);
+    words.offset += low;
+    return chunk;
+  }
+
+  // ─── ending ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  /** A fatal refusal: said once in a unit, then the stream closes. */
+  private refuse(code: string): void {
+    if (this.ended) return;
+    this.fatal = { code, message: sentenceOf(code) };
+    this.emit();
+    this.endWith(CLOSE_FOR[code] ?? STREAM_CLOSES.failed);
+  }
+
+  private endWith(close: { readonly code: number; readonly reason: string }): void {
+    if (this.ended) return;
+    this.finish();
+    this.parts.downstream.close(close.code, close.reason);
+  }
+
+  private finish(): void {
+    if (this.ended) return;
+    this.ended = true;
+    for (const cancel of this.cancels.splice(0)) cancel();
+    this.wakeProof?.();
+    this.releaseFerret?.();
+    this.releaseFerret = undefined;
+    this.parts.onEnd();
+  }
+}
+
+/** The final decode did not answer within its budget. */
+class StreamTimeout extends Error {}

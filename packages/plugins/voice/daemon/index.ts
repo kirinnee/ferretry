@@ -11,6 +11,7 @@ import { freemem } from 'node:os';
 import { StateEngineFiles } from './adapters/state-engine-files.ts';
 import { startSpeechThread, SPEECH_WORKER_URL } from './adapters/worker-speech-thread.ts';
 import { SpeechEngine } from './lib/engine/engine.ts';
+import { voiceStreamAccept } from './lib/stream/accept.ts';
 import { voiceRoutes } from './routes.ts';
 
 /**
@@ -26,7 +27,7 @@ export default implementDaemon(manifest, {
   workers: { speech: SPEECH_WORKER_URL },
   build(ctx) {
     const { kernel } = ctx;
-    const { vault } = ctx.needs;
+    const { vault, gate, ferrets } = ctx.needs;
     const authorizer = new OutboundProviderAuthorizer(vault);
     const stopwatch = { monotonicMs: () => kernel.clock.nowMs() };
     const log = kernel.log.child('stt');
@@ -67,6 +68,34 @@ export default implementDaemon(manifest, {
       settings: () => kernel.config.file(VOICE_CONFIG) ?? { postProcessing: DEFAULT_CLEANUP_SETTINGS },
     };
 
-    return { routes: voiceRoutes(enhancement, speedups, engine), provides: { voice } };
+    // The voice stream: each finished turn is sent to the ferret through Conversation's send, as the person's own message.
+    const streamLog = kernel.log.child('stream');
+    const sockets = {
+      'GET /v1/voice/stream': voiceStreamAccept({
+        engine,
+        clock: kernel.clock,
+        send: () => {
+          const conversation = ctx.uses.conversation.current();
+          if (conversation === undefined) return undefined;
+          return async (ferretId, message, sendId) => {
+            const sent = await conversation.send(
+              ferretId as Parameters<typeof conversation.send>[0],
+              { kind: 'owner' },
+              { message, sendId },
+            );
+            return sent.ok ? { ok: true } : { ok: false, code: 'send_refused' };
+          };
+        },
+        resolveFerret: async reference => {
+          const address = await ferrets.resolve(reference);
+          return address.kind === 'ferret' ? address.id : undefined;
+        },
+        fleetUseGranted: () => gate.policy()?.grants.fleet.use === true,
+        audit: async draft => await gate.audit(draft),
+        log: { info: (message, fields) => streamLog.info(message, fields) },
+      }),
+    };
+
+    return { routes: voiceRoutes(enhancement, speedups, engine), sockets, provides: { voice } };
   },
 });

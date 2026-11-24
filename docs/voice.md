@@ -8,7 +8,8 @@ fallback for the other, and nothing is chosen for you: until a device has chosen
 | **Parakeet on this device** | A one-time download of about 683 MB; about 1 GB of memory while in use | Nowhere. It is recorded and transcribed inside this browser.                            |
 | **Phone/browser voice**     | Nothing to download                                                    | To the browser's vendor (Google for Chrome and Android, Apple for Safari) to transcribe |
 
-Either way, **Ferretry never sends microphone audio to your daemon**. Optional clean-up (Groq,
+Either way, **dictation never sends microphone audio to your daemon**. (Voice mode and Talk to test do, on purpose, and only
+over the stream below, sealed end to end and never stored.) Optional clean-up (Groq,
 Cerebras — `voice.yaml`, [secrets.md](secrets.md)) receives the transcript _text_ only.
 
 The interface says "audio never leaves this device" **only while Parakeet is the active engine**
@@ -359,9 +360,9 @@ choosing Browser voice there sends no audio anywhere and Record says to pick an 
 
 ## Voice mode: the machine's speech engine
 
-**Built (voice mode unit 3):** the machine can install, load and run the speech models voice mode needs. Nothing
-calls them yet: the audio stream (unit 4), the panel (5) and the reply voice (6) come next, so Settings › Voice ›
-**Voice mode** only installs, shows the state and removes.
+**Built (voice mode units 3 and 4):** the machine can install, load and run the speech models voice mode needs, and a
+device can stream its microphone to them (below). The panel (5) and the reply voice (6) come next, so Settings › Voice ›
+**Voice mode** installs, shows the state, removes, and offers **Talk to test**.
 
 - **What runs where.** Owner decision O2: the sherpa-onnx **WebAssembly** runtime first (the same `@sherpaw/asr` the
   app ships), in one **worker thread** of the daemon (`daemon/worker/speech.worker.ts`), never in the daemon's own
@@ -389,6 +390,51 @@ calls them yet: the audio stream (unit 4), the panel (5) and the reply voice (6)
   `MemoryMax` the daemon may be running under.
 - **The port.** Other plugins use `VoiceApi.engine`: `transcribe(samples)` (16 kHz mono, one whole take; returns the
   text and the real-time factor) and `detectSpeech(samples)` (spans in samples). No route takes audio.
+
+### The voice stream (`GET /v1/voice/stream`)
+
+A `voice.use` socket, **person-only** (`caller: 'person'`: a ferret's or the warden's credential is not a grant caller, so
+the capability alone would not have stopped it). It is a §14 stream session (`docs/relay-protocol.md`), so direct, WebRTC
+and relay carry it with no new code, and the kernel re-checks the device's grants on every frame: **narrowing `voice`
+closes an open stream at once** (4401). `contract/stream.ts` is the wire; `daemon/lib/stream/` is the machine's end.
+
+- **Open.** Before the protocol switches the machine answers with a status: `409 voice_not_ready` (speech not installed),
+  `429 voice_busy` (one stream per device, two per machine). The first record is a text frame
+  `{t:'start', v:1, purpose:'test'|'chat', ferretId?, style?}`; anything else first, or a second start, is a protocol
+  error (4400). `test` shows live words and sends nothing. `chat` sends each finished turn to `ferretId` (an id or a
+  callsign, resolved as a typed send resolves it), and a second stream for the same ferret, however it is named, is refused
+  `voice_busy` in its first unit. **A chat needs `fleet.use` as well as `voice.use`**: without it the start is refused in
+  a plain sentence (`fleet_not_granted`, close 4403), the grant is asked again before every message, and each message
+  sent leaves the same `agent.prompted` audit record a typed send does.
+- **Up: a constant 1,344-byte unit every 40 ms** — 640 samples of 16 kHz PCM16, then a 64-byte control slot (`none`,
+  `muted`, `unmuted`, `end`, and the newest nonce echoed). Silence and muted time are zero samples, so a relay never sees
+  when anyone speaks. More than 1.25× the nominal rate over 5 s is closed (1008).
+- **Down: a constant 1,024-byte unit every 200 ms** — a length and JSON, zero-padded: the machine's state (`loading`,
+  `listening`, `hearing`, `working`, `muted`), a fresh nonce, the words of the turn in fragments that arrive over
+  consecutive ticks (the browser rebuilds them by `(turn, rev)`; over 16 KB is refused), and how the last turn ended
+  (`sent`, `heard`, `dropped`, `cancelled`, `failed`). A refusal is one unit with a fixed sentence, then the close.
+- **The pause and the send (owner decision O1: no countdown).** Silero VAD finds the voice; a silence of 1.5 s (styles
+  `quick` 1.0 s, `thinker` 2.5 s — **guesses**, tuned from unit 5's numbers) ends the turn, or 120 s whatever the voice
+  is doing. The final decode starts at once and the message is sent **as soon as it is ready**, as the person's own
+  message through Conversation's send, prefixed `(voice) `, with the stable id `<streamId>:<turn>`. A turn is handed over
+  once; a refused or failed send is reported, never repeated by the stream.
+- **A dead phone never sends.** The send waits for an echo of a nonce the machine issued **after** it heard the pause. A
+  device that died, lost its network or entered a tunnel cannot echo it; the turn is cancelled
+  (`phone_silent`) and nothing is sent. Units that arrive for a moment after a phone dies carry the OLD nonce, which proves
+  nothing. A stream with no unit for 5 s is closed (4408).
+- **Words while you speak.** The engine has no streaming decode, so a turn of at most 5 s is re-decoded about every 1.2 s
+  (5 s of speech decodes in about 1.9 s, above); a longer turn keeps its last words until the final decode. Past that the
+  final decode has 5 s plus half the audio's length.
+- **Fails out loud.** More than 2 s of unseen audio (`engine_behind`) or a decode over its budget (`engine_timeout`) loses
+  that turn, with a sentence; three lost turns in a row end the stream (`engine_overloaded`, 4450). Not enough memory to
+  load speech ends it at once (`voice_no_memory`). Audio is never silently skipped inside a turn. Only the engine's
+  public API is used: the load generation and the idle unload are the engine's own, and a load superseded by an unload is
+  asked again once.
+- **Never stored.** Audio lives in the stream's memory for the turn and is dropped when the turn ends.
+- **Declared gaps.** The browser cannot yet see the socket's back-pressure (`PluginSocket` has no credit signal), so it
+  does not stop at "2 s of audio it has no credit to send". The Opus uplink (design B6) is not built: about 190 MB an hour
+  over the wire. The nonce proof is stricter than the design's text (an echo issued after the pause, not any echo within
+  1 s), so a phone dying within the last second can no longer send.
 
 **Measured here (2026-11-24; 32-core Linux x64, load average about 8, run under `nice`; one WebAssembly thread):**
 

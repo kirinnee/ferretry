@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import type { HostFactsPort } from '@ferretry/kernel/contract';
 import { ferret, owner, testHost, warden } from '@ferretry/kernel/testing';
 import { CAPABILITY_NAMES, FULL_DEVICE_GRANTS, type CapabilityGrants } from '@ferretry/core-gate/contract';
-import { deviceStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
+import { deviceStanding, FakeGate, StandInAdmission } from '@ferretry/core-gate/contract/testing';
+import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { ENGINE_HOSTS, VoiceEngineViewSchema } from '../../../contract/index.ts';
 import voice from '../../../daemon/index.ts';
@@ -12,7 +13,11 @@ import manifest from '../../../manifest.ts';
 const refused = (url: URL): Response => new Response(`no ${url.pathname}`, { status: 503 });
 
 async function host(fetch: (url: URL) => Response | Promise<Response> = refused) {
-  return await testHost({ plugins: [voice], fakes: { vault: new FakeVault() }, fetch });
+  return await testHost({
+    plugins: [voice],
+    fakes: { vault: new FakeVault(), gate: new FakeGate(), ferrets: new FakeFerrets() },
+    fetch,
+  });
 }
 
 describe('the machine speech engine routes', () => {
@@ -87,7 +92,7 @@ describe('the voice capability governs the engine routes (owner decision O3)', (
   async function gated(grants: CapabilityGrants) {
     return await testHost({
       plugins: [voice],
-      fakes: { vault: new FakeVault() },
+      fakes: { vault: new FakeVault(), gate: new FakeGate(), ferrets: new FakeFerrets() },
       fetch: refused,
       // A paired phone, with the passkey step-up already done: only the grants decide here.
       gate: new StandInAdmission(() => deviceStanding('phone', grants, true)),
@@ -119,7 +124,7 @@ describe('Install checks the disk through the host', () => {
   const withFree = async (free: number | undefined) =>
     await testHost({
       plugins: [voice],
-      fakes: { vault: new FakeVault() },
+      fakes: { vault: new FakeVault(), gate: new FakeGate(), ferrets: new FakeFerrets() },
       fetch: refused,
       hostFacts: { diskFreeBytes: async () => free } as unknown as HostFactsPort,
     });

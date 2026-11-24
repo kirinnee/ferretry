@@ -1153,7 +1153,10 @@ frames is when the screen changed, and their size is how much of it changed. The
 is true of a remote-browser view, whose frame sizes also track how much of the page is changing. The operator meter persists the
 counts, sizes and timing fields described above. Neither party can observe frame payloads, device
 tokens, pairing codes, session content, stream content, commands, output, daemon names or device
-names. The same X25519/Ed25519/AES-256-GCM channel described in §§2, 6 and 7 terminates only at the
+names. A **voice stream** (`/v1/voice/stream`, [voice.md](voice.md)) is one more stream session: the relay sees that it was opened, when,
+how long, and a constant record size and cadence both ways — 1,344 bytes up every 40 ms, 1,024 down every 200 ms, with silence
+and muted time sent as zero samples — so the stream itself does not show when anyone speaks, pauses or presses End. It can still
+see roughly when a turn was SENT, because the ordinary event stream moves exactly as when typing. Never any audio or word. The same X25519/Ed25519/AES-256-GCM channel described in §§2, 6 and 7 terminates only at the
 daemon and browser. The relay is incapable of decrypting content, including when a cap is hit.
 
 ### The carrier set a daemon publishes

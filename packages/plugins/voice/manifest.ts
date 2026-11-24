@@ -1,6 +1,7 @@
-import { audit, cap } from '@ferretry/core-gate/contract';
+import { audit, cap, GatePort } from '@ferretry/core-gate/contract';
+import { FerretsPort } from '@ferretry/core-ferrets/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
-import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, panel, route, settingsTab, socket, verb } from '@ferretry/kernel/manifest';
 import {
   CLEANUP_PROVIDERS,
   ENGINE_HOSTS,
@@ -38,7 +39,8 @@ export default definePlugin({
   // The machine speech engine's worker thread (voice mode): `fyd --check` starts it, so a binary without it is seen at once.
   workers: ['speech'],
 
-  needs: { vault: VaultPort },
+  // Gate to record the messages the stream sends; Ferrets to say which ferret a name means (as a typed send does).
+  needs: { vault: VaultPort, gate: GatePort, ferrets: FerretsPort },
   // Conversation is optional: Read aloud is drawn in its transcript, and with Conversation off there is no transcript.
   uses: { logins: LoginsPort, conversation: ConversationPort },
   provides: { voice: VoicePort },
@@ -94,6 +96,22 @@ export default definePlugin({
         // A Test spends one provider key on the operator's account; the secret's NAME is the subject.
         audit: audit('secrets.used'),
         guard: { none: 'a code and one fixed sentence; never the provider body' },
+      }),
+    ],
+    sockets: [
+      // The voice stream (§14, unit 4): the microphone up, the words down, and the machine sends each finished turn to the
+      // ferret itself, which needs fleet.use as well as voice.use (checked at the start and before every send). A person's own device only: a ferret's session credential is not a grant caller, so `caller: 'person'`
+      // is what keeps it from streaming audio to this machine or sending as the person.
+      socket('GET /v1/voice/stream', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('voice', 'use'),
+        audit: {
+          skip: 'a stream is opened, not an act: each message it sends is recorded by the stream itself, as a typed send is (agent.prompted, action send)',
+        },
+        guard: {
+          none: "audio in and fixed-shape snapshots out; the words are the speaker's own, from no pane, page or vault",
+        },
       }),
     ],
     cli: [

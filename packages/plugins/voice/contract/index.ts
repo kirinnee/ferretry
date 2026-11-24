@@ -10,3 +10,4 @@ export * from './speedups.ts';
 export * from './state.ts';
 export * from './stt.ts';
 export * from './engine.ts';
+export * from './stream.ts';
