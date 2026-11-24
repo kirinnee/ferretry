@@ -61,6 +61,16 @@ describe('the composer quota', () => {
   });
 });
 
+describe('the composer quota — while the feed has not answered', () => {
+  test('says nothing when nothing is known yet, and still draws what is', () => {
+    for (const quota of [undefined, null, {}])
+      expect(render(<ComposerQuota pending quota={quota} />).toJSON()).toBeNull();
+    expect(findText(render(<ComposerQuota pending={false} quota={null} />).root, 'No usage data')).toHaveLength(1);
+    expect(findText(render(<ComposerQuota pending quota={{ weeklyPercent: 40 }} />).root, 'wk 40%')).toHaveLength(1);
+    expect(findText(render(<ComposerQuota pending quota={{ atLimit: true }} />).root, 'at limit')).toHaveLength(1);
+  });
+});
+
 describe('the composer quota — the money that was read', () => {
   test('says the month spend that was read, never the balance left in its place', () => {
     const openRouter = { spendUsd: 12.4, balance: { amount: 37.6, currency: 'USD' } };
