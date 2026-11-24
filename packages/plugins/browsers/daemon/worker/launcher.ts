@@ -22,7 +22,6 @@ import type { BrowserAutomation } from '../pages/automation.ts';
 import type { BrowserHost } from '../adapters/host.ts';
 import type { ListenerProverPort } from './control/adapters/listener-prover.ts';
 import type { BrowserDisplayPort } from './control/adapters/login-runtime.ts';
-import type { EngineLaunch } from './control/engines.ts';
 import { ProxySignInRelay } from '../proxy/adapters/sign-in-relay.ts';
 import { BrowserWorkerClient, type StartWorker, type WorkerClientOptions } from './client.ts';
 
@@ -74,12 +73,6 @@ export interface SessionBrowserModeOptions {
    * `undefined` too: hiding automation is never the fallback.
    */
   readonly stealth?: (proxy: ResolvedBrowserProxy | undefined) => Promise<StealthLaunch | undefined>;
-  /**
-   * The browser build to run (`browsers.yaml engine:`), read at every launch like the mode; `undefined` is the machine's
-   * own Chromium. Unlike the mode, an engine that cannot be had REFUSES the launch with its sentence, before anything is
-   * leased: another browser is never the fallback.
-   */
-  readonly engine?: () => Promise<EngineLaunch | undefined>;
   /**
    * The proxy the shared browser goes through, read at every launch like the mode. Unlike the mode, a proxy
    * that cannot be resolved REFUSES the launch: starting without it would send traffic its owner asked to route
@@ -145,16 +138,11 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     const noWorker = this.modes.workerRefusal?.();
     if (noWorker !== undefined) throw new BrowserControlError('launch_failed', noWorker);
     const host = this.ports.host;
-    // An engine other than the machine's Chromium brings its own program (fetched on first use) and switches; a refusal
-    // from it is the launch's, said before anything is leased.
-    const engine = await this.modes.engine?.();
-    const executable =
-      engine?.executable ??
-      selectChromeExecutable(host.platform, this.environment.FY_CHROME_BIN, host.exists, {
-        home: this.environment.HOME,
-        path: this.environment.PATH,
-        available: command => host.which(command, this.environment.PATH) !== undefined,
-      });
+    const executable = selectChromeExecutable(host.platform, this.environment.FY_CHROME_BIN, host.exists, {
+      home: this.environment.HOME,
+      path: this.environment.PATH,
+      available: command => host.which(command, this.environment.PATH) !== undefined,
+    });
     // The display is a precondition too: a Linux real window with no Xvfb refuses here, before any lease.
     const platform = this.modes.platform ?? host.platform;
     const configuredMode = await this.mode();
@@ -197,7 +185,6 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         ...agentBrowserArguments(executable, lease.profile, cdp, viewport, platform, mode, {
           ...(userAgent === undefined ? {} : { userAgent }),
           ...(stealth === undefined ? {} : { stealth }),
-          ...(engine === undefined ? {} : { engineFlags: engine.flags }),
           ...(proxy === undefined
             ? {}
             : {

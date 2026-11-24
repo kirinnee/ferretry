@@ -1,5 +1,4 @@
 import { existsSync, realpathSync } from 'node:fs';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type BrowserWorkerProgram, selectBrowserWorker } from '../worker/program.ts';
@@ -25,10 +24,6 @@ export interface BrowserHost {
   /** A program on this host's PATH (or on `path`) at the moment of use, or `undefined`. */
   which(name: string, path?: string): string | undefined;
   exists(path: string): boolean;
-  /** The three file calls fetching an engine needs (`state/browsers/engines/`): write a file (its folder made), move a folder into place, remove a path (absent is fine). */
-  writeFile(path: string, bytes: Uint8Array): Promise<void>;
-  rename(from: string, to: string): Promise<void>;
-  remove(path: string): Promise<void>;
   /** The browser worker program: the compiled worker beside the daemon, or the source entry run under Node. */
   workerProgram(): BrowserWorkerProgram;
 }
@@ -95,12 +90,6 @@ export function processHost(source: Readonly<Record<string, string | undefined>>
     arch: process.arch,
     which: (name, path) => Bun.which(name, { PATH: path ?? environment.PATH ?? '' }) ?? undefined,
     exists: path => existsSync(path),
-    writeFile: async (path, bytes) => {
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, bytes);
-    },
-    rename: async (from, to) => await rename(from, to),
-    remove: async path => await rm(path, { recursive: true, force: true }),
     // Beside the daemon both as invoked and as resolved: a Homebrew or Nix install reaches it through a symlink whose
     // directory holds no worker (today's `browserWorkerProgram`).
     workerProgram: () => {

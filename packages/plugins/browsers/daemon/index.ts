@@ -48,7 +48,6 @@ import { NodeBrowserLoginRuntime, XvfbDisplay } from './worker/control/adapters/
 import { loopbackFirewallDoctor } from './proxy/firewall/doctor.ts';
 import { BrowserProfileStore } from './worker/control/adapters/profile-store.ts';
 import { stealthLaunchFor } from './worker/control/policy.ts';
-import { EngineResolver } from './worker/control/engines.ts';
 import type { StartWorker } from './worker/client.ts';
 import { NodeSessionBrowserLauncher } from './worker/launcher.ts';
 import { workerCommand } from './worker/program.ts';
@@ -141,20 +140,6 @@ export function buildBrowsers(
   });
   // One probe for the proxy test and for the exit a stealth identity's zone and language are read from.
   const proxyProbe = new TunnelProxyProbe({ clock: kernel.clock });
-  // The browser build (`browsers.yaml engine:`): the machine's Chromium, or a patched one fetched once, by hash, on first use.
-  const engines = new EngineResolver({
-    platform: host.platform,
-    arch: host.arch,
-    stateDirectory: host.stateDirectory,
-    path: host.environment.PATH,
-    exists: host.exists,
-    fetch: kernel.fetch,
-    spawn: kernel.spawn,
-    writeFile: host.writeFile,
-    rename: host.rename,
-    remove: host.remove,
-    info: (message, fields) => kernel.log.info(message, fields),
-  });
   const launcher =
     seams.launcher ??
     new NodeSessionBrowserLauncher(
@@ -166,7 +151,6 @@ export function buildBrowsers(
       {
         workerRefusal: () => ('refused' in command ? command.refused : undefined),
         mode: async () => config()?.mode ?? 'headless',
-        engine: async () => await engines.resolve(config()?.engine ?? 'chromium'),
         // GAP: the Vault has no port that hands Browsers a proxy credential (use, never read), so a proxy that
         // names `${secret:…}` credentials refuses the launch rather than going around the proxy.
         proxy: async () => {

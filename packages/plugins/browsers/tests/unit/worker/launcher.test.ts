@@ -237,49 +237,6 @@ describe('the agent browser launcher, with the worker as a process of its own', 
   });
 });
 
-describe('an engine’s launch', () => {
-  test('runs the engine’s own program with its switches, and asks the machine’s Chromium for nothing', async () => {
-    // Arrange
-    const w = world({
-      modes: {
-        engine: async () => ({
-          executable: '/engines/chrome',
-          flags: ['--fingerprint=7', '--fingerprint-platform=linux'],
-        }),
-      },
-    });
-
-    // Act
-    const browser = await w.launcher.launch(VIEWPORT);
-
-    // Assert — the version run and the browser are the engine's program, and its switches are on the command line.
-    expect(w.spawned.map(each => each.program)).toEqual(['/engines/chrome', '/engines/chrome']);
-    expect(w.spawned[1]?.args).toContain('--fingerprint=7');
-    expect(w.spawned[1]?.args).toContain('--fingerprint-platform=linux');
-    await browser.close();
-  });
-
-  test('refuses with the engine’s sentence before anything is leased or spawned, and never falls back to Chromium', async () => {
-    // Arrange
-    const w = world({
-      modes: { engine: async () => await Promise.reject(new Error('the cloakbrowser engine is not available')) },
-    });
-
-    // Act + Assert
-    await expect(w.launcher.launch(VIEWPORT)).rejects.toThrow('the cloakbrowser engine is not available');
-    expect(w.acquired).toEqual([]);
-    expect(w.spawned).toEqual([]);
-  });
-
-  test('leaves a launch with no engine byte for byte as it was: no fingerprint switch', async () => {
-    const w = world({ modes: { engine: async () => undefined } });
-    const browser = await w.launcher.launch(VIEWPORT);
-    expect(w.spawned[1]?.program).toBe(CHROME);
-    expect(w.spawned[1]?.args.some(argument => argument.startsWith('--fingerprint'))).toBe(false);
-    await browser.close();
-  });
-});
-
 describe('a stealth identity’s launch', () => {
   const DISPLAY = { display: async () => ':77', authority: () => '/fake/x11/cookie', close: async () => undefined };
 

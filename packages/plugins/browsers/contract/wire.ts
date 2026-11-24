@@ -226,16 +226,6 @@ export type BrowserLoginAction = z.infer<typeof BrowserLoginActionSchema>;
 // ─── stealth (docs/browser-mode.md, "Stealth") ──────────────────────────────────────────────────────────────────
 
 export const StealthSwitchSchema = z.enum(['off', 'on']);
-
-/**
- * Which browser build the agent browser runs (docs/browser-mode.md, "Engine"). `chromium` is the one the machine has and
- * the default; `fingerprint-chromium` is a patched Chromium Ferretry fetches on demand (a pinned release, checked by
- * hash); `cloakbrowser` is named so the choice exists, but its binary is proprietary and licensed per launch, and this
- * build refuses it with a sentence rather than download or start it.
- */
-export const BROWSER_ENGINES = ['chromium', 'cloakbrowser', 'fingerprint-chromium'] as const;
-export const BrowserEngineSchema = z.enum(BROWSER_ENGINES);
-export type BrowserEngine = z.infer<typeof BrowserEngineSchema>;
 export type StealthSwitch = z.infer<typeof StealthSwitchSchema>;
 
 /** The key a per-identity entry is written under: a short name, never an email address. */
@@ -258,8 +248,6 @@ export const BrowsersConfigSchema = z.strictObject({
   proxy: BrowserProxySettingSchema.optional(),
   /** The ONE stealth switch: `on` opts in every identity on this machine (except one that opted out). Off → on is held for the owner. */
   stealth: StealthSwitchSchema.default('off'),
-  /** The browser build, for the whole machine; anything but `chromium` is held for the owner (it runs a different program). */
-  engine: BrowserEngineSchema.default('chromium'),
   identities: z.record(z.string().regex(BROWSER_IDENTITY_KEY_PATTERN), BrowserIdentitySettingSchema).optional(),
 });
 export type BrowsersConfig = z.infer<typeof BrowsersConfigSchema>;

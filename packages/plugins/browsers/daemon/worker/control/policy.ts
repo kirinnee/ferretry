@@ -190,8 +190,6 @@ export interface ChromeLaunchOptions {
   readonly proxy?: { readonly server: string; readonly bypass: readonly string[] };
   /** A stealth identity's hygiene ({@link StealthLaunch}); `undefined` is every other launch, which is byte for byte as it was. */
   readonly stealth?: StealthLaunch;
-  /** The switches the chosen engine takes (`engineFlags`); none for the machine's own Chromium. */
-  readonly engineFlags?: readonly string[];
 }
 
 /**
@@ -351,7 +349,6 @@ export function chromeLaunchArguments(
                 `--accept-lang=${options.stealth.locale},${options.stealth.locale.split('-')[0] ?? ''}`,
               ]),
         ]),
-    ...(options.engineFlags ?? []),
     ...(options.proxy === undefined ? [] : chromeProxyArguments(options.proxy.server, options.proxy.bypass)),
     '--disable-dev-shm-usage',
     ...(options.keepPainting === true
@@ -508,8 +505,6 @@ export interface AgentBrowserExtras {
   readonly proxy?: { readonly server: string; readonly bypass: readonly string[] };
   /** A stealth identity: always a real window ({@link StealthLaunch}), whatever the mode says. */
   readonly stealth?: StealthLaunch;
-  /** The switches of the engine the machine chose; a launch without any is unchanged. */
-  readonly engineFlags?: readonly string[];
 }
 
 /**
@@ -545,7 +540,6 @@ export function agentBrowserArguments(
     ...(headless && extras.userAgent !== undefined ? { userAgent: extras.userAgent } : {}),
     ...(extras.proxy === undefined ? {} : { proxy: extras.proxy }),
     ...(extras.stealth === undefined ? {} : { stealth: extras.stealth }),
-    ...(extras.engineFlags === undefined ? {} : { engineFlags: extras.engineFlags }),
   });
 }
 

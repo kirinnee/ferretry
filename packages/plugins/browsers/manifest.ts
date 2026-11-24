@@ -791,8 +791,6 @@ export default definePlugin({
       'google-chrome-stable',
       'Google Chrome',
       'Chromium',
-      /** Unpacks the one engine archive Ferretry fetches (`daemon/worker/control/engines.ts`). */
-      'tar',
       'Xvfb',
       'x11vnc',
       'timeout',
@@ -813,10 +811,7 @@ export default definePlugin({
     hostFacts: true,
     /** Uploads come from the ferret's own folder, and downloads and PDFs are saved into it (S51). */
     roots: ['work'],
-    /**
-     * Chrome's own DevTools endpoint on loopback, which the launcher waits for; and the two hosts the one pinned engine
-     * download uses, GitHub's release address and the host it redirects its assets to (`ENGINE_DOWNLOAD_HOSTS`).
-     */
-    network: ['127.0.0.1', 'github.com', 'release-assets.githubusercontent.com'],
+    /** Chrome's own DevTools endpoint on loopback, which the launcher waits for. */
+    network: ['127.0.0.1'],
   },
 });
