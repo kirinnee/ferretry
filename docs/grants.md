@@ -36,19 +36,31 @@ no questionnaire and no secret** to be useful.
 keyboard can open a terminal, read the admin token and do all of it anyway. What the model buys is that every
 browser is bounded and deliberate, not that the host is defended against somebody sitting at it.
 
-The answer has two cases:
+The answer has these cases:
 
-| caller                                                 | governed?            | person routes?                   |
-| ------------------------------------------------------ | -------------------- | -------------------------------- |
-| `fy` on the host (admin token, loopback)               | no, always           | yes                              |
-| a ferret session (its own `fys_` credential, on host)  | no — not a grant one | never: `403 owner_only`          |
-| the admin token naming a ferret's session (older `fy`) | no, always           | never: `403 owner_only`          |
-| anything else, a browser on the host too               | yes, unconditionally | yes, a paired device is a person |
+| caller                                                 | governed?             | person routes?                     |
+| ------------------------------------------------------ | --------------------- | ---------------------------------- |
+| `fy` on the host (admin token, loopback)               | no, always            | yes                                |
+| a ferret session (its own `fys_` credential, on host)  | no — not a grant one  | never: `403 owner_only`            |
+| the admin token naming a ferret's session (older `fy`) | no, always            | never: `403 owner_only`            |
+| a remote MCP connector (admin token, off loopback)     | yes, daemon-wide only | person routes, never a step-up act |
+| anything else, a browser on the host too               | yes, unconditionally  | yes, a paired device is a person   |
 
-`GrantsView` carries `governed` (do the limits apply to me), `hostLocal` (did this request arrive on the
-machine) and `steppedUp` (does this device hold a passkey step-up right now). Today `hostLocal` is exactly
-`!governed`; the two stay separate fields because they are different questions, and a UI that derived one
-from the other would have to be rewritten the day a third caller class appears.
+The connector row needs its own paragraph. The remote MCP connector ([mcp-connector.md](mcp-connector.md)) presents the **admin token off loopback**, so it is **governed** — the daemon-wide grants
+apply and every act that wants a passkey is refused — yet it **never unlocks**, because the unlock is asked only of a
+proven device and the connector has none. For as long as its grant lives it works with every phone locked and nobody
+home. That is why approving one wants `pairing.configure` and a passkey proved fresh for that act
+(`approve-connector`): the approval is the only moment a person is in the loop. And because a `fleet:write` grant
+reaches `spawn_ferret` and `send_to_ferret`, whose ferrets run commands on the host as the owner, that grant is in
+effect code execution — see [mcp-connector.md](mcp-connector.md#what-a-tool-may-do-and-how) for the plain statement and
+for the read-only recommendation.
+
+| caller                                                                                                     | governed? | person routes? |
+| ---------------------------------------------------------------------------------------------------------- | --------- | -------------- |
+| `GrantsView` carries `governed` (do the limits apply to me), `hostLocal` (did this request arrive on the   |
+| machine) and `steppedUp` (does this device hold a passkey step-up right now). Today `hostLocal` is exactly |
+| `!governed`; the two stay separate fields because they are different questions, and a UI that derived one  |
+| from the other would have to be rewritten the day a third caller class appears.                            |
 
 ### A ferret session's own credential is not a device
 

@@ -9,6 +9,7 @@ import {
   type PushNotificationPayload,
   PushNotificationPayloadSchema,
 } from '@ferretry/protocol';
+import { type ApiActor, connectorGrantOf } from '../api/actor.ts';
 import type { AuthenticatedCredential } from '../api/authentication.ts';
 import type { AuditEntry, PairedDeviceNotice } from './types.ts';
 
@@ -27,13 +28,22 @@ import type { AuditEntry, PairedDeviceNotice } from './types.ts';
  *
  * A FERRET'S OWN SESSION CREDENTIAL IS `host` TOO — it is on this machine — and the record says which
  * ferret in its detail ({@link agentAuditDetail}), exactly as the agent tools have always recorded one.
+ *
+ * A REMOTE CONNECTOR IS NOT THE HOST, though it holds the admin token. The connector's in-process dispatch sends
+ * the admin token and names its grant as the request's API actor (`connector:<grantId>`, `connectorActor`), and
+ * that actor — derived at the boundary, never from the body — is what says "Claude acted, under this grant". A log
+ * that read only the token class would file a prompt Claude sent as "this computer", the one actor a reader has
+ * no reason to question. Only the ADMIN token can carry it: a device or a session credential is itself, whatever
+ * header rode along.
  */
 export function auditActorOf(
   credential: AuthenticatedCredential | undefined,
   deviceName: string | undefined,
+  apiActor?: ApiActor,
 ): AuditActor {
   if (credential === undefined) return { kind: 'anonymous' };
   if (credential.tokenClass === 'session') return { kind: 'host' };
+  if (credential.tokenClass === 'admin' && connectorGrantOf(apiActor) !== undefined) return { kind: 'connector' };
   if (credential.tokenClass !== 'device') return { kind: credential.tokenClass === 'admin' ? 'host' : 'warden' };
   return {
     kind: 'device',
@@ -43,11 +53,15 @@ export function auditActorOf(
 }
 
 /**
- * The detail that names the ferret behind a record its own session credential caused: `by: 'agent'`, as
- * the agent tools write, and the session — never the credential. Nothing for any other caller.
+ * The detail that names who is behind a record the actor alone does not: the ferret whose own session credential
+ * caused it (`by: 'agent'`, as the agent tools write, and the session — never the credential), or the grant of a
+ * remote connector (`grant`, the key the connector's own rows use, so one grant's rows read together). Nothing
+ * for any other caller.
  */
-export function agentAuditDetail(credential: AuthenticatedCredential | undefined): AuditDetail {
-  return credential?.tokenClass === 'session' ? { by: 'agent', session: credential.sessionId } : {};
+export function agentAuditDetail(credential: AuthenticatedCredential | undefined, apiActor?: ApiActor): AuditDetail {
+  if (credential?.tokenClass === 'session') return { by: 'agent', session: credential.sessionId };
+  const grant = credential?.tokenClass === 'admin' ? connectorGrantOf(apiActor) : undefined;
+  return grant === undefined ? {} : { grant };
 }
 
 /**

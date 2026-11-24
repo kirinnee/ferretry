@@ -55,6 +55,15 @@ export function connectorActor(grantId: string): `connector:${string}` {
   return `${CONNECTOR_ACTOR_PREFIX}${grantId}`;
 }
 
+/**
+ * The grant a connector actor names, or nothing for any other actor. The ONE place an actor string becomes a grant
+ * id, so the security log and the journal read the same value ({@link CONNECTOR_CLIENT} is the only shape
+ * `resolveApiActor` ever lets through).
+ */
+export function connectorGrantOf(actor: ApiActor | undefined): string | undefined {
+  return actor !== undefined && CONNECTOR_CLIENT.test(actor) ? actor.slice(CONNECTOR_ACTOR_PREFIX.length) : undefined;
+}
+
 /** Which credential authenticated the request. `session` is a ferret's own session credential. */
 export type TokenClass = 'admin' | 'warden' | 'device' | 'session';
 
