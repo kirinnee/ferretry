@@ -265,7 +265,7 @@ describe('a stealth identity’s launch', () => {
       TZ: 'Europe/Berlin',
       LANGUAGE: 'de_DE',
     });
-    expect(w.workerStarts[0]?.env).toMatchObject({ FY_BROWSER_STEALTH: '1' });
+    expect(w.workerStarts[0]?.env).toMatchObject({ FY_BROWSER_WORKER_STEALTH: '1' });
     await browser.close();
   });
 
@@ -292,7 +292,7 @@ describe('a stealth identity’s launch', () => {
       );
       expect(chrome?.options?.env).not.toHaveProperty('TZ');
       expect(chrome?.options?.env).not.toHaveProperty('LANGUAGE');
-      expect(w.workerStarts[0]?.env).not.toHaveProperty('FY_BROWSER_STEALTH');
+      expect(w.workerStarts[0]?.env).not.toHaveProperty('FY_BROWSER_WORKER_STEALTH');
       await browser.close();
     },
   );

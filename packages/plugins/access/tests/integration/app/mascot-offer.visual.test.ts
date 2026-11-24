@@ -504,10 +504,13 @@ describe('r11 O10: the passkey offer buttons are one fixed size', () => {
         expect(card.border, 'no border').toEqual([0, 0, 0, 0]);
         expect(card.background, 'no fill').toBe('rgba(0, 0, 0, 0)');
         expect(card.padding, 'no padding').toEqual([0, 0, 0, 0]);
-        // C59 O3: the shared answer row. Desktop: 192 px each at the two ends of one row; phone: the offer's width, stacked.
+        // C59 O3 + owner ruling C-6 ("dont make the button take the full width"): the pair shares ONE width (the longer label's, 12rem
+        // at the least) and neither takes the column's. Desktop: 192 px each in one row; phone: stacked, at that one width.
         const offerBox = must(await tab.locator('[data-first-passkey-offer]').boundingBox(), 'the offer');
-        if (variant.phone) expect(add.width, 'phone: Add is the full width').toBeCloseTo(offerBox.width, 0);
-        else expect(add.width, 'desktop: Add is 192 px wide').toBeCloseTo(192, 0);
+        if (variant.phone) {
+          expect(add.width, 'phone: Add is not the column’s full width').toBeLessThan(offerBox.width - 8);
+          expect(add.width, 'phone: Add is at least 12rem (192 px)').toBeGreaterThanOrEqual(192 - 0.5);
+        } else expect(add.width, 'desktop: Add is 192 px wide').toBeCloseTo(192, 0);
         expect(later.width, 'Not now is the same width').toBeCloseTo(add.width, 0);
         expect(add.height).toBeGreaterThanOrEqual(44);
         // The label (icon included) is centred in its button: its content box midpoint is the button midpoint ± 1 px.

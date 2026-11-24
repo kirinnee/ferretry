@@ -370,7 +370,7 @@ export function buildBrowsers(
     platform: host.platform,
   });
 
-  // The ONE stealth switch (no behaviour behind it yet): its real changes are audited, a held `on` only once confirmed.
+  // The ONE stealth switch: its real changes are audited, a held `on` only once confirmed.
   const cancelStealthAudit = auditStealthSwitch({
     read: () => config()?.stealth ?? 'off',
     watch: listener => kernel.config.watch(manifest.data.config[0] as ConfigFileDef<BrowsersConfig>, listener),

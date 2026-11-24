@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { AuditDetailSchema, AuditRecordSchema } from '@ferretry/core-gate/contract';
+import { AUDIT_KEPT_KINDS, AuditDetailSchema, AuditRecordSchema } from '@ferretry/core-gate/contract';
 import { AUDIT, StealthAuditDetailSchemas } from '../../../contract/index.ts';
 import { auditStealthSwitch } from '../../../daemon/stealth-audit.ts';
 
@@ -61,6 +61,12 @@ describe('stealth audit records hold no secret', () => {
           detail,
         }).success,
       ).toBe(true);
+  });
+
+  test('the switch change is a KEPT record (a security setting), and the per-session and per-solve ones are not', () => {
+    expect(AUDIT_KEPT_KINDS).toContain(AUDIT.stealthSwitched);
+    for (const kind of [AUDIT.stealthSession, AUDIT.captchaSolve, AUDIT.captchaCapReached])
+      expect(AUDIT_KEPT_KINDS as readonly string[]).not.toContain(kind);
   });
 
   test('no field name can carry a secret, and a shape takes no field it did not declare', () => {
