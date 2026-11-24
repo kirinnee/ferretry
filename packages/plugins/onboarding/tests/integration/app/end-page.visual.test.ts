@@ -357,3 +357,38 @@ describe('the last page', () => {
       }, 90_000);
     }
 });
+
+/** Q8b item 9: with no runtime made the done page leaves Runtimes unticked, as a row left for later with a way to set it up. */
+describe('the last page when no runtime was made', () => {
+  for (const viewport of [
+    { name: '1440', width: 1_440, height: 900, phone: false },
+    { name: '390', width: 390, height: 844, phone: true },
+  ] as const)
+    for (const mode of ['light', 'dark'] as const)
+      it(`does not tick Runtimes (${viewport.name}, ${mode})`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          colorScheme: mode,
+          deviceScaleFactor: viewport.phone ? 2 : 1,
+          ...(viewport.phone ? { isMobile: true, hasTouch: true } : {}),
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const tab = await context.newPage();
+        try {
+          await tab.goto(`${origin}/?case=norun&theme=studio-${mode}`);
+          await tab.waitForSelector('[data-flow-end]');
+          await tab.waitForTimeout(300);
+          const runtimes = tab.locator('[data-end-row="daemon:runtimes"]');
+          expect(await runtimes.getAttribute('data-end-state')).toBe('later');
+          expect(await runtimes.locator('[data-mark="done"]').count(), 'no tick on Runtimes').toBe(0);
+          expect(await tab.locator('[data-end-row="daemon:codex"] [data-mark="done"]').count()).toBe(1);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `end-page-${viewport.name}-${mode}-no-runtime.png`) });
+        } finally {
+          await context.close();
+        }
+      });
+});

@@ -246,6 +246,7 @@ const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
   'fake-pack.stale': step => <StalePage step={step} />,
   'fake-pack.save': step => <SavePage step={step} />,
   'fake-pack.after': step => <ReadyPage step={step} />,
+  'runtimes.start': step => <ReadyPage step={step} />,
   'fake-pack.legacy': () => <p>an old page that never calls ready</p>,
   'fake-pack.forgot': step => <ReadyPage step={step} />,
   'projects.folders': step => <ProjectSetupPage step={step} />,
@@ -397,6 +398,7 @@ function setup(options: {
       stepPanel('claude-code', 'step'),
       stepPanel('codex', 'step'),
       stepPanel('projects', 'step'),
+      stepPanel('runtimes', 'step'),
     ],
   };
   const tree = (
@@ -1774,8 +1776,57 @@ describe('Connect GitHub never pulls a finished setup back (O9-10)', () => {
     expect(view.container.querySelector('[data-onboarding-summary-set]')).not.toBeNull();
   });
 
+  /** A machine with Runtimes' "Start fresh or copy" page still to answer (answering is choosing, whatever came of it). */
+  const withStart = (): Machine => {
+    const machine = fakeDaemon(A, 'Studio', { withFake: false });
+    return {
+      ...machine,
+      steps: [
+        ...machine.steps,
+        {
+          plugin: 'runtimes',
+          id: 'start',
+          title: 'Start fresh or copy',
+          order: 10,
+          group: 'Runtimes',
+          stepHost: true as const,
+          state: 'pending' as const,
+        },
+      ],
+    };
+  };
+
+  /** Answers every page with Next until the end page shows (a page the machine adds is never an endless walk). */
+  const walkToEnd = async (): Promise<void> => {
+    await settle();
+    for (let pages = 0; pages < 6 && !ended(); pages += 1) {
+      await next();
+      await settle();
+    }
+  };
+
+  it('the done page does not tick Runtimes when no runtime was made', async () => {
+    view = await mount(setup({ machines: [withStart()] }).tree);
+    await walkToEnd();
+    expect(ended()).toBe(true);
+    expect(row('daemon:runtimes')?.getAttribute('data-end-state')).toBe('later');
+    expect(row('daemon:runtimes')?.querySelector('[data-mark="done"]')).toBeNull();
+  });
+
+  it('and ticks it once the machine has a runtime', async () => {
+    view = await mount(
+      setup({
+        machines: [withStart()],
+        runtimes: [{ id: 'codex-default', name: 'Codex (you)', harness: 'codex' }],
+      }).tree,
+    );
+    await walkToEnd();
+    expect(ended()).toBe(true);
+    expect(row('daemon:runtimes')?.getAttribute('data-end-state')).toBe('done');
+  });
+
   it('the same device whose project page was left for later (Skip for now) also ends', async () => {
-    const store = ledgerOf('onboarding.appearance');
+    const store = ledgerOf('onboarding.appearance', 'projects.folders');
     store.set(CLIENT_LATER_KEY, JSON.stringify({ format: 1, steps: { 'projects.folders': AT } }));
     view = await mount(setup({ machines: [upgraded()], search: GUIDED_REPAIR, storage: store }).tree);
     await settle();
