@@ -9,6 +9,7 @@ import {
   agendaItem,
   NOW,
   ok,
+  READ_ACCESS,
   refuse,
   sessionView,
   snapshot,
@@ -315,5 +316,38 @@ describe('ConnectorToolbox — a tool that fails in ways its author did not plan
       gateway,
     );
     should(result).eql({ text: 'Stopped.', isError: false });
+  });
+});
+
+describe('ConnectorToolbox — a connection approved to look and not to change', () => {
+  it('refuses a write tool before it runs, and records the refusal', async () => {
+    let ran = false;
+    const calls = new CallsSpy();
+    const audit = new AuditSpy();
+    const toolbox = new ConnectorToolbox({
+      daemonGrants: () => ALL_GRANTS,
+      guard: new ConnectorTextGuard({ redact: async value => value }),
+      callsLog: calls,
+      audit,
+      now: () => NOW,
+    });
+    const write: ConnectorToolSpec = {
+      name: 'stop_ferret',
+      title: 't',
+      description: 'd',
+      scope: 'fleet:write',
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      input: {},
+      run: async () => {
+        ran = true;
+        return { text: 'Stopped.' };
+      },
+    };
+    const result = await toolbox.execute(write, {}, READ_ACCESS, {} as FleetGateway);
+    should(result.isError).be.true();
+    should(result.text).containEql('only look');
+    should(ran).be.false();
+    should(calls.records.map(record => record.outcome)).eql(['refused']);
+    should(audit.events).eql([]);
   });
 });

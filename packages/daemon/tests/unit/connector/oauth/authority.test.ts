@@ -577,3 +577,16 @@ describe('connector authority — edges of the sign-in flow', () => {
     ).rejects.toMatchObject({ error: 'unauthorized_client' });
   });
 });
+
+describe('connector authority — client metadata', () => {
+  test('registers only clients that use the code response type', async () => {
+    const f = fixture();
+    await expect(f.register({ response_types: ['token'] })).rejects.toMatchObject({
+      error: 'invalid_client_metadata',
+    });
+    await expect(f.register({ response_types: ['code', 'token'] })).rejects.toMatchObject({
+      error: 'invalid_client_metadata',
+    });
+    expect((await f.register({ response_types: ['code'] })).client_id).toStartWith('fycl_');
+  });
+});
