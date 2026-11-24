@@ -1,3 +1,10 @@
+## [4.291.23](https://github.com/kirinnee/ferretry/compare/v4.291.22...v4.291.23) (2026-11-24)
+
+### Fixes
+
+* **daemon:** refuse a Claude start effort Claude does not take before launch ([4ca17fb](https://github.com/kirinnee/ferretry/commit/4ca17fbf1c8820dec466e0a2c9db2aca20768c5c))
+* **daemon:** start Claude at its effort via --effort instead of typing /effort ([8397b26](https://github.com/kirinnee/ferretry/commit/8397b264fb3b9f02a4a380978f05530d5290bc97))
+
 ## [4.291.22](https://github.com/kirinnee/ferretry/compare/v4.291.21...v4.291.22) (2026-11-23)
 
 ### Fixes

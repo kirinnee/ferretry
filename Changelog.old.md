@@ -1,3 +1,15 @@
+## [4.291.22](https://github.com/kirinnee/ferretry/compare/v4.291.21...v4.291.22) (2026-11-23)
+
+### Fixes
+
+* **daemon:** count 'pin' only as a word of its own in password signals ([feadbbf](https://github.com/kirinnee/ferretry/commit/feadbbf7bb3fb8c99a5e8e80c761b6c18e147abe))
+* **daemon:** count pin ending a name (userPIN, cardpin) as a password signal ([3a1163f](https://github.com/kirinnee/ferretry/commit/3a1163f13946a59dab88aa038c0ba3b345c1c228))
+* **daemon:** keep PIN-like fields secret and mask reformatted card numbers ([6ed01b7](https://github.com/kirinnee/ferretry/commit/6ed01b708c6fa174cceb429c9c2463377764e2b8))
+* **daemon:** password signals and requested secrets always win over one-time-code ([87a30e6](https://github.com/kirinnee/ferretry/commit/87a30e69550ae8a1a94cccd90f21376e8144cfb7))
+* **input:** drop the dead lock engine, restore value-level tests, prompt back under its size budget ([4fe1d31](https://github.com/kirinnee/ferretry/commit/4fe1d31e17637e7b9e76694ca93fa1aaf5abc25b))
+* **input:** journal-first outcomes, page evidence for codes, same-lineage re-find, no surface hold for grant cleanup, value-level picture protection ([3e80194](https://github.com/kirinnee/ferretry/commit/3e801944454a50efaed4c999c694bbac158a909e))
+* **input:** no lock after typing, codes are codes, re-rendered fields typed at once ([512cb64](https://github.com/kirinnee/ferretry/commit/512cb6455922920ac00f2099cd088fbc4f23dea2))
+
 ## [4.291.21](https://github.com/kirinnee/ferretry/compare/v4.291.20...v4.291.21) (2026-11-23)
 
 ### Fixes
