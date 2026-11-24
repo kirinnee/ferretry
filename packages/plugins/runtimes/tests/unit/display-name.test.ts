@@ -4,10 +4,12 @@ import {
   harnessWord,
   isMachineMadeRuntimeName,
   loginDisplayName,
+  modelDisplayName,
   profileDisplayName,
   runtimeAccounts,
   runtimeAccountsFrom,
   runtimeDisplayName,
+  terminalSignInWords,
 } from '../../contract/index.ts';
 
 const source = (overrides: Partial<RuntimeNameSource> & Pick<RuntimeNameSource, 'harness'>): RuntimeNameSource => ({
@@ -202,5 +204,23 @@ describe('how a runtime is named for a person (O9-5)', () => {
     expect(profileDisplayName('claude-starter')).toBe('Claude starter');
     // Only the two words an import uses: a profile the owner made with a similar name stays as typed.
     expect(profileDisplayName('claude-review')).toBe('claude-review');
+  });
+});
+
+describe('model names and the terminal sign-in words (O12 S2)', () => {
+  const choices = [{ id: 'claude-opus-5-5', label: 'Opus 5.5' }, { id: 'claude-haiku-5-5' }];
+
+  it('names a model by its catalog label and falls back to the id', () => {
+    expect(modelDisplayName('claude-opus-5-5', choices)).toBe('Opus 5.5');
+    expect(modelDisplayName('claude-haiku-5-5', choices)).toBe('claude-haiku-5-5');
+    expect(modelDisplayName('gpt-6.1-sol')).toBe('gpt-6.1-sol');
+    expect(modelDisplayName('gpt-6.1-sol', choices)).toBe('gpt-6.1-sol');
+  });
+
+  it('never calls a terminal sign-in Ferretry cannot see "ready"', () => {
+    expect(terminalSignInWords('host', 'ready')).toBe('Uses your terminal sign-in');
+    expect(terminalSignInWords('host', 'needs_sign_in')).toBeUndefined();
+    expect(terminalSignInWords('ferretry', 'ready')).toBeUndefined();
+    expect(terminalSignInWords('environment', 'ready')).toBeUndefined();
   });
 });

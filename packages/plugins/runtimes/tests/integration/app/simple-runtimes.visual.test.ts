@@ -160,3 +160,70 @@ for (const mode of ['light', 'dark'] as const)
       });
     }
   });
+
+// O12 S2: a person's own terminal sign-in is named honestly, models read as their catalog says them, and no id is printed.
+for (const mode of ['light', 'dark'] as const)
+  describe(`runtime words on a terminal sign-in (${mode})`, () => {
+    for (const size of WINDOWS) {
+      it(`at ${size.name}: the Login picker shows the human name only, and "Starts on" says the catalog's label`, async () => {
+        const { tab, close } = await openScene(size, mode, 'view=advanced&logins=2&codex=1&host=1');
+        try {
+          await tab.waitForSelector('[data-add-runtime-credential-select]');
+          await tab.locator('[data-add-runtime-credential-select] [role="combobox"]').click();
+          await tab.waitForTimeout(300);
+          await shot(tab, `${size.name}-${mode}-s2-login-picker`);
+          const list = await tab.locator('[role="listbox"]').innerText();
+          expect(list).toContain('Claude · your terminal sign-in (atomi)');
+          expect(list).not.toMatch(/\bid (atomi|llm1|codex-personal)\b/u);
+          expect(await tab.locator('[role="option"] .fy-sb__hint').count()).toBe(0);
+          await tab.keyboard.press('Escape');
+          expect(await tab.locator('[data-add-runtime-login-sub]').innerText()).toContain('Uses your terminal sign-in');
+          await tab.locator('[data-add-runtime-more] summary').click();
+          await tab.waitForTimeout(300);
+          expect(await tab.locator('[data-add-runtime-model]').innerText()).toBe('Starts on Opus 5.5');
+          await shot(tab, `${size.name}-${mode}-s2-advanced-more`);
+          await noSideways(tab);
+        } finally {
+          await close();
+        }
+      });
+
+      it(`at ${size.name}: New ferret and Runtimes name the model, and say the terminal sign-in is used, never ready`, async () => {
+        const picker = await openScene(size, mode, 'view=new&logins=1&codex=1&host=1');
+        try {
+          await picker.tab.waitForSelector('[data-chosen-runtime]');
+          await picker.tab
+            .locator('[aria-labelledby="fy-new-ferret-runtime-label"], #fy-new-ferret-runtime')
+            .first()
+            .click();
+          await picker.tab.waitForTimeout(300);
+          await shot(picker.tab, `${size.name}-${mode}-s2-new-ferret-list`);
+          const list = await picker.tab.locator('[role="listbox"]').innerText();
+          expect(list).toContain('Opus 5.5');
+          expect(list).toContain('uses your terminal sign-in');
+          expect(list).not.toContain('claude-opus-5-5');
+          expect(list).not.toMatch(/\bready\b/iu);
+          await noSideways(picker.tab);
+        } finally {
+          await picker.close();
+        }
+        const tabView = await openScene(size, mode, 'view=runtimes&logins=1&codex=1&host=1');
+        try {
+          await tabView.tab.waitForSelector('[data-runtime-details]');
+          await tabView.tab.waitForTimeout(500);
+          await shot(tabView.tab, `${size.name}-${mode}-s2-runtimes`);
+          const text = (await tabView.tab.locator('[data-runtime-details]').allInnerTexts()).join(' ');
+          expect(text).toContain('Opus 5.5');
+          expect(text).toContain('GPT-6.1 Sol');
+          expect(text).not.toContain('claude-opus-5-5');
+          expect(text).not.toContain('gpt-6.1-sol');
+          const page = await tabView.tab.locator('body').innerText();
+          expect(page).toMatch(/uses your terminal sign-in/iu);
+          expect(page).not.toMatch(/\bready\b/iu);
+          await noSideways(tabView.tab);
+        } finally {
+          await tabView.close();
+        }
+      });
+    }
+  });

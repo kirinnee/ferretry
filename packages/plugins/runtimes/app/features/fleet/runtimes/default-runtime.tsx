@@ -107,7 +107,9 @@ export function DefaultRuntimeControl({
                 tone={
                   stateWords === 'ready'
                     ? 'ok'
-                    : stateWords === 'checking' || stateWords === 'refresh due'
+                    : stateWords === 'checking' ||
+                        stateWords === 'refresh due' ||
+                        stateWords === 'uses your terminal sign-in'
                       ? 'pend'
                       : 'warn'
                 }

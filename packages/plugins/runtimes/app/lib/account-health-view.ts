@@ -16,6 +16,7 @@
  */
 
 import type { LoginStatusWord } from '@ferretry/plugin-logins/contract';
+import { type CredentialStore, terminalSignInWords } from '../../contract/index.ts';
 import type { PickerAccountHealth } from './account-picker-catalog.ts';
 
 /** The tone a row paints itself with. */
@@ -64,11 +65,18 @@ export function lastCheckedAt(health: PickerAccountHealth): number | null {
   return Number.isNaN(at) ? null : at;
 }
 
-/** One runtime's login status as the words a row prints. */
-export function accountHealthView(health: PickerAccountHealth, now: number): AccountHealthView {
+/**
+ * One runtime's login status as the words a row prints. `store` is where the login lives: a terminal sign-in Ferretry cannot see
+ * is never headlined "Ready" (`terminalSignInWords`).
+ */
+export function accountHealthView(
+  health: PickerAccountHealth,
+  now: number,
+  store?: CredentialStore,
+): AccountHealthView {
   const checkedAt = lastCheckedAt(health);
   return {
-    label: health.label,
+    label: (store === undefined ? undefined : terminalSignInWords(store, health.word)) ?? health.label,
     checked: checkedAt === null ? 'Never checked' : `Checked ${relativeInstantLabel(checkedAt, now)}`,
     detail: health.explanation,
     ...(health.lastCheckInconclusive && checkedAt !== null

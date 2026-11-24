@@ -105,3 +105,14 @@ describe('UNREAD_ACCOUNT_HEALTH', () => {
     });
   });
 });
+
+describe('accountHealthView on a terminal sign-in (O12 S2)', () => {
+  it('says the terminal sign-in is used, never Ready, when Ferretry cannot see it', () => {
+    expect(accountHealthView(health(), NOW, 'host').label).toBe('Uses your terminal sign-in');
+    expect(accountHealthView(health(), NOW, 'ferretry').label).toBe('Ready');
+    expect(accountHealthView(health(), NOW).label).toBe('Ready');
+    expect(accountHealthView(health({ word: 'needs_sign_in', label: 'Needs sign-in' }), NOW, 'host').label).toBe(
+      'Needs sign-in',
+    );
+  });
+});

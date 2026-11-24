@@ -17,9 +17,11 @@ import {
   type LoginNameSource,
   type MachineView,
   loginDisplayName,
+  modelDisplayName,
   profileDisplayName,
   runtimeAccounts,
   runtimeDisplayName,
+  terminalSignInWords,
 } from '../../../../contract/index.ts';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
@@ -201,6 +203,14 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
   const ready =
     credential !== undefined && chosenProfile !== undefined && (duplicate === undefined || draft.addAnother);
   const model = chosenProfile === undefined ? undefined : profileModel(chosenProfile, data);
+  // The model in its catalog's words: read from a runtime already on this login and CLI, else the id as the profile names it.
+  const modelName =
+    model === undefined
+      ? undefined
+      : modelDisplayName(
+          model,
+          runtimes.find(item => item.credential.id === credential?.id && item.harness === harness)?.models?.choices,
+        );
 
   const create = async (): Promise<void> => {
     if (credential === undefined || chosenProfile === undefined) return;
@@ -220,6 +230,8 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
 
   const missing = credential === undefined ? [] : harnesses.filter(candidate => !harnessInstalled(machine, candidate));
   const needsSignIn = credential?.status.word === 'needs_sign_in';
+  const signInWords =
+    credential === undefined ? undefined : terminalSignInWords(credential.store, credential.status.word);
   const noLogins = credentials.length === 0;
   // A login is added and signed in right here: Logins contributes both panels to the two slots this
   // page offers (add-runtime-login-slots.tsx), and without them each falls back to the Sign-ins link.
@@ -246,7 +258,6 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
                 options={credentials.map(item => ({
                   value: item.id,
                   label: loginName(item),
-                  hint: `id ${item.id}`,
                 }))}
               />
             </span>
@@ -255,7 +266,11 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
                 className="inline-flex flex-wrap items-center gap-1 text-cell text-muted"
                 data-add-runtime-login-sub=""
               >
-                <AccountStatus word={credential.status.word} showLabel />
+                <AccountStatus
+                  word={credential.status.word}
+                  showLabel
+                  {...(signInWords === undefined ? {} : { label: signInWords })}
+                />
                 {missing.length === 0 ? '' : ` · ${harnessesName(missing)} isn’t installed here`}
               </span>
             )}
@@ -323,7 +338,7 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
               )}
               {model === undefined ? null : (
                 <span className="text-meta text-muted" data-add-runtime-model="">
-                  Starts on <span className="font-mono">{model}</span>
+                  Starts on <span>{modelName}</span>
                 </span>
               )}
               <a

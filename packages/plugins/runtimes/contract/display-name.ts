@@ -204,3 +204,19 @@ export const profileDisplayName = (name: string): string => {
     ? name
     : `Ferretry standard for ${pinned[1] === 'codex' ? 'Codex' : 'Claude'}, pinned to ${pinned[2]}`;
 };
+
+/**
+ * A model as a person says it: the label its login's model catalog gives that id (`Opus 5.5`), else the id itself (a model
+ * the catalog does not list, a custom id). `choices` is the runtime's own catalog choices, when it reads one.
+ */
+export const modelDisplayName = (
+  id: string,
+  choices: readonly { readonly id: string; readonly label?: string | undefined }[] = [],
+): string => choices.find(choice => choice.id === id)?.label ?? id;
+
+/**
+ * What a login in the `ready` state says when the sign-in is the person's own terminal one (`store: host`): Ferretry cannot see
+ * that sign-in, so it never calls it "ready", and uses the words onboarding uses (sentence case; a surface that shows it lowercase lowercases it). `undefined` when "ready" is true as it stands.
+ */
+export const terminalSignInWords = (store: CredentialStore, word: string): string | undefined =>
+  store === 'host' && word === 'ready' ? 'Uses your terminal sign-in' : undefined;
