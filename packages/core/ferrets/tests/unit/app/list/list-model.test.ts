@@ -149,27 +149,40 @@ describe('which ferrets the list lists', () => {
     expect(agents.counts).toEqual({ all: 3, auto: 2, interactive: 1 });
   });
 
-  test('O12-S5 Mine holds a ferret the owner started, whatever its mode; a ferret an agent started stays out', () => {
+  test('O12-S5 Mine and Agents split by who started the ferret, so they never share one and add up to All', () => {
     // The New ferret form's default mode is `auto`, so a ferret started from the browser is autonomous but the owner's.
     const started = ferret('started', { birth: 'person' });
     const driven = ferret('driven', { mode: 'interactive' });
     const worker = ferret('worker', { birth: 'agent' });
+    const daemon = ferret('daemon', { birth: 'daemon' });
     const unknown = ferret('unknown');
-    const ferrets = [started, driven, worker, unknown];
+    const ferrets = [started, driven, worker, daemon, unknown];
 
+    // An owner-started auto ferret is Mine and NOT Agents.
     expect(matchesMode(started, 'interactive')).toBe(true);
+    expect(matchesMode(started, 'auto')).toBe(false);
+    // An agent-started one is Agents only.
     expect(matchesMode(worker, 'interactive')).toBe(false);
+    expect(matchesMode(worker, 'auto')).toBe(true);
+    // No recorded birth: the mode says who drives it. A daemon start is not a person.
+    expect(matchesMode(driven, 'interactive')).toBe(true);
+    expect(matchesMode(driven, 'auto')).toBe(false);
     expect(matchesMode(unknown, 'interactive')).toBe(false);
-    // It is still an autonomous ferret, so Agents lists it too.
-    expect(matchesMode(started, 'auto')).toBe(true);
+    expect(matchesMode(unknown, 'auto')).toBe(true);
+    expect(matchesMode(daemon, 'interactive')).toBe(false);
+    expect(matchesMode(daemon, 'auto')).toBe(true);
 
-    expect(ferretListView(ferrets, { mode: 'interactive', showStopped: false }).counts).toEqual({
-      all: 4,
-      auto: 3,
-      interactive: 2,
-    });
+    const all = ferretListView(ferrets, { mode: 'all', showStopped: false });
+    expect(all.counts).toEqual({ all: 5, auto: 3, interactive: 2 });
+    expect(all.counts.interactive + all.counts.auto).toBe(all.counts.all);
     const mine = ferretListView(ferrets, { mode: 'interactive', showStopped: false });
     expect(mine.groups.flatMap(group => group.rows.map(row => String(row.id))).sort()).toEqual(['driven', 'started']);
+    const agents = ferretListView(ferrets, { mode: 'auto', showStopped: false });
+    expect(agents.groups.flatMap(group => group.rows.map(row => String(row.id))).sort()).toEqual([
+      'daemon',
+      'unknown',
+      'worker',
+    ]);
     expect(
       listTallies([ferret('gone', { birth: 'person', state: 'stopped' })], DEFAULT_LIST_FILTER).hiddenStopped,
     ).toBe(1);

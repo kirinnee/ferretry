@@ -68,15 +68,17 @@ export const isStopped = (ferret: FerretSummary): boolean => statusMark(ferret).
 const modeOf = (ferret: FerretSummary): 'auto' | 'interactive' => ferret.mode ?? 'auto';
 
 /**
- * Whether the ferret is the owner's — the "Mine" segment: one they drive (interactive) OR one a person started. The New
- * ferret form starts an `auto` ferret by default, so a ferret the owner made from the browser is autonomous yet theirs;
- * the record's `birth` says who first started it. A ferret an agent started, or whose record names no birth, is not.
+ * Whether the ferret is the owner's — the "Mine" segment: one a person started. The New ferret form starts an `auto`
+ * ferret by default, so a ferret the owner made from the browser is autonomous yet theirs; the record's `birth` says
+ * who first started it. A record that names no birth falls back to its mode (one a person drives is theirs). A start by
+ * an agent or the daemon is never the owner's, so every ferret is exactly Mine or an agent's.
  */
-const isMine = (ferret: FerretSummary): boolean => modeOf(ferret) === 'interactive' || ferret.birth === 'person';
+const isMine = (ferret: FerretSummary): boolean =>
+  ferret.birth === undefined ? modeOf(ferret) === 'interactive' : ferret.birth === 'person';
 
-/** Whether the ferret is the kind a segment asks for. Mine and Agents may share a ferret: it is both theirs and autonomous. */
+/** Whether the ferret is the kind a segment asks for. Mine and Agents split the ferrets by who started them: no overlap. */
 export const matchesMode = (ferret: FerretSummary, mode: ModeFilter): boolean =>
-  mode === 'all' || (mode === 'interactive' ? isMine(ferret) : modeOf(ferret) === mode);
+  mode === 'all' || (mode === 'interactive') === isMine(ferret);
 
 /**
  * Which ferrets the list draws before the kind is chosen: everything live, the stopped ones only when ticked, a pinned
@@ -133,7 +135,7 @@ export const listTallies = (
   return {
     counts: {
       all: listed.length,
-      auto: listed.filter(ferret => modeOf(ferret) === 'auto').length,
+      auto: listed.filter(ferret => !isMine(ferret)).length,
       interactive: listed.filter(isMine).length,
     },
     hiddenStopped: ferrets.filter(
