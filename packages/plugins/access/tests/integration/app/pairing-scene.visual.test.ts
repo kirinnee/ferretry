@@ -208,7 +208,12 @@ describe('The pair page: mascot and night sky', () => {
         });
         if (variant.phone) expect(titleBox, 'phone: the heading is centred').toBeGreaterThan(notNowBox.x + 24);
         else {
-          expect(column.width, 'desktop: a reading column').toBeLessThanOrEqual(640);
+          // One reading width per page type: the column is capped by the step frame's `--fy-reading-w` token, not a literal.
+          const readingWidth = await tab.evaluate(() =>
+            Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fy-reading-w')),
+          );
+          expect(readingWidth, 'the step frame defines --fy-reading-w').toBeGreaterThan(0);
+          expect(column.width, 'desktop: a reading column').toBeLessThanOrEqual(readingWidth);
           // C59 O8-2: the two answers are ONE group at the column's right edge (Not now beside Pair this device), under a
           // heading and a field that start at the column's left edge: no answer on each edge of the page.
           const pairBox = must(await tab.getByRole('button', { name: 'Pair this device' }).boundingBox(), 'Pair');
