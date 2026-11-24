@@ -1,8 +1,16 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { CONNECTOR_TOOL_NAMES } from '../../../../src/lib/connector/mcp/demands.ts';
-import { agendaItem, ok, READ_ACCESS, refuse, sessionView, snapshot, text } from './fixtures.ts';
-import { ALL_GRANTS, callTool, INIT, post, rig, rpc, TOKEN, tool } from './harness.ts';
+import {
+  agendaItem,
+  ok,
+  READ_ACCESS,
+  refuse,
+  sessionView,
+  snapshot,
+  text,
+} from '../../../support/connector/mcp-fixtures.ts';
+import { ALL_GRANTS, callTool, INIT, post, rig, rpc, TOKEN, tool } from '../../../support/connector/mcp-harness.ts';
 
 interface ListedTool {
   readonly name: string;

@@ -11,7 +11,7 @@ import type {
   ConnectorApiCall,
   ConnectorApiDispatch,
   ConnectorAuditEvent,
-} from '../../../../src/lib/connector/ports.ts';
+} from '../../../src/lib/connector/ports.ts';
 
 export const NOW = Date.parse('2026-11-24T12:00:00.000Z');
 

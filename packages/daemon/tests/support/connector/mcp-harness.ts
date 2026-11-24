@@ -1,11 +1,11 @@
 import { DAEMON_CAPABILITIES, type CapabilityGrants } from '@ferretry/protocol';
-import type { ApiRequest, ApiResponse } from '../../../../src/lib/api/http.ts';
-import type { ConnectorAccess } from '../../../../src/lib/connector/ports.ts';
-import { ConnectorToolbox } from '../../../../src/lib/connector/mcp/tools.ts';
-import type { ConnectorCallRecord, ConnectorCallsLog } from '../../../../src/lib/connector/mcp/ports.ts';
-import { ConnectorTextGuard } from '../../../../src/lib/connector/mcp/redaction.ts';
-import { ConnectorMcpEndpoint } from '../../../../src/adapters/connector/mcp/mcp-endpoint.ts';
-import { AuditSpy, FakeDispatch, NOW, WRITE_ACCESS } from './fixtures.ts';
+import type { ApiRequest, ApiResponse } from '../../../src/lib/api/http.ts';
+import type { ConnectorAccess } from '../../../src/lib/connector/ports.ts';
+import { ConnectorToolbox } from '../../../src/lib/connector/mcp/tools.ts';
+import type { ConnectorCallRecord, ConnectorCallsLog } from '../../../src/lib/connector/mcp/ports.ts';
+import { ConnectorTextGuard } from '../../../src/lib/connector/mcp/redaction.ts';
+import { ConnectorMcpEndpoint } from '../../../src/adapters/connector/mcp/mcp-endpoint.ts';
+import { AuditSpy, FakeDispatch, NOW, WRITE_ACCESS } from './mcp-fixtures.ts';
 
 export const ALL_GRANTS: CapabilityGrants = Object.fromEntries(
   DAEMON_CAPABILITIES.map(capability => [capability, { use: true, configure: true }]),

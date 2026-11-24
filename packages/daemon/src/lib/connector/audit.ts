@@ -66,6 +66,15 @@ function entryOf(event: ConnectorAuditEvent): AuditEntry {
         detail: { client: name(event.clientName) },
       };
     case 'connector.grant.revoked':
+      // The OAuth client's own revocation and a reuse detection are nobody's owner act: say so, never `host`.
+      if (event.initiator === 'client' || event.initiator === 'reuse-detected')
+        return {
+          event: 'connector.grant-revoked',
+          actor: ANONYMOUS,
+          subject: event.grantId,
+          outcome: 'succeeded',
+          detail: { via: event.initiator === 'client' ? 'oauth-revoke' : 'reuse' },
+        };
       return {
         event: 'connector.grant-revoked',
         actor: event.actor.startsWith('connector:') ? CONNECTOR : personOf(event.actor),
