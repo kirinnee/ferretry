@@ -34,8 +34,11 @@ const MARIN = sessionView({
 });
 
 /** A fake daemon whose board remembers a snooze and whose timer can be moved, as the real one does. */
-function world(items: AgendaItem[], options: { also?: [string, AgendaItem[]][] } = {}) {
-  const r = rig();
+function world(
+  items: AgendaItem[],
+  options: { also?: [string, AgendaItem[]][]; redact?: (text: string) => Promise<string> } = {},
+) {
+  const r = rig(options.redact === undefined ? {} : { redact: options.redact });
   const boards = new Map<string, AgendaItem[]>([[LIZ.config.id, items], ...(options.also ?? [])]);
   const bodies: { path: string; body: Record<string, unknown> }[] = [];
   r.dispatch
@@ -282,5 +285,206 @@ describe('snooze_attention', () => {
     should(reply.isError).be.true();
     should(reply.text).containEql('only look');
     should(bodies.length).equal(0);
+  });
+});
+
+describe('snooze_attention — the time words, at the edges of the calendar', () => {
+  it('refuses a zoned date that is not on the calendar instead of rolling it to March', () => {
+    for (const bad of ['2026-02-29T09:00:00Z', '2026-04-31T09:00:00+08:00', '2026-11-25T24:00:00Z']) {
+      const parsed = parseSnoozeUntil(bad, NOW);
+      should(parsed.ok).be.false();
+      if (!parsed.ok) should(parsed.problem).containEql(`"${bad}" is not a time I can read.`);
+    }
+    should(parseSnoozeUntil('2028-02-29T09:00:00Z', NOW)).eql({ ok: true, at: Date.parse('2028-02-29T09:00:00Z') });
+  });
+
+  it('refuses a time the clocks skip (02:30 on the day daylight saving starts) rather than moving it an hour', () => {
+    const parsed = parseSnoozeUntil('2026-03-08T02:30', NOW);
+    should(parsed.ok).be.false();
+    if (!parsed.ok) should(parsed.problem).containEql('does not exist in Pacific time (the clocks skip it that day)');
+    // Either side of the gap is fine.
+    should(parseSnoozeUntil('2026-03-08T01:59', NOW)).eql({ ok: true, at: Date.parse('2026-03-08T09:59:00Z') });
+    should(parseSnoozeUntil('2026-03-08T03:00', NOW)).eql({ ok: true, at: Date.parse('2026-03-08T10:00:00Z') });
+  });
+
+  it('refuses a skipped time said as a clock time, with today or tomorrow, or as the next occurrence', () => {
+    const night = Date.parse('2026-03-08T08:00:00Z'); // 00:00 PST on the day the clocks jump
+    const evening = Date.parse('2026-03-07T20:00:00Z'); // noon PST the day before
+    for (const [text, now] of [
+      ['2:30am', night],
+      ['today 2:30am', night],
+      ['tomorrow 2:30am', evening],
+      ['2:30am', evening],
+    ] as const) {
+      const parsed = parseSnoozeUntil(text, now);
+      should(parsed.ok).be.false();
+      if (!parsed.ok) should(parsed.problem).containEql('does not exist in Pacific time');
+    }
+    should(parseSnoozeUntil('3am', night)).eql({ ok: true, at: Date.parse('2026-03-08T10:00:00Z') });
+  });
+});
+
+describe('snooze_attention — a deadline wakes it sooner', () => {
+  it('says the deadline, not the time asked for, when the item is needed by before then', async () => {
+    const { r, bodies } = world([a12({ neededBy: '2026-11-24T12:15:00.000Z' })]);
+    const reply = await tool(r, 'snooze_attention', { item: 'A12', duration: '2h' });
+    should(reply.isError).be.false();
+    should(reply.text).startWith(
+      'Snoozed !A12 (Today: close OCBC 365 card) until Tue, Nov 24, 4:15 AM PST (in 15 min).',
+    );
+    should(reply.text).containEql(
+      'That is sooner than the Tue, Nov 24, 6:00 AM PST you asked for, because it is needed by Tue, Nov 24, 4:15 AM PST.',
+    );
+    should((bodies[0]?.body as { until: string } | undefined)?.until).equal('2026-11-24T14:00:00.000Z');
+  });
+
+  it('says the daemon wakes it at once when the deadline has already passed', async () => {
+    const { r } = world([a12({ neededBy: '2026-11-24T11:00:00.000Z' })]);
+    const reply = await tool(r, 'snooze_attention', { item: 'A12', duration: '2h' });
+    should(reply.isError).be.false();
+    should(reply.text).containEql('it was needed by Tue, Nov 24, 3:00 AM PST, which has passed');
+    should(reply.text).containEql('wakes it again at once');
+    should(reply.text).not.containEql('(in ');
+  });
+
+  it('keeps the time asked for when the deadline is later', async () => {
+    const { r } = world([a12({ neededBy: '2026-12-01T12:00:00.000Z' })]);
+    const reply = await tool(r, 'snooze_attention', { item: 'A12', duration: '2h' });
+    should(reply.text).startWith('Snoozed !A12 (Today: close OCBC 365 card) until Tue, Nov 24, 6:00 AM PST (in 2 h).');
+    should(reply.text).not.containEql('sooner');
+  });
+});
+
+describe('snooze_attention — what it will not snooze', () => {
+  it('leaves an item waiting on its ferret for information or a discussion alone, parked or not', async () => {
+    for (const waitingFor of ['info', 'discussion']) {
+      const { r, bodies } = world([a12({ waitingOn: 'ferret', askedAt: '2026-11-24T11:00:00.000Z', waitingFor })]);
+      const reply = await tool(r, 'snooze_attention', { item: 'A12', duration: '2h' });
+      should(reply.isError).be.true();
+      should(reply.text).containEql('is waiting on its ferret, not on you, so there is nothing to snooze.');
+      should(bodies.length).equal(0);
+    }
+  });
+});
+
+describe('snooze_attention — a title is a write target only when it is exact', () => {
+  const two = () => {
+    const theirs = agendaItem({
+      id: 'A12',
+      subject: 'Marin asks',
+      why: 'Marin?',
+      raisedBySession: MARIN.config.id,
+      extra: { title: 'Today: close OCBC 365 card' },
+    });
+    return world([a12()], { also: [[MARIN.config.id, [theirs]]] });
+  };
+
+  it('snoozes by the whole title, in any case, and never by a part of it', async () => {
+    const { r, bodies } = world([a12()]);
+    const part = await tool(r, 'snooze_attention', { item: 'close OCBC', duration: '2h' });
+    should(part.isError).be.true();
+    should(part.text).containEql('no item has exactly that title.');
+    should(part.text).containEql('Did you mean !A12 (Today: close OCBC 365 card)?');
+    should(bodies.length).equal(0);
+    const whole = await tool(r, 'snooze_attention', { item: 'today: CLOSE ocbc 365 card', duration: '2h' });
+    should(whole.isError).be.false();
+    should(bodies.length).equal(1);
+  });
+
+  it('asks which one when two ferrets have the same exact title, and `ferret` settles it', async () => {
+    const { r, bodies } = two();
+    const both = await tool(r, 'snooze_attention', { item: 'Today: close OCBC 365 card', duration: '2h' });
+    should(both.isError).be.true();
+    should(both.text).containEql('More than one item matches');
+    should(bodies.length).equal(0);
+    await tool(r, 'snooze_attention', { item: 'Today: close OCBC 365 card', duration: '2h', ferret: 'marin' });
+    should(bodies.map(entry => entry.path)).eql([`/v1/sessions/${MARIN.config.id}/agenda`]);
+  });
+
+  it('says so when the ferret it names has no open items', async () => {
+    const { r, bodies } = world([a12()]);
+    const reply = await tool(r, 'snooze_attention', {
+      item: 'Today: close OCBC 365 card',
+      duration: '2h',
+      ferret: 'marin',
+    });
+    should(reply.isError).be.true();
+    should(reply.text).equal('Marin has no open items.');
+    should(bodies.length).equal(0);
+  });
+});
+
+describe('answer_attention and list_attention agree on what is open', () => {
+  const due = (id: string, extra: Record<string, unknown> = {}) =>
+    agendaItem({
+      id,
+      subject: 'Approve it',
+      why: 'OK?',
+      ask: { kind: 'permission' },
+      raisedBySession: id === 'A12' ? LIZ.config.id : MARIN.config.id,
+      extra: {
+        parked: { reason: 'snoozed', at: '2026-11-24T10:00:00.000Z', until: '2026-11-24T11:00:00.000Z' },
+        ...extra,
+      },
+    });
+
+  it('answers a snoozed item whose time has come, before the daemon timer has woken it', async () => {
+    const { r, bodies } = world([due('A12')]);
+    should((await tool(r, 'list_attention', {})).text).containEql('!A12');
+    const reply = await tool(r, 'answer_attention', { item: 'A12', answer: 'approve' });
+    should(reply.isError).be.false();
+    should(bodies.map(entry => entry.body.action)).eql(['resolve']);
+  });
+
+  it('does not answer one that is still asleep', async () => {
+    const asleep = due('A12', {
+      parked: { reason: 'snoozed', at: '2026-11-24T10:00:00.000Z', until: '2026-11-25T11:00:00.000Z' },
+    });
+    const { r, bodies } = world([asleep]);
+    const reply = await tool(r, 'answer_attention', { item: 'A12', answer: 'approve' });
+    should(reply.isError).be.true();
+    should(reply.text).containEql('There is no open item A12.');
+    should(bodies.length).equal(0);
+  });
+
+  it('asks which ferret when the due item shares its id with an open one, instead of answering the other board', async () => {
+    const mine = due('A12');
+    const theirs = agendaItem({
+      id: 'A12',
+      subject: 'Marin asks',
+      why: 'OK?',
+      ask: { kind: 'permission' },
+      raisedBySession: MARIN.config.id,
+    });
+    const { r, bodies } = world([mine], { also: [[MARIN.config.id, [theirs]]] });
+    const reply = await tool(r, 'answer_attention', { item: 'A12', answer: 'approve' });
+    should(reply.isError).be.true();
+    should(reply.text).equal('Item A12 is open for more than one ferret (Lizzette and Marin). Which ferret asked?');
+    should(bodies.length).equal(0);
+  });
+});
+
+describe('a ferret’s words are cleaned before they are cut', () => {
+  const redact = async (text: string) => text.replace(/sk-[A-Za-z0-9]{20,}/gu, '[redacted]');
+  const key = `sk-${'Q'.repeat(30)}`;
+  const untitled = (id: string, subject: string) =>
+    agendaItem({ id, subject, why: `Why? ${'w'.repeat(230)} ${key}`, ask: { kind: 'task' }, kind: 'task' });
+
+  it('leaves no fragment of a credential at the cutoff of the heading, the suggestions, the list or the receipt', async () => {
+    const { r } = world([untitled('A98', `${'a'.repeat(55)} ${key}`), untitled('A97', `${'b'.repeat(115)} ${key}`)], {
+      redact,
+    });
+    const texts = [
+      (await tool(r, 'get_attention', { item: 'A97' })).text.split('\n')[0],
+      (await tool(r, 'get_attention', { item: 'A99' })).text,
+      (await tool(r, 'list_attention', {})).text,
+      (await tool(r, 'snooze_attention', { item: 'A98', duration: '2h' })).text,
+      (await tool(r, 'snooze_attention', { item: 'zzzzzzzz', duration: '2h' })).text,
+    ];
+    for (const text of texts) {
+      should(text).not.containEql('sk-');
+      should(text).not.containEql('QQQQ');
+    }
+    should(texts[3]).containEql(' [re…)');
   });
 });

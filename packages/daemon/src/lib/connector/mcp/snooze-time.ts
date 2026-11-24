@@ -116,6 +116,26 @@ const validWall = (wall: Wall): boolean => {
 
 const refuse = (problem: string): TimeResult => ({ ok: false, problem });
 
+const sameWall = (left: Wall, right: Wall): boolean =>
+  left.year === right.year &&
+  left.month === right.month &&
+  left.day === right.day &&
+  left.hour === right.hour &&
+  left.minute === right.minute &&
+  left.second === right.second;
+
+/**
+ * The instant at which Pacific clocks read `wall`. A time the clocks skip (02:30 on the day daylight saving starts)
+ * is refused in a plain sentence rather than moved an hour. The hour that repeats when the clocks go back reads as
+ * its first occurrence (a documented limitation).
+ */
+function atWall(wall: Wall, said: string): TimeResult {
+  const at = instantOfWall(wall);
+  return sameWall(wallAt(at), wall)
+    ? { ok: true, at }
+    : refuse(`"${said}" does not exist in Pacific time (the clocks skip it that day). Pick a time before or after it.`);
+}
+
 function hourOf(hour: number, meridiem: string | undefined): number | undefined {
   if (meridiem === undefined) return hour <= 23 ? hour : undefined;
   if (hour < 1 || hour > 12) return undefined;
@@ -131,19 +151,21 @@ export function parseSnoozeUntil(raw: string, now: number): TimeResult {
   const iso = ISO.exec(value);
   if (iso !== null) {
     const [, year, month, day, hour, minute, second, zone] = iso;
-    if (zone !== undefined) {
-      const ms = Date.parse(value.replace(' ', 'T').replace(/\s+(?=Z|[+-]\d)/iu, ''));
-      return Number.isFinite(ms) ? { ok: true, at: ms } : bad;
-    }
     const wall: Wall = {
       year: Number(year),
       month: Number(month),
       day: Number(day),
-      hour: hour === undefined ? 9 : Number(hour),
+      hour: hour === undefined ? (zone === undefined ? 9 : 0) : Number(hour),
       minute: minute === undefined ? 0 : Number(minute),
       second: second === undefined ? 0 : Number(second),
     };
-    return validWall(wall) ? { ok: true, at: instantOfWall(wall) } : bad;
+    // The calendar fields are checked for a zoned time too: Date.parse rolls 2026-02-29 over to 1 March.
+    if (!validWall(wall)) return bad;
+    if (zone !== undefined) {
+      const ms = Date.parse(value.replace(' ', 'T').replace(/\s+(?=Z|[+-]\d)/iu, ''));
+      return Number.isFinite(ms) ? { ok: true, at: ms } : bad;
+    }
+    return atWall(wall, value);
   }
 
   const dayClock = DAY_CLOCK.exec(value);
@@ -159,28 +181,18 @@ export function parseSnoozeUntil(raw: string, now: number): TimeResult {
     if (dayClock !== null) {
       const shift = dayClock[1]?.toLowerCase() === 'tomorrow' ? 1 : 0;
       const date = new Date(Date.UTC(today.year, today.month - 1, today.day + shift));
-      return {
-        ok: true,
-        at: instantOfWall({
-          ...base,
-          year: date.getUTCFullYear(),
-          month: date.getUTCMonth() + 1,
-          day: date.getUTCDate(),
-        }),
-      };
+      return atWall(
+        { ...base, year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() },
+        value,
+      );
     }
-    const todayAt = instantOfWall(base);
-    if (todayAt > now) return { ok: true, at: todayAt };
+    const todayAt = atWall(base, value);
+    if (!todayAt.ok || todayAt.at > now) return todayAt;
     const next = new Date(Date.UTC(today.year, today.month - 1, today.day + 1));
-    return {
-      ok: true,
-      at: instantOfWall({
-        ...base,
-        year: next.getUTCFullYear(),
-        month: next.getUTCMonth() + 1,
-        day: next.getUTCDate(),
-      }),
-    };
+    return atWall(
+      { ...base, year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() },
+      value,
+    );
   }
   return bad;
 }

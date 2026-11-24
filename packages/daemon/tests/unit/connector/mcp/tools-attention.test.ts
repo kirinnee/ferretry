@@ -394,3 +394,52 @@ describe('the budget, as pure parts', () => {
     should(cutAtLine('short', 50)).equal('short');
   });
 });
+
+describe('get_attention — a title, read loosely, and the ferret that is named', () => {
+  const marins = (title: string) =>
+    agendaItem({
+      id: 'A40',
+      subject: 'Marin asks',
+      why: 'Marin?',
+      raisedBySession: MARIN.config.id,
+      extra: { title },
+    });
+
+  it('asks which one when a part of a title fits two items', async () => {
+    const other = agendaItem({ id: 'A21', subject: 'Other', why: 'Other?', extra: { title: 'Database backup' } });
+    const reply = await tool(world([full(), other]), 'get_attention', { item: 'database' });
+    should(reply.isError).be.true();
+    should(reply.text).equal(
+      'More than one item matches "database": !A12 (Database choice); !A21 (Database backup). Which one?',
+    );
+  });
+
+  it('applies the ferret it is given before it matches a title, so the other ferret’s item cannot answer', async () => {
+    const r = world([full()], { also: [[MARIN.config.id, [marins('Database backup')]]] });
+    const unqualified = await tool(r, 'get_attention', { item: 'database' });
+    should(unqualified.text).containEql('More than one item matches');
+    should((await tool(r, 'get_attention', { item: 'database', ferret: 'marin' })).text.split('\n')[0]).equal(
+      '!A40 — Database backup — from Marin',
+    );
+    should((await tool(r, 'get_attention', { item: 'database', ferret: 'lizzette' })).text.split('\n')[0]).equal(
+      '!A12 — Database choice — from Lizzette',
+    );
+  });
+
+  it('says so when the ferret it names has no open items, and never reads another’s by title', async () => {
+    const reply = await tool(world([full()]), 'get_attention', { item: 'database', ferret: 'marin' });
+    should(reply.isError).be.true();
+    should(reply.text).equal('Marin has no open items.');
+  });
+});
+
+describe('get_attention — a credential at the cutoff of the heading', () => {
+  it('cleans the whole title before it is cut, so no fragment is left', async () => {
+    const key = `sk-${'Q'.repeat(30)}`;
+    const item = agendaItem({ id: 'A5', subject: `${'a'.repeat(110)} ${key}`, why: 'Why?' });
+    const redact = async (text: string) => text.replace(/sk-[A-Za-z0-9]{20,}/gu, '[redacted]');
+    const first = (await tool(world([item], { redact }), 'get_attention', { item: 'A5' })).text.split('\n')[0];
+    should(first).not.containEql('sk-');
+    should(first).containEql('[redacte…');
+  });
+});

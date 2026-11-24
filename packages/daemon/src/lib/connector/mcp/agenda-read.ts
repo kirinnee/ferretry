@@ -32,9 +32,6 @@ export const ATTENTION_READ_CAP = 24_000;
 /** The most earlier replies the replies section lists (the newest), so a long thread cannot crowd out the rest. */
 const REPLIES_LISTED = 20;
 
-/** What the room is reserved for besides the sections: the heading, the cut notice and the section marker lines. */
-const MARKER_ROOM = 220;
-
 export interface AttentionSection {
   /** Lower-case, stable: what `tab` may name besides the section's name. */
   readonly id: string;
@@ -234,14 +231,17 @@ export function attentionSections(item: AgendaItem, who: AttentionContext): read
   });
   const taken = new Set(tabs.flatMap(tab => [tab.id, tab.name.toLowerCase()]));
   // An item's own tab may be called "Context"; the item's field then says "(item)", so a name never means two things.
-  const fixed = (id: string, name: string, text: string): AttentionSection[] =>
-    text.trim() === ''
-      ? []
-      : [
-          taken.has(id) || taken.has(name.toLowerCase())
-            ? { id: `${id}-item`, name: `${name} (item)`, text }
-            : { id, name, text },
-        ];
+  // Every selector stays unique: if "Context (item)" is taken too, the next is "Context (item 2)".
+  const fixed = (id: string, name: string, text: string): AttentionSection[] => {
+    if (text.trim() === '') return [];
+    for (let k = 0; ; k += 1) {
+      const label = k === 0 ? name : k === 1 ? `${name} (item)` : `${name} (item ${k})`;
+      const key = k === 0 ? id : k === 1 ? `${id}-item` : `${id}-item-${k}`;
+      if (taken.has(key) || taken.has(label.toLowerCase())) continue;
+      taken.add(key).add(label.toLowerCase());
+      return [{ id: key, name: label, text }];
+    }
+  };
   return [
     ...fixed('overview', 'Overview', overviewOf(item, who)),
     ...fixed('replies', 'Replies', repliesOf(item, who.now)),
@@ -293,32 +293,60 @@ export interface RenderedAttention {
   readonly cut: readonly string[];
 }
 
-/**
- * The answer for the WHOLE item: a heading, the list of sections, a notice naming each cut section and how to read
- * it, then the sections within {@link ATTENTION_READ_CAP}.
- */
-export function renderWhole(heading: string, sections: readonly AttentionSection[]): RenderedAttention {
-  const names = sections.map(section => section.name);
-  const head = `${heading}\nSections: ${names.join('; ')}.`;
-  const lengths = sections.map(section => section.text.length);
-  const fixed = head.length + sections.reduce((sum, section) => sum + section.name.length + 8, 0);
-  const fits = lengths.reduce((sum, length) => sum + length, 0) + fixed <= ATTENTION_READ_CAP;
-  const room = ATTENTION_READ_CAP - fixed - (fits ? 0 : MARKER_ROOM + 140 * sections.length);
-  const each = fits ? lengths : shares(lengths, room);
+/** What follows a cut section's text: the marker that says how much is missing and how to fetch it. */
+const cutMarker = (name: string, missing: number): string =>
+  `\n[… cut here: ${missing} more characters. Call get_attention again with tab "${name}" to read it whole.]`;
+
+const cutNotice = (cut: readonly string[]): string =>
+  `Clipped to fit one answer. Cut: ${cut.join('; ')}. Ask for one of them with the tab argument to read it in full.`;
+
+/** The whole answer with each section cut to `each[index]` characters. */
+function renderAt(heading: string, sections: readonly AttentionSection[], each: readonly number[]): RenderedAttention {
+  const head = `${heading}\nSections: ${sections.map(section => section.name).join('; ')}.`;
   const cut: string[] = [];
   const blocks = sections.map((section, index) => {
     const shown = cutAtLine(section.text, each[index] ?? 0);
     if (shown.length >= section.text.length) return `## ${section.name}\n${section.text}`;
     cut.push(section.name);
-    return `## ${section.name}\n${shown}\n[… cut here: ${section.text.length - shown.length} more characters. Call get_attention again with tab "${section.name}" to read it whole.]`;
+    return `## ${section.name}\n${shown}${cutMarker(section.name, section.text.length - shown.length)}`;
   });
-  const notice =
-    cut.length === 0
-      ? []
-      : [
-          `Clipped to fit one answer. Cut: ${cut.join('; ')}. Ask for one of them with the tab argument to read it in full.`,
-        ];
+  const notice = cut.length === 0 ? [] : [cutNotice(cut)];
   return { text: [head, ...notice, '', ...blocks.flatMap(block => [block, ''])].join('\n').trimEnd(), cut };
+}
+
+/** How many times the room is shrunk and the answer drawn again before the last resort. */
+const FIT_ATTEMPTS = 12;
+
+/**
+ * The answer for the WHOLE item: a heading, the list of sections, a notice naming each cut section and how to read
+ * it, then the sections within {@link ATTENTION_READ_CAP} — ALWAYS. The room for the sections is worked out from
+ * the real lengths of everything else (the heading, the section names, each cut marker and the notice); the answer is
+ * then drawn, and when it still comes out over the cap (redaction made a name longer, a marker needs more digits)
+ * the room is shrunk and it is drawn again, a bounded number of times. The last resort, when even no text at all
+ * cannot fit (hundreds of very long names), is a hard cut of the answer at the cap.
+ */
+export function renderWhole(heading: string, sections: readonly AttentionSection[]): RenderedAttention {
+  const lengths = sections.map(section => section.text.length);
+  const whole = renderAt(heading, sections, lengths);
+  if (whole.text.length <= ATTENTION_READ_CAP) return whole;
+  const names = sections.map(section => section.name);
+  const overhead =
+    whole.text.length -
+    lengths.reduce((sum, length) => sum + length, 0) +
+    names.reduce((sum, name) => sum + cutMarker(name, 999_999).length, 0) +
+    cutNotice(names).length;
+  let room = ATTENTION_READ_CAP - overhead;
+  for (let attempt = 0; attempt < FIT_ATTEMPTS; attempt += 1) {
+    const drawn = renderAt(heading, sections, shares(lengths, Math.max(0, room)));
+    if (drawn.text.length <= ATTENTION_READ_CAP) return drawn;
+    room = attempt < FIT_ATTEMPTS / 2 ? room - (drawn.text.length - ATTENTION_READ_CAP) : Math.floor(room / 2);
+  }
+  const last = renderAt(
+    heading,
+    sections,
+    lengths.map(() => 0),
+  );
+  return { text: last.text.slice(0, ATTENTION_READ_CAP), cut: last.cut };
 }
 
 /**

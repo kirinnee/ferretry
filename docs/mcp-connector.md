@@ -213,8 +213,9 @@ The agenda is the main channel between the owner and Claude, and `list_attention
 reads ONE item completely, so Claude can work from what the ferret wrote.
 
 - **Input**: `item` — the id as `list_attention` prints it (`A12`, `!A12`, `12`, `a 12`); a title also works when exactly one
-  item has it. `ferret` — only when two ferrets have an item with the same id (the same rule, and the same sentence,
-  as `answer_attention`). `tab` — one section by name in any case or by id. `from` — with `tab`, the character to start at.
+  item has it (a part of a title is enough for READING; `snooze_attention` wants the whole title). `ferret` — when two
+  ferrets have an item with the same id (the same rule, and the same sentence, as `answer_attention`); a `ferret` that
+  is named narrows a title match FIRST too, so the title is looked for among that ferret's items only. `tab` — one section by name in any case or by id. `from` — with `tab`, the character to start at.
 - **Output** (Markdown-ish text, an item's own Markdown kept exactly as written, so a table stays a table): a heading
   `!A12 — Title — from Lizzette`, the list of sections, then each section under `## Name`:
   **Overview** (title, summary, who raised it and on whose agenda, state, kind, waiting since, whether only the app can
@@ -224,7 +225,8 @@ reads ONE item completely, so Claude can work from what the ferret wrote.
   on an item from before conversations were kept, what its history recorded), **Context**, then **every tab** in the order
   the app draws them (the main tab "Where we are now" with the ferret's answer, what is decided and what is still open;
   "The full picture"; the ferret's own tabs), then **Detail** (the from-zero explanation). An empty section is left out.
-  A section that would share a name with one of the item's own tabs is called "… (item)".
+  A section that would share a name with one of the item's own tabs is called "… (item)" (or "… (item 2)" when that is
+  taken too), so a name and an id never mean two sections.
 - **Read, not answer.** Parked (snoozed or resting) items can be read though `list_attention` hides them; an
   `input` item (a value only the owner types) is never shown, as it is never listed. Scope `fleet:read`; it makes
   only the two reads `list_attention` makes (`GET /v1/agenda/open`, `GET /v1/sessions`), through the same gateway.
@@ -233,11 +235,15 @@ reads ONE item completely, so Claude can work from what the ferret wrote.
   next to the conversation; items run to 560 000, so it is a cap, not a promise. The room is shared by
   _water-filling_: a section shorter than its share is whole, longer ones each show their start, and the answer
   says `Clipped to fit one answer. Cut: <names>` with, under each cut section, how to read it whole. A first long tab
-  therefore never pushes the later tabs out.
+  therefore never pushes the later tabs out. The cap is ENFORCED, not estimated: the room is worked out from the real
+  lengths of the heading, the (redacted) section names, each cut marker and the notice, the answer is drawn, and if it is
+  still over the cap the room is shrunk and it is drawn again (a bounded number of times); the last resort, when even the
+  names alone do not fit, is a hard cut at the cap.
 - **Nothing is out of reach**: `tab` returns that one section, capped the same way; when it is longer than the cap the
   answer ends with the `from` offset that continues it, so a 200 000-character tab is read in a few calls.
 - **Secrets**: every section — and each section's NAME and the heading — goes through the connector's one redaction
-  door BEFORE it is cut (stored-secret values, live host tokens, credential shapes), so a credential is never cut in
+  door BEFORE it is cut (the same holds for every short line a tool makes of an item's title, summary or question: the
+  whole text is cleaned, then cut) (stored-secret values, live host tokens, credential shapes), so a credential is never cut in
   half and left half-visible; a section that cannot be cleaned is `[output withheld]` while the others still show.
 - **Unknown id**: a plain sentence plus the close matches, as ferret names get ("There is no open item A22. Did you
   mean !A21 (Other thing)?"), else the open ids, else "Nothing is waiting on you."
@@ -252,22 +258,32 @@ Hides one open agenda item until a time and lists it again afterwards — the da
   exactly what the app's Snooze sends. The item gets `parked: { reason: 'snoozed', until }`; `list_attention` stops listing
   it, and the daemon's minute timer (`agenda/waker.ts`) wakes it at `until`, fresh (`waitingSince` = then), so it reads as new.
   `list_attention` also lists a snoozed item whose time has come before the timer has run, so it is never late by the
-  timer's minute. `list_attention` with `snoozed: true` also lists the sleeping ones, marked "(snoozed until …)".
+  timer's minute. ONE predicate, "open for the owner now" (not parked, or snoozed with its time come), decides what
+  `list_attention` lists, which items `answer_attention` may close, and which items count when two ferrets share an id — so
+  a due item is answerable, and an unqualified answer can never go to the OTHER board's item instead. `list_attention` with `snoozed: true` also lists the sleeping ones, marked "(snoozed until …)".
 - **Governance**: the same as the other write tools. The snooze action asks no passkey step-up and no capability beyond
   `fleet.use` (the daemon's route declares none), so the connector reaches it as the owner's own act, stamped remote and
   governed like every connector call. Scope `fleet:write`; it is in the calls log and the security log (`connector.tool`,
   with the ferret's session id) like `answer_attention`. It never answers, closes or edits the item.
-- **Input**: `item` (the same forms and the same lookup as `get_attention`: `A12`, `!A12`, `12`, a unique title; `ferret`
-  when two ferrets share an id) and EXACTLY ONE of:
+- **Input**: `item` (the same forms and lookup as `get_attention`: `A12`, `!A12`, `12`; `ferret` when two ferrets
+  share an id; but a TITLE must be the whole title, matched exactly in any case, because this changes something: a part
+  of a title is only offered back as "Did you mean …?") and EXACTLY ONE of:
   - `until` — an ISO time with a zone (`2026-11-25T09:00:00Z`) or without (**read as Pacific, `America/Los_Angeles`**,
     daylight saving included), a date alone (9:00 AM Pacific), a clock time (`17:00`, `5pm`: the next one) or
-    `today`/`tomorrow` with a clock time (`tomorrow 9am`);
+    `today`/`tomorrow` with a clock time (`tomorrow 9am`). The calendar is checked for a zoned time too (`2026-02-29T09:00:00Z`
+    is refused, not rolled to March), and a Pacific time the clocks skip (02:30 on the day daylight saving starts) is
+    refused in a sentence rather than moved. The hour that REPEATS when the clocks go back reads as its first occurrence
+    (a known limitation);
   - `duration` — `90m`, `2h`, `1d`, `1w`, together (`1d 2h`), an optional leading "in".
     Anything else is refused with the forms on offer, never guessed.
 - **Bounds**: at least one minute and at most **30 days** ahead (a snooze is "not now", not "never"; the daemon itself only
-  needs "still ahead"). An item that waits on its ferret (`parked: replied`) is refused ("not on you, nothing to snooze"); a
+  needs "still ahead"). An item that waits on its ferret (resting: `parked: replied`, or `waitingOn: ferret` for more information or a
+  discussion — `agendaState` says `resting`) is refused ("not on you, nothing to snooze"); a
   notice is refused by the daemon in its own words; an already snoozed item may be snoozed again and the answer says so.
-- **Answer**: "Snoozed !A12 (Title) until Wed, Nov 25, 9:00 AM PST (in 29 h)." — the wake time in Pacific, always.
+- **Answer**: "Snoozed !A12 (Title) until Wed, Nov 25, 9:00 AM PST (in 29 h)." — the wake time in Pacific, always, and the
+  time the DAEMON will wake it: an item with a `neededBy` before the time asked for wakes at the deadline (`agendaWakeAt`),
+  so the answer says that time and "sooner than the … you asked for, because it is needed by …"; a deadline that has
+  already passed is said too ("which has passed, so the daemon wakes it again at once").
 
 ## What a tool may do, and how
 
