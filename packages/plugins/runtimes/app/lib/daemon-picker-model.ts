@@ -33,6 +33,7 @@ export interface AccountPickerOption {
   readonly kind: PickerAccount['kind'];
   /** The login it uses; its health is that login's status. */
   readonly credentialId: string;
+  readonly credentialStore?: PickerAccount['credentialStore'];
   readonly defaultModel: string | null;
   readonly models: PickerAccount['models'];
   /** The login's model catalog, when it reads one (docs/model-catalog.md). */
@@ -109,6 +110,7 @@ const accountPickerOption = (
   displayName: account.displayName,
   kind: account.kind,
   credentialId: account.credentialId,
+  ...(account.credentialStore === undefined ? {} : { credentialStore: account.credentialStore }),
   defaultModel: account.defaultModel,
   models: account.models,
   ...(account.modelCatalog === undefined ? {} : { modelCatalog: account.modelCatalog }),

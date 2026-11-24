@@ -132,6 +132,7 @@ describe('pickerAccount', () => {
       displayName: 'Claude Atelier',
       kind: 'claude-code',
       credentialId: 'login-claude-auto-a',
+      credentialStore: 'host',
       defaultModel: null,
       models: [],
       available: true,

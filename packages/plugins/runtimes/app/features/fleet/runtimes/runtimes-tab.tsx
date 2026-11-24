@@ -18,6 +18,7 @@ import {
   profileDisplayName,
   runtimeAccounts,
   runtimeDisplayName,
+  terminalSignInWords,
 } from '../../../../contract/index.ts';
 import { ChevronLeft, ChevronRight, Lock, Plus, TriangleAlert } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
@@ -172,6 +173,7 @@ function RuntimePage({
   const layers = profile === undefined ? [] : layerRows(profile, data.components, runtime.harness);
   const models = modelRows(runtime);
   const canLaunch = online && runtime.launch.available;
+  const signInWords = terminalSignInWords(runtime.credential.store, word);
   const shownName = runtimeDisplayName(runtime, data.runtimes.runtimes, runtimeAccounts(data.credentials.logins));
   return (
     <section className="flex min-w-0 flex-col gap-4" data-runtime-page={runtime.name}>
@@ -191,7 +193,7 @@ function RuntimePage({
           {shownName}
         </h3>
         <p className="m-0 mt-1 flex items-center gap-2 text-cell text-muted">
-          <AccountStatus word={word} showLabel />
+          <AccountStatus word={word} showLabel {...(signInWords === undefined ? {} : { label: signInWords })} />
         </p>
         {shownName === runtime.name ? null : (
           <p className="m-0 mt-1 text-meta text-muted" data-runtime-stored-name="">
@@ -262,7 +264,7 @@ function RuntimePage({
           className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel no-underline hover:border-accent hover:no-underline"
           data-runtime-credential={runtime.credential.id}
         >
-          <AccountStatus word={word} />
+          <AccountStatus word={word} {...(signInWords === undefined ? {} : { label: signInWords })} />
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="truncate font-mono text-row text-fg">{loginLine(runtime, data)}</span>
             <span className="text-cell text-muted">{harnessName(runtime.harness)}</span>
@@ -328,9 +330,9 @@ function RuntimePage({
             {models.map(model => (
               <li key={model.id} className="flex min-w-0 items-center justify-between gap-2 text-cell">
                 {model.available ? (
-                  <span className="min-w-0 truncate text-fg">{model.id}</span>
+                  <span className="min-w-0 truncate text-fg">{model.name}</span>
                 ) : (
-                  <s className="min-w-0 truncate text-muted">{model.id}</s>
+                  <s className="min-w-0 truncate text-muted">{model.name}</s>
                 )}
                 <span className={model.available ? 'text-muted' : 'text-err'}>
                   {model.available ? (model.isDefault ? 'Default' : '') : 'Not available on this login'}
@@ -431,6 +433,7 @@ function RuntimeRow({
 }) {
   const showMakeDefault =
     onMakeDefault !== undefined && runtime.disabled === undefined && !isDefaultRuntime(machine, runtime);
+  const rowWords = terminalSignInWords(runtime.credential.store, runtimeWord(runtime));
   const detailsLine = `${loginLine(runtime, data)} · ${profileDisplayName(runtime.profile)} profile · ${runtimeDefaultModel(runtime)}`;
   return (
     <div className="flex flex-col gap-1">
@@ -457,6 +460,7 @@ function RuntimeRow({
                 >
                   <AccountStatus
                     word={runtimeWord(runtime)}
+                    {...(rowWords === undefined ? {} : { label: rowWords })}
                     className="min-h-[calc(var(--control-h)-0.5rem)] w-4 shrink-0 justify-center"
                   />
                   <span

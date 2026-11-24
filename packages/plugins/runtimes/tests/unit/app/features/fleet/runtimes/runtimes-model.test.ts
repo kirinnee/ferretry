@@ -274,10 +274,37 @@ describe('models', () => {
     expect(runtimeDefaultModel(modelSetOf({ default: undefined }))).toBe('No model available');
   });
 
+  it('names the models by their catalog label, and by the id when the catalog does not list it (O12 S2)', () => {
+    const choice = (id: string, label: string) => ({ id, label, efforts: [], available: true });
+    const withCatalog = {
+      ...modelSetOf({
+        models: [
+          { id: 'claude-opus-5-5', available: true },
+          { id: 'custom-x', available: true },
+        ],
+        declaredDefault: 'claude-opus-5-5',
+        default: 'claude-opus-5-5',
+      }),
+      models: {
+        catalog: {
+          id: 'anthropic',
+          label: 'Anthropic',
+          origin: 'built-in',
+          customIds: false,
+          docs: 'https://example.test',
+        },
+        choices: [choice('claude-opus-5-5', 'Opus 5.5')],
+        default: 'claude-opus-5-5',
+      },
+    } as RuntimeView;
+    expect(runtimeDefaultModel(withCatalog)).toBe('Opus 5.5');
+    expect(modelRows(withCatalog).map(row => row.name)).toEqual(['Opus 5.5', 'custom-x']);
+  });
+
   it('lists the rows with what this login cannot use, and the default marked', () => {
     expect(modelRows(runtimeNamed('codex-default'))).toEqual([
-      { id: 'GPT-6', available: true, isDefault: true },
-      { id: 'Opus 5.5', available: false, isDefault: false },
+      { id: 'GPT-6', name: 'GPT-6', available: true, isDefault: true },
+      { id: 'Opus 5.5', name: 'Opus 5.5', available: false, isDefault: false },
     ]);
     expect(modelRows(runtimeNamed('claude-review'))).toEqual([]);
   });

@@ -66,6 +66,7 @@ import {
   type RunState,
   pagesOf,
   progressOf,
+  withUnfinished,
   retreat,
   startRun,
 } from './flow-model.ts';
@@ -544,41 +545,45 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     shown,
     retry: () => setAttempt(count => count + 1),
     summary: withRuntimesRead(
-      ready === undefined
-        ? []
-        : [
-            ...ready.flow.daemon.flatMap(segment =>
-              segment.steps
-                .filter(step => !hidden.has(step.key))
-                .map(step => ({
-                  plugin: step.plugin,
-                  id: step.id,
-                  title: step.title,
-                  group: segment.group,
-                  phase: 'daemon' as const,
-                  state: outcomes[step.key] ?? step.state ?? 'pending',
-                })),
-            ),
-            // This device's own pages: set during this run, found on the device ledger, or left for later.
-            ...ready.flow.client.flatMap(segment =>
-              segment.steps
-                // An offer this run never reached is not part of what was set up (nor of what was left).
-                .filter(
-                  step =>
-                    !hidden.has(step.key) && !(isOffer(step.key) && !(step.key in outcomes) && !answered.has(step.key)),
-                )
-                .map(step => ({
-                  plugin: step.plugin,
-                  id: step.id,
-                  title: step.title,
-                  group: segment.group,
-                  phase: 'client' as const,
-                  state:
-                    outcomes[step.key] ??
-                    (step.skip === 'already-set' ? 'found' : answered.has(step.key) ? 'later' : 'pending'),
-                })),
-            ),
-          ],
+      withUnfinished(
+        ready === undefined
+          ? []
+          : [
+              ...ready.flow.daemon.flatMap(segment =>
+                segment.steps
+                  .filter(step => !hidden.has(step.key))
+                  .map(step => ({
+                    plugin: step.plugin,
+                    id: step.id,
+                    title: step.title,
+                    group: segment.group,
+                    phase: 'daemon' as const,
+                    state: outcomes[step.key] ?? step.state ?? 'pending',
+                  })),
+              ),
+              // This device's own pages: set during this run, found on the device ledger, or left for later.
+              ...ready.flow.client.flatMap(segment =>
+                segment.steps
+                  // An offer this run never reached is not part of what was set up (nor of what was left).
+                  .filter(
+                    step =>
+                      !hidden.has(step.key) &&
+                      !(isOffer(step.key) && !(step.key in outcomes) && !answered.has(step.key)),
+                  )
+                  .map(step => ({
+                    plugin: step.plugin,
+                    id: step.id,
+                    title: step.title,
+                    group: segment.group,
+                    phase: 'client' as const,
+                    state:
+                      outcomes[step.key] ??
+                      (step.skip === 'already-set' ? 'found' : answered.has(step.key) ? 'later' : 'pending'),
+                  })),
+              ),
+            ],
+        memoryOf,
+      ),
       runtimesRead,
     ),
     retrySave,

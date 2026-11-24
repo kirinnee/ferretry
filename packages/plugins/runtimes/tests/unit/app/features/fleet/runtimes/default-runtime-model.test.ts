@@ -12,7 +12,8 @@ const at = (value: string): Instant => InstantSchema.parse(value);
 
 describe('runtimeStateWords', () => {
   it('says the login word of a runtime that is fine', () => {
-    expect(runtimeStateWords(runtime({ name: 'a' }), machine())).toBe('ready');
+    const ferretry = runtime({ name: 'a', credential: { id: 'x', store: 'ferretry', status: 'ready' } });
+    expect(runtimeStateWords(ferretry, machine())).toBe('ready');
     expect(
       runtimeStateWords(
         runtime({ name: 'a', credential: { id: 'x', store: 'host', status: 'refresh_due' } }),
@@ -22,6 +23,16 @@ describe('runtimeStateWords', () => {
     expect(runtimeStateWords(runtime({ name: 'a', credential: { id: 'x', store: 'host' } }), machine())).toBe(
       'checking',
     );
+  });
+
+  it('never calls a terminal sign-in Ferretry cannot see ready', () => {
+    expect(runtimeStateWords(runtime({ name: 'a' }), machine())).toBe('uses your terminal sign-in');
+    expect(
+      runtimeStateWords(
+        runtime({ name: 'a', credential: { id: 'x', store: 'host', status: 'needs_sign_in' } }),
+        machine(),
+      ),
+    ).toBe('needs sign-in');
   });
 
   it('says a switch-off first, with the day it ends when there is one', () => {
@@ -35,7 +46,7 @@ describe('runtimeStateWords', () => {
     const codex = runtime({ name: 'a', harness: 'codex' });
     const noCodex = machine({ tools: [{ harness: 'codex', label: 'Codex', installed: false }] });
     expect(runtimeStateWords(codex, noCodex)).toBe('Codex not installed');
-    expect(runtimeStateWords(codex, null)).toBe('ready');
+    expect(runtimeStateWords(codex, null)).toBe('uses your terminal sign-in');
   });
 });
 

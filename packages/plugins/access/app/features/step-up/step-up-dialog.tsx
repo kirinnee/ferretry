@@ -7,7 +7,7 @@
  * for is exactly the prompt a person must learn to refuse, and Safari would refuse it anyway.
  *
  * What a confirmation buys is stated once, here: the window this machine is set to, for this open copy of
- * the app, ended by closing the page. It holds no value — the daemon remembers the step-up, the browser
+ * the app, ended by closing the page — or, for an act that takes its own passkey once, that one act. It holds no value — the daemon remembers the step-up, the browser
  * keeps nothing.
  *
  * NOT A BOTTOM SHEET, for the reason the shell gives elsewhere: a dismiss swipe that is not portalled
@@ -47,6 +47,13 @@ export const STEP_UP_SCOPE_NOTE =
 /** What a confirmation bound to one staged thing buys: that thing, once. */
 export const STEP_UP_BOUND_SCOPE_NOTE =
   'This one confirmation covers exactly what is listed here, once. Nothing else, and not a later change.';
+
+/**
+ * What a confirmation stamped for one act buys (an import's `loosen-config`, adding a device): that act, once. The
+ * daemon spends the proof on it, so a second import asks again; promising the window here was the O12 S4 lie.
+ */
+export const STEP_UP_ONCE_SCOPE_NOTE =
+  'This confirms this one change. The next change like it asks for your passkey again.';
 
 /** What a confirmation does when a bound request shares its prompt with others: it is stamped for none of them, and buys the ordinary window. */
 export const sharedBoundNote = (scope: string): string =>
@@ -114,7 +121,9 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
       ? STEP_UP_BOUND_SCOPE_NOTE
       : prompt.shared === true && stepUp
         ? sharedBoundNote(prompt.scope ?? STEP_UP_SCOPE_NOTE)
-        : (prompt.scope ?? copy.scope);
+        : prompt.once === true && stepUp
+          ? STEP_UP_ONCE_SCOPE_NOTE
+          : (prompt.scope ?? copy.scope);
   // A confirmation bound to a staged thing lists what it approves, one line each (a task plan brings the daemon's own
   // words).
   // A standing sign-in rule brings its words as STRUCTURE (`prompt.words`): its rows and its red block are separate

@@ -509,6 +509,63 @@ describe('Settings forms: one save model, said out loud', () => {
     });
   }
 
+  // ── C59 O8-10 (QA walk 3 finding 6): Browser saves with the SAME bar as Security: in flow while clean, sticky while dirty ──
+  for (const viewport of [
+    { name: '1440', width: 1_440, height: 900 },
+    { name: '390', width: 390, height: 844 },
+  ]) {
+    it(`${viewport.name}: Browser proxy: with an address typed the Save bar is a Save bar, sticky and on screen`, async () => {
+      const { page, close } = await open(viewport.width, viewport.height, 'browsers', 'browser');
+      try {
+        const bar = page.locator('[data-setting-group="Browser proxy"] [data-setting-savebar]');
+        await bar.waitFor();
+        expect(await bar.getAttribute('data-state'), 'clean until something is typed').toBe('clean');
+        expect(await bar.evaluate(el => getComputedStyle(el).position), 'in flow while clean').toBe('static');
+        await page.locator('[data-browser-proxy-url]').fill('http://proxy.example.test:8080');
+        await page.waitForSelector('[data-setting-group="Browser proxy"] [data-setting-savebar][data-state="dirty"]');
+        expect(await bar.evaluate(el => getComputedStyle(el).position), 'sticky while dirty').toBe('sticky');
+        const save = bar.getByRole('button', { name: 'Save and test' });
+        const box = await save.boundingBox();
+        expect(box, 'Save and test is drawn').not.toBeNull();
+        expect(
+          (box?.y ?? 0) + (box?.height ?? 0) <= viewport.height,
+          `Save and test is on screen (bottom at ${String((box?.y ?? 0) + (box?.height ?? 0))} of ${String(viewport.height)})`,
+        ).toBe(true);
+        expect(await save.isEnabled(), 'a valid address can be saved').toBe(true);
+        // The bar and the choice cards fade between states: look at them once they have settled.
+        await page.locator('[data-browser-proxy-url]').evaluate(el => el.scrollIntoView({ block: 'center' }));
+        await page.waitForTimeout(600);
+        await shot(page, `${viewport.name}-browser-proxy-dirty`);
+      } finally {
+        await close();
+      }
+    });
+
+    it(`${viewport.name}: Browser mode: staging a mode swaps no bar and moves nothing`, async () => {
+      const { page, close } = await open(viewport.width, viewport.height, 'browsers', 'browser');
+      try {
+        const bar = page.locator('[data-setting-group="Browser mode"] [data-setting-savebar]');
+        await bar.waitFor();
+        const hint = page.locator('[data-browser-mode-hint]');
+        const before = await hint.boundingBox();
+        await page.locator('[data-choice="window"]').click();
+        await page.waitForSelector('[data-setting-group="Browser mode"] [data-setting-savebar][data-state="dirty"]');
+        const after = await hint.boundingBox();
+        expect(after?.y, 'the text under the choices did not move').toBe(before?.y);
+        expect(await bar.count(), 'one Save bar, the same one').toBe(1);
+        expect(await bar.getByRole('button').allInnerTexts(), 'the shared pair: Discard and Save').toEqual([
+          'Discard changes',
+          'Save browser mode',
+        ]);
+        expect(await bar.evaluate(el => getComputedStyle(el).position), 'sticky while dirty').toBe('sticky');
+        await page.waitForTimeout(600);
+        await shot(page, `${viewport.name}-browser-mode-dirty`);
+      } finally {
+        await close();
+      }
+    });
+  }
+
   // ── item 2: a failed proxy test leaves the prior proxy (and its secrets) exactly as they were ──
   const SAVED_PROXY = {
     'fyFake.browsersYaml':

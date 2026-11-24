@@ -18,6 +18,7 @@ import {
   type LayeredProfileView,
   type MachineView,
   type RuntimeView,
+  modelDisplayName,
   runtimeDisplayName,
 } from '../../../../contract/index.ts';
 import { SCOPE_WORDS } from '../components/component-model.ts';
@@ -172,10 +173,16 @@ export const launchLabel = (
 
 /** The row under a runtime's name: "you@example.com (work) · Default profile · Sonnet 5.5". */
 export const runtimeDefaultModel = (runtime: RuntimeView): string =>
-  runtime.modelSet.source === 'model-set' ? (runtime.modelSet.default ?? 'No model available') : 'Harness default';
+  runtime.modelSet.source === 'model-set'
+    ? runtime.modelSet.default === undefined
+      ? 'No model available'
+      : modelDisplayName(runtime.modelSet.default, runtime.models?.choices)
+    : 'Harness default';
 
 export interface ModelRow {
   readonly id: string;
+  /** The model as a person says it (its catalog's label, else the id). */
+  readonly name: string;
   readonly available: boolean;
   readonly isDefault: boolean;
 }
@@ -185,6 +192,7 @@ export const modelRows = (runtime: RuntimeView): readonly ModelRow[] =>
   runtime.modelSet.source === 'model-set'
     ? runtime.modelSet.models.map(model => ({
         id: model.id,
+        name: modelDisplayName(model.id, runtime.models?.choices),
         available: model.available,
         isDefault: runtime.modelSet.source === 'model-set' && model.id === runtime.modelSet.default,
       }))

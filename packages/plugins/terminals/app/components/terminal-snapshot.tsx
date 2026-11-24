@@ -37,6 +37,7 @@ import {
   formatSnapshotAge,
   formatSnapshotClock,
   paneColumns,
+  trimBlankTail,
 } from './terminal-snapshot-model.ts';
 
 /** The `<pre>`'s horizontal padding (`px-3`), which the fitted text does not get to use. */
@@ -117,7 +118,7 @@ export const TerminalSnapshotView = ({
     if (typeof document !== 'undefined' && document.hidden) return;
     try {
       const snapshot = await readSnapshot(daemon, scope);
-      setText(snapshot);
+      setText(trimBlankTail(snapshot));
       setLastUpdatedAt(now());
       setStale(false);
       setErrorMessage(null);

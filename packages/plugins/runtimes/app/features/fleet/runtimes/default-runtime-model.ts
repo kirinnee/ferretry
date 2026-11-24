@@ -12,6 +12,7 @@ import {
   type RuntimeAccounts,
   type RuntimeView,
   runtimeDisplayName,
+  terminalSignInWords,
 } from '../../../../contract/index.ts';
 import { untilWords } from '../shell/disable-model.ts';
 import { harnessInstalled } from './runtimes-model.ts';
@@ -30,14 +31,15 @@ const LOGIN_WORDS: Readonly<Record<NonNullable<RuntimeView['credential']['status
   checking: 'checking',
 };
 
-/** One runtime's state in a few words: "ready", "disabled until 4 Nov 2026", "Codex not installed". */
+/** One runtime's state in a few words: "ready", "uses your terminal sign-in", "disabled until 4 Nov 2026", "Codex not installed". */
 export const runtimeStateWords = (runtime: RuntimeView, machine: MachineView | null): string => {
   if (runtime.disabled !== undefined)
     return runtime.disabled.until === undefined
       ? 'switched off'
       : `switched off until ${untilWords(runtime.disabled.until)}`;
   if (!harnessInstalled(machine, runtime.harness)) return `${harnessName(runtime.harness)} not installed`;
-  return LOGIN_WORDS[runtime.credential.status ?? 'checking'];
+  const word = runtime.credential.status ?? 'checking';
+  return terminalSignInWords(runtime.credential.store, word)?.toLowerCase() ?? LOGIN_WORDS[word];
 };
 
 /** An option of the select: the name only ("claude-default"); its state is the badge beside the select. */

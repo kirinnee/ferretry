@@ -10,12 +10,14 @@ import type { z } from 'zod';
 import {
   FIRST_PASSKEY_TITLE,
   STEP_UP_BOUND_SCOPE_NOTE,
+  STEP_UP_ONCE_SCOPE_NOTE,
   STEP_UP_SCOPE_NOTE,
   StepUpDialog,
   sharedBoundNote,
   UNLOCK_COPY,
 } from '../../../app/features/step-up/step-up-dialog.tsx';
 import { type DaemonConnection, daemonConnection } from '../../../app/shell-grants.ts';
+import { stepUpStaysSentence } from '../../../app/lib/security-settings-client.ts';
 import { ownerCommandOffer } from '../../../app/lib/step-up-ceremony.ts';
 import { StepUpGate, type StepUpGateDependencies } from '../../../app/lib/step-up-gate.ts';
 import { interact, type Mounted, mount, must } from '../../support/app/dom.ts';
@@ -504,6 +506,62 @@ describe('the passkey prompt bound to a task plan, once another request joins it
     void gate.require(studio, words, 'explicit', STEP_UP_ACTS.approveTaskPlan, `tps_${'e'.repeat(24)}` as never);
     expect(gate.snapshot()?.bound).toBeUndefined();
     expect(gate.snapshot()?.shared).toBe(true);
+  });
+});
+
+describe('the passkey prompt for an act that takes its own passkey once (O12 S4)', () => {
+  /** A gate whose machine says its window is 15 minutes, as Settings > Security does by default. */
+  function windowed() {
+    const gate = new StepUpGate({
+      ceremony: async () => undefined,
+      describe: () => 'unknown',
+      scope: async () => stepUpStaysSentence(15),
+    });
+    return gate;
+  }
+  const IMPORT = 'put a configuration change into effect';
+
+  it('says an import’s passkey confirms that one change, never that it covers 15 minutes of changes', async () => {
+    const gate = windowed();
+
+    await withDialog(gate, async ({ container }) => {
+      await interact(() => void gate.require(studio, IMPORT, 'explicit', STEP_UP_ACTS.loosenConfig));
+      await interact(async () => await Promise.resolve());
+
+      const scope = must(container.querySelector('[data-step-up-scope]'), 'the scope note').textContent;
+      expect(scope).toBe(STEP_UP_ONCE_SCOPE_NOTE);
+      expect(scope).not.toContain('15 minutes');
+      expect(gate.snapshot()?.once).toBe(true);
+    });
+  });
+
+  it('keeps the machine’s window words for an ordinary change that names no act', async () => {
+    const gate = windowed();
+
+    await withDialog(gate, async ({ container }) => {
+      await interact(() => void gate.require(studio, 'change the settings for the agent fleet'));
+      await interact(async () => await Promise.resolve());
+
+      expect(must(container.querySelector('[data-step-up-scope]'), 'the scope note').textContent).toBe(
+        stepUpStaysSentence(15),
+      );
+      expect(gate.snapshot()?.once).toBeUndefined();
+    });
+  });
+
+  it('stops saying "this one change" once another request joins the prompt, because the proof is then stamped for none', async () => {
+    const gate = windowed();
+
+    await withDialog(gate, async ({ container }) => {
+      await interact(() => void gate.require(studio, IMPORT, 'explicit', STEP_UP_ACTS.loosenConfig));
+      await interact(() => void gate.require(studio, 'open a terminal'));
+      await interact(async () => await Promise.resolve());
+
+      expect(gate.snapshot()?.once).toBeUndefined();
+      expect(must(container.querySelector('[data-step-up-scope]'), 'the scope note').textContent).toBe(
+        stepUpStaysSentence(15),
+      );
+    });
   });
 });
 

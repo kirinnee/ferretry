@@ -413,46 +413,42 @@ describe('the demos say what they show', () => {
   });
 });
 
-describe('C59 O5 item 6 / O11 R5 S-25: the sign-in page (heading and block) sits in the vertical middle of a desktop page', () => {
-  for (const theme of THEMES)
-    it(`the free room above and below the block is the same, desktop only (1280, ${theme}); a phone keeps it at the top`, async () => {
-      const measure = async (viewport: (typeof VIEWPORTS)[number]) => {
+describe('O12 S1 / S-25 / O9-15: the sign-in page is top-aligned and its heading stays put as the block under it grows', () => {
+  for (const viewport of VIEWPORTS)
+    for (const theme of THEMES)
+      it(`the heading sits right under the progress bar and does not move when the block grows (${viewport.name}, ${theme})`, async () => {
         const { tab, close } = await open(viewport, theme, '&page=sign-in');
         try {
           await tab.waitForTimeout(300);
-          return await tab.evaluate(() => {
-            const head = document.querySelector('.fy-spf__head') as HTMLElement;
-            const main = document.querySelector('.fy-spf__main') as HTMLElement;
-            const page = document.querySelector('.fy-spf__page') as HTMLElement;
-            const progress = document.querySelector('.fy-sp-progress');
-            const style = getComputedStyle(page);
-            const gap = Number.parseFloat(style.rowGap);
-            // O11 R5 (S-25): the heading AND the block are centred together, in the room under the progress bar.
-            const top =
-              progress === null
-                ? page.getBoundingClientRect().top + Number.parseFloat(style.paddingTop)
-                : progress.getBoundingClientRect().bottom + gap;
-            const above = head.getBoundingClientRect().top - top;
-            const below =
-              page.getBoundingClientRect().bottom -
-              Number.parseFloat(style.paddingBottom) -
-              main.getBoundingClientRect().bottom;
-            return { above, below };
+          const read = () =>
+            tab.evaluate(() => {
+              const head = document.querySelector('.fy-spf__head') as HTMLElement;
+              const page = document.querySelector('.fy-spf__page') as HTMLElement;
+              const progress = document.querySelector('.fy-sp-progress');
+              const style = getComputedStyle(page);
+              const top =
+                progress === null
+                  ? page.getBoundingClientRect().top + Number.parseFloat(style.paddingTop)
+                  : progress.getBoundingClientRect().bottom + Number.parseFloat(style.rowGap);
+              return { heading: head.getBoundingClientRect().top, above: head.getBoundingClientRect().top - top };
+            });
+          const idle = await read();
+          // The card replacing the idle block is taller: a stand-in block of any height must not move the heading.
+          await tab.evaluate(() => {
+            const grown = document.createElement('div');
+            grown.style.blockSize = '320px';
+            document.querySelector('[data-onboarding-step="claude-code.sign-in"]')?.append(grown);
           });
+          const grown = await read();
+          console.log(
+            `S1 sign-in ${viewport.name} ${theme}: heading idle ${String(idle.heading)} grown ${String(grown.heading)}; above ${String(idle.above)}`,
+          );
+          expect(idle.above, 'top-aligned: nothing is centred above the heading').toBeLessThanOrEqual(1);
+          expect(grown.heading, 'the heading does not move when the block grows').toBe(idle.heading);
         } finally {
           await close();
         }
-      };
-      const desktop = await measure(VIEWPORTS[0]);
-      const phone = await measure(VIEWPORTS[1]);
-      console.log(
-        `O5 sign-in centring ${theme}: desktop above ${String(desktop.above)} below ${String(desktop.below)}; phone above ${String(phone.above)} below ${String(phone.below)}`,
-      );
-      expect(desktop.above).toBeGreaterThan(8);
-      expect(Math.abs(desktop.above - desktop.below)).toBeLessThanOrEqual(2);
-      // A phone keeps the heading at the top (the block under it).
-      expect(phone.above).toBeLessThanOrEqual(1);
-    });
+      });
 });
 
 describe('audit row: Install is as wide as the command it runs', () => {

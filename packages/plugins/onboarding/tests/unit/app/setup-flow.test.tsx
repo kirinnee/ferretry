@@ -125,6 +125,15 @@ function RepickPage({ step }: { readonly step: StepHost }): ReactNode {
 }
 /** Whether the machine already has a project: project setup then passes itself over, as the real page does. */
 const machineHasProject = { value: false };
+/** A page that is shown and leaves nothing decided (Lessons with neither card picked): it says it is unfinished, like the real ones. */
+function UnfinishedPage({ step }: { readonly step: StepHost }): ReactNode {
+  useEffect(() => {
+    step.remember({ unfinished: true });
+    step.ready();
+  }, [step]);
+  return <p>nothing picked</p>;
+}
+
 /**
  * Project setup's page (C59 O8-13): it commits like the real one and leaves where its project is. Like the real one it
  * passes over on a machine that already has a project, unless THIS run made it (`madeIds`: Back lands here and stays).
@@ -271,6 +280,7 @@ const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
   'fake-pack.repick': step => <RepickPage step={step} />,
   'fake-pack.after': step => <ReadyPage step={step} />,
   'runtimes.start': step => <ReadyPage step={step} />,
+  'lessons.choose': step => <UnfinishedPage step={step} />,
   'fake-pack.legacy': () => <p>an old page that never calls ready</p>,
   'fake-pack.forgot': step => <ReadyPage step={step} />,
   'projects.folders': step => <ProjectSetupPage step={step} />,
@@ -337,7 +347,13 @@ function setup(options: {
   readonly scan?: 'fails' | 'finds';
   readonly report?: (message: string) => void;
   /** What `GET /v1/runtimes` answers: the runtimes this machine has (none by default). */
-  readonly runtimes?: readonly { readonly id: string; readonly name: string; readonly harness: string }[];
+  readonly runtimes?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly harness: string;
+    /** Whether the runtime can start (default true). */
+    readonly available?: boolean;
+  }[];
   /** Holds a daemon answer until the returned promise settles (the test releases it). */
   readonly gate?: (state: string, step: string) => Promise<void> | undefined;
 }) {
@@ -359,7 +375,12 @@ function setup(options: {
         if (route === 'GET /v1/claude-code/update' || route === 'GET /v1/codex/update') return null;
         if (route === 'GET /v1/logins/presets') return REAL_PROVIDER_PRESET_CATALOG;
         if (route === 'GET /v1/runtimes')
-          return { runtimes: (options.runtimes ?? []).map(runtime => ({ ...runtime, launch: { available: true } })) };
+          return {
+            runtimes: (options.runtimes ?? []).map(({ available, ...runtime }) => ({
+              ...runtime,
+              launch: { available: available ?? true },
+            })),
+          };
         if (route === 'GET /v1/onboarding') {
           reads.push({ daemon: machine.id, init: request });
           if (options.hangReads?.has(machine.id) === true) return new Promise(() => undefined);
@@ -423,6 +444,7 @@ function setup(options: {
       stepPanel('codex', 'step'),
       stepPanel('projects', 'step'),
       stepPanel('runtimes', 'step'),
+      stepPanel('lessons', 'step'),
     ],
   };
   const tree = (
@@ -1852,6 +1874,43 @@ describe('Connect GitHub never pulls a finished setup back (O9-10)', () => {
     expect(row('daemon:runtimes')?.querySelector('[data-mark="done"]')).toBeNull();
   });
 
+  it('and does not tick a page that was shown and left with nothing decided (Lessons, Shells), but ticks the rest', async () => {
+    const base = withStart();
+    const machine: Machine = {
+      ...base,
+      steps: [
+        ...base.steps,
+        {
+          plugin: 'lessons',
+          id: 'choose',
+          title: 'Learn rules',
+          order: 20,
+          group: 'Lessons',
+          stepHost: true as const,
+          state: 'pending' as const,
+        },
+      ],
+    };
+    view = await mount(setup({ machines: [machine] }).tree);
+    await walkToEnd();
+    expect(ended()).toBe(true);
+    expect(row('daemon:lessons')?.getAttribute('data-end-state')).toBe('later');
+    expect(row('daemon:lessons')?.querySelector('[data-mark="done"]')).toBeNull();
+    expect(row('daemon:onboarding')?.getAttribute('data-end-state') ?? 'done').toBe('done');
+  });
+
+  it('nor when the machine has runtimes but none can start', async () => {
+    view = await mount(
+      setup({
+        machines: [withStart()],
+        runtimes: [{ id: 'codex-default', name: 'Codex (you)', harness: 'codex', available: false }],
+      }).tree,
+    );
+    await walkToEnd();
+    expect(ended()).toBe(true);
+    expect(row('daemon:runtimes')?.getAttribute('data-end-state')).toBe('later');
+  });
+
   it('and ticks it once the machine has a runtime', async () => {
     view = await mount(
       setup({
@@ -1889,10 +1948,15 @@ describe('Connect GitHub never pulls a finished setup back (O9-10)', () => {
     await next();
     await settle();
     expect(pageKey()).toBe('projects.folders');
+    // Connect GitHub is counted up front (O12 S3): the total on Projects is already the total on GitHub.
+    expect(progressText()).toBe('Projects · page 2 of 3');
     await next();
     await settle();
     expect(pageKey()).toBe('projects.github');
     expect(progressText()).toBe('Projects · page 3 of 3');
+    await press('[data-step-back]');
+    await settle();
+    expect(progressText()).toBe('Projects · page 2 of 3');
   });
 
   it('a machine with a project still offers it to a run that drew an earlier page', async () => {

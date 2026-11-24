@@ -282,7 +282,7 @@ describe('a runtime’s own page', () => {
   it('shows the login and profile as links, with the profile’s size', async () => {
     const view = await page('claude-default');
     expect(text(view.container, 'h3')).toBe('Claude · your terminal sign-in (personal) — Default profile');
-    expect(text(view.container, '[data-runtime-page] p')).toContain('Ready');
+    expect(text(view.container, '[data-runtime-page] p')).toContain('Uses your terminal sign-in');
     expect(text(view.container, '[data-runtime-page] p')).not.toContain('Agent runtime');
     const login = must(view.container.querySelector('[data-runtime-credential]'), 'login link');
     expect(login.getAttribute('href')).toBe(

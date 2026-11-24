@@ -5,7 +5,7 @@
  *
  *   ?theme=<family>-<mode>                     the first look (the mode is read from it)
  *   ?tool=claude-code|codex                    which tool's page (default claude-code)
- *   ?state=ready|own|many|none|blocked|unread  what the machine says about that tool's runtimes (default ready: a terminal sign-in)
+ *   ?state=ready|own|many|none|blocked|blocked-own|unread  what the machine says about that tool's runtimes (default ready: a terminal sign-in)
  */
 import { StepPageFrame } from '@ferretry/app';
 import { LivingBackground } from '@ferretry/app/ui';
@@ -36,6 +36,7 @@ const client = {
     if (state === 'unread') throw new Error('unreachable');
     if (state === 'none') return { runtimes: [] };
     if (state === 'blocked') return { runtimes: [row(`${label} (work)`, false)] };
+    if (state === 'blocked-own') return { runtimes: [row(`${label} (work)`, false, 'ferretry')] };
     if (state === 'many')
       return { runtimes: [row(`${label} (personal)`, true, 'ferretry'), row(`${label} (work)`, true, 'ferretry')] };
     if (state === 'own') return { runtimes: [row(`${label} (personal)`, true, 'ferretry')] };
