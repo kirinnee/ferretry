@@ -5,7 +5,7 @@
  *
  *   /            a first visit: the shell sends a device with no daemon to the first run
  *   ?theme=<family>-<mode>
- *   ?paused=<plugin>   the machines report that plugin as off and list none of its steps, as a daemon with it switched off does
+ *   ?paused=<plugin>[,<plugin>…]   the machines report that plugin as off and list none of its steps, as a daemon with it switched off does
  *
  * Pairing is REAL up to the wire: Access's pairing page reads the link, mints its device key in the browser, and asks the
  * (fake) `pairDirect`; the fake saves the key as the shell does after a sealed `paired` answer, and the machine is added.
@@ -33,14 +33,14 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 // r11-1b G6: ?latency=N makes every machine read and write answer N ms late (the machines answer at once by default).
 const latencyMs = Number(params.get('latency') ?? 0);
 const surfaces = generated.surfaces;
-const paused = params.get('paused');
-const overrides = paused === null ? {} : { [paused]: { on: false } };
+const paused = (params.get('paused') ?? '').split(',').filter(name => name !== '');
+const overrides = Object.fromEntries(paused.map(name => [name, { on: false }]));
 
 // A paused plugin offers the machine no steps (a switched-off plugin's steps are not listed).
 const daemons = new Map<string, FakeDaemon>(
   MACHINES.map(machine => [
     machine.id,
-    new FakeDaemon({ ...machine, steps: machine.steps.filter(step => step.plugin !== paused) }),
+    new FakeDaemon({ ...machine, steps: machine.steps.filter(step => !paused.includes(step.plugin)) }),
   ]),
 );
 const transports = new Map<string, FakeTransport>();
