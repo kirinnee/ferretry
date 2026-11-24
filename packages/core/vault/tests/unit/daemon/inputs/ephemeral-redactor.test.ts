@@ -94,3 +94,25 @@ describe('EphemeralAwareRedactor', () => {
     await should(redactor.redact('x')).be.rejectedWith('vault locked');
   });
 });
+
+describe('the digest of what a read masks', () => {
+  const digest = async (held: EphemeralValues): Promise<string> =>
+    await new EphemeralAwareRedactor(vault, held).batch(scrub => scrub.fingerprint());
+
+  it('should move when a value is typed and again when it expires, so a verdict made before either is stale', async () => {
+    // Arrange
+    let now = 1;
+    const held = new EphemeralValues({ now: () => now });
+    const before = await digest(held);
+
+    // Act
+    held.hold('s1', 'JUST-TYPED-VALUE', 'A1', 5);
+    const typed = await digest(held);
+    now = 10_000;
+    const expired = await digest(held);
+
+    // Assert
+    should(typed).not.equal(before);
+    should(expired).equal(before);
+  });
+});

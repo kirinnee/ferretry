@@ -47,6 +47,11 @@ export class VaultRedaction implements Redaction {
         },
         cells: grid => maskGrid(grid, needles(), text => scrub.cover(text)),
         lines: lines => maskLines(lines, needles(), text => scrub.cover(text)),
+        // The digest of what this scope masks, typed values included, so a caller may keep a verdict until it moves.
+        fingerprint: () => {
+          values();
+          return scrub.fingerprint();
+        },
       });
     } finally {
       // Revoked, so a scope that escaped its read holds nothing.

@@ -129,6 +129,11 @@ export interface FsFileView {
    * document a daemon token or device grant.
    */
   readonly base64?: string;
+  /**
+   * The bytes themselves, present only when the caller asked for them RAW. They never leave through a route as they are:
+   * the caller owns what is done with them (the media route scans them, then serves a range). With a span, only that span.
+   */
+  readonly bytes?: Uint8Array;
   /** A NUL byte inside the first {@link BINARY_SNIFF_BYTES}. */
   readonly binary?: boolean;
   /** Larger than the cap; `size` still reports the real size. */

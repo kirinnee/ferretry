@@ -352,6 +352,12 @@ export class FakeRedaction implements Redaction {
           return out;
         });
       },
+      // The set of values, in order, joined: equal exactly when the set is equal (a real redactor keys and hashes it).
+      fingerprint: () =>
+        values
+          .map(([, value]) => value)
+          .sort()
+          .join(String.fromCharCode(0)),
     };
     return await fn(scope);
   }
