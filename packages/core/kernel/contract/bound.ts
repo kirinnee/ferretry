@@ -240,6 +240,13 @@ export interface RedactionScope {
   cells(grid: CellGrid): CellGrid;
   /** A value wrapped across rows is masked in each row. */
   lines(lines: readonly string[]): readonly string[];
+  /**
+   * A keyed digest of every value this scope would mask, in this daemon process only: equal exactly when the set of
+   * values is equal, so a caller may keep a verdict about some bytes for as long as it is. It is not a value, cannot
+   * be turned back into one, and is never to leave the process (a log, a response, a file). Absent on a redactor that
+   * cannot say, and then nothing may be kept: ask again for every read.
+   */
+  fingerprint?(): string;
 }
 
 /**

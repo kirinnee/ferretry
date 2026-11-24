@@ -79,27 +79,42 @@ export function mediaAnswer(
   rangeHeader: string | null | undefined,
   name: string,
 ): ApiResponse {
-  const size = bytes.byteLength;
+  const range = parseMediaRange(rangeHeader ?? undefined, bytes.byteLength);
+  const piece = range.kind === 'part' ? bytes.subarray(range.start, range.end + 1) : bytes;
+  return mediaRangeAnswer(range, bytes.byteLength, piece, type, name);
+}
+
+/**
+ * The same answer when only the PIECE is in hand: `range` is {@link parseMediaRange}'s verdict for a file of `size`, and
+ * `piece` is the bytes it names (a `part`: exactly `start..end`; `whole`: the whole file; `unsatisfiable`: none are read).
+ * It exists so a route that read one range of a large file answers exactly as one that read all of it.
+ */
+export function mediaRangeAnswer(
+  range: MediaRange,
+  size: number,
+  piece: Uint8Array,
+  type: string,
+  name: string,
+): ApiResponse {
   const safe = {
     'accept-ranges': 'bytes',
     'content-security-policy': "default-src 'none'; sandbox",
     'cross-origin-resource-policy': 'same-origin',
     'x-content-type-options': 'nosniff',
   };
-  const range = parseMediaRange(rangeHeader ?? undefined, size);
   if (range.kind === 'unsatisfiable')
     return jsonResponse({ error: 'the range starts past the end of the file', code: 'range_not_satisfiable' }, 416, {
       ...safe,
       'content-range': `bytes */${size}`,
     });
   if (range.kind === 'part')
-    return bytesResponse(bytes.subarray(range.start, range.end + 1), type, 206, {
+    return bytesResponse(piece, type, 206, {
       ...safe,
       'content-range': `bytes ${range.start}-${range.end}/${size}`,
     });
   if (size > MEDIA_CHUNK_BYTES)
     throw new ApiError(413, `${name} is read in ranges of at most ${MEDIA_CHUNK_BYTES} bytes`, 'range_required');
-  return bytesResponse(bytes, type, 200, safe);
+  return bytesResponse(piece, type, 200, safe);
 }
 
 /** What a `Range` header asks for, decided against the file's size. */

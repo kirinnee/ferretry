@@ -25,6 +25,8 @@ import {
   type PinnedOpenOptions,
   type PinOptions,
   type PinnedRoot,
+  type ByteWindow,
+  type PinnedStat,
   type PinnedTarget,
   type SessionRootPinner,
   unsupportedPlatform,
@@ -226,9 +228,15 @@ class InstalledDirectory {
 }
 
 /** Bytes of an already-open file, with no path anywhere in the call. */
-async function readAt(fd: number, buffer: Uint8Array, offset: number, length: number): Promise<number> {
+async function readAt(
+  fd: number,
+  buffer: Uint8Array,
+  offset: number,
+  length: number,
+  position: number,
+): Promise<number> {
   return await new Promise((resolve, reject) => {
-    read(fd, buffer, offset, length, offset, (error, bytesRead) => (error ? reject(error) : resolve(bytesRead)));
+    read(fd, buffer, offset, length, position, (error, bytesRead) => (error ? reject(error) : resolve(bytesRead)));
   });
 }
 
@@ -255,17 +263,23 @@ class PosixPinnedTarget implements PinnedTarget {
    * Taking the descriptor rather than a path is the whole point: `stat` then `readFile` checks one path
    * and reads another, and everything in between can be replaced with a symlink pointing anywhere.
    */
-  async read(maxBytes: number): Promise<Uint8Array | undefined> {
+  async read(maxBytes: number, window?: ByteWindow): Promise<Uint8Array | undefined> {
     const size = this.metadata.size;
     if (size > maxBytes) return undefined;
-    const bytes = new Uint8Array(size);
+    const start = window === undefined ? 0 : Math.min(window.start, size);
+    const bytes = new Uint8Array(window === undefined ? size : Math.min(window.length, size - start));
     let done = 0;
     while (done < bytes.byteLength) {
-      const bytesRead = await readAt(this.fd, bytes, done, bytes.byteLength - done);
+      const bytesRead = await readAt(this.fd, bytes, done, bytes.byteLength - done, start + done);
       if (bytesRead === 0) break; // truncated under us; serve what exists
       done += bytesRead;
     }
     return done === bytes.byteLength ? bytes : bytes.subarray(0, done);
+  }
+
+  async restat(): Promise<PinnedStat> {
+    const now = this.directory.fs.fstat(this.fd);
+    return { identity: componentIdentity(now), size: Number(now.size), mtime: now.mtime.toISOString() };
   }
 
   /**

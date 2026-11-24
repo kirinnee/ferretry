@@ -132,6 +132,26 @@ export interface SpawnBudget extends WorkBudget {
   remainingMs(): number;
 }
 
+/** A span of a file: `length` bytes from `start`. */
+export interface ByteWindow {
+  readonly start: number;
+  readonly length: number;
+}
+
+/** What a caller learns of a regular file once every gate has passed and before one byte is read. */
+export interface ReadTarget {
+  /** The leaf's identity from the open descriptor itself (device, inode, ctime). */
+  readonly identity: ComponentIdentity;
+  readonly size: number;
+  readonly mtime: string;
+}
+
+/**
+ * Chooses what to read of a file that passed every gate: a span, or `undefined` for all of it. Asked after the gates and
+ * before the read, and it may refuse by throwing, which ends the read with nothing served.
+ */
+export type SpanChooser = (file: ReadTarget) => Promise<ByteWindow | undefined>;
+
 /**
  * An object opened through the pinned walk, held OPEN.
  *
@@ -150,8 +170,14 @@ export interface PinnedTarget {
   readonly canonical: string;
   /** The identity of every component of the walk, root first and leaf last. */
   readonly identities: readonly ComponentIdentity[];
-  /** Bytes of an already-open regular file, or `undefined` when it exceeds `maxBytes`. */
-  read(maxBytes: number): Promise<Uint8Array | undefined>;
+  /**
+   * Bytes of an already-open regular file, or `undefined` when the FILE exceeds `maxBytes`. With a `window` only that
+   * span is read (clamped to the file), so a caller who needs one piece of a large file does not pay for all of it;
+   * the size cap still judges the whole file.
+   */
+  read(maxBytes: number, window?: ByteWindow): Promise<Uint8Array | undefined>;
+  /** A fresh `fstat` of the SAME open descriptor: what a verdict keyed on the open-time stat must still match after a read. */
+  restat(): Promise<ReadTarget>;
   /**
    * One level of an already-open directory, streamed and stopped one entry past `maxEntries`.
    *
