@@ -69,7 +69,8 @@
         "packages/plugins/codex/",
         "packages/plugins/mcp/",
         "packages/plugins/projects/",
-        "packages/plugins/runtimes/"
+        "packages/plugins/runtimes/",
+        "packages/plugins/search/"
       ]
     },
     {
