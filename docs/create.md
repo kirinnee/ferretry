@@ -1,13 +1,14 @@
-# Create: pictures and sound (and later video) for agents that cannot make them
+# Create: pictures, sound and video for agents that cannot make them
 
 An agent whose runtime has no image or sound tool (an open-weight model behind Claude Code, say) calls
-`generate_image`, `generate_speech`, `generate_sfx` or `generate_music`. Create makes the file on **the owner's own
+`generate_image`, `generate_speech`, `generate_sfx`, `generate_music` or `generate_video`. Create makes the file on **the owner's own
 fal and ElevenLabs keys**, prices the call before it is sent, refuses past a daily limit, and asks the owner before one
 dear call. This page is the contract; the code is `packages/plugins/create`.
 
-Built so far: the core (tools, price table, ledger, daily cap, the ask), `generate_image`, and the sound tools
-(`generate_speech`, `generate_sfx`, `generate_music`). The streamed media route that lifts the 1 MiB chat limit (U15)
-and video (U16) come after it.
+Built: the core (tools, price table, ledger, daily cap, the ask), `generate_image`, the sound tools
+(`generate_speech`, `generate_sfx`, `generate_music`), and video (`generate_video` + `generation_status`, below). A
+clip is played from the media folder through the streamed byte route ([fy-render.md](fy-render.md) rule 11), up to
+32 MiB.
 
 ## Turning it on
 
@@ -64,6 +65,48 @@ audio from ElevenLabs would be dropped. Create calls the `/v1/text-to-speech/{vo
 answers JSON whose `audio_base64` field is the MP3, and decodes it itself. Only that field is read; the per-letter
 timings it also returns are ignored. A reply that is not JSON is unreadable, so the call is counted as possibly billed.
 
+### Video: two calls, because a clip takes minutes
+
+`generate_video(prompt, model?, seconds?, aspect?, resolution?, audio?)` puts one request in **fal's queue**
+(`POST queue.fal.run/<endpoint>`) and answers at once with a **job id** (`vid_…`). `generation_status(job)` asks fal
+about it: still waiting (it says so, spends nothing), or made, in which case Create fetches the file from fal's
+storage with no key, saves it to the ferret's media folder and answers the same one piece to paste as a picture, here
+`type: video`. Asked again after that it answers the same block and fetches nothing. A job is its ferret's own: another
+ferret's id is answered as no job.
+
+- `model`: `kling` (default; Kling 2.6 Pro, `fal-ai/kling-video/v2.6/pro/text-to-video`; 5 or 10 s; 16:9, 9:16 or 1:1) or
+  `veo-fast` (Veo 3.1 Fast, `fal-ai/veo3.1/fast`; 4, 6 or 8 s, default 8; 16:9 or 9:16; `resolution` 720p or 1080p).
+  A length, shape or resolution the model does not take is refused before any price is read; 4K is not offered.
+- `audio` (default **false**) asks for generated sound, which doubles the price. Every setting is sent by name, so no
+  default of fal's can change what the call costs.
+- **Priced by the second**: Kling $0.07 (sound $0.14), Veo Fast $0.10 (sound $0.15), 720p and 1080p alike, from the
+  pages in `contract/pricing.ts`. fal's own rate is asked first; it is ONE number per endpoint, so it is compared with the
+  table for **both** options (sound off and on) and the clip is priced at the **higher** (a price that rose is seen; one
+  that fell is not; a base rate that rose lifts a clip with sound by the table's own sound/silent ratio),
+  and a live rate in a unit other than the second refuses the call. So a Kling 5 s silent clip is $0.35, a Veo 8 s silent
+  $0.80, and a Veo 8 s clip with sound is **$1.20, over the $1 limit: it asks first**.
+- **The spend is reserved when it is queued**, by the same steps as every tool (cap, ask, reserve). Checking a job never
+  reserves or charges again.
+- **A job fal fails is refunded only on an error fal does not bill, and only from its status.** fal's one statement on
+  billing is that "failed requests that return 5xx status codes are not billed"
+  ([Reliability](https://fal.ai/docs/documentation/model-apis/inference/reliability.md)). So the refund (the ledger's
+  `refund: true` line) is given when the **status** endpoint ends the request (`COMPLETED` carrying an `error`) with an
+  `error_type` of that 5xx class (`request_timeout`, `startup_timeout`, `runner_*`, `internal_error`) or `bad_request`
+  (the same "4xx = no charge" rule a refused submit already follows). A cancel or dropped client (`client_cancelled`,
+  `client_disconnected`, 499), `content_policy_violation`, and any `error_type` Create does not know **stay counted**.
+  A request whose status says `COMPLETED` with no error succeeded and was billed, so a result that will not read (422, 499,
+  5xx, a dropped connection) is **never a refund**: the job stays open and is read again on the next `generation_status`
+  (free), and after 5 failed reads (of the result, or of the file on fal's storage, which also covers a file that has
+  expired) it is closed as counted with "made and paid for, could not be fetched, do NOT retry". A result that has expired
+  (404; fal keeps a result for an hour), a finished answer with no video, a job fal no longer knows, a file on a host that
+  is not fal's storage, or a file over 32 MiB or not a video also **stays counted** at once, and the ferret is told not to
+  retry. A clip that could not be saved leaves the job open: asking again retries for free.
+- **A restart loses nothing and charges nothing twice.** The job (fal's request id and the two queue addresses it
+  answered, https on `queue.fal.run` only) is written to `state/create/jobs.jsonl` (`0600`, private) before `generate_video`
+  answers; `generation_status` reads it from there. The order is chosen so a crash can only **over-count**: the spend is
+  reserved before fal is called, and a job's end is written before its refund. The same request made again while its
+  job is still open is answered with that job and not queued again.
+
 ## What it costs, and where each price came from
 
 Every call is priced **before** it is sent. fal's own price endpoint is asked first
@@ -88,6 +131,11 @@ not shown is not spent. The answer says which one priced the call (`fal's price`
 | ------------ | ------------------------------------ | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | sound effect | `fal-ai/elevenlabs/sound-effects/v2` | $0.002 / second                                          | [fal.ai/models/fal-ai/elevenlabs/sound-effects/v2](https://fal.ai/models/fal-ai/elevenlabs/sound-effects/v2/llms.txt) |
 | music        | `fal-ai/elevenlabs/music`            | $0.60 / audio minute, **rounded up to the whole minute** | [fal.ai/models/fal-ai/elevenlabs/music](https://fal.ai/models/fal-ai/elevenlabs/music/llms.txt)                       |
+
+| Video (fal) | fal endpoint                                | Table price (sound off / on) | Read from (2026-11-24)                                                                                                              |
+| ----------- | ------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `kling`     | `fal-ai/kling-video/v2.6/pro/text-to-video` | $0.07 / $0.14 per second     | [fal.ai/models/fal-ai/kling-video/v2.6/pro/text-to-video](https://fal.ai/models/fal-ai/kling-video/v2.6/pro/text-to-video/llms.txt) |
+| `veo-fast`  | `fal-ai/veo3.1/fast`                        | $0.10 / $0.15 per second     | [fal.ai/models/fal-ai/veo3.1/fast](https://fal.ai/models/fal-ai/veo3.1/fast/llms.txt)                                               |
 
 **ElevenLabs has no price endpoint**, so speech is always priced from the table above (the answer says `the listed
 price`), by the characters of the text sent. fal's own endpoint is asked first for the sound effect and the music, and
@@ -121,7 +169,7 @@ part of what was approved.
 ## The ledger
 
 `state/create/ledger.jsonl` (`0600`, private: no ferret reads it through any root) keeps one line per spend: time, day,
-tool (`generate_image`, `generate_speech`, `generate_sfx` or `generate_music`), model, ferret, cost in micro-dollars, whether the provider's own endpoint (fal) or the table priced it, and a digest of the request. **Never**
+tool (`generate_image`, `generate_speech`, `generate_sfx`, `generate_music` or `generate_video`), model, ferret, cost in micro-dollars, whether the provider's own endpoint (fal) or the table priced it, and a digest of the request. **Never**
 the prompt, a key, or anything fal sent. **The spend is reserved before the run**, so a call that may have been billed
 is always counted. It is given back (a second line, `refund: true`, that cancels the first; the ledger is only ever
 appended to) only when the provider definitely billed nothing: the request never left, it was refused, or it answered 401, 403,
@@ -129,8 +177,8 @@ appended to) only when the provider definitely billed nothing: the request never
 
 ## Where the key goes, and where it does not
 
-- `kernel.secrets.send` places `FAL_KEY` as `Authorization: Key …` on a request to **`fal.run`** (the run) or
-  **`api.fal.ai`** (the price), and `ELEVENLABS_API_KEY` as `xi-api-key: …` on a request to **`api.elevenlabs.io`**.
+- `kernel.secrets.send` places `FAL_KEY` as `Authorization: Key …` on a request to **`fal.run`** (the run),
+  **`queue.fal.run`** (a video's queue, status and result) or **`api.fal.ai`** (the price), and `ELEVENLABS_API_KEY` as `xi-api-key: …` on a request to **`api.elevenlabs.io`**.
   Those are the only hosts it may reach (`permissions.network`, named exactly). Create never
   holds the value; a reply that echoes it is reported unreadable; the security log names the secret and host only
   ([secrets.md](secrets.md#a-plugins-own-key-placed-by-the-kernel)).
@@ -151,7 +199,14 @@ appended to) only when the provider definitely billed nothing: the request never
 - **The day's zone is Create's own key or the host's.** Usage's `usage.yaml` `timeZone` is not read: Create does not
   depend on Usage, so `create.yaml` `timeZone` names the zone, and absent it the day follows the machine's own zone
   (what Usage does when it has none).
+- **A crash between fal answering a submit and the job being written loses the job** (the money stays counted, and the
+  ferret is told so if the write fails; a crash at that instant is not told). fal's own usage page shows the clip.
+- **fal's result is kept for an hour.** A job nobody checks within that hour may be unfetchable (it is then counted, not
+  refunded).
+- **HeyGen avatar video is not built** (optional in the plan; it needs its own key, host and price table).
 - **Estimates, not invoices.** fal returns no cost with a run, so the ledger holds the price that was shown. Its own
   usage page is the authority for the bill.
 - **No real run has been made.** Everything here was built and tested against fake fal and ElevenLabs servers; the first
-  real picture (about $0.003), voiceover (about $0.001), sound effect ($0.01) and song ($0.60) wait for the owner's keys.
+  real picture (about $0.003), voiceover (about $0.001), sound effect ($0.01), song ($0.60) and Kling 5 s clip ($0.35)
+  wait for the owner's keys. The queue's wire shape (`request_id`, `status_url`, `response_url`, `COMPLETED` with an
+  `error`) is from fal's queue documentation, not a live reply.

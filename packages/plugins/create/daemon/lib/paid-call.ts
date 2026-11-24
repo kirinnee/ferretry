@@ -21,7 +21,8 @@ import {
   type SpendTool,
   usdWords,
 } from '../../contract/index.ts';
-import { type FalFailure, isFailure } from './fal.ts';
+import { type FalFailure, isFailure, readPrice } from './fal.ts';
+import type { LiveRate } from '../../contract/index.ts';
 import { approvalFor, dayOf, judgeSpend, type SpendAsks, type SpendLedger } from './spend.ts';
 
 export interface ToolAnswer {
@@ -92,6 +93,8 @@ export type Paid<T extends object> =
   | {
       readonly ok: true;
       readonly value: T;
+      /** The line reserved in the ledger before the run: a job that is refunded later gives back exactly this. */
+      readonly reservation: SpendRecord;
       /** `$0.03 (fal’s price; $0.05 of $5.00 spent today)`: for "paid for" in a sentence. */
       readonly paid: string;
       /** `flux-schnell · $0.03 · $0.05 of $5.00 today`: the line the ferret pastes first. */
@@ -162,6 +165,7 @@ export async function paidCall<T extends object>(deps: PaidDeps, job: PaidJob<T>
   return {
     ok: true,
     value: made,
+    reservation,
     costLine: `${job.label} · ${usdWords(job.cost)} · ${usdWords(spentToday)} of ${dailyCap} today`,
     paid: `${usdWords(job.cost)} (${job.priced === 'fal' ? 'fal’s price' : 'the listed price'}; ${usdWords(spentToday)} of ${dailyCap} spent today)`,
   };
@@ -190,6 +194,8 @@ export function isFalCdn(url: string): boolean {
 export interface Unfetched {
   readonly why: string;
   readonly hostRefused?: true;
+  /** True when asking again cannot help (the file is too large, or is not what was asked for). */
+  readonly permanent?: true;
 }
 
 /**
@@ -208,7 +214,11 @@ export async function download(
   fetcher: FetchPort,
   url: string,
   types: readonly string[],
-  noun: 'picture' | 'sound',
+  noun: 'picture' | 'sound' | 'video',
+  limits: { readonly maxBytes: number; readonly timeoutMs: number } = {
+    maxBytes: MAX_DOWNLOAD_BYTES,
+    timeoutMs: DOWNLOAD_TIMEOUT_MS,
+  },
 ): Promise<{ readonly bytes: Uint8Array; readonly type: string } | Unfetched> {
   if (!isFalCdn(url))
     return { why: `the ${noun} was not on fal’s own storage, so it was not fetched`, hostRefused: true };
@@ -216,16 +226,17 @@ export async function download(
     const response = await fetcher.request(url, {
       method: 'GET',
       redirect: 'error',
-      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+      signal: AbortSignal.timeout(limits.timeoutMs),
     });
     if (!response.ok) return { why: `fal’s storage answered ${response.status}` };
     const declared = Number(response.headers.get('content-length') ?? 0);
-    if (declared > MAX_DOWNLOAD_BYTES) return { why: `the ${noun} is larger than Create will fetch` };
+    if (declared > limits.maxBytes) return { why: `the ${noun} is larger than Create will fetch`, permanent: true };
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength === 0) return { why: 'fal’s storage sent an empty file' };
-    if (bytes.byteLength > MAX_DOWNLOAD_BYTES) return { why: `the ${noun} is larger than Create will fetch` };
+    if (bytes.byteLength > limits.maxBytes)
+      return { why: `the ${noun} is larger than Create will fetch`, permanent: true };
     const type = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
-    if (!types.includes(type)) return { why: `what fal’s storage sent was not a ${noun}` };
+    if (!types.includes(type)) return { why: `what fal’s storage sent was not a ${noun}`, permanent: true };
     return { bytes, type };
   } catch {
     return { why: `the ${noun} could not be fetched from fal’s storage` };
@@ -242,3 +253,13 @@ export const altOf = (text: string): string => {
 };
 
 export const kib = (bytes: number): string => `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+/** fal's own rate for an endpoint (`live`, absent when fal gave none), or the answer that ends the call. */
+export type Rate =
+  | { readonly kind: 'rate'; readonly live: LiveRate | undefined }
+  | { readonly kind: 'end'; readonly answer: ToolAnswer };
+
+export async function falRate(secrets: Parameters<typeof readPrice>[0], endpoint: string): Promise<Rate> {
+  const live = await readPrice(secrets, endpoint);
+  return live !== undefined && isFailure(live) ? { kind: 'end', answer: failed(live) } : { kind: 'rate', live };
+}

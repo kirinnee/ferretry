@@ -360,9 +360,10 @@ choosing Browser voice there sends no audio anywhere and Record says to pick an 
 
 ## Voice mode: the machine's speech engine
 
-**Built (voice mode units 3 and 4):** the machine can install, load and run the speech models voice mode needs, and a
-device can stream its microphone to them (below). The panel (5) and the reply voice (6) come next, so Settings › Voice ›
-**Voice mode** installs, shows the state, removes, and offers **Talk to test**.
+**Built (voice mode units 3, 4 and 5):** the machine can install, load and run the speech models voice mode needs, a
+device can stream its microphone to them (below), and a chat has a **Voice mode** panel ([below](#the-voice-mode-panel)).
+The reply voice (6) and barge-in (7) come next, so Settings › Voice › **Voice mode** installs, shows the state, removes,
+and offers **Talk to test**.
 
 - **What runs where.** Owner decision O2: the sherpa-onnx **WebAssembly** runtime first (the same `@sherpaw/asr` the
   app ships), in one **worker thread** of the daemon (`daemon/worker/speech.worker.ts`), never in the daemon's own
@@ -458,6 +459,51 @@ sherpa-onnx with several threads is the next step **only if** the first-audio ta
 Proof: `packages/plugins/voice/tests/realworld/speech-engine.realworld.test.ts` runs the engine's own entry (install →
 load → decode) against the real files, first with one flipped bit (refused) and then the pinned bytes
 (`FY_VOICE_ENGINE_FILES` names a folder holding the files by role; without it the test skips).
+
+### The voice mode panel
+
+Hands-free chat with the ferret whose page you are on. **Voice mode** is a button in the composer's tools
+(`composer.tools`, beside dictation); the panel stands where the composer was, through Conversation's
+**`conversation.composer`** slot (a replace slot, like `conversation.row-body`; the chat offers it only on a ferret's own page, never
+under an agenda item's reply box). Voice's own code is `app/components/voice-mode-panel.tsx`, `voice-mode-button.tsx` and
+`app/lib/voice-mode/voice-mode-store.ts`.
+
+- **Pressing it** first reads `GET /v1/voice/engine`. Speech not installed, still installing, or a machine that cannot be
+  reached leaves the composer where it is and says why in one sentence above it (with where to install: Settings › Voice ›
+  Voice mode). It never installs by itself: that download is the person's press, with its size shown.
+- **The composer is hidden, never dropped.** The panel renders the chat's composer in the same place with `display: none`,
+  so the draft, caret and attachments are the very ones that come back on **End**. Nothing is sent from the draft.
+- **One `chat` stream** (`purpose: 'chat'`, this ferret) opens as soon as voice mode is on, and every stream rule above holds:
+  the **machine** sends each utterance once, right after the pause (owner decision O1), as the person's own `(voice) `
+  message; a device that stops answering sends nothing; muted time is zero samples; the chat needs `voice.use` AND
+  `fleet.use`. The panel only shows what the machine reports: **Loading speech on <machine>…**, **Listening**, **Hearing
+  you…** with the live words (greyed while they may still change, firm when final), **Muted**, and **Working…** while the
+  ferret's turn runs. The ferret's turn is the chat's own live reading, handed to the slot, so an unread or cached turn is
+  never claimed as working.
+- **Replies are read aloud by the device's voice, and the microphone is muted while they are.** Voice mode turns **Auto-read**
+  on for that ferret whatever the device's switch says (the switch itself is untouched); a `<voice>` reply is what it reads
+  (unit 1). Until barge-in exists the microphone under the speaker would hear the reply and the machine would send it back as
+  the person's own words, so the panel mutes (zero samples) while a reading goes on and unmutes after. The panel says so.
+- **It ends, and says why.** **End voice mode** tells the machine, closes the stream, stops the microphone and gives the
+  composer back. A refusal (the machine's own sentence, or one for its close code), a lost machine, a refused microphone, or a
+  browser that cannot open a stream also give the composer back and leave one sentence above it until dismissed. Leaving the
+  chat, or a question taking the composer's place, ends it; it never restarts by itself on return.
+- **Measured here (2026-11-24, real Chrome, real engine).** Chrome's fake microphone plays `clip-5s.wav` ("Please fix the
+  login redirect and run the tests again", with 1 s of silence before it) into the shipped `browserMic`; the panel's stream
+  runs over a WebSocket to the daemon's real `VoiceStream` and the real Parakeet + Silero (`tests/realworld/voice-mode.realworld.test.ts`,
+  `FY_VOICE_MODE_REAL=1`). The panel showed interim words while the clip played and firm words at the end; the machine sent
+  **one** message, `(voice) Please fix the login redirect, and run the tests again.`, id `<stream>:1`, and nothing more over
+  3 s of trailing silence and End. **From the last word to the send: 3.1–3.2 s** in four runs (the 1.5 s pause, then the
+  final decode, then the nonce echo). The ferret was a recorder, not a live one: a real ferret needs a harness login and spends a
+  turn, and the send is the same function the daemon hands the stream.
+  **A finding about the stream, not the panel:** on a busy box (load average 7–10) **6 of 12 runs lost the turn** with
+  `engine_behind` and the sentence "This machine is too busy to keep up": an interim decode that takes over 2 s trips the
+  stream's "more than 2 s of unseen audio" rule, so the panel says "The machine could not turn that into words. Try again." and
+  sends nothing (it never sends a lost turn). The panel is honest about it; whether the rule should wait for the decode is the
+  stream's to decide (unit 4's latency follow-up).
+- **Declared gaps.** No barge-in (unit 7), and the panel does not yet ask the machine's reply voice (unit 6, built: [The reply voice](#the-reply-voice-kokoro-on-the-machine)) to speak: the device voice reads, the microphone is muted
+  meanwhile. No phone-fallback engine (unit 8): a machine that cannot be reached means voice mode ends, not a different engine.
+  A keyboard shortcut and a palette entry for it are not built.
 
 ### The reply voice (Kokoro, on the machine)
 
@@ -1147,10 +1193,11 @@ pause plus the countdown plus STT and clean-up, an estimated 3.4–5.5 s at the 
 - **Live voice** (listen, notice the pause, send after a visible countdown, read the reply aloud):
   nothing of it exists (its end-of-turn detector was dropped by the owner, !A525 — see
   [Pause detection](#pause-detection-the-end-of-a-spoken-turn)). There is no Live button, bar or loop.
-- **Voice mode on your machine** (hands-free chat): the machine's speech engine, the audio stream and the reply voice
-  are built and measured (see [Voice mode: the machine's speech engine](#voice-mode-the-machines-speech-engine) and
-  [The reply voice](#the-reply-voice-kokoro-on-the-machine)); the panel that ties them to a conversation (unit 5) and
-  barge-in (unit 7) are not.
+- **Voice mode on your machine** (hands-free chat): the machine's speech engine, the audio stream to it, the panel and the
+  machine's reply voice are built and measured (see [Voice mode: the machine's speech engine](#voice-mode-the-machines-speech-engine),
+  [The voice mode panel](#the-voice-mode-panel) and [The reply voice](#the-reply-voice-kokoro-on-the-machine)); the panel does not
+  yet send its reply lines to the machine's voice (the device voice still reads them), and barge-in (unit 7) and the phone
+  fallback are not built.
 - ~~A machine-wide default chosen during onboarding~~ — done: New machine setup's Voice step renders
   `VoiceEngineChoice` and saves the choice as `voice.yaml`'s `defaultEngine`; a device that has not picked an
   engine dictates with it until it picks its own. Settings › Dictation still shows the device's own choice

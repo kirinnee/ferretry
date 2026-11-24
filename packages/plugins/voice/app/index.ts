@@ -18,6 +18,8 @@ export default implementApp(manifest, {
       DictationPanel,
       ReadAloudPanel,
       AutoReadPanel,
+      VoiceModeButtonPanel,
+      VoiceModePanel,
       VoiceStepPanel,
       SpeedupsStepPanel,
     } = voiceSurfaces(client, {
@@ -29,6 +31,8 @@ export default implementApp(manifest, {
         dictation: DictationPanel,
         'read-aloud': ReadAloudPanel,
         'auto-read': AutoReadPanel,
+        'voice-mode-button': VoiceModeButtonPanel,
+        'voice-mode': VoiceModePanel,
         'speedup-key': speedupKeyPanel(client),
         'onboarding-speedups': forSubject('voice.speedups', SpeedupsStepPanel),
         'onboarding-voice': forSubject('voice.voice', VoiceStepPanel),

@@ -343,8 +343,15 @@ describe('McpServer — a slow plugin inventory never stalls tool discovery', ()
     const names = await list(slow(5, false, 1000));
     should(names).not.containEql('task_progress');
     should(names).not.containEql('web_search');
-    for (const tool of ['generate_image', 'generate_speech', 'generate_sfx', 'generate_music'])
+    for (const tool of [
+      'generate_image',
+      'generate_speech',
+      'generate_sfx',
+      'generate_music',
+      'generate_video',
+      'generation_status',
+    ])
       should(names).not.containEql(tool);
-    should(names).have.length(MCP_TOOLS.length - 7);
+    should(names).have.length(MCP_TOOLS.length - 9);
   });
 });

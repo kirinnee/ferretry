@@ -102,6 +102,8 @@ export interface AutoReadInput {
   readonly question: QuestionLike | null | undefined;
   /** The daemon's own send ledger for this session (not the browser's outbox): where `acceptedAt` comes from. */
   readonly sends: readonly SendAcceptance[];
+  /** Read replies whatever the device's Auto-read switch says (voice mode: hands-free has no other way to hear them). */
+  readonly forced?: boolean;
   /** The clock, for tests. */
   readonly now?: () => number;
 }
@@ -150,8 +152,9 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
   const visible = useDocumentVisible();
 
   // Everything the evaluation reads, in one ref, so a timer always sees the latest without re-arming.
-  const latest = useRef({ ...input, settings, visible });
-  latest.current = { ...input, settings, visible };
+  const enabled = settings.autoRead || input.forced === true;
+  const latest = useRef({ ...input, settings, visible, enabled });
+  latest.current = { ...input, settings, visible, enabled };
   const watch = useRef<TurnWatch>(IDLE_WATCH);
   const token = useRef<SendToken | null>(null);
   const pending = useRef<PendingReply | null>(null);
@@ -181,7 +184,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     timer.current = null;
     const current = latest.current;
     const sendId = token.current?.sendId ?? null;
-    if (!current.settings.autoRead || !controller.supported) {
+    if (!current.enabled || !controller.supported) {
       // Off: nothing is watched, but what was already read stays read.
       watch.current = stopWatching(watch.current);
       token.current = null;
@@ -310,7 +313,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
       changedAt.current = now();
     }
     evaluate();
-  }, [changeKey, settings.autoRead, evaluate, now]);
+  }, [changeKey, enabled, evaluate, now]);
 
   /** Arms a send from what the page has seen up to this moment — or arms nothing when this daemon dates no turns. */
   const arm = useCallback(
@@ -319,7 +322,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
       // A newer send replaces whatever the older one was still waiting to read.
       pending.current = null;
       if (
-        !current.settings.autoRead ||
+        !current.enabled ||
         !controller.supported ||
         !current.authoritative ||
         parseInstant(current.turnStateAt) === null
@@ -379,8 +382,8 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
 
   // Switched off: silence what this hook started.
   useEffect(() => {
-    if (!settings.autoRead) stop();
-  }, [settings.autoRead, stop]);
+    if (!enabled) stop();
+  }, [enabled, stop]);
 
   // The tab goes to the background: speech stops, the timer is cancelled and anything that has ended is
   // judged now, while nobody is looking — so it can never be read on return.
