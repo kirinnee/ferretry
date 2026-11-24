@@ -495,6 +495,9 @@ when a stored list differs from the one before it.
 - **The picker's "New from" rows carry no description yet.** The U5 `suggestions` (context, price, reasoning) stay in
   Logins and do not reach the wire, so a new row shows its id and "not reviewed" only; describing it needs Runtimes to carry
   the suggestion rows. The composer's chip and Info › Runtime (a live session's menus) do not draw the live list yet.
+- **The New ferret page's picker has no tier groups.** The slot hands the page each model's id, label and availability
+  (`ChosenFerretAccount.models`), not its tier or context, so on that page the curated models read in catalog order, then
+  **New from <provider>**, then **Custom id…**. Every other `ModelSelect` that is handed tiers still groups by them.
 - **Only Ollama on this machine is detected.** Another host (a GPU box on the network) is refused, not
   dialled, and LM Studio and other local servers are not read. The address comes from the daemon's own
   `OLLAMA_HOST`, which a service started outside a shell may not have.

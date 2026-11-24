@@ -8,7 +8,7 @@
  * a read that failed, gives no list and the picker reads as it did before: nothing here is an error a person must act on.
  */
 import { type ModelListRefreshResult, ModelListRefreshResultSchema } from '@ferretry/plugin-logins/contract';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useChangeAuthority } from '@ferretry/app/ui';
 import type { LiveRuntimesClient } from '../lib/client.ts';
 
@@ -58,7 +58,13 @@ export function useLiveModelList(
       () => setBusy(false),
     );
   }, [client, loginId]);
-  if (loginId === undefined || read === null || read.loginId !== loginId || read.result.outcome === 'unavailable')
-    return undefined;
-  return { list: read.result.list, ...(mayForce ? { refresh: { run, busy } } : {}) };
+  // The same object while nothing it holds changed: the picker panel tells the page from an effect keyed on this value, and a
+  // page keeps what it is told in state, so an object built on every render re-told the page on every render, for ever.
+  return useMemo(
+    () =>
+      loginId === undefined || read === null || read.loginId !== loginId || read.result.outcome === 'unavailable'
+        ? undefined
+        : { list: read.result.list, ...(mayForce ? { refresh: { run, busy } } : {}) },
+    [loginId, read, mayForce, run, busy],
+  );
 }

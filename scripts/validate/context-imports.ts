@@ -174,10 +174,12 @@ export function refusal(edge: ImportEdge): string | undefined {
   // FIFTH EXEMPTION: Projects' "where it works" panel hands the New ferret page ONE value (the folder a start sends), and the
   // proof that what the panel SHOWS is what the page SENDS needs the REAL page around the REAL panel: a stand-in page
   // cannot tell a folder left over from the other mode from the one the person sees (O9-9). Only Projects' tests may reach
-  // exactly two Ferrets app files: the page and the client type it takes.
+  // exactly two Ferrets app files: the page and the client type it takes. Runtimes' tests are the same case for the runtime
+  // field: the page keeps what the picker proposes in state, and only the REAL page around the REAL picker can show that the
+  // two settle (a picker that proposed a new object on every draw drew the page for ever, U6b).
   if (
     from === 'tests' &&
-    edge.fromPkg.name === '@ferretry/plugin-projects' &&
+    (edge.fromPkg.name === '@ferretry/plugin-projects' || edge.fromPkg.name === '@ferretry/plugin-runtimes') &&
     toPkg.name === '@ferretry/core-ferrets' &&
     to === 'app' &&
     /\/app\/(features\/new-ferret\/new-ferret-page|lib\/client)\.ts(x)?$/u.test(edge.specifier)

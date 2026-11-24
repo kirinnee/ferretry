@@ -1,11 +1,12 @@
 /**
- * THE MODEL PICKER'S LIVE LIST in a real browser over fake data (`fixtures/live-model-list-scene.tsx`): the curated models,
+ * THE MODEL PICKER'S LIVE LIST in a real browser over fake data (`fixtures/live-model-list-scene.tsx`: Ferrets' REAL New ferret
+ * page around Runtimes' REAL picker, so a picker that told the page again on every draw would loop here): the curated models,
  * then "New from DeepSeek", then "Custom id…"; the curated model the key lacks says so and stays pickable; a list read
  * three days ago says it is out of date; "Refresh list" is drawn only for a device that may press it; and the default the
  * first option names does not move. At 1440 (a popover) and 390 with touch (a dialog), light and dark.
  * Set `FY_RUNTIMES_LIVE_SHOTS_DIR` to keep `<viewport>-<theme>-<state>-<shot>.png`.
  */
-import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -73,10 +74,23 @@ const open = async (
     colorScheme: theme,
   });
   const tab = await context.newPage();
+  // A picker that tells the page again on every draw never stops drawing: React says so, once per pass.
+  tab.on('console', message => {
+    if (message.text().includes('Maximum update depth')) loops.push(message.text());
+  });
+  tab.on('pageerror', error => loops.push(error.message));
   await tab.goto(`${server?.url.origin ?? ''}/?theme=studio-${theme}&${query}`);
-  await tab.waitForSelector('[role="combobox"]');
+  await tab.waitForSelector(MODEL_FIELD);
+  await tab.waitForSelector('[data-live-model-list]');
   return { tab, close: () => context.close() };
 };
+
+/** The model field of the REAL New ferret page. */
+const MODEL_FIELD = '#fy-new-ferret-model';
+const loops: string[] = [];
+beforeEach(() => {
+  loops.length = 0;
+});
 
 const shoot = async (tab: Page, viewport: string, theme: string, name: string): Promise<void> => {
   if (shotsDir === '') return;
@@ -103,7 +117,7 @@ describe('the model picker shows the login’s live list', () => {
               await tab.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth),
             ).toBe(false);
             await shoot(tab, viewport.name, theme, `${state}-closed`);
-            await tab.click('[role="combobox"]');
+            await tab.click(MODEL_FIELD);
             await tab.waitForSelector('[role="option"]');
             const listed = await tab.evaluate(() => ({
               options: [...document.querySelectorAll('[role="option"]')].map(
@@ -122,7 +136,8 @@ describe('the model picker shows the login’s live list', () => {
               'deepseek-v4-flash-vision-exp',
               'Custom id…',
             ]);
-            expect(listed.groups).toEqual(['Most capable', 'Fast', 'New from DeepSeek']);
+            // The slot hands the page each model's id, label and availability, not its tier, so the real page has no tier groups.
+            expect(listed.groups).toEqual(['New from DeepSeek']);
             expect(listed.hints[2]).toContain('not offered to this key');
             expect(listed.hints[3]).toBe('not reviewed');
             await shoot(tab, viewport.name, theme, `${state}-open`);
@@ -143,7 +158,12 @@ describe('the model picker shows the login’s live list', () => {
             await shoot(tab, viewport.name, theme, `${state}-open-end`);
             // The newer model is offered, never adopted: picking nothing leaves the default where it was.
             await tab.keyboard.press('Escape');
-            expect(await tab.textContent('[data-chosen]')).toContain('(login default)');
+            expect(await tab.textContent(MODEL_FIELD)).toContain('Login default');
+            // The page settled: the picker asked the daemon once, never forced a read, and nothing looped.
+            const routes = await tab.evaluate(() => (window as unknown as { __calls: { route: string }[] }).__calls);
+            expect(routes.filter(call => call.route.endsWith('/model-list/refresh'))).toHaveLength(1);
+            expect(routes.filter(call => call.route.endsWith('/model-list/force'))).toHaveLength(0);
+            expect(loops).toEqual([]);
           } finally {
             await close();
           }

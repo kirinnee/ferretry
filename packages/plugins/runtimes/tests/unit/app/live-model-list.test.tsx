@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { type ChosenFerretAccount, NEW_FERRET_ACCOUNT_SLOT } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { type ComponentType, Suspense } from 'react';
+import { type ComponentType, Suspense, useState } from 'react';
 import half from '../../../app/index.ts';
 import manifest from '../../../manifest.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
@@ -97,6 +97,48 @@ const draw = async (routes: Record<string, unknown>, calls: Call[], page: Page) 
   return view;
 };
 
+/**
+ * A page that keeps the proposal in STATE, as Ferrets' new-ferret page does (`onChosen: setChosenRuntime`): every
+ * proposal that is a new object draws the page and the slot again. Counts how often it is drawn and told.
+ */
+const drawInStatefulPage = async (routes: Record<string, unknown>, calls: Call[]) => {
+  const client = { ...scripted(routes, calls), subscribe: () => () => undefined } as unknown as PluginClient;
+  const built = half.build?.({ manifest, client }) as unknown as {
+    panels: Record<string, (props: unknown) => unknown>;
+  };
+  const id = must(
+    (manifest.ui?.panels ?? []).find(panel => panel.slot === NEW_FERRET_ACCOUNT_SLOT)?.id,
+    'the new-ferret panel',
+  );
+  const Panel = must(built.panels[id], 'the panel') as unknown as ComponentType<Record<string, unknown>>;
+  const seen = { renders: 0, told: 0, last: null as ChosenFerretAccount | null };
+  function Page() {
+    const [chosen, setChosen] = useState<ChosenFerretAccount | null>(null);
+    seen.renders += 1;
+    seen.last = chosen;
+    return (
+      <Suspense fallback={null}>
+        <Panel
+          fallbackId="agent-fallback"
+          fallbackPlaceholder="runtime"
+          labelId="agent-label"
+          noAccounts={null}
+          onChosen={(next: ChosenFerretAccount | null) => {
+            seen.told += 1;
+            setChosen(next);
+          }}
+          onValueChange={() => undefined}
+          value="claude-a"
+        />
+      </Suspense>
+    );
+  }
+  const view = await mount(<Page />);
+  mounted.push(view);
+  await settle();
+  return seen;
+};
+
 const count = (calls: readonly Call[], route: string): number => calls.filter(call => call.route === route).length;
 
 describe('the live model list in the new-ferret picker', () => {
@@ -179,5 +221,24 @@ describe('the live model list in the new-ferret picker', () => {
     await draw({ ...READS, 'GET /v1/grants': granted(true), [REFRESH]: new Error('offline') }, [], down);
     expect(down.chosen?.wrapper).toBe('claude-a');
     expect(down.chosen?.live).toBeUndefined();
+  });
+
+  it('a page that keeps the proposal in state settles: the list arriving tells it once, and nothing draws forever', async () => {
+    const calls: Call[] = [];
+    const seen = await drawInStatefulPage(
+      {
+        ...READS,
+        'GET /v1/grants': granted(true),
+        [REFRESH]: answer('refreshed', ['kimi-k3', 'kimi-k3-turbo'], 60_000),
+      },
+      calls,
+    );
+    expect(seen.last?.live?.list?.ids).toEqual(['kimi-k3', 'kimi-k3-turbo']);
+    const settled = { renders: seen.renders, told: seen.told };
+    expect(settled.renders).toBeLessThan(20);
+    expect(settled.told).toBeLessThan(6);
+    await settle();
+    expect({ renders: seen.renders, told: seen.told }).toEqual(settled);
+    expect(count(calls, REFRESH)).toBe(1);
   });
 });

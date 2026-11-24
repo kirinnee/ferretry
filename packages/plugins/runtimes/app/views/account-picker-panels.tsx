@@ -70,6 +70,20 @@ export const chosenFerretAccount = (
   };
 };
 
+/** Whether two proposals say the same thing: same content, and the same Refresh door (`run` is stable per login). */
+const sameProposal = (a: ChosenFerretAccount | null, b: ChosenFerretAccount | null): boolean => {
+  if (a === null || b === null) return a === b;
+  const { live: liveA, ...restA } = a;
+  const { live: liveB, ...restB } = b;
+  if (JSON.stringify(restA) !== JSON.stringify(restB)) return false;
+  if (liveA === undefined || liveB === undefined) return liveA === liveB;
+  return (
+    JSON.stringify(liveA.list) === JSON.stringify(liveB.list) &&
+    liveA.refresh?.run === liveB.refresh?.run &&
+    liveA.refresh?.busy === liveB.refresh?.busy
+  );
+};
+
 interface FieldProps {
   readonly client: LiveRuntimesClient;
   readonly store: AccountPickerStore;
@@ -94,8 +108,14 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
     chosen?.account.modelCatalog === undefined ? undefined : chosen.account.credentialId,
   );
   const onChosen = useCallback((next: ChosenRuntime | null) => setChosen(next), []);
+  // Told only when what the page would learn differs from what it was last told: a proposal that is merely a new object
+  // with the same content must not draw the page again, because the page keeps it in state.
+  const lastTold = useRef<ChosenFerretAccount | null | undefined>(undefined);
   useEffect(() => {
-    proposed.current(chosenFerretAccount(chosen, live));
+    const next = chosenFerretAccount(chosen, live);
+    if (lastTold.current !== undefined && sameProposal(lastTold.current, next)) return;
+    lastTold.current = next;
+    proposed.current(next);
   }, [chosen, live]);
   // Stable for the same reason; `onOffered` is optional, so what the page hands over is read at call time.
   const told = useRef(slot.onOffered);
