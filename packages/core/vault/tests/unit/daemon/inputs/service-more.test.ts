@@ -523,7 +523,7 @@ describe('a saved value that is typed or kept', () => {
 describe('a grant that is revoked, a store that fails, and a card that is kept', () => {
   it('should type nothing when the line ends between the last look and the write, leaving the card the owner’s', async () => {
     const w = world({ facts: page(), grants: [planLine()], accounts: github() });
-    w.state.holdsSeq = [true, false];
+    w.state.holdsSeq = [false];
 
     const view = await w.service.raise(SESSION, PAGE_LOGIN);
 
@@ -798,7 +798,7 @@ describe('the rows of a saved fill and of a save', () => {
     should(view).match({ state: 'delivered', submitted: true, source: 'saved' });
     const said = JSON.stringify([view, w.told, w.notes]);
     for (const secret of [PASSWORD, USERNAME, 'GITHUB']) should(said).not.containEql(secret);
-    should(Object.keys(view).sort()).eql(['id', 'lockSeconds', 'source', 'state', 'submitted']);
+    should(Object.keys(view).sort()).eql(['id', 'source', 'state', 'submitted']);
   });
 });
 

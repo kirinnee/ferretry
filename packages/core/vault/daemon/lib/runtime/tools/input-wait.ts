@@ -57,7 +57,7 @@ function inputSummary(view: InputAgentView): string {
       return `${card}: the owner's value is being typed now. Wait again with input.wait.`;
     case 'delivered':
       if (view.source === 'sealed')
-        return `${card}: the secure copy was pasted${view.submitted === true ? ' and Enter pressed' : ''}. Read the terminal once its quarantine allows.`;
+        return `${card}: the secure copy was pasted${view.submitted === true ? ' and Enter pressed' : ''}. Read the terminal at once.`;
       return `${card}: the owner typed the value${view.submitted === true ? ' and pressed Enter' : ''}. Read the terminal to see what happened.`;
     case 'refused':
       return `${card} was refused${view.reason === undefined ? '' : ` (${view.reason})`}: the value was not typed. Look at the terminal, then raise a new request if it is still needed.`;
