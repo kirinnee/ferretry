@@ -729,3 +729,26 @@ describe('the order persists, and listing a provider is not a loosening', () => 
     await host.stop();
   });
 });
+
+describe('a daily counter that breaks part-way through a fall-through', () => {
+  test('stops there, names the provider that failed, and says the rest were not tried', async () => {
+    let planted: (() => void) | undefined;
+    const { host, seen } = await hostFor(listed(['serper', 'brave']), {
+      vault: bothKeys,
+      answer: () => {
+        planted?.();
+        return new Response('', { status: 503 });
+      },
+    });
+    planted = () => host.state('search').plant(SEARCH_LEDGER_STATE, 'this is not json');
+
+    const result = await host.tool('web_search', { query: 'q' }, asFerret);
+
+    expect(result).toEqual({
+      isError: true,
+      text: `Web search failed on every provider tried: Serper (returned an error). Its daily counter could not be read, so the rest were not tried. The owner can check them in Settings › Web search.`,
+    });
+    expect(seen).toHaveLength(1);
+    await host.stop();
+  });
+});
