@@ -91,10 +91,29 @@ export function redactedFileBase64(
 export function fileHoldsValue(bytes: Uint8Array, scope: RedactionScope): boolean {
   const buffer = Buffer.from(bytes);
   try {
-    return redactedFile(new TextDecoder('utf-8', { fatal: true }).decode(buffer), scope).covered;
+    return covers(new TextDecoder('utf-8', { fatal: true }).decode(buffer), scope);
   } catch {
-    return coverage(buffer.toString('latin1'), scope).includes(true);
+    return covers(buffer.toString('latin1'), scope);
   }
+}
+
+/**
+ * Whether ANY of {@link coverage}'s three looks covers anything, decided line by line with string comparisons instead of
+ * one cell per unit: the same answer as `coverage(text, scope).includes(true)`, without the row of booleans, so it
+ * stays cheap on a media file of tens of mebibytes (the streamed media route asks it once per piece it serves).
+ */
+function covers(text: string, scope: RedactionScope): boolean {
+  const lines = text.split('\n').map((line, at, all) => (at < all.length - 1 ? `${line}\n` : line));
+  const contents = lines.map(line => line.replace(/\r?\n?$/, ''));
+  const looks: readonly (readonly [readonly string[], readonly string[] | undefined])[] = [
+    [lines, lines],
+    [contents.map(content => `${content}\n`), undefined],
+    [contents.map(content => `${content}\r\n`), undefined],
+  ];
+  return looks.some(([look, fallback]) => {
+    const masked = scope.lines(look);
+    return contents.some((content, at) => (masked[at] ?? fallback?.[at] ?? '').slice(0, content.length) !== content);
+  });
 }
 
 function redactedBytes(

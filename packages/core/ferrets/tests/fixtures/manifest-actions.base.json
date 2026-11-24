@@ -1722,6 +1722,22 @@
     },
     {
       "audit": {
+        "skip": "a media read records nothing, as a file read does not"
+      },
+      "caller": "any",
+      "capability": {
+        "axis": "use",
+        "capability": "filesystem"
+      },
+      "guard": "secrets",
+      "key": "GET /v1/ferrets/:ferretId/fs/media",
+      "method": "GET",
+      "minimum": "operator",
+      "noStore": true,
+      "path": "/v1/ferrets/:ferretId/fs/media"
+    },
+    {
+      "audit": {
         "skip": "a file index read records nothing, as today"
       },
       "caller": "any",

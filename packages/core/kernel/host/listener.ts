@@ -71,6 +71,7 @@ export function toResponse(response: ApiResponse, acceptsGzip: boolean): Respons
     headers.set('content-encoding', 'gzip');
     return new Response(new Uint8Array(last.gzip), { status: last.status, headers });
   }
+  if (last.bytes !== undefined) return new Response(new Uint8Array(last.bytes), { status: last.status, headers });
   return new Response(last.status === 304 ? null : last.body, { status: last.status, headers });
 }
 

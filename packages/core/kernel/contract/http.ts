@@ -70,6 +70,13 @@ export interface ApiResponse {
   readonly body: string;
   readonly late?: () => PlainApiResponse | PublishedApiResponse;
   readonly gzip?: Uint8Array;
+  /**
+   * A BINARY BODY: the answer's bytes, with `body` left empty. A listener sends them as they are; the session wire
+   * carries them as unpadded base64url under `content-transfer-encoding: base64url` (and no `content-encoding`), which
+   * is how the app tells them from a gzip answer. Only a route that serves a file (a picture, a clip) sets one, through
+   * {@link bytesResponse}; every other answer is text.
+   */
+  readonly bytes?: Uint8Array;
   /** The sealed session ends after this response (a revoke of the caller's own device). */
   readonly endsSession?: true;
 }
@@ -117,6 +124,18 @@ export function jsonResponse(
 
 export function textResponse(body: string, status = 200, contentType = 'text/plain; charset=utf-8'): PlainApiResponse {
   return { status, headers: new Map([['content-type', contentType]]), body };
+}
+
+/** A binary body (see {@link ApiResponse.bytes}). `headers` are lowercased here; `content-type` is the caller's to name. */
+export function bytesResponse(
+  bytes: Uint8Array,
+  contentType: string,
+  status = 200,
+  extra: Readonly<Record<string, string>> = {},
+): PlainApiResponse {
+  const headers = new Map<string, string>([['content-type', contentType]]);
+  for (const [name, headerValue] of Object.entries(extra)) headers.set(name.toLowerCase(), headerValue);
+  return { status, headers, body: '', bytes };
 }
 
 /** The error envelope every JSON failure uses: `{ error, code }`. */

@@ -653,7 +653,8 @@ URL.
   put media it MADE to show the person: outside any repository, so a generated chart never dirties a
   working tree and no repository's ignore rules decide whether it can be shown. It is read through the
   same route with `scope=media` — the daemon names the folder from the session id; a caller never names
-  a directory — under the same `filesystem` _use_ grant, the same denylist and the same 1 MiB bound.
+  a directory — under the same `filesystem` _use_ grant and the same denylist. The JSON read bounds it at
+  1 MiB; a larger file is read in ranges from `fs/media` (rule 11), up to 32 MiB.
 - **A refusal names the rule that refused it.** The daemon's file view carries `rule`: the ignore
   source, line and pattern Git matched (`git check-ignore -v`), the Git failure that stopped the check
   (the gitignore gate fails closed, so a Git error used to read as "ignored" with no way to tell), or
@@ -1119,10 +1120,17 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
     Chrome's decoder — PNG, JPEG, WebP and GIF at 1×1 through 8192×2048, 18 samples, all matching
     `naturalWidth`/`naturalHeight` — but a container this parser refuses is refused even if a browser
     would have decoded it. The bias is deliberate and one-directional: it fails toward not rendering.
-11. **A workspace media file is capped at 1 MiB**, because that is what the session filesystem route
-    serves per file (`MAX_FILE_BYTES`), base64 over JSON. A real screen recording is larger than that
-    and gets the "larger than 1 MB" row. Lifting it needs a streamed, range-capable byte route on the
-    daemon, which is a separate change with its own grant review — not a bigger number here.
+11. **A working-tree media file is capped at 1 MiB; a `media:` file is not.** The working tree is served by
+    the session filesystem route per file (`MAX_FILE_BYTES`), base64 over JSON, so a real screen recording
+    there gets the "larger than 1 MB" row. A file of the session's MEDIA folder (`media:<file>`, the place
+    an agent puts what it made) is read past that through a streamed, range-capable byte route,
+    `GET /v1/ferrets/:ferretId/fs/media`, up to **32 MiB** (`MAX_MEDIA_BYTES`, owned by Ferrets' contract
+    and read by both ends). The JSON read still goes first — it names the size and runs every gate — and when
+    it says `tooLarge` the reader fetches `Range: bytes=a-b` pieces of at most 4 MiB and joins them into the
+    one `blob:` the player gets, so a 3 MB clip plays and seeks as a local file does. A media file over
+    32 MiB gets a row that says so ("larger than the 32 MB a media file can be shown at"). The route is
+    `filesystem` _use_ with its own review, [grants.md](grants.md#media-bytes). It lifts the cap for the
+    media folder only; lifting it for the working tree would need that review made again.
 12. **An https image needs the host's permission to be read.** It is fetched by the parent in `cors`
     mode so that its bytes can pass the admission checks; a host that sends no
     `Access-Control-Allow-Origin` gets the link row instead. That is the price of not widening

@@ -13,6 +13,7 @@ import { afterEach, describe, test } from 'bun:test';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
 import { render, run, runAsync } from '@ferretry/app/testing';
+import { MAX_MEDIA_BYTES } from '@ferretry/core-ferrets/contract';
 import { FyRenderMedia } from '../../../../app/render/fy-render-media.tsx';
 import {
   FY_RENDER_LIMITS,
@@ -396,6 +397,38 @@ describe('FyRenderMedia workspace source', () => {
       should(fallbackOf(tree)).equal('too-large');
       should(urls.minted.length).equal(0);
     });
+  });
+
+  test('should show a media-folder file past the working-tree mebibyte, and refuse one past its own cap', async () => {
+    // Arrange
+    const three = new Uint8Array(3 * 1024 * 1024);
+    const over = new Uint8Array(MAX_MEDIA_BYTES + 1);
+
+    // Act
+    await withObjectUrls(async urls => {
+      const shown = mount(video('media:clip.mp4'), answers({ bytes: three, ok: true }).read);
+      const refused = mount(video('media:big.mp4'), answers({ bytes: over, ok: true }).read);
+      await flush();
+
+      // Assert
+      should(fallbackOf(shown)).equal('');
+      should(urls.minted.length).equal(1);
+      should(fallbackOf(refused)).equal('too-large');
+      should(sentenceOf(refused)).equal('big.mp4 is larger than the 32 MB a media file can be shown at.');
+    });
+  });
+
+  test('should still refuse a working-tree file past the mebibyte, whatever the media cap is', async () => {
+    // Arrange
+    const three = new Uint8Array(3 * 1024 * 1024);
+
+    // Act
+    const tree = mount(video('@clip.mp4'), answers({ bytes: three, ok: true }).read);
+    await flush();
+
+    // Assert
+    should(fallbackOf(tree)).equal('too-large');
+    should(sentenceOf(tree)).equal('clip.mp4 is larger than the 1 MB a workspace file can be shown at.');
   });
 
   test('should call a reader that throws unavailable', async () => {

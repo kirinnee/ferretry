@@ -27,6 +27,8 @@ import {
   type PrivateKeyHandle,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
   RELAY_CLOSE_CODES,
+  TUNNEL_BASE64URL_TRANSFER,
+  TUNNEL_TRANSFER_ENCODING_HEADER,
   type RelayCrypto,
   toBase64Url,
 } from './wire/index.ts';
@@ -168,6 +170,18 @@ const requestLane = (body: string | undefined): RequestLane =>
 function encodeBody(body: unknown): string | undefined {
   if (body === undefined) return undefined;
   return typeof body === 'string' ? body : JSON.stringify(body);
+}
+
+/**
+ * What an answer's body is: its bytes when the daemon sent a served file (`content-transfer-encoding: base64url`; a
+ * gzip answer lost that header when the session client decompressed it), else the JSON it parsed to, else the text.
+ * Bytes that are not valid unpadded base64url are a damaged answer and throw, never a fabricated body.
+ */
+export function answerBody(headers: Readonly<Record<string, string>>, text: string): unknown {
+  if (headers[TUNNEL_TRANSFER_ENCODING_HEADER]?.toLowerCase() !== TUNNEL_BASE64URL_TRANSFER) return decodeBody(text);
+  const bytes = fromBase64Url(text);
+  if (bytes === null) throw new Error('the daemon sent a file that is not valid base64url');
+  return bytes;
 }
 
 function decodeBody(text: string): unknown {
@@ -486,7 +500,7 @@ export class SessionTransport implements DaemonTransport {
         throw again;
       }
     }
-    const result = { status: answer.status, headers: answer.headers, body: decodeBody(answer.body) };
+    const result = { status: answer.status, headers: answer.headers, body: answerBody(answer.headers, answer.body) };
     // Only an ANSWER settles the pending key. A request that died without one leaves it pending, which is the
     // recovery: the daemon may have swapped and the answer is what was lost (R252, {@link #openKeyed}).
     if (amended.rotated) await rotation?.settle(daemon.daemonId, result);

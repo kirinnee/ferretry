@@ -1978,6 +1978,15 @@ list reads each running session's transcript tail, so no version is cheaper than
 that skipped the build could answer `304` for a list that had moved. What a large, changing list costs
 on the wire is what the next paragraph removes.
 
+**A served file** (`content-transfer-encoding: base64url` alone). A route that serves a file — today
+`GET /v1/ferrets/:ferretId/fs/media` ([grants.md](grants.md#media-bytes)) — answers with raw bytes, and a `res` body is a
+string, so the bytes travel as unpadded base64url in `body` under `content-transfer-encoding: base64url` and **no**
+`content-encoding`: that absence is how the app tells a file from a gzip answer, which has both. The app reads
+the bytes back (`answerBody`) and the caller gets a `Uint8Array`; a body that is not valid base64url rejects, never
+reads as text. The envelope and the 32 MiB bound on the body as it travels are unchanged, and a route that serves
+a file bounds its own pieces well under it (4 MiB, so about 5.4 MiB on the wire). A plain HTTP caller gets the raw
+bytes. The names are `TUNNEL_*` as below.
+
 **A compressed answer** (`gzip`). Only a caller that sends `accept-encoding: gzip` in a `req`'s `headers`
 may be answered with the gzip bytes of the body the route would have sent, as unpadded base64url in
 `body`, under two response headers. **A request that names no `accept-encoding` — every app and every

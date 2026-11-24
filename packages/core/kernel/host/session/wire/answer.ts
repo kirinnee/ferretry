@@ -35,11 +35,18 @@ function snapshot(response: ApiResponse): ApiResponse {
     headers: new Map(response.headers),
     body: response.body,
     ...(response.gzip === undefined ? {} : { gzip: response.gzip.slice() }),
+    ...(response.bytes === undefined ? {} : { bytes: response.bytes.slice() }),
   };
 }
 
 function sameAnswer(left: ApiResponse, right: ApiResponse): boolean {
   if (left.status !== right.status || left.body !== right.body) return false;
+  if (
+    left.bytes === undefined
+      ? right.bytes !== undefined
+      : right.bytes === undefined || !sameBytes(left.bytes, right.bytes)
+  )
+    return false;
   // Header order affects the wire envelope. A plain source may own and mutate its backing map.
   const entries = [...right.headers];
   return (
