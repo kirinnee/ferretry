@@ -58,6 +58,7 @@ export const INPUT_REASONS = [
   'target_gone',
   'insecure_origin',
   'interrupted',
+  'outcome_unknown',
   'owner_declined',
   'agent_cancelled',
   'check_failures',

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type React from 'react';
 import { useState } from 'react';
 import { type ModelChoice, ModelSelect } from '../../../src/ui/model-select.tsx';
 import type { LocalModelsSnapshot } from '../../../src/ui/local-models-note.tsx';
@@ -191,5 +192,92 @@ describe('ModelSelect · models installed on this machine', () => {
     expect(note.textContent).toContain('Ollama is not running');
     expect(note.querySelector('[data-local-models-command]')?.textContent).toBe(PULL);
     await screen.unmount();
+  });
+});
+
+describe('ModelSelect with a live model list', () => {
+  const NOW = Date.parse('2026-11-24T12:00:00.000Z');
+  const live = (over: Partial<NonNullable<React.ComponentProps<typeof ModelSelect>['live']>> = {}) => ({
+    list: { fetchedAt: new Date(NOW - 3_600_000).toISOString(), complete: true, ids: ['glm-5.3', 'glm-6'] },
+    now: NOW,
+    providerLabel: 'Z.ai',
+    ...over,
+  });
+  const Live = ({ liveProps }: { liveProps: ReturnType<typeof live> }) => (
+    <ModelSelect
+      customIds
+      defaultModel="glm-5.3"
+      id="model"
+      live={liveProps}
+      models={MODELS}
+      onChange={() => undefined}
+      value=""
+    />
+  );
+
+  test('lists curated models, then "New from <provider>", then "Custom id…"; marks the curated model the key lacks', async () => {
+    const screen = await mount(<Live liveProps={live()} />);
+    await opened(screen.container);
+    const labels = options().map(option => labelOf(option));
+    expect(labels).toEqual(['Login default (GLM-5.3)', 'GLM-5.3', 'GLM old', 'GLM-5.3-Flash', 'glm-6', 'Custom id…']);
+    expect(document.querySelector('[role="group"][aria-label="New from Z.ai"]')).not.toBeNull();
+    const fresh = must(
+      options().find(option => labelOf(option) === 'glm-6'),
+      'the new model',
+    );
+    expect(hintOf(fresh)).toBe('not reviewed');
+    expect(fresh.getAttribute('aria-disabled')).not.toBe('true');
+    // The curated model the list lacks stays pickable (a provider may hide it from /models) and says so.
+    const flash = must(
+      options().find(option => labelOf(option) === 'GLM-5.3-Flash'),
+      'the flash model',
+    );
+    expect(hintOf(flash)).toBe('not offered to this key');
+    expect(flash.getAttribute('aria-disabled')).not.toBe('true');
+    await screen.unmount();
+  });
+
+  test('a newer model in the list is offered and never becomes the default', async () => {
+    const screen = await mount(<Live liveProps={live()} />);
+    await opened(screen.container);
+    expect(labelOf(options()[0] as HTMLElement)).toBe('Login default (GLM-5.3)');
+    expect(
+      options()
+        .filter(option => hintOf(option)?.includes('default'))
+        .map(option => labelOf(option)),
+    ).toEqual(['GLM-5.3']);
+    await screen.unmount();
+  });
+
+  test('says when the list is stale, and draws Refresh list only when the caller may press it', async () => {
+    const stale = live({
+      list: { fetchedAt: new Date(NOW - 3 * 86_400_000).toISOString(), complete: true, ids: ['glm-5.3'] },
+    });
+    const limited = await mount(<Live liveProps={stale} />);
+    const line = must(limited.container.querySelector('[data-live-model-list]'), 'the list line');
+    expect(line.getAttribute('data-live-model-list')).toBe('stale');
+    expect(line.textContent).toContain('List out of date: read 3 days ago.');
+    expect(limited.container.textContent).not.toContain('Refresh list');
+    await limited.unmount();
+    const runs: string[] = [];
+    const allowed = await mount(
+      <Live liveProps={{ ...stale, refresh: { run: () => runs.push('run'), busy: false } }} />,
+    );
+    const button = must(
+      [...allowed.container.querySelectorAll('button')].find(b => b.textContent?.includes('Refresh list')),
+      'Refresh list',
+    );
+    await interact(() => button.click());
+    expect(runs).toEqual(['run']);
+    await allowed.unmount();
+  });
+
+  test('a fresh list says so; no list and no way to ask draws nothing', async () => {
+    const fresh = await mount(<Live liveProps={live()} />);
+    expect(fresh.container.querySelector('[data-live-model-list]')?.getAttribute('data-live-model-list')).toBe('fresh');
+    await fresh.unmount();
+    const none = await mount(<Live liveProps={live({ list: undefined })} />);
+    expect(none.container.querySelector('[data-live-model-list]')).toBeNull();
+    await none.unmount();
   });
 });

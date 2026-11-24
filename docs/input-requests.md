@@ -155,6 +155,12 @@ one-time.
   the observed field of that sign-in ([Codes Ferretry makes](#codes-ferretry-makes)). Its text is also masked from
   text reads for the redaction window, as defence in depth; that covers text only, so the ferret may still see it on
   screen (a screenshot, a scripted read). The owner allowed that: TOTP codes are fine to see (design §11.1).
+- **A login password is never offered to a code or code or payment field, whatever the input shows.** A saved login's password is
+  not offered, not kept by "Save as", not matched by a task-plan line or standing rule (at the raise or at the last look
+  before the write) and not typed at delivery into a page field the page says is a payment field (card number, expiry, security code) or a one-time code. That
+  check does not follow the input's masking: a `type=password` box with `autocomplete="one-time-code"` (or a name, id or
+  label that says otp, totp, 2fa, mfa or one-time, with no password word beside it) stays masked as asked **and** gets no
+  login password. A numeric keypad, a PIN box or the bare word "code" is not that proof.
 - **A `code` aimed at a password is a secret.** The daemon handles a code field as `secret` when any of these
   holds (the ferret's words may only ever raise a code, never lower one):
   - the page field is `type=password`, or its name, id or autocomplete says pass, pwd or PIN (any type);
@@ -228,7 +234,8 @@ raise naming `code`, and the agent is told so.
 - **Retries never type twice.** Each Send carries a `deliveryId`. The daemon journals
   `surface.input_delivering` (the id and the fact that a write is about to start, never a value)
   **before** it writes, and fails closed if it cannot. A daemon that restarts with a delivery started
-  and not finished restores the request as **interrupted**, never pending, and never retries it. A
+  and not finished restores the request as **`cancelled` with the reason `outcome_unknown`**, never pending, never
+  "refused" and never "delivered", and never retries it (below, "How a request ends"). A
   second id after delivery is 409 `already_delivered`. The WHOLE attempt (observe, compare, write) runs
   under the session lock, so two Sends with different ids that arrive together queue: the first types,
   the second finds the request delivered and is refused.
@@ -246,8 +253,18 @@ raise naming `code`, and the agent is told so.
 - **One write, never repeated.** A terminal delivery is **one** hex `send-keys -H` carrying the
   value and, when the owner wants Enter pressed, the `\r` in the same command (on by default for a
   terminal secret, off for a browser). If that command fails or throws, the outcome is _uncertain_: the
-  value may or may not have been typed. That is a terminal `interrupted` outcome. It is never
+  value may or may not have been typed. That is a `cancelled` outcome with the reason `outcome_unknown`. It is never
   retried, whatever `deliveryId` the next Send carries.
+- **How a request ends, and what a restart finds.** The daemon writes the final outcome to the journal **before** anyone
+  is told it: the request still reads `delivering` (to `input_wait`, polled or waited on, and in the journal) until the
+  write lands, and only then does the ferret's wait wake as `delivered` (or `refused`, `expired`, `cancelled`). A
+  request whose value WAS typed and whose end could not be recorded reads `cancelled` with the reason
+  `outcome_unknown` to every waiter, never `delivered`; the owner's own Send still answers that it typed it. The same
+  state is what a restart finds for a `delivering` left by a crash: **outcome unknown, the value may have been typed**
+  (the ferret is told to read the target before it acts, and the request is never retried). A restart also brings back
+  every request that had already ended, with its true final state (who answered, and how, is not kept), so `input_wait`
+  after a restart reads what happened instead of `not_found`; they are kept for an hour after the request would have
+  expired and then let go.
 - **Serialised per session.** Raising a request, an agent's own `terminal.send`/`close` and a delivery
   take one lock per session, so an agent send cannot complete after a request is raised on its pane,
   and two raises on one target cannot both be admitted. Admission reserves the surface and the

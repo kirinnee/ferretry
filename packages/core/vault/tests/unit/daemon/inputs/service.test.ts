@@ -1113,9 +1113,9 @@ describe('review regressions: delivery is one recorded, serialised, never-repeat
     should(retry).equal(first);
     should(other.code).equal('gone');
     should(w.writes.length).equal(1);
-    should(w.order).eql(['surface.input_requested', 'surface.input_delivering', 'write', 'surface.input_refused']);
+    should(w.order).eql(['surface.input_requested', 'surface.input_delivering', 'write', 'surface.input_cancelled']);
     should(w.events.find(event => event.type === 'surface.input_delivering')?.deliveryId).equal(body.deliveryId);
-    should(w.events.at(-1)?.reason).equal('interrupted');
+    should(w.events.at(-1)?.reason).equal('outcome_unknown');
     should(w.told.at(-1)?.message).containEql('partly or fully typed');
     should(w.closed.length).equal(1);
     should((await service.list(HOST)).length).equal(0);
@@ -1127,7 +1127,7 @@ describe('review regressions: delivery is one recorded, serialised, never-repeat
 
     should(error.code).equal('unavailable');
     should(w.writes.length).equal(1);
-    should(w.events.at(-1)?.reason).equal('interrupted');
+    should(w.events.at(-1)?.reason).equal('outcome_unknown');
   });
 
   it('should type nothing, hold nothing and stay pending when the delivery start cannot be recorded', async () => {
@@ -1173,7 +1173,7 @@ describe('review regressions: delivery is one recorded, serialised, never-repeat
 
     should(second.w.writes.length).equal(0);
     should((await second.service.list(HOST)).length).equal(0);
-    should(second.w.events.at(-1)?.reason).equal('interrupted');
+    should(second.w.events.at(-1)?.reason).equal('outcome_unknown');
     should(second.w.told.at(-1)?.message).containEql('partly or fully typed');
     should(second.w.closed.length).equal(1);
     should(promptless.w.closed.length).equal(1);

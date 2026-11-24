@@ -45,14 +45,25 @@ export interface BrowserSessionScope {
 export interface BrowserViewerSlot {
   current(): string | undefined;
   set(id: string | undefined): void;
+  /** Hears every change of the id (the stream came up, or ended). Returns what stops listening. */
+  subscribe(listener: () => void): () => void;
 }
 
 export const browserViewerSlot = (): BrowserViewerSlot => {
   let held: string | undefined;
+  const listeners = new Set<() => void>();
   return {
     current: () => held,
     set: id => {
+      if (held === id) return;
       held = id;
+      for (const listener of [...listeners]) listener();
+    },
+    subscribe: listener => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
   };
 };

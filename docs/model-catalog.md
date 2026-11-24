@@ -421,7 +421,7 @@ changes nothing.
 
 An environment login whose provider documents a model list also keeps **the ids that list returned for this
 key**, so a picker can say which curated models the key lacks and which models the catalog has not reviewed yet
-(that picker is a later change; this section is the daemon half).
+(§ The picker below draws it; the rest of this section is the daemon half).
 
 **Reading.** The request is the one a login's **Test** already sends, through the Vault's `authorizeFetch`: the
 Vault puts the key on that one request to that one host and returns only the body. Logins never holds the key.
@@ -466,11 +466,38 @@ read is recorded** as `secrets.used` ([audit.md](audit.md)): the secret's name, 
 outcome's kind, never the key or the reply. A removed login's list is deleted with it. The cooldown record is in
 memory, so a daemon restart clears it.
 
+### The picker
+
+The new-session form's model field (`ModelSelect`, also Settings › Warden's and a lessons scan's model) draws the list of
+the login it is for. The panel that proposes the runtime reads it (`use-live-model-list.ts`): opening the picker sends
+`POST …/model-list/refresh` once, and the daemon reads the provider only when the held list is a day old or more. One pure
+function (`liveModelPicker`, `packages/app/src/ui/live-model-list.ts`) turns the catalog's models and the list into what is
+drawn:
+
+1. the curated models, by tier, as before; one the list lacks says **not offered to this key** and stays pickable (some
+   providers hide models from `/models`). Only a **complete** list can say so;
+2. **New from <provider>**: ids the list has that no curated model names, in id order, marked **not reviewed**, offered and
+   never adopted. A context suffix (`[1m]`) on a curated id and a dated snapshot (`-20261101`) on a live one are ignored when
+   matching, so a snapshot of a curated model is neither new nor missing;
+3. **Custom id…** last, where the provider takes any id.
+
+A line under the field says when the list was read, and **List out of date: read 3 days ago** when it is a day old or more
+(the provider could not be asked again; the old list stands). **Refresh list** (`…/model-list/force`, `fleet.configure`) is
+drawn only for a browser that holds that axis, so a limited device never sees a button it would be refused. A login with no
+model list, or a read that failed, draws the picker as before. **Nothing here reads or moves a default**: the first option
+names the catalog's default, whatever the list holds.
+
 `LoginsApi.modelLists()` hands the held lists (by login id, no network) to Runtimes; `ModelsChanged` is published
 when a stored list differs from the one before it.
 
 ## Declared gaps
 
+- **The picker's "New from" rows carry no description yet.** The U5 `suggestions` (context, price, reasoning) stay in
+  Logins and do not reach the wire, so a new row shows its id and "not reviewed" only; describing it needs Runtimes to carry
+  the suggestion rows. The composer's chip and Info › Runtime (a live session's menus) do not draw the live list yet.
+- **The New ferret page's picker has no tier groups.** The slot hands the page each model's id, label and availability
+  (`ChosenFerretAccount.models`), not its tier or context, so on that page the curated models read in catalog order, then
+  **New from <provider>**, then **Custom id…**. Every other `ModelSelect` that is handed tiers still groups by them.
 - **Only Ollama on this machine is detected.** Another host (a GPU box on the network) is refused, not
   dialled, and LM Studio and other local servers are not read. The address comes from the daemon's own
   `OLLAMA_HOST`, which a service started outside a shell may not have.

@@ -11,7 +11,9 @@
 import type { LocalModelsSnapshot } from './local-models-note.tsx';
 import { useId, useMemo, useState } from 'react';
 import type { ClipboardWriter } from './copy-button.tsx';
+import { type LiveModelList, type LiveModelPicker, liveModelPicker } from './live-model-list.ts';
 import { CUSTOM_MODEL_ID, contextWords, groupByTier, type ModelTier } from './model-tiers.ts';
+import { Button } from './primitives.tsx';
 import { LocalModelsNote, localNote } from './local-models-note.tsx';
 import { SelectBox, type SelectOption } from './select-box.tsx';
 
@@ -34,6 +36,19 @@ export interface ModelChoice {
   readonly local?: true;
 }
 
+/**
+ * What the login's live model list (docs/model-catalog.md § Live model list) adds to the field: the list the daemon holds (or
+ * none yet), the time it is judged against, the provider's name for "New from …", and "Refresh list" when this browser may
+ * press it (`fleet.configure`): absent for a limited device, so the button is never drawn to be refused.
+ */
+export interface LiveModels {
+  readonly list: LiveModelList | undefined;
+  /** Epoch milliseconds: the list is stale when it is a day old by this clock. */
+  readonly now: number;
+  readonly providerLabel: string;
+  readonly refresh?: { readonly run: () => void; readonly busy: boolean };
+}
+
 export interface ModelSelectProps {
   readonly id: string;
   /** The field's name, for a screen reader and the phone dialog's title; the caller's visible `<label htmlFor>` carries the same words. */
@@ -52,6 +67,8 @@ export interface ModelSelectProps {
   readonly 'aria-describedby'?: string;
   /** What the daemon last read from a local server (Ollama), for a login whose catalog detects one. */
   readonly local?: LocalModelsSnapshot | null;
+  /** The login's live model list, when it has one or may be asked for one. */
+  readonly live?: LiveModels;
   /** The clipboard the note's copy button writes to; the browser's by default. */
   readonly write?: ClipboardWriter;
 }
@@ -60,26 +77,36 @@ const nameOf = (models: readonly ModelChoice[], id: string | null): string | und
   id === null ? undefined : (models.find(model => model.id === id)?.label ?? id);
 
 /** What a reader weighs an option by, after its name. */
-const optionHint = (model: ModelChoice, defaultModel: string | null): string | undefined =>
+const optionHint = (
+  model: ModelChoice,
+  defaultModel: string | null,
+  notOffered: ReadonlySet<string> | undefined,
+): string | undefined =>
   [
     model.id === defaultModel ? 'default' : undefined,
     model.local === true ? 'installed here' : undefined,
     contextWords(model.context),
     model.available ? undefined : 'not on this login',
+    notOffered?.has(model.id) === true ? 'not offered to this key' : undefined,
   ]
     .filter(part => part !== undefined)
     .join(' · ') || undefined;
 
-/** The catalog as a select's options: the login's default first, each tier a heading, "Custom id…" last when the provider takes any id. */
+/**
+ * The catalog as a select's options: the login's default first, each tier a heading, then the live list's "New from <provider>"
+ * rows (offered, never adopted: the default is the caller's and is not read from the list), "Custom id…" last when the
+ * provider takes any id. A curated model the list lacks stays pickable and says so.
+ */
 function optionsFor(
   models: readonly ModelChoice[],
   defaultModel: string | null,
   defaultLabel: string,
   customIds: boolean,
+  live: { readonly picker: LiveModelPicker; readonly providerLabel: string } | undefined,
 ): readonly SelectOption[] {
   const defaultName = nameOf(models, defaultModel);
   const hintOf = (model: ModelChoice): { readonly hint?: string } => {
-    const hint = optionHint(model, defaultModel);
+    const hint = optionHint(model, defaultModel, live?.picker.notOffered);
     return hint === undefined ? {} : { hint };
   };
   return [
@@ -95,6 +122,16 @@ function optionsFor(
         }),
       ),
     ),
+    ...(live === undefined
+      ? []
+      : live.picker.newIds.map(
+          (id): SelectOption => ({
+            value: id,
+            label: id,
+            hint: 'not reviewed',
+            group: `New from ${live.providerLabel}`,
+          }),
+        )),
     ...(customIds ? [{ value: CUSTOM, label: 'Custom id…' }] : []),
   ];
 }
@@ -107,13 +144,21 @@ export function ModelSelect({
   id,
   label = 'Model',
   models,
+  live,
   local,
   onChange,
   value,
   write,
   'aria-describedby': describedBy,
 }: ModelSelectProps) {
-  const listed = value === '' || models.some(model => model.id === value);
+  const liveList = live?.list;
+  const liveNow = live?.now ?? 0;
+  const providerLabel = live?.providerLabel;
+  const picker = useMemo(
+    () => (liveList === undefined ? undefined : liveModelPicker(models, liveList, liveNow)),
+    [models, liveList, liveNow],
+  );
+  const listed = value === '' || models.some(model => model.id === value) || picker?.newIds.includes(value) === true;
   const [custom, setCustom] = useState(!listed);
   const customId = useId();
   const noteId = useId();
@@ -123,8 +168,15 @@ export function ModelSelect({
   const typed = value.trim();
   const problem = custom && typed.length > 0 && !CUSTOM_MODEL_ID.test(typed);
   const options = useMemo(
-    () => optionsFor(models, defaultModel, defaultLabel, customIds),
-    [models, defaultModel, defaultLabel, customIds],
+    () =>
+      optionsFor(
+        models,
+        defaultModel,
+        defaultLabel,
+        customIds,
+        picker === undefined || providerLabel === undefined ? undefined : { picker, providerLabel },
+      ),
+    [models, defaultModel, defaultLabel, customIds, picker, providerLabel],
   );
   return (
     <>
@@ -145,6 +197,7 @@ export function ModelSelect({
         options={options}
         value={custom ? CUSTOM : value}
       />
+      <LiveListLine live={live} picker={picker} />
       <LocalModelsNote id={noteId} local={local} {...(write === undefined ? {} : { write })} />
       {custom ? (
         <>
@@ -167,5 +220,39 @@ export function ModelSelect({
         </>
       ) : null}
     </>
+  );
+}
+
+/**
+ * One quiet line under the field about the live list: how old it is (flagged when it is a day or more, which means the
+ * provider could not be asked again) and "Refresh list" when this browser may press it. Nothing at all when there is no
+ * list and no way to ask for one.
+ */
+function LiveListLine({
+  live,
+  picker,
+}: {
+  readonly live: LiveModels | undefined;
+  readonly picker: LiveModelPicker | undefined;
+}) {
+  if (live === undefined || (picker === undefined && live.refresh === undefined)) return null;
+  return (
+    <div
+      className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted"
+      data-live-model-list={picker === undefined ? 'none' : picker.stale ? 'stale' : 'fresh'}
+    >
+      <span className={picker?.stale === true ? 'text-warn' : undefined}>
+        {picker === undefined
+          ? `No model list from ${live.providerLabel} yet.`
+          : picker.stale
+            ? `List out of date: read ${picker.readAgo}.`
+            : `List read ${picker.readAgo}.`}
+      </span>
+      {live.refresh === undefined ? null : (
+        <Button busy={live.refresh.busy} busyLabel="Refreshing…" onClick={live.refresh.run} size="sm" type="button">
+          Refresh list
+        </Button>
+      )}
+    </div>
   );
 }

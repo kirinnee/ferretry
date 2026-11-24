@@ -86,6 +86,26 @@ export function pageFieldKind(
   return short && words(field, field.label).some(word => CODE_WORDS.test(word)) ? 'code' : undefined;
 }
 
+/** The words that say a field is a one-time code beyond doubt: otp, totp, 2fa, mfa, one-time. Not "code", not "verify". */
+const CODE_EVIDENCE_WORDS =
+  /(?:^|[^a-z])(?:otp|totp|2fa|mfa)(?![a-z])|[a-z](?:Otp|OTP|Totp|TOTP)(?![a-z])|otp[\s._-]*(?:input|field|code|digit|value)/u;
+/** "One-time" in any case ("One-time passcode"). */
+const ONE_TIME = /one[\s._-]*time/iu;
+
+/**
+ * Whether the page says UNAMBIGUOUSLY that a field takes a one-time code: `autocomplete="one-time-code"`, or a name, id or
+ * label that says otp, totp, 2fa, mfa or one-time with no password word beside it. Independent of what the field's
+ * `type` is and of the sensitivity the owner's card shows: a masked code box (`type="password"`) is still a code box.
+ * Weaker hints (a numeric keypad, the word "code" or "verify") are not evidence here: a PIN box has them too.
+ */
+function codeEvidence(field: Field, ferretLabel?: string): boolean {
+  if (field.autocomplete !== undefined && CODE_AUTOCOMPLETE.test(field.autocomplete)) return true;
+  if (passwordSignalled(field, ferretLabel)) return false;
+  return words(field, field.label, ferretLabel).some(
+    word => CODE_EVIDENCE_WORDS.test(word) || CODE_EVIDENCE_WORDS.test(word.toLowerCase()) || ONE_TIME.test(word),
+  );
+}
+
 /**
  * Whether anything on the field says secret: the substring set pass, pwd, ssn, mpin, pincode, security code, cvv, cvc or
  * csc, or "pin" as a word of its own, in its name, id, autocomplete, page label or the ferret's label. ONE definition:
@@ -113,8 +133,8 @@ const foundOn = (
 ): PageFieldFacts | undefined => (facts.kind === 'page' ? facts.fields?.find(each => each.fieldId === id) : undefined);
 
 /**
- * Whether a field may NOT be filled from a saved LOGIN password, as an offer or at delivery: it is a `secret` and the page
- * says it is a card field or a one-time code. A login's password goes into a password box, never a card number or a code
+ * Whether a field may NOT be filled from a saved LOGIN password, as an offer, a Save as, a grant's match or recheck, or at
+ * delivery: it is a `secret` and the page says it is a card field or a one-time code (`type` and the card's masking aside). A login's password goes into a password box, never a card number or a code
  * box. SEPARATE from the field's sensitivity: the agent's secret stays a secret (masked) either way.
  */
 export function barredFromLoginPassword(
@@ -126,7 +146,10 @@ export function barredFromLoginPassword(
   if (found === undefined) return false;
   const given = field.label === FIELD_LABELS[field.sensitivity];
   const siblings = (facts.fields ?? []).map(each => each.field);
-  return pageFieldKind(found.field, given ? undefined : field.label, siblings) !== undefined;
+  const ferretLabel = given ? undefined : field.label;
+  // The deny check does not follow the UI's precedence: a masked box (`type="password"`) that says one-time code is a
+  // code box, kept masked AND given no login password.
+  return pageFieldKind(found.field, ferretLabel, siblings) !== undefined || codeEvidence(found.field, ferretLabel);
 }
 
 /**

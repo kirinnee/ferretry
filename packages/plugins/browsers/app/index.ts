@@ -3,6 +3,8 @@ import { implementApp } from '@ferretry/kernel/manifest';
 import { createElement } from 'react';
 import manifest from '../manifest.ts';
 import { BrowserPanel } from './features/browser/browser-panel.tsx';
+import { PageOpenedListener } from './features/browser/page-opened-listener.tsx';
+import { PageOpenedMark } from './features/browser/page-opened-mark.tsx';
 import { BrowserTab } from './features/settings/browser-tab.tsx';
 import { OpenLinksInPanel } from './features/settings/open-links-in-panel.tsx';
 import { browserLoginPort, DaemonBrowserLoginStore } from './lib/browser-login.ts';
@@ -27,6 +29,9 @@ export default provideToShell(
         panels: {
           // Drawn from `shell.deviceSettings` (no daemon), never from a machine's half.
           'open-links-in': () => null,
+          // `ferrets.list-row-mark`: the row of the ferret whose page opened where the owner was not looking.
+          'page-opened': ({ subject }) =>
+            subject === undefined ? null : createElement(PageOpenedMark, { daemon: daemon.daemonId, ferret: subject }),
           browser: ({ subject, intent }) =>
             subject === undefined
               ? null
@@ -52,6 +57,9 @@ export default provideToShell(
     },
   }),
   {
+    // A page the agent opens (`browsers.page-changed`): heard on every page, once per machine, so a ferret's row gets its dot
+    // whether or not its chat is open, and the ferret on screen switches to the page.
+    background: { 'page-opened': PageOpenedListener },
     // S7: where a tap on an external link opens, built per machine over Browsers' own client there.
     links: linkProvisionFor,
     // Settings › This device (S4): "Open links in". No machine, no client.

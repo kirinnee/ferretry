@@ -376,6 +376,32 @@ describe('barredFromLoginPassword: a saved login password never goes into a card
     should(barred(on(input({ inputmode: 'numeric', maxlength: '6' })))).be.true();
   });
 
+  it('should bar a MASKED code box (type=password) on unambiguous code evidence, whatever the UI shows', () => {
+    const masked = (over: Partial<Field>) => input({ type: 'password', ...over });
+    should(barred(on(masked({ name: 'otp', autocomplete: 'one-time-code' })))).be.true();
+    should(barred(on(masked({ autocomplete: 'one-time-code' })))).be.true();
+    should(barred(on(masked({ name: 'totp_token' })))).be.true();
+    should(barred(on(masked({ id: 'mfa-input' })))).be.true();
+    should(barred(on(masked({ label: 'One-time passcode' })))).be.true();
+    should(barred(on(masked({ name: 'f1' }), 'Authenticator 2FA code'))).be.true();
+    // It stays what the ferret asked (masked): the bar is not a change of sensitivity.
+    should(
+      pickedOnPage(
+        on(masked({ autocomplete: 'one-time-code' })).facts,
+        { id: 'f', label: 'Password', sensitivity: 'secret' },
+        { secret: 'Password', private: 'Private value', code: 'Code', plain: 'Value' },
+      ).sensitivity,
+    ).equal('secret');
+  });
+
+  it('should NOT bar a masked box whose only hints are ambiguous (a PIN keypad, a plain password, a "code" word)', () => {
+    const masked = (over: Partial<Field>) => input({ type: 'password', ...over });
+    should(barred(on(masked({ name: 'pin', inputmode: 'numeric', maxlength: '4' })))).be.false();
+    should(barred(on(masked({ name: 'password', autocomplete: 'current-password' })))).be.false();
+    should(barred(on(masked({ name: 'access_code' })))).be.false();
+    should(barred(on(masked({ name: 'password_otp' })))).be.false();
+  });
+
   it('should not bar a real password field, a non-secret, or a terminal', () => {
     should(barred(on(input({ type: 'password', name: 'password' })))).be.false();
     should(barred(on(input({ name: 'field1', maxlength: '40' })))).be.false();

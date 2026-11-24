@@ -10,7 +10,7 @@ import {
 } from '@ferretry/core-ferrets/contract';
 import { type ComponentType, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { LiveFerretsClient } from '../../lib/client.ts';
-import { Button, Card, cn, FastSwitch, ModelSelect, PanelBody, SegmentedChoice, Textarea } from '../../ui.ts';
+import { Button, Card, cn, FastSwitch, ModelSelect, PanelBody, SegmentedChoice, Textarea, useNow } from '../../ui.ts';
 import { FolderPicker } from './folder-picker.tsx';
 import { daemonHomeHref, ferretChatHref, addLoginHref } from './hrefs.ts';
 import {
@@ -238,6 +238,7 @@ export function NewFerretPage({
   const homePath = daemonHomeHref(daemon);
   const back = backPlace ?? { path: homePath, label: '← Home' };
   const chosen = chosenForDraft(chosenRuntime, draft.runtime);
+  const now = useNow();
   const models = modelSuggestions(chosen);
   const blocker = createBlocker(draft, submitting, noRunnableAccount, awaitingPick);
   // A model the panel says has no fast mode cannot be launched with it, so the switch says why it is unavailable and
@@ -417,6 +418,9 @@ export function NewFerretPage({
                   id={fieldId('model')}
                   models={chosen.models}
                   onChange={value => update('model', value)}
+                  {...(chosen.live === undefined
+                    ? {}
+                    : { live: { ...chosen.live, now, providerLabel: chosen.modelCatalog.label } })}
                   value={draft.model}
                 />
               )}

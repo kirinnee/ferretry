@@ -3,7 +3,7 @@ import should from 'should';
 import type { InputRaise, InputTargetFacts } from '../../../../contract/index.ts';
 import { account, page, pageField, SESSION, site } from './grant-fixtures.ts';
 import { padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
-import { OWNER, world } from './world.ts';
+import { OWNER, PAGE_LOGIN, planLine, world } from './world.ts';
 
 /**
  * What the daemon makes of the agent's pick for a page field, from what the page says the field is: it may only RAISE it.
@@ -188,5 +188,74 @@ describe('the card for a page field the page says is a card number, expiry or se
     should(refused).not.be.undefined();
     should(w.writes).eql([]);
     should(w.fills).eql([]);
+  });
+});
+
+/**
+ * A MASKED one-time-code box (`type="password"`, `autocomplete="one-time-code"`) is still a code box: it stays masked as
+ * asked AND is given no saved login password, at every entry point (offer, Save as, a grant's match and recheck, saved delivery).
+ */
+describe('a masked one-time-code field', () => {
+  const MASKED = { type: 'password', name: 'otp', autocomplete: 'one-time-code', maxlength: '6' };
+
+  it('should stay a secret (masked) and be offered no saved login password', async () => {
+    const w = world(withPassword(facing(MASKED)));
+
+    await w.service.raise(SESSION, raise('secret'));
+    const request = await w.pending();
+
+    should(request.fields[0]?.sensitivity).equal('secret');
+    should(request.saved?.offers.filter(offer => offer.fills === 'password')).eql([]);
+  });
+
+  it('should refuse "Save as" with nothing typed', async () => {
+    const w = world(withPassword(facing(MASKED)));
+    await w.service.raise(SESSION, raise('secret'));
+    const request = await w.pending();
+
+    const refused = await w.service
+      .deliver(
+        SESSION,
+        request.id,
+        w.send(request, {
+          fields: [{ field: 'code', padded: padInputValue('482913-UNIQUE') }],
+          save: { entry: 'GITHUB', label: 'GitHub' },
+        }),
+        OWNER,
+      )
+      .then(
+        () => undefined,
+        (error: unknown) => error as Error,
+      );
+
+    should(refused?.message).containEql('payment or code field');
+    should(w.writes).eql([]);
+  });
+
+  it('should refuse to type a saved login password into it, with nothing typed', async () => {
+    const w = world(withPassword(facing(MASKED)));
+    await w.service.raise(SESSION, raise('secret'));
+    const request = await w.pending();
+
+    const refused = await w.service.deliver(SESSION, request.id, w.send(request, { entry: 'GITHUB' }), OWNER).then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+
+    should(refused).not.be.undefined();
+    should(w.writes).eql([]);
+    should(w.fills).eql([]);
+  });
+
+  it('should be passed over by a task-plan line (the match and the recheck read the same sighting): nothing typed, no use spent', async () => {
+    const facts = page({}, [pageField('user'), pageField('pass', {}, MASKED)]);
+    const w = world({ facts, grants: [planLine()], accounts: { accounts: [account()], signIns: [site()] } });
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+    should(w.fills).eql([]);
+    should(w.grantLog.used).eql([]);
   });
 });

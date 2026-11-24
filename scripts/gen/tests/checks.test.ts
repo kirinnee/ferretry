@@ -478,9 +478,16 @@ describe('context-imports', () => {
         },
       },
       { id: 'other', files: { 'tests/page.test.ts': `import '../../../core/ferrets/app/lib/client.ts';\n` } },
+      {
+        id: 'runtimes',
+        files: {
+          'tests/page.test.ts': `import '../../../core/ferrets/app/features/new-ferret/new-ferret-page.tsx';\n`,
+        },
+      },
     ]);
     const found = messages(await run(contextImports, f));
     expect(found).not.toContain('projects/tests/page.test.ts');
+    expect(found).not.toContain('runtimes/tests/page.test.ts');
     expect(found).toContain('projects/tests/other.test.ts:1: ../../../core/ferrets/app/lib/other.ts');
     expect(found).toContain(
       'projects/app/host.ts:1: ../../../core/ferrets/app/features/new-ferret/new-ferret-page.tsx',

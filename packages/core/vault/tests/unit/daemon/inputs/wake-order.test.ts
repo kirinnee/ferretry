@@ -135,7 +135,7 @@ describe('a ferret waiting with input_wait when the owner answers', () => {
     should(woke?.stored.at(-1)).equal('surface.input_delivered');
   });
 
-  it('should still wake the wait with the true outcome when the final journal write fails', async () => {
+  it('should wake the wait with an unknown outcome, never delivered, when the final journal write fails', async () => {
     const world = inputRequestService({
       journalled: event => {
         if ((event as { type: string }).type === 'surface.input_delivered') throw new Error('disk full');
@@ -152,8 +152,9 @@ describe('a ferret waiting with input_wait when the owner answers', () => {
     await waiting;
 
     should(world.writes).eql(['hunter2-UNIQUE']);
+    // The owner's Send did type it; the ferret is told what the journal can prove (durable-final.test.ts has the restart).
     should(result.state).equal('delivered');
-    should(seen).equal('delivered');
+    should(seen).equal('cancelled');
   });
 
   it('should still have the journal event written exactly once, before the wake', async () => {
