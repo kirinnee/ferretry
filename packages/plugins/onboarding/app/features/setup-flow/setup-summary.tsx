@@ -21,6 +21,8 @@ type SegmentState = 'done' | 'partial' | 'later';
 interface Segment {
   /** `daemon:<plugin>` or `client:<plugin>.<page>`: one per segment. */
   readonly key: string;
+  /** The page's id (a device page is its own segment). */
+  readonly id: string;
   /** The Settings tab that holds it. */
   readonly plugin: string;
   readonly name: string;
@@ -35,13 +37,14 @@ interface Segment {
 const segmentsOf = (steps: readonly SummaryStep[]): readonly Segment[] => {
   const counts = new Map<
     string,
-    { key: string; plugin: string; name: string; phase: Phase; set: number; left: number }
+    { key: string; id: string; plugin: string; name: string; phase: Phase; set: number; left: number }
   >();
   for (const step of steps) {
     const phase: Phase = step.phase ?? 'daemon';
     const id = phase === 'client' ? `client:${step.plugin}.${step.id}` : `daemon:${step.plugin}`;
     const before = counts.get(id) ?? {
       key: id,
+      id: step.id,
       plugin: step.plugin,
       name: phase === 'client' ? step.title : step.group,
       phase,
@@ -56,6 +59,15 @@ const segmentsOf = (steps: readonly SummaryStep[]): readonly Segment[] => {
     state: left === 0 ? 'done' : set === 0 ? 'later' : 'partial',
   }));
 };
+
+/** Where a page left for later is finished: the page's own place when it has one (Connect GitHub is the GitHub accounts tab), else this device's settings. */
+const GITHUB_ACCOUNTS_PAGE = 'projects.github';
+const finishHref = (daemon: string, segment: Segment): string =>
+  segment.phase === 'daemon'
+    ? daemonSettingsHref(daemon, segment.plugin)
+    : `${segment.plugin}.${segment.id}` === GITHUB_ACCOUNTS_PAGE
+      ? daemonSettingsHref(daemon, 'git-accounts', 'accounts')
+      : deviceSettingsHref(daemon);
 
 /** What a row that is not fully set up says, quietly, under its name. */
 const NOTE: Record<Exclude<SegmentState, 'done'>, string> = { later: 'Finish later', partial: 'Partly set up' };
@@ -74,7 +86,7 @@ function Row({ daemon, segment }: { readonly daemon: string; readonly segment: S
       </span>
       {done ? null : (
         <RouterLink
-          href={segment.phase === 'client' ? deviceSettingsHref(daemon) : daemonSettingsHref(daemon, segment.plugin)}
+          href={finishHref(daemon, segment)}
           aria-label={`Finish ${segment.name}`}
           data-onboarding-later-link={segment.plugin}
         >

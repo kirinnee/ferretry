@@ -38,7 +38,7 @@ const overrides = paused === null ? {} : { [paused]: { on: false } };
 
 // ?projects=1: the machines also carry Projects' two device pages (the full journey's walk leaves them out).
 const PROJECT_STEPS: readonly FakeStep[] =
-  params.get('projects') === '1'
+  params.get('projects') !== null
     ? [
         { plugin: 'projects', id: 'folders', title: 'Add your projects', order: 90, side: 'client', group: 'Projects' },
         { plugin: 'projects', id: 'github', title: 'Connect GitHub', order: 91, side: 'client', group: 'Projects' },

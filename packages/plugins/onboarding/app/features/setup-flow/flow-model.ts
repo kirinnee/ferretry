@@ -72,6 +72,17 @@ export const answeredBefore = (
 
 const NONE: ReadonlySet<string> = new Set();
 
+/**
+ * OFFERS: device pages that are held out to a run that is going on anyway, never a reason to open one. A setup that was
+ * finished before (every other page answered, or passing itself over) must not be pulled back for a page added later, so an
+ * offer is walked only when the run drew a page before it (`passesOffer`); a run that starts with nothing else to ask ends.
+ */
+const OFFERS: ReadonlySet<string> = new Set(['projects.github']);
+export const isOffer = (key: string): boolean => OFFERS.has(key);
+
+/** Whether the offer page at `key` is passed over now: a page of this run was never drawn before it (`drawn`). */
+export const passesOffer = (key: string, drawn: ReadonlySet<string>): boolean => isOffer(key) && drawn.size === 0;
+
 /** Every page the run does not draw: the ones it gave up on and the ones marked not needed. */
 export const passedOver = (state: Pick<RunState, 'gone' | 'notNeeded' | 'aside'>): ReadonlySet<string> =>
   state.notNeeded.size === 0 && state.aside.size === 0
@@ -85,9 +96,9 @@ const liveAfter = (
   from: number,
 ): Place => pages.slice(from).find(page => !skipped.has(page.key) && !gone.has(page.key))?.key ?? END;
 
-/** The start of a run: the first page nobody answered yet, or the end when everything was. */
+/** The start of a run: the first page nobody answered yet, or the end when everything was (an offer alone never starts one). */
 export const startRun = (pages: readonly FlowStep[], answered: ReadonlySet<string>): RunState => ({
-  at: liveAfter(pages, answered, NONE, 0),
+  at: pages.some(page => !answered.has(page.key) && !isOffer(page.key)) ? liveAfter(pages, answered, NONE, 0) : END,
   trail: [],
   gone: NONE,
   notNeeded: NONE,

@@ -7,8 +7,10 @@
  * - It shows the accounts already connected (logins only: a token never reaches a browser) and the card to add another.
  * - A machine that wants the passkey before it LISTS the accounts never walls the page: the card to connect is always
  *   there, and the list is one quiet "confirm" button below it.
- * - When the page before it registered exactly one project (`linkProjectId`, `linkProjectName` in the step's memory), each
- *   connected account can be ticked to link to that project, and Next saves the link. Nothing ticked: Next just moves on.
+ * - When the page before it PROVED it made exactly one project (`linkProjectId`, `linkProjectName` in the step's memory), each
+ *   connected account can be ticked to link to that project, and Next saves the link. Every tick is the person's own, visible
+ *   and unticked to begin with (connecting an account ticks nothing); Next adds the ticked accounts to the project's list as it
+ *   stands (read, merge, write) and never replaces it. Nothing ticked: Next just moves on and sends nothing.
  * - Git accounts off on this machine: the page says so and the way out is still "Skip for now".
  */
 import { daemonOfClient, useAppHook } from '@ferretry/app';
@@ -26,6 +28,7 @@ import { setProjectAccounts } from '../features/create-project/accounts-api.ts';
 import { ConnectCard } from '../features/create-project/connect-card.tsx';
 import { useGitAccounts } from '../features/create-project/use-git-accounts.ts';
 import { type ProjectsClient, reasonOf } from '../lib/client.ts';
+import { fetchProjects } from '../lib/projects-api.ts';
 
 export interface GithubStepProps {
   readonly step: StepHost | undefined;
@@ -56,24 +59,30 @@ export function GithubStep({ step, client, connectAccount }: GithubStepProps) {
     if (answered) host.current?.ready();
   }, [answered]);
 
-  // What Next saves: the link to the one project, when something is ticked; otherwise Next only moves on.
+  // What Next saves: the ticked accounts added to the one project, when something visible is ticked; otherwise Next only moves on.
   const projectId = project?.id;
+  const visible = (accounts.accounts ?? []).map(account => account.id);
+  // The ticked accounts the page still lists, as one string so the save below is rebuilt exactly when the set changes.
+  const tickedKey = linked.filter(id => visible.includes(id)).join(',');
   useEffect(() => {
-    if (projectId === undefined || linked.length === 0) return host.current?.commit(null);
+    const ticked = tickedKey === '' ? [] : tickedKey.split(',');
+    if (projectId === undefined || ticked.length === 0) return host.current?.commit(null);
     host.current?.commit(async () => {
       try {
-        await setProjectAccounts(client, projectId, linked);
+        // The project may already hold accounts: add to its list as it stands now, never replace it.
+        const row = (await fetchProjects(client)).find(each => each.id === projectId);
+        if (row === undefined) throw new Error('that project is no longer registered');
+        const merged = [...(row.accounts ?? []), ...ticked.filter(id => !(row.accounts ?? []).includes(id))];
+        await setProjectAccounts(client, projectId, merged);
       } catch (cause) {
         throw new Error(`The link was not saved: ${reasonOf(cause)}`);
       }
     });
-  }, [client, projectId, linked]);
+  }, [client, projectId, tickedKey]);
 
-  const connected = (accountId: string): void => {
+  const connected = (): void => {
     setJustConnected(count => count + 1);
     accounts.reload();
-    // A freshly connected account is the one meant to be used: tick it for the project without a second press.
-    if (projectId !== undefined) setLinked(known => (known.includes(accountId) ? known : [...known, accountId]));
   };
   const toggle = (id: string, on: boolean): void =>
     setLinked(known => (on ? (known.includes(id) ? known : [...known, id]) : known.filter(each => each !== id)));

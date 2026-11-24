@@ -1820,11 +1820,19 @@ describe('the End page of a Pair journey', () => {
 
 // ─── O9-10: the "Connect GitHub" page, the setup flow's last device page ─────────────────────────────────────────────────
 describe('the Connect GitHub step of the setup flow', () => {
+  type Answer = 'connect' | 'skip' | 'tick' | 'untouched';
+  const WORDS: Record<Answer, string> = {
+    connect: 'connect a fake account (the same card, the same consent), then Next',
+    skip: 'Skip for now leaves it unanswered, ends the flow, and "Finish later" opens the GitHub accounts page',
+    tick: 'a project made in this run: the account is offered UNTICKED, a tick links it, Back stays on Folders',
+    untouched: 'a project made in this run, nothing ticked: Next only moves on and sends no link',
+  };
   for (const variant of VARIANTS)
-    for (const answer of ['connect', 'skip'] as const)
-      it(`${variant.name}: ${answer === 'connect' ? 'connect a fake account (the same card, the same consent), then Next' : 'Skip for now leaves it unanswered and ends the flow'}`, async () => {
+    for (const answer of ['connect', 'skip', 'tick', 'untouched'] as const)
+      it(`${variant.name}: ${WORDS[answer]}`, async () => {
         const browser = await sharedChromium();
         const phone = variant.width < 600;
+        const fresh = answer === 'tick' || answer === 'untouched';
         const context = await browser.newContext({
           viewport: { width: variant.width, height: variant.height },
           colorScheme: variant.dark ? 'dark' : 'light',
@@ -1835,30 +1843,31 @@ describe('the Connect GitHub step of the setup flow', () => {
         await context.route('**/*', async route =>
           new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
         );
-        // This device already set everything but Projects' pages, so the one page left to ask is Connect GitHub (the project
-        // page passes over itself: the fake machine already has projects).
+        // This device already set everything but Projects' pages and (unless the machine is fresh) Layout: a run that DREW Layout
+        // is one that offers Connect GitHub (the project page passes over, the fake machine has projects). On a fresh machine the
+        // project page is drawn and registers one; nothing else is left to ask.
+        const answered = ['onboarding.appearance', 'access.passkey', ...(fresh ? ['layouts.layout'] : [])];
         await context.addInitScript(
-          ({ key, daemon }) =>
+          ({ key, daemon, steps }) =>
             window.localStorage.setItem(
               key,
               JSON.stringify({
                 format: 1,
                 steps: Object.fromEntries(
-                  ['onboarding.appearance', 'layouts.layout', 'voice.voice', 'access.passkey'].map(step => [
-                    step,
-                    { at: '2026-11-20T10:00:00.000Z', daemons: [daemon] },
-                  ]),
+                  steps.map(step => [step, { at: '2026-11-20T10:00:00.000Z', daemons: [daemon] }]),
                 ),
               }),
             ),
-          { key: 'fy:onboarding:client', daemon: MACHINE_B.id },
+          { key: 'fy:onboarding:client', daemon: MACHINE_B.id, steps: answered },
         );
         const tab = await context.newPage();
         tab.setDefaultTimeout(loadAware(60_000, IDLE_FRAME_MS));
         const problems: string[] = [];
         tab.on('pageerror', error => problems.push(error.message));
         try {
-          await tab.goto(`${origin}/pair?theme=studio-${variant.dark ? 'dark' : 'light'}&projects=1`);
+          await tab.goto(
+            `${origin}/pair?theme=studio-${variant.dark ? 'dark' : 'light'}&projects=${fresh ? 'fresh' : '1'}`,
+          );
           await tab.getByText('Paste a link').click();
           await tab.getByLabel('Pairing link').fill(pairLinkOf(MACHINE_B, origin));
           await tab.getByText('Use this link').click();
@@ -1877,53 +1886,118 @@ describe('the Connect GitHub step of the setup flow', () => {
             dispatchEvent(new PopStateEvent('popstate'));
           }, `/d/${MACHINE_B.id}/onboarding/setup?phase=client&journey=pair`);
 
-          await reach(tab, 'projects.github');
-          await inspect(tab, variant, 'projects.github', { first: true, later: 'Skip for now' });
           const snap = async (name: string): Promise<void> => {
             if (shotsDir !== '')
-              await tab.screenshot({ path: join(shotsDir, `${variant.name}-github-${name}.png`), fullPage: true });
+              await tab.screenshot({
+                path: join(shotsDir, `${variant.name}-github-${answer}-${name}.png`),
+                fullPage: true,
+              });
           };
           const text = async (): Promise<string> => await tab.locator('[data-projects-step="github"]').innerText();
-          // Empty: nothing connected, the card to connect is there, and Skip for now is always available.
-          expect(await text(), 'empty: says no account is connected').toContain('No GitHub account is connected');
-          expect(
-            await tab.getByRole('button', { name: 'Connect a GitHub account' }).count(),
-            'the existing connect card is drawn',
-          ).toBe(1);
-          expect(await tab.locator('[data-step-later]').innerText(), 'Skip for now is on the page').toBe(
-            'Skip for now',
-          );
-          const counter = await counterOf(tab);
-          expect(counter, 'the counter counts Connect GitHub as the one page of Projects').toMatch(/page 1 of 1$/u);
-          await snap('1-empty');
+          const writesOf = async (): Promise<string[]> =>
+            (await daemonOf(tab, MACHINE_B.id)).writes.map(write => write.route);
 
-          if (answer === 'skip') {
-            await tab.locator('[data-step-later]').click();
-            await reach(tab, 'end');
-            expect(
-              Object.keys(await ledgerOf(tab)),
-              'Skip for now does not put Connect GitHub on the ledger as answered',
-            ).not.toContain('projects.github');
-            expect((await daemonOf(tab, MACHINE_B.id)).mutations, 'skipping wrote nothing to the machine').toEqual([]);
-            await snap('3-skipped');
+          if (fresh) {
+            // Project setup is drawn first: pick the folder, Next registers it (this run PROVES it made it).
+            await reach(tab, 'projects.folders');
+            await tab.getByRole('button', { name: 'Add this folder' }).click();
+            await next(tab, 'projects.github');
           } else {
-            await tab.getByRole('button', { name: 'Connect a GitHub account' }).click();
-            // The same consent words, then the code to type at GitHub (a fake one); the page polls until GitHub approves.
-            await tab.getByRole('button', { name: 'Continue to GitHub' }).click();
-            await tab.locator('[data-testid="git-done"]').waitFor();
-            await tab.waitForFunction(() =>
-              document.querySelector('[data-projects-step="github"]')?.textContent?.includes('@hubot-fake'),
+            await reach(tab, 'layouts.layout');
+            await next(tab, 'projects.github');
+          }
+          await inspect(tab, variant, 'projects.github', { later: 'Skip for now' });
+
+          if (fresh) {
+            expect(await writesOf(), 'the folder was registered').toContain('POST /v1/projects');
+            expect(await text(), 'the connected account is offered for the project').toContain(
+              'Use @hubot-fake for atlas',
             );
-            const connected = await text();
-            expect(connected, 'the connected account is listed by login').toContain('@hubot-fake');
-            for (const secret of ['token', 'ghp_', 'gho_'])
-              expect(connected.toLowerCase(), `no ${secret} on the page`).not.toContain(secret);
-            await snap('2-connected');
+            expect(
+              await tab.locator('[data-projects-step="github"] input[type="checkbox"]').isChecked(),
+              'the tick starts EMPTY',
+            ).toBe(false);
+            await snap('1-unticked');
+            // Back lands on Folders and stays there (it does not bounce straight back to GitHub).
+            await tab.locator('[data-step-back]').click();
+            await reach(tab, 'projects.folders');
+            await tab.waitForTimeout(800);
+            expect(await keyOf(tab), 'Back stays on Folders').toBe('projects.folders');
+            await snap('2-back-on-folders');
+            await next(tab, 'projects.github');
+            if (answer === 'tick') {
+              await tab.locator('[data-projects-step="github"] input[type="checkbox"]').check();
+              await snap('3-ticked');
+            }
             await next(tab, 'end');
-            expect(Object.keys(await ledgerOf(tab)), 'Next puts Connect GitHub on the device ledger').toContain(
+            const sent = (await daemonOf(tab, MACHINE_B.id)).writes.filter(
+              write => write.route === 'PUT /v1/projects/:id/accounts',
+            );
+            if (answer === 'tick')
+              expect(
+                sent.map(write => write.body),
+                'the tick linked the account',
+              ).toEqual([{ accounts: ['gha_7'] }]);
+            else expect(sent, 'nothing ticked: no link is sent').toEqual([]);
+            expect(Object.keys(await ledgerOf(tab)), 'Next puts Connect GitHub on the ledger').toContain(
               'projects.github',
             );
-            await snap('3-end');
+            await snap('4-end');
+          } else {
+            // Empty: nothing connected, the card to connect is there, and Skip for now is always available.
+            expect(await text(), 'empty: says no account is connected').toContain('No GitHub account is connected');
+            expect(
+              await tab.getByRole('button', { name: 'Connect a GitHub account' }).count(),
+              'the existing connect card is drawn',
+            ).toBe(1);
+            expect(await tab.locator('[data-step-later]').innerText(), 'Skip for now is on the page').toBe(
+              'Skip for now',
+            );
+            expect(await counterOf(tab), 'the counter counts Connect GitHub as a page of Projects').toMatch(
+              /page 1 of 1$/u,
+            );
+            expect(
+              await tab.locator('[data-projects-step="github"] input[type="checkbox"]').count(),
+              'no project made: no tick',
+            ).toBe(0);
+            await snap('1-empty');
+
+            if (answer === 'skip') {
+              await tab.locator('[data-step-later]').click();
+              await reach(tab, 'end');
+              expect(
+                Object.keys(await ledgerOf(tab)),
+                'Skip for now does not put Connect GitHub on the ledger as answered',
+              ).not.toContain('projects.github');
+              expect((await daemonOf(tab, MACHINE_B.id)).mutations, 'skipping wrote nothing to the machine').toEqual(
+                [],
+              );
+              const row = tab.locator('[data-end-row="client:projects.github"]');
+              expect(await row.innerText(), 'the summary says Connect GitHub is for later').toContain('Finish later');
+              expect(
+                await row.locator('a').getAttribute('href'),
+                'Finish later opens the GitHub accounts page, not Device Settings',
+              ).toBe(`/d/${MACHINE_B.id}/settings/git-accounts/accounts`);
+              await snap('3-skipped');
+            } else {
+              await tab.getByRole('button', { name: 'Connect a GitHub account' }).click();
+              // The same consent words, then the code to type at GitHub (a fake one); the page polls until GitHub approves.
+              await tab.getByRole('button', { name: 'Continue to GitHub' }).click();
+              await tab.locator('[data-testid="git-done"]').waitFor();
+              await tab.waitForFunction(() =>
+                document.querySelector('[data-projects-step="github"]')?.textContent?.includes('@hubot-fake'),
+              );
+              const connected = await text();
+              expect(connected, 'the connected account is listed by login').toContain('@hubot-fake');
+              for (const secret of ['token', 'ghp_', 'gho_'])
+                expect(connected.toLowerCase(), `no ${secret} on the page`).not.toContain(secret);
+              await snap('2-connected');
+              await next(tab, 'end');
+              expect(Object.keys(await ledgerOf(tab)), 'Next puts Connect GitHub on the device ledger').toContain(
+                'projects.github',
+              );
+              await snap('3-end');
+            }
           }
           expect(problems).toEqual([]);
         } finally {
