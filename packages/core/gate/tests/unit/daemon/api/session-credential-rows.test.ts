@@ -71,6 +71,23 @@ describe('what the daemon does with the credential a shell presents', () => {
     expect(bearerDigest(FERRET_TOKEN)).not.toContain(FERRET_TOKEN);
   });
 
+  test('a ferret token the directory cannot judge yet is 503 daemon_starting, never the 401 a pane counts; the rest is unchanged', () => {
+    const w = world();
+    let judgeable = false;
+    (w.ferrets as { judgeable?: () => boolean }).judgeable = () => judgeable;
+    expect(admit(w, fleetUse, { bearer: STRANGER, arrival: local(true) }).outcome).toBe('503 daemon_starting');
+    // a digest the directory already holds is a known ferret whether or not the rest has loaded
+    expect(admit(w, fleetUse, ferretCall).outcome).toBe('admitted');
+    // only a ferret-shaped bearer on the privileged listener waits: the admin token and a carrier's stranger do not
+    expect(admit(w, fleetUse, { bearer: ADMIN, arrival: local() }).outcome).toBe('admitted');
+    expect(admit(w, fleetUse, { bearer: FERRET_TOKEN, arrival: carried() }).outcome).toBe('401 unauthorized');
+    expect(admit(w, fleetUse, { arrival: local(true) }).outcome).toBe('401 unauthorized');
+    // once it can judge, the answers are exactly the old ones
+    judgeable = true;
+    expect(admit(w, fleetUse, ferretCall).outcome).toBe('admitted');
+    expect(admit(w, fleetUse, { bearer: STRANGER, arrival: local(true) }).outcome).toBe('401 unauthorized');
+  });
+
   test("S58 the session id header keeps a pane's acts the ferret's: the admin token naming a session is refused on a person route", () => {
     const w = world();
     expect(

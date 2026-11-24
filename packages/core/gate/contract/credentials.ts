@@ -183,6 +183,12 @@ export type BearerDigest = string & { readonly __bearerDigest: true };
  */
 export interface FerretBearerDirectory {
   ferretFor(digest: BearerDigest): FerretId | undefined;
+  /**
+   * Whether a digest this directory names nothing for is really unknown. `false` while the tokens are still being read:
+   * a ferret bearer then cannot be judged yet, and Gate answers it a retryable 503 instead of the 401 that tells a
+   * polling pane its credential is dead. Absent means the directory is always ready.
+   */
+  judgeable?(): boolean;
   /** Bumps on every issue, rotation and revoke; Gate re-admits open ferret streams. */
   generation(): number;
 }

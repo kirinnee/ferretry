@@ -108,6 +108,12 @@ export { callerFerret, NOT_OWN_FERRET_CODE, TURN_WATCH_JOB };
 /** A random ferret id: base-36 time + 8 hex characters (today's `TimeSessionIdFactory`). */
 const mintId = (nowMs: number): FerretId => `${nowMs.toString(36)}-${randomBytes(4).toString('hex')}` as FerretId;
 
+/**
+ * The longest Ferrets holds the daemon's listener back for its records and tokens to load. Under the kernel's own
+ * 5 s `beforeListen` bound, so Ferrets (not the kernel) is the one that says it ran out.
+ */
+const FERRETS_READY_WAIT_MS = 4_000;
+
 function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest> {
   const { kernel, hooks, needs } = ctx;
   const log = kernel.log.child('ferrets');
@@ -156,6 +162,17 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     if (held.ok && held.value !== undefined) for (const entry of held.value.tokens) tokens.add(entry as TokenEntry);
     hydrated = true;
   })();
+  // Whether the load has FINISHED, well or badly: the tokens are then as known as they will be, so a digest the directory
+  // names nothing for is a stranger's. Until then a ferret bearer cannot be judged, and Gate answers it a retryable 503.
+  let settled = false;
+  void loaded.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
   const ready = async (): Promise<void> => {
     await loaded;
   };
@@ -908,6 +925,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       // Lineage for the agenda: who exists and who started whom (Asks refuses a helper's item on it).
       'agenda.context:ferrets': ferretsAgendaContext(registry, ready),
       'bearers:ferret': {
+        judgeable: () => settled,
         ferretFor: (digest: BearerDigest) => {
           const ferret = tokens.ferretFor(digest);
           const record = ferret === undefined ? undefined : registry.get(ferret);
@@ -920,10 +938,23 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     sockets: served.sockets as NonNullable<DaemonHalf<typeof manifest>['sockets']>,
     routes: served.routes as NonNullable<DaemonHalf<typeof manifest>['routes']>,
-    // Records and tokens are loaded before any listener answers: a live ferret polling during boot is never refused as
-    // an unknown credential just because its digest was not read yet.
+    // Records and tokens are loaded before a listener answers, but only for so long: a state read that hangs must not keep
+    // the whole daemon from listening. Past the bound it says so once and lets the daemon listen; a ferret bearer is then
+    // answered 503 "still starting" (never the 401 a polling pane counts) until the load lands.
     beforeListen: async () => {
-      await ready();
+      let cancel = (): void => {};
+      const late = new Promise<'late'>(resolve => {
+        cancel = kernel.clock.after(milliseconds(FERRETS_READY_WAIT_MS), () => resolve('late'));
+      });
+      try {
+        const outcome = await Promise.race([ready().then(() => 'ready' as const), late]);
+        if (outcome === 'late')
+          log.warn(
+            'the ferret records are still loading; the daemon is listening anyway and answers ferrets "still starting" until they land',
+          );
+      } finally {
+        cancel();
+      }
     },
   };
 }

@@ -4,6 +4,7 @@ import { FakeAsks } from '../../../../asks/contract/testing/index.ts';
 import { Harnesses, Runners } from '../../../../ferrets/contract/index.ts';
 import type { HarnessHistoryFiles, HarnessHistorySource } from '../../../../ferrets/contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../ferrets/contract/testing/index.ts';
+import { Bearers, type FerretBearerDirectory } from '../../../../gate/contract/index.ts';
 import { FakeGate, ownerStanding, StandInAdmission } from '../../../../gate/contract/testing/index.ts';
 import { FakeVault } from '../../../../vault/contract/testing/index.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
@@ -109,6 +110,37 @@ const runnerPlugin = (runner: FakeRunner) =>
     { build: () => ({ hooks: { 'runners:tmux': runner } }) },
   );
 
+/** A stand-in offerer of that hook (Gate's seat), so the test can ask the REAL directory whether it can judge a bearer yet. */
+let probed: (() => FerretBearerDirectory | 'unavailable') | undefined;
+const bearerProbe = implementDaemon(
+  definePlugin({
+    id: 'bearer-probe',
+    title: 'Bearer probe (fake)',
+    version: '5.0.0',
+    api: 5,
+    core: false,
+    kinds: [],
+    hooks: { offers: [{ hook: Bearers }] },
+  }),
+  {
+    build: ctx => {
+      probed = () => ctx.hooks.provider(Bearers, 'ferret');
+      return {};
+    },
+  },
+);
+/** Whether a ferret bearer can be judged now. While it cannot, Gate answers it 503 (never 401): see session-credential-rows. */
+const judgeable = (): boolean | undefined => {
+  const directory = probed?.();
+  return directory === undefined || directory === 'unavailable' ? undefined : (directory.judgeable?.() ?? true);
+};
+
+/** The records land a few real ticks after the listing is released; waits (bounded) until the directory can judge. */
+const judgeableSoon = async (): Promise<boolean | undefined> => {
+  for (let tries = 0; tries < 100 && judgeable() === false; tries++) await Bun.sleep(10);
+  return judgeable();
+};
+
 const AT = '2026-11-14T09:30:00.000Z';
 const FIRST = 'can you look at why the deploy script fails on mac?';
 const LATE = 'Fix flaky deploy script';
@@ -139,6 +171,7 @@ async function boot(): Promise<World> {
       real('agenda'),
       harnessPlugin(new HistoryHarness(tree)),
       runnerPlugin(new FakeRunner()),
+      bearerProbe,
     ],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
@@ -263,7 +296,7 @@ describe('r11 S11 round 3: the sweep reads only for a RUNNING ferret that is sti
   });
 });
 
-describe('r11 S11 rounds 6-7: a refresh that runs before Ferrets has a whole roster never clears an owner title or a ferret', () => {
+describe('r11 S11 rounds 6-8: a refresh that runs before Ferrets has a whole roster never clears an owner title or a ferret', () => {
   type Listed = { ferret?: string; ferretName?: string; title?: string; name?: string };
   const listed = async (w: World): Promise<Listed | undefined> => {
     const answer = (await w.h.request('GET', '/v1/links/conversations')).json<{ conversations: Listed[] }>();
@@ -294,9 +327,8 @@ describe('r11 S11 rounds 6-7: a refresh that runs before Ferrets has a whole ros
 
   const AGENDA_PREVIEW = ['POST', '/v1/agenda/clear-agents', { body: { dryRun: true } }] as const;
 
-  test('the registry still loading: the owner title and the ferret survive; the agenda clear-agents preview answers as it does without Conversation', async () => {
-    const w = await owned();
-    // A daemon restart whose Ferrets records load slowly: its state listing is held until the test lets it go.
+  /** A daemon restart whose Ferrets records load slowly: its state listing is held until `release` is called. */
+  const hold = (w: World): (() => void) => {
     let release!: () => void;
     const held = new Promise<void>(resolve => (release = resolve));
     const folder = w.h.state('ferrets');
@@ -311,8 +343,30 @@ describe('r11 S11 rounds 6-7: a refresh that runs before Ferrets has a whole ros
         },
       };
     };
-    const second = await w.h.restart();
+    return release;
+  };
+  /**
+   * The restart with the listing held. Ferrets waits for its records only so long (the clock is wound past that wait):
+   * the restart STILL RESOLVES, the daemon listens, and Ferrets says once that it went on without them.
+   */
+  const restartHeld = async (w: World): Promise<TestHost> => {
+    const restarting = w.h.restart();
+    const winding = drive(w.h, 10_000);
+    const second = await within(restarting);
+    await winding;
+    expect(second, 'a held ferrets listing must not keep the daemon from listening').not.toBe('hung');
+    const host = second as TestHost;
+    expect(host.logs.filter(line => line.message.includes('ferret records are still loading'))).toHaveLength(1);
+    return host;
+  };
+
+  test('the registry still loading: the restart resolves within the bound, the preview answers, a ferret bearer is not judged yet; then the owner title and the ferret survive', async () => {
+    const w = await owned();
+    const release = hold(w);
+    const second = await restartHeld(w);
     const again: World = { ...w, h: second };
+    // Its tokens are not read yet: a ferret bearer cannot be judged, so Gate answers it 503 "still starting", never 401.
+    expect(judgeable()).toBe(false);
 
     await drive(second, 2_000);
     // The preview other callers use does not wait for the registry (as on the parent): it answers 200 while the records are held.
@@ -324,6 +378,8 @@ describe('r11 S11 rounds 6-7: a refresh that runs before Ferrets has a whole ros
     const whileLoading = (await duringLoad).json<{ conversations: Listed[] }>().conversations[0];
     release();
     await second.settle();
+    // Once the records land the directory judges every bearer again: a ferret bearer is 200-or-401, as before the bound.
+    expect(await judgeableSoon()).toBe(true);
     expect(whileLoading).toMatchObject({ ferret: w.id, title: OWNERS });
     await wind(again, 3_000);
     await second.request('GET', '/v1/links/conversations');
@@ -335,21 +391,8 @@ describe('r11 S11 rounds 6-7: a refresh that runs before Ferrets has a whole ros
 
   test('round 8: hydration held pending never holds a refresh — a transcript appended after one IS read by the next, full refreshes do not queue, the owner title stays', async () => {
     const w = await owned();
-    let release!: () => void;
-    const held = new Promise<void>(resolve => (release = resolve));
-    const folder = w.h.state('ferrets');
-    const realPort = folder.port.bind(folder);
-    folder.port = declared => {
-      const port = realPort(declared);
-      return {
-        ...port,
-        list: async (...args: Parameters<typeof port.list>) => {
-          await held;
-          return await port.list(...args);
-        },
-      };
-    };
-    const second = await w.h.restart();
+    const release = hold(w);
+    const second = await restartHeld(w);
     await drive(second, 2_000);
 
     // A listing's own deadline is on the driven clock, so time is wound while each is asked.
@@ -394,6 +437,7 @@ describe('r11 S11 rounds 6-7: a refresh that runs before Ferrets has a whole ros
     expect((after as unknown[])[0]).toMatchObject({ ferret: w.id, title: OWNERS, latest: SECOND });
     release();
     await second.settle();
+    expect(await judgeableSoon()).toBe(true);
   });
 
   test('the registry failing to load: the owner title and the ferret survive a full refresh; the preview still answers 200', async () => {
