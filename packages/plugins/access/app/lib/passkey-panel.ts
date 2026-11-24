@@ -9,7 +9,7 @@
 import { type StepUpRefusal, stepUpRefusalCode } from '@ferretry/core-gate/contract';
 import { HOSTED_APP_ORIGIN } from '../../contract/index.ts';
 import { FyHttpError } from '../shell-grants.ts';
-import { PasskeyCeremonyError, passkeySentence, viewerClock } from '@ferretry/app';
+import { PasskeyCeremonyError, passkeySentence, type ViewerClock, viewerClock } from '@ferretry/app';
 
 /** What changing a setting costs, said where a person decides to add a passkey (docs/design/zero-trust.md B2). */
 export const PASSKEY_COST_SENTENCE =
@@ -82,12 +82,15 @@ export const AFTER_WINDOW_SENTENCE =
 export const stillClosedSentence = (command: string): string =>
   `No passkey window is open for this device yet. Run \`${command}\` on the machine, then try again.`;
 
-/** When an open registration window closes, in one sentence, or `null` when the machine named no end. */
-export function registrationClosesSentence(closesAt: string | undefined): string | null {
+/**
+ * When an open registration window closes, in one sentence, on the VIEWER's clock with the zone named, or `null` when the machine
+ * named no end. `clock` only lets a test pin the zone; the page passes nothing.
+ */
+export function registrationClosesSentence(closesAt: string | undefined, clock: ViewerClock = {}): string | null {
   if (closesAt === undefined) return null;
   const closes = new Date(closesAt);
   if (Number.isNaN(closes.getTime())) return null;
-  return `You can add a passkey until ${viewerClock(closes)}.`;
+  return `You can add a passkey until ${viewerClock(closes, clock)}.`;
 }
 
 /**

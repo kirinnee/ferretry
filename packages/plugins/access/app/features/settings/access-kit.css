@@ -443,3 +443,9 @@
   margin: 0;
   padding: 2px 8px;
 }
+
+/* The Limits form's sticky Save bar rests over whatever scrolls under it; the block measures the bar (`--fy-acc-savebar-height`, 61px for a
+   one-line bar until measured) and the rows keep that much room at their foot, so the last of them ends clear of it. */
+[data-security-settings] [data-setting-group][data-setting-saves='on-save'] > ul {
+  padding-bottom: var(--fy-acc-savebar-height, 61px);
+}

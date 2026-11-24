@@ -521,8 +521,9 @@ describe('PairingScreen naming this device', () => {
     expect(sent).toEqual(['Studio box']);
     await screen.unmount();
 
+    // A link by IP address names no machine, so an untouched field is empty and sends none (a named host is prefilled: pairing-machine-name-prefill.test.tsx).
     const quiet = await screenWith({
-      arrival: PREFILLED,
+      arrival: { kind: 'seed', seed: { ...SEED, daemonUrl: 'http://192.168.1.20:7456' } },
       onPair: async (_seed, _name, machine) => {
         sent.push(machine);
       },

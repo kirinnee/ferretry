@@ -43,7 +43,7 @@ import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
 import { browserDeviceName } from '@ferretry/app';
 import { normalizedDeviceName } from '../../lib/device-name.ts';
 import { FerretMascot, type FerretPose } from './ferret-mascot.tsx';
-import { MachineNameField, machineNameChoice } from './machine-name-field.tsx';
+import { MachineNameField, machineNameChoice, machineNameFromAddress } from './machine-name-field.tsx';
 import { ConfirmActions, DeviceNameLine, LineWithDetails, PairProgress } from './pair-confirm-pieces.tsx';
 import { PairScanner } from './pair-scanner.tsx';
 import {
@@ -235,7 +235,11 @@ export function PairingScreen({
   }, [onStatedFailure, statedFailure]);
   // Chosen once per screen, so a person editing it is never overwritten and two attempts send one name.
   const [deviceName, setDeviceName] = useState(defaultName);
-  const [machineName, setMachineName] = useState('');
+  // `undefined` until the person types: the field then shows what the link knows (the host of a named address), and an emptied field stays empty.
+  const [typedMachineName, setMachineName] = useState<string | undefined>(undefined);
+  const machineName =
+    typedMachineName ??
+    (stage.kind === 'confirm' || stage.kind === 'pairing' ? machineNameFromAddress(stage.seed.daemonUrl) : '');
   const [pasting, setPasting] = useState(false);
   /** The pasted link holds a live code: it lives only in the input's own value, read on submit, never in state or markup. */
   const link = useSecretField(typed => typed.trim().length);

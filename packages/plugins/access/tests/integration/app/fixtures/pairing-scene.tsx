@@ -7,6 +7,7 @@
  *   &arrival=link|cold|broken   a pairing link (default), a cold open, or a link whose redemption fails
  *   &offer=open                the machine says the first-passkey window is open (7 minutes left): the success screen offers
  *                              "Add a passkey now" and waits for "Not now"
+ *   &daemon=<url>              the address the link carries (default a loopback one): a named host prefills "Name this machine", an IP does not
  *   &same=1                    the page runs on the daemon's own machine (`sameMachine`): the line is the direct one, with its address
  *   &scan=camera              a browser that can scan (an idle camera), so the cold page shows all three ways in
  *   &back=1                    the host gave the page a way back (Back), as `/pair` does when reached from Settings or the first run
@@ -27,7 +28,11 @@ const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 if (params.get('motion') === 'reduced') document.documentElement.dataset.motion = 'reduced';
 
-const SEED = { daemonUrl: 'http://127.0.0.1:7617', daemonId: 'fy_daemon_9k3q2m7x4n8v1b6c5z0wd2f8', code: 'FAKE-0000' };
+const SEED = {
+  daemonUrl: params.get('daemon') ?? 'http://127.0.0.1:7617',
+  daemonId: 'fy_daemon_9k3q2m7x4n8v1b6c5z0wd2f8',
+  code: 'FAKE-0000',
+};
 const arrival = params.get('arrival') ?? 'link';
 
 // A stand-in daemon that keeps the name typed while pairing, as the real one does (the REAL Access half and host are

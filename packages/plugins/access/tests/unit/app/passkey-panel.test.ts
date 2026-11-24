@@ -132,6 +132,17 @@ describe('passkey panel sentences', () => {
     should(registrationClosesSentence('2026-01-01T00:10:00.000Z')).startWith('You can add a passkey until ');
   });
 
+  it("says the closing time in the viewer's zone, never as the UTC the machine sent", () => {
+    const closes = '2026-11-02T10:17:00.000Z';
+
+    should(registrationClosesSentence(closes, { timeZone: 'America/Los_Angeles', locale: 'en-US' })).equal(
+      'You can add a passkey until 2:17 AM PST.',
+    );
+    should(registrationClosesSentence(closes, { timeZone: 'Asia/Singapore', locale: 'en-US' })).equal(
+      'You can add a passkey until 6:17 PM GMT+8.',
+    );
+  });
+
   it('turns every ceremony failure and daemon refusal into one plain sentence', () => {
     // Arrange
     const refusal = (code: string): FyHttpError => new FyHttpError('raw daemon text', 403, code);
