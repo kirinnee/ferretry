@@ -3,7 +3,7 @@
  * for a name is checked as you type (`newFolderProblem`), and its refusal, if it still refuses, is shown as it worded it.
  * The name stays after a refusal so nothing has to be typed again.
  */
-import { Spinner } from '@ferretry/app/ui';
+import { Button } from '@ferretry/app/ui';
 import { FolderPlus } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { newFolderProblem } from './folders-api.ts';
@@ -57,13 +57,18 @@ export function NewFolderRow({ onMake, onCancel }: NewFolderRowProps) {
             if (event.key === 'Escape') onCancel();
           }}
         />
-        <button type="submit" className="kt-btn min-h-control" data-variant="primary" disabled={busy || name === ''}>
-          {busy ? <Spinner size={14} wait /> : <FolderPlus size={14} aria-hidden="true" />}
+        <Button
+          type="submit"
+          size="sm"
+          disabled={name === ''}
+          busy={busy}
+          icon={<FolderPlus size={14} aria-hidden="true" />}
+        >
           Create
-        </button>
-        <button type="button" className="kt-btn min-h-control" onClick={onCancel} disabled={busy}>
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel} disabled={busy}>
           Cancel
-        </button>
+        </Button>
       </div>
       {problem !== null && (
         <p className="m-0 text-meta text-err" role="alert" data-explorer-new-folder-problem="">

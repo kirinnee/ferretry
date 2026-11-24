@@ -20,6 +20,7 @@ const harnessOf = (wrapper: string): KnownHarnessKey => (wrapper.startsWith('cod
 /** One picker row. `credentialId` defaults to one login per wrapper. */
 export const pickerAccount = (overrides: Partial<PickerAccount> & { wrapper: string }): PickerAccount => ({
   id: `rt-${overrides.wrapper}`,
+  name: overrides.wrapper,
   displayName: overrides.wrapper,
   kind: harnessOf(overrides.wrapper),
   credentialId: `login-${overrides.wrapper}`,

@@ -30,11 +30,20 @@ import { acted, maskedSnapshot, maskedStatus, opOfAction, targetOfAction, writeA
 import { parseBody } from './body.ts';
 import { ferretAnswer, ferretStatus } from './agent-view.ts';
 import { type ProtectionWindows, pairingScreenGuard } from './pairing-screen-guard.ts';
-import { type BrowserActGuard, type BrowserPageGuard, BrowserSessionError, type BrowserSubsystem } from './service.ts';
+import {
+  type BrowserActGuard,
+  type BrowserPageGuard,
+  BrowserSessionError,
+  type BrowserSubsystem,
+  MAX_VIEWERS_PER_SESSION,
+} from './service.ts';
+import type { ViewerRef } from '../stream/viewer-contracts.ts';
 import {
   type BrowserAction,
   type BrowserActionResult,
   BrowserActionSchema,
+  BrowserViewerIdSchema,
+  BROWSER_VIEWER_QUERY,
   type BrowserStatus,
 } from '../../contract/wire/browser.ts';
 
@@ -58,6 +67,40 @@ interface BrowserViewer {
   readonly agent: boolean;
   readonly mayType: boolean;
   readonly ferret?: string;
+  /** Who the stream belongs to, as Gate authenticated it (see {@link callerOf}): the only caller that may name its screen. */
+  readonly caller: string;
+}
+
+/**
+ * WHO a call is, as the credential Gate admitted it proves: the owner's admin token, a ferret's own, or one paired device
+ * (all its panes and sessions). Never read from a header, a query or a body, and never the `actor` string (attribution
+ * only: a header moves it). A viewer id is only ever good for the caller whose stream it was minted for.
+ */
+function callerOf(call: Pick<CallContext, 'credential'>): string {
+  const credential = call.credential;
+  if (credential === undefined) return 'none';
+  switch (credential.tokenClass) {
+    case 'device':
+      return `device:${credential.principal.holder}`;
+    case 'ferret':
+      return `ferret:${credential.ferret}`;
+    default:
+      return credential.tokenClass;
+  }
+}
+
+/**
+ * The screen a call names, as its own caller holds it, or undefined when it names none; a malformed id is refused, never
+ * guessed at. A FERRET's call names no screen whatever its query says: it is on its own page, and ignoring the override
+ * (not refusing it) keeps its acts where the page tools put them.
+ */
+function viewerOf(call: CallContext): ViewerRef | undefined {
+  if (isFerretCall(call)) return undefined;
+  const sent = call.request.query.get(BROWSER_VIEWER_QUERY)?.[0];
+  if (sent === undefined) return undefined;
+  const parsed = BrowserViewerIdSchema.safeParse(sent);
+  if (!parsed.success) throw new ApiError(400, 'the viewer id in the query is not usable', 'bad_request');
+  return { id: parsed.data, caller: callerOf(call) };
 }
 
 /** Opens one viewer stream on a socket. */
@@ -285,7 +328,7 @@ async function browserStatus(
   if (caller !== undefined) await guard.check(caller, sessionId, undefined);
   const agent = gate !== undefined && isFerretCall(call);
   const since = agent ? gate.stamp() : undefined;
-  const all = await browser.status(sessionId).catch(browserFailure);
+  const all = await browser.status(sessionId, viewerOf(call)).catch(browserFailure);
   // A ferret is shown its own pages and nothing of a person's; then what a sealed value covers is withheld from that.
   const raw = caller === undefined ? all : ferretStatus(all, await guard.owned(caller, sessionId, all.pages));
   const status = isFerretCall(call) ? await withholdStatus(gate, browser, sessionId, raw) : raw;
@@ -351,7 +394,8 @@ async function browserAction(
     caller !== undefined && readsPageAction(action as Readonly<Record<string, unknown>>)
       ? pairingScreenGuard(pairingScreenRefusal, protection)
       : undefined;
-  const before = await browser.status(sessionId).catch(browserFailure);
+  const viewer = viewerOf(call);
+  const before = await browser.status(sessionId, viewer).catch(browserFailure);
   const target = targetOfAction(sessionId, action, before);
   const op = opOfAction(action);
   // A ferret's own credential on this route is an AGENT: it meets the same sealed gate the tools do, before the act and again
@@ -400,6 +444,7 @@ async function browserAction(
     ...(touched === undefined ? {} : { pinned: touched }),
     ...(queueGuard === undefined ? {} : { guard: queueGuard }),
     ...(caller === undefined ? {} : { openedBy: { by: 'agent' as const, sessionId: caller } }),
+    ...(viewer === undefined ? {} : { viewer }),
   };
   /** What the caller may be shown of an answer: a person all of it, a ferret its own pages. */
   const view = async (answer: BrowserActionResult): Promise<BrowserActionResult> =>
@@ -472,7 +517,7 @@ async function browserAction(
     return leaves(jsonResponse(answerBody));
   }
   await writeAct(kernel.act, target, op, async () => await act());
-  const afterAll = await browser.status(sessionId).catch(browserFailure);
+  const afterAll = await browser.status(sessionId, viewer).catch(browserFailure);
   const after =
     caller === undefined ? afterAll : ferretStatus(afterAll, await guard.owned(caller, sessionId, afterAll.pages));
   const shownAfter = await answerStatus(after);
@@ -515,8 +560,18 @@ export function streamSocket(
     const status = await browser.status(id).catch(browserFailure);
     const mayType = viewerMayType(call);
     const ferret = ferretOf(call);
-    // A person's viewer — the owner's own, a paired device's — always opens, whole.
-    if (ferret === undefined) return async downstream => await stream(id, downstream, { agent: false, mayType });
+    // A person's viewer — the owner's own, a paired device's — opens, whole, while the session has room for one: a full
+    // session says so here, before the socket, and the service refuses the same again where the screen is attached.
+    if (ferret === undefined) {
+      if (status.state === 'running' && status.viewers >= MAX_VIEWERS_PER_SESSION)
+        throw new ApiError(
+          409,
+          `this ferret's browser already has ${MAX_VIEWERS_PER_SESSION} screens watching it; close one to open another`,
+          'capacity',
+        );
+      const caller = callerOf(call);
+      return async downstream => await stream(id, downstream, { agent: false, mayType, caller });
+    }
     // A ferret's credential here is an AGENT. Its stream is refused while a sealed value lives (the frames are pictures,
     // which cannot be masked), and on a page that is not its own, that somebody holds or that the one rule (the page
     // tools') does not allow — each BEFORE the socket opens.

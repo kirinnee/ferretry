@@ -7,7 +7,7 @@
  */
 import type { AccountUsage, LoginUsage, LoginUsageWindow, ProviderQuotaReading } from '../../../../contract/index.ts';
 
-const windowNamed = (reading: ProviderQuotaReading, label: '5h' | 'week') =>
+const windowNamed = (reading: ProviderQuotaReading, label: '5h' | 'week' | 'month') =>
   reading.windows.find(window => window.label === label);
 
 function credentialWindow(reading: ProviderQuotaReading, label: '5h' | 'week'): LoginUsageWindow {
@@ -34,6 +34,15 @@ export function withProviderQuota(usage: LoginUsage, reading: ProviderQuotaReadi
   };
 }
 
+/**
+ * The money this login spent this month, as the reading states it: the month window the provider's own endpoint
+ * reported in dollars wins (it is what was actually read), else this daemon's transcript-counted spend.
+ */
+const spentUsd = (reading: ProviderQuotaReading): number | undefined => {
+  const month = windowNamed(reading, 'month');
+  return month?.unit === 'usd' && month.used !== undefined ? month.used : reading.spend?.amountUsd;
+};
+
 const percent = (value: number | undefined): number | undefined =>
   value === undefined ? undefined : Math.min(100, value);
 
@@ -51,6 +60,7 @@ export function providerAccountFields(reading: ProviderQuotaReading): Partial<Ac
   const weeklyPercent = percent(week?.usedPercent);
   const fiveHourResetAt = epoch(five?.resetsAt);
   const weeklyResetAt = epoch(week?.resetsAt);
+  const spent = spentUsd(reading);
   return {
     ...(fiveHourPercent === undefined ? {} : { fiveHourPercent }),
     ...(weeklyPercent === undefined ? {} : { weeklyPercent }),
@@ -58,6 +68,6 @@ export function providerAccountFields(reading: ProviderQuotaReading): Partial<Ac
     ...(weeklyResetAt === undefined ? {} : { weeklyResetAt }),
     ...(reading.via === 'endpoint' ? { atLimit: reading.exhausted } : {}),
     ...(reading.balance === undefined ? {} : { balance: reading.balance }),
-    ...(reading.spend === undefined ? {} : { spendUsd: reading.spend.amountUsd }),
+    ...(spent === undefined ? {} : { spendUsd: spent }),
   };
 }

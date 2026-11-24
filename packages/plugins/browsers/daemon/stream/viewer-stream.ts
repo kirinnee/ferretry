@@ -138,6 +138,11 @@ export class BrowserViewerStream {
     return stream;
   }
 
+  /** The id the daemon minted for this display on attach; every input it carries is for this display alone. */
+  get viewerId(): string {
+    return this.attachment.viewerId;
+  }
+
   /** True once the stream has finished, whichever side ended it. */
   get finished(): boolean {
     return this.closed;
@@ -175,7 +180,7 @@ export class BrowserViewerStream {
     this.serial = this.serial
       .then(async () => {
         if (this.closed) return;
-        await this.host.dispatchHumanInput(this.sessionId, decoded);
+        await this.host.dispatchHumanInput(this.sessionId, decoded, this.attachment.viewerId);
       })
       .catch((error: unknown) => {
         if (error instanceof ViewerInputRefused) this.finish(VIEWER_CLOSE_POLICY, 'browser input not permitted');
@@ -312,7 +317,7 @@ export class BrowserViewerStream {
     if (releases.length > 0) {
       const release = async (): Promise<void> => {
         for (const input of releases) {
-          await this.host.dispatchHumanInput(this.sessionId, input).catch(() => undefined);
+          await this.host.dispatchHumanInput(this.sessionId, input, this.attachment.viewerId).catch(() => undefined);
         }
       };
       this.serial = this.serial.then(release, release);

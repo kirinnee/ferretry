@@ -2243,7 +2243,9 @@ one it was handed. Binary travels as unpadded base64url, like every other binary
 protocol. What a stream means by its frames is the route's own contract, directionality included:
 the event stream is server-to-client and refuses client data itself, the terminal stream carries
 bytes both ways and a JSON resize control from the client, and the browser stream carries frame
-bytes from the daemon and one JSON input event per text record from the client.
+bytes from the daemon, plus one JSON text record, sent as the stream opens, that names the screen the stream is
+(`{"viewer":"<id>"}`, minted by the daemon on attach and bound to the caller that opened the stream), and
+one JSON input event per text record from the client.
 
 The two value shapes carry **different delivery semantics**, and the difference is what makes an
 envelope smaller than the direct socket's frames honest rather than lossy:

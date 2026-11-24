@@ -8,10 +8,9 @@ import {
   type NewFerretAccountSlotProps,
   type NewFerretProjectSlotProps,
 } from '@ferretry/core-ferrets/contract';
-import { ChevronDown, ChevronUp } from 'lucide-react';
 import { type ComponentType, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { LiveFerretsClient } from '../../lib/client.ts';
-import { Button, Card, cn, FastSwitch, ModelSelect, PanelBody, Textarea } from '../../ui.ts';
+import { Button, Card, cn, FastSwitch, ModelSelect, PanelBody, SegmentedChoice, Textarea } from '../../ui.ts';
 import { FolderPicker } from './folder-picker.tsx';
 import { daemonHomeHref, ferretChatHref, addLoginHref } from './hrefs.ts';
 import {
@@ -89,6 +88,12 @@ const fastUnavailableReason = (account: ChosenFerretAccount | null, typed: strin
   return model?.fast === false ? `${model.label ?? model.id} has no fast mode.` : undefined;
 };
 
+/** The two ways in the page offers, as the switch at its top spells them. */
+const START_CHOICES = [
+  { value: 'new', label: 'New conversation' },
+  { value: 'continue', label: 'Continue a conversation' },
+] as const;
+
 /** What each mode MEANS to the person starting it, one short line each. */
 const MODE_MEANING: Readonly<Record<NewFerretDraft['mode'], string>> = {
   auto: 'the agent works through your request on its own',
@@ -100,8 +105,15 @@ const MODE_MEANING: Readonly<Record<NewFerretDraft['mode'], string>> = {
  * decision; this only names it, checking the same facts in the same order so the sentence can never describe a
  * different blocker from the one actually holding the button.
  */
-const createBlocker = (draft: NewFerretDraft, submitting: boolean, noRunnableAccount: boolean): string | null => {
+const createBlocker = (
+  draft: NewFerretDraft,
+  submitting: boolean,
+  noRunnableAccount: boolean,
+  awaitingPick: boolean,
+): string | null => {
   if (submitting) return null;
+  // Continue mode starts a ferret only from a conversation: until one is picked, Create would start a fresh one.
+  if (awaitingPick) return 'Pick a conversation to continue.';
   if (draft.runtime.trim() === '') {
     return noRunnableAccount ? 'No runtime can run a ferret yet — add a login first.' : 'Choose a runtime first.';
   }
@@ -130,7 +142,7 @@ export interface NewFerretPageProps {
    * daemon's start route still decides whether it may be used.
    */
   readonly initialFolder?: string;
-  /** Open with the "Continue a past conversation" section shown (`?continue=1`: the Runtimes and setup links to it). */
+  /** Open with "Continue a conversation" chosen (`?continue=1`: the Runtimes and setup links to it). */
   readonly initialContinue?: boolean;
   /** What draws the runtime field's slot. The shell's by default; a test hands a stand-in. */
   readonly AccountSlot?: ComponentType<AccountSlotProps>;
@@ -167,13 +179,14 @@ export function NewFerretPage({
   const [folders, setFolders] = useState<FolderRead>(LOADING_FOLDERS);
   // A past conversation picked from the Continue list: it fills the form, and Create starts with it named so it resumes.
   const [picked, setPicked] = useState<ContinuePick | null>(null);
-  const [continueShown, setContinueShown] = useState(initialContinue);
+  // Which of the two ways in the page is on: a fresh conversation, or one picked from the Continue list.
+  const [starting, setStarting] = useState<'new' | 'continue'>(initialContinue ? 'continue' : 'new');
   const continueOffered = useSlotHasPanels(NEW_FERRET_CONTINUE_SLOT);
+  const whereOffered = useSlotHasPanels(NEW_FERRET_PROJECT_SLOT);
   const pick = (next: ContinuePick | null): void => {
     setPicked(next);
     setError(null);
-    // The pick is in the form: the list folds away so the form (runtime, folder, mode, prompt) is what the page shows.
-    if (next !== null) setContinueShown(false);
+    // The pick is in the form: the list gives way to a one-line "Continuing" so the form is what the page shows.
     setDraft(current => {
       const { harnessConversation: _before, harness: _harness, ...rest } = current;
       if (next === null) return { ...rest, folder: '', folderExact: undefined };
@@ -187,6 +200,14 @@ export function NewFerretPage({
         harness: next.harness,
       };
     });
+  };
+
+  const chooseStart = (choice: 'new' | 'continue'): void => {
+    if (choice === starting) return;
+    // Going back to a new conversation drops a pick: no conversation is sent and no harness limits the runtime. With NO
+    // pick there is nothing derived from a conversation to drop, and the Folder (a `?folder=` prefill or typed) stays.
+    if (choice === 'new' && picked !== null) pick(null);
+    setStarting(choice);
   };
 
   // The Folder box's catalogue: one read of the daemon's ferrets. A failure is a status, never a throw.
@@ -211,12 +232,14 @@ export function NewFerretPage({
   }, [client]);
 
   const update = (field: TextDraftField, value: string): void => setDraft(current => ({ ...current, [field]: value }));
-  const canSubmit = canStartFerret(draft, submitting);
+  // Continue is a way in only while the list is offered (the switch is drawn); on it, nothing starts before a pick.
+  const awaitingPick = continueOffered && starting === 'continue' && picked === null;
+  const canSubmit = canStartFerret(draft, submitting) && !awaitingPick;
   const homePath = daemonHomeHref(daemon);
   const back = backPlace ?? { path: homePath, label: '← Home' };
   const chosen = chosenForDraft(chosenRuntime, draft.runtime);
   const models = modelSuggestions(chosen);
-  const blocker = createBlocker(draft, submitting, noRunnableAccount);
+  const blocker = createBlocker(draft, submitting, noRunnableAccount, awaitingPick);
   // A model the panel says has no fast mode cannot be launched with it, so the switch says why it is unavailable and
   // the request never carries it (the daemon would refuse it too).
   const fastReason = fastUnavailableReason(chosen, draft.model);
@@ -283,50 +306,39 @@ export function NewFerretPage({
       <Card>
         <PanelBody className="space-y-5">
           {continueOffered ? (
-            <section className="rounded-control border border-border-strong" data-new-ferret-continue="">
-              <button
-                aria-controls={CONTINUE_LIST_ID}
-                aria-expanded={continueShown}
-                className="flex min-h-[44px] w-full items-center justify-between gap-sm px-control-x text-left text-ui font-semibold text-fg"
-                onClick={() => setContinueShown(shown => !shown)}
-                type="button"
-              >
-                <span>Continue a past conversation</span>
-                {continueShown ? (
-                  <ChevronUp aria-hidden="true" className="shrink-0 text-faint" size={16} />
+            <section data-new-ferret-continue="">
+              <SegmentedChoice
+                className="max-w-[28rem]"
+                data-new-ferret-switch=""
+                label="New or continue"
+                onChange={chooseStart}
+                options={START_CHOICES}
+                value={starting}
+              />
+              {starting === 'continue' ? (
+                picked === null ? (
+                  <div className="mt-3" id={CONTINUE_LIST_ID}>
+                    <PanelSlot
+                      daemon={daemon}
+                      props={{ picked: null, onPick: pick } satisfies NewFerretContinueSlotProps}
+                      slot={NEW_FERRET_CONTINUE_SLOT}
+                    />
+                  </div>
                 ) : (
-                  <ChevronDown aria-hidden="true" className="shrink-0 text-faint" size={16} />
-                )}
-              </button>
-              {picked === null ? (
-                continueShown ? null : (
-                  <p className="m-0 px-control-x pb-2 text-meta leading-base text-muted">
-                    Pick up where an earlier Claude Code or Codex conversation left off.
+                  <p
+                    className="m-0 mt-3 flex items-center justify-between gap-sm text-meta leading-base text-fg-soft"
+                    data-new-ferret-picked={picked.key}
+                  >
+                    <span className="min-w-0 [overflow-wrap:anywhere]">Continuing: {picked.title}</span>
+                    <button
+                      className="min-h-[44px] shrink-0 px-2 text-ui font-medium text-fg underline"
+                      onClick={() => pick(null)}
+                      type="button"
+                    >
+                      Choose another
+                    </button>
                   </p>
                 )
-              ) : (
-                <p
-                  className="m-0 flex items-center justify-between gap-sm px-control-x pb-2 text-meta leading-base text-fg-soft"
-                  data-new-ferret-picked={picked.key}
-                >
-                  <span className="min-w-0 [overflow-wrap:anywhere]">Continuing: {picked.title}</span>
-                  <button
-                    className="min-h-[44px] shrink-0 px-2 text-ui font-medium text-fg underline"
-                    onClick={() => pick(null)}
-                    type="button"
-                  >
-                    Start fresh instead
-                  </button>
-                </p>
-              )}
-              {continueShown ? (
-                <div className="border-t border-border px-control-x py-3" id={CONTINUE_LIST_ID}>
-                  <PanelSlot
-                    daemon={daemon}
-                    props={{ picked: picked?.key ?? null, onPick: pick } satisfies NewFerretContinueSlotProps}
-                    slot={NEW_FERRET_CONTINUE_SLOT}
-                  />
-                </div>
               ) : null}
             </section>
           ) : null}
@@ -340,31 +352,41 @@ export function NewFerretPage({
             <AccountSlot daemon={daemon} fallback={typedRuntime} slot={slot} />
           </FerretField>
 
-          <FerretField hint="the folder the agent works in" inputId={fieldId('folder')} label="Folder">
-            {/* Registered projects are Projects': its picker fills the folder field through the slot Ferrets offers.
-                It sits ABOVE the box so a machine with projects and no ferret history still shows where to start. */}
-            <PanelSlot
-              daemon={daemon}
-              props={
-                {
-                  value: draft.folder,
-                  onPick: folder => setDraft(current => ({ ...current, folder, folderExact: folder })),
-                } satisfies NewFerretProjectSlotProps
-              }
-              slot={NEW_FERRET_PROJECT_SLOT}
-            />
-            <FolderPicker
-              id={fieldId('folder')}
-              label="Folder"
-              onValueChange={value => update('folder', value)}
-              placeholder={
-                folders.folders === null && folders.status === 'error'
-                  ? TYPED_PATH_PLACEHOLDER
-                  : PICKED_PATH_PLACEHOLDER
-              }
-              read={folders}
-              value={draft.folder}
-            />
+          <FerretField
+            hint={whereOffered ? 'a folder, or one of your projects' : 'the folder the agent works in'}
+            inputId={fieldId('folder')}
+            label={whereOffered ? 'Where it works' : 'Folder'}
+          >
+            {whereOffered ? (
+              // Projects' panel: a Folder | Project choice (the project-setup finder, recent folders, a searchable
+              // project list). It puts the label's id on its main control and only proposes a folder through `onPick`.
+              <PanelSlot
+                daemon={daemon}
+                props={
+                  {
+                    daemon,
+                    value: draft.folder,
+                    id: fieldId('folder'),
+                    recent: folders.folders?.map(folder => folder.path) ?? [],
+                    onPick: folder => setDraft(current => ({ ...current, folder, folderExact: folder })),
+                  } satisfies NewFerretProjectSlotProps
+                }
+                slot={NEW_FERRET_PROJECT_SLOT}
+              />
+            ) : (
+              <FolderPicker
+                id={fieldId('folder')}
+                label="Folder"
+                onValueChange={value => update('folder', value)}
+                placeholder={
+                  folders.folders === null && folders.status === 'error'
+                    ? TYPED_PATH_PLACEHOLDER
+                    : PICKED_PATH_PLACEHOLDER
+                }
+                read={folders}
+                value={draft.folder}
+              />
+            )}
           </FerretField>
 
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">

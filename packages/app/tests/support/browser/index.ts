@@ -29,4 +29,13 @@ export {
   ringOfFocused,
   walkFocusRings,
 } from './focus-ring.ts';
+export {
+  type DemoScroll,
+  demoScroll,
+  type PinReading,
+  type PinScroll,
+  type PreviewFit,
+  pinnedStrip,
+  previewFit,
+} from './stepper-layout.ts';
 export { NEXT_SPINNER_LOG, type NextSpinnerRun } from './next-spinner-log.ts';

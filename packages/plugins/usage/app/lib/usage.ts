@@ -46,7 +46,8 @@ interface QuotaState {
 }
 export interface QuotaSubject {
   readonly state: QuotaState;
-  readonly config: { readonly agent: string };
+  /** The login the quota is read for; a ferret with none is resolved from its own stamped usage alone. */
+  readonly config: { readonly agent?: string | undefined };
 }
 
 /** One session's quota, normalized from whichever source supplied it. */
@@ -148,7 +149,10 @@ export class DaemonUsageIndex {
    * than as zero.
    */
   quotaFor(daemonId: DaemonId, view: QuotaSubject): ResolvedQuota | null {
-    return stateQuota(view.state) ?? this.#accounts.get(daemonId)?.get(view.config.agent) ?? null;
+    const { agent } = view.config;
+    return (
+      stateQuota(view.state) ?? (agent === undefined ? undefined : this.#accounts.get(daemonId)?.get(agent)) ?? null
+    );
   }
 
   /** Drops one disconnected daemon's feed and leaves every other daemon's. */

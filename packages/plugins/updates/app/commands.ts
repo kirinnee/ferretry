@@ -1,4 +1,4 @@
-import { DEVICE_SETTINGS_HREF, type PluginCommandSource } from '@ferretry/app';
+import { deviceSettingsHref, type PluginCommandSource } from '@ferretry/app';
 import { whatsNewRequests } from './lib/whats-new-requests.ts';
 
 /**
@@ -7,7 +7,7 @@ import { whatsNewRequests } from './lib/whats-new-requests.ts';
  * first keystroke and never calls `changed`.
  */
 export const whatsNewCommands: PluginCommandSource =
-  ({ navigate }) =>
+  ({ daemon, navigate }) =>
   () => [
     {
       id: 'updates-whats-new',
@@ -17,7 +17,7 @@ export const whatsNewCommands: PluginCommandSource =
       keywords: ['changelog', 'release notes', 'releases', 'updates', 'new', 'version'],
       run: () => {
         whatsNewRequests.request();
-        navigate(DEVICE_SETTINGS_HREF);
+        navigate(deviceSettingsHref(daemon));
       },
     },
   ];

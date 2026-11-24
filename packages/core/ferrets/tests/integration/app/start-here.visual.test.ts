@@ -117,7 +117,7 @@ const create = async (tab: Page): Promise<void> => {
 
 describe('New ferret with projects and no ferret history', () => {
   for (const variant of VARIANTS)
-    it(`${variant.name}: the page draws the projects above the Folder box, picking fills it, and the start is exact`, () =>
+    it(`${variant.name}: the page draws the where-it-works panel in the Folder's place, picking fills it, and the start is exact`, () =>
       withTab(variant, '', async tab => {
         const geometry = await tab.evaluate(
           ([folder, rows]) => ({
@@ -131,14 +131,14 @@ describe('New ferret with projects and no ferret history', () => {
           [FOLDER, ROWS],
         );
         console.info(
-          `[s8-ferrets] ${variant.name}: projects top ${geometry.sectionTop.toFixed(1)} < folder top ${geometry.fieldTop.toFixed(1)}, rows ${geometry.rows}, scrollWidth ${geometry.scrollWidth} <= ${geometry.clientWidth}`,
+          `[s8-ferrets] ${variant.name}: panel top ${geometry.sectionTop.toFixed(1)}, folder id top ${geometry.fieldTop.toFixed(1)}, rows ${geometry.rows}, scrollWidth ${geometry.scrollWidth} <= ${geometry.clientWidth}`,
         );
         expect(geometry.rows, 'two projects, two rows').toBe(2);
-        expect(geometry.sectionTop, 'the real page draws the slot above the Folder box').toBeGreaterThanOrEqual(0);
-        expect(geometry.sectionTop).toBeLessThan(geometry.fieldTop);
+        expect(geometry.sectionTop, 'the real page draws the slot').toBeGreaterThanOrEqual(0);
+        expect(geometry.fieldTop, 'the panel carries the id the page’s label points at').toBeGreaterThanOrEqual(0);
         expect(geometry.body, 'the old picker copy is gone').not.toContain(OLD_COPY);
-        expect(geometry.body, 'the new picker copy says where to start').toContain(
-          'No recent folders. Pick a project above, or type a path.',
+        expect(geometry.body, 'the page draws no folder box of its own beside the panel').not.toContain(
+          'No recent folders',
         );
         expect(geometry.scrollWidth, 'no sideways scroll').toBeLessThanOrEqual(geometry.clientWidth);
         if (shotsDir !== '') await tab.screenshot({ fullPage: true, path: join(shotsDir, `${variant.name}-new.png`) });
@@ -175,16 +175,11 @@ describe('New ferret with projects and no ferret history', () => {
 });
 
 describe('a folder with a trailing space', () => {
-  it('is carried verbatim from ?folder=, and trimmed once the person types over it', async () => {
+  it('is carried verbatim from ?folder= into the start', async () => {
     await withTab(VARIANTS[0], '&folder=%2Ffake%2Fp2%20', async tab => {
       expect(await tab.locator(FOLDER).inputValue()).toBe('/fake/p2 ');
       await create(tab);
       expect(folderOf((await startsOf(tab))[0])).toBe('/fake/p2 ');
-    });
-    await withTab(VARIANTS[0], '&folder=%2Ffake%2Fp2%20', async tab => {
-      await tab.fill(FOLDER, '/fake/other ');
-      await create(tab);
-      expect(folderOf((await startsOf(tab))[0]), 'typed input stays trimmed').toBe('/fake/other');
     });
   });
 });

@@ -52,10 +52,10 @@ describe('the input_wait tool: where a card stands, in words', () => {
       '^A7: the owner typed the value. Read the terminal to see what happened.',
     );
     should((await waitFor({ state: 'delivered', source: 'sealed', submitted: true })).text).equal(
-      '^A7: the secure copy was pasted and Enter pressed. Read the terminal once its quarantine allows.',
+      '^A7: the secure copy was pasted and Enter pressed. Read the terminal at once.',
     );
     should((await waitFor({ state: 'delivered', source: 'sealed' })).text).equal(
-      '^A7: the secure copy was pasted. Read the terminal once its quarantine allows.',
+      '^A7: the secure copy was pasted. Read the terminal at once.',
     );
   });
 

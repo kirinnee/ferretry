@@ -49,12 +49,60 @@ const clientFixture = (overrides: Partial<Record<string, unknown>> = {}): Client
   };
 };
 
+describe('a picker row’s name', () => {
+  it('is the words a person understands, not the stored name', async () => {
+    const fixture = clientFixture({
+      'GET /v1/runtimes': runtimeCatalog(runtimeView({ wrapper: 'claude-you' }), runtimeView({ wrapper: 'codex-you' })),
+    });
+    const catalog = await readAccountPickerCatalog(fixture.client);
+    expect(catalog.accounts.map(row => [row.wrapper, row.displayName])).toEqual([
+      ['claude-you', 'Claude · your terminal sign-in'],
+      ['codex-you', 'Codex · your terminal sign-in'],
+    ]);
+  });
+});
+
+describe('two accounts of one kind in the picker (O9-5)', () => {
+  const twoAccounts = (emails: readonly [string | undefined, string | undefined]) =>
+    clientFixture({
+      'GET /v1/runtimes': runtimeCatalog(
+        runtimeView({ wrapper: 'claude-you', credential: { id: 'login-a', store: 'host' } }),
+        runtimeView({ wrapper: 'claude-you-2', credential: { id: 'login-b', store: 'host' } }),
+      ),
+      'GET /v1/logins': loginList(
+        loginView('login-a', 'ready', emails[0] === undefined ? {} : { email: emails[0] }),
+        loginView('login-b', 'ready', emails[1] === undefined ? {} : { email: emails[1] }),
+      ),
+    });
+
+  it('says which account each is, by the email its login shows', async () => {
+    const catalog = await readAccountPickerCatalog(twoAccounts(['kirin@one.example', 'kirin@two.example']).client);
+    expect(catalog.accounts.map(row => [row.wrapper, row.displayName])).toEqual([
+      ['claude-you', 'Claude · your terminal sign-in — kirin@one.example'],
+      ['claude-you-2', 'Claude · your terminal sign-in — kirin@two.example'],
+    ]);
+  });
+
+  it('falls back to the runtime’s own name when both logins are the same account', async () => {
+    const catalog = await readAccountPickerCatalog(twoAccounts(['kirin@one.example', 'kirin@one.example']).client);
+    expect(catalog.accounts.map(row => row.displayName)).toEqual([
+      'Claude · your terminal sign-in — claude-you',
+      'Claude · your terminal sign-in — claude-you-2',
+    ]);
+  });
+
+  it('never puts anything but what the login view shows into a name', async () => {
+    const catalog = await readAccountPickerCatalog(twoAccounts(['kirin@one.example', undefined]).client);
+    expect(catalog.accounts.map(row => row.displayName).join('\n')).not.toMatch(/token|secret|key/iu);
+  });
+});
+
 describe('readAccountPickerCatalog', () => {
   it('reads this machine’s runtimes from one daemon-bound client', async () => {
     const fixture = clientFixture();
     const catalog = await readAccountPickerCatalog(fixture.client);
 
-    expect(fixture.routes).toEqual(['GET /v1/runtimes']);
+    expect(fixture.routes).toEqual(['GET /v1/runtimes', 'GET /v1/logins']);
     expect(catalog.accounts.map(row => row.wrapper)).toEqual(['claude-auto-a', 'codex-auto-b']);
   });
 
@@ -65,6 +113,13 @@ describe('readAccountPickerCatalog', () => {
     const broken = clientFixture({ 'GET /v1/runtimes': new Error('catalogue damaged') });
     await expect(readAccountPickerCatalog(broken.client)).rejects.toThrow('catalogue damaged');
     expect(broken.routes).toEqual(['GET /v1/runtimes']);
+
+    // Who each login is only tells runtimes apart: a login list that cannot be read leaves the roster as it was.
+    const noLogins = clientFixture({ 'GET /v1/logins': new Error('logins damaged') });
+    expect((await readAccountPickerCatalog(noLogins.client)).accounts.map(row => row.wrapper)).toEqual([
+      'claude-auto-a',
+      'codex-auto-b',
+    ]);
   });
 });
 
@@ -72,6 +127,7 @@ describe('pickerAccount', () => {
   it('reads a runtime’s id, wrapper, name, harness and login verbatim', () => {
     expect(pickerAccount(runtimeView({ wrapper: 'claude-auto-a', name: 'Claude Atelier' }))).toEqual({
       id: 'rt-claude-auto-a',
+      name: 'Claude Atelier',
       wrapper: 'claude-auto-a',
       displayName: 'Claude Atelier',
       kind: 'claude-code',

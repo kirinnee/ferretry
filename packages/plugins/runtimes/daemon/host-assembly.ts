@@ -30,6 +30,7 @@ import { componentWriters } from './adapters/component-writers.ts';
 import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { CommandCache } from './adapters/command-cache.ts';
 import { harnessAwareWhich } from './adapters/harness-lookup.ts';
+import { statePins } from './adapters/starter-pins.ts';
 import { HostPlatform } from './adapters/host-platform.ts';
 import { toolInstaller } from './adapters/tool-installer.ts';
 import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
@@ -364,6 +365,7 @@ export function fleetHost(
 export function fileAssembly(
   ctx: {
     readonly kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log' | 'identity'> &
+      Pick<KernelPorts, 'state'> &
       Partial<Pick<KernelPorts, 'spawn'>> & {
         readonly config: Pick<ConfigPort, 'writeAll' | 'collection' | 'file' | 'etag'>;
       };
@@ -422,6 +424,9 @@ export function fileAssembly(
   const config = runtimesConfigFiles({
     config: ctx.kernel.config,
     logins: ctx.needs.logins,
+    pins: statePins(ctx.kernel.state, sentence => {
+      ctx.kernel.log.warn(sentence);
+    }),
     components: hook => ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY),
     within: withinMs((delay, fn) => ctx.kernel.clock.after(milliseconds(delay), fn), PROVIDER_ANSWER_MS),
     installed,

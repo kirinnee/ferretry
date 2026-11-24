@@ -25,7 +25,7 @@ import {
   SysfsDiskScheduler,
   unmeasuredHostFacts,
 } from './adapters/cgroups/index.ts';
-import { hostPid, hostPlatform, hostUid } from './adapters/host/fs.ts';
+import { hostNamedEnvironment, hostPid, hostPlatform, hostUid } from './adapters/host/fs.ts';
 import { TmuxPaneObserver } from './adapters/session/attach/index.ts';
 import {
   HarnessProcessProvenance,
@@ -43,6 +43,7 @@ import {
   type LaunchKind,
   LIMITS_TICK_MS,
   LimitsService,
+  MANAGER_ENVIRONMENT_NAMES,
   probeEnforcement,
   type SessionSpawnFactsPort,
 } from './lib/cgroups/index.ts';
@@ -205,6 +206,7 @@ export function buildProcesses(deps: ProcessesDeps): Processes {
       sessions: spawnFacts,
       enforcement,
       nonce,
+      managerEnvironment: () => hostNamedEnvironment(MANAGER_ENVIRONMENT_NAMES),
       // A ferret that had to start unconfined says so in the daemon log, not only in the status.
       warn: message => log.warn(message),
     });

@@ -1,7 +1,7 @@
 import type { ConfigFileDef, FerretId } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { type DaemonContext, type DaemonHalf, implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
-import { type BrowsersApi, type BrowsersConfig, PageChanged } from '../contract/index.ts';
+import { type BrowsersApi, type BrowsersConfig, type BrowserStreamHello, PageChanged } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { withAddressRuleKernel, withAddressRuleTools } from './address-rule.ts';
 import { protectionWindows } from './protection/windows.ts';
@@ -225,7 +225,7 @@ export function buildBrowsers(
       who.agent && who.ferret !== undefined
         ? allOf([sealedDelivery(gate), scopeDelivery(viewerScope, who.ferret)])
         : undefined;
-    const viewerHost = heldViewerHost(kernel, pages, { mayType: who.mayType, delivery });
+    const viewerHost = heldViewerHost(kernel, pages, { caller: who.caller, mayType: who.mayType, delivery });
     return {
       open: async () => {
         viewer = await BrowserViewerStream.connect(
@@ -235,6 +235,8 @@ export function buildBrowsers(
           new KernelFrameClock(kernel.clock),
           delivery === undefined ? {} : { delivery },
         );
+        // The daemon is who names this display: the screen learns its id here, and never chooses one.
+        downstream.send(JSON.stringify({ viewer: viewer.viewerId } satisfies BrowserStreamHello));
       },
       fromClient: frame => viewer?.fromClient(frame),
       close: () => viewer?.close(),

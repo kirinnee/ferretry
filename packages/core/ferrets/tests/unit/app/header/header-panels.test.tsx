@@ -3,6 +3,7 @@ import type { PanelProps } from '@ferretry/kernel/manifest';
 import type { ComponentType } from 'react';
 import { RouterProvider } from '@ferretry/app/testing';
 import { ActionsPanel } from '../../../../app/features/header/actions-panel.tsx';
+import { FerretLifecycle } from '../../../../app/features/header/status-panel.tsx';
 import { movePath } from '../../../../app/features/header/header-paths.ts';
 import { createActionsPanel, createNamePanel, createStatusPanel } from '../../../../app/views/header.tsx';
 import type { LiveFerretsClient } from '../../../../app/lib/client.ts';
@@ -94,6 +95,51 @@ describe('the name and status panels', () => {
     expect(root.querySelector('.fy-ferret-status__word')?.textContent).toBe('working');
     expect(root.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('active — working');
     expect(h.calls.every(call => call.route === GET)).toBe(true);
+  });
+
+  it('say how to start and stop beside the state: Resume when stopped, Stop (asked twice) when running', async () => {
+    const h = harness(ferretSummary('a1', { state: 'stopped' }));
+    const Status = createStatusPanel(h.client) as ComponentType<PanelProps>;
+    mounted = await mount(<Status subject="a1" />);
+    await settle();
+    const root = mounted.container;
+    expect(root.querySelector('[data-ferret-stop]')).toBeNull();
+    await click(root, '[data-ferret-start]');
+    expect(h.calls.map(call => call.route)).toContain('POST /v1/ferrets/:ferretId/resume');
+    h.ferret = ferretSummary('a1', { state: 'working' });
+    h.announce('a1');
+    await settle();
+    expect(root.querySelector('[data-ferret-start]')).toBeNull();
+    await click(root, '[data-ferret-stop]');
+    expect(h.calls.map(call => call.route)).not.toContain('POST /v1/ferrets/:ferretId/stop');
+    await click(root, '[data-ferret-stop-confirm]');
+    expect(h.calls.map(call => call.route)).toContain('POST /v1/ferrets/:ferretId/stop');
+  });
+
+  it('on a phone keep Resume but leave Stop to the menu (one toolbar line has no room for two buttons)', async () => {
+    const stopped = harness(ferretSummary('a1', { state: 'stopped' }));
+    mounted = await mount(
+      <FerretLifecycle client={stopped.client} compact={true} ferret={stopped.ferret} reload={async () => undefined} />,
+    );
+    expect(mounted.container.querySelector('[data-ferret-start]')).not.toBeNull();
+    await mounted.unmount();
+    const running = harness(ferretSummary('a1', { state: 'working' }));
+    mounted = await mount(
+      <FerretLifecycle client={running.client} compact={true} ferret={running.ferret} reload={async () => undefined} />,
+    );
+    expect(mounted.container.querySelector('[data-ferret-lifecycle]')).toBeNull();
+  });
+
+  it('say a refused Resume in words, beside the button', async () => {
+    const h = harness(ferretSummary('a1', { state: 'stopped' }));
+    h.refuse.set('POST /v1/ferrets/:ferretId/resume', new Refused('not now', 409, 'conflict'));
+    const Status = createStatusPanel(h.client) as ComponentType<PanelProps>;
+    mounted = await mount(<Status subject="a1" />);
+    await settle();
+    await click(mounted.container, '[data-ferret-start]');
+    expect(mounted.container.querySelector('[data-ferret-lifecycle-failure]')?.textContent).toContain(
+      'Resume failed: not now',
+    );
   });
 
   it('draw nothing when the ferret cannot be read, and read again when the daemon says it changed', async () => {

@@ -60,6 +60,16 @@ export interface CodexLaunchParts {
 }
 
 /**
+ * The programs a Codex launch execs through at the pane's one pid, ending in Codex itself (`RunSpec.execChain`): the
+ * `env` that sets `CODEX_HOME`, then the interpreter an installed `codex` script runs on before it execs the real
+ * binary (measured on a nix install: `systemd-run` → `bash` → `codex`; an npm install is a `node` script, a shim may be
+ * `sh`), then the binary's own name. A runner binds a first turn to the pane along this chain and no other.
+ */
+export function codexExecChain(executable: string): readonly string[] {
+  return ['env', 'bash', 'sh', 'node', executable.slice(executable.lastIndexOf('/') + 1)];
+}
+
+/**
  * The whole argv, in launch order. It carries NO prompt: a start's task is the ferret's `turns/turn-001.md`, and Ferrets
  * types the pointer to it into the pane once Codex is up, under the effect ledger's first-turn admission, exactly as
  * for every other harness (today put the prompt on no harness's argv). A prompt here as well would hand the agent its

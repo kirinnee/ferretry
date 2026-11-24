@@ -323,8 +323,8 @@ describe('a ferret on the whole-browser routes and the viewer socket', () => {
       tabs.emit(ids.mine);
       await drain(host);
 
-      // Assert
-      should(owner.frames.length).equal(0);
+      // Assert — no picture left; the one text frame is the daemon telling the stream who it is.
+      should(owner.frames.filter(frame => typeof frame !== 'string')).have.length(0);
     });
   });
 

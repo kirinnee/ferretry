@@ -46,7 +46,7 @@ const SET_UP = {
       { plugin: 'claude-code', id: 'harness', state: 'done' },
       { plugin: 'codex', id: 'harness', state: 'found' },
     ],
-    complete: false,
+    complete: true,
     setUp: true,
   },
   'GET /v1/projects': [{ id: 'p1' }],
@@ -111,45 +111,30 @@ describe('reading the stepper facts', () => {
     expect(calls.filter(call => call.route === 'GET /v1/ferrets')).toHaveLength(1);
   });
 
-  it('setup holds when no step the plugins declared is pending (found, done, later, skipped) and is open while any is pending', async () => {
-    const tools = (claude: string, codex: string) => ({
-      ...FRESH,
-      'GET /v1/onboarding': {
-        steps: [
-          { plugin: 'claude-code', id: 'harness', state: claude },
-          { plugin: 'codex', id: 'harness', state: codex },
-        ],
-      },
-    });
-    expect(await batch(clientOf(tools('done', 'pending')).client)).toMatchObject({ setup: false });
-    expect(await batch(clientOf(tools('pending', 'skipped')).client)).toMatchObject({ setup: false });
-    expect(await batch(clientOf(tools('later', 'found')).client)).toMatchObject({ setup: true });
-    expect(await batch(clientOf(tools('skipped', 'done')).client)).toMatchObject({ setup: true });
+  it("setup holds when the machine says its onboarding is complete (the daemon owns the rule: no step pending, a client step or a tool's Ready page never counts) and is open while it is not", async () => {
+    const view = (complete: boolean) => ({ ...FRESH, 'GET /v1/onboarding': { steps: [], complete, setUp: true } });
+    expect(await batch(clientOf(view(false)).client)).toMatchObject({ setup: false });
+    expect(await batch(clientOf(view(true)).client)).toMatchObject({ setup: true });
   });
 
-  it('a pending step the person answers on their own device (side client) is ignored: it never holds setup open', async () => {
-    const answers = {
-      ...FRESH,
+  it('O9-6 a finished setup an upgrade gave a pending Ready step stays set up: Home shows no "Continue setup"', async () => {
+    const upgraded = {
+      ...SET_UP,
       'GET /v1/onboarding': {
         steps: [
-          { plugin: 'claude-code', id: 'harness', state: 'done', side: 'machine' },
-          { plugin: 'notifications', id: 'push', state: 'pending', side: 'client' },
+          { plugin: 'claude-code', id: 'sign-in', state: 'done' },
+          { plugin: 'claude-code', id: 'ready', state: 'pending' },
         ],
+        complete: true,
+        setUp: true,
       },
+      'GET /v1/ferrets': [],
     };
-    expect(await batch(clientOf(answers).client)).toMatchObject({ setup: true });
-    // The same pending step on the machine's side still holds setup open.
-    const machineSide = {
-      ...answers,
-      'GET /v1/onboarding': {
-        steps: [{ plugin: 'notifications', id: 'push', state: 'pending', side: 'machine' }],
-      },
-    };
-    expect(await batch(clientOf(machineSide).client)).toMatchObject({ setup: false });
+    expect(await batch(clientOf(upgraded).client)).toMatchObject({ setup: true });
   });
 
   it('a machine whose plugins declare no step has nothing to ask here, so setup holds', async () => {
-    const answers = { ...FRESH, 'GET /v1/onboarding': { steps: [] } };
+    const answers = { ...FRESH, 'GET /v1/onboarding': { steps: [], complete: true } };
     expect(await batch(clientOf(answers).client)).toMatchObject({ setup: true, project: false });
   });
 

@@ -55,6 +55,7 @@ const runtimeSessionViewOf = (summary: FerretSummary & { readonly harness: Known
   config: {
     id: summary.id,
     harness: summary.harness,
+    runtime: summary.runtime,
     model: summary.model,
     launchReasoningEffort: summary.effort,
     launchFast: summary.fast,

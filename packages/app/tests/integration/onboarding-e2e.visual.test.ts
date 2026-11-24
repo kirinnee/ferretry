@@ -42,6 +42,12 @@ import { FAKE_CODE, MACHINE_A, MACHINE_B, pairLinkOf } from './fixtures/onboardi
 setDefaultTimeout(280_000);
 
 const scene = new URL('./fixtures/onboarding-e2e-scene.tsx', import.meta.url).pathname;
+/** What the gap under the title is measured into: beside the choices (a wide page) the body; on a phone the demo too, which is drawn between the heading and the body. */
+const gapRoot = async (tab: Page): Promise<string> =>
+  (await tab.evaluate(() => (document.querySelector('.fy-spf__page') as HTMLElement).clientWidth)) >= 900
+    ? '.fy-spf__main'
+    : '.fy-spf__demo:not(:empty), .fy-spf__main';
+
 const shotsDir = process.env.FY_ONBOARDING_E2E_SHOTS_DIR ?? '';
 const VARIANTS = (process.env.FY_ONBOARDING_E2E_VARIANTS ?? '1280-light,390-dark').split(',').map(name => {
   const [width = '1280', scheme = 'light'] = name.trim().split('-');
@@ -121,6 +127,8 @@ interface FakeView {
   mutations: { route: string; body: unknown }[];
   writes: { route: string; body: unknown }[];
   unanswered: string[];
+  /** The runtimes the machine derived from sign-ins, by name, in the order it made them (none at the start). */
+  runtimesMade: string[];
 }
 const daemonOf = async (tab: Page, id: string): Promise<FakeView> =>
   await tab.evaluate(
@@ -313,7 +321,12 @@ const shot = async (tab: Page, variant: Variant, name: string): Promise<void> =>
 };
 
 /** What every flow page must satisfy, whatever it is. */
-const inspect = async (tab: Page, variant: Variant, key: string, opts: { first?: boolean } = {}): Promise<void> => {
+const inspect = async (
+  tab: Page,
+  variant: Variant,
+  key: string,
+  opts: { first?: boolean; held?: boolean; centered?: boolean } = {},
+): Promise<void> => {
   const read = await tab.evaluate(chrome => {
     const rect = (el: Element) => el.getBoundingClientRect();
     const footer = [...document.querySelectorAll('[data-step-footer] button')].map(button => ({
@@ -392,7 +405,10 @@ const inspect = async (tab: Page, variant: Variant, key: string, opts: { first?:
   expect(read.streaks, `${key}: shooting stars`).toBeGreaterThanOrEqual(3);
   expect(read.streakMoving, `${key}: a shooting star moves`).toBe('fy-lb-shoot');
   expect(read.next, `${key}: a Next button`).toBe(1);
-  expect(read.nextOff, `${key}: Next is on`).toBe(false);
+  // `held`: a sign-in page holds Next until the person has signed in (nothing is recorded over a sign-in that did not happen).
+  expect(read.nextOff, `${key}: Next is ${opts.held === true ? 'held until signed in' : 'on'}`).toBe(
+    opts.held === true,
+  );
   expect(read.back, `${key}: Back ${opts.first === true ? 'is absent on the first page' : 'is there'}`).toBe(
     opts.first === true ? 0 : 1,
   );
@@ -405,13 +421,16 @@ const inspect = async (tab: Page, variant: Variant, key: string, opts: { first?:
     expect(button.h, `${key}: ${button.label} is a 44px target`).toBeGreaterThanOrEqual(43.5);
   }
   // Item 3: the title sits right over the page (no dead band between them), and Later is a real button in the footer row
-  // (Back · Later · Next), never a link floating in the page. Measured from `.fy-spf__main` (demo + body): on a phone the
+  // (Back · Later · Next), never a link floating in the page. Measured from the demo when there is one (it follows the heading), else the body: on a phone the
   // populated demo panel is drawn ABOVE the body, so the body alone would count the demo's height as dead space.
-  const gap = await gapUnderTitle(tab, '.fy-spf__head', '.fy-spf__main');
+  const gap = await gapUnderTitle(tab, '.fy-spf__head', await gapRoot(tab));
   expect(gap.gap, `${key}: something is drawn under the title (first: ${gap.first})`).toBeGreaterThanOrEqual(0);
-  expect(gap.gap, `${key}: no dead gap between the title and the page (first thing: ${gap.first})`).toBeLessThanOrEqual(
-    40,
-  );
+  // `centered`: Claude's sign-in block sits in the vertical middle of a wide page on purpose (C59 O5 item 6, onboarding.css).
+  if (!(opts.centered === true && variant.width >= 900))
+    expect(
+      gap.gap,
+      `${key}: no dead gap between the title and the page (first thing: ${gap.first})`,
+    ).toBeLessThanOrEqual(40);
   const row = await footerButtons(tab);
   expect(
     row.map(button => button.label),
@@ -642,6 +661,22 @@ const answerWithNext = async (
   expect(await recorded(tab, daemon, key), `${key}: the machine recorded the answer`).toBe('done');
 };
 
+/**
+ * A tool's Ready page (O9-6) names the runtime that tool's own sign-in made, and says its status. `index` is where that runtime
+ * stands in the order the machine made them (Claude's sign-in came first, Codex's second): a page that spoke for another
+ * login's runtime, or for none, fails here.
+ */
+const expectReady = async (tab: Page, daemon: string, tool: string, index: number): Promise<void> => {
+  const made = (await daemonOf(tab, daemon)).runtimesMade;
+  expect(made.length, `${tool}: the machine made its runtime by signing in`).toBeGreaterThan(index);
+  const page = tab.locator('[data-runtime-ready]');
+  expect(await page.getAttribute('data-runtime-ready'), `${tool}: its runtime can start`).toBe('ready');
+  expect(await tab.locator('[data-ready-headline]').innerText(), `${tool}: the headline`).toContain(`${tool} is ready`);
+  expect(await tab.locator('[data-ready-names]').innerText(), `${tool}: names the runtime its sign-in made`).toBe(
+    `Runtime: ${made[index]}.`,
+  );
+};
+
 const counterOf = async (tab: Page): Promise<string> =>
   (await tab.locator('.fy-sp-progress__text').textContent()) ?? '';
 
@@ -701,8 +736,8 @@ const endPage = async (tab: Page, variant: Variant, key: string): Promise<void> 
     await underFooter(tab, '[data-step-footer]'),
     `${key}: nothing is under the footer at the end of the scroll`,
   ).toEqual([]);
-  // Measured from `.fy-spf__main` (picture + body): on a phone the picture (the ferret) is drawn ABOVE the body, like every demo.
-  const gap = await gapUnderTitle(tab, '.fy-spf__head', '.fy-spf__main');
+  // Measured from the picture (the demo), which follows the heading: on a phone the picture (the ferret) is drawn ABOVE the body, like every demo.
+  const gap = await gapUnderTitle(tab, '.fy-spf__head', await gapRoot(tab));
   expect(gap.gap, `${key}: no dead gap under the title`).toBeLessThanOrEqual(40);
 };
 
@@ -957,7 +992,7 @@ describe('the first run, end to end', () => {
         await reach(tab, 'onboarding.agents');
         walked.push('onboarding.agents');
         const agentBox = (row: string) => tab.locator(`[data-agent-row="${row}"] > label input`);
-        expect(await agentBox('claude').isChecked(), 'Which AI: Claude is ticked first').toBe(true);
+        expect(await agentBox('claude-code').isChecked(), 'Which AI: Claude is ticked first').toBe(true);
         await agentBox('others').click();
         await tab.waitForSelector('[data-agent-providers] [data-agent-row]');
         const offered = async (): Promise<string[]> =>
@@ -1046,7 +1081,7 @@ describe('the first run, end to end', () => {
         // A name that is NOT the one the field starts with (the machine's host name), so the payload proves the typed name was sent.
         await tab.getByLabel('Machine name').last().fill('harbor-lamp');
         await tab.locator('[data-step-next]').click();
-        await reach(tab, 'claude-code.import-choice');
+        await reach(tab, 'claude-code.sign-in');
         const nameWrites = (await daemonOf(tab, A)).writes.filter(
           write => write.route === 'PUT /v1/config/file' && (write.body as { path?: string }).path === 'host.yaml',
         );
@@ -1056,15 +1091,36 @@ describe('the first run, end to end', () => {
         ).toEqual([{ path: 'host.yaml', text: 'name: "harbor-lamp"\n', etag: 'e1' }]);
         expect(await recorded(tab, A, 'onboarding.name'), 'Machine name recorded').toMatch(/done|skipped/u);
 
-        // ── Claude: installed and signed in are never asked; Choose what to import ──────────────────────────────────
+        // ── Claude: sign in (O9-6). The machine has NO login and NO runtime: the sign-in below is what makes them ────────────
+        walked.push('claude-code.sign-in');
+        expect((await daemonOf(tab, A)).runtimesMade, 'the machine starts with no runtime').toEqual([]);
+        await inspect(tab, variant, 'claude-code.sign-in', { held: true, centered: true });
+        await shot(tab, variant, 'claude-code.sign-in');
+        await tab.locator('[data-harness-sign-in="claude-code"] button', { hasText: 'Sign in to Claude Code' }).click();
+        await tab.locator('[data-claude-login-code] input').fill('FAKE-CODE-0001');
+        await tab.getByRole('button', { name: 'Finish sign-in' }).click();
+        await tab.waitForFunction(() => !(document.querySelector('[data-step-next]') as HTMLButtonElement).disabled);
+        expect((await daemonOf(tab, A)).runtimesMade, 'the sign-in made Claude its one runtime').toHaveLength(1);
+        // The sign-in page HOLDS Next (a spinner on it) until the person is signed in: a hold, not an answer's wait, so what the
+        // sampler saw there is not what "the Next spinner never flashes" is about. It counts again from the next press on.
+        await tab.waitForFunction(() => document.querySelector('[data-step-next] .fy-spinner') === null);
+        await tab.waitForTimeout(200);
+        await tab.evaluate(() => {
+          (window as unknown as { __nextSpinner: unknown[] }).__nextSpinner.length = 0;
+        });
+        await shot(tab, variant, 'claude-code.sign-in-done');
+        await next(tab, 'claude-code.import-choice');
+        expect(await recorded(tab, A, 'claude-code.sign-in'), 'Claude sign-in recorded').toBe('done');
+
+        // ── Claude: installed is never asked; Choose what to import ─────────────────────────────────────────────────
         walked.push('claude-code.import-choice');
         await inspect(tab, variant, 'claude-code.import-choice');
-        // Item 1: the count is known from the answer BEFORE the next page: Import everything (the default) will show 4 pages, not 9.
+        // Item 1: the count is known from the answer BEFORE the next page: Import everything (the default) will show 6 pages (sign-in first), not 11.
         expect(await counterOf(tab), 'Claude: Import everything counts the pages it will show').toBe(
-          'Claude Code · page 1 of 4',
+          'Claude Code · page 2 of 6',
         );
         await shot(tab, variant, 'claude-code.import-choice');
-        await backAndForth(tab, 'onboarding.name', 'claude-code.import-choice');
+        // Back from here lands on the sign-in, which is already done and so passes itself over (`not-needed`): there is no back-and-forth to walk to it.
         await laterThenBack(tab, A, 'claude-code.import-choice');
         // An arrow key moves the FOCUS and writes nothing: no request, no answer, nothing on the device ledger, and the
         // card is not chosen until Enter (or Space, or a click).
@@ -1088,7 +1144,7 @@ describe('the first run, end to end', () => {
         );
         // Item 1 (continued): Enter picked Choose, so the count is already 9 on this very page, not a page later.
         expect(await counterOf(tab), 'Claude: Choose counts all of its pages as soon as it is picked').toBe(
-          'Claude Code · page 1 of 9',
+          'Claude Code · page 2 of 11',
         );
         await tab.locator('label[data-choice="choose"]').click();
         await shot(tab, variant, 'claude-code.import-choice-chosen');
@@ -1180,8 +1236,36 @@ describe('the first run, end to end', () => {
         // Back to the saved card: Next has nothing to save.
         await tab.locator('[data-flow-page="claude-code.permission"] [data-choice="skip"]').click();
         await tab.waitForTimeout(300);
-        await next(tab, 'codex.import-choice');
+        await next(tab, 'claude-code.ready');
         expect(await recorded(tab, A, 'claude-code.permission')).toBe('done');
+
+        // Ready (O9-6): the Claude segment ENDS by saying what the sign-in above came to: the runtime it made, launchable.
+        await reach(tab, 'claude-code.ready');
+        walked.push('claude-code.ready');
+        await inspect(tab, variant, 'claude-code.ready');
+        await shot(tab, variant, 'claude-code.ready');
+        await expectReady(tab, A, 'Claude Code', 0);
+        await next(tab, 'codex.sign-in');
+        expect(await recorded(tab, A, 'claude-code.ready')).toBe('done');
+
+        // ── Codex: sign in (O9-6): no Codex login yet, so the page offers to make one and sign it in ───────────────────────
+        await reach(tab, 'codex.sign-in');
+        walked.push('codex.sign-in');
+        expect((await daemonOf(tab, A)).runtimesMade, 'only Claude has a runtime so far').toHaveLength(1);
+        await inspect(tab, variant, 'codex.sign-in');
+        await shot(tab, variant, 'codex.sign-in');
+        await tab.locator('[data-add-login-locked="codex"] button', { hasText: 'Sign in to Codex' }).click();
+        // The device grant is approved elsewhere: the second poll (2 s apart) finds it done, and the page ends by itself.
+        await tab.waitForFunction(
+          machine =>
+            (window as unknown as { __fake: { daemon: (id: string) => { runtimesMade: string[] } } }).__fake.daemon(
+              machine as string,
+            ).runtimesMade.length === 2,
+          A,
+          { timeout: 30_000 },
+        );
+        await recorded(tab, A, 'codex.sign-in');
+        await next(tab, 'codex.import-choice');
 
         // ── Codex: Import everything ────────────────────────────────────────────────────────────────────────────────
         await reach(tab, 'codex.import-choice');
@@ -1200,6 +1284,8 @@ describe('the first run, end to end', () => {
           walked.push(key);
           await inspect(tab, variant, key);
           await shot(tab, variant, key);
+          // The Codex segment ENDS on its Ready page: the runtime Codex's own sign-in made, with its name and status.
+          if (key === 'codex.ready') await expectReady(tab, A, 'Codex', 1);
           await tab.locator('[data-step-next]').click();
         }
         seen.codexKindPagesInEverything = walked.filter(key =>
@@ -1437,27 +1523,35 @@ describe('the first run, end to end', () => {
           new Set(run.map(counter => counter.bar)).size,
           `the bar has the same number of segments on every page (${run.map(counter => counter.bar).join(',')})`,
         ).toBe(1);
+        // A tool's sign-in comes BEFORE its import choice, so it counts every page (the mode is not answered yet): it is left out
+        // of the "n never changes" rows below, which start at the choice.
+        const answered = run.filter(counter => !['claude-code.sign-in', 'codex.sign-in'].includes(counter.key));
         for (const plugin of ['codex', 'warden', 'lessons'])
           expect(
-            new Set(run.filter(counter => counter.key.startsWith(`${plugin}.`)).map(counter => counter.of)).size,
+            new Set(answered.filter(counter => counter.key.startsWith(`${plugin}.`)).map(counter => counter.of)).size,
             `${plugin}: n never changes while its answers stand`,
           ).toBe(1);
         expect(
-          run.filter(counter => counter.key.startsWith('codex.')).map(counter => [counter.n, counter.of]),
-          'Codex: Import everything reads page 1 of 4 on its first page and walks 1, 2, 3, 4',
+          answered.filter(counter => counter.key.startsWith('codex.')).map(counter => [counter.n, counter.of]),
+          'Codex: Import everything walks pages 2 to 6 of 6 after its sign-in (the last is Codex is ready)',
         ).toEqual([
-          [1, 4],
-          [2, 4],
-          [3, 4],
-          [4, 4],
+          [2, 6],
+          [3, 6],
+          [4, 6],
+          [5, 6],
+          [6, 6],
         ]);
         expect(
           new Set(
             run
-              .filter(counter => counter.key.startsWith('claude-code.') && counter.key !== 'claude-code.import-choice')
+              .filter(
+                counter =>
+                  counter.key.startsWith('claude-code.') &&
+                  !['claude-code.sign-in', 'claude-code.import-choice'].includes(counter.key),
+              )
               .map(counter => counter.of),
           ).size,
-          'Claude: after Choose is picked n stays 9 on every later page',
+          'Claude: after Choose is picked n stays 11 on every later page',
         ).toBe(1);
         expect(
           run
@@ -1517,11 +1611,15 @@ describe('the first run, end to end', () => {
           expect.arrayContaining([
             'onboarding.agents',
             'onboarding.name',
+            'claude-code.sign-in',
             'claude-code.import-choice',
             'claude-code.import-settings',
             'claude-code.import-skills',
             'claude-code.import-run',
             'claude-code.permission',
+            'claude-code.ready',
+            'codex.ready',
+            'codex.sign-in',
             'codex.import-choice',
             'warden.warden',
             'lessons.lessons',
@@ -1530,13 +1628,7 @@ describe('the first run, end to end', () => {
             'voice.voice',
           ]),
         );
-        for (const never of [
-          'claude-code.installed',
-          'claude-code.sign-in',
-          'codex.installed',
-          'codex.sign-in',
-          'shells.nix',
-        ])
+        for (const never of ['claude-code.installed', 'codex.installed', 'shells.nix'])
           expect(walked.includes(never), `${never} is never drawn on a machine that has it`).toBe(false);
         // Nothing is "Only on" yet: one machine carries every step.
         expect(await tab.locator('[data-only-on]').count()).toBe(0);

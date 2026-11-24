@@ -71,3 +71,24 @@ export function loginModelCatalog(
   const local = catalog?.detect === undefined ? undefined : sources.local?.[catalog.detect];
   return { ...(catalog === undefined ? {} : { catalog }), personOwned, ...(local === undefined ? {} : { local }) };
 }
+
+/**
+ * The model each harness STARTS with when nothing names another: the default model of the catalog its sign-in reads
+ * (docs/model-catalog.md), never a model id written here. A harness whose catalog this machine does not hold (Logins could
+ * not be read) has no entry: the starter is then absent, and the built-in profile of that harness holds no model set.
+ */
+export type StarterModels = Readonly<Partial<Record<HarnessKind, string>>>;
+
+/** No starter for any harness: what a reader that only needs profile NAMES passes. */
+export const NO_STARTERS: StarterModels = {};
+
+export function starterModelsOf(sources: Pick<ModelCatalogSources, 'catalogs'> | undefined): StarterModels {
+  if (sources === undefined) return NO_STARTERS;
+  const starters: Partial<Record<HarnessKind, string>> = {};
+  for (const [harness, catalogId] of Object.entries(SIGN_IN_MODEL_CATALOGS) as [HarnessKind, string][]) {
+    const half = sources.catalogs[catalogId]?.[harness];
+    const model = half?.models.find(candidate => candidate.default);
+    if (model !== undefined) starters[harness] = model.id;
+  }
+  return starters;
+}

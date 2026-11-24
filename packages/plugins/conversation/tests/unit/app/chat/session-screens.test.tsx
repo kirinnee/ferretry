@@ -33,7 +33,7 @@ const session = (id: string, status: string, overrides: Record<string, unknown> 
       teammate: `Teammate ${id}`,
       model: 'gpt-5.6-sol',
       modelHint: 'gpt-5.6',
-      agent: 'codex',
+      login: 'codex',
       mode: 'auto',
       cwd: `/work/${id}`,
       updatedAt: '1970-01-01T00:00:01.000Z',

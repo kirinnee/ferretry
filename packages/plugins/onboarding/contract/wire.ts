@@ -51,9 +51,22 @@ export const StepViewSchema = z.strictObject({
 });
 export type StepView = z.infer<typeof StepViewSchema>;
 
+/**
+ * One harness installed on this machine, as the Ferrets registry knows it (`FerretsApi.harnesses` and the display name of
+ * `harnessFacts`). The key is the harness plugin's own id: the "Which AI?" page lists these and the flow passes over the pages
+ * of the ones left out.
+ */
+export const HarnessViewSchema = z.strictObject({ key: z.string().min(1), label: z.string().min(1) });
+export type HarnessView = z.infer<typeof HarnessViewSchema>;
+
 /** `GET /v1/onboarding`. */
 export const OnboardingViewSchema = z.strictObject({
   steps: z.array(StepViewSchema),
+  /**
+   * The harnesses installed on this machine, in registry order. Absent when none is known (Ferrets off), like every other optional
+   * field of this view, so a reader older than this field still parses a view that does not need it.
+   */
+  harnesses: z.array(HarnessViewSchema).optional(),
   /** Every step is found, done, later or skipped (none pending). */
   complete: z.boolean(),
   /**

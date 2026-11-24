@@ -14,7 +14,6 @@ import { definePlugin, implementDaemon, route } from '@ferretry/kernel/manifest'
 import { ferret, owner, standInAdmission, type TestHost, testHost } from '@ferretry/kernel/testing';
 import {
   HoldsFile,
-  InputRequestFiles,
   InputHoldsPort,
   InputTargets,
   OutputGuardPort,
@@ -124,48 +123,26 @@ async function setup(beforeRestore?: (host: TestHost) => void) {
 }
 
 describe('the composed Vault input half', () => {
-  test('I78 I84 replay retains the original attempt id and releases all terminal aliases together', async () => {
-    const { host, deliver, id } = await setup();
+  test('no lock after an answer: the ferret reads the terminal at once, under every alias, and a restart changes nothing', async () => {
+    const { host, deliver } = await setup();
     expect((await deliver()).status).toBe(200);
+    const alias = { ...TERMINAL, key: '%3' };
+    const holds = host.provided(InputHoldsPort);
+    for (const act of ['read', 'wait', 'stream'] as const) {
+      expect(holds.decide(TERMINAL, act, 'ferret')).toBe('allow');
+      expect(holds.decide(alias, act, 'ferret')).toBe('allow');
+    }
+    expect(holds.decide(TERMINAL, 'read', 'owner-tools')).toBe('allow');
+    expect(host.state('vault').raw(HoldsFile) ?? '').toBe('');
+    const quarantines = await host.request('GET', `/v1/ferrets/${FERRET}/input-quarantines`);
+    expect(quarantines.status).toBe(200);
+    expect(quarantines.body).not.toContain('dev');
     const restarted = await host.restart();
     hosts.push(restarted);
     await restarted.runJob('inputs-restore');
-    const alias = { ...TERMINAL, key: '%3' };
-    expect(restarted.provided(InputHoldsPort).decide(alias, 'read', 'ferret')).toEqual({ refused: 'quarantined' });
-    expect((await restarted.request('POST', `/v1/ferrets/${FERRET}/input-quarantines/dev/end`)).status).toBe(200);
     expect(restarted.provided(InputHoldsPort).decide(alias, 'read', 'ferret')).toBe('allow');
     expect(restarted.provided(InputHoldsPort).decide(TERMINAL, 'read', 'ferret')).toBe('allow');
-    const lines = (host.state('vault').raw(HoldsFile) ?? '')
-      .trim()
-      .split('\n')
-      .map(line => JSON.parse(line));
-    expect(lines[0]?.hold).toBe(`${id}/1`);
-    expect(new Set(lines.map(line => line.hold)).size).toBe(1);
-    expect(lines.every(line => line.names.join(',') === 'dev,%3')).toBe(true);
-    const twice = await restarted.restart();
-    hosts.push(twice);
-    await twice.runJob('inputs-restore');
-    expect(twice.provided(InputHoldsPort).decide(alias, 'read', 'ferret')).toBe('allow');
   });
-  for (const damage of ['damaged', 'missing'] as const) {
-    test(`I82 durable hold evidence survives a ${damage} request record independently`, async () => {
-      const { host, deliver, id } = await setup();
-      expect((await deliver()).status).toBe(200);
-      const folder = host.state('vault');
-      expect(folder.raw(HoldsFile)).toContain('began');
-      if (damage === 'damaged') folder.plant(InputRequestFiles, '{broken', id);
-      else folder.files.delete(`input-requests/${id}.json`);
-      const restarted = await host.restart();
-      hosts.push(restarted);
-      if (damage === 'damaged') await expect(restarted.runJob('inputs-restore')).rejects.toThrow();
-      else await restarted.runJob('inputs-restore');
-      expect(restarted.provided(InputHoldsPort).decide(TERMINAL, 'read', 'ferret')).toEqual({ refused: 'quarantined' });
-      // A global fallback alone is insufficient: the original durable holds must have been recovered too.
-      const response = await restarted.request('GET', `/v1/ferrets/${FERRET}/input-quarantines`);
-      expect(response.status).toBe(200);
-      expect(response.body).toContain('dev');
-    });
-  }
   test('I53 owner-dismissed asks cancel the current pending input and prevent any later delivery', async () => {
     const { host, asks, gate, api, id, request, target, deliver } = await setup();
     const askId = AskIdSchema.parse(request.agendaItemId);
@@ -252,22 +229,18 @@ describe('the composed Vault input half', () => {
     expect(await redaction.read(scope => scope.text(VALUE))).not.toContain(VALUE);
   });
 
-  test('I74 a real input hold withholds an earlier guarded response; ending it allows a fresh read', async () => {
+  test('I74 an answer withholds no earlier guarded response: the read that was in flight still goes through', async () => {
     const { host, deliver, built, send, guard } = await setup();
     const earlier = host.request('GET', '/v1/input-test/read');
     await built.promise;
     const stamp = guard.stamp([TERMINAL]);
     expect((await deliver()).status).toBe(200);
-    expect(guard.stillShowable(stamp)).toBe(false);
-    expect(host.provided(InputHoldsPort).decide(TERMINAL, 'read', 'ferret')).toEqual({ refused: 'quarantined' });
-    send.resolve();
-    const withheld = await earlier;
-    expect(withheld.status).toBe(409);
-    expect(withheld.body).toContain(WITHHELD_SENTENCE);
-    const held = guard.stamp();
-    expect((await host.request('POST', `/v1/ferrets/${FERRET}/input-quarantines/dev/end`)).status).toBe(200);
-    expect(guard.stillShowable(held)).toBe(false);
+    expect(guard.stillShowable(stamp)).toBe(true);
     expect(host.provided(InputHoldsPort).decide(TERMINAL, 'read', 'ferret')).toBe('allow');
+    send.resolve();
+    const answered = await earlier;
+    expect(answered.status).toBe(200);
+    expect(answered.body).not.toContain(WITHHELD_SENTENCE);
     expect((await host.request('GET', '/v1/input-test/read')).status).toBe(200);
   });
 
