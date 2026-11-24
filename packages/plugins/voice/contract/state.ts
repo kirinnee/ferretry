@@ -23,3 +23,19 @@ export const MODELS_STATE = defineState({
   format: 1,
   onDamaged: { narrower: 'the model cache starts empty; devices keep their own copies' },
 });
+
+/**
+ * `state/voice/reply-spend.json`: how many characters of spoken replies were sent to ElevenLabs on one machine-day, so the
+ * daily cap holds across restarts. A count and a day, never a word. A document that is missing or unreadable reads as
+ * "nothing spent today", which can only let one more day's worth through after damage, never lose a key.
+ */
+export const REPLY_SPEND_STATE = defineState({
+  name: 'reply-spend',
+  path: 'reply-spend.json',
+  store: 'json',
+  format: 1,
+  schema: z.looseObject({ day: z.string(), chars: z.number() }),
+  onDamaged: {
+    narrower: 'today’s spoken-character count starts again from zero; the keys and settings are unaffected',
+  },
+});
