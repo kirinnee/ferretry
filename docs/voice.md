@@ -477,9 +477,10 @@ Hands-free chat with the ferret whose page you are on. **Voice mode** is a butto
 under an agenda item's reply box). Voice's own code is `app/components/voice-mode-panel.tsx`, `voice-mode-button.tsx` and
 `app/lib/voice-mode/voice-mode-store.ts`.
 
-- **Pressing it** first reads `GET /v1/voice/engine`. Speech not installed, still installing, or a machine that cannot be
-  reached leaves the composer where it is and says why in one sentence above it (with where to install: Settings › Voice ›
-  Voice mode). It never installs by itself: that download is the person's press, with its size shown.
+- **Pressing it** first reads `GET /v1/voice/engine`. Speech not installed or still installing leaves the composer where it
+  is and says why in one sentence above it (with where to install: Settings › Voice › Voice mode). It never installs by
+  itself: that download is the person's press, with its size shown. A machine that cannot be reached starts voice mode on the
+  phone's own engine instead ([Phone fallback](#phone-fallback-the-phones-own-engine)).
 - **The composer is hidden, never dropped.** The panel renders the chat's composer in the same place with `display: none`,
   so the draft, caret and attachments are the very ones that come back on **End**. Nothing is sent from the draft.
 - **One `chat` stream** (`purpose: 'chat'`, this ferret) opens as soon as voice mode is on, and every stream rule above holds:
@@ -494,8 +495,9 @@ under an agenda item's reply box). Voice's own code is `app/components/voice-mod
   (unit 1). Until barge-in exists the microphone under the speaker would hear the reply and the machine would send it back as
   the person's own words, so the panel mutes (zero samples) while a reading goes on and unmutes after. The panel says so.
 - **It ends, and says why.** **End voice mode** tells the machine, closes the stream, stops the microphone and gives the
-  composer back. A refusal (the machine's own sentence, or one for its close code), a lost machine, a refused microphone, or a
-  browser that cannot open a stream also give the composer back and leave one sentence above it until dismissed. Leaving the
+  composer back. A refused permission (the machine's own sentence, or one for its close code: 4401 voice, 4403 fleet), a
+  refused microphone, or a browser that cannot open a stream also give the composer back and leave one sentence above it until
+  dismissed. A machine that fails for any other reason does not end it: the loop moves to the phone. Leaving the
   chat, or a question taking the composer's place, ends it; it never restarts by itself on return.
 - **Measured here (2026-11-24, real Chrome, real engine).** Chrome's fake microphone plays `clip-5s.wav` ("Please fix the
   login redirect and run the tests again", with 1 s of silence before it) into the shipped `browserMic`; the panel's stream
@@ -511,8 +513,51 @@ under an agenda item's reply box). Voice's own code is `app/components/voice-mod
   sends nothing (it never sends a lost turn). The panel is honest about it; whether the rule should wait for the decode is the
   stream's to decide (unit 4's latency follow-up).
 - **Declared gaps.** No barge-in (unit 7), and the panel does not yet ask the machine's reply voice (unit 6, built: [The reply voice](#the-reply-voice-kokoro-on-the-machine)) to speak: the device voice reads, the microphone is muted
-  meanwhile. No phone-fallback engine (unit 8): a machine that cannot be reached means voice mode ends, not a different engine.
-  A keyboard shortcut and a palette entry for it are not built.
+  meanwhile. A keyboard shortcut and a palette entry for it are not built.
+
+### Phone fallback: the phone's own engine
+
+**Built (voice mode unit 8).** Voice mode runs on the machine; the phone's own engine is only ever the fallback (owner
+decision 2026-11-23). The same panel, the same two buttons and the same hidden composer carry on, with a banner at the top
+of the panel (`data-voice-mode-banner`, `data-engine="phone"`) that says why for as long as it is there. There are three ways in, and
+nothing else starts it:
+
+1. **The machine cannot be reached when Voice mode is pressed** (`GET /v1/voice/engine` fails): "Your machine cannot be
+   reached, so voice mode runs on this phone's own speech."
+2. **The machine's stream ends for any reason but a refused permission or a person's End** (the route dies mid-chat, a close
+   with no code, `4408` it stopped hearing the phone, `4429` busy, `4450` too slow, `1011` speech failed, a protocol
+   error). The loop moves to the phone and the banner says why, in the machine's own sentence when it gave one. A refused
+   permission (`4401`, `4403`) is **not** routed round: the owner said this device may not, and the phone would be doing it
+   anyway.
+3. **The person chose "Keep audio on this phone"** (Settings › Voice › Voice mode; `voiceModeOnPhone` in this browser's
+   live-voice settings, off by default). The machine is then not asked at all, and the banner says that is why.
+
+What the phone's engine is: the dictation engine the person already chose (Settings › Voice: Parakeet on this device, the
+browser's voice, the others), driven by `useDictation` as a person would drive it, into an empty draft that is never shown
+(`afterDictation: 'insert'`; the transcription log and debug ring are not written: voice mode is not a dictation the person
+asked to keep). The phone watches its own microphone level for the pause (`lib/voice-mode/phone-loop.ts`: speech heard, then
+**1.5 s** of quiet, the machine's own pause, so the rhythm is the same), or, for an engine that lends no microphone tap (the
+browser's voice), the words standing still for as long. Then it stops the take and **sends it itself**, through the ordinary
+`POST /v1/ferrets/:ferretId/send`, as `(voice) <words>` with a send id of its own (`phone-<uuid>:<n>`) in both the body and
+`x-fy-request-id`: a send that fails is tried once more with the **same** id, so a lost answer never sends twice, and one that
+still fails says "Not sent: <the route's sentence>" and keeps listening. Sends go out one at a time, in the order spoken. The
+send needs `fleet.use`, as a typed send does. Replies are read by the device's voice (Voice mode turns Auto-read on), and the
+microphone is off while one is read (the take is stopped, then restarted a moment after: no reply can be heard and sent back as
+the person's words). Mute stops the take too.
+
+If the engine cannot listen at all (no dictation engine chosen yet, the microphone refused, the engine unavailable), voice mode
+**ends** with the engine's own sentence and the composer comes back: nothing else would ever send.
+
+**Declared gaps.** The fallback is one way: the phone does not go back to the machine by itself (End, then Voice mode again, asks
+the machine first). A machine that is wholly unreachable cannot take the phone's sends either: the panel says "Not sent" for each.
+The phone engine has no live words unless the chosen engine gives them (the browser's voice does; Parakeet does with
+"Live words"). Real-device proof (a phone's own Parakeet in a real chat) is the owner's: the harness below scripts the engine.
+
+**Measured here (2026-11-24, real Chrome).** `tests/integration/app/voice-mode-panel.visual.test.ts`: the machine's stream is
+dropped 600 ms into a chat (`1006`); the panel moves to the phone engine (banner "Lost Studio Mac, so voice mode carries on
+with this phone's own speech."), the machine's microphone is released, a scripted engine hears one sentence, the pause is found
+from the microphone level and `(voice) Please check the build` is sent once. A machine unreachable on press starts on the phone
+with no stream opened. At 390 and 1440 px, light and dark: no sideways scroll, 44 px controls.
 
 ### The reply voice (Kokoro, on the machine)
 

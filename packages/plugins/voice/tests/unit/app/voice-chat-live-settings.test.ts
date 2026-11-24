@@ -28,6 +28,7 @@ describe('defaults', () => {
       voiceId: null,
       rate: 1.1,
       maxSeconds: 60,
+      voiceModeOnPhone: false,
       whatToRead: 'last',
     });
     expect(LIVE_VOICE_SETTINGS_KEY).toBe('fy:voice:live-settings');
@@ -62,6 +63,7 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
       rate: 1.5,
       maxSeconds: 120,
       whatToRead: 'every',
+      voiceModeOnPhone: true,
     } as const;
     expect(parseLiveVoiceSettings(JSON.stringify(good))).toEqual(good);
   });
@@ -105,6 +107,12 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
     expect(id(null)).toBeNull();
   });
 
+  test('keeping audio on the phone is off by default, and a bad value falls back to off', () => {
+    expect(DEFAULT_LIVE_VOICE_SETTINGS.voiceModeOnPhone).toBe(false);
+    expect(parseLiveVoiceSettings(JSON.stringify({ format: 1, voiceModeOnPhone: true })).voiceModeOnPhone).toBe(true);
+    expect(parseLiveVoiceSettings(JSON.stringify({ format: 1, voiceModeOnPhone: 'yes' })).voiceModeOnPhone).toBe(false);
+  });
+
   test('unknown extra fields are dropped, so nothing hostile is carried along', () => {
     const parsed = parseLiveVoiceSettings(
       JSON.stringify({ format: 1, autoRead: true, token: 'secret', text: 'a reply' }),
@@ -116,6 +124,7 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
       'rate',
       'readAloudButton',
       'voiceId',
+      'voiceModeOnPhone',
       'whatToRead',
     ]);
   });

@@ -12,8 +12,9 @@
  *     device first, `docs/voice.md` › The voice stream). A device that stops answering sends nothing.
  *
  * WHAT THE PERSON IS TOLD, IN WORDS. Loading, Listening, Hearing you, Working (the ferret's turn, read from the chat's
- * own live reading of the ferret, never guessed), Muted. A refusal or a lost machine ends voice mode, gives the composer
- * back and leaves one sentence above it.
+ * own live reading of the ferret, never guessed), Muted. A refused permission, a refused microphone or a browser that cannot
+ * open a stream ends voice mode, gives the composer back and leaves one sentence above it; a machine that is LOST hands the
+ * loop to the phone's own engine (`voice-mode-phone.tsx`, drawn by the page through `renderPhone`) with a banner that says why.
  *
  * THE MICROPHONE IS MUTED WHILE A REPLY IS READ ALOUD. Until barge-in (a later unit) the device's own voice is the only
  * reader of replies, and a microphone open under it would hear it and send it back as the person's own words. Muted is
@@ -27,6 +28,7 @@ import type { StreamSnapshot, StreamState } from '../../contract/index.ts';
 import { useReadAloudController } from '../hooks/use-read-aloud.ts';
 import { browserMic } from '../lib/stream/mic-source.ts';
 import { type MicSource, openVoiceStream, type VoiceStreamHandle } from '../lib/stream/voice-stream.ts';
+import { lostBanner, shouldFallBack } from '../lib/voice-mode/phone-loop.ts';
 import { useVoiceMode, type VoiceModeStore } from '../lib/voice-mode/voice-mode-store.ts';
 import { Button, type VoicePluginClient } from '../shell-voice.ts';
 
@@ -73,9 +75,31 @@ export interface VoiceModeSlotProps {
   readonly fallback: ReactNode;
   /** A suite supplies a microphone; the page uses the browser's. */
   readonly createMic?: () => MicSource;
+  /**
+   * The panel's phone-engine half (the fallback): the page's own draws it inside the voice stores it needs. Without one, a
+   * machine that is lost ends voice mode as it always did.
+   */
+  readonly renderPhone?: (props: PhoneSlotProps) => ReactNode;
 }
 
-export function VoiceModeSlot({ ferretId, store, client, turn, fallback, createMic = browserMic }: VoiceModeSlotProps) {
+/** What the page's phone-engine panel is handed. */
+export interface PhoneSlotProps {
+  readonly ferretId: string;
+  readonly machine: string;
+  readonly banner: string;
+  readonly store: VoiceModeStore;
+  readonly turn: Turn | undefined;
+}
+
+export function VoiceModeSlot({
+  ferretId,
+  store,
+  client,
+  turn,
+  fallback,
+  createMic = browserMic,
+  renderPhone,
+}: VoiceModeSlotProps) {
   const state = useVoiceMode(store, ferretId);
   // Leaving the chat (or a question taking the composer's place) ends voice mode: it never resumes by itself on return.
   useEffect(() => () => store.end(ferretId), [store, ferretId]);
@@ -89,8 +113,11 @@ export function VoiceModeSlot({ ferretId, store, client, turn, fallback, createM
           </button>
         </p>
       )}
-      {state.active ? (
+      {state.active && state.engine === 'phone' && renderPhone !== undefined ? (
+        renderPhone({ ferretId, machine: state.machine, banner: state.banner ?? '', store, turn })
+      ) : state.active ? (
         <VoiceModeSession
+          canFallBack={renderPhone !== undefined}
           client={client}
           createMic={createMic}
           ferretId={ferretId}
@@ -117,9 +144,11 @@ interface SessionProps {
   readonly client: Pick<VoicePluginClient, 'socket'>;
   readonly createMic: () => MicSource;
   readonly turn: Turn | undefined;
+  /** Whether a lost machine hands the loop to the phone's own engine (the page supplies one). */
+  readonly canFallBack: boolean;
 }
 
-function VoiceModeSession({ ferretId, machine, store, client, createMic, turn }: SessionProps) {
+function VoiceModeSession({ ferretId, machine, store, client, createMic, turn, canFallBack }: SessionProps) {
   const [state, setState] = useState<StreamState>('loading');
   const [heard, setHeard] = useState<Heard | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -155,7 +184,11 @@ function VoiceModeSession({ ferretId, machine, store, client, createMic, turn }:
       onEnded: ended => {
         if (disposed) return;
         handle.current = null;
-        if (ended.sentence !== undefined) store.end(ferretId, ended.sentence);
+        // A machine that could not keep going hands the loop to this phone's own engine, and says so; a person's End or a
+        // refused permission is not a failure to route round.
+        if (canFallBack && shouldFallBack(ended))
+          store.fallBack(ferretId, lostBanner(machine, ended.code, ended.sentence));
+        else if (ended.sentence !== undefined) store.end(ferretId, ended.sentence);
         else if (ended.code !== 1000 && ended.code !== undefined)
           store.end(ferretId, refusalSentence(ended.code, machine));
         else store.end(ferretId);
@@ -170,7 +203,7 @@ function VoiceModeSession({ ferretId, machine, store, client, createMic, turn }:
       handle.current = null;
       opened.stop();
     };
-  }, [client, createMic, ferretId, machine, store]);
+  }, [canFallBack, client, createMic, ferretId, machine, store]);
 
   // The machine is told once per change; the first unit of a stream starts unmuted.
   useEffect(() => {
@@ -192,6 +225,7 @@ function VoiceModeSession({ ferretId, machine, store, client, createMic, turn }:
     <section
       aria-label="Voice mode"
       className="fy-voice-mode"
+      data-engine="machine"
       data-state={reading ? 'muted' : working ? 'working' : shown}
       data-voice-mode="on"
     >

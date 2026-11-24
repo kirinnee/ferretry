@@ -65,6 +65,7 @@ interface Fake {
   closed: unknown[];
   micStopped: number;
   reads: number;
+  sent: string[];
 }
 
 describe('Voice mode panel', () => {
@@ -158,6 +159,49 @@ describe('Voice mode panel', () => {
           expect((await fakeOf(tab)).starts).toEqual([]);
           expect(await overflow(tab)).toBeLessThanOrEqual(0);
           await shot(tab, 'not-installed');
+        } finally {
+          await context.close();
+        }
+      });
+
+      it(`a machine lost mid-chat hands the panel to the phone's engine, says why, and the loop keeps sending (${viewport.name}, ${theme})`, async () => {
+        const { context, tab } = await open('lost');
+        try {
+          await tab.locator('[data-voice-mode-start]').click();
+          await tab.locator('[data-voice-mode="on"][data-engine="machine"]').waitFor({ state: 'visible' });
+          await tab.locator('[data-voice-mode="on"][data-engine="phone"]').waitFor({ state: 'visible' });
+          const banner = tab.locator('[data-voice-mode-banner]');
+          expect(await banner.innerText()).toContain('Lost Studio Mac');
+          expect(await banner.innerText()).toContain("this phone's own speech");
+          expect(await tab.locator('[data-voice-mode-notice]').count()).toBe(0);
+          expect(await tab.locator('[data-fake-composer]').isVisible()).toBe(false);
+          expect((await fakeOf(tab)).micStopped).toBe(1);
+          await tab.locator('[data-voice-mode-words]').filter({ hasText: 'Please check the build' }).waitFor();
+          expect(await tab.locator('[data-voice-mode-status]').innerText()).toContain('Hearing you');
+          for (const button of await tab.locator('[data-voice-mode] button').all())
+            expect((await button.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(43.5);
+          expect(await overflow(tab)).toBeLessThanOrEqual(0);
+          await shot(tab, 'phone-hearing');
+          await tab.locator('[data-voice-mode-outcome]').filter({ hasText: 'Sent.' }).waitFor({ timeout: 15_000 });
+          expect((await fakeOf(tab)).sent).toEqual(['(voice) Please check the build']);
+          await shot(tab, 'phone-sent');
+          await tab.locator('[data-voice-mode-end]').click();
+          await tab.locator('[data-fake-composer]').waitFor({ state: 'visible' });
+          expect(await tab.getByLabel('Message').inputValue()).toBe('half a thought');
+        } finally {
+          await context.close();
+        }
+      });
+
+      it(`a machine that cannot be reached starts voice mode on the phone with a banner (${viewport.name}, ${theme})`, async () => {
+        const { context, tab } = await open('unreachable');
+        try {
+          await tab.locator('[data-voice-mode-start]').click();
+          await tab.locator('[data-voice-mode="on"][data-engine="phone"]').waitFor({ state: 'visible' });
+          expect(await tab.locator('[data-voice-mode-banner]').innerText()).toContain('cannot be reached');
+          expect((await fakeOf(tab)).starts).toEqual([]);
+          expect(await overflow(tab)).toBeLessThanOrEqual(0);
+          await shot(tab, 'phone-unreachable');
         } finally {
           await context.close();
         }
