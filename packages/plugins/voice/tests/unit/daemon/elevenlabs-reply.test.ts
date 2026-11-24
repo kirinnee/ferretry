@@ -63,6 +63,7 @@ function build(
   options: {
     outcome?: (request: OutboundHttpRequest) => AuthorizedOutcome | Promise<AuthorizedOutcome>;
     keys?: readonly string[];
+    listFails?: boolean;
     config?: Partial<ReplyVoiceConfig['elevenlabs']>;
     day?: () => string;
   } = {},
@@ -83,11 +84,13 @@ function build(
       },
     },
     secrets: {
-      list: async () =>
-        (options.keys ?? [KEY_NAME]).map(name => ({
+      list: async () => {
+        if (options.listFails) throw new Error('the store is unreadable');
+        return (options.keys ?? [KEY_NAME]).map(name => ({
           name: name as SecretName,
           updatedAt: '2026-11-24T00:00:00.000Z' as never,
-        })),
+        }));
+      },
     },
     spend,
     settings: () => settings,
@@ -268,6 +271,12 @@ describe('ready, and the voices', () => {
     expect(sent[0]?.request.url).toStartWith('https://api.elevenlabs.io/v2/voices?');
     expect(sent[0]?.placement).toEqual({ header: 'xi-api-key' });
     expect(sent[0]?.request.body).toBeUndefined();
+  });
+
+  test('a secret store that cannot be read says the key is not set, and the voice is not ready', async () => {
+    const { voice } = build({ listFails: true });
+    expect(await voice.ready()).toBe(false);
+    expect((await voice.status()).keySet).toBe(false);
   });
 
   test.each([
