@@ -255,6 +255,25 @@ describe('folder path box', () => {
           await box.waitFor({ timeout: 5_000 });
           expect(await box.inputValue()).toBe('~');
 
+          // O11 R8 (S-68): the Go label is the same size as the explorer's other buttons (it was extra-small text), and a real touch target.
+          const sizes = await tab.evaluate(() => {
+            const newFolder = [...document.querySelectorAll('button')].find(
+              button => button.textContent?.trim() === 'New folder',
+            ) as HTMLElement;
+            const go = [...document.querySelectorAll('button')].find(
+              button => button.textContent?.trim() === 'Go',
+            ) as HTMLElement;
+            return {
+              input: Number.parseFloat(getComputedStyle(newFolder).fontSize),
+              go: Number.parseFloat(getComputedStyle(go).fontSize),
+              goHeight: go.getBoundingClientRect().height,
+            };
+          });
+          expect(sizes.go, 'Go is not smaller than New folder').toBeGreaterThanOrEqual(sizes.input - 0.5);
+          expect(sizes.goHeight, 'Go fills the field (a touch target on a phone)').toBeGreaterThanOrEqual(
+            viewport.phone ? 40 : 34,
+          );
+
           // `~/project1` + Enter: the route is asked for that path and the breadcrumb shows it.
           await box.fill('~/project1');
           await box.press('Enter');
