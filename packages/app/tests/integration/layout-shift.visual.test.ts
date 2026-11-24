@@ -15,7 +15,7 @@
  * walked (Which AI, Name, Appearance, Layout, Voice) with a style and a palette picked on Appearance and an engine on Voice.
  *
  *   FY_LAYOUT_SHIFT_LOG=1         print every measured act and its shift
- *   FY_LAYOUT_SHIFT_SHOTS_DIR     keep `<width>-<light|dark>-<page>.png` of each onboarding page (fake data only)
+ *   FY_LAYOUT_SHIFT_SHOTS_DIR     keep `<width>-<light|dark>-<page>.png` of each onboarding page and of New ferret loading / resolved (fake data only)
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
@@ -87,7 +87,7 @@ const RECORDER = `
   }).observe({ type: 'layout-shift', buffered: true });
 
   // Watched boxes: every frame, the size of each match (keyed by order), kept as the smallest and largest seen.
-  window.__watch = { selectors: ['.fy-sp', '.fy-spf__demo', '[data-side-toggle]:not([hidden])'], seen: {} };
+  window.__watch = { selectors: ['.fy-sp', '.fy-spf__demo', '[data-side-toggle]:not([hidden])', '[data-ferret-side]', '[data-panel][data-phone-shown]'], seen: {} };
   const frame = () => {
     for (const selector of window.__watch.selectors) {
       document.querySelectorAll(selector).forEach((node, index) => {
@@ -199,8 +199,7 @@ const journey = (name: string, body: () => Promise<void>): void => {
 };
 
 // ─── the main routes ─────────────────────────────────────────────────────────────────────────────────────────────
-// New ferret is not in this list either: a block of its form arrives 25 -> 118px tall when the machine's answers do (a late read, so
-// the number depends on timing), and that page is being reshaped by O9-8, O9-9 and O9-11, which own what it shows while it waits.
+// New ferret is not in this list: its roster of runtimes arrives late by design, so it has its own held-runtimes case below (a late read the route list cannot time).
 // The ferret's chat is not in this list: its composer grows when its status line arrives (94 -> 122px) and that is the composer's
 // own item (O9-17, the status bar), which is not this PR's file to change. The chat IS measured below, around the side panel.
 const ROUTES = [
@@ -233,10 +232,36 @@ describe('a route draws and settles without moving anything that was already on 
 });
 
 describe('the ferret page side panel', () => {
+  const CHAT = '/d/ws/ferrets/zoe/chat?agenda=off&asks=0';
+  /** The pane must really be there: a pane that fails to render (or draws no box) fails here instead of passing as "nothing moved". */
+  const pane = async (tab: Page, label: string, selector: string): Promise<void> => {
+    await tab.locator(selector).first().waitFor({ state: 'visible', timeout: 15_000 });
+    const box = await tab.locator(selector).first().boundingBox();
+    if (box === null || box.width < 100 || box.height < 100)
+      found.push(`${label}: ${selector} drew no usable box ${JSON.stringify(box)}`);
+    // The slot draws its panels together, under one loading bar, once every view has arrived: wait for that, so the pane's
+    // box is measured across its loading AND its drawn panels, and a pane whose panels never arrive fails here.
+    if (selector.startsWith('[data-ferret-side]'))
+      await tab
+        .locator(`${selector} [data-panel]:visible`)
+        .first()
+        .waitFor({ state: 'visible', timeout: 15_000 })
+        .catch(async () =>
+          found.push(
+            `${label}: ${selector} drew no panel; it shows: ${JSON.stringify(
+              await tab
+                .locator(selector)
+                .first()
+                .evaluate(node => (node as HTMLElement).innerText.slice(0, 300)),
+            )}`,
+          ),
+        );
+  };
+
   for (const viewport of VIEWPORTS.filter(candidate => !candidate.phone))
     for (const dark of [false, true])
       journey(`opens and closes without moving the chat at ${viewport.name}, ${dark ? 'dark' : 'light'}`, async () => {
-        const { tab, context } = await open(viewport, dark, origins.app, '/d/ws/ferrets/zoe/chat?agenda=off&asks=0');
+        const { tab, context, problems } = await open(viewport, dark, origins.app, CHAT);
         try {
           await tab.waitForSelector('[data-side-toggle]:visible', { timeout: 30_000 });
           await tab.waitForTimeout(800);
@@ -245,7 +270,9 @@ describe('the ferret page side panel', () => {
             `side panel opens ${viewport.name}`,
             async () => {
               await tab.locator('[data-side-toggle]:visible').first().click();
+              await pane(tab, `side panel opens ${viewport.name}`, '[data-ferret-side]');
             },
+            // The chat recentres when a column opens beside it (by design); the pane's OWN box is what must hold still while it loads.
             { shifts: false },
           );
           await still(
@@ -256,12 +283,111 @@ describe('the ferret page side panel', () => {
             },
             { shifts: false },
           );
+          expect(problems, 'the page threw').toEqual([]);
+        } finally {
+          await context.close();
+        }
+      });
+
+  // A phone has no column: its equivalent is the chip row, one panel at a time at full width.
+  for (const viewport of VIEWPORTS.filter(candidate => candidate.phone))
+    for (const dark of [false, true])
+      journey(
+        `the side tabs show a panel without moving the chip row at ${viewport.name}, ${dark ? 'dark' : 'light'}`,
+        async () => {
+          const { tab, context, problems } = await open(viewport, dark, origins.app, CHAT);
+          try {
+            await tab.waitForSelector('[data-phone-chip]', { timeout: 30_000 });
+            await tab.waitForTimeout(800);
+            const chips = tab.locator('[data-phone-chip]');
+            const count = await chips.count();
+            if (count < 2) found.push(`side tabs ${viewport.name}: only ${count} chip(s) drawn`);
+            for (let pick = 1; pick < Math.min(count, 4); pick += 1)
+              await still(
+                tab,
+                `side tab ${pick} ${viewport.name}`,
+                async () => {
+                  await chips.nth(pick).tap();
+                  await pane(tab, `side tab ${pick} ${viewport.name}`, '[data-panel][data-phone-shown]');
+                },
+                { shifts: false },
+              );
+            expect(problems, 'the page threw').toEqual([]);
+          } finally {
+            await context.close();
+          }
+        },
+      );
+});
+// ─── New ferret, while the machine is slow to say what can run ───────────────────────────────────────────────────
+/** The controls BELOW the Runtime field: none of them may move when the roster of runtimes arrives. */
+const BELOW_RUNTIME = [
+  ['folder field', '#fy-new-ferret-folder'],
+  ['model override', '#fy-new-ferret-model'],
+  ['fast mode', '[data-new-ferret-fast]'],
+  ['advanced', '[data-new-ferret-advanced]'],
+  ['opening prompt', 'textarea'],
+  ['create', 'button:text:Create ferret'],
+] as const;
+const HOLD_MS = 650;
+
+const tops = async (tab: Page): Promise<Record<string, number | null>> =>
+  await tab.evaluate(
+    (entries: [string, string][]) =>
+      Object.fromEntries(
+        entries.map(([name, selector]) => {
+          // `tag:text:<words>` finds the first such tag whose text holds the words (the Create button has no id of its own).
+          const [tag, kind, words] = selector.split(':');
+          const node =
+            kind === 'text'
+              ? ([...document.querySelectorAll(tag as string)].find(candidate =>
+                  candidate.textContent?.includes(words as string),
+                ) ?? null)
+              : document.querySelector(selector);
+          return [name, node === null ? null : Math.round(node.getBoundingClientRect().top * 10) / 10];
+        }),
+      ),
+    BELOW_RUNTIME.map(([name, selector]): [string, string] => [name, selector]),
+  );
+
+describe('New ferret keeps every control below Runtime still while the roster of runtimes arrives', () => {
+  for (const viewport of VIEWPORTS)
+    for (const dark of [false, true])
+      journey(`runtimes held ${HOLD_MS} ms at ${viewport.name}, ${dark ? 'dark' : 'light'}`, async () => {
+        const { tab, context, problems } = await open(viewport, dark, origins.app, `/d/ws/new?holdRuntimes=${HOLD_MS}`);
+        try {
+          // The loading frame: the page is drawn and the roster has not answered.
+          await tab.locator('textarea').waitFor({ state: 'attached', timeout: 30_000 });
+          const loading = await tops(tab);
+          if (shotsDir !== '')
+            await tab.screenshot({
+              path: `${shotsDir}/${viewport.name}-${dark ? 'dark' : 'light'}-new-ferret-loading.png`,
+              fullPage: true,
+            });
+          expect(await tab.locator('[data-runtime-select]').count(), 'the roster must still be on its way').toBe(0);
+          await clear(tab);
+          await tab.locator('[data-runtime-select]').waitFor({ state: 'attached', timeout: 30_000 });
+          await tab.waitForTimeout(SETTLE_MS);
+          const resolved = await tops(tab);
+          if (shotsDir !== '')
+            await tab.screenshot({
+              path: `${shotsDir}/${viewport.name}-${dark ? 'dark' : 'light'}-new-ferret-resolved.png`,
+              fullPage: true,
+            });
+          for (const [name] of BELOW_RUNTIME) {
+            if (loading[name] === null || resolved[name] === null) found.push(`${name} ${viewport.name}: not drawn`);
+            else if (Math.abs((resolved[name] as number) - (loading[name] as number)) > BOX_TOLERANCE)
+              found.push(`${name} ${viewport.name}: y ${loading[name]} while loading -> ${resolved[name]} resolved`);
+          }
+          const reading = await read(tab);
+          if (reading.total > BUDGET)
+            found.push(`New ferret ${viewport.name}: layout shift ${reading.total.toFixed(4)}\n    ${said(reading)}`);
+          expect(problems, 'the page threw').toEqual([]);
         } finally {
           await context.close();
         }
       });
 });
-
 // ─── the onboarding pages ────────────────────────────────────────────────────────────────────────────────────────
 /** Everything but the pages this test walks is switched off, so the first run is agents, name, appearance, layout, voice. */
 const ONBOARDING = '/pair?paused=claude-code,codex,warden,lessons,shells';
