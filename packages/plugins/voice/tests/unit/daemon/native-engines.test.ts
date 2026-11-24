@@ -86,6 +86,7 @@ interface Script {
   probeFails?: boolean;
   nativeLoadFails?: boolean;
   nativeSpeakFails?: boolean;
+  releaseFails?: boolean;
 }
 
 function server(options: { tamper?: string } = {}) {
@@ -126,6 +127,7 @@ class ReplyThreadFake implements ReplyThread {
         if (this.script.probeFails) throw new Error('libstdc++.so.6: cannot open shared object file');
         return { id: 1, ok: true as const, kind: 'probe' as const, version: NATIVE_VERSION };
       case 'release':
+        if (this.script.releaseFails) throw new Error('the worker is gone');
         return { id: 1, ok: true as const, kind: 'release' as const };
       case 'load':
         if (request.engine === 'native' && this.script.nativeLoadFails) throw new Error('the graph would not build');
@@ -400,6 +402,43 @@ describe('the reply voice, native first', () => {
     expect(files.has('voices')).toBe(true);
   });
 
+  test('a saved library that is not the pinned file is found by the probe, deleted, and the install says so rather than running WebAssembly', async () => {
+    const files = new Files();
+    // The same length as the pinned file, so the size check sees nothing: only the hash does.
+    files.held.set('libonnxruntime.so', body('the runtimX'));
+    const { engine } = replyEngine({ files });
+    await engine.install();
+    await engine.settled();
+    const view = await engine.view();
+    expect(view.state).toBe('failed');
+    expect(view.failure?.code).toBe('hash_mismatch');
+    expect(files.has('libonnxruntime.so')).toBe(false);
+  });
+
+  test('a voice on WebAssembly whose upgrade could not start native stays on WebAssembly and names why', async () => {
+    const { engine, files, requests } = replyEngine({ script: { nativeLoadFails: true } });
+    for (const file of REPLY_CATALOG) files.held.set(file.role, body(`reply ${file.role}`));
+    await engine.install();
+    await engine.settled();
+    const view = await engine.view();
+    expect(view.state).toBe('ready');
+    expect(view.runtime?.kind).toBe('wasm');
+    expect(view.runtime?.sentence).toContain('the graph would not build');
+    expect(view.runtime?.upgradeBytes).toBeUndefined();
+    expect(requests.map(r => (r.kind === 'load' ? `load:${r.engine}` : r.kind))).toContain('load:wasm');
+  });
+
+  test('an unload still ends the thread when the worker cannot answer the release', async () => {
+    const { engine, requests } = replyEngine({ script: { releaseFails: true } });
+    await engine.install();
+    await engine.settled();
+    requests.length = 0;
+    await engine.speak('hello');
+    await engine.unload();
+    expect(requests.map(r => r.kind)).toEqual(['load', 'speak', 'release']);
+    expect((await engine.view()).loaded).toBe(false);
+  });
+
   test('Remove deletes the native files with the models', async () => {
     const { engine, files } = replyEngine();
     await engine.install();
@@ -426,6 +465,7 @@ class SpeechThreadFake implements SpeechThread {
         if (this.script.probeFails) throw new Error('libstdc++.so.6: cannot open shared object file');
         return { id: 1, ok: true as const, kind: 'probe' as const, version: NATIVE_VERSION };
       case 'release':
+        if (this.script.releaseFails) throw new Error('the worker is gone');
         return { id: 1, ok: true as const, kind: 'release' as const };
       case 'load':
         if (request.engine === 'native' && this.script.nativeLoadFails) throw new Error('the graph would not build');
@@ -451,8 +491,10 @@ class SpeechThreadFake implements SpeechThread {
   }
 }
 
-function speechEngine(options: { script?: Script; target?: NativeTarget | undefined; tamper?: string } = {}) {
-  const files = new Files();
+function speechEngine(
+  options: { script?: Script; target?: NativeTarget | undefined; tamper?: string; files?: Files } = {},
+) {
+  const files = options.files ?? new Files();
   const net = server(options.tamper === undefined ? {} : { tamper: options.tamper });
   const requests: SpeechCall[] = [];
   const engine = new SpeechEngine({
@@ -524,6 +566,93 @@ describe('the speech engine, native first', () => {
     expect(view.failure?.code).toBe('hash_mismatch');
     expect(files.has('libonnxruntime.so')).toBe(false);
     expect(files.has('encoder')).toBe(false);
+  });
+
+  test('a library that loads but cannot decode ends on WebAssembly with the reason, and the graphs it downloaded are deleted', async () => {
+    const { engine, files, requests } = speechEngine({ script: { nativeLoadFails: true } });
+    await engine.install();
+    await engine.settled();
+    const view = await engine.view();
+    expect(view.state).toBe('ready');
+    expect(view.runtime?.kind).toBe('wasm');
+    expect(view.runtime?.sentence).toContain('the graph would not build');
+    for (const file of TARGET.files) expect(files.has(file.role)).toBe(false);
+    expect(requests.map(r => (r.kind === 'load' ? `load:${r.engine}` : r.kind))).toEqual([
+      'probe',
+      'load:native',
+      'load:wasm',
+      'transcribe',
+    ]);
+  });
+
+  test('a saved library that is not the pinned file is found by the probe and deleted, and the install says so', async () => {
+    const files = new Files();
+    files.held.set('libonnxruntime.so', body('the runtimX'));
+    const { engine } = speechEngine({ files });
+    await engine.install();
+    await engine.settled();
+    const view = await engine.view();
+    expect(view.state).toBe('failed');
+    expect(view.failure?.code).toBe('hash_mismatch');
+    expect(files.has('libonnxruntime.so')).toBe(false);
+  });
+
+  test('a library changed on disk after it was saved is deleted at the next load; with the WebAssembly files there it carries on', async () => {
+    const both = speechEngine();
+    await both.engine.install();
+    await both.engine.settled();
+    expect((await both.engine.view()).runtime?.kind).toBe('native');
+    for (const file of SPEECH_CATALOG) both.files.held.set(file.role, body(`speech ${file.role}`));
+    both.files.held.set('sherpa-wasm', body('speech sherpa-wasm'));
+    both.files.held.set('libonnxruntime.so', body('the runtimX'));
+    const restarted = speechEngine({ files: both.files });
+    expect((await restarted.engine.transcribe(new Float32Array(16_000))).text).toBe('hello');
+    const view = await restarted.engine.view();
+    expect(view.runtime?.kind).toBe('wasm');
+    expect(view.runtime?.sentence).toContain('were not the pinned ones');
+    expect(both.files.has('libonnxruntime.so')).toBe(false);
+    expect(restarted.requests.filter(r => r.kind === 'load').map(r => (r as { engine: string }).engine)).toEqual([
+      'wasm',
+    ]);
+
+    // Without them it cannot load at all, and says to install again.
+    const alone = speechEngine();
+    await alone.engine.install();
+    await alone.engine.settled();
+    alone.files.held.set('libonnxruntime.so', body('the runtimX'));
+    const later = speechEngine({ files: alone.files });
+    await expect(later.engine.transcribe(new Float32Array(16_000))).rejects.toBeInstanceOf(VoiceEngineError);
+  });
+
+  test('a voice installed on WebAssembly can be upgraded; one whose native start failed stays on WebAssembly and says why', async () => {
+    const { engine, files } = speechEngine();
+    for (const file of SPEECH_CATALOG) files.held.set(file.role, body(`speech ${file.role}`));
+    files.held.set('sherpa-wasm', body('speech sherpa-wasm'));
+    const before = await engine.view();
+    expect(before.runtime?.kind).toBe('wasm');
+    expect(before.runtime?.upgradeBytes).toBeGreaterThan(0);
+    expect(before.runtime?.sentence).toContain('can be installed');
+
+    const failing = speechEngine({ script: { nativeLoadFails: true } });
+    for (const file of SPEECH_CATALOG) failing.files.held.set(file.role, body(`speech ${file.role}`));
+    failing.files.held.set('sherpa-wasm', body('speech sherpa-wasm'));
+    await failing.engine.install();
+    await failing.engine.settled();
+    const view = await failing.engine.view();
+    expect(view.state).toBe('ready');
+    expect(view.runtime?.kind).toBe('wasm');
+    expect(view.runtime?.sentence).toContain('the graph would not build');
+    expect(view.runtime?.upgradeBytes).toBeUndefined();
+  });
+
+  test('an unload still ends the thread when the worker cannot answer the release', async () => {
+    const { engine, requests } = speechEngine({ script: { releaseFails: true } });
+    await engine.install();
+    await engine.settled();
+    requests.length = 0;
+    await engine.transcribe(new Float32Array(16_000));
+    await engine.unload();
+    expect(requests.map(r => r.kind)).toEqual(['load', 'transcribe', 'release']);
   });
 
   test('a machine with no native build is exactly the WebAssembly engine it was', async () => {
