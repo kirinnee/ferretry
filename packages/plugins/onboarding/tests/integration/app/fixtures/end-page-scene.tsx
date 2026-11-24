@@ -59,6 +59,15 @@ const STEPS: Record<string, readonly SummaryStep[]> = {
     machine('runtimes', 'Runtimes', 'done'),
     machine('logins', 'Logins', 'found'),
   ],
+  // A Codex whose sign-in was left for later: the machine has no runtime, so Runtimes is left for later too (it is not ticked).
+  norun: [
+    machine('onboarding', 'Machine', 'done'),
+    machine('runtimes', 'Runtimes', 'later'),
+    machine('codex', 'Codex', 'done'),
+    machine('lessons', 'Lessons', 'done'),
+    device('appearance', 'Appearance', 'done'),
+    device('layout', 'Layout', 'done'),
+  ],
   device: [device('passkey', 'Passkey', 'done')],
   bare: [machine('runtimes', 'Runtimes', 'done'), machine('voice', 'Voice', 'later')],
 };

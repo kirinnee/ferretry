@@ -28,6 +28,7 @@
 import { daemonOfClient, useEveryDaemon } from '@ferretry/app';
 import { readPress } from '@ferretry/app/ui';
 import { forgetSetupScanAhead, readSetupScanAhead } from './machine-scan.ts';
+import { useRuntimesRead, withRuntimesRead } from './runtimes-made.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { StepSegmentMemory } from '@ferretry/kernel/contract';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
@@ -456,6 +457,9 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     }
   }, [run.at, run.notNeeded, pages, answered, sendDaemon]);
 
+  // The closing summary ticks Runtimes only when the machine has a runtime (runtimes-made.ts).
+  const runtimesRead = useRuntimesRead(targetRow?.client, run.at === END);
+
   // An offer reached with nothing drawn before it (a finished setup whose project page passed itself over) is passed over too.
   // It is decided here, before the page is drawn (a page draws, and so counts as drawn, the moment it mounts), and kept by the effect.
   const offerPassed = run.at !== END && passesOffer(run.at, drawn.current);
@@ -522,7 +526,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     later,
     shown,
     retry: () => setAttempt(count => count + 1),
-    summary:
+    summary: withRuntimesRead(
       ready === undefined
         ? []
         : [
@@ -558,6 +562,8 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
                 })),
             ),
           ],
+      runtimesRead,
+    ),
     retrySave,
     retryStep,
   };
