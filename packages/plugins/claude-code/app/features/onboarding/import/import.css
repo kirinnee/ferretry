@@ -1,23 +1,4 @@
-/* The import pages' own bits: the runtime-name field. Everything else is the segment's `onboarding.css`. */
-.cc-field {
-  color: var(--fg);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 360px;
-}
-.cc-input {
-  background: var(--surface);
-  border: var(--stroke-control) solid var(--border);
-  border-radius: var(--radius-control);
-  box-sizing: border-box;
-  color: var(--fg);
-  font: inherit;
-  min-height: 44px;
-  padding: 8px 12px;
-  width: 100%;
-}
-
+/* The import pages' own bits (the runtime-name field is the import kit's). Everything else is the segment's `onboarding.css`. */
 /* C59 O5 items 8 and 9: every item found is one row (a tick, a fold, and one status line that is reserved so it never moves the
    row), and one working bar under the list that is always drawn and only moves while the import runs. */
 .cc-items {
