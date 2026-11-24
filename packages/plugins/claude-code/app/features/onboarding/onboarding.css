@@ -161,10 +161,28 @@
     opacity: 0;
   }
 }
-/* C59 O5 item 6: on a desktop the sign-in block (the card and its picture) sits in the vertical middle of the page, between the
-   title and the footer. A phone keeps it at the top so a state change never moves what is under the thumb. */
+/* S-25 (O11 R5): on a desktop the WHOLE sign-in page — the heading and its block — sits in the vertical middle of the room under the
+   progress bar (the bar stays where it is on every page). The heading takes the room above it and the block the room below, so the two
+   stay together; a phone keeps it at the top so a state change never moves what is under the thumb. O9-15: the block reserves one
+   height for every state (the card, the waiting line, "Signed in"), and the note under the footer buttons is drawn over the page, so
+   nothing here changes height when the state changes and the button stays put. */
+.cc-step[data-onboarding-step='claude-code.sign-in'] {
+  min-block-size: 11rem;
+}
 @container (min-width: 900px) {
-  .fy-spf__main:has([data-onboarding-step='claude-code.sign-in']) {
-    margin-block: auto;
+  .fy-spf__page:has([data-onboarding-step='claude-code.sign-in']) {
+    grid-template-rows: auto 1fr auto auto 1fr;
+    /* No gap row: the 20px under the bar and under the heading are the pieces' own margins, so the empty room under the block is not 20px short. */
+    row-gap: 0;
+  }
+  .fy-spf__page:has([data-onboarding-step='claude-code.sign-in']) > .fy-sp-progress,
+  .fy-spf__page:has([data-onboarding-step='claude-code.sign-in']) .fy-spf__head {
+    margin-block-end: 20px;
+  }
+  .fy-spf__page:has([data-onboarding-step='claude-code.sign-in']) .fy-spf__head {
+    grid-row: 3;
+  }
+  .fy-spf__page:has([data-onboarding-step='claude-code.sign-in']) .fy-spf__main {
+    grid-row: 4;
   }
 }

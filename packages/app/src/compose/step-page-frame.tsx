@@ -7,11 +7,11 @@
  *     <ChoiceCards … />
  *   </StepPageFrame>
  *
- * The title, one line, the body, and a demo column on the right at >= 900px of the frame (choices 44% | demo, the demo
- * sticky; above the body, <= 140px tall, on a phone). A page fills the column with `demo` or, from anywhere in its body,
+ * The title, one line, the body, and a demo column on the right at >= 900px of the frame (one reading column of 520..600px
+ * at the same place on every page, with or without a demo | demo, the demo sticky; above the body, <= 140px tall, on a phone). A page fills the column with `demo` or, from anywhere in its body,
  * with `<StepDemo>` (`step-demo.tsx`); a page with neither draws no column.
  * The footer may carry one `note` line above the buttons. It holds Back (ghost), an optional Later (secondary) and Next (primary), in that order: each exactly 8.5rem wide
- * (136px), 44px tall, 12px apart, right-aligned; on a phone the three share the row in equal thirds, sticky at the bottom of the screen. `next.busy` locks Next
+ * (136px), 44px tall, 12px apart, right-aligned to the reading column's edge; the note is drawn over the page just above the footer, never in its height; on a phone the three share the row in equal thirds, sticky at the bottom of the screen. `next.busy` locks Next
  * and shows the spinner. Any Button in the body is the same width and height (one rule in the CSS).
  * Layout and motion live in `step-page-frame.css`; this file chooses no colour.
  */
