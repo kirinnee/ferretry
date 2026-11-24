@@ -384,7 +384,8 @@ describe('solving a token check in a real browser', () => {
     for (let attempt = 0; attempt < 60 && empty.audits.length === 0; attempt += 1) await Bun.sleep(100);
     issued = 'token';
     should(empty.audits[0]?.detail).have.properties({ outcome: 'failed' });
-    should(empty.state.value?.micros).equal(0);
+    // The vendor took the task and answered without a token: it may still bill, so the reservation stays.
+    should(empty.state.value?.micros).equal(1200);
     should((await shown('empty')).field).equal('empty');
     await browser.closePage(SESSION, 'empty');
   }, 90_000);

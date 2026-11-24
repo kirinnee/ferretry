@@ -48,7 +48,9 @@ interface SentBody {
 }
 
 /** A fake CapSolver: what each path answers, and every request body it saw. */
-function fakeVendor(answers: { create?: unknown; results?: unknown[]; fail?: 'status' | 'throw' } = {}) {
+function fakeVendor(
+  answers: { create?: unknown; results?: unknown[]; fail?: 'status' | 'throw' | 'poll-status' | 'poll-throw' } = {},
+) {
   const seen: { path: string; body: SentBody }[] = [];
   const results = [...(answers.results ?? [{ errorId: 0, status: 'ready', solution: { token: TOKEN } }])];
   const fetch: CapSolverPorts['fetch'] = async (url, init) => {
@@ -56,6 +58,11 @@ function fakeVendor(answers: { create?: unknown; results?: unknown[]; fail?: 'st
     const path = new URL(url).pathname;
     seen.push({ path, body: JSON.parse(String(init.body)) as SentBody });
     if (answers.fail === 'status') return new Response('no', { status: 500 });
+    // A fake that takes the task and then goes wrong on the second poll.
+    if (path === '/getTaskResult' && seen.filter(each => each.path === path).length > 1) {
+      if (answers.fail === 'poll-throw') throw new Error(`could not reach ${url} with ${String(init.body)}`);
+      if (answers.fail === 'poll-status') return new Response('no', { status: 502 });
+    }
     const body = path === '/createTask' ? (answers.create ?? { errorId: 0, taskId: 'task-1' }) : results.shift();
     return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
   };
@@ -208,10 +215,6 @@ describe('the CapSolver adapter', () => {
         fakeVendor({ results: [{ errorId: 1, errorCode: 'ERROR_CAPTCHA_UNSOLVABLE' }] }),
         'The solver could not solve the check (ERROR_CAPTCHA_UNSOLVABLE).',
       ],
-      [
-        fakeVendor({ results: [{ errorId: 0, status: 'ready', solution: {} }] }),
-        'The solver answered without a token.',
-      ],
       [fakeVendor({ fail: 'status' }), 'The solver could not be reached.'],
       [fakeVendor({ fail: 'throw' }), 'The solver could not be reached.'],
     ];
@@ -220,13 +223,31 @@ describe('the CapSolver adapter', () => {
       should(await solver.solve(TURNSTILE)).eql({ refused: 'failed', reason });
       should(state.box.value?.micros).equal(0);
     }
-    const slow = capSolver(
-      fakeVendor({ results: Array.from({ length: 5 }, () => ({ errorId: 0, status: 'processing' })) }),
-      {
-        deadlineMilliseconds: 2_000,
-      },
-    );
-    should(await slow.solver.solve(TURNSTILE)).eql({ refused: 'failed', reason: 'The solver did not answer in time.' });
+  });
+
+  it('should keep the reservation once the vendor has a task id: it may still finish and charge', async () => {
+    const processing = Array.from({ length: 5 }, () => ({ errorId: 0, status: 'processing' }));
+    const cases: [ReturnType<typeof fakeVendor>, string, number?][] = [
+      [fakeVendor({ results: processing }), 'The solver did not answer in time.', 2_000],
+      [
+        fakeVendor({ results: [{ errorId: 0, status: 'ready', solution: {} }] }),
+        'The solver answered without a token.',
+      ],
+      [
+        fakeVendor({ results: [{ errorId: 0, status: 'processing' }], fail: 'poll-status' }),
+        'The solver could not be reached.',
+      ],
+      [
+        fakeVendor({ results: [{ errorId: 0, status: 'processing' }], fail: 'poll-throw' }),
+        'The solver could not be reached.',
+      ],
+    ];
+    for (const [vendor, reason, deadline] of cases) {
+      const { solver, state } = capSolver(vendor, deadline === undefined ? {} : { deadlineMilliseconds: deadline });
+      should(await solver.solve(TURNSTILE)).eql({ refused: 'failed', reason });
+      should(state.box.value?.micros).equal(SOLVE_COST_MICROS.turnstile);
+      should(vendor.seen[0]?.path).equal('/createTask');
+    }
   });
 
   it('should refuse, not spend, when the spending record cannot be read', async () => {
@@ -280,6 +301,7 @@ function harness(options: {
   readonly proxy?: ReturnType<typeof captchaProxyOf>;
 }) {
   const injected: { page: string; kind: string; token: string }[] = [];
+  const injectedAt: string[] = [];
   const audits: AuditDraft[] = [];
   const failures: string[] = [];
   const asked: CaptchaSolveRequest[] = [];
@@ -291,6 +313,7 @@ function harness(options: {
     },
     captchaInject: async (pageId, answer) => {
       injected.push({ page: pageId, kind: answer.kind, token: answer.token });
+      injectedAt.push(answer.pageUrl);
       return options.taken ?? true;
     },
   };
@@ -315,7 +338,7 @@ function harness(options: {
     nowMs: () => clock.now,
     failed: message => failures.push(message),
   });
-  return { solving, injected, audits, failures, asked, clock };
+  return { solving, injected, injectedAt, audits, failures, asked, clock };
 }
 
 /** Waits for the background solve the way a tool call that comes later would find it done. */
@@ -370,6 +393,35 @@ describe('solving a check a page shows', () => {
     should(AuditDetailSchema.safeParse(record.detail).success).be.true();
     const text = JSON.stringify(audits);
     for (const secret of [TOKEN, SITE_KEY, KEY, '#/login', 'code=abc']) should(text).not.containEql(secret);
+  });
+
+  it('should hand the token only for the address it was solved for', async () => {
+    const { solving, injectedAt } = harness({ widget: WIDGET });
+    await solving.begin('s1', 'p1');
+    await settle();
+    should(injectedAt).eql([PAGE_URL]);
+  });
+
+  it('should not solve a page again once it is solved, and say so, until the rest period is over', async () => {
+    const { solving, injected, asked, audits, clock } = harness({ widget: WIDGET });
+    should(await solving.begin('s1', 'p1')).eql({ kind: 'solving' });
+    await settle();
+    should(asked).have.length(1);
+    for (let call = 0; call < 3; call += 1) {
+      should(await solving.begin('s1', 'p1')).eql({ kind: 'solved' });
+      await settle();
+    }
+    should(asked).have.length(1);
+    should(injected).have.length(1);
+    should(audits).have.length(1);
+    // Another page of the same session is its own check.
+    should(await solving.begin('s1', 'p2')).eql({ kind: 'solving' });
+    await settle();
+    should(asked).have.length(2);
+    clock.now += 6 * 60_000;
+    should(await solving.begin('s1', 'p1')).eql({ kind: 'solving' });
+    await settle();
+    should(asked).have.length(3);
   });
 
   it('should say a page it cannot solve is the owner’s, and leave that page alone for a while', async () => {
@@ -495,6 +547,14 @@ describe('what an agent is told', () => {
     should(SOLVING_NOTE).containEql('ask your owner');
   });
 
+  it('should say "carry on" for a page the browser has already solved, and not ask the agent to wait', async () => {
+    const told = await solveCheck(solverSaying({ kind: 'solved' }), agent, page, answer);
+    should(told.summary).containEql('already solved');
+    should(told.summary).not.containEql('wait a few seconds');
+    should(told.summary).not.containEql('Do not try to solve');
+    should(told.extra).equal(1);
+  });
+
   it('should keep the takeover and add the reason when nothing can solve it', async () => {
     const told = await solveCheck(
       solverSaying({ kind: 'not-solving', reason: 'The captcha solver has no key yet.' }),
@@ -595,9 +655,10 @@ describe('the page-side answers a worker gives', () => {
       sent.push({ method, ...params });
       return { taken: true };
     });
-    should(await port.captchaInject('p1', { kind: 'turnstile', token: TOKEN })).be.true();
-    should(sent).eql([{ method: 'captchaInject', pageId: 'p1', kind: 'turnstile', token: TOKEN }]);
-    should(await request({ taken: 'yes' }).captchaInject('p1', { kind: 'turnstile', token: TOKEN })).be.false();
-    should(await request(null).captchaInject('p1', { kind: 'turnstile', token: TOKEN })).be.false();
+    const answer = { kind: 'turnstile', token: TOKEN, pageUrl: PAGE_URL } as const;
+    should(await port.captchaInject('p1', answer)).be.true();
+    should(sent).eql([{ method: 'captchaInject', pageId: 'p1', kind: 'turnstile', token: TOKEN, pageUrl: PAGE_URL }]);
+    should(await request({ taken: 'yes' }).captchaInject('p1', answer)).be.false();
+    should(await request(null).captchaInject('p1', answer)).be.false();
   });
 });

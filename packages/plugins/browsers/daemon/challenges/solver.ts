@@ -222,9 +222,9 @@ export class CapSolver implements CaptchaSolverPort {
     if (reserved === 'cap') return { refused: 'cap', reason: CAP_SENTENCE(this.cap) };
     if (reserved === 'unreadable')
       return { refused: 'cap', reason: 'The captcha solver’s spending record could not be read, so it is not used.' };
-    const outcome = await this.run(key, request);
-    // The vendor charges for a solve only: a task that failed gives its reservation back.
-    if ('refused' in outcome) await this.ports.ledger.release(cost).catch(() => undefined);
+    const { outcome, charged } = await this.run(key, request);
+    // The vendor charges for a task it took: only a check it never took, or one it answered with an error, gives its reservation back.
+    if ('refused' in outcome && !charged) await this.ports.ledger.release(cost).catch(() => undefined);
     return outcome;
   }
 
@@ -240,8 +240,16 @@ export class CapSolver implements CaptchaSolverPort {
     return await response.json();
   }
 
-  private async run(key: OwnSecret, request: CaptchaSolveRequest): Promise<CaptchaSolveResult> {
-    const failed = (reason: string): CaptchaSolveResult => ({ refused: 'failed', reason });
+  /** `charged`: the vendor took a task and did not answer with an error, so it may still finish and bill (our deadline, a lost poll, no token). */
+  private async run(
+    key: OwnSecret,
+    request: CaptchaSolveRequest,
+  ): Promise<{ readonly outcome: CaptchaSolveResult; readonly charged: boolean }> {
+    let taken = false;
+    const failed = (reason: string): { outcome: CaptchaSolveResult; charged: boolean } => ({
+      outcome: { refused: 'failed', reason },
+      charged: taken,
+    });
     try {
       const task = taskFor(request);
       const created = (await this.call(key, '/createTask', {
@@ -249,15 +257,21 @@ export class CapSolver implements CaptchaSolverPort {
       })) as VendorAnswer;
       if (created.errorId !== 0 || typeof created.taskId !== 'string')
         return failed(`The solver did not take the check (${codeOf(created.errorCode)}).`);
+      taken = true;
       const deadline = this.ports.deadlineMilliseconds ?? 120_000;
       const every = this.ports.pollMilliseconds ?? 2_000;
       for (let waited = 0; waited <= deadline; waited += every) {
         await this.ports.sleep(every);
         const answer = (await this.call(key, '/getTaskResult', { taskId: created.taskId })) as VendorAnswer;
-        if (answer.errorId !== 0) return failed(`The solver could not solve the check (${codeOf(answer.errorCode)}).`);
+        if (answer.errorId !== 0) {
+          taken = false; // the vendor itself says the task failed: it does not bill a failed task
+          return failed(`The solver could not solve the check (${codeOf(answer.errorCode)}).`);
+        }
         if (answer.status === 'ready') {
           const token = answer.solution?.token ?? answer.solution?.gRecaptchaResponse;
-          return typeof token === 'string' && token !== '' ? { token } : failed('The solver answered without a token.');
+          return typeof token === 'string' && token !== ''
+            ? { outcome: { token }, charged: true }
+            : failed('The solver answered without a token.');
         }
       }
       return failed('The solver did not answer in time.');
@@ -298,6 +312,7 @@ export interface CaptchaSolvingPorts {
 export type CaptchaStart =
   | { readonly kind: 'off' }
   | { readonly kind: 'solving' }
+  | { readonly kind: 'solved' }
   | { readonly kind: 'not-solving'; readonly reason: string };
 
 /** After an attempt that gave nothing, how long the same page is left alone, so a tool loop cannot spend or retry at once. */
@@ -319,7 +334,8 @@ export class CaptchaSolving {
   private readonly inFlight = new Set<string>();
   /** The month a cap record was last written for, so a spent month is said once and not on every tool call. */
   private capSaid = '';
-  private readonly coolingUntil = new Map<string, { readonly until: number; readonly reason: string }>();
+  /** Pages left alone for a while: one the solver gave up on (with why), or one it has solved (the widget's frame stays up until the form is sent). */
+  private readonly coolingUntil = new Map<string, { readonly until: number; readonly start: CaptchaStart }>();
 
   constructor(private readonly ports: CaptchaSolvingPorts) {}
 
@@ -332,8 +348,7 @@ export class CaptchaSolving {
     const key = `${sessionId}\u0000${pageId}`;
     if (this.inFlight.has(key)) return { kind: 'solving' };
     const cooling = this.coolingUntil.get(key);
-    if (cooling !== undefined && cooling.until > this.ports.nowMs())
-      return { kind: 'not-solving', reason: cooling.reason };
+    if (cooling !== undefined && cooling.until > this.ports.nowMs()) return cooling.start;
     const widget = await this.ports
       .onPage(sessionId, pageId, async (page, id) => await page.captchaProbe?.(id))
       .catch(() => undefined);
@@ -353,9 +368,13 @@ export class CaptchaSolving {
   }
 
   private rest(key: string, reason: string): CaptchaStart {
+    return this.remember(key, { kind: 'not-solving', reason });
+  }
+
+  private remember(key: string, start: CaptchaStart): CaptchaStart {
     if (this.coolingUntil.size >= MAX_REMEMBERED_PAGES) this.coolingUntil.clear();
-    this.coolingUntil.set(key, { until: this.ports.nowMs() + COOLDOWN_MS, reason });
-    return { kind: 'not-solving', reason };
+    this.coolingUntil.set(key, { until: this.ports.nowMs() + COOLDOWN_MS, start });
+    return start;
   }
 
   private async solve(
@@ -377,15 +396,15 @@ export class CaptchaSolving {
       .catch((): CaptchaSolveResult => ({ refused: 'failed', reason: 'The solver could not be reached.' }));
     let taken = false;
     if ('token' in result) {
-      const answer: CaptchaAnswer = { kind: widget.kind, token: result.token };
+      const answer: CaptchaAnswer = { kind: widget.kind, token: result.token, pageUrl: widget.pageUrl };
       taken = await this.ports
         .onPage(sessionId, pageId, async (page, id) => (await page.captchaInject?.(id, answer)) === true)
         .catch(() => false);
     }
     const outcome =
       'token' in result ? (taken ? 'solved' : 'failed') : result.refused === 'failed' ? 'failed' : 'refused';
-    if (outcome !== 'solved')
-      this.rest(key, 'token' in result ? 'The page did not take the solver’s answer.' : result.reason);
+    if (outcome === 'solved') this.remember(key, { kind: 'solved' });
+    else this.rest(key, 'token' in result ? 'The page did not take the solver’s answer.' : result.reason);
     const host = hostOf(widget.pageUrl);
     if (host !== undefined)
       await this.record({
@@ -439,6 +458,10 @@ export const HUMAN_CHECK_NOTE =
 export const SOLVING_NOTE =
   ' The page is showing a human check (a captcha). The browser is solving this check now: wait a few seconds and read the page again. If it still shows the check, ask your owner to take the page over in Ferretry and solve it themselves.';
 
+/** What an agent is told for a page the daemon has already solved: nothing new is started, and the takeover is the way out if it still refuses. */
+const SOLVED_NOTE =
+  ' The page showed a human check (a captcha) and the browser has already solved it: carry on (submit the form or read the page again). If the page still refuses, ask your owner to take the page over in Ferretry and solve it themselves.';
+
 /** What the tools service asks: start solving for this page, if it may. */
 export interface CheckSolver {
   begin(sessionId: string, pageId: string): Promise<CaptchaStart>;
@@ -460,7 +483,11 @@ export async function solveCheck<Answer extends { readonly summary: string }>(
   const start = await solver.begin(caller.sessionId, surface.id).catch((): CaptchaStart => ({ kind: 'off' }));
   if (start.kind === 'off') return answer;
   const note =
-    start.kind === 'solving' ? SOLVING_NOTE : `${HUMAN_CHECK_NOTE} Automatic solving is not running: ${start.reason}`;
+    start.kind === 'solving'
+      ? SOLVING_NOTE
+      : start.kind === 'solved'
+        ? SOLVED_NOTE
+        : `${HUMAN_CHECK_NOTE} Automatic solving is not running: ${start.reason}`;
   return { ...answer, summary: answer.summary.replace(HUMAN_CHECK_NOTE, () => note) };
 }
 

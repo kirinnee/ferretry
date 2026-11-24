@@ -142,6 +142,7 @@ export function workerInputFields(request: WorkerRequest): Required<BrowserInput
         pageId,
         kind: answer.kind,
         token: answer.token,
+        pageUrl: answer.pageUrl,
       });
       return (raw as { taken?: unknown } | null)?.taken === true;
     },

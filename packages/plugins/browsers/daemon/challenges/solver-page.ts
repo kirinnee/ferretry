@@ -22,10 +22,12 @@ export interface CaptchaWidget {
   readonly action?: string;
 }
 
-/** What {@link injectCaptchaToken} is handed: the check's kind and the token the solver returned. */
+/** What the solving side hands the worker: the check's kind, the token the solver returned, and the address it was solved for. */
 export interface CaptchaAnswer {
   readonly kind: CaptchaKind;
   readonly token: string;
+  /** The page's address when the check was probed: the token goes in only if the page is still on its origin. */
+  readonly pageUrl: string;
 }
 
 /** Looks for a solvable widget in the page's main document and its frames' addresses. `null` when there is none. */
@@ -84,8 +86,10 @@ export function probeCaptcha(): { kind: CaptchaKind; siteKey: string; action?: s
 /**
  * Hands the solver's token to the widget the way the widget itself would: into its response field (made if the page has not
  * rendered one yet), then into the callback the page registered for it. `true` when the page took the token anywhere.
+ * A page that has moved to another origin since the check was probed (a solve takes up to two minutes) is handed nothing.
  */
-export function injectCaptchaToken(answer: { kind: CaptchaKind; token: string }): boolean {
+export function injectCaptchaToken(answer: { kind: CaptchaKind; token: string; origin: string }): boolean {
+  if (location.origin !== answer.origin) return false;
   const names =
     answer.kind === 'turnstile'
       ? ['cf-turnstile-response']

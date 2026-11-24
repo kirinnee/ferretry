@@ -125,7 +125,7 @@ describe('reading the check a page shows', () => {
 
 describe('handing a token to the widget', () => {
   const inject = (window: Window, kind: Parameters<typeof injectCaptchaToken>[0]['kind']) =>
-    inside(window, () => injectCaptchaToken({ kind, token: TOKEN }));
+    inside(window, () => injectCaptchaToken({ kind, token: TOKEN, origin: new URL(URL_OF_PAGE).origin }));
   const fieldValue = (page: Window, name: string): string | undefined =>
     (page.document.querySelector(`[name="${name}"]`) as unknown as { value?: string } | null)?.value;
 
@@ -222,6 +222,20 @@ describe('handing a token to the widget', () => {
     };
     should(inject(window, 'recaptcha-v3')).be.false();
   });
+
+  it('should hand nothing to a page that is no longer on the origin the check was solved for', () => {
+    const calls: string[] = [];
+    const window = pageOf(
+      `<div class="cf-turnstile" data-sitekey="${SITE}" data-callback="onDone"><input type="hidden" name="cf-turnstile-response"></div>`,
+    );
+    (window as unknown as Record<string, unknown>).onDone = (token: string) => calls.push(token);
+    const asked = inside(window, () =>
+      injectCaptchaToken({ kind: 'turnstile', token: TOKEN, origin: 'https://other.example.test' }),
+    );
+    should(asked).be.false();
+    should(fieldValue(window, 'cf-turnstile-response')).equal('');
+    should(calls).eql([]);
+  });
 });
 
 describe('the worker serving a probe and an inject', () => {
@@ -255,15 +269,21 @@ describe('the worker serving a probe and an inject', () => {
     const serve = serving(window);
     const asked = (params: Record<string, unknown>) =>
       serve(BROWSER_INPUT_WORKER_METHODS.captchaInject, { pageId: 'p1', ...params });
-    should(await asked({ kind: 'turnstile', token: TOKEN })).eql({ taken: true });
-    should(await asked({ kind: 'arkose', token: TOKEN })).eql({ taken: false });
-    should(await asked({ kind: 'turnstile', token: '' })).eql({ taken: false });
-    should(await asked({ kind: 'turnstile', token: 7 })).eql({ taken: false });
+    should(await asked({ kind: 'turnstile', token: TOKEN, pageUrl: URL_OF_PAGE })).eql({ taken: true });
+    should(await asked({ kind: 'turnstile', token: TOKEN, pageUrl: 'https://elsewhere.example.test/x' })).eql({
+      taken: false,
+    });
+    should(await asked({ kind: 'turnstile', token: TOKEN })).eql({ taken: false });
+    should(await asked({ kind: 'turnstile', token: TOKEN, pageUrl: 'not an address' })).eql({ taken: false });
+    should(await asked({ kind: 'arkose', token: TOKEN, pageUrl: URL_OF_PAGE })).eql({ taken: false });
+    should(await asked({ kind: 'turnstile', token: '', pageUrl: URL_OF_PAGE })).eql({ taken: false });
+    should(await asked({ kind: 'turnstile', token: 7, pageUrl: URL_OF_PAGE })).eql({ taken: false });
     should(
       await serving(window, 'throws')(BROWSER_INPUT_WORKER_METHODS.captchaInject, {
         pageId: 'p1',
         kind: 'turnstile',
         token: TOKEN,
+        pageUrl: URL_OF_PAGE,
       }),
     ).eql({
       taken: false,

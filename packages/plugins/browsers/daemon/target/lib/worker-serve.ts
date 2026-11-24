@@ -181,12 +181,16 @@ async function captchaInject(
   pages: InputWorkerPages,
   params: Readonly<Record<string, unknown>>,
 ): Promise<Record<string, unknown>> {
-  const { kind, token } = params;
+  const { kind, token, pageUrl } = params;
   if (!(CAPTCHA_KINDS as readonly unknown[]).includes(kind) || typeof token !== 'string' || token === '')
     return { taken: false };
   try {
+    const origin = typeof pageUrl === 'string' && /^https?:\/\//u.test(pageUrl) ? new URL(pageUrl).origin : undefined;
+    if (origin === undefined) return { taken: false };
     return {
-      taken: await pages.pushPage(params.pageId).evaluate(injectCaptchaToken, { kind: kind as CaptchaKind, token }),
+      taken: await pages
+        .pushPage(params.pageId)
+        .evaluate(injectCaptchaToken, { kind: kind as CaptchaKind, token, origin }),
     };
   } catch {
     return { taken: false };
