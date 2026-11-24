@@ -16,6 +16,7 @@ import {
 } from '@ferretry/app/ui';
 import { useCallback, useState } from 'react';
 import { type McpClient, readMachineMcpServers } from '../lib/client.ts';
+import { useRuntimeNames } from '../lib/runtime-names.ts';
 import { useMcpSignIns } from '../lib/use-sign-ins.ts';
 import { type McpChip, MCP_SEARCH_LABEL, mcpChips, sortedMcpServers, visibleMcpServers } from '../lib/mcp-model.ts';
 import './mcp.css';
@@ -36,6 +37,7 @@ export function McpSettings({ client, now = Date.now, origin }: McpSettingsProps
     [client],
   );
   const { load, reload, refresh } = useContextRead(loader, true);
+  const runtimeNames = useRuntimeNames(client);
   const actions = useMcpServerActions(
     { client, machineName: MACHINE_NAME, now, ...(origin === undefined ? {} : { origin }) },
     refresh,
@@ -92,7 +94,7 @@ export function McpSettings({ client, now = Date.now, origin }: McpSettingsProps
               <li key={server.id} className="border-b border-border-soft" data-context-mcp={server.name}>
                 {/* A server with its own sign-in section leaves Sign in to that section. */}
                 <McpServerRow server={server} actions={actions} nowMs={nowMs} offerSignIn={!section} />
-                <McpServerDetails server={server} />
+                <McpServerDetails server={server} names={runtimeNames} />
                 {section && server.signIn !== undefined ? (
                   <McpSignInSection
                     client={client}
