@@ -71,6 +71,17 @@
   min-height: var(--spf-button-h);
   min-inline-size: var(--spf-button-w);
 }
+/* A page that draws a TOOLBAR in its body (the project page's folder explorer: Up, Go, New folder) opts out with
+   `data-compact-controls`: its buttons keep the shared control size (`--control-h`, `--control-h-sm`; the 44px touch floor
+   still comes through those tokens) instead of the page-action size, so a toolbar fits one row. */
+.fy-spf__body [data-compact-controls] .kt-btn {
+  height: var(--control-h);
+  min-block-size: var(--target-floor, 0px);
+  min-inline-size: var(--target-floor, 0px);
+}
+.fy-spf__body [data-compact-controls] .kt-btn--sm {
+  height: var(--control-h-sm);
+}
 .fy-spf__body :has(> .kt-btn + .kt-btn) {
   gap: 12px;
 }
