@@ -62,7 +62,7 @@ afterAll(async () => {
 });
 
 const WINDOWS = [
-  { name: '1280', width: 1_280, height: 900, phone: false },
+  { name: '1440', width: 1_440, height: 900, phone: false },
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 
@@ -118,14 +118,36 @@ for (const mode of ['light', 'dark'] as const)
         }
       });
 
-      it(`at ${size.name}: the Advanced form is Login, Profile and Name, short, with Create`, async () => {
-        const { tab, close } = await openScene(size, mode, 'view=advanced&logins=4');
+      it(`at ${size.name}: the Advanced form shows Login and Name first, in plain words, with the rest under one More`, async () => {
+        const { tab, close } = await openScene(size, mode, 'view=advanced&logins=4&codex=1');
         try {
           await tab.waitForSelector('#add-runtime-name');
           await tab.waitForTimeout(600);
           await shot(tab, `${size.name}-${mode}-advanced`);
-          expect(await tab.locator('[data-add-runtime-part]').count()).toBe(3);
-          expect(await tab.locator('[data-add-runtime-more]').count()).toBe(0);
+          // Login and Name, then the one "More" that holds the new-login block, sign-in and Profile.
+          expect(await tab.locator('[data-add-runtime-more]').count()).toBe(1);
+          expect(
+            await tab.locator('[data-add-runtime-more]').evaluate(element => (element as HTMLDetailsElement).open),
+          ).toBe(false);
+          expect(await tab.locator('[data-add-runtime-more] #add-runtime-name').count()).toBe(0);
+          expect(await tab.locator('[data-add-runtime-profile-select]').isVisible()).toBe(false);
+          const first = (await tab.locator('[data-add-runtime]').innerText()).replaceAll('\n', ' ');
+          // The login reads as words (never its stored id), and the id has its own line.
+          expect(first).toContain('Claude · Claude.ai sign-in (atomi)');
+          expect(await tab.locator('[data-add-runtime-id]').textContent()).toMatch(/^id /u);
+          for (const slug of ['ferretry-claude', 'ferretry-codex', 'codex-ferretry-codex', 'claude-ferretry-claude'])
+            expect(first.replace(/id [a-z-]+/u, '')).not.toContain(slug);
+          await tab.locator('[data-add-runtime-more] summary').click();
+          await tab.waitForTimeout(300);
+          await shot(tab, `${size.name}-${mode}-advanced-more`);
+          expect(await tab.locator('[data-add-runtime-profile-select]').isVisible()).toBe(true);
+          await tab.locator('[data-add-runtime-profile-select] [role="combobox"]').click();
+          await tab.waitForTimeout(300);
+          await shot(tab, `${size.name}-${mode}-advanced-more-profiles`);
+          const labels = await tab.locator('[role="option"] [data-label]').allTextContents();
+          expect(labels).toContain('Ferretry standard for Claude');
+          expect(labels.filter(label => label.startsWith('ferretry-'))).toEqual([]);
+          await tab.keyboard.press('Escape');
           expect(await tab.locator('[data-change-submit]').count()).toBeGreaterThan(0);
           await noSideways(tab);
         } finally {

@@ -1,9 +1,10 @@
 /**
  * Advanced: add a runtime by hand. Most people never need this: every ready login already has a runtime, so it shows up in
- * New ferret by itself. This is for choosing a different profile or a name of your own, and it is ONE SHORT FORM: **Login**,
- * **Profile** (a few named presets, with the model each starts with shown under it) and **Name**, and one Create button.
- * Everything else (which CLI a login that drives both runs, adding a second runtime on the same login and profile) is
- * collapsed under "More options".
+ * New ferret by itself. This is for choosing a different profile or a name of your own, and it is ONE SHORT FORM: **Login**
+ * and **Name** (optional: left blank it is named after its login), and one Create button. Everything else (a new login, its
+ * sign-in, **Profile** with the model it starts on, which CLI a login that drives both runs) is collapsed under ONE "More"
+ * disclosure. A login, a runtime and a profile are named in plain words (`runtimeDisplayName`); their stored ids show only
+ * on an "id" line.
  *
  * A missing login is added IN PLACE ("+ Add a new login" opens Logins' add-login panel right under the field, through the slot
  * this page offers) and comes back picked; a login that needs sign-in is signed in under it the same way. Profiles are built
@@ -12,19 +13,21 @@
  * already being a runtime (E15), and a clashing or invalid name (E16).
  */
 
-import type { LayeredProfileView, MachineView } from '../../../../contract/index.ts';
+import {
+  type LayeredProfileView,
+  type LoginNameSource,
+  type MachineView,
+  loginDisplayName,
+  profileDisplayName,
+  runtimeAccounts,
+  runtimeDisplayName,
+} from '../../../../contract/index.ts';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { cn } from '../../../ui.ts';
 import { Button, SelectBox } from '../../../ui.ts';
 
-import {
-  credentialEmail,
-  credentialHarnesses,
-  HARNESSES,
-  type HarnessKind,
-  harnessesName,
-} from '../../../lib/logins-view.ts';
+import { credentialHarnesses, HARNESSES, type HarnessKind, harnessesName } from '../../../lib/logins-view.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { currentDaemon, followInApp, tabHref } from '../shell/machine-route.ts';
@@ -124,6 +127,8 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
     candidate => credential === undefined || sameLoginAndProfile(runtimes, credential.id, candidate.name) === undefined,
   );
   const chosenProfile = fitting.find(candidate => candidate.name === draft.profile) ?? unused ?? fitting[0];
+  const accounts = runtimeAccounts(data.credentials.logins);
+  const loginName = (item: LoginNameSource): string => loginDisplayName(item, data.credentials.logins, accounts);
   const set = (patch: Partial<AddRuntimeDraft>): void => setDraft(current => ({ ...current, ...patch }));
   const pickLogin = (id: string): void =>
     setDraft(current => ({ ...current, credentialId: id, profile: null, name: null, addAnother: false, runs: null }));
@@ -164,10 +169,15 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
         {back}
         <div role="status" className="kt-panel flex flex-col gap-1 p-panel" data-add-runtime-done="">
           <p className="m-0 text-row font-semibold text-ok">
-            <span className="font-mono">{made}</span> is ready to launch
+            {runtime === undefined
+              ? made
+              : runtimeDisplayName(runtime, runtimes, runtimeAccounts(data.credentials.logins))}{' '}
+            is ready to launch
           </p>
           <p className="m-0 text-cell leading-base text-muted">
-            {runtime === undefined ? '' : `${harnessName(runtime.harness)} · ${runtime.profile} profile`}
+            {runtime === undefined
+              ? ''
+              : `${harnessName(runtime.harness)} · ${profileDisplayName(runtime.profile)} profile`}
             {signInFirst ? '. Sign in before you launch.' : ''}
           </p>
         </div>
@@ -176,7 +186,7 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
             Back to Runtimes
           </Button>
           <Button type="button" variant="primary" data-add-runtime-finish="open" onClick={() => onFinish(made)}>
-            Open {made}
+            Open this runtime
           </Button>
         </div>
       </section>
@@ -187,11 +197,13 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
     credential === undefined || chosenProfile === undefined
       ? undefined
       : sameLoginAndProfile(runtimes, credential.id, chosenProfile.name);
-  const name =
-    draft.name ??
-    (harness === undefined || chosenProfile === undefined
+  // Blank is "name it after its login": the stored name is made for the person and shown as an id, never typed for them.
+  const suggested =
+    harness === undefined || chosenProfile === undefined
       ? ''
-      : suggestedRuntimeName(harness, chosenProfile.name, runtimes));
+      : suggestedRuntimeName(harness, chosenProfile.name, runtimes);
+  const typed = draft.name ?? '';
+  const name = typed === '' ? suggested : typed;
   const problem = chosenProfile === undefined ? null : runtimeNameProblem(name, runtimes, machineName);
   const ready =
     credential !== undefined &&
@@ -217,13 +229,18 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
   };
 
   const missing = credential === undefined ? [] : harnesses.filter(candidate => !harnessInstalled(machine, candidate));
+  const needsSignIn = credential?.status.word === 'needs_sign_in';
+  const noLogins = credentials.length === 0;
+  // A login is added and signed in right here: Logins contributes both panels to the two slots this
+  // page offers (add-runtime-login-slots.tsx), and without them each falls back to the Sign-ins link.
+  const addLogin = <AddLoginSlot machineName={machineName} open={adding} onOpenChange={setAdding} onAdded={added} />;
 
   return (
     <section className="flex min-w-0 flex-col gap-5" data-add-runtime="">
       {back}
 
       <Field title="Login" name="login" htmlFor="add-runtime-login">
-        {credentials.length === 0 ? (
+        {noLogins ? (
           <p className="m-0 text-cell leading-base text-muted" data-add-runtime-no-logins="">
             There are no logins on {machineName} yet. Add one below: sign in to Claude Code or Codex, or use a provider
             key.
@@ -238,10 +255,8 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
                 onChange={pickLogin}
                 options={credentials.map(item => ({
                   value: item.id,
-                  label: item.id,
-                  hint: `${harnessesName(credentialHarnesses(item))} · ${
-                    item.label ?? (item.store === 'environment' ? item.id : credentialEmail(item))
-                  }`,
+                  label: loginName(item),
+                  hint: `id ${item.id}`,
                 }))}
               />
             </span>
@@ -256,85 +271,32 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
             )}
           </>
         )}
-        {/* A login is added and signed in right here: Logins contributes both panels to the two slots this
-            page offers (add-runtime-login-slots.tsx), and without them each falls back to the Sign-ins link. */}
-        <AddLoginSlot machineName={machineName} open={adding} onOpenChange={setAdding} onAdded={added} />
-        {credential?.status.word === 'needs_sign_in' ? (
-          <div className="m-0 text-cell leading-base text-muted" data-add-runtime-needs-sign-in="">
-            This login needs sign-in before you launch.{' '}
-            <SignInSlot
-              machineName={machineName}
-              login={credential.id}
-              harness={credential.harness}
-              onSignedIn={() => void reload()}
-            />
-          </div>
-        ) : null}
+        {noLogins ? addLogin : null}
       </Field>
 
-      {credential === undefined ? null : (
-        <Field title="Profile" name="profile" htmlFor="add-runtime-profile">
-          {fitting.length === 0 ? (
-            <p className="m-0 text-cell text-muted" data-add-runtime-no-profiles="">
-              No profile on {machineName} applies to {harness === undefined ? 'this login' : harnessName(harness)} yet.
-            </p>
-          ) : (
-            <span className="contents" data-add-runtime-profile-select="">
-              <SelectBox
-                id="add-runtime-profile"
-                label="Profile"
-                value={chosenProfile?.name ?? ''}
-                onChange={next => set({ profile: next, name: null, addAnother: false })}
-                options={fitting.map(profile => ({ value: profile.name, label: profile.name }))}
-              />
-            </span>
-          )}
-          {model === undefined ? null : (
-            <span className="text-meta text-muted" data-add-runtime-model="">
-              Starts on <span className="font-mono">{model}</span>
-            </span>
-          )}
-          <a
-            href={tabHref(currentDaemon(), machineName, 'profiles')}
-            onClick={followInApp}
-            className="inline-flex min-h-control items-center gap-1 self-start text-cell font-semibold text-accent underline"
-            data-add-runtime-profiles-link=""
-          >
-            Build or change profiles in Profiles
-            <ChevronRight size={14} aria-hidden="true" />
-          </a>
-          {duplicate === undefined ? null : (
-            <div role="status" className="kt-panel flex flex-col gap-2 p-panel" data-add-runtime-duplicate="">
-              <p className="m-0 text-row font-semibold text-fg">
-                <span className="font-mono">{duplicate.name}</span> already uses this login and profile.
-              </p>
-              <label className="flex min-h-control items-center gap-2 text-cell text-fg">
-                <input
-                  type="checkbox"
-                  data-duplicate-ok=""
-                  checked={draft.addAnother}
-                  onChange={event => set({ addAnother: event.target.checked })}
-                />
-                Add another anyway
-              </label>
-            </div>
-          )}
-        </Field>
-      )}
-
-      {chosenProfile === undefined ? null : (
-        <Field title="Name" name="name" htmlFor="add-runtime-name">
+      {chosenProfile === undefined || credential === undefined ? null : (
+        <Field title="Name (optional)" name="name" htmlFor="add-runtime-name">
           <input
             id="add-runtime-name"
-            className="kt-input font-mono"
+            className="kt-input"
             autoComplete="off"
             spellCheck={false}
-            value={name}
+            value={typed}
+            placeholder={loginName(credential)}
             aria-invalid={problem !== null}
             onChange={event => set({ name: event.target.value.trim() })}
           />
           {problem === null ? (
-            <span className="text-meta text-muted">Letters, digits and dashes. You type this to launch it.</span>
+            <>
+              <span className="text-meta text-muted" data-add-runtime-name-help="">
+                {typed === ''
+                  ? 'Leave blank to name it after its login.'
+                  : 'Letters, digits and dashes. You type this to launch it.'}
+              </span>
+              <span className="break-all text-meta text-faint" data-add-runtime-id="">
+                id <span className="font-mono">{name}</span>
+              </span>
+            </>
           ) : (
             <span className="text-meta text-err" data-runtime-name-problem="">
               {problem.message}{' '}
@@ -353,37 +315,111 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
         </Field>
       )}
 
-      {dual ? (
-        <details className="min-w-0" data-add-runtime-more="">
-          <summary className="min-h-control cursor-pointer text-cell font-semibold text-fg">More options</summary>
-          <div className="mt-2 flex flex-col gap-2" data-add-runtime-part="runs">
-            <p className="m-0 text-cell leading-base text-muted" data-add-runtime-runs={harness}>
-              This login drives both CLIs. The runtime runs one of them
-              {draft.runs === null ? ' — Claude Code until you choose' : ''}.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {harnesses.map(candidate => (
-                <label
-                  key={candidate}
-                  className={cn(
-                    'kt-panel flex min-h-control min-w-0 cursor-pointer items-center gap-2 px-3 py-2',
-                    candidate === harness && 'border-accent',
-                  )}
-                  data-add-runtime-runs-option={candidate}
-                >
-                  <input
-                    type="radio"
-                    name="add-runtime-runs"
-                    checked={candidate === harness}
-                    onChange={() => set({ runs: candidate, profile: null, name: null, addAnother: false })}
+      {duplicate === undefined ? null : (
+        <div role="status" className="kt-panel flex flex-col gap-2 p-panel" data-add-runtime-duplicate="">
+          <p className="m-0 text-row font-semibold text-fg">
+            <span data-add-runtime-duplicate-name="">{runtimeDisplayName(duplicate, runtimes, accounts)}</span> already
+            uses this login and profile.
+          </p>
+          <label className="flex min-h-control items-center gap-2 text-cell text-fg">
+            <input
+              type="checkbox"
+              data-duplicate-ok=""
+              checked={draft.addAnother}
+              onChange={event => set({ addAnother: event.target.checked })}
+            />
+            Add another anyway
+          </label>
+        </div>
+      )}
+
+      {credential === undefined ? null : (
+        <details className="min-w-0" data-add-runtime-more="" open={adding || needsSignIn}>
+          <summary className="min-h-control cursor-pointer text-cell font-semibold text-fg">More</summary>
+          <div className="mt-2 flex flex-col gap-5">
+            <div className="flex flex-col gap-2" data-add-runtime-part="login-more">
+              {addLogin}
+              {needsSignIn ? (
+                <div className="m-0 text-cell leading-base text-muted" data-add-runtime-needs-sign-in="">
+                  This login needs sign-in before you launch.{' '}
+                  <SignInSlot
+                    machineName={machineName}
+                    login={credential.id}
+                    harness={credential.harness}
+                    onSignedIn={() => void reload()}
                   />
-                  <span className="text-row font-semibold text-fg">{harnessName(candidate)}</span>
-                </label>
-              ))}
+                </div>
+              ) : null}
             </div>
+
+            <Field title="Profile" name="profile" htmlFor="add-runtime-profile">
+              {fitting.length === 0 ? (
+                <p className="m-0 text-cell text-muted" data-add-runtime-no-profiles="">
+                  No profile on {machineName} applies to {harness === undefined ? 'this login' : harnessName(harness)}{' '}
+                  yet.
+                </p>
+              ) : (
+                <span className="contents" data-add-runtime-profile-select="">
+                  <SelectBox
+                    id="add-runtime-profile"
+                    label="Profile"
+                    value={chosenProfile?.name ?? ''}
+                    onChange={next => set({ profile: next, name: null, addAnother: false })}
+                    options={fitting.map(profile => ({
+                      value: profile.name,
+                      label: profileDisplayName(profile.name),
+                      ...(profileDisplayName(profile.name) === profile.name ? {} : { hint: `id ${profile.name}` }),
+                    }))}
+                  />
+                </span>
+              )}
+              {model === undefined ? null : (
+                <span className="text-meta text-muted" data-add-runtime-model="">
+                  Starts on <span className="font-mono">{model}</span>
+                </span>
+              )}
+              <a
+                href={tabHref(currentDaemon(), machineName, 'profiles')}
+                onClick={followInApp}
+                className="inline-flex min-h-control items-center gap-1 self-start text-cell font-semibold text-accent underline"
+                data-add-runtime-profiles-link=""
+              >
+                Build or change profiles in Profiles
+                <ChevronRight size={14} aria-hidden="true" />
+              </a>
+            </Field>
+
+            {dual ? (
+              <div className="flex flex-col gap-2" data-add-runtime-part="runs">
+                <p className="m-0 text-cell leading-base text-muted" data-add-runtime-runs={harness}>
+                  This login drives both CLIs. The runtime runs one of them
+                  {draft.runs === null ? ' — Claude Code until you choose' : ''}.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {harnesses.map(candidate => (
+                    <label
+                      key={candidate}
+                      className={cn(
+                        'kt-panel flex min-h-control min-w-0 cursor-pointer items-center gap-2 px-3 py-2',
+                        candidate === harness && 'border-accent',
+                      )}
+                      data-add-runtime-runs-option={candidate}
+                    >
+                      <input
+                        type="radio"
+                        name="add-runtime-runs"
+                        checked={candidate === harness}
+                        onChange={() => set({ runs: candidate, profile: null, name: null, addAnother: false })}
+                      />
+                      <span className="text-row font-semibold text-fg">{harnessName(candidate)}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         </details>
-      ) : null}
+      )}
 
       <ChangeApplyPanel
         machineName={machineName}

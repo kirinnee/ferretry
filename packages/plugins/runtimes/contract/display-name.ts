@@ -145,6 +145,56 @@ export const runtimeDisplayName = (
   const account = accounts.get(source.credential.id);
   if (account !== undefined && twins.every(twin => accounts.get(twin.credential.id) !== account))
     return `${base} — ${account}`;
-  const profileTellsApart = source.profile !== undefined && twins.every(twin => twin.profile !== source.profile);
-  return profileTellsApart ? `${base} — ${source.profile} profile` : `${base} — ${source.name}`;
+  const { profile } = source;
+  return profile !== undefined && twins.every(twin => twin.profile !== profile)
+    ? `${base} — ${profileDisplayName(profile)} profile`
+    : `${base} — ${source.name}`;
+};
+
+/** What {@link loginDisplayName} reads of a login: the fields `GET /v1/logins` already carries. Never a credential. */
+export interface LoginNameSource extends LoginAccountSource {
+  readonly harness: HarnessKey;
+  readonly store: CredentialStore;
+  /** The owner's own label for the login. */
+  readonly label?: string | undefined;
+  /** An environment login's preset: the provider it is a key for. */
+  readonly environment?: { readonly preset?: { readonly label: string } | undefined } | undefined;
+}
+
+/** A login read as a runtime made from it, so one set of words names both (a runtime's id is its login's id). */
+const loginAsRuntime = (login: LoginNameSource): RuntimeNameSource => ({
+  name: login.id,
+  harness: login.harness,
+  credential: { id: login.id, store: login.store, label: login.label },
+  ...(login.environment?.preset === undefined
+    ? {}
+    : { models: { catalog: { label: login.environment.preset.label } } }),
+});
+
+/**
+ * A login named the way its runtime is: `Claude · your terminal sign-in`, `Claude · Anthropic (work)`, told apart from
+ * its peers by account, never by its stored id. The id stays out of the name; a surface shows it on an "id" line.
+ */
+export const loginDisplayName = (
+  login: LoginNameSource,
+  others: readonly LoginNameSource[] = [],
+  accounts: RuntimeAccounts = NO_ACCOUNTS,
+): string =>
+  runtimeDisplayName(
+    loginAsRuntime(login),
+    others.map(loginAsRuntime),
+    accounts.size > 0 ? accounts : runtimeAccounts([login, ...others]),
+  );
+
+/**
+ * A profile in words. The built-ins carry a plumbing name (`ferretry-codex`, `ferretry-claude-pinned-opus-4`); a profile
+ * the owner made is shown as they named it.
+ */
+export const profileDisplayName = (name: string): string => {
+  const standard = /^ferretry-(claude-code|claude|codex)$/u.exec(name);
+  if (standard?.[1] !== undefined) return `Ferretry standard for ${standard[1] === 'codex' ? 'Codex' : 'Claude'}`;
+  const pinned = /^ferretry-(claude-code|claude|codex)-pinned-(.+)$/u.exec(name);
+  return pinned?.[1] === undefined || pinned[2] === undefined
+    ? name
+    : `Ferretry standard for ${pinned[1] === 'codex' ? 'Codex' : 'Claude'}, pinned to ${pinned[2]}`;
 };

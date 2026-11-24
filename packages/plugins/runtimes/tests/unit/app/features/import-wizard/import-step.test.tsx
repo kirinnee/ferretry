@@ -164,9 +164,7 @@ describe('everything found', () => {
     );
     const root = view.container;
     expect(root.querySelector('[data-runtime-name]')).toBeNull();
-    expect(text(root, '[data-duplicate-note]')).toBe(
-      'A runtime named claude-default already uses this setup, so no second one is added.',
-    );
+    expect(text(root, '[data-duplicate-note]')).toBe('A runtime already uses this setup, so no second one is added.');
     expect(root.querySelector<HTMLButtonElement>('[data-change-submit]')?.disabled).toBe(false);
     await click(root, '[data-change-submit]');
     await settle();
@@ -197,6 +195,12 @@ describe('everything found', () => {
       calls,
     );
     const root = view.container;
+    // The stored name is an id: it sits under "More" and is called an id, never offered as a name to pick (Q8a).
+    const more = must(root.querySelector<HTMLDetailsElement>('[data-runtime-name-more]'), 'More');
+    expect(more.open).toBe(false);
+    expect(more.querySelector('summary')?.textContent).toBe('More');
+    expect(more.textContent).toContain('Runtime id');
+    expect(root.textContent).not.toContain('Runtime name');
     const name = must(root.querySelector<HTMLInputElement>('[data-runtime-name]'), 'name');
     await interact(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(name, 'work-claude');
@@ -208,9 +212,7 @@ describe('everything found', () => {
     await click(root, '[data-tool-reopen="claude-code"]');
     await settle();
     expect(root.querySelector('[data-runtime-name]')).toBeNull();
-    expect(text(root, '[data-duplicate-note]')).toBe(
-      'A runtime named work-claude already uses this setup, so no second one is added.',
-    );
+    expect(text(root, '[data-duplicate-note]')).toBe('A runtime already uses this setup, so no second one is added.');
     expect(root.querySelector<HTMLButtonElement>('[data-change-submit]')?.disabled).toBe(false);
     await click(root, '[data-change-submit]');
     await settle();
