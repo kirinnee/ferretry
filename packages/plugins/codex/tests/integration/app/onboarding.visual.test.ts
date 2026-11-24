@@ -44,7 +44,7 @@ const PAGES = [
   { page: 'sign-in-link', cards: 0, demo: false },
   { page: 'sign-in-checking', cards: 0, demo: false },
   { page: 'import-choice', cards: 3, demo: true },
-  { page: 'conversations', cards: 2, demo: true },
+  { page: 'conversations', cards: 0, demo: true },
   { page: 'permission', cards: 2, demo: true },
   { page: 'permission-auto', cards: 2, demo: true },
   { page: 'permission-unknown', cards: 0, demo: false },
@@ -321,23 +321,6 @@ describe('r11 O5: permission saves on Next only', () => {
     await context.close();
   }, 60_000);
 
-  it('conversations: a held edit cleared in Settings after the page opened: the next Next writes exactly once', async () => {
-    const context = await newContext(VIEWPORTS[1], 'light');
-    const tab = await open(context, 'conversations', 'light', '&pending=1');
-    await tab.locator('[data-choice="off"]').click();
-    await tab.locator('[data-step-next]').click();
-    await tab.waitForFunction(() => window.__nextError !== '');
-    expect(await tab.evaluate(() => window.__nextError)).toContain('waiting for your OK');
-    expect(await puts(tab)).toEqual([]);
-    await tab.evaluate(() => window.__clearHeld());
-    await tab.locator('[data-step-next]').click();
-    await tab.waitForFunction(() => window.__puts.length > 0);
-    await tab.waitForTimeout(300);
-    expect(await puts(tab)).toHaveLength(1);
-    expect(await tab.evaluate(() => window.__nextError)).toBe('');
-    await context.close();
-  }, 60_000);
-
   it('a file the page cannot read safely offers no card and writes nothing', async () => {
     const context = await newContext(VIEWPORTS[1], 'light');
     const tab = await open(context, 'permission-unknown', 'light');
@@ -348,17 +331,14 @@ describe('r11 O5: permission saves on Next only', () => {
     await context.close();
   }, 60_000);
 
-  it('conversations: a click writes nothing; Next writes hostHistory once', async () => {
+  it('conversations: no choice and nothing to press; Next writes nothing', async () => {
     const context = await newContext(VIEWPORTS[1], 'light');
     const tab = await open(context, 'conversations', 'light');
-    await tab.locator('[data-choice="off"]').click();
-    await tab.waitForSelector('[data-choice="off"][data-selected="true"]');
-    expect(await puts(tab)).toEqual([]);
+    expect(await tab.locator('[data-choice], input[type="radio"]').count()).toBe(0);
+    expect(await tab.locator('[data-conversations-words]').count()).toBe(1);
     await tab.locator('[data-step-next]').click();
-    await tab.waitForFunction(() => window.__puts.length > 0);
-    const written = await puts(tab);
-    expect(written).toHaveLength(1);
-    expect(written[0]?.text).toContain('hostHistory: false');
+    await tab.waitForTimeout(300);
+    expect(await puts(tab)).toEqual([]);
     await context.close();
   }, 60_000);
 });

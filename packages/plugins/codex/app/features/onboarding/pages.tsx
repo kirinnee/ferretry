@@ -21,7 +21,7 @@ const PAGES: Readonly<Record<string, Page>> = {
   ...IMPORT_PAGES,
   installed: (client, step) => createElement(InstalledPage, { client, step }),
   'sign-in': (client, step) => createElement(SignInPage, { client, step }),
-  'import-choice': (_client, step) => createElement(ImportChoicePage, { step }),
+  'import-choice': (client, step) => createElement(ImportChoicePage, { client, step }),
   permission: (client, step) => createElement(PermissionPage, { client, step }),
   ready: (client, step) => createElement(RuntimeReadyPage, { client, harness: 'codex', label: 'Codex', step }),
 };

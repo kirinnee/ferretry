@@ -2,7 +2,6 @@
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { WAITING } from '../../../../app/features/onboarding/config-choice.ts';
-import { ConversationsPage } from '../../../../app/features/onboarding/import/conversations-page.tsx';
 import { PermissionPage } from '../../../../app/features/onboarding/permission-page.tsx';
 import { type Call, scripted, stepHarness } from '../../../fixtures/onboarding/harness.ts';
 
@@ -132,21 +131,5 @@ describe('useConfigChoice: a file with a change held for the owner', () => {
     await settle();
     await interact(() => run.runCommit());
     expect(count('PUT /v1/config/file')).toBe(1);
-  });
-
-  it('says so too on the conversations page', async () => {
-    const calls: Call[] = [];
-    const run = stepHarness();
-    const view = await mount(
-      <ConversationsPage
-        client={scripted({ 'GET /v1/config/file': { ...file('hostHistory: true\n', 'e1'), state: 'pending' } }, calls)}
-        step={run.step}
-      />,
-    );
-    mounted.push(view);
-    await settle();
-    expect(view.container.querySelector('[data-config-waiting]')?.textContent).toBe(WAITING);
-    expect(run.hasCommit).toBe(true); // Next re-reads a held file rather than going on over it
-    expect(calls.map(call => call.route)).toEqual(['GET /v1/config/file']);
   });
 });

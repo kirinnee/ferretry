@@ -20,6 +20,6 @@ export const IMPORT_PAGES: Readonly<Record<string, Page>> = {
   'import-instructions': kindPage('import-instructions'),
   'import-skills': kindPage('import-skills'),
   'import-mcp': kindPage('import-mcp'),
-  conversations: (client, step) => createElement(ConversationsPage, { client, step }),
+  conversations: (_client, step) => createElement(ConversationsPage, { step }),
   'import-run': (client, step) => createElement(ImportRunPage, { client, step }),
 };

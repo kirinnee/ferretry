@@ -214,8 +214,7 @@ export interface ConfigFile {
 }
 
 /** What the footer says when a write is refused because an earlier change to the file still waits for the owner. */
-export const PENDING_WORDS =
-  'A change to this file is waiting for your OK — confirm or discard it in Settings > Files first.';
+const PENDING_WORDS = 'A change to this file is waiting for your OK — confirm or discard it in Settings > Files first.';
 
 /** The mode this file says, or `null` when it cannot be known here (withheld, unparsable, or an unknown mode): then nothing is written. */
 export const currentMode = (file: ConfigFile): PermissionMode | null => (file.withheld ? null : modeOf(file.text));

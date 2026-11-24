@@ -5,7 +5,7 @@
  *
  *   ?theme=<family>-<mode>                     the first look (the mode is read from it)
  *   ?tool=claude-code|codex                    which tool's page (default claude-code)
- *   ?state=ready|many|none|blocked|unread      what the machine says about that tool's runtimes (default ready)
+ *   ?state=ready|own|many|none|blocked|unread  what the machine says about that tool's runtimes (default ready: a terminal sign-in)
  */
 import { StepPageFrame } from '@ferretry/app';
 import { LivingBackground } from '@ferretry/app/ui';
@@ -22,11 +22,11 @@ const tool = params.get('tool') === 'codex' ? 'codex' : 'claude-code';
 const label = tool === 'codex' ? 'Codex' : 'Claude Code';
 const state = params.get('state') ?? 'ready';
 
-const row = (name: string, available = true) => ({
+const row = (name: string, available = true, store: 'host' | 'ferretry' = 'host') => ({
   id: name,
   name,
   harness: tool,
-  credential: { id: name, store: 'host' },
+  credential: { id: name, store },
   launch: available ? { available: true } : { available: false, reason: 'Sign in to launch.' },
 });
 
@@ -36,7 +36,9 @@ const client = {
     if (state === 'unread') throw new Error('unreachable');
     if (state === 'none') return { runtimes: [] };
     if (state === 'blocked') return { runtimes: [row(`${label} (work)`, false)] };
-    if (state === 'many') return { runtimes: [row(`${label} (personal)`), row(`${label} (work)`)] };
+    if (state === 'many')
+      return { runtimes: [row(`${label} (personal)`, true, 'ferretry'), row(`${label} (work)`, true, 'ferretry')] };
+    if (state === 'own') return { runtimes: [row(`${label} (personal)`, true, 'ferretry')] };
     return { runtimes: [row(`${label} (your terminal sign-in)`)] };
   },
 } as unknown as PluginClient;
