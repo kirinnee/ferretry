@@ -134,9 +134,7 @@ function RunBody({
             {nothingToImport ? null : model.duplicateOf === null ? (
               <RuntimeNameField value={typed} invalid={problem !== null} disabled={changes.busy} onChange={setName} />
             ) : (
-              <StepLine data-import-existing="">
-                {`A runtime named ${model.duplicateOf} already uses this setup, so no second one is added.`}
-              </StepLine>
+              <StepLine data-import-existing="">A runtime already uses this setup, so no second one is added.</StepLine>
             )}
             {problem === null ? null : (
               <StepLine role="alert" data-import-name-problem="">
