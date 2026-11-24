@@ -5,7 +5,7 @@
  * What the person leaves out is a SET OF ITEM IDS (`claude-code:mcp:notes`): the wizard sends it as `setup.import` `skip`, so
  * the daemon leaves each out of the plan and everything only it would have brought.
  */
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { z } from 'zod';
 import {
   type HarnessScan,
@@ -18,9 +18,11 @@ import {
   type AccountChange,
 } from '../../../contract/index.ts';
 import { buildImportChange } from './change.ts';
-import { becomes, GITHUB_TOKEN_NAMES, HARNESS_LABEL } from './mapping-words.ts';
+import { becomes, GITHUB_TOKEN_NAMES } from './mapping-words.ts';
+import { harnessName, harnessWords, supportedHarnessKeys } from '../../../contract/harness-words.ts';
 
-export const HARNESSES: readonly KnownHarnessKey[] = ['claude-code', 'codex'];
+/** The harnesses the import wizard walks, in the order it shows them: every one Runtimes has behaviour for. */
+export const HARNESSES: readonly HarnessKey[] = supportedHarnessKeys();
 
 /** The part of each tool's own update read the header reads: the installed version, nothing else. */
 const InstalledVersionReadSchema = z.looseObject({
@@ -73,7 +75,7 @@ export interface LeftAlone {
 type ToolStage = 'not-installed' | 'needs-sign-in' | 'ready';
 
 export interface ToolModel {
-  readonly harness: KnownHarnessKey;
+  readonly harness: HarnessKey;
   readonly label: string;
   readonly installed: boolean;
   readonly version: string | null;
@@ -106,7 +108,7 @@ const itemId = (id: () => string): ImportItemId | null => {
  * What the host holds for this tool, as choices. A thing already brought in whose source has CHANGED is offered once, in the
  * "Changed since" group, so it is not listed a second time here as if it were new (`updated` are those references).
  */
-const groupsOf = (harness: KnownHarnessKey, scan: HarnessScan, updated: readonly string[]): readonly FoundGroup[] => {
+const groupsOf = (harness: HarnessKey, scan: HarnessScan, updated: readonly string[]): readonly FoundGroup[] => {
   const groups: FoundGroup[] = [];
   const refreshed = (kind: 'instructions' | 'mcp' | 'skills', name?: string): boolean =>
     updated.some(reference =>
@@ -193,13 +195,13 @@ const groupsOf = (harness: KnownHarnessKey, scan: HarnessScan, updated: readonly
 };
 
 /** The model for one tool. A tool the scan did not list reads as not installed. */
-export function toolModel(harness: KnownHarnessKey, scan: SetupScan, version: string | null): ToolModel {
+export function toolModel(harness: HarnessKey, scan: SetupScan, version: string | null): ToolModel {
   const found = scan.harnesses.find(entry => entry.harness === harness);
   const tool = scan.tools.find(entry => entry.harness === harness);
   const installed = found?.installed ?? tool?.installed ?? false;
   const signedIn = found !== undefined && SIGNED_IN.has(found.account.state);
   // An update belongs to the tool whose own files it is read from (the scan names each source by its path).
-  const home = harness === 'claude-code' ? '.claude' : '.codex';
+  const home = harnessWords(harness)?.hostFolder ?? harness;
   const ownSources = [found?.instructions?.source, found?.settings?.source];
   const updates = scan.updates
     .filter(update => update.sources.some(source => ownSources.includes(source) || source.includes(home)))
@@ -215,7 +217,7 @@ export function toolModel(harness: KnownHarnessKey, scan: SetupScan, version: st
   const suggested = scan.runtimes.find(entry => entry.harness === harness)?.name;
   return {
     harness,
-    label: HARNESS_LABEL[harness],
+    label: harnessName(harness),
     installed,
     version,
     stage: !installed ? 'not-installed' : signedIn ? 'ready' : 'needs-sign-in',
@@ -287,7 +289,7 @@ export const counts = (
 
 /** The old onboarding steps a finished tool settles: its harness step and the sign-in (the runtime is named on the import itself). */
 export const stepsSettledBy = (
-  harness: KnownHarnessKey,
+  harness: HarnessKey,
 ): readonly {
   readonly plugin: string;
   readonly stepId: string;

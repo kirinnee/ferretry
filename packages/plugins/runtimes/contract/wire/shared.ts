@@ -8,15 +8,18 @@
  * today's wire, or loosened to a documented placeholder. Every placeholder is listed in the port's hand-over; when the
  * owner's contract lands, the port compares and (where §2.4 allows) swaps to its import.
  *
- * COPIED, not loosened: KnownHarnessKey (Claude Code / Codex key), CredentialStore, CredentialStatusWord, Disabled,
+ * COPIED, not loosened: HarnessKey (a harness plugin's key), CredentialStore, CredentialStatusWord, Disabled,
  * GrantRefusal, BrowserMode, BrowserFirewallFailure, BrowserPortsSetting, AutoResumeSummary, LocalModels, SecretName.
  * PLACEHOLDER (looser than today): BrowserProxySetting, CatalogProvenance, CredentialView.
  */
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { KnownHarnessKeySchema } from '@ferretry/core-ferrets/contract';
+import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 
-export { KnownHarnessKeySchema, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema };
+/** The most harnesses one request may name: a bound on a list, not the number of harnesses a machine has. */
+export const MAX_HARNESSES = 32;
+
+export { HarnessKeySchema, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema };
 
 // ─── Logins ──────────────────────────────────────────────────────────────────────────────────────────────────────
 

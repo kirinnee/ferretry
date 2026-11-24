@@ -94,7 +94,7 @@ describe('runtime model catalog parsing', () => {
   });
 
   it('should reject malformed catalogs, choices, and effort ids', () => {
-    should(() => parseRuntimeModelCatalog({ harness: 'other', source: 'codex-app-server', choices: [] })).throw(
+    should(() => parseRuntimeModelCatalog({ harness: 'Not A Key', source: 'codex-app-server', choices: [] })).throw(
       /invalid runtime model catalog/u,
     );
     should(() =>

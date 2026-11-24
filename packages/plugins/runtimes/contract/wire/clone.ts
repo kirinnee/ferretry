@@ -4,7 +4,7 @@
  * The runnable-listing types are from `fleet-clone-review.ts`; the pure functions that build them stay with the port.
  */
 import { z } from 'zod';
-import { KnownHarnessKeySchema } from './shared.ts';
+import { HarnessKeySchema } from './shared.ts';
 import {
   CONFIG_FILE_MAX_BYTES,
   CloneableSecretNameSchema,
@@ -74,7 +74,7 @@ const CloneRunnableSchema = z.strictObject({
   reference: NonEmptyStringSchema,
   kind: z.enum(['instructions', 'mcp', 'skills', 'settings', 'hooks']),
   name: NonEmptyStringSchema,
-  harness: KnownHarnessKeySchema.optional(),
+  harness: HarnessKeySchema.optional(),
   entries: z.array(CloneRunnableEntrySchema),
 });
 

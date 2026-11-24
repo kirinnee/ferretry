@@ -2,7 +2,7 @@ import { tmpdir } from 'node:os';
 import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
-import { RuntimeIdSchema, type RuntimesApi } from '@ferretry/plugin-runtimes/contract';
+import { isSupportedHarnessKey, RuntimeIdSchema, type RuntimesApi } from '@ferretry/plugin-runtimes/contract';
 import {
   DEFAULT_ROUTING_FILE,
   type FerretPackPatchResult,
@@ -135,7 +135,10 @@ export default implementDaemon(manifest, {
         const id = RuntimeIdSchema.safeParse(name);
         const found = id.success ? await runtimes()?.get(id.data) : undefined;
         // The check (`RuntimeLaunchProbe`) and the start both name the runtime by its name.
-        return found === undefined ? undefined : { wrapper: found.id, harness: found.harness };
+        // A runtime on a harness Packs has no routing for is not one it can clean up with.
+        return found === undefined || !isSupportedHarnessKey(found.harness)
+          ? undefined
+          : { wrapper: found.id, harness: found.harness };
       },
       probeSettings: async () => config().probe,
       probe: async (request, ttlMs) => await probes.probe(request, ttlMs),

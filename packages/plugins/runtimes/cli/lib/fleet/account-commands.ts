@@ -1,5 +1,6 @@
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import type { VerbInvocation } from '@ferretry/kernel/manifest';
+import { harnessWords, supportedHarnessKeys } from '../../../contract/harness-words.ts';
 import { AccountCommandError, type AccountWriteOptions } from './account-ports.ts';
 
 /** The flags as the shell parsed them (`--dry-run` is `dry-run`; `-y` is `y`), read without guessing a type. */
@@ -34,11 +35,13 @@ export const writeFlags = (options: Options): AccountWriteOptions => ({
 });
 
 /** A tool as a person typed it. `claude` is Claude Code. */
-export function parseHarness(value: string): KnownHarnessKey {
-  const harness = value.trim().toLowerCase();
-  if (harness === 'claude' || harness === 'claude-code') return 'claude-code';
-  if (harness === 'codex') return 'codex';
-  throw new AccountCommandError(`"${value}" is not a tool this machine knows: use claude or codex.`);
+export function parseHarness(value: string): HarnessKey {
+  const word = value.trim().toLowerCase();
+  const keys = supportedHarnessKeys();
+  const named = keys.find(key => key === word || harnessWords(key)?.commandWord === word);
+  if (named !== undefined) return named;
+  const commands = keys.map(key => harnessWords(key)?.commandWord ?? key);
+  throw new AccountCommandError(`"${value}" is not a tool this machine knows: use ${commands.join(' or ')}.`);
 }
 
 /** A required positional, or a refusal naming what is missing. */

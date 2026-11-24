@@ -38,9 +38,10 @@ import {
   CredentialViewSchema,
   DisabledSchema,
   GrantRefusalSchema,
-  KnownHarnessKeySchema,
+  HarnessKeySchema,
   InstantSchema,
   LocalModelsSchema,
+  MAX_HARNESSES,
   NonEmptyStringSchema,
   NonNegativeIntegerSchema,
 } from './shared.ts';
@@ -97,7 +98,7 @@ export type CatalogAct = z.infer<typeof CatalogActSchema>;
 // ── Machine ──────────────────────────────────────────────────────────────────────────────────────
 
 export const MachineToolSchema = z.strictObject({
-  harness: KnownHarnessKeySchema,
+  harness: HarnessKeySchema,
   /** "Claude Code", "Codex". */
   label: NonEmptyStringSchema,
   installed: z.boolean(),
@@ -294,7 +295,7 @@ export type ComponentUsage = z.infer<typeof ComponentUsageSchema>;
 
 /** A component one harness honours only in part (K5, E22). */
 export const PartialSupportSchema = z.strictObject({
-  harness: KnownHarnessKeySchema,
+  harness: HarnessKeySchema,
   reason: NonEmptyStringSchema,
 });
 
@@ -321,7 +322,7 @@ export const ComponentViewSchema = z.strictObject({
   kind: ComponentKindSchema,
   name: NonEmptyStringSchema,
   /** The one harness it belongs to; absent for a generic component. */
-  harness: KnownHarnessKeySchema.optional(),
+  harness: HarnessKeySchema.optional(),
   /** Generic, or the one harness it can be used with — for a model set, derived from its model ids. */
   scope: HarnessScopeSchema,
   detail: ComponentDetailSchema,
@@ -364,7 +365,7 @@ export type ComponentCatalog = z.infer<typeof ComponentCatalogSchema>;
 
 /** One key two layers set to different values (P4, E18). Information, never an error. */
 export const LayerConflictSchema = z.strictObject({
-  harness: KnownHarnessKeySchema,
+  harness: HarnessKeySchema,
   field: z.enum(['settings', 'env', 'model']),
   key: NonEmptyStringSchema,
   /** "`permissions.defaultMode` · Claude Code: acceptEdits (from agent) overrides plan (from default)". */
@@ -382,7 +383,7 @@ export const SkippedLayerSchema = z.strictObject({
 
 /** A profile resolved for one harness: what applies, what is skipped, and what overrides what. */
 export const StackViewSchema = z.strictObject({
-  harness: KnownHarnessKeySchema,
+  harness: HarnessKeySchema,
   available: CatalogActSchema,
   /** The components that apply, oldest first. */
   applied: z.array(NonEmptyStringSchema).readonly(),
@@ -461,7 +462,7 @@ export type ResolvedSetter = z.infer<typeof ResolvedSetterSchema>;
  * item it came from, and every earlier value it overrode, oldest first.
  */
 export const ResolvedEntrySchema = z.strictObject({
-  harness: KnownHarnessKeySchema,
+  harness: HarnessKeySchema,
   field: ResolvedFieldSchema,
   key: NonEmptyStringSchema,
   value: z.string(),
@@ -573,7 +574,7 @@ export const RuntimeViewSchema = z.strictObject({
   name: NonEmptyStringSchema,
   /** The command name `fy start --agent` takes: the manifest account row's `wrapper`. */
   wrapper: NonEmptyStringSchema,
-  harness: KnownHarnessKeySchema,
+  harness: HarnessKeySchema,
   credential: z.strictObject({
     id: NonEmptyStringSchema,
     store: CredentialStoreSchema,
@@ -648,7 +649,7 @@ export type SettingsEntriesInput = z.infer<typeof SettingsEntriesInputSchema>;
  * text.
  */
 export const ComponentInputSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('instructions'), harness: KnownHarnessKeySchema.optional() }),
+  z.strictObject({ kind: z.literal('instructions'), harness: HarnessKeySchema.optional() }),
   z.strictObject({
     kind: z.literal('mcp'),
     command: NonEmptyStringSchema.optional(),
@@ -659,16 +660,16 @@ export const ComponentInputSchema = z.discriminatedUnion('kind', [
     /** `oauth` on a `url` server: signed in to from Ferretry (docs/mcp-oauth.md). */
     auth: z.literal('oauth').optional(),
     env: EnvInputSchema.optional(),
-    harness: KnownHarnessKeySchema.optional(),
+    harness: HarnessKeySchema.optional(),
   }),
   z.strictObject({
     kind: z.literal('skills'),
     items: z.array(NonEmptyStringSchema).min(1),
-    harness: KnownHarnessKeySchema.optional(),
+    harness: HarnessKeySchema.optional(),
   }),
   z.strictObject({
     kind: z.literal('settings'),
-    harness: KnownHarnessKeySchema,
+    harness: HarnessKeySchema,
     flags: z.array(FlagInputSchema).optional(),
     /** The `flagsEtag` the kept flags were read with; needed by every `{ keep: true }` in `flags`. */
     flagsEtag: NonEmptyStringSchema.optional(),
@@ -676,7 +677,7 @@ export const ComponentInputSchema = z.discriminatedUnion('kind', [
     /** The file by entry, instead of `content`: the daemon writes the document. */
     entries: SettingsEntriesInputSchema.optional(),
   }),
-  z.strictObject({ kind: z.literal('hooks'), harness: KnownHarnessKeySchema }),
+  z.strictObject({ kind: z.literal('hooks'), harness: HarnessKeySchema }),
   z.strictObject({
     kind: z.literal('modelSets'),
     models: z.array(NonEmptyStringSchema).min(1),
@@ -702,7 +703,7 @@ export const AccountChangeSchema = z.discriminatedUnion('kind', [
      * Which CLI it runs, for a login that drives both (docs/provider-presets.md). Absent: the one its
      * profile is scoped to, else the login's own.
      */
-    harness: KnownHarnessKeySchema.optional(),
+    harness: HarnessKeySchema.optional(),
     create: z.boolean(),
     /** E15: the person saw "already uses this login and profile" and chose to add another anyway. */
     addAnother: z.boolean().optional(),
@@ -751,7 +752,7 @@ export const AccountChangeSchema = z.discriminatedUnion('kind', [
      * every half the preset offers, so it drives both with one secret, and `env` holds the variables
      * of every half (docs/provider-presets.md).
      */
-    harness: KnownHarnessKeySchema,
+    harness: HarnessKeySchema,
     label: NonEmptyStringSchema.optional(),
     /**
      * Where the login lives. Absent (or `ferretry`) is an empty slot Ferretry keeps on this machine;
@@ -841,9 +842,9 @@ export const AccountChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('setup.import'),
     /** The harnesses the person chose to import ("Skip Claude Code"). Default: every installed one. */
-    include: z.array(KnownHarnessKeySchema).max(2).optional(),
+    include: z.array(HarnessKeySchema).max(MAX_HARNESSES).optional(),
     /** The runtime name the person gave each imported harness (§4.3 step 4). Default: the suggestion. */
-    names: z.strictObject({ 'claude-code': TypedNameSchema.optional(), codex: TypedNameSchema.optional() }).optional(),
+    names: z.record(HarnessKeySchema, TypedNameSchema).optional(),
     /**
      * Things the person chose NOT to import (`claude-code:mcp:notes`, `codex:skill:review`): one id per item, in the
      * grammar of `import-items.ts`. Each is left out of the plan, and so is everything only it would have brought
@@ -915,7 +916,7 @@ export type AccountChangeRequest = z.infer<typeof AccountChangeRequestSchema>;
 /** A runtime as the change would publish it. */
 export const ChangedRuntimeSchema = z.strictObject({
   name: NonEmptyStringSchema,
-  harness: KnownHarnessKeySchema,
+  harness: HarnessKeySchema,
   launch: CatalogActSchema,
 });
 
@@ -924,7 +925,7 @@ export const RunningSessionSchema = z.strictObject({
   id: NonEmptyStringSchema,
   /** What the person calls it: its teammate name, else its own name, else its id. */
   name: NonEmptyStringSchema,
-  harness: KnownHarnessKeySchema,
+  harness: HarnessKeySchema,
   /** The runtime it runs on, named when one change touches several (removing a login). */
   runtime: NonEmptyStringSchema.optional(),
 });

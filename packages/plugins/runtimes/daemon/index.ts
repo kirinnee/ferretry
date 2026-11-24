@@ -14,7 +14,6 @@
  *
  * LoginsPort is required and supplies safe sign-in facts: they are also what the model's logins are read from.
  */
-import { isKnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { ConfigCollectionDef, ConfigFileDef, DoctorFinding } from '@ferretry/kernel/contract';
 import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
@@ -318,8 +317,8 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         runtimes: () => config.collection(runtimeItems),
         profiles: () => config.collection(profileItems),
         defaultSetting: () => config.file(runtimesFile)?.defaultRuntime,
-        // The runtimes API serves the two harnesses this build ships; a third one is not offered here until it is swept in.
-        harnesses: () => ctx.needs.ferrets.harnesses().filter(isKnownHarnessKey),
+        // Every harness the registry holds; the API refuses (by name) the ones Runtimes has no behaviour for.
+        harnesses: () => ctx.needs.ferrets.harnesses(),
         logins: ctx.needs.logins,
         now: () => clock.nowMs(),
         currentName: async former => await assembly.catalog.currentRuntimeName?.(former),

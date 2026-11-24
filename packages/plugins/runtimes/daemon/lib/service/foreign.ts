@@ -9,10 +9,17 @@
  * Pure: no IO.
  */
 import type { z } from 'zod';
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
-import { harnessKeyOfKind, harnessKindOfKey, isSupportedKind, UnsupportedHarnessError } from '../harness-kind.ts';
+import {
+  type HarnessKeyOfKind,
+  harnessKeyOfKind,
+  harnessKindOfKey,
+  isSupportedKind,
+  supportedKindOfKey,
+  UnsupportedHarnessError,
+  unsupportedHarnessSentence,
+} from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
-import { type BrowserModeSchema, type BrowserPortsSettingSchema } from '../../../contract/index.ts';
+import type { BrowserModeSchema, BrowserPortsSettingSchema } from '../../../contract/index.ts';
 
 /** A runtime's old name and its new one (the edits that re-point every other file that names it). */
 // GAP(kernel): `fleet/src/lib/config-files/render.ts`.
@@ -131,7 +138,7 @@ export const CREDENTIALS_DIRECTORY = 'credentials';
  * Inside the services a harness is `claude` or `codex` (the library's word); on the wire and in the configuration it is
  * the Ferrets key `claude-code` or `codex`. These two are the only places the two spellings meet.
  */
-export const harnessKey = (kind: string): KnownHarnessKey => {
+export const harnessKey = (kind: string): HarnessKeyOfKind => {
   if (!isSupportedKind(kind)) throw new UnsupportedHarnessError(kind);
   return harnessKeyOfKind(kind);
 };
@@ -140,7 +147,7 @@ export const harnessKey = (kind: string): KnownHarnessKey => {
 export const harnessKind = (key: string): HarnessKind => harnessKindOfKey(key);
 
 /** A scope word (a harness's word, or `generic`) as the wire spells it. */
-export const scopeKey = (scope: HarnessKind | 'generic'): KnownHarnessKey | 'generic' =>
+export const scopeKey = (scope: HarnessKind | 'generic'): HarnessKeyOfKind | 'generic' =>
   scope === 'generic' ? scope : harnessKeyOfKind(scope);
 
 /** `T` with every `claude-code` value spelled `claude`: the change as the library reads it. */
@@ -154,15 +161,23 @@ export type LoweredHarness<T> = T extends 'claude-code'
         ? { -readonly [K in keyof T]: LoweredHarness<T[K]> }
         : T;
 
-/** A change body read off the wire, with its harness values in the library's words. Pure; copies what it changes. */
-export function lowerHarness<T>(value: T): LoweredHarness<T> {
+/**
+ * A change body read off the wire, with its harness values in the library's words. Pure; copies what it changes.
+ *
+ * Every `harness` it meets, nested component inputs included, is a WIRE key and is checked here, BEFORE it is lowered: the
+ * library's word `claude` is not a wire key, and once lowered it could no longer be told from the key `claude-code`. A key
+ * Runtimes has no behaviour for (`claude` included) is handed to `refuse` with the one sentence, which does not return.
+ */
+export function lowerHarness<T>(value: T, refuse: (sentence: string) => never): LoweredHarness<T> {
   const lower = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(lower);
     if (typeof node !== 'object' || node === null) return node;
     return Object.fromEntries(
       Object.entries(node).map(([key, item]) => [
         key,
-        key === 'harness' && item === 'claude-code' ? 'claude' : lower(item),
+        key === 'harness' && typeof item === 'string'
+          ? (supportedKindOfKey(item) ?? refuse(unsupportedHarnessSentence(item)))
+          : lower(item),
       ]),
     );
   };

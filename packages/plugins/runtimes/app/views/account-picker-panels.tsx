@@ -15,7 +15,6 @@ import {
   isMoveAccountSlotProps,
   isNewFerretAccountSlotProps,
 } from '@ferretry/core-ferrets/contract';
-import { isKnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useRef } from 'react';
 import { type ChosenRuntime, RuntimeSelect } from '../components/runtime-select.tsx';
@@ -27,6 +26,7 @@ import {
 } from '../lib/account-picker-catalog.ts';
 import { AccountPickerStore } from '../lib/account-picker-store.ts';
 import type { LiveRuntimesClient } from '../lib/client.ts';
+import { isSupportedHarnessKey } from '../../contract/harness-words.ts';
 import { useNow } from '../ui.ts';
 
 const noSubscribe = (): (() => void) => () => undefined;
@@ -103,8 +103,10 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
       usageError={error}
       value={slot.value}
       {...(preferred === undefined ? {} : { preferred })}
-      {...(move === null || !isKnownHarnessKey(move.harness) ? {} : { harness: move.harness, offerHealthCheck: true })}
-      {...(move === null && slot.harness !== undefined && isKnownHarnessKey(slot.harness)
+      {...(move === null || !isSupportedHarnessKey(move.harness)
+        ? {}
+        : { harness: move.harness, offerHealthCheck: true })}
+      {...(move === null && slot.harness !== undefined && isSupportedHarnessKey(slot.harness)
         ? { harness: slot.harness }
         : {})}
     />
