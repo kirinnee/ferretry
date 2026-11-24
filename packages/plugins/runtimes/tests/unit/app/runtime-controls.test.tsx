@@ -180,7 +180,7 @@ describe('RuntimeModelChoices', () => {
     await screen.unmount();
   });
 
-  test('renders a real list, marks current and default, and hides a redundant value line', async () => {
+  test('renders a real list, marks current and default, and keeps a raw id as the tooltip only', async () => {
     const chosen: string[] = [];
     const screen = await mount(
       <RuntimeModelChoices
@@ -202,14 +202,17 @@ describe('RuntimeModelChoices', () => {
     const current = byLabel(screen.container, 'Switch model in place to claude-sonnet-5, current');
     expect(current.getAttribute('aria-checked')).toBe('true');
     expect(current.getAttribute('role')).toBe('menuitemradio');
-    // label === value, so the mono second line is suppressed.
+    // label === value, so there is no second name to show.
     expect(current.querySelectorAll('.mono').length).toBe(0);
 
     const pending = byLabel(screen.container, 'Switch model in place to Opus 5');
     expect(pending.getAttribute('aria-busy')).toBe('true');
     expect(pending.textContent).toContain('Default');
     expect(pending.textContent).toContain('The big one');
-    expect(must(pending.querySelector('.mono'), 'the value line').textContent).toBe('claude-opus-5');
+    // The raw id is on demand: never drawn beside the name, but in the row's tooltip.
+    expect(pending.querySelectorAll('.mono').length).toBe(0);
+    expect(pending.textContent).not.toContain('claude-opus-5');
+    expect(pending.getAttribute('title')).toContain('claude-opus-5');
 
     await click(current);
     expect(chosen).toEqual(['claude-sonnet-5']);

@@ -3,12 +3,14 @@ import { ApiError, headerValue, jsonResponse } from '@ferretry/kernel/contract';
 import { FerretLiveReadSchema, SubtreeViewSchema } from '../../contract/index.ts';
 import { ConditionalFleetList } from '../lib/fleet-list/conditional.ts';
 import { liveRead } from '../lib/protocol/session-subtree.ts';
+import { SessionStateSchema } from '../lib/protocol/session.ts';
+import type { SessionId } from '../lib/session-id.ts';
 import { SubtreeService } from '../lib/session/pack/subtree.ts';
 import { hiddenFromLiveList } from '../modules/archive.ts';
 import type { FeatureContribution, FerretsContext, FerretsFeature } from './types.ts';
 
 function register(f: FerretsContext): FeatureContribution | undefined {
-  const { kernel, registry, service, ready, storeLoaded, pathFerret, mayAct, isArchived } = f;
+  const { kernel, registry, service, ready, storeLoaded, pathFerret, mayAct, isArchived, sessionStore } = f;
   const { outdated, displayModelOf, ingestEvidenceOf } = f;
   const outdatedMarks = outdated.marks;
   const fleetList = new ConditionalFleetList();
@@ -51,7 +53,14 @@ function register(f: FerretsContext): FeatureContribution | undefined {
         // `pathFerret` already refused an id the registry does not hold; a ferret gone in between is still a 404 with a
         // sentence, never a 200 with no body.
         if (summary === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
-        return jsonResponse(await outdatedMarks.one(summary));
+        // What the harness reports running rides this one read (the list does not open documents), so the composer names a
+        // model the ferret was never pinned to, and a switch typed into the pane.
+        const reported = SessionStateSchema.safeParse(
+          await sessionStore.readState(id as unknown as SessionId).catch(() => undefined),
+        );
+        const observedModel = reported.success ? reported.data.observedModel?.trim() : undefined;
+        const marked = await outdatedMarks.one(summary);
+        return jsonResponse(observedModel ? { ...marked, observedModel } : marked);
       },
       // The stored last screen, through the same gated and re-masked read the API gives other plugins: `lastSnapshot`
       // refuses a caller that may not touch the ferret before the file is opened and masks with the Vault's values now.
