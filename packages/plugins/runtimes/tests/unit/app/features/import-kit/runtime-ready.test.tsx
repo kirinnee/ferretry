@@ -47,6 +47,7 @@ describe('readyStateOf', () => {
       kind: 'blocked',
       name: 'Codex · your terminal sign-in',
       reason: 'Sign in to launch',
+      terminal: true,
     });
   });
   it('O9-6 matches the LOGIN just handled: another ready login of the same tool never hides a blocked or missing runtime', () => {
@@ -58,6 +59,7 @@ describe('readyStateOf', () => {
       kind: 'blocked',
       name: 'Codex · your terminal sign-in',
       reason: 'Sign in to launch',
+      terminal: true,
     });
     expect(readyStateOf(runtimes, 'codex', 'old')).toEqual({
       kind: 'ready',
@@ -138,7 +140,7 @@ describe('RuntimeReadyPage', () => {
     );
     await settle();
     expect(view.container.querySelector('[data-ready-headline]')?.textContent).toBe(
-      'Claude Code uses your terminal sign-in',
+      'No Claude Code sign-in was found on this machine',
     );
     expect(view.container.querySelector('[data-ready-names]')?.textContent).toBe(
       'Runtime: Claude · your terminal sign-in.',
@@ -147,6 +149,7 @@ describe('RuntimeReadyPage', () => {
       'Sign in to Claude Code in a terminal before you start a ferret.',
     );
     expect(view.container.textContent).not.toContain('is ready');
+    expect(view.container.textContent).not.toContain('uses your terminal sign-in');
     await view.unmount();
     // The sign-in step handled this login: no warning, still never "ready".
     const handled = await mount(
@@ -201,8 +204,14 @@ describe('RuntimeReadyPage', () => {
     );
     await settle();
     expect(blocked.container.querySelector('[data-runtime-ready]')?.getAttribute('data-runtime-ready')).toBe('blocked');
-    expect(blocked.container.querySelector('[data-ready-names]')?.textContent).toContain(
-      'Runtime: Codex · your terminal sign-in. Sign in to launch',
+    expect(blocked.container.querySelector('[data-ready-headline]')?.textContent).toBe(
+      'No Codex sign-in was found on this machine',
+    );
+    expect(blocked.container.querySelector('[data-ready-names]')?.textContent).toBe(
+      'Runtime: Codex · your terminal sign-in.',
+    );
+    expect(blocked.container.querySelector('[data-ready-terminal]')?.textContent).toBe(
+      'Sign in to Codex in a terminal before you start a ferret.',
     );
     await blocked.unmount();
     const missing = await mount(
@@ -234,7 +243,9 @@ describe('RuntimeReadyPage', () => {
 
   it('says a runtime cannot start yet, with the reason', async () => {
     const { client } = clientOf([
-      () => ({ runtimes: [runtime('codex', 'codex-a', { available: false, reason: 'Sign in to launch' })] }),
+      () => ({
+        runtimes: [runtime('codex', 'codex-a', { available: false, reason: 'Needs a newer CLI' }, 'own', 'ferretry')],
+      }),
     ]);
     const view = await mount(
       createElement(RuntimeReadyPage, { client, harness: 'codex', label: 'Codex', step: stepHarness().host }),
@@ -243,7 +254,7 @@ describe('RuntimeReadyPage', () => {
     expect(view.container.querySelector('[data-ready-headline]')?.textContent).toBe(
       'Codex has a runtime, but it cannot start yet',
     );
-    expect(view.container.querySelector('[data-ready-names]')?.textContent).toContain('Sign in to launch');
+    expect(view.container.querySelector('[data-ready-names]')?.textContent).toContain('Needs a newer CLI');
     await view.unmount();
   });
 

@@ -64,13 +64,25 @@ const VARIANTS = [
 type Variant = (typeof VARIANTS)[number];
 
 const CASES = [
-  { name: 'ready-terminal', query: '', headline: 'Claude Code uses your terminal sign-in', kind: 'ready' },
+  { name: 'ready-terminal', query: '', headline: 'No Claude Code sign-in was found on this machine', kind: 'ready' },
   { name: 'ready', query: '&state=own', headline: 'Claude Code is ready', kind: 'ready' },
   { name: 'codex-many', query: '&tool=codex&state=many', headline: 'Codex is ready', kind: 'ready' },
   { name: 'none', query: '&tool=codex&state=none', headline: 'No runtime was made for Codex', kind: 'none' },
   {
     name: 'blocked',
     query: '&state=blocked',
+    headline: 'No Claude Code sign-in was found on this machine',
+    kind: 'blocked',
+  },
+  {
+    name: 'codex-blocked',
+    query: '&tool=codex&state=blocked',
+    headline: 'No Codex sign-in was found on this machine',
+    kind: 'blocked',
+  },
+  {
+    name: 'blocked-own',
+    query: '&state=blocked-own',
     headline: 'Claude Code has a runtime, but it cannot start yet',
     kind: 'blocked',
   },
