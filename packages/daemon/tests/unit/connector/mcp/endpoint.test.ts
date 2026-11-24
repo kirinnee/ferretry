@@ -193,7 +193,13 @@ describe('write tools', () => {
     should(JSON.stringify(record)).not.containEql('hunter22');
     should(JSON.stringify(record)).not.containEql(TOKEN);
     should(r.audit.events).eql([
-      { kind: 'connector.tool', grantId: 'cg_aaaaaaaaaa', tool: 'send_to_ferret', sessionId: 'mwuanehg-4531fa9e' },
+      {
+        kind: 'connector.tool',
+        grantId: 'cg_aaaaaaaaaa',
+        tool: 'send_to_ferret',
+        sessionId: 'mwuanehg-4531fa9e',
+        outcome: 'ok',
+      },
     ]);
   });
 
@@ -377,6 +383,7 @@ describe('attention', () => {
       should(post?.call.body).eql({
         action: 'resolve',
         id: 'A12',
+        askVersion: 1,
         response: { kind: 'multiple-choice', choice: 'SQLite' },
       });
     }

@@ -75,6 +75,9 @@ export interface AgendaSpec {
   readonly raisedBySession?: string;
   readonly ask?: Record<string, unknown>;
   readonly kind?: string;
+  readonly askVersion?: number;
+  /** Any other field of the item (a confirmation, a plan …), merged last and still schema-checked. */
+  readonly extra?: Record<string, unknown>;
 }
 
 export function agendaItem(spec: AgendaSpec): AgendaItem {
@@ -91,6 +94,8 @@ export function agendaItem(spec: AgendaSpec): AgendaItem {
     raisedByName: 'lizzette',
     ...(spec.ask === undefined ? {} : { ask: spec.ask }),
     ...(spec.kind === undefined ? {} : { kind: spec.kind }),
+    ...(spec.askVersion === undefined ? {} : { askVersion: spec.askVersion }),
+    ...spec.extra,
   });
 }
 

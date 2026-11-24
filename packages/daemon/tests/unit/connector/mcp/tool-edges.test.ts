@@ -224,12 +224,16 @@ describe('shapeAnswer — what cannot be answered by voice', () => {
   it('refuses a card review gate', () => {
     const shaped = shapeAnswer(item({ gate: { cardId: 'c1' }, ask: { kind: 'task' } }), 'approve');
     should(shaped.kind).equal('refuse');
-    if (shaped.kind === 'refuse') should(shaped.sentence).containEql('card review');
+    if (shaped.kind === 'refuse') should(shaped.sentence).containEql('passkey in the Ferretry app');
   });
 
   it('refuses a permission answer that is neither a yes nor a no', () => {
     const shaped = shapeAnswer(item({ ask: { kind: 'permission' } }), 'maybe later');
-    should(shaped).eql({ kind: 'refuse', sentence: 'That is a permission request. Say approve or reject.' });
+    should(shaped).eql({
+      kind: 'refuse',
+      sentence: 'That is a permission request. Say approve or reject.',
+      refused: false,
+    });
   });
 
   it('only marks a task ask or an item with no ask as done', () => {

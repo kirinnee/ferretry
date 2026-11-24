@@ -101,6 +101,14 @@ describe('SecurityLogConnectorAudit', () => {
     should((await recorded({ kind: 'connector.tool', grantId: 'cg_1', tool: 'spawn_ferret' }))?.subject).be.undefined();
   });
 
+  it('records how a tool call ended: ok and unrecorded read as succeeded, an error as failed, a refusal as refused', async () => {
+    const base = { kind: 'connector.tool', grantId: 'cg_1', tool: 'stop_ferret', sessionId: 's1' } as const;
+    should((await recorded({ ...base, outcome: 'ok' }))?.outcome).equal('succeeded');
+    should((await recorded(base))?.outcome).equal('succeeded');
+    should((await recorded({ ...base, outcome: 'error' }))?.outcome).equal('failed');
+    should((await recorded({ ...base, outcome: 'refused' }))?.outcome).equal('refused');
+  });
+
   it('never throws into a request when the log cannot write', async () => {
     await new SecurityLogConnectorAudit({
       record: async () => {

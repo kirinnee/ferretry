@@ -12,14 +12,14 @@
  * session id or its short id (the first segment of the id), matched by `names.ts`.
  */
 
-import type { AgendaItem, AgendaResponse, SessionView } from '@ferretry/protocol';
+import type { AgendaItem, AgendaKind, AgendaResponse, SessionView } from '@ferretry/protocol';
 import { formatTaskRef } from '@ferretry/protocol/board-refs';
 import { z } from 'zod';
-import type { ConnectorAccess, ConnectorAuditSink, ConnectorScope } from '../ports.ts';
+import type { ConnectorAccess, ConnectorAuditSink, ConnectorScope, ConnectorToolOutcome } from '../ports.ts';
 import { type ConnectorToolName, daemonGrantRefusal } from './demands.ts';
 import { ago, clip, oneLine, tailText } from './format.ts';
-import { type FleetGateway, ToolFailure } from './gateway.ts';
-import { matchName, titleVariants } from './names.ts';
+import { type FleetGateway, type OpenAgendaItem, ToolFailure } from './gateway.ts';
+import { matchExact, matchName, titleVariants } from './names.ts';
 import type { ConnectorCallsLog, DaemonGrantsSource } from './ports.ts';
 import type { ConnectorTextGuard } from './redaction.ts';
 
@@ -129,21 +129,49 @@ const keysOfSession = (view: SessionView) => ({
 });
 
 const describeShort = (view: SessionView): string => `${callsignOf(view)} (${clip(oneLine(view.config.name), 60)})`;
+/** As above, naming the state of one that is not running, so "two Lizzettes" is told apart. */
+const describeWithState = (view: SessionView): string =>
+  isLive(view) ? describeShort(view) : `${describeShort(view)}, ${view.state.status}`;
 
 /**
- * The one live ferret a spoken name means, or a {@link ToolFailure} that says what to try. Live ones are asked
- * first; a stopped one is found only when no live one matches (so "restart lizzette" can wake a stopped one).
+ * How careful a name must be. `look` reads: a live ferret is preferred, and a near miss is only suggested.
+ * `act` changes something (send, restart, stop, answering for a ferret) and is stricter, because a retried call
+ * must meet the SAME ferret again: it never prefers a live ferret over a stopped one it matched as well.
  */
-async function resolveFerret(gateway: FleetGateway, query: string): Promise<SessionView> {
+type ResolveMode = 'look' | 'act';
+
+const manyFailure = (query: string, views: readonly SessionView[]): ToolFailure =>
+  new ToolFailure(
+    `More than one ferret matches "${oneLine(query)}": ${views.slice(0, 5).map(describeWithState).join('; ')}. Which one do you mean?`,
+  );
+
+/**
+ * The one ferret a spoken name means, or a {@link ToolFailure} that says what to try.
+ *
+ * EXACT IDENTITIES COME FIRST, across every state: its callsign, session id, short id or exact task name.
+ * Only when none matches does a prefix or substring count, and then only when exactly one thing matches.
+ * That order is what makes "stop lizzette" safe to retry: the first call stops Lizzette, the second finds her
+ * stopped ("already stopped") and can never fall through to a different, live ferret whose name merely starts
+ * with the same letters.
+ *
+ * In `look` mode a live ferret is preferred over a stopped one (so a recycled callsign reads the running
+ * one). In `act` mode two matches of any state are a question, never a guess; a stopped ferret still matches,
+ * so "restart lizzette" can wake it.
+ */
+async function resolveFerret(gateway: FleetGateway, query: string, mode: ResolveMode = 'look'): Promise<SessionView> {
   const all = await gateway.sessions();
-  const live = all.filter(isLive);
-  for (const pool of [live, all.filter(view => !isLive(view))]) {
+  const exact = matchExact(query, all, keysOfSession);
+  if (exact.length === 1) return exact[0] as SessionView;
+  if (exact.length > 1) {
+    const live = exact.filter(isLive);
+    if (mode === 'look' && live.length === 1) return live[0] as SessionView;
+    throw manyFailure(query, exact);
+  }
+  const pools = mode === 'look' ? [all.filter(isLive), all.filter(view => !isLive(view))] : [all];
+  for (const pool of pools) {
     const result = matchName(query, pool, keysOfSession);
     if (result.kind === 'one') return result.item;
-    if (result.kind === 'many') {
-      const names = result.items.slice(0, 5).map(describeShort).join('; ');
-      throw new ToolFailure(`More than one ferret matches "${oneLine(query)}": ${names}. Which one do you mean?`);
-    }
+    if (result.kind === 'many') throw manyFailure(query, result.items);
   }
   const near = matchName(query, all, keysOfSession);
   const hints = near.kind === 'none' ? near.suggestions : [];
@@ -168,6 +196,14 @@ function optionsOf(item: AgendaItem): readonly string[] {
   return item.ask?.kind === 'multiple-choice' ? item.ask.options.map(option => option.label) : [];
 }
 
+/** One open item as a line a voice reads: id, who asks, title, the question, its options, and when only the app can answer it. */
+function attentionLine(item: AgendaItem, byId: ReadonlyMap<string, SessionView>): string {
+  const options = optionsOf(item);
+  const choices = options.length === 0 ? '' : ` Options: ${options.join(', ')}.`;
+  const appOnly = needsTheApp(item) ? ' Only the Ferretry app can answer this one.' : '';
+  return `!${item.id} — from ${askerOf(item, byId)} — ${clip(oneLine(item.title ?? item.subject), 80)} — ${clip(oneLine(item.why), 240)}${choices}${appOnly}`;
+}
+
 /** "A12", "!A12", "a 12", "12" → "A12"; undefined when it is none of those. */
 export function parseAttentionRef(raw: string): string | undefined {
   const match = /^\s*!?\s*a?\s*0*([1-9][0-9]{0,8})\s*$/iu.exec(raw);
@@ -177,18 +213,70 @@ export function parseAttentionRef(raw: string): string | undefined {
 type AnswerShape =
   | { readonly kind: 'response'; readonly response: AgendaResponse }
   | { readonly kind: 'done' }
-  | { readonly kind: 'refuse'; readonly sentence: string };
+  | { readonly kind: 'refuse'; readonly sentence: string; readonly refused: boolean };
 
 const YES = ['yes', 'yep', 'yeah', 'ok', 'okay', 'approve', 'approved', 'allow', 'allowed', 'good', 'sure'];
 const NO = ['no', 'nope', 'reject', 'rejected', 'deny', 'denied', 'refuse'];
 const bare = (text: string): string => text.toLowerCase().replace(/[^a-z]/gu, '');
 
+/** The card kinds a spoken answer may close: a plain question, a choice, a yes/no, a review, a to-do, a note. */
+const PLAIN_KINDS: readonly (AgendaKind | undefined)[] = [
+  undefined,
+  'task',
+  'yesno',
+  'permission',
+  'choice',
+  'review',
+  'reply',
+  'info',
+];
+
+/**
+ * What makes an item an act only the OWNER does in the app, whatever its ask says: a held configuration change
+ * (`confirms`), a card's gate or ask (`gate`, `gateAttached`, `cardAsks`), a task plan, a paste plan, a phone
+ * approval, a 2FA seed, a sign-in rule, a form (`fields`), a typed value (`input`), a machine notice's cards.
+ * Each of those is approved with a passkey or its own form, and a voice answer must never stand in for it.
+ *
+ * The primary defence is the daemon's boundary, which refuses these when the caller arrives governed; this is
+ * the second, so the connector would not even TRY, and so it never reads like it could.
+ */
+const OWNER_ONLY_FIELDS = [
+  'confirms',
+  'gate',
+  'gateAttached',
+  'cardAsks',
+  'input',
+  'copyPlan',
+  'taskPlan',
+  'phoneApproval',
+  'twoFactorSeed',
+  'signInRuleSuggestion',
+  'signInRuleSuspended',
+  'cards',
+  'fields',
+] as const satisfies readonly (keyof AgendaItem)[];
+
+const OWNER_ONLY_SENTENCE = 'That one needs your passkey in the Ferretry app.';
+
+/**
+ * True for any item a spoken answer may not close. An ALLOW-list of plain asks, not a list of bad ones: an item
+ * is answerable only when its kind is one of {@link PLAIN_KINDS} AND it carries none of the owner-only fields,
+ * so a kind or field added later is refused until someone decides a voice may answer it.
+ */
+function needsTheApp(item: AgendaItem): boolean {
+  if (!PLAIN_KINDS.includes(item.kind)) return true;
+  return OWNER_ONLY_FIELDS.some(field => item[field] !== undefined);
+}
+
 /** How a spoken answer becomes the response this item's ask accepts — or why it cannot. Pure. */
 export function shapeAnswer(item: AgendaItem, answer: string): AnswerShape {
   if (item.kind === 'input')
-    return { kind: 'refuse', sentence: 'That one asks for a value that can only be typed in the Ferretry app.' };
-  if (item.gate !== undefined)
-    return { kind: 'refuse', sentence: 'That one is a card review. Answer it in the Ferretry app.' };
+    return {
+      kind: 'refuse',
+      sentence: 'That one asks for a value that can only be typed in the Ferretry app.',
+      refused: true,
+    };
+  if (needsTheApp(item)) return { kind: 'refuse', sentence: OWNER_ONLY_SENTENCE, refused: true };
   const ask = item.ask;
   if (ask === undefined || ask.kind === 'task') return { kind: 'done' };
   switch (ask.kind) {
@@ -198,7 +286,7 @@ export function shapeAnswer(item: AgendaItem, answer: string): AnswerShape {
       const word = bare(answer);
       if (YES.includes(word)) return { kind: 'response', response: { kind: 'permission', decision: 'approve' } };
       if (NO.includes(word)) return { kind: 'response', response: { kind: 'permission', decision: 'reject' } };
-      return { kind: 'refuse', sentence: 'That is a permission request. Say approve or reject.' };
+      return { kind: 'refuse', sentence: 'That is a permission request. Say approve or reject.', refused: false };
     }
     case 'answer-review': {
       if (YES.includes(bare(answer))) return { kind: 'response', response: { kind: 'answer-review', verdict: 'good' } };
@@ -209,7 +297,7 @@ export function shapeAnswer(item: AgendaItem, answer: string): AnswerShape {
       const result = matchName(answer, labels, label => ({ exact: [label], names: [] }));
       if (result.kind === 'one')
         return { kind: 'response', response: { kind: 'multiple-choice', choice: result.item } };
-      return { kind: 'refuse', sentence: `Pick one of these: ${labels.join(', ')}.` };
+      return { kind: 'refuse', sentence: `Pick one of these: ${labels.join(', ')}.`, refused: false };
     }
   }
 }
@@ -320,12 +408,7 @@ const listAttention: ConnectorToolSpec<Record<string, never>> = {
     const open = items.filter(({ item }) => item.parked === undefined && item.kind !== 'input');
     if (open.length === 0) return { text: 'Nothing is waiting on you.' };
     const shown = open.slice(0, ATTENTION_CAP);
-    const lines = shown.map(({ item }) => {
-      const asker = askerOf(item, byId);
-      const options = optionsOf(item);
-      const choices = options.length === 0 ? '' : ` Options: ${options.join(', ')}.`;
-      return `!${item.id} — from ${asker} — ${clip(oneLine(item.title ?? item.subject), 80)} — ${clip(oneLine(item.why), 240)}${choices}`;
-    });
+    const lines = shown.map(({ item }) => attentionLine(item, byId));
     const more = open.length > shown.length ? [`…and ${open.length - shown.length} more.`] : [];
     return { text: [`${open.length} waiting on you:`, ...lines, ...more].join('\n') };
   },
@@ -340,7 +423,7 @@ const sendToFerret: ConnectorToolSpec<{ ferret: typeof ferretArg; message: z.Zod
   annotations: WRITE,
   input: { ferret: ferretArg, message: z.string().trim().min(1).max(MESSAGE_MAX_CHARS).describe('The message text.') },
   run: async ({ ferret, message }, env) => {
-    const view = await resolveFerret(env.gateway, ferret);
+    const view = await resolveFerret(env.gateway, ferret, 'act');
     const result = await env.gateway.send(view.config.id, message);
     const who = callsignOf(view);
     const said: Record<string, string> = {
@@ -382,9 +465,16 @@ const answerAttention: ConnectorToolSpec<{
     const [items, sessions] = await Promise.all([env.gateway.openAgenda(), env.gateway.sessions()]);
     const byId = new Map(sessions.map(view => [view.config.id, view]));
     let found = items.filter(entry => entry.item.id === id && entry.item.parked === undefined);
-    if (ferret !== undefined && found.length > 1) {
-      const wanted = await resolveFerret(env.gateway, ferret);
-      found = found.filter(entry => entry.sessionId === wanted.config.id);
+    if (ferret !== undefined) {
+      // A ferret the caller NAMES is always honoured: when it has no such item the answer is a refusal, never
+      // another ferret's item that happens to carry the same id.
+      const wanted = await resolveFerret(env.gateway, ferret, 'act');
+      found = found.filter(
+        entry =>
+          entry.sessionId === wanted.config.id ||
+          (entry.item.raisedBy === 'agent' && entry.item.raisedBySession === wanted.config.id),
+      );
+      if (found.length === 0) throw new ToolFailure(`${callsignOf(wanted)} has no open item ${id}.`);
     }
     if (found.length === 0) throw new ToolFailure(`There is no open item ${id}. Ask me to list what is waiting.`);
     if (found.length > 1) {
@@ -393,12 +483,46 @@ const answerAttention: ConnectorToolSpec<{
     }
     const target = found[0] as (typeof found)[number];
     const shaped = shapeAnswer(target.item, answer);
-    if (shaped.kind === 'refuse') throw new ToolFailure(shaped.sentence);
+    if (shaped.kind === 'refuse')
+      throw new ToolFailure(shaped.sentence, { refused: shaped.refused, sessionId: target.sessionId });
     const response = shaped.kind === 'response' ? shaped.response : undefined;
-    await env.gateway.resolveAgenda(target.sessionId, id, response, shaped.kind === 'done' ? answer : undefined);
+    try {
+      await env.gateway.resolveAgenda(
+        target.sessionId,
+        id,
+        target.item.askVersion ?? 1,
+        response,
+        shaped.kind === 'done' ? answer : undefined,
+      );
+    } catch (error) {
+      if (error instanceof ToolFailure && error.code === 'ask_changed') throw await changedAsk(env, target, id, byId);
+      throw error instanceof ToolFailure ? error.aimedAt(target.sessionId) : error;
+    }
     return { text: `Answered ${id} from ${askerOf(target.item, byId)}.`, sessionId: target.sessionId };
   },
 };
+
+/**
+ * The ferret replaced the ask between the moment the answer was shaped and the moment it landed. Nothing was
+ * applied; say what the item asks NOW so the owner can answer the question they have not yet heard.
+ */
+async function changedAsk(
+  env: ToolEnvironment,
+  target: OpenAgendaItem,
+  id: string,
+  byId: ReadonlyMap<string, SessionView>,
+): Promise<ToolFailure> {
+  const now = (await env.gateway.openAgenda()).find(
+    entry => entry.sessionId === target.sessionId && entry.item.id === id && entry.item.parked === undefined,
+  );
+  const sessionId = target.sessionId;
+  if (now === undefined)
+    return new ToolFailure(`That question changed and ${id} is not open any more. Nothing was sent.`, { sessionId });
+  return new ToolFailure(
+    `That question changed, so nothing was sent; here it is now: ${attentionLine(now.item, byId)}`,
+    { sessionId },
+  );
+}
 
 const restartFerret: ConnectorToolSpec<{ ferret: typeof ferretArg }> = {
   name: 'restart_ferret',
@@ -409,7 +533,7 @@ const restartFerret: ConnectorToolSpec<{ ferret: typeof ferretArg }> = {
   annotations: DESTRUCTIVE,
   input: { ferret: ferretArg },
   run: async ({ ferret }, env) => {
-    const view = await resolveFerret(env.gateway, ferret);
+    const view = await resolveFerret(env.gateway, ferret, 'act');
     const result = await env.gateway.restart(view.config.id);
     const who = callsignOf(view);
     if (result.restarted.length > 0) return { text: `Restarted ${who}.`, sessionId: view.config.id };
@@ -435,7 +559,7 @@ const stopFerret: ConnectorToolSpec<{ ferret: typeof ferretArg }> = {
   annotations: { ...DESTRUCTIVE, idempotentHint: true },
   input: { ferret: ferretArg },
   run: async ({ ferret }, env) => {
-    const view = await resolveFerret(env.gateway, ferret);
+    const view = await resolveFerret(env.gateway, ferret, 'act');
     const who = callsignOf(view);
     if (!isLive(view)) return { text: `${who} is already ${view.state.status}.`, sessionId: view.config.id };
     await env.gateway.stop(view.config.id);
@@ -535,9 +659,11 @@ export class ConnectorToolbox {
     gateway: FleetGateway,
   ): Promise<ToolResult> {
     const write = spec.scope === 'fleet:write';
-    const finish = async (output: ToolOutput, outcome: 'ok' | 'error' | 'refused'): Promise<ToolResult> => {
+    // `gated`: refused BEFORE the tool ran (scope, the operator's grants). The calls log keeps those; the security
+    // log does not, because nothing was attempted. Every outcome of a tool that DID run is in both, as it ended.
+    const finish = async (output: ToolOutput, outcome: ConnectorToolOutcome, gated = false): Promise<ToolResult> => {
       const text = await this.options.guard.clean(output.text);
-      if (write) await this.record(spec, rawArgs, access, outcome, output.sessionId);
+      if (write) await this.record(spec, rawArgs, access, outcome, output.sessionId, gated);
       return { text, isError: outcome !== 'ok' };
     };
     if (!access.scopes.includes(spec.scope)) {
@@ -547,6 +673,7 @@ export class ConnectorToolbox {
           isError: true,
         },
         'refused',
+        true,
       );
     }
     let grants: ReturnType<DaemonGrantsSource>;
@@ -556,7 +683,7 @@ export class ConnectorToolbox {
       grants = undefined;
     }
     const refusal = daemonGrantRefusal(spec.name, grants);
-    if (refusal !== undefined) return await finish({ text: refusal, isError: true }, 'refused');
+    if (refusal !== undefined) return await finish({ text: refusal, isError: true }, 'refused', true);
     try {
       const args = z.object(spec.input as z.ZodRawShape).parse(rawArgs ?? {});
       const output = await (spec.run as (a: unknown, e: ToolEnvironment) => Promise<ToolOutput>)(args, {
@@ -566,7 +693,15 @@ export class ConnectorToolbox {
       });
       return await finish(output, 'ok');
     } catch (error) {
-      if (error instanceof ToolFailure) return await finish({ text: error.message, isError: true }, 'error');
+      if (error instanceof ToolFailure)
+        return await finish(
+          {
+            text: error.message,
+            isError: true,
+            ...(error.sessionId === undefined ? {} : { sessionId: error.sessionId }),
+          },
+          error.refused ? 'refused' : 'error',
+        );
       return await finish(
         { text: 'Something went wrong on the machine, so I did not do that.', isError: true },
         'error',
@@ -578,8 +713,9 @@ export class ConnectorToolbox {
     spec: ConnectorToolSpec,
     rawArgs: unknown,
     access: ConnectorAccess,
-    outcome: 'ok' | 'error' | 'refused',
+    outcome: ConnectorToolOutcome,
     sessionId: string | undefined,
+    gated: boolean,
   ): Promise<void> {
     try {
       const args = cutLongStrings(await this.options.guard.cleanData(rawArgs));
@@ -594,13 +730,14 @@ export class ConnectorToolbox {
     } catch {
       // The security log below still has the call; a calls-log failure must not fail the tool.
     }
-    if (outcome === 'refused') return;
+    if (gated) return;
     try {
       await this.options.audit.record({
         kind: 'connector.tool',
         grantId: access.grantId,
         tool: spec.name,
         ...(sessionId === undefined ? {} : { sessionId }),
+        outcome,
       });
     } catch {
       // The sink never throws into a request by contract; belt and braces.

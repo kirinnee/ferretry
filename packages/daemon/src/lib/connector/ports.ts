@@ -122,7 +122,17 @@ export type ConnectorAuditEvent =
       readonly initiator?: ConnectorRevocationInitiator;
     }
   | { readonly kind: 'connector.refresh.reused'; readonly grantId: string }
-  | { readonly kind: 'connector.tool'; readonly grantId: string; readonly tool: string; readonly sessionId?: string };
+  | {
+      readonly kind: 'connector.tool';
+      readonly grantId: string;
+      readonly tool: string;
+      readonly sessionId?: string;
+      /** How the call ended; absent reads as `ok` (an event from before outcomes were recorded). */
+      readonly outcome?: ConnectorToolOutcome;
+    };
+
+/** How a tool call ended: it did what was asked, it failed, or it was refused (by a gate, the tool or the daemon). */
+export type ConnectorToolOutcome = 'ok' | 'error' | 'refused';
 
 /** Where those events go. Never throws into a request. */
 export interface ConnectorAuditSink {

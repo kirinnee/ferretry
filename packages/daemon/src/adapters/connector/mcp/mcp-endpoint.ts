@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
+import { SUPPORTED_PROTOCOL_VERSIONS } from '@modelcontextprotocol/sdk/types.js';
 import { type ApiRequest, type ApiResponse, BodyTooLargeError } from '../../../lib/api/http.ts';
 import type {
   ConnectorAccess,
@@ -104,8 +105,18 @@ export class ConnectorMcpEndpoint implements ConnectorHttpHandler {
       const refused = this.#rateLimit(access, spec?.scope === 'fleet:write');
       if (refused !== undefined) return refused;
       // A write tool this token was not approved for is not registered, so the SDK would call it unknown. Say it
-      // as the tool error the contract asks for, through the same toolbox that records the refusal.
+      // as the tool error the contract asks for, through the same toolbox that records the refusal. This reply
+      // never reaches the SDK, so the transport's own envelope check is made here first: an unsupported
+      // `MCP-Protocol-Version` is a 400 whatever the token may do.
       if (spec !== undefined && !access.scopes.includes(spec.scope)) {
+        const version = request.headers.get('mcp-protocol-version');
+        if (version !== undefined && !SUPPORTED_PROTOCOL_VERSIONS.includes(version)) {
+          return jsonRpcError(
+            400,
+            -32000,
+            `Bad Request: Unsupported protocol version: ${version} (supported versions: ${SUPPORTED_PROTOCOL_VERSIONS.join(', ')})`,
+          );
+        }
         const result = await this.options.toolbox.execute(spec, call.arguments, access, this.#gateway(access));
         return {
           status: 200,

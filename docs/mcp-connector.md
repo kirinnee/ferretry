@@ -206,6 +206,17 @@ mean lizzette (Build MCP Connector)?` More than one match lists them and asks wh
   needs every capability and axis that the routes it calls declare. A narrowed grant refuses the call and names the
   capability; a grant document the daemon cannot read refuses every call. A paired device's OWN grant record does
   not apply — the connector is not a device — and its own switch, scopes and revocation narrow it further.
+- **A voice never answers what needs the owner's passkey.** `answer_attention` closes only PLAIN asks — an
+  open question, a choice, a yes/no, a permission, an answer review, a to-do or a note — and refuses, with "That
+  one needs your passkey in the Ferretry app.", any item that carries a held configuration change (`confirms`), a
+  card gate or card ask, a task or paste plan, a phone approval, a 2FA seed, a sign-in rule, a form or a typed
+  input. It is an allow-list of kinds plus a list of owner-only fields, so a kind added later is refused until
+  someone decides a voice may answer it; `list_attention` still lists such an item and says only the app can
+  answer it. This is the second defence: the daemon's boundary refuses these acts first, because tool requests
+  arrive governed.
+- **An answer names the ask it was given to.** The resolve body carries the item's `askVersion`; if the ferret
+  has replaced the ask since, the daemon refuses `ask_changed` and the tool says "That question changed, so
+  nothing was sent; here it is now: …" so the owner answers the question that is really being asked.
 - **No secrets.** No tool returns a secret, an environment, a credential or a token. Every text a tool returns
   that came from a ferret (output, summaries, errors, agenda questions) passes the daemon's fail-closed secret
   redactor first; if it cannot run, the text is `[output withheld]`.
@@ -229,10 +240,15 @@ mean lizzette (Build MCP Connector)?` More than one match lists them and asks wh
 - **Rate limit is HTTP-level**: `429` with `Retry-After`, 60 `tools/call`s a minute per grant, 10 of them write
   tools. `initialize` and `tools/list` are free. (A tool-level error would be read aloud as one more sentence and
   would not tell the client to back off.)
-- **Naming** (`names.ts`): normalised (case, spaces, hyphens, leading `:`, doubled letters, `ph`/`ck`/`y`
-  folded) and matched in tiers — exact, then unique prefix/substring (3+ characters), which may act; a close
-  edit distance only ever SUGGESTS ("Did you mean …?"), because the next sentence may be "stop it". Ambiguity is a
-  question. Live ferrets are searched first; a stopped one only when no live one matches.
+- **Naming** (`names.ts`, `resolveFerret`): normalised (case, spaces, hyphens, leading `:`, doubled letters,
+  `ph`/`ck`/`y` folded) and matched in tiers — EXACT IDENTITIES FIRST, over every ferret whatever its state (call
+  sign, session id, short id, exact task name), then a unique prefix/substring (3+ characters); a close edit
+  distance only ever SUGGESTS ("Did you mean …?"), because the next sentence may be "stop it". Ambiguity is a
+  question. A tool that changes something (send, restart, stop, and `answer_attention` naming a ferret) matches
+  across all states at once and never prefers a live ferret, so a retried call meets the same ferret: "stop
+  lizzette" twice says "already stopped" the second time, never stops another ferret whose name starts the same.
+  A reading tool prefers the one live ferret when a call sign is shared with stopped ones. A ferret the caller
+  names for `answer_attention` is always honoured: no such item on it is a refusal, never another ferret's item.
 - **Routes the tools call**: `GET /v1/sessions`, `GET /v1/sessions/:id/logs`, `POST /v1/sessions/:id/send`,
   `POST /v1/sessions/:id/stop`, `POST /v1/restarts` (`scope: ids`), `GET /v1/projects`,
   `POST /v1/sessions` (`mode: auto`, `cwd` = a REGISTERED project's path — never a caller's string),
@@ -243,8 +259,13 @@ mean lizzette (Build MCP Connector)?` More than one match lists them and asks wh
   (`fys_`/`fyc_`, `sk-ant-`, `sk-`, GitHub, AWS, Slack, Google, JWTs, `Bearer`/`Basic`, PEM private keys,
   `password=`-style assignments (value only), URL userinfo). If either throws the text is `[output withheld]`.
 - **Calls log**: write calls only, args redacted and message/answer/task cut to 500 characters, appended with
-  `O_APPEND | O_NOFOLLOW`, `0600`, rotated to `calls.1.jsonl` at 1 MiB. A refused write (scope or grants) is in
-  the calls log with outcome `refused` but not in the security log.
+  `O_APPEND | O_NOFOLLOW`, `0600`, rotated to `calls.1.jsonl` at 1 MiB. Each line, and each `connector.tool`
+  security-log event, says HOW the call ended: `ok` (`succeeded`), `error` (`failed`: the daemon or the tool
+  could not do it) or `refused` (`refused`: the tool or the daemon said not this, e.g. an item that needs the
+  passkey, or a 401/403). A call refused at the gate (scope or grants) before the tool ran is in the calls log with
+  outcome `refused` but not in the security log, because nothing was attempted.
+- **Protocol version**: the endpoint's own refusal reply for a write tool a read-only token may not call never
+  reaches the SDK, so it checks `MCP-Protocol-Version` itself (an unsupported value is `400`, as the SDK does).
 
 ## Turning it on (the owner, at the machine)
 

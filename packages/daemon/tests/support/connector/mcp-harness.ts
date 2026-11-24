@@ -87,6 +87,8 @@ export interface PostOptions {
   readonly protocolVersion?: string;
   /** Replaces reading the body, to say what a transport that refuses it does. */
   readonly readBody?: () => Promise<string>;
+  /** Extra request headers, lower-case names (an `mcp-protocol-version`, say). */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export function post(
@@ -104,6 +106,7 @@ export function post(
   if (token !== null) headers.set('authorization', `Bearer ${token}`);
   if (options.origin !== undefined) headers.set('origin', options.origin);
   if (options.protocolVersion !== undefined) headers.set('mcp-protocol-version', options.protocolVersion);
+  for (const [key, value] of Object.entries(options.headers ?? {})) headers.set(key, value);
   const raw = typeof body === 'string' ? body : JSON.stringify(body);
   const request: ApiRequest = {
     method: options.method ?? 'POST',
