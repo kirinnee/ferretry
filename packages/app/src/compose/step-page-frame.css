@@ -65,6 +65,16 @@
 .fy-spf__body {
   min-width: 0;
 }
+/* A BUSY STEP FILLS ITS AREA (C59 O8-4c). The page loader (`ui/loading.css`) centres in the box it fills, but a step draws it a few plugin
+   boxes down inside the body, which was only as tall as its content, so the mark sat in the top of the area. Every box from the main
+   column down to a (non-compact) page loader becomes a column that takes the room left between the heading and the footer; a compact
+   loader (a small panel's own wait) and a page with no loader are untouched. */
+:is(.fy-spf__main, .fy-spf__body, .fy-spf__body div):has(.fy-loading--page:not(.fy-loading--compact)) {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
 /* A row of Buttons anywhere in the body is the same fixed size and 12px apart. */
 .fy-spf__body .kt-btn {
   height: auto;

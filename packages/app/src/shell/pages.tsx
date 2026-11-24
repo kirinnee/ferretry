@@ -54,7 +54,13 @@ export function DaemonListPage() {
     if (sendTo !== undefined) router.navigate(sendTo, { replace: true });
   }, [sendTo, router]);
   if (sendTo !== undefined)
-    return <Loading kind="page" label={entry.kind === 'fleet' ? 'Opening your machine…' : 'Opening setup…'} />;
+    return (
+      <Loading
+        className="fy-loading--fill"
+        kind="page"
+        label={entry.kind === 'fleet' ? 'Opening your machine…' : 'Opening setup…'}
+      />
+    );
   if (groups.length === 0) {
     return (
       <section className="fy-page">

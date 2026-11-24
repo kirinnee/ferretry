@@ -321,6 +321,34 @@ describe('r11 O2: step page layout, stacked choices left and demo right', () => 
     });
   }
 
+  // C59 O8-4c: a step that is busy (onboarding's cover) draws the page loader in the middle of the area between the heading and the footer.
+  for (const variant of VARIANTS)
+    it(`${variant.name}: the busy loader sits in the vertical middle of the step's area, not at the top`, async () => {
+      const { tab, close } = await open(variant, 'covered');
+      try {
+        await tab.waitForSelector('[data-loading="page"]');
+        await tab.waitForTimeout(650); // past the 300 ms threshold and the fade
+        await shotOf(tab, variant, 'busy-loader');
+        const where = await tab.evaluate(() => {
+          const loader = document.querySelector('[data-loading="page"]')?.getBoundingClientRect() ?? new DOMRect();
+          const head = document.querySelector('.fy-spf__head')?.getBoundingClientRect() ?? new DOMRect();
+          const footer = document.querySelector('.fy-spf__footer')?.getBoundingClientRect() ?? new DOMRect();
+          const area = { top: head.bottom, bottom: footer.top };
+          return {
+            offCentre:
+              Math.abs((loader.top + loader.bottom) / 2 - (area.top + area.bottom) / 2) / (area.bottom - area.top),
+            scrolls:
+              (document.querySelector('[data-scroller]')?.scrollHeight ?? 0) >
+              (document.querySelector('[data-scroller]')?.clientHeight ?? 0) + 1,
+          };
+        });
+        expect(where.offCentre, 'centred between the heading and the footer, not top-heavy').toBeLessThan(0.06);
+        expect(where.scrolls, 'filling the area adds no scroll').toBe(false);
+      } finally {
+        await close();
+      }
+    });
+
   it('should keep the old `demo` prop working (drawn in the same right column)', async () => {
     const { tab, close } = await open(VARIANTS[0] as Viewport, 'prop');
     try {
