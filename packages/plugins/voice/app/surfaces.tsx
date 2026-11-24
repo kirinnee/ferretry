@@ -5,8 +5,14 @@
 
 import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { type ReactNode, useEffect, useState } from 'react';
-import type { ConversationAboveComposerProps, ConversationRowProps } from '@ferretry/plugin-conversation/contract';
+import type {
+  ConversationAboveComposerProps,
+  ConversationComposerProps,
+  ConversationRowProps,
+} from '@ferretry/plugin-conversation/contract';
 import { AutoReadChip } from './components/auto-read-chip.tsx';
+import { VoiceModeButton } from './components/voice-mode-button.tsx';
+import { VoiceModeSlot } from './components/voice-mode-panel.tsx';
 import { DictationControl } from './components/dictation-control.tsx';
 import { ReadAloudControl } from './components/read-aloud.tsx';
 import { DictationDebugSettings } from './features/settings/dictation-debug-settings.tsx';
@@ -22,6 +28,7 @@ import { useDeviceVoiceSettingsStore, useLiveVoiceSettings } from './hooks/use-l
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { needsInputOf } from './lib/voice-chat/reply-picker.ts';
 import type { SpeechAssets } from './lib/stt/on-device-voices.ts';
+import { createVoiceModeStore, useVoiceMode } from './lib/voice-mode/voice-mode-store.ts';
 import { createVoiceStore, StoreProvider, useSttSettingsStore, type VoiceStore } from './lib/voice-store.tsx';
 import { useComposerDraft } from '@ferretry/app';
 import { daemonConnection, SettingGroup, VoiceClientProvider } from './shell-voice.ts';
@@ -47,6 +54,8 @@ export interface VoiceSurfaceOptions {
 
 /** Builds the surfaces over one plugin client and ONE voice store for the page. */
 export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions = {}) {
+  /** Which ferrets this page is in voice mode with: the button starts it, the panel in front of the composer runs it. */
+  const voiceMode = createVoiceModeStore();
   let held: VoiceStore | undefined;
   let loading: Promise<VoiceStore> | undefined;
   const build = (speechAssets: SpeechAssets | null | undefined): VoiceStore => {
@@ -217,6 +226,8 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
       scope: subject,
       entries: rows,
       authoritative: turn.live,
+      // Voice mode reads the replies aloud whatever the device's Auto-read switch says: hands-free has no other way to hear them.
+      forced: useVoiceMode(voiceMode, subject).active,
       turn: turn.state,
       turnStateAt: turn.at,
       question: needsInputOf(needsInput),
@@ -242,6 +253,31 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
       </Boundary>
     );
 
+  /** The Voice mode button in the composer's tools (`composer.tools`), for this ferret only. */
+  const VoiceModeButtonPanel = ({ subject }: { readonly subject?: string }) =>
+    subject === undefined ? null : <VoiceModeButton client={client} ferretId={subject} store={voiceMode} />;
+
+  /**
+   * Voice mode's panel in front of the composer (`conversation.composer`): the composer as it was while voice mode is off, hidden
+   * (never dropped) while it is on. It needs the chat's own composer to stand in front of, so it draws nothing without one.
+   */
+  const VoiceModePanel = ({
+    subject,
+    turn,
+    fallback,
+  }: { readonly subject?: string } & Partial<ConversationComposerProps>) =>
+    subject === undefined ? (
+      (fallback as ReactNode)
+    ) : (
+      <VoiceModeSlot
+        client={client}
+        fallback={fallback as ReactNode}
+        ferretId={subject}
+        store={voiceMode}
+        turn={turn}
+      />
+    );
+
   return {
     VoiceTab,
     VoiceCleanupTab,
@@ -249,6 +285,10 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
     DictationPanel,
     ReadAloudPanel,
     AutoReadPanel,
+    VoiceModeButtonPanel,
+    VoiceModePanel,
+    /** Which ferrets this page is in voice mode with (a suite starts one without the button). */
+    voiceMode,
     VoiceStepPanel,
     SpeedupsStepPanel,
   };

@@ -13,6 +13,7 @@ import {
 } from './contract/index.ts';
 import {
   CONVERSATION_ABOVE_COMPOSER_SLOT,
+  CONVERSATION_COMPOSER_SLOT,
   CONVERSATION_ROW_ACTIONS_SLOT,
   ConversationPort,
 } from '@ferretry/plugin-conversation/contract';
@@ -145,6 +146,9 @@ export default definePlugin({
       panel(CONVERSATION_ROW_ACTIONS_SLOT, { id: 'read-aloud', order: 10 }),
       // "Read replies aloud": reads a finished reply (or a question) while the device setting is on (Conversation's `conversation.above-composer` slot).
       panel(CONVERSATION_ABOVE_COMPOSER_SLOT, { id: 'auto-read', order: 40 }),
+      // Voice mode: its button in the composer's tools, and its panel standing in front of the composer (Conversation's `conversation.composer` slot).
+      panel('composer.tools', { id: 'voice-mode-button', order: 25 }),
+      panel(CONVERSATION_COMPOSER_SLOT, { id: 'voice-mode', order: 10 }),
       // First-run steps (Onboarding's steps screen offers this slot): this device's two client steps, Voice then Speed-ups.
       panel('onboarding.step', { id: 'onboarding-voice', order: 3 }),
       panel('onboarding.step', { id: 'onboarding-speedups', order: 4 }),

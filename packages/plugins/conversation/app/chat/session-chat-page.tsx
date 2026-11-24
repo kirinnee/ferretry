@@ -19,6 +19,7 @@ import {
   FerretWorkspace,
   LiveStreamIndicator,
   type LiveStreamIndicatorProps,
+  PanelReplace,
   PanelSlot,
 } from '@ferretry/app';
 import { ReferenceSurfaceProvider, TERMINAL_STATUSES, statusMark, useAppHook, useLiveActivity } from '@ferretry/app';
@@ -32,9 +33,13 @@ import {
 import { useChatFleet } from './chat-fleet.ts';
 import { FilesPanelBridge } from './files-panel-bridge.tsx';
 import { type ChatSession, isUnread } from './chat-session.ts';
-import { CONVERSATION_ABOVE_COMPOSER_SLOT, type ComposerAccount } from '../../contract/index.ts';
+import {
+  CONVERSATION_ABOVE_COMPOSER_SLOT,
+  CONVERSATION_COMPOSER_SLOT,
+  type ComposerAccount,
+} from '../../contract/index.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AttachmentGalleryProvider } from '../composer/attachment-gallery.tsx';
 import { composerApi } from '../composer/composer-api.ts';
 import { Composer, type ComposerSent } from '../composer/composer.tsx';
@@ -370,6 +375,21 @@ export function SessionChatPage({
   const chatSurface = useRef<HTMLDivElement | null>(null);
   useChatScrollbarGutter(chatSurface, ferretId);
 
+  // The composer, or whatever stands in front of it (`conversation.composer`: Voice's voice mode). Never under an agenda item's
+  // reply box: that box answers the item, not the ferret, so voice mode (which sends to the ferret) has no place there.
+  const composerSlot = (composer: ReactNode) =>
+    askId !== undefined ? (
+      composer
+    ) : (
+      <PanelReplace
+        daemon={daemonId}
+        fallback={composer}
+        props={{ turn: aboveComposer.turn }}
+        slot={CONVERSATION_COMPOSER_SLOT}
+        subject={ferretId}
+      />
+    );
+
   const header = (
     <>
       {embedded ? null : (
@@ -497,33 +517,35 @@ export function SessionChatPage({
                   This ferret could not be read, so nothing can be sent to it until it can.
                 </p>
               ) : null}
-              <Composer
-                busy={busy}
-                compact={compact}
-                compacting={liveSample?.compaction?.phase === 'running'}
-                {...(session.context === undefined ? {} : { context: session.context })}
-                daemon={daemonConnection(daemonId)}
-                {...composerPreferences}
-                disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl || isUnread(session)}
-                ferretId={ferretId}
-                {...(account === undefined ? {} : { account })}
-                {...(askApi === undefined ? {} : { api: askApi })}
-                {...(session.config.harness === undefined || !isRecordedHarness(session.config.harness)
-                  ? {}
-                  : { harness: session.config.harness })}
-                {...(askId === undefined ? {} : { draftSlot: askId })}
-                {...(forForm
-                  ? {
-                      allowEmptySend: true,
-                      // A form card's Send answers THE FORM, from the press itself: never a chat message, never the outbox.
-                      onFormSend: answerForm,
-                      ...(ask?.formChanges === undefined ? {} : { clearErrorOn: ask.formChanges }),
-                    }
-                  : {})}
-                {...(ask?.restore === undefined ? {} : { restore: ask.restore })}
-                {...(ask?.onRestored === undefined ? {} : { onRestored: ask.onRestored })}
-                onSent={onSent}
-              />
+              {composerSlot(
+                <Composer
+                  busy={busy}
+                  compact={compact}
+                  compacting={liveSample?.compaction?.phase === 'running'}
+                  {...(session.context === undefined ? {} : { context: session.context })}
+                  daemon={daemonConnection(daemonId)}
+                  {...composerPreferences}
+                  disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl || isUnread(session)}
+                  ferretId={ferretId}
+                  {...(account === undefined ? {} : { account })}
+                  {...(askApi === undefined ? {} : { api: askApi })}
+                  {...(session.config.harness === undefined || !isRecordedHarness(session.config.harness)
+                    ? {}
+                    : { harness: session.config.harness })}
+                  {...(askId === undefined ? {} : { draftSlot: askId })}
+                  {...(forForm
+                    ? {
+                        allowEmptySend: true,
+                        // A form card's Send answers THE FORM, from the press itself: never a chat message, never the outbox.
+                        onFormSend: answerForm,
+                        ...(ask?.formChanges === undefined ? {} : { clearErrorOn: ask.formChanges }),
+                      }
+                    : {})}
+                  {...(ask?.restore === undefined ? {} : { restore: ask.restore })}
+                  {...(ask?.onRestored === undefined ? {} : { onRestored: ask.onRestored })}
+                  onSent={onSent}
+                />,
+              )}
             </>
           ) : null}
         </div>
