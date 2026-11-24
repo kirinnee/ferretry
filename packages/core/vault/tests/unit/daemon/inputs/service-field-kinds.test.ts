@@ -151,6 +151,30 @@ describe('the card for a page field the page says is a card number, expiry or se
     should(request.saved?.saves).be.undefined();
   });
 
+  it('should refuse to keep a typed card number as a saved login password, with nothing typed', async () => {
+    const w = world(withPassword(facing({ name: 'cardnumber', autocomplete: 'cc-number', inputmode: 'numeric' })));
+    await w.service.raise(SESSION, raise('secret'));
+    const request = await w.pending();
+
+    const refused = await w.service
+      .deliver(
+        SESSION,
+        request.id,
+        w.send(request, {
+          fields: [{ field: 'code', padded: padInputValue('4111111111111111') }],
+          save: { entry: 'GITHUB', label: 'GitHub' },
+        }),
+        OWNER,
+      )
+      .then(
+        () => undefined,
+        (error: unknown) => error as Error,
+      );
+
+    should(refused?.message).containEql('payment or code field');
+    should(w.writes).eql([]);
+  });
+
   it('should refuse to type a saved login password into a card number, with nothing typed', async () => {
     const w = world(withPassword(facing({ name: 'cardnumber', autocomplete: 'cc-number', inputmode: 'numeric' })));
     await w.service.raise(SESSION, raise('secret'));

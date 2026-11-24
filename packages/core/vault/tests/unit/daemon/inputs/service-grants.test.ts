@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { identityOf } from '../../../../daemon/lib/inputs/login-observer.ts';
 import { MachineScripts } from '../../../../daemon/lib/inputs/machine-scripts.ts';
-import { account, NOW, page, ruleGrant, SESSION, site } from './grant-fixtures.ts';
+import { account, NOW, page, pageField, ruleGrant, SESSION, site } from './grant-fixtures.ts';
 import { PAGE_LOGIN, PASSWORD, planLine, USERNAME, world } from './world.ts';
 
 /**
@@ -14,6 +14,20 @@ import { PAGE_LOGIN, PASSWORD, planLine, USERNAME, world } from './world.ts';
 const github = () => ({ accounts: [account()], signIns: [site()] });
 
 describe('a task-plan line fills a sign-in at the raise', () => {
+  it('should never type a login password into a secret the page says is a card number', async () => {
+    const facts = page({}, [
+      pageField('user'),
+      pageField('pass', {}, { type: 'text', name: 'cardnumber', autocomplete: 'cc-number', inputmode: 'numeric' }),
+    ]);
+    const w = world({ facts, grants: [planLine()], accounts: github() });
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+    should(w.fills).eql([]);
+  });
+
   it('I213 should type the username and password under the line, close the card, and spend one use', async () => {
     const w = world({ facts: page(), grants: [planLine()], accounts: github() });
 

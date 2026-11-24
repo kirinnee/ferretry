@@ -157,16 +157,6 @@ describe('matchSignInGrant: every check holds or nothing is typed (one row per c
       reason: 'field-not-covered',
     },
     {
-      check: '6 a secret the page says is a card number (a login password never goes into a payment field)',
-      seen: {
-        facts: page({}, [
-          pageField('user'),
-          pageField('pass', {}, { type: 'text', name: 'cardnumber', autocomplete: 'cc-number' }),
-        ]),
-      },
-      reason: 'field-not-covered',
-    },
-    {
       check: '6 a code with no code tick',
       seen: { fields: [{ id: 'otp', label: 'Code', sensitivity: 'code' }] },
       reason: 'code-not-ticked',

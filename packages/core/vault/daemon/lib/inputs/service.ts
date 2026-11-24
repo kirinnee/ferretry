@@ -891,7 +891,10 @@ export class InputRequestService {
       sessionId,
       facts,
       matchKey: targetMatchKey(facts, this.deps.hostName ?? ''),
-      fields,
+      // A secret the page says is a payment or code field is no sign-in's password: the matcher never covers a `private` value.
+      fields: fields.map(field =>
+        barredFromLoginPassword(facts, field) ? { ...field, sensitivity: 'private' as const } : field,
+      ),
       listing,
       keys,
       // Any page script the ferret EVER ran in this session: stricter than "on this document".
@@ -1864,12 +1867,6 @@ export class InputRequestService {
       // typing, and only to be typed: it is in no request, event, audit entry, result or error.
       const values: InputFieldValue[] = [];
       for (const field of request.fields) {
-        // A saved login's password never goes into a card or code field, whatever the card offered: checked on what was just seen.
-        if (!typed.has(field.id) && barredFromLoginPassword(seen.facts, field))
-          throw new InputRequestError(
-            'bad_request',
-            'a saved login is not typed into a payment or code field; nothing was typed',
-          );
         const text = typed.get(field.id) ?? (await this.fill(field, body.entry as LoginEntryId, factor));
         values.push({ field: field.id, text });
       }
