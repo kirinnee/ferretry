@@ -24,6 +24,7 @@
  * Pure: values only.
  */
 import { isKind, supportedKinds } from '../harness-kind.ts';
+import { slugName } from './document.ts';
 import type { HarnessKind } from '../manifest.ts';
 import type { StarterModels } from '../models/catalog.ts';
 import type { InstructionsComponent, SettingsComponent } from './schema.ts';
@@ -36,7 +37,7 @@ export const builtinProfileName = (harness: HarnessKind): string => `ferretry-${
  * layers over a model set of that one model. Named by the model, so runtimes pinned to the same model share it.
  */
 export const pinnedProfileName = (harness: HarnessKind, model: string): string =>
-  `${builtinProfileName(harness)}-pinned-${model.replaceAll(/[\\/]/gu, '-')}`;
+  `${builtinProfileName(harness)}-pinned-${slugName(model, 'model')}`;
 
 /** The generic instructions component every built-in profile names. */
 const AUTONOMOUS_INSTRUCTIONS_NAME = 'ferretry-work-alone';
