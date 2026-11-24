@@ -1,3 +1,4 @@
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { afterEach, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { chmod, link, lstat, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
@@ -238,7 +239,7 @@ test('S175 owned store metadata reaches the actual daemon list: status, email, p
   await f.put('codex/auth.json', codex());
   const host = await testHost({
     plugins: [composed(f.roots())],
-    fakes: { vault: emptyVault() },
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
     config,
     clock: fixedClock(instantFromEpochMs(NOW)),
   });
@@ -289,7 +290,7 @@ test('owned metadata retains today’s expiry/missing/unreadable rules and rerea
   await f.put('codex/auth.json', codex(NOW + 60_000));
   const host = await testHost({
     plugins: [composed(f.roots())],
-    fakes: { vault: emptyVault() },
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
     config,
     clock: fixedClock(instantFromEpochMs(NOW)),
   });
@@ -408,7 +409,7 @@ test('S178 actual daemon Check now makes only the free provider read, on the hou
   const requests: { url: string; method: string }[] = [];
   const host = await testHost({
     plugins: [composed(f.roots(), jobs)],
-    fakes: { vault: emptyVault() },
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
     config,
     clock: fixedClock(instantFromEpochMs(NOW)),
     gate,
@@ -506,7 +507,7 @@ test('owned passive usage supplies measured windows; a list never rotates Codex,
   });
   const host = await testHost({
     plugins: [wired],
-    fakes: { vault: emptyVault() },
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
     config,
     gate,
     clock: fixedClock(instantFromEpochMs(NOW)),
@@ -621,7 +622,7 @@ for (const scenario of sharingCases) {
     });
     const host = await testHost({
       plugins: [wired],
-      fakes: { vault: emptyVault() },
+      fakes: { gate: new FakeGate(), vault: emptyVault() },
       config,
       gate,
       uses: scenario.browsers === undefined ? {} : { browsers: scenario.browsers },
@@ -661,7 +662,7 @@ test('external entrypoints still refuse missing governance after private launch 
   const f = await fixture();
   const host = await testHost({
     plugins: [composed(f.roots())],
-    fakes: { vault: emptyVault() },
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
     config,
   });
   try {
@@ -685,7 +686,7 @@ test('an owned Codex login whose file cannot be read or has a second name is nev
   await link(join(f.base, 'codex-linked/auth.json'), join(f.base, 'codex-linked/second-name'));
   const host = await testHost({
     plugins: [composed(f.roots())],
-    fakes: { vault: emptyVault() },
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
     config,
     clock: fixedClock(instantFromEpochMs(NOW)),
   });

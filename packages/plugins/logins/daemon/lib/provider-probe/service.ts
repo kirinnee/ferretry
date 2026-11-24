@@ -4,6 +4,7 @@ import type { LoginId, LoginTestCode, LoginTestResult } from '../../../contract/
 import type { AuthorizedOutcome } from '@ferretry/core-vault/contract';
 import { planProviderProbe, type ProviderProbePlan } from './plan.ts';
 import type { ProviderProbeClock, ProviderProbePort } from './ports.ts';
+import type { ModelListReadNote } from '../model-lists/audit.ts';
 
 /**
  * A person's **Test** of an environment login (docs/provider-presets.md): one request, the cheapest
@@ -62,11 +63,20 @@ export interface ProviderProbeServiceParts {
   readonly probe: ProviderProbePort;
   readonly clock: ProviderProbeClock;
   /**
-   * A Test (or a list read) that asked a model list and got a body: hand it on to be kept as ids. The body is the
-   * provider's reply and is never logged or returned; the callee reads the ids and drops it. Must not throw.
+   * A Test that asked a model list is about to be sent: the function that takes the body it gets, to be kept as ids. It
+   * is asked for BEFORE the request, so the login it speaks for is the one the request was made under. The body is the
+   * provider's reply and is never logged or returned; the callee reads the ids and drops it. Neither may throw.
    */
-  readonly onModelList?: (loginId: string, payload: unknown) => Promise<void>;
+  readonly modelListRecorder?: (loginId: string) => (payload: unknown) => Promise<void>;
+  /**
+   * A keyed read of a model list put the login's key on a request: say so (the `secrets.used` record). Metadata only: the
+   * login, the secret's name, the host and the outcome's kind. Must not throw.
+   */
+  readonly onListRead?: (note: ModelListReadNote) => Promise<void>;
 }
+
+/** The outcomes of a keyed read that put the key on no request. */
+const NOTHING_SENT: ReadonlySet<string> = new Set(['refused', 'secret_missing', 'vault_damaged']);
 
 /** A model list is asked at a path ending `/models` (every provider's list endpoint); a quota or key read is not one. */
 const MODEL_LIST_PATH = /\/models\/?$/u;
@@ -118,12 +128,11 @@ export class ProviderProbeService {
     const plan = planProviderProbe(subject.preset, subject.credential);
     if ('reason' in plan) return result(plan.code, 'nothing', plan.reason);
     if (plan.spends === 'one-token' && !consent.allowInference) return result('consent_required', 'nothing');
+    const record = asksModelList(plan) ? this.parts.modelListRecorder?.(subject.id) : undefined;
     const outcome = await this.parts.probe.probe(plan);
     const code = probeCode(outcome);
     // The Test of a provider whose Test IS its model list keeps the ids from that same reply: no second request.
-    if (outcome.kind === 'completion' && asksModelList(plan)) {
-      await this.parts.onModelList?.(subject.id, outcome.payload).catch(() => undefined);
-    }
+    if (outcome.kind === 'completion' && record !== undefined) await record(outcome.payload).catch(() => undefined);
     // A refusal, a missing secret or a damaged store sent nothing; anything else reached the provider.
     const sent = !['refused', 'not_set', 'vault_damaged'].includes(code);
     return result(code, sent ? plan.spends : 'nothing', PROVIDER_TEST_MESSAGES[code], sent);
@@ -140,6 +149,18 @@ export class ProviderProbeService {
     const plan = planProviderProbe(subject.preset, subject.credential);
     if ('reason' in plan || !asksModelList(plan)) return undefined;
     const outcome = await this.parts.probe.probe(plan);
+    // The Vault placed the key on that request (or refused before it did): say so, by name and host, once per read. A
+    // refusal, a missing secret or a damaged store put nothing on a request and writes nothing.
+    if (plan.kind === 'authorized' && !NOTHING_SENT.has(outcome.kind)) {
+      await this.parts
+        .onListRead?.({
+          loginId: subject.id,
+          secret: String(plan.secretName),
+          host: new URL(plan.request.url).host,
+          outcome: outcome.kind,
+        })
+        .catch(() => undefined);
+    }
     return outcome.kind === 'completion' ? { payload: outcome.payload } : 'failed';
   }
 }

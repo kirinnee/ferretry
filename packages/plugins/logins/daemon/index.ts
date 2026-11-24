@@ -60,6 +60,7 @@ import { changeRoutes } from './lib/routes/changes.ts';
 import { loginRoutes } from './lib/routes/logins.ts';
 import { modelRoutes } from './lib/routes/models.ts';
 import { modelListRoutes } from './lib/routes/model-lists.ts';
+import { modelListReadDraft } from './lib/model-lists/audit.ts';
 import { ModelListService } from './lib/model-lists/service.ts';
 import { signInRoutes } from './lib/routes/sign-in.ts';
 import { HOSTED_APP_ORIGIN, HOSTED_APP_RELEASE_KEY } from './lib/shared/hosted.ts';
@@ -144,7 +145,12 @@ export function buildLoginsDaemon() {
       const providerProbe = new ProviderProbeService({
         probe,
         clock: { monotonicMs: () => clock.nowMs(), now: () => clock.now() },
-        onModelList: (loginId, payload) => modelLists.record(loginId, payload),
+        modelListRecorder: loginId => modelLists.recorder(loginId),
+        // Each keyed list read puts the login's key on a request: the Vault does not write `secrets.used` for that, so the
+        // read does (the secret's name, the host and the outcome's kind; docs/audit.md).
+        onListRead: async note => {
+          await needs.gate.audit(modelListReadDraft(note));
+        },
       });
       // Each login's live model list: read when somebody's act causes it (Add login, Test, a picker open past a day,
       // "Refresh list"), never on a timer. Ids only, in `state/logins/model-lists/`.
@@ -152,6 +158,11 @@ export function buildLoginsDaemon() {
         store: new StateModelListStore(state),
         now: () => clock.now(),
         nowMs: () => clock.nowMs(),
+        // The login's file as it is in effect: an edit of its key or address is a different revision, and a removal is none.
+        revision: id => {
+          const file = files().get(id);
+          return file === undefined ? undefined : JSON.stringify(file);
+        },
         read: async id => {
           const entry = await catalog.entry(id).catch(() => undefined);
           if (entry === undefined) return undefined;

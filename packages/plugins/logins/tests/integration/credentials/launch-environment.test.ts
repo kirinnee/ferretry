@@ -1,3 +1,4 @@
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { afterEach, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -64,7 +65,7 @@ async function boot(logins: Record<string, unknown>) {
   });
   const host = await testHost({
     plugins: [wired],
-    fakes: { vault: emptyVault() },
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
     config: { logins },
     gate: admission,
     clock: fixedClock(instantFromEpochMs(NOW)),

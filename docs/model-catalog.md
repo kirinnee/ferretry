@@ -442,14 +442,29 @@ page that is HTML, a map) is **never stored** and the last list stands.
 
 - **Add login** (and an edit of one): once, when the login's file appears or changes.
 - **Test**: the same reply is kept, with no second request.
-- **A picker opens and the list is older than 24 hours**: `POST /v1/logins/:loginId/model-list/refresh` with `{}`
-  reads only when due and otherwise answers from the held list.
-- **"Refresh list"**: the same route with `{ "force": true }`. (It is not "Update now", which moves a runtime's
-  pinned default; a list refresh **never moves a default or a pin**.)
+- **A picker opens and the list is older than 24 hours**: `POST /v1/logins/:loginId/model-list/refresh` (body `{}`,
+  `fleet.use`) reads only when due and otherwise answers from the held list.
+- **"Refresh list"**: `POST /v1/logins/:loginId/model-list/force` (body `{}`, **`fleet.configure`**, like the keyed
+  Test). A device holding only `fleet.use` (a limited one) is refused it. (It is not "Update now", which moves a
+  runtime's pinned default; a list refresh **never moves a default or a pin**.)
 
-Callers that arrive while a read of the same login is under way share one request. Offline or a provider that is
-down keeps the last list and answers `kept`: an answer, never an error. The route is `fleet.use`; the Vault records
-each use of the key itself (`secrets.used`). A removed login's list is deleted with it.
+**Attempt cooldown.** No caller can aim requests at a provider, however often it asks. Every attempt to read a login's
+list, whatever it came to, is on record (in memory, per login and per revision of the login's file), and a login's
+provider is **not asked again within 60 seconds of an attempt**; a _plain_ read (a picker opening on a stale list)
+also waits **15 minutes after an attempt that gave no list**. A request that falls inside answers `cooling` with the
+held list and sends nothing. An edit of the login's key or address is a different revision, so it is read at once.
+Callers that arrive while a read of the same login (and revision) is under way share one request.
+
+**An edit or a removal while a read is under way.** Each read is tagged with the revision of the login's file in effect
+when it began, and how many times the login had been removed. Its reply is kept **only if that revision is still in
+effect and the login is still there**: a reply from the key or address the login had before an edit never marks the
+list fresh, an edit always gets its own read, and a list is never written back for a login that was removed (nor for
+one removed and added again under the same name). A Test's reply is held to the same rule.
+
+Offline or a provider that is down keeps the last list and answers `kept`: an answer, never an error. **Each keyed
+read is recorded** as `secrets.used` ([audit.md](audit.md)): the secret's name, the host, the login id and the
+outcome's kind, never the key or the reply. A removed login's list is deleted with it. The cooldown record is in
+memory, so a daemon restart clears it.
 
 `LoginsApi.modelLists()` hands the held lists (by login id, no network) to Runtimes; `ModelsChanged` is published
 when a stored list differs from the one before it.

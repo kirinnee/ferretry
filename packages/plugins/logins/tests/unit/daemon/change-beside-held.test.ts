@@ -7,6 +7,7 @@
  * cannot tell the two calls apart: the first case pins the outcome (the label is in effect, the other caller's raise is
  * still held and not in effect), the second pins WHICH port call the change made, which is what M12 changes.
  */
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { describe, expect, test } from 'bun:test';
 import type { ConfigPort, ConfigWriteJudgement } from '@ferretry/kernel/contract';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
@@ -54,7 +55,7 @@ async function worldWithHeldRaise() {
   });
   const host = await testHost({
     plugins: [logins, runtimes],
-    fakes: { vault: emptyVault() },
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
     gate: {
       ...standInAdmission(() => owner()),
       judgeConfigWrite: (_input: ConfigWriteJudgement) => verdict.now,

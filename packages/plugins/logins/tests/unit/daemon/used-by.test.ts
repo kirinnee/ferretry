@@ -3,6 +3,7 @@
  * before it removes one, and a removal FAILS CLOSED when nothing can answer. The provider here stands where Runtimes
  * stands (the key and the hook are the real ones); Runtimes' own answer is tested with Runtimes.
  */
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { describe, expect, test } from 'bun:test';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { testHost } from '@ferretry/kernel/testing';
@@ -34,7 +35,7 @@ function provider(users: LoginUsers) {
 async function removal(users: LoginUsers | undefined) {
   const host = await testHost({
     plugins: users === undefined ? [daemon] : [daemon, provider(users)],
-    fakes: { vault: emptyVault() },
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
     config: files,
   });
   const staged = await host.request('POST', '/v1/logins/changes', { body: { kind: 'login.remove', id: 'work' } });
@@ -100,7 +101,7 @@ describe('the logins list names the runtimes that use each login', () => {
   async function listed(users: LoginUsers | undefined) {
     const host = await testHost({
       plugins: users === undefined ? [daemon] : [daemon, provider(users)],
-      fakes: { vault: emptyVault() },
+      fakes: { gate: new FakeGate(), vault: emptyVault() },
       config: files,
     });
     try {

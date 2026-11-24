@@ -11,6 +11,7 @@
  * stamp) and by never keeping a store's facts (so a changed store is simply seen at the next read). What Logins' watch does do
  * is announce a file that moved in effect (`logins.changed`), proved in tests/unit/daemon/config-watch.test.ts.
  */
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { describe, expect, test } from 'bun:test';
 import { milliseconds } from '@ferretry/std';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
@@ -32,7 +33,7 @@ describe('the jobs and timers Logins keeps', () => {
   test('J-0042 J-0087 the models read runs once after start as a kernel job and never throws when the network is down', async () => {
     const host = await testHost({
       plugins: [daemon],
-      fakes: { vault: emptyVault() },
+      fakes: { gate: new FakeGate(), vault: emptyVault() },
       fetch: async () => {
         throw new Error('offline');
       },
@@ -50,7 +51,11 @@ describe('the jobs and timers Logins keeps', () => {
     // whatever the next read shows, Logins took it from the host at that moment and held none of its own. (The real
     // host serves the last reload's snapshot, which is the kernel's cache, proved in its service test J-0096.)
     const logins: Record<string, unknown> = { work: { harness: 'claude-code', store: 'host' } };
-    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: { logins } });
+    const host = await testHost({
+      plugins: [daemon],
+      fakes: { gate: new FakeGate(), vault: emptyVault() },
+      config: { logins },
+    });
     try {
       await host.settle();
       const idsOf = async () =>
@@ -122,7 +127,7 @@ describe('the jobs and timers Logins keeps', () => {
   test('J-0232 a daemon with no Ferrets to ask has no ferret on any login, and a run records nothing and fails nothing', async () => {
     const host = await testHost({
       plugins: [daemon],
-      fakes: { vault: emptyVault() },
+      fakes: { gate: new FakeGate(), vault: emptyVault() },
       config: { logins: { team: { harness: 'codex', store: 'ferretry' } } },
     });
     try {
@@ -239,7 +244,7 @@ async function codexRig(initial: number, startedAt = '2026-10-13T08:00:00.000Z')
   });
   const host = await testHost({
     plugins: [daemon],
-    fakes: { vault: emptyVault() },
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
     uses: { ferrets },
     config: { logins: { team: { harness: 'codex', store: 'ferretry' } } },
   });

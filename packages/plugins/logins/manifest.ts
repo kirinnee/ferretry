@@ -1,6 +1,6 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract';
-import { audit, cap } from '@ferretry/core-gate/contract';
+import { audit, cap, GatePort } from '@ferretry/core-gate/contract';
 import { FerretsPort, Logins } from '@ferretry/core-ferrets/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
@@ -51,7 +51,7 @@ export default definePlugin({
   kinds: ['login', 'item', 'command', 'view'],
   words: LOGINS_WORDS,
 
-  needs: { vault: VaultPort },
+  needs: { vault: VaultPort, gate: GatePort },
   uses: { browsers: BrowsersPort, ferrets: FerretsPort },
   provides: { logins: LoginsPort, loginChanges: LoginChangesPort, loginEnvImport: LoginEnvImportPort },
 
@@ -160,13 +160,28 @@ export default definePlugin({
         audit: { skip: 'a read' },
         guard: { none: 'labels, model ids and tiers only' },
       }),
-      // "Refresh list" and a picker's open: one read of a login's own model list, with its key on that one request to that one host.
+      // A picker's open: one read of a login's own model list, with its key on that one request to that one host, and
+      // only when the held list is a day old or more. It can never aim a request at the provider on demand.
       route('POST /v1/logins/:loginId/model-list/refresh', {
         minimum: 'operator',
         caller: 'any',
         capability: cap('fleet', 'use'),
         noStore: true,
-        audit: { skip: 'the Vault records every use of the key itself (secrets.used); a refresh spends nothing' },
+        audit: {
+          skip: 'each read of the key writes its own secrets.used (the list read, docs/audit.md); a refresh spends nothing',
+        },
+        guard: { none: 'model ids only; no key, price or provider body has a field' },
+      }),
+      // "Refresh list": the same read at once. Configure, like the keyed Test, because it is the call that makes the
+      // provider be asked whenever the caller likes (still held to the attempt cooldowns).
+      route('POST /v1/logins/:loginId/model-list/force', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('fleet', 'configure'),
+        noStore: true,
+        audit: {
+          skip: 'each read of the key writes its own secrets.used (the list read, docs/audit.md); a refresh spends nothing',
+        },
         guard: { none: 'model ids only; no key, price or provider body has a field' },
       }),
       route('POST /v1/models/refresh', {

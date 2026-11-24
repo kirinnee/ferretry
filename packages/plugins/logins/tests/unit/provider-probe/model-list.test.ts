@@ -8,6 +8,7 @@ import type { Credential } from '../../../daemon/lib/shared/credential.ts';
 import type { ProviderProbePlan } from '../../../daemon/lib/provider-probe/plan.ts';
 import type { ProviderProbePort } from '../../../daemon/lib/provider-probe/ports.ts';
 import { ProviderProbeService } from '../../../daemon/lib/provider-probe/service.ts';
+import type { ModelListReadNote } from '../../../daemon/lib/model-lists/audit.ts';
 import { CredentialSchema } from '../../support/credential.ts';
 
 const PRESETS = builtInPresets();
@@ -37,19 +38,32 @@ class Scripted implements ProviderProbePort {
   }
 }
 
-function world(outcome: AuthorizedOutcome, onModelList?: (id: string, payload: unknown) => Promise<void>) {
+function world(
+  outcome: AuthorizedOutcome,
+  onModelList?: (id: string, payload: unknown) => Promise<void>,
+  onListRead?: (note: ModelListReadNote) => Promise<void>,
+) {
   const heard: { id: string; payload: unknown }[] = [];
+  const reads: ModelListReadNote[] = [];
   const probe = new Scripted(outcome);
   const service = new ProviderProbeService({
     probe,
     clock: { monotonicMs: () => 0, now: () => '2026-11-23T00:00:00.000Z' as Instant },
-    onModelList:
-      onModelList ??
-      (async (id, payload) => {
-        heard.push({ id, payload });
+    modelListRecorder: id => async payload => {
+      await (
+        onModelList ??
+        (async (loginId, body) => {
+          heard.push({ id: loginId, payload: body });
+        })
+      )(id, payload);
+    },
+    onListRead:
+      onListRead ??
+      (async note => {
+        reads.push(note);
       }),
   });
-  return { service, probe, heard };
+  return { service, probe, heard, reads };
 }
 
 const subject = (id: string, credential: Credential, name: string) => ({ id, credential, preset: preset(name) });
@@ -186,5 +200,70 @@ describe('ProviderProbeService model lists', () => {
     // Assert
     should(JSON.stringify(heard)).not.containEql('DEEPSEEK_API_KEY');
     should(JSON.stringify(heard)).not.containEql('authorization');
+  });
+
+  it('should record each keyed list read as a use of the key: login, secret name, host and outcome, never a value', async () => {
+    // Arrange
+    const { service, reads } = world({ kind: 'completion', payload: DEEPSEEK_LIST });
+
+    // Act
+    await service.listModels(subject('deepseek', DEEPSEEK, 'deepseek'));
+
+    // Assert
+    should(reads).eql([
+      { loginId: 'deepseek', secret: 'DEEPSEEK_API_KEY', host: 'api.deepseek.com', outcome: 'completion' },
+    ]);
+    should(JSON.stringify(reads)).not.containEql('deepseek-chat');
+  });
+
+  it('should record a list read that the provider refused or never answered, with the outcome it came to', async () => {
+    for (const outcome of [{ kind: 'status', status: 401 }, { kind: 'timeout' }, { kind: 'unreachable' }] as const) {
+      // Arrange
+      const { service, reads } = world(outcome);
+
+      // Act
+      await service.listModels(subject('deepseek', DEEPSEEK, 'deepseek'));
+
+      // Assert
+      should(reads.map(note => note.outcome)).eql([outcome.kind]);
+    }
+  });
+
+  it('should record nothing for a read that put the key on no request', async () => {
+    for (const outcome of [{ kind: 'refused' }, { kind: 'secret_missing' }, { kind: 'vault_damaged' }] as const) {
+      // Arrange
+      const { service, reads } = world(outcome);
+
+      // Act
+      await service.listModels(subject('deepseek', DEEPSEEK, 'deepseek'));
+
+      // Assert
+      should(reads).eql([]);
+    }
+  });
+
+  it('should record nothing for a login that has no list to read: no request, no use', async () => {
+    // Arrange
+    const openrouter = login({ harness: 'claude', preset: 'openrouter', env: { ANTHROPIC_AUTH_TOKEN: '${secret:K}' } });
+    const { service, reads } = world({ kind: 'completion', payload: DEEPSEEK_LIST });
+
+    // Act
+    await service.listModels(subject('or', openrouter, 'openrouter'));
+
+    // Assert
+    should(reads).eql([]);
+  });
+
+  it('should answer the list read normally when the audit cannot be written', async () => {
+    // Arrange
+    const { service } = world({ kind: 'completion', payload: DEEPSEEK_LIST }, undefined, async () => {
+      throw new Error('audit log full');
+    });
+
+    // Act
+    const actual = await service.listModels(subject('deepseek', DEEPSEEK, 'deepseek'));
+
+    // Assert
+    should(actual).eql({ payload: DEEPSEEK_LIST });
   });
 });
