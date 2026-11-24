@@ -99,8 +99,9 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--gap-xs);
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+  /* The gutter is reserved whether or not the list overflows: with classic desktop scrollbars an appearing bar takes layout width, and
+     the right-aligned check of the selected row jumped left by it (10px) as the list grew past its max height, and back as it shrank. */
+  scrollbar-gutter: stable;
 }
 .fy-sb__list:focus {
   outline: none;
