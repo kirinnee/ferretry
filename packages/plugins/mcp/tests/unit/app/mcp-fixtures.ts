@@ -4,6 +4,7 @@
  * real single-use state, and the code is a word.
  */
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { RuntimeCatalogSchema } from '@ferretry/plugin-runtimes/contract';
 import {
   type McpInventory,
   McpInventorySchema,
@@ -169,3 +170,34 @@ export const fakeChannels = (): { factory: McpSignInChannelFactory; opened: Fake
   };
   return { factory, opened };
 };
+
+// ── The runtimes behind "Seen by" ────────────────────────────────────────────────────────────────
+
+/** `GET /v1/runtimes` with the one runtime the fixtures' servers name (`claude-work`), to the wire schema. */
+export const RUNTIMES = RuntimeCatalogSchema.parse({
+  format: 'present',
+  runtimes: [
+    {
+      id: 'rt-claude-work',
+      name: 'claude-work',
+      wrapper: 'claude-work',
+      harness: 'claude-code',
+      credential: { id: 'claude-work', store: 'host', status: 'ready' },
+      profile: 'ferretry-claude',
+      stack: {
+        harness: 'claude-code',
+        available: { available: true },
+        applied: [],
+        skipped: [],
+        conflicts: [],
+        partial: [],
+      },
+      modelSet: { source: 'harness-default' },
+      launch: { available: true },
+      sameAs: [],
+    },
+  ],
+});
+
+/** What "Seen by" says for `claude-work`: its words, never its stored name. */
+export const CLAUDE_WORK_WORDS = 'Claude · your terminal sign-in';

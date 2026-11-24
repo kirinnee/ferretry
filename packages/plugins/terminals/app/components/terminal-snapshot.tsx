@@ -12,9 +12,9 @@
  *  - the header states the tmux session plus a "cached · updated <n>s ago"
  *    hint, so freshness is never a guess.
  *
- * ON EVERY SCREEN two more things hold. The pane FITS ITS WIDTH by default — the text
+ * ON EVERY SCREEN two more things hold. The pane FITS ITS WIDTH by default when that keeps the text at 10px or more — the text
  * is sized so the widest captured line fits (`fitFontPx`), instead of being cut at the right edge
- * behind a sideways scroll — with a Fit / Scroll toggle in the header for the reader who wants 12px
+ * behind a sideways scroll; a narrower pane opens in Scroll at full size — with a Fit / Scroll toggle in the header for the reader who wants 12px
  * and a scrollbar. And the header is one short row: the terminal glyph and a "live" dot, its words
  * kept for screen readers and the tooltip.
  *
@@ -32,6 +32,7 @@ import { splitLinkedRuns } from '../lib/terminal-links.ts';
 import {
   describeSnapshotError,
   fitFontPx,
+  fitIsReadable,
   formatSnapshotAge,
   formatSnapshotClock,
   paneColumns,
@@ -157,12 +158,13 @@ export const TerminalSnapshotView = ({
     return () => clearInterval(timer);
   }, [now]);
 
-  // FIT TO WIDTH: the default on every screen (a line cut at the right edge reads as lost text), the reader's choice after one tap. The pane's width is measured
+  // FIT TO WIDTH: the default while the fitted text stays readable (>= 10px; a side pane or phone that would shrink it further opens in Scroll at full size), the reader's choice after one tap. The pane's width is measured
   // and re-measured as it resizes (rotation, the keyboard); a browser without ResizeObserver keeps the
   // first measurement.
   const [fitChoice, setFitChoice] = useState<boolean | null>(null);
-  const fit = fitChoice ?? true;
   const [paneWidth, setPaneWidth] = useState(0);
+  const textWidth = paneWidth - PANE_PADDING_X_PX;
+  const fit = fitChoice ?? fitIsReadable(paneColumns(text), textWidth);
   useEffect(() => {
     const viewport = viewportRef.current;
     if (viewport === null) return;
@@ -173,7 +175,7 @@ export const TerminalSnapshotView = ({
     observer.observe(viewport);
     return () => observer.disconnect();
   }, [viewportRef]);
-  const fontSize = fit ? fitFontPx(paneColumns(text), paneWidth - PANE_PADDING_X_PX) : undefined;
+  const fontSize = fit ? fitFontPx(paneColumns(text), textWidth) : undefined;
   // Addresses in the capture are real anchors, opened by the one "Open links in" decision. The text
   // is unchanged, so the fit measurement above and the copied selection read exactly what was captured.
   const links = useLinkBehaviour();

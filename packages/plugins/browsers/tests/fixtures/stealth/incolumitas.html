@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bot / Headless Chrome Detection Tests</title>
+    <meta name="fy-status" content="200" />
+    <meta name="fy-host" content="bot.incolumitas.com" />
+  </head>
+  <body>
+    <div class="behavioralData">
+      <span id="botScore">
+        <span>Your Behavioral Score: <span id="behavioralScore">...</span></span>
+      </span>
+      <div id="behavioralSamples"></div>
+    </div>
+    <h3 id="newDetectionTests" class="title is-3">
+      New Detection Tests
+      <a style="font-size: 70%" href="https://github.com/berstend/puppeteer-extra/issues/403">[1]</a>
+      <a style="font-size: 70%" href="https://github.com/berstend/puppeteer-extra/issues/407">[2]</a>
+      <a style="font-size: 70%" href="https://github.com/niespodd/browser-fingerprinting">[3]</a>
+      <a style="font-size: 70%" href="https://github.com/berstend/puppeteer-extra/issues/451">[4]</a>
+    </h3>
+    <pre id="new-tests">
+{
+  "puppeteerEvaluationScript": "OK",
+  "webdriverPresent": "OK",
+  "connectionRTT": "OK",
+  "refMatch": "OK",
+  "overrideTest": "OK",
+  "overflowTest": "OK",
+  "puppeteerExtraStealthUsed": "OK",
+  "inconsistentWebWorkerNavigatorPropery": "OK",
+  "inconsistentServiceWorkerNavigatorPropery": "OK"
+}</pre
+    >
+    <hr />
+    <h3 id="oldDetectionTests" class="title is-3">
+      Old Bot Detection Tests (Intoli.com tests + additions, Fingerprint Scanner tests)
+    </h3>
+    <pre id="detection-tests">
+{
+  "intoli": {
+    "userAgent": "OK",
+    "webDriver": "OK",
+    "webDriverAdvanced": "OK",
+    "pluginsLength": "OK",
+    "pluginArray": "OK",
+    "languages": "OK"
+  },
+  "fpscanner": {
+    "PHANTOM_UA": "OK",
+    "PHANTOM_PROPERTIES": "OK",
+    "PHANTOM_ETSL": "OK",
+    "PHANTOM_LANGUAGE": "OK",
+    "PHANTOM_WEBSOCKET": "OK",
+    "MQ_SCREEN": "OK",
+    "PHANTOM_OVERFLOW": "OK",
+    "PHANTOM_WINDOW_HEIGHT": "OK",
+    "HEADCHR_UA": "OK",
+    "WEBDRIVER": "FAIL",
+    "HEADCHR_CHROME_OBJ": "OK",
+    "HEADCHR_PERMISSIONS": "OK",
+    "HEADCHR_PLUGINS": "OK",
+    "HEADCHR_IFRAME": "OK",
+    "CHR_DEBUG_TOOLS": "OK",
+    "SELENIUM_DRIVER": "OK",
+    "CHR_BATTERY": "OK",
+    "CHR_MEMORY": "OK",
+    "TRANSPARENT_PIXEL": "OK",
+    "SEQUENTUM": "OK",
+    "VIDEO_CODECS": "OK"
+  }
+}</pre
+    >
+    <hr />
+  </body>
+</html>

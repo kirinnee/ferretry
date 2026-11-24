@@ -41,6 +41,7 @@ import {
 } from '../lib/mcp-model.ts';
 import './mcp.css';
 import { AddMcpDialog } from './add-mcp-dialog.tsx';
+import { useRuntimeNames } from '../lib/runtime-names.ts';
 import { McpServerDetails } from './server-details.tsx';
 import { McpServerRow, useMcpServerActions } from './server-row.tsx';
 
@@ -76,6 +77,8 @@ export function McpServersPanel({
   const [chip, setChip] = useState<McpChip>('all');
   const [adding, setAdding] = useState(false);
   const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
+  // "Seen by" names runtimes in words: read their names once a details block is first opened.
+  const runtimeNames = useRuntimeNames(client, shown.size > 0);
   const toggleDetails = (id: string): void =>
     setShown(previous => {
       const next = new Set(previous);
@@ -182,7 +185,7 @@ export function McpServersPanel({
               >
                 {shown.has(server.id) ? 'Hide details' : `Show details · ${MCP_TRANSPORT_LABEL[server.transport]}`}
               </button>
-              {shown.has(server.id) ? <McpServerDetails server={server} /> : null}
+              {shown.has(server.id) ? <McpServerDetails server={server} names={runtimeNames} /> : null}
             </li>
           ))}
         </ul>

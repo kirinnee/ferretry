@@ -19,6 +19,17 @@ const statusWord = (ferret: FerretSummary): string => {
   return detail ?? info.label;
 };
 
+/**
+ * A phone's one toolbar line keeps the status as a shape, its word for screen readers only — except at the prompt: "Your turn"
+ * is the one word the owner scans for, and it is drawn nowhere else (Conversation's turn panel says Working / Needs you, never
+ * this), so it stays visible there and is still drawn once.
+ */
+const wordShown = (ferret: FerretSummary, compact: boolean): boolean => {
+  if (!compact) return true;
+  const info = statusMark(ferret);
+  return info.klass === 'waiting' && info.tone === 'ok';
+};
+
 export function FerretStatus({ ferret, compact }: { readonly ferret: FerretSummary; readonly compact: boolean }) {
   return (
     <span
@@ -28,7 +39,7 @@ export function FerretStatus({ ferret, compact }: { readonly ferret: FerretSumma
       title={statusMark(ferret).label}
     >
       <StatusMark ferret={ferret} />
-      <span className={compact ? 'sr-only' : 'fy-ferret-status__word'}>{statusWord(ferret)}</span>
+      <span className={wordShown(ferret, compact) ? 'fy-ferret-status__word' : 'sr-only'}>{statusWord(ferret)}</span>
     </span>
   );
 }

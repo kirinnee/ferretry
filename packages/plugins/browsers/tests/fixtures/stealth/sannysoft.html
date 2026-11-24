@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en" style="" class="no-hairline">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Antibot</title>
+    <meta name="fy-status" content="200" />
+    <meta name="fy-host" content="bot.sannysoft.com" />
+  </head>
+  <body>
+    <!-- Yandex.Metrika counter -->
+    <!-- /Yandex.Metrika counter -->
+    <h1>Intoli.com tests + additions</h1>
+    <table>
+      <tbody>
+        <tr>
+          <th>Test Name</th>
+          <th>Result</th>
+        </tr>
+        <tr>
+          <td>User Agent <span class="age">(Old)</span></td>
+          <td class="result passed" id="user-agent-result">
+            Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36
+          </td>
+        </tr>
+        <tr>
+          <td>WebDriver <span class="age">(New)</span></td>
+          <td class="result passed" id="webdriver-result">missing (passed)</td>
+        </tr>
+        <tr>
+          <td>WebDriver Advanced</td>
+          <td class="result passed" id="advanced-webdriver-result">passed</td>
+        </tr>
+        <tr>
+          <td>Chrome <span class="age">(New)</span></td>
+          <td class="result passed" id="chrome-result">present (passed)</td>
+        </tr>
+        <tr>
+          <td>Permissions <span class="age">(New)</span></td>
+          <td class="result passed" id="permissions-result">denied</td>
+        </tr>
+        <tr>
+          <td>Plugins Length <span class="age">(Old)</span></td>
+          <td class="result passed" id="plugins-length-result">5</td>
+        </tr>
+        <tr>
+          <td>Plugins is of type PluginArray</td>
+          <td class="result passed" id="plugins-type-result">passed</td>
+        </tr>
+        <tr>
+          <td>Languages <span class="age">(Old)</span></td>
+          <td class="result passed" id="languages-result">en-US,en</td>
+        </tr>
+        <tr>
+          <td>WebGL Vendor</td>
+          <td id="webgl-vendor" class="passed">Google Inc. (Google)</td>
+        </tr>
+        <tr>
+          <td>WebGL Renderer</td>
+          <td id="webgl-renderer" class="failed">
+            ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)
+          </td>
+        </tr>
+        <tr>
+          <td>Broken Image Dimensions</td>
+          <td id="broken-image-dimensions" class="passed">16x16</td>
+        </tr>
+      </tbody>
+    </table>
+    <h1><a href="https://github.com/antoinevastel/fpscanner" target="_blank">Fingerprint Scanner</a> tests</h1>
+    <table id="fp2">
+      <tr>
+        <td>PHANTOM_UA</td>
+        <td class="passed">ok</td>
+        <td>
+          <pre>
+{
+     "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+}</pre
+          >
+        </td>
+      </tr>
+      <tr>
+        <td>PHANTOM_PROPERTIES</td>
+        <td class="passed">ok</td>
+        <td>
+          <pre>
+{
+     "attributesFound": [
+          false,
+          false,
+          false
+     ]
+}</pre
+          >
+        </td>
+      </tr>
+      <tr>
+        <td>PHANTOM_ETSL</td>
+        <td class="passed">ok</td>
+        <td>
+          <pre>
+{
+     "etsl": 33
+}</pre
+          >
+        </td>
+      </tr>
+      <tr>
+        <td>PHANTOM_LANGUAGE</td>
+        <td class="passed">ok</td>
+        <td>
+          <pre>
+{
+     "languages": [
+          "en-US",
+          "en"
+     ]
+}</pre
+          >
+        </td>
+      </tr>
+      <tr>
+        <td>PHANTOM_WEBSOCKET</td>
+        <td class="passed">ok</td>
+        <td><pre>{}</pre></td>
+      </tr>
+      <tr>
+        <td>MQ_SCREEN</td>
+        <td class="passed">ok</td>
+        <td><pre>{}</pre></td>
+      </tr>
+      <tr>
+        <td>PHANTOM_OVERFLOW</td>
+        <td class="passed">ok</td>
+        <td>
+          <pre>
+{
+     "depth": 15690,
+     "errorMessage": "Maximum call stack size exceeded",
+     "errorName": "RangeError",
+     "errorStacklength": 846
+}</pre
+          >
+        </td>
+      </tr>
+      <tr>
+        <td>PHANTOM_WINDOW_HEIGHT</td>
+        <td class="passed">ok</td>
+        <td>
+          <pre>
+{
+     "wInnerHeight": 800,
+     "wOuterHeight": 800,
+     "wOuterWidth": 1280,
+     "wInnerWidth": 1280,
+     "wScreenX": 20,
+     "wPageXOffset": 0,
+     "wPageYOffset": 0,
+     "cWidth": 1249,
+     "cHeight": 1622,
+     "sWidth": 800,
+     "sHeight": 600,
+     "sAvailWidth": 800,
+     "sAvailHeight": 600,
+     "sColorDepth": 24,
+     "sPixelDepth": 24,
+     "wDevicePixelRatio": 1
+}</pre
+          >
+        </td>
+      </tr>
+      <tr>
+        <td>HEADCHR_UA</td>
+        <td class="passed">ok</td>
+        <td>
+          <pre>
+{
+     "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+}</pre
+          >
+        </td>
+      </tr>
+      <tr>
+        <td>HEADCHR_CHROME_OBJ</td>
+        <td class="passed">ok</td>
+        <td><pre>{}</pre></td>
+      </tr>
+      <tr>
+        <td>HEADCHR_PERMISSIONS</td>
+        <td class="passed">ok</td>
+        <td><pre>{}</pre></td>
+      </tr>
+      <tr>
+        <td>HEADCHR_PLUGINS</td>
+        <td class="passed">ok</td>
+        <td>
+          <pre>
+{
+     "plugins": [
+          "PDF Viewer::Portable Document Format::internal-pdf-viewer::__application/pdf~pdf~Portable Document Format,text/pdf~pdf~Portable Document Format",
+          "Chrome PDF Viewer::Portable Document Format::internal-pdf-viewer::__application/pdf~pdf~Portable Document Format,text/pdf~pdf~Portable Document Format",
+          "Chromium PDF Viewer::Portable Document Format::internal-pdf-viewer::__application/pdf~pdf~Portable Document Format,text/pdf~pdf~Portable Document Format",
+          "Microsoft Edge PDF Viewer::Portable Document Format::internal-pdf-viewer::__application/pdf~pdf~Portable Document Format,text/pdf~pdf~Portable Document Format",
+          "WebKit built-in PDF::Portable Document Format::internal-pdf-viewer::__application/pdf~pdf~Portable Document Format,text/pdf~pdf~Portable Document Format"
+     ]
+}</pre
+          >
+        </td>
+      </tr>
+      <tr>
+        <td>HEADCHR_IFRAME</td>
+        <td class="passed">ok</td>
+        <td><pre>{}</pre></td>
+      </tr>
+      <tr>
+        <td>CHR_DEBUG_TOOLS</td>
+        <td class="passed">ok</td>
+        <td><pre>{}</pre></td>
+      </tr>
+      <tr>
+        <td>SELENIUM_DRIVER</td>
+        <td class="passed">ok</td>
+        <td>
+          <pre>
+{
+     "attributesFound": [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+     ]
+}</pre
+          >
+        </td>
+      </tr>
+      <tr>
+        <td>CHR_BATTERY</td>
+        <td class="passed">ok</td>
+        <td><pre>{}</pre></td>
+      </tr>
+      <tr>
+        <td>CHR_MEMORY</td>
+        <td class="passed">ok</td>
+        <td><pre>{}</pre></td>
+      </tr>
+      <tr>
+        <td>TRANSPARENT_PIXEL</td>
+        <td class="passed">ok</td>
+        <td>
+          <pre>
+{
+     "0": 0,
+     "1": 0,
+     "2": 0,
+     "3": 0
+}</pre
+          >
+        </td>
+      </tr>
+      <tr>
+        <td>SEQUENTUM</td>
+        <td class="passed">ok</td>
+        <td><pre>{}</pre></td>
+      </tr>
+      <tr>
+        <td>VIDEO_CODECS</td>
+        <td class="passed">ok</td>
+        <td>
+          <pre>
+{
+     "h264": "probably"
+}</pre
+          >
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
