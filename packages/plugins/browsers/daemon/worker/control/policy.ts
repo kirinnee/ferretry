@@ -494,6 +494,10 @@ export function chromeProxyArguments(server: string, bypass: readonly string[]):
   return [
     `--proxy-server=${server}`,
     ...(bypass.length === 0 ? [] : [`--proxy-bypass-list=${bypass.join(';')}`]),
+    // The switch's name changed: Chrome 154 reads `--webrtc-ip-handling-policy` and has NO `--force-` one, so the old
+    // spelling alone is silently ignored and STUN walks around the proxy (measured: agent-browser-webrtc-proxy.test.ts).
+    // Chrome ignores a switch it does not know, so both spellings cover the Chromes an owner may have installed.
+    '--webrtc-ip-handling-policy=disable_non_proxied_udp',
     '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
   ];
 }

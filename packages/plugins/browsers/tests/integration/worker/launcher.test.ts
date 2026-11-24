@@ -696,7 +696,7 @@ describe('NodeSessionBrowserLauncher', () => {
       });
       should(started).containEql('--proxy-server=socks5://proxy.example.test:1080');
       should(started).containEql('--proxy-bypass-list=*.internal.example.test;<local>');
-      should(started).containEql('--force-webrtc-ip-handling-policy=disable_non_proxied_udp');
+      should(started).containEql('--webrtc-ip-handling-policy=disable_non_proxied_udp');
       should(browser.proxy).eql({ url: 'socks5://proxy.example.test:1080', authenticated: false, bypassCount: 2 });
     });
 

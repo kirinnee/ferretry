@@ -63,6 +63,7 @@ describe('honest user agent', () => {
     // Assert
     should(plain.some(argument => argument.startsWith('--user-agent'))).be.false();
     should(plain.some(argument => argument.startsWith('--proxy-server'))).be.false();
+    should(plain.some(argument => argument.includes('webrtc-ip-handling-policy'))).be.false();
   });
 });
 
@@ -71,6 +72,7 @@ describe('browser proxy switches', () => {
     // Act + Assert
     should(chromeProxyArguments('socks5://p.example:1080', [])).eql([
       '--proxy-server=socks5://p.example:1080',
+      '--webrtc-ip-handling-policy=disable_non_proxied_udp',
       '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
     ]);
   });
