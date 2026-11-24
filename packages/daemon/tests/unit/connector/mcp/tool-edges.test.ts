@@ -92,7 +92,7 @@ describe('restart_ferret — a ferret the daemon left alone', () => {
           : undefined,
       );
     should((await tool(r, 'restart_ferret', { ferret: 'lizzette' })).text).equal(
-      'I left Lizzette alone (not running).',
+      'Lizzette is stopped, so there is nothing to restart. To bring it back, send it a message with send_to_ferret and it will wake up for it.',
     );
     const bare = rig();
     bare.dispatch

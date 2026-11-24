@@ -194,7 +194,8 @@ mean lizzette (Build MCP Connector)?` More than one match lists them and asks wh
 
 - **Through the daemon's own API, never beside it.** Each tool is one or more ordinary requests to the daemon's
   own route table, dispatched in-process under the host admin credential, with the actor `connector:<grantId>` so
-  the journal and the security log say who acted. The request is stamped as arriving REMOTE, so the daemon governs
+  the journal and the security log say who acted: a route-level row a tool causes (`agent.prompted`, `session.opened`,
+  a restart or stop) is recorded with actor `connector` and the grant in `detail.grant`, never as `host` ("this computer"). The request is stamped as arriving REMOTE, so the daemon governs
   it like the admin token off loopback: the boundary applies the daemon-wide grants, and every act that needs a
   passkey step-up (confirming a held configuration change, restoring a cut-off ferret, any widen) is refused. There is no second control path:
   validation, ledgers, journalling and every route's own checks apply.
@@ -219,8 +220,29 @@ mean lizzette (Build MCP Connector)?` More than one match lists them and asks wh
   nothing was sent; here it is now: …" so the owner answers the question that is really being asked.
 - **No secrets.** No tool returns a secret, an environment, a credential or a token. Every text a tool returns
   that came from a ferret (output, summaries, errors, agenda questions) passes the daemon's fail-closed secret
-  redactor first; if it cannot run, the text is `[output withheld]`.
-- **No shell.** No tool runs a command. Control is only through ferrets.
+  redactor first; if it cannot run, the text is `[output withheld]`. The guard also masks the live host admin
+  token and warden token as literals (bare base64url values no pattern would catch), so a ferret that printed
+  `~/.ferretry/api-token` does not hand it to Claude.
+- **No tool runs a shell itself — but a write grant is, in effect, code execution as the owner.** No tool takes a
+  path, a command or a raw route, and none starts a process of its own. But `spawn_ferret` and `send_to_ferret`
+  hand free text to a ferret, and a ferret is an agent that runs commands on this machine as the owner. So whoever
+  can put words in front of Claude can say "start a ferret and run X", and `fleet:write` carries it out. That includes
+  a prompt injected into something Claude read (a web page, an email, a document). The ferret's own limits (its
+  runtime, `limits.yaml`, what the daemon lets agents control) still apply to what it does; the connector adds none
+  of its own to the ferret's work. Treat a `fleet:write` grant like handing a stranger a terminal.
+- **It never needs the unlock, for as long as its grant lives.** The passkey unlock (docs/grants.md) is asked only of
+  a device the tunnel proved. The connector holds the admin token off loopback and no device, so nothing ever asks
+  it to unlock: it is governed by the daemon-wide grants, and refused every act that wants a passkey, but between
+  those it works with the owner's phone locked, the owner away, and the machine unattended. That is why
+  APPROVING one asks more than any ordinary act: `pairing.configure` (not merely `use`) and a fresh passkey proved
+  for that one act (`approve-connector`) from a paired device, or the owner at the machine. Revoking a grant, or
+  turning the connector off, is the only thing that ends it.
+- **Prefer a read-only grant where voice control is not needed.** A grant with only `fleet:read` can list and
+  describe ferrets and read their (redacted) output, and can run nothing. Today the owner CANNOT pick this when
+  approving: the grant carries the scopes the client asked for (both, when it names none), and the app and the
+  waiting page only show them. Letting the owner narrow the scopes at approval is a FOLLOW-UP, not built. Until then,
+  the controls are the ones that exist: revoke a grant you no longer use, turn the connector off in
+  `config/daemon.json` when nobody needs it, or narrow `fleet.use` in the daemon-wide grants to refuse every call.
 
 ### How the tools are built (`packages/daemon/src/{lib,adapters}/connector/mcp/`)
 

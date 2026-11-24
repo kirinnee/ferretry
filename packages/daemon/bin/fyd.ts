@@ -13898,6 +13898,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
         api: world.api,
         dispatch: async request => await dispatcher.dispatch(request),
         adminToken: () => base.credentials.admin,
+        wardenToken: () => base.credentials.warden,
         remotePeer: tunnelPeer,
       });
       if (listening !== undefined) {

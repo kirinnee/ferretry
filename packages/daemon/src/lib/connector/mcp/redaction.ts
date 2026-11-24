@@ -8,7 +8,12 @@
  * Neither is complete — docs/secrets.md says what the first does and does not catch — which is why the
  * connector also has no tool that reads a file, an environment or a command's output.
  *
- * FAIL CLOSED. If either layer throws — the vault cannot be opened, a regular expression meets something it
+ * A THIRD, FOR THE HOST'S OWN TOKENS. The admin token and the warden token are bare 43-character base64url values —
+ * no prefix, no key beside them — so neither layer above would recognise one that a ferret printed (a `cat` of
+ * `~/.ferretry/api-token`). The daemon knows their live values, so they are masked as literals
+ * ({@link LiveCredentials}), exactly as stored secrets are. They are handed in, never read from a file here.
+ *
+ * FAIL CLOSED. If any layer throws — the vault cannot be opened, a regular expression meets something it
  * cannot take — the answer is {@link WITHHELD}, never the raw text and never a blank.
  */
 
@@ -84,15 +89,38 @@ export function redactCredentialPatterns(text: string): string {
 }
 
 /**
- * The one door every connector text leaves through. Constructed with the daemon's stored-secret redactor.
+ * The values of the credentials this daemon is serving under RIGHT NOW (the host admin token, the warden token),
+ * asked for each time a text is cleaned because a token can be rotated while the daemon runs. An absent value (no
+ * warden token) is skipped. A port, so the lib reads no file: the composition root supplies it.
+ */
+export type LiveCredentials = () => readonly (string | undefined)[];
+
+/** Shorter than any real token, so an empty or trivial value can never turn into "mask everything". */
+const MIN_LIVE_CREDENTIAL = 16;
+
+/** The text with every live credential value masked as a literal. */
+function withoutLiveCredentials(text: string, live: readonly (string | undefined)[]): string {
+  let result = text;
+  for (const value of live)
+    if (value !== undefined && value.length >= MIN_LIVE_CREDENTIAL) result = result.replaceAll(value, REDACTED);
+  return result;
+}
+
+/**
+ * The one door every connector text leaves through. Constructed with the daemon's stored-secret redactor and,
+ * optionally, the host's live credentials.
  */
 export class ConnectorTextGuard {
-  constructor(private readonly secrets: Pick<TextRedactor, 'redact'>) {}
+  constructor(
+    private readonly secrets: Pick<TextRedactor, 'redact'>,
+    private readonly live: LiveCredentials = () => [],
+  ) {}
 
-  /** The text with stored secret values and credential shapes masked, or {@link WITHHELD}. Never throws. */
+  /** The text with stored secret values, live host tokens and credential shapes masked, or {@link WITHHELD}. Never throws. */
   async clean(text: string): Promise<string> {
     try {
-      return redactCredentialPatterns(await this.secrets.redact(redactCredentialPatterns(text)));
+      const literal = withoutLiveCredentials(text, this.live());
+      return redactCredentialPatterns(await this.secrets.redact(redactCredentialPatterns(literal)));
     } catch {
       return WITHHELD;
     }

@@ -937,7 +937,7 @@ async function record(
       : undefined;
   const detail: AuditDetail = {
     ...rule.detail,
-    ...agentAuditDetail(credential),
+    ...agentAuditDetail(credential, context.actor),
     ...settings,
     ...fields,
     ...(answer.action === undefined ? {} : { action: answer.action }),
@@ -949,7 +949,7 @@ async function record(
   };
   await subsystem.log.record({
     event: outcome === 'succeeded' ? rule.event : (rule.refusedEvent ?? rule.event),
-    actor: auditActorOf(credential, actorName),
+    actor: auditActorOf(credential, actorName, context.actor),
     ...(answer.subject === undefined || answer.subject === '' ? {} : { subject: answer.subject }),
     outcome,
     ...(Object.keys(detail).length === 0 ? {} : { detail }),
@@ -970,10 +970,10 @@ export async function recordHandlerAct(
   try {
     const credential = context.credential;
     const actorName = credential?.tokenClass === 'device' ? await subsystem.deviceName(credential.deviceId) : undefined;
-    const detail: AuditDetail = { ...act.detail, ...agentAuditDetail(credential) };
+    const detail: AuditDetail = { ...act.detail, ...agentAuditDetail(credential, context.actor) };
     await subsystem.log.record({
       event: act.event,
-      actor: auditActorOf(credential, actorName),
+      actor: auditActorOf(credential, actorName, context.actor),
       outcome: act.outcome,
       ...(Object.keys(detail).length === 0 ? {} : { detail }),
     });
@@ -1184,14 +1184,13 @@ function auditedSocket(subsystem: AuditedRoutesSubsystem, route: SocketRoute, ru
         const credential = context.credential;
         const actorName =
           credential?.tokenClass === 'device' ? await subsystem.deviceName(credential.deviceId) : undefined;
+        const merged: AuditDetail = { ...detail, ...agentAuditDetail(credential, context.actor) };
         await subsystem.log.record({
           event,
-          actor: auditActorOf(credential, actorName),
+          actor: auditActorOf(credential, actorName, context.actor),
           ...(subject === '' ? {} : { subject }),
           outcome,
-          ...(detail === undefined && credential?.tokenClass !== 'session'
-            ? {}
-            : { detail: { ...detail, ...agentAuditDetail(credential) } }),
+          ...(Object.keys(merged).length === 0 ? {} : { detail: merged }),
         });
       };
       const said = (event: AuditEvent, outcome: AuditOutcome, detail?: AuditDetail): Promise<void> =>

@@ -56,6 +56,11 @@ interface ConnectorListenNeeds {
   readonly api: ApiServerPort;
   readonly dispatch: (request: ApiRequest) => Promise<ApiResponse>;
   readonly adminToken: () => string;
+  /**
+   * The warden's token, when this daemon runs one. With the admin token it is a bare base64url value no pattern
+   * recognises, so the connector's text guard masks both as literals if a ferret ever prints one.
+   */
+  readonly wardenToken?: () => string | undefined;
   /** How a peer is keyed for rate limits behind `cloudflared` (`CF-Connecting-IP`, never trusted for authority). */
   readonly remotePeer: NonNullable<ApiBindOptions['remotePeer']>;
 }
@@ -160,7 +165,7 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
         }),
         toolbox: new ConnectorToolbox({
           daemonGrants: needs.daemonGrants,
-          guard: new ConnectorTextGuard(needs.redactor),
+          guard: new ConnectorTextGuard(needs.redactor, () => [listenNeeds.adminToken(), listenNeeds.wardenToken?.()]),
           callsLog: new FileConnectorCallsLog(join(needs.stateDirectory, 'connector')),
           audit,
           now: () => needs.clock.now(),

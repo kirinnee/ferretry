@@ -156,7 +156,9 @@ const manyFailure = (query: string, views: readonly SessionView[]): ToolFailure 
  *
  * In `look` mode a live ferret is preferred over a stopped one (so a recycled callsign reads the running
  * one). In `act` mode two matches of any state are a question, never a guess; a stopped ferret still matches,
- * so "restart lizzette" can wake it.
+ * so the answer names the right ferret ("stopped") instead of drifting to a live one. What a tool then DOES with a
+ * stopped ferret is its own: `send_to_ferret` wakes it with the message, while `restart_ferret` leaves it alone
+ * (the daemon's restart skips a session that is not running).
  */
 async function resolveFerret(gateway: FleetGateway, query: string, mode: ResolveMode = 'look'): Promise<SessionView> {
   const all = await gateway.sessions();
@@ -529,7 +531,7 @@ const restartFerret: ConnectorToolSpec<{ ferret: typeof ferretArg }> = {
   name: 'restart_ferret',
   title: 'Restart a ferret',
   description:
-    'Restart one ferret on its current conversation, as the Restart button does. If it is busy mid-turn the restart waits until it is idle. Interrupts work in progress.',
+    'Restart one ferret on its current conversation, as the Restart button does. If it is busy mid-turn the restart waits until it is idle. Interrupts work in progress. Only a running ferret restarts; a stopped one is woken by send_to_ferret.',
   scope: 'fleet:write',
   annotations: DESTRUCTIVE,
   input: { ferret: ferretArg },
@@ -544,6 +546,13 @@ const restartFerret: ConnectorToolSpec<{ ferret: typeof ferretArg }> = {
     if (failure !== undefined)
       throw new ToolFailure(`I could not restart ${who}: ${clip(oneLine(failure.reason), 200)}`);
     const skipped = result.skipped[0];
+    // The daemon restarts only a RUNNING ferret. Say that plainly, and the one thing that does bring it back here:
+    // a message to it wakes it (`send_to_ferret`, disposition `revived`).
+    if (skipped?.reason === 'not-running')
+      return {
+        text: `${who} is stopped, so there is nothing to restart. To bring it back, send it a message with send_to_ferret and it will wake up for it.`,
+        sessionId: view.config.id,
+      };
     return {
       text: `I left ${who} alone${skipped === undefined ? '' : ` (${skipped.reason.replace(/-/gu, ' ')})`}.`,
       sessionId: view.config.id,

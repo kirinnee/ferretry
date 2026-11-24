@@ -98,6 +98,33 @@ describe('ConnectorTextGuard', () => {
     should(await guard.cleanAll(['a', 'b'])).eql([WITHHELD, WITHHELD]);
   });
 
+  it('masks the live host admin and warden tokens, which no pattern would recognise', async () => {
+    // Bare 43-character base64url values, assembled from pieces like every sample here.
+    const admin = part('A1b2C3d4E5f6G7h8I9j0', 'K1l2M3n4O5p6Q7r8S9t0', 'U1v');
+    const warden = part('Z9y8X7w6V5u4T3s2R1q0', 'P9o8N7m6L5k4J3i2H1g0', 'F9e');
+    let live = [admin, warden, undefined, ''];
+    const guard = new ConnectorTextGuard({ redact: async text => text }, () => live);
+
+    const out = await guard.clean(`$ cat ~/.ferretry/api-token\n${admin}\nwarden ${warden}; again ${admin}`);
+
+    should(out).not.containEql(admin);
+    should(out).not.containEql(warden);
+    should(out).containEql('$ cat ~/.ferretry/api-token');
+    should(out.split(REDACTED).length - 1).equal(3);
+    // Asked each time, so a token rotated while the daemon runs is covered from its next use.
+    live = [warden];
+    should(await guard.clean(`${admin} ${warden}`)).equal(`${admin} ${REDACTED}`);
+  });
+
+  it('never lets an empty or short live value mask everything, and withholds when the port throws', async () => {
+    const trivial = new ConnectorTextGuard({ redact: async text => text }, () => ['', undefined, 'abc']);
+    should(await trivial.clean('abc plain text')).equal('abc plain text');
+    const broken = new ConnectorTextGuard({ redact: async text => text }, () => {
+      throw new Error('no token');
+    });
+    should(await broken.clean('x')).equal(WITHHELD);
+  });
+
   it('cleans every string inside data', async () => {
     const guard = new ConnectorTextGuard({ redact: async text => text });
     const out = (await guard.cleanData({ a: `x ${SAMPLES['ferretry session']}`, n: 3, l: ['password=abc'] })) as Record<
