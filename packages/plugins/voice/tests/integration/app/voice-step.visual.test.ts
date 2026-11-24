@@ -490,7 +490,7 @@ describe('the Voice first-run page', () => {
     const { tab, close } = await open(VIEWPORTS[0], 'studio-light', VOICE, CARD);
     try {
       await tab.getByText('Show every engine').click();
-      await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 10);
+      await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 11);
       expect(
         await tab
           .locator('.fy-voice-step button:not(.fy-engine-mini):not(.fy-engine-info):not([data-test-action])')
@@ -619,7 +619,7 @@ describe('r11-1b G3: the Voice and Speed-ups buttons and their focus ring', () =
             expect(Math.abs(button.w - (installs[0]?.w ?? 0))).toBeLessThanOrEqual(1);
           }
           await tab.getByText('Show every engine').click();
-          await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 10);
+          await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 11);
           const all = (await bodyButtons(tab, '.fy-voice-step .fy-engine-card')).filter(button =>
             /^(Install|Resume)/.test(button.label),
           );
@@ -702,7 +702,7 @@ describe('r11-1b G3: the Voice and Speed-ups buttons and their focus ring', () =
               // r11-1c C2: the same walk AFTER "Show every engine" is open, plus every engine card by the arrow keys (the cards are
               // one radio group: one Tab stop). The last cards' rings used to be cut at the bottom of the frame (5.4 px).
               await tab.getByText('Show every engine').click();
-              await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 10);
+              await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 11);
               const open = await walkFocusRings(tab, 150);
               expect(open.violations).toEqual([]);
               // The ring is drawn INSIDE the card, so no scroll can ever cut it: every case below is measured where the browser left

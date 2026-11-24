@@ -542,3 +542,49 @@ describe('Voice settings in the real Settings shell', () => {
       });
     }
 });
+
+// VC U12: Google's live transcriber is one more card in Settings › Voice, drawn by the same card as every engine.
+describe('the Google live-words engine card in Settings › Voice', () => {
+  for (const viewport of [VIEWPORTS[1], VIEWPORTS[2]])
+    for (const scheme of ['light', 'dark'] as const)
+      it(`${viewport.name} ${scheme}: sits in the list at the cards' height, says its size, licence and credit, and has no Accuracy bar`, async () => {
+        const device = viewport.phone ? 'phone' : 'computer';
+        const { page, problems, close } = await open(viewport, scheme, 'voice', `&device=${device}`);
+        try {
+          await page.waitForSelector('.fy-engine-card');
+          await page.getByRole('button', { name: /Show every engine/u }).click();
+          const card = page.locator('.fy-engine-card[data-engine="google-audio-transcriber"]');
+          await card.scrollIntoViewIfNeeded();
+          const parakeet = page.locator('.fy-engine-card[data-engine="parakeet"]');
+          expect((await card.boundingBox())?.height, 'the same fixed height as every other card').toBe(
+            (await parakeet.boundingBox())?.height,
+          );
+          expect(await card.locator('.fy-engine-name').innerText()).toBe('Google live words');
+          expect(await card.locator('.fy-engine-chip').allInnerTexts()).toEqual(['Live words', 'On device']);
+          // Speed and Size are measured; Accuracy was not run on the 33 key terms, so it is not drawn.
+          const bars = await card.locator('.fy-engine-bars').innerText();
+          expect(bars).toContain('Speed');
+          expect(bars).toContain('Size');
+          expect(bars).not.toContain('Accuracy');
+          expect(bars).toContain('637 MB');
+          const install = card.getByRole('button', { name: /Install/u });
+          expect(await install.innerText()).toContain('637 MB');
+          expect((await install.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+          if (shotsDir !== '')
+            await card.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-google-card.png`) });
+          await card.getByRole('button', { name: 'About Google live words' }).click();
+          const details = await card.locator('.fy-engine-details').innerText();
+          expect(details).toContain('CC-BY-4.0');
+          expect(details).toContain('Google AudioTranscriber (NVIDIA Parakeet) · CC-BY-4.0 · 25 languages');
+          expect(details).toContain('637 MB to download once');
+          expect(details).toContain('Measured (Chrome with the whole browser held to a quarter of one core');
+          expect(details).toContain('the 33 key terms were not run');
+          if (shotsDir !== '')
+            await card.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-google-card-about.png`) });
+          expect(await overflowing(page)).toEqual([]);
+          expect(problems).toEqual([]);
+        } finally {
+          await close();
+        }
+      });
+});

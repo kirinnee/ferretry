@@ -1,9 +1,9 @@
 /**
  * THE SPEED BENCHMARK under the app's real policy — manual, NEVER in CI (it downloads the on-device models).
  *
- *   cd packages/pwa && bunx vite build && bun harness/stt-speed-bench.ts [options]
+ *   cd packages/app && bunx vite build && bun ../plugins/voice/tests/realworld/dev/harness/stt-speed-bench.ts [options]
  *
- *   --engines a,b,c   catalog ids (default: parakeet,parakeet-tdt-110m,whisper-base-en,vosk-small-en)
+ *   --engines a,b,c   catalog ids (default: parakeet,parakeet-tdt-110m,whisper-base-en,vosk-small-en,google-audio-transcriber)
  *   --isolated        answer every request with COOP same-origin + COEP require-corp, so the page is
  *                     cross-origin isolated and `wasm-threads` can run
  *   --blob-workers    ALSO allow `blob:` in `worker-src`, to show whether threads need that policy change
@@ -26,8 +26,10 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
-const packageDir = resolve(harnessDir, '..');
-const dist = join(packageDir, 'dist');
+const devDir = resolve(harnessDir, '..');
+// The built app (`bunx vite build` in packages/app, or any `--outDir` named by FY_APP_DIST) and its real headers.
+const appDir = resolve(harnessDir, '../../../../../../app');
+const dist = process.env.FY_APP_DIST ?? join(appDir, 'dist');
 
 const args = process.argv.slice(2);
 const flag = (name: string): boolean => args.includes(`--${name}`);
@@ -36,11 +38,14 @@ const value = (name: string, fallback: string): string => {
   return at >= 0 && args[at + 1] !== undefined ? (args[at + 1] as string) : fallback;
 };
 const isolated = flag('isolated');
-const engines = value('engines', 'parakeet,parakeet-tdt-110m,whisper-base-en,vosk-small-en').split(',');
-const profile = value('profile', join(packageDir, 'harness/out/stt-speed-bench-profile'));
+const engines = value(
+  'engines',
+  'parakeet,parakeet-tdt-110m,whisper-base-en,vosk-small-en,google-audio-transcriber',
+).split(',');
+const profile = value('profile', join(process.env.TMPDIR ?? '/tmp', 'fy-stt-speed-bench-profile'));
 
 const appHeaders = (): Record<string, string> => {
-  const lines = readFileSync(join(packageDir, 'public/_headers'), 'utf8').split('\n');
+  const lines = readFileSync(join(appDir, 'public/_headers'), 'utf8').split('\n');
   const headers: Record<string, string> = {};
   for (const line of lines.slice(lines.indexOf('/*') + 1)) {
     if (!line.startsWith('  ')) break;
@@ -69,6 +74,7 @@ const ort = named('ort-wasm-simd-threaded', '.wasm');
 const assets = {
   parakeet: { workerUrl: named('parakeet-worker-', '.js'), runtimeUrl: ort },
   sherpa: { workerUrl: named('sherpa-worker-', '.js'), runtimeUrl: named('asr-', '.wasm') },
+  google: { workerUrl: named('google-worker-', '.js'), runtimeUrl: named('audio_wasm_module_internal-', '.wasm') },
   vosk: { workerUrl: named('vosk-worker-', '.js'), runtimeUrl: named('vosk-', '.wasm') },
   whisper: { workerUrl: named('whisper-worker-', '.js'), runtimeUrl: ort },
 };
@@ -95,8 +101,7 @@ const server = Bun.serve({
       new Response(body, { headers: { ...headers, 'content-type': type } });
     if (path === '/') return respond(page, types.html as string);
     if (path === '/__bench.js') return respond(scriptText, types.js as string);
-    if (path === '/clip-5s.wav')
-      return respond(Bun.file(join(packageDir, 'speed-bench/clip-5s.wav')), types.wav as string);
+    if (path === '/clip-5s.wav') return respond(Bun.file(join(devDir, 'speed-bench/clip-5s.wav')), types.wav as string);
     if (path.startsWith('/assets/'))
       return respond(Bun.file(join(dist, path)), types[path.split('.').pop() ?? ''] ?? 'application/octet-stream');
     return new Response('not found', { status: 404 });
@@ -109,6 +114,9 @@ const context = await chromium.launchPersistentContext(profile, { executablePath
 try {
   const tab = context.pages()[0] ?? (await context.newPage());
   tab.on('pageerror', error => console.error(`[page error] ${error.message}`));
+  tab.on('console', message =>
+    console.error(`[page] ${message.text()} @${message.location().url}:${message.location().lineNumber}`),
+  );
   // A worker's own console (the speech workers warn when they give up on threads, and say which URL a thread used).
   tab.on('worker', worker => worker.on('console', message => console.error(`[worker] ${message.text()}`)));
   await tab.goto(`http://127.0.0.1:${server.port}/`);
@@ -134,6 +142,10 @@ try {
     options,
   );
   clearInterval(timer);
+  for (const line of await tab
+    .evaluate(() => (globalThis as { __progress?: string[] }).__progress?.splice(0) ?? [])
+    .catch(() => []))
+    console.error(line);
   const violations = (
     (await tab.evaluate(() => (globalThis as { __violations?: string[] }).__violations)) ?? []
   ).filter(violation => !violation.includes('/__bench.js'));

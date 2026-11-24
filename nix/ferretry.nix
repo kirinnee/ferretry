@@ -115,7 +115,7 @@ let
     outputHashAlgo = "sha256";
     # When a build reports a hash mismatch here, the install inputs changed what it installs: take the
     # `got:` hash. It is the same on every builder, so a mismatch is never fixed by rerunning.
-    outputHash = "sha256-y9p80i6UPEQ9vnKvl6FFJT1CkVF1BmdbdFOOVtwZ7h8=";
+    outputHash = "sha256-Srv4+TrK4S2+wsSulOFhQqZ5Brqa2yFpaI0EGM7D+PI=";
     dontFixup = true;
 
     # Read by scripts/validate/bun-deps-hash.sh, which fails a change to the install inputs that did not

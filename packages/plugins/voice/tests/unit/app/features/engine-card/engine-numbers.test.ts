@@ -42,7 +42,9 @@ describe('the engine measures', () => {
       const speed = model.measured?.speed ?? '';
       const accuracy = model.measured?.accuracy ?? '';
       expect(speed).toContain(`${measure.stopToTextSeconds.toFixed(1)} s`);
-      expect(accuracy).toContain(`${measure.keyTerms} of ${KEY_TERM_COUNT} key terms`);
+      // An engine not run on the 33 key terms says so, and draws no Accuracy bar.
+      if (measure.keyTerms === undefined) expect(accuracy).toContain('the 33 key terms were not run');
+      else expect(accuracy).toContain(`${measure.keyTerms} of ${KEY_TERM_COUNT} key terms`);
     }
   });
 
@@ -68,16 +70,18 @@ describe('the bar lengths', () => {
     expect(sizeValue(86_000_000)).toBeLessThan(sizeValue(683_000_000));
   });
 
-  it('draws three bars per on-device engine, in range, with the real download size in words', () => {
+  it('draws three bars per on-device engine (two where the 33 key terms were not run), in range, with the real download size in words', () => {
     for (const model of ON_DEVICE_MODELS) {
       const bars = engineBars(model);
-      expect(bars.map(bar => bar.label)).toEqual(['Speed', 'Accuracy', 'Size']);
+      expect(bars.map(bar => bar.label)).toEqual(
+        ENGINE_MEASURES[model.id].keyTerms === undefined ? ['Speed', 'Size'] : ['Speed', 'Accuracy', 'Size'],
+      );
       for (const bar of bars) {
         expect(bar.value).toBeGreaterThan(0);
         expect(bar.value as number).toBeGreaterThanOrEqual(MIN_BAR);
         expect(bar.value as number).toBeLessThanOrEqual(1);
       }
-      expect(bars[2]?.text).toBe(`${Math.round(modelDownloadBytes(model) / 1_000_000)} MB`);
+      expect(bars.at(-1)?.text).toBe(`${Math.round(modelDownloadBytes(model) / 1_000_000)} MB`);
     }
   });
 

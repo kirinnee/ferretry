@@ -27,6 +27,11 @@ import {
   PARAKEET_REVISION,
   PARAKEET_VERSION_LABEL,
 } from './parakeet-model.ts';
+import {
+  GOOGLE_TRANSCRIBER_MODEL,
+  MEDIAPIPE_AUDIO_RUNTIME,
+  type GoogleCatalogModel,
+} from './google-transcriber-model.ts';
 import { SHERPA_MODELS, SHERPA_RUNTIME, type SherpaCatalogModel } from './sherpa-models.ts';
 import {
   VOSK_CACHE,
@@ -58,13 +63,14 @@ export const ON_DEVICE_MODEL_IDS = [
   'parakeet-tdt-110m',
   'vosk-small-en',
   'parakeet',
+  'google-audio-transcriber',
 ] as const;
 export type OnDeviceModelId = (typeof ON_DEVICE_MODEL_IDS)[number];
 
 /** The programs a model can run on. */
-export type SpeechRuntimeId = 'onnxruntime-web' | 'sherpa-onnx' | 'vosk-wasm' | 'transformers-js';
+export type SpeechRuntimeId = 'onnxruntime-web' | 'sherpa-onnx' | 'vosk-wasm' | 'transformers-js' | 'mediapipe-audio';
 
-type SpeechModelFamily = 'parakeet' | 'zipformer' | 'moonshine' | 'whisper' | 'vosk';
+type SpeechModelFamily = 'parakeet' | 'zipformer' | 'moonshine' | 'whisper' | 'vosk' | 'google';
 
 /** A runtime's one binary: pinned like a model file, its URL known only once the build has run. */
 export interface SpeechRuntime {
@@ -91,6 +97,7 @@ export const SPEECH_RUNTIMES: Readonly<Record<SpeechRuntimeId, SpeechRuntime>> =
     shared: null,
   },
   'sherpa-onnx': SHERPA_RUNTIME,
+  'mediapipe-audio': MEDIAPIPE_AUDIO_RUNTIME,
   'vosk-wasm': {
     id: 'vosk-wasm',
     label: `Vosk WebAssembly ${VOSK_RUNTIME_VERSION}`,
@@ -171,7 +178,12 @@ export interface WhisperCatalogModel extends OnDeviceModelBase {
   readonly family: 'whisper';
 }
 
-export type OnDeviceModel = ParakeetCatalogModel | SherpaCatalogModel | VoskCatalogModel | WhisperCatalogModel;
+export type OnDeviceModel =
+  | ParakeetCatalogModel
+  | SherpaCatalogModel
+  | VoskCatalogModel
+  | WhisperCatalogModel
+  | GoogleCatalogModel;
 
 export const PARAKEET_CATALOG_MODEL: ParakeetCatalogModel = {
   id: 'parakeet',
@@ -221,6 +233,7 @@ export const ON_DEVICE_MODELS: readonly OnDeviceModel[] = [
   ...SHERPA_MODELS.slice(3),
   VOSK_CATALOG_MODEL,
   PARAKEET_CATALOG_MODEL,
+  GOOGLE_TRANSCRIBER_MODEL,
 ];
 
 /** The catalog entry for an id, or `null` for anything else (including `browser`). */

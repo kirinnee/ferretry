@@ -222,7 +222,7 @@ describe('<EngineCardGrid>', () => {
   it('lists the catalog, the browser voice and Off as one radio group with a single name', async () => {
     const view = await mount(<EngineCardGrid {...gridProps()} />);
     const radios = [...view.container.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
-    expect(radios).toHaveLength(8 + 2);
+    expect(radios).toHaveLength(9 + 2);
     expect(new Set(radios.map(radio => radio.name)).size).toBe(1);
     expect(radios.some(radio => radio.checked)).toBe(false);
     expect(radios.every(radio => radio.tabIndex <= 0)).toBe(true);

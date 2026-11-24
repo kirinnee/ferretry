@@ -9,10 +9,12 @@
  * fetched only by an Install. Whisper runs on the same WebAssembly-only ONNX Runtime build Parakeet does.
  */
 
+import googleRuntimeUrl from '@mediapipe/tasks-audio/audio_wasm_module_internal.wasm?url';
 import sherpaRuntimeUrl from 'sherpa-runtime-wasm?url';
 import voskRuntimeUrl from '@lichess-org/vosk-browser/dist/vosk.wasm?url';
 import runtimeUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 import type { SpeechAssets } from './lib/stt/on-device-voices.ts';
+import googleWorkerUrl from './worker/google-worker.ts?worker&url';
 import workerUrl from './worker/parakeet-worker.ts?worker&url';
 import sherpaWorkerUrl from './worker/sherpa-worker.ts?worker&url';
 import voskWorkerUrl from './worker/vosk-worker.ts?worker&url';
@@ -23,6 +25,7 @@ export const speechAssets: SpeechAssets = {
   workerUrl,
   runtimeUrl,
   sherpa: { workerUrl: sherpaWorkerUrl, runtimeUrl: sherpaRuntimeUrl },
+  google: { workerUrl: googleWorkerUrl, runtimeUrl: googleRuntimeUrl },
   vosk: { workerUrl: voskWorkerUrl, runtimeUrl: voskRuntimeUrl },
   whisper: { workerUrl: whisperWorkerUrl, runtimeUrl },
 };

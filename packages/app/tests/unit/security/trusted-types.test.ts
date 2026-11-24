@@ -111,6 +111,20 @@ describe('isWorkerScriptUrl', () => {
     }
   });
 
+  it('accepts the Google transcriber worker the build emits, and its dev-server address', () => {
+    expect(isWorkerScriptUrl('/assets/google-worker-BTR2B3u1.js')).toBe(true);
+    expect(isWorkerScriptUrl('/src/worker/google-worker.ts?worker_file&type=module')).toBe(true);
+    for (const url of [
+      '/assets/google-worker-.js',
+      '/assets/google-worker-abc.js?x=1',
+      'https://evil.test/assets/google-worker-abc.js',
+      '/assets/google-abc.js',
+      '/src/worker/google-worker.ts',
+    ]) {
+      expect(isWorkerScriptUrl(url)).toBe(false);
+    }
+  });
+
   it('accepts the Vosk speech worker the build emits, and its dev-server address', () => {
     expect(isWorkerScriptUrl('/assets/vosk-worker-DonRcPBX.js')).toBe(true);
     expect(isWorkerScriptUrl('/src/worker/vosk-worker.ts?worker_file&type=module')).toBe(true);

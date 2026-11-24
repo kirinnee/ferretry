@@ -13,7 +13,8 @@
  *   - SIZE      the whole first download in bytes (`modelDownloadBytes`: the model's files plus its runtime). More is
  *               longer on the bar, and the megabytes are always written beside it, so "full" never means "good".
  *
- * An engine with no measurement (the browser's own) draws no bars at all: its card says so in a sentence instead of
+ * An engine with no 33-term measurement (the Google live transcriber) draws the Speed and Size bars and no Accuracy bar; its
+ * accuracy is said in words behind the "i". An engine with no measurement at all (the browser's own) draws no bars at all: its card says so in a sentence instead of
  * drawing empty tracks for numbers it does not have.
  */
 
@@ -24,8 +25,8 @@ import { formatMegabytes } from '../../lib/stt/model-store.ts';
 export interface EngineMeasure {
   /** Seconds from Stop to the text on the phone-speed CPU. */
   readonly stopToTextSeconds: number;
-  /** Technical key terms caught, of {@link KEY_TERM_COUNT}. */
-  readonly keyTerms: number;
+  /** Technical key terms caught, of {@link KEY_TERM_COUNT}; absent where the engine was not run on that set. */
+  readonly keyTerms?: number;
 }
 
 export const KEY_TERM_COUNT = 33;
@@ -45,6 +46,7 @@ export const ENGINE_MEASURES: Readonly<Record<OnDeviceModelId, EngineMeasure>> =
   'parakeet-tdt-110m': { stopToTextSeconds: 1.7, keyTerms: 27 },
   'vosk-small-en': { stopToTextSeconds: 2.7, keyTerms: 19 },
   parakeet: { stopToTextSeconds: 7.1, keyTerms: 29 },
+  'google-audio-transcriber': { stopToTextSeconds: 8.2 },
 };
 
 /** The one sentence under each engine's name: what it is for, in plain words. */
@@ -57,6 +59,7 @@ export const ENGINE_LINES: Readonly<Record<OnDeviceModelId, string>> = {
   'parakeet-tdt-110m': 'Accurate and light. The phone default.',
   'vosk-small-en': 'Smallest. Best for plain sentences.',
   parakeet: 'Most accurate. Wants a laptop.',
+  'google-audio-transcriber': 'Live words and punctuation. A laptop.',
 };
 
 /**
@@ -73,6 +76,7 @@ export const ENGINE_BRIEF_LINES: Readonly<Record<OnDeviceModelId, string>> = {
   'parakeet-tdt-110m': '',
   'vosk-small-en': '',
   parakeet: '',
+  'google-audio-transcriber': '',
 };
 
 /** One bar: its label, how long it is (0–1), and the words beside it. */
@@ -100,13 +104,18 @@ const seconds = (value: number): string => `${value.toFixed(1)} s`;
 export function engineBars(model: OnDeviceModel): readonly EngineBar[] {
   const measure = ENGINE_MEASURES[model.id];
   const bytes = modelDownloadBytes(model);
+  const keyTerms = measure.keyTerms;
   return [
     { label: 'Speed', value: speedValue(measure.stopToTextSeconds), text: seconds(measure.stopToTextSeconds) },
-    {
-      label: 'Accuracy',
-      value: accuracyValue(measure.keyTerms),
-      text: `${Math.round((measure.keyTerms / KEY_TERM_COUNT) * 100)}%`,
-    },
+    ...(keyTerms === undefined
+      ? []
+      : [
+          {
+            label: 'Accuracy',
+            value: accuracyValue(keyTerms),
+            text: `${Math.round((keyTerms / KEY_TERM_COUNT) * 100)}%`,
+          } as const,
+        ]),
     { label: 'Size', value: sizeValue(bytes), text: formatMegabytes(bytes) },
   ];
 }
