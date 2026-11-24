@@ -1,5 +1,5 @@
 import { implementDaemon } from '@ferretry/kernel/manifest';
-import { type VoiceApi, VOICE_CONFIG } from '../contract/index.ts';
+import { DEFAULT_VOICE_CONFIG, type VoiceApi, VOICE_CONFIG } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { OutboundProviderAuthorizer } from './adapters/outbound-provider-authorizer.ts';
 import { StateSpeedupTestLedger } from './adapters/state-speedup-test-ledger.ts';
@@ -17,6 +17,9 @@ import {
 } from './adapters/worker-speech-thread.ts';
 import { REPLY_DIR } from './lib/reply/catalog.ts';
 import { ReplyVoiceEngine } from './lib/reply/engine.ts';
+import { ElevenLabsReplyVoice } from './lib/reply/elevenlabs.ts';
+import { routeReplyVoice } from './lib/reply/router.ts';
+import { StateReplySpend } from './adapters/state-reply-spend.ts';
 import { SpeechEngine } from './lib/engine/engine.ts';
 import { voiceStreamAccept } from './lib/stream/accept.ts';
 import { voiceRoutes } from './routes.ts';
@@ -83,12 +86,31 @@ export default implementDaemon(manifest, {
     });
     kernel.lifecycle.onStop(() => void reply.unload());
 
+    // ElevenLabs, the optional reply voice: spent through the same outbound holder as the other keys, counted per character.
+    const elevenlabsLog = kernel.log.child('elevenlabs');
+    const elevenlabs = new ElevenLabsReplyVoice({
+      authorizer,
+      secrets: { list: async () => await vault.names() },
+      spend: new StateReplySpend(kernel.state),
+      settings: () => (kernel.config.file(VOICE_CONFIG) ?? DEFAULT_VOICE_CONFIG).replyVoice,
+      today: () => new Intl.DateTimeFormat('en-CA').format(new Date(kernel.clock.nowMs())),
+      monotonicMs: () => kernel.clock.nowMs(),
+      log: { info: (message, fields) => elevenlabsLog.info(message, fields) },
+    });
+    // The voice a stream speaks in is chosen per use by voice.yaml, so a change in Settings is heard from the next line.
+    const replyVoice = routeReplyVoice({
+      provider: () => (kernel.config.file(VOICE_CONFIG) ?? DEFAULT_VOICE_CONFIG).replyVoice.provider,
+      kokoro: reply,
+      elevenlabs,
+    });
+
     const voice: VoiceApi = {
       engine,
       enhance: async input => await enhancement.enhance(input),
       speedups: async () => await speedups.view(),
       testSpeedup: async provider => await speedups.test(provider),
-      settings: () => kernel.config.file(VOICE_CONFIG) ?? { postProcessing: DEFAULT_CLEANUP_SETTINGS },
+      settings: () =>
+        kernel.config.file(VOICE_CONFIG) ?? { ...DEFAULT_VOICE_CONFIG, postProcessing: DEFAULT_CLEANUP_SETTINGS },
     };
 
     // The voice stream: each finished turn is sent to the ferret through Conversation's send, as the person's own message.
@@ -96,7 +118,7 @@ export default implementDaemon(manifest, {
     const sockets = {
       'GET /v1/voice/stream': voiceStreamAccept({
         engine,
-        reply,
+        reply: replyVoice,
         clock: kernel.clock,
         send: () => {
           const conversation = ctx.uses.conversation.current();
@@ -120,6 +142,6 @@ export default implementDaemon(manifest, {
       }),
     };
 
-    return { routes: voiceRoutes(enhancement, speedups, engine, reply), sockets, provides: { voice } };
+    return { routes: voiceRoutes(enhancement, speedups, engine, reply, elevenlabs), sockets, provides: { voice } };
   },
 });

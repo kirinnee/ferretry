@@ -14,7 +14,9 @@ import type { VoiceEngineView } from '../../../contract/index.ts';
 import { useDeviceVoiceSettingsStore, useLiveVoiceSettings } from '../../hooks/use-live-voice-settings.ts';
 import { type DaemonConnection, SettingGroup, SettingRow, SettingSwitch } from '../../shell-voice.ts';
 import { useDaemonClient } from '../../lib/voice-store.tsx';
+import { ReplyVoiceSourceRow, type ReplyVoiceSourceState, useReplyVoiceSource } from './elevenlabs-voice.tsx';
 import { type HearItProps, ReplyVoiceRow, type ReplyVoiceState, useReplyVoice } from './reply-voice.tsx';
+import type { SpeedupClientFactory } from '../speedups/key-row.tsx';
 import { TalkToTest, type TalkToTestProps } from './talk-to-test.tsx';
 import { installVoiceEngine, readVoiceEngine, removeVoiceEngine, type VoiceEngineClient } from './voice-engine-api.ts';
 import './voice-settings.css';
@@ -64,6 +66,9 @@ interface VoiceModePanelProps {
   readonly onInstall: () => void;
   readonly onRemove: () => void;
   readonly reply: ReplyVoiceState;
+  readonly source: ReplyVoiceSourceState;
+  readonly connection: DaemonConnection;
+  readonly createClient: SpeedupClientFactory;
 }
 
 /**
@@ -90,7 +95,19 @@ function KeepOnPhoneRow() {
   );
 }
 
-function VoiceModePanel({ view, talk, hear, reply, busy, error, onInstall, onRemove }: VoiceModePanelProps) {
+function VoiceModePanel({
+  view,
+  talk,
+  hear,
+  reply,
+  source,
+  connection,
+  createClient,
+  busy,
+  error,
+  onInstall,
+  onRemove,
+}: VoiceModePanelProps) {
   const percent = view.sizeBytes === 0 ? 0 : Math.min(100, Math.round((view.doneBytes / view.sizeBytes) * 100));
   return (
     <SettingGroup label="Voice mode">
@@ -166,7 +183,20 @@ function VoiceModePanel({ view, talk, hear, reply, busy, error, onInstall, onRem
         </div>
       </SettingRow>
       {view.state === 'ready' && <TalkToTest machine={view.machine} {...talk} />}
-      <ReplyVoiceRow state={reply} speechReady={view.state === 'ready'} hear={hear} />
+      <ReplyVoiceRow
+        state={reply}
+        speechReady={view.state === 'ready'}
+        hear={hear}
+        provider={source.pending === null ? source.choice.provider : 'kokoro'}
+      />
+      <ReplyVoiceSourceRow
+        state={source}
+        machine={view.machine}
+        connection={connection}
+        createClient={createClient}
+        speechReady={view.state === 'ready'}
+        hear={hear}
+      />
       <KeepOnPhoneRow />
     </SettingGroup>
   );
@@ -197,6 +227,7 @@ export function VoiceModeSettings({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reply = useReplyVoice(client);
+  const source = useReplyVoiceSource(client);
 
   useEffect(() => {
     let current = true;
@@ -276,6 +307,9 @@ export function VoiceModeSettings({
       talk={talk}
       hear={hear}
       reply={reply}
+      source={source}
+      connection={connection}
+      createClient={createClient as SpeedupClientFactory}
       busy={busy}
       error={error}
       onInstall={() => void act(installVoiceEngine)}

@@ -1516,10 +1516,13 @@ It does NOT protect against:
 
 ## Speed-up keys: the fifth holder
 
-Settings › This machine › **Speed-ups** takes three optional keys, stored here like any other secret:
-`JEV_API_KEY` (the Warden's triage guard), and `GROQ_API_KEY` or `CEREBRAS_API_KEY` (cleaning up a
+Settings › This machine › **Speed-ups** takes four optional keys, stored here like any other secret:
+`JEV_API_KEY` (the Warden's triage guard), `GROQ_API_KEY` or `CEREBRAS_API_KEY` (cleaning up a
 dictated transcript after it has been recognised — the provider gets text, never audio; see
-[`docs/voice.md`](voice.md) for where the audio itself goes). The daemon
+[`docs/voice.md`](voice.md) for where the audio itself goes), and `ELEVENLABS_API_KEY` (an optional reply voice: it
+receives the text of a ferret's spoken lines, placed as `xi-api-key`, and its JSON-only answer carries the audio as base64 so the
+holder is not widened for raw audio; [voice.md](voice.md#elevenlabs-as-the-reply-voice-unit-10)). Create shares the same key name
+for its voiceovers. The daemon
 spends them itself, on the operator's account, through ONE holder:
 `OutboundProviderAuthorizer.send(secretName, hostAllowlist, request)` in `lib/speedups/authorizer.ts`.
 

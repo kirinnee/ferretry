@@ -4,8 +4,11 @@ import { VaultPort } from '@ferretry/core-vault/contract';
 import { definePlugin, panel, route, settingsTab, socket, verb } from '@ferretry/kernel/manifest';
 import {
   CLEANUP_PROVIDERS,
+  ELEVENLABS_HOST,
+  ELEVENLABS_SECRET_NAME,
   ENGINE_HOSTS,
   MODELS_STATE,
+  REPLY_SPEND_STATE,
   SPEEDUP_TESTS_STATE,
   VOICE_CONFIG,
   VOICE_READ_MODELS,
@@ -106,6 +109,26 @@ export default definePlugin({
         audit: { skip: 'deletes the downloaded voice files from this machine; carries no secret and no audio' },
         guard: { none: 'a state, byte counts and one fixed sentence; no audio and no text that was spoken' },
       }),
+      // ElevenLabs as the reply voice: which voice, which model and what is spent today. A read of names and counts; the key is not opened.
+      route('GET /v1/voice/reply-voice/elevenlabs', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('voice', 'use'),
+        noStore: true,
+        audit: { skip: 'a read of a chosen voice id, a count of characters and whether a key name exists' },
+        guard: { none: 'ids, counts and booleans; no key, no audio and no text that was spoken' },
+      }),
+      // The picker's list spends the key once, on the owner's account, to read the voices it can speak with: a person's act.
+      route('GET /v1/voice/reply-voice/elevenlabs/voices', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('secrets', 'use'),
+        noStore: true,
+        audit: audit('secrets.used'),
+        guard: {
+          none: 'voice ids and names the account holds; never the provider body, a key or a text that was spoken',
+        },
+      }),
       route('GET /v1/speedups', {
         minimum: 'operator',
         caller: 'any',
@@ -196,7 +219,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [SPEEDUP_TESTS_STATE, MODELS_STATE],
+    state: [SPEEDUP_TESTS_STATE, MODELS_STATE, REPLY_SPEND_STATE],
     config: [VOICE_CONFIG],
     readModels: [...VOICE_READ_MODELS],
   },
@@ -215,8 +238,14 @@ export default definePlugin({
 
   permissions: {
     // Keys ride only on requests the Vault's outbound holder builds; the hosts are the provider table's.
-    network: [CLEANUP_PROVIDERS.groq.host, CLEANUP_PROVIDERS.cerebras.host, 'api.typesafe.ai', ...ENGINE_HOSTS],
-    secrets: ['GROQ_API_KEY', 'CEREBRAS_API_KEY', 'JEV_API_KEY'],
+    network: [
+      CLEANUP_PROVIDERS.groq.host,
+      CLEANUP_PROVIDERS.cerebras.host,
+      'api.typesafe.ai',
+      ELEVENLABS_HOST,
+      ...ENGINE_HOSTS,
+    ],
+    secrets: ['GROQ_API_KEY', 'CEREBRAS_API_KEY', 'JEV_API_KEY', ELEVENLABS_SECRET_NAME],
     // Only `diskFreeBytes`: Install asks how much room the models folder has before it downloads 700 MB.
     hostFacts: true,
   },

@@ -1,8 +1,13 @@
-import type { SecretName } from '@ferretry/core-vault/contract';
-import { CLEANUP_PROVIDERS, type SpeedupProvider } from '../../../contract/index.ts';
+import type { CredentialPlacement, SecretName } from '@ferretry/core-vault/contract';
+import {
+  CLEANUP_PROVIDERS,
+  ELEVENLABS_HOST,
+  ELEVENLABS_SECRET_NAME,
+  type SpeedupProvider,
+} from '../../../contract/index.ts';
 
 /**
- * The three speed-up providers, as data.
+ * The four speed-up providers, as data.
  *
  * Each entry names the ONE secret it spends, the hosts that secret may reach, and the words a person
  * reads before pasting a key. The hosts are the whole allowlist the outbound holder enforces for that
@@ -22,6 +27,8 @@ interface SpeedupProviderDefinition {
   readonly privacyNote: string;
   readonly keyUrl: string;
   readonly testNote: string;
+  /** Where the key goes on a request, when the provider is not the default `authorization: Bearer`. */
+  readonly placement?: CredentialPlacement;
 }
 
 /** A provider whose Test is a free, authenticated `GET` of its model list: no inference, no spend. */
@@ -97,7 +104,23 @@ export const SPEEDUP_CATALOG: Readonly<Record<SpeedupProvider, SpeedupCatalogEnt
     testNote: 'Test lists the models your key can use. It is free and runs no model.',
     probe: Object.freeze({ kind: 'model-list', url: CLEANUP_PROVIDERS.cerebras.modelsUrl }),
   }),
+  elevenlabs: Object.freeze({
+    id: 'elevenlabs',
+    label: 'ElevenLabs',
+    secretName: ELEVENLABS_SECRET_NAME,
+    hosts: Object.freeze([ELEVENLABS_HOST]),
+    purpose:
+      'An optional voice for voice mode: a ferret’s spoken lines are read in a natural ElevenLabs voice of your choice.',
+    costNote:
+      'Billed by ElevenLabs per character spoken (about $0.04 a minute on its fast model); a daily limit of characters (20,000 unless you change it) stands in front of it.',
+    privacyNote:
+      'The text of each spoken line is sent to ElevenLabs to be turned into sound. ElevenLabs never receives your voice or any other part of the chat.',
+    keyUrl: 'https://elevenlabs.io/app/settings/api-keys',
+    testNote: 'Test lists the models your key can use. It is free and speaks nothing.',
+    placement: Object.freeze({ header: 'xi-api-key' }),
+    probe: Object.freeze({ kind: 'model-list', url: `https://${ELEVENLABS_HOST}/v1/models` }),
+  }),
 });
 
-/** In the order a person reads them: the Warden's guard first, then the two clean-up choices. */
-export const SPEEDUP_ORDER: readonly SpeedupProvider[] = Object.freeze(['jev', 'groq', 'cerebras']);
+/** In the order a person reads them: the Warden's guard first, the two clean-up choices, then the reply voice. */
+export const SPEEDUP_ORDER: readonly SpeedupProvider[] = Object.freeze(['jev', 'groq', 'cerebras', 'elevenlabs']);

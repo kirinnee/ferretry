@@ -37,7 +37,7 @@ describe('voice.yaml', () => {
 
 describe('the speed-up wire', () => {
   test('the providers are a closed set', () => {
-    expect(SpeedupProviderSchema.options).toEqual(['jev', 'groq', 'cerebras']);
+    expect(SpeedupProviderSchema.options).toEqual(['jev', 'groq', 'cerebras', 'elevenlabs']);
   });
 
   test('a view carries no field a value could ride in', async () => {
@@ -76,7 +76,10 @@ describe('T-0034 voice.yaml loosens where dictated text goes, as today', () => {
   });
 
   test('T-0034 a login provider that names no login is said without a stray space', () => {
-    const bare: VoiceConfig = { postProcessing: { ...DEFAULT_VOICE_CONFIG.postProcessing, provider: 'login' } };
+    const bare: VoiceConfig = {
+      ...DEFAULT_VOICE_CONFIG,
+      postProcessing: { ...DEFAULT_VOICE_CONFIG.postProcessing, provider: 'login' },
+    };
     expect(voiceLoosens(DEFAULT_VOICE_CONFIG, bare)).toEqual(['dictated text now goes to the login to be cleaned up']);
   });
 

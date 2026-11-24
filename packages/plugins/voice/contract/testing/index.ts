@@ -11,6 +11,7 @@ const PROVIDERS = [
   { provider: 'jev', label: 'Jev', secretName: 'JEV_API_KEY' },
   { provider: 'groq', label: 'Groq', secretName: 'GROQ_API_KEY' },
   { provider: 'cerebras', label: 'Cerebras', secretName: 'CEREBRAS_API_KEY' },
+  { provider: 'elevenlabs', label: 'ElevenLabs', secretName: 'ELEVENLABS_API_KEY' },
 ] as const;
 
 /** In-memory engine: install is instant, transcription answers a fixed sentence, no voice is ever found. */

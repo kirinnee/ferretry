@@ -590,7 +590,7 @@ Without it voice mode still listens, and the device's own voice reads the reply,
 - **Playing it.** `createReplyPlayer` schedules each 200 ms piece to start where the last one ends (a gapless queue on one
   WebAudio context created inside the tap that starts voice mode, because iOS lets sound start only from a gesture), and a
   piece that arrives late leaves the gap the machine itself left. The speaker is one voice: **`af_heart`** (speaker 3); a
-  picker is unit 10's, with ElevenLabs.
+  second reply voice, ElevenLabs, is [below](#elevenlabs-as-the-reply-voice-unit-10).
 - **Hear it.** Settings › Voice › Voice mode › Reply voice has **Hear it**: it opens a real stream with `reply: 'machine'`
   and a **silent** microphone (the room's sound never leaves the page), sends one sentence, plays what comes back, and says
   how long the first sound took. It is the whole path, so what a person hears and what it costs are the same test.
@@ -623,6 +623,47 @@ Proof: `packages/plugins/voice/tests/realworld/reply-voice.realworld.test.ts` (`
 `FY_REPLY_VOICE_DIR` to keep the files between runs) refuses a file with a wrong pinned hash, then installs the real files,
 loads Kokoro in its worker, speaks a line (audible level, a length a person would take to say it) and asks for the same line
 over a real `VoiceStream`, measuring the first sound.
+
+### ElevenLabs as the reply voice (unit 10)
+
+**Built:** an optional second reply voice. Kokoro stays the default; ElevenLabs is **off until the owner chooses it**, adds
+`ELEVENLABS_API_KEY` and picks a voice. Settings › Voice › Voice mode › **Reply voice source** holds the choice (On this
+machine | ElevenLabs), the key row (the Speed-ups one: write-only, Test is a free read of `/v1/models`), **Load my voices**,
+the voice picker, the day's use, and its own **Hear it**.
+
+- **The key stays in the Vault's outbound holder, and the holder answers only JSON** (owner decision O4: no widening for raw
+  audio; [secrets.md](secrets.md)). So a line is ONE `POST https://api.elevenlabs.io/v1/text-to-speech/<voice>/with-timestamps
+?output_format=pcm_16000` through `authorizeFetch` with the `xi-api-key` placement. The answer is JSON whose `audio_base64`
+  is 16 kHz PCM16: **already the stream's own sample rate, so there is no decoder and no resampling** (the same endpoint Create's
+  `generate_speech` uses, which asks for MP3). A reply that is not JSON (raw audio, or one that echoes the key) is the holder's
+  `unreadable`: **no sound, the device's voice reads the line**, and the failure is logged as a code, never the text.
+- **Where the choice lives.** `voice.yaml` › `replyVoice` (`provider: kokoro | elevenlabs`, `elevenlabs: { voiceId, voiceName,
+model, dailyChars }`). It is read **at each line**, so a change is heard from the next one with no stream reopened. **No key
+  lives in the file**: a key-shaped field is refused by the schema, and a voice id must be 8–40 letters or digits before it is
+  put in a URL path.
+- **What loosens is held for the owner** (docs/config-files.md rule 2): moving the lines to ElevenLabs (they leave this machine
+  and are billed per character), a different model, and a higher `dailyChars`. The page says "Saved, but not in effect until you
+  confirm it" and keeps speaking in Kokoro (and keeps Kokoro's Hear it) until then.
+- **What leaves the machine:** the text of each `<voice>` line, to ElevenLabs. Never audio, never the chat. Nothing is sent
+  unless the provider is `elevenlabs`, a key is in the store and a voice is chosen; otherwise the stream says `absent` and the
+  device reads.
+- **Spend: a daily character cap.** Characters are **counted before the call** and kept in `state/voice/reply-spend.json`
+  (a day and a count, never a word; the machine's own calendar day). Default **20,000 characters** a day; **about 20 minutes of
+  speech, roughly $0.7 on the fast model (a guess from ElevenLabs' $0.036/min list price, 2026-11-23)**. Past it a line is refused
+  without a call and the device reads it. Characters are given back only when the call **definitely billed nothing** (no key,
+  401, 403, 429, any 4xx); a timeout, a dropped connection, a 5xx or an unreadable answer stays counted, as Create's ledger does.
+  Lines are made one at a time, so two cannot both pass the same cap. This is a separate counter from Create's $5/day.
+- **Routes** (`/v1/voice/reply-voice/elevenlabs`): `GET` (voice.use) answers the chosen voice, the model, whether a key
+  **name** exists, and today's count: free, the key is not opened. `GET …/voices` (a **person's** `secrets.use`, audited as
+  `secrets.used`, so no ferret or warden can spend the key unattended) reads the account's first 100 voices through the holder and
+  keeps only id, name and kind; a row whose id is not a plain id is dropped.
+- **Declared gaps.** **No real call has been made** (no key yet): the endpoint, the `pcm_16000` format on `/with-timestamps`
+  and the `/v2/voices` shape are read from ElevenLabs' documentation and proved only against a fake server; the owner's first
+  real line ("one line spoken, about $0.01") is the proof still owed, and a miss would change only the request or the reply
+  parser. The first sound's latency is **not measured** (one round trip per piece, plus ElevenLabs' own time). Only the first
+  100 voices are listed. A voice's preview and settings (stability, speed) are not offered. The per-line key use is not written
+  to the audit log (a line a minute would drown it): counts and milliseconds only go to the daemon log. The model and the daily
+  limit are edited in `voice.yaml`, not on the page.
 
 ### Setting voice mode up on first run (the Voice step)
 

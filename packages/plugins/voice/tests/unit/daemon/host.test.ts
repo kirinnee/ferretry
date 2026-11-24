@@ -132,7 +132,7 @@ describe('the speed-ups routes', () => {
     expect(JSON.stringify(routes[1]?.audit)).toContain('secrets.used');
   });
 
-  test('the status read lists the three providers by name', async () => {
+  test('the status read lists the four providers by name', async () => {
     const { vault } = await vaultWith({ GROQ_API_KEY: GROQ_KEY });
     const host = await hostOf(vault);
     const response = await host.request('GET', '/v1/speedups', { as: owner() });
@@ -141,6 +141,7 @@ describe('the speed-ups routes', () => {
       ['jev', false],
       ['groq', true],
       ['cerebras', false],
+      ['elevenlabs', false],
     ]);
     expect(view.vault).toBe('ok');
   });
@@ -322,7 +323,12 @@ describe('Appendix D rows', () => {
     for (const field of ['key', 'apiKey', 'authorization', 'secret', 'token'])
       expect(SttEnhancementRequestSchema.safeParse({ ...enhance, [field]: 'sk-device-held' }).success).toBe(false);
     // And the manifest names secrets only by NAME for the Vault to spend.
-    expect(manifest.permissions?.secrets).toEqual(['GROQ_API_KEY', 'CEREBRAS_API_KEY', 'JEV_API_KEY']);
+    expect(manifest.permissions?.secrets).toEqual([
+      'GROQ_API_KEY',
+      'CEREBRAS_API_KEY',
+      'JEV_API_KEY',
+      'ELEVENLABS_API_KEY',
+    ]);
   });
 
   test('R626 dictation sends no microphone audio to the daemon: the only STT route is JSON text (voice mode has its own stream)', async () => {
