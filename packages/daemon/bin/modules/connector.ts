@@ -118,10 +118,11 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
       });
       return authority;
     };
-    const availability: ConnectorAvailability = {
-      enabled: true,
-      publicUrl: settings.publicUrl,
-      mcpUrl: `${settings.publicUrl}/mcp`,
+    // What the app and `fy connector` are told: ON only once the listener is actually bound, so a port that was taken
+    // or a damaged connector.json never shows a copyable address nothing answers on.
+    let availability: ConnectorAvailability = {
+      enabled: false,
+      disabledReason: 'The connector is starting; ask again in a moment.',
     };
     const provides: ConnectorModule = {
       settings,
@@ -136,38 +137,53 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
         availability: () => availability,
       },
       listen: async listenNeeds => {
-        // A damaged connector.json refuses here, loudly, rather than serving a listener whose every token fails.
-        await store.load();
-        const mcp = new ConnectorMcpEndpoint({
-          verifier: authorityOf(),
-          unauthorized: tokenPresented => unauthorizedResponse(endpoints(), { tokenPresented }),
-          dispatch: new InProcessConnectorDispatch({ dispatch: listenNeeds.dispatch, adminToken: listenNeeds.adminToken }),
-          toolbox: new ConnectorToolbox({
-            daemonGrants: needs.daemonGrants,
-            guard: new ConnectorTextGuard(needs.redactor),
-            callsLog: new FileConnectorCallsLog(join(needs.stateDirectory, 'connector')),
-            audit,
-            now: () => needs.clock.now(),
-          }),
-          now: () => needs.clock.now(),
-          newRequestId: () => `connector-${randomUUID()}`,
-          serverVersion: daemonVersion,
-        });
-        const handlers: ConnectorHttpHandler[] = [new ConnectorOAuthHttp(authorityOf(), endpoints()), mcp];
-        const listener = await listenNeeds.api.listen(connectorListenerSurface(handlers), {
-          host: '127.0.0.1',
-          port: settings.port,
-          directLoopbackIsPrivileged: false,
-          remotePeer: listenNeeds.remotePeer,
-        });
-        return {
-          url: listener.url,
-          close: async () => {
-            listener.closeSockets();
-            await listener.stop();
-          },
-        };
+        try {
+          return await startListener(listenNeeds);
+        } catch (error) {
+          availability = {
+            enabled: false,
+            disabledReason: `The connector is on in config/daemon.json but could not start: ${error instanceof Error ? error.message : String(error)}`,
+          };
+          throw error;
+        }
       },
+    };
+    const startListener = async (listenNeeds: ConnectorListenNeeds) => {
+      // A damaged connector.json refuses here, loudly, rather than serving a listener whose every token fails.
+      await store.load();
+      const mcp = new ConnectorMcpEndpoint({
+        verifier: authorityOf(),
+        unauthorized: tokenPresented => unauthorizedResponse(endpoints(), { tokenPresented }),
+        dispatch: new InProcessConnectorDispatch({
+          dispatch: listenNeeds.dispatch,
+          adminToken: listenNeeds.adminToken,
+        }),
+        toolbox: new ConnectorToolbox({
+          daemonGrants: needs.daemonGrants,
+          guard: new ConnectorTextGuard(needs.redactor),
+          callsLog: new FileConnectorCallsLog(join(needs.stateDirectory, 'connector')),
+          audit,
+          now: () => needs.clock.now(),
+        }),
+        now: () => needs.clock.now(),
+        newRequestId: () => `connector-${randomUUID()}`,
+        serverVersion: daemonVersion,
+      });
+      const handlers: ConnectorHttpHandler[] = [new ConnectorOAuthHttp(authorityOf(), endpoints()), mcp];
+      const listener = await listenNeeds.api.listen(connectorListenerSurface(handlers), {
+        host: '127.0.0.1',
+        port: settings.port,
+        directLoopbackIsPrivileged: false,
+        remotePeer: listenNeeds.remotePeer,
+      });
+      availability = { enabled: true, publicUrl: settings.publicUrl, mcpUrl: `${settings.publicUrl}/mcp` };
+      return {
+        url: listener.url,
+        close: async () => {
+          listener.closeSockets();
+          await listener.stop();
+        },
+      };
     };
     return { id: 'connector', provides, jobs: {}, contributes: {} };
   },
