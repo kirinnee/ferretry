@@ -30,17 +30,34 @@ describe('how a start carries its reasoning level', () => {
       transcript: [],
       readableFolders: [],
       model: 'gpt-6.1-sol',
-      ...(effort?.kind === 'argv' ? { effort: effort.effort } : {}),
+      ...(effort === undefined ? {} : { effort: effort.effort }),
       harnessFlags: [],
     });
 
     // Assert
-    expect(effort).toEqual({ kind: 'argv', effort: 'high' });
+    expect(effort).toEqual({ effort: 'high', checksCatalog: true });
     expect(argv).toEqual(['/fleet/bin/codex-work', '--model', 'gpt-6.1-sol', '-c', 'model_reasoning_effort="high"']);
   });
 
-  it('keeps a Claude level as the command it answers locally before turn one', () => {
-    expect(startupEffort('claude', 'xhigh')).toEqual({ kind: 'command', effort: 'xhigh' });
+  it('puts a Claude level on the launch argv too, so no /effort is typed (it could become a model turn, and it saves the login default)', () => {
+    // Arrange
+    const effort = startupEffort('claude', 'xhigh');
+
+    // Act
+    const argv = buildLaunchArgv({
+      harness: 'claude',
+      executable: '/fleet/bin/claude-work',
+      remoteControl: [],
+      transcript: [],
+      readableFolders: [],
+      model: 'claude-opus-5-5',
+      ...(effort === undefined ? {} : { effort: effort.effort }),
+      harnessFlags: [],
+    });
+
+    // Assert — Claude's CLI checks its own --effort, so no catalog read is asked for.
+    expect(effort).toEqual({ effort: 'xhigh', checksCatalog: false });
+    expect(argv).toEqual(['/fleet/bin/claude-work', '--model', 'claude-opus-5-5', '--effort', 'xhigh']);
   });
 
   it('carries nothing when no level, or only a blank one, was asked for', () => {
@@ -50,12 +67,12 @@ describe('how a start carries its reasoning level', () => {
   });
 
   it('trims the level it carries', () => {
-    expect(startupEffort('codex', ' high ')).toEqual({ kind: 'argv', effort: 'high' });
+    expect(startupEffort('codex', ' high ')).toEqual({ effort: 'high', checksCatalog: true });
   });
 
   it('lowercases the level, as a relaunch does, so both spell it the way the catalog does', () => {
-    expect(startupEffort('codex', ' High ')).toEqual({ kind: 'argv', effort: 'high' });
-    expect(startupEffort('claude', 'XHigh')).toEqual({ kind: 'command', effort: 'xhigh' });
+    expect(startupEffort('codex', ' High ')).toEqual({ effort: 'high', checksCatalog: true });
+    expect(startupEffort('claude', 'XHigh')).toEqual({ effort: 'xhigh', checksCatalog: false });
   });
 
   it('normalises exactly as the document records it, so a level the launch rejects is carried as none (and refused by the plan)', () => {
@@ -130,11 +147,23 @@ describe('the plan for a start’s reasoning level', () => {
     });
   });
 
-  it('turns a Claude level into the effort command and puts nothing on the argv, whatever the catalog', () => {
-    expect(planStartupEffort('claude', 'claude-opus-5-5', 'xhigh', undefined)).toEqual({
-      kind: 'planned',
-      startupRuntime: { action: 'effort', effort: 'xhigh' },
-    });
+  it('puts a Claude level on the argv and types no runtime command, without reading any catalog', () => {
+    for (const catalogRead of [undefined, new Error('not read'), catalog]) {
+      expect(planStartupEffort('claude', 'claude-opus-5-5', ' XHigh ', catalogRead)).toEqual({
+        kind: 'planned',
+        argvEffort: 'xhigh',
+      });
+    }
+  });
+
+  it('refuses a Claude level Claude does not take, as the typed /effort did, instead of recording one the session lacks', () => {
+    for (const level of ['zigzag', 'ultra', 'minimal']) {
+      expect(planStartupEffort('claude', 'claude-opus-5-5', level, undefined)).toEqual({
+        kind: 'refused',
+        cause: 'invalid',
+        reason: 'effort must be one of low, medium, high, xhigh, max',
+      });
+    }
   });
 
   it('refuses a non-blank level that is not a reasoning level, instead of starting without it', () => {
