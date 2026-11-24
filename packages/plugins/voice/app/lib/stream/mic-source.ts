@@ -90,3 +90,21 @@ function browserEnvironment(): MicEnvironment {
     createContext: sampleRate => new AudioContext({ sampleRate }),
   };
 }
+
+/**
+ * A microphone that hears nothing: one unit of zeros every 40 ms, on a timer. A stream that only LISTENS TO the machine
+ * (the reply voice's sample) still has to send its 40 ms units, because the machine ends a stream that goes quiet, and it
+ * must not open the real microphone for it: nothing of the room leaves the device.
+ */
+export function silentMic(): MicSource {
+  let timer: ReturnType<typeof setInterval> | undefined;
+  return {
+    async start(onUnit) {
+      timer = setInterval(() => onUnit(new Int16Array(UNIT_SAMPLES)), 40);
+    },
+    stop() {
+      if (timer !== undefined) clearInterval(timer);
+      timer = undefined;
+    },
+  };
+}

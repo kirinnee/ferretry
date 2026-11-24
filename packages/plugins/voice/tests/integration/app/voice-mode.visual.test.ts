@@ -64,6 +64,13 @@ const VIEWPORTS = [
 interface Fake {
   installs: number;
   removes: number;
+  replyInstalls: number;
+  replyRemoves: number;
+  hearStarts: string[];
+  hearFrames: string[];
+  played: number;
+  playerClosed: number;
+  deviceSpoke: string[];
   reads: number;
   starts: string[];
   units: number;
@@ -228,6 +235,164 @@ describe('Voice mode settings', () => {
             await failed.tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-failed.png`) });
         } finally {
           await failed.context.close();
+        }
+      });
+
+      const replyBox = async (tab: Awaited<ReturnType<typeof open>>['tab']) =>
+        await tab.evaluate(() => {
+          const rect = (el: Element) => el.getBoundingClientRect();
+          const row = rect(document.querySelector('[data-voice-reply]') as Element);
+          return {
+            buttons: [...document.querySelectorAll('[data-voice-reply] button')].map(el => ({
+              h: rect(el).height,
+              right: rect(el).right,
+              clipped: (el as HTMLElement).scrollWidth > (el as HTMLElement).clientWidth + 1,
+            })),
+            rowRight: row.right,
+            scrollX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          };
+        });
+
+      it(`the reply voice installs apart from speech, shows progress, and ends Ready (${viewport.name}, ${theme})`, async () => {
+        const { context, tab } = await open('ready', '&reply=not_installed');
+        try {
+          const install = tab.getByRole('button', { name: 'Install on Studio Mac (164 MB)' });
+          await install.waitFor({ state: 'visible' });
+          expect(await tab.locator('[data-voice-hear-it]').count()).toBe(0);
+          const before = await replyBox(tab);
+          expect(before.scrollX).toBeLessThanOrEqual(0);
+          for (const button of before.buttons) {
+            expect(button.h).toBeGreaterThanOrEqual(43.5);
+            expect(button.right).toBeLessThanOrEqual(before.rowRight + 1);
+            expect(button.clipped).toBe(false);
+          }
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-reply-not-installed.png`) });
+          await install.click();
+          await tab.locator('[data-voice-reply-progress]').waitFor({ state: 'visible' });
+          await tab.getByText(/Downloading to Studio Mac: \d+ MB of 164 MB/u).waitFor({ state: 'visible' });
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-reply-installing.png`) });
+          await tab.locator('[data-voice-reply-ready]').waitFor({ state: 'visible', timeout: 15_000 });
+          const fake = await fakeOf(tab);
+          expect(fake.replyInstalls).toBe(1);
+          // Speech was already installed: this was the reply voice only.
+          expect(fake.installs).toBe(0);
+          expect(await tab.locator('[data-voice-reply-ready]').innerText()).toContain('3.2× the time it lasts');
+          await tab.locator('[data-voice-hear-it]').waitFor({ state: 'visible' });
+          const after = await replyBox(tab);
+          expect(after.scrollX).toBeLessThanOrEqual(0);
+          for (const button of after.buttons) expect(button.h).toBeGreaterThanOrEqual(43.5);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-reply-ready.png`) });
+        } finally {
+          await context.close();
+        }
+      });
+
+      it(`Hear it speaks one sentence through the machine and says how long the first sound took (${viewport.name}, ${theme})`, async () => {
+        const { context, tab } = await open('ready', '&reply=ready&hear=ok');
+        try {
+          await tab.locator('[data-voice-hear-it]').click();
+          const first = tab.locator('[data-voice-first-sound]');
+          await first.waitFor({ state: 'visible' });
+          expect(await first.innerText()).toMatch(/The first sound came \d+\.\d s after the line was sent\./u);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-reply-speaking.png`) });
+          await tab.getByText(/Spoken by Studio Mac\./u).waitFor({ state: 'visible', timeout: 10_000 });
+          const fake = await fakeOf(tab);
+          // The machine is asked for its voice, in the stream's own start record, and the sentence leaves in one fixed-size frame.
+          expect(JSON.parse(fake.hearStarts[0] as string)).toEqual({
+            t: 'start',
+            v: 1,
+            purpose: 'test',
+            reply: 'machine',
+          });
+          expect(fake.hearFrames).toHaveLength(1);
+          expect(JSON.parse(fake.hearFrames[0] as string)).toEqual({
+            t: 'speak',
+            id: 0,
+            text: 'Let me check the failing test.',
+          });
+          expect(fake.played).toBe(4_000);
+          expect(fake.playerClosed).toBeGreaterThanOrEqual(1);
+          // The machine spoke it, so the device's own voice said nothing.
+          expect(fake.deviceSpoke).toEqual([]);
+          // Nothing of the room left the page: the stream's microphone is the silent one the scene gives it.
+          expect(
+            await tab.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+          ).toBeLessThanOrEqual(0);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-reply-spoken.png`) });
+        } finally {
+          await context.close();
+        }
+      });
+
+      it(`Hear it falls back to this device's voice, and says so, when the machine has no reply voice or a line failed (${viewport.name}, ${theme})`, async () => {
+        const absent = await open('ready', '&reply=ready&hear=absent');
+        try {
+          await absent.tab.locator('[data-voice-hear-it]').click();
+          const said = absent.tab.locator('[data-voice-by-device]');
+          await said.waitFor({ state: 'visible' });
+          expect(await said.innerText()).toContain("this device's own voice read it");
+          const fake = await fakeOf(absent.tab);
+          expect(fake.deviceSpoke).toEqual(['Let me check the failing test.']);
+          expect(fake.played).toBe(0);
+          if (shotsDir !== '')
+            await absent.tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-reply-device.png`) });
+        } finally {
+          await absent.context.close();
+        }
+        const failed = await open('ready', '&reply=ready&hear=failed');
+        try {
+          await failed.tab.locator('[data-voice-hear-it]').click();
+          await failed.tab.locator('[data-voice-by-device]').waitFor({ state: 'visible' });
+          expect((await fakeOf(failed.tab)).deviceSpoke).toEqual(['Let me check the failing test.']);
+          await failed.tab.locator('[data-voice-hear-it]').waitFor({ state: 'visible' });
+        } finally {
+          await failed.context.close();
+        }
+      });
+
+      it(`a reply voice that failed to download says why and offers Try again; Remove is one call (${viewport.name}, ${theme})`, async () => {
+        const failed = await open('ready', '&reply=failed');
+        try {
+          const alert = failed.tab.locator('[data-voice-reply-failure="download_failed"]');
+          await alert.waitFor({ state: 'visible' });
+          expect(await alert.innerText()).toContain('internet');
+          await failed.tab
+            .locator('[data-voice-reply]')
+            .getByRole('button', { name: 'Try again' })
+            .waitFor({ state: 'visible' });
+          expect((await replyBox(failed.tab)).scrollX).toBeLessThanOrEqual(0);
+          if (shotsDir !== '')
+            await failed.tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-reply-failed.png`) });
+        } finally {
+          await failed.context.close();
+        }
+        const ready = await open('ready', '&reply=ready');
+        try {
+          await ready.tab.locator('[data-voice-reply]').getByRole('button', { name: 'Remove from Studio Mac' }).click();
+          await ready.tab
+            .locator('[data-voice-reply]')
+            .getByRole('button', { name: 'Install on Studio Mac (164 MB)' })
+            .waitFor({ state: 'visible' });
+          const fake = await fakeOf(ready.tab);
+          expect(fake.replyRemoves).toBe(1);
+          expect(fake.removes).toBe(0);
+        } finally {
+          await ready.context.close();
+        }
+      });
+
+      it(`without speech installed the reply voice says what it needs before it can be heard (${viewport.name}, ${theme})`, async () => {
+        const { context, tab } = await open('not_installed', '&reply=ready');
+        try {
+          await tab.getByText(/Install speech on Studio Mac above to hear it/u).waitFor({ state: 'visible' });
+          expect(await tab.locator('[data-voice-hear-it]').count()).toBe(0);
+        } finally {
+          await context.close();
         }
       });
     }

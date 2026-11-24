@@ -2,20 +2,26 @@ import { dirname } from 'node:path';
 import type { HostFactsPort, StatePort } from '@ferretry/kernel/contract';
 import { MODELS_STATE } from '../../contract/index.ts';
 import { ENGINE_DIR, type EngineFile } from '../lib/engine/catalog.ts';
-import type { EngineFilesPort } from '../lib/engine/ports.ts';
+import type { EnginePathsPort } from '../lib/engine/ports.ts';
 
 /**
  * The engine's downloaded files, in `state/voice/models/<ENGINE_DIR>/<role>`. A file is written whole and atomically
  * AFTER its hash was checked, so a file that is present at its pinned size is a verified one.
  */
-export class StateEngineFiles implements EngineFilesPort {
+export class StateEngineFiles implements EnginePathsPort {
   constructor(
     private readonly state: StatePort,
     private readonly host: Pick<HostFactsPort, 'diskFreeBytes'>,
+    /** The folder under `models/` these files live in: the speech engine's by default, the reply voice's by name. */
+    private readonly dir: string = ENGINE_DIR,
   ) {}
 
+  pathOf(file: Pick<EngineFile, 'role'>): string {
+    return this.state.pathOf(MODELS_STATE, this.name(file));
+  }
+
   private name(file: Pick<EngineFile, 'role'>): string {
-    return `${ENGINE_DIR}/${file.role}`;
+    return `${this.dir}/${file.role}`;
   }
 
   async size(file: Pick<EngineFile, 'role'>): Promise<number | undefined> {
@@ -40,7 +46,7 @@ export class StateEngineFiles implements EngineFilesPort {
    * install has none yet). A host that cannot say, or refuses, is "cannot say": Install is not blocked on a guess.
    */
   async freeBytes(): Promise<number | undefined> {
-    let folder = dirname(this.state.pathOf(MODELS_STATE, `${ENGINE_DIR}/encoder`));
+    let folder = dirname(this.state.pathOf(MODELS_STATE, `${this.dir}/free-space-probe`));
     try {
       for (;;) {
         const free = await this.host.diskFreeBytes(folder);

@@ -9,6 +9,8 @@ import { VoiceStream, type StreamParts } from './session.ts';
 /** What `GET /v1/voice/stream` needs from the daemon. */
 export interface VoiceStreamDeps {
   readonly engine: Pick<VoiceEngineApi, 'view' | 'transcribe' | 'detectSpeech'>;
+  /** The machine's reply voice: asked about by a stream that wants it, never needed by one that does not. */
+  readonly reply?: StreamParts['reply'];
   readonly clock: Pick<Clock, 'nowMs' | 'every' | 'after'>;
   /** Read at each stream, so Conversation loading or unloading later is seen. `undefined` = Conversation is off. */
   readonly send: () => StreamParts['send'];
@@ -109,6 +111,7 @@ export function voiceStreamAccept(deps: VoiceStreamDeps): SocketAccept {
       if (!slot.ok) throw new ApiError(429, 'This machine is busy with voice chats.', 'voice_busy');
       return new VoiceStream({
         engine: deps.engine,
+        reply: deps.reply,
         clock: deps.clock,
         downstream,
         streamId,

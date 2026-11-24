@@ -38,7 +38,7 @@ export default definePlugin({
   words: [{ word: 'dictate', means: 'speak a message', insteadOf: ['STT'] }],
 
   // The machine speech engine's worker thread (voice mode): `fyd --check` starts it, so a binary without it is seen at once.
-  workers: ['speech'],
+  workers: ['speech', 'reply'],
 
   // Gate to record the messages the stream sends; Ferrets to say which ferret a name means (as a typed send does).
   needs: { vault: VaultPort, gate: GatePort, ferrets: FerretsPort },
@@ -80,6 +80,31 @@ export default definePlugin({
         noStore: true,
         audit: { skip: 'deletes the downloaded speech files from this machine; carries no secret and no audio' },
         guard: { none: 'a state, byte counts and one fixed sentence; no audio and no transcript' },
+      }),
+      // The reply voice (Kokoro): installed apart from the speech engine; the same three acts and the same two capabilities.
+      route('GET /v1/voice/reply-voice', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('voice', 'use'),
+        noStore: true,
+        audit: { skip: 'a read of an install state, sizes and a measurement' },
+        guard: { none: 'a state, byte counts and one fixed sentence; no audio and no text that was spoken' },
+      }),
+      route('POST /v1/voice/reply-voice/install', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('voice', 'configure'),
+        noStore: true,
+        audit: { skip: 'downloads pinned public voice files onto this machine; carries no secret and no audio' },
+        guard: { none: 'a state, byte counts and one fixed sentence; no audio and no text that was spoken' },
+      }),
+      route('DELETE /v1/voice/reply-voice', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('voice', 'configure'),
+        noStore: true,
+        audit: { skip: 'deletes the downloaded voice files from this machine; carries no secret and no audio' },
+        guard: { none: 'a state, byte counts and one fixed sentence; no audio and no text that was spoken' },
       }),
       route('GET /v1/speedups', {
         minimum: 'operator',

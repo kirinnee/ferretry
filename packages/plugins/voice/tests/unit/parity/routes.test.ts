@@ -59,12 +59,15 @@ describe('the voice routes', () => {
     expect((await host.request('POST', '/v1/speedups/openai/test', { as: owner() })).status).toBe(404);
   });
 
-  test('the three of today’s routes keep today’s paths, and the machine engine adds its three', () => {
+  test('the three of today’s routes keep today’s paths, and the machine engine and the reply voice add three each', () => {
     expect(manifest.actions.routes.map(route => route.key)).toEqual([
       'POST /v1/stt/enhance',
       'GET /v1/voice/engine',
       'POST /v1/voice/engine/install',
       'DELETE /v1/voice/engine',
+      'GET /v1/voice/reply-voice',
+      'POST /v1/voice/reply-voice/install',
+      'DELETE /v1/voice/reply-voice',
       'GET /v1/speedups',
       'POST /v1/speedups/:provider/test',
     ]);
