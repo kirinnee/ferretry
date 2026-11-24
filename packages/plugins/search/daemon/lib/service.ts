@@ -78,10 +78,8 @@ function dayOf(ms: number): string {
   return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms);
 }
 
-function codeOf(outcome: OutboundSecretOutcome): SearchTestCode {
+function codeOf(outcome: Exclude<OutboundSecretOutcome, { readonly kind: 'completion' }>): SearchTestCode {
   switch (outcome.kind) {
-    case 'completion':
-      return 'ok';
     case 'status':
       if (outcome.status === 401 || outcome.status === 403) return 'rejected';
       return outcome.status === 429 ? 'rate_limited' : 'provider_error';

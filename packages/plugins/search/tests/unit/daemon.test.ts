@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
-import type { Log } from '@ferretry/kernel/contract';
+import type { Log, OutboundSecretOutcome } from '@ferretry/kernel/contract';
 import { config as hostConfig, state as hostState } from '@ferretry/kernel/host';
 import type { DaemonImplementation, Manifest } from '@ferretry/kernel/manifest';
 import { ferret, owner, testHost } from '@ferretry/kernel/testing';
@@ -89,11 +89,12 @@ async function hostFor(
     readonly vault?: Record<string, string>;
     readonly answer?: Answer;
     readonly real?: ReturnType<typeof realConfig>;
+    readonly plugin?: DaemonImplementation<Manifest>;
   } = {},
 ) {
   const world = servers(options.answer);
   const host = await testHost({
-    plugins: [options.real === undefined ? search : over(options.real)],
+    plugins: [options.plugin ?? (options.real === undefined ? search : over(options.real))],
     ...(file === undefined ? {} : { config: { 'search.yaml': file } }),
     ...(options.vault === undefined ? {} : { vault: options.vault }),
     // Search needs the Vault only for the Settings screen's key paste; the key it SPENDS is `vault` above, the kernel's.
@@ -102,6 +103,25 @@ async function hostFor(
   });
   return { host, seen: world.seen };
 }
+
+/** The plugin with the kernel's outbound send, or its config write, replaced: the answers a fake server cannot make. */
+const withKernel = (
+  change: (kernel: Record<string, unknown>) => Record<string, unknown>,
+): DaemonImplementation<Manifest> =>
+  ({
+    ...search,
+    build: (given: Parameters<NonNullable<typeof search.build>>[0]) =>
+      search.build?.({
+        ...given,
+        kernel: change(given.kernel as unknown as Record<string, unknown>),
+      } as unknown as typeof given),
+  }) as unknown as DaemonImplementation<Manifest>;
+
+const sending = (outcome: OutboundSecretOutcome) =>
+  withKernel(kernel => ({
+    ...kernel,
+    secrets: { ...(kernel.secrets as object), send: async () => outcome },
+  }));
 
 const named = (id: SearchProviderId, extra: Record<string, unknown> = {}) => ({
   provider: id,
@@ -220,6 +240,36 @@ describe('each of the six providers answers a ferret', () => {
   });
 });
 
+describe('every answer the kernel can give a send', () => {
+  const cases: readonly [OutboundSecretOutcome, keyof typeof SEARCH_MESSAGES][] = [
+    [{ kind: 'timeout' }, 'timeout'],
+    [{ kind: 'too_large' }, 'malformed'],
+    [{ kind: 'unreadable' }, 'malformed'],
+    [{ kind: 'vault_damaged' }, 'vault_damaged'],
+    [{ kind: 'completion', status: 200, payload: 'not an object' }, 'malformed'],
+  ];
+  for (const [outcome, code] of cases)
+    test(`${outcome.kind} reads as ${code}, in one fixed sentence`, async () => {
+      const { host } = await hostFor(named('serper'), { vault: stored('serper'), plugin: sending(outcome) });
+      expect(await host.tool('web_search', { query: 'q' }, asFerret)).toMatchObject({
+        isError: true,
+        text: SEARCH_MESSAGES[code],
+      });
+      await host.stop();
+    });
+
+  test('a send the kernel refused before anything left gives its call back to the day', async () => {
+    const { host } = await hostFor(named('serper'), {
+      vault: stored('serper'),
+      plugin: sending({ kind: 'vault_damaged' }),
+    });
+    await host.tool('web_search', { query: 'q' }, asFerret);
+    const view = SearchViewSchema.parse((await host.request('GET', '/v1/web-search', { as: owner() })).json());
+    expect(view.usedToday).toBe(0);
+    await host.stop();
+  });
+});
+
 describe('the daily cap', () => {
   test('stops at the cap with a sentence that says how to raise it, and sends nothing past it', async () => {
     const { host, seen } = await hostFor(named('serper', { dailyCap: 2 }), { vault: stored('serper') });
@@ -278,6 +328,28 @@ describe('a damaged daily counter', () => {
 
     expect(result).toMatchObject({ isError: true, text: 'Web search is paused: its daily counter could not be read.' });
     expect(seen).toEqual([]);
+    await host.stop();
+  });
+});
+
+describe('Settings › Web search, when the counter or the file is not in order', () => {
+  test('a Test over a damaged counter says the provider failed, never that the key works', async () => {
+    const { host, seen } = await hostFor(named('serper'), { vault: stored('serper') });
+    host.state('search').plant(SEARCH_LEDGER_STATE, 'this is not json');
+    const response = await host.request('POST', '/v1/web-search/test', { as: owner() });
+    expect(response.json()).toMatchObject({ ok: false, code: 'provider_error' });
+    expect(seen).toEqual([]);
+    await host.stop();
+  });
+
+  test('a file that changed while it was being written is a 409 that says to read it again', async () => {
+    const plugin = withKernel(kernel => ({
+      ...kernel,
+      config: { ...(kernel.config as object), writeAsCaller: async () => ({ kind: 'conflict' }) },
+    }));
+    const { host } = await hostFor(undefined, { plugin });
+    const response = await host.request('PUT', '/v1/web-search/setup', { as: owner(), body: { dailyCap: 5 } });
+    expect(response.status).toBe(409);
     await host.stop();
   });
 });
