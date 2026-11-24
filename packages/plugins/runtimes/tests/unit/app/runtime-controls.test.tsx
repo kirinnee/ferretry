@@ -29,7 +29,7 @@ const view = (overrides: ViewOverrides = {}): RuntimeSessionView => ({
 });
 
 const claudeCatalog: RuntimeModelCatalog = {
-  harness: 'claude-code',
+  harness: 'claude',
   source: 'wrapper-inventory',
   choices: [
     { value: 'claude-opus-5', label: 'Opus 5', description: 'The big one', isDefault: true, reasoningEfforts: [] },
@@ -468,7 +468,7 @@ describe('RuntimeModelControls', () => {
   test('discards a catalog whose harness does not match the session', async () => {
     const screen = await mount(<RuntimeModelControls {...props({ catalogs: resolved(codexCatalog) })} />);
     expect(must(screen.container.querySelector('[role="alert"]'), 'the mismatch alert').textContent).toContain(
-      'codex model catalog for a claude-code session',
+      'belongs to another assistant, not Claude Code',
     );
     await screen.unmount();
   });
@@ -927,7 +927,7 @@ describe('popover presentation', () => {
 
 /** A GLM login's catalog (docs/model-catalog.md): tiers, a context window, efforts per model, no custom ids. */
 const glmCatalog: RuntimeModelCatalog = {
-  harness: 'claude-code',
+  harness: 'claude',
   source: 'wrapper-inventory',
   catalog: { id: 'zai', label: 'GLM / Z.ai', customIds: false },
   choices: [

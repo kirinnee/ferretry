@@ -38,8 +38,8 @@ const deferred = (): { resolve: (value: unknown) => void; answer: Promise<unknow
 describe('runtime model catalog parsing', () => {
   it('should preserve opaque ordered model data and optional values', () => {
     should(parseRuntimeModelCatalog(catalog('GPT-5.6 Sol'))).deepEqual(catalog('GPT-5.6 Sol'));
-    should(parseRuntimeModelCatalog({ harness: 'claude-code', source: 'wrapper-inventory', choices: [] })).deepEqual({
-      harness: 'claude-code',
+    should(parseRuntimeModelCatalog({ harness: 'claude', source: 'wrapper-inventory', choices: [] })).deepEqual({
+      harness: 'claude',
       source: 'wrapper-inventory',
       choices: [],
     });
@@ -111,9 +111,13 @@ describe('runtime model catalog parsing', () => {
 
   it('should reject a catalog whose harness does not match the session', () => {
     should(() => requireRuntimeModelCatalogHarness(catalog('Codex'), 'claude-code')).throw(
-      /codex model catalog for a claude-code session/u,
+      /belongs to another assistant, not Claude Code/u,
     );
     should(requireRuntimeModelCatalogHarness(catalog('Codex'), 'codex')).deepEqual(catalog('Codex'));
+    // The daemon names a Claude Code session's catalog by its catalog half, not by the plugin key.
+    const claude: RuntimeModelCatalog = { harness: 'claude', source: 'wrapper-inventory', choices: [] };
+    should(requireRuntimeModelCatalogHarness(claude, 'claude-code')).deepEqual(claude);
+    should(() => requireRuntimeModelCatalogHarness(claude, 'codex')).throw(/not Codex/u);
   });
 
   it('should say what went wrong, whatever was thrown', () => {

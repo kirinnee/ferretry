@@ -21,7 +21,7 @@ import type { LiveRuntimesClient, RuntimesClient } from '../../../app/lib/client
 import { runtimeCatalog, runtimeView } from './support/picker.ts';
 
 const CATALOG = {
-  harness: 'claude-code',
+  harness: 'claude',
   source: 'wrapper-inventory',
   choices: [
     { value: 'claude-opus-5', label: 'Opus 5', isDefault: true, reasoningEfforts: [], fast: true },

@@ -31,7 +31,7 @@ const asked: string[] = [];
 (window as unknown as { __asked: string[] }).__asked = asked;
 
 const CATALOG = {
-  harness: 'claude-code',
+  harness: 'claude',
   source: 'wrapper-inventory',
   choices: [
     {

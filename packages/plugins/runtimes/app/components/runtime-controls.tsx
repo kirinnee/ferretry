@@ -45,6 +45,7 @@ import {
 import {
   type RuntimeModelCatalog,
   type RuntimeModelChoice,
+  requireRuntimeModelCatalogHarness,
   runtimeModelCatalogErrorMessage,
 } from '../lib/runtime-models.ts';
 import { contextWords, CUSTOM_MODEL_ID, groupByTier, Loading, Spinner } from '@ferretry/app/ui';
@@ -215,9 +216,7 @@ function useRuntimeModelCatalog(
       .load(sessionId)
       .then(value => {
         if (cancelled) return;
-        if (value.harness !== expectedHarness)
-          throw new Error(`daemon returned a ${value.harness} model catalog for a ${expectedHarness} session`);
-        setCatalog(value);
+        setCatalog(requireRuntimeModelCatalogHarness(value, expectedHarness));
         setLoadedFor(requestKey);
       })
       .catch(reason => {
