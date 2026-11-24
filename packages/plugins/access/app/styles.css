@@ -692,3 +692,20 @@
 .kt-btn.fy-pair-btn {
   min-width: 8.5rem;
 }
+
+/* THE PASSKEY OFFER'S TWO ANSWERS ARE ONE SIZE (r11 O10) AND CONTENT-SIZED (owner ruling C-6, "dont make the button take the full
+   width"). On a phone the answer row stacks them, each at its own width; here the stack is one grid column as wide as the longer
+   label (never under 12rem, never over the column), so "Add a passkey now" and "Not now" share that one width and neither takes the
+   whole column. From the desktop breakpoint the row is the shared one: both answers are 12rem side by side. */
+@media (max-width: 639.98px) {
+  [data-first-passkey-offer] .fy-action-row {
+    display: grid;
+    grid-template-columns: minmax(min(12rem, 100%), max-content);
+    justify-content: start;
+    align-items: stretch;
+  }
+  [data-first-passkey-offer] .fy-action-row > .kt-btn {
+    inline-size: auto;
+    justify-content: center;
+  }
+}
