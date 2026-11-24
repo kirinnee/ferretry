@@ -11,7 +11,7 @@ import type { Environment } from './credential.ts';
 
 /**
  * - `FY_SESSION_ID`: the ferret this process runs inside (`fy pack`, `fy card --mine`, `fy instructions`).
- * - `FY_SESSION_MODE`, `FY_HYPERMEDIA`, `FY_PACK`, `FY_AGENDA`, `FY_LEARNING_PASSIVE`: the launch switches
+ * - `FY_SESSION_MODE`, `FY_HYPERMEDIA`, `FY_PACK`, `FY_AGENDA`, `FY_BROWSER_STEALTH`, `FY_LEARNING_PASSIVE`: the launch switches
  *   `fy instructions` reports, the same variables the runtime wrapper composed the appended prompt from.
  * - `PWD`: where `fy` was run, for a folder typed relative to it (`fy pack <folder>`). It is NOT copied from the
  *   inherited variable (a parent that spawns `fy` with its own `cwd` leaves `PWD` stale): it is the CLI's real
@@ -23,6 +23,7 @@ const PLUGIN_ENV_NAMES = [
   'FY_HYPERMEDIA',
   'FY_PACK',
   'FY_AGENDA',
+  'FY_BROWSER_STEALTH',
   'FY_LEARNING_PASSIVE',
   'PWD',
 ] as const;
