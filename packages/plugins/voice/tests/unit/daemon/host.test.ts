@@ -5,6 +5,8 @@ import {
   type SecretName,
   allowedDestination,
 } from '@ferretry/core-vault/contract';
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
+import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { FakeVault, type FakeTransport } from '@ferretry/core-vault/contract/testing';
 import { device, ferret, owner, testHost, warden } from '@ferretry/kernel/testing';
 import {
@@ -46,7 +48,7 @@ async function vaultWith(
 async function hostOf(vault: FakeVault, config: Record<string, unknown> = {}) {
   return await testHost({
     plugins: [voice],
-    fakes: { vault },
+    fakes: { vault, gate: new FakeGate(), ferrets: new FakeFerrets() },
     config: { 'voice.yaml': { postProcessing: { provider: 'groq' }, ...config } },
   });
 }
@@ -323,10 +325,13 @@ describe('Appendix D rows', () => {
     expect(manifest.permissions?.secrets).toEqual(['GROQ_API_KEY', 'CEREBRAS_API_KEY', 'JEV_API_KEY']);
   });
 
-  test('R626 no microphone audio crosses the daemon: the only STT route is JSON text', async () => {
+  test('R626 dictation sends no microphone audio to the daemon: the only STT route is JSON text (voice mode has its own stream)', async () => {
     const stt = manifest.actions.routes.filter(candidate => /stt|audio|dictat|transcri/u.test(candidate.path));
     expect(stt.map(candidate => `${candidate.method} ${candidate.path}`)).toEqual(['POST /v1/stt/enhance']);
-    expect(Object.keys(manifest.actions)).not.toContain('sockets');
+    // Audio reaches the daemon through ONE route, voice mode's stream (unit 4), and never through dictation's.
+    expect((manifest.actions.sockets ?? []).map(candidate => `${candidate.method} ${candidate.path}`)).toEqual([
+      'GET /v1/voice/stream',
+    ]);
     expect(SttEnhancementRequestSchema.safeParse({ ...enhance, audio: 'AAAA' }).success).toBe(false);
     const { vault, sent } = await vaultWith({ GROQ_API_KEY: GROQ_KEY });
     const host = await hostOf(vault);

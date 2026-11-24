@@ -1,5 +1,7 @@
 /** The Voice daemon half on the kernel's test host, over a Vault fake that holds the given keys and records each send. */
 import type { AuthorizedOutcome, OutboundHttpRequest, SecretName } from '@ferretry/core-vault/contract';
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
+import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { FakeVault, type FakeTransport } from '@ferretry/core-vault/contract/testing';
 import { testHost } from '@ferretry/kernel/testing';
 import voice from '../../../daemon/index.ts';
@@ -24,6 +26,10 @@ export async function voiceHost(
   };
   const vault = new FakeVault(undefined, recording);
   for (const [name, value] of Object.entries(keys)) await vault.put(name as SecretName, value);
-  const host = await testHost({ plugins: [voice], fakes: { vault }, config: { 'voice.yaml': config } });
+  const host = await testHost({
+    plugins: [voice],
+    fakes: { vault, gate: new FakeGate(), ferrets: new FakeFerrets() },
+    config: { 'voice.yaml': config },
+  });
   return { host, sent, vault };
 }

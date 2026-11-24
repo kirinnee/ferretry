@@ -113,7 +113,7 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 | `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `sharing`    | making catalogs of skills and MCP setups, freezing items into them, listing one item in many catalogs, choosing the default catalog, one-tap Add into it and its Undo, seeing what changed between versions, publishing a new version of an item, making a kept version current and retiring one, and exporting a signed file ([catalogs.md](catalogs.md#the-publisher-side)); a ferret reads only the current version of an item, older versions and their changes are the owner's; no new passkey act |
-| `voice`      | the machine speech engine: reading what is installed (**use**), and installing or removing it, a download of about 700 MB onto this machine's disk (**configure**) — `GET`/`POST`/`DELETE /v1/voice/engine` (owner decision O3; [voice.md](voice.md))                                                                                                                                                                                                                                                   |
+| `voice`      | the machine speech engine: reading what is installed (**use**), and installing or removing it, a download of about 700 MB onto this machine's disk (**configure**) — `GET`/`POST`/`DELETE /v1/voice/engine`; and streaming the microphone to it (**use**) — `GET /v1/voice/stream`, person-only like the rest (owner decision O3; [voice.md](voice.md))                                                                                                                                                 |
 
 **Leaving a ferret alone is `warden.configure`.** `POST /v1/warden/leave` keeps the Warden off one flagged
 or cleared ferret for an hour, four, or until its status changes ([config-files.md](config-files.md#the-warden)).
@@ -633,9 +633,15 @@ device that has Sharing and may manage devices, or at the machine with `fy devic
 
 `voice` is narrowable on its own and is on by default on both axes, like every other capability, so adding it loosens
 nothing. The engine's routes used to ride on `fleet`; they no longer do, so narrowing `fleet` does not stop a
-device installing the speech files and narrowing `voice` does not stop it using the fleet. `voice.configure` (Install,
+device installing the speech files, and narrowing `voice` does not give a device the fleet. `voice.configure` (Install,
 Remove) is a step-up act like every `configure`; `voice.use` (the read) is not. It is not a superset of anything: the
-engine decodes audio a caller hands the daemon's own code and reaches no files, secrets or terminals.
+engine decodes audio a caller hands the daemon's own code and reaches no files, secrets or terminals. The stream's one write is a
+message to a ferret, sent as the person's own through the ordinary send path, so **voice chat needs BOTH `voice.use` and
+`fleet.use`** (Talk to test needs `voice.use` alone). The stream asks for `fleet.use` when a chat starts (refused with a
+sentence and a `4403` close otherwise) and again before every message, and writes the same `agent.prompted` audit record a typed
+send writes (the ferret as subject, never the words). Narrowing `voice` closes an open stream at once; narrowing the machine-wide
+`fleet` stops the next message of an open stream; narrowing one device's own `fleet` takes effect on that device's next stream
+(declared GAP: the device half is read when the stream opens).
 
 Each instance above cites a command. **Verify a cited command exists before adding one**, and verify it a
 second way: `rg -n --fixed-strings "fy daemon adopt"`. Not `rg -r` — that is `--replace`, so
