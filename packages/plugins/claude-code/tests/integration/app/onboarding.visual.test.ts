@@ -86,7 +86,11 @@ interface Fake {
   advanced: boolean;
 }
 
-async function open(viewport: (typeof VIEWPORTS)[number], theme: string, query: string) {
+async function open(
+  viewport: { readonly width: number; readonly height: number; readonly phone: boolean },
+  theme: string,
+  query: string,
+) {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     deviceScaleFactor: viewport.phone ? 2 : 1,
@@ -407,6 +411,40 @@ describe('the sign-in page: the slot draws no harness chooser', () => {
           if (!viewport.phone) for (const w of widths) expect(Math.abs(w - 136)).toBeLessThanOrEqual(1);
           for (const b of footer) expect(b.right).toBeLessThanOrEqual(viewport.width);
           if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `sign-in-${viewport.name}-${theme}.png`) });
+        } finally {
+          await close();
+        }
+      });
+
+  // O10 Q2: the REAL page holds Next with a refusing save, never `busy()`, which would lock the whole footer.
+  for (const viewport of [{ name: '1440', width: 1_440, height: 900, phone: false }, VIEWPORTS[1]] as const)
+    for (const theme of THEMES)
+      it(`sign-in (real page): Back and Later stay enabled, Next says why it stays, at ${viewport.name}, ${theme}`, async () => {
+        const { tab, close } = await open(viewport, theme, '&page=sign-in&signin=real');
+        try {
+          await tab.waitForTimeout(600);
+          const state = () =>
+            tab.evaluate(() => ({
+              buttons: [...document.querySelectorAll('[data-step-footer] button')].map(b => ({
+                label: (b as HTMLElement).innerText.trim(),
+                disabled: (b as HTMLButtonElement).disabled,
+              })),
+              note: document.querySelector('[data-flow-commit-error]')?.textContent ?? '',
+            }));
+          const before = await state();
+          expect(before.buttons).toEqual([
+            { label: 'Back', disabled: false },
+            { label: 'Later', disabled: false },
+            { label: 'Next', disabled: false },
+          ]);
+          await tab.getByRole('button', { name: 'Next' }).click();
+          await tab.locator('[data-flow-commit-error]').waitFor({ state: 'visible' });
+          const after = await state();
+          expect(after.note).toBe('Sign in to Claude to continue, or press Later.');
+          expect(after.buttons.map(b => b.disabled)).toEqual([false, false, false]);
+          expect(await tab.locator('[data-next-page]').count()).toBe(0);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `sign-in-real-${viewport.name}-${theme}.png`) });
         } finally {
           await close();
         }

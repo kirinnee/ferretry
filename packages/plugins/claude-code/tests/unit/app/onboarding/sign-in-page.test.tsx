@@ -66,21 +66,21 @@ describe('the sign-in page', () => {
 
   it('lifts its loading cover, holds Next while nobody is signed in, and is done (Next free) only once it signed in', async () => {
     const { view, run } = await open('nothing');
-    // ready, then the hold: the shell's Next is locked (it would record a default as done); Later and Skip are not.
-    expect(run.events).toEqual(['ready', 'busy:Sign in to Claude to continue']);
+    // ready, then Next's refusing save (rule 8): Next stays and says why; Back and Later stay live. Signed in clears the save.
+    expect(run.events).toEqual(['ready', 'commit']);
     await interact(() => (view.container.querySelector('[data-fake-sign-in]') as HTMLElement).click());
-    expect(run.events).toEqual(['ready', 'busy:Sign in to Claude to continue', 'busy:null', 'done']);
+    expect(run.events).toEqual(['ready', 'commit', 'commit', 'done']);
   });
 
-  it('holds Next (never records a sign-in with no login) when there is no panel to sign in with; Later and Skip stay', async () => {
+  it('holds Next with a refusing save (never records a sign-in with no login) when there is no panel to sign in with; Later and Skip stay', async () => {
     const { run } = await open(null);
-    expect(run.events).toEqual(['ready', 'busy:Sign in to Claude to continue']);
+    expect(run.events).toEqual(['ready', 'commit']);
     expect(run.events).not.toContain('done');
   });
 
   it('shows itself, saying where to sign in, when no plugin fills the slot', async () => {
     const { view, run } = await open(null);
-    expect(run.events).toEqual(['ready', 'busy:Sign in to Claude to continue']);
+    expect(run.events).toEqual(['ready', 'commit']);
     expect(view.container.querySelector('[data-sign-in-missing]')?.textContent).toContain('Settings › Logins');
   });
 
