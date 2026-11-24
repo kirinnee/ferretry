@@ -9,7 +9,7 @@
  *
  * Pure: fleet facts, the vocabulary and the prompt in, the inventory out.
  */
-import type { RuntimeView } from '@ferretry/plugin-runtimes/contract';
+import { isSupportedHarnessKey, type RuntimeView } from '@ferretry/plugin-runtimes/contract';
 import type { Instant } from '@ferretry/std';
 import type {
   PackFleetModel,
@@ -47,18 +47,22 @@ const offered = (runtime: RuntimeView): readonly string[] =>
 
 /** Every runtime here: what it is, what it offers, whether it can start a ferret now, and its quota. */
 export function inventoryRuntimes(facts: PackFleetFacts, now: string): readonly PackInventoryRuntime[] {
-  return facts.runtimes.map(runtime => {
+  // A runtime on a harness Packs has no routing for is not listed: it is never offered as one of the two it knows.
+  return facts.runtimes.flatMap(runtime => {
+    if (!isSupportedHarnessKey(runtime.harness)) return [];
     const refusal = runtimeRefusal(runtime, undefined, facts);
-    return {
-      name: runtime.name,
-      harness: runtime.harness,
-      ...(runtime.models === undefined ? {} : { provider: runtime.models.catalog.id }),
-      login: runtime.credential.id,
-      ready: refusal === undefined,
-      ...(refusal === undefined ? {} : { refusal }),
-      quota: quotaFor(runtime, facts, now),
-      models: offered(runtime),
-    };
+    return [
+      {
+        name: runtime.name,
+        harness: runtime.harness,
+        ...(runtime.models === undefined ? {} : { provider: runtime.models.catalog.id }),
+        login: runtime.credential.id,
+        ready: refusal === undefined,
+        ...(refusal === undefined ? {} : { refusal }),
+        quota: quotaFor(runtime, facts, now),
+        models: offered(runtime),
+      },
+    ];
   });
 }
 

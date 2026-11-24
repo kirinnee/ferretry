@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { emptyMemory, readMemory, withMemory } from '../../../../../app/features/import-wizard/wizard-memory.ts';
+import { emptyMemory, readMemory, setOf, withMemory } from '../../../../../app/features/import-wizard/wizard-memory.ts';
 
 describe('what the wizard remembers in the address', () => {
   it('nothing remembered writes no parameter and leaves the rest of the query alone', () => {
@@ -22,9 +22,9 @@ describe('what the wizard remembers in the address', () => {
     const read = readMemory(search);
     expect(read.tool).toBe(1);
     expect(read.names).toEqual({ codex: 'work-codex' });
-    expect([...read.left['claude-code']]).toEqual(['claude-code:mcp:issues']);
-    expect([...read.ticked['claude-code']]).toEqual(['GITHUB_TOKEN']);
-    expect([...read.declined['claude-code']]).toEqual(['instructions/claude']);
+    expect([...setOf(read.left, 'claude-code')]).toEqual(['claude-code:mcp:issues']);
+    expect([...setOf(read.ticked, 'claude-code')]).toEqual(['GITHUB_TOKEN']);
+    expect([...setOf(read.declined, 'claude-code')]).toEqual(['instructions/claude']);
   });
 
   it('a damaged or hand-edited parameter reads as nothing remembered', () => {
@@ -34,7 +34,7 @@ describe('what the wizard remembers in the address', () => {
       '?fyimport=%7B%22left%22%3A%7B%22codex%22%3A%5B%22x%22%5D%7D%7D',
     ])
       expect(readMemory(bad).tool).toBe(0);
-    expect(readMemory('?fyimport=%7B%22left%22%3A%7B%22codex%22%3A%5B%22x%22%5D%7D%7D').left.codex.size).toBe(0);
+    expect(readMemory('?fyimport=%7B%22left%22%3A%7B%22codex%22%3A%5B%22x%22%5D%7D%7D').left.codex?.size).toBe(0);
   });
 
   it('an address that would be too long is not written', () => {

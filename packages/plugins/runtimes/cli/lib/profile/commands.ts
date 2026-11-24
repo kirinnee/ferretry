@@ -3,8 +3,9 @@ import type { LayeredProfileCatalog, LayeredProfileView, ProfileScope } from '..
 import { runChange } from '../fleet/account-change.ts';
 import { flagList, flagOn, flagText, positional, writeFlags } from '../fleet/account-commands.ts';
 import { type AccountCommandDeps, AccountCommandError } from '../fleet/account-ports.ts';
-import { HARNESS_LABEL, HARNESS_SCOPE_WORDS, indent, listOrNone, unavailable } from '../fleet/account-render.ts';
+import { HARNESS_SCOPE_WORDS, indent, listOrNone, unavailable } from '../fleet/account-render.ts';
 import { renderStack } from '../runtime/render.ts';
+import { harnessName } from '../../../contract/harness-words.ts';
 
 /** A profile's scope badge: "Generic", "Claude only", "Codex only", or "Mixed" for one written before P7. */
 const scopeBadge = (scope: ProfileScope): string =>
@@ -42,7 +43,7 @@ export function renderProfile(profile: LayeredProfileView): string {
     ]),
   ];
   for (const stack of profile.harnesses) {
-    lines.push(...indent([`On ${HARNESS_LABEL[stack.harness]}:`, ...renderStack(stack).map(line => `  ${line}`)]));
+    lines.push(...indent([`On ${harnessName(stack.harness)}:`, ...renderStack(stack).map(line => `  ${line}`)]));
   }
   const removal = unavailable(profile.remove);
   if (removal !== undefined) lines.push(...indent([`Cannot delete yet: ${removal}`]));

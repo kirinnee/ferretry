@@ -13,7 +13,6 @@ import {
   type ComponentDraft,
   draftDefault,
   componentDraftModels,
-  HARNESS_NAMES,
   type CatalogHarness,
   harnessBound,
   mcpDraftIsUrl,
@@ -21,6 +20,7 @@ import {
   WITHHELD_COMMAND_PROBLEM,
   WITHHELD_FLAGS_PROBLEM,
 } from './component-model.ts';
+import { harnessName, supportedHarnessKeys } from '../../../../contract/harness-words.ts';
 
 const BODY_LABEL = {
   instructions: 'Instructions',
@@ -71,9 +71,9 @@ export function ComponentForm({ draft, onChange, editing, problem }: ComponentFo
               label="Tool"
               value={draft.harness ?? 'claude-code'}
               onChange={next => set({ harness: next as CatalogHarness })}
-              options={(['claude-code', 'codex'] as const).map(harness => ({
+              options={supportedHarnessKeys().map(harness => ({
                 value: harness,
-                label: HARNESS_NAMES[harness],
+                label: harnessName(harness),
               }))}
             />
           </span>

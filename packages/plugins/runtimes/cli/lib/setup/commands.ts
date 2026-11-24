@@ -4,7 +4,8 @@ import { runChange } from '../fleet/account-change.ts';
 import { requireMayApply } from '../fleet/account-authority.ts';
 import { flagOn, flagText, parseHarness, positional, writeFlags } from '../fleet/account-commands.ts';
 import { type AccountCommandDeps, AccountCommandError, type AccountWriteOptions } from '../fleet/account-ports.ts';
-import { HARNESS_LABEL, indent, listOrNone, unavailable } from '../fleet/account-render.ts';
+import { harnessName } from '../../../contract/harness-words.ts';
+import { indent, listOrNone, unavailable } from '../fleet/account-render.ts';
 
 /** What the first run found for one tool, before anybody chooses. Names only, never a value. */
 export function renderHarnessScan(scan: HarnessScan): string {
@@ -14,7 +15,7 @@ export function renderHarnessScan(scan: HarnessScan): string {
       ? `signed in${account.email ? ` as ${account.email}` : ''}`
       : account.state.replace(/-/gu, ' ');
   return [
-    HARNESS_LABEL[scan.harness],
+    harnessName(scan.harness),
     ...indent([
       `Your login: ${login}${account.reason ? ` (${account.reason})` : ''}`,
       ...(scan.instructions === undefined ? [] : [`Instructions: ${scan.instructions.source}`]),
@@ -60,21 +61,19 @@ export function renderScan(scan: SetupScan): string {
     lines.push(
       'An import would create:',
       ...indent(
-        scan.runtimes.map(
-          runtime => `${runtime.name}  (${HARNESS_LABEL[runtime.harness]}, profile ${runtime.profile})`,
-        ),
+        scan.runtimes.map(runtime => `${runtime.name}  (${harnessName(runtime.harness)}, profile ${runtime.profile})`),
       ),
     );
   }
   for (const duplicate of scan.duplicates) {
     lines.push(
-      `${duplicate.existing} already uses that ${HARNESS_LABEL[duplicate.harness]} login and profile, so no new runtime would be added.`,
+      `${duplicate.existing} already uses that ${harnessName(duplicate.harness)} login and profile, so no new runtime would be added.`,
     );
   }
   for (const update of scan.updates) {
     lines.push(`${update.reference} changed in ${update.sources.join(', ')} since the last import.`);
   }
-  for (const note of scan.notes) lines.push(`${HARNESS_LABEL[note.harness]}: ${note.text}`);
+  for (const note of scan.notes) lines.push(`${harnessName(note.harness)}: ${note.text}`);
   const blocked = unavailable(scan.importing);
   if (blocked !== undefined) lines.push(`An import is not possible now: ${blocked}`);
   return lines.join('\n');
@@ -93,7 +92,7 @@ function reportNext(deps: AccountCommandDeps, scan: SetupScan, include: readonly
     const found = scan.harnesses.find(candidate => candidate.harness === harness);
     if (found !== undefined && !signedIn(found))
       deps.out.report(
-        `${HARNESS_LABEL[harness]} is not signed in yet: find its login with \`${bin} login ls\`, then run \`${bin} login signin <login>\` before you launch.`,
+        `${harnessName(harness)} is not signed in yet: find its login with \`${bin} login ls\`, then run \`${bin} login signin <login>\` before you launch.`,
       );
   }
   deps.out.report(`See what was set up with \`${bin} runtime ls\` and \`${bin} login ls\`.`);
@@ -123,13 +122,13 @@ export async function runtimeLink(deps: AccountCommandDeps, invocation: VerbInvo
   const found = scan.harnesses.find(candidate => candidate.harness === harness);
   if (found === undefined || !found.installed) {
     throw new AccountCommandError(
-      `${HARNESS_LABEL[harness]} is not installed on ${scan.machine}. Install it with \`${bin} machine install ${harness}\`, then link it.`,
+      `${harnessName(harness)} is not installed on ${scan.machine}. Install it with \`${bin} machine install ${harness}\`, then link it.`,
     );
   }
   for (const duplicate of scan.duplicates) {
     if (duplicate.harness === harness)
       deps.out.report(
-        `${duplicate.existing} already uses that ${HARNESS_LABEL[harness]} login and profile, so no new runtime is added.`,
+        `${duplicate.existing} already uses that ${harnessName(harness)} login and profile, so no new runtime is added.`,
       );
   }
   const name = flagText(invocation.options, 'name');

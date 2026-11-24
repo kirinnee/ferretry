@@ -291,7 +291,7 @@ describe('the wire contract for skip and the scan', () => {
     }
     for (const id of [
       '',
-      'claude:instructions',
+      'Claude:instructions',
       'codex:hooks',
       'codex:mcp',
       'codex:mcp:',

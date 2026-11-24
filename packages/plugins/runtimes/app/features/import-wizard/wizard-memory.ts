@@ -3,51 +3,72 @@
  * tokens were ticked. It rides in the address (`?fyimport=…`, rewritten without leaving the page, as the Board does for its
  * filters), so no new storage exists and a copied link reads the same. Names and item ids only; never a value.
  */
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { z } from 'zod';
+import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { ImportItemIdSchema, type ImportItemId } from '../../../contract/index.ts';
+import { supportedHarnessKeys } from '../../../contract/harness-words.ts';
 
 const PARAM = 'fyimport';
 /** A longer address is not written: losing the memory is better than an address a server refuses. */
 const LONGEST = 6_000;
 
-const Names = z.strictObject({
-  'claude-code': z.string().max(200).optional(),
-  codex: z.string().max(200).optional(),
-});
-const Lists = <T extends z.ZodType<string>>(item: T) =>
-  z.strictObject({ 'claude-code': z.array(item).max(512).optional(), codex: z.array(item).max(512).optional() });
+/** Each map is keyed by harness: the keys a person's address names are the plugin keys, whatever harnesses exist. */
+const Names = z.record(HarnessKeySchema, z.string().max(200));
+const Lists = <T extends z.ZodType<string>>(item: T) => z.record(HarnessKeySchema, z.array(item).max(512));
 
 const End = z.enum(['imported', 'skipped']);
 
 const MemorySchema = z.strictObject({
-  tool: z.number().int().min(0).max(1).optional(),
+  tool: z
+    .number()
+    .int()
+    .min(0)
+    .max(supportedHarnessKeys().length - 1)
+    .optional(),
   names: Names.optional(),
   left: Lists(ImportItemIdSchema).optional(),
   ticked: Lists(z.string().min(1).max(100)).optional(),
   /** Changed sources the person unticked: they are kept as they were. */
   declined: Lists(z.string().min(1).max(200)).optional(),
   /** How each finished tool ended, and whether the person pressed Finish: which step they were on. */
-  ends: z.strictObject({ 'claude-code': End.optional(), codex: End.optional() }).optional(),
+  ends: z.record(HarnessKeySchema, End).optional(),
   finished: z.boolean().optional(),
 });
 
+/** What each harness holds, by harness. A harness the wizard has not touched holds nothing (see {@link setOf}). */
+export type PerHarness<T> = Readonly<Record<string, ReadonlySet<T>>>;
+
+/** The set a harness holds in `sets`: empty when it has none. */
+export const setOf = <T>(sets: PerHarness<T>, harness: string): ReadonlySet<T> => sets[harness] ?? new Set<T>();
+
+const emptySets = <T>(): Record<string, ReadonlySet<T>> =>
+  Object.fromEntries(supportedHarnessKeys().map(harness => [harness, new Set<T>()]));
+
+/** The harnesses the wizard walks always hold a set, so what an address carries is the same whatever was touched. */
+const setsOf = <T>(lists: Readonly<Record<string, readonly T[]>>): Record<string, ReadonlySet<T>> => ({
+  ...emptySets<T>(),
+  ...Object.fromEntries(Object.entries(lists).map(([harness, list]) => [harness, new Set(list)])),
+});
+
+const listsOf = <T>(sets: PerHarness<T>): Record<string, readonly T[]> =>
+  Object.fromEntries(Object.entries(sets).map(([harness, set]) => [harness, [...set]]));
+
 export interface Memory {
   readonly tool: number;
-  readonly names: Partial<Record<KnownHarnessKey, string>>;
-  readonly left: Readonly<Record<KnownHarnessKey, ReadonlySet<ImportItemId>>>;
-  readonly ticked: Readonly<Record<KnownHarnessKey, ReadonlySet<string>>>;
-  readonly declined: Readonly<Record<KnownHarnessKey, ReadonlySet<string>>>;
-  readonly ends: Partial<Record<KnownHarnessKey, 'imported' | 'skipped'>>;
+  readonly names: Readonly<Record<string, string>>;
+  readonly left: PerHarness<ImportItemId>;
+  readonly ticked: PerHarness<string>;
+  readonly declined: PerHarness<string>;
+  readonly ends: Readonly<Record<string, 'imported' | 'skipped'>>;
   readonly finished: boolean;
 }
 
 export const emptyMemory = (): Memory => ({
   tool: 0,
   names: {},
-  left: { 'claude-code': new Set(), codex: new Set() },
-  ticked: { 'claude-code': new Set(), codex: new Set() },
-  declined: { 'claude-code': new Set(), codex: new Set() },
+  left: emptySets(),
+  ticked: emptySets(),
+  declined: emptySets(),
   ends: {},
   finished: false,
 });
@@ -63,9 +84,9 @@ export const readMemory = (search: string): Memory => {
     return {
       tool,
       names,
-      left: { 'claude-code': new Set(left['claude-code']), codex: new Set(left.codex) },
-      ticked: { 'claude-code': new Set(ticked['claude-code']), codex: new Set(ticked.codex) },
-      declined: { 'claude-code': new Set(declined['claude-code']), codex: new Set(declined.codex) },
+      left: setsOf(left),
+      ticked: setsOf(ticked),
+      declined: setsOf(declined),
       ends,
       finished,
     };
@@ -79,13 +100,7 @@ const nothingRemembered = (memory: Memory): boolean =>
   Object.keys(memory.names).length === 0 &&
   Object.keys(memory.ends).length === 0 &&
   !memory.finished &&
-  memory.left['claude-code'].size +
-    memory.left.codex.size +
-    memory.ticked['claude-code'].size +
-    memory.ticked.codex.size +
-    memory.declined['claude-code'].size +
-    memory.declined.codex.size ===
-    0;
+  [memory.left, memory.ticked, memory.declined].every(sets => Object.values(sets).every(set => set.size === 0));
 
 /** The address's query with this memory in it (and nothing else of the query touched), or null when it would be too long. */
 export const withMemory = (search: string, memory: Memory): string | null => {
@@ -97,9 +112,9 @@ export const withMemory = (search: string, memory: Memory): string | null => {
       JSON.stringify({
         tool: memory.tool,
         names: memory.names,
-        left: { 'claude-code': [...memory.left['claude-code']], codex: [...memory.left.codex] },
-        ticked: { 'claude-code': [...memory.ticked['claude-code']], codex: [...memory.ticked.codex] },
-        declined: { 'claude-code': [...memory.declined['claude-code']], codex: [...memory.declined.codex] },
+        left: listsOf(memory.left),
+        ticked: listsOf(memory.ticked),
+        declined: listsOf(memory.declined),
         ends: memory.ends,
         finished: memory.finished,
       }),

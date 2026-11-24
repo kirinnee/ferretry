@@ -197,10 +197,10 @@ describe('the machine setup wire contract', () => {
         ...installed,
         install: missing.install,
       }),
-      rejects('a tool of an unknown harness', setup.SetupToolSchema, { ...installed, harness: 'gemini' }),
+      rejects('a tool of a malformed harness key', setup.SetupToolSchema, { ...installed, harness: 'Not A Key' }),
       rejects('an install request naming no harness', setup.ToolInstallRequestSchema, { harnesses: [] }),
-      rejects('an install request naming three harnesses', setup.ToolInstallRequestSchema, {
-        harnesses: ['claude-code', 'codex', 'claude-code'],
+      rejects('an install request naming more harnesses than the bound', setup.ToolInstallRequestSchema, {
+        harnesses: Array.from({ length: 33 }, () => 'codex'),
       }),
       rejects('an install request whose shown command is empty', setup.ToolInstallRequestSchema, {
         harnesses: ['codex'],

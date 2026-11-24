@@ -12,7 +12,7 @@ import { ArrowDown, ArrowUp, GripVertical, X } from 'lucide-react';
 import type { DragEvent } from 'react';
 import { cn } from '../../../ui.ts';
 import { Button } from '../../../ui.ts';
-import { type CatalogHarness, HARNESS_NAMES } from '../components/component-model.ts';
+import { type CatalogHarness } from '../components/component-model.ts';
 import {
   ITEM_ACTIONS,
   ITEM_ROW,
@@ -24,6 +24,7 @@ import {
   McpStatusFooter,
 } from './profile-library.tsx';
 import { itemName, type OverrideChip, type ProfileItem, RESOLVED_FIELD_WORDS } from './profile-model.ts';
+import { harnessName } from '../../../../contract/harness-words.ts';
 
 export interface ContentsListProps {
   readonly items: readonly ProfileItem[];
@@ -191,7 +192,7 @@ export function ResolvedTable({
               data-resolved-harness={each}
               onClick={() => onHarness(each)}
             >
-              {HARNESS_NAMES[each]}
+              {harnessName(each)}
             </button>
           ))}
         </fieldset>
@@ -208,7 +209,7 @@ export function ResolvedTable({
             <span>Value</span>
             <span>From</span>
           </div>
-          <ul className="m-0 flex min-w-0 list-none flex-col p-0" aria-label={`Resolved for ${HARNESS_NAMES[harness]}`}>
+          <ul className="m-0 flex min-w-0 list-none flex-col p-0" aria-label={`Resolved for ${harnessName(harness)}`}>
             {keyedRows(rows).map(({ entry, id }) => (
               <li
                 key={id}

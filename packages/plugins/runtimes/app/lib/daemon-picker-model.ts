@@ -17,6 +17,7 @@
  */
 
 import type { UsageAccountView } from '@ferretry/plugin-usage/contract';
+import { harnessWords } from '../../contract/harness-words.ts';
 import type { PickerAccount, PickerAccountHealth } from './account-picker-catalog.ts';
 
 export interface AccountPickerOption {
@@ -167,8 +168,7 @@ export const hintedAccountOption = (
     : (options?.find(option => option.available && (option.wrapper === hint || option.name === hint)) ?? null);
 
 /** How a harness reads on screen. */
-export const fleetHarnessLabel = (harness: PickerAccount['kind']): 'Claude' | 'Codex' =>
-  harness === 'claude-code' ? 'Claude' : 'Codex';
+export const fleetHarnessLabel = (harness: PickerAccount['kind']): string => harnessWords(harness)?.short ?? harness;
 
 /** The option for a chosen wrapper, or `null` when it is absent or the roster is unread. */
 export const findAccountOption = (

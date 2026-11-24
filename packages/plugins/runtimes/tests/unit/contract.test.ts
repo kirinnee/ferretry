@@ -120,7 +120,7 @@ describe('runtimes contract', () => {
 
   test('the conformance suite names each way an implementation can fail it', async () => {
     const fake = fakeRuntimes();
-    const bad = { ...summary('bad'), harness: 'nonsense' } as unknown as RuntimeSummary;
+    const bad = { ...summary('bad'), harness: 'Not A Key' } as unknown as RuntimeSummary;
     fake.setRuntimes([bad], RuntimeIdSchema.parse('ghost'));
     expect(await runtimesConformance(() => fake)).toEqual({
       ok: false,

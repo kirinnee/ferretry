@@ -3,9 +3,9 @@
  * left out and named, what an install or an import answered. Everything reaches the daemon through the client the shell
  * handed over; nothing here holds a value, a token or a path.
  */
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { useCallback, useEffect, useState } from 'react';
-import { readMemory, rememberInAddress } from './wizard-memory.ts';
+import { type PerHarness, readMemory, rememberInAddress, setOf } from './wizard-memory.ts';
 import { type ImportItemId, ToolInstallResultSchema, type ToolInstallOutcome } from '../../../contract/index.ts';
 import type { RuntimesClient } from '../../lib/client.ts';
 import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
@@ -35,12 +35,12 @@ export function useImportWizard(client: RuntimesClient, applyOptions?: ApplyImpo
   // What a reload keeps (the address): the open tool, the names, what was left out, the ticked tokens.
   const [remembered] = useState(() => readMemory(globalThis.location?.search ?? ''));
   const [tool, setTool] = useState(remembered.tool);
-  const [left, setLeft] = useState<Readonly<Record<KnownHarnessKey, ReadonlySet<ImportItemId>>>>(remembered.left);
-  const [tickedEnv, setTickedEnv] = useState<Readonly<Record<KnownHarnessKey, ReadonlySet<string>>>>(remembered.ticked);
-  const [declined, setDeclined] = useState<Readonly<Record<KnownHarnessKey, ReadonlySet<string>>>>(remembered.declined);
-  const [names, setNames] = useState<Partial<Record<KnownHarnessKey, string>>>(remembered.names);
+  const [left, setLeft] = useState<PerHarness<ImportItemId>>(remembered.left);
+  const [tickedEnv, setTickedEnv] = useState<PerHarness<string>>(remembered.ticked);
+  const [declined, setDeclined] = useState<PerHarness<string>>(remembered.declined);
+  const [names, setNames] = useState<Readonly<Record<string, string>>>(remembered.names);
   // A tool that ended before the reload is shown as ended; the daemon's own sentences are not kept in the address.
-  const [ends, setEnds] = useState<Partial<Record<KnownHarnessKey, ToolEnd>>>(() =>
+  const [ends, setEnds] = useState<Readonly<Record<string, ToolEnd>>>(() =>
     Object.fromEntries(
       Object.entries(remembered.ends).map(([harness, how]) => [
         harness,
@@ -49,8 +49,8 @@ export function useImportWizard(client: RuntimesClient, applyOptions?: ApplyImpo
     ),
   );
   const [finished, setFinished] = useState(remembered.finished);
-  const [installing, setInstalling] = useState<KnownHarnessKey | null>(null);
-  const [installNote, setInstallNote] = useState<Partial<Record<KnownHarnessKey, string>>>({});
+  const [installing, setInstalling] = useState<HarnessKey | null>(null);
+  const [installNote, setInstallNote] = useState<Readonly<Record<string, string>>>({});
   const { changes, apply, partial } = useApplyImport(client, applyOptions);
 
   useEffect(() => {
@@ -65,27 +65,27 @@ export function useImportWizard(client: RuntimesClient, applyOptions?: ApplyImpo
     });
   }, [tool, names, left, tickedEnv, declined, ends, finished]);
 
-  const toggle = useCallback((harness: KnownHarnessKey, id: ImportItemId, on: boolean): void => {
+  const toggle = useCallback((harness: HarnessKey, id: ImportItemId, on: boolean): void => {
     setLeft(current => {
-      const next = new Set(current[harness]);
+      const next = new Set(setOf(current, harness));
       if (on) next.delete(id);
       else next.add(id);
       return { ...current, [harness]: next };
     });
   }, []);
 
-  const takeUpdate = useCallback((harness: KnownHarnessKey, reference: string, on: boolean): void => {
+  const takeUpdate = useCallback((harness: HarnessKey, reference: string, on: boolean): void => {
     setDeclined(current => {
-      const next = new Set(current[harness]);
+      const next = new Set(setOf(current, harness));
       if (on) next.delete(reference);
       else next.add(reference);
       return { ...current, [harness]: next };
     });
   }, []);
 
-  const tickEnv = useCallback((harness: KnownHarnessKey, name: string, on: boolean): void => {
+  const tickEnv = useCallback((harness: HarnessKey, name: string, on: boolean): void => {
     setTickedEnv(current => {
-      const next = new Set(current[harness]);
+      const next = new Set(setOf(current, harness));
       if (on) next.add(name);
       else next.delete(name);
       return { ...current, [harness]: next };
@@ -93,12 +93,12 @@ export function useImportWizard(client: RuntimesClient, applyOptions?: ApplyImpo
   }, []);
 
   const nameOf = useCallback(
-    (harness: KnownHarnessKey): string => names[harness] ?? models?.[harness].suggestedName ?? `${harness}-default`,
+    (harness: HarnessKey): string => names[harness] ?? models?.[harness]?.suggestedName ?? `${harness}-default`,
     [names, models],
   );
 
   const install = useCallback(
-    async (harness: KnownHarnessKey): Promise<void> => {
+    async (harness: HarnessKey): Promise<void> => {
       setInstalling(harness);
       try {
         const result = ToolInstallResultSchema.parse(
@@ -122,7 +122,7 @@ export function useImportWizard(client: RuntimesClient, applyOptions?: ApplyImpo
 
   /** The old first-run steps this tool settles; a failure is told, never blocks. Answers whether any could not be marked. */
   const settleSteps = useCallback(
-    async (harness: KnownHarnessKey): Promise<boolean> => {
+    async (harness: HarnessKey): Promise<boolean> => {
       const answers = await Promise.all(
         stepsSettledBy(harness).map(step =>
           client
@@ -140,13 +140,14 @@ export function useImportWizard(client: RuntimesClient, applyOptions?: ApplyImpo
   );
 
   const bringIn = useCallback(
-    async (harness: KnownHarnessKey): Promise<void> => {
+    async (harness: HarnessKey): Promise<void> => {
       if (models === null) return;
       const model = models[harness];
+      if (model === undefined) return;
       // A retry on the same import has its runtime already: the name is not asked for again.
       if (model.duplicateOf === null && nameProblem(nameOf(harness)) !== null) return;
       const applied = await apply(
-        importChange(model, left[harness], nameOf(harness), tickedEnv[harness], declined[harness]),
+        importChange(model, setOf(left, harness), nameOf(harness), setOf(tickedEnv, harness), setOf(declined, harness)),
         model.label,
       );
       if (applied === null) return;
@@ -157,11 +158,12 @@ export function useImportWizard(client: RuntimesClient, applyOptions?: ApplyImpo
       // What happened to each changed source, in words: the daemon names an accepted one; an unticked one is said here.
       const updated = model.updates
         .filter(
-          update => !declined[harness].has(update.reference) && !told.some(line => line.includes(update.reference)),
+          update =>
+            !setOf(declined, harness).has(update.reference) && !told.some(line => line.includes(update.reference)),
         )
         .map(update => `Updated ${update.reference} from its changed source.`);
       const kept = model.updates
-        .filter(update => declined[harness].has(update.reference))
+        .filter(update => setOf(declined, harness).has(update.reference))
         .map(update => `${update.reference} kept as it was.`);
       setEnds(current => ({
         ...current,
@@ -172,11 +174,11 @@ export function useImportWizard(client: RuntimesClient, applyOptions?: ApplyImpo
   );
 
   const skip = useCallback(
-    (harness: KnownHarnessKey): void => setEnds(current => ({ ...current, [harness]: { kind: 'skipped' } })),
+    (harness: HarnessKey): void => setEnds(current => ({ ...current, [harness]: { kind: 'skipped' } })),
     [],
   );
   const reopen = useCallback(
-    (harness: KnownHarnessKey): void => {
+    (harness: HarnessKey): void => {
       setEnds(current => {
         const { [harness]: _gone, ...rest } = current;
         return rest;
@@ -202,7 +204,7 @@ export function useImportWizard(client: RuntimesClient, applyOptions?: ApplyImpo
     declined,
     takeUpdate,
     nameOf,
-    setName: (harness: KnownHarnessKey, name: string): void => setNames(current => ({ ...current, [harness]: name })),
+    setName: (harness: HarnessKey, name: string): void => setNames(current => ({ ...current, [harness]: name })),
     ends,
     installing,
     installNote,

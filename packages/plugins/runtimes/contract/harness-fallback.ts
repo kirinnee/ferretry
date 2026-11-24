@@ -8,11 +8,8 @@
  *
  * Order and precedence: the config's `binary` override first, then the config's search directories, then the daemon's
  * `PATH` (all unchanged), then these, in this order. Only the two harness commands are looked up here; no other command
- * ever searches these folders.
+ * ever searches these folders (the daemon names them: `harness-lookup.ts`).
  */
-
-/** The only commands the fallback folders are searched for. */
-export const HARNESS_FALLBACK_COMMANDS: readonly string[] = ['claude', 'codex'];
 
 /** What the list depends on. All plain facts the caller already holds; nothing is read from the disk here. */
 export interface HarnessFallbackFacts {

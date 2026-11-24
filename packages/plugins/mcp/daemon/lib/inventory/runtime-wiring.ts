@@ -3,19 +3,24 @@
  * into a home) and the runtimes whose profile stack carries each MCP item. Read live, per call; Runtimes off answers
  * nothing (no accounts, no component carried by any runtime).
  */
-import type { RuntimeHome, RuntimesApi, RuntimeId } from '@ferretry/plugin-runtimes/contract';
+import {
+  isSupportedHarnessKey,
+  type RuntimeHome,
+  type RuntimesApi,
+  type RuntimeId,
+} from '@ferretry/plugin-runtimes/contract';
 import type { McpItem } from '../../../contract/index.ts';
 import type { McpInventoryAccount, McpInventoryComponent } from './service.ts';
 
 /** The slice of Runtimes this wiring reads. */
 export type RuntimesView = Pick<RuntimesApi, 'homes' | 'list' | 'layers'>;
 
-/** One account per runtime name a published home lists, in manifest order. */
+/** One account per runtime name a published home lists, in manifest order. A home of a harness MCP has no layout for lists none. */
 export function accountsOf(homes: readonly RuntimeHome[]): readonly McpInventoryAccount[] {
   return homes.flatMap(home =>
-    home.runtimes.map(runtime => ({
+    (isSupportedHarnessKey(home.harness) ? home.runtimes : []).map(runtime => ({
       runtime,
-      harness: home.harness,
+      harness: home.harness as McpInventoryAccount['harness'],
       home: home.home,
       wrapper: home.wrapper,
       ...(home.secretEnv === undefined ? {} : { secretEnv: home.secretEnv }),
