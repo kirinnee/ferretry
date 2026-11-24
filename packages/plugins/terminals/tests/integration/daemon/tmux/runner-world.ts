@@ -102,6 +102,7 @@ export function subject(options: { readonly unguarded?: boolean; readonly redact
       },
     },
     socketPath: '/fixture/tmux.sock',
+    politeGraceMs: 0,
     ...(options.redaction === undefined
       ? {}
       : { look: { act: lookAct, redaction: options.redaction, digest: undefined as never } }),

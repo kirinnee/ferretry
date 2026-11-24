@@ -167,3 +167,48 @@ describe('fy mcp serve (SIT)', () => {
     should((poll?.input?.generation ?? '').length).be.above(8);
   });
 });
+
+describe('fy mcp serve (SIT): a credential the daemon refuses', () => {
+  it('ends the PROCESS, standard input still open, within a second of a 401 the daemon repeats after it said it was healthy', async () => {
+    const stamps: { readonly at: number; readonly what: string }[] = [];
+    const { url } = standInDaemon((request, path) => {
+      if (path === '/healthz') {
+        stamps.push({ at: Date.now(), what: 'healthz' });
+        return Response.json({ ...HEALTH, pid: 4242 });
+      }
+      if (path === '/v1/plugins') return Response.json(PLUGINS);
+      if (path === '/v1/agent/tools' && request.method === 'POST') {
+        stamps.push({ at: Date.now(), what: 'poll' });
+        return Response.json({ error: 'unauthorized' }, { status: 401 });
+      }
+      return Response.json({ error: 'no' }, { status: 404 });
+    });
+    const proc = Bun.spawn([...command, 'mcp', 'serve'], {
+      env: environment({
+        FY_URL: url,
+        FY_SESSION_TOKEN: 'fys_pane-credential',
+        FY_SESSION_ID: 'pane-1',
+        FERRETRY_CHANNEL: '1',
+      }),
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: 60_000,
+      killSignal: 'SIGKILL',
+    });
+    try {
+      // Claude's end: the client says it is initialized and then holds standard input open, as a live session does.
+      proc.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+      proc.stdin.flush();
+      const code = await Promise.race([proc.exited, Bun.sleep(30_000).then(() => 'hung' as const)]);
+      const endedAt = Date.now();
+      should(code).equal(1);
+      should(stamps.map(stamp => stamp.what)).eql(['poll', 'healthz', 'poll']);
+      should(endedAt - (stamps[2]?.at ?? 0)).be.below(1_000);
+      should(await new Response(proc.stderr).text()).containEql('no longer accepts this ferret’s credential');
+    } finally {
+      proc.kill('SIGKILL');
+      await proc.exited;
+    }
+  });
+});

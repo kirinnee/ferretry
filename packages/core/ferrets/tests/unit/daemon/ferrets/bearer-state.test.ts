@@ -46,3 +46,43 @@ test('S47 R-0364 a persisted live digest cannot authenticate a stopped or absent
   expect(directory?.ferretFor('3'.repeat(64) as BearerDigest)).toBeUndefined();
   expect(directory?.ferretFor('4'.repeat(64) as BearerDigest)).toBeUndefined();
 });
+
+test('a valid token is known the moment the daemon listens: boot waits for the token load (no 401 for a live ferret)', async () => {
+  let directory: FerretBearerDirectory | undefined;
+  const build = daemon.build;
+  if (build === undefined) throw new Error('Ferrets daemon must be built');
+  const watched = implementDaemon(manifest, {
+    build: ctx => {
+      // Every state read answers a macrotask late, so a load nobody waits for is still pending when boot ends.
+      const state = ctx.kernel.state as unknown as Record<string, unknown>;
+      const slow = new Proxy(state, {
+        get: (target, key) => {
+          const member = target[key as string];
+          return typeof member === 'function' && (key === 'read' || key === 'list')
+            ? async (...args: unknown[]) => {
+                await new Promise(resolve => setTimeout(resolve, 5));
+                return await (member as (...rest: unknown[]) => unknown).apply(target, args);
+              }
+            : member;
+        },
+      });
+      const half = build({ ...ctx, kernel: { ...ctx.kernel, state: slow } } as unknown as typeof ctx);
+      directory = half.hooks['bearers:ferret'];
+      return half;
+    },
+  });
+  let h = await testHost({
+    everyDirectory: true,
+    plugins: [watched],
+    gate: new StandInAdmission(() => ownerStanding()),
+    fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
+  });
+  h.state('ferrets').plant(FerretFiles, JSON.stringify({ ...record('working'), state: 'working' }), 'working');
+  h.state('ferrets').plant(
+    FerretTokensFile,
+    JSON.stringify({ format: 1, tokens: [{ ferret: 'working', digest: '1'.repeat(64), issuedAt: T0 }] }),
+  );
+  h = await h.restart();
+  // No request first: a caller who arrives at the first listening instant is judged on what boot left behind.
+  expect(directory?.ferretFor('1'.repeat(64) as BearerDigest)).toBe(ferretId('working'));
+});

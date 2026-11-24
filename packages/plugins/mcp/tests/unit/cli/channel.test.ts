@@ -9,6 +9,8 @@ import {
   type ChannelMessage,
   type ChannelPort,
   ChannelPump,
+  ChannelRefusal,
+  CREDENTIAL_REVOKED_SENTENCE,
   channelNotification,
   parseChannelMessages,
 } from '../../../cli/lib/serve/channel.ts';
@@ -648,5 +650,183 @@ describe('serveTools — the channel end to end', () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     should(err.join('')).containEql('channel poll failed: daemon down');
     should(out).eql([]);
+  });
+});
+
+describe('a revoked credential ends the channel', () => {
+  const refusal = (status: number) => new ChannelRefusal(`the daemon answered HTTP ${String(status)}`, status);
+
+  it('should stop only at a SECOND 401 after the daemon said it was healthy, saying it once', async () => {
+    const events: string[] = [];
+    const slept: number[] = [];
+    const errors: string[] = [];
+    const pump = new ChannelPump(
+      {
+        poll: async () => {
+          events.push('poll');
+          throw refusal(401);
+        },
+        claim: async () => ({ claimed: false, writeBudgetMs: 0 }),
+      },
+      () => undefined,
+      {
+        ...seams,
+        sleep: async ms => void slept.push(ms),
+        healthy: async () => {
+          events.push('healthy');
+          return true;
+        },
+        onError: text => errors.push(text),
+      },
+    );
+    should(await pump.start()).equal('credential_revoked');
+    should(events).eql(['poll', 'healthy', 'poll']);
+    should(slept).eql([CHANNEL_BACKOFF_START_MS]);
+    should(errors).eql([CREDENTIAL_REVOKED_SENTENCE]);
+    should(CREDENTIAL_REVOKED_SENTENCE).containEql('no longer accepts').and.containEql('restart the ferret');
+    should(CREDENTIAL_REVOKED_SENTENCE).not.containEql('revoked');
+  });
+
+  it('should keep running when a 401 is followed by a 200 (a daemon that was still booting)', async () => {
+    const holder: { current?: ChannelPump } = {};
+    const errors: string[] = [];
+    const events: string[] = [];
+    const { port } = scripted(holder, [refusal(401), [message], refusal(401), [message]], { events });
+    const pump = new ChannelPump(port, () => undefined, {
+      ...seams,
+      healthy: async () => {
+        events.push('healthy');
+        return true;
+      },
+      onError: text => errors.push(text),
+    });
+    holder.current = pump;
+    should(await pump.start()).equal('stopped');
+    // Each 401 was answered by a healthy daemon and then a good poll: the doubt never carried over to the second one.
+    should(errors).eql([]);
+    should(events.filter(event => event === 'healthy')).have.length(2);
+  });
+
+  it('should wait for the daemon to be healthy before it asks again, and not count the wait as a refusal', async () => {
+    const holder: { current?: ChannelPump } = {};
+    let answers = 0;
+    const probes: number[] = [];
+    const slept: number[] = [];
+    const { port, polls } = scripted(holder, [refusal(401), [message]]);
+    const pump = new ChannelPump(port, () => undefined, {
+      ...seams,
+      sleep: async ms => void slept.push(ms),
+      healthy: async () => {
+        probes.push(polls.length);
+        answers += 1;
+        return answers >= 3;
+      },
+    });
+    holder.current = pump;
+    should(await pump.start()).equal('stopped');
+    should(probes).eql([1, 1, 1]);
+    should(polls.length).equal(3);
+    should(slept.length).equal(3);
+  });
+
+  it('should treat a 401, a failure, then a 401 as two doubts, not a revocation', async () => {
+    const holder: { current?: ChannelPump } = {};
+    const { port } = scripted(holder, [refusal(401), new Error('ECONNRESET'), refusal(401), [message]]);
+    const pump = new ChannelPump(port, () => undefined, { ...seams, healthy: async () => true });
+    holder.current = pump;
+    should(await pump.start()).equal('stopped');
+  });
+
+  it('should stop at a repeated 401 on a CLAIM too, writing nothing', async () => {
+    const written: string[] = [];
+    const errors: string[] = [];
+    let polls = 0;
+    const pump = new ChannelPump(
+      {
+        poll: async () => {
+          polls += 1;
+          return [message];
+        },
+        claim: async () => {
+          throw refusal(401);
+        },
+      },
+      line => written.push(line),
+      { ...seams, healthy: async () => true, onError: text => errors.push(text) },
+    );
+    should(await pump.start()).equal('credential_revoked');
+    should(polls).equal(1);
+    should(written).eql([]);
+    should(errors).eql([CREDENTIAL_REVOKED_SENTENCE]);
+  });
+
+  it('should still back off and retry on a 5xx, a 403 and a network error', async () => {
+    const holder: { current?: ChannelPump } = {};
+    const slept: number[] = [];
+    const { port, polls } = scripted(holder, [refusal(503), refusal(403), new Error('ECONNREFUSED'), [message]]);
+    const pump = new ChannelPump(port, () => undefined, { ...seams, sleep: async ms => void slept.push(ms) });
+    holder.current = pump;
+    should(await pump.start()).equal('stopped');
+    should(polls.length).be.above(3);
+    should(slept.slice(0, 3)).eql([
+      CHANNEL_BACKOFF_START_MS,
+      CHANNEL_BACKOFF_START_MS * 2,
+      CHANNEL_BACKOFF_START_MS * 4,
+    ]);
+  });
+
+  it('should keep the daemon’s status and code from a refused tool call, and leave other failures plain', async () => {
+    const refused = Object.assign(new Error('bad credential'), { status: 401, code: 'unauthorized' });
+    const port = clientChannelPort({ tool: async () => Promise.reject(refused) } as unknown as PluginClient);
+    const caught = await port.poll('g', 1).catch((error: unknown) => error);
+    should(caught).be.instanceOf(ChannelRefusal);
+    should(caught).containEql({ status: 401, code: 'unauthorized' });
+    const plain = await clientChannelPort({
+      tool: async () => Promise.reject(new Error('socket hang up')),
+    } as unknown as PluginClient)
+      .poll('g', 1)
+      .catch((error: unknown) => error);
+    should(plain).not.be.instanceOf(ChannelRefusal);
+  });
+
+  it('should end the SERVER with exit 1 after the second 401, though standard input stays open, saying it once', async () => {
+    const out: string[] = [];
+    const err: string[] = [];
+    let polls = 0;
+    const client = {
+      call: async () => undefined,
+      subscribe: () => () => undefined,
+      tool: async (name: string) => {
+        if (name === 'channel_poll') {
+          polls += 1;
+          throw Object.assign(new Error('401 unauthorized'), { status: 401 });
+        }
+        return { text: 'ok', data: {} };
+      },
+    } as unknown as PluginClient;
+    let inputReleased = false;
+    const open = () =>
+      (async function* () {
+        yield new TextEncoder().encode(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+        // A real standard input: nothing more is ever read, and it is never closed.
+        await new Promise<void>(() => undefined);
+        inputReleased = true;
+      })();
+    const code = await Promise.race([
+      serveTools({
+        client,
+        io: { out: text => void out.push(text), err: text => void err.push(text) },
+        stdin: open,
+        version: '1',
+        instructions: 'Tools.',
+        channel: true,
+        sleep: async () => undefined,
+      }),
+      new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 2_000)),
+    ]);
+    should(code).equal(1);
+    should(polls).equal(2);
+    should(err.join('')).equal(`${CREDENTIAL_REVOKED_SENTENCE}\n`);
+    should(inputReleased).equal(false);
   });
 });

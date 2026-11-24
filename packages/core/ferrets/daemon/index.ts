@@ -920,6 +920,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     sockets: served.sockets as NonNullable<DaemonHalf<typeof manifest>['sockets']>,
     routes: served.routes as NonNullable<DaemonHalf<typeof manifest>['routes']>,
+    // Records and tokens are loaded before any listener answers: a live ferret polling during boot is never refused as
+    // an unknown credential just because its digest was not read yet.
+    beforeListen: async () => {
+      await ready();
+    },
   };
 }
 
