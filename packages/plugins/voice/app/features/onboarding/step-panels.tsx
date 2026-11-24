@@ -10,6 +10,8 @@ import { browserRecognitionProvider } from '../../lib/stt/browser-recognition.ts
 import { type DeviceClassGlobalLike, deviceClassOf } from '../../lib/stt/engine-defaults.ts';
 import type { SttSettingsStore } from '../../lib/stt/stt-settings.ts';
 import { useOnDeviceVoices, useSttSettingsStore } from '../../lib/voice-store.tsx';
+import type { DaemonConnection } from '../../shell-voice.ts';
+import { VoiceModeSetup } from './voice-mode-setup.tsx';
 import { SpeedupsStep } from './speedups-step.tsx';
 import type { StepHost } from '@ferretry/kernel/contract';
 import { VoiceStep } from './voice-step.tsx';
@@ -17,9 +19,11 @@ import { VoiceStep } from './voice-step.tsx';
 function VoiceStepWithStore({
   store,
   step,
+  daemon,
 }: {
   readonly store: SttSettingsStore;
   readonly step?: StepHost | undefined;
+  readonly daemon: DaemonConnection | undefined;
 }) {
   const { settings, update } = useSttSettings(store);
   const voices = useOnDeviceVoices();
@@ -35,13 +39,21 @@ function VoiceStepWithStore({
       browserSupport={support}
       deviceClass={deviceClass}
       step={step}
+      voiceMode={daemon === undefined ? undefined : <VoiceModeSetup connection={daemon} />}
     />
   );
 }
 
-export function VoiceStepContainer({ step }: { readonly step?: StepHost | undefined }) {
+/** `daemon` is the machine this page's voice mode is set up on (the one the shell's client is for); left out, the page is the device's dictation alone. */
+export function VoiceStepContainer({
+  step,
+  daemon,
+}: {
+  readonly step?: StepHost | undefined;
+  readonly daemon?: DaemonConnection | undefined;
+}) {
   const store = useSttSettingsStore();
-  return store === null ? null : <VoiceStepWithStore store={store} step={step} />;
+  return store === null ? null : <VoiceStepWithStore store={store} step={step} daemon={daemon} />;
 }
 
 function SpeedupsStepWithStore({

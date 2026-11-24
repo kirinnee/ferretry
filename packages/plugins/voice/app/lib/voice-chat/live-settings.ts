@@ -68,6 +68,11 @@ export interface LiveVoiceSettings {
   /** The longest one reading runs, in seconds, or null for no limit. */
   readonly maxSeconds: number | null;
   readonly whatToRead: WhatToReadId;
+  /**
+   * Keep voice mode's audio on this phone: it runs on this device's own speech engine and voice and never asks the machine.
+   * OFF by default (voice mode runs on the machine), and independent of the others.
+   */
+  readonly voiceModeOnPhone: boolean;
 }
 
 export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = Object.freeze({
@@ -78,6 +83,7 @@ export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = Object.freeze({
   rate: DEFAULT_SPEECH_RATE,
   maxSeconds: DEFAULT_READING_SECONDS,
   whatToRead: 'last',
+  voiceModeOnPhone: false,
 });
 
 const fieldsSchema = z.object({
@@ -98,6 +104,7 @@ const fieldsSchema = z.object({
     .nullable()
     .catch(DEFAULT_LIVE_VOICE_SETTINGS.maxSeconds),
   whatToRead: z.enum(['last', 'every']).catch(DEFAULT_LIVE_VOICE_SETTINGS.whatToRead),
+  voiceModeOnPhone: z.boolean().catch(DEFAULT_LIVE_VOICE_SETTINGS.voiceModeOnPhone),
 });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

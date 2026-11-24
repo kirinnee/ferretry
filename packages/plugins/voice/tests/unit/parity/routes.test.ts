@@ -43,6 +43,7 @@ describe('the voice routes', () => {
       ['jev', false],
       ['groq', true],
       ['cerebras', false],
+      ['elevenlabs', false],
     ]);
     expect(String(response.body)).not.toContain(GROQ_KEY);
   });
@@ -59,7 +60,7 @@ describe('the voice routes', () => {
     expect((await host.request('POST', '/v1/speedups/openai/test', { as: owner() })).status).toBe(404);
   });
 
-  test('the three of today’s routes keep today’s paths, and the machine engine and the reply voice add three each', () => {
+  test('the three of today’s routes keep today’s paths, and the machine engine and the reply voice add three each, and ElevenLabs two more', () => {
     expect(manifest.actions.routes.map(route => route.key)).toEqual([
       'POST /v1/stt/enhance',
       'GET /v1/voice/engine',
@@ -68,6 +69,8 @@ describe('the voice routes', () => {
       'GET /v1/voice/reply-voice',
       'POST /v1/voice/reply-voice/install',
       'DELETE /v1/voice/reply-voice',
+      'GET /v1/voice/reply-voice/elevenlabs',
+      'GET /v1/voice/reply-voice/elevenlabs/voices',
       'GET /v1/speedups',
       'POST /v1/speedups/:provider/test',
     ]);

@@ -11,9 +11,12 @@
 import { AlertTriangle, Check, Download, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { VoiceEngineView } from '../../../contract/index.ts';
-import { type DaemonConnection, SettingGroup, SettingRow } from '../../shell-voice.ts';
+import { useDeviceVoiceSettingsStore, useLiveVoiceSettings } from '../../hooks/use-live-voice-settings.ts';
+import { type DaemonConnection, SettingGroup, SettingRow, SettingSwitch } from '../../shell-voice.ts';
 import { useDaemonClient } from '../../lib/voice-store.tsx';
+import { ReplyVoiceSourceRow, type ReplyVoiceSourceState, useReplyVoiceSource } from './elevenlabs-voice.tsx';
 import { type HearItProps, ReplyVoiceRow, type ReplyVoiceState, useReplyVoice } from './reply-voice.tsx';
+import type { SpeedupClientFactory } from '../speedups/key-row.tsx';
 import { TalkToTest, type TalkToTestProps } from './talk-to-test.tsx';
 import { installVoiceEngine, readVoiceEngine, removeVoiceEngine, type VoiceEngineClient } from './voice-engine-api.ts';
 import './voice-settings.css';
@@ -56,16 +59,55 @@ function StateChip({ view }: { readonly view: VoiceEngineView }) {
 
 interface VoiceModePanelProps {
   readonly view: VoiceEngineView;
-  readonly talk?: Pick<TalkToTestProps, 'client' | 'createMic'> | undefined;
+  readonly talk?: Pick<TalkToTestProps, 'client' | 'createMic' | 'limitMs'> | undefined;
   readonly hear?: Omit<HearItProps, 'machine'> | undefined;
   readonly busy: boolean;
   readonly error: string | null;
   readonly onInstall: () => void;
   readonly onRemove: () => void;
   readonly reply: ReplyVoiceState;
+  readonly source: ReplyVoiceSourceState;
+  readonly connection: DaemonConnection;
+  readonly createClient: SpeedupClientFactory;
 }
 
-function VoiceModePanel({ view, talk, hear, reply, busy, error, onInstall, onRemove }: VoiceModePanelProps) {
+/**
+ * "Keep voice mode's audio on this phone": this device's choice, so it lives in this browser and nowhere else. On, voice
+ * mode runs on this device's own speech engine and voice and never asks the machine (the machine is the default, and the
+ * phone is otherwise only the fallback when it cannot be reached).
+ */
+function KeepOnPhoneRow() {
+  const { settings, update } = useLiveVoiceSettings(useDeviceVoiceSettingsStore());
+  return (
+    <SettingRow
+      settingId="voice-mode-on-phone"
+      name="Keep audio on this phone"
+      hint="Voice mode uses this phone's own speech"
+      explanation="Off, voice mode listens and speaks on your machine, which is faster and uses bigger models. On, your voice never leaves this phone: it is turned into words by the engine you chose for dictation (Settings › Voice), and replies are read by this phone's voice. Either way the words you say are sent to the ferret as messages."
+      control={labelId => (
+        <SettingSwitch
+          checked={settings.voiceModeOnPhone}
+          labelledBy={labelId}
+          onChange={voiceModeOnPhone => update({ voiceModeOnPhone })}
+        />
+      )}
+    />
+  );
+}
+
+function VoiceModePanel({
+  view,
+  talk,
+  hear,
+  reply,
+  source,
+  connection,
+  createClient,
+  busy,
+  error,
+  onInstall,
+  onRemove,
+}: VoiceModePanelProps) {
   const percent = view.sizeBytes === 0 ? 0 : Math.min(100, Math.round((view.doneBytes / view.sizeBytes) * 100));
   return (
     <SettingGroup label="Voice mode">
@@ -141,7 +183,21 @@ function VoiceModePanel({ view, talk, hear, reply, busy, error, onInstall, onRem
         </div>
       </SettingRow>
       {view.state === 'ready' && <TalkToTest machine={view.machine} {...talk} />}
-      <ReplyVoiceRow state={reply} speechReady={view.state === 'ready'} hear={hear} />
+      <ReplyVoiceRow
+        state={reply}
+        speechReady={view.state === 'ready'}
+        hear={hear}
+        provider={source.pending === null ? source.choice.provider : 'kokoro'}
+      />
+      <ReplyVoiceSourceRow
+        state={source}
+        machine={view.machine}
+        connection={connection}
+        createClient={createClient}
+        speechReady={view.state === 'ready'}
+        hear={hear}
+      />
+      <KeepOnPhoneRow />
     </SettingGroup>
   );
 }
@@ -160,7 +216,7 @@ export function VoiceModeSettings({
   readonly connection: DaemonConnection;
   readonly createClient?: VoiceEngineClientFactory | undefined;
   /** A suite's own socket and microphone for Talk to test; the page uses the shell's client and the real microphone. */
-  readonly talk?: Pick<TalkToTestProps, 'client' | 'createMic'> | undefined;
+  readonly talk?: Pick<TalkToTestProps, 'client' | 'createMic' | 'limitMs'> | undefined;
   /** A suite's own sound and socket for the reply voice's "Hear it". */
   readonly hear?: Omit<HearItProps, 'machine'> | undefined;
 }) {
@@ -171,6 +227,7 @@ export function VoiceModeSettings({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reply = useReplyVoice(client);
+  const source = useReplyVoiceSource(client);
 
   useEffect(() => {
     let current = true;
@@ -241,6 +298,7 @@ export function VoiceModeSettings({
             {error}
           </p>
         </li>
+        <KeepOnPhoneRow />
       </SettingGroup>
     );
   return (
@@ -249,6 +307,9 @@ export function VoiceModeSettings({
       talk={talk}
       hear={hear}
       reply={reply}
+      source={source}
+      connection={connection}
+      createClient={createClient as SpeedupClientFactory}
       busy={busy}
       error={error}
       onInstall={() => void act(installVoiceEngine)}

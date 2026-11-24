@@ -12,6 +12,7 @@
  *                             `persisted` reads false afterwards
  *   ?save=denied-once         storage denies the first write only
  *   ?phone=1                  the device is a phone (the short list's first card follows the device class)
+ *   ?machine=1                voice mode's setup under the audio test, over the fake machine of fake-machine.ts (its own queries)
  *   ?theme=<family>-<mode>
  */
 import { StepPageFrame } from '@ferretry/app';
@@ -40,6 +41,9 @@ import {
 } from '../../../../app/lib/stt/on-device-voice.ts';
 import { OnDeviceVoices } from '../../../../app/lib/stt/on-device-voices.ts';
 import { DeviceSpeedupKeys, type SpeedupKeyRecords } from '../../../../app/lib/stt/speedup-keys.ts';
+import { VoiceModeSetup } from '../../../../app/features/onboarding/voice-mode-setup.tsx';
+import { daemonConnection } from '../../../../app/shell-voice.ts';
+import { machine } from './fake-machine.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings, type SttSettingsPatch } from '../../../../app/lib/stt/stt-settings.ts';
 
 const params = new URLSearchParams(window.location.search);
@@ -67,6 +71,9 @@ interface Fake {
   sessions: number;
   spoken: string[];
 }
+// ?machine=1 draws the step with Voice mode's setup under the audio test, over a fake machine (see fake-machine.ts for its queries).
+const machineOn = params.get('machine') === '1';
+const studio = machineOn ? machine(params) : null;
 const fake: Fake = {
   writes: [],
   commits: 0,
@@ -80,6 +87,7 @@ const fake: Fake = {
   spoken: [],
 };
 (window as unknown as { __fake: Fake }).__fake = fake;
+if (studio !== null) (window as unknown as { __machine: unknown }).__machine = studio.fake;
 
 class FakeStore implements ModelInstaller {
   readonly totalBytes: number;
@@ -299,6 +307,16 @@ function Host() {
               deviceClass={deviceClass}
               step={hostRef.current}
               mic={fakeMic}
+              voiceMode={
+                studio === null ? undefined : (
+                  <VoiceModeSetup
+                    connection={daemonConnection({ daemonId: 'a', baseUrl: 'https://a.example.test', deviceId: 'd' })}
+                    createClient={studio.createClient}
+                    talk={studio.talk}
+                    hear={studio.hear}
+                  />
+                )
+              }
             />
           )}
         </div>

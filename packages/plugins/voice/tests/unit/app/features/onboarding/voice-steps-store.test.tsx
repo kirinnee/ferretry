@@ -18,6 +18,7 @@ import { OnDeviceVoices } from '../../../../../app/lib/stt/on-device-voices.ts';
 import { DeviceSpeedupKeys } from '../../../../../app/lib/stt/speedup-keys.ts';
 import { SttSettingsStore } from '../../../../../app/lib/stt/stt-settings.ts';
 import { StoreProvider, createVoiceStore, type VoiceStore } from '../../../../../app/lib/voice-store.tsx';
+import { daemonConnection } from '../../../../../app/shell-voice.ts';
 import { interact, mount, must, submit, typeInto } from '../../../../support/app/dom.ts';
 
 const KEY = 'gsk_test_0123456789abcdXY';
@@ -144,6 +145,34 @@ describe('<VoiceStep> over the real voice store', () => {
       await view.unmount();
     });
   }
+
+  it("draws voice mode's set-up only for a step that is given its machine, and an unreachable machine leaves the step whole", async () => {
+    const store = storeOver(catalog(true));
+    const bare = await mount(
+      <StoreProvider store={store}>
+        <VoiceStepContainer step={fakeHost().host} />
+      </StoreProvider>,
+    );
+    await settle();
+    expect(bare.container.querySelector('[data-voice-mode-setup]')).toBeNull();
+    await bare.unmount();
+    const { host, save } = fakeHost();
+    const view = await mount(
+      <StoreProvider store={store}>
+        <VoiceStepContainer
+          step={host}
+          daemon={daemonConnection({ daemonId: 'a', baseUrl: 'https://a.invalid', deviceId: 'd' })}
+        />
+      </StoreProvider>,
+    );
+    await settle();
+    const setup = must(view.container.querySelector('[data-voice-mode-setup]'), 'the set-up');
+    expect(setup.textContent).toContain('Optional');
+    expect(setup.textContent).toContain('Keep audio on this phone');
+    expect(view.container.querySelectorAll('.fy-engine-card').length).toBeGreaterThan(0);
+    expect(save()).not.toBeNull();
+    await view.unmount();
+  });
 
   it('still lets the browser voice and Off be chosen when no on-device engine can run', async () => {
     const store = storeOver(catalog(false));

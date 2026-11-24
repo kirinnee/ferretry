@@ -110,3 +110,14 @@
   margin: 0 0 var(--gap-sm);
   padding: var(--gap-sm) var(--gap-md);
 }
+/* The phone-engine banner (voice-mode-phone.tsx): why this panel is on the phone's own speech and not the machine's. A
+   sentence, never colour alone, with the same warn pair the notice above the composer uses. */
+.fy-voice-mode__banner {
+  background: var(--warn-bg);
+  border-radius: var(--radius-control);
+  color: var(--warn);
+  font-size: var(--text-sm, 0.875rem);
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: var(--gap-sm) var(--gap-md);
+}

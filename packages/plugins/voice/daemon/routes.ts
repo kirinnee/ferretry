@@ -13,7 +13,13 @@ import {
   type SttEnhancementResult,
   SttEnhancementError,
 } from '../contract/index.ts';
-import { type ReplyVoiceApi, type VoiceEngineApi, VoiceEngineError } from '../contract/index.ts';
+import {
+  type ElevenLabsStatus,
+  type ElevenLabsVoices,
+  type ReplyVoiceApi,
+  type VoiceEngineApi,
+  VoiceEngineError,
+} from '../contract/index.ts';
 import { enhancementErrorStatus, enhancementErrorView } from './lib/stt/enhancement.ts';
 
 /**
@@ -66,6 +72,7 @@ export function voiceRoutes(
   speedups: SpeedupsSubsystem,
   engine: Pick<VoiceEngineApi, 'view' | 'install' | 'remove'>,
   reply: Pick<ReplyVoiceApi, 'view' | 'install' | 'remove'>,
+  elevenlabs: { status(): Promise<ElevenLabsStatus>; voices(): Promise<ElevenLabsVoices> },
 ): {
   readonly 'GET /v1/voice/engine': RouteHandler;
   readonly 'POST /v1/voice/engine/install': RouteHandler;
@@ -73,6 +80,8 @@ export function voiceRoutes(
   readonly 'GET /v1/voice/reply-voice': RouteHandler;
   readonly 'POST /v1/voice/reply-voice/install': RouteHandler;
   readonly 'DELETE /v1/voice/reply-voice': RouteHandler;
+  readonly 'GET /v1/voice/reply-voice/elevenlabs': RouteHandler;
+  readonly 'GET /v1/voice/reply-voice/elevenlabs/voices': RouteHandler;
   readonly 'POST /v1/stt/enhance': RouteHandler;
   readonly 'GET /v1/speedups': RouteHandler;
   readonly 'POST /v1/speedups/:provider/test': RouteHandler;
@@ -99,6 +108,9 @@ export function voiceRoutes(
         throw error;
       }
     },
+    // ElevenLabs as the reply voice: what is set and spent today (free), and the account's voices (one use of the key).
+    'GET /v1/voice/reply-voice/elevenlabs': async () => jsonResponse(await elevenlabs.status()),
+    'GET /v1/voice/reply-voice/elevenlabs/voices': async () => jsonResponse(await elevenlabs.voices()),
     'POST /v1/stt/enhance': async call => {
       try {
         return jsonResponse(await enhancement.enhance(await readJson(call)));

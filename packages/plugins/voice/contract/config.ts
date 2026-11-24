@@ -1,6 +1,13 @@
 import { defineConfig } from '@ferretry/kernel/contract';
 import { NonEmptyStringSchema } from '@ferretry/std';
 import { z } from 'zod';
+import {
+  ELEVENLABS_DEFAULT_DAILY_CHARS,
+  ELEVENLABS_DEFAULT_MODEL,
+  ELEVENLABS_MAX_DAILY_CHARS,
+  ElevenLabsVoiceIdSchema,
+  ReplyProviderSchema,
+} from './reply-elevenlabs.ts';
 
 /**
  * `config/voice.yaml` (§9.2): how a dictated take is post-processed, and which speech engine a paired device uses until
@@ -43,7 +50,29 @@ export const DEFAULT_VOICE_CLEANUP_PROMPTS: Readonly<Record<Exclude<VoiceCleanup
     'Rewrite the dictated text into clear, well-formed sentences with correct spelling, punctuation and capitalization. Keep the same meaning and every fact; do not add, answer or explain anything.',
 };
 
+/**
+ * The reply voice a ferret's `<voice>` lines are read in during voice mode (`replyVoice`): Kokoro on this machine
+ * (the default, free) or ElevenLabs on the owner's own account. NO KEY LIVES HERE: ElevenLabs is spent through the Vault's
+ * outbound holder by the secret's NAME (`ELEVENLABS_API_KEY`).
+ */
+export const ReplyVoiceConfigSchema = z.strictObject({
+  provider: ReplyProviderSchema.default('kokoro'),
+  elevenlabs: z
+    .strictObject({
+      /** The voice to speak with; the picker in Settings writes it with its name. */
+      voiceId: ElevenLabsVoiceIdSchema.optional(),
+      voiceName: z.string().trim().min(1).max(100).optional(),
+      model: z.string().trim().min(1).max(64).default(ELEVENLABS_DEFAULT_MODEL),
+      /** The most characters of speech sent to ElevenLabs in one machine-day. Past it, the device's own voice reads. */
+      dailyChars: z.number().int().min(1).max(ELEVENLABS_MAX_DAILY_CHARS).default(ELEVENLABS_DEFAULT_DAILY_CHARS),
+    })
+    .prefault({}),
+});
+export type ReplyVoiceConfig = z.infer<typeof ReplyVoiceConfigSchema>;
+
 export const VoiceConfigSchema = z.strictObject({
+  /** Which voice reads a ferret's spoken lines in voice mode. */
+  replyVoice: ReplyVoiceConfigSchema.prefault({}),
   /**
    * The speech engine a device paired to this machine uses until that device picks its own (New machine
    * setup's Voice step writes it). Transcription always runs ON the device; this only names the default.
@@ -111,6 +140,30 @@ export function voiceLoosens(before: VoiceConfig | undefined, after: VoiceConfig
   return [
     ...(moved ? [`dictated text now goes to ${destination} to be cleaned up`] : []),
     ...(context ? ['recent conversation messages may now go to the cleanup provider to help clean up dictation'] : []),
+    ...replyVoiceLoosens(before, after),
+  ];
+}
+
+/**
+ * The reply voice's loosenings: a ferret's spoken lines newly sent to ElevenLabs (they leave this machine and are billed
+ * per character), a different model (priced differently), and a higher daily character cap. Moving back to Kokoro, picking
+ * another voice and a lower cap never loosen.
+ */
+function replyVoiceLoosens(before: VoiceConfig | undefined, after: VoiceConfig | undefined): readonly string[] {
+  const from = (before ?? DEFAULT_VOICE_CONFIG).replyVoice;
+  const to = (after ?? DEFAULT_VOICE_CONFIG).replyVoice;
+  if (to.provider !== 'elevenlabs') return [];
+  const moved = from.provider !== 'elevenlabs';
+  return [
+    ...(moved ? ['a ferret’s spoken lines now go to ElevenLabs to be read aloud, billed per character'] : []),
+    ...(!moved && to.elevenlabs.model !== from.elevenlabs.model
+      ? [`spoken lines now use the ElevenLabs model ${to.elevenlabs.model}`]
+      : []),
+    ...(to.elevenlabs.dailyChars > from.elevenlabs.dailyChars
+      ? [
+          `the most ElevenLabs may speak in a day rises to ${to.elevenlabs.dailyChars.toLocaleString('en-US')} characters`,
+        ]
+      : []),
   ];
 }
 
