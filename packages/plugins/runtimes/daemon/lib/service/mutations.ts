@@ -29,7 +29,7 @@ import {
 } from '../account/scope.ts';
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from '../account/layering.ts';
 import type { HarnessKind } from '../manifest.ts';
-import { byHarness, isSupportedKind, unsupportedHarnessSentence } from '../harness-kind.ts';
+import { byHarness, isSupportedKind } from '../harness-kind.ts';
 import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
 import { refusedIndexes, type ShownWord, shownWords, shownWordsEtag } from './command-line.ts';
 import { slugName } from '../account/document.ts';
@@ -870,8 +870,7 @@ function putRuntime(
     return refuse(`no profile ${change.profile} exists on this machine`);
   // A login that drives both CLIs runs the one asked for, else the one the profile is scoped to.
   const served = credentialHarnesses(credential);
-  if (change.harness !== undefined && !isSupportedKind(change.harness))
-    refuse(unsupportedHarnessSentence(change.harness));
+  // `change.harness` is a stored word here: `lowerHarness` refused any wire key Runtimes has no behaviour for before this ran.
   if (change.harness !== undefined && isSupportedKind(change.harness) && !served.includes(change.harness)) {
     refuse(
       `${change.credential} does not drive ${HARNESS_DISPLAY_NAMES[change.harness]}: it is a ${HARNESS_DISPLAY_NAMES[credential.harness]} login.`,
