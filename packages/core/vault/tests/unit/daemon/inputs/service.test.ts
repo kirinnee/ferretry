@@ -5,7 +5,6 @@ import {
   type InputDeliverBody,
   type InputEvent,
   type InputQuarantineEvent,
-  type InputRequest,
   padInputValue,
 } from '../../../../daemon/lib/inputs/wire.ts';
 import should from 'should';
@@ -83,6 +82,8 @@ interface World {
   quarantineGate: Promise<void> | undefined;
   /** The quarantine journal cannot be read. */
   quarantinesThrow: boolean;
+  /** The list of sessions that have a quarantine journal cannot be read. */
+  durableSessionsThrow: boolean;
   /** Fails every quarantine append once this many have been taken. */
   quarantineBudget: number | undefined;
   /** Holds the read of one session's quarantine journal. */
@@ -139,6 +140,7 @@ function build(overrides: Partial<World> = {}) {
     failQuarantine: undefined,
     quarantineGate: undefined,
     quarantinesThrow: false,
+    durableSessionsThrow: false,
     quarantinesGate: undefined,
     quarantineBudget: undefined,
     historyGate: undefined,
@@ -223,6 +225,10 @@ function build(overrides: Partial<World> = {}) {
           throw new Error('the journal is full');
         w.quarantineEvents.push(event);
       },
+      quarantineSessions: async () => {
+        if (w.durableSessionsThrow) throw new Error('the journal cannot be listed');
+        return [];
+      },
       quarantines: async session => {
         if (w.quarantinesGate?.session === session) await w.quarantinesGate.gate;
         if (w.quarantinesThrow) throw new Error('the journal cannot be read');
@@ -269,9 +275,6 @@ const bodyFor = (digest: string, over: Partial<InputDeliverBody> = {}, value = V
   ...over,
 });
 
-const buildWorld = (overrides: Partial<World> = {}) => build(overrides);
-const raisedIn = async (over: Partial<World> = {}, raise: InputRaise = RAISE) => await raised(over, raise);
-
 async function raised(over: Partial<World> = {}, raise: InputRaise = RAISE) {
   const built = build(over);
   const view = await built.service.raise(SESSION, raise);
@@ -305,7 +308,6 @@ describe('InputRequestService.raise', () => {
       id: 'A1',
       state: 'pending',
       observed: { consumer: 'sudo', echo: 'off', recognised: true },
-      lockSeconds: 120,
       note: 'Waiting for the owner on A1.',
     });
     should(w.cards[0]?.title).equal('Needs a secret');
@@ -675,7 +677,7 @@ describe('InputRequestService.deliver', () => {
     }
   });
 
-  it('I22 should accept a private code, flag it amber and quarantine the terminal like a secret', async () => {
+  it('I22 should accept a private code and flag it amber, with nothing held from the ferret', async () => {
     const { w, service, values, id, digest, view } = await raised({}, { ...RAISE, sensitivity: 'private' });
     const [card] = await service.list(HOST);
     const done = await service.deliver(SESSION, id, bodyFor(digest), HOST);
@@ -683,11 +685,11 @@ describe('InputRequestService.deliver', () => {
     should(view.state).equal('pending');
     should(card?.risk?.level).equal('amber');
     should(card?.risk?.reason).containEql('show on screen');
-    should(card?.risk?.reason).containEql('two minutes');
+    should(card?.risk?.reason).containEql('ferret can read');
     should(done.state).equal('delivered');
     should(w.writes).eql([{ text: VALUE, submit: true }]);
     should(values.scrub(SESSION, VALUE)).equal('[redacted:input A1]');
-    should(w.quarantineEvents.length).be.above(0);
+    should(w.quarantineEvents.length).equal(0);
   });
 
   it('should still refuse a private code with a control character', async () => {
@@ -848,13 +850,13 @@ describe('the value never leaves the one write', () => {
     should(values.scrub(SESSION, VALUE)).equal(VALUE);
   });
 
-  it('I91 should keep the full redaction window when the lock is the short one', async () => {
+  it('should keep the full redaction window though nothing is held from the ferret', async () => {
     const { w, service, values, quarantine, request, id, digest } = await raised({
       facts: { ...FACTS, trustedProgram: true },
     });
-    should(request.lock?.seconds).equal(10);
+    should(request.lock).be.undefined();
     await service.deliver(SESSION, id, bodyFor(digest), HOST);
-    should(quarantine.until(SESSION, ['dev'])).equal(w.now + 10_000);
+    should(quarantine.until(SESSION, ['dev'])).be.undefined();
     w.now += 599_000;
     should(values.scrub(SESSION, VALUE)).equal('[redacted:input A1]');
   });
@@ -1382,36 +1384,15 @@ describe('review regressions: what is shown is masked whole, then clipped, and n
   });
 });
 
-describe('the pane quarantine: a terminal a secret was typed into is kept from an agent for a window', () => {
+describe('holds an older daemon left, and the owner’s hand on them (no delivery takes a new one)', () => {
   const NAMES = ['dev', '000000000001'];
   const WINDOW = 120_000;
   const STARTED = 'surface.input_quarantined';
   const ENDED = 'surface.input_quarantine_ended';
-  // These are about the hold itself at its FULL window: a terminal the daemon has not proven hides typing (a program
-  // it does not recognise) is held the whole 120 s. A proven one's short lock is in lock-service.test.ts.
-  const UNPROVEN = { ...FACTS, recognisedConsumer: false };
-  const build = (over: Partial<World> = {}) => buildWorld({ facts: UNPROVEN, ...over });
-  const raised = async (over: Partial<World> = {}, raise: InputRaise = RAISE) =>
-    await raisedIn({ facts: UNPROVEN, ...over }, raise);
-
-  it('should hold the terminal under all its names once a secret is typed, and journal names and an end time only', async () => {
-    const { w, service, quarantine, id, digest } = await raised({ names: NAMES });
-    await service.deliver(SESSION, id, bodyFor(digest), HOST);
-
-    should(service.quarantinedUntil(SESSION, ['000000000001'])).equal(w.now + WINDOW);
-    should(service.quarantinedUntil(SESSION, ['dev'])).equal(w.now + WINDOW);
-    should(service.quarantinedUntil(SESSION, ['other'])).be.undefined();
-    should(w.quarantineEvents.map(event => event.type)).eql([STARTED, STARTED]);
-    should(w.quarantineEvents[0]?.names).eql(NAMES);
-    should(w.quarantineEvents[0]?.hold).equal(w.quarantineEvents[1]?.hold);
-    should(JSON.stringify(w.quarantineEvents)).not.containEql(VALUE);
-    should(w.order.indexOf(STARTED)).be.below(w.order.indexOf('write'));
-    should(w.order.indexOf('surface.input_delivering')).be.below(w.order.indexOf('write'));
-    should(service.quarantines(HOST, SESSION)).eql([{ key: 'dev', until: '2026-10-30T12:02:00.000Z' }]);
-    w.now += WINDOW;
-    should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
-    should(quarantine.sessions()).eql([]);
-  });
+  const AT = '2026-10-30T12:00:00.000Z';
+  const event = (type: string, hold: string, until: string, over: Partial<InputQuarantineEvent> = {}) =>
+    ({ type, sessionId: SESSION, names: NAMES, hold, until, at: AT, ...over }) as InputQuarantineEvent;
+  const NOW = Date.parse(AT);
 
   it('I21 should hold nothing for a plain answer', async () => {
     const { w, service, id, digest } = await raised({}, { ...RAISE, sensitivity: 'plain' });
@@ -1422,257 +1403,48 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
     should(w.writes[0]?.text).equal('y');
   });
 
-  it('should open the terminal up again when nothing was typed after all', async () => {
-    const { w, service, id, digest } = await raised({ typeResult: 'target_changed' });
-    await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
-
-    should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
-    should(w.quarantineEvents.map(event => event.type)).eql([STARTED, ENDED]);
-  });
-
-  it('should keep the terminal held when the write is uncertain, because something may be on screen', async () => {
-    const { service, id, digest } = await raised({ typeResult: 'uncertain' });
-    await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
-
-    should(service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
-  });
-
-  it('should keep the terminal held when the write throws after it began', async () => {
-    const { service, id, digest } = await raised({ typeThrows: true });
-    await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
-
-    should(service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
-  });
-
-  it('should hold nothing when the delivery cannot be recorded', async () => {
-    const { w, service, id, digest } = await raised({ failJournal: 'surface.input_delivering' });
-    await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
-
-    should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
-    should(w.writes.length).equal(0);
-    should(w.quarantineEvents.map(event => event.type)).eql([STARTED, ENDED]);
-  });
-
-  // Q1
-  it('should type nothing when the quarantine cannot be journalled, and leave nothing held for it', async () => {
-    const { w, service, id, digest } = await raised({ failQuarantine: 'all' });
-
-    const error = await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
-
-    should(error.code).equal('unavailable');
-    should(w.writes.length).equal(0);
-    should(w.order).not.containEql('surface.input_delivering');
-    should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
-    w.failQuarantine = undefined;
-    const retried = await service.deliver(SESSION, id, bodyFor(digest), HOST);
-    should(retried.state).equal('delivered');
-    should(w.writes.length).equal(1);
-  });
-
-  // Q1
-  it('should leave a terminal held after a restart when the append failed once and the next attempt went through', async () => {
-    const first = await raised({ failQuarantine: STARTED });
-    await refused(first.service.deliver(SESSION, first.id, bodyFor(first.digest), HOST));
-    first.w.failQuarantine = undefined;
-    await first.service.deliver(SESSION, first.id, bodyFor(first.digest), HOST);
-    const restarted = build({ quarantineHistory: first.w.quarantineEvents, now: first.w.now + 1 });
-
-    await restarted.service.restore();
-
-    should(first.w.writes.length).equal(1);
-    should(restarted.service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
-  });
-
-  // Q1
-  it('should still hold a terminal after a restart when the process died between the journal and the write', async () => {
-    const { w, service, id, digest } = await raised({ names: NAMES });
-    w.gate = new Promise<void>(() => undefined);
-    void service.deliver(SESSION, id, bodyFor(digest), HOST);
-    await new Promise(resolve => setTimeout(resolve, 0));
-
-    const restarted = build({
-      quarantineHistory: w.quarantineEvents,
-      history: w.events,
-      now: w.now + 30_000,
-    });
-    await restarted.service.restore();
-
-    should(w.writes.length).equal(1);
-    should(restarted.service.quarantinedUntil(SESSION, ['000000000001'])).not.be.undefined();
-    should(restarted.w.writes.length).equal(0);
-  });
-
-  // Q2
-  it('should leave an earlier delivery held when a later attempt on the same terminal is refused', async () => {
-    const { w, service, id, digest } = await raised({ names: NAMES });
-    await service.deliver(SESSION, id, bodyFor(digest), HOST);
-    const heldUntil = w.now + WINDOW;
-    w.now += 30_000;
-    w.facts = { ...FACTS };
-    await service.raise(SESSION, RAISE);
-    const [second] = await service.list(HOST);
-    w.typeResult = 'target_changed';
-    await refused(service.deliver(SESSION, second?.id ?? '', bodyFor(second?.observedDigest ?? ''), HOST));
-
-    should(service.quarantinedUntil(SESSION, ['dev'])).equal(heldUntil);
-    should(service.quarantinedUntil(SESSION, ['000000000001'])).equal(heldUntil);
-  });
-
-  // Q2
-  it('should leave an earlier delivery held when a later attempt cannot record its delivering event, now and after a restart', async () => {
-    const { w, service, id, digest } = await raised({ names: NAMES });
-    await service.deliver(SESSION, id, bodyFor(digest), HOST);
-    const heldUntil = w.now + WINDOW;
-    w.now += 30_000;
-    await service.raise(SESSION, RAISE);
-    const [second] = await service.list(HOST);
-    w.failJournal = 'surface.input_delivering';
-    await refused(service.deliver(SESSION, second?.id ?? '', bodyFor(second?.observedDigest ?? ''), HOST));
-    const restarted = build({ quarantineHistory: w.quarantineEvents, now: w.now });
-    await restarted.service.restore();
-
-    should(service.quarantinedUntil(SESSION, ['dev'])).equal(heldUntil);
-    should(restarted.service.quarantinedUntil(SESSION, ['dev'])).equal(heldUntil);
-  });
-
-  // Q7
-  it('should keep the hold open while the journal is slow, so the window cannot run out before the write', async () => {
-    const { w, service, id, digest } = await raised();
-    let release: () => void = () => undefined;
-    w.quarantineGate = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    const delivering = service.deliver(SESSION, id, bodyFor(digest), HOST);
-    await new Promise(resolve => setTimeout(resolve, 0));
-
-    w.now += WINDOW + 1;
-    should(service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
-    w.quarantineGate = undefined;
-    release();
-    await delivering;
-
-    should(service.quarantinedUntil(SESSION, ['dev'])).equal(w.now + WINDOW);
-  });
-
-  // Q7
-  it('should keep the hold open while the write itself is suspended', async () => {
-    const { w, service, id, digest } = await raised();
-    let release: () => void = () => undefined;
-    w.gate = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    const delivering = service.deliver(SESSION, id, bodyFor(digest), HOST);
-    await new Promise(resolve => setTimeout(resolve, 0));
-
-    w.now += 5 * WINDOW;
-    should(service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
-    release();
-    await delivering;
-
-    should(service.quarantinedUntil(SESSION, ['dev'])).equal(w.now + WINDOW);
-  });
-
-  it('I77 should let only the owner see, end or reveal a quarantine, and record each', async () => {
-    const { w, service, id, digest } = await raised();
-    await service.deliver(SESSION, id, bodyFor(digest), DEVICE);
-
-    should(() => service.quarantines(AGENT, SESSION)).throw();
-    await refused(service.endQuarantine(AGENT, SESSION, 'dev'));
-    await refused(service.revealed(AGENT, SESSION, 'dev'));
-    await service.revealed(DEVICE, SESSION, 'dev');
-    await service.endQuarantine(HOST, SESSION, 'dev');
-
-    should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
-    should(w.audits.map(entry => entry.event).slice(-2)).eql(['input.quarantine_revealed', 'input.quarantine_ended']);
-    should(w.audits.at(-1)?.requestId).be.undefined();
-    should(w.quarantineEvents.at(-1)?.type).equal(ENDED);
-    const gone = await refused(service.endQuarantine(HOST, SESSION, 'dev'));
-    should(gone.code).equal('not_found');
-  });
-
-  it('I83 should refuse to reveal a quarantined terminal when the reveal cannot be recorded', async () => {
-    const { w, service, id, digest } = await raised({ auditThrows: true });
-    await service.deliver(SESSION, id, bodyFor(digest), HOST);
-
-    const error = await refused(service.revealed(HOST, SESSION, 'dev'));
-
-    should(error.code).equal('unavailable');
-    should(w.audits.some(entry => entry.event === 'input.quarantine_revealed')).be.false();
-  });
-
   it('should come back after a restart for the time it had left, and not once it ended or was ended', async () => {
-    const { w, service, id, digest } = await raised({ names: NAMES });
-    await service.deliver(SESSION, id, bodyFor(digest), HOST);
-    const started = w.quarantineEvents.at(-1);
-    if (started === undefined) throw new Error('no event');
-    const ended = { ...started, type: ENDED as typeof started.type };
+    const started = event(STARTED, 'a/1', new Date(NOW + WINDOW).toISOString());
+    const ended = { ...started, type: ENDED } as InputQuarantineEvent;
 
-    const live = build({ quarantineHistory: [started], now: w.now + 60_000 });
+    const live = build({ quarantineHistory: [started], now: NOW + 60_000 });
     await live.service.restore();
-    const over = build({ quarantineHistory: [started], now: w.now + WINDOW });
+    const over = build({ quarantineHistory: [started], now: NOW + WINDOW });
     await over.service.restore();
-    const closed = build({ quarantineHistory: [started, ended], now: w.now + 60_000 });
+    const closed = build({ quarantineHistory: [started, ended], now: NOW + 60_000 });
     await closed.service.restore();
-    const foreign = build({ quarantineHistory: [{ ...started, sessionId: 'x-1' }], now: w.now + 60_000 });
+    const foreign = build({ quarantineHistory: [{ ...started, sessionId: 'x-1' }], now: NOW + 60_000 });
     await foreign.service.restore();
 
-    should(live.service.quarantinedUntil(SESSION, ['000000000001'])).equal(w.now + WINDOW);
+    should(live.service.quarantinedUntil(SESSION, ['000000000001'])).equal(NOW + WINDOW);
     should(over.service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
     should(closed.service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
     should(foreign.service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
   });
 
-  it('should keep one attempt’s hold when another attempt on the terminal let go of its own, in the journal', async () => {
-    const at = '2026-10-30T12:00:00.000Z';
-    const event = (type: string, hold: string, until: string) =>
-      ({ type, sessionId: SESSION, names: ['dev'], hold, until, at }) as InputQuarantineEvent;
-    const { service } = build({
-      quarantineHistory: [
-        event(STARTED, 'a/1', '2026-10-30T12:02:00.000Z'),
-        event(STARTED, 'b/2', '2026-10-30T12:04:00.000Z'),
-        event(ENDED, 'b/2', at),
-      ],
-      now: Date.parse(at) + 30_000,
+  it('should give a hold that was unresolved when the daemon stopped a fresh window, and journal it settled', async () => {
+    const { w, service } = build({
+      quarantineHistory: [event(STARTED, 'a/1', AT, { unresolved: true })],
+      now: NOW + 10 * WINDOW,
     });
 
     await service.restore();
 
-    should(service.quarantinedUntil(SESSION, ['dev'])).equal(Date.parse('2026-10-30T12:02:00.000Z'));
+    should(service.quarantinedUntil(SESSION, ['dev'])).equal(NOW + 11 * WINDOW);
+    should(w.quarantineEvents.map(each => each.type)).eql([STARTED]);
+    should(w.quarantineEvents[0]?.unresolved).be.undefined();
   });
 
-  // Q4
-  it('should hold every terminal while recovery runs, however slow the observation of a request is', async () => {
-    const live = await raised({ names: NAMES });
-    await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
-    let open: () => void = () => undefined;
-    const stalled = build({
-      quarantineHistory: live.w.quarantineEvents,
-      history: [
-        {
-          ...live.w.events[0],
-          type: 'surface.input_requested',
-          state: 'pending',
-          expiresAt: '2026-10-30T12:10:00.000Z',
-        } as InputEvent,
-      ],
-      observeGate: new Promise<void>(resolve => {
-        open = resolve;
-      }),
-      now: live.w.now + 30_000,
-    });
-    stalled.quarantine.lock();
+  it('should hold every terminal while recovery runs, and read closed again once it is done', async () => {
+    const { w, service, quarantine } = build({ sessions: [SESSION] });
+    quarantine.lock();
 
-    const restoring = stalled.service.restore();
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await service.restore();
 
-    should(stalled.service.quarantinedUntil(SESSION, ['dev'])).equal(live.w.now + WINDOW);
-    open();
-    await restoring;
-    should(stalled.service.quarantinedUntil(SESSION, ['dev'])).equal(live.w.now + WINDOW);
-    should(stalled.service.quarantinedUntil(SESSION, ['unrelated'])).be.undefined();
+    should(quarantine.until(SESSION, ['anything'])).be.undefined();
+    should(w.quarantineEvents.length).equal(0);
   });
 
-  // Q4
   it('should hold a session whose quarantine journal cannot be read, and not another', async () => {
     const { w, service } = build({ quarantinesThrow: true, sessions: [SESSION] });
     w.sessions = [SESSION];
@@ -1683,7 +1455,6 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
     should(service.quarantinedUntil('x-1', ['anything'])).be.undefined();
   });
 
-  // Q4
   it('should keep every terminal held, for a window, when the sessions cannot be listed', async () => {
     const { w, service, quarantine } = build({ sessionsThrow: true });
     quarantine.lock();
@@ -1695,510 +1466,89 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
     should(quarantine.until('x-1', ['anything'])).be.undefined();
   });
 
-  // Q4
-  it('should replay a later session’s quarantine before it revives an earlier session’s requests', async () => {
-    const at = '2026-10-30T12:00:00.000Z';
-    let open: () => void = () => undefined;
-    const { service } = build({
-      sessions: [SESSION, 'x-1'],
-      history: [
-        {
-          type: 'surface.input_requested',
-          requestId: 'r2',
-          agendaItemId: 'A9',
-          sessionId: SESSION,
-          target: { kind: 'terminal', key: 'dev' },
-          sensitivity: 'plain',
-          submit: 'offer-owner',
-          state: 'pending',
-          expiresAt: '2026-10-30T12:10:00.000Z',
-          at,
-        } as InputEvent,
-      ],
-      quarantineHistory: [
-        {
-          type: STARTED,
-          sessionId: 'x-1',
-          names: ['dev'],
-          until: '2026-10-30T12:02:00.000Z',
-          at,
-        } as InputQuarantineEvent,
-      ],
-      observeGate: new Promise<void>(resolve => {
-        open = resolve;
-      }),
-    });
+  it('should keep every terminal held, for a window, when the quarantine journals cannot be listed', async () => {
+    const { w, service, quarantine } = build({ durableSessionsThrow: true });
+    quarantine.lock();
 
-    const restoring = service.restore();
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await service.restore().catch(() => undefined);
 
-    should(service.quarantinedUntil('x-1', ['dev'])).equal(Date.parse('2026-10-30T12:02:00.000Z'));
-    open();
-    await restoring;
+    should(quarantine.until('x-1', ['anything'])).equal(w.now + WINDOW);
   });
 
-  // Q5
-  it('should show a follow-up request on a held terminal no prompt line, argv or program name', async () => {
-    const first = await raised({ names: NAMES });
-    await first.service.deliver(SESSION, first.id, bodyFor(first.digest), HOST);
-    first.w.facts = {
+  it('I76 should show a request on a held terminal no prompt line, argv or program name', async () => {
+    const { w, service, quarantine } = build({ names: NAMES });
+    w.facts = {
       ...FACTS,
       promptLine: `login: ${VALUE}`,
       foreground: { ...FACTS.foreground, comm: VALUE, argv: `tool --password=${VALUE}` },
     };
+    quarantine.begin(SESSION, NAMES, 'old');
 
-    const view = await first.service.raise(SESSION, { ...RAISE, sensitivity: 'plain' });
-    const listed = JSON.stringify(await first.service.list(HOST));
+    const view = await service.raise(SESSION, { ...RAISE, sensitivity: 'plain' });
+    const listed = JSON.stringify(await service.list(HOST));
 
     should(JSON.stringify(view)).not.containEql(VALUE);
     should(listed).not.containEql(VALUE);
-    should(JSON.stringify(first.w.cards)).not.containEql(VALUE);
-    should(JSON.stringify(first.w.audits)).not.containEql(VALUE);
+    should(JSON.stringify(w.cards)).not.containEql(VALUE);
+    should(JSON.stringify(w.audits)).not.containEql(VALUE);
     should(view.observed?.consumer).containEql('hidden');
   });
 
-  // Q5
-  it('should show a restored request on a held terminal no prompt line, argv or program name', async () => {
-    const live = await raised({ names: NAMES });
-    await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
-    const restarted = build({
-      quarantineHistory: live.w.quarantineEvents,
-      history: [
-        {
-          type: 'surface.input_requested',
-          requestId: 'r2',
-          agendaItemId: 'A9',
-          sessionId: SESSION,
-          target: { kind: 'terminal', key: 'dev' },
-          sensitivity: 'plain',
-          submit: 'offer-owner',
-          state: 'pending',
-          expiresAt: '2026-10-30T12:10:00.000Z',
-          at: '2026-10-30T12:00:00.000Z',
-        } as InputEvent,
-      ],
-      facts: {
-        ...FACTS,
-        promptLine: `login: ${VALUE}`,
-        foreground: { ...FACTS.foreground, comm: VALUE, argv: `tool ${VALUE}` },
-      },
-      now: live.w.now + 30_000,
-    });
+  it('I76 should seal a listed card when a hold began while its text was being redacted', async () => {
+    const { w, service, quarantine } = await raised({ names: NAMES });
+    let open!: () => void;
+    w.redactGate = new Promise<void>(resolve => (open = resolve));
+    w.redactOnly = FACTS.promptLine;
 
-    await restarted.service.restore();
-    const listed = JSON.stringify(await restarted.service.list(HOST));
+    const pending = service.list(HOST);
+    for (let n = 0; n < 50 && w.redacting === 0; n += 1) await new Promise(resolve => setTimeout(resolve, 0));
+    quarantine.lockSession(SESSION);
+    open();
+    const [request] = await pending;
 
-    should(listed).containEql('r2');
-    should(listed).not.containEql(VALUE);
-    restarted.w.now += WINDOW;
-    should(JSON.stringify(await restarted.service.list(HOST))).not.containEql(VALUE);
+    const facts = request?.observed;
+    if (facts?.kind !== 'terminal') throw new Error('expected terminal facts');
+    should(facts.promptLine).not.equal(FACTS.promptLine);
+    should(facts.foreground.argv).equal('');
   });
 
-  // Q5
-  it('I76 should keep a quarantined consumer name out of the audit record of the delivery', async () => {
-    const { w, service, id, digest } = await raised();
-    await service.deliver(SESSION, id, bodyFor(digest), HOST);
+  it('I77 should let only the owner see, end or reveal a quarantine, and record each', async () => {
+    const { w, service, quarantine } = build({ names: NAMES });
+    quarantine.settle(quarantine.begin(SESSION, NAMES, 'old'));
 
-    const delivered = w.audits.find(entry => entry.event === 'input.delivered');
+    should(() => service.quarantines(AGENT, SESSION)).throw();
+    await refused(service.endQuarantine(AGENT, SESSION, 'dev'));
+    await refused(service.revealed(AGENT, SESSION, 'dev'));
+    should(service.quarantines(HOST, SESSION).map(entry => entry.key)).eql(['dev']);
+    await service.revealed(DEVICE, SESSION, 'dev');
+    await service.endQuarantine(HOST, SESSION, 'dev');
 
-    should(JSON.stringify(delivered)).not.containEql('"consumer":"sudo"');
+    should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
+    should(w.audits.map(entry => entry.event).slice(-2)).eql(['input.quarantine_revealed', 'input.quarantine_ended']);
+    should(w.audits.at(-1)?.requestId).be.undefined();
+    const gone = await refused(service.endQuarantine(HOST, SESSION, 'dev'));
+    should(gone.code).equal('not_found');
   });
 
-  // R9-3
-  it('should word the agenda card without any program the pane named', async () => {
-    const CANARY = 'pane-consumer-CANARY';
-    const built = build();
-    built.w.facts = { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY } } as InputTargetFacts;
+  it('should say when a page the owner held is held until, and show no hold for one never held', async () => {
+    const { w, service, quarantine } = build();
+    quarantine.begin(SESSION, ['~page:app'], 'old');
 
-    await built.service.raise(SESSION, RAISE);
+    const held = service.pageHeld(SESSION, ['app', undefined]);
 
-    should(JSON.stringify(built.w.cards)).not.containEql(CANARY);
+    should(held?.until).equal(w.now + WINDOW);
+    should(held?.documents).eql([]);
+    should(service.pageHeld(SESSION, ['other'])).be.undefined();
   });
 
-  // R9-2
-  it('should record no program name in any audit entry, held or not', async () => {
-    const CANARY = 'pane-consumer-CANARY';
-    const live = await raised({ facts: { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY } }, names: NAMES });
-    await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
+  it('I83 should refuse to reveal a quarantined terminal when the reveal cannot be recorded', async () => {
+    const { w, service, quarantine } = build({ auditThrows: true });
+    quarantine.begin(SESSION, ['dev'], 'old');
 
-    should(live.w.audits.length).be.above(1);
-    should(JSON.stringify(live.w.audits)).not.containEql(CANARY);
-  });
+    const error = await refused(service.revealed(HOST, SESSION, 'dev'));
 
-  describe('audit records while a terminal is held', () => {
-    const CANARY = 'pane-consumer-CANARY';
-    const facts = { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY } };
-
-    // R8-3
-    it('should keep the consumer out of the record of a refused check on a request whose terminal is held', async () => {
-      const live = await raised({ facts, names: NAMES });
-      await live.service.raise(SESSION, { ...RAISE, target: { kind: 'terminal', key: '000000000001' } });
-      const second = (await live.service.list(HOST)).find(request => request.id !== live.id);
-      await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
-      should(live.service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
-
-      // A redraw first (the prompt a row lower), then a refused check (echo came on): neither record names it.
-      live.w.facts = { ...facts, cursorRow: 5 };
-      await live.service
-        .deliver(SESSION, second?.id ?? '', bodyFor(second?.observedDigest ?? ''), HOST)
-        .catch(() => undefined);
-      const redrawn = (await live.service.list(HOST)).find(request => request.id === second?.id);
-      live.w.facts = { ...facts, echo: 'on' };
-      await live.service
-        .deliver(SESSION, second?.id ?? '', bodyFor(redrawn?.observedDigest ?? ''), HOST)
-        .catch(() => undefined);
-
-      const record = live.w.audits.filter(entry => entry.event === 'input.refused').at(-1);
-      const rebound = live.w.audits.filter(entry => entry.event === 'input.rebound').at(-1);
-      should(record).not.be.undefined();
-      should(rebound).not.be.undefined();
-      should(JSON.stringify([record, rebound])).not.containEql(CANARY);
-    });
-
-    // R8-3
-    it('should keep the consumer out of the record of a request raised on a terminal that is already held', async () => {
-      const live = await raised({ facts, names: NAMES });
-      await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
-
-      await live.service.raise(SESSION, RAISE);
-
-      const record = live.w.audits.filter(entry => entry.event === 'input.requested').at(-1);
-      should(JSON.stringify(record)).not.containEql(CANARY);
-    });
-
-    // R8-3
-    it('should keep the consumer out of the cancellation record when a hold begins while the cancellation is journalled', async () => {
-      const live = await raised({ facts, names: NAMES });
-      const journal = live.w.events;
-      const publish = (
-        live.service as unknown as { deps: { journal: { publish: (s: string, e: InputEvent) => Promise<void> } } }
-      ).deps.journal.publish;
-      (live.service as unknown as { deps: { journal: { publish: typeof publish } } }).deps.journal.publish = async (
-        session: string,
-        event: InputEvent,
-      ) => {
-        await publish(session, event);
-        if (event.state === 'cancelled') live.quarantine.begin(SESSION, NAMES, 'concurrent');
-      };
-
-      await live.service.cancel(SESSION, live.id, HOST);
-
-      should(journal.at(-1)?.state).equal('cancelled');
-      should(live.service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
-      const record = live.w.audits.filter(entry => entry.event === 'input.cancelled').at(-1);
-      should(JSON.stringify(record)).not.containEql(CANARY);
-    });
-  });
-
-  it('should hold a restored delivering request’s terminal for a fresh window, because the write may have landed', async () => {
-    const live = await raised({ names: NAMES });
-    live.w.gate = new Promise<void>(() => undefined);
-    void live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
-    await new Promise(resolve => setTimeout(resolve, 0));
-    const restarted = build({
-      history: live.w.events,
-      quarantineHistory: live.w.quarantineEvents,
-      now: live.w.now + 10 * WINDOW,
-    });
-
-    await restarted.service.restore();
-
-    should(live.w.quarantineEvents[0]?.unresolved).equal(true);
-    should(restarted.service.quarantinedUntil(SESSION, ['dev'])).equal(restarted.w.now + WINDOW);
-    should(restarted.service.quarantinedUntil(SESSION, ['000000000001'])).equal(restarted.w.now + WINDOW);
-    should(restarted.w.quarantineEvents.at(-1)?.type).equal(STARTED);
-    should(restarted.w.quarantineEvents.at(-1)?.unresolved).be.undefined();
-    should(restarted.w.writes.length).equal(0);
-  });
-
-  describe('R6: a hold taken while a card is being redacted still seals it (one publication gate)', () => {
-    const sealed = (request: InputRequest | undefined): void => {
-      const facts = request?.observed;
-      if (facts?.kind !== 'terminal') {
-        should(JSON.stringify(request)).not.containEql(FACTS.promptLine);
-        return;
-      }
-      should(facts.promptLine).not.equal(FACTS.promptLine);
-      should(facts.foreground.argv).equal('');
-    };
-
-    const suspended = async (w: { redacting: number }): Promise<void> => {
-      for (let n = 0; n < 50 && w.redacting === 0; n += 1) await new Promise(resolve => setTimeout(resolve, 0));
-      should(w.redacting).be.above(0);
-    };
-
-    it('should seal a listed card when a hold began while its text was being redacted', async () => {
-      const live = await raised({ names: NAMES });
-      let open!: () => void;
-      live.w.redactGate = new Promise<void>(resolve => (open = resolve));
-      live.w.redactOnly = FACTS.promptLine;
-
-      const pending = live.service.list(HOST);
-      await suspended(live.w);
-      live.quarantine.lockSession(SESSION);
-      open();
-      const [request] = await pending;
-
-      sealed(request);
-    });
-
-    // R8-4
-    it('should seal a card that finished projection first, when a hold begins while a later card in the batch is still being redacted', async () => {
-      const live = await raised({ names: NAMES });
-      await live.service.raise(SESSION, {
-        ...RAISE,
-        target: { kind: 'terminal', key: 'other' },
-        prompt: 'second-prompt',
-      });
-      let open!: () => void;
-      live.w.redactGate = new Promise<void>(resolve => (open = resolve));
-      live.w.redactOnly = 'second-prompt';
-
-      const pending = live.service.list(HOST);
-      await suspended(live.w);
-      live.quarantine.lockSession(SESSION);
-      open();
-      const listed = await pending;
-
-      should(listed.length).equal(2);
-      for (const request of listed) sealed(request);
-    });
-
-    // An ended request keeps no observed facts at all, so this pins the invariant rather than a race.
-    it('should show a cancelled card no terminal text, even when a hold began while its prompt was being redacted', async () => {
-      const live = await raised({ names: NAMES });
-      let open!: () => void;
-      live.w.redactGate = new Promise<void>(resolve => (open = resolve));
-
-      const pending = live.service.cancel(SESSION, live.id, HOST);
-      await suspended(live.w);
-      live.quarantine.lockSession(SESSION);
-      open();
-
-      sealed(await pending);
-    });
-  });
-
-  describe('R6: recovery evidence outlives the request and holds every name', () => {
-    const afterRestart = (live: {
-      w: { events: InputEvent[]; quarantineEvents: InputQuarantineEvent[]; now: number };
-    }) => build({ history: live.w.events, quarantineHistory: live.w.quarantineEvents, now: live.w.now + 10 * WINDOW });
-
-    // R7-1
-    it('should keep a live delivery pinned, under every alias, while a stalled multi-session replay finishes', async () => {
-      let open: () => void = () => undefined;
-      const live = build({ sessions: [SESSION, 'x-2'], names: NAMES });
-      live.w.quarantinesGate = {
-        session: 'x-2',
-        gate: new Promise<void>(resolve => {
-          open = resolve;
-        }),
-      };
-      const restoring = live.service.restore();
-      await new Promise(resolve => setTimeout(resolve, 0));
-      await live.service.raise(SESSION, RAISE);
-      const [request] = await live.service.list(HOST);
-      let finish: () => void = () => undefined;
-      live.w.gate = new Promise<void>(resolve => {
-        finish = resolve;
-      });
-      const delivering = live.service.deliver(SESSION, request?.id ?? '', bodyFor(request?.observedDigest ?? ''), HOST);
-      await new Promise(resolve => setTimeout(resolve, 0));
-
-      open();
-      await restoring;
-      live.w.now += WINDOW + 1;
-
-      should(live.service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
-      should(live.service.quarantinedUntil(SESSION, ['000000000001'])).not.be.undefined();
-      finish();
-      await delivering;
-      should(live.service.quarantinedUntil(SESSION, ['dev'])).equal(live.w.now + WINDOW);
-      should(live.service.quarantinedUntil(SESSION, ['000000000001'])).equal(live.w.now + WINDOW);
-    });
-    // R8-1
-    it('should keep a live delivery pinned, under every alias, when its own session replay read was stalled and then reads the live hold', async () => {
-      let open: () => void = () => undefined;
-      const live = build({ names: NAMES });
-      live.w.quarantinesGate = {
-        session: SESSION,
-        gate: new Promise<void>(resolve => {
-          open = resolve;
-        }),
-      };
-      live.w.quarantineHistory = live.w.quarantineEvents;
-      live.quarantine.lock();
-      const restoring = live.service.restore();
-      await new Promise(resolve => setTimeout(resolve, 0));
-      await live.service.raise(SESSION, RAISE);
-      const [request] = await live.service.list(HOST);
-      let finish: () => void = () => undefined;
-      live.w.gate = new Promise<void>(resolve => {
-        finish = resolve;
-      });
-      const delivering = live.service.deliver(SESSION, request?.id ?? '', bodyFor(request?.observedDigest ?? ''), HOST);
-      await new Promise(resolve => setTimeout(resolve, 0));
-      should(live.w.writes.length).equal(1);
-
-      open();
-      await restoring;
-
-      should(live.quarantine.unresolved(SESSION).length).equal(1);
-      should(live.w.quarantineEvents.at(-1)?.unresolved).equal(true);
-      should(live.w.quarantineEvents.filter(event => event.unresolved !== true)).eql([]);
-      const restarted = build({
-        history: live.w.events,
-        quarantineHistory: live.w.quarantineEvents,
-        now: live.w.now + WINDOW + 1,
-      });
-      await restarted.service.restore();
-      should(restarted.service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
-      should(restarted.service.quarantinedUntil(SESSION, ['000000000001'])).not.be.undefined();
-      live.w.now += WINDOW + 1;
-      should(live.service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
-      should(live.service.quarantinedUntil(SESSION, ['000000000001'])).not.be.undefined();
-      finish();
-      await delivering;
-      should(live.service.quarantinedUntil(SESSION, ['dev'])).equal(live.w.now + WINDOW);
-    });
-
-    // R6-1
-    it('should keep a successful delivery held, under every name, when the settlement could not be recorded and the daemon restarts', async () => {
-      const live = await raised({ names: NAMES, quarantineBudget: 1 });
-      const done = await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
-      const restarted = afterRestart(live);
-
-      await restarted.service.restore();
-
-      should(done.state).equal('delivered');
-      should(live.w.events.at(-1)?.type).equal('surface.input_delivered');
-      should(live.w.quarantineEvents.map(event => event.unresolved)).eql([true]);
-      should(restarted.service.quarantinedUntil(SESSION, ['dev'])).equal(restarted.w.now + WINDOW);
-      should(restarted.service.quarantinedUntil(SESSION, ['000000000001'])).equal(restarted.w.now + WINDOW);
-      should(restarted.w.writes.length).equal(0);
-    });
-
-    // R6-1
-    it('should keep an uncertain write held, under every name, when the settlement could not be recorded and the daemon restarts', async () => {
-      const live = await raised({ names: NAMES, quarantineBudget: 1, typeResult: 'uncertain' });
-      await refused(live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST));
-      const restarted = afterRestart(live);
-
-      await restarted.service.restore();
-
-      should(restarted.service.quarantinedUntil(SESSION, ['dev'])).equal(restarted.w.now + WINDOW);
-      should(restarted.service.quarantinedUntil(SESSION, ['000000000001'])).equal(restarted.w.now + WINDOW);
-    });
-
-    // R6-1
-    it('should keep a delivery held after a restart when the pre-write step was delayed past the window and settlement was refused', async () => {
-      const live = await raised({ names: NAMES, quarantineBudget: 1 });
-      let open: () => void = () => undefined;
-      live.w.gate = new Promise<void>(resolve => {
-        open = resolve;
-      });
-      const delivering = live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
-      await new Promise(resolve => setTimeout(resolve, 0));
-      live.w.now += 3 * WINDOW;
-      open();
-      await delivering;
-      const restarted = build({
-        history: live.w.events,
-        quarantineHistory: live.w.quarantineEvents,
-        now: live.w.now + 1,
-      });
-
-      await restarted.service.restore();
-
-      should(restarted.service.quarantinedUntil(SESSION, ['000000000001'])).equal(restarted.w.now + WINDOW);
-    });
-
-    // R6-2
-    it('should hold every alias of an interrupted write, and no other terminal, while history and the agenda lookup stall', async () => {
-      const live = await raised({ names: NAMES });
-      live.w.gate = new Promise<void>(() => undefined);
-      void live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
-      await new Promise(resolve => setTimeout(resolve, 0));
-      const stalled = build({
-        history: live.w.events,
-        quarantineHistory: live.w.quarantineEvents,
-        historyGate: new Promise<void>(() => undefined),
-        promptGate: new Promise<void>(() => undefined),
-        now: live.w.now + 10 * WINDOW,
-      });
-      stalled.quarantine.lock();
-
-      void stalled.service.restore();
-      await new Promise(resolve => setTimeout(resolve, 0));
-
-      should(stalled.service.quarantinedUntil(SESSION, ['dev'])).equal(stalled.w.now + WINDOW);
-      should(stalled.service.quarantinedUntil(SESSION, ['000000000001'])).equal(stalled.w.now + WINDOW);
-      should(stalled.service.quarantinedUntil(SESSION, ['unrelated'])).be.undefined();
-      should(stalled.service.quarantinedUntil('x-1', ['dev'])).be.undefined();
-    });
-
-    // R6-2
-    it('should keep the holds, under every alias, when reading the history fails', async () => {
-      const live = await raised({ names: NAMES });
-      live.w.gate = new Promise<void>(() => undefined);
-      void live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
-      await new Promise(resolve => setTimeout(resolve, 0));
-      const broken = build({
-        history: live.w.events,
-        quarantineHistory: live.w.quarantineEvents,
-        historyThrows: true,
-        now: live.w.now + 10 * WINDOW,
-      });
-      broken.quarantine.lock();
-
-      await broken.service.restore().catch(() => undefined);
-
-      should(broken.service.quarantinedUntil(SESSION, ['dev'])).equal(broken.w.now + WINDOW);
-      should(broken.service.quarantinedUntil(SESSION, ['000000000001'])).equal(broken.w.now + WINDOW);
-      should(broken.service.quarantines(HOST, SESSION).map(entry => entry.key)).eql(['dev']);
-    });
-
-    // R6-3
-    it('should journal only the holds the owner actually released, so a delivery in flight is still held after a restart', async () => {
-      const first = await raised({ names: NAMES });
-      await first.service.deliver(SESSION, first.id, bodyFor(first.digest), HOST);
-      const { w, service } = first;
-      w.now += 30_000;
-      await service.raise(SESSION, RAISE);
-      const [second] = await service.list(HOST);
-      let open: () => void = () => undefined;
-      w.gate = new Promise<void>(resolve => {
-        open = resolve;
-      });
-      const delivering = service.deliver(SESSION, second?.id ?? '', bodyFor(second?.observedDigest ?? ''), HOST);
-      await new Promise(resolve => setTimeout(resolve, 0));
-
-      await service.endQuarantine(HOST, SESSION, 'dev');
-      const ended = w.quarantineEvents.filter(event => event.type === ENDED);
-      const restarted = build({
-        history: w.events,
-        quarantineHistory: w.quarantineEvents,
-        now: w.now + 1,
-      });
-      await restarted.service.restore();
-      open();
-      await delivering;
-
-      should(ended.length).equal(1);
-      should(ended[0]?.hold).startWith(first.id);
-      should(ended[0]?.hold).not.startWith(second?.id ?? 'x');
-      should(restarted.service.quarantinedUntil(SESSION, ['dev'])).equal(restarted.w.now + WINDOW);
-      should(restarted.service.quarantinedUntil(SESSION, ['000000000001'])).equal(restarted.w.now + WINDOW);
-    });
-  });
-
-  it('should let go of a session that ended', async () => {
-    const { w, service, quarantine, id, digest } = await raised();
-    await service.deliver(SESSION, id, bodyFor(digest), HOST);
-    w.sessions = [];
-    await service.sweep();
-
-    should(quarantine.sessions()).eql([]);
+    should(error.code).equal('unavailable');
+    should(w.audits.some(entry => entry.event === 'input.quarantine_revealed')).be.false();
   });
 });
 
@@ -2387,16 +1737,16 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
       const gate = service.pendingOn(SESSION, { kind: 'terminal', key: 'dev' }, { typing: true });
       await service.deliver(SESSION, id, bodyFor(digest), HOST);
 
-      // Assert — hidden on the card, said so, locked, blocking, masked, and journalled as a secret.
+      // Assert — hidden on the card, said so, never locked, blocking, masked, and journalled as a secret.
       should(request.sensitivity).equal('secret');
       should(request.fields[0]?.sensitivity).equal('secret');
       should(request.risk).eql({ level: 'amber', reason: 'Treated as a secret: this is a password field.' });
-      should(view.lockSeconds).be.above(0);
+      should(view.lockSeconds).be.undefined();
       should(w.cards[0]?.title).equal('Needs a secret');
       should(w.cards[0]?.blocking).be.true();
       should(gate).equal('A1');
       should(values.scrub(SESSION, VALUE)).equal('[redacted:input A1]');
-      should(w.quarantineEvents.length).be.above(0);
+      should(w.quarantineEvents.length).equal(0);
       should(w.events.map(event => event.sensitivity)).containEql('secret');
       should(w.events.map(event => event.sensitivity)).not.containEql('code');
       should(w.audits.map(entry => entry.detail.sensitivity)).not.containEql('code');
@@ -2460,7 +1810,7 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
     // Assert
     should(back?.sensitivity).equal('secret');
     should(back?.fields[0]?.risk?.reason).equal('Treated as a secret: this is a password field.');
-    should(second.w.quarantineEvents.length).be.above(0);
+    should(second.w.quarantineEvents.length).equal(0);
   });
 });
 

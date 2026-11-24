@@ -62,6 +62,106 @@ describe('a task-plan line fills a sign-in at the raise', () => {
   });
 });
 
+/**
+ * No lock after an answer: the ferret reads the surface at once. The deadline of the field's own cleanup (and of the
+ * grant's did-not-move-on check) is a separate fact: 10 s for a form the daemon has proven hides the value, 120 s
+ * otherwise, each run 2 s early, whatever the ferret reads or does after the fill.
+ */
+const proven = () => ({
+  accounts: [account()],
+  signIns: [
+    site({
+      observed: [
+        {
+          at: 'github.com',
+          surface: 'page' as const,
+          identity: identityOf(page(), 'github.com') as string,
+          since: '2026-10-31T09:00:00.000Z',
+          masked: { value: true, observedAt: '2026-10-31T09:00:00.000Z', count: 2 },
+          noEchoAfterSubmit: { value: true, observedAt: '2026-10-31T09:00:00.000Z', count: 2 },
+          navigatedAway: { value: true, observedAt: '2026-10-31T09:00:00.000Z', count: 2 },
+        },
+      ],
+    }),
+  ],
+});
+
+describe('the cleanup deadline of a grant fill is independent of what the ferret reads', () => {
+  it("should empty a proven form's field about 8 s after the write, and stop the line at that deadline", async () => {
+    const w = world({ facts: page(), grants: [planLine()], accounts: proven() });
+    w.state.clearOutcome = 'cleared';
+
+    await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(w.timers.map(timer => timer.ms)).eql([8_000]);
+    should(w.cleared).have.length(0);
+    for (const timer of w.timers) timer.fire();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    should(w.cleared).have.length(1);
+    should(w.grantLog.stopped.map(each => each.because)).eql(['did-not-move-on']);
+  });
+
+  it('should keep the full window (118 s before the clear) for a form nothing has proven', async () => {
+    const w = world({ facts: page(), grants: [planLine()], accounts: github() });
+
+    await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(w.timers.map(timer => timer.ms)).eql([118_000]);
+  });
+
+  it('should keep the full window for a page whose saved facts say it showed the value', async () => {
+    const contrary = proven();
+    const [first] = contrary.signIns;
+    const bad = {
+      ...first,
+      observed: [
+        {
+          ...(first?.observed?.[0] as object),
+          masked: { value: false, observedAt: '2026-10-31T09:00:00.000Z', count: 2 },
+        },
+      ],
+    };
+    const w = world({
+      facts: page(),
+      grants: [planLine()],
+      accounts: { accounts: [account()], signIns: [bad as never] },
+    });
+
+    await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(w.timers.map(timer => timer.ms)).eql([118_000]);
+  });
+
+  it('should keep the full window when the saved logins cannot be read at the write: nothing is proven', async () => {
+    let filled = false;
+    const port = {
+      listing: async () => {
+        if (filled) throw new Error('the store could not be read');
+        return proven();
+      },
+      fill: async (_entry: string, role: string) => {
+        filled = true;
+        return role === 'username' ? USERNAME : PASSWORD;
+      },
+      save: async () => undefined,
+    };
+    const w = world({ facts: page(), grants: [planLine()], accounts: proven(), loginPort: port as never });
+
+    await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(w.timers.map(timer => timer.ms)).eql([118_000]);
+  });
+
+  it('should hold nothing from a read of the page while the deadline runs', async () => {
+    const w = world({ facts: page(), grants: [planLine()], accounts: proven() });
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(await w.service.agentView(SESSION, view.id, 0)).not.have.property('lockSeconds');
+    should(w.service.pageHeld(SESSION, ['github.com'])).be.undefined();
+  });
+});
+
 describe('a task-plan line that does not apply leaves the card to the owner', () => {
   it('should say the line did not apply, stop it when the recipe changed, and add the one fixed line to the card', async () => {
     const line = planLine({ pins: { placeKeys: ['github.com'], recipeVersion: 4, identities: undefined } });

@@ -398,3 +398,15 @@ describe('the input card’s Enter default', () => {
     }
   });
 });
+
+describe('the input card says nothing about a lock after the answer', () => {
+  it('should show no "hidden from the ferret" line or timer, even for a request that carries a lock', async () => {
+    const { mounted } = await card({ ...terminalRequest(), lock: { seconds: 120, reason: 'terminal-shows' } });
+    try {
+      expect(mounted.container.querySelector('[data-input-lock]')).toBeNull();
+      expect(mounted.container.textContent).not.toContain('Hidden from the ferret');
+    } finally {
+      await mounted.unmount();
+    }
+  });
+});
