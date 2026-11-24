@@ -161,7 +161,7 @@ describe('connector authority', () => {
     expect(await f.authority.verify(first.value.access_token)).toBeUndefined();
   });
 
-  test('refresh rotates; a rotated token revokes all access and emits the reuse audit', async () => {
+  test('refresh rotates; a rotated token used again after the retry window revokes all access and emits the reuse audit', async () => {
     const f = fixture();
     const flow = await f.flow();
     const next = await f.authority.exchange({
@@ -171,6 +171,7 @@ describe('connector authority', () => {
     });
     expect(next.refresh_token).not.toBe(flow.tokens.refresh_token);
     expect(await f.authority.verify(next.access_token)).toBeDefined();
+    f.advance(61_000);
     await expect(
       f.authority.exchange({
         grant_type: 'refresh_token',

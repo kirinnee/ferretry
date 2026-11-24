@@ -106,7 +106,6 @@ describe('shared limits cannot be exhausted by one source (finding 1)', () => {
     const make = (i: number) => f.authority.register({ redirect_uris: [redirectUri] }, { source: `s${i}` });
     const clients = [];
     for (let i = 0; i < 20; i++) clients.push(await make(i));
-    await expect(make(20)).rejects.toMatchObject({ error: 'invalid_client_metadata' });
     f.advance(59 * 60_000);
     await f.authorize(clients[0]?.client_id ?? '');
     f.advance(60_000);
@@ -189,8 +188,10 @@ describe('shared limits cannot be exhausted by one source (finding 1)', () => {
     for (const source of ['n1', 'n2', 'n3']) for (let i = 0; i < 3; i++) noisy.push(await start(source));
     // 10 undecided now; the next arrival makes room by dropping the oldest of the busiest source.
     await start('n4');
+    // n1, n2 and n3 tie at three each: the one holding the NEWEST sign-in (n3) gives one up, its own oldest.
     expect((await f.authority.waitPage(quiet)).kind).toBe('pending');
-    await expect(f.authority.waitPage(noisy[0] ?? '')).rejects.toMatchObject({ error: 'invalid_request' });
+    expect((await f.authority.waitPage(noisy[0] ?? '')).kind).toBe('pending');
+    await expect(f.authority.waitPage(noisy[6] ?? '')).rejects.toMatchObject({ error: 'invalid_request' });
     expect((await f.authority.pending()).length).toBeLessThanOrEqual(10);
   });
 
@@ -498,6 +499,7 @@ describe('audit initiator (finding 5)', () => {
     const f = fixture();
     const flow = await f.flow();
     await f.authority.exchange(...refresh(flow.client.client_id, flow.tokens.refresh_token ?? ''));
+    f.advance(61_000);
     await expect(
       f.authority.exchange(...refresh(flow.client.client_id, flow.tokens.refresh_token ?? '')),
     ).rejects.toMatchObject({ error: 'invalid_grant' });
@@ -526,11 +528,11 @@ describe('rate limiter bounds', () => {
 
   test('forgets the oldest window instead of growing past its key bound', () => {
     const limiter = new ConnectorRateLimiter({ now: () => 0 }, 3);
-    for (const key of ['a', 'b', 'c']) limiter.take(key, 1);
-    expect(() => limiter.take('a', 1)).toThrow(OAuthError);
-    limiter.take('d', 1);
-    limiter.take('a', 1);
-    expect(() => limiter.take('d', 1)).toThrow(OAuthError);
+    for (const key of ['a', 'b', 'c']) limiter.take(key, 1, 60_000, 'source');
+    expect(() => limiter.take('a', 1, 60_000, 'source')).toThrow(OAuthError);
+    limiter.take('d', 1, 60_000, 'source');
+    limiter.take('a', 1, 60_000, 'source');
+    expect(() => limiter.take('d', 1, 60_000, 'source')).toThrow(OAuthError);
   });
 });
 

@@ -22,6 +22,7 @@ import {
   type ConnectorStore,
   OAuthError,
   type PendingAuthorization,
+  type UsedRefresh,
   base64url,
   canonicalResource,
   digest,
@@ -111,6 +112,12 @@ const UNUSED_CLIENT_GRACE_MS = HOUR;
 const MAX_PENDING = 10;
 const MAX_PENDING_PER_SOURCE = 3;
 const MAX_PENDING_PER_CLIENT = 2;
+/** A rotated-away refresh token is accepted once more for this long, so a lost response does not cost the grant. */
+const REFRESH_RETRY_MS = MINUTE;
+/** A revoked grant stays listed (and its record kept) this long, then is dropped on the next write. */
+const REVOKED_RETENTION_MS = 30 * DAY;
+/** What an old `connector.json` entry that never recorded its expiry is given, counted from the write that finds it. */
+const LEGACY_USED_REFRESH_MS = 30 * DAY;
 
 /**
  * The authorization server has no host privileges. Owner acts arrive through a separately authorized boundary.
@@ -126,7 +133,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
   /** HTTP takes admission before parsing a body; direct callers take it inside the corresponding act. */
   admit(endpoint: 'register' | 'authorize' | 'wait' | 'token', source: string = UNKNOWN_SOURCE): void {
     const rule = ADMISSION[endpoint];
-    this.ports.limiter.take(`${endpoint}:source:${this.sourceKey(source)}`, rule.source, rule.windowMs);
+    this.ports.limiter.take(`${endpoint}:source:${this.sourceKey(source)}`, rule.source, rule.windowMs, 'source');
     if (rule.all !== undefined) this.ports.limiter.take(`${endpoint}:all`, rule.all, rule.windowMs);
   }
 
@@ -176,9 +183,30 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
   private ready(): Promise<void> {
     return this.ports.memory.index.ensure(() => this.ports.store.load());
   }
+  /**
+   * Every write drops what can no longer matter: a revoked grant long after its revocation, and, from every other
+   * grant, the rotated-away refresh tokens that have expired (an expired token replayed is just `invalid_grant`).
+   * An entry from before expiries were recorded is stamped to expire 30 days from this write.
+   */
+  private tidy(state: ConnectorState): ConnectorState {
+    const now = this.now();
+    const grants = state.grants
+      .filter(grant => !grant.revokedAt || Date.parse(grant.revokedAt) + REVOKED_RETENTION_MS > now)
+      .map(grant => {
+        const usedRefresh = grant.usedRefresh
+          .map(used => (used.expiresAt === undefined ? { ...used, expiresAt: now + LEGACY_USED_REFRESH_MS } : used))
+          .filter(used => (used.expiresAt ?? 0) > now);
+        return usedRefresh.length === grant.usedRefresh.length &&
+          usedRefresh.every((used, i) => used === grant.usedRefresh[i])
+          ? grant
+          : { ...grant, usedRefresh };
+      });
+    return { ...state, grants };
+  }
   private async persist(state: ConnectorState): Promise<void> {
-    await this.ports.store.save(state);
-    this.ports.memory.index.replace(state);
+    const tidy = this.tidy(state);
+    await this.ports.store.save(tidy);
+    this.ports.memory.index.replace(tidy);
   }
   private saveGrant(state: ConnectorState, grant: ConnectorGrant): Promise<void> {
     return this.persist({ ...state, grants: state.grants.map(g => (g.id === grant.id ? grant : g)) });
@@ -190,7 +218,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     initiator: ConnectorRevocationInitiator,
   ): Promise<ConnectorGrant> {
     if (grant.revokedAt) return grant;
-    const revoked = { ...grant, revokedAt: this.instant(), access: [], refresh: [] };
+    const revoked = { ...grant, revokedAt: this.instant(), access: [], refresh: [], usedRefresh: [] };
     await this.saveGrant(state, revoked);
     await this.audit({ kind: 'connector.grant.revoked', grantId: grant.id, actor, initiator });
     return revoked;
@@ -229,6 +257,20 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     return grants.length === 0 ? age >= UNUSED_CLIENT_GRACE_MS : age > DAY;
   }
 
+  /** A client holding nothing: no grant at all, no sign-in waiting and no code to redeem — whatever its age. */
+  private holdsNothing(client: ConnectorClient, state: ConnectorState): boolean {
+    const now = this.now();
+    return (
+      !state.grants.some(g => g.clientId === client.id) &&
+      ![...this.ports.memory.pending.values()].some(
+        p => p.clientId === client.id && Date.parse(p.view.expiresAt) > now,
+      ) &&
+      ![...this.ports.memory.codes.values()].some(
+        code => code.clientId === client.id && !code.used && code.expiresAt > now,
+      )
+    );
+  }
+
   private async registerClient(input: RegisterInput) {
     const method = input.token_endpoint_auth_method ?? 'none';
     const secret = method === 'none' ? undefined : this.random();
@@ -236,6 +278,12 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     return this.ports.memory.run(async () => {
       const state = await this.ports.store.load();
       const clients = state.clients.filter(client => !this.reclaimable(client, state));
+      // Every slot taken: a client that never reached anything is dropped, oldest first, grace or not, so a
+      // flood of registrations spends its own slots and the owner's next real one still finds room.
+      if (clients.length >= MAX_CLIENTS) {
+        const idle = clients.findIndex(client => this.holdsNothing(client, state));
+        if (idle >= 0) clients.splice(idle, 1);
+      }
       if (clients.length >= MAX_CLIENTS)
         throw new OAuthError('invalid_client_metadata', 'The daemon has reached its registered client limit.');
       const client: ConnectorClient = {
@@ -289,7 +337,12 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       }
     }
   }
-  /** Room for one more undecided sign-in: a client or source over its share loses its OWN oldest first. */
+  /**
+   * Room for one more undecided sign-in: a client or source over its share loses its OWN oldest first. Over the
+   * overall cap, only a source holding MORE than one sign-in gives one up (the busiest, and on a tie the one whose
+   * sign-in is newest); when every source holds exactly one, nobody holds more than their share and the newcomer
+   * is refused, so an existing sign-in — usually the owner's — is never displaced by a tie.
+   */
   private makeRoom(clientId: string, source: string): void {
     const undecided = () => [...this.ports.memory.pending.values()].filter(p => !p.decision);
     const sourceOf = (p: PendingAuthorization) => p.source ?? UNKNOWN_SOURCE;
@@ -299,8 +352,21 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       this.evictOldest(p => sourceOf(p) === source);
     while (undecided().length >= MAX_PENDING) {
       const counts = new Map<string, number>();
-      for (const p of undecided()) counts.set(sourceOf(p), (counts.get(sourceOf(p)) ?? 0) + 1);
-      const heaviest = [...counts.entries()].reduce((best, entry) => (entry[1] > best[1] ? entry : best));
+      const newest = new Map<string, number>();
+      for (const [index, p] of undecided().entries()) {
+        counts.set(sourceOf(p), (counts.get(sourceOf(p)) ?? 0) + 1);
+        newest.set(sourceOf(p), index);
+      }
+      const heaviest = [...counts.entries()].reduce((best, entry) => {
+        if (entry[1] !== best[1]) return entry[1] > best[1] ? entry : best;
+        return (newest.get(entry[0]) ?? 0) > (newest.get(best[0]) ?? 0) ? entry : best;
+      });
+      if (heaviest[1] <= 1)
+        throw new OAuthError(
+          'temporarily_unavailable',
+          'Too many sign-ins are waiting for approval. Please try again in a few minutes.',
+          503,
+        );
       this.evictOldest(p => sourceOf(p) === heaviest[0]);
     }
   }
@@ -497,7 +563,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       return await operation();
     } catch (error) {
       if (error instanceof OAuthError && error.status >= 400 && error.status < 500 && error.status !== 429)
-        this.ports.limiter.record(key, TOKEN_FAILURES.windowMs);
+        this.ports.limiter.record(key, TOKEN_FAILURES.windowMs, 'source');
       throw error;
     }
   }
@@ -539,6 +605,8 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     if (!client) throw new OAuthError('invalid_client', 'Client authentication failed.', 401);
     let grant: ConnectorGrant | undefined;
     let scopes: readonly ConnectorScope[];
+    /** The refresh token being rotated, and (on a retry inside its window) the pair its first rotation issued. */
+    let rotating: { readonly used: UsedRefresh; readonly retry: boolean } | undefined;
     if (grantType === 'authorization_code') {
       const key = await digest(this.ports.crypto, input.code ?? '');
       const code = this.ports.memory.codes.get(key);
@@ -564,15 +632,27 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     } else {
       const key = await digest(this.ports.crypto, input.refresh_token ?? '');
       grant = state.grants.find(
-        g => g.clientId === client.id && (g.refresh.some(t => t.digest === key) || g.usedRefresh.includes(key)),
+        g =>
+          g.clientId === client.id &&
+          (g.refresh.some(t => t.digest === key) || g.usedRefresh.some(u => u.digest === key)),
       );
       if (!grant || grant.revokedAt) throw new OAuthError('invalid_grant', 'Invalid refresh token.');
-      if (grant.usedRefresh.includes(key)) {
-        await this.revokeGrant(state, grant, 'refresh-reuse', 'reuse-detected');
-        await this.audit({ kind: 'connector.refresh.reused', grantId: grant.id });
-        throw new OAuthError('invalid_grant', 'Refresh token was already used.');
-      }
-      const token = grant.refresh.find(t => t.digest === key);
+      const used = grant.usedRefresh.find(u => u.digest === key);
+      let token: ConnectorGrant['refresh'][number] | undefined;
+      if (used) {
+        // Past its own expiry a rotated-away token is just an invalid one; it is not evidence of theft.
+        if (used.expiresAt !== undefined && used.expiresAt <= this.now())
+          throw new OAuthError('invalid_grant', 'Invalid or expired refresh token.');
+        // A lost response: the token rotated moments ago and nothing has used its successor yet.
+        const successor = this.retryable(grant, used);
+        if (!successor) {
+          await this.revokeGrant(state, grant, 'refresh-reuse', 'reuse-detected');
+          await this.audit({ kind: 'connector.refresh.reused', grantId: grant.id });
+          throw new OAuthError('invalid_grant', 'Refresh token was already used.');
+        }
+        token = successor;
+        rotating = { used, retry: true };
+      } else token = grant.refresh.find(t => t.digest === key);
       if (!token || token.expiresAt <= this.now() || token.audience !== this.ports.endpoints.resource)
         throw new OAuthError('invalid_grant', 'Invalid or expired refresh token.');
       scopes =
@@ -581,39 +661,42 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
           : ([...new Set(input.scope.split(' ').filter(Boolean))] as ConnectorScope[]);
       if (scopes.some(scope => !token.scopes.includes(scope)))
         throw new OAuthError('invalid_scope', 'A refresh cannot increase its granted scopes.');
+      // On a retry the pair the first rotation issued is superseded: the client never saw it, so it dies here.
+      const superseded = used?.successors;
       grant = {
         ...grant,
-        refresh: grant.refresh.filter(t => t.digest !== key),
-        usedRefresh: [...grant.usedRefresh, key],
+        access: grant.access.filter(t => t.digest !== superseded?.access),
+        refresh: grant.refresh.filter(t => t.digest !== key && t.digest !== superseded?.refresh),
       };
+      rotating ??= { used: { digest: key, expiresAt: token.expiresAt, rotatedAt: this.now() }, retry: false };
     }
     const access = this.random('fyc_at_');
     const refresh = client.grantTypes.includes('refresh_token') ? this.random('fyc_rt_') : undefined;
     const audience = this.ports.endpoints.resource;
+    const accessDigest = await digest(this.ports.crypto, access);
+    const refreshDigest = refresh ? await digest(this.ports.crypto, refresh) : undefined;
+    // Rotation is recorded with the digests of what it issued, so a retry can supersede exactly that pair.
+    const rotated: UsedRefresh | undefined = rotating
+      ? {
+          ...rotating.used,
+          successors: refreshDigest ? { access: accessDigest, refresh: refreshDigest } : undefined,
+        }
+      : undefined;
     const updated: ConnectorGrant = {
       ...grant,
       access: [
         ...grant.access.filter(t => t.expiresAt > this.now()),
-        {
-          digest: await digest(this.ports.crypto, access),
-          expiresAt: this.now() + 3_600_000,
-          audience,
-          scopes: [...scopes],
-        },
+        { digest: accessDigest, expiresAt: this.now() + 3_600_000, audience, scopes: [...scopes] },
       ],
       refresh: [
         ...grant.refresh.filter(t => t.expiresAt > this.now()),
-        ...(refresh
-          ? [
-              {
-                digest: await digest(this.ports.crypto, refresh),
-                expiresAt: this.now() + 30 * DAY,
-                audience,
-                scopes: [...scopes],
-              },
-            ]
+        ...(refreshDigest
+          ? [{ digest: refreshDigest, expiresAt: this.now() + 30 * DAY, audience, scopes: [...scopes] }]
           : []),
       ],
+      usedRefresh: rotated
+        ? [...grant.usedRefresh.filter(u => u.digest !== rotated.digest), rotated]
+        : grant.usedRefresh,
     };
     await this.saveGrant(state, updated);
     return {
@@ -623,6 +706,18 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       refresh_token: refresh,
       scope: scopes.join(' '),
     };
+  }
+
+  /**
+   * The live refresh token a rotated-away one handed out, when presenting the old one again is a retry rather than
+   * a theft: within a minute of the rotation and with nothing yet rotated from its successor. A token rotated two
+   * generations ago, or one outside the window, has no such successor and revokes.
+   */
+  private retryable(grant: ConnectorGrant, used: UsedRefresh): ConnectorGrant['refresh'][number] | undefined {
+    if (used.rotatedAt === undefined || used.successors === undefined) return undefined;
+    if (this.now() - used.rotatedAt > REFRESH_RETRY_MS) return undefined;
+    const successor = used.successors.refresh;
+    return grant.refresh.find(t => t.digest === successor);
   }
 
   /** RFC 7009: a token this client does not hold is silently accepted, and only a held one takes a queue slot. */

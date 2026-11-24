@@ -22,6 +22,24 @@ const tokenSchema = z.object({
   audience: z.string(),
   scopes: z.array(scopeSchema),
 });
+/**
+ * A refresh token that was rotated away. `expiresAt` is that token's OWN refresh expiry: once past it the token is
+ * simply invalid, so the entry is dropped on the next write. `rotatedAt` and `successors` (the digests of the
+ * access and refresh token its rotation issued) exist for the one-minute retry window after a lost response.
+ * Both, and `expiresAt`, are absent on an entry written before they existed (a bare digest string in an old
+ * `connector.json`, read as `{ digest }`): such an entry is stamped to expire 30 days from the next write of its
+ * grant, and has no retry window — a reuse of it revokes, exactly as before.
+ */
+const usedRefreshSchema = z.preprocess(
+  value => (typeof value === 'string' ? { digest: value } : value),
+  z.object({
+    digest: digestSchema,
+    expiresAt: z.number().finite().optional(),
+    rotatedAt: z.number().finite().optional(),
+    successors: z.object({ access: digestSchema, refresh: digestSchema }).optional(),
+  }),
+);
+export type UsedRefresh = z.infer<typeof usedRefreshSchema>;
 const grantSchema = z.object({
   id: z.string().regex(/^cg_[a-z2-7]{10}$/),
   clientId: z.string(),
@@ -34,7 +52,7 @@ const grantSchema = z.object({
   revokedAt: z.string().datetime().optional(),
   access: z.array(tokenSchema),
   refresh: z.array(tokenSchema),
-  usedRefresh: z.array(digestSchema),
+  usedRefresh: z.array(usedRefreshSchema),
 });
 export type ConnectorGrant = z.infer<typeof grantSchema>;
 export const connectorStateSchema = z.object({
@@ -114,7 +132,7 @@ export class ConnectorIndex {
       for (const token of grant.access) tokens.set(token.digest, { ...base, ...token, kind: 'access' });
       for (const token of grant.refresh) tokens.set(token.digest, { ...base, ...token, kind: 'refresh' });
       for (const used of grant.usedRefresh)
-        tokens.set(used, { ...base, kind: 'used-refresh', expiresAt: 0, audience: '', scopes: [] });
+        tokens.set(used.digest, { ...base, kind: 'used-refresh', expiresAt: 0, audience: '', scopes: [] });
     }
     this.clients = clients;
     this.tokens = tokens;

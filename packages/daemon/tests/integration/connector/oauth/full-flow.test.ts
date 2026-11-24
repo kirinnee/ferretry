@@ -171,6 +171,36 @@ describe('connector OAuth with real crypto and atomic files', () => {
     }
   });
 
+  test('a connector.json whose rotated tokens are bare digests still loads, and the next write gives them an expiry', async () => {
+    const f = await setup();
+    await f.store.save({ version: 1, clients: [], grants: [] });
+    const file = join(f.directory, 'connector', 'connector.json');
+    const digest = 'a'.repeat(64);
+    const grant = {
+      id: 'cg_abcdefghij',
+      clientId: 'fycl_abcdefghij',
+      clientName: 'Old client',
+      redirectHost: 'claude.ai',
+      scopes: ['fleet:read'],
+      createdAt: '2026-10-01T00:00:00.000Z',
+      approvedBy: 'admin-cli',
+      access: [],
+      refresh: [],
+      usedRefresh: [digest],
+    };
+    await writeFile(file, JSON.stringify({ version: 1, clients: [], grants: [grant] }));
+    const loaded = await f.store.load();
+    expect(loaded.grants[0]?.usedRefresh).toEqual([{ digest }]);
+    // Any write of the state (here a registration) stamps it, and the file then holds the new shape.
+    const response = await f.call('POST', '/oauth/register', {
+      redirect_uris: ['https://claude.ai/api/mcp/auth_callback'],
+    });
+    expect(response.status).toBe(201);
+    const written = JSON.parse(await readFile(file, 'utf8'));
+    expect(written.grants[0].usedRefresh).toEqual([{ digest, expiresAt: expect.any(Number) }]);
+    expect(written.grants[0].usedRefresh[0].expiresAt).toBeGreaterThan(Date.now() + 29 * 86_400_000);
+  });
+
   test('serialized writes always leave a complete validated document', async () => {
     const f = await setup();
     await Promise.all(Array.from({ length: 20 }, () => f.store.save({ version: 1, clients: [], grants: [] })));

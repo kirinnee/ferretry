@@ -101,13 +101,18 @@ unknown client or a redirect URI problem is shown as an error page and NEVER red
   Limits: at most 20 registered clients, 10 registrations per hour per source address (200 per hour overall),
   request body ≤ 8 KiB. A client with no grant, no waiting sign-in and no redeemable code is reclaimable 1 h after it
   registered, a client whose grants are all dead 24 h after, and reclaimable clients are dropped first when the cap is
-  reached; only if none is reclaimable is a registration refused.
+  reached. If every slot is still taken, the OLDEST client that holds nothing at all (no grant of any kind, no waiting
+  sign-in, no redeemable code) is dropped whatever its age; only when every client holds something is a registration
+  refused.
 - **Authorize**: `response_type=code`, `client_id`, `redirect_uri` (required, exact), `code_challenge` +
   `code_challenge_method=S256` (required — `plain` and absent are refused), `state` (passed through),
   `scope` (⊆ `fleet:read fleet:write`; absent means both), `resource` (if present, must equal the resource
   URI after canonicalisation — lowercase scheme and host, default port dropped, one trailing `/` ignored). A request lives 10 minutes. Undecided sign-ins are capped at 2 per client, 3 per source address and 10 overall; a new
-  one over a cap EVICTS the oldest undecided request of the client or source over its share (overall: of the busiest
-  source), so a flood displaces only itself and nobody is refused. After the client and `redirect_uri` are
+  one over the per-client or per-source cap EVICTS that client's or source's OWN oldest undecided request, so a
+  flood from one source displaces only that source. Over the overall cap, the busiest source (on a tie, the one
+  holding the newest sign-in) gives up its oldest — but only a source holding MORE than one does: when every source
+  holds exactly one, the new sign-in is refused (`503`, a plain page) and no existing sign-in, usually the
+  owner's, is displaced. After the client and `redirect_uri` are
   validated, a protocol error (`invalid_request` for a missing or non-S256 challenge, `unsupported_response_type`,
   `unauthorized_client`, `invalid_scope`, `invalid_target`) is a `302` to the `redirect_uri` with `error`,
   `error_description`, `state` (when sent) and `iss` (RFC 6749 §4.1.2.1).
@@ -115,7 +120,11 @@ unknown client or a redirect URI problem is shown as an error page and NEVER red
   The redirect carries `code`, `state` and `iss` (RFC 9207).
 - **Tokens**: opaque, `fyc_at_` + 43 base64url (access, 1 h) and `fyc_rt_` + 43 base64url (refresh, 30 days,
   rotated on every use). Only SHA-256 digests are stored. Presenting a rotated-away refresh token revokes the
-  whole grant (reuse detection). The token response is `Cache-Control: no-store`.
+  whole grant (reuse detection), with one exception for a lost response: the token just rotated is accepted again for
+  60 s after its rotation, as long as nothing has yet been rotated from its successor. That retry issues a fresh pair
+  (rotating again) and revokes the pair the first exchange issued; it does not extend the window. Outside the
+  window, or for a token rotated two generations ago, reuse revokes the grant as before. A rotated-away token
+  that has passed its own 30-day expiry is simply `invalid_grant`. The token response is `Cache-Control: no-store`.
 - **Resource / audience**: every token is bound to the one resource URI; a token request naming another
   `resource` is `invalid_target`.
 - **Revocation**: `POST /oauth/revoke` (RFC 7009, always `200`), `fy connector revoke <grant>`, and the app's
@@ -126,7 +135,9 @@ unknown client or a redirect URI problem is shown as an error page and NEVER red
   source with NO overall ceiling, plus 30 failed attempts per source per 5 min and 30 successful exchanges per
   authenticated client per minute (only a holder of a valid credential spends the latter, so anonymous traffic can
   never starve a valid refresh); `/mcp` 60 calls/min per grant, of which write tools 10/min. Over the limit is `429`
-  with `Retry-After`.
+  with `Retry-After`. Only the per-source counters are kept in a bounded table (10,000 sources; at the bound the
+  oldest source's counter is forgotten). The overall ceilings and the per-client budgets are never evicted, so a flood
+  of sources cannot reset them.
 - **No public path waits on the owner, and the owner never waits on the public.** All writes share one transaction
   queue with three lanes: owner acts (approve, deny, revoke, lists) run first, then token exchanges for a credential
   the daemon issued to the authenticated client, then anonymous writes (registration, last-use bookkeeping). The
@@ -155,7 +166,10 @@ authorization server metadata names the endpoints above, `code_challenge_methods
 
 - `<FY_HOME>/state/connector/connector.json`, `0600` in a `0700` directory, written atomically: clients (secret
   hashes only), grants (scopes, who approved, created/last used, revoked), the digests of live access and refresh
-  tokens and the rotated-away refresh digests of each grant. **No token, code or secret is ever written, logged,
+  tokens and the rotated-away refresh digests of each grant (each with its own expiry, the rotation time and the
+  digests of the pair its rotation issued, all dropped on the next write once expired; an older file's bare digests are
+  read, and stamped to expire 30 days after the write that finds them). A revoked grant is kept 30 days, then dropped
+  on the next write. **No token, code or secret is ever written, logged,
   journalled or returned after the response that minted it.**
 - Pending requests, handles and codes live in memory only; a restart drops them (the sign-in is simply retried).
 - `<FY_HOME>/state/connector/calls.jsonl`, `0600`, rotated to `.1.jsonl` at 1 MiB: one line per **write** tool
