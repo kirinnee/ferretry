@@ -331,6 +331,7 @@ export const LaunchInstructionSectionIdSchema = z.enum([
   'hypermedia',
   'pack',
   'agenda',
+  'browser',
   'learning',
   'rm-targets',
 ]);

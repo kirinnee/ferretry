@@ -352,7 +352,24 @@ export const FERRET_SECTIONS = (fy: string): readonly FerretSection[] => [
 
 /** The built-in instruction: the tools exist, and how names work. Short on purpose — it is in every prompt. */
 export const AGENT_TOOLS_INSTRUCTION =
-  "Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value in an input; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code). The input flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never solve captchas, create passkeys, spoof a browser or identity, or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask. Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.";
+  "Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value in an input; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code). The input flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never create passkeys or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask. Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.";
+
+/**
+ * The launch variable the Browsers plugin writes from its ONE stealth switch (`1` stealth is on in effect, `0` it is not).
+ * It picks the words of the `browser` section: one switch drives both what the browser does and what the pane is told.
+ */
+export const BROWSER_STEALTH_ENV = 'FY_BROWSER_STEALTH';
+
+/**
+ * The `browser` section, said to every ferret (never left out): the words a launch gets while stealth is off (`off`, the
+ * rule as it always read: also what a wrapper run by hand, or a variable that is not `1`, says) and while it is on (`on`:
+ * the browser clears checks and captchas itself, so the ferret must not). "Never create passkeys" and "never spend
+ * money unattended" are not here: they stay in the always-on tools section.
+ */
+export const BROWSER_INSTRUCTION = {
+  off: 'Never solve captchas, spoof a browser or identity.',
+  on: "On the owner's identities the browser passes bot checks and solves captchas itself; never solve or bypass one yourself or with your own tools, never change the browser's identity; if a check stays, ask the owner (browser_ask_owner).",
+} as const;
 
 /** Claude's `--mcp-config` document for the tools server: a JSON string, so no file has to exist. */
 export const claudeToolsConfig = (fyCommand: string): SettingsObject => ({
@@ -507,6 +524,8 @@ export function instructionDigest(text: string): string {
 export function launchInstructions(fy: string, env: Readonly<Record<string, string>>): SessionLaunchInstructions {
   const mode = env[SESSION_MODE_ENV] === 'interactive' ? 'interactive' : 'auto';
   const subFerret = env[SUB_FERRET_ENV] === '1';
+  // Never left out: only its words follow the switch (a variable that is not `1` says the `off` words).
+  const browser = env[BROWSER_STEALTH_ENV] === '1' ? BROWSER_INSTRUCTION.on : BROWSER_INSTRUCTION.off;
   return {
     sections: [
       ...ALWAYS_ON_SECTIONS(fy, subFerret).map(section => ({
@@ -514,6 +533,7 @@ export function launchInstructions(fy: string, env: Readonly<Record<string, stri
         chars: section.text.length,
         digest: instructionDigest(section.text),
       })),
+      { id: 'browser' as const, chars: browser.length, digest: instructionDigest(browser) },
       ...FERRET_SECTIONS(fy)
         .filter(section => env[section.env] === '1' && !(subFerret && section.unlessEnv === SUB_FERRET_ENV))
         .map(section => {
