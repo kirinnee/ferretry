@@ -1,5 +1,5 @@
 import type { DaemonImplementation } from '../manifest/implement.ts';
-import { embeddedWorkerFile, embeddedWorkerUrl } from './adapters/embedded-worker.ts';
+import { embeddedWorkerFile } from './adapters/embedded-worker.ts';
 
 /**
  * `fyd --plugin-child <program> [args…]`: THE DAEMON'S OWN EXECUTABLE, RUN AS A PLUGIN'S CHILD PROCESS. A plugin that must
@@ -25,11 +25,13 @@ export async function runPluginChild(argv: readonly string[]): Promise<number> {
   const registry = (await import('../src/generated/plugins.ts')) as unknown as {
     readonly daemonImplementations: readonly DaemonImplementation[];
   };
-  const url = registry.daemonImplementations
+  const declared = registry.daemonImplementations
     .flatMap(half => Object.values(half.workers ?? {}))
     .find(candidate => embeddedWorkerFile(candidate) === `${stem}.js`);
-  if (url === undefined) return refuse(stem);
-  await import(embeddedWorkerUrl(url).href);
+  if (declared === undefined) return refuse(stem);
+  // Beside the entry, flat, under the stem the registry just matched (`scripts/release/plugin-workers.ts` embeds it there). A compiled
+  // binary is the only caller: from source a plugin starts its program by path, never through here.
+  await import(`./${stem}.js`);
   // The program owns the process from here: it ends it (a closed stdin, a signal), so this never answers.
   return await new Promise<number>(() => undefined);
 }
