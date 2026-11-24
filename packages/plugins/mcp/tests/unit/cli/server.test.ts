@@ -303,7 +303,7 @@ describe('McpServer — the work switch', () => {
       asked.push(plugin);
       return true;
     });
-    should(asked).eql(['board', 'create']);
+    should([...asked].sort()).eql(['board', 'create', 'search']);
     should(JSON.stringify((await harness().request('tools/list')) as object)).not.containEql('"plugin"');
   });
 });
@@ -342,6 +342,8 @@ describe('McpServer — a slow plugin inventory never stalls tool discovery', ()
   it('should still apply the inventory when it answers inside the bound', async () => {
     const names = await list(slow(5, false, 1000));
     should(names).not.containEql('task_progress');
-    should(names).have.length(MCP_TOOLS.length - 3);
+    should(names).not.containEql('web_search');
+    should(names).not.containEql('generate_image');
+    should(names).have.length(MCP_TOOLS.length - 4);
   });
 });

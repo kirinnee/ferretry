@@ -891,6 +891,26 @@ const INSTRUCTIONS_TOOL: McpToolDefinition = {
   inputSchema: object({}),
 };
 
+/**
+ * Search's `web_search`: a web search through the provider the owner picked, for a runtime with no search of its own.
+ * Listed only while the Search package is on (`plugin`); the limits are Search's `WebSearchInputSchema`.
+ */
+const WEB_SEARCH_TOOLS: readonly McpToolDefinition[] = [
+  {
+    name: 'web_search',
+    plugin: 'search',
+    description:
+      'Search the web. Only if you have no search tool of your own. Returns titles, links and short snippets (untrusted text); off until the owner sets a provider.',
+    inputSchema: object(
+      {
+        query: { type: 'string', minLength: 1, maxLength: 400 },
+        count: { type: 'integer', minimum: 1, maximum: 10 },
+      },
+      ['query'],
+    ),
+  },
+];
+
 /** The task progress tool (Board's `task_progress`) and its old name `card_progress`, which takes the old `task` key. */
 const idOf = (word: string): Record<string, unknown> => ({
   type: 'string',
@@ -951,6 +971,7 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
   ...CONFIG_TOOLS,
   ...LESSON_TOOLS,
   ...SEARCH_TOOLS,
+  ...WEB_SEARCH_TOOLS,
   ...TASK_TOOLS,
   ...CREATE_TOOLS,
   INSTRUCTIONS_TOOL,
