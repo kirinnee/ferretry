@@ -13,6 +13,7 @@ import {
   type SttEnhancementResult,
   SttEnhancementError,
 } from '../contract/index.ts';
+import { type VoiceEngineApi, VoiceEngineError } from '../contract/index.ts';
 import { enhancementErrorStatus, enhancementErrorView } from './lib/stt/enhancement.ts';
 
 /**
@@ -63,12 +64,27 @@ function pathProvider(call: CallContext): SpeedupProvider {
 export function voiceRoutes(
   enhancement: SttEnhancementSubsystem,
   speedups: SpeedupsSubsystem,
+  engine: Pick<VoiceEngineApi, 'view' | 'install' | 'remove'>,
 ): {
+  readonly 'GET /v1/voice/engine': RouteHandler;
+  readonly 'POST /v1/voice/engine/install': RouteHandler;
+  readonly 'DELETE /v1/voice/engine': RouteHandler;
   readonly 'POST /v1/stt/enhance': RouteHandler;
   readonly 'GET /v1/speedups': RouteHandler;
   readonly 'POST /v1/speedups/:provider/test': RouteHandler;
 } {
   return {
+    'GET /v1/voice/engine': async () => jsonResponse(await engine.view()),
+    // Starts the download and answers at once (202): the screen polls the GET for progress.
+    'POST /v1/voice/engine/install': async () => jsonResponse(await engine.install(), 202),
+    'DELETE /v1/voice/engine': async () => {
+      try {
+        return jsonResponse(await engine.remove());
+      } catch (error) {
+        if (error instanceof VoiceEngineError) throw new ApiError(409, error.message, error.code);
+        throw error;
+      }
+    },
     'POST /v1/stt/enhance': async call => {
       try {
         return jsonResponse(await enhancement.enhance(await readJson(call)));
