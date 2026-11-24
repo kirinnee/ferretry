@@ -4,10 +4,15 @@ import {
   DOWNLINK_JSON_MAX_BYTES,
   PAUSE_STYLES,
   PROOF_WINDOW_MS,
+  REPLY_AUDIO_SAMPLES,
   SILENT_PHONE_MS,
+  SPEAK_QUEUE_MAX,
   STREAM_CLOSES,
   STREAM_MAX_MS,
   StreamProtocolError,
+  type ReplyAudio,
+  type ReplyState,
+  type ReplyVoiceApi,
   type StreamSnapshot,
   type StreamStart,
   StreamStartSchema,
@@ -21,10 +26,13 @@ import {
   WORDS_MAX_CHARS,
   type VoiceEngineApi,
   VoiceEngineError,
+  decodeSpeakFrame,
   decodeUplinkUnit,
   encodeDownlinkUnit,
+  encodeReplyDownlinkUnit,
   snapshotBytes,
 } from '../../../contract/index.ts';
+import { splitForSpeech } from '../reply/chunks.ts';
 import { SampleBuffer, SECOND } from './samples.ts';
 
 /** Sentences a person reads, one per refusal code. None carries a transcript. */
@@ -44,6 +52,10 @@ const SENTENCES: Readonly<Record<string, string>> = {
     'This device may not use the agent fleet, so voice chat cannot send to a ferret. Voice chat needs both the voice and the fleet permissions.',
   ferret_unknown: 'No single ferret goes by that name on this machine.',
 };
+/** Why one line was not spoken by the machine, so the device reads it instead. These are codes, not sentences: the browser decides what to say. */
+const LINE_ABSENT = 'reply_voice_absent';
+const LINE_FAILED = 'reply_voice_failed';
+const LINE_QUEUE_FULL = 'queue_full';
 /** The close each refusal ends the stream with; any other refusal is a failure on the machine. */
 const CLOSE_FOR: Readonly<Record<string, { readonly code: number; readonly reason: string }>> = {
   engine_overloaded: STREAM_CLOSES.overloaded,
@@ -81,6 +93,11 @@ export interface StreamParts {
   readonly recordSent: (ferretId: string) => void;
   /** Takes the one voice chat a ferret may have; `undefined` when another stream holds it. Returns the release. */
   readonly claimFerret: (ferretId: string) => (() => void) | undefined;
+  /**
+   * The machine's reply voice. `undefined` only where there is none to ask (a suite): a stream that asks for it is then told
+   * `absent`. A stream that does not ask for it never touches this.
+   */
+  readonly reply?: Pick<ReplyVoiceApi, 'view' | 'warm' | 'speak'> | undefined;
   /** Called once when the stream is over, whatever ended it. */
   readonly onEnd: () => void;
   readonly log: { info(message: string, fields?: Record<string, string | number | boolean>): void };
@@ -93,6 +110,12 @@ const BEHIND = 2 * SECOND;
 /** Interim words are re-decoded this often, and only while the turn is short enough to decode in about two seconds (5 s → 1.76 s). */
 const INTERIM_EVERY = Math.round(1.2 * SECOND);
 const INTERIM_MAX = 5 * SECOND;
+/**
+ * The final decode starts this long after the last word, not at the pause: if the voice has not come back by the pause
+ * the turn is already decoded and only the proof of the phone is left to wait for. A decode that voice then outdates is
+ * thrown away. Only turns short enough to interim-decode start early (a longer decode would leave audio unseen).
+ */
+const EARLY_SILENCE = Math.round(0.3 * SECOND);
 /** Audio that arrives while no turn is open is kept this long, so a late speech start is not clipped. */
 const IDLE_KEEP = Math.round(1.5 * SECOND);
 /** The most unheard audio kept while a turn is being finished. */
@@ -109,7 +132,26 @@ const SAMPLES_CAP = Math.round((TURN_MAX_MS / 1000) * SECOND) + BACKLOG_KEEP;
 /** A backed-up socket (the browser stopped reading) ends the stream rather than growing without bound. */
 const MAX_BUFFERED = 64 * 1024;
 
+/** The most sound waiting to be sent down: more than this and the next line is not made until some has gone. */
+const OUTGOING_MAX = 30 * SECOND;
+
 type Phase = 'loading' | 'idle' | 'hearing' | 'working';
+
+/** Sound made for one line, waiting for its place in the downlink. An empty one is a line's end or its failure. */
+interface Outgoing {
+  readonly id: number;
+  readonly pcm: Int16Array;
+  offset: number;
+  readonly last: boolean;
+  readonly failed?: string;
+}
+
+const toPcm16 = (samples: Float32Array): Int16Array => {
+  const out = new Int16Array(samples.length);
+  for (let index = 0; index < samples.length; index += 1)
+    out[index] = Math.max(-32768, Math.min(32767, Math.round((samples[index] ?? 0) * 32767)));
+  return out;
+};
 
 /**
  * One open voice stream: the uplink's audio in, the downlink's snapshots out, and the one decision the machine makes on
@@ -148,10 +190,20 @@ export class VoiceStream implements SocketHandler {
   private lastSpeechEnd = 0;
   private seenLength = 0;
   private interimAt = 0;
+  /** The decode of this turn that began in the pause, valid only while no voice has come back (same `cut`). */
+  private early: { turn: number; cut: number; text: string } | undefined;
+  /** Where the audio the VAD has not looked at starts, after an early decode kept it from looking: it is scanned from here. */
+  private scanFrom: number | undefined;
   private pauseSamples = 0;
   private words: { turn: number; rev: number; text: string; offset: number; final: boolean } | undefined;
   private last: TurnOutcome | undefined;
   private failures = 0;
+
+  private replyState: ReplyState | undefined;
+  private readonly spokenQueue: { id: number; text: string }[] = [];
+  private readonly outgoing: Outgoing[] = [];
+  private outgoingSamples = 0;
+  private draining = false;
 
   constructor(private readonly parts: StreamParts) {}
 
@@ -161,8 +213,8 @@ export class VoiceStream implements SocketHandler {
     this.lastUnitAt = now;
     this.cancels.push(this.parts.clock.every(milliseconds(TICK_MS), () => this.tick()));
     this.cancels.push(this.parts.clock.after(milliseconds(STREAM_MAX_MS), () => this.endWith(STREAM_CLOSES.ended)));
-    // The snapshot a client reads first, before it has said anything: it also carries the first nonce.
-    this.emit();
+    // Nothing is sent until the start record has arrived: what it asks for decides the size of every unit after it (a
+    // stream that asked for the reply voice has a larger one), so a unit sent first could be the wrong size.
   }
 
   fromClient(frame: SocketFrame): void {
@@ -183,7 +235,10 @@ export class VoiceStream implements SocketHandler {
   // ─── uplink ────────────────────────────────────────────────────────────────────────────────────────────────────
 
   private onText(text: string): void {
-    if (this.start !== undefined) throw new StreamProtocolError('a stream says what it is for once');
+    if (this.start !== undefined) {
+      this.onSpeak(text);
+      return;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
@@ -194,6 +249,9 @@ export class VoiceStream implements SocketHandler {
     if (!start.success) throw new StreamProtocolError('the start record is not one the stream defines');
     this.start = start.data;
     this.pauseSamples = Math.round((PAUSE_STYLES[start.data.style ?? 'normal'] / 1000) * SECOND);
+    if (start.data.reply === 'machine') this.beginReply();
+    // The first snapshot a client reads: it carries the first nonce, and says what the machine is doing from here on.
+    this.emit();
     if (start.data.purpose === 'chat') {
       if (this.parts.send === undefined) {
         this.refuse('voice_unavailable');
@@ -228,6 +286,145 @@ export class VoiceStream implements SocketHandler {
   private begin(purpose: string): void {
     this.parts.log.info('voice.stream.start', { purpose, stream: this.parts.streamId });
     void this.warmUp();
+  }
+
+  // ─── the reply voice ───────────────────────────────────────────────────────────────────────────────────────────
+
+  /** A stream that asked for the machine's voice: learn whether there is one, and load it now so the first line is not what waits. */
+  private beginReply(): void {
+    const reply = this.parts.reply;
+    if (reply === undefined) {
+      this.replyState = 'absent';
+      return;
+    }
+    this.replyState = 'loading';
+    void (async () => {
+      try {
+        if ((await reply.view()).state !== 'ready') throw new Error('not installed');
+        await reply.warm();
+        if (this.ended) return;
+        this.replyState = 'ready';
+        void this.drain();
+      } catch {
+        if (this.ended) return;
+        this.replyState = 'absent';
+        this.failQueued(LINE_ABSENT);
+      }
+    })();
+  }
+
+  /** One line to speak. A device that did not ask for the voice has no business sending one: that is a protocol error. */
+  private onSpeak(text: string): void {
+    if (this.start?.reply !== 'machine') throw new StreamProtocolError('this stream did not ask for the reply voice');
+    const frame = decodeSpeakFrame(text);
+    const refusal =
+      this.replyState === 'absent'
+        ? LINE_ABSENT
+        : this.spokenQueue.length >= SPEAK_QUEUE_MAX
+          ? LINE_QUEUE_FULL
+          : undefined;
+    if (refusal !== undefined) {
+      this.queueSound({ id: frame.id, pcm: new Int16Array(0), offset: 0, last: true, failed: refusal });
+      return;
+    }
+    this.spokenQueue.push({ id: frame.id, text: frame.text });
+    void this.drain();
+  }
+
+  private failQueued(code: string): void {
+    for (const line of this.spokenQueue.splice(0))
+      this.queueSound({ id: line.id, pcm: new Int16Array(0), offset: 0, last: true, failed: code });
+  }
+
+  private queueSound(sound: Outgoing): void {
+    this.outgoing.push(sound);
+    this.outgoingSamples += sound.pcm.length;
+  }
+
+  /** Lines are made one at a time, in the order they were sent, and no faster than the downlink can carry them away. */
+  private async drain(): Promise<void> {
+    if (this.draining || this.replyState !== 'ready') return;
+    this.draining = true;
+    try {
+      for (;;) {
+        if (this.ended) return;
+        const next = this.spokenQueue[0];
+        if (next === undefined) return;
+        if (this.outgoingSamples > OUTGOING_MAX) {
+          await new Promise<void>(resolve => this.parts.clock.after(milliseconds(TICK_MS), resolve));
+          continue;
+        }
+        this.spokenQueue.shift();
+        await this.speakLine(next.id, next.text);
+      }
+    } finally {
+      this.draining = false;
+    }
+  }
+
+  private async speakLine(id: number, text: string): Promise<void> {
+    const reply = this.parts.reply;
+    const pieces = splitForSpeech(text);
+    if (reply === undefined || pieces.length === 0) {
+      this.queueSound({
+        id,
+        pcm: new Int16Array(0),
+        offset: 0,
+        last: true,
+        ...(reply === undefined ? { failed: LINE_ABSENT } : {}),
+      });
+      return;
+    }
+    for (const [index, piece] of pieces.entries()) {
+      let made: Awaited<ReturnType<typeof reply.speak>>;
+      try {
+        made = await reply.speak(piece);
+      } catch {
+        if (!this.ended) this.queueSound({ id, pcm: new Int16Array(0), offset: 0, last: true, failed: LINE_FAILED });
+        return;
+      }
+      if (this.ended) return;
+      const pcm = toPcm16(made.samples);
+      // Milliseconds and counts only: what was said never reaches a log.
+      this.parts.log.info('voice.stream.spoke', {
+        stream: this.parts.streamId,
+        line: id,
+        piece: index,
+        speakMs: Math.round(made.speakMs),
+        audioMs: Math.round((pcm.length / SECOND) * 1000),
+      });
+      this.queueSound({ id, pcm, offset: 0, last: index === pieces.length - 1 });
+    }
+  }
+
+  /** The next 200 ms of sound for the downlink: one line's, from as many of its pieces as fill the slot. */
+  private nextSound(): { readonly audio: ReplyAudio; readonly pcm: Int16Array } | undefined {
+    const head = this.outgoing[0];
+    if (head === undefined) return undefined;
+    const pcm = new Int16Array(REPLY_AUDIO_SAMPLES);
+    let filled = 0;
+    let last = false;
+    let failed: string | undefined;
+    while (this.outgoing[0]?.id === head.id) {
+      const piece = this.outgoing[0];
+      if (piece === undefined) break;
+      const take = Math.min(REPLY_AUDIO_SAMPLES - filled, piece.pcm.length - piece.offset);
+      pcm.set(piece.pcm.subarray(piece.offset, piece.offset + take), filled);
+      piece.offset += take;
+      filled += take;
+      this.outgoingSamples -= take;
+      if (piece.offset < piece.pcm.length) break;
+      this.outgoing.shift();
+      if (piece.failed !== undefined) failed = piece.failed;
+      if (piece.last) {
+        last = true;
+        break;
+      }
+    }
+    return {
+      audio: { id: head.id, samples: filled, last, ...(failed === undefined ? {} : { failed }) },
+      pcm: pcm.subarray(0, filled),
+    };
   }
 
   private onBytes(frame: Exclude<SocketFrame, string>): void {
@@ -287,7 +484,7 @@ export class VoiceStream implements SocketHandler {
       this.endWith(STREAM_CLOSES.silentPhone);
       return;
     }
-    this.emit();
+    if (this.start !== undefined) this.emit();
     if (!this.ended && this.phase !== 'loading') void this.step();
   }
 
@@ -333,6 +530,7 @@ export class VoiceStream implements SocketHandler {
     this.turnStart = Math.max(0, first.start - LEAD_IN);
     this.lastSpeechEnd = spans[spans.length - 1]?.end ?? first.end;
     this.interimAt = 0;
+    this.early = undefined;
     this.words = undefined;
     this.last = undefined;
     this.phase = 'hearing';
@@ -341,8 +539,11 @@ export class VoiceStream implements SocketHandler {
   /** A turn is open: find the end of the voice, and show interim words while the turn is short. */
   private async hear(): Promise<void> {
     const at = this.samples.length;
-    if (at - this.seenLength > BEHIND) return this.failTurn('engine_behind');
-    const from = Math.max(this.turnStart, at - (this.pauseSamples + SECOND));
+    // After an early decode the unseen audio is expected, and is scanned in full, so no voice in it is skipped.
+    const resume = this.scanFrom;
+    this.scanFrom = undefined;
+    if (resume === undefined && at - this.seenLength > BEHIND) return this.failTurn('engine_behind');
+    const from = Math.max(this.turnStart, Math.min(at - (this.pauseSamples + SECOND), resume ?? at));
     const spans = await this.call(() => this.parts.engine.detectSpeech(this.samples.slice(from, at)));
     this.seenLength = at;
     const last = spans[spans.length - 1];
@@ -354,6 +555,19 @@ export class VoiceStream implements SocketHandler {
       return;
     }
     const spoken = this.lastSpeechEnd - this.turnStart;
+    const cut = this.lastSpeechEnd + LEAD_IN;
+    if (spoken <= INTERIM_MAX && silence >= EARLY_SILENCE && !this.isEarly(cut)) {
+      const heard = await this.decodeWithin(
+        this.samples.slice(this.turnStart, cut),
+        this.finalBudget(cut - this.turnStart),
+      );
+      if (this.phase !== 'hearing') return;
+      this.early = { turn: this.turn, cut, text: heard.text };
+      this.scanFrom = this.seenLength;
+      this.interimAt = spoken;
+      this.setWords(heard.text, false);
+      return;
+    }
     if (spoken <= INTERIM_MAX && spoken - this.interimAt >= INTERIM_EVERY) {
       const heard = await this.decodeWithin(this.samples.slice(this.turnStart, this.lastSpeechEnd), FINAL_BASE_MS);
       this.interimAt = spoken;
@@ -368,8 +582,10 @@ export class VoiceStream implements SocketHandler {
     this.samples.dropBefore(cut);
     if (this.samples.length > BACKLOG_KEEP) this.samples.dropBefore(this.samples.length - BACKLOG_KEEP);
     this.seenLength = 0;
-    const seconds = audio.length / SECOND;
-    const heard = await this.decodeWithin(audio, FINAL_BASE_MS + (seconds * 1000) / 2);
+    // The decode that began in the pause is this turn's final decode when no voice came back since (same cut).
+    const early = this.isEarly(cut) ? this.early : undefined;
+    this.early = undefined;
+    const heard = early ?? (await this.decodeWithin(audio, this.finalBudget(audio.length)));
     // A phone that died or pressed End during the decode must not send.
     if (this.ended) return;
     // Noise the model wrote as punctuation (".") is not words either.
@@ -387,6 +603,14 @@ export class VoiceStream implements SocketHandler {
       return this.settle({ turn, outcome: 'cancelled', code: 'phone_silent' });
     }
     await this.deliver(text, turn);
+  }
+
+  private isEarly(cut: number): boolean {
+    return this.early?.turn === this.turn && this.early.cut === cut;
+  }
+
+  private finalBudget(samples: number): number {
+    return FINAL_BASE_MS + ((samples / SECOND) * 1000) / 2;
   }
 
   private async deliver(text: string, turn: number): Promise<void> {
@@ -513,8 +737,18 @@ export class VoiceStream implements SocketHandler {
       ...(this.last === undefined ? {} : { last: this.last }),
       ...(this.fatal === undefined ? {} : { error: this.fatal }),
     };
-    const snapshot = this.withWords(base);
-    this.parts.downstream.send(encodeDownlinkUnit(snapshot));
+    if (this.start?.reply !== 'machine') {
+      this.parts.downstream.send(encodeDownlinkUnit(this.withWords(base)));
+      return;
+    }
+    // A stream that asked for the voice always sends the larger unit, with its audio slot filled or zero.
+    const sound = this.nextSound();
+    const snapshot = this.withWords({
+      ...base,
+      ...(this.replyState === undefined ? {} : { reply: this.replyState }),
+      ...(sound === undefined ? {} : { audio: sound.audio }),
+    });
+    this.parts.downstream.send(encodeReplyDownlinkUnit(snapshot, sound?.pcm ?? new Int16Array(0)));
   }
 
   private withWords(base: StreamSnapshot): StreamSnapshot {

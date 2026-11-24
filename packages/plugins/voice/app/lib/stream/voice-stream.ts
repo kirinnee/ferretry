@@ -8,6 +8,8 @@
  */
 import {
   DOWNLINK_UNIT_BYTES,
+  REPLY_DOWNLINK_UNIT_BYTES,
+  type ReplyState,
   STREAM_CLOSES,
   StreamProtocolError,
   type StreamControl,
@@ -17,7 +19,10 @@ import {
   UnitAssembler,
   WordsAssembler,
   decodeDownlinkUnit,
+  decodeReplyDownlinkUnit,
+  encodeSpeakFrame,
   encodeUplinkUnit,
+  fitSpeakText,
 } from '../../../contract/index.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 
@@ -30,7 +35,31 @@ export interface MicSource {
   stop(): void;
 }
 
+/** The machine's sound for a reply line, played as it arrives: 16 kHz mono PCM, in order, with no gap the machine did not make. */
+export interface ReplyPlayer {
+  play(pcm: Int16Array): void;
+  /** Silences everything queued at once. */
+  stop(): void;
+  /** How much sound is still waiting to be heard, in milliseconds. */
+  remainingMs(): number;
+  close(): void;
+}
+
+/** What happened to one line sent to the machine to be spoken. */
+export interface SpeechLineEvent {
+  readonly id: number;
+  /** `started`: its first sound arrived. `finished`: all its sound has arrived. `failed`: the machine could not speak it (`code`). */
+  readonly event: 'started' | 'finished' | 'failed';
+  readonly code?: string;
+  /** Only `started`: milliseconds from sending the line to its first sound arriving. */
+  readonly firstSoundMs?: number;
+}
+
 export interface VoiceStreamEvents {
+  /** Where the machine's reply voice is, whenever it changes. Only a stream that asked for it. */
+  readonly onReply?: (state: ReplyState) => void;
+  /** One line's progress. Only a stream that asked for the reply voice. */
+  readonly onSpeech?: (line: SpeechLineEvent) => void;
   /** Every snapshot, as it arrives. */
   readonly onSnapshot: (snapshot: StreamSnapshot) => void;
   /** A whole revision of the turn's words, once its last fragment is in. */
@@ -45,7 +74,19 @@ export interface VoiceStreamEvents {
   readonly onMicFailed: (cause: unknown) => void;
 }
 
+export interface VoiceStreamOptions {
+  /** Where the machine's sound is played. Required for a stream that asked for the reply voice. */
+  readonly player?: ReplyPlayer;
+  /** Milliseconds, monotonic. A suite supplies its own. */
+  readonly now?: () => number;
+}
+
 export interface VoiceStreamHandle {
+  /**
+   * Sends a reply line to the machine to be spoken, cut into pieces that each fit one frame. Each piece is a line of its
+   * own with its own id, in order; the ids and their words are returned so the caller can read a failed one itself.
+   */
+  speak(text: string): readonly { readonly id: number; readonly text: string }[];
   /** Leaves on purpose: tells the machine, then closes. */
   stop(): void;
   setMuted(muted: boolean): void;
@@ -62,9 +103,18 @@ export function openVoiceStream(
   start: StreamStart,
   mic: MicSource,
   events: VoiceStreamEvents,
+  options: VoiceStreamOptions = {},
 ): VoiceStreamHandle {
   if (client.socket === undefined) throw new Error('this browser has no way to open a voice stream');
-  const assembler = new UnitAssembler(DOWNLINK_UNIT_BYTES);
+  const wantsReply = start.reply === 'machine';
+  if (wantsReply && options.player === undefined)
+    throw new Error('a stream that asks for the reply voice needs a player');
+  const now = options.now ?? (() => performance.now());
+  const assembler = new UnitAssembler(wantsReply ? REPLY_DOWNLINK_UNIT_BYTES : DOWNLINK_UNIT_BYTES);
+  const sentAt = new Map<number, number>();
+  const began = new Set<number>();
+  let nextLine = 0;
+  let replyState: ReplyState | undefined;
   const words = new WordsAssembler();
   let echo: string | undefined;
   let control: StreamControl = 'none';
@@ -72,9 +122,28 @@ export function openVoiceStream(
   let ended = false;
   let sentence: string | undefined;
 
+  const hear = (audio: NonNullable<StreamSnapshot['audio']>, pcm: Int16Array | undefined): void => {
+    if (pcm !== undefined && pcm.length > 0) {
+      options.player?.play(pcm);
+      if (!began.has(audio.id)) {
+        began.add(audio.id);
+        const at = sentAt.get(audio.id);
+        events.onSpeech?.({
+          id: audio.id,
+          event: 'started',
+          ...(at === undefined ? {} : { firstSoundMs: Math.round(now() - at) }),
+        });
+      }
+    }
+    if (audio.failed !== undefined) events.onSpeech?.({ id: audio.id, event: 'failed', code: audio.failed });
+    else if (audio.last) events.onSpeech?.({ id: audio.id, event: 'finished' });
+    if (audio.last) sentAt.delete(audio.id);
+  };
+
   const finish = (code: number | undefined, reason: string): void => {
     if (ended) return;
     ended = true;
+    options.player?.stop();
     mic.stop();
     events.onEnded({ code, reason, ...(sentence === undefined ? {} : { sentence }) });
   };
@@ -102,8 +171,16 @@ export function openVoiceStream(
         if (typeof frame === 'string' || ended) return;
         try {
           for (const unit of assembler.push(frame)) {
-            const snapshot = decodeDownlinkUnit(unit);
+            const decoded = wantsReply
+              ? decodeReplyDownlinkUnit(unit)
+              : { snapshot: decodeDownlinkUnit(unit), pcm: undefined };
+            const snapshot = decoded.snapshot;
             echo = snapshot.nonce;
+            if (snapshot.reply !== undefined && snapshot.reply !== replyState) {
+              replyState = snapshot.reply;
+              events.onReply?.(snapshot.reply);
+            }
+            if (snapshot.audio !== undefined) hear(snapshot.audio, decoded.pcm);
             if (snapshot.error !== undefined) sentence = snapshot.error.message;
             events.onSnapshot(snapshot);
             if (snapshot.words !== undefined) {
@@ -122,6 +199,18 @@ export function openVoiceStream(
   );
 
   const handle: VoiceStreamHandle = {
+    speak: text => {
+      if (!wantsReply || ended) return [];
+      const lines: { id: number; text: string }[] = [];
+      for (const piece of fitSpeakText(text)) {
+        const id = nextLine;
+        nextLine += 1;
+        sentAt.set(id, now());
+        socket.send(encodeSpeakFrame({ t: 'speak', id, text: piece }));
+        lines.push({ id, text: piece });
+      }
+      return lines;
+    },
     stop: () => {
       if (ended) return;
       // The machine hears "end" in a unit of its own, then the close: it stops listening at once and frees its place.

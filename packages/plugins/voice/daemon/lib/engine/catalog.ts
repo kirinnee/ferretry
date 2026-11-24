@@ -1,5 +1,3 @@
-import type { LoadRole } from './protocol.ts';
-
 /**
  * THE MACHINE SPEECH ENGINE'S FILES, pinned by size and SHA-256 like every model file the app installs. Nothing here
  * is embedded in the daemon: Install downloads each file once, checks it against these lines, and keeps it in
@@ -10,7 +8,7 @@ import type { LoadRole } from './protocol.ts';
  * version the lockfile resolves.
  */
 export interface EngineFile {
-  readonly role: LoadRole;
+  readonly role: string;
   readonly label: string;
   readonly url: string;
   readonly bytes: number;

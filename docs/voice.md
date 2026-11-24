@@ -401,8 +401,9 @@ closes an open stream at once** (4401). `contract/stream.ts` is the wire; `daemo
 
 - **Open.** Before the protocol switches the machine answers with a status: `409 voice_not_ready` (speech not installed),
   `429 voice_busy` (one stream per device, two per machine). The first record is a text frame
-  `{t:'start', v:1, purpose:'test'|'chat', ferretId?, style?}`; anything else first, or a second start, is a protocol
-  error (4400). `test` shows live words and sends nothing. `chat` sends each finished turn to `ferretId` (an id or a
+  `{t:'start', v:1, purpose:'test'|'chat', ferretId?, style?, reply?:'machine'}`; anything else first is a protocol error
+  (4400), and the machine **sends nothing until it has the start record** (what it asks for decides the size of every unit
+  after it). A frame after the start is a `speak` line (below), and only on a stream that asked for `reply: 'machine'`. `test` shows live words and sends nothing. `chat` sends each finished turn to `ferretId` (an id or a
   callsign, resolved as a typed send resolves it), and a second stream for the same ferret, however it is named, is refused
   `voice_busy` in its first unit. **A chat needs `fleet.use` as well as `voice.use`**: without it the start is refused in
   a plain sentence (`fleet_not_granted`, close 4403), the grant is asked again before every message, and each message
@@ -413,10 +414,16 @@ closes an open stream at once** (4401). `contract/stream.ts` is the wire; `daemo
 - **Down: a constant 1,024-byte unit every 200 ms** — a length and JSON, zero-padded: the machine's state (`loading`,
   `listening`, `hearing`, `working`, `muted`), a fresh nonce, the words of the turn in fragments that arrive over
   consecutive ticks (the browser rebuilds them by `(turn, rev)`; over 16 KB is refused), and how the last turn ended
-  (`sent`, `heard`, `dropped`, `cancelled`, `failed`). A refusal is one unit with a fixed sentence, then the close.
+  (`sent`, `heard`, `dropped`, `cancelled`, `failed`). A refusal is one unit with a fixed sentence, then the close. A
+  stream that asked for the reply voice has a **larger constant unit, 7,424 bytes**: the same 1,024-byte slot, then 200 ms
+  of 16 kHz PCM16 (see [The reply voice](#the-reply-voice-kokoro-on-the-machine)).
 - **The pause and the send (owner decision O1: no countdown).** Silero VAD finds the voice; a silence of 1.5 s (styles
   `quick` 1.0 s, `thinker` 2.5 s — **guesses**, tuned from unit 5's numbers) ends the turn, or 120 s whatever the voice
-  is doing. The final decode starts at once and the message is sent **as soon as it is ready**, as the person's own
+  is doing. The final decode starts **0.3 s after the last word**, not at the pause: a turn of at most 5 s is decoded in the pause, and
+  the pause uses that result when no voice came back (voice that did outdates it, and the whole turn is decoded again).
+  Measured on the real engine, `clip-5s`, last word → sent: **3.28 s before, 2.4–2.6 s after** (0.5 s trigger: 2.88 s). The
+  floor is the decode itself (about 1.7 s for 5 s), which the offline engine cannot hide the way the browser's
+  `beginFinish()` hides a streaming one. A longer turn is decoded at the pause as before. The message is sent **as soon as it is ready**, as the person's own
   message through Conversation's send, prefixed `(voice) `, with the stable id `<streamId>:<turn>`. A turn is handed over
   once; a refused or failed send is reported, never repeated by the stream.
 - **A dead phone never sends.** The send waits for an echo of a nonce the machine issued **after** it heard the pause. A
@@ -425,7 +432,8 @@ closes an open stream at once** (4401). `contract/stream.ts` is the wire; `daemo
   nothing. A stream with no unit for 5 s is closed (4408).
 - **Words while you speak.** The engine has no streaming decode, so a turn of at most 5 s is re-decoded about every 1.2 s
   (5 s of speech decodes in about 1.9 s, above); a longer turn keeps its last words until the final decode. Past that the
-  final decode has 5 s plus half the audio's length.
+  final decode has 5 s plus half the audio's length. A decode that began in the pause keeps the VAD from looking for a
+  moment; the audio it missed is scanned in full afterwards, so no voice is skipped.
 - **Fails out loud.** More than 2 s of unseen audio (`engine_behind`) or a decode over its budget (`engine_timeout`) loses
   that turn, with a sentence; three lost turns in a row end the stream (`engine_overloaded`, 4450). Not enough memory to
   load speech ends it at once (`voice_no_memory`). Audio is never silently skipped inside a turn. Only the engine's
@@ -498,9 +506,74 @@ under an agenda item's reply box). Voice's own code is `app/components/voice-mod
   stream's "more than 2 s of unseen audio" rule, so the panel says "The machine could not turn that into words. Try again." and
   sends nothing (it never sends a lost turn). The panel is honest about it; whether the rule should wait for the decode is the
   stream's to decide (unit 4's latency follow-up).
-- **Declared gaps.** No barge-in (unit 7) and no machine reply voice (unit 6): the device voice reads, the microphone is muted
+- **Declared gaps.** No barge-in (unit 7), and the panel does not yet ask the machine's reply voice (unit 6, built: [The reply voice](#the-reply-voice-kokoro-on-the-machine)) to speak: the device voice reads, the microphone is muted
   meanwhile. No phone-fallback engine (unit 8): a machine that cannot be reached means voice mode ends, not a different engine.
   A keyboard shortcut and a palette entry for it are not built.
+
+### The reply voice (Kokoro, on the machine)
+
+Voice mode's reply voice is **Kokoro-82M (int8, Apache 2.0)**, run by sherpa-onnx's own WebAssembly build for Node and Bun
+(`sherpa-onnx` 2.0.3, owner decision O2) in a **worker thread of its own** (`daemon/worker/reply.worker.ts`), so the
+speech engine keeps listening while a reply is being made. It is installed **apart from speech to text**
+(`GET|POST|DELETE /v1/voice/reply-voice`, the same two grants and the same install/measure/unload rules as the engine's
+routes): five pinned, hash-checked files, **164 MB** (`daemon/lib/reply/catalog.ts`), in `state/voice/models/kokoro-82m-int8/`.
+Without it voice mode still listens, and the device's own voice reads the reply, with a sentence that says so.
+
+- **Who speaks what.** The browser already knows which lines of a reply are `<voice>` lines (the grammar is Conversation's
+  `voice-tag.ts`). It asks the machine to speak each one by sending a **`speak` text frame**: JSON
+  `{t:'speak', id, text}` padded with spaces to exactly **1,024 bytes**, so a relay sees one size for every line
+  (`encodeSpeakFrame`; a longer line is cut at a space into several frames, `fitSpeakText`). The machine answers in the
+  stream it already has: nothing new is opened, nothing is stored, and the text is sealed end to end like the audio.
+- **Down: a constant 7,424-byte unit every 200 ms** for a stream that asked: the snapshot slot (now also `reply`:
+  `loading` / `ready` / `absent`, and `audio`: which line this slot belongs to, how many of its samples are valid, `last`,
+  and `failed` with a fixed code), then **3,200 samples of 16 kHz PCM16**, zero-filled when nothing is being said. Audio
+  therefore arrives at exactly the speed it plays (**about 115 MB an hour more downlink**, as the plan guessed), and a relay
+  sees nothing of when a reply is spoken beyond what the event stream already shows (design §3.4).
+- **How a line is made.** `splitForSpeech` cuts it into sentences, and a sentence of more than 12 words into clauses at its
+  commas, so the first sound does not wait for the last word. Each piece is turned into sound (24 kHz, resampled to 16 kHz by
+  a windowed-sinc filter, `resample.ts`) and queued; the pieces of one line are packed into consecutive slots so no slot but
+  the line's last is part empty. A unit carries one line's sound only. At most 16 lines wait; a 17th is refused for that line
+  (`queue_full`), and no more than 30 s of sound waits to be sent before the next line is made.
+- **The device voice is the fallback, never both.** A line the machine could not speak (`reply_voice_absent`,
+  `reply_voice_failed`, `queue_full`) comes back `failed`, and the browser's `createReplySpeaker` reads it with the device's
+  voice **only if no sound of it had begun** (a person would otherwise hear its start twice). `absent` is also what a stream
+  is told when the voice is not installed or did not start.
+- **Playing it.** `createReplyPlayer` schedules each 200 ms piece to start where the last one ends (a gapless queue on one
+  WebAudio context created inside the tap that starts voice mode, because iOS lets sound start only from a gesture), and a
+  piece that arrives late leaves the gap the machine itself left. The speaker is one voice: **`af_heart`** (speaker 3); a
+  picker is unit 10's, with ElevenLabs.
+- **Hear it.** Settings › Voice › Voice mode › Reply voice has **Hear it**: it opens a real stream with `reply: 'machine'`
+  and a **silent** microphone (the room's sound never leaves the page), sends one sentence, plays what comes back, and says
+  how long the first sound took. It is the whole path, so what a person hears and what it costs are the same test.
+- **Declared gaps.** The reply voice's English front end is sherpa-onnx's lexicon (sherpa-onnx 2.x dropped espeak-ng): a
+  word that is not in the lexicon (a product name such as Kubernetes) is skipped, not spelled out; numbers are written out first
+  (`spokenNumbers`: "1,204" is "one thousand two hundred four") because the lexicon has no digits. Voices other than `af_heart`, speed and stopping a line
+  mid-way (barge-in) are not here (barge-in is unit 7). The browser cannot yet tell the machine to stop speaking.
+
+**Measured here (2026-11-24; the same 32-core Linux x64 box, load average 9–12 from other agents, run under `nice`; one
+WebAssembly thread; `speak` times include the resample):**
+
+| What                                                                    | Measured                                            |
+| ----------------------------------------------------------------------- | --------------------------------------------------- |
+| Install, real download from Hugging Face + jsDelivr                     | 164 MB, 5 files (a few seconds on this box)         |
+| Load Kokoro in its worker                                               | 1.5–1.9 s; the runtime's own heap **512 MB**        |
+| "Let me check the failing test." (1.6 s of speech)                      | 4.6–5.3 s: **real-time factor 2.8–3.3**             |
+| A 3.4 s line, three runs                                                | 10.3–10.7 s: real-time factor 3.0–3.2               |
+| **First sound of an 11-word, two-clause line, sent over a real stream** | **4.0 s** after the line was sent (3.6 s of speech) |
+
+**The plan's target — first audio for a 12-word line in 1 s or less (a guess) — is NOT met**, and the miss is not close:
+the same model through sherpa-onnx's **native** Node addon (not shipped, measured only to size the next step) ran at a
+real-time factor of 1.5 on one thread and 1.0 on four, on this same loaded box. So even native is not 1 s here for a whole
+clause; the first clause being short is what helps (it is cut first), and a quiet machine, a GPU or a smaller voice would
+be the next levers. **A reply is still understandable**, because each piece's sound is queued and played gapless, but on
+this box a long reply is spoken **slower than it is made**, so there are pauses between pieces. That is why the device's
+own voice is the fallback and why `reply` is reported honestly. The next step, if the owner wants it, is the native
+sherpa-onnx path (plan risk 1) — with its NixOS `nix-ld` cost (design §2.3).
+
+Proof: `packages/plugins/voice/tests/realworld/reply-voice.realworld.test.ts` (`FY_REPLY_VOICE_REAL=1`, and
+`FY_REPLY_VOICE_DIR` to keep the files between runs) refuses a file with a wrong pinned hash, then installs the real files,
+loads Kokoro in its worker, speaks a line (audible level, a length a person would take to say it) and asks for the same line
+over a real `VoiceStream`, measuring the first sound.
 
 ## Speed: which path each engine runs on
 
@@ -1125,9 +1198,11 @@ pause plus the countdown plus STT and clean-up, an estimated 3.4–5.5 s at the 
 - **Live voice** (listen, notice the pause, send after a visible countdown, read the reply aloud):
   nothing of it exists (its end-of-turn detector was dropped by the owner, !A525 — see
   [Pause detection](#pause-detection-the-end-of-a-spoken-turn)). There is no Live button, bar or loop.
-- **Voice mode on your machine** (hands-free chat): the machine's speech engine, the audio stream to it and the panel
-  are built (see [Voice mode: the machine's speech engine](#voice-mode-the-machines-speech-engine) and
-  [The voice mode panel](#the-voice-mode-panel)); the machine's reply voice (Kokoro), barge-in and the phone fallback are not.
+- **Voice mode on your machine** (hands-free chat): the machine's speech engine, the audio stream to it, the panel and the
+  machine's reply voice are built and measured (see [Voice mode: the machine's speech engine](#voice-mode-the-machines-speech-engine),
+  [The voice mode panel](#the-voice-mode-panel) and [The reply voice](#the-reply-voice-kokoro-on-the-machine)); the panel does not
+  yet send its reply lines to the machine's voice (the device voice still reads them), and barge-in (unit 7) and the phone
+  fallback are not built.
 - ~~A machine-wide default chosen during onboarding~~ — done: New machine setup's Voice step renders
   `VoiceEngineChoice` and saves the choice as `voice.yaml`'s `defaultEngine`; a device that has not picked an
   engine dictates with it until it picks its own. Settings › Dictation still shows the device's own choice

@@ -9,7 +9,14 @@ import { type CleanupSettings, DEFAULT_CLEANUP_SETTINGS } from './lib/stt/enhanc
 import { SttEnhancementService } from './lib/stt/enhancer.ts';
 import { freemem } from 'node:os';
 import { StateEngineFiles } from './adapters/state-engine-files.ts';
-import { startSpeechThread, SPEECH_WORKER_URL } from './adapters/worker-speech-thread.ts';
+import {
+  REPLY_WORKER_URL,
+  startReplyThread,
+  startSpeechThread,
+  SPEECH_WORKER_URL,
+} from './adapters/worker-speech-thread.ts';
+import { REPLY_DIR } from './lib/reply/catalog.ts';
+import { ReplyVoiceEngine } from './lib/reply/engine.ts';
 import { SpeechEngine } from './lib/engine/engine.ts';
 import { voiceStreamAccept } from './lib/stream/accept.ts';
 import { voiceRoutes } from './routes.ts';
@@ -24,7 +31,7 @@ import { voiceRoutes } from './routes.ts';
  */
 export default implementDaemon(manifest, {
   // The machine speech engine's thread: `fyd --check` starts and stops it, and a compiled binary embeds it.
-  workers: { speech: SPEECH_WORKER_URL },
+  workers: { speech: SPEECH_WORKER_URL, reply: REPLY_WORKER_URL },
   build(ctx) {
     const { kernel } = ctx;
     const { vault, gate, ferrets } = ctx.needs;
@@ -60,6 +67,22 @@ export default implementDaemon(manifest, {
     });
     kernel.lifecycle.onStop(() => void engine.unload());
 
+    // The reply voice (Kokoro): installed apart from the speech engine, and its own worker thread so listening never waits.
+    const replyLog = kernel.log.child('reply');
+    const reply = new ReplyVoiceEngine({
+      http: { request: async (url, init) => await kernel.fetch.request(url, init) },
+      files: new StateEngineFiles(kernel.state, kernel.hostFacts, REPLY_DIR),
+      clock: kernel.clock,
+      machine: () => kernel.identity.daemonName,
+      start: () => startReplyThread(kernel.workers),
+      availableMemory: () => freemem(),
+      log: {
+        info: (message, fields) => replyLog.info(message, fields),
+        warn: (message, fields) => replyLog.warn(message, fields),
+      },
+    });
+    kernel.lifecycle.onStop(() => void reply.unload());
+
     const voice: VoiceApi = {
       engine,
       enhance: async input => await enhancement.enhance(input),
@@ -73,6 +96,7 @@ export default implementDaemon(manifest, {
     const sockets = {
       'GET /v1/voice/stream': voiceStreamAccept({
         engine,
+        reply,
         clock: kernel.clock,
         send: () => {
           const conversation = ctx.uses.conversation.current();
@@ -96,6 +120,6 @@ export default implementDaemon(manifest, {
       }),
     };
 
-    return { routes: voiceRoutes(enhancement, speedups, engine), sockets, provides: { voice } };
+    return { routes: voiceRoutes(enhancement, speedups, engine, reply), sockets, provides: { voice } };
   },
 });
