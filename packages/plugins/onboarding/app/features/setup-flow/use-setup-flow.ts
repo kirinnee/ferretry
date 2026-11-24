@@ -54,8 +54,10 @@ import {
   clearNotNeeded,
   dropPage,
   END,
+  isOffer,
   markNotNeeded,
   passedOver,
+  passesOffer,
   pickedOf,
   type Place,
   type ProgressRead,
@@ -208,6 +210,8 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   const answeredNow = useRef(new Map<string, HowAnswered>());
   /** The pages the end of the run already told the machine about (a page still marked not needed when the run ends). */
   const toldAtEnd = useRef(new Set<string>());
+  /** The pages truly drawn in this run: an offer page is walked only after one of them (`passesOffer`). */
+  const drawn = useRef(new Set<string>());
   const stage = useRef(loading);
   stage.current = loading;
   runNow.current = run;
@@ -281,6 +285,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       setRun(startRun(pages, answered));
       answeredNow.current = new Map();
       toldAtEnd.current = new Set();
+      drawn.current = new Set();
       lanes.current = new Map();
       setFailed({});
       setOutcomes({});
@@ -389,6 +394,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   /** A page was truly drawn: project setup leaves a mark on the device ledger so a relaunch returns to it (project-resume.ts). */
   const shown = useCallback(
     (step: FlowStep): void => {
+      drawn.current.add(step.key);
       if (step.key === PROJECT_SETUP_STEP && target !== undefined)
         markProjectSetupShown(env.current.storage(), target, env.current.now());
     },
@@ -414,6 +420,8 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     (key: string, visit: number): void => {
       if (!current(key, visit)) return;
       const here = pages.find(candidate => candidate.key === key);
+      // A page the person pressed Next on was drawn, whether or not it said so (a legacy page never does).
+      drawn.current.add(key);
       if (here !== undefined) done(here);
       setRun(state => (state.at === key && state.visit === visit ? advance(state, pages, answered) : state));
     },
@@ -448,9 +456,18 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     }
   }, [run.at, run.notNeeded, pages, answered, sendDaemon]);
 
-  const page = pages.find(candidate => candidate.key === run.at);
-  const hidden = passedOver(run);
-  const firstAfter = page === undefined ? run : advance(run, pages, answered);
+  // An offer reached with nothing drawn before it (a finished setup whose project page passed itself over) is passed over too.
+  // It is decided here, before the page is drawn (a page draws, and so counts as drawn, the moment it mounts), and kept by the effect.
+  const offerPassed = run.at !== END && passesOffer(run.at, drawn.current);
+  const live = offerPassed ? markNotNeeded(run, pages, answered, run.at) : run;
+  runNow.current = live;
+  useEffect(() => {
+    if (offerPassed) setRun(state => (state.at === run.at ? markNotNeeded(state, pages, answered, run.at) : state));
+  }, [offerPassed, run.at, pages, answered]);
+
+  const page = pages.find(candidate => candidate.key === live.at);
+  const hidden = passedOver(live);
+  const firstAfter = page === undefined ? live : advance(live, pages, answered);
   const upcoming = [firstAfter, advance(firstAfter, pages, answered)]
     .map(state => pages.find(candidate => candidate.key === state.at))
     .filter(
@@ -473,14 +490,14 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     loading: loading.kind,
     flow: ready?.flow,
     journey: address.journey,
-    at: run.at,
-    direction: run.direction,
+    at: live.at,
+    direction: live.direction,
     page,
     upcoming,
-    canBack: run.trail.some(key => !hidden.has(key)),
+    canBack: live.trail.some(key => !hidden.has(key)),
     progress,
     unsaved: Object.values(failed),
-    visit: run.visit,
+    visit: live.visit,
     target,
     memoryOf: plugin => memory.current.get(plugin) ?? {},
     remember: (plugin, patch) => {
@@ -524,7 +541,11 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
             // This device's own pages: set during this run, found on the device ledger, or left for later.
             ...ready.flow.client.flatMap(segment =>
               segment.steps
-                .filter(step => !hidden.has(step.key))
+                // An offer this run never reached is not part of what was set up (nor of what was left).
+                .filter(
+                  step =>
+                    !hidden.has(step.key) && !(isOffer(step.key) && !(step.key in outcomes) && !answered.has(step.key)),
+                )
                 .map(step => ({
                   plugin: step.plugin,
                   id: step.id,

@@ -65,6 +65,16 @@ const foldersStepPanel = (client: ProjectsClient): AppComponent<PanelProps> =>
     )(client),
   );
 
+/** The setup flow's "Connect GitHub" page, right after it: its module loads when the flow first draws it. */
+const githubStepPanel = (client: ProjectsClient): AppComponent<PanelProps> =>
+  lazyComponent<PanelProps>(async () =>
+    (
+      ((await import(`./views/${'github-step'}.tsx`)) as Record<string, unknown>).createGithubStep as (
+        client: ProjectsClient,
+      ) => AppComponent<PanelProps>
+    )(client),
+  );
+
 /**
  * Projects' app half: the `projects` screen (the registry, the add form, the discoveries) and the `project` screen (one
  * project's provenance, board switch, ferrets and files). The lane editor draws Board's data and is Board's.
@@ -79,6 +89,7 @@ export default provideToShell(
       panels: {
         'new-ferret-projects': newFerretProjectsPanel(client),
         'onboarding-step': forSubject('projects.folders', foldersStepPanel(client)),
+        'github-step': forSubject('projects.github', githubStepPanel(client)),
       },
     }),
   }),

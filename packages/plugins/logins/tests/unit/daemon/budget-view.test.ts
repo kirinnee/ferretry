@@ -4,6 +4,7 @@
  * the spend). The provider here stands where Usage stands (the key and the hook are the real ones); Usage's own answer
  * is tested with Usage. The budget lives in `usage.yaml`, so the login's own file carries none.
  */
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { describe, expect, test } from 'bun:test';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { testHost } from '@ferretry/kernel/testing';
@@ -49,7 +50,7 @@ const files = {
 async function listed(budgets: LoginBudgets | undefined) {
   const host = await testHost({
     plugins: budgets === undefined ? [daemon] : [daemon, usage(budgets)],
-    fakes: { vault: emptyVault() },
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
     config: files,
   });
   try {

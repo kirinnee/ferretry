@@ -7,7 +7,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { ChatWidthPreview } from '../../../../../app/composer/previews/chat-width-preview.tsx';
-import { EditorStylePreview } from '../../../../../app/composer/previews/editor-style-preview.tsx';
+import { DockLayoutSample } from '../../../../../app/composer/previews/dock-layout-sample.tsx';
+import { EditorStyleSample } from '../../../../../app/composer/previews/editor-style-preview.tsx';
 import { SendKeyPreview } from '../../../../../app/composer/previews/send-key-preview.tsx';
 import { SuggestionsPreview } from '../../../../../app/composer/previews/suggestions-preview.tsx';
 import { ComposerEnterKeySettings } from '../../../../../app/composer/composer-enter-key-settings.tsx';
@@ -56,16 +57,45 @@ describe('Conversation previews', () => {
     expect(mounted.container.querySelector('.fy-cvp-bubble')).not.toBeNull();
   });
 
-  it('editor style: markdown keeps its markers, rich hides them and adds the toolbar, plain is as typed', async () => {
-    mounted = await mount(<EditorStylePreview pref="on" />);
+  it('editor style sample: markdown keeps its markers, rich hides them and adds the toolbar, plain is as typed', async () => {
+    mounted = await mount(<EditorStyleSample pref="on" />);
     expect(textOf(mounted.container)).toContain('# Plan');
     expect(mounted.container.querySelector('.fy-cvp-tools')).toBeNull();
-    await mounted.render(<EditorStylePreview pref="rich" />);
+    await mounted.render(<EditorStyleSample pref="rich" />);
     expect(mounted.container.querySelector('.fy-cvp-tools')).not.toBeNull();
     expect(mounted.container.querySelector('.fy-cvp-h')?.textContent).toBe('Plan');
-    await mounted.render(<EditorStylePreview pref="off" />);
-    expect(frameOf(mounted.container).getAttribute('data-sp-value')).toBe('off');
+    await mounted.render(<EditorStyleSample pref="off" />);
     expect(mounted.container.querySelector('.fy-cvp-h')).toBeNull();
+    // The one shared box: fixed shape, decorative, and not a second setting preview frame.
+    const box = must(mounted.container.querySelector('[data-choice-sample]'), 'the sample box');
+    expect(box.getAttribute('aria-hidden')).toBe('true');
+    expect((box as HTMLElement).style.aspectRatio).toBe('160 / 100');
+    expect(mounted.container.querySelector('[data-setting-preview]')).toBeNull();
+  });
+
+  it('button layout sample: the real phone composer, laid out by the attributes the composer stamps', async () => {
+    const attributes = (container: HTMLElement) =>
+      [...container.querySelectorAll('.fy-composer')].map(composer => [
+        composer.getAttribute('data-composer-layout'),
+        composer.getAttribute('data-composer-dock-layout'),
+        composer.hasAttribute('data-composer-empty'),
+      ]);
+    mounted = await mount(<DockLayoutSample layout="stacked" />);
+    expect(attributes(mounted.container)).toEqual([['phone', 'stacked', true]]);
+    expect(mounted.container.querySelectorAll('.fy-composer-dock').length).toBe(2);
+    expect(mounted.container.querySelector('.fy-composer-send')).not.toBeNull();
+    await mounted.render(<DockLayoutSample layout="row" />);
+    expect(attributes(mounted.container)).toEqual([['phone', 'row', true]]);
+    // Auto draws both looks, one above the other: empty (side by side), then typed (stacked).
+    await mounted.render(<DockLayoutSample layout="auto" />);
+    expect(attributes(mounted.container)).toEqual([
+      ['phone', 'auto', true],
+      ['phone', 'auto', false],
+    ]);
+    expect(mounted.container.querySelector('.fy-dls__half--typed')).not.toBeNull();
+    expect(
+      (must(mounted.container.querySelector('[data-choice-sample]'), 'box') as HTMLElement).style.aspectRatio,
+    ).toBe('300 / 120');
   });
 
   it('suggestions: the ladder types @@, the symbols type :, and skills open their OWN menu rather than a row in the agents one', async () => {

@@ -1,6 +1,6 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract';
-import { audit, cap } from '@ferretry/core-gate/contract';
+import { audit, cap, GatePort } from '@ferretry/core-gate/contract';
 import { FerretsPort, Logins } from '@ferretry/core-ferrets/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
@@ -16,6 +16,7 @@ import {
   LOGINS_CONFIG,
   LOGINS_CREDENTIALS,
   LOGINS_MODELS,
+  LOGINS_MODEL_LISTS,
   LOGINS_PASSIVE_ASSIGNMENTS,
   LOGINS_READ_MODELS,
   LOGINS_WORDS,
@@ -50,7 +51,7 @@ export default definePlugin({
   kinds: ['login', 'item', 'command', 'view'],
   words: LOGINS_WORDS,
 
-  needs: { vault: VaultPort },
+  needs: { vault: VaultPort, gate: GatePort },
   uses: { browsers: BrowsersPort, ferrets: FerretsPort },
   provides: { logins: LoginsPort, loginChanges: LoginChangesPort, loginEnvImport: LoginEnvImportPort },
 
@@ -158,6 +159,30 @@ export default definePlugin({
         noStore: true,
         audit: { skip: 'a read' },
         guard: { none: 'labels, model ids and tiers only' },
+      }),
+      // A picker's open: one read of a login's own model list, with its key on that one request to that one host, and
+      // only when the held list is a day old or more. It can never aim a request at the provider on demand.
+      route('POST /v1/logins/:loginId/model-list/refresh', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('fleet', 'use'),
+        noStore: true,
+        audit: {
+          skip: 'each read of the key writes its own secrets.used (the list read, docs/audit.md); a refresh spends nothing',
+        },
+        guard: { none: 'model ids only; no key, price or provider body has a field' },
+      }),
+      // "Refresh list": the same read at once. Configure, like the keyed Test, because it is the call that makes the
+      // provider be asked whenever the caller likes (still held to the attempt cooldowns).
+      route('POST /v1/logins/:loginId/model-list/force', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('fleet', 'configure'),
+        noStore: true,
+        audit: {
+          skip: 'each read of the key writes its own secrets.used (the list read, docs/audit.md); a refresh spends nothing',
+        },
+        guard: { none: 'model ids only; no key, price or provider body has a field' },
       }),
       route('POST /v1/models/refresh', {
         minimum: 'operator',
@@ -336,7 +361,7 @@ export default definePlugin({
     private: ['credentials'],
   },
   data: {
-    state: [LOGINS_CREDENTIALS, LOGINS_MODELS, LOGINS_PASSIVE_ASSIGNMENTS],
+    state: [LOGINS_CREDENTIALS, LOGINS_MODELS, LOGINS_MODEL_LISTS, LOGINS_PASSIVE_ASSIGNMENTS],
     config: [LOGINS_CONFIG, ENDPOINTS_CONFIG, MODELS_CONFIG],
     readModels: LOGINS_READ_MODELS,
     publishes: [LoginSignedIn, LoginChanged, ModelsChanged],

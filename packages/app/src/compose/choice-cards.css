@@ -175,3 +175,47 @@
   animation: none;
   transition: none;
 }
+
+/* ---- ChoiceSample (choice-cards.tsx): the fixed-shape picture of what a card's choice does ----
+   The box's shape is its inline `aspect-ratio`, so it holds its height before the scene draws and the cards around it never
+   move. The stage is the scene's authored size, centred and scaled by the inline transform. One fade plays when a card is
+   CHOSEN (`data-pulse` is set only then, and never under reduced motion); a scene may hang a richer movement off the same
+   attribute. */
+.fy-cs {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  contain: layout paint;
+  display: block;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+.fy-cs__stage {
+  display: block;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform-origin: center;
+}
+@keyframes fy-cs-in {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-cc__card[data-pulse='true'] .fy-cs__stage {
+    animation: fy-cs-in 240ms var(--ease-out);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-cs__stage {
+    animation: none;
+  }
+}
+:root[data-motion='reduced'] .fy-cs__stage {
+  animation: none;
+}

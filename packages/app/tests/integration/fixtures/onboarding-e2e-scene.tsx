@@ -25,7 +25,7 @@ import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
 import { FakeTransport, inventoryOf, json } from '../../unit/client/fixtures.ts';
-import { FAKE_CODE, FakeDaemon, MACHINES } from './onboarding-e2e-daemon.ts';
+import { FAKE_CODE, FakeDaemon, type FakeStep, MACHINES } from './onboarding-e2e-daemon.ts';
 import { extraRoutes } from './onboarding-e2e-routes.ts';
 
 const params = new URLSearchParams(window.location.search);
@@ -36,11 +36,22 @@ const surfaces = generated.surfaces;
 const paused = (params.get('paused') ?? '').split(',').filter(name => name !== '');
 const overrides = Object.fromEntries(paused.map(name => [name, { on: false }]));
 
+// ?projects=1: the machines also carry Projects' two device pages (the full journey's walk leaves them out).
+const PROJECT_STEPS: readonly FakeStep[] =
+  params.get('projects') !== null
+    ? [
+        { plugin: 'projects', id: 'folders', title: 'Add your projects', order: 90, side: 'client', group: 'Projects' },
+        { plugin: 'projects', id: 'github', title: 'Connect GitHub', order: 91, side: 'client', group: 'Projects' },
+      ]
+    : [];
 // A paused plugin offers the machine no steps (a switched-off plugin's steps are not listed).
 const daemons = new Map<string, FakeDaemon>(
   MACHINES.map(machine => [
     machine.id,
-    new FakeDaemon({ ...machine, steps: machine.steps.filter(step => !paused.includes(step.plugin)) }),
+    new FakeDaemon({
+      ...machine,
+      steps: [...machine.steps, ...PROJECT_STEPS].filter(step => !paused.includes(step.plugin)),
+    }),
   ]),
 );
 const transports = new Map<string, FakeTransport>();

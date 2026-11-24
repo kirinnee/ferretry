@@ -100,11 +100,19 @@ function SavePage({ step }: { readonly step: StepHost }): ReactNode {
   }, [step]);
   return <p>pick something</p>;
 }
-/** Project setup's page (C59 O8-13): it commits like the real one and leaves where its project is. */
+/** Whether the machine already has a project: project setup then passes itself over, as the real page does. */
+const machineHasProject = { value: false };
+/**
+ * Project setup's page (C59 O8-13): it commits like the real one and leaves where its project is. Like the real one it
+ * passes over on a machine that already has a project, unless THIS run made it (`madeIds`: Back lands here and stays).
+ */
 function ProjectSetupPage({ step }: { readonly step: StepHost }): ReactNode {
   useEffect(() => {
+    if (machineHasProject.value && step.segment.madeIds === undefined) return step.notNeeded();
     step.ready();
-    step.commit(async () => step.remember({ openLabel: 'Open Atlas', openHref: '/d/fy_daemon_a/projects/p1' }));
+    step.commit(async () =>
+      step.remember({ openLabel: 'Open Atlas', openHref: '/d/fy_daemon_a/projects/p1', madeIds: 'p1' }),
+    );
   }, [step]);
   return <p>folders</p>;
 }
@@ -241,6 +249,7 @@ const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
   'fake-pack.legacy': () => <p>an old page that never calls ready</p>,
   'fake-pack.forgot': step => <ReadyPage step={step} />,
   'projects.folders': step => <ProjectSetupPage step={step} />,
+  'projects.github': step => <ReadyPage step={step} />,
   // A pick's own pages (the real ones are the harness plugins'): each is ready at once; the Ready page is the real shared body.
   ...Object.fromEntries(
     ['claude-code', 'codex'].flatMap(plugin => [
@@ -1710,5 +1719,140 @@ describe('the flow ends in project setup (C59 O8-13)', () => {
     await settle();
     expect(pageKey()).toBe('projects.folders');
     expect(view.container.querySelector('[data-step-back]')).toBeNull();
+  });
+});
+
+describe('Connect GitHub never pulls a finished setup back (O9-10)', () => {
+  const clientStep = (id: string, title: string, order: number) => ({
+    plugin: 'projects',
+    id,
+    title,
+    order,
+    side: 'client' as const,
+    group: 'Projects',
+    stepHost: true as const,
+    state: 'pending' as const,
+  });
+  /** A machine whose own setup is finished, upgraded to carry Projects' two device pages (the second is new). */
+  const upgraded = (): Machine => {
+    const machine = fakeDaemon(A, 'Studio', { withFake: false });
+    return {
+      ...machine,
+      steps: [
+        ...machine.steps.map(step => ({ ...step, state: 'done' as const })),
+        clientStep('folders', 'Add your projects', 90),
+        clientStep('github', 'Connect GitHub', 91),
+      ],
+    };
+  };
+  const ledgerOf = (...keys: string[]): Map<string, string> =>
+    new Map([
+      [
+        CLIENT_LEDGER_KEY,
+        JSON.stringify({ format: 1, steps: Object.fromEntries(keys.map(key => [key, { at: AT, daemons: [A] }])) }),
+      ],
+    ]);
+  const GUIDED_REPAIR = '?phase=client&journey=pair';
+  const ended = () => view?.container.querySelector('[data-flow-end]') !== null;
+  const row = (key: string) => view?.container.querySelector(`[data-end-row="${key}"]`);
+  afterEach(() => {
+    machineHasProject.value = false;
+  });
+
+  it('an upgraded device that finished before, guided back through pairing, starts at the END (it is not asked to connect)', async () => {
+    const run = setup({
+      machines: [upgraded()],
+      search: GUIDED_REPAIR,
+      storage: ledgerOf('onboarding.appearance', 'projects.folders'),
+    });
+    view = await mount(run.tree);
+    await settle();
+    expect(ended()).toBe(true);
+    // Nothing was answered or recorded on the way, and the summary neither lists nor asks for Connect GitHub.
+    expect(run.writes).toEqual([]);
+    expect(row('client:projects.github')).toBeNull();
+    expect(view.container.querySelector('[data-onboarding-summary-set]')).not.toBeNull();
+  });
+
+  it('the same device whose project page was left for later (Skip for now) also ends', async () => {
+    const store = ledgerOf('onboarding.appearance');
+    store.set(CLIENT_LATER_KEY, JSON.stringify({ format: 1, steps: { 'projects.folders': AT } }));
+    view = await mount(setup({ machines: [upgraded()], search: GUIDED_REPAIR, storage: store }).tree);
+    await settle();
+    expect(ended()).toBe(true);
+  });
+
+  it('and so does one whose machine already has a project (the project page passes itself over, then so does Connect GitHub)', async () => {
+    machineHasProject.value = true;
+    view = await mount(
+      setup({ machines: [upgraded()], search: GUIDED_REPAIR, storage: ledgerOf('onboarding.appearance') }).tree,
+    );
+    await settle();
+    expect(ended()).toBe(true);
+    expect(row('client:projects.github')).toBeNull();
+  });
+
+  it('a run that DID draw a page offers it: project setup, then Connect GitHub, then the end', async () => {
+    view = await mount(setup({ machines: [upgraded()], search: GUIDED_REPAIR }).tree);
+    await settle();
+    expect(pageKey()).toBe('onboarding.appearance');
+    await next();
+    await settle();
+    expect(pageKey()).toBe('projects.folders');
+    await next();
+    await settle();
+    expect(pageKey()).toBe('projects.github');
+    expect(progressText()).toBe('Projects · page 2 of 2');
+  });
+
+  it('a machine with a project still offers it to a run that drew an earlier page', async () => {
+    machineHasProject.value = true;
+    view = await mount(setup({ machines: [upgraded()], search: GUIDED_REPAIR }).tree);
+    await settle();
+    await next(); // appearance
+    await settle();
+    expect(pageKey()).toBe('projects.github');
+  });
+
+  it('Back from Connect GitHub lands on project setup and STAYS there, even when it was the first page and made a project', async () => {
+    machineHasProject.value = true; // the machine has one by the time the person is back here: the run made it
+    const run = setup({ machines: [upgraded()], search: GUIDED_REPAIR, storage: ledgerOf('onboarding.appearance') });
+    machineHasProject.value = false;
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('projects.folders');
+    await next(); // registers the project
+    await settle();
+    expect(pageKey()).toBe('projects.github');
+    machineHasProject.value = true;
+    await press('[data-step-back]');
+    await settle();
+    expect(pageKey()).toBe('projects.folders');
+    await settle();
+    expect(pageKey()).toBe('projects.folders');
+  });
+
+  it('Skip for now on Connect GitHub ends, remembers it for later, and "Finish later" opens the GitHub accounts page', async () => {
+    const run = setup({
+      machines: [upgraded()],
+      search: GUIDED_REPAIR,
+      storage: ledgerOf('onboarding.appearance', 'projects.folders'),
+    });
+    // Everything else is answered, so the offer is only reached by a run that drew something: a Back-and-forth is not one, so start unanswered.
+    run.store.delete(CLIENT_LEDGER_KEY);
+    view = await mount(run.tree);
+    await settle();
+    await next(); // appearance
+    await next(); // folders
+    await settle();
+    expect(pageKey()).toBe('projects.github');
+    await click('Skip for now');
+    await settle();
+    expect(ended()).toBe(true);
+    const later = JSON.parse(run.store.get(CLIENT_LATER_KEY) ?? '{}') as { steps: object };
+    expect(Object.keys(later.steps)).toEqual(['projects.github']);
+    const link = row('client:projects.github')?.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('/d/fy_daemon_a/settings/git-accounts/accounts');
+    expect(row('client:projects.github')?.textContent).toContain('Finish later');
   });
 });
