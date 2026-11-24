@@ -75,3 +75,14 @@ export async function readInputShot(client: VaultClient, request: Ids): Promise<
     await client.call(SHOT_ROUTE, { params: { ferretId: request.sessionId, requestId: request.id } }),
   );
 }
+
+const OBSERVE_ROUTE = 'POST /v1/ferrets/:ferretId/input-requests/:requestId/observe';
+
+/**
+ * Asks the machine to look at one request's target again, so a card that has sat open is redrawn from what the target
+ * shows now (the daemon holds only the facts it last saw). Types nothing and returns nothing: the caller reads the list
+ * again for the redrawn card. A machine that cannot answer leaves the card as it was.
+ */
+export async function observeInput(client: VaultClient, request: Ids): Promise<void> {
+  await client.call(OBSERVE_ROUTE, { params: { ferretId: request.sessionId, requestId: request.id }, body: {} });
+}

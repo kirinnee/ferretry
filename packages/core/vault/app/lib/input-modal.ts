@@ -114,3 +114,73 @@ export const tappedAsks = {
     return () => listeners.delete(listener);
   },
 };
+
+/**
+ * WHO MAY SHOW A MODAL NOW. The shell mounts one modal host per paired machine, and every open dialog makes every other
+ * element of the page `inert`, so two machines' dialogs open together would each lock the other out (no tap or key
+ * reaches either). One modal at a time, app-wide: a host that has a card joins the queue, the first in the queue shows
+ * its card, and the next shows its own once that one has closed. A host keeps its own cards and keeps reading while it
+ * waits; only the drawing waits.
+ */
+const seatQueue: string[] = [];
+const seatListeners = new Set<() => void>();
+const seatChanged = (): void => {
+  for (const listener of [...seatListeners]) listener();
+};
+
+export const modalSeat = {
+  /** `daemon` has a card to show: it joins the back of the queue (once). The returned function leaves it (once). */
+  join(daemon: string): () => void {
+    if (!seatQueue.includes(daemon)) {
+      seatQueue.push(daemon);
+      seatChanged();
+    }
+    return () => {
+      const at = seatQueue.indexOf(daemon);
+      if (at === -1) return;
+      seatQueue.splice(at, 1);
+      seatChanged();
+    };
+  },
+  /** Whether `daemon` is the machine whose modal is on screen now. */
+  holds: (daemon: string): boolean => seatQueue[0] === daemon,
+  subscribe(listener: () => void): () => void {
+    seatListeners.add(listener);
+    return () => seatListeners.delete(listener);
+  },
+};
+
+let coldAsk: { readonly daemon: string; readonly ask: string } | 'none' | undefined;
+
+/**
+ * The ask a notification named by opening the app COLD: with no window open the worker opens the routed address itself
+ * (`/d/<machine>/…/chat?ask=A7`), so no tap is ever told to the page (`notificationOpened` only hears a running app).
+ * Read once, the first time any machine's host mounts, and handed only to the machine the address names. It is taken
+ * out of the address the moment it is handed over, so a reload or a copied link does not open the card again.
+ */
+export function takeColdAsk(daemon: string): string | undefined {
+  if (coldAsk === undefined) {
+    const place = typeof window === 'undefined' ? undefined : window.location;
+    const named = place === undefined ? null : /(?:^|\/)d\/([^/]+)\//u.exec(place.pathname)?.[1];
+    const ask = place === undefined ? undefined : askFromUrl(place.href);
+    let machine: string | undefined;
+    try {
+      machine = named == null ? undefined : decodeURIComponent(named);
+    } catch {
+      machine = undefined;
+    }
+    coldAsk = machine === undefined || ask === undefined ? 'none' : { daemon: machine, ask };
+  }
+  if (coldAsk === 'none' || coldAsk.daemon !== daemon) return undefined;
+  const { ask } = coldAsk;
+  coldAsk = 'none';
+  const url = new URL(window.location.href);
+  url.searchParams.delete('ask');
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  return ask;
+}
+
+/** Forgets what {@link takeColdAsk} read, so the next call reads the address again (tests only). */
+export function forgetColdAsk(): void {
+  coldAsk = undefined;
+}
