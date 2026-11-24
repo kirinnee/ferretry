@@ -32,11 +32,11 @@ export type FalFailure =
 const NO_KEY =
   'creative tools are off: no fal key. The owner adds one with `fy secret set FAL_KEY`, then names it in create.yaml as `fal: { key: ${secret:FAL_KEY} }`.';
 
-/** The kernel's outcome, as one of three failures; `undefined` for a completion the caller reads. */
-function failureOf(outcome: OutboundSecretOutcome): FalFailure | undefined {
+/** The kernel's outcome as what fal answered (a completion's payload) or as one of three failures. */
+function answerOf(outcome: OutboundSecretOutcome): { readonly payload: unknown } | FalFailure {
   switch (outcome.kind) {
     case 'completion':
-      return undefined;
+      return { payload: outcome.payload };
     case 'refused':
       return outcome.refused === 'destination' || outcome.refused === 'placement'
         ? { code: 'unavailable', sentence: 'the request to fal was refused before it was sent' }
@@ -81,22 +81,20 @@ export async function readPrice(secrets: SecretsPort, endpoint: string): Promise
     },
     PLACEMENT,
   );
-  const failed = failureOf(outcome);
+  const answer = answerOf(outcome);
   // A key problem is the caller's to hear about; any other failure just means "ask the table".
-  if (failed?.code === 'no_key' || failed?.code === 'rejected') return failed;
-  if (failed !== undefined || outcome.kind !== 'completion') return undefined;
-  const parsed = PriceReplySchema.safeParse(outcome.payload);
+  if ('code' in answer) return answer.code === 'unavailable' ? undefined : answer;
+  const parsed = PriceReplySchema.safeParse(answer.payload);
   const row = parsed.success ? parsed.data.prices.find(price => price.endpoint_id === endpoint) : undefined;
   return row === undefined ? undefined : { unitPrice: row.unit_price, unit: row.unit };
 }
 
 const RunReplySchema = z.object({
-  images: z.array(z.object({ url: z.string().max(2048), content_type: z.string().max(100).optional() })).min(1),
+  images: z.array(z.object({ url: z.string().max(2048) })).min(1),
 });
 
 export interface FalImage {
   readonly url: string;
-  readonly contentType: string | undefined;
 }
 
 /** One synchronous run of an image endpoint (`POST fal.run/<endpoint>`): the link to the picture it made. */
@@ -125,19 +123,12 @@ export async function runImage(
     },
     PLACEMENT,
   );
-  const failed = failureOf(outcome);
-  if (failed !== undefined) return failed;
-  if (outcome.kind !== 'completion')
-    return { code: 'unavailable', sentence: 'fal answered something Create could not read' };
-  const parsed = RunReplySchema.safeParse(outcome.payload);
+  const answer = answerOf(outcome);
+  if ('code' in answer) return answer;
+  const parsed = RunReplySchema.safeParse(answer.payload);
   if (!parsed.success) return { code: 'unavailable', sentence: 'fal made no picture (its answer held none)' };
-  const [first] = parsed.data.images;
-  return { url: first!.url, contentType: first!.content_type };
+  return { url: parsed.data.images[0]!.url };
 }
 
-export const isFailure = (value: unknown): value is FalFailure =>
-  typeof value === 'object' &&
-  value !== null &&
-  'code' in value &&
-  'sentence' in value &&
-  ['no_key', 'rejected', 'unavailable'].includes(String((value as { code: unknown }).code));
+/** A failure carries a `code`; a rate and a picture's link never do. */
+export const isFailure = (value: object): value is FalFailure => 'code' in value;

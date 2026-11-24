@@ -22,6 +22,8 @@ class FakeFal {
   picture: Uint8Array = PNG;
   pictureUrl = CDN;
   pictureType = 'image/jpeg';
+  /** How fal's storage answers: a picture, a 404, a dropped connection, or a file that says it is huge. */
+  cdn: 'ok' | 'not-found' | 'throws' | 'declares-huge' = 'ok';
 
   readonly fetch = async (url: URL, init?: RequestInit): Promise<Response> => {
     const headers = new Headers(init?.headers);
@@ -46,15 +48,19 @@ class FakeFal {
     if (url.host.endsWith('fal.media')) {
       // A plain reply object: the unit tier runs many files in one process, some of which replace the global
       // `Response` and `Blob`, and these bytes must reach the tool exactly as they are here.
+      if (this.cdn === 'throws') throw new Error('connection reset');
       const bytes = this.picture;
       return {
-        ok: true,
-        status: 200,
-        headers: new Map([['content-type', this.pictureType]]) as unknown as Headers,
+        ok: this.cdn !== 'not-found',
+        status: this.cdn === 'not-found' ? 404 : 200,
+        headers: new Map<string, string>([
+          ['content-type', this.pictureType],
+          ...(this.cdn === 'declares-huge' ? ([['content-length', String(64 * 1024 * 1024)]] as const) : []),
+        ]) as unknown as Headers,
         arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
       } as unknown as Response;
     }
-    return new Response('not a fal host', { status: 404 });
+    throw new Error(`the fake fal was asked for ${url.host}`);
   };
 
   runs(): number {
@@ -256,6 +262,30 @@ describe('generate_image: a picture, priced first, recorded, and handed over', (
     const lost = await ask(nowhere);
     expect(lost.isError).toBe(true);
     expect(ledgerLines(nowhere)).toHaveLength(1);
+  });
+
+  test('what fal’s storage may answer wrongly never becomes a picture, and the spend is still recorded', async () => {
+    const wrong: readonly [string, (fal: FakeFal) => void][] = [
+      ['answered 404', fal => (fal.cdn = 'not-found')],
+      ['could not be fetched', fal => (fal.cdn = 'throws')],
+      ['larger than Create will fetch', fal => (fal.cdn = 'declares-huge')],
+      ['not a picture', fal => (fal.pictureType = 'text/html')],
+    ];
+    for (const [sentence, arrange] of wrong) {
+      const w = await world();
+      arrange(w.fal);
+      const answer = await ask(w);
+      expect(answer.isError).toBe(true);
+      expect(answer.text).toContain(sentence);
+      expect(w.delivered).toHaveLength(0);
+      expect(ledgerLines(w)).toHaveLength(1);
+    }
+  });
+
+  test('a png or webp picture keeps its own extension', async () => {
+    const w = await world();
+    w.fal.pictureType = 'image/webp';
+    expect((await ask(w)).text).toContain('.webp');
   });
 
   test('an empty file from fal’s storage is not handed over as a picture (the spend is still recorded)', async () => {

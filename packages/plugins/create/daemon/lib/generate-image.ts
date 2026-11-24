@@ -112,10 +112,8 @@ export function generateImageTool(deps: GenerateImageDeps) {
   // One call at a time: a chain, so a failure never blocks the next call.
   let running: Promise<unknown> = Promise.resolve();
   return async (ferret: string, rawInput: unknown): Promise<ToolAnswer> => {
-    const turn = running.then(
-      () => generate(deps, ferret, rawInput),
-      () => generate(deps, ferret, rawInput),
-    );
+    // `running` never rejects (it holds the previous call's end, caught), so one handler is enough.
+    const turn = running.then(() => generate(deps, ferret, rawInput));
     running = turn.catch(() => undefined);
     return await turn;
   };
