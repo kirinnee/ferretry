@@ -1,4 +1,5 @@
 import { INPUT_QUARANTINE_SECONDS, INPUT_SHORT_LOCK_SECONDS, type InputTargetFacts } from '../../../contract/index.ts';
+import { passwordSignalled } from './field-kinds.ts';
 import type { InputLock, InputRequestField } from './wire.ts';
 import type { LoginObserved } from './borrowed.ts';
 import { identityOf, placeOf } from './login-observer.ts';
@@ -193,6 +194,7 @@ export function passwordTarget(
   if (found === undefined) return false;
   return (
     found.field.type?.toLowerCase() === 'password' ||
+    passwordSignalled(found.field) ||
     [found.field.name, found.field.id, found.field.autocomplete].some(
       word => word !== undefined && (PASSWORD_FIELD.test(matchable(word)) || spellsPassword(word) || lookAlike(word)),
     )
