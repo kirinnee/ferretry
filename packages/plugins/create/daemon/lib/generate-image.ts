@@ -84,6 +84,7 @@ async function download(
     const declared = Number(response.headers.get('content-length') ?? 0);
     if (declared > MAX_DOWNLOAD_BYTES) return 'the picture is larger than Create will fetch';
     const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength === 0) return 'fal’s storage sent an empty file';
     if (bytes.byteLength > MAX_DOWNLOAD_BYTES) return 'the picture is larger than Create will fetch';
     const type = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
     if (!PICTURE_TYPES.includes(type)) return 'what fal’s storage sent was not a picture';

@@ -43,8 +43,17 @@ class FakeFal {
       if (this.runStatus !== 200) return new Response('no', { status: this.runStatus });
       return Response.json({ images: [{ url: this.pictureUrl, content_type: this.pictureType }], seed: 1 });
     }
-    if (url.host.endsWith('fal.media'))
-      return new Response(new Blob([this.picture as BlobPart]), { headers: { 'content-type': this.pictureType } });
+    if (url.host.endsWith('fal.media')) {
+      // A plain reply object: the unit tier runs many files in one process, some of which replace the global
+      // `Response` and `Blob`, and these bytes must reach the tool exactly as they are here.
+      const bytes = this.picture;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', this.pictureType]]) as unknown as Headers,
+        arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      } as unknown as Response;
+    }
     return new Response('not a fal host', { status: 404 });
   };
 
@@ -247,6 +256,16 @@ describe('generate_image: a picture, priced first, recorded, and handed over', (
     const lost = await ask(nowhere);
     expect(lost.isError).toBe(true);
     expect(ledgerLines(nowhere)).toHaveLength(1);
+  });
+
+  test('an empty file from fal’s storage is not handed over as a picture (the spend is still recorded)', async () => {
+    const w = await world();
+    w.fal.picture = new Uint8Array(0);
+    const answer = await ask(w);
+    expect(answer.isError).toBe(true);
+    expect(answer.text).toContain('empty file');
+    expect(w.delivered).toHaveLength(0);
+    expect(ledgerLines(w)).toHaveLength(1);
   });
 
   test('a picture over the chat’s 1 MB is handed over with no block to show', async () => {
