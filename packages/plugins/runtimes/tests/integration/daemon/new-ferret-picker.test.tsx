@@ -9,7 +9,7 @@
  * `packages/core/kernel/tests/integration/host/launch-mode-runtimes.test.ts`: a page cannot import another package's app half,
  * so the page and the daemon meet there on the route the page POSTs to. Fake values only; nothing reads a real home.
  */
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, describe, expect, it } from 'bun:test';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import type { ChosenFerretAccount, NewFerretAccountSlotProps } from '@ferretry/core-ferrets/contract';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
@@ -24,12 +24,22 @@ import {
   sampleLogin,
 } from '@ferretry/plugin-logins/contract/testing';
 import { createElement } from 'react';
-import { interact, mount } from '../../unit/support/dom.ts';
 import { createNewFerretAccountPanel } from '../../../app/views/account-picker-panels.tsx';
 import { hostAssembly, runtimesDaemon } from '../../../daemon/index.ts';
 import { cleanupWorlds, fleetWorld } from '../../unit/support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
+
+// The picker needs a DOM, and the DOM registers by replacing the global `Response`, `fetch`, `WebSocket` and the rest with
+// classes that cannot be served from `Bun.serve`. This tier runs every file in ONE process, so a DOM left registered would
+// make the next file that serves a page (Settings › Web search's visual test) fail with "Expected a Response object". Take
+// Bun's own before the DOM loads (hence the import below, not at the top), and put them back when this file is done.
+const NETWORK = ['fetch', 'Request', 'Response', 'Headers', 'WebSocket', 'AbortController', 'AbortSignal'] as const;
+const natives = NETWORK.map(name => [name, Reflect.get(globalThis, name)] as const);
+const { interact, mount } = await import('../../unit/support/dom.ts');
+afterAll(() => {
+  for (const [name, native] of natives) Reflect.set(globalThis, name, native);
+});
 
 const NEEDS_SIGN_IN = {
   word: 'needs_sign_in',
