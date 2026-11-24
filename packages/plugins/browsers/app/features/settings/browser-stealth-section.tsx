@@ -39,7 +39,7 @@ export function BrowserStealthSection({
     });
   };
   return (
-    <SetupSection title="Stealth" name="browser-stealth">
+    <SetupSection title="Stealth" name="browser-stealth" saves="now">
       <div className="flex max-w-xl min-w-0 items-center gap-2">
         <span id={labelId} className="min-w-0 flex-1 text-ui font-semibold text-fg">
           Let this machine’s browser pass bot checks
