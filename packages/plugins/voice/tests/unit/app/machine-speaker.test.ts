@@ -257,3 +257,21 @@ describe('the read-aloud controller with the machine voice attached', () => {
     expect(controller.getState().status).toBe('unavailable');
   });
 });
+
+describe('the machine speaker on its own clock', () => {
+  test('has no device voices to offer, nothing to unlock, and ends a finished reading on a real timer', async () => {
+    const events: SpeakerEvent[] = [];
+    const speaker = createMachineSpeaker({
+      stream: () => ({ speak: text => [{ id: 0, text }], hush: () => undefined }),
+      replyState: () => 'ready',
+      player: { remainingMs: () => 0 },
+    });
+    expect(speaker.voices()).toEqual([]);
+    expect(speaker.unlock()).toBeUndefined();
+    speaker.speak({ segments: ['Hello.'], rate: 1, voice: null, language: 'en-US' }, event => void events.push(event));
+    speaker.onSpeech({ id: 0, event: 'started' });
+    speaker.onSpeech({ id: 0, event: 'finished' });
+    await Bun.sleep(250);
+    expect(events.at(-1)).toEqual({ type: 'end' });
+  });
+});
