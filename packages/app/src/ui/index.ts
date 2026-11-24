@@ -71,6 +71,7 @@ export * from './dialog.tsx';
 export * from './model-select.tsx';
 export * from './select-box.tsx';
 export * from './model-tiers.ts';
+export * from './live-model-list.ts';
 export * from './local-models-note.tsx';
 export { ImageViewer, type ImageViewerProps, type ViewerImage } from './image-viewer.tsx';
 export * from './lib/reveal-hidden.ts';
