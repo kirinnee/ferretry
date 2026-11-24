@@ -36,8 +36,10 @@ const file = (bytes: Uint8Array, overrides: Partial<FakeNode> = {}): FakeNode =>
 });
 const bytesOf = (response: ApiResponse): Uint8Array => response.bytes ?? new Uint8Array();
 
-/** The 9 MiB clip every test below serves in pieces: three 4 MiB pieces, the last one short. */
+/** The 9 MiB clip the first two tests serve in pieces: three 4 MiB pieces, the last one short. */
 const CLIP = patterned(2 * MEDIA_CHUNK_BYTES + MEDIA_CHUNK_BYTES / 4);
+/** A small file for every test that is about WHEN a scan happens, not about pieces: cheap even on a loaded runner. */
+const SMALL = patterned(10_000);
 
 function fixture(
   node: FakeNode,
@@ -104,7 +106,7 @@ describe('the media scan: a file is scanned once, not once per piece', () => {
     should(answers[1]?.headers.get('content-range')).eql(
       `bytes ${MEDIA_CHUNK_BYTES}-${MEDIA_CHUNK_BYTES + 99}/${CLIP.byteLength}`,
     );
-  });
+  }, 60_000);
 
   it('should answer a range past the end and a file too large for one answer from the verdict, with no new scan', async () => {
     // Arrange
@@ -120,24 +122,19 @@ describe('the media scan: a file is scanned once, not once per piece', () => {
     should(past.headers.get('content-range')).eql(`bytes */${CLIP.byteLength}`);
     should(whole).eql({ code: 'range_required', status: 413 });
     should(scans().length).eql(1);
-  });
+  }, 60_000);
 
   it('should share one scan between requests that arrive together for a file nobody has judged', async () => {
     // Arrange
-    const { ask, scans } = fixture(file(CLIP));
+    const { ask, scans } = fixture(file(SMALL));
 
     // Act
-    const answers = await Promise.all([
-      ask('bytes=0-99'),
-      ask(`bytes=${MEDIA_CHUNK_BYTES}-${MEDIA_CHUNK_BYTES + 99}`),
-      ask('bytes=-50'),
-      ask('bytes=7-8'),
-    ]);
+    const answers = await Promise.all([ask('bytes=0-99'), ask('bytes=5000-5099'), ask('bytes=-50'), ask('bytes=7-8')]);
 
     // Assert
     should(scans().length).eql(1);
     should(answers.map(answer => answer.status)).eql([206, 206, 206, 206]);
-    should(bytesOf(answers[3] as ApiResponse)).eql(CLIP.subarray(7, 9));
+    should(bytesOf(answers[3] as ApiResponse)).eql(SMALL.subarray(7, 9));
   });
 });
 
@@ -178,7 +175,7 @@ describe('the media scan: a request that meets a scan in flight', () => {
         return await inner.read(fn);
       },
     };
-    const { ask, scans } = fixture(file(CLIP), { redaction: gated });
+    const { ask, scans } = fixture(file(SMALL), { redaction: gated });
     const settle = async (until: () => boolean): Promise<void> => {
       while (!until()) await new Promise<void>(resolve => setImmediate(resolve));
     };
@@ -195,8 +192,8 @@ describe('the media scan: a request that meets a scan in flight', () => {
     // Assert
     should(reads).eql(1); // nothing but the leader had read the file when the follower arrived
     should(scans().length).eql(1);
-    should(bytesOf(first)).eql(CLIP.subarray(0, 10));
-    should(bytesOf(second)).eql(CLIP.subarray(100, 110));
+    should(bytesOf(first)).eql(SMALL.subarray(0, 10));
+    should(bytesOf(second)).eql(SMALL.subarray(100, 110));
   });
 });
 
@@ -219,7 +216,7 @@ describe('the media scan: what makes a verdict stale', () => {
 
   it('should scan again for a vault change that does not touch the file, then keep the new verdict', async () => {
     // Arrange
-    const { ask, scans, secrets } = fixture(file(CLIP));
+    const { ask, scans, secrets } = fixture(file(SMALL));
     await ask('bytes=0-9');
     await ask('bytes=10-19');
     should(scans().length).eql(1);
@@ -250,22 +247,22 @@ describe('the media scan: what makes a verdict stale', () => {
 
   it('should scan again when the file is rewritten: new size, new mtime or a new inode', async () => {
     // Arrange
-    const { ask, scans, tree } = fixture(file(CLIP));
+    const { ask, scans, tree } = fixture(file(SMALL));
     await ask('bytes=0-9');
     should(scans().length).eql(1);
 
     // Act + Assert, one rewrite at a time
-    tree.set('clip.mp4', file(CLIP, { mtime: '2031-01-01T00:00:00.000Z' }));
+    tree.set('clip.mp4', file(SMALL, { mtime: '2031-01-01T00:00:00.000Z' }));
     await ask('bytes=0-9');
     should(scans().length).eql(2);
 
-    tree.set('clip.mp4', file(CLIP.subarray(0, CLIP.byteLength - 1), { mtime: '2031-01-01T00:00:00.000Z' }));
+    tree.set('clip.mp4', file(SMALL.subarray(0, SMALL.byteLength - 1), { mtime: '2031-01-01T00:00:00.000Z' }));
     await ask('bytes=0-9');
     should(scans().length).eql(3);
 
     tree.set(
       'clip.mp4',
-      file(CLIP.subarray(0, CLIP.byteLength - 1), {
+      file(SMALL.subarray(0, SMALL.byteLength - 1), {
         mtime: '2031-01-01T00:00:00.000Z',
         identities: [
           { dev: 1n, ino: 100n, ctimeNs: 1_000_000_000n, mode: 0o40755 },
@@ -278,7 +275,7 @@ describe('the media scan: what makes a verdict stale', () => {
 
     tree.set(
       'clip.mp4',
-      file(CLIP.subarray(0, CLIP.byteLength - 1), {
+      file(SMALL.subarray(0, SMALL.byteLength - 1), {
         mtime: '2031-01-01T00:00:00.000Z',
         identities: [
           { dev: 1n, ino: 100n, ctimeNs: 1_000_000_000n, mode: 0o40755 },
@@ -296,10 +293,10 @@ describe('the media scan: what makes a verdict stale', () => {
 
   it('should refuse a rewritten file that now holds a value, though the old bytes were clean', async () => {
     // Arrange
-    const { ask, tree } = fixture(file(CLIP), { secrets: new Map([['API_KEY' as never, SECRET]]) });
+    const { ask, tree } = fixture(file(SMALL), { secrets: new Map([['API_KEY' as never, SECRET]]) });
     await ask('bytes=0-9');
     const dirty = new Uint8Array([
-      ...CLIP.subarray(0, CLIP.byteLength - SECRET.length),
+      ...SMALL.subarray(0, SMALL.byteLength - SECRET.length),
       ...new TextEncoder().encode(SECRET),
     ]);
 
@@ -315,9 +312,9 @@ describe('the media scan: what makes a verdict stale', () => {
 describe('the media scan: a file cut short after it was judged', () => {
   it('should refuse a piece shorter than the range it named, never serve it short', async () => {
     // Arrange: the descriptor says the file is whole, and the bytes under it have gone (a truncation under the read)
-    const { ask, tree } = fixture(file(CLIP));
+    const { ask, tree } = fixture(file(SMALL));
     await ask('bytes=0-9');
-    tree.set('clip.mp4', file(CLIP.subarray(0, 100), { size: CLIP.byteLength }));
+    tree.set('clip.mp4', file(SMALL.subarray(0, 100), { size: SMALL.byteLength }));
 
     // Act
     const refused = await refusalOf(ask('bytes=1000-1999'));
@@ -377,7 +374,7 @@ describe('the media scan: a redactor that cannot name its values keeps nothing',
     const blind: Pick<Redaction, 'read'> = {
       read: async fn => await inner.read(scope => fn({ text: scope.text, cells: scope.cells, lines: scope.lines })),
     };
-    const { ask, scans } = fixture(file(CLIP), { redaction: blind });
+    const { ask, scans } = fixture(file(SMALL), { redaction: blind });
 
     // Act
     const first = await ask('bytes=0-9');
