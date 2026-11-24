@@ -4,6 +4,7 @@
  * with `refuseIfHeld`, so the owner removes in ONE step and a governed caller is refused with the budget-first sentence
  * — file untouched, nothing held, the judge asked once. The held rule lives in the kernel only; this proves the wiring.
  */
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { describe, expect, test } from 'bun:test';
 import type { ConfigWriteJudgement } from '@ferretry/kernel/contract';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
@@ -40,7 +41,7 @@ async function world(verdict: 'apply' | 'hold', files: Record<string, unknown>) 
   };
   const host = await testHost({
     plugins: [daemon, runtimes],
-    fakes: { vault: emptyVault() },
+    fakes: { gate: new FakeGate(), vault: emptyVault() },
     gate,
     config: { logins: files },
   });

@@ -1,5 +1,5 @@
-/* The composer editor rows (Style, Button layout): the cards sit in ONE row under the row's name, the line for the chosen
-   card under them, and the preview (Style only) beside them, or under them where the panel is too narrow for both.
+/* The composer editor rows (Style, Button layout): the cards sit in ONE row under the row's name, each with its own sample
+   of what the choice does (`ChoiceSample`, a fixed-shape box), and the line for the chosen card under them.
    They lay out by the width of the PANEL (container queries), never the window's. Theme tokens only. */
 .fy-cm-body {
   align-items: flex-start;
@@ -24,6 +24,8 @@
   font-size: var(--text-sm, 12px);
   line-height: 1.4;
   margin: 0;
+  /* Two lines are held whichever card is chosen (Rich text wraps on a phone, the others do not), so choosing never moves the page. */
+  min-height: 2.8em;
 }
 /* Three cards share the row down to the narrowest the cards themselves allow (480px, below which they stack); the title
    wraps rather than the row breaking in two. */
@@ -35,7 +37,7 @@
 /* Stacked (a phone, a narrow panel): the cards are compact so three of them do not fill the screen. */
 @container (max-width: 479.98px) {
   .fy-cm-cards .fy-cc__card {
-    gap: 0;
+    gap: 8px;
     min-height: 0;
     padding: 8px 14px;
   }

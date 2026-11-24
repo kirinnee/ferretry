@@ -13,6 +13,7 @@ import { ImportResultList } from '../import-kit/import-results.tsx';
 import { counts, nameProblem, type ToolModel } from '../import-kit/model.ts';
 import { plural, toolHeadline } from '../import-kit/mapping-words.ts';
 import type { ImportWizard } from './use-import-wizard.ts';
+import { setOf } from './wizard-memory.ts';
 
 function Header({ model, hideState = false }: { readonly model: ToolModel; readonly hideState?: boolean }) {
   const signedInAs = !model.installed ? 'unknown' : model.stage === 'needs-sign-in' ? 'none' : { email: model.email };
@@ -137,13 +138,13 @@ export interface ToolPageProps {
 export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: ToolPageProps) {
   const [signedHere, setSignedHere] = useState(false);
   const harness = model.harness;
-  const left: ReadonlySet<ImportItemId> = wizard.left[harness];
+  const left: ReadonlySet<ImportItemId> = setOf(wizard.left, harness);
   const name = wizard.nameOf(harness);
   // A runtime this setup already made is carried through a retry: no new name is asked for, so none is checked.
   const invalid = model.duplicateOf === null ? nameProblem(name) : null;
   const end = wizard.ends[harness];
   const taking = counts(model, left);
-  const refreshing = model.updates.filter(update => !wizard.declined[harness].has(update.reference)).length;
+  const refreshing = model.updates.filter(update => !setOf(wizard.declined, harness).has(update.reference)).length;
   const stage = model.stage === 'needs-sign-in' && signedHere ? 'ready' : model.stage;
 
   if (end !== undefined)
@@ -216,10 +217,10 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
           left={left}
           leftAlone={model.leftAlone}
           onToggle={(id, on) => wizard.toggle(harness, id, on)}
-          tickedEnv={wizard.tickedEnv[harness]}
+          tickedEnv={setOf(wizard.tickedEnv, harness)}
           onTickEnv={(name, on) => wizard.tickEnv(harness, name, on)}
           updates={model.updates}
-          declined={wizard.declined[harness]}
+          declined={setOf(wizard.declined, harness)}
           onTakeUpdate={(reference, on) => wizard.takeUpdate(harness, reference, on)}
         />
       </section>

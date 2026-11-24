@@ -7,7 +7,8 @@
  * The kernel's own lookup searches the caller's `directories` first and `PATH` second; that is the same answer here
  * because `PATH` has just missed, so PATH keeps its precedence.
  */
-import { HARNESS_FALLBACK_COMMANDS, harnessFallbackDirectories } from '../../contract/index.ts';
+import { harnessFallbackDirectories } from '../../contract/index.ts';
+import { supportedKinds } from '../lib/harness-kind.ts';
 import type { HostPlatform } from './host-platform.ts';
 
 export interface HarnessLookupDeps {
@@ -21,7 +22,7 @@ export interface HarnessLookupDeps {
 export function harnessAwareWhich(deps: HarnessLookupDeps): (name: string) => Promise<string | undefined> {
   return async name => {
     const onPath = await deps.which(name);
-    if (onPath !== undefined || !HARNESS_FALLBACK_COMMANDS.includes(name)) return onPath;
+    if (onPath !== undefined || !(supportedKinds() as readonly string[]).includes(name)) return onPath;
     await deps.platform.prime();
     return await deps.which(name, {
       directories: harnessFallbackDirectories({ home: deps.home(), platform: deps.platform.name() }),

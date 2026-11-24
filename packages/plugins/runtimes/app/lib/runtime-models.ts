@@ -1,4 +1,4 @@
-import { KnownHarnessKeySchema, type KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import { HarnessKeySchema, type HarnessKey } from '@ferretry/core-ferrets/contract';
 import type { RuntimesClient } from './client.ts';
 import { asModelTier, type ModelTier } from '@ferretry/app/ui';
 
@@ -27,7 +27,7 @@ export interface RuntimeModelChoice {
 // GAP(ferrets): the per-ferret runtime catalog wire (`RuntimeModelCatalog`) is not in Ferrets' contract yet; this
 // is the app's own parse of it, kept until Ferrets publishes the schema.
 export interface RuntimeModelCatalog {
-  readonly harness: KnownHarnessKey;
+  readonly harness: HarnessKey;
   readonly source: 'wrapper-inventory' | 'codex-app-server';
   readonly choices: readonly RuntimeModelChoice[];
   /**
@@ -48,7 +48,7 @@ class DaemonResponseError extends Error {
   }
 }
 
-const isHarness = (value: unknown): value is KnownHarnessKey => KnownHarnessKeySchema.safeParse(value).success;
+const isHarness = (value: unknown): value is HarnessKey => HarnessKeySchema.safeParse(value).success;
 
 const asObject = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;

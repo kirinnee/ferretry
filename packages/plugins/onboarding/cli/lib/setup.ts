@@ -226,7 +226,7 @@ async function interview(deps: SetupDeps, prompt: OnboardPrompt, flags: SetupFla
     return 0;
   }
 
-  const names: Partial<Record<Harness, string>> = {};
+  const names: Record<string, string> = {};
   for (const runtime of scan.runtimes) {
     if (!include.includes(runtime.harness)) continue;
     const answer = (await prompt.ask(`Name for the ${LABEL[runtime.harness]} runtime [${runtime.name}]:`)).trim();

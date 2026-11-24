@@ -8,7 +8,7 @@ import {
 } from '../../../app/lib/runtime-switch.ts';
 import { launchedModel } from '../../../app/lib/session-view.ts';
 import { type Call, scripted } from './support/client.ts';
-import { ferretSummary } from '@ferretry/core-ferrets/contract/testing';
+import { ferretSummary, THIRD_HARNESS_KEY } from '@ferretry/core-ferrets/contract/testing';
 
 // What `GET /v1/ferrets/:ferretId` serves: Ferrets' summary, built from the contract (not a hand-written view).
 const FERRET = ferretSummary({
@@ -86,9 +86,12 @@ describe('readRuntimeSessionView', () => {
     expect(() =>
       parseRuntimeSessionView({ config: { id: 's', harness: 'codex' }, state: { status: 'running' } }),
     ).toThrow('cannot read as a ferret');
-    expect(() => parseRuntimeSessionView({ ...ferretSummary({ id: 's-1' }), harness: 'claude' })).toThrow(
-      'cannot read as a ferret',
-    );
+  });
+
+  it('carries a ferret on a harness this build has no behaviour for, open, instead of refusing it as unreadable', () => {
+    expect(
+      parseRuntimeSessionView({ ...ferretSummary({ id: 's-1' }), harness: THIRD_HARNESS_KEY }).config.harness,
+    ).toBe(THIRD_HARNESS_KEY);
   });
 });
 

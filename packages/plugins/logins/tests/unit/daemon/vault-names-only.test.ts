@@ -7,6 +7,7 @@
  * any element or in its serialisation, (c) what the plugin sent out holds no seeded value, and (d) the answer is right:
  * Ready where the name is stored, Needs sign-in where it is not. The seeded value is synthetic.
  */
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { expect, spyOn, test } from 'bun:test';
 import type { VaultApi } from '@ferretry/core-vault/contract';
 import { testHost } from '@ferretry/kernel/testing';
@@ -82,7 +83,7 @@ test('the names-only vault port reaching the real logins plugin never returns a 
   const port = observePort();
   const host = await testHost({
     plugins: [daemon],
-    fakes: { vault: held.vault },
+    fakes: { gate: new FakeGate(), vault: held.vault },
     config: {
       logins: {
         stored: {

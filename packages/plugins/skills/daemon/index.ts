@@ -1,6 +1,7 @@
 import type { ConfigCollectionDef, FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { isKnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import { isSupportedHarnessKey } from '@ferretry/plugin-runtimes/contract';
 import type { CatalogSkillProvider } from '@ferretry/plugin-catalogs/contract';
 import {
   type FerretSkills,
@@ -94,7 +95,12 @@ export default implementDaemon(manifest, {
     const portsFor = (files: SkillFilesRouter) => ({
       files,
       homes: async () =>
-        (await publishedHomes()).map(home => ({ runtimes: home.runtimes, harness: home.harness, home: home.home })),
+        (await publishedHomes()).flatMap(home =>
+          // A home of a harness this plugin has no skills layout for lists none here: never read as another harness.
+          isSupportedHarnessKey(home.harness)
+            ? [{ runtimes: home.runtimes, harness: home.harness, home: home.home }]
+            : [],
+        ),
       projects: async () =>
         ((await projects.current()?.list()) ?? []).map(project => ({
           id: project.id,

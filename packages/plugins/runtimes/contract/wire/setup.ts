@@ -5,7 +5,13 @@
  */
 import { z } from 'zod';
 import { CatalogActSchema, CatalogFormatSchema } from './catalog.ts';
-import { KnownHarnessKeySchema, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from './shared.ts';
+import {
+  HarnessKeySchema,
+  InstantSchema,
+  MAX_HARNESSES,
+  NonEmptyStringSchema,
+  NonNegativeIntegerSchema,
+} from './shared.ts';
 
 // ── Tools ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -23,12 +29,12 @@ export type ToolInstallPlan = z.infer<typeof ToolInstallPlanSchema>;
 /** One harness tool on this machine: found, or the plan an install would follow. */
 export const SetupToolSchema = z.discriminatedUnion('installed', [
   z.strictObject({
-    harness: KnownHarnessKeySchema,
+    harness: HarnessKeySchema,
     label: NonEmptyStringSchema,
     installed: z.literal(true),
   }),
   z.strictObject({
-    harness: KnownHarnessKeySchema,
+    harness: HarnessKeySchema,
     label: NonEmptyStringSchema,
     installed: z.literal(false),
     install: ToolInstallPlanSchema,
@@ -37,15 +43,15 @@ export const SetupToolSchema = z.discriminatedUnion('installed', [
 export type SetupTool = z.infer<typeof SetupToolSchema>;
 
 export const ToolInstallRequestSchema = z.strictObject({
-  harnesses: z.array(KnownHarnessKeySchema).min(1).max(2),
+  harnesses: z.array(HarnessKeySchema).min(1).max(MAX_HARNESSES),
   /**
    * The command the person was SHOWN for a harness before pressing Install. When it is there and the daemon's fresh plan
    * for that harness is a different command, the daemon refuses before starting anything (the machine changed between the
    * look and the press), so what runs is only ever what was on the screen. Absent: the daemon runs its own plan.
    */
   shown: z
-    .array(z.strictObject({ harness: KnownHarnessKeySchema, command: NonEmptyStringSchema }))
-    .max(2)
+    .array(z.strictObject({ harness: HarnessKeySchema, command: NonEmptyStringSchema }))
+    .max(MAX_HARNESSES)
     .readonly()
     .optional(),
 });
@@ -53,16 +59,16 @@ export type ToolInstallRequest = z.infer<typeof ToolInstallRequestSchema>;
 
 /** How installing one tool ended (E1, E2). A failure always carries the command to run by hand. */
 export const ToolInstallOutcomeSchema = z.discriminatedUnion('outcome', [
-  z.strictObject({ harness: KnownHarnessKeySchema, outcome: z.literal('already-installed') }),
+  z.strictObject({ harness: HarnessKeySchema, outcome: z.literal('already-installed') }),
   z.strictObject({
-    harness: KnownHarnessKeySchema,
+    harness: HarnessKeySchema,
     outcome: z.literal('installed'),
     command: NonEmptyStringSchema,
     // The manager's last lines, scrubbed daemon-side (no token, no credential line); bounded.
     output: z.array(z.string().max(200)).max(20).readonly().default([]),
   }),
   z.strictObject({
-    harness: KnownHarnessKeySchema,
+    harness: HarnessKeySchema,
     outcome: z.literal('failed'),
     cause: z.enum([
       'no-package-manager',
@@ -96,7 +102,7 @@ export type HostLogin = z.infer<typeof HostLoginSchema>;
 
 /** What the first run found for one harness (§4.3 steps 2 and 3). */
 export const HarnessScanSchema = z.strictObject({
-  harness: KnownHarnessKeySchema,
+  harness: HarnessKeySchema,
   installed: z.boolean(),
   account: HostLoginSchema,
   instructions: z
@@ -141,7 +147,7 @@ export type HarnessScan = z.infer<typeof HarnessScanSchema>;
 
 /** A runtime the import would create, under the name it suggests (§4.3 step 4). */
 export const SetupRuntimeSchema = z.strictObject({
-  harness: KnownHarnessKeySchema,
+  harness: HarnessKeySchema,
   name: NonEmptyStringSchema,
   profile: NonEmptyStringSchema,
 });
@@ -154,7 +160,7 @@ export const SetupUpdateSchema = z.strictObject({
 
 /** A runtime the import did not create because one already uses that login and profile (E15). */
 export const SetupDuplicateSchema = z.strictObject({
-  harness: KnownHarnessKeySchema,
+  harness: HarnessKeySchema,
   existing: NonEmptyStringSchema,
   suggested: NonEmptyStringSchema,
 });
@@ -172,7 +178,7 @@ export const SetupScanSchema = z.strictObject({
   updates: z.array(SetupUpdateSchema).readonly(),
   duplicates: z.array(SetupDuplicateSchema).readonly(),
   /** The result screen's sentences (E4–E9). */
-  notes: z.array(z.strictObject({ harness: KnownHarnessKeySchema, text: NonEmptyStringSchema })).readonly(),
+  notes: z.array(z.strictObject({ harness: HarnessKeySchema, text: NonEmptyStringSchema })).readonly(),
   /** Whether an import may be staged now, and why not when it may not. */
   importing: CatalogActSchema,
 });
@@ -191,7 +197,7 @@ export const CLONE_BUNDLE_FORMAT = 'ferretry-clone';
  */
 export const CloneCredentialSchema = z.strictObject({
   id: NonEmptyStringSchema,
-  harness: KnownHarnessKeySchema,
+  harness: HarnessKeySchema,
   label: NonEmptyStringSchema.optional(),
   email: NonEmptyStringSchema.optional(),
   store: z.literal('environment').optional(),

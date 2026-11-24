@@ -417,6 +417,58 @@ models too, so `/model` in a Codex session offers what Ollama has, not the two s
 A read that changes what a runtime offers republishes the fleet (as a newer catalog does); one that does not
 changes nothing.
 
+## Live model list
+
+An environment login whose provider documents a model list also keeps **the ids that list returned for this
+key**, so a picker can say which curated models the key lacks and which models the catalog has not reviewed yet
+(that picker is a later change; this section is the daemon half).
+
+**Reading.** The request is the one a login's **Test** already sends, through the Vault's `authorizeFetch`: the
+Vault puts the key on that one request to that one host and returns only the body. Logins never holds the key.
+Only a Test that is **a free read at a path ending `/models`** is a model list (Anthropic, OpenAI, Azure OpenAI,
+DeepSeek, Kimi, LiteLLM and a custom gateway today); a Test that reads a quota, a key or sends one message is
+never read as a list, so a balance can never be taken for models. Three reply shapes are read, each as the
+provider documents it: Anthropic's `{ data: [{ id }], has_more }` (also MiniMax's Anthropic-compatible
+`/anthropic/v1/models`), OpenAI-style `{ object: "list", data: [{ id }] }`, and Gemini's
+`{ models: [{ name: "models/<id>" }], nextPageToken }`.
+
+**What is kept.** Ids only, in `state/logins/model-lists/<login>.json`: the ids (an id that is not one word of
+the catalog's grammar is dropped, at most 2,000 are kept), when they were read, and `complete`. `complete: false`
+means the provider paged or the list was cut, so an id missing from it proves nothing. No name, price, owner,
+header, key or body is kept, logged or returned. A reply that is not a model list (an error status, `[]`, a
+page that is HTML, a map) is **never stored** and the last list stands.
+
+**When it reads.** Only when somebody's act causes it — never on a timer:
+
+- **Add login** (and an edit of one): once, when the login's file appears or changes.
+- **Test**: the same reply is kept, with no second request.
+- **A picker opens and the list is older than 24 hours**: `POST /v1/logins/:loginId/model-list/refresh` (body `{}`,
+  `fleet.use`) reads only when due and otherwise answers from the held list.
+- **"Refresh list"**: `POST /v1/logins/:loginId/model-list/force` (body `{}`, **`fleet.configure`**, like the keyed
+  Test). A device holding only `fleet.use` (a limited one) is refused it. (It is not "Update now", which moves a
+  runtime's pinned default; a list refresh **never moves a default or a pin**.)
+
+**Attempt cooldown.** No caller can aim requests at a provider, however often it asks. Every attempt to read a login's
+list, whatever it came to, is on record (in memory, per login and per revision of the login's file), and a login's
+provider is **not asked again within 60 seconds of an attempt**; a _plain_ read (a picker opening on a stale list)
+also waits **15 minutes after an attempt that gave no list**. A request that falls inside answers `cooling` with the
+held list and sends nothing. An edit of the login's key or address is a different revision, so it is read at once.
+Callers that arrive while a read of the same login (and revision) is under way share one request.
+
+**An edit or a removal while a read is under way.** Each read is tagged with the revision of the login's file in effect
+when it began, and how many times the login had been removed. Its reply is kept **only if that revision is still in
+effect and the login is still there**: a reply from the key or address the login had before an edit never marks the
+list fresh, an edit always gets its own read, and a list is never written back for a login that was removed (nor for
+one removed and added again under the same name). A Test's reply is held to the same rule.
+
+Offline or a provider that is down keeps the last list and answers `kept`: an answer, never an error. **Each keyed
+read is recorded** as `secrets.used` ([audit.md](audit.md)): the secret's name, the host, the login id and the
+outcome's kind, never the key or the reply. A removed login's list is deleted with it. The cooldown record is in
+memory, so a daemon restart clears it.
+
+`LoginsApi.modelLists()` hands the held lists (by login id, no network) to Runtimes; `ModelsChanged` is published
+when a stored list differs from the one before it.
+
 ## Declared gaps
 
 - **Only Ollama on this machine is detected.** Another host (a GPU box on the network) is refused, not

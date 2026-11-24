@@ -14,7 +14,8 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
 import type { PanelProps } from '@ferretry/kernel/manifest';
 import { createElement, type FunctionComponent } from 'react';
-import { ferretSummary } from '@ferretry/core-ferrets/contract/testing';
+import { ferretSummary, THIRD_HARNESS_KEY } from '@ferretry/core-ferrets/contract/testing';
+import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
 import { createRuntimePicker } from '../../../app/views/runtime-picker.tsx';
 import type { LiveRuntimesClient, RuntimesClient } from '../../../app/lib/client.ts';
 import { runtimeCatalog, runtimeView } from './support/picker.ts';
@@ -355,5 +356,22 @@ describe('Fast is offered only when the catalog confirms it for the model in for
   it('offers Fast when the catalog confirms the model has it', async () => {
     await openSpeed(daemon(true, { model: 'claude-opus-5' }).client);
     expect(fastChoice().disabled).toBe(false);
+  });
+});
+
+describe('the runtime picker for a ferret on a harness this build has no behaviour for (through the route parser)', () => {
+  it("draws its bar and says the one sentence in every list, never a parse error and never Claude's controls", async () => {
+    const { client, asked } = daemon(true, { harness: THIRD_HARNESS_KEY });
+    const root = await draw(client);
+    await settle();
+    expect(root.querySelector('[role="alert"]')).toBeNull();
+    expect(root.textContent).not.toContain('cannot read');
+    const chip = must(root.querySelector<HTMLElement>('[data-runtime-chip="model"]'), 'the model chip');
+    await interact(() => chip.click());
+    await settle();
+    const text = must(popover(), 'the popover').textContent ?? '';
+    expect(text).toContain(unsupportedHarnessSentence(THIRD_HARNESS_KEY));
+    expect(text).not.toContain('Opus 5');
+    expect(asked.map(call => call.route)).not.toContain('GET /v1/ferrets/:id/runtime-models');
   });
 });

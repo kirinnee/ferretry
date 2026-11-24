@@ -8,7 +8,7 @@ import {
   type EnvironmentLoginTemplate,
   type LoginChange,
   type LoginChangesApi,
-  LoginChangeError,
+  type LoginChangeError,
   type LoginChangeOutcome,
   type LoginChangeView,
   type LoginEnvImportApi,
@@ -164,6 +164,7 @@ export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
       ModelCatalogsViewSchema.parse({ published: { origin: 'https://example.invalid', enabled: false }, catalogs: [] }),
     modelPrices: async () => prices,
     modelSources: async () => sources,
+    modelLists: async () => ({}),
     authorizeFetch: async (loginId, variable, hosts) => {
       spends.push({ loginId, variable, hosts });
       return spendAnswer;

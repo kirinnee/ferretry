@@ -37,7 +37,7 @@ describe('planProviderProbe', () => {
       placement: { header: 'x-api-key' },
       request: {
         method: 'GET',
-        url: 'https://api.anthropic.com/v1/models',
+        url: 'https://api.anthropic.com/v1/models?limit=1000',
         headers: { accept: 'application/json', 'anthropic-version': '2023-06-01' },
         timeoutMs: 10_000,
         maxResponseBytes: 512 * 1_024,

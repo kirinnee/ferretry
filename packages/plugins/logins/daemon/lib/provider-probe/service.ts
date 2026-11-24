@@ -2,8 +2,9 @@ import type { Credential } from '../shared/credential.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
 import type { LoginId, LoginTestCode, LoginTestResult } from '../../../contract/index.ts';
 import type { AuthorizedOutcome } from '@ferretry/core-vault/contract';
-import { planProviderProbe } from './plan.ts';
+import { planProviderProbe, type ProviderProbePlan } from './plan.ts';
 import type { ProviderProbeClock, ProviderProbePort } from './ports.ts';
+import type { ModelListReadNote } from '../model-lists/audit.ts';
 
 /**
  * A person's **Test** of an environment login (docs/provider-presets.md): one request, the cheapest
@@ -61,7 +62,28 @@ export function probeCode(outcome: AuthorizedOutcome): LoginTestCode {
 export interface ProviderProbeServiceParts {
   readonly probe: ProviderProbePort;
   readonly clock: ProviderProbeClock;
+  /**
+   * A Test that asked a model list is about to be sent: the function that takes the body it gets, to be kept as ids. It
+   * is asked for BEFORE the request, so the login it speaks for is the one the request was made under. The body is the
+   * provider's reply and is never logged or returned; the callee reads the ids and drops it. Neither may throw.
+   */
+  readonly modelListRecorder?: (loginId: string) => (payload: unknown) => Promise<void>;
+  /**
+   * A keyed read of a model list put the login's key on a request: say so (the `secrets.used` record). Metadata only: the
+   * login, the secret's name, the host and the outcome's kind. Must not throw.
+   */
+  readonly onListRead?: (note: ModelListReadNote) => Promise<void>;
 }
+
+/** The outcomes of a keyed read that put the key on no request. */
+const NOTHING_SENT: ReadonlySet<string> = new Set(['refused', 'secret_missing', 'vault_damaged']);
+
+/** A model list is asked at a path ending `/models` (every provider's list endpoint); a quota or key read is not one. */
+const MODEL_LIST_PATH = /\/models\/?$/u;
+
+/** Whether a plan is one free read of a model list. */
+const asksModelList = (plan: ProviderProbePlan): boolean =>
+  plan.kind === 'authorized' && plan.spends === 'nothing' && MODEL_LIST_PATH.test(new URL(plan.request.url).pathname);
 
 /** One login to test: its id, what it is, and the preset it was made from. */
 export interface ProviderProbeSubject {
@@ -106,10 +128,39 @@ export class ProviderProbeService {
     const plan = planProviderProbe(subject.preset, subject.credential);
     if ('reason' in plan) return result(plan.code, 'nothing', plan.reason);
     if (plan.spends === 'one-token' && !consent.allowInference) return result('consent_required', 'nothing');
+    const record = asksModelList(plan) ? this.parts.modelListRecorder?.(subject.id) : undefined;
     const outcome = await this.parts.probe.probe(plan);
     const code = probeCode(outcome);
+    // The Test of a provider whose Test IS its model list keeps the ids from that same reply: no second request.
+    if (outcome.kind === 'completion' && record !== undefined) await record(outcome.payload).catch(() => undefined);
     // A refusal, a missing secret or a damaged store sent nothing; anything else reached the provider.
     const sent = !['refused', 'not_set', 'vault_damaged'].includes(code);
     return result(code, sent ? plan.spends : 'nothing', PROVIDER_TEST_MESSAGES[code], sent);
+  }
+
+  /**
+   * The model-list reply of an environment login whose Test is a free read of the provider's model list: the parsed body,
+   * for the list service to read the ids from. `undefined` for every login that has no such read (a sign-in, a preset
+   * with no key, a Test that is a quota read or an inference, a refusal), and for any answer that is not a 2xx body: the
+   * caller keeps the list it had. Nothing is spent, and the body goes no further than the caller.
+   */
+  async listModels(subject: ProviderProbeSubject): Promise<{ readonly payload: unknown } | 'failed' | undefined> {
+    if (subject.credential.store !== 'environment' || subject.preset === undefined) return undefined;
+    const plan = planProviderProbe(subject.preset, subject.credential);
+    if ('reason' in plan || !asksModelList(plan)) return undefined;
+    const outcome = await this.parts.probe.probe(plan);
+    // The Vault placed the key on that request (or refused before it did): say so, by name and host, once per read. A
+    // refusal, a missing secret or a damaged store put nothing on a request and writes nothing.
+    if (plan.kind === 'authorized' && !NOTHING_SENT.has(outcome.kind)) {
+      await this.parts
+        .onListRead?.({
+          loginId: subject.id,
+          secret: String(plan.secretName),
+          host: new URL(plan.request.url).host,
+          outcome: outcome.kind,
+        })
+        .catch(() => undefined);
+    }
+    return outcome.kind === 'completion' ? { payload: outcome.payload } : 'failed';
   }
 }
