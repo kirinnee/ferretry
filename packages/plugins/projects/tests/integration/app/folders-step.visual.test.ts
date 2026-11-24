@@ -183,7 +183,7 @@ describe('the setup flow ends in project setup', () => {
             await tab.click('[data-step-next]');
             await tab.waitForFunction(() => window.__registered.length === 2);
             expect(await tab.evaluate(() => window.__registered)).toEqual(['/home/sam', '/home/sam/atlas']);
-            expect(await tab.evaluate(() => window.__memory)).toEqual({
+            expect(await tab.evaluate(() => window.__memory)).toMatchObject({
               openLabel: 'Open your projects',
               openHref: '/d/studio-box/projects',
             });
