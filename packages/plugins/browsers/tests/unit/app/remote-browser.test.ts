@@ -24,6 +24,7 @@ import type { BrowserStatus } from '../../../contract/wire/browser.ts';
 import { encodeBrowserStreamChunks } from '../../../contract/wire/stream.ts';
 import { browserDaemon, daemonConnection, recordingClient, refusal, socketClient } from '../../support/app/client.ts';
 import { daemonSessionScope } from '../../support/app/scope.ts';
+import { browserViewerSlot } from '../../../app/lib/scope.ts';
 
 const status = {
   sessionId: 'same/session',
@@ -102,6 +103,61 @@ describe('remote browser transport', () => {
     await expect(runRemoteBrowserAction(daemon, scope, { action: 'start' })).rejects.toThrow(
       'daemon returned another session',
     );
+  });
+
+  it('B1 names its screen on its calls only while the daemon has told its stream who it is, and never makes an id up', async () => {
+    // Arrange — one screen: its scope and the slot its stream's id is kept in.
+    const { client, calls } = scripted();
+    const sockets = socketClient();
+    const daemon = browserDaemon(client);
+    const slot = browserViewerSlot();
+    const screen = daemonSessionScope(daemon, 'same/session', slot);
+
+    // Act — a call before any stream; the stream opens and is told its id; two calls; the stream ends; a call.
+    await fetchRemoteBrowserStatus(daemon, screen);
+    const socket = remoteBrowserSocketFactory(browserDaemon(sockets.client), screen);
+    recordEvents(socket);
+    sockets.daemon.open();
+    sockets.daemon.frame(JSON.stringify({ viewer: 'minted-by-the-daemon' }));
+    await fetchRemoteBrowserStatus(daemon, screen);
+    await runRemoteBrowserAction(daemon, screen, { action: 'activate-page', pageId: 'p2' });
+    sockets.daemon.close('gone', 1006);
+    await fetchRemoteBrowserStatus(daemon, screen);
+
+    // Assert — the stream asked for no id, the calls carried the daemon's while it lived, and none before or after.
+    expect(sockets.opened).toEqual([{ key: STREAM, params: { ferretId: 'same/session' } }]);
+    expect(calls[0]?.init).not.toHaveProperty('query');
+    expect(calls[1]?.init?.query).toEqual({ viewer: 'minted-by-the-daemon' });
+    expect(calls[2]?.init?.query).toEqual({ viewer: 'minted-by-the-daemon' });
+    expect(calls[3]?.init).not.toHaveProperty('query');
+    expect(slot.current()).toBeUndefined();
+  });
+
+  it('B1 ignores a hello that is not the daemon’s shape, and an ended stream never clears a newer stream’s id', () => {
+    // Arrange
+    const sockets = socketClient();
+    const daemon = browserDaemon(sockets.client);
+    const slot = browserViewerSlot();
+    const scope = daemonSessionScope(daemon, 'same/session', slot);
+    const first = remoteBrowserSocketFactory(daemon, scope);
+    recordEvents(first);
+
+    // Act
+    sockets.daemon.frame('not json');
+    sockets.daemon.frame(JSON.stringify({ viewer: 'a/../b' }));
+    sockets.daemon.frame(JSON.stringify({ viewer: 'first', extra: true }));
+    const unheard = slot.current();
+    sockets.daemon.frame(JSON.stringify({ viewer: 'first' }));
+    const second = remoteBrowserSocketFactory(daemon, scope);
+    recordEvents(second);
+    sockets.daemon.frame(JSON.stringify({ viewer: 'second' }));
+    first.close();
+
+    // Assert — only a well-formed hello is believed; the first stream ending leaves the second's id in place.
+    expect(unheard).toBeUndefined();
+    expect(slot.current()).toBe('second');
+    second.close();
+    expect(slot.current()).toBeUndefined();
   });
 
   it('R548 opens the display on the guarded socket and rebuilds whole frames from contiguous chunks', () => {

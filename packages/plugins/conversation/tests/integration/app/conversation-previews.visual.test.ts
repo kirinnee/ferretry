@@ -313,7 +313,12 @@ describe('Conversation tab previews', () => {
             const page = (await tab.locator('.fy-settings-page').boundingBox())?.width ?? 0;
             expect(page).toBeGreaterThan(700);
             for (const box of boxes) expect(box.width).toBeLessThanOrEqual(320);
-            expect(new Set(boxes.map(box => Math.round(box.top))).size, '3 cards in ONE row').toBe(1);
+            // Layout position, not the painted box: `nudge` leaves the chosen card held at the start of its pop (scale 0.98), which
+            // moves its painted top by a fraction of a pixel and, after rounding, would read as a second row.
+            const rows = await tab
+              .locator('[data-scene="suggestions"] .fy-cc__card')
+              .evaluateAll(cards => cards.map(card => (card as HTMLElement).offsetTop));
+            expect(new Set(rows).size, '3 cards in ONE row').toBe(1);
             expect(boxes[2]!.right - boxes[0]!.left).toBeLessThanOrEqual(group + 1);
           } else {
             // Below 480px of the group's own width the cards stack, and stay short.

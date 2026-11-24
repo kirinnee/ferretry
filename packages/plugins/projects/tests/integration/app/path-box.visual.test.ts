@@ -168,13 +168,22 @@ describe('create sheet scroll bars', () => {
             document.getElementById('probe-clip')?.remove();
           });
 
-          // The path box and its Go button are one row, one height.
+          // O9-4: Go sits INSIDE the path field (centred on it, never taller than it), not beside it.
           const sizes = await tab.evaluate(() => {
             const form = document.querySelector('[data-explorer-path-box]');
-            const height = (selector: string) => form?.querySelector(selector)?.getBoundingClientRect().height ?? 0;
-            return { input: height('input'), go: height('button') };
+            const box = (selector: string) => form?.querySelector(selector)?.getBoundingClientRect();
+            return { input: box('input'), go: box('button[type="submit"]') };
           });
-          expect(Math.abs(sizes.input - sizes.go), 'input and Go are the same height').toBeLessThanOrEqual(1);
+          const { input, go } = sizes;
+          expect(input !== undefined && go !== undefined, 'the path box has its field and Go').toBe(true);
+          if (input !== undefined && go !== undefined) {
+            expect(go.left >= input.left && go.right <= input.right, 'Go sits inside the field').toBe(true);
+            expect(go.height, 'Go is no taller than the field').toBeLessThanOrEqual(input.height + 1);
+            expect(
+              Math.abs(go.top + go.height / 2 - (input.top + input.height / 2)),
+              'Go is centred on the field',
+            ).toBeLessThanOrEqual(1);
+          }
 
           // SIXTY folders: exactly ONE element scrolls (the sheet's body), and nothing scrolls sideways.
           await open('folders=60');

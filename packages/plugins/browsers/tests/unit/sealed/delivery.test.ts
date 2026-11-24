@@ -87,7 +87,7 @@ describe('R1: the viewer socket’s frame is checked again where it is sent', ()
     const host = {
       attachViewer: async (_session: string, onFrame: (frame: BrowserScreencastFrame) => void) => {
         deliver = onFrame;
-        return { detach: () => undefined };
+        return { viewerId: 'v1', detach: () => undefined };
       },
     };
     const release: (() => void)[] = [];
@@ -97,7 +97,11 @@ describe('R1: the viewer socket’s frame is checked again where it is sent', ()
         return { ok: true as const, value: { kind: 'content' as const } };
       },
     };
-    const viewer = heldViewerHost(kernel as never, host as never, { mayType: false, delivery: sealedDelivery(gate) });
+    const viewer = heldViewerHost(kernel as never, host as never, {
+      caller: 'ferret:f1',
+      mayType: false,
+      delivery: sealedDelivery(gate),
+    });
     const frames: unknown[] = [];
     const ended: ViewerTerminalSignal[] = [];
     return {
@@ -167,7 +171,7 @@ describe('R1: a frame held back for a congested socket is not resent once a valu
     const host: BrowserViewerHost = {
       attachViewer: async (_s, frame) => {
         onFrame = frame;
-        return { detach: () => undefined };
+        return { viewerId: 'v1', detach: () => undefined };
       },
       dispatchHumanInput: async () => undefined,
     };
