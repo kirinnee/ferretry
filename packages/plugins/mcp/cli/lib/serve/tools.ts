@@ -916,6 +916,35 @@ const TASK_TOOLS: readonly McpToolDefinition[] = [
   progress('card_progress', 'card', 'Old name of task_progress: rewrite one task’s progress (now, doneSoFar, next).'),
 ];
 
+/**
+ * Create's `generate_image` (docs/create.md): one picture from a written description through the owner's own fal key,
+ * priced before it is sent, under a daily cap and an ask over one dollar. Listed only while Create is on.
+ */
+const CREATE_TOOLS: readonly McpToolDefinition[] = [
+  {
+    name: 'generate_image',
+    plugin: 'create',
+    description:
+      'Make one picture from a written description with fal, on the owner’s key and budget. It is priced first; a call over the owner’s one-call limit asks them and sends nothing until they approve. The answer says where the file is and gives the block that shows it in chat.',
+    inputSchema: object(
+      {
+        prompt: { type: 'string', minLength: 1, maxLength: 2_000, description: 'What the picture shows.' },
+        model: {
+          type: 'string',
+          enum: ['flux-schnell', 'flux-dev', 'flux-pro'],
+          description: 'flux-schnell (default, cheapest), flux-dev (more detail) or flux-pro (best).',
+        },
+        size: {
+          type: 'string',
+          enum: ['square_hd', 'square', 'portrait_4_3', 'portrait_16_9', 'landscape_4_3', 'landscape_16_9'],
+          description: 'The shape; default landscape_4_3.',
+        },
+      },
+      ['prompt'],
+    ),
+  },
+];
+
 /** Every tool this server lists, in the order a model reads them. */
 export const MCP_TOOLS: readonly McpToolDefinition[] = [
   ...TERMINAL_AND_BROWSER_TOOLS,
@@ -923,5 +952,6 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
   ...LESSON_TOOLS,
   ...SEARCH_TOOLS,
   ...TASK_TOOLS,
+  ...CREATE_TOOLS,
   INSTRUCTIONS_TOOL,
 ];

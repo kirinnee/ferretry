@@ -297,13 +297,13 @@ describe('McpServer — the work switch', () => {
     ).eql(MCP_TOOLS.map(tool => tool.name));
   });
 
-  it('should ask the inventory about Board only, and never put the owner into a tool schema', async () => {
+  it('should ask the inventory about the plugins that own a tool, and never put the owner into a tool schema', async () => {
     const asked: string[] = [];
     await listing(async plugin => {
       asked.push(plugin);
       return true;
     });
-    should(asked).eql(['board']);
+    should(asked).eql(['board', 'create']);
     should(JSON.stringify((await harness().request('tools/list')) as object)).not.containEql('"plugin"');
   });
 });
@@ -342,6 +342,6 @@ describe('McpServer — a slow plugin inventory never stalls tool discovery', ()
   it('should still apply the inventory when it answers inside the bound', async () => {
     const names = await list(slow(5, false, 1000));
     should(names).not.containEql('task_progress');
-    should(names).have.length(MCP_TOOLS.length - 2);
+    should(names).have.length(MCP_TOOLS.length - 3);
   });
 });
