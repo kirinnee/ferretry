@@ -18,6 +18,8 @@ export interface HarnessWords {
   readonly name: string;
   /** The short name used mid-sentence: "Claude settings will be skipped on Codex". */
   readonly short: string;
+  /** The word the daemon's model catalog and a session record name this harness by: `claude` for the key `claude-code`. */
+  readonly catalogHalf: string;
   /** The word a runtime's suggested name starts with (the CLI's own name): `claude-default`. */
   readonly commandWord: string;
   /**
@@ -33,12 +35,20 @@ export interface HarnessWords {
 const HARNESS_WORDS = {
   'claude-code': {
     name: 'Claude Code',
+    catalogHalf: 'claude',
     short: 'Claude',
     commandWord: 'claude',
     picker: 'allowlist',
     hostFolder: '.claude',
   },
-  codex: { name: 'Codex', short: 'Codex', commandWord: 'codex', picker: 'two-step', hostFolder: '.codex' },
+  codex: {
+    name: 'Codex',
+    catalogHalf: 'codex',
+    short: 'Codex',
+    commandWord: 'codex',
+    picker: 'two-step',
+    hostFolder: '.codex',
+  },
 } as const satisfies Readonly<Record<string, HarnessWords>>;
 
 /** The key of a harness Runtimes has behaviour for: derived from the table, so no second list can drift from it. */

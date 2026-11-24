@@ -296,7 +296,7 @@ describe('the toolbar turn word, as the screen feeds it', () => {
     const emit = withEvents(client);
     const view = await openWithTurnPanel(client, placed);
     await waitFor(() => client.callsTo(PROMPT).length >= 1, 'the first read');
-    const said = async (expected: string, why: string) => {
+    const said = async (expected: string | null, why: string) => {
       if (placed)
         await waitFor(
           () => word(view) === expected,
@@ -304,7 +304,7 @@ describe('the toolbar turn word, as the screen feeds it', () => {
           () => view.container.textContent ?? '',
         );
     };
-    await said('Your turn', 'Your turn');
+    await said(null, 'no turn word: the status mark says Your turn');
 
     turnState = 'needs-input';
     emit(FerretsChanged.name, { ferret: 'shared', change: 'state' });
@@ -314,7 +314,7 @@ describe('the toolbar turn word, as the screen feeds it', () => {
     turnState = 'your-turn';
     emit(FerretsChanged.name, { ferret: 'shared', change: 'state' });
     await waitFor(() => client.callsTo(PROMPT).length >= 3, 'the third read');
-    await said('Your turn', 'Your turn again');
+    await said(null, 'no turn word again');
     await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 30)));
     return client.callsTo(PROMPT).length;
   };

@@ -31,7 +31,7 @@ export function DeviceSettingsPage() {
   useEffect(() => {
     if (inside !== undefined) router.navigate(inside, { replace: true });
   }, [inside, router]);
-  if (inside !== undefined) return <Loading kind="page" label="Opening settings…" />;
+  if (inside !== undefined) return <Loading className="fy-loading--fill" kind="page" label="Opening settings…" />;
   return (
     <section className="fy-page">
       <h1>This device</h1>

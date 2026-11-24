@@ -39,8 +39,8 @@ export const composerQuotaSpoken = (quota?: Quota | null): string => {
  *
  * ONLY WHAT IS KNOWN IS DRAWN. A window the daemon has no number for is left out rather than drawn as
  * `—`: a dash beside a label reads as "nothing used", the one confident claim nobody made. With no
- * number for either window (and no money to say) NOTHING is drawn, not even an empty tooltip carrier: `usage unknown` is a daemon-side state, not a thing to
- * read on every message box, so the status line goes without it.
+ * number for either window (and no money to say) the line says "No usage data" in words: silence cannot be told from a
+ * broken readout, and the owner asked to be told (O9-17).
  */
 export function ComposerQuota({ quota }: ComposerQuotaProps) {
   const authFailed = quota?.authOk === false;
@@ -49,8 +49,16 @@ export function ComposerQuota({ quota }: ComposerQuotaProps) {
   const week = authFailed ? undefined : quota?.weeklyPercent;
   const spoken = composerQuotaSpoken(quota);
   const money = quotaMoneyText(quota);
-  // NOTHING KNOWN, NOTHING DRAWN: not even an empty element with a tooltip on it.
-  if (!authFailed && !atLimit && money === null && !known(five) && !known(week)) return null;
+  // NOTHING KNOWN: say so in plain words. A silent status line reads as "not measured" or "broken" and the person cannot tell which.
+  if (!authFailed && !atLimit && money === null && !known(five) && !known(week))
+    return (
+      <span className="fy-composer-quota" data-quota="none" title={spoken}>
+        <span className="sr-only">{spoken}</span>
+        <span aria-hidden="true" className="text-faint">
+          No usage data
+        </span>
+      </span>
+    );
   const windows = [
     ...(known(five) ? [{ key: '5h', value: five }] : []),
     ...(known(week) ? [{ key: 'wk', value: week }] : []),

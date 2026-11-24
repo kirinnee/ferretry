@@ -7,7 +7,7 @@
  * screen is fake data; no daemon.
  *
  *   ?compact=1                     the phone's composer
- *   ?usage=known|key|unknown       a subscription login's 5h + weekly, a key login's money spent, or nothing known (draws nothing)
+ *   ?usage=known|key|unknown       a subscription login's 5h + weekly, a key login's money spent, or nothing known ("No usage data")
  *   ?theme=<palette>-<mode>   ?style=<look family>
  */
 
@@ -81,7 +81,7 @@ const RuntimePicker = () => (
   </div>
 );
 
-/** Usage's `composer-quota` panel, as it draws: the windows, the money a key login spent, or NOTHING while unknown. */
+/** Usage's `composer-quota` panel, as it draws: the windows, the money a key login spent, or "No usage data" while unknown. */
 const Quota = () =>
   usage === 'known' ? (
     <span className="fy-composer-quota" data-quota="known">
@@ -97,7 +97,13 @@ const Quota = () =>
         $12.40 this month
       </span>
     </span>
-  ) : null;
+  ) : (
+    <span className="fy-composer-quota" data-quota="none">
+      <span aria-hidden="true" className="text-faint">
+        No usage data
+      </span>
+    </span>
+  );
 
 const slots = {
   'composer.tools': [
