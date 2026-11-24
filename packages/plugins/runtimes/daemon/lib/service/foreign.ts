@@ -14,7 +14,9 @@ import {
   harnessKeyOfKind,
   harnessKindOfKey,
   isSupportedKind,
+  supportedKindOfKey,
   UnsupportedHarnessError,
+  unsupportedHarnessSentence,
 } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import type { BrowserModeSchema, BrowserPortsSettingSchema } from '../../../contract/index.ts';
@@ -164,16 +166,18 @@ export type LoweredHarness<T> = T extends 'claude-code'
  *
  * Every `harness` it meets, nested component inputs included, is a WIRE key and is checked here, BEFORE it is lowered: the
  * library's word `claude` is not a wire key, and once lowered it could no longer be told from the key `claude-code`. A key
- * Runtimes has no behaviour for (`claude` included) throws {@link UnsupportedHarnessError}, the one sentence.
+ * Runtimes has no behaviour for (`claude` included) is handed to `refuse` with the one sentence, which does not return.
  */
-export function lowerHarness<T>(value: T): LoweredHarness<T> {
+export function lowerHarness<T>(value: T, refuse: (sentence: string) => never): LoweredHarness<T> {
   const lower = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(lower);
     if (typeof node !== 'object' || node === null) return node;
     return Object.fromEntries(
       Object.entries(node).map(([key, item]) => [
         key,
-        key === 'harness' && typeof item === 'string' ? harnessKind(item) : lower(item),
+        key === 'harness' && typeof item === 'string'
+          ? (supportedKindOfKey(item) ?? refuse(unsupportedHarnessSentence(item)))
+          : lower(item),
       ]),
     );
   };
