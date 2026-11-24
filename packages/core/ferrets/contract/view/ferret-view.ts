@@ -334,6 +334,7 @@ export const LaunchInstructionSectionIdSchema = z.enum([
   'browser',
   'learning',
   'rm-targets',
+  'voice',
 ]);
 export type LaunchInstructionSectionId = z.infer<typeof LaunchInstructionSectionIdSchema>;
 

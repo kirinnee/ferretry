@@ -27,6 +27,7 @@ const SECTION_WORDS: Readonly<Record<LaunchInstructionSectionId, string>> = {
   browser: 'browser',
   learning: 'learning',
   'rm-targets': 'rm rule',
+  voice: 'voice rules',
 };
 
 const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`;
