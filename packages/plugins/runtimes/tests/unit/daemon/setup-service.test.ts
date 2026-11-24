@@ -944,7 +944,7 @@ describe('the setup.import executor', () => {
     should(description).not.containEql(SECRET_VALUE);
     // The answer names the key it filed (the name, never the value).
     should(summary).equal(
-      'studio is ready · 1 runtime created: claude-default. Filed in the secret store: ANTHROPIC_API_KEY.',
+      '1 runtime created on studio: Claude · your terminal sign-in. Filed in the secret store: ANTHROPIC_API_KEY.',
     );
     const paths = (applied[0]?.documents ?? []).map(document => document.path);
     should(paths).containEql('/state/config/model.yaml');
@@ -3780,8 +3780,7 @@ describe('the setup.import executor, components another plugin owns', () => {
       'skills/claude-skills.yaml',
     ]);
     should(description).containEql('Hands 3 parts to the parts of Ferretry that own them');
-    should(summary).containEql('Written by the parts that own them:');
-    should(summary).containEql('mcp/github.yaml');
+    should(summary).containEql('Saved: your MCP servers, your Claude skills and settings.');
     const written = rawModelOf(applied[0]?.documents ?? []);
     should(Object.keys(written.components.mcp ?? {})).eql([]);
     should(Object.keys(written.components.skills ?? {})).eql([]);
@@ -3824,9 +3823,9 @@ describe('the setup.import executor, components another plugin owns', () => {
     const { summary } = await importOnce(service);
 
     // Assert
-    should(summary).containEql('Written by the parts that own them: skills/claude-skills.yaml.');
-    should(summary).containEql('Held until you confirm: claude-code/settings/claude-settings.yaml.');
-    should(summary).containEql('Not written: mcp/github.yaml (the server is not valid).');
+    should(summary).containEql('Saved: your Claude skills.');
+    should(summary).containEql('Held until you confirm: your Claude settings.');
+    should(summary).containEql('Not written: your MCP servers (the server is not valid).');
     should(summary).not.containEql('settings file held');
     should(applied).have.length(1);
     const model = rawModelOf(applied[0]?.documents ?? []);
@@ -3859,7 +3858,7 @@ describe('the setup.import executor, components another plugin owns', () => {
     const { summary } = await importOnce(service);
 
     // Assert
-    should(summary).containEql('studio is ready');
+    should(summary).containEql('1 runtime created on studio');
     should(summary).containEql('Not written:');
     should(applied).have.length(1);
   });
@@ -4032,7 +4031,7 @@ describe('the setup.import executor builds the fleet from what the owners report
     const { summary } = await importOnce(service);
 
     // Assert
-    should(summary).containEql('Held until you confirm: mcp/github.yaml.');
+    should(summary).containEql('Held until you confirm: your MCP servers.');
     should(planText(applied)).not.containEql('server-github');
     const profiles = Object.values(rawModelOf(applied[0]?.documents ?? []).profiles);
     should(profiles.some(profile => profile.layers.includes('mcp/github'))).be.true();
@@ -4065,7 +4064,7 @@ describe('the setup.import executor builds the fleet from what the owners report
     const { summary } = await importOnce(service, IMPORT({ acceptedUpdates: ['mcp/github'], addDuplicates: true }));
 
     // Assert
-    should(summary).containEql('Held until you confirm: mcp/github.yaml.');
+    should(summary).containEql('Held until you confirm: your MCP servers.');
     const text = JSON.stringify(applied.slice(1).map(entry => entry.plan));
     should(text).containEql('server-github');
     should(text).not.containEql('server-github-newer');
@@ -4139,7 +4138,7 @@ describe('the setup.import executor, what an owner refuses', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     // Assert
-    should(summary).containEql('Not written: claude-code/settings/claude-settings.yaml');
+    should(summary).containEql('Not written: your Claude settings');
     should(applied).have.length(1);
     const files = await tree(home);
     should(files.length).be.above(0);
@@ -4568,7 +4567,7 @@ describe('the setup.import executor adds the harness env to the login the apply 
     const none = world();
     none.state.scans = envScan();
     should((await importOnce(none.service)).summary).equal(
-      'studio is ready · 1 runtime created: claude-default. Filed in the secret store: ANTHROPIC_API_KEY.',
+      '1 runtime created on studio: Claude · your terminal sign-in. Filed in the secret store: ANTHROPIC_API_KEY.',
     );
   });
 

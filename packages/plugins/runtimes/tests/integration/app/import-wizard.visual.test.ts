@@ -230,11 +230,7 @@ const CASES: readonly Case[] = [
       await tab.locator('[data-change-submit]').click();
       await tab.waitForSelector('[data-import-answer]');
     },
-    expectText: [
-      'Claude Code is set up',
-      'Written by the parts that own them',
-      'Not written: skills/release-notes.yaml',
-    ],
+    expectText: ['Claude Code is set up', 'Saved: your MCP servers', 'Not written: your Claude settings'],
   },
 ];
 

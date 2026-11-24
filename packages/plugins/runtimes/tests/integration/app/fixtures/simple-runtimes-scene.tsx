@@ -71,7 +71,14 @@ const runtimes = RuntimeCatalogSchema.parse({
 // The built-in profiles carry a plumbing name; the form says them in words ("Ferretry standard").
 const profiles = LayeredProfileCatalogSchema.parse({
   ...PROFILES,
-  profiles: [...PROFILES.profiles, profile({ name: 'ferretry-claude' }), profile({ name: 'ferretry-codex' })],
+  profiles: [
+    ...PROFILES.profiles,
+    profile({ name: 'ferretry-claude' }),
+    profile({ name: 'ferretry-codex' }),
+    // The two an import makes, one per tool: the picker says them in words.
+    profile({ name: 'claude-default' }),
+    profile({ name: 'codex-default' }),
+  ],
 });
 
 const runtimesClient = {

@@ -86,6 +86,7 @@ import type { FleetDocumentWrite, FleetModelApplyPlan } from '../provisioning.ts
 import { notingLanded } from './apply-bracket.ts';
 import { type ApplyLedger, namingWhatLanded } from './apply-ledger.ts';
 import { configurationLanded, failedApplySentence, landedWithCommittedFleet } from './failed-apply.ts';
+import { importSummary } from './import-summary.ts';
 import { putConfigFile, writeConfigFiles } from './setup-config-files.ts';
 import { reportLeft, writeVaultAndLogins } from './setup-vault-logins.ts';
 import {
@@ -808,10 +809,7 @@ export class FleetSetupService {
       secrets,
       reused,
       lines,
-      summary:
-        runtimes.length > 0
-          ? `${catalog.machineName()} is ready · ${plural(runtimes.length, 'runtime')} created: ${runtimes.join(', ')}.`
-          : `Imported into ${catalog.machineName()}.`,
+      summary: importSummary(catalog.machineName(), plan, reading.model),
       fingerprint: this.#fingerprint(
         documents,
         planned.map(secret => this.deps.digest(`${secret.name}\n${secret.value}`)),

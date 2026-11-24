@@ -1,10 +1,9 @@
 /**
  * Advanced: add a runtime by hand. Most people never need this: every ready login already has a runtime, so it shows up in
- * New ferret by itself. This is for choosing a different profile or a name of your own, and it is ONE SHORT FORM: **Login**
- * and **Name** (optional: left blank it is named after its login), and one Create button. Everything else (a new login, its
- * sign-in, **Profile** with the model it starts on, which CLI a login that drives both runs) is collapsed under ONE "More"
- * disclosure. A login, a runtime and a profile are named in plain words (`runtimeDisplayName`); their stored ids show only
- * on an "id" line.
+ * New ferret by itself. This is for choosing a different profile, and it is ONE SHORT FORM: **Login** and one Create
+ * button. Everything else (a new login, its sign-in, **Profile** with the model it starts on, which CLI a login that
+ * drives both runs) is collapsed under ONE "More" disclosure. A login, a runtime and a profile are named in plain words
+ * (`runtimeDisplayName`, `profileDisplayName`). The runtime's stored id is made for the person and never typed or shown.
  *
  * A missing login is added IN PLACE ("+ Add a new login" opens Logins' add-login panel right under the field, through the slot
  * this page offers) and comes back picked; a login that needs sign-in is signed in under it the same way. Profiles are built
@@ -37,7 +36,6 @@ import {
   harnessInstalled,
   profileFit,
   runsHarness,
-  runtimeNameProblem,
   sameLoginAndProfile,
   suggestedRuntimeName,
 } from './runtimes-model.ts';
@@ -47,8 +45,6 @@ import { harnessName } from '../../../../contract/harness-words.ts';
 interface AddRuntimeDraft {
   readonly credentialId: string | null;
   readonly profile: string | null;
-  /** The name typed; `null` while the suggestion is used. */
-  readonly name: string | null;
   /** E15: "Add another anyway". */
   readonly addAnother: boolean;
   /** **Runs**: the CLI the person chose for a login that drives both. `null`: not chosen. */
@@ -58,7 +54,6 @@ interface AddRuntimeDraft {
 const EMPTY: AddRuntimeDraft = {
   credentialId: null,
   profile: null,
-  name: null,
   addAnother: false,
   runs: null,
 };
@@ -131,7 +126,7 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
   const loginName = (item: LoginNameSource): string => loginDisplayName(item, data.credentials.logins, accounts);
   const set = (patch: Partial<AddRuntimeDraft>): void => setDraft(current => ({ ...current, ...patch }));
   const pickLogin = (id: string): void =>
-    setDraft(current => ({ ...current, credentialId: id, profile: null, name: null, addAnother: false, runs: null }));
+    setDraft(current => ({ ...current, credentialId: id, profile: null, addAnother: false, runs: null }));
   // A login added in place: re-read the machine so it is listed, close the panel, and come back with it picked.
   const added = (id: string): void => {
     void reload().then(() => {
@@ -156,7 +151,7 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
       <h3 className="m-0 mt-2 text-title font-semibold text-fg">Advanced: add a runtime</h3>
       <p className="m-0 mt-1 text-cell leading-base text-muted" data-add-runtime-intro="">
         Every ready login already has a runtime on {machineName}, so you don’t need this to start a ferret. Add one to
-        pick another profile or a name of your own.
+        pick another profile.
       </p>
     </div>
   );
@@ -172,13 +167,13 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
             {runtime === undefined
               ? made
               : runtimeDisplayName(runtime, runtimes, runtimeAccounts(data.credentials.logins))}{' '}
-            is ready to launch
+            {signInFirst ? 'is added' : 'is ready to launch'}
           </p>
           <p className="m-0 text-cell leading-base text-muted">
             {runtime === undefined
               ? ''
               : `${harnessName(runtime.harness)} · ${profileDisplayName(runtime.profile)} profile`}
-            {signInFirst ? '. Sign in before you launch.' : ''}
+            {signInFirst ? '. Sign in to its login before you launch it.' : ''}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -197,26 +192,21 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
     credential === undefined || chosenProfile === undefined
       ? undefined
       : sameLoginAndProfile(runtimes, credential.id, chosenProfile.name);
-  // Blank is "name it after its login": the stored name is made for the person and shown as an id, never typed for them.
+  // The stored id is made for the person (harness plus profile, made unique) and never typed or shown: every screen names
+  // the runtime in words (`runtimeDisplayName`).
   const suggested =
     harness === undefined || chosenProfile === undefined
       ? ''
       : suggestedRuntimeName(harness, chosenProfile.name, runtimes);
-  const typed = draft.name ?? '';
-  const name = typed === '' ? suggested : typed;
-  const problem = chosenProfile === undefined ? null : runtimeNameProblem(name, runtimes, machineName);
   const ready =
-    credential !== undefined &&
-    chosenProfile !== undefined &&
-    problem === null &&
-    (duplicate === undefined || draft.addAnother);
+    credential !== undefined && chosenProfile !== undefined && (duplicate === undefined || draft.addAnother);
   const model = chosenProfile === undefined ? undefined : profileModel(chosenProfile, data);
 
   const create = async (): Promise<void> => {
     if (credential === undefined || chosenProfile === undefined) return;
     const result = await changes.apply({
       kind: 'runtime.put',
-      name,
+      name: suggested,
       credential: credential.id,
       profile: chosenProfile.name,
       ...(dual && harness !== undefined ? { harness } : {}),
@@ -225,7 +215,7 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
     });
     if (result.kind !== 'applied') return;
     await reload();
-    setMade(name);
+    setMade(suggested);
   };
 
   const missing = credential === undefined ? [] : harnesses.filter(candidate => !harnessInstalled(machine, candidate));
@@ -273,47 +263,6 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
         )}
         {noLogins ? addLogin : null}
       </Field>
-
-      {chosenProfile === undefined || credential === undefined ? null : (
-        <Field title="Name (optional)" name="name" htmlFor="add-runtime-name">
-          <input
-            id="add-runtime-name"
-            className="kt-input"
-            autoComplete="off"
-            spellCheck={false}
-            value={typed}
-            placeholder={loginName(credential)}
-            aria-invalid={problem !== null}
-            onChange={event => set({ name: event.target.value.trim() })}
-          />
-          {problem === null ? (
-            <>
-              <span className="text-meta text-muted" data-add-runtime-name-help="">
-                {typed === ''
-                  ? 'Leave blank to name it after its login.'
-                  : 'Letters, digits and dashes. You type this to launch it.'}
-              </span>
-              <span className="break-all text-meta text-faint" data-add-runtime-id="">
-                id <span className="font-mono">{name}</span>
-              </span>
-            </>
-          ) : (
-            <span className="text-meta text-err" data-runtime-name-problem="">
-              {problem.message}{' '}
-              {problem.suggestion === undefined ? null : (
-                <button
-                  type="button"
-                  className="font-semibold text-accent underline"
-                  data-runtime-name-suggestion=""
-                  onClick={() => set({ name: problem.suggestion ?? name })}
-                >
-                  Use {problem.suggestion}
-                </button>
-              )}
-            </span>
-          )}
-        </Field>
-      )}
 
       {duplicate === undefined ? null : (
         <div role="status" className="kt-panel flex flex-col gap-2 p-panel" data-add-runtime-duplicate="">
@@ -364,11 +313,10 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
                     id="add-runtime-profile"
                     label="Profile"
                     value={chosenProfile?.name ?? ''}
-                    onChange={next => set({ profile: next, name: null, addAnother: false })}
+                    onChange={next => set({ profile: next, addAnother: false })}
                     options={fitting.map(profile => ({
                       value: profile.name,
                       label: profileDisplayName(profile.name),
-                      ...(profileDisplayName(profile.name) === profile.name ? {} : { hint: `id ${profile.name}` }),
                     }))}
                   />
                 </span>
@@ -409,7 +357,7 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
                         type="radio"
                         name="add-runtime-runs"
                         checked={candidate === harness}
-                        onChange={() => set({ runs: candidate, profile: null, name: null, addAnother: false })}
+                        onChange={() => set({ runs: candidate, profile: null, addAnother: false })}
                       />
                       <span className="text-row font-semibold text-fg">{harnessName(candidate)}</span>
                     </label>

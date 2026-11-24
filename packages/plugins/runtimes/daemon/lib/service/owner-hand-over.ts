@@ -104,6 +104,30 @@ export interface HandOver {
   readonly refused: number;
 }
 
+const KIND_WORDS: Readonly<Record<OwnerComponentWrite['kind'], string>> = {
+  mcp: 'MCP servers',
+  skills: 'skills',
+  settings: 'settings',
+};
+
+/** Whose a component is, in the tool's own word: its settings' harness, else the word its import-made name starts with. */
+const toolOf = (write: OwnerComponentWrite): string | undefined => {
+  const word = write.harness ?? /^(claude|codex)(?:-|$)/u.exec(write.name)?.[1];
+  return word === undefined ? undefined : word === 'codex' ? 'Codex' : 'Claude';
+};
+
+/** What owner files are, in words and never as paths: "your Claude skills and settings, your Codex MCP servers". */
+function ownedInWords(writes: readonly OwnerComponentWrite[]): string {
+  const byTool = new Map<string, Set<string>>();
+  for (const write of writes) {
+    const tool = toolOf(write) ?? '';
+    byTool.set(tool, (byTool.get(tool) ?? new Set()).add(KIND_WORDS[write.kind]));
+  }
+  return [...byTool]
+    .map(([tool, kinds]) => `your ${tool === '' ? '' : `${tool} `}${[...kinds].join(' and ')}`)
+    .join(', ');
+}
+
 /**
  * Gives each component its owner's door, one at a time. The answer names every file written, held and refused (names, and
  * the owner's own sentence with every secret value this import carries masked and its length bounded).
@@ -128,8 +152,10 @@ export async function handOver(input: {
     return clean.length > 200 ? `${clean.slice(0, 200)}…` : clean;
   };
   const written: string[] = [];
+  const writtenWrites: OwnerComponentWrite[] = [];
+  const heldWrites: OwnerComponentWrite[] = [];
   const held: string[] = [];
-  const refused: { readonly file: string; readonly reason: string }[] = [];
+  const refused: { readonly write: OwnerComponentWrite; readonly reason: string }[] = [];
   const noted: string[] = [];
   const left = new Set<string>();
   const heldReferences = new Set<string>();
@@ -143,14 +169,15 @@ export async function handOver(input: {
         : await writer.put({ ...write, text: write.text });
     if (answer.outcome !== 'refused') {
       (answer.outcome === 'written' ? written : held).push(write.file);
+      (answer.outcome === 'written' ? writtenWrites : heldWrites).push(write);
       if (answer.outcome === 'held') heldReferences.add(write.reference);
       if (answer.created !== undefined && answer.created.length > 0) created.set(write.reference, answer.created);
       if (answer.etags !== undefined) etags.set(write.reference, answer.etags);
-      for (const warning of answer.warnings ?? []) noted.push(`${write.file} (${say(warning)})`);
+      for (const warning of answer.warnings ?? []) noted.push(`${ownedInWords([write])} (${say(warning)})`);
       if (write.skipped !== undefined)
-        noted.push(`${write.file} (hidden files not handed over: ${say(write.skipped.join(', '))})`);
+        noted.push(`${ownedInWords([write])} (hidden files not handed over: ${say(write.skipped.join(', '))})`);
     } else {
-      refused.push({ file: write.file, reason: say(answer.reason) });
+      refused.push({ write, reason: say(answer.reason) });
       left.add(write.reference);
     }
   }
@@ -205,12 +232,12 @@ export async function handOver(input: {
     held: held.length,
     refused: refused.length,
     sentences: [
-      ...(written.length === 0 ? [] : [`Written by the parts that own them: ${written.join(', ')}.`]),
-      ...(held.length === 0 ? [] : [`Held until you confirm: ${held.join(', ')}.`]),
+      ...(writtenWrites.length === 0 ? [] : [`Saved: ${ownedInWords(writtenWrites)}.`]),
+      ...(held.length === 0 ? [] : [`Held until you confirm: ${ownedInWords(heldWrites)}.`]),
       ...(noted.length === 0 ? [] : [`Written with a warning: ${noted.join('; ')}.`]),
       ...(refused.length === 0
         ? []
-        : [`Not written: ${refused.map(entry => `${entry.file} (${entry.reason})`).join('; ')}.`]),
+        : [`Not written: ${refused.map(entry => `${ownedInWords([entry.write])} (${entry.reason})`).join('; ')}.`]),
     ],
   };
 }

@@ -42,7 +42,7 @@ describe('handOver', () => {
     // Assert
     should(asked).equal(0);
     should(answer.sentences).eql([
-      'Not written: claude-code/settings/a.yaml (the settings this was made from could not be read).',
+      'Not written: your Claude settings (the settings this was made from could not be read).',
     ]);
   });
 
@@ -68,6 +68,47 @@ describe('handOver', () => {
   });
 });
 
+describe('handOver, what was saved', () => {
+  it('should say what was saved in words, whose it is and what kind, and never a file path', async () => {
+    // Arrange
+    const writer: ComponentWriter = { put: async () => ({ outcome: 'written' }) };
+    const owners: OwnedComponents = {
+      writes: [
+        {
+          kind: 'skills',
+          name: 'claude-skills',
+          reference: 'skills/claude-skills',
+          file: 'skills/claude-skills.yaml',
+          text: '{}',
+        },
+        {
+          kind: 'settings',
+          name: 'claude-settings',
+          reference: 'settings/claude-settings',
+          harness: 'claude',
+          file: 'claude-code/settings/claude-settings.yaml',
+          text: '{}',
+        },
+        { kind: 'mcp', name: 'github', reference: 'mcp/github', file: 'mcp/github.yaml', text: '{}' },
+        {
+          kind: 'skills',
+          name: 'codex-skills',
+          reference: 'skills/codex-skills',
+          file: 'skills/codex-skills.yaml',
+          text: '{}',
+        },
+      ],
+      rebuild: async () => applied,
+    };
+
+    // Act
+    const { sentences } = await handOver({ writer, owners, applied, secretValues: [], inEffect: async () => MODEL });
+
+    // Assert
+    should(sentences).eql(['Saved: your Claude skills and settings, your MCP servers, your Codex skills.']);
+  });
+});
+
 describe('handOver warnings', () => {
   it('should say a file was written with a warning, masking any secret in it', async () => {
     // Arrange
@@ -90,7 +131,7 @@ describe('handOver warnings', () => {
 
     // Assert
     should(sentences).containEql(
-      'Written with a warning: mcp/a.yaml (command "x" is not on this machine); skills/b.yaml (command "x" is not on this machine).',
+      'Written with a warning: your MCP servers (command "x" is not on this machine); your skills (command "x" is not on this machine).',
     );
   });
 });
@@ -155,7 +196,7 @@ describe('handOver, what is in effect', () => {
     // Assert
     should(rebuilt).eql([{ held: ['mcp/a'], refused: ['skills/b'] }]);
     should(reads).equal(1);
-    should(answer.sentences).containEql('Held until you confirm: mcp/a.yaml.');
+    should(answer.sentences).containEql('Held until you confirm: your MCP servers.');
   });
 
   it('should not read what is in effect when every owner refuses', async () => {
@@ -297,7 +338,7 @@ describe('handOver, a written component the owner keeps out of effect', () => {
 
     // Assert
     should(rebuilds).eql([[]]);
-    should(answer.sentences).containEql('Held until you confirm: codex/settings/codex-settings.yaml.');
+    should(answer.sentences).containEql('Held until you confirm: your Codex settings.');
   });
 });
 
@@ -324,7 +365,7 @@ describe('handOver, hidden files', () => {
 
     // Assert
     should(sentences).containEql(
-      'Written with a warning: skills/b.yaml (hidden files not handed over: review/.git/config).',
+      'Written with a warning: your skills (hidden files not handed over: review/.git/config).',
     );
   });
 });
