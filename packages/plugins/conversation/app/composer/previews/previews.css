@@ -194,6 +194,16 @@
 .fy-cvp-page--tools {
   top: 22px;
 }
+/* Inside a settings card's ChoiceSample frame the page is the sample's own picture: the card and the frame already draw the boxes, so no third border. */
+.fy-cs .fy-cvp-page {
+  border: 0;
+}
+/* The Button layout samples draw the real composer: its frame and its Send stroke stay (so the box keeps its size) but are not drawn,
+   the row's own fill and Send's fill carry the shape. */
+.fy-cs .fy-composer-row,
+.fy-cs .fy-composer-send {
+  border-color: transparent;
+}
 
 /* --- The chat-width strip: a pane, and the text column inside it writing lines. ------------------------------- */
 .fy-cvp-write {

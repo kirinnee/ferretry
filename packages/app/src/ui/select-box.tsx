@@ -459,7 +459,7 @@ export function SelectBox({
         role="combobox"
         type="button"
       >
-        <span className="fy-sb__value" data-placeholder={chosen === undefined ? '' : undefined}>
+        <span className="fy-sb__value" data-placeholder={chosen === undefined ? '' : undefined} title={chosen?.label}>
           {chosen?.label ?? placeholder}
         </span>
         <ChevronDown aria-hidden="true" className="fy-sb__chev" size={16} />

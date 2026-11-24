@@ -183,7 +183,6 @@
    attribute. */
 .fy-cs {
   background: var(--bg);
-  border: 1px solid var(--border);
   border-radius: var(--radius-control);
   contain: layout paint;
   display: block;

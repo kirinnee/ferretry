@@ -437,10 +437,12 @@ const inspect = async (
   expect(read.streaks, `${key}: shooting stars`).toBeGreaterThanOrEqual(3);
   expect(read.streakMoving, `${key}: a shooting star moves`).toBe('fy-lb-shoot');
   expect(read.next, `${key}: a Next button`).toBe(1);
-  // `held`: a sign-in page holds Next until the person has signed in (nothing is recorded over a sign-in that did not happen).
-  expect(read.nextOff, `${key}: Next is ${opts.held === true ? 'held until signed in' : 'on'}`).toBe(
-    opts.held === true,
-  );
+  // `held`: a sign-in page REFUSES Next until the person has signed in (nothing is recorded over a sign-in that did not happen).
+  // The button itself stays enabled on every page; the refusal is asserted where the page is walked (see the sign-in step).
+  expect(
+    read.nextOff,
+    `${key}: Next is enabled${opts.held === true ? ' (it refuses until signed in, it is not disabled)' : ''}`,
+  ).toBe(false);
   expect(read.back, `${key}: Back ${opts.first === true ? 'is absent on the first page' : 'is there'}`).toBe(
     opts.first === true ? 0 : 1,
   );
@@ -1139,12 +1141,40 @@ describe('the first run, end to end', () => {
         expect((await daemonOf(tab, A)).runtimesMade, 'the machine starts with no runtime').toEqual([]);
         await inspect(tab, variant, 'claude-code.sign-in', { held: true, centered: true });
         await shot(tab, variant, 'claude-code.sign-in');
+        // Next is NOT disabled here: pressing it shows the refusal on the page, stays on the sign-in and records nothing, while
+        // Back and Later stay live (O10 Q2, https://github.com/kirinnee/ferretry/pull/2413).
+        await tab.locator('[data-step-next]').click();
+        await tab.locator('[data-flow-commit-error]').waitFor({ state: 'visible' });
+        expect(
+          await tab.locator('[data-flow-commit-error]').innerText(),
+          'Next refuses with the reason until Claude is signed in',
+        ).toContain('Sign in to Claude to continue');
+        expect(await keyOf(tab), 'the refusal leaves the flow on the sign-in').toBe('claude-code.sign-in');
+        expect(
+          await tab
+            .locator('[data-step-footer] button')
+            .evaluateAll(buttons => buttons.map(button => (button as HTMLButtonElement).disabled)),
+          'Back, Later and Next are all enabled after the refusal',
+        ).toEqual([false, false, false]);
+        expect(
+          (await daemonOf(tab, A)).states['claude-code.sign-in'],
+          'a refused Next records nothing',
+        ).toBeUndefined();
         await tab.locator('[data-harness-sign-in="claude-code"] button', { hasText: 'Sign in to Claude Code' }).click();
         await tab.locator('[data-claude-login-code] input').fill('FAKE-CODE-0001');
         await tab.getByRole('button', { name: 'Finish sign-in' }).click();
-        await tab.waitForFunction(() => !(document.querySelector('[data-step-next]') as HTMLButtonElement).disabled);
+        // Next is enabled before AND after the sign-in, so the sign-in's end is the machine holding its one runtime.
+        await tab.waitForFunction(
+          machine =>
+            (window as unknown as { __fake: { daemon: (id: string) => { runtimesMade: unknown[] } } }).__fake.daemon(
+              machine,
+            ).runtimesMade.length > 0,
+          A,
+        );
         expect((await daemonOf(tab, A)).runtimesMade, 'the sign-in made Claude its one runtime').toHaveLength(1);
-        // The sign-in page HOLDS Next (a spinner on it) until the person is signed in: a hold, not an answer's wait, so what the
+        // Signed in: the page stops refusing, so the refusal it showed is gone.
+        await tab.locator('[data-flow-commit-error]').waitFor({ state: 'detached' });
+        // The sign-in page REFUSES Next until the person is signed in: the press above is not an answer's wait, so what the
         // sampler saw there is not what "the Next spinner never flashes" is about. It counts again from the next press on.
         await tab.waitForFunction(() => document.querySelector('[data-step-next] .fy-spinner') === null);
         await tab.waitForTimeout(200);
