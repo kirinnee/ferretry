@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { ApiError, jsonResponse } from '../../../contract/http.ts';
 import type { PluginId } from '../../../contract/ids.ts';
 import { Dispatcher, type MountedRoute, type Owner } from '../../../host/dispatch.ts';
-import { describeFailure, type FailureNote } from '../../../host/responses.ts';
+import type { Log, LogFields } from '../../../contract/ports.ts';
+import { onceEach, REFUSAL_WINDOW_MS } from '../../../host/refusal-log.ts';
+import { describeFailure, failureKey, type FailureNote } from '../../../host/responses.ts';
 import { recordingAdmission, request } from './fixtures.ts';
 
 const owner: Owner = { plugin: 'board' as PluginId, title: 'Board', serving: () => ({ kind: 'serving' }) };
@@ -84,5 +86,57 @@ describe('every 500 says why in the daemon log', () => {
       secretGuarded: true,
     });
     expect(line.message).toBe('failed GET /v1/vault/:id (500): Error');
+  });
+});
+
+describe('a route that throws on every poll does not flood the log', () => {
+  const said: Array<{ level: string; message: string; fields?: LogFields }> = [];
+  const log: Log = {
+    debug: () => undefined,
+    info: () => undefined,
+    warn: () => undefined,
+    error: (message, fields) =>
+      void said.push({ level: 'error', message, ...(fields === undefined ? {} : { fields }) }),
+    child: () => log,
+  };
+  const note = (route: string, error: unknown): FailureNote => ({
+    table: 'route',
+    method: 'GET',
+    route,
+    error,
+    secretGuarded: false,
+  });
+
+  test('1000 identical 500s say one line, then one line carrying how many were held back', () => {
+    said.length = 0;
+    let now = 0;
+    const say = onceEach(log, 'error', () => now);
+    const fail = (n: FailureNote): void => {
+      const line = describeFailure(n);
+      say(failureKey(n), line.message, line.fields);
+    };
+    // The message changes every call (an id in it): the key is method + template + class, so it is still one failure.
+    for (let index = 0; index < 1000; index += 1) fail(note('/v1/board/:id', new Error(`row ${index} unreadable`)));
+    expect(said).toHaveLength(1);
+    expect(said[0]?.fields?.['suppressed']).toBeUndefined();
+
+    now += REFUSAL_WINDOW_MS;
+    fail(note('/v1/board/:id', new Error('row 1000 unreadable')));
+    expect(said).toHaveLength(2);
+    expect(said[1]?.fields).toMatchObject({ suppressed: 999 });
+  });
+
+  test('a different template or a different error class still logs at once', () => {
+    said.length = 0;
+    const say = onceEach(log, 'error', () => 0);
+    const fail = (n: FailureNote): void => {
+      const line = describeFailure(n);
+      say(failureKey(n), line.message, line.fields);
+    };
+    fail(note('/v1/board/:id', new Error('a')));
+    fail(note('/v1/board/:id', new Error('a again')));
+    fail(note('/v1/agenda/:id', new Error('a')));
+    fail(note('/v1/board/:id', new TypeError('a')));
+    expect(said).toHaveLength(3);
   });
 });

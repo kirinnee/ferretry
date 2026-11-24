@@ -52,6 +52,16 @@ export interface FailureNote {
   readonly secretGuarded: boolean;
 }
 
+/**
+ * What makes two failures the same one for the log's once-a-minute rule: the method, the declared template and the
+ * error's class. The message is not part of it (it can carry a changing id or path), so a route that throws on every
+ * poll is one line a minute, while a different route or a different class says so at once. Total.
+ */
+export function failureKey(note: FailureNote): string {
+  const name = note.error instanceof Error ? note.error.name : typeof note.error;
+  return `${note.table}\u0000${note.method}\u0000${note.route}\u0000${name}`;
+}
+
 const FAILURE_REASON_MAX = 200;
 
 /** The one `error` line for a 500: the route template, the error's class and (unless guarded) a short message. Total. */
