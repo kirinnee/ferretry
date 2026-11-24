@@ -106,10 +106,23 @@ const fastUnavailableReason = (account: ChosenFerretAccount | null, typed: strin
   return model?.fast === false ? `${model.label ?? model.id} has no fast mode.` : undefined;
 };
 
+/**
+ * One segment's words: the whole phrase from `sm` up, and on a phone ONE short word so a segment never wraps. The whole phrase
+ * stays the segment's name for a screen reader at every width (the short word is `aria-hidden`; the phrase is only clipped).
+ */
+const startLabel = (short: string, whole: string): ReactNode => (
+  <>
+    <span aria-hidden="true" className="sm:hidden">
+      {short}
+    </span>
+    <span className="sr-only sm:not-sr-only">{whole}</span>
+  </>
+);
+
 /** The two ways in the page offers, as the switch at its top spells them. */
 const START_CHOICES = [
-  { value: 'new', label: 'New conversation' },
-  { value: 'continue', label: 'Continue a conversation' },
+  { value: 'new', label: startLabel('New', 'New conversation') },
+  { value: 'continue', label: startLabel('Continue', 'Continue a conversation') },
 ] as const;
 
 /** What each mode MEANS to the person starting it, one short line each. */
@@ -128,6 +141,7 @@ const createBlocker = (
   submitting: boolean,
   noRunnableAccount: boolean,
   awaitingPick: boolean,
+  whereOffered: boolean,
 ): string | null => {
   if (submitting) return null;
   // Continue mode starts a ferret only from a conversation: until one is picked, Create would start a fresh one.
@@ -135,7 +149,10 @@ const createBlocker = (
   if (draft.runtime.trim() === '') {
     return noRunnableAccount ? 'No runtime can run a ferret yet — add a login first.' : 'Choose a runtime first.';
   }
-  if (draft.folder.trim() === '') return 'Choose the folder the agent works in first.';
+  // With Projects' panel the field is "Where it works" (a folder OR a project), so the sentence must not name a folder box.
+  if (draft.folder.trim() === '') {
+    return whereOffered ? 'Choose where the agent works first.' : 'Choose the folder the agent works in first.';
+  }
   return draft.mode === 'auto' && draft.prompt.trim() === '' ? 'Say what you want the agent to do first.' : null;
 };
 
@@ -277,7 +294,7 @@ export function NewFerretPage({
   const chosen = chosenForDraft(chosenRuntime, draft.runtime);
   const now = useNow();
   const models = modelSuggestions(chosen);
-  const blocker = createBlocker(draft, submitting, noRunnableAccount, awaitingPick);
+  const blocker = createBlocker(draft, submitting, noRunnableAccount, awaitingPick, whereOffered);
   // A model the panel says has no fast mode cannot be launched with it, so the switch says why it is unavailable and
   // the request never carries it (the daemon would refuse it too).
   const fastReason = fastUnavailableReason(chosen, draft.model);

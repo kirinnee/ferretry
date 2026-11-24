@@ -159,6 +159,11 @@ describe('New ferret: the path a start sends is the one the visible mode shows',
           await modeButton(tab, 'Project').click();
           expect(await tab.locator(TRIGGER).textContent()).toContain('Choose a project');
           expect(await createButton(tab).isEnabled(), 'nothing is chosen under Project, so Create is off').toBe(false);
+          // The line that explains the off button speaks of where it works, not of a folder box that Project mode does not show.
+          expect(
+            await tab.locator('#fy-new-ferret-create-blocker').textContent(),
+            'the blocker fits Project mode',
+          ).toBe('Choose where the agent works first.');
           await noSideways(tab);
           await shot('project-nothing-chosen');
           expect(await startsOf(tab), 'nothing was started').toHaveLength(0);

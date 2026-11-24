@@ -58,7 +58,14 @@ const found = (view: ReturnType<typeof render>, predicate: (node: ReactTestInsta
 const byId = (view: ReturnType<typeof render>, id: string): ReactTestInstance =>
   found(view, node => typeof node.type === 'string' && node.props.id === id);
 const choice = (view: ReturnType<typeof render>, text: string): ReactTestInstance =>
-  found(view, node => node.type === 'button' && node.props.role === 'radio' && node.children.join('') === text);
+  // A segment draws a short word for a phone and the whole phrase (its name) for a screen reader and a wider screen.
+  found(
+    view,
+    node =>
+      node.type === 'button' &&
+      node.props.role === 'radio' &&
+      node.findAllByType('span').some(part => part.children.join('') === text),
+  );
 const NEW = 'New conversation';
 const CONTINUE = 'Continue a conversation';
 const typeInto = (view: ReturnType<typeof render>, id: string, value: string): void =>
