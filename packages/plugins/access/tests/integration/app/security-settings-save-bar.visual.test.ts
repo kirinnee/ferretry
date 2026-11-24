@@ -122,4 +122,54 @@ describe('the Security settings Save bar', () => {
           await context.close();
         }
       });
+
+  // The other half of the rule: while something is UNSAVED the bar sticks to the foot, so a long form never loses its Save.
+  for (const viewport of VIEWPORTS)
+    it(`keeps Save in view while there are unsaved changes, even scrolled up to the form's first rows (${viewport.name})`, async () => {
+      const context = await browser.newContext({
+        viewport: { width: viewport.width, height: viewport.height },
+        deviceScaleFactor: viewport.phone ? 2 : 1,
+        hasTouch: viewport.phone,
+        isMobile: viewport.phone,
+      });
+      const origin = server?.url.origin ?? '';
+      await context.route('**/*', async route =>
+        new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+      );
+      const tab = await context.newPage();
+      try {
+        await tab.goto(`${origin}/?theme=studio-light`);
+        await tab.waitForSelector('[data-security-save]', { timeout: 15_000 });
+        // Clean at the first view: the bar rests in flow (below the fold on a short window), covering nothing.
+        expect(
+          await tab.evaluate(
+            () => getComputedStyle(document.querySelector('[data-setting-savebar]') as HTMLElement).position,
+          ),
+        ).toBe('static');
+        await tab.locator('[data-setting-saves="on-save"] input[type="number"]').first().fill('9');
+        await tab.waitForSelector('[data-setting-savebar][data-state="dirty"]');
+        // Scrolled up so only the TOP of the form is on screen (its own foot is far below): the bar still stays in reach.
+        await tab.evaluate(() => {
+          const group = document.querySelector('[data-setting-saves="on-save"]') as HTMLElement | null;
+          document.querySelector('[data-scene-scroll]')?.scrollTo(0, (group?.offsetTop ?? 0) - 40);
+        });
+        await tab.waitForTimeout(100);
+        const seen = await tab.evaluate(() => {
+          const bar = document.querySelector('[data-setting-savebar]') as HTMLElement;
+          const box = bar.getBoundingClientRect();
+          return {
+            position: getComputedStyle(bar).position,
+            top: box.top,
+            bottom: box.bottom,
+            height: window.innerHeight,
+          };
+        });
+        expect(seen.position).toBe('sticky');
+        expect(seen.top).toBeGreaterThanOrEqual(0);
+        expect(seen.bottom).toBeLessThanOrEqual(seen.height + 1);
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${viewport.name}-light-dirty-top.png`) });
+      } finally {
+        await context.close();
+      }
+    });
 });
