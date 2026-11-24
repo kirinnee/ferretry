@@ -58,6 +58,12 @@ export interface StepUpPrompt {
   readonly shared?: true;
   /** The structured words of the one bound request, when it brought them (a standing sign-in rule): only while `bound`. */
   readonly words?: StepUpWords;
+  /**
+   * The confirmation is stamped for ONE act that takes its own passkey once (an import's `loosen-config`, adding a
+   * device): the daemon spends that proof on this act, so the next act like it asks again (docs/grants.md "one proof
+   * is one act"). Only while that one named request is all that waits; the prompt then never promises a window.
+   */
+  readonly once?: true;
   /** One plain sentence for the person, or nothing. */
   readonly failure?: string;
   /** What this confirmation buys, once the machine has said; until then the prompt's own words stand. */
@@ -196,15 +202,17 @@ export class StepUpGate {
         waiting.explicit ||= explicit;
         waiting.background ||= background;
         waiting.words ??= words;
-        const covered = this.#boundness(waiting);
+        const covered = this.#boundWords(waiting);
         if (actId === undefined) waiting.unnamed = true;
         else waiting.actIds.add(actId);
         if (subject !== undefined) waiting.subjects.add(subject);
         const named = !waiting.acts.includes(act);
         if (named) waiting.acts.push(act);
-        // Every join re-checks what the prompt covers: the same words with a second stage is no longer one bound act.
-        const now = this.#boundness(waiting);
-        if (named || now.bound !== covered.bound || now.shared !== covered.shared) this.#refreshActs(daemon.daemonId);
+        // Every join re-checks what the prompt covers: the same words with a second stage is no longer one bound act,
+        // and an unnamed request joining a stamped one leaves a proof stamped for nothing.
+        const now = this.#boundWords(waiting);
+        if (named || now.bound !== covered.bound || now.shared !== covered.shared || now.once !== covered.once)
+          this.#refreshActs(daemon.daemonId);
         if (this.#prompt === null && this.#mayShow(waiting)) this.#show(waiting);
         return;
       }
@@ -299,8 +307,10 @@ export class StepUpGate {
    * wants its own asks again. An act bound to a subject is stamped only with exactly one subject: a request that
    * named none (the router's answer to a refusal) or two different ones is left unstamped, which the save refuses.
    */
-  #soleProof(daemonId: DaemonId): { readonly act: StepUpAct; readonly subject?: StepUpSubject } | undefined {
-    const waiting = this.#waiting.get(daemonId);
+  #soleProof(
+    daemonId: DaemonId,
+    waiting: Waiting | undefined = this.#waiting.get(daemonId),
+  ): { readonly act: StepUpAct; readonly subject?: StepUpSubject } | undefined {
     if (waiting === undefined || waiting.unnamed || waiting.actIds.size !== 1) return undefined;
     const act = [...waiting.actIds][0];
     if (act === undefined) return undefined;
@@ -392,7 +402,7 @@ export class StepUpGate {
     const prompt = this.#prompt;
     if (prompt === null || prompt.daemon.daemonId !== daemonId) return;
     const waiting = this.#waiting.get(daemonId);
-    const { bound: _bound, shared: _shared, words: _words, ...rest } = prompt;
+    const { bound: _bound, shared: _shared, words: _words, once: _once, ...rest } = prompt;
     this.#set({
       ...rest,
       acts: [...(waiting?.acts ?? [])],
@@ -408,10 +418,16 @@ export class StepUpGate {
     return sole ? { bound: true } : { shared: true };
   }
 
-  /** The boundness, plus the structured words only while exactly one bound request is waiting. */
-  #boundWords(waiting: Waiting): Pick<StepUpPrompt, 'bound' | 'shared' | 'words'> {
+  /**
+   * The boundness, plus the structured words only while exactly one bound request is waiting, plus `once` while the
+   * proof will be stamped for one act the machine may skip (the sole proof, with no stage): that act takes it once.
+   */
+  #boundWords(waiting: Waiting): Pick<StepUpPrompt, 'bound' | 'shared' | 'words' | 'once'> {
     const boundness = this.#boundness(waiting);
-    return boundness.bound === true && waiting.words !== undefined ? { ...boundness, words: waiting.words } : boundness;
+    const words = boundness.bound === true && waiting.words !== undefined ? { words: waiting.words } : {};
+    const sole = this.#soleProof(waiting.daemon.daemonId, waiting);
+    const once = sole !== undefined && sole.subject === undefined ? { once: true as const } : {};
+    return { ...boundness, ...words, ...once };
   }
 
   #set(prompt: StepUpPrompt | null): void {
