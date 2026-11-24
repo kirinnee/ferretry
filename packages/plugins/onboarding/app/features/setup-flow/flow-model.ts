@@ -14,6 +14,7 @@
  * The position is a step KEY (`<plugin>.<step>`), never an index, so a step list that changes under a run cannot move it.
  */
 import { askableSteps, type Flow, type FlowStep } from '../../lib/index.ts';
+import type { SummaryStep } from '../../views/steps-screen.tsx';
 
 /** The place after the last page. */
 export const END = 'end' as const;
@@ -234,6 +235,22 @@ export function applyPicked(
   return sameOf(marks, state.notNeeded) && sameOf(aside, state.aside) ? state : { ...state, notNeeded: marks, aside };
 }
 
+/**
+ * The segment-memory key a page sets (`step.remember({ unfinished: true })`) when it was shown and the person moved on with
+ * nothing decided there (Lessons with neither card picked, Shells without nix): its step stays "left for later" on the
+ * closing page instead of ticking, and a page that is settled sets it back to `false`. Memory is per plugin and this run only.
+ */
+export const UNFINISHED_KEY = 'unfinished';
+
+/** The summary as the pages' own memory leaves it: a step answered `done` by a plugin that says it is unfinished is left for later. */
+export const withUnfinished = (
+  summary: readonly SummaryStep[],
+  memoryOf: (plugin: string) => Readonly<Record<string, unknown>>,
+): readonly SummaryStep[] =>
+  summary.map(step =>
+    step.state === 'done' && memoryOf(step.plugin)[UNFINISHED_KEY] === true ? { ...step, state: 'later' } : step,
+  );
+
 /** The bar's label for every client page: they read as one stage, "This device". */
 const DEVICE_LABEL = 'This device';
 
@@ -263,7 +280,8 @@ export interface ProgressRead {
  *     only Back lowers it.
  *   - m changes ONLY when the person changes an answer that adds or removes pages (ticking Codex in "Which AI", choosing what to
  *     bring over). Until "Which AI" is answered the pick that is ticked by default is counted.
- *   - an OFFER page (see `isOffer`) never counts, unless it is the page on screen: it is held out to a run that goes on anyway.
+ *   - an OFFER page (see `isOffer`) counts like any other page, but only when the run has a page of its own to draw before it
+ *     (otherwise the run passes it over, `passesOffer`): so the total is the same before and after the person walks up to it.
  * The page on screen always counts.
  */
 export function progressOf(
@@ -283,8 +301,16 @@ export function progressOf(
     page.phase === 'client' && !OWN_DEVICE_SEGMENT.has(page.plugin)
       ? DEVICE_LABEL
       : (labels.get(page.plugin) ?? page.plugin);
+  const asked = (page: FlowStep): boolean =>
+    page.key === here.key || (!answered.has(page.key) && !excluded.has(page.key));
+  // An offer is decided by the answers like any page: it counts when the run has a page of its own to draw before it (the run
+  // would walk it), never by whether the person has reached it yet, so the total does not move when they walk up to it.
   const counted = pages.filter(
-    page => page.key === here.key || (!answered.has(page.key) && !excluded.has(page.key) && !isOffer(page.key)),
+    (page, index) =>
+      asked(page) &&
+      (!isOffer(page.key) ||
+        page.key === here.key ||
+        pages.slice(0, index).some(earlier => !isOffer(earlier.key) && asked(earlier))),
   );
   return {
     segments: counted.map(page => ({ id: page.key, label: labelOf(page) })),

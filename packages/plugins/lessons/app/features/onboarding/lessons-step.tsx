@@ -16,7 +16,10 @@
  *     the footer line by the shell and Next stays ready to try again. The page has no Save / Use / Keep button.
  *   - While that write is in flight the cards are locked: the footer already captured the pick it is saving, so a later
  *     click would change the card and the picture but not what is written. A refusal unlocks them again.
- *   - The picture on the right (`StepDemo`) follows the card on screen: a rule filed on the Lessons shelf, or nothing filed.
+ *   - The picture on the right (`StepDemo`) follows the card on screen: a rule filed on the Lessons shelf, or nothing filed;
+ *     before a pick it says nothing is chosen yet.
+ *   - Next with neither card picked answers nothing, so the page says it is unfinished (`remember({ unfinished: true })`, read
+ *     by the closing page, which then leaves Lessons for later instead of ticking it); a pick says it is not.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -59,6 +62,8 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
       () => {
         setRead(true);
         setProblem(null);
+        // Nothing is picked yet: moving on now would answer nothing (the closing page reads this, see the header).
+        host.current?.remember({ unfinished: true });
         lift();
       },
       (reason: unknown) => {
@@ -74,6 +79,7 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
     (next: string) => {
       const chosen: Answer = next === 'on' ? 'on' : 'off';
       setAnswer(chosen);
+      host.current?.remember({ unfinished: false });
       host.current?.commit(async () => {
         setSaving(true);
         try {
@@ -106,7 +112,7 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
       <p className="fy-lessons-step-line">{LESSONS_STEP_LINE}</p>
       {read ? (
         <StepDemo>
-          <LessonDemo kept={answer !== 'off'} />
+          <LessonDemo kept={answer === null ? null : answer === 'on'} />
         </StepDemo>
       ) : null}
       {problem === null ? null : (

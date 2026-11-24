@@ -11,6 +11,8 @@ import {
   progressOf,
   retreat,
   startRun,
+  UNFINISHED_KEY,
+  withUnfinished,
 } from '../../../app/features/setup-flow/flow-model.ts';
 import { readFlowAddress, setupFlowHref } from '../../../app/features/setup-flow/flow-href.ts';
 import { foreseenPassedOver, undecidedPages } from '../../../app/features/setup-flow/foresight.ts';
@@ -113,6 +115,34 @@ describe('moving through the run', () => {
   });
 });
 
+describe('the closing page ticks only what is really done', () => {
+  const step = (plugin: string, state: 'done' | 'found' | 'later') => ({
+    plugin,
+    id: plugin,
+    title: plugin,
+    group: plugin,
+    state,
+    phase: 'daemon' as const,
+  });
+  const memory = (unfinished: Record<string, boolean>) => (plugin: string) =>
+    plugin in unfinished ? { [UNFINISHED_KEY]: unfinished[plugin] } : {};
+
+  test('a step answered done by a plugin that says it is unfinished is left for later', () => {
+    const summary = [step('lessons', 'done'), step('shells', 'done'), step('warden', 'done'), step('mcp', 'found')];
+    expect(withUnfinished(summary, memory({ lessons: true, shells: true, warden: false })).map(s => s.state)).toEqual([
+      'later',
+      'later',
+      'done',
+      'found',
+    ]);
+  });
+
+  test('a plugin that never spoke changes nothing', () => {
+    const summary = [step('lessons', 'done')];
+    expect(withUnfinished(summary, () => ({}))).toEqual(summary);
+  });
+});
+
 describe('the progress counter: ONE reading for the words and the bar', () => {
   const flow = flowOf();
   const pages = pagesOf(flow);
@@ -169,15 +199,27 @@ describe('the progress counter: ONE reading for the words and the bar', () => {
     expect([state?.step, state?.of]).toEqual([1, 5]);
   });
 
-  test('an offer page does not count, unless it is the page on screen', () => {
+  describe('an offer page (Connect GitHub)', () => {
     const offered = flowOf();
     const withOffer = [
       ...pagesOf(offered),
       { key: 'projects.github', plugin: 'projects', id: 'github', phase: 'client' },
     ] as never;
     const last = pagesOf(offered).at(-1)?.key ?? '';
-    expect(progressOf(offered, withOffer, none, none, last)).toMatchObject({ step: 6, of: 6 });
-    expect(progressOf(offered, withOffer, none, none, 'projects.github')).toMatchObject({ step: 7, of: 7 });
+    const everyOther = new Set(pagesOf(offered).map(page => page.key));
+
+    test('counts up front whenever the run has another page to draw before it, so the total never moves on the way there', () => {
+      expect(progressOf(offered, withOffer, none, none, last)).toMatchObject({ step: 6, of: 7 });
+      expect(progressOf(offered, withOffer, none, none, 'projects.github')).toMatchObject({ step: 7, of: 7 });
+    });
+
+    test('is not counted more than the page on screen when every page before it is answered or left out (the run would pass it over)', () => {
+      expect(progressOf(offered, withOffer, everyOther, none, 'projects.github')).toMatchObject({ step: 1, of: 1 });
+      expect(progressOf(offered, withOffer, none, everyOther, 'projects.github')).toMatchObject({ step: 1, of: 1 });
+      const answered = new Set(everyOther);
+      answered.delete(last);
+      expect(progressOf(offered, withOffer, answered, none, last)).toMatchObject({ step: 1, of: 2 });
+    });
   });
 
   test('Back lowers the place by one and nothing else', () => {
