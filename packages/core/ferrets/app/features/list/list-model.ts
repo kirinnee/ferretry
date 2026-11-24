@@ -67,9 +67,16 @@ export const isStopped = (ferret: FerretSummary): boolean => statusMark(ferret).
 /** The kind a ferret is: its recorded mode, and an agent when the record names none (as the daemon reads it). */
 const modeOf = (ferret: FerretSummary): 'auto' | 'interactive' => ferret.mode ?? 'auto';
 
-/** Whether the ferret is the kind a segment asks for. */
+/**
+ * Whether the ferret is the owner's — the "Mine" segment: one they drive (interactive) OR one a person started. The New
+ * ferret form starts an `auto` ferret by default, so a ferret the owner made from the browser is autonomous yet theirs;
+ * the record's `birth` says who first started it. A ferret an agent started, or whose record names no birth, is not.
+ */
+const isMine = (ferret: FerretSummary): boolean => modeOf(ferret) === 'interactive' || ferret.birth === 'person';
+
+/** Whether the ferret is the kind a segment asks for. Mine and Agents may share a ferret: it is both theirs and autonomous. */
 export const matchesMode = (ferret: FerretSummary, mode: ModeFilter): boolean =>
-  mode === 'all' || modeOf(ferret) === mode;
+  mode === 'all' || (mode === 'interactive' ? isMine(ferret) : modeOf(ferret) === mode);
 
 /**
  * Which ferrets the list draws before the kind is chosen: everything live, the stopped ones only when ticked, a pinned
@@ -127,7 +134,7 @@ export const listTallies = (
     counts: {
       all: listed.length,
       auto: listed.filter(ferret => modeOf(ferret) === 'auto').length,
-      interactive: listed.filter(ferret => modeOf(ferret) === 'interactive').length,
+      interactive: listed.filter(isMine).length,
     },
     hiddenStopped: ferrets.filter(
       ferret => !listedBeforeMode(ferret, filter, keep, needing) && matchesMode(ferret, filter.mode),
@@ -272,7 +279,7 @@ export const openByDefault = (
 
 /** The kind segments in the order they are drawn (Mine first: what a new device opens on), in the reader's words. */
 export const MODE_SEGMENTS: readonly { readonly mode: ModeFilter; readonly label: string; readonly hint: string }[] = [
-  { mode: 'interactive', label: 'Mine', hint: 'Mine — the ferrets you drive yourself' },
+  { mode: 'interactive', label: 'Mine', hint: 'Mine — the ferrets you started or drive yourself' },
   { mode: 'all', label: 'All', hint: 'Every ferret' },
   { mode: 'auto', label: 'Agents', hint: 'Agents — autonomous ferrets that work unattended' },
 ];

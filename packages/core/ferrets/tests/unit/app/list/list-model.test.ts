@@ -149,6 +149,32 @@ describe('which ferrets the list lists', () => {
     expect(agents.counts).toEqual({ all: 3, auto: 2, interactive: 1 });
   });
 
+  test('O12-S5 Mine holds a ferret the owner started, whatever its mode; a ferret an agent started stays out', () => {
+    // The New ferret form's default mode is `auto`, so a ferret started from the browser is autonomous but the owner's.
+    const started = ferret('started', { birth: 'person' });
+    const driven = ferret('driven', { mode: 'interactive' });
+    const worker = ferret('worker', { birth: 'agent' });
+    const unknown = ferret('unknown');
+    const ferrets = [started, driven, worker, unknown];
+
+    expect(matchesMode(started, 'interactive')).toBe(true);
+    expect(matchesMode(worker, 'interactive')).toBe(false);
+    expect(matchesMode(unknown, 'interactive')).toBe(false);
+    // It is still an autonomous ferret, so Agents lists it too.
+    expect(matchesMode(started, 'auto')).toBe(true);
+
+    expect(ferretListView(ferrets, { mode: 'interactive', showStopped: false }).counts).toEqual({
+      all: 4,
+      auto: 3,
+      interactive: 2,
+    });
+    const mine = ferretListView(ferrets, { mode: 'interactive', showStopped: false });
+    expect(mine.groups.flatMap(group => group.rows.map(row => String(row.id))).sort()).toEqual(['driven', 'started']);
+    expect(
+      listTallies([ferret('gone', { birth: 'person', state: 'stopped' })], DEFAULT_LIST_FILTER).hiddenStopped,
+    ).toBe(1);
+  });
+
   test('groups of one size are ordered by name, and a folder with no name is "ungrouped"', () => {
     const groups = groupByFolder([
       ferret('z', { folder: '/work/zed' }),
