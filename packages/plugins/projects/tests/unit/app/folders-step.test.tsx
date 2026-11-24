@@ -196,4 +196,18 @@ describe('the Add your projects step', () => {
     expect(picks(mounted)).toHaveLength(1);
     expect(recorder.segment.openLabel).toBeUndefined();
   });
+
+  it("registers the save again when the person adds or removes a folder (that clears the footer's old message), never on its own refusal", async () => {
+    const { recorder, mounted } = await open({ [REGISTER]: refusal(422, 'that folder cannot be a project') });
+    await pickFirstFolder(mounted);
+    const afterAdd = recorder.count('commit');
+    await expect(must(recorder.committed, 'a save').call(null)).rejects.toThrow('that folder cannot be a project');
+    await interact(() => undefined);
+    // The refusal re-registered nothing: the frame clears its message on a registration, so one here would erase it.
+    expect(recorder.count('commit')).toBe(afterAdd);
+    await press(must(mounted.container.querySelector('[aria-label^="Remove "]'), 'the remove button'));
+    expect(picks(mounted)).toHaveLength(0);
+    expect(recorder.count('commit')).toBe(afterAdd + 1);
+    await expect(must(recorder.committed, 'a save').call(null)).rejects.toThrow('Skip for now');
+  });
 });

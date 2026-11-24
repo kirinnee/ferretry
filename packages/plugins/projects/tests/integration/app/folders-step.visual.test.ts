@@ -123,9 +123,14 @@ describe('the setup flow ends in project setup', () => {
             await tab.click('[data-step-next]');
             expect(await tab.evaluate(() => window.__error)).toContain('Skip for now');
             expect(await tab.evaluate(() => window.__registered)).toEqual([]);
+            await tab.waitForSelector('[data-flow-commit-error]');
+            await shot('1a-refused');
 
             // Pick two folders: the open one, then atlas.
             await tab.getByRole('button', { name: 'Add this folder' }).click();
+            // O8-13b: the old refusal is gone the moment a folder is added (it must not stay red over the list).
+            await tab.waitForFunction(() => document.querySelector('[data-flow-commit-error]') === null);
+            await shot('1c-added');
             await tab.click('[data-explorer-entry="atlas"]');
             await tab.waitForFunction(() => document.querySelector('[data-explorer-state="ready"]') !== null);
             await tab.waitForSelector('[data-explorer-up]');

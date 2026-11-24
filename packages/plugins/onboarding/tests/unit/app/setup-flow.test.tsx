@@ -21,7 +21,7 @@ import type { StepHost } from '@ferretry/kernel/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { Instant } from '@ferretry/std';
 import { REAL_PROVIDER_PRESET_CATALOG } from '@ferretry/plugin-logins/contract/testing';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createAgentsPanel } from '../../../app/features/agents/agents-panel.tsx';
 import { useScan } from '../../../app/features/setup-flow/machine-scan.ts';
 import { createSetupFlow } from '../../../app/features/setup-flow/setup-flow.tsx';
@@ -99,6 +99,29 @@ function SavePage({ step }: { readonly step: StepHost }): ReactNode {
     });
   }, [step]);
   return <p>pick something</p>;
+}
+/** A page whose save refuses until something is picked; the pick button registers the save again, as a page does when its pick changes. */
+function RepickPage({ step }: { readonly step: StepHost }): ReactNode {
+  const picked = useRef(false);
+  const save = useCallback(async (): Promise<void> => {
+    if (!picked.current) throw new Error('Pick a folder, or choose Skip for now.');
+  }, []);
+  useEffect(() => {
+    step.ready();
+    step.commit(save);
+  }, [step, save]);
+  return (
+    <button
+      type="button"
+      data-repick=""
+      onClick={() => {
+        picked.current = true;
+        step.commit(save);
+      }}
+    >
+      pick
+    </button>
+  );
 }
 /** Whether the machine already has a project: project setup then passes itself over, as the real page does. */
 const machineHasProject = { value: false };
@@ -245,6 +268,7 @@ const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
   'fake-pack.slowsave': step => <SlowSavePage step={step} />,
   'fake-pack.stale': step => <StalePage step={step} />,
   'fake-pack.save': step => <SavePage step={step} />,
+  'fake-pack.repick': step => <RepickPage step={step} />,
   'fake-pack.after': step => <ReadyPage step={step} />,
   'runtimes.start': step => <ReadyPage step={step} />,
   'fake-pack.legacy': () => <p>an old page that never calls ready</p>,
@@ -1156,6 +1180,21 @@ describe('Next saves the choice (contract rule 8, r11 O1)', () => {
     expect(pageKey()).toBe('fake-pack.after');
     expect(errorText()).toBeUndefined();
     expect(run.answers.map(answer => `${answer.step}:${answer.state}`)).toEqual(['save:done']);
+  });
+
+  it('a refusal does not outlive a change of pick: registering the save again clears the old message', async () => {
+    const run = steps('repick', 'after');
+    view = await mount(run.tree);
+    await settle();
+    await next();
+    await settle();
+    expect(errorText()).toBe('Pick a folder, or choose Skip for now.');
+    await press('[data-repick]');
+    await settle();
+    expect(errorText()).toBeUndefined();
+    await next();
+    await settle();
+    expect(pageKey()).toBe('fake-pack.after');
   });
 
   it('a save that throws while it is being prepared is a failed save: message, Next ready, retry runs it', async () => {

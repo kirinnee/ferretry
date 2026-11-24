@@ -170,6 +170,8 @@ export function FlowPage(props: FlowPageProps): ReactNode {
       commit: save => {
         flagless('commit');
         commit.current = save;
+        // A page registers its save again when its pick changes: a refusal of the old pick must not linger over the new one.
+        setSaveError(null);
       },
       busy: label => {
         flagless('busy');
