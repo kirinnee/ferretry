@@ -343,7 +343,7 @@ describe('LoginSignIn', () => {
     expect(text(view.container, '[data-codex-login-user-code]')).toBe('0IER-FFQW6');
     expect(view.container.textContent).toContain('https://auth.openai.com/codex/device');
     expect(view.container.textContent).toContain('Waiting for the provider.');
-    expect(view.container.querySelector('textarea')).toBeNull();
+    expect(view.container.querySelector('input[type="password"]')).toBeNull();
 
     await wait(80);
     expect(only(calls, FLOW_GET)).toHaveLength(2);
@@ -467,7 +467,7 @@ describe('LoginSignIn with a Codex link', () => {
     expect(only(calls, FLOW_POST)[0]?.body).toEqual({ method: 'link' });
     expect(state(view.container)).toBe('awaiting-callback');
 
-    await type(must(view.container.querySelector('textarea'), 'the address field'), ADDRESS);
+    await type(must(view.container.querySelector('input'), 'the address field'), ADDRESS);
     await click(button(view.container, 'Finish sign-in'), 'Finish sign-in');
     expect(only(calls, FLOW_POST)[1]?.body).toEqual({ code: ADDRESS });
     expect(view.container.textContent).toContain('Codex is finishing the sign-in…');

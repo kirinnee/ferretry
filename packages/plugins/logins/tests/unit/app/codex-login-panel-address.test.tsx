@@ -1,6 +1,6 @@
 /**
  * The one field Codex's link sign-in has: the address the browser ends on, which carries an authorization code. It is
- * an uncontrolled secret textarea, so these run against a real DOM (the renderer-tree suite has no nodes to read).
+ * an uncontrolled, masked single-line field (the same shared secret field Claude's code goes in), so these run against a real DOM (the renderer-tree suite has no nodes to read).
  */
 import { describe, expect, it } from 'bun:test';
 import { CodexLoginPanel } from '../../../app/features/codex-login-panel.tsx';
@@ -32,12 +32,12 @@ const panel = (overrides: Partial<Parameters<typeof CodexLoginPanel>[0]> = {}) =
   />
 );
 
-const areaIn = (container: HTMLElement): HTMLTextAreaElement =>
-  must(container.querySelector('textarea'), 'the address box');
+const areaIn = (container: HTMLElement): HTMLInputElement =>
+  must(container.querySelector('input'), 'the address field');
 
-const typeAddress = async (area: HTMLTextAreaElement, text: string): Promise<void> => {
+const typeAddress = async (area: HTMLInputElement, text: string): Promise<void> => {
   await interact(() => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(area, text);
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(area, text);
     area.dispatchEvent(new Event('input', { bubbles: true }));
   });
 };
@@ -104,8 +104,47 @@ describe('the Codex address box', () => {
     const area = areaIn(view.container);
     await typeAddress(area, ADDRESS);
     await view.render(panel({ flow: codexFlow('finishing') }));
-    expect(view.container.querySelector('textarea')).toBeNull();
+    expect(view.container.querySelector('input')).toBeNull();
     expect(area.value).toBe('');
+    await view.unmount();
+  });
+});
+
+describe('C59 O11 R4: Codex draws the sign-in the way Claude does', () => {
+  it('masks the address on one line: a password input, no textarea, nothing resizable', async () => {
+    const view = await mount(panel());
+    const field = areaIn(view.container);
+    expect(view.container.querySelectorAll('textarea')).toHaveLength(0);
+    expect(field.tagName).toBe('INPUT');
+    expect(field.type).toBe('password');
+    expect(field.getAttribute('autocomplete')).toBe('new-password');
+    expect(field.id).toBe('codex-login-address-codex-studio');
+    await view.unmount();
+  });
+
+  it('cuts the long link short and opens it on "Show full", with Copy always holding all of it', async () => {
+    const view = await mount(panel());
+    const link = must(view.container.querySelector<HTMLElement>('[data-sign-in-link]'), 'the link');
+    const toggle = must(view.container.querySelector<HTMLButtonElement>('[data-sign-in-link-toggle]'), 'the toggle');
+    expect(link.getAttribute('data-expanded')).toBe('false');
+    expect(link.className).toContain('truncate');
+    expect(toggle.textContent).toBe('Show full');
+    expect(view.container.querySelector('[aria-label="Copy the Codex sign-in link"]')).not.toBeNull();
+    await interact(() => toggle.click());
+    expect(link.getAttribute('data-expanded')).toBe('true');
+    expect(toggle.textContent).toBe('Show less');
+    await view.unmount();
+  });
+
+  it('puts Finish, then Start over beside Cancel, in the same answer rows Claude has', async () => {
+    const view = await mount(panel({ onStartOver: () => undefined }));
+    const row = must(view.container.querySelector('[data-sign-in-actions]'), 'the answers');
+    expect(row.querySelector('button[type="submit"]')?.textContent).toContain('Finish sign-in');
+    const secondary = must(row.querySelector('[data-sign-in-secondary]'), 'the secondary row');
+    expect([...secondary.querySelectorAll('button')].map(item => item.textContent?.trim())).toEqual([
+      'Start over',
+      'Cancel',
+    ]);
     await view.unmount();
   });
 });
