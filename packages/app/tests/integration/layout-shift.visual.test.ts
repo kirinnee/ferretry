@@ -408,7 +408,12 @@ describe('New ferret draws once, after the runtimes and the projects were read',
             if (shotsDir !== '')
               await tab.screenshot({ path: `${shotsDir}/${name}-new-ferret-loading.png`, fullPage: true });
             expect(await tab.locator('[data-loading="page"]').count(), 'one loader, not two').toBe(1);
-            expect(await tab.locator('[data-runtime-select]').count(), 'the roster must still be on its way').toBe(0);
+            // The form is mounted but hidden (display: none) while it reads, so the roster may already be in the DOM once
+            // the runtimes answer (650 ms); what must hold is that none of it is SEEN until both reads answered.
+            expect(
+              await tab.locator('[data-runtime-select]:visible').count(),
+              'the roster must still be on its way',
+            ).toBe(0);
             await tab.locator('[data-new-ferret-form="drawn"]').waitFor({ state: 'visible', timeout: 30_000 });
             await clear(tab);
             const first = await tops(tab);
