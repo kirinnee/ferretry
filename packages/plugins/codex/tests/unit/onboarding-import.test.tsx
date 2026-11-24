@@ -456,7 +456,9 @@ describe('import-run', () => {
       machine(scanOf(CODEX_FULL, { duplicate: 'codex-main' })),
     );
     expect(container.querySelector('[data-runtime-name]')).toBeNull();
-    expect(container.querySelector('[data-import-existing]')?.textContent).toContain('codex-main');
+    expect(container.querySelector('[data-import-existing]')?.textContent).toBe(
+      'A runtime already uses this setup, so no second one is added.',
+    );
     await press(container, '[data-import-run]');
     expect(proposal(calls).names).toBeUndefined();
   });

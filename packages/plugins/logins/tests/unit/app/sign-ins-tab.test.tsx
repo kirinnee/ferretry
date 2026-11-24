@@ -200,7 +200,7 @@ describe('the page the address names', () => {
     const view = await mount(<SignInsTab client={scripted({ [LIST]: loginList(login()) })} />);
     await until(() => view.container.querySelector('[data-login-missing]') !== null, 'the notice');
     expect(view.container.querySelector('[data-login-missing]')?.textContent).toBe(
-      'There is no login claude-gone on box any more.',
+      'That login is not on box any more.',
     );
     expect(view.container.querySelectorAll('[data-login-row]')).toHaveLength(1);
     await view.unmount();

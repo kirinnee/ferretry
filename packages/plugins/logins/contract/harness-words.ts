@@ -28,6 +28,8 @@ export interface HarnessWords {
   readonly blurb: string;
   /** The stored word and the key of this harness's half in a login, a preset and a model catalog (`claude`, `codex`). */
   readonly half: string;
+  /** What a sign-in made inside Ferretry is called: "Claude.ai sign-in" (the same words a runtime on it uses). */
+  readonly signIn: string;
 }
 
 /** The harnesses Logins has behaviour for, by plugin key, in the order its surfaces list them (Claude Code first). */
@@ -38,8 +40,16 @@ const HARNESS_WORDS = {
     commandWord: 'claude',
     blurb: 'Anthropic’s coding agent',
     half: 'claude',
+    signIn: 'Claude.ai sign-in',
   },
-  codex: { name: 'Codex', short: 'Codex', commandWord: 'codex', blurb: 'OpenAI’s coding agent', half: 'codex' },
+  codex: {
+    name: 'Codex',
+    short: 'Codex',
+    commandWord: 'codex',
+    blurb: 'OpenAI’s coding agent',
+    half: 'codex',
+    signIn: 'ChatGPT sign-in',
+  },
 } as const satisfies Readonly<Record<string, HarnessWords>>;
 
 /** The key of a harness Logins has behaviour for: derived from the table, so no second list can drift from it. */
