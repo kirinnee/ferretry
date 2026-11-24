@@ -40,6 +40,7 @@ import { sizeWords } from './files-policy.ts';
 import { AGENT_TOOL_MAX_OUTPUT_CHARS } from './limits.ts';
 import type { ProtectionWindows } from '../pages/pairing-screen-guard.ts';
 import { pairingScreenGuard } from './pairing-screen.ts';
+import { type CheckSolver, HUMAN_CHECK_NOTE, solveCheck } from '../challenges/solver.ts';
 import type { ResolvedSurface, ToolCaller } from './types.ts';
 import type { BrowserToolCall } from './wire.ts';
 
@@ -187,6 +188,8 @@ export interface BrowserToolPorts {
   readonly pageActs?: PageActs;
   /** Which pages hold a sealed value, and whether a clipboard capture is running (docs/secure-copy.md). */
   readonly sealed?: SealedGate;
+  /** Solves a token check a page shows when stealth is in effect (B5 D7); absent, a check is the owner's alone. */
+  readonly captcha?: CheckSolver;
   /** Told when a person takes a page over, so a secure paste still waiting for it is refused at once (P2-5). */
   readonly takeovers?: {
     landed(sessionId: string, keys: readonly string[]): Promise<void>;
@@ -374,7 +377,8 @@ export class BrowserTools {
       if (caller.kind === 'agent' && actsOnPage(call))
         note = this.ports.pageActs?.acted(caller.sessionId, call.tool === 'browser.eval') ?? undefined;
       // The page is known only once the call has run: dispatch resolves it.
-      return await this.dispatch(caller, call, seen);
+      const answer = await this.dispatch(caller, call, seen);
+      return await solveCheck(this.ports.captcha, caller, seen.surface, answer);
     } catch (error) {
       throw await this.withheld(caller, call, translate(error) ?? error);
     } finally {
@@ -1850,9 +1854,6 @@ function humanCheckNote(answer: BrowserActionResult, pageId: string): string {
   const page = answer.result.pages.find(candidate => candidate.id === (answer.result.actedPageId ?? pageId));
   return page?.challenge === undefined ? '' : HUMAN_CHECK_NOTE;
 }
-
-const HUMAN_CHECK_NOTE =
-  ' The page appears to be showing a human check (a captcha or a "checking your browser" page). Do not try to solve or get around it: ask your owner to take the page over in Ferretry and solve it themselves, then carry on.';
 
 /**
  * The host a page is on, as a standing rule's login domains name it (`github.com`, a port when there is one), or

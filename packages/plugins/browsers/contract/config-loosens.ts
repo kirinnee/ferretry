@@ -5,6 +5,8 @@ const PROXY_SENTENCE = (url: string): string => `the agent browser now sends its
 /** What a held machine-wide `off` → `on` says; the Browser tab reads it from the kernel's pending list to know the switch is NOT in effect. */
 export const STEALTH_LOOSENING =
   'the agent browser now passes bot checks and solves captchas for the owner’s identities';
+/** A solver key newly named: the browser may now spend the owner's CapSolver balance (up to the monthly cap) on captchas. */
+const CAPTCHA_SENTENCE = 'the agent browser may now spend your CapSolver balance on solving captchas, up to $5 a month';
 const IDENTITY_STEALTH_LOOSENING =
   'an identity that opted out of stealth now passes bot checks and solves captchas too';
 
@@ -27,6 +29,7 @@ export const browsersLoosens: Loosens<BrowsersConfig> = (before, after) => {
     proxy === undefined ||
     (was !== undefined && was.url === proxy.url && was.username === proxy.username && was.password === proxy.password);
   if (proxy !== undefined && !same) sentences.push(PROXY_SENTENCE(proxy.url));
+  if (after.captcha !== undefined && before?.captcha === undefined) sentences.push(CAPTCHA_SENTENCE);
   const machineNewlyOn = stealthOn(after) && (before === undefined || !stealthOn(before));
   if (machineNewlyOn) sentences.push(STEALTH_LOOSENING);
   else {

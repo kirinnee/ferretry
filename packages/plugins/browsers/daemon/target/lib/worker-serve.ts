@@ -1,5 +1,6 @@
 import { InputTargetFactsSchema } from '@ferretry/core-vault/contract';
 import { type PushNumberPage, readPushNumber } from '../../challenges/push-number-read.ts';
+import { CAPTCHA_KINDS, type CaptchaKind, injectCaptchaToken, probeCaptcha } from '../../challenges/solver-page.ts';
 import {
   BROWSER_INPUT_WORKER_METHODS,
   type BrowserInputClearJob,
@@ -173,6 +174,30 @@ async function inputProbe(
 }
 
 /**
+ * A solver's token handed to the page's widget (D7). The token is read here and goes into the page and nowhere else:
+ * the answer is `taken` and a flag, whatever happens, and a failure says nothing of what was sent.
+ */
+async function captchaInject(
+  pages: InputWorkerPages,
+  params: Readonly<Record<string, unknown>>,
+): Promise<Record<string, unknown>> {
+  const { kind, token, pageUrl } = params;
+  if (!(CAPTCHA_KINDS as readonly unknown[]).includes(kind) || typeof token !== 'string' || token === '')
+    return { taken: false };
+  try {
+    const origin = typeof pageUrl === 'string' && /^https?:\/\//u.test(pageUrl) ? new URL(pageUrl).origin : undefined;
+    if (origin === undefined) return { taken: false };
+    return {
+      taken: await pages
+        .pushPage(params.pageId)
+        .evaluate(injectCaptchaToken, { kind: kind as CaptchaKind, token, origin }),
+    };
+  } catch {
+    return { taken: false };
+  }
+}
+
+/**
  * Answers one page input request. A read that fails throws (the worker answers its fixed error); the four acts that
  * can carry or touch a value answer a word instead. A method that is not one of the seam's is refused.
  */
@@ -190,6 +215,13 @@ export async function serveInputMethod(
     }
     case BROWSER_INPUT_WORKER_METHODS.document:
       return { document: await describeInputDocument(pages.subject(params.pageId)) };
+    case BROWSER_INPUT_WORKER_METHODS.captchaProbe: {
+      const page = pages.pushPage(params.pageId);
+      const widget = await page.evaluate(probeCaptcha, {}).catch(() => null);
+      return { widget: widget === null ? null : { ...widget, pageUrl: page.url() } };
+    }
+    case BROWSER_INPUT_WORKER_METHODS.captchaInject:
+      return await captchaInject(pages, params);
     case BROWSER_INPUT_WORKER_METHODS.text:
       return { text: await readInputText(pages.subject(params.pageId)) };
     case BROWSER_INPUT_WORKER_METHODS.observe:

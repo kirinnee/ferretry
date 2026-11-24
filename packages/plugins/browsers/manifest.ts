@@ -14,6 +14,8 @@ import {
   BROWSERS_WORDS,
   BrowsersConfigSchema,
   BrowsersPort,
+  CAPTCHA_SECRET_NAME,
+  CAPTCHA_SPEND_FILE,
   CONFIGURE,
   GUARD_ACK,
   GUARD_NONE,
@@ -23,6 +25,9 @@ import {
   SKIP_READ,
   USE,
 } from './contract/index.ts';
+
+/** The captcha solver's API host (CapSolver): the only host added to `permissions.network` beside Chrome's own loopback endpoint. */
+const CAPSOLVER_HOST = 'api.capsolver.com';
 
 /** Every browser tool: a ferret's call (or the owner's tools), on `browser.use`, kept as one `agent.tool` entry. */
 const TOOL = {
@@ -744,6 +749,8 @@ export default definePlugin({
         onDamaged: { narrower: 'that profile starts empty; the others are kept' },
       }),
       defineState({ name: 'browsers', path: 'data.json', store: 'json', format: 1 }),
+      /** What the captcha solver has spent this month: the cap's ledger. */
+      CAPTCHA_SPEND_FILE,
       defineState({
         name: 'x11',
         path: 'x11/*',
@@ -811,7 +818,9 @@ export default definePlugin({
     hostFacts: true,
     /** Uploads come from the ferret's own folder, and downloads and PDFs are saved into it (S51). */
     roots: ['work'],
-    /** Chrome's own DevTools endpoint on loopback, which the launcher waits for. */
-    network: ['127.0.0.1'],
+    /** Chrome's own DevTools endpoint on loopback, which the launcher waits for; and the captcha solver's API (D7), the one host a solve may reach. */
+    network: ['127.0.0.1', CAPSOLVER_HOST],
+    /** The solver's key: named by `browsers.yaml`, resolved in the daemon at the moment of a solve, never handed to the worker. */
+    secrets: [CAPTCHA_SECRET_NAME],
   },
 });
