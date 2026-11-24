@@ -194,6 +194,8 @@ export class VoiceStream implements SocketHandler {
   private early: { turn: number; cut: number; text: string } | undefined;
   /** Where the audio the VAD has not looked at starts, after an early decode kept it from looking: it is scanned from here. */
   private scanFrom: number | undefined;
+  /** Speculative decodes (interim words, the early decode) wait until the engine has been left alone as long as it was kept busy. */
+  private speculateAfter = 0;
   private pauseSamples = 0;
   private words: { turn: number; rev: number; text: string; offset: number; final: boolean } | undefined;
   private last: TurnOutcome | undefined;
@@ -531,6 +533,7 @@ export class VoiceStream implements SocketHandler {
     this.lastSpeechEnd = spans[spans.length - 1]?.end ?? first.end;
     this.interimAt = 0;
     this.early = undefined;
+    this.speculateAfter = 0;
     this.words = undefined;
     this.last = undefined;
     this.phase = 'hearing';
@@ -556,22 +559,43 @@ export class VoiceStream implements SocketHandler {
     }
     const spoken = this.lastSpeechEnd - this.turnStart;
     const cut = this.lastSpeechEnd + LEAD_IN;
-    if (spoken <= INTERIM_MAX && silence >= EARLY_SILENCE && !this.isEarly(cut)) {
-      const heard = await this.decodeWithin(
+    // Interim words and the early decode are best-effort: a busy engine is skipped, never queued, and its time is not
+    // unseen audio. Only the final decode (at the pause) can lose the turn.
+    if (spoken > INTERIM_MAX || this.parts.clock.nowMs() < this.speculateAfter) return;
+    if (silence >= EARLY_SILENCE && !this.isEarly(cut)) {
+      const heard = await this.speculate(
         this.samples.slice(this.turnStart, cut),
         this.finalBudget(cut - this.turnStart),
       );
-      if (this.phase !== 'hearing') return;
-      this.early = { turn: this.turn, cut, text: heard.text };
-      this.scanFrom = this.seenLength;
       this.interimAt = spoken;
+      if (this.phase !== 'hearing' || heard === undefined) return;
+      this.early = { turn: this.turn, cut, text: heard.text };
       this.setWords(heard.text, false);
       return;
     }
-    if (spoken <= INTERIM_MAX && spoken - this.interimAt >= INTERIM_EVERY) {
-      const heard = await this.decodeWithin(this.samples.slice(this.turnStart, this.lastSpeechEnd), FINAL_BASE_MS);
+    if (spoken - this.interimAt >= INTERIM_EVERY) {
+      const heard = await this.speculate(this.samples.slice(this.turnStart, this.lastSpeechEnd), FINAL_BASE_MS);
       this.interimAt = spoken;
-      if (this.phase === 'hearing') this.setWords(heard.text, false);
+      if (this.phase === 'hearing' && heard !== undefined) this.setWords(heard.text, false);
+    }
+  }
+
+  /**
+   * A decode nobody is waiting for yet. Whatever it costs the engine, the VAD then scans every sample that arrived meanwhile
+   * (so the pause is heard and no voice is skipped), the unseen audio it left is expected, and the engine is left alone as
+   * long as this took. A decode over its budget is no answer rather than a lost turn: the final decode has its own deadline.
+   */
+  private async speculate(audio: Float32Array, budgetMs: number): Promise<{ readonly text: string } | undefined> {
+    const began = this.parts.clock.nowMs();
+    try {
+      return await this.decodeWithin(audio, budgetMs);
+    } catch (error) {
+      if (error instanceof StreamTimeout) return undefined;
+      throw error;
+    } finally {
+      const now = this.parts.clock.nowMs();
+      this.speculateAfter = now + (now - began);
+      this.scanFrom = this.seenLength;
     }
   }
 
