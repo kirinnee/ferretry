@@ -134,7 +134,17 @@ identities:
     (`ipinfo.io`, asked with the same sign-in as the proxy test, once per launch) and set as the browser's `TZ`, `--lang` and
     `--accept-lang`, so the page's clock and `navigator.languages` match where it appears to be. Only a country the daemon has a
     language for sets one; an answer it cannot read, or no proxy at all, leaves the machine's own zone and language.
-  - Still to come, each on its own: a patched engine, a stable fingerprint per identity, a proxy per identity, a captcha solver.
+  - **What it needs.** Linux needs Xvfb (a launch without it is refused with the one-line fix, never started headless); on macOS
+    the window is visible on the desktop. The stealth worker is about 13 MB larger (it carries `patchright-core` beside `playwright-core`).
+  - **Turning it off does not touch a running browser.** `on` → `off` applies to the next launch: a stealth Chrome that is
+    already running keeps running as it was until it closes or the machine's browser is restarted.
+  - **GAP: the per-identity opt-out has no target yet.** `identities.<key>.stealth: false` is read and held to its rules, but
+    the machine has ONE agent browser and it carries no identity key, so nothing asks the question per identity until
+    identities get a browser each (Group C of the browser rework).
+  - **No patched engine.** One was measured (fingerprint-chromium 150, fetched by hash, three runs per layer, direct IP) and it did
+    worse than the stock browser with this layer: 3 of 7 checks against 5 of 7 (it fails the user-agent test and Navia's Cloudflare
+    check never cleared), and it is an extra binary to download. So there is no engine switch.
+  - Still to come, each on its own: a stable fingerprint per identity, a proxy per identity, a captcha solver.
 - **The audit log** ([audit.md](audit.md)) records metadata only: `browser.stealth.switched` (from, to) when the switch
   really changes — a held `on` leaves no record until it is confirmed — and, as the layers arrive,
   `browser.stealth.session`, `browser.captcha.solve` and `browser.captcha.cap-reached` (identity key, never an

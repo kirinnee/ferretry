@@ -118,7 +118,7 @@ export const FORWARDED_ENVIRONMENT = [
 ] as const;
 
 /** What tells a worker it drives a stealth identity's Chrome: it then connects through patchright-core (`worker/main.ts`). */
-const STEALTH_WORKER_ENVIRONMENT = { FY_BROWSER_STEALTH: '1' } as const;
+const STEALTH_WORKER_ENVIRONMENT = { FY_BROWSER_WORKER_STEALTH: '1' } as const;
 
 /**
  * Starts the worker PROCESS with these arguments and exactly this environment: `kernel.spawn.start` of the worker
