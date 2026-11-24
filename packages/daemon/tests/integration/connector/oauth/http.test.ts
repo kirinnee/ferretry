@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { ConnectorOAuthHttp } from '../../../../src/adapters/connector/oauth-http.ts';
 import { BodyTooLargeError, type ApiRequest } from '../../../../src/lib/api/http.ts';
 import { unauthorizedResponse } from '../../../../src/lib/connector/oauth/discovery.ts';
-import { endpoints, fixture, redirectUri } from './fixture.ts';
+import { endpoints, fixture, redirectUri } from '../../../support/connector/oauth-fixture.ts';
 
 function request(
   method: string,

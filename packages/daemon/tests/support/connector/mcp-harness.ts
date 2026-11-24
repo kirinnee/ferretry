@@ -1,11 +1,11 @@
 import { DAEMON_CAPABILITIES, type CapabilityGrants } from '@ferretry/protocol';
-import type { ApiRequest, ApiResponse } from '../../../../src/lib/api/http.ts';
-import type { ConnectorAccess } from '../../../../src/lib/connector/ports.ts';
-import { ConnectorToolbox } from '../../../../src/lib/connector/mcp/tools.ts';
-import type { ConnectorCallRecord, ConnectorCallsLog } from '../../../../src/lib/connector/mcp/ports.ts';
-import { ConnectorTextGuard } from '../../../../src/lib/connector/mcp/redaction.ts';
-import { ConnectorMcpEndpoint } from '../../../../src/adapters/connector/mcp/mcp-endpoint.ts';
-import { AuditSpy, FakeDispatch, NOW, WRITE_ACCESS } from './fixtures.ts';
+import type { ApiRequest, ApiResponse } from '../../../src/lib/api/http.ts';
+import type { ConnectorAccess } from '../../../src/lib/connector/ports.ts';
+import { ConnectorToolbox } from '../../../src/lib/connector/mcp/tools.ts';
+import type { ConnectorCallRecord, ConnectorCallsLog } from '../../../src/lib/connector/mcp/ports.ts';
+import { ConnectorTextGuard } from '../../../src/lib/connector/mcp/redaction.ts';
+import { ConnectorMcpEndpoint } from '../../../src/adapters/connector/mcp/mcp-endpoint.ts';
+import { AuditSpy, FakeDispatch, NOW, WRITE_ACCESS } from './mcp-fixtures.ts';
 
 export const ALL_GRANTS: CapabilityGrants = Object.fromEntries(
   DAEMON_CAPABILITIES.map(capability => [capability, { use: true, configure: true }]),
@@ -74,6 +74,8 @@ export interface PostOptions {
   readonly method?: string;
   readonly path?: string;
   readonly contentType?: string;
+  /** Extra request headers, lower-case names (an `mcp-protocol-version`, say). */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export function post(
@@ -88,6 +90,7 @@ export function post(
   const token = options.token === undefined ? TOKEN : options.token;
   if (token !== null) headers.set('authorization', `Bearer ${token}`);
   if (options.origin !== undefined) headers.set('origin', options.origin);
+  for (const [key, value] of Object.entries(options.headers ?? {})) headers.set(key, value);
   const raw = typeof body === 'string' ? body : JSON.stringify(body);
   const request: ApiRequest = {
     method: options.method ?? 'POST',

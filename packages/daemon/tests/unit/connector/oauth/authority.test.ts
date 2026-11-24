@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ConnectorAuthority } from '../../../../src/lib/connector/oauth/authority.ts';
 import { ConnectorMemory, OAuthError, canonicalResource } from '../../../../src/lib/connector/oauth/model.ts';
-import { endpoints, fixture, redirectUri, verifier } from './fixture.ts';
+import { endpoints, fixture, redirectUri, verifier } from '../../../support/connector/oauth-fixture.ts';
 
 describe('connector authority', () => {
   test('mints only digest-backed tokens, codes, handles and client secrets', async () => {

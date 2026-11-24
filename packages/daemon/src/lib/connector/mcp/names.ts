@@ -123,3 +123,17 @@ export function matchName<T>(query: string, items: readonly T[], keysOf: (item: 
   }
   return { kind: 'none', suggestions: scored.slice(0, 3).map(entry => entry.item) };
 }
+
+/**
+ * Everything whose identity IS the query: an `exact` key (id, short id) or a name that normalises to the same
+ * words — no prefix, no substring, no edit distance. A caller that must not act on a near miss (stop, restart,
+ * send) asks this first, over EVERY candidate whatever its state, so a retried call finds the same thing again.
+ */
+export function matchExact<T>(query: string, items: readonly T[], keysOf: (item: T) => NameKeys): readonly T[] {
+  const wanted = normalizeName(query);
+  if (wanted === '') return [];
+  return items.filter(item => {
+    const keys = keysOf(item);
+    return [...keys.exact, ...keys.names].some(key => normalizeName(key) === wanted);
+  });
+}

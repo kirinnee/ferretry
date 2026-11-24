@@ -21,8 +21,9 @@ describe('SecurityLogConnectorAudit', () => {
       outcome: 'succeeded',
       detail: { client: 'Claude' },
     });
-    should((await recorded({ kind: 'connector.client.registered', clientId: 'c', clientName: '\u0000' }))?.detail)
-      .deepEqual({ client: 'unnamed' });
+    should(
+      (await recorded({ kind: 'connector.client.registered', clientId: 'c', clientName: '\u0000' }))?.detail,
+    ).deepEqual({ client: 'unnamed' });
   });
 
   it('records the approving device, or this computer', async () => {
@@ -34,18 +35,21 @@ describe('SecurityLogConnectorAudit', () => {
       (await recorded({ kind: 'connector.grant.denied', requestId: 'cr_1', clientName: 'Claude', actor: 'admin-cli' }))
         ?.actor,
     ).deepEqual({ kind: 'host' });
-    should((await recorded({ kind: 'connector.grant.denied', requestId: 'cr_1', clientName: 'C', actor: 'device:' }))?.actor)
-      .deepEqual({ kind: 'host' });
+    should(
+      (await recorded({ kind: 'connector.grant.denied', requestId: 'cr_1', clientName: 'C', actor: 'device:' }))?.actor,
+    ).deepEqual({ kind: 'host' });
   });
 
   it('says a connector revoked its own grant, and a person revoked one', async () => {
-    should((await recorded({ kind: 'connector.grant.revoked', grantId: 'cg_1', actor: 'connector:cg_1' }))?.actor).deepEqual(
-      { kind: 'connector' },
+    should(
+      (await recorded({ kind: 'connector.grant.revoked', grantId: 'cg_1', actor: 'connector:cg_1' }))?.actor,
+    ).deepEqual({ kind: 'connector' });
+    should((await recorded({ kind: 'connector.grant.revoked', grantId: 'cg_1', actor: 'device:d2' }))?.actor).deepEqual(
+      {
+        kind: 'device',
+        deviceId: 'd2',
+      },
     );
-    should((await recorded({ kind: 'connector.grant.revoked', grantId: 'cg_1', actor: 'device:d2' }))?.actor).deepEqual({
-      kind: 'device',
-      deviceId: 'd2',
-    });
   });
 
   it('records a refresh reuse as a refusal and a tool call by tool and ferret', async () => {
@@ -55,14 +59,24 @@ describe('SecurityLogConnectorAudit', () => {
       subject: 'cg_1',
       outcome: 'refused',
     });
-    should(await recorded({ kind: 'connector.tool', grantId: 'cg_1', tool: 'stop_ferret', sessionId: 's1' })).deepEqual({
-      event: 'connector.tool',
-      actor: { kind: 'connector' },
-      subject: 's1',
-      outcome: 'succeeded',
-      detail: { grant: 'cg_1', tool: 'stop_ferret' },
-    });
+    should(await recorded({ kind: 'connector.tool', grantId: 'cg_1', tool: 'stop_ferret', sessionId: 's1' })).deepEqual(
+      {
+        event: 'connector.tool',
+        actor: { kind: 'connector' },
+        subject: 's1',
+        outcome: 'succeeded',
+        detail: { grant: 'cg_1', tool: 'stop_ferret' },
+      },
+    );
     should((await recorded({ kind: 'connector.tool', grantId: 'cg_1', tool: 'spawn_ferret' }))?.subject).be.undefined();
+  });
+
+  it('records how a tool call ended: ok and unrecorded read as succeeded, an error as failed, a refusal as refused', async () => {
+    const base = { kind: 'connector.tool', grantId: 'cg_1', tool: 'stop_ferret', sessionId: 's1' } as const;
+    should((await recorded({ ...base, outcome: 'ok' }))?.outcome).equal('succeeded');
+    should((await recorded(base))?.outcome).equal('succeeded');
+    should((await recorded({ ...base, outcome: 'error' }))?.outcome).equal('failed');
+    should((await recorded({ ...base, outcome: 'refused' }))?.outcome).equal('refused');
   });
 
   it('never throws into a request when the log cannot write', async () => {

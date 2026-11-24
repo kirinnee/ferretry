@@ -27,11 +27,37 @@ import {
 import type { z } from 'zod';
 import type { ConnectorApiAnswer, ConnectorApiCall, ConnectorApiDispatch } from '../ports.ts';
 
-/** A failure a tool reports as its result, in a sentence a person hears. */
+/**
+ * A failure a tool reports as its result, in a sentence a person hears.
+ *
+ * `code` is the daemon's own error code when it sent one (`ask_changed`), so a tool can react to it without
+ * parsing a sentence. `refused` says the act was REFUSED (the daemon or the tool said "not you, not this") as
+ * against failing, so the record can say which: a refusal of something the owner must do themselves matters to
+ * whoever reads the security log. `sessionId` names the ferret the act was aimed at, when the tool knew it, so a
+ * refusal is in the log against the right ferret.
+ */
 export class ToolFailure extends Error {
-  constructor(message: string) {
+  readonly code: string | undefined;
+  readonly refused: boolean;
+  readonly sessionId: string | undefined;
+  constructor(
+    message: string,
+    options: { readonly code?: string; readonly refused?: boolean; readonly sessionId?: string } = {},
+  ) {
     super(message);
     this.name = 'ToolFailure';
+    this.code = options.code;
+    this.refused = options.refused === true;
+    this.sessionId = options.sessionId;
+  }
+
+  /** The same failure, aimed at a ferret. */
+  aimedAt(sessionId: string): ToolFailure {
+    return new ToolFailure(this.message, {
+      ...(this.code === undefined ? {} : { code: this.code }),
+      refused: this.refused,
+      sessionId,
+    });
   }
 }
 
@@ -131,14 +157,26 @@ export class FleetGateway {
     return found;
   }
 
-  /** Resolve one agenda item with the owner's answer, through the same route the app and `fy agenda done` use. */
-  async resolveAgenda(sessionId: string, id: string, response?: AgendaResponse, note?: string): Promise<void> {
+  /**
+   * Resolve one agenda item with the owner's answer, through the same route the app and `fy agenda done` use.
+   * `askVersion` is the version of the ask the item SHOWED when the answer was shaped: the daemon refuses
+   * `ask_changed` (a {@link ToolFailure} with that `code`) if the ferret has replaced the ask since, instead of
+   * applying the answer to a question nobody saw.
+   */
+  async resolveAgenda(
+    sessionId: string,
+    id: string,
+    askVersion: number,
+    response?: AgendaResponse,
+    note?: string,
+  ): Promise<void> {
     const path = isMachineAgendaId(sessionId)
       ? '/v1/machine/agenda'
       : `/v1/sessions/${encodeURIComponent(sessionId)}/agenda`;
     const body = AgendaActionRequestSchema.parse({
       action: 'resolve',
       id,
+      askVersion,
       ...(response === undefined ? {} : { response }),
       ...(note === undefined ? {} : { note }),
     });
@@ -167,20 +205,25 @@ export class FleetGateway {
       throw new ToolFailure('The daemon could not be reached just now.');
     }
     if (answer.status >= 200 && answer.status < 300) return answer;
-    throw new ToolFailure(refusalSentence(answer));
+    throw refusalOf(answer);
   }
 }
 
-/** The daemon's own sentence when it sent one; otherwise a plain one by status. */
-function refusalSentence(answer: ConnectorApiAnswer): string {
+/** The daemon's own sentence and code when it sent them; otherwise a plain sentence by status. */
+function refusalOf(answer: ConnectorApiAnswer): ToolFailure {
+  const refused = answer.status === 403 || answer.status === 401;
   try {
     const parsed = ApiErrorResponseSchema.safeParse(JSON.parse(answer.body));
-    if (parsed.success && parsed.data.error.trim() !== '') return parsed.data.error.trim();
+    if (parsed.success && parsed.data.error.trim() !== '')
+      return new ToolFailure(parsed.data.error.trim(), {
+        ...(parsed.data.code === undefined ? {} : { code: parsed.data.code }),
+        refused,
+      });
   } catch {
     // not JSON: fall through to the status sentence
   }
-  if (answer.status === 404) return 'The daemon does not know that.';
-  if (answer.status === 403 || answer.status === 401) return 'The daemon refused that request.';
-  if (answer.status === 429) return 'The daemon is busy right now. Try again in a moment.';
-  return `The daemon could not do that (status ${answer.status}).`;
+  if (answer.status === 404) return new ToolFailure('The daemon does not know that.');
+  if (refused) return new ToolFailure('The daemon refused that request.', { refused });
+  if (answer.status === 429) return new ToolFailure('The daemon is busy right now. Try again in a moment.');
+  return new ToolFailure(`The daemon could not do that (status ${answer.status}).`);
 }

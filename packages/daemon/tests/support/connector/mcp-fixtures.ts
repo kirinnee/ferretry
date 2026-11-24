@@ -11,7 +11,7 @@ import type {
   ConnectorApiCall,
   ConnectorApiDispatch,
   ConnectorAuditEvent,
-} from '../../../../src/lib/connector/ports.ts';
+} from '../../../src/lib/connector/ports.ts';
 
 export const NOW = Date.parse('2026-11-24T12:00:00.000Z');
 
@@ -23,6 +23,8 @@ export interface ViewSpec {
   readonly turnState?: 'working' | 'your-turn' | 'needs-input';
   readonly lastActivityAt?: string;
   readonly reason?: string;
+  /** Any other field of the session's state (an activity, a wait …), merged last and still schema-checked. */
+  readonly state?: Record<string, unknown>;
 }
 
 /** A schema-valid session view, so a fixture that drifts from the protocol fails here, loudly. */
@@ -60,6 +62,7 @@ export function sessionView(spec: ViewSpec): SessionView {
       ...(spec.turnState === undefined ? {} : { turnState: spec.turnState }),
       lastActivityAt: spec.lastActivityAt ?? '2026-11-24T11:55:00.000Z',
       ...(spec.reason === undefined ? {} : { reason: spec.reason }),
+      ...spec.state,
     },
     directory: '/state/sessions/x',
   });
@@ -72,6 +75,9 @@ export interface AgendaSpec {
   readonly raisedBySession?: string;
   readonly ask?: Record<string, unknown>;
   readonly kind?: string;
+  readonly askVersion?: number;
+  /** Any other field of the item (a confirmation, a plan …), merged last and still schema-checked. */
+  readonly extra?: Record<string, unknown>;
 }
 
 export function agendaItem(spec: AgendaSpec): AgendaItem {
@@ -88,6 +94,8 @@ export function agendaItem(spec: AgendaSpec): AgendaItem {
     raisedByName: 'lizzette',
     ...(spec.ask === undefined ? {} : { ask: spec.ask }),
     ...(spec.kind === undefined ? {} : { kind: spec.kind }),
+    ...(spec.askVersion === undefined ? {} : { askVersion: spec.askVersion }),
+    ...spec.extra,
   });
 }
 

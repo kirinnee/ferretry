@@ -1,8 +1,16 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { CONNECTOR_TOOL_NAMES } from '../../../../src/lib/connector/mcp/demands.ts';
-import { agendaItem, ok, READ_ACCESS, refuse, sessionView, snapshot, text } from './fixtures.ts';
-import { ALL_GRANTS, callTool, INIT, post, rig, rpc, TOKEN, tool } from './harness.ts';
+import {
+  agendaItem,
+  ok,
+  READ_ACCESS,
+  refuse,
+  sessionView,
+  snapshot,
+  text,
+} from '../../../support/connector/mcp-fixtures.ts';
+import { ALL_GRANTS, callTool, INIT, post, rig, rpc, TOKEN, tool } from '../../../support/connector/mcp-harness.ts';
 
 interface ListedTool {
   readonly name: string;
@@ -359,7 +367,13 @@ describe('write tools', () => {
     should(JSON.stringify(record)).not.containEql('hunter22');
     should(JSON.stringify(record)).not.containEql(TOKEN);
     should(r.audit.events).eql([
-      { kind: 'connector.tool', grantId: 'cg_aaaaaaaaaa', tool: 'send_to_ferret', sessionId: 'mwuanehg-4531fa9e' },
+      {
+        kind: 'connector.tool',
+        grantId: 'cg_aaaaaaaaaa',
+        tool: 'send_to_ferret',
+        sessionId: 'mwuanehg-4531fa9e',
+        outcome: 'ok',
+      },
     ]);
   });
 
@@ -543,6 +557,7 @@ describe('attention', () => {
       should(post?.call.body).eql({
         action: 'resolve',
         id: 'A12',
+        askVersion: 1,
         response: { kind: 'multiple-choice', choice: 'SQLite' },
       });
     }

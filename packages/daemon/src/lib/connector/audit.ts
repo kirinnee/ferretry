@@ -1,7 +1,7 @@
 import type { AuditActor } from '@ferretry/protocol';
 import { parseActor } from '../api/actor.ts';
 import type { AuditEntry, AuditSink } from '../audit/types.ts';
-import type { ConnectorAuditEvent, ConnectorAuditSink } from './ports.ts';
+import type { ConnectorAuditEvent, ConnectorAuditSink, ConnectorToolOutcome } from './ports.ts';
 
 /**
  * The connector's events, written to the machine's security log (docs/audit.md, docs/mcp-connector.md "Storage").
@@ -79,8 +79,15 @@ function entryOf(event: ConnectorAuditEvent): AuditEntry {
         event: 'connector.tool',
         actor: CONNECTOR,
         ...(event.sessionId === undefined ? {} : { subject: event.sessionId }),
-        outcome: 'succeeded',
+        outcome: toolOutcome(event.outcome),
         detail: { grant: event.grantId, tool: event.tool },
       };
   }
+}
+
+/** A tool call's outcome in the security log's words: it did it, it could not, or it was refused. */
+function toolOutcome(outcome: ConnectorToolOutcome | undefined): AuditEntry['outcome'] {
+  if (outcome === 'error') return 'failed';
+  if (outcome === 'refused') return 'refused';
+  return 'succeeded';
 }

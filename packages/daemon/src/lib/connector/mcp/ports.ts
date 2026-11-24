@@ -4,6 +4,7 @@
  */
 
 import type { CapabilityGrants } from '@ferretry/protocol';
+import type { ConnectorToolOutcome } from '../ports.ts';
 
 /** One line of the calls log: a WRITE tool call, arguments already redacted. Never a token, never a secret. */
 export interface ConnectorCallRecord {
@@ -13,7 +14,7 @@ export interface ConnectorCallRecord {
   /** The access token's id (first 12 hex of its digest), never the token. */
   readonly tokenId: string;
   readonly args: Readonly<Record<string, unknown>>;
-  readonly outcome: 'ok' | 'error' | 'refused';
+  readonly outcome: ConnectorToolOutcome;
 }
 
 /** Where write calls are recorded. A failure to record never fails the call (the security log still has it). */
