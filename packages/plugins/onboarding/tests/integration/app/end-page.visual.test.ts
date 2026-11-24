@@ -267,7 +267,27 @@ describe('the last page', () => {
           }
           // The heading is on screen at the top of the page (390: it used to start at "This machine").
           const heading = await one('.fy-spf__title');
-          expect(await tab.locator('.fy-spf__title').innerText()).toBe("You're set up");
+          // O11 R5 (S-54): some of this machine was left for later, so the heading does NOT say "set up / ready": it says what is left.
+          expect(await tab.locator('.fy-spf__title').innerText()).toBe('Setup is partly done');
+          expect(await tab.locator('.fy-spf__line').innerText()).toContain('Claude Code');
+          // O11 R5 (S-54): the ways to start are in the first screen, whole, above the sticky footer (no scrolling to find them).
+          {
+            // At EVERY width the way on comes before the long checklist, so a longer list can never push it under the footer.
+            expect(
+              (await one('[data-flow-end-start]')).bottom,
+              'the ways to start come before the checklist',
+            ).toBeLessThanOrEqual((await one('[data-onboarding-summary]')).y + 1);
+            const first = await one('[data-flow-end-project]');
+            const bar = await one('[data-step-footer]');
+            expect(first.bottom, 'Create a project is whole above the footer without scrolling').toBeLessThanOrEqual(
+              bar.y,
+            );
+            for (const box of await all('[data-flow-end-alternative]'))
+              expect(
+                box.bottom,
+                'Continue a conversation is whole above the footer without scrolling',
+              ).toBeLessThanOrEqual(bar.y);
+          }
           expect(heading.y, 'the "You\'re set up" heading is on screen').toBeGreaterThanOrEqual(0);
           expect(heading.bottom).toBeLessThanOrEqual(viewport.height);
           expect(
@@ -304,6 +324,7 @@ describe('the last page', () => {
           await tab.goto(`${origin}/?case=clean&theme=studio-${mode}`);
           await tab.waitForSelector('[data-flow-end]');
           expect(await tab.locator('[data-onboarding-later-link]').count()).toBe(0);
+          expect(await tab.locator('.fy-spf__title').innerText(), 'all done: it says so').toBe("You're set up");
           expect(await tab.locator('[data-end-state="done"]').count()).toBe(
             await tab.locator('[data-end-row]').count(),
           );
@@ -384,6 +405,10 @@ describe('the last page when no runtime was made', () => {
           await tab.waitForTimeout(300);
           const runtimes = tab.locator('[data-end-row="daemon:runtimes"]');
           expect(await runtimes.getAttribute('data-end-state')).toBe('later');
+          expect(await tab.locator('.fy-spf__title').innerText(), 'no runtime was made: not "set up"').toBe(
+            'Setup is partly done',
+          );
+          expect(await tab.locator('.fy-spf__line').innerText()).toContain('Runtimes');
           expect(await runtimes.locator('[data-mark="done"]').count(), 'no tick on Runtimes').toBe(0);
           expect(await tab.locator('[data-end-row="daemon:codex"] [data-mark="done"]').count()).toBe(1);
           if (shotsDir !== '')
@@ -392,4 +417,48 @@ describe('the last page when no runtime was made', () => {
           await context.close();
         }
       });
+});
+
+/** O11 R5 (S-54): with a long checklist the ways to start are still whole above the sticky footer in the first screen. */
+describe('the last page with a long checklist: the ways to start are in the first screen', () => {
+  for (const viewport of [
+    { name: '1440x900', width: 1_440, height: 900 },
+    { name: '390x844', width: 390, height: 844 },
+  ] as const)
+    for (const mode of ['light', 'dark'] as const)
+      it(`${viewport.name}, ${mode}`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          colorScheme: mode,
+          ...(viewport.width < 600 ? { isMobile: true, hasTouch: true } : {}),
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const tab = await context.newPage();
+        try {
+          await tab.goto(`${origin}/?case=long&theme=studio-${mode}`);
+          await tab.waitForSelector('[data-flow-end]');
+          await tab.waitForTimeout(300);
+          const read = await tab.evaluate(() => {
+            const rect = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
+            return {
+              project: rect('[data-flow-end-project]')?.bottom ?? 1e9,
+              alternative: rect('[data-flow-end-alternative]')?.bottom ?? 1e9,
+              footer: rect('[data-step-footer]')?.top ?? 0,
+              title: document.querySelector('.fy-spf__title')?.textContent ?? '',
+            };
+          });
+          expect(read.project, 'Create a project is whole above the footer').toBeLessThanOrEqual(read.footer);
+          expect(read.alternative, 'Continue a conversation is whole above the footer').toBeLessThanOrEqual(
+            read.footer,
+          );
+          expect(read.title).toBe('Setup is partly done');
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `end-page-long-${viewport.name}-${mode}.png`) });
+        } finally {
+          await context.close();
+        }
+      }, 60_000);
 });

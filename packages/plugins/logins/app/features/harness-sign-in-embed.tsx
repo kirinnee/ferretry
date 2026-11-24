@@ -212,7 +212,6 @@ export function HarnessSignInEmbed({
         refusal={changes.refusal}
         submitLabel={`Sign in to ${name}`}
         onSubmit={() => void make()}
-        answerRow
       />
     </section>
   );

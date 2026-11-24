@@ -191,9 +191,9 @@ describe('r11 O2: step page layout, stacked choices left and demo right', () => 
         }
         for (const [index, card] of m.cards.entries())
           if (index > 0) expect(card.y).toBeGreaterThan(m.cards[index - 1]?.y ?? 0);
-        // Column width: 44% of the body, 360..480.
-        expect(m.cards[0]?.w ?? 0).toBeGreaterThanOrEqual(360);
-        expect(m.cards[0]?.w ?? 0).toBeLessThanOrEqual(480);
+        // Column width (O11 R5): the one reading column, 520..600.
+        expect(m.cards[0]?.w ?? 0).toBeGreaterThanOrEqual(520);
+        expect(m.cards[0]?.w ?? 0).toBeLessThanOrEqual(600);
         // The long line clamps to 2.
         for (const lines of m.cardTitles) expect(lines).toBeLessThanOrEqual(2.01);
         // Demo to the right with a real gutter, top-aligned with the first card.
@@ -430,4 +430,74 @@ describe('r11-1c C3: the Next button spinner is gated like a page loader', () =>
       expect(runs[0]?.fullMs ?? 0).toBeGreaterThanOrEqual(LOADING_MIN_MS - SLACK_MS);
     });
   }
+});
+
+describe('O11 R5 (O8-2): one column and one footer on every page', () => {
+  for (const variant of VARIANTS.filter(v => !v.phone)) {
+    it(`${variant.name}: a page with a demo and a page with none put the heading, the choices and Next in the same place`, async () => {
+      const place = async (scene: string) => {
+        const { tab, close } = await open(variant, scene);
+        try {
+          const read = await tab.evaluate(() => {
+            const box = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
+            return {
+              title: box('.fy-spf__title')?.x ?? -1,
+              card: box('.fy-cc__card')?.x ?? -1,
+              cardRight: box('.fy-cc__card')?.right ?? -1,
+              nextRight: box('[data-step-next]')?.right ?? -1,
+              nextWidth: box('[data-step-next]')?.width ?? -1,
+              actions: box('.fy-spf__actions')?.x ?? -1,
+            };
+          });
+          return read;
+        } finally {
+          await close();
+        }
+      };
+      const withDemo = await place('stack');
+      const without = await place('long');
+      near(without.title, withDemo.title, 0.5);
+      near(without.card, withDemo.card, 0.5);
+      near(without.cardRight, withDemo.cardRight, 0.5);
+      near(without.nextRight, withDemo.nextRight, 0.5);
+      near(without.actions, withDemo.actions, 0.5);
+      // The buttons end where the reading column ends (its 16px gutter is the page's own).
+      near(withDemo.nextRight, withDemo.cardRight, 1);
+    });
+  }
+});
+
+describe('O11 R5 (O9-15): a footer note moves nothing', () => {
+  for (const variant of VARIANTS)
+    it(`${variant.name}: the page and the buttons stay where they were when the note appears`, async () => {
+      const { tab, close } = await open(variant, 'stack&note=1');
+      try {
+        const read = () =>
+          tab.evaluate(() => {
+            const y = (selector: string) => document.querySelector(selector)?.getBoundingClientRect().y ?? -1;
+            return {
+              title: y('.fy-spf__title'),
+              card: y('.fy-cc__card'),
+              next: y('[data-step-next]'),
+              footer: document.querySelector('[data-step-footer]')?.getBoundingClientRect().height ?? -1,
+              note: document.querySelector('[data-footer-note]')?.getBoundingClientRect().bottom ?? null,
+              footerTop: document.querySelector('[data-step-footer]')?.getBoundingClientRect().top ?? -1,
+            };
+          });
+        const before = await read();
+        expect(before.note).toBeNull();
+        await tab.locator('[data-step-next]').click();
+        await tab.waitForSelector('[data-footer-note]');
+        const after = await read();
+        near(after.title, before.title, 0.5);
+        near(after.card, before.card, 0.5);
+        near(after.next, before.next, 0.5);
+        near(after.footer, before.footer, 0.5);
+        // It is drawn just above the footer, on screen with the buttons.
+        expect(after.note ?? 1e9).toBeLessThanOrEqual(after.footerTop + 1);
+        await shotOf(tab, variant, 'note');
+      } finally {
+        await close();
+      }
+    });
 });

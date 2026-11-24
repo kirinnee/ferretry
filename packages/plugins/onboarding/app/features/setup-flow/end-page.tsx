@@ -23,7 +23,7 @@ import { ONBOARDING_END_SLOT } from '../../../contract/index.ts';
 import type { Unsaved } from './use-setup-flow.ts';
 import { type ReactNode, useMemo } from 'react';
 import type { SummaryStep } from '../../views/steps-screen.tsx';
-import { SetupSummary } from './setup-summary.tsx';
+import { leftToFinish, SetupSummary } from './setup-summary.tsx';
 import { addProjectHref, continueConversationHref, projectAction } from '../stepper/project-action.ts';
 
 /** The picture, in the frame's demo column. */
@@ -77,11 +77,12 @@ export function EndPage({
       go(continueConversationHref(screenHref, daemon)),
     );
   }, [daemon, opens, router, screenHref]);
+  const left = useMemo(() => leftToFinish(summary), [summary]);
   const home = (): void => router?.navigate(opens?.href ?? daemonHomeHref(daemon));
   return (
     <StepPageFrame
-      title="You're set up"
-      line="Your machine is ready."
+      title={left.length === 0 ? "You're set up" : 'Setup is partly done'}
+      line={left.length === 0 ? 'Your machine is ready.' : `Still to finish: ${left.join(', ')}.`}
       {...(onBack === undefined ? {} : { back: { onClick: onBack } })}
       next={{ label: opens?.label ?? 'Open this machine', onClick: home }}
     >

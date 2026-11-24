@@ -60,6 +60,17 @@ const segmentsOf = (steps: readonly SummaryStep[]): readonly Segment[] => {
   }));
 };
 
+/**
+ * The names of the segments NOT fully set up (a plugin left for later, a page of this device skipped), in the order the
+ * flow met them. The last page's heading reads this: it says "You're set up" only when this is empty (S-54).
+ */
+export const leftToFinish = (steps: readonly SummaryStep[]): readonly string[] =>
+  steps.some(step => step.state === 'pending')
+    ? []
+    : segmentsOf(steps)
+        .filter(segment => segment.state !== 'done')
+        .map(segment => segment.name);
+
 /** Where a page left for later is finished: the page's own place when it has one (Connect GitHub is the GitHub accounts tab), else this device's settings. */
 const GITHUB_ACCOUNTS_PAGE = 'projects.github';
 const finishHref = (daemon: string, segment: Segment): string =>

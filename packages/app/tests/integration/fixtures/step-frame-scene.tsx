@@ -96,7 +96,10 @@ const Covered = () => (
 const Page = () => {
   const [value, setValue] = useState<string | null>('auto');
   const [busy, setBusy] = useState(false);
+  // ?note=1: the footer's note line appears when Next is pressed (a held Next, a failed save).
+  const [noted, setNoted] = useState(false);
   const pressNext = (): void => {
+    if (params.get('note') === '1') setNoted(true);
     if (scene !== 'busy') return;
     setBusy(true);
     window.setTimeout(() => setBusy(false), Number(params.get('busyMs') ?? 0));
@@ -110,6 +113,7 @@ const Page = () => {
         back={{ onClick: () => undefined }}
         {...(scene === 'long' ? {} : { later: { onClick: () => undefined } })}
         next={{ label: scene === 'long' ? 'Open this machine' : 'Next', busy, onClick: pressNext }}
+        {...(noted ? { note: <p data-footer-note="">Sign in to continue, or press Later.</p> } : {})}
       >
         <ChoiceCards label="Permission mode" layout="stack" options={OPTIONS} value={value} onChange={setValue} />
         {scene === 'stack' || scene === 'busy' ? (

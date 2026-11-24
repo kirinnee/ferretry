@@ -54,6 +54,23 @@ const STEPS: Record<string, readonly SummaryStep[]> = {
     device('passkey', 'Passkey', 'done'),
     device('layout', 'Layout', 'later'),
   ],
+  // The owner's QA walk (S-54): a long checklist with two harnesses partly set up, so the page is taller than 900px.
+  long: [
+    machine('onboarding', 'Machine', 'done'),
+    machine('runtimes', 'Runtimes', 'done'),
+    machine('claude-code', 'Claude Code', 'done'),
+    machine('claude-code', 'Claude Code', 'later', 'permission'),
+    machine('codex', 'Codex', 'done'),
+    machine('codex', 'Codex', 'later', 'permission'),
+    machine('warden', 'Warden', 'done'),
+    machine('lessons', 'Lessons', 'done'),
+    device('appearance', 'Appearance', 'done'),
+    device('layout', 'Layout', 'done'),
+    device('voice', 'Voice', 'done'),
+    device('speedups', 'Speed-ups', 'done'),
+    device('projects', 'Add your projects', 'done'),
+    device('github', 'Connect GitHub', 'later'),
+  ],
   clean: [
     machine('onboarding', 'Machine', 'done'),
     machine('runtimes', 'Runtimes', 'done'),

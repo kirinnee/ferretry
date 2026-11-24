@@ -70,7 +70,7 @@ afterAll(async () => {
 });
 
 const VIEWPORTS = [
-  { name: '1280', width: 1_280, height: 900, phone: false },
+  { name: '1440', width: 1_440, height: 900, phone: false },
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 const THEMES = ['studio-light', 'studio-dark'] as const;
@@ -634,7 +634,7 @@ describe('the demos say what they show', () => {
   });
 });
 
-describe('C59 O5 item 6: the sign-in block sits in the vertical middle of a desktop page', () => {
+describe('C59 O5 item 6 / O11 R5 S-25: the sign-in page (heading and block) sits in the vertical middle of a desktop page', () => {
   for (const theme of THEMES)
     it(`the free room above and below the block is the same, desktop only (1280, ${theme}); a phone keeps it at the top`, async () => {
       const measure = async (viewport: (typeof VIEWPORTS)[number]) => {
@@ -645,9 +645,15 @@ describe('C59 O5 item 6: the sign-in block sits in the vertical middle of a desk
             const head = document.querySelector('.fy-spf__head') as HTMLElement;
             const main = document.querySelector('.fy-spf__main') as HTMLElement;
             const page = document.querySelector('.fy-spf__page') as HTMLElement;
+            const progress = document.querySelector('.fy-sp-progress');
             const style = getComputedStyle(page);
             const gap = Number.parseFloat(style.rowGap);
-            const above = main.getBoundingClientRect().top - head.getBoundingClientRect().bottom - gap;
+            // O11 R5 (S-25): the heading AND the block are centred together, in the room under the progress bar.
+            const top =
+              progress === null
+                ? page.getBoundingClientRect().top + Number.parseFloat(style.paddingTop)
+                : progress.getBoundingClientRect().bottom + gap;
+            const above = head.getBoundingClientRect().top - top;
             const below =
               page.getBoundingClientRect().bottom -
               Number.parseFloat(style.paddingBottom) -
@@ -665,6 +671,7 @@ describe('C59 O5 item 6: the sign-in block sits in the vertical middle of a desk
       );
       expect(desktop.above).toBeGreaterThan(8);
       expect(Math.abs(desktop.above - desktop.below)).toBeLessThanOrEqual(2);
+      // A phone keeps the heading at the top (the block under it).
       expect(phone.above).toBeLessThanOrEqual(1);
     });
 });
