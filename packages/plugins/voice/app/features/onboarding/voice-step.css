@@ -404,9 +404,14 @@
   .fy-wd__axis {
     font-size: 12px;
   }
-  /* "Live words" is just "Live" here: the strip is too narrow for the long label beside the drawing. */
+  /* "Live words" is the one two-word name and it sits beside the drawing: stack its second word under the first so the whole
+     name fits the half-width strip and takes less room than it would on one line. */
   .fy-wd__more {
-    display: none;
+    display: block;
+    white-space: normal;
+  }
+  .fy-wd__axis[data-at='left'] {
+    text-align: end;
   }
   .fy-wd__caption {
     display: none;

@@ -33,6 +33,7 @@ assumes it is running inside the nix devshell — see [Nix](../nix/index.md).
 | `task test:app`                 | the real-Chromium app tests only (shell + plugin halves)              |
 | `task test:sit`                 | black-box journeys through the freshly compiled binary                |
 | `task test:realworld`           | non-blocking machine-dependent suite (not in `task test`)             |
+| `task test:stealth`             | bot-check pass-rate scorecard through the real launcher (on request)  |
 | `task test:e2e`                 | isolated end-to-end journeys (`scripts/test/run-e2e.sh`)              |
 | `task test:gate`                | the exact coverage gate CI runs (`scripts/ci/test.sh`)                |
 | `task test:coverage`            | every coverage-capable suite with coverage                            |

@@ -431,7 +431,7 @@ function RelayFallbackWatcher(): ReactNode {
 }
 
 // `?install=1`: a stand-in for Updates' install toast (`plugins/updates/app/views/install-offer.tsx`, which this package cannot import):
-// the same contract the real one meets — a `role="status"` line carrying the shell's `fy-status-overlay` class — with its words and
+// the same contract the real one meets — a `role="status"` line carrying the shell's `fy-status-dock` class — with its words and
 // buttons, drawn from the theme's own tokens. A suite there pins that the real toast carries the class.
 function InstallToastStand(): ReactNode {
   if (params.get('install') !== '1') return null;
@@ -439,7 +439,7 @@ function InstallToastStand(): ReactNode {
     <div
       role="status"
       data-install-toast="prompt"
-      className="fy-status-overlay"
+      className="fy-status-dock"
       style={{
         alignItems: 'center',
         background: 'var(--accent-soft)',

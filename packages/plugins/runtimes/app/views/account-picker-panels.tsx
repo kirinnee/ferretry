@@ -121,6 +121,9 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
   const told = useRef(slot.onOffered);
   told.current = slot.onOffered;
   const onOffered = useCallback((wrappers: readonly string[] | null) => told.current?.(wrappers), []);
+  const settled = useRef(slot.onSettled);
+  settled.current = slot.onSettled;
+  const onSettled = useCallback(() => settled.current?.(), []);
   return (
     <RuntimeSelect
       client={{ subscribe: client.subscribe ?? noSubscribe }}
@@ -131,6 +134,7 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
       now={now}
       onChosen={onChosen}
       onOffered={onOffered}
+      onSettled={onSettled}
       onValueChange={slot.onValueChange}
       store={store}
       usage={rows}

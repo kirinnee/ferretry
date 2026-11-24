@@ -226,17 +226,21 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
       </section>
       <section className="flex min-w-0 flex-col gap-2" data-tool-name="">
         {model.duplicateOf === null ? (
-          <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-            Runtime name
-            <input
-              type="text"
-              className="min-h-control w-full min-w-0 max-w-[28rem] rounded-md border border-border bg-surface px-3 text-row text-fg"
-              value={name}
-              aria-invalid={invalid !== null}
-              data-runtime-name={harness}
-              onChange={event => wizard.setName(harness, event.currentTarget.value)}
-            />
-          </label>
+          // The stored name (`codex-default`) is an id the runtime is launched by, not a name to pick: it sits under "More".
+          <details className="min-w-0" data-runtime-name-more="" open={invalid !== null}>
+            <summary className="min-h-control cursor-pointer text-cell font-semibold text-fg">More</summary>
+            <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+              Runtime id
+              <input
+                type="text"
+                className="min-h-control w-full min-w-0 max-w-[28rem] rounded-md border border-border bg-surface px-3 text-row text-fg"
+                value={name}
+                aria-invalid={invalid !== null}
+                data-runtime-name={harness}
+                onChange={event => wizard.setName(harness, event.currentTarget.value)}
+              />
+            </label>
+          </details>
         ) : null}
         {invalid === null ? null : (
           <p role="alert" className="m-0 text-cell text-warn">
@@ -245,7 +249,7 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
         )}
         {model.duplicateOf === null ? null : (
           <p className="m-0 text-cell text-muted" data-duplicate-note="">
-            {`A runtime named ${model.duplicateOf} already uses this setup, so no second one is added.`}
+            A runtime already uses this setup, so no second one is added.
           </p>
         )}
       </section>

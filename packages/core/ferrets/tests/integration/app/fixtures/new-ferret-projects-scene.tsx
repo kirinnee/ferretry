@@ -10,7 +10,7 @@
  */
 import { NEW_FERRET_PROJECT_SLOT, type NewFerretProjectSlotProps } from '@ferretry/core-ferrets/contract';
 import { WithSlotPanels } from '@ferretry/app/testing/settings-shell';
-import { type ReactNode, useLayoutEffect } from 'react';
+import { type ReactNode, useEffect, useLayoutEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { FerretsClient } from '../../../../app/lib/client.ts';
 import { NewFerretPage } from '../../../../app/features/new-ferret/new-ferret-page.tsx';
@@ -50,6 +50,8 @@ const client: FerretsClient = {
  */
 const projectsPanel = (props: Record<string, unknown>): ReactNode => {
   const slot = props as unknown as NewFerretProjectSlotProps;
+  // The page draws nothing of the form until the field says its read is over; a stand-in has nothing to read.
+  useEffect(() => slot.onSettled?.(), [slot.onSettled]);
   return (
     <section data-new-ferret-projects="">
       <input className="kt-input w-full font-mono" id={slot.id} readOnly value={slot.value} />

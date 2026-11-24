@@ -21,7 +21,6 @@ import { OLLAMA_PRESET_ID } from '../lib/local-models.ts';
 import { checkLogin, readLogins } from '../lib/logins-api.ts';
 import {
   hasSharedEmails,
-  loginEmail,
   loginExplanation,
   loginGroups,
   loginHarnesses,
@@ -176,15 +175,6 @@ function LoginBadges({ login }: { readonly login: LoginView }) {
           Disabled
         </Badge>
       )}
-      {login.label === undefined ? null : (
-        <Badge
-          tone="accent"
-          className="max-w-full !whitespace-normal [overflow-wrap:anywhere]"
-          data-login-label-badge=""
-        >
-          {login.label}
-        </Badge>
-      )}
       {slot === null ? null : <Badge className="max-w-full !whitespace-normal">{slot}</Badge>}
       {terminal === null ? null : <Badge className="max-w-full !whitespace-normal">{terminal}</Badge>}
     </span>
@@ -250,7 +240,12 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
             .join(' + ')}{' '}
           login
         </h3>
-        <p className="m-0 mt-1 break-all font-mono text-cell text-muted">{loginName(login)}</p>
+        <p className="m-0 mt-1 break-all text-cell text-muted" data-login-page-name="">
+          {loginName(login)}
+        </p>
+        <p className="m-0 mt-1 break-all text-meta text-faint" data-login-id="">
+          id <span className="font-mono">{login.id}</span>
+        </p>
         <div className="mt-2">
           <LoginBadges login={login} />
         </div>
@@ -407,8 +402,8 @@ function LoginRow({
         >
           <AccountStatus word={login.status.word} className="mt-1" />
           <span className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="block min-h-9 break-words pr-24 font-mono text-row text-fg">
-              {login.store === 'environment' ? login.id : breakAtAt(loginEmail(login))}
+            <span className="block min-h-9 break-words pr-40 font-mono text-row text-fg" data-login-name="">
+              {breakAtAt(loginName(login))}
             </span>
             <LoginBadges login={login} />
             <span className="text-cell text-muted">
@@ -430,7 +425,7 @@ function LoginRow({
           <button
             type="button"
             className="inline-flex min-h-[44px] min-w-[28px] shrink-0 items-center justify-center gap-1 border-0 bg-transparent p-0 text-meta text-muted"
-            aria-label={`Open ${login.id}`}
+            aria-label={`Open ${loginName(login)}`}
             onClick={onOpen}
           >
             Open
@@ -478,7 +473,7 @@ function LoginRow({
             size="sm"
             className="text-err"
             data-login-card-remove={login.id}
-            aria-label={`Remove ${login.id}`}
+            aria-label={`Remove ${loginName(login)}`}
             title={refusal ?? undefined}
             disabled={changes.busy || elsewhere || open === 'disable' || refusal !== null}
             onClick={() => {
@@ -594,7 +589,7 @@ function SignInsBody({ client, now = () => globalThis.Date.now(), pollMs, browse
     <section className="fy-lg-groups min-w-0" data-logins-tab="">
       {detail === null ? null : (
         <p role="status" className="m-0 text-cell text-warn" data-login-missing="">
-          There is no login {detail} on {list.machine} any more.
+          That login is not on {list.machine} any more.
         </p>
       )}
       {list.logins.length === 0 ? (

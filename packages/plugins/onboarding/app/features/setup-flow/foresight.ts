@@ -49,3 +49,26 @@ export function foreseenPassedOver(
   }
   return keys;
 }
+
+/**
+ * The pages whose need the answers so far do not decide yet, which the counter leaves out until they are: a page that depends on
+ * an answer not given (the import checklist before the import mode is chosen), and a harness's pages before "Which AI" is
+ * answered. Counting them would show a total that shrinks the moment the answer comes, so the total grows when they turn out
+ * to be needed instead. A page on screen always counts (`progressOf`).
+ */
+export function undecidedPages(
+  pages: readonly FlowStep[],
+  memoryOf: (plugin: string) => StepSegmentMemory,
+  harnesses: ReadonlySet<string>,
+  pickPending: boolean,
+): ReadonlySet<string> {
+  const keys = new Set<string>();
+  for (const page of pages) {
+    if (page.phase !== 'daemon') continue;
+    if (pickPending && harnesses.has(page.plugin)) keys.add(page.key);
+    const memory = memoryOf(page.plugin);
+    for (const rule of FORECASTS)
+      if (typeof memory[rule.key] !== 'string' && rule.steps.includes(page.id)) keys.add(page.key);
+  }
+  return keys;
+}

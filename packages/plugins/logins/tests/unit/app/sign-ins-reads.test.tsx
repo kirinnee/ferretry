@@ -94,9 +94,11 @@ describe('the Sign-ins list', () => {
     ).toEqual(['claude-personal', 'claude-work']);
 
     const row = must(c.querySelector('[data-login-row="claude-personal"]'), 'personal row');
-    expect(row.textContent).toContain('you@example.com');
+    // Named by who it is, with the owner's label in brackets; no separate tag, and never the stored id.
+    expect(row.textContent).toContain('you@example.com (personal)');
+    expect(row.textContent).not.toContain('claude-personal');
     expect(row.querySelector('[data-login-badges]')?.textContent).toBe(
-      'Claude onlypersonalShared with claude in your terminal',
+      'Claude onlyShared with claude in your terminal',
     );
     expect(row.textContent).toContain('Ready · Used by 3 runtimes');
     const bars = Array.from(row.querySelectorAll('[role="img"]'));
@@ -111,7 +113,7 @@ describe('the Sign-ins list', () => {
     const refresh = must(c.querySelector('[data-login-row="claude-work"]'), 'work row');
     expect(refresh.textContent).toContain('Refresh due · Used by 1 runtime');
     expect(refresh.querySelector('[data-login-usage]')).toBeNull();
-    expect(refresh.querySelector('[data-login-badges]')?.textContent).toBe('Claude onlywork');
+    expect(refresh.querySelector('[data-login-badges]')?.textContent).toBe('Claude only');
 
     const codexRow = must(c.querySelector('[data-login-row="codex"]'), 'codex row');
     expect(codexRow.textContent).toContain('Shared with codex in your terminal');
@@ -137,7 +139,8 @@ describe('the Sign-ins list', () => {
     const view = await open([slot, half]);
     const c = view.container;
     const slotRow = must(c.querySelector('[data-login-row="claude-slot"]'), 'slot row');
-    expect(slotRow.textContent).toContain('Claude Code login');
+    expect(slotRow.textContent).toContain('Claude · Claude.ai sign-in');
+    expect(slotRow.textContent).not.toContain('claude-slot');
     expect(slotRow.querySelector('[data-login-badges]')?.textContent).toBe('Claude onlyCopied slot from laptop');
     expect(slotRow.textContent).toContain('Needs sign-in · Not used yet');
     const halfRow = must(c.querySelector('[data-login-row="claude-half"]'), 'half row');
@@ -212,10 +215,10 @@ describe('a login’s page', () => {
     await click(c.querySelector('[data-login-row="claude-personal"]'), 'the row');
     expect(c.querySelector('[data-login-page]')?.getAttribute('data-login-page')).toBe('claude-personal');
     expect(text(c, 'h3')).toBe('Claude Code login');
-    expect(text(c, '[data-login-page] p.font-mono')).toBe('you@example.com (personal)');
-    expect(text(c, '[data-login-page] [data-login-badges]')).toBe(
-      'Claude onlypersonalShared with claude in your terminal',
-    );
+    expect(text(c, '[data-login-page-name]')).toBe('you@example.com (personal)');
+    // The stored id has its own small line, and nowhere else on the page reads as a name.
+    expect(text(c, '[data-login-id]')).toBe('id claude-personal');
+    expect(text(c, '[data-login-page] [data-login-badges]')).toBe('Claude onlyShared with claude in your terminal');
     expect(c.querySelector('[data-login-status]')?.getAttribute('data-login-status')).toBe('ready');
     expect(c.querySelectorAll('[data-login-status] [role="img"]')).toHaveLength(2);
     // A count a person reads; the runtimes' stored names are one hover away.
@@ -261,7 +264,7 @@ describe('an environment login', () => {
   const { preset: _preset, ...noPreset } = environment;
   const glm = login({ id: 'glm-env', store: 'environment', email: undefined, environment });
 
-  it('lists it by its id with its scope and preset chips', async () => {
+  it('lists it by its provider with its scope and preset chips, never by its id', async () => {
     const view = await open([
       glm,
       login({ id: 'hand-env', harness: 'codex', harnesses: ['codex'], store: 'environment', email: undefined }),
@@ -269,7 +272,10 @@ describe('an environment login', () => {
     ]);
     const c = view.container;
     const row = must(c.querySelector('[data-login-row="glm-env"]'), 'the GLM row');
-    expect(row.textContent).toContain('glm-env');
+    expect(row.textContent).toContain('Claude · GLM / Z.ai');
+    expect(row.textContent).not.toContain('glm-env');
+    expect(c.querySelector('[data-login-row="hand-env"]')?.textContent).toContain('Codex · API key');
+    expect(c.querySelector('[data-login-row="hand-env"]')?.textContent).not.toContain('hand-env');
     expect(row.querySelector('[data-login-badges]')?.textContent).toBe('Claude onlyEnvironment · GLM / Z.ai');
     expect(c.querySelector('[data-login-row="hand-made"] [data-login-environment-chip]')?.textContent).toBe(
       'Environment',
@@ -388,7 +394,7 @@ describe('a login that is gone', () => {
     );
     await click(view.container.querySelector('[data-login-actions] [data-change-submit]'), 'Check now');
     await until(() => view.container.querySelector('[data-login-missing]') !== null, 'the missing sentence');
-    expect(text(view.container, '[data-login-missing]')).toBe('There is no login claude-b on box any more.');
+    expect(text(view.container, '[data-login-missing]')).toBe('That login is not on box any more.');
     expect(view.container.querySelectorAll('[data-login-row]')).toHaveLength(1);
     await view.unmount();
   });

@@ -9,6 +9,8 @@ import {
   mcpConnection,
   mcpServer,
   NOW,
+  RUNTIMES,
+  CLAUDE_WORK_WORDS,
   scriptedClient,
   SECRETS,
 } from './mcp-fixtures.ts';
@@ -26,6 +28,7 @@ const settings = async (answers: Answers = {}, calls: Call[] = []) => {
   const client = scriptedClient(
     {
       'GET /v1/mcp': MCP,
+      'GET /v1/runtimes': RUNTIMES,
       'GET /v1/mcp/auth': { connections: [mcpConnection()] },
       'GET /v1/grants': GRANTS_OPEN,
       ...answers,
@@ -51,6 +54,19 @@ describe('DOM tests — Settings › MCP servers', () => {
       'linear',
     ]);
     expect(root.querySelector('[data-settings="mcp"]')).not.toBeNull();
+  });
+
+  it('says "Seen by" in words: a runtime by its login, never by its stored name; a runtime not found by its tool', async () => {
+    const { root } = await settings();
+    const seen = (name: string): string => text(root, `[data-mcp-details="${name}"]`);
+    expect(seen('notion')).toContain(`Seen by${CLAUDE_WORK_WORDS} (approved)`);
+    expect(seen('lint')).toContain(`Seen by${CLAUDE_WORK_WORDS} (waiting for approval)`);
+    for (const name of ['notion', 'lint', 'github']) expect(seen(name)).not.toContain('claude-work');
+    await mounted?.unmount();
+    // Runtimes cannot be read: still no stored name, only the tool.
+    const { root: unread } = await settings({ 'GET /v1/runtimes': new Error('off') });
+    expect(text(unread, '[data-mcp-details="notion"]')).toContain('Seen byClaude runtime (approved)');
+    expect(unread.textContent).not.toContain('claude-work');
   });
 
   it('checks a server as the machine, with no ferret named', async () => {

@@ -1,16 +1,28 @@
-import { PanelSlot, useSlotHasPanels } from '@ferretry/app';
+import { PanelSlot, useSlotHasPanels, useSlotHasUsablePanels } from '@ferretry/app';
 import {
   type ChosenFerretAccount,
   type ContinuePick,
+  NEW_FERRET_ACCOUNT_SLOT,
   NEW_FERRET_CONTINUE_SLOT,
   type NewFerretContinueSlotProps,
   NEW_FERRET_PROJECT_SLOT,
   type NewFerretAccountSlotProps,
   type NewFerretProjectSlotProps,
 } from '@ferretry/core-ferrets/contract';
-import { type ComponentType, type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ComponentType, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { LiveFerretsClient } from '../../lib/client.ts';
-import { Button, Card, cn, FastSwitch, ModelSelect, PanelBody, SegmentedChoice, Textarea, useNow } from '../../ui.ts';
+import {
+  Button,
+  Card,
+  cn,
+  FastSwitch,
+  Loading,
+  ModelSelect,
+  PanelBody,
+  SegmentedChoice,
+  Textarea,
+  useNow,
+} from '../../ui.ts';
 import { FolderPicker } from './folder-picker.tsx';
 import { daemonHomeHref, ferretChatHref, addLoginHref } from './hrefs.ts';
 import {
@@ -26,6 +38,12 @@ import { type AccountSlotProps, ShellAccountSlot } from './shell-account-slot.ts
 
 /** The runtime a first run makes for Claude Code — the example a person can actually type. */
 const FIRST_RUN_RUNTIME = 'claude-default';
+
+/**
+ * How long the page waits for the fields' first reads before it draws the form anyway. A read that never answers must
+ * not hold the whole page; past this the form shows what it has (a field still reading says so in its own place).
+ */
+const FIELDS_READ_LIMIT_MS = 10_000;
 
 /** The one sentence about what fast mode costs, said once in the form's hint. */
 const FAST_COST_NOTE = 'Fast mode can cost more.';
@@ -183,6 +201,25 @@ export function NewFerretPage({
   const [starting, setStarting] = useState<'new' | 'continue'>(initialContinue ? 'continue' : 'new');
   const continueOffered = useSlotHasPanels(NEW_FERRET_CONTINUE_SLOT);
   const whereOffered = useSlotHasPanels(NEW_FERRET_PROJECT_SLOT);
+  // THE FORM IS DRAWN ONCE, FROM WHAT THE FIELDS READ. The runtime roster and the registered projects decide what the
+  // form first shows (the runtime, Project or Folder), so until both fields that read them have said so the page shows
+  // ONE centred loading state and nothing else; the fields stay mounted (hidden) so their reads run meanwhile. A field
+  // nothing draws (its plugin is off here) has nothing to wait for. Once drawn the form never goes back to the loader.
+  const accountReads = useSlotHasUsablePanels(daemon, NEW_FERRET_ACCOUNT_SLOT);
+  const whereReads = useSlotHasUsablePanels(daemon, NEW_FERRET_PROJECT_SLOT);
+  const [accountRead, setAccountRead] = useState(false);
+  const [whereRead, setWhereRead] = useState(false);
+  const [gaveUp, setGaveUp] = useState(false);
+  const accountSettled = useCallback(() => setAccountRead(true), []);
+  const whereSettled = useCallback(() => setWhereRead(true), []);
+  const drawn = useRef(false);
+  if (gaveUp || ((!accountReads || accountRead) && (!whereReads || whereRead))) drawn.current = true;
+  const formDrawn = drawn.current;
+  useEffect(() => {
+    if (formDrawn) return undefined;
+    const timer = setTimeout(() => setGaveUp(true), FIELDS_READ_LIMIT_MS);
+    return () => clearTimeout(timer);
+  }, [formDrawn]);
   const pick = (next: ContinuePick | null): void => {
     setPicked(next);
     setError(null);
@@ -258,6 +295,7 @@ export function NewFerretPage({
     value: draft.runtime,
     onValueChange: value => update('runtime', value),
     onChosen: setChosenRuntime,
+    onSettled: accountSettled,
     fallbackId: fieldId('runtime'),
     labelId: RUNTIME_LABEL_ID,
     fallbackPlaceholder: `e.g. ${FIRST_RUN_RUNTIME}`,
@@ -304,7 +342,11 @@ export function NewFerretPage({
         </h1>
       </div>
 
-      <Card>
+      {formDrawn ? null : <Loading kind="page" label="Reading this machine…" />}
+      <Card
+        data-new-ferret-form={formDrawn ? 'drawn' : 'reading'}
+        {...(formDrawn ? {} : { hidden: true, style: { display: 'none' } })}
+      >
         <PanelBody className="space-y-5">
           {continueOffered ? (
             <section data-new-ferret-continue="">
@@ -370,6 +412,7 @@ export function NewFerretPage({
                     id: fieldId('folder'),
                     recent: folders.folders?.map(folder => folder.path) ?? [],
                     onPick: folder => setDraft(current => ({ ...current, folder, folderExact: folder })),
+                    onSettled: whereSettled,
                   } satisfies NewFerretProjectSlotProps
                 }
                 slot={NEW_FERRET_PROJECT_SLOT}

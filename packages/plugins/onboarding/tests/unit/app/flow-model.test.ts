@@ -8,12 +8,13 @@ import {
   END,
   markNotNeeded,
   pagesOf,
+  passedOver,
   progressOf,
   retreat,
   startRun,
 } from '../../../app/features/setup-flow/flow-model.ts';
 import { readFlowAddress, setupFlowHref } from '../../../app/features/setup-flow/flow-href.ts';
-import { foreseenPassedOver } from '../../../app/features/setup-flow/foresight.ts';
+import { foreseenPassedOver, undecidedPages } from '../../../app/features/setup-flow/foresight.ts';
 import { fakeDaemon } from '../../fixtures/fake-steps/index.ts';
 
 const A = 'fy_daemon_a';
@@ -113,60 +114,115 @@ describe('moving through the run', () => {
   });
 });
 
-describe('the progress bar', () => {
+describe('the progress counter: ONE reading for the words and the bar', () => {
   const flow = flowOf();
   const pages = pagesOf(flow);
   const none = new Set<string>();
+  const read = (at: string, trail: readonly string[], extra: { passed?: Set<string>; unknown?: Set<string> } = {}) =>
+    progressOf(flow, pages, none, extra.passed ?? none, extra.unknown ?? none, at, trail);
 
-  test('one segment per plugin with pages left, then "This device"; n of m counts inside the current segment', () => {
-    const read = progressOf(flow, pages, none, none, none, 'fake-pack.choose');
-    expect(read?.segments.map(segment => segment.label)).toEqual(['Onboarding', 'Fake Pack', 'This device']);
-    expect(read?.current).toBe('fake-pack');
-    expect([read?.step, read?.of]).toEqual([2, 3]);
-    // The bar fills the current segment 2 of 3: the words and the bar are one reading.
-    expect(read?.fills).toBe(true);
+  test('one segment per counted page: the bar is as long as the total and its lit segment is the place', () => {
+    const state = read('fake-pack.choose', ['onboarding.name', 'fake-pack.welcome']);
+    expect([state?.step, state?.of]).toEqual([3, 6]);
+    expect(state?.segments).toHaveLength(6);
+    expect(state?.segments[(state?.step ?? 0) - 1]?.id).toBe(state?.current);
+    expect(state?.segments.map(segment => segment.label)).toEqual([
+      'Onboarding',
+      'Fake Pack',
+      'Fake Pack',
+      'Fake Pack',
+      'This device',
+      'This device',
+    ]);
   });
 
-  test('a skipped page never counts: the total shrinks, it never grows backwards', () => {
-    const gone = new Set(['fake-pack.choose']);
-    const read = progressOf(flow, pages, none, gone, none, 'fake-pack.finish');
-    expect([read?.step, read?.of]).toEqual([2, 2]);
+  test('walking forward the counter only goes up and never falls below the page on screen', () => {
+    let state = startRun(pages, none);
+    const reads: [number, number][] = [];
+    for (let guard = 0; state.at !== END && guard < 20; guard += 1) {
+      const now = progressOf(flow, pages, none, passedOver(state), none, state.at, state.trail);
+      reads.push([now?.step ?? 0, now?.of ?? 0]);
+      state = advance(state, pages, none);
+    }
+    expect(reads).toEqual([
+      [1, 6],
+      [2, 6],
+      [3, 6],
+      [4, 6],
+      [5, 6],
+      [6, 6],
+    ]);
   });
 
-  test('the client pages are one segment, whichever plugin they belong to', () => {
-    const read = progressOf(flow, pages, none, none, none, 'fake-pack.look');
-    expect(read?.current).toBe('device');
-    expect([read?.step, read?.of]).toEqual([2, 2]);
+  test('a page that passes over is never counted: the total shrinks but never below the page on screen', () => {
+    const passed = new Set(['fake-pack.choose']);
+    const state = read('fake-pack.finish', ['onboarding.name', 'fake-pack.welcome'], { passed });
+    expect([state?.step, state?.of]).toEqual([3, 5]);
   });
 
-  test('the bar is the segments of the run and never changes while the run goes: a segment whose pages all pass over stays', () => {
-    const all = progressOf(flow, pages, none, none, none, 'onboarding.name');
-    const passed = new Set(['fake-pack.welcome', 'fake-pack.choose', 'fake-pack.finish']);
-    const later = progressOf(flow, pages, none, passed, none, 'fake-pack.look');
-    expect(later?.segments).toEqual(all?.segments);
-    expect(all?.segments.map(segment => segment.id)).toEqual(['onboarding', 'fake-pack', 'device']);
-  });
-
-  test('n counts the pages that will be shown: a page the answers foresee passing over is not counted before it is reached', () => {
-    const foreseen = new Set(['fake-pack.choose']);
-    // On the first page of the segment, before the passed-over page is ever mounted: the count is already 2, not 3.
-    expect(progressOf(flow, pages, none, none, foreseen, 'fake-pack.welcome')).toMatchObject({ step: 1, of: 2 });
-    expect(progressOf(flow, pages, none, none, none, 'fake-pack.welcome')).toMatchObject({ step: 1, of: 3 });
-    // ... and it is the same count on every page of the segment (it never changes backwards while the answers stand).
-    expect(progressOf(flow, pages, none, new Set(foreseen), foreseen, 'fake-pack.finish')).toMatchObject({
-      step: 2,
-      of: 2,
-    });
+  test('pages not decided yet are left out of the total, and the total grows when they turn out to be needed', () => {
+    const unknown = new Set(['fake-pack.choose', 'fake-pack.finish']);
+    expect(read('fake-pack.welcome', ['onboarding.name'], { unknown })).toMatchObject({ step: 2, of: 4 });
+    expect(read('fake-pack.welcome', ['onboarding.name'])).toMatchObject({ step: 2, of: 6 });
   });
 
   test('the page on screen always counts, even when it was foreseen to pass over', () => {
-    const foreseen = new Set(['fake-pack.choose']);
-    expect(progressOf(flow, pages, none, none, foreseen, 'fake-pack.choose')).toMatchObject({ step: 2, of: 3 });
+    const unknown = new Set(['fake-pack.choose']);
+    expect(read('fake-pack.choose', ['onboarding.name', 'fake-pack.welcome'], { unknown })).toMatchObject({
+      step: 3,
+      of: 6,
+    });
   });
 
-  test('answered-before pages leave the bar', () => {
-    const read = progressOf(flow, pages, new Set(['onboarding.name']), none, none, 'fake-pack.welcome');
-    expect(read?.segments.map(segment => segment.id)).toEqual(['fake-pack', 'device']);
+  test('an answered-before page is not counted', () => {
+    const state = progressOf(flow, pages, new Set(['onboarding.name']), none, none, 'fake-pack.welcome', []);
+    expect([state?.step, state?.of]).toEqual([1, 5]);
+  });
+
+  test('an offer page does not count, unless it is the page on screen', () => {
+    const offered = flowOf();
+    const withOffer = [
+      ...pagesOf(offered),
+      { key: 'projects.github', plugin: 'projects', id: 'github', phase: 'client' },
+    ] as never;
+    const last = pagesOf(offered).at(-1)?.key ?? '';
+    expect(
+      progressOf(
+        offered,
+        withOffer,
+        none,
+        none,
+        none,
+        last,
+        pagesOf(offered)
+          .slice(0, -1)
+          .map(page => page.key),
+      ),
+    ).toMatchObject({
+      step: 6,
+      of: 6,
+    });
+    expect(
+      progressOf(
+        offered,
+        withOffer,
+        none,
+        none,
+        none,
+        'projects.github',
+        pagesOf(offered).map(page => page.key),
+      ),
+    ).toMatchObject({
+      step: 7,
+      of: 7,
+    });
+  });
+
+  test('Back lowers the place by one and nothing else', () => {
+    const forward = read('fake-pack.finish', ['onboarding.name', 'fake-pack.welcome', 'fake-pack.choose']);
+    const back = read('fake-pack.choose', ['onboarding.name', 'fake-pack.welcome']);
+    expect([forward?.step, forward?.of]).toEqual([4, 6]);
+    expect([back?.step, back?.of]).toEqual([3, 6]);
   });
 });
 
@@ -186,6 +242,17 @@ describe('the pages the answers given so far pass over', () => {
   ];
   const named = (mode: string | undefined) => (plugin: string) =>
     plugin === 'claude-code' && mode !== undefined ? { importMode: mode } : {};
+
+  test('before the import mode is chosen the checklist and the run page are undecided; a chosen mode decides them', () => {
+    expect([...undecidedPages(claude(...ids), named(undefined), new Set(), false)].length).toBe(6);
+    expect(undecidedPages(claude(...ids), named('custom'), new Set(), false).size).toBe(0);
+  });
+
+  test("a harness's pages are undecided until Which AI is answered", () => {
+    const harnesses = new Set(['claude-code']);
+    expect(undecidedPages(claude(...ids), named('custom'), harnesses, true).size).toBe(ids.length);
+    expect(undecidedPages(claude(...ids), named('custom'), harnesses, false).size).toBe(0);
+  });
 
   test('Import everything passes over the five checklist pages and keeps the run page', () => {
     expect([...foreseenPassedOver(claude(...ids), named('everything'))]).toEqual([
@@ -264,10 +331,18 @@ describe('a page that is not needed for this run', () => {
     );
     const flow = flowOf();
     expect(
-      progressOf(flow, pages, none, new Set([...state.gone, ...state.notNeeded]), none, 'fake-pack.finish'),
+      progressOf(
+        flow,
+        pages,
+        none,
+        new Set([...state.gone, ...state.notNeeded]),
+        none,
+        'fake-pack.finish',
+        state.trail,
+      ),
     ).toMatchObject({
       step: 2,
-      of: 2,
+      of: 4,
     });
   });
 

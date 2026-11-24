@@ -65,7 +65,7 @@ const PROGRESS = {
   current: 'fake-pack',
   step: 2,
   of: 3,
-  fills: true as const,
+  pages: true as const,
 };
 
 function Choice({ host }: { readonly host: StepHost }): ReactNode {

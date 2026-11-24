@@ -10,6 +10,7 @@ import type { LoginChangeView, LoginView } from '../../contract/index.ts';
 import type { LoginChanges } from '../lib/login-changes.ts';
 import { Button, ChangeApplyPanel, Segmented } from '../ui.ts';
 import { harnessName } from '../../contract/harness-words.ts';
+import { loginName } from '../lib/logins-view.ts';
 
 const SIGN_OUT_VERSUS_REMOVE = 'Sign out keeps the login but it needs sign-in again. Remove deletes it.';
 
@@ -370,7 +371,7 @@ export function CardSwitch({
         type="button"
         role="switch"
         aria-checked={!off}
-        aria-label={`${login.id}: ${off ? 'off' : 'on'} for new starts`}
+        aria-label={`${loginName(login)}: ${off ? 'off' : 'on'} for new starts`}
         disabled={changes.busy || blocked || refusal !== null}
         title={refusal ?? undefined}
         onClick={() => void toggle()}

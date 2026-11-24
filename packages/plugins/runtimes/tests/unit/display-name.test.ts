@@ -3,6 +3,8 @@ import {
   type RuntimeNameSource,
   harnessWord,
   isMachineMadeRuntimeName,
+  loginDisplayName,
+  profileDisplayName,
   runtimeAccounts,
   runtimeAccountsFrom,
   runtimeDisplayName,
@@ -159,5 +161,37 @@ describe('how a runtime is named for a person (O9-5)', () => {
   it('says the harness in the words a person uses', () => {
     expect(harnessWord('claude-code')).toBe('Claude');
     expect(harnessWord('codex')).toBe('Codex');
+  });
+
+  it('names a login the way its runtime is named, never by its stored id', () => {
+    const login = (id: string, extra: object = {}) => ({
+      id,
+      harness: 'claude-code' as const,
+      store: 'host' as const,
+      status: {},
+      ...extra,
+    });
+    expect(loginDisplayName(login('claude-you'))).toBe('Claude · your terminal sign-in');
+    expect(loginDisplayName(login('claude-qa-fake-key', { store: 'environment', label: 'qa' }))).toBe(
+      'Claude · API key (qa)',
+    );
+    expect(
+      loginDisplayName(
+        login('claude-qa-fake-key', { store: 'environment', environment: { preset: { label: 'Anthropic' } } }),
+      ),
+    ).toBe('Claude · Anthropic');
+    // Two logins of one kind are told apart by their account, as their runtimes are.
+    const one = login('a', { email: 'kirin@one.example' });
+    const two = login('b', { email: 'kirin@two.example' });
+    expect(loginDisplayName(one, [one, two])).toBe('Claude · your terminal sign-in — kirin@one.example');
+    expect(loginDisplayName(two, [one, two])).toBe('Claude · your terminal sign-in — kirin@two.example');
+  });
+
+  it('names the built-in profiles in words and leaves the owner’s own profile as typed', () => {
+    expect(profileDisplayName('ferretry-codex')).toBe('Ferretry standard for Codex');
+    expect(profileDisplayName('ferretry-claude-code')).toBe('Ferretry standard for Claude');
+    expect(profileDisplayName('ferretry-claude-pinned-opus-5')).toBe('Ferretry standard for Claude, pinned to opus-5');
+    expect(profileDisplayName('Review')).toBe('Review');
+    expect(profileDisplayName('ferretry-codexy')).toBe('ferretry-codexy');
   });
 });

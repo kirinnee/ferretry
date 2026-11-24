@@ -27,7 +27,7 @@ const SCENE_CSS = `
 
 const VIEWPORTS = [
   { name: 'phone-390', width: 390, height: 844, phone: true },
-  { name: 'desktop-1280', width: 1_280, height: 800, phone: false },
+  { name: 'desktop-1440', width: 1_440, height: 900, phone: false },
 ] as const;
 const PAGES = [
   'settings',
@@ -143,6 +143,31 @@ describe('the Claude import pages', () => {
             await tab.screenshot({ fullPage: true, path: join(shotsDir, `${page}-${viewport.name}-${mode}.png`) });
           await context.close();
         }, 60_000);
+
+  for (const viewport of VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`run: the runtime's stored name is an id under "More", never a "Runtime name" to pick (Q8a) at ${viewport.name}, ${mode}`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'run', mode);
+        const more = tab.locator('[data-runtime-name-more]');
+        expect(await more.count()).toBe(1);
+        expect(await more.evaluate(element => (element as HTMLDetailsElement).open)).toBe(false);
+        expect(await tab.locator('.cc-step').innerText()).not.toContain('Runtime name');
+        expect(await tab.locator('[data-runtime-name]').isVisible()).toBe(false);
+        if (shotsDir !== '')
+          await tab.screenshot({
+            fullPage: true,
+            path: join(shotsDir, `run-more-closed-${viewport.name}-${mode}.png`),
+          });
+        await more.locator('summary').click();
+        await tab.waitForTimeout(300);
+        expect(await tab.locator('[data-runtime-name]').isVisible()).toBe(true);
+        expect(await more.innerText()).toContain('Runtime id');
+        expect(await tab.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+        if (shotsDir !== '')
+          await tab.screenshot({ fullPage: true, path: join(shotsDir, `run-more-open-${viewport.name}-${mode}.png`) });
+        await context.close();
+      }, 60_000);
 
   for (const viewport of VIEWPORTS)
     for (const mode of ['light', 'dark'] as const) {

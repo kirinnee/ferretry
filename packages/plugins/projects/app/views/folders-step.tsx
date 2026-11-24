@@ -126,7 +126,7 @@ export function FoldersStep({ step, client, daemon }: FoldersStepProps) {
   };
 
   return (
-    <div className="grid max-w-[660px] gap-md" data-projects-step="folders">
+    <div className="grid gap-md" data-projects-step="folders">
       <p className="m-0 text-ui text-muted">
         Open a folder and press Add this folder, as many times as you like. Each becomes a project; you can link GitHub
         accounts from the project&apos;s own page. Next saves your list.

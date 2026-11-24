@@ -19,7 +19,7 @@ const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_IMPORT_WIZARD_SHOTS_DIR ?? '';
 
 const VIEWPORTS = [
-  { name: '1280', width: 1_280, height: 800, phone: false },
+  { name: '1440', width: 1_440, height: 800, phone: false },
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 
@@ -176,7 +176,7 @@ const CASES: readonly Case[] = [
   {
     name: 'retry-same-runtime',
     view: 'retry',
-    expectText: ['A runtime named claude-default already uses this setup, so no second one is added.'],
+    expectText: ['A runtime already uses this setup, so no second one is added.'],
     expectNo: ['Runtime name'],
   },
   {
