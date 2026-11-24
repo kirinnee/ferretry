@@ -1,4 +1,4 @@
-import type { RuntimeControlRequest, RuntimeModelChoice } from '@ferretry/protocol';
+import type { RuntimeModelChoice } from '@ferretry/protocol';
 import type { HarnessKind } from '../../core/inventory.ts';
 import { reasoningLevel } from './launch-effort.ts';
 import { harnessQuirks } from './quirks.ts';
@@ -16,12 +16,11 @@ export function startupModelArguments(model: string): readonly string[] {
 }
 
 /**
- * How a START gets the reasoning level it was asked for.
+ * How a START gets the reasoning level it was asked for: on the launch argv, for BOTH harnesses
+ * (`effortLaunchArguments` — Claude `--effort <level>`, Codex `-c model_reasoning_effort=…`), so the
+ * harness is born on it and nothing is typed into its pane before turn one.
  *
- * `argv` — the level rides the launch command (`effortLaunchArguments`), so the harness is born on it
- * and nothing is typed into its pane. `command` — the level is a runtime command typed before turn one.
- *
- * CODEX IS `argv`, AND MUST STAY SO. A Codex start used to apply the level by typing `/model` and
+ * CODEX IS ARGV, AND MUST STAY SO. A Codex start used to apply the level by typing `/model` and
  * driving the picker the instant the composer appeared. From Codex 0.166 the composer is drawn BEFORE
  * startup has finished — startup waits on an `account/read` round trip to chatgpt.com, which can take
  * up to fifteen seconds before it times out — so the `/model` landed in a harness that could not run it
@@ -31,31 +30,40 @@ export function startupModelArguments(model: string): readonly string[] {
  * the host's. `-c model_reasoning_effort=…` has no such window: Codex reads it as configuration before
  * it draws anything, and it is the form every relaunch already uses.
  *
- * That is a NEW session's start (`fy new`, the app's New ferret). A FORK still applies its target's model
- * and effort through the startup picker hook, and that drive tolerates a slow startup because frames
- * showing Codex's `Waiting for startup` line are not charged to its budget (`CODEX_STARTUP_WAIT_OBSERVATIONS`).
+ * CLAUDE IS ARGV TOO, for two measured reasons (Claude Code 2.1.327). A start used to type `/effort <level>`
+ * the moment the composer was ready, and:
+ *   - Now and then Claude submitted it as a MODEL TURN instead of running it — the pane echoed
+ *     `❯ /effort high` and showed its turn spinner — and the start failed with "the harness consumed
+ *     /effort high as a model turn instead of a native runtime control" (112 starts failed that way on
+ *     one host between 2026-11-18 and 2026-11-24, after burning a turn on the literal text).
+ *   - `/effort` now SAVES the level as the login's default for every later session ("saved as your
+ *     default for new sessions"), so one ferret's start silently changed the effort of every session
+ *     started on that login after it. `--effort` is "for the current session" and writes nothing.
+ * A level Claude does not know is warned about and ignored by its own CLI, as `/effort` did, so it needs
+ * no catalog check here.
  *
- * Claude keeps `/effort` here: it is a command Claude answers locally, it opens no picker, and its
- * start has never been seen to lose one.
+ * That is a NEW session's start (`fy new`, the app's New ferret). A FORK still applies its target's model
+ * and effort through the startup runtime hook (`forkStartupRuntimeRequest`), and a live session's level is
+ * still switched by its own command or picker (`harnessQuirks().effortIsRuntimeCommand`).
  */
-export type StartupEffort =
-  | { readonly kind: 'argv'; readonly effort: string }
-  | { readonly kind: 'command'; readonly effort: string };
+export interface StartupEffort {
+  readonly effort: string;
+  /** Whether the level must be checked against the login's live catalog before launch (Codex). */
+  readonly checksCatalog: boolean;
+}
 
 /**
  * The way this harness's start carries `effort`, or `undefined` when none was asked for.
  *
  * The level goes through `reasoningLevel`, the very normaliser `launchReasoningEffort` records the document's
  * level with, so the level on the argv and the level the session records can never differ — and a level that
- * normaliser rejects (`x_high`, `9`) is carried as none here, and `planStartupEffort` refuses it. An `argv`
- * answer also tells the caller it must read the login's catalog before `planStartupEffort`.
+ * normaliser rejects (`x_high`, `9`) is carried as none here, and `planStartupEffort` refuses it.
+ * `checksCatalog` tells the caller it must read the login's catalog before `planStartupEffort`.
  */
 export function startupEffort(harness: HarnessKind, effort: string | undefined): StartupEffort | undefined {
   const level = reasoningLevel(effort);
   if (level === undefined) return undefined;
-  return harnessQuirks(harness).effortIsRuntimeCommand
-    ? { kind: 'command', effort: level }
-    : { kind: 'argv', effort: level };
+  return { effort: level, checksCatalog: harnessQuirks(harness).launchEffortNeedsCatalogCheck };
 }
 
 /**
@@ -98,19 +106,17 @@ export type StartupEffortPlan =
     }
   | {
       readonly kind: 'planned';
-      /** The level for the launch argv (Codex). */
+      /** The level for the launch argv. */
       readonly argvEffort?: string;
-      /** The runtime command to apply before turn one (Claude). */
-      readonly startupRuntime?: RuntimeControlRequest;
     };
 
 /**
  * The whole decision of how a start carries `effort`, with nothing read or typed.
  *
  * `catalog` is what the caller read for a Codex level — the login's models, or the `Error` its probe threw —
- * and is only consulted for an `argv` start (`startupEffort` says whether the caller must read it). No level
- * plans nothing; a Codex level is checked against the catalog (`codexStartupEffortRefusal`) and then rides the
- * argv; a Claude level becomes an `effort` runtime command.
+ * and is only consulted when `startupEffort` says the level `checksCatalog`. No level plans nothing; a Codex
+ * level is checked against the catalog (`codexStartupEffortRefusal`) and then rides the argv; a Claude level
+ * rides the argv unchecked.
  */
 export function planStartupEffort(
   harness: HarnessKind,
@@ -127,8 +133,7 @@ export function planStartupEffort(
       ? { kind: 'planned' }
       : { kind: 'refused', cause: 'invalid', reason: `${asked} is not a reasoning level` };
   }
-  if (carried.kind === 'command')
-    return { kind: 'planned', startupRuntime: { action: 'effort', effort: carried.effort } };
+  if (!carried.checksCatalog) return { kind: 'planned', argvEffort: carried.effort };
   const reason = codexStartupEffortRefusal(model, carried.effort, catalog);
   if (reason === undefined) return { kind: 'planned', argvEffort: carried.effort };
   return {

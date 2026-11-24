@@ -22,6 +22,15 @@ export interface HarnessQuirks {
    */
   readonly effortIsRuntimeCommand: boolean;
   /**
+   * A reasoning level put on a START's launch argv must be checked against the login's live model
+   * catalog first, because nothing else checks it.
+   *
+   * Codex accepts any `-c model_reasoning_effort=…` and a level the model does not take only surfaces as
+   * a failed first turn. Claude's own CLI checks `--effort`: an unknown level is warned about and the
+   * session starts on its default, exactly as `/effort` treated one.
+   */
+  readonly launchEffortNeedsCatalogCheck: boolean;
+  /**
    * Changing the model of a live session requires driving a modal picker with
    * keystrokes, because the harness offers no command that takes the model as an
    * argument.
@@ -56,6 +65,7 @@ export interface HarnessQuirks {
 const QUIRKS: Readonly<Record<HarnessKind, HarnessQuirks>> = {
   claude: {
     effortIsRuntimeCommand: true,
+    launchEffortNeedsCatalogCheck: false,
     modelSwitchNeedsPicker: false,
     reportsTokenCounter: true,
     fastIsToggle: false,
@@ -64,6 +74,7 @@ const QUIRKS: Readonly<Record<HarnessKind, HarnessQuirks>> = {
   },
   codex: {
     effortIsRuntimeCommand: false,
+    launchEffortNeedsCatalogCheck: true,
     modelSwitchNeedsPicker: true,
     reportsTokenCounter: false,
     fastIsToggle: true,

@@ -378,6 +378,14 @@ loopback proxy held every connection, then the pane was killed before startup co
   **fork** (which applies its target's model and effort through the startup picker hook) still drive
   the picker, and that drive tolerates a slow startup because a frame showing the park is not charged
   to its budget (`CODEX_STARTUP_WAIT_OBSERVATIONS`, which outlasts Codex's own startup timeout).
+- **A NEW Claude start no longer types `/effort` either**: its level rides `--effort <level>` on the
+  launch command, as every Claude relaunch already did. On Claude Code 2.1.327 a typed `/effort high` was
+  now and then submitted as a model turn (the pane echoed `❯ /effort high` under a turn spinner), which
+  failed the start with "the harness consumed /effort high as a model turn instead of a native runtime
+  control" — 112 starts on one host from 2026-11-18 to 2026-11-24. And `/effort` now saves the level as
+  the login's default for every later session, while `--effort` sets this session only. Claude's own CLI
+  warns about and ignores an unknown level, so no catalog is read for it. A live switch and a fork still
+  type `/effort`.
 - The captures were taken through the real fleet wrapper, which configures the ferretry MCP server, and
   once with that server deliberately delayed 8 s; no line was drawn below the wait line, and MCP
   start-up did not hold startup.

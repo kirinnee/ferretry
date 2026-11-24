@@ -45,6 +45,7 @@ describe('harnessQuirks', () => {
     // Arrange / Act / Assert
     should(harnessQuirks('codex')).eql({
       effortIsRuntimeCommand: false,
+      launchEffortNeedsCatalogCheck: true,
       modelSwitchNeedsPicker: true,
       reportsTokenCounter: false,
       fastIsToggle: true,
@@ -57,6 +58,7 @@ describe('harnessQuirks', () => {
     // Arrange / Act / Assert
     should(harnessQuirks('claude')).eql({
       effortIsRuntimeCommand: true,
+      launchEffortNeedsCatalogCheck: false,
       modelSwitchNeedsPicker: false,
       reportsTokenCounter: true,
       fastIsToggle: false,
