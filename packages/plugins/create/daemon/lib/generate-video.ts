@@ -163,9 +163,7 @@ function generateVideo(deps: GenerateVideoDeps) {
         return refusal(`${model.id} makes ${model.aspects.join(', ')} clips, not ${input.aspect}.`);
       if (input.resolution !== undefined && !model.resolutions.includes(input.resolution))
         return refusal(
-          model.resolutions.length === 0
-            ? `${model.id} has one resolution; leave resolution out.`
-            : `${model.id} makes ${model.resolutions.join(' or ')}, not ${input.resolution}.`,
+          `${model.id} ${model.resolutions.length === 0 ? 'has one resolution; leave resolution out' : `makes ${model.resolutions.join(' or ')}, not ${input.resolution}`}.`,
         );
       const resolution = input.resolution ?? model.resolutions[0] ?? '';
       if (deps.config().fal.key === undefined) return failed({ code: 'no_key', sentence: FAL.noKey });

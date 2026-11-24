@@ -32,7 +32,7 @@ class FakeFal {
   readonly seen: { host: string; path: string; method: string; headers: Headers; body: string | undefined }[] = [];
   readonly queued = new Map<string, Queued>();
   prices = new Map<string, { unit_price: number; unit: string }>();
-  submit: 'ok' | 'drops' | number = 'ok';
+  submit: 'ok' | 'drops' | 'garbled' | number = 'ok';
   videoUrl = CDN;
   cdn: 'ok' | 'not-found' | 'wrong-type' = 'ok';
   video: Uint8Array = MP4;
@@ -59,6 +59,8 @@ class FakeFal {
       if (method === 'POST') {
         if (this.submit === 'drops') throw new Error('connection dropped');
         if (typeof this.submit === 'number') return new Response('no', { status: this.submit });
+        if (this.submit === 'garbled')
+          return Response.json({ request_id: 'req-x', status_url: 'https://evil.example/s' });
         const id = `req-${++this.count}`;
         const endpoint = url.pathname.slice(1);
         this.queued.set(id, { endpoint, status: this.startAs, result: 'ok', statusDrops: false });
@@ -118,6 +120,8 @@ interface World {
   readonly delivered: { ferret: string; name: string; bytes: number }[];
   readonly host: Awaited<ReturnType<typeof testHost>>;
   readonly standing: { current: CallStanding };
+  /** While true, a write to the jobs file fails (a full or damaged disk). */
+  readonly jobsWrite: { fails: boolean };
 }
 
 async function world(
@@ -170,7 +174,14 @@ async function world(
       );
   if (options.carried?.ledger !== undefined) host.state('create').plant(SPEND_LEDGER, options.carried.ledger);
   if (options.carried?.jobs !== undefined) host.state('create').plant(VIDEO_JOBS, options.carried.jobs);
-  return { fake, asks, delivered, host, standing };
+  const jobsWrite = { fails: false };
+  const files = host.state('create').files;
+  const set = files.set.bind(files);
+  files.set = (path, text) => {
+    if (jobsWrite.fails && path === 'jobs.jsonl') throw new Error('the disk is full');
+    return set(path, text);
+  };
+  return { fake, asks, delivered, host, standing, jobsWrite };
 }
 
 const video = (w: World, input: Record<string, unknown> = {}) =>
@@ -362,6 +373,26 @@ describe('generate_video: queued, priced before it is sent, reserved at submit',
       expect(net(w)).toBe(350_000);
       expect(jobLines(w)).toHaveLength(0);
     }
+  });
+
+  test('an answer fal gave that Create will not follow is counted, with no job', async () => {
+    const w = await world();
+    w.fake.submit = 'garbled';
+    const answer = await video(w);
+    expect(answer.isError).toBe(true);
+    expect(answer.text).toContain('may have billed');
+    expect(net(w)).toBe(350_000);
+    expect(jobLines(w)).toHaveLength(0);
+  });
+
+  test('a job that cannot be saved after fal queued it is paid for and counted, and says not to ask again', async () => {
+    const w = await world();
+    w.jobsWrite.fails = true;
+    const answer = await video(w);
+    expect(answer.isError).toBe(true);
+    expect(answer.text).toContain('the job could not be saved');
+    expect(answer.text).toContain('Do NOT ask again');
+    expect(net(w)).toBe(350_000);
   });
 
   test('the same clip asked for again while its job is open is that job, not a second payment', async () => {
@@ -559,6 +590,33 @@ describe('a job fal fails is refunded only when fal bills nothing', () => {
       expect(net(w)).toBe(350_000);
       expect(jobLines(w).at(-1)).toMatchObject({ kind: 'finished', outcome: 'delivered' });
     }
+  });
+
+  test('a failed read that cannot be written down still keeps the job open and says to ask again', async () => {
+    const w = await world();
+    const job = jobOf((await video(w)).text);
+    w.fake.finish('req-1', { result: 500 });
+    w.jobsWrite.fails = true;
+    const answer = await status(w, job);
+    expect(answer.isError).toBe(true);
+    expect(answer.text).toContain('call generation_status again');
+    expect(net(w)).toBe(350_000);
+  });
+
+  test('a job whose end cannot be written is not refunded, and is asked again', async () => {
+    const w = await world();
+    const job = jobOf((await video(w)).text);
+    w.fake.finish('req-1', { error: 'the runner was lost', errorType: 'runner_disconnected' });
+    w.jobsWrite.fails = true;
+    const answer = await status(w, job);
+    expect(answer.isError).toBe(true);
+    expect(answer.text).toContain('its end could not be saved');
+    expect(net(w)).toBe(350_000);
+    expect(ledgerLines(w)).toHaveLength(1);
+    // the disk recovers: the same end is written and the refund given, once
+    w.jobsWrite.fails = false;
+    expect((await status(w, job)).text).toContain('given back');
+    expect(net(w)).toBe(0);
   });
 
   test('a result that never reads is closed as counted after five failed reads, and never read again', async () => {
