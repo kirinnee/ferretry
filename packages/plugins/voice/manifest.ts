@@ -132,6 +132,11 @@ export default definePlugin({
     { id: 'speedups', title: 'Speed-ups', order: 4, side: 'client', stepHost: true },
   ],
 
+  // What a ferret is told about voice mode (`instructions/voice.md`): Voice's own words, so with Voice off a ferret is told
+  // nothing of `<voice>` lines. A lead is who the person talks to (a helper reports to its lead), and no harness is named so
+  // Claude and Codex both read it. The grammar it teaches is Conversation's `<voice>` tag (`contract/voice-tag.ts`).
+  instructions: [{ id: 'voice', text: 'instructions/voice.md', when: { role: 'lead' } }],
+
   permissions: {
     // Keys ride only on requests the Vault's outbound holder builds; the hosts are the provider table's.
     network: [CLEANUP_PROVIDERS.groq.host, CLEANUP_PROVIDERS.cerebras.host, 'api.typesafe.ai'],
