@@ -4,7 +4,7 @@ import type { BrowsersConfig } from '../../../contract/index.ts';
 import { BROWSER_STEALTH_ENV, browserLaunchPart } from '../../../daemon/launch-parts.ts';
 
 const spec = {} as unknown as Omit<LaunchSpec, 'parts'>;
-const config = (stealth: 'on' | 'off'): BrowsersConfig => ({ mode: 'headless', stealth });
+const config = (stealth: 'on' | 'off'): BrowsersConfig => ({ mode: 'headless', stealth, engine: 'chromium' });
 const part = (value: '0' | '1') => [{ kind: 'env' as const, env: { FY_BROWSER_STEALTH: value } }];
 const launched = async (read: () => BrowsersConfig | undefined) => await browserLaunchPart(read).parts(spec);
 
