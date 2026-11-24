@@ -25,6 +25,8 @@ import {
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
   CODEX_QUESTIONS_OFF_OVERRIDE,
+  BROWSER_INSTRUCTION,
+  BROWSER_STEALTH_ENV,
   FERRET_SECTIONS,
   SUB_FERRET_ENV,
   SUB_FERRET_INSTRUCTION,
@@ -620,6 +622,8 @@ function ferretSectionLines(harness: HarnessKind, fyCommand: string): string[] {
     '',
     "# This ferret's own sections of the appended system prompt: each switch the daemon set to 1.",
     `if [ "\${${SUB_FERRET_ENV}:-0}" = 1 ]; then ${SECTIONS_VARIABLE}=${quoted(`\n\n${SUB_FERRET_INSTRUCTION(fy)}`)}; else ${SECTIONS_VARIABLE}=''; fi`,
+    // The browser section is always told; only its words follow the stealth switch, and anything but `1` says the `off` ones.
+    `if [ "\${${BROWSER_STEALTH_ENV}:-0}" = 1 ]; then ${SECTIONS_VARIABLE}="$${SECTIONS_VARIABLE}"${quoted(`\n\n${BROWSER_INSTRUCTION.on}`)}; else ${SECTIONS_VARIABLE}="$${SECTIONS_VARIABLE}"${quoted(`\n\n${BROWSER_INSTRUCTION.off}`)}; fi`,
     ...FERRET_SECTIONS(fy).flatMap(section => [
       `if [ "\${${section.env}:-0}" = 1 ]${section.unlessEnv === undefined ? '' : ` && [ "\${${section.unlessEnv}:-0}" != 1 ]`}; then ${SECTIONS_VARIABLE}="$${SECTIONS_VARIABLE}"${quoted(`\n\n${section.text}`)}; fi`,
       ...(section.env === PACK_ENV ? packRoutingLines(quoted) : []),

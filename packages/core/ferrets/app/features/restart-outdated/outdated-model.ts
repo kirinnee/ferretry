@@ -24,6 +24,7 @@ const SECTION_WORDS: Readonly<Record<LaunchInstructionSectionId, string>> = {
   attention: 'attention',
   agenda: 'agenda',
   asks: 'asks',
+  browser: 'browser',
   learning: 'learning',
   'rm-targets': 'rm rule',
 };

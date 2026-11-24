@@ -127,6 +127,7 @@ export type LaunchInstructionSectionId =
   | 'hypermedia'
   | 'pack'
   | 'agenda'
+  | 'browser'
   | 'learning';
 
 /** What one launch was told: its sections by name and size (never the text), its mode, and whether it may ask. */

@@ -12,6 +12,7 @@ import {
   AGENDA_INSTRUCTION,
   ALWAYS_ON_SECTIONS,
   AGENT_TOOLS_INSTRUCTION,
+  BROWSER_INSTRUCTION,
   CLAUDE_NO_QUESTIONS_FLAG,
   fixedLayerFor,
   HYPERMEDIA_INSTRUCTION,
@@ -205,8 +206,9 @@ describe("a resumed conversation hears this launch's sections", () => {
 
 describe("each ferret's sections of the appended system prompt", () => {
   const BASE = 'Ferretry tools: the base instruction.';
-  // A lead's notify, board and lessons rules are the plugins' instruction files: the wrapper adds nothing for a lead.
-  const LEAD = BASE;
+  // A lead's notify, board and lessons rules are the plugins' instruction files: the wrapper adds only the browser section,
+  // which every ferret is told (its off words while FY_BROWSER_STEALTH is not 1).
+  const LEAD = `${BASE}\n\n${BROWSER_INSTRUCTION.off}`;
 
   it('should append exactly the sections this ferret switched on, after a blank line, in the fixed order', () => {
     // Arrange
@@ -261,7 +263,9 @@ describe("each ferret's sections of the appended system prompt", () => {
     const sub = prompt({ FY_SUB_FERRET: '1', FY_AGENDA: '1', FY_PACK: '1' });
 
     // Assert
-    should(sub).startWith(`--append-system-prompt=${BASE}\n\n${SUB_FERRET_INSTRUCTION('fy')}\n\nPack mode: `);
+    should(sub).startWith(
+      `--append-system-prompt=${BASE}\n\n${SUB_FERRET_INSTRUCTION('fy')}\n\n${BROWSER_INSTRUCTION.off}\n\nPack mode: `,
+    );
     should(sub).not.containEql('Agenda mode:');
     should(sub).not.containEql('Board: all work');
     should(sub).not.containEql('Notify: the owner');
@@ -355,6 +359,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       const env = Object.fromEntries(SWITCHES.map(section => [section.env, on.includes(section) ? '1' : '0']));
       const expected = [
         ...ALWAYS_ON_SECTIONS('fy').map(section => section.text),
+        BROWSER_INSTRUCTION.off,
         ...on.map(section => section.text),
       ].join('\n\n');
 
@@ -371,6 +376,37 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       // Assert
       should(prompt).equal(expected);
       should(args.filter(arg => arg.includes('Pack mode:')).length).equal(on.some(s => s.env === 'FY_PACK') ? 1 : 0);
+    },
+  );
+
+  it.each(
+    (['claude', 'codex'] as const).flatMap(harness =>
+      (
+        [
+          ['0', BROWSER_INSTRUCTION.off],
+          ['1', BROWSER_INSTRUCTION.on],
+          ['yes', BROWSER_INSTRUCTION.off],
+          ['', BROWSER_INSTRUCTION.off],
+        ] as const
+      ).map(([value, words]) => [harness, value, words] as const),
+    ),
+  )(
+    'should give a %s ferret the browser words its FY_BROWSER_STEALTH=%j picks, run in a real shell',
+    (harness, value, words) => {
+      // Act
+      const args = launchArguments(wrapperFor(harness), { FY_BROWSER_STEALTH: value });
+      const prompt =
+        harness === 'claude'
+          ? args.find(arg => arg.startsWith('--append-system-prompt='))?.slice('--append-system-prompt='.length)
+          : JSON.parse(
+              args.find(arg => arg.startsWith('developer_instructions='))?.slice('developer_instructions='.length) ??
+                '""',
+            );
+
+      // Assert — exactly the always-on text, then the one browser section; the other variant's words are absent
+      should(prompt).equal([...ALWAYS_ON_SECTIONS('fy').map(section => section.text), words].join('\n\n'));
+      const other = words === BROWSER_INSTRUCTION.on ? BROWSER_INSTRUCTION.off : BROWSER_INSTRUCTION.on;
+      should(prompt).not.containEql(other);
     },
   );
 
@@ -416,6 +452,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       hypermedia: HYPERMEDIA_INSTRUCTION('fy').length,
       pack: PACK_INSTRUCTION('fy').length,
       agenda: AGENDA_INSTRUCTION('fy').length,
+      browser: BROWSER_INSTRUCTION.on.length,
     };
 
     // Assert — the whole prompt, every section on and the longest routing prompt as its one `Routing: ` line,
@@ -474,7 +511,6 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       'ask_owner',
       'askOwner',
       'exactly what to do',
-      'Never solve captchas',
       'spend money unattended',
       'Never put a secret in chat',
       'terminal_ask_owner',
@@ -486,6 +522,10 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       'account_hint',
     ])
       should(AGENT_TOOLS_INSTRUCTION).containEql(phrase);
+    // "Never solve captchas, spoof a browser or identity" moved to the browser section, which says it while stealth is off.
+    for (const phrase of ['Never solve captchas', 'spoof a browser or identity'])
+      should(BROWSER_INSTRUCTION.off).containEql(phrase);
+    should(AGENT_TOOLS_INSTRUCTION).not.containEql('Never solve captchas');
     // No lock after an answer: the ferret reads the surface at once, so the prompt never promises a hold.
     should(AGENT_TOOLS_INSTRUCTION).not.containEql('unreadable');
   });

@@ -8,6 +8,8 @@ import {
   AGENT_TOOLS_INSTRUCTION,
   ALWAYS_ON_SECTIONS,
   applyFixedLayer,
+  BROWSER_INSTRUCTION,
+  BROWSER_STEALTH_ENV,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
   CODEX_HIDDEN_NOTICES,
@@ -990,6 +992,12 @@ describe('launchInstructions', () => {
           chars: SET_UP_FERRETRY_INSTRUCTION(binary).length,
           digest: instructionDigest(SET_UP_FERRETRY_INSTRUCTION(binary)),
         },
+        // Never left out: the stealth variable is not set here, so it says the off words.
+        {
+          id: 'browser',
+          chars: BROWSER_INSTRUCTION.off.length,
+          digest: instructionDigest(BROWSER_INSTRUCTION.off),
+        },
         {
           id: 'hypermedia',
           chars: HYPERMEDIA_INSTRUCTION(binary).length,
@@ -1020,7 +1028,7 @@ describe('launchInstructions', () => {
     should(pack?.chars).equal(PACK_INSTRUCTION('fy').length + 1 + line.length);
     should(pack?.digest).equal(instructionDigest(`${PACK_INSTRUCTION('fy')}\n${line}`));
     should(pack?.digest).not.equal(instructionDigest(PACK_INSTRUCTION('fy')));
-    should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings']);
+    should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'browser']);
   });
 
   it.each([
@@ -1048,7 +1056,7 @@ describe('launchInstructions', () => {
     const launched = launchInstructions('fy', env);
 
     // Assert
-    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings']);
+    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'browser']);
     should(launched.mode).equal('auto');
     should(launched.questions).be.false();
   });
@@ -1069,7 +1077,14 @@ describe('launchInstructions', () => {
     should(off.sections.map(section => section.id)).not.containEql('agenda');
     should(zero.sections.map(section => section.id)).not.containEql('agenda');
     should(yes.sections.map(section => section.id)).not.containEql('agenda');
-    should(on.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'hypermedia', 'pack', 'agenda']);
+    should(on.sections.map(section => section.id)).deepEqual([
+      'tools',
+      'settings',
+      'browser',
+      'hypermedia',
+      'pack',
+      'agenda',
+    ]);
     // A per-ferret section carries a size and a fingerprint, so a changed word is told from a changed switch.
     should(on.sections.find(section => section.id === 'agenda')).deepEqual({
       id: 'agenda',
@@ -1127,7 +1142,13 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     });
 
     // Assert
-    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'sub-ferret', 'pack']);
+    should(launched.sections.map(section => section.id)).deepEqual([
+      'tools',
+      'settings',
+      'sub-ferret',
+      'browser',
+      'pack',
+    ]);
     should(launched.sections.find(section => section.id === 'sub-ferret')?.chars).equal(
       SUB_FERRET_INSTRUCTION('zz').length,
     );
@@ -1140,8 +1161,57 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     should(launchInstructions('zz', { [SUB_FERRET_ENV]: '0', [AGENDA_ENV]: '1' }).sections.map(s => s.id)).deepEqual([
       'tools',
       'settings',
+      'browser',
       'agenda',
     ]);
+  });
+});
+
+describe('the browser section follows FY_BROWSER_STEALTH', () => {
+  it("should say today's words exactly while stealth is off, missing or anything but 1", () => {
+    // Assert — the frozen words: a change here is a change to every ferret that has stealth off.
+    should(BROWSER_INSTRUCTION.off).equal('Never solve captchas, spoof a browser or identity.');
+    for (const env of [
+      {} as Record<string, string>,
+      { [BROWSER_STEALTH_ENV]: '0' },
+      { [BROWSER_STEALTH_ENV]: 'yes' },
+      { [BROWSER_STEALTH_ENV]: '' },
+    ])
+      should(launchInstructions('fy', env).sections.find(s => s.id === 'browser')).deepEqual({
+        id: 'browser',
+        chars: BROWSER_INSTRUCTION.off.length,
+        digest: instructionDigest(BROWSER_INSTRUCTION.off),
+      });
+  });
+
+  it('should say the new words, with a different digest, while stealth is 1, so a running ferret is marked outdated', () => {
+    // Act
+    const off = launchInstructions('fy', { [BROWSER_STEALTH_ENV]: '0' }).sections.find(s => s.id === 'browser');
+    const on = launchInstructions('fy', { [BROWSER_STEALTH_ENV]: '1' }).sections.find(s => s.id === 'browser');
+
+    // Assert
+    should(on).deepEqual({
+      id: 'browser',
+      chars: BROWSER_INSTRUCTION.on.length,
+      digest: instructionDigest(BROWSER_INSTRUCTION.on),
+    });
+    should(on?.digest).not.equal(off?.digest);
+    // The always-on text did not move with the switch.
+    should(launchInstructions('fy', {}).sections.filter(s => s.id !== 'browser')).deepEqual(
+      launchInstructions('fy', { [BROWSER_STEALTH_ENV]: '1' }).sections.filter(s => s.id !== 'browser'),
+    );
+  });
+
+  it('should keep "never create passkeys" and "never spend money unattended" always on, and "never solve" only while off', () => {
+    should(AGENT_TOOLS_INSTRUCTION).containEql('Never create passkeys or spend money unattended.');
+    should(AGENT_TOOLS_INSTRUCTION).not.containEql('solve captchas');
+    should(BROWSER_INSTRUCTION.off).containEql('Never solve captchas');
+    should(BROWSER_INSTRUCTION.off).containEql('spoof a browser or identity');
+    should(BROWSER_INSTRUCTION.on).equal(
+      "On the owner's identities the browser passes bot checks and solves token checks (Turnstile, reCAPTCHA, hCaptcha) itself. You may try a simple picture puzzle shown in the page yourself; never use outside tools or services to solve or bypass a check, and never change the browser's identity. If a check stays, ask the owner (browser_ask_owner).",
+    );
+    should(BROWSER_INSTRUCTION.on).not.containEql('never solve a captcha');
+    should(BROWSER_INSTRUCTION.on).containEql('browser_ask_owner');
   });
 });
 
