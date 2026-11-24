@@ -28,7 +28,6 @@ const STEPS = [
   'claude-code.import-mcp',
   'claude-code.conversations',
   'claude-code.import-run',
-  'claude-code.permission',
 ] as const;
 /** Well under React's 300 ms fallback hold: a page that suspends cannot draw inside it, a page that does not always does. */
 const FAST_MS = 200;

@@ -3,17 +3,12 @@
  *
  * Every read is `quiet` (a page mounting is not a person's act, so it never raises a passkey prompt); an act the person
  * pressed (Install, a card that writes) is not. Nothing here holds a credential: the update view carries a version and a
- * path, the logins list carries status words and secret NAMES, and the config file carries a permission mode.
+ * path, the logins list carries status words and secret NAMES.
  */
 import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { type LoginList, LoginListSchema, type LoginView } from '@ferretry/plugin-logins/contract';
 import { SetupScanSchema, ToolInstallResultSchema, type ToolInstallOutcome } from '@ferretry/plugin-runtimes/contract';
-import { HIDDEN_VALUE_TEXT } from '@ferretry/std/secret-reference';
-import { editConfigText, readConfigText } from '@ferretry/std/yaml';
-import { type HarnessCliView, PermissionModeSchema } from '../../../contract/index.ts';
-import type { z } from 'zod';
-
-export type PermissionMode = z.infer<typeof PermissionModeSchema>;
+import type { HarnessCliView } from '../../../contract/index.ts';
 
 export type OnboardingClient = Pick<PluginClient, 'call' | 'subscribe'>;
 
@@ -25,21 +20,10 @@ const ROUTES = {
   scan: 'GET /v1/runtimes/setup/scan',
   install: 'POST /v1/runtimes/machine/tools/install',
   logins: 'GET /v1/logins',
-  readFile: 'GET /v1/config/file',
-  writeFile: 'PUT /v1/config/file',
 } as const;
-
-/** The file `permissionMode` lives in (`config/harness-codex.yaml`), as the config routes name it. */
-const CODEX_CONFIG_FILE = 'harness-codex.yaml';
 
 /** The command a person can run by hand when this machine cannot run an install for them. */
 const MANUAL_INSTALL = 'npm install -g @openai/codex';
-
-/** The permission cards' one-line words, and what Skip allows in plain words (the flag is drawn as code beside it). */
-export const SKIP_WORDS = 'No approvals, no sandbox.';
-export const SKIP_PLAIN = 'Runs every command without asking, even deleting files.';
-export const SKIP_FLAG = '--dangerously-bypass-approvals-and-sandbox';
-export const AUTO_WORDS = 'Asks before risky things.';
 
 /** The sentence for a failed call: the daemon's own words, or that it did not answer. */
 export const refusalWords = (cause: unknown): string => {
@@ -168,95 +152,4 @@ export function signInFacts(list: LoginList): SignInFacts {
 
 export async function readSignIn(client: OnboardingClient): Promise<SignInFacts> {
   return signInFacts(LoginListSchema.parse(await client.call(ROUTES.logins, { quiet: true })));
-}
-
-// ── permission ───────────────────────────────────────────────────────────────────────────────────
-
-/**
- * The permission mode a `harness-codex.yaml` text says, read by the shared config parser (so a flow map, a folded scalar,
- * a quoted key and an inline comment all read right): an absent key is `skip` (the default, owner !A525); a text that does not
- * parse, is not a mapping of keys, or holds a mode this page does not know is `null` — unknown, never guessed.
- */
-export function modeOf(text: string): PermissionMode | null {
-  const read = readConfigText(text);
-  if (!read.ok) return null;
-  const { value } = read.read;
-  if (value === null || value === undefined) return 'skip';
-  if (typeof value !== 'object' || Array.isArray(value)) return null;
-  const said = (value as Record<string, unknown>).permissionMode;
-  if (said === undefined || said === null) return 'skip';
-  const parsed = PermissionModeSchema.safeParse(said);
-  return parsed.success ? parsed.data : null;
-}
-
-/**
- * The text with ONLY `permissionMode` changed, by the shared config editor: a scalar is changed in place (so a comment on its
- * line stays), a missing key is added, and every other key and comment is kept byte for byte. It throws on a text it cannot read
- * as a mapping, rather than replacing the file: a file nobody can read is fixed by a person.
- */
-export function withMode(text: string, mode: PermissionMode): string {
-  const read = readConfigText(text);
-  const value = read.ok ? read.read.value : undefined;
-  if (!read.ok || modeOf(text) === null) throw new Error('the file cannot be edited here');
-  const now = value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
-  return editConfigText(text, { ...now, permissionMode: mode }, now, undefined);
-}
-
-export interface ConfigFile {
-  readonly text: string;
-  readonly etag: string;
-  /** Where the file is on the machine, for "Change this at the machine: <file>". */
-  readonly where: string;
-  /** The daemon did not show the text (a value in it looks like a credential, or it does not parse): it must not be written. */
-  readonly withheld: boolean;
-  /** A held edit waits for the owner's OK (the read's `state` is `pending`): a write from here would overwrite it, so none is made. */
-  readonly pending: boolean;
-}
-
-/** What the footer says when a write is refused because an earlier change to the file still waits for the owner. */
-const PENDING_WORDS = 'A change to this file is waiting for your OK — confirm or discard it in Settings > Files first.';
-
-/** The mode this file says, or `null` when it cannot be known here (withheld, unparsable, or an unknown mode): then nothing is written. */
-export const currentMode = (file: ConfigFile): PermissionMode | null => (file.withheld ? null : modeOf(file.text));
-
-/** The sentence for a file this page cannot read or edit safely. */
-export const changeAtMachineWords = (file: ConfigFile): string => `Change this at the machine: ${file.where}`;
-
-/** The daemon's shown comment for a file whose text it withholds starts with the hidden mark; its issue says the same. */
-const withheldView = (text: string, issues: readonly { readonly message?: string }[]): boolean =>
-  text.startsWith(`# ${HIDDEN_VALUE_TEXT}`) ||
-  issues.some(issue => issue.message?.startsWith('the text of this file is not shown') === true);
-
-export async function readConfig(client: OnboardingClient): Promise<ConfigFile> {
-  const file = (await client.call(ROUTES.readFile, { quiet: true, query: { path: CODEX_CONFIG_FILE } })) as {
-    readonly text?: string;
-    readonly etag?: string;
-    readonly absolutePath?: string;
-    readonly state?: string;
-    readonly issues?: readonly { readonly message?: string }[];
-  };
-  const text = file.text ?? '';
-  return {
-    text,
-    etag: file.etag ?? '',
-    where: file.absolutePath ?? `config/${CODEX_CONFIG_FILE}`,
-    withheld: withheldView(text, file.issues ?? []),
-    pending: file.state === 'pending',
-  };
-}
-
-/** What a mode write did: in effect now, or written and held until the owner confirms it. Never called for a file whose mode is unknown. */
-export async function writeMode(
-  client: OnboardingClient,
-  file: ConfigFile,
-  mode: PermissionMode,
-): Promise<'applied' | 'held'> {
-  // The last line of defence: a withheld, unparsable or unknown file is never written, whatever the page decided.
-  if (currentMode(file) === null) throw new Error(changeAtMachineWords(file));
-  // A held edit waits: the text shown may be the held one, and writing over it would overwrite what the owner has yet to confirm.
-  if (file.pending) throw new Error(PENDING_WORDS);
-  const answer = (await client.call(ROUTES.writeFile, {
-    body: { path: CODEX_CONFIG_FILE, text: withMode(file.text, mode), etag: file.etag },
-  })) as { readonly outcome?: string };
-  return answer.outcome === 'pending' ? 'held' : 'applied';
 }

@@ -10,7 +10,6 @@ import { ImportChoicePage } from './import-choice-page.tsx';
 import { IMPORT_PAGES } from './import/index.ts';
 import { InstalledPage } from './installed-page.tsx';
 import type { OnboardingClient, StepHost } from './onboarding-api.ts';
-import { PermissionPage } from './permission-page.tsx';
 import { RuntimeReadyPage } from '@ferretry/plugin-runtimes/import-kit';
 import { SignInPage } from './sign-in-page.tsx';
 
@@ -22,7 +21,6 @@ const PAGES: Readonly<Record<string, Page>> = {
   installed: (client, step) => createElement(InstalledPage, { client, step }),
   'sign-in': (client, step) => createElement(SignInPage, { client, step }),
   'import-choice': (client, step) => createElement(ImportChoicePage, { client, step }),
-  permission: (client, step) => createElement(PermissionPage, { client, step }),
   ready: (client, step) => createElement(RuntimeReadyPage, { client, harness: 'codex', label: 'Codex', step }),
 };
 

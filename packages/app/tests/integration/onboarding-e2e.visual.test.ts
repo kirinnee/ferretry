@@ -1128,7 +1128,26 @@ describe('the first run, end to end', () => {
         // A name that is NOT the one the field starts with (the machine's host name), so the payload proves the typed name was sent.
         await tab.getByLabel('Machine name').last().fill('harbor-lamp');
         await tab.locator('[data-step-next]').click();
+
+        // Permissions (O11 R1): ONE page for every harness picked, a single tick-box ticked by default. Choosing writes nothing, and
+        // Next with the defaults ticked leaves both files as they were.
+        await reach(tab, 'onboarding.permissions');
+        walked.push('onboarding.permissions');
+        await inspect(tab, variant, 'onboarding.permissions');
+        await shot(tab, variant, 'onboarding.permissions');
+        expect(
+          await tab.locator('[data-permissions-defaults] input').isChecked(),
+          'the autonomous defaults are ticked by default',
+        ).toBe(true);
+        expect(await tab.locator('[data-permissions-details]').count(), 'the per-harness choice starts closed').toBe(0);
+        const permBefore = (await daemonOf(tab, A)).mutations.length;
+        await tab.locator('[data-permissions-change]').click();
+        await tab.locator('[data-permissions-details]').waitFor();
+        await shot(tab, variant, 'onboarding.permissions-change');
+        expect((await daemonOf(tab, A)).mutations.length, 'opening Change wrote nothing').toBe(permBefore);
+        await tab.locator('[data-step-next]').click();
         await reach(tab, 'claude-code.sign-in');
+        expect(await recorded(tab, A, 'onboarding.permissions')).toBe('done');
         const nameWrites = (await daemonOf(tab, A)).writes.filter(
           write => write.route === 'PUT /v1/config/file' && (write.body as { path?: string }).path === 'host.yaml',
         );
@@ -1283,36 +1302,8 @@ describe('the first run, end to end', () => {
         await tab.waitForTimeout(500);
         await shot(tab, variant, 'claude-code.import-run-done');
         await tab.locator('[data-step-next]').waitFor();
-        await next(tab, 'claude-code.permission');
-        expect(await recorded(tab, A, 'claude-code.import-run')).toBe('done');
-
-        // Permission (r11 O4): an arrow key moves the focus and writes nothing; Enter selects and still writes nothing; the page has
-        // no button of its own, and Next with the saved card showing leaves the default as it was.
-        await reach(tab, 'claude-code.permission');
-        walked.push('claude-code.permission');
-        await inspect(tab, variant, 'claude-code.permission');
-        await shot(tab, variant, 'claude-code.permission');
-        const permBefore = (await daemonOf(tab, A)).mutations.length;
-        await tab.locator('input[type="radio"]:checked').first().focus();
-        await tab.keyboard.press('ArrowUp');
-        await tab.waitForTimeout(300);
-        expect((await daemonOf(tab, A)).mutations.length, 'an arrow key on Permissions wrote nothing').toBe(permBefore);
-        expect(
-          await tab.locator('[data-flow-page="claude-code.permission"] button').count(),
-          'Permissions draws no button of its own',
-        ).toBe(0);
-        // Enter chooses the focused card; that alone still writes nothing (only Next does).
-        await tab.keyboard.press('Enter');
-        await tab.waitForTimeout(300);
-        expect((await daemonOf(tab, A)).mutations.length, 'choosing a card on Permissions wrote nothing').toBe(
-          permBefore,
-        );
-        await shot(tab, variant, 'claude-code.permission-picked');
-        // Back to the saved card: Next has nothing to save.
-        await tab.locator('[data-flow-page="claude-code.permission"] [data-choice="skip"]').click();
-        await tab.waitForTimeout(300);
         await next(tab, 'claude-code.ready');
-        expect(await recorded(tab, A, 'claude-code.permission')).toBe('done');
+        expect(await recorded(tab, A, 'claude-code.import-run')).toBe('done');
 
         // Ready (O9-6): the Claude segment ENDS by saying what the sign-in above came to: the runtime it made, launchable.
         await reach(tab, 'claude-code.ready');
@@ -1676,7 +1667,7 @@ describe('the first run, end to end', () => {
             'claude-code.import-settings',
             'claude-code.import-skills',
             'claude-code.import-run',
-            'claude-code.permission',
+            'onboarding.permissions',
             'claude-code.ready',
             'codex.ready',
             'codex.sign-in',

@@ -73,7 +73,6 @@ export function onboardingPanels(load: () => Promise<Record<string, unknown>>, c
     'onboarding-import-mcp': stepPage(pages, client, 'import-mcp', 'McpPage'),
     'onboarding-conversations': stepPage(pages, client, 'conversations', 'ConversationsPage'),
     'onboarding-import-run': stepPage(pages, client, 'import-run', 'ImportRunPage'),
-    'onboarding-permission': stepPage(pages, client, 'permission', 'PermissionPage'),
     'onboarding-ready': stepPage(pages, client, 'ready', 'ReadyPage'),
   };
 }

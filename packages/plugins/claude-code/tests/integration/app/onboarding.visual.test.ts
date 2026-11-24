@@ -1,21 +1,17 @@
 /**
  * THE CLAUDE SEGMENT'S FIRST-RUN PAGES in a real browser over fixed fake data (`fixtures/onboarding-scene.tsx`): r11 O4's
  * proof of the owner's lines (items 3, 5: options stacked, the demo on the right, fewer words, no page buttons, fixed-width
- * footer buttons) and of the one security rule of the permission page: ONLY Next writes, and it writes `permissionMode` only.
+ * footer buttons).
  *
  * The ASSERT, on computed geometry, the DOM and the fake daemon (never a snapshot):
  *   1280 — on every page with cards: the cards share x and width and stack (y increases); the demo sits right of them
  *   (> 32 px gap) and its top is within 8 px of the first card's; the page text, card titles left out, is <= 160 characters;
- *   Back/Next are 136 px wide. Permission: no button in the page body; Skip + Next -> exactly one PUT whose YAML differs
- *   from the original in the `permissionMode` line alone; Auto (= saved) + Next -> no PUT; arrow keys -> no PUT; a refused
- *   write keeps the page, shows the reason, and the next Next writes once.
+ *   Back/Next are 136 px wide.
  *   390 — the demo is above the first card and <= 140 px tall; no sideways scroll; the footer buttons are inside the screen.
  *   Every page (the four above, the five import kind pages, the sign-in page) in both widths and both modes: the footer is
  *   Back, Later, Next, in that order, all the same width (136 px at 1280; equal thirds inside the screen at 390). The kind
  *   pages keep their checklist and draw the demo right of it (above it at 390). The sign-in slot draws no harness chooser
- *   (the detector is itself proved on a scene that draws one). From a saved Auto, picking Skip shows its warning and only
- *   Next sends one exact YAML change; an untouched saved Auto sends none. A read that becomes unreadable after a refused
- *   write drops the hidden pick; a file with a change held for the owner is never written.
+ *   (the detector is itself proved on a scene that draws one).
  *
  * Set `FY_O4_SHOTS_DIR` to keep a screenshot of each case.
  */
@@ -29,8 +25,6 @@ setDefaultTimeout(60_000);
 
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_O4_SHOTS_DIR ?? '';
-const ORIGINAL = 'binary: /fake/bin/claude\npermissionMode: skip\nhostHistory: true\n';
-const AUTO_ORIGINAL = 'binary: /fake/bin/claude\npermissionMode: auto\nhostHistory: true\n';
 
 let browser: Awaited<ReturnType<typeof sharedChromium>>;
 let directory = '';
@@ -74,7 +68,7 @@ const VIEWPORTS = [
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 const THEMES = ['studio-light', 'studio-dark'] as const;
-const CARD_PAGES = ['import-choice', 'permission'] as const;
+const CARD_PAGES = ['import-choice'] as const;
 const KIND_PAGES = ['kind-settings', 'kind-model-set', 'kind-instructions', 'kind-skills', 'kind-mcp'] as const;
 const DEMO_PAGES = [...CARD_PAGES, 'conversations', 'installed', ...KIND_PAGES] as const;
 const FOOTER = ['Back', 'Later', 'Next'] as const;
@@ -108,8 +102,6 @@ async function open(
 }
 
 const fakeOf = (tab: Tab) => tab.evaluate(() => (window as unknown as { __fake: Fake }).__fake);
-const lineDiff = (before: string, after: string): string[] =>
-  after.split('\n').filter((line, index) => line !== before.split('\n')[index]);
 
 describe('the Claude pages: stacked cards, the demo on the right, few words', () => {
   for (const viewport of VIEWPORTS)
@@ -251,98 +243,6 @@ describe('the Settings import page: the page text reads short', () => {
     });
 });
 
-describe('the permission page: only Next writes, and only permissionMode', () => {
-  it('has no button of its own in the page body (1280)', async () => {
-    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', '&page=permission');
-    try {
-      expect(await tab.locator('[data-step-page] .fy-spf__body button').count()).toBe(0);
-      expect(await tab.locator('[data-permission-confirm]').count()).toBe(0);
-      const text = await tab.evaluate(() => document.body.innerText);
-      for (const old of ['Use Skip permissions', 'Keep Auto mode', 'Press “Use', 'Nothing is saved until'])
-        expect(text).not.toContain(old);
-    } finally {
-      await close();
-    }
-  });
-
-  for (const theme of THEMES)
-    it(`Skip is selected: one line names the real flag; Auto + Next writes ONE put changing permissionMode only (${theme})`, async () => {
-      const { tab, close } = await open(VIEWPORTS[0], theme, '&page=permission');
-      try {
-        // Saved mode is skip (the scene's file): the warning is visible and names the flag.
-        const warning = tab.locator('[data-permission-consequence="skip"]');
-        await warning.waitFor({ state: 'visible' });
-        expect(await warning.innerText()).toContain('--dangerously-skip-permissions');
-        expect(await warning.innerText()).toContain('deleting files');
-        // An arrow key moves the focus and writes nothing; Enter selects the focused card and still writes nothing.
-        await tab.locator('input[type="radio"]:checked').focus();
-        await tab.keyboard.press('ArrowUp');
-        await tab.waitForTimeout(300);
-        expect((await fakeOf(tab)).puts.length).toBe(0);
-        await tab.keyboard.press('Enter');
-        await tab.waitForTimeout(300);
-        expect((await fakeOf(tab)).puts.length).toBe(0);
-        expect(await tab.locator('input[value="auto"]').isChecked()).toBe(true);
-        expect(await tab.locator('[data-permission-consequence="skip"]').count()).toBe(0);
-        // Clicking back to Skip shows the warning again and still writes nothing.
-        await tab.locator('[data-choice="skip"]').click();
-        await warning.waitFor({ state: 'visible' });
-        await tab.locator('[data-choice="auto"]').click();
-        expect((await fakeOf(tab)).puts.length).toBe(0);
-        await tab.locator('[data-step-next]').click();
-        await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
-        const { puts } = await fakeOf(tab);
-        expect(puts.length).toBe(1);
-        expect(puts[0]?.path).toBe('harness-claude-code.yaml');
-        expect(lineDiff(ORIGINAL, puts[0]?.text ?? '')).toEqual(['permissionMode: auto']);
-      } finally {
-        await close();
-      }
-    });
-
-  it('the saved mode + Next writes nothing (1280)', async () => {
-    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', '&page=permission');
-    try {
-      await tab.locator('[data-choice="skip"]').waitFor({ state: 'visible' });
-      await tab.locator('[data-step-next]').click();
-      await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
-      expect((await fakeOf(tab)).puts.length).toBe(0);
-    } finally {
-      await close();
-    }
-  });
-
-  it('a pick and back to the saved card writes nothing (1280)', async () => {
-    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', '&page=permission');
-    try {
-      await tab.locator('[data-choice="auto"]').click();
-      await tab.locator('[data-choice="skip"]').click();
-      await tab.locator('[data-step-next]').click();
-      await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
-      expect((await fakeOf(tab)).puts.length).toBe(0);
-    } finally {
-      await close();
-    }
-  });
-
-  it('a refused write keeps the page, says why, and the next Next writes once (1280)', async () => {
-    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', '&page=permission&save=fail');
-    try {
-      await tab.locator('[data-choice="auto"]').click();
-      await tab.locator('[data-step-next]').click();
-      await tab.locator('[data-flow-commit-error]').waitFor({ state: 'visible' });
-      expect(await tab.locator('[data-flow-commit-error]').innerText()).toContain('refused');
-      expect(await tab.locator('[data-choice-cards]').isVisible()).toBe(true);
-      expect((await fakeOf(tab)).puts.length).toBe(0);
-      await tab.locator('[data-step-next]').click();
-      await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
-      expect((await fakeOf(tab)).puts.length).toBe(1);
-    } finally {
-      await close();
-    }
-  });
-});
-
 describe('the conversations page: no choice, Next writes nothing', () => {
   it('draws one sentence and a generic demo, no card and no button; Next goes on without a write (1280)', async () => {
     const { tab, close } = await open(VIEWPORTS[0], 'studio-light', '&page=conversations');
@@ -457,127 +357,6 @@ describe('the sign-in page: the slot draws no harness chooser', () => {
       expect(found.codex).toBe(true);
     } finally {
       await close();
-    }
-  });
-});
-
-describe('the permission page from a saved Auto', () => {
-  for (const viewport of VIEWPORTS)
-    for (const theme of THEMES)
-      it(`Skip shows its warning; only Next writes ONE put, permissionMode: skip (${viewport.name}, ${theme})`, async () => {
-        const { tab, close } = await open(viewport, theme, '&page=permission-auto');
-        try {
-          await tab.locator('[data-choice="auto"]').waitFor({ state: 'visible' });
-          expect(await tab.locator('input[value="auto"]').isChecked()).toBe(true);
-          expect(await tab.locator('[data-permission-consequence]').count()).toBe(0);
-          await tab.locator('[data-choice="skip"]').click();
-          const warning = tab.locator('[data-permission-consequence="skip"]');
-          await warning.waitFor({ state: 'visible' });
-          const said = await warning.innerText();
-          expect(said).toContain('--dangerously-skip-permissions');
-          expect(said).toContain('deleting files');
-          // Nothing is sent by the pick itself, nor by moving the focus.
-          await tab.keyboard.press('ArrowUp');
-          await tab.waitForTimeout(300);
-          expect((await fakeOf(tab)).puts.length).toBe(0);
-          if (shotsDir !== '')
-            await tab.screenshot({ path: join(shotsDir, `permission-skip-from-auto-${viewport.name}-${theme}.png`) });
-          await tab.locator('[data-choice="skip"]').click();
-          await tab.locator('[data-step-next]').click();
-          await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
-          const { puts } = await fakeOf(tab);
-          expect(puts.length).toBe(1);
-          expect(lineDiff(AUTO_ORIGINAL, puts[0]?.text ?? '')).toEqual(['permissionMode: skip']);
-        } finally {
-          await close();
-        }
-      });
-
-  it('an untouched saved Auto + Next writes nothing (1280)', async () => {
-    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', '&page=permission-auto');
-    try {
-      await tab.locator('[data-choice="auto"]').waitFor({ state: 'visible' });
-      await tab.locator('[data-step-next]').click();
-      await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
-      expect((await fakeOf(tab)).puts.length).toBe(0);
-    } finally {
-      await close();
-    }
-  });
-});
-
-describe('a read that stops being readable, and a file with a held change', () => {
-  it('after a refused write the withheld re-read drops the hidden pick: a later Next writes nothing (1280)', async () => {
-    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', '&page=permission&save=fail&reread=withheld');
-    try {
-      await tab.locator('[data-choice="auto"]').click();
-      await tab.locator('[data-step-next]').click();
-      await tab.locator('[data-flow-commit-error]').waitFor({ state: 'visible' });
-      expect(await tab.locator('[data-flow-commit-error]').innerText()).toContain('refused');
-      // The next Next reads the file afresh: it is withheld now, the cards go, and so does the pick.
-      await tab.locator('[data-step-next]').click();
-      await tab.locator('[data-mode-unknown]').waitFor({ state: 'visible' });
-      expect(await tab.locator('[data-choice]').count()).toBe(0);
-      const reads = (await fakeOf(tab)).gets;
-      // The file reads again (the scene serves it): the hidden Auto pick must NOT be written by the next Next.
-      await tab.locator('[data-step-next]').click();
-      await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
-      const after = await fakeOf(tab);
-      console.log(
-        `O4 stale commit: reads ${String(reads)} -> ${String(after.gets)}; puts ${String(after.puts.length)}`,
-      );
-      expect(after.puts.length, 'the hidden pick was never written').toBe(0);
-      expect(after.gets).toBe(reads);
-    } finally {
-      await close();
-    }
-  });
-
-  it('a held change: the waiting line replaces the cards, Next re-reads and writes nothing while it is held (1280 and 390)', async () => {
-    for (const viewport of VIEWPORTS) {
-      const { tab, close } = await open(viewport, 'studio-light', '&page=permission&read=pending');
-      try {
-        await tab.locator('[data-config-waiting]').waitFor({ state: 'visible' });
-        expect(await tab.locator('[data-config-waiting]').innerText()).toContain('waiting for your OK');
-        expect(await tab.locator('[data-choice]').count()).toBe(0);
-        await tab.locator('[data-step-next]').click();
-        await tab.locator('[data-flow-commit-error]').waitFor({ state: 'visible' });
-        expect(await tab.locator('[data-flow-commit-error]').innerText()).toContain('waiting for your OK');
-        const fake = await fakeOf(tab);
-        console.log(`O4 held ${viewport.name}: reads ${String(fake.gets)}, puts ${String(fake.puts.length)}`);
-        expect(fake.gets, 'Next read the file again').toBe(2);
-        expect(fake.puts.length).toBe(0);
-        expect(fake.advanced, 'the page stays while it is held').toBe(false);
-      } finally {
-        await close();
-      }
-    }
-  });
-
-  it('a held change the owner then confirms: Next re-reads, the cards appear, and one pick + Next writes exactly one PUT (1280 and 390)', async () => {
-    for (const viewport of VIEWPORTS) {
-      const { tab, close } = await open(viewport, 'studio-light', '&page=permission-auto&read=pending-once');
-      try {
-        await tab.locator('[data-config-waiting]').waitFor({ state: 'visible' });
-        await tab.locator('[data-step-next]').click();
-        await tab.locator('[data-choice]').first().waitFor({ state: 'visible' });
-        expect(await tab.locator('[data-config-waiting]').count()).toBe(0);
-        const mid = await fakeOf(tab);
-        console.log(
-          `O4 held-then-confirmed ${viewport.name}: reads ${String(mid.gets)}, puts ${String(mid.puts.length)}`,
-        );
-        expect(mid.gets, 'Next re-read the file').toBe(2);
-        expect(mid.puts.length, 'nothing written by that Next').toBe(0);
-        expect(mid.advanced).toBe(false);
-        await tab.locator('[data-choice="skip"]').click();
-        await tab.locator('[data-step-next]').click();
-        await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
-        const end = await fakeOf(tab);
-        expect(end.puts.length, 'the pick writes once').toBe(1);
-        expect(lineDiff(AUTO_ORIGINAL, end.puts[0]?.text ?? '')).toEqual(['permissionMode: skip']);
-      } finally {
-        await close();
-      }
     }
   });
 });

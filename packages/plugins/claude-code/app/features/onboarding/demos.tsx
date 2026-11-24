@@ -1,6 +1,5 @@
-/** The small demos Claude's pages show in the frame's demo column: the shared permission demo from the import kit (Codex's pages draw the same), with Claude's words, and Claude's own install, import, kind and conversations scenes. */
+/** The small demos Claude's pages show in the frame's demo column: Claude's own install, import, kind and conversations scenes. */
 import type { CSSProperties } from 'react';
-import { PermissionDemo as PermissionDemoBox } from '@ferretry/plugin-runtimes/import-kit';
 
 /** A terminal typing the command the Install button runs (the installer's own plan, never made up here), then the answer. */
 export const InstalledDemo = ({ command }: { readonly command: string }) => (
@@ -19,11 +18,6 @@ export const InstalledDemo = ({ command }: { readonly command: string }) => (
     </p>
     <p className="cc-term__line cc-term__done">Claude Code is installed.</p>
   </div>
-);
-
-/** An agent that asks before running a command, against one that runs it straight through. */
-export const PermissionDemo = ({ mode }: { readonly mode: 'auto' | 'skip' }) => (
-  <PermissionDemoBox tool="Claude" mode={mode} />
 );
 
 const ITEMS = ['Settings', 'CLAUDE.md', 'Skills', 'MCP servers'] as const;

@@ -501,6 +501,7 @@ describe('the onboarding pages animate inside their own boxes', () => {
           const pages = [
             'onboarding.agents',
             'onboarding.name',
+            'onboarding.permissions',
             'onboarding.appearance',
             'layouts.layout',
             'voice.voice',
@@ -542,6 +543,8 @@ describe('the onboarding pages animate inside their own boxes', () => {
               async () => {
                 await tab.locator('[data-step-next]').click();
                 await arrive(tab, to);
+                // The footer's Later button comes in with the page; the first frames of that are the cover going, not the page moving.
+                await tab.waitForTimeout(300);
                 // The loading cover and the page are two different layouts by design; what is measured is everything that
                 // happens AFTER the page says it is ready (the picture arriving, the pin settling, the slide-in).
                 await clear(tab);

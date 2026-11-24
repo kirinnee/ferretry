@@ -5,7 +5,7 @@
  *
  *   (3, 5)  at 1280 the cards are STACKED (one x and width, y increasing), the demo is in `[data-step-demo]` to the RIGHT of
  *           them (gap > 32 px, top within 8 px of the first card's top), the page's own words are <= 160 characters, and the
- *           page has no button of its own (permission, conversations, import-choice). At 390 the demo is ABOVE the cards and
+ *           page has no button of its own (conversations, import-choice). At 390 the demo is ABOVE the cards and
  *           <= 140 px tall, the three footer buttons are inside the viewport, and nothing scrolls sideways.
  *   (1, 5)  Back / Later / Next are 136 px wide (+-1) and >= 44 px tall at 1280; equal thirds inside the viewport at 390.
  *   (6)     no Codex page says "Claude" (the whole screen's text, light and dark, 390 and 1280), and the sign-in page is the
@@ -13,9 +13,7 @@
  *           (`add-login`, `codex-login`). On the real DOM: no chooser, no provider grid, the link first with a device code
  *           behind it, and the one-press add keeps its flow when the daemon publishes `LoginChanged` BEFORE it answers the
  *           add (the link flow starts once, and its UI stays).
- *   save    a pick writes NOTHING (a click or an arrow key); Next writes exactly once, `permissionMode` only, for Skip -> Auto
- *           AND for Auto -> Skip (the whole YAML diff is that one line); a pick back on the saved card clears the save; a held
- *           change keeps the page and a second Next tries again.
+ *   save    the conversations page has no choice and writes nothing; Next goes on.
  *
  * Set `FY_O5_SHOTS_DIR` to keep a screenshot of each case.
  */
@@ -45,9 +43,6 @@ const PAGES = [
   { page: 'sign-in-checking', cards: 0, demo: false },
   { page: 'import-choice', cards: 3, demo: true },
   { page: 'conversations', cards: 0, demo: true },
-  { page: 'permission', cards: 2, demo: true },
-  { page: 'permission-auto', cards: 2, demo: true },
-  { page: 'permission-unknown', cards: 0, demo: false },
 ] as const;
 
 let browser: Browser;
@@ -212,124 +207,8 @@ describe('r11 O5: every Codex page, laid out as the owner asked', () => {
       }
 });
 
-describe('r11 O5: permission saves on Next only', () => {
+describe('r11 O5: the conversations page writes nothing', () => {
   const puts = (tab: Page) => tab.evaluate(() => window.__puts as { text: string; path: string }[]);
-
-  it('Skip -> Auto: a click and arrow keys write nothing; Next writes once, permissionMode only; Auto (saved) -> Next writes nothing', async () => {
-    const context = await newContext(VIEWPORTS[1], 'light');
-    const tab = await open(context, 'permission', 'light');
-    expect(await tab.locator('input[value="skip"]').isChecked()).toBe(true);
-    // The warning is the one line under the cards while Skip is selected: plain words and the real flag.
-    const words = await tab.locator('[data-permission-words="skip"]').innerText();
-    expect(words).toContain('Runs every command without asking, even deleting files.');
-    expect(words).toContain('--dangerously-bypass-approvals-and-sandbox');
-    await tab.locator('[data-choice="auto"]').click();
-    await tab.waitForSelector('[data-choice="auto"][data-selected="true"]');
-    await tab.keyboard.press('ArrowDown');
-    await tab.keyboard.press('ArrowUp');
-    expect(await puts(tab)).toEqual([]);
-    // The demo follows the pick, and the warning is gone with Skip.
-    expect(await tab.locator('[data-step-demo] [data-demo="permission-auto"]').count()).toBe(1);
-    expect(await tab.locator('[data-permission-words]').count()).toBe(0);
-    await tab.locator('[data-step-next]').click();
-    await tab.waitForFunction(() => window.__puts.length > 0);
-    await tab.waitForTimeout(200);
-    const written = await puts(tab);
-    expect(written).toHaveLength(1);
-    // Only permissionMode differs from the file the page read.
-    expect(written[0]?.text).toBe('binary: /fake/bin/codex\npermissionMode: auto\n');
-    expect(written[0]?.path).toBe('harness-codex.yaml');
-    // Auto is now the saved card: choosing Skip and back to Auto, then Next, writes nothing more.
-    await tab.locator('[data-choice="skip"]').click();
-    await tab.locator('[data-choice="auto"]').click();
-    await tab.locator('[data-step-next]').click();
-    await tab.waitForTimeout(300);
-    expect(await puts(tab)).toHaveLength(1);
-    await context.close();
-  }, 60_000);
-
-  it('Auto -> Skip (the applied write): no click or arrow writes; Next writes once, and the YAML differs in permissionMode only', async () => {
-    const context = await newContext(VIEWPORTS[1], 'light');
-    const tab = await open(context, 'permission-auto', 'light');
-    expect(await tab.locator('input[value="auto"]').isChecked()).toBe(true);
-    // No warning while Auto is the card.
-    expect(await tab.locator('[data-permission-words]').count()).toBe(0);
-    await tab.locator('[data-choice="skip"]').click();
-    await tab.waitForSelector('[data-choice="skip"][data-selected="true"]');
-    await tab.keyboard.press('ArrowUp');
-    await tab.keyboard.press('ArrowDown');
-    expect(await puts(tab), 'a click and the arrow keys write nothing').toEqual([]);
-    // The warning shows while Skip is selected, and the demo follows the pick.
-    expect(await tab.locator('[data-permission-words="skip"]').count()).toBe(1);
-    expect(await tab.locator('[data-step-demo] [data-demo="permission-skip"]').count()).toBe(1);
-    const before = await tab.evaluate(() => window.__puts.length);
-    expect(before).toBe(0);
-    await tab.locator('[data-step-next]').click();
-    await tab.waitForFunction(() => window.__puts.length > 0);
-    await tab.waitForTimeout(300);
-    const written = await puts(tab);
-    expect(written, 'exactly one Next PUT').toHaveLength(1);
-    expect(written[0]?.path).toBe('harness-codex.yaml');
-    // The line-by-line diff against the file the page read: only `permissionMode` changed, the other key stays.
-    const was = 'binary: /fake/bin/codex\npermissionMode: auto\n'.split('\n');
-    const now = (written[0]?.text ?? '').split('\n');
-    expect(now).toHaveLength(was.length);
-    expect(now.flatMap((line, at) => (line === was[at] ? [] : [line]))).toEqual(['permissionMode: skip']);
-    expect(await tab.evaluate(() => window.__nextError)).toBe('');
-    await context.close();
-  }, 60_000);
-
-  it('on the saved card, Next writes nothing', async () => {
-    const context = await newContext(VIEWPORTS[1], 'light');
-    const tab = await open(context, 'permission-auto', 'light');
-    expect(await tab.locator('input[value="auto"]').isChecked()).toBe(true);
-    await tab.locator('[data-step-next]').click();
-    await tab.waitForTimeout(300);
-    expect(await puts(tab)).toEqual([]);
-    expect(await tab.evaluate(() => window.__nextError)).toBe('');
-    await context.close();
-  }, 60_000);
-
-  it('a change the daemon holds: the page stays, says why, and a second Next tries again', async () => {
-    const context = await newContext(VIEWPORTS[1], 'light');
-    const tab = await open(context, 'permission-auto', 'light', '&held=1');
-    await tab.locator('[data-choice="skip"]').click();
-    await tab.locator('[data-step-next]').click();
-    await tab.waitForFunction(() => window.__nextError !== '');
-    expect(await tab.evaluate(() => window.__nextError)).toContain('waiting for your confirmation');
-    await tab.locator('[data-step-next]').click();
-    await tab.waitForFunction(() => window.__puts.length > 1);
-    expect(await puts(tab)).toHaveLength(2);
-    await context.close();
-  }, 60_000);
-
-  it('a held edit cleared in Settings after the page opened: Next (refused, then again) re-reads the file and writes exactly once', async () => {
-    const context = await newContext(VIEWPORTS[1], 'light');
-    const tab = await open(context, 'permission-auto', 'light', '&pending=1');
-    await tab.locator('[data-choice="skip"]').click();
-    await tab.locator('[data-step-next]').click();
-    await tab.waitForFunction(() => window.__nextError !== '');
-    expect(await tab.evaluate(() => window.__nextError)).toContain('waiting for your OK');
-    expect(await puts(tab), 'a pending read writes nothing').toEqual([]);
-    // The owner confirms the held edit in Settings; the page is not reopened.
-    await tab.evaluate(() => window.__clearHeld());
-    await tab.locator('[data-step-next]').click();
-    await tab.waitForFunction(() => window.__puts.length > 0);
-    await tab.waitForTimeout(300);
-    expect(await puts(tab), 'exactly one PUT after the hold cleared').toHaveLength(1);
-    expect(await tab.evaluate(() => window.__nextError)).toBe('');
-    await context.close();
-  }, 60_000);
-
-  it('a file the page cannot read safely offers no card and writes nothing', async () => {
-    const context = await newContext(VIEWPORTS[1], 'light');
-    const tab = await open(context, 'permission-unknown', 'light');
-    expect(await tab.locator('[data-choice]').count()).toBe(0);
-    await tab.locator('[data-step-next]').click();
-    await tab.waitForTimeout(300);
-    expect(await puts(tab)).toEqual([]);
-    await context.close();
-  }, 60_000);
 
   it('conversations: no choice and nothing to press; Next writes nothing', async () => {
     const context = await newContext(VIEWPORTS[1], 'light');

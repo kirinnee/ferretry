@@ -3,8 +3,8 @@
  * app's own `StepPageFrame` (the frame the setup flow draws every page in). Nothing reads a network. Every name, path
  * and command below is made up.
  *
- *   ?page=installed|sign-in|sign-in-link|sign-in-checking|import-choice|conversations|permission|permission-auto|
- *         permission-unknown   ?theme=<family>-<mode>   &held=1 (a write is held)   &pending=1 (the file read says a held
+ *   ?page=installed|sign-in|sign-in-link|sign-in-checking|import-choice|conversations
+ *         ?theme=<family>-<mode>   &held=1 (a write is held)   &pending=1 (the file read says a held
  *         edit waits until `window.__clearHeld()`)   &other=1 (another signable Codex login appears beside the one the add makes)
  *
  * The footer's Next runs the page's registered `commit` the way the shell does; every write the pages make is counted on
@@ -24,7 +24,6 @@ import { ConversationsPage } from '../../../../app/features/onboarding/import/co
 import { ImportChoicePage } from '../../../../app/features/onboarding/import-choice-page.tsx';
 import { InstalledPage } from '../../../../app/features/onboarding/installed-page.tsx';
 import type { StepHost } from '../../../../app/features/onboarding/onboarding-api.ts';
-import { PermissionPage } from '../../../../app/features/onboarding/permission-page.tsx';
 import { SignInPage } from '../../../../app/features/onboarding/sign-in-page.tsx';
 
 const params = new URLSearchParams(window.location.search);
@@ -35,10 +34,6 @@ const COPY: Record<string, { title: string; line: string }> = {
   installed: { title: 'Install Codex', line: 'Codex runs your agents on this machine.' },
   'sign-in': { title: 'Sign in to Codex', line: 'Ferretry never sees the sign-in: Codex keeps it.' },
   'import-choice': { title: 'What to bring over', line: 'Copy your setup from the Codex on this computer.' },
-  permission: { title: 'Permissions', line: 'How Codex asks before it acts.' },
-  'permission-auto': { title: 'Permissions', line: 'How Codex asks before it acts.' },
-  'permission-confirm': { title: 'Permissions', line: 'How Codex asks before it acts.' },
-  'permission-unknown': { title: 'Permissions', line: 'How Codex asks before it acts.' },
   'sign-in-checking': { title: 'Sign in to Codex', line: 'Ferretry never sees the sign-in: Codex keeps it.' },
   'sign-in-link': { title: 'Sign in to Codex', line: 'Ferretry never sees the sign-in: Codex keeps it.' },
   conversations: { title: 'Conversations', line: 'Your terminal’s Codex history.' },
@@ -112,14 +107,7 @@ const checking = {
 const MADE = { ...needsSignIn.logins[0], id: 'codex-login' };
 /** `?other=1`: a second signable Codex login that sorts BEFORE the one the add makes. */
 const OTHER = { ...needsSignIn.logins[0], id: 'codex-older' };
-const WITHHELD =
-  '# ‹hidden›: the text of this file is not shown because it holds a raw secret, which the owner must move into the secret store; edit it at the machine\n';
-let fileText =
-  page === 'permission-auto'
-    ? FILE.replace('permissionMode: skip', 'permissionMode: auto')
-    : page === 'permission-unknown'
-      ? WITHHELD
-      : FILE;
+let fileText = FILE;
 const table: Record<string, unknown> = {
   'GET /v1/codex/update': absent,
   'GET /v1/runtimes/setup/scan': {
@@ -247,10 +235,8 @@ const body =
     <WithSlotPanels slots={{ settings: loginsPanels }}>
       <SignInPage client={client} step={step} />
     </WithSlotPanels>
-  ) : page === 'import-choice' ? (
-    <ImportChoicePage client={client} step={step} />
   ) : (
-    <PermissionPage client={client} step={step} />
+    <ImportChoicePage client={client} step={step} />
   );
 
 const copy = COPY[page] ?? COPY.installed;
@@ -258,9 +244,6 @@ const STEP: Record<string, number> = {
   installed: 1,
   'sign-in': 2,
   'import-choice': 3,
-  permission: 4,
-  'permission-auto': 4,
-  'permission-unknown': 4,
   'sign-in-checking': 2,
   'sign-in-link': 2,
   conversations: 4,
