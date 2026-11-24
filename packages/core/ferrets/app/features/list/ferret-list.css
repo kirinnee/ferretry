@@ -51,11 +51,15 @@
 .fy-sbar__seg:hover {
   color: var(--fg);
 }
+/* ONE cue, the shared neutral fill (as `.kt-tab`): no accent edge, ink swap or heavier weight on top of it. The ring is the
+   keyboard's alone, drawn from the shell's focus tokens (the segment resets its own outline). */
 .fy-sbar__seg[aria-pressed='true'] {
-  border-color: var(--nav-sel-edge, var(--accent-border));
-  background: var(--nav-sel-bg, var(--accent-soft));
-  color: var(--nav-sel-fg, var(--accent));
-  font-weight: var(--weight-strong);
+  background: var(--select-fill);
+  color: var(--fg);
+}
+.fy-sbar__seg:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
 }
 .fy-sbar__count {
   color: inherit;
@@ -79,12 +83,15 @@
 .fy-sbar__footer {
   display: flex;
   flex-shrink: 0;
+  justify-content: center;
   padding: var(--gap-sm);
   border-top: var(--stroke-control) solid var(--border);
 }
+/* The door is the width of its words (a floor so it is not a pip), at a finger's height: never a bar across the drawer. */
 .fy-sbar__footer .kt-btn {
-  flex: 1;
+  flex: 0 0 auto;
   justify-content: center;
+  min-width: 8rem;
   min-height: 44px;
 }
 .fy-sbar__empty {

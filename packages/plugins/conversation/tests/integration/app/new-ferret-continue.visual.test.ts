@@ -176,7 +176,6 @@ describe('New ferret: continue a past conversation', () => {
               const form = document.querySelector<HTMLElement>('#fy-new-ferret-runtime') as HTMLElement;
               const choices = [...group.querySelectorAll<HTMLElement>('[role="radio"]')];
               return {
-                labels: choices.map(choice => choice.textContent),
                 checked: choices.map(choice => choice.getAttribute('aria-checked')),
                 groupTop: group.getBoundingClientRect().top,
                 formTop: form.getBoundingClientRect().top,
@@ -189,7 +188,9 @@ describe('New ferret: continue a past conversation', () => {
             },
             [SWITCH, NEW_CHOICE, CONTINUE_CHOICE],
           );
-          expect(fresh.labels).toEqual(['New conversation', 'Continue a conversation']);
+          // Their names are the full words at every width, whatever a phone shows of them (see the one-line test below).
+          await tab.getByRole('radio', { name: 'New conversation' }).waitFor();
+          await tab.getByRole('radio', { name: 'Continue a conversation' }).waitFor();
           expect(fresh.checked, 'New conversation is on to begin with').toEqual(['true', 'false']);
           expect(fresh.groupTop, 'the switch sits above the form, on the same page').toBeLessThan(fresh.formTop);
           expect(fresh.listed, 'New: no list').toBe(0);
@@ -217,6 +218,34 @@ describe('New ferret: continue a past conversation', () => {
           await shot(tab, variant, scheme, 'continue');
           await tab.click(NEW_CHOICE);
           expect(await tab.evaluate(() => document.querySelector('[data-continue-row]') !== null)).toBe(false);
+        }));
+
+      it(`${variant.name} ${scheme}: each choice of the switch is ONE line, and a phone shows New | Continue`, () =>
+        withPage(variant, scheme, '', async tab => {
+          const seen = await tab.evaluate(selector => {
+            const group = document.querySelector<HTMLElement>(selector) as HTMLElement;
+            return [...group.querySelectorAll<HTMLElement>('[role="radio"]')].map(choice => {
+              // The visible words only: the screen-reader-only spelling is clipped to a pixel and aria-hidden ones are shown.
+              const shown = [...choice.querySelectorAll<HTMLElement>('span')].filter(
+                part => part.getBoundingClientRect().width > 2 && getComputedStyle(part).display !== 'none',
+              );
+              // A clipped phrase keeps its text box at full size, so only what a reader sees is measured.
+              const range = document.createRange();
+              const tops = new Set<number>();
+              for (const part of shown) {
+                range.selectNodeContents(part);
+                for (const box of range.getClientRects()) if (box.width > 2) tops.add(Math.round(box.top));
+              }
+              return { visible: shown.map(part => part.textContent).join(' ') || choice.textContent, lines: tops.size };
+            });
+          }, SWITCH);
+          for (const choice of seen) expect(choice.lines, `"${choice.visible}" wraps`).toBe(1);
+          expect(seen.map(choice => choice.visible)).toEqual(
+            variant.phone ? ['New', 'Continue'] : ['New conversation', 'Continue a conversation'],
+          );
+          expect(await tab.getByRole('radio', { name: 'New conversation' }).count()).toBe(1);
+          expect(await tab.getByRole('radio', { name: 'Continue a conversation' }).count()).toBe(1);
+          await shot(tab, variant, scheme, 'switch');
         }));
 
       it(`${variant.name} ${scheme}: an empty daemon says so inside the open offer`, () =>

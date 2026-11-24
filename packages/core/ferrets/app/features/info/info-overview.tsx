@@ -7,6 +7,7 @@ import type { ClipboardWriter } from '../../ui.ts';
 import { InfoAbout, type InfoAboutProps } from './info-about.tsx';
 import { endCauseWord, INFO_HINT, lineage, projectFact, relativeTime, STATE_WORD, worktreeFact } from './info-model.ts';
 import { InfoChip, InfoRow, InfoSection } from './info-parts.tsx';
+import { useProjectName } from './use-project-name.ts';
 import type { ManagedWorktree } from './info-wire.ts';
 
 export interface InfoOverviewProps {
@@ -45,6 +46,7 @@ export function InfoOverview({
   const tree = worktreeFact(ferret, worktrees);
   const family = lineage(ferret, ferrets);
   const project = projectFact(ferret);
+  const projectName = useProjectName(project);
   const task = ferret.task ?? ferret.card; // `card` is the former key
   const link = (target: FerretSummary) =>
     onOpenFerret === undefined ? (
@@ -104,8 +106,11 @@ export function InfoOverview({
         <InfoRow label="Project">
           {project === null ? (
             <span className="fy-info-muted">Not in a project</span>
+          ) : projectName === null ? (
+            // The id is a UUID a reader cannot use: until the project's name is known, say only that there is one.
+            <span className="fy-info-muted">In a project</span>
           ) : (
-            <span className="font-mono">{project}</span>
+            <span data-info-project={project}>{projectName}</span>
           )}
         </InfoRow>
         <InfoRow copy={ferret.folder} hint={INFO_HINT.folder} label="Folder" mono write={write}>
