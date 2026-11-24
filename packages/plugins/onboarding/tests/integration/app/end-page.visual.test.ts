@@ -198,7 +198,8 @@ describe('the last page', () => {
           }
           if (viewport.phone) {
             for (const box of [project, alternative]) {
-              expect(Math.abs(box.w - body.w), '390: a way to start fills the row').toBeLessThanOrEqual(1);
+              // Q6 (ruling C-6): content-sized with a minimum, NOT the row's full width, from the row's start edge.
+              expect(box.w, '390: a way to start is narrower than the row').toBeLessThan(body.w - 40);
               expect(Math.abs(box.x - body.x), '390: it starts at the row’s edge').toBeLessThanOrEqual(1);
             }
             expect(Math.abs(project.w - alternative.w), '390: the two share one width').toBeLessThanOrEqual(1);

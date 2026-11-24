@@ -492,9 +492,10 @@ const stagePage = async (tab: Page, variant: Variant, key: string): Promise<void
 };
 
 /**
- * Collects a pairing button of the wrong shape (read by the gap below, not asserted here): on a phone it is FULL width,
- * at least 0.9 of the page's content width (its `<main>` minus padding, not its action row's), and its `answers` action-row
- * answers are STACKED one under another (the owner's words, since #2296); on a desktop it is under half the page width.
+ * Collects a pairing button of the wrong shape (read by the gap below, not asserted here): on a phone it is NOT full width
+ * (Q6, owner ruling C-6: content-sized with a minimum; under 0.9 of the page's content width, its `<main>` minus padding, not
+ * its action row's) and its `answers` action-row answers are STACKED one under another (the owner's words, since #2296); on a
+ * desktop it is under half the page width.
  * Either way it is at least 44px tall, and a button, page or row that cannot be measured is collected as a failure.
  */
 const measureButton = async (
@@ -537,7 +538,7 @@ const measureButton = async (
     return;
   }
   const phone = variant.width < 600;
-  const wrongWidth = phone ? measured.width < 0.9 * measured.content : measured.width >= 0.5 * variant.width;
+  const wrongWidth = phone ? measured.width >= 0.9 * measured.content : measured.width >= 0.5 * variant.width;
   const notStacked = phone && (measured.answers !== measured.expected || !measured.stacked);
   if (wrongWidth || notStacked || measured.height < 44)
     seen.badButtons.push(
@@ -724,10 +725,11 @@ const endPage = async (tab: Page, variant: Variant, key: string): Promise<void> 
       };
     });
     expect(read.h, `${key}: ${read.label} is a 44px target`).toBeGreaterThanOrEqual(43.5);
-    // A phone's two ways to start fill their row on purpose (the owner asked for fixed, even widths); a desktop's never do.
+    // Q6: neither a phone's nor a desktop's two ways to start are full width (the owner: "dont make the button take the full width").
     expect(read.w, `${key}: ${read.label} fits the screen`).toBeLessThanOrEqual(variant.width);
-    if (variant.width >= 600)
-      expect(read.w, `${key}: ${read.label} is not full width`).toBeLessThan(0.5 * variant.width);
+    expect(read.w, `${key}: ${read.label} is not full width`).toBeLessThan(
+      (variant.width >= 600 ? 0.5 : 0.8) * variant.width,
+    );
     expect(read.border, `${key}: ${read.label} is a real (bordered) secondary button`).toBeGreaterThan(0);
     expect(read.variant, `${key}: ${read.label} is not a ghost or text button`).not.toBe('ghost');
     expect(read.underline, `${key}: ${read.label} is not underlined text`).toBe('none');
@@ -2101,7 +2103,7 @@ describe('the gaps the gate found, now closed', () => {
       expect(seen.footerOffScreen).toEqual([]);
     },
   );
-  it('the pairing page buttons are full width on a phone, under half the page on a desktop, and 44px tall', () => {
+  it('the pairing page buttons are content-sized (not full width) on a phone, under half the page on a desktop, and 44px tall', () => {
     expect(seen.badButtons).toEqual([]);
   });
   it('the pairing page reached from the first run has no sidebar or app chrome', () => {

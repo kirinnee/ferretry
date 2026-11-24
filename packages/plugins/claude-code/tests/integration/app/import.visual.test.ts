@@ -341,7 +341,9 @@ describe('C59 O5: the import page lists every item, and working moves nothing', 
           run: [importDuring.left, importDuring.right, importDuring.w],
         };
         if (viewport.phone) {
-          expect(Math.abs(importDuring.w - (row.barRight - row.barLeft))).toBeLessThanOrEqual(1);
+          // Q6 (ruling C-6): content-sized (12rem minimum), at the start edge, NOT the bar's full width, while it works too.
+          expect(importDuring.w).toBeLessThan(row.barRight - row.barLeft - 40);
+          expect(Math.abs(importDuring.left - row.barLeft)).toBeLessThanOrEqual(1);
         } else {
           expect(Math.abs(importDuring.right - row.barRight)).toBeLessThanOrEqual(1);
         }
