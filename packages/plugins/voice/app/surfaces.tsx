@@ -12,7 +12,8 @@ import type {
 } from '@ferretry/plugin-conversation/contract';
 import { AutoReadChip } from './components/auto-read-chip.tsx';
 import { VoiceModeButton } from './components/voice-mode-button.tsx';
-import { VoiceModeSlot } from './components/voice-mode-panel.tsx';
+import { type PhoneSlotProps, VoiceModeSlot } from './components/voice-mode-panel.tsx';
+import { PhoneSession } from './components/voice-mode-phone.tsx';
 import { DictationControl } from './components/dictation-control.tsx';
 import { ReadAloudControl } from './components/read-aloud.tsx';
 import { DictationDebugSettings } from './features/settings/dictation-debug-settings.tsx';
@@ -253,9 +254,39 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
       </Boundary>
     );
 
+  function VoiceModeButtonBody({ subject }: { readonly subject: string }) {
+    const { settings } = useLiveVoiceSettings(useDeviceVoiceSettingsStore());
+    return (
+      <VoiceModeButton client={client} ferretId={subject} keepOnPhone={settings.voiceModeOnPhone} store={voiceMode} />
+    );
+  }
+
   /** The Voice mode button in the composer's tools (`composer.tools`), for this ferret only. */
   const VoiceModeButtonPanel = ({ subject }: { readonly subject?: string }) =>
-    subject === undefined ? null : <VoiceModeButton client={client} ferretId={subject} store={voiceMode} />;
+    subject === undefined ? null : (
+      <Boundary>
+        <VoiceModeButtonBody subject={subject} />
+      </Boundary>
+    );
+
+  /** Voice mode on this phone's own engine (the fallback), inside the voice stores the dictation engine needs. */
+  function PhoneModePanelBody(props: PhoneSlotProps) {
+    const sttStore = useSttSettingsStore();
+    if (sttStore === null) return null;
+    return <PhoneModePanelRun {...props} sttStore={sttStore} />;
+  }
+  function PhoneModePanelRun({
+    sttStore,
+    ...props
+  }: PhoneSlotProps & { readonly sttStore: NonNullable<ReturnType<typeof useSttSettingsStore>> }) {
+    const { settings } = useSttSettings(sttStore);
+    return <PhoneSession {...props} client={client} daemon={THIS_DAEMON} settings={settings} />;
+  }
+  const renderPhone = (props: PhoneSlotProps): ReactNode => (
+    <Boundary>
+      <PhoneModePanelBody {...props} />
+    </Boundary>
+  );
 
   /**
    * Voice mode's panel in front of the composer (`conversation.composer`): the composer as it was while voice mode is off, hidden
@@ -273,6 +304,7 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
         client={client}
         fallback={fallback as ReactNode}
         ferretId={subject}
+        renderPhone={renderPhone}
         store={voiceMode}
         turn={turn}
       />

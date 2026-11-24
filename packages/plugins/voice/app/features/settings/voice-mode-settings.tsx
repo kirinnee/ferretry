@@ -11,7 +11,8 @@
 import { AlertTriangle, Check, Download, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { VoiceEngineView } from '../../../contract/index.ts';
-import { type DaemonConnection, SettingGroup, SettingRow } from '../../shell-voice.ts';
+import { useDeviceVoiceSettingsStore, useLiveVoiceSettings } from '../../hooks/use-live-voice-settings.ts';
+import { type DaemonConnection, SettingGroup, SettingRow, SettingSwitch } from '../../shell-voice.ts';
 import { useDaemonClient } from '../../lib/voice-store.tsx';
 import { type HearItProps, ReplyVoiceRow, type ReplyVoiceState, useReplyVoice } from './reply-voice.tsx';
 import { TalkToTest, type TalkToTestProps } from './talk-to-test.tsx';
@@ -63,6 +64,30 @@ interface VoiceModePanelProps {
   readonly onInstall: () => void;
   readonly onRemove: () => void;
   readonly reply: ReplyVoiceState;
+}
+
+/**
+ * "Keep voice mode's audio on this phone": this device's choice, so it lives in this browser and nowhere else. On, voice
+ * mode runs on this device's own speech engine and voice and never asks the machine (the machine is the default, and the
+ * phone is otherwise only the fallback when it cannot be reached).
+ */
+function KeepOnPhoneRow() {
+  const { settings, update } = useLiveVoiceSettings(useDeviceVoiceSettingsStore());
+  return (
+    <SettingRow
+      settingId="voice-mode-on-phone"
+      name="Keep audio on this phone"
+      hint="Voice mode uses this phone's own speech"
+      explanation="Off, voice mode listens and speaks on your machine, which is faster and uses bigger models. On, your voice never leaves this phone: it is turned into words by the engine you chose for dictation (Settings › Voice), and replies are read by this phone's voice. Either way the words you say are sent to the ferret as messages."
+      control={labelId => (
+        <SettingSwitch
+          checked={settings.voiceModeOnPhone}
+          labelledBy={labelId}
+          onChange={voiceModeOnPhone => update({ voiceModeOnPhone })}
+        />
+      )}
+    />
+  );
 }
 
 function VoiceModePanel({ view, talk, hear, reply, busy, error, onInstall, onRemove }: VoiceModePanelProps) {
@@ -142,6 +167,7 @@ function VoiceModePanel({ view, talk, hear, reply, busy, error, onInstall, onRem
       </SettingRow>
       {view.state === 'ready' && <TalkToTest machine={view.machine} {...talk} />}
       <ReplyVoiceRow state={reply} speechReady={view.state === 'ready'} hear={hear} />
+      <KeepOnPhoneRow />
     </SettingGroup>
   );
 }
@@ -241,6 +267,7 @@ export function VoiceModeSettings({
             {error}
           </p>
         </li>
+        <KeepOnPhoneRow />
       </SettingGroup>
     );
   return (
