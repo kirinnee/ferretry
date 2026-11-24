@@ -44,10 +44,9 @@ export type BrowserInputFacts = PageFacts;
  * matches nothing): nothing is asked of the owner for a field that is not there.
  */
 export type BrowserInputObservation =
-  | { readonly ok: true; readonly facts: BrowserInputFacts }
-  | { readonly ok: false; readonly missing: string }
-  /** A re-find only: more than one field on the page could be this one, so none is chosen. */
-  | { readonly ok: false; readonly ambiguous: string };
+  /** `ambiguous` (a re-find only): more than one field on the page could be this one, so the facts are what the card SHOWS and are never written to. */
+  | { readonly ok: true; readonly facts: BrowserInputFacts; readonly ambiguous?: true }
+  | { readonly ok: false; readonly missing: string };
 
 /** One value for one field, by the card's field id. */
 export interface BrowserInputValue {
@@ -158,9 +157,9 @@ export interface BrowserInputFieldsPort {
   inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation>;
   /**
    * The fields `expected` describes, found again in the page as it is now. Each field: the node the card showed, if
-   * it is still that field (same frame origin, tag and attributes, visible); else the agent's pointer when it names
-   * exactly one such element; else the one visible look-alike. None is `missing`; several, or a search the page
-   * disturbed, is `ambiguous`.
+   * it is still that field (same frame origin, tag and attributes, visible); else the page's one visible look-alike.
+   * None is `missing`; several, or a search the page disturbed, is `ambiguous`: the facts then name one candidate to SHOW
+   * (the agent's pointer only chooses which) and the Vault never writes to it.
    */
   inputRefind(
     pageId: string,

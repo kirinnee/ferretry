@@ -205,7 +205,43 @@ const ACTIVE_ELEMENT = `(() => {
 /** The longest the page's title may take when it is read for the challenge hint. */
 const TITLE_WAIT_MS = 750;
 
-const FIELD_LIMITS = { type: 32, autocomplete: 64, name: 128, id: 128, inputmode: 32 } as const;
+/**
+ * What the page says about a field, read in the trusted world (an isolated world: nothing the page defines is called, and
+ * every method is taken from the prototype so a form's named children cannot shadow it): its label (`aria-label`, else the
+ * text of what its `aria-labelledby` names, else its `<label>`s) and the form that owns it (the form it submits with, `form=`
+ * included): its id, its name and where it sends what is typed, as origin + path: the form's action, or the `formaction` of
+ * its default submit button. A field with no form answers `form: null`. Only read, never trusted: every fact is compared
+ * with itself across looks and, in the card's classifier, can only raise a field's care.
+ */
+const FIELD_READ = `function () {
+  const clean = (s) => String(s || "").replace(/\\s+/g, " ").trim();
+  const attr = (el, name) => Element.prototype.getAttribute.call(el, name);
+  const get = (proto, name) => Object.getOwnPropertyDescriptor(proto, name).get;
+  const doc = get(Node.prototype, "ownerDocument").call(this);
+  let label = clean(attr(this, "aria-label"));
+  const by = attr(this, "aria-labelledby");
+  if (!label && by) label = clean(by.split(/\\s+/).map((id) => { const e = Document.prototype.getElementById.call(doc, id); return e ? get(Node.prototype, "textContent").call(e) : ""; }).join(" "));
+  const labels = this.labels;
+  if (!label && labels && labels.length) label = clean(Array.from(labels).map((l) => get(Node.prototype, "textContent").call(l)).join(" "));
+  const owner = this.form;
+  let form = null;
+  if (owner) {
+    let raw = attr(owner, "action");
+    const button = Element.prototype.querySelector.call(owner, 'button:not([type]), button[type="submit" i], input[type="submit" i], input[type="image" i]');
+    const own = button ? attr(button, "formaction") : null;
+    if (own !== null && own.trim() !== "") raw = own;
+    let action = "";
+    try {
+      const url = raw === null || raw.trim() === "" ? new URL(get(Document.prototype, "URL").call(doc)) : new URL(raw, get(Node.prototype, "baseURI").call(doc));
+      action = url.origin + url.pathname;
+    } catch (error) { action = ""; }
+    form = { id: clean(attr(owner, "id")), name: clean(attr(owner, "name")), action };
+  }
+  return { label, form };
+}`;
+const FIELD_LIMITS = { type: 32, autocomplete: 64, name: 128, id: 128, inputmode: 32, maxlength: 8 } as const;
+const LABEL_LIMIT = 128;
+const ACTION_LIMIT = 256;
 const TAG_LIMIT = 32;
 const ORIGIN_LIMIT = 256;
 const FRAME_ID_LIMIT = 128;
@@ -256,9 +292,10 @@ const oneLine = (value: string, maximum: number): string => value.replace(/[\p{C
 /**
  * The fields of a node as DevTools describes it: its tag and the few attributes the card shows, cut to the
  * protocol's bounds and left out when empty. The same function reads the node at the look and at the write, so
- * a cut value compares equal to itself.
+ * a cut value compares equal to itself. The label and the form are not attributes of the node: the caller reads them
+ * (`FIELD_READ`) and hands them in, and they are kept cut and on one line like the rest.
  */
-export function inputFieldAttributes(node: unknown): FieldAttributes {
+export function inputFieldAttributes(node: unknown, label?: string, form?: FormRead | null): FieldAttributes {
   const described = (node ?? {}) as { readonly nodeName?: unknown; readonly attributes?: unknown };
   const raw = Array.isArray(described.attributes) ? (described.attributes as readonly unknown[]) : [];
   const attribute = (name: string): string | undefined => {
@@ -283,12 +320,30 @@ export function inputFieldAttributes(node: unknown): FieldAttributes {
     ...kept('name'),
     ...kept('id'),
     ...kept('inputmode'),
+    ...kept('maxlength'),
+    ...(label === undefined || oneLine(label, LABEL_LIMIT).trim() === ''
+      ? {}
+      : { label: oneLine(label, LABEL_LIMIT).trim() }),
+    ...(form === undefined || form === null
+      ? {}
+      : {
+          ...(form.id === '' ? {} : { formId: form.id }),
+          ...(form.name === '' ? {} : { formName: form.name }),
+          formAction: form.action,
+        }),
   };
+}
+
+/** The form that owns a field, as {@link FIELD_READ} answers it: its id and name (empty when it has none) and its action. */
+interface FormRead {
+  readonly id: string;
+  readonly name: string;
+  readonly action: string;
 }
 
 const sameAttributes = (left: FieldAttributes, right: FieldAttributes): boolean =>
   left.tag === right.tag &&
-  (['type', 'autocomplete', 'name', 'id', 'inputmode'] as const).every(key => left[key] === right[key]);
+  (['type', 'autocomplete', 'name', 'id', 'inputmode', 'maxlength'] as const).every(key => left[key] === right[key]);
 
 const objectOf = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
@@ -638,12 +693,16 @@ async function observeLocated(
     const visible = (await handle.isVisible().catch(() => false)) && box.w > 0 && box.h > 0;
     const covered = !(await onTop(session, backendNodeId));
     subject.sessions.remember(frameId, session, owned);
+    const read = await readField(session, backendNodeId);
     return {
       fieldId,
       frameOrigin: originOfUrl(frame.url()),
       frameId,
+      ...(read.ownerFrame === undefined ? {} : { ownerFrame: read.ownerFrame }),
+      ...(read.ownerLoader === undefined ? {} : { ownerLoader: read.ownerLoader }),
+      ...(read.unread === true ? { unread: true as const } : {}),
       backendNodeId,
-      field: inputFieldAttributes(node),
+      field: inputFieldAttributes(node, read.label, read.form),
       box,
       visible,
       ...(covered ? { covered: true } : {}),
@@ -651,6 +710,137 @@ async function observeLocated(
   } finally {
     await handle.dispose().catch(() => undefined);
   }
+}
+
+/**
+ * What the browser read about a field beyond its attributes: its label and form ({@link FIELD_READ}) and the DevTools
+ * frame its document is in with that frame's loader. `unread` when ANY of it could not be read (never "absent": a field with
+ * no label has an empty one, and one whose label could not be read is `unread`, which is never proved the same).
+ */
+interface FieldRead {
+  readonly label?: string;
+  readonly form?: FormRead | null;
+  readonly ownerFrame?: string;
+  readonly ownerLoader?: string;
+  readonly unread?: true;
+}
+
+/** A form fact that does not fit the protocol's bounds, or an action that did not resolve, is not a fact: it is unread. */
+const formFits = (form: FormRead): boolean =>
+  form.action !== '' &&
+  form.action.length <= ACTION_LIMIT &&
+  form.id.length <= FIELD_LIMITS.id &&
+  form.name.length <= FIELD_LIMITS.name &&
+  oneLine(form.action, ACTION_LIMIT) === form.action &&
+  oneLine(form.id, FIELD_LIMITS.id) === form.id &&
+  oneLine(form.name, FIELD_LIMITS.name) === form.name;
+
+/** The label and form the page gives the node, read in the trusted world (`FIELD_READ`). A throw is the caller's `unread`. */
+async function pageReadOf(trusted: TrustedField, session: InputCdpSession): Promise<FieldRead> {
+  const value = objectOf(
+    objectOf(
+      await ask(session, 'Runtime.callFunctionOn', {
+        objectId: trusted.objectId,
+        functionDeclaration: FIELD_READ,
+        returnByValue: true,
+      }),
+    ).result,
+  ).value;
+  const read = objectOf(value);
+  const form = read.form === null ? null : objectOf(read.form);
+  if (typeof read.label !== 'string') throw new Refusal();
+  if (
+    form !== null &&
+    (typeof form.id !== 'string' || typeof form.name !== 'string' || typeof form.action !== 'string')
+  )
+    throw new Refusal();
+  const owner =
+    form === null ? null : { id: form.id as string, name: form.name as string, action: form.action as string };
+  if (owner !== null && !formFits(owner)) throw new Refusal();
+  return { label: read.label, form: owner };
+}
+
+/**
+ * The DevTools frame the node's document is in, from the session's Page frame tree (never the target id), and that frame's
+ * loader id. The node's document is found as the root document of the session's frames or the content document of a frame's
+ * owner element; a document no frame answers for is a throw.
+ */
+async function frameOfNode(
+  session: InputCdpSession,
+  trusted: TrustedField,
+): Promise<{ readonly ownerFrame: string; readonly ownerLoader: string }> {
+  const document = objectOf(
+    objectOf(
+      await ask(session, 'Runtime.callFunctionOn', {
+        objectId: trusted.objectId,
+        functionDeclaration:
+          'function () { return Object.getOwnPropertyDescriptor(Node.prototype, "ownerDocument").get.call(this); }',
+        returnByValue: false,
+      }),
+    ).result,
+  );
+  if (typeof document.objectId !== 'string') throw new Refusal();
+  const wanted = objectOf((await ask(session, 'DOM.describeNode', { objectId: document.objectId })).node).backendNodeId;
+  if (typeof wanted !== 'number') throw new Refusal();
+  const frames: { readonly id: string; readonly loader: string }[] = [];
+  const walk = (entry: unknown): void => {
+    const frame = objectOf(objectOf(entry).frame);
+    if (typeof frame.id === 'string' && typeof frame.loaderId === 'string' && frame.id !== '' && frame.loaderId !== '')
+      frames.push({ id: frame.id.slice(0, FRAME_ID_LIMIT), loader: frame.loaderId.slice(0, NAVIGATION_ID_LIMIT) });
+    const children = objectOf(entry).childFrames;
+    if (Array.isArray(children)) for (const child of children as readonly unknown[]) walk(child);
+  };
+  walk(objectOf(await ask(session, 'Page.getFrameTree')).frameTree);
+  const [root, ...below] = frames;
+  if (root === undefined) throw new Refusal();
+  const top = objectOf(
+    objectOf(
+      await ask(session, 'Runtime.evaluate', {
+        expression: 'document',
+        contextId: trusted.rootContextId,
+        returnByValue: false,
+      }),
+    ).result,
+  );
+  if (typeof top.objectId === 'string') {
+    const rootDocument = objectOf(
+      (await ask(session, 'DOM.describeNode', { objectId: top.objectId })).node,
+    ).backendNodeId;
+    if (rootDocument === wanted) return { ownerFrame: root.id, ownerLoader: root.loader };
+  }
+  for (const frame of below) {
+    const owner = objectOf(await ask(session, 'DOM.getFrameOwner', { frameId: frame.id })).backendNodeId;
+    if (typeof owner !== 'number') continue;
+    const inside = objectOf(
+      objectOf(objectOf(await ask(session, 'DOM.describeNode', { backendNodeId: owner, depth: 1 })).node)
+        .contentDocument,
+    ).backendNodeId;
+    if (inside === wanted) return { ownerFrame: frame.id, ownerLoader: frame.loader };
+  }
+  throw new Refusal();
+}
+
+/** Everything read about a field beyond its attributes, or `unread` for what could not be: one failed read never throws out. */
+async function readField(
+  session: InputCdpSession,
+  backendNodeId: number,
+  worlds: IsolatedWorlds = new IsolatedWorlds(),
+): Promise<FieldRead> {
+  let trusted: TrustedField;
+  try {
+    trusted = await worlds.resolve(session, backendNodeId);
+  } catch {
+    return { unread: true };
+  }
+  const [page, frame] = await Promise.all([
+    pageReadOf(trusted, session).catch(() => undefined),
+    frameOfNode(session, trusted).catch(() => undefined),
+  ]);
+  return {
+    ...(page ?? {}),
+    ...(frame ?? {}),
+    ...(page === undefined || frame === undefined ? { unread: true as const } : {}),
+  };
 }
 
 /** Two descriptions of one node agree: the same element name and the same attributes. */
@@ -722,7 +912,11 @@ export function inputFieldSelector(field: FieldAttributes): string {
   return `css=${tag}${parts.join('')}`;
 }
 
-/** A candidate is the field the card showed: the same frame origin, tag and attributes, and the owner can see it. */
+/**
+ * A candidate is the field the card showed: the same frame origin, tag and attributes, and the owner can see it. Its label,
+ * form and frame are NOT compared here: they are what the Vault PROVES a replacement by (`replacedAsShown`), and a candidate
+ * that differs in them is still shown to the owner on a redrawn card instead of being dropped as if it were not there.
+ */
 const isSameField = (want: PageFieldFacts, got: PageFieldFacts): boolean =>
   got.visible && got.frameOrigin === want.frameOrigin && sameAttributes(got.field, want.field);
 
@@ -731,62 +925,77 @@ const sameNodeAs = (left: PageFieldFacts, right: PageFieldFacts): boolean =>
   left.frameId === right.frameId && left.backendNodeId === right.backendNodeId;
 
 /**
- * Every visible element of the page that is the field the card showed, found by its tag and attributes. Strict
- * against the page itself: more than {@link INPUT_REFIND_MAX_CANDIDATES} elements, one whose identity cannot be
- * proved or that went away while it was looked at, or one node met twice, makes the whole search `ambiguous`,
- * so a page that mutates while it is searched never narrows the field down to one.
+ * Every visible element of the page that is the field the card showed, found by its tag and attributes. Strict against the
+ * page itself: more than {@link INPUT_REFIND_MAX_CANDIDATES} elements, one whose identity cannot be proved or that went away
+ * while it was looked at, or one node met twice, makes the search `disturbed` (the first elements it could look at are still
+ * returned, for the card to SHOW): a page that mutates while it is searched never narrows the field down to one.
  */
-async function lookAlikes(subject: InputSubject, want: PageFieldFacts): Promise<PageFieldFacts[] | 'ambiguous'> {
+async function lookAlikes(
+  subject: InputSubject,
+  want: PageFieldFacts,
+): Promise<{ readonly matches: PageFieldFacts[]; readonly disturbed: boolean }> {
   const alike = subject.page.locator(inputFieldSelector(want.field));
   const count = await alike.count().catch(() => 0);
-  if (count > INPUT_REFIND_MAX_CANDIDATES) return 'ambiguous';
+  let disturbed = count > INPUT_REFIND_MAX_CANDIDATES;
   const matches: PageFieldFacts[] = [];
   const seen: PageFieldFacts[] = [];
-  for (let index = 0; index < count; index += 1) {
+  for (let index = 0; index < Math.min(count, INPUT_REFIND_MAX_CANDIDATES); index += 1) {
     const found = await observeLocated(subject, want.fieldId, alike.nth(index)).catch(() => undefined);
-    if (found === undefined || seen.some(other => sameNodeAs(other, found))) return 'ambiguous';
+    if (found === undefined || seen.some(other => sameNodeAs(other, found))) {
+      disturbed = true;
+      continue;
+    }
     seen.push(found);
     if (isSameField(want, found)) matches.push(found);
   }
-  return matches;
+  return { matches, disturbed };
+}
+
+/** One field of a re-find: the facts to use, and whether they are only what the card SHOWS (`ambiguous`: never typed). */
+interface Refound {
+  readonly field: PageFieldFacts;
+  readonly ambiguous: boolean;
 }
 
 /**
- * One field of a re-find, in order: the node the owner approved, when it is still there and still that field; the
- * agent's pointer, when it names exactly one element that is that field; the page's ONE look-alike. A search the page
- * disturbed is `ambiguous` before the pointer is asked: nothing narrows a page that changes under the search.
+ * One field of a re-find, in order: the node the owner approved, when it is still there; else the page's ONE look-alike.
+ * Only those are ever typed into. Anything else is `ambiguous`: more than one candidate, or a search the page disturbed. The
+ * agent's pointer then only chooses WHICH candidate the card shows (the first one when it names none of them), and no
+ * candidate chosen that way is ever written to. No candidate at all is `missing`.
  */
 async function refindField(
   subject: InputSubject,
   want: PageFieldFacts,
   pointer: BrowserInputFieldPointer | undefined,
-): Promise<PageFieldFacts | 'missing' | 'ambiguous'> {
-  const matches = await lookAlikes(subject, want);
-  if (matches === 'ambiguous') return 'ambiguous';
+): Promise<Refound | 'missing'> {
+  const { matches, disturbed } = await lookAlikes(subject, want);
   const approved = matches.find(found => sameNodeAs(found, want));
-  if (approved !== undefined) return approved;
+  if (approved !== undefined) return { field: approved, ambiguous: disturbed };
+  const [first, ...more] = matches;
+  if (first === undefined) return 'missing';
+  if (more.length === 0) return { field: first, ambiguous: disturbed };
+  let shown = first;
   if (pointer !== undefined) {
     const named = subject.page.locator(browserSelectorOf(pointer.target as ElementTarget));
     if ((await named.count().catch(() => 0)) === 1) {
-      const found = await observeLocated(subject, want.fieldId, named.first()).catch(() => undefined);
-      if (found !== undefined && isSameField(want, found)) return found;
+      const chosen = await observeLocated(subject, want.fieldId, named.first()).catch(() => undefined);
+      shown = matches.find(found => chosen !== undefined && sameNodeAs(found, chosen)) ?? first;
     }
   }
-  const [only, ...more] = matches;
-  if (only === undefined) return 'missing';
-  return more.length > 0 ? 'ambiguous' : only;
+  return { field: shown, ambiguous: true };
 }
 
 /**
  * THE FIELDS A CARD SHOWED, FOUND AGAIN after the page changed under it: a re-render replaced the node (a new
  * backend node id, so the agent's ref is stale), a countdown moved the box, or a reload made a new document.
  *
- * Each field is the node the owner approved when it is still there, else the agent's pointer when it names exactly
- * one element that is still that field, else the ONE visible element of the page's main frame (or an open shadow
- * root) with the same tag and attributes. Every candidate is
- * looked at exactly as {@link observeInputFields} looks — the node Playwright holds, described by the session that
- * holds it — so the identity is proved the same way. None is `missing`; several, or two fields landing on one
- * node, is `ambiguous`; nothing is chosen then. It never types: the card is redrawn and the owner sends again.
+ * Each field is the node the owner approved when it is still there, else the ONE visible element of the page's main frame
+ * (or an open shadow root) with the same tag and attributes. Every candidate is looked at exactly as
+ * {@link observeInputFields} looks — the node Playwright holds, described by the session that holds it, with the label,
+ * form and frame the browser read — so the identity is proved the same way. None is `missing`. Several, a search the page
+ * disturbed, or two fields landing on one node is `ambiguous`: the facts are one candidate to SHOW, flagged, and nothing is
+ * chosen to be written. It never types: the card is redrawn (or, for exactly one proved candidate, the Vault decides) and the
+ * owner sends again.
  */
 export async function refindInputFields(
   subject: InputSubject,
@@ -794,24 +1003,51 @@ export async function refindInputFields(
   fields: readonly BrowserInputFieldPointer[],
 ): Promise<BrowserInputObservation> {
   const found: PageFieldFacts[] = [];
+  let ambiguous = false;
   for (const want of expected.fields) {
     const pointer = fields.find(each => each.id === want.fieldId);
-    const field = await refindField(subject, want, pointer);
-    if (field === 'missing') return { ok: false, missing: want.fieldId };
-    if (field === 'ambiguous') return { ok: false, ambiguous: want.fieldId };
-    if (found.some(other => other.frameId === field.frameId && other.backendNodeId === field.backendNodeId))
-      return { ok: false, ambiguous: want.fieldId };
-    found.push(field);
+    const refound = await refindField(subject, want, pointer);
+    if (refound === 'missing') return { ok: false, missing: want.fieldId };
+    if (refound.ambiguous || found.some(other => sameNodeAs(other, refound.field))) ambiguous = true;
+    found.push(refound.field);
   }
-  return { ok: true, facts: await pageFactsOf(subject, found) };
+  return { ok: true, facts: await pageFactsOf(subject, found), ...(ambiguous ? { ambiguous: true as const } : {}) };
 }
 
-/** Whether the node a field fact names is still the same node: it answers, with the same tag and attributes. */
-async function stillThere(subject: InputSubject, field: PageFieldFacts): Promise<InputCdpSession> {
+/** Every fact two descriptions of a field's attributes carry agrees, one present on one side only included. */
+function sameFacts(left: FieldAttributes, right: FieldAttributes): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)] as (keyof FieldAttributes)[]);
+  return [...keys].every(key => left[key] === right[key]);
+}
+
+/**
+ * The write's own proof, read afresh from the browser at the moment of the write: the node answers, with EVERY fact the card
+ * was drawn from the same: its attributes, its label, the form that owns it and where that form sends what is typed, and
+ * the DevTools frame its document is in with that frame's loader. A fact the browser cannot read now, or could not when the
+ * card was drawn, is never the same: the value is not typed, and the owner is asked again.
+ */
+async function proveField(
+  session: InputCdpSession,
+  field: PageFieldFacts,
+  worlds: IsolatedWorlds = new IsolatedWorlds(),
+): Promise<void> {
+  const node = objectOf((await ask(session, 'DOM.describeNode', { backendNodeId: field.backendNodeId })).node);
+  const read = await readField(session, field.backendNodeId, worlds);
+  if (field.unread === true || read.unread === true) throw new Refusal();
+  if (field.ownerFrame === undefined || field.ownerLoader === undefined) throw new Refusal();
+  if (read.ownerFrame !== field.ownerFrame || read.ownerLoader !== field.ownerLoader) throw new Refusal();
+  if (!sameFacts(inputFieldAttributes(node, read.label, read.form), field.field)) throw new Refusal();
+}
+
+/** Whether the node a field fact names is still the same node, proved as {@link proveField} does. */
+async function stillThere(
+  subject: InputSubject,
+  field: PageFieldFacts,
+  worlds: IsolatedWorlds,
+): Promise<InputCdpSession> {
   const session = subject.sessions.get(field.frameId);
   if (session === undefined) throw new Refusal();
-  const node = objectOf((await ask(session, 'DOM.describeNode', { backendNodeId: field.backendNodeId })).node);
-  if (!sameAttributes(inputFieldAttributes(node), field.field)) throw new Refusal();
+  await proveField(session, field, worlds);
   return session;
 }
 
@@ -820,12 +1056,14 @@ async function checkUnchanged(
   subject: InputSubject,
   expected: BrowserInputFacts,
   values: readonly BrowserInputValue[],
+  worlds: IsolatedWorlds = new IsolatedWorlds(),
 ): Promise<Map<string, { readonly session: InputCdpSession; readonly field: PageFieldFacts }>> {
   const url = subject.page.url();
   if (originOfUrl(url) !== expected.origin) throw new Refusal();
   if ((await navigationIdOf(await subject.cdp.page())) !== expected.navigationId) throw new Refusal();
   const known = new Map<string, { readonly session: InputCdpSession; readonly field: PageFieldFacts }>();
-  for (const field of expected.fields) known.set(field.fieldId, { session: await stillThere(subject, field), field });
+  for (const field of expected.fields)
+    known.set(field.fieldId, { session: await stillThere(subject, field, worlds), field });
   for (const value of values) if (!known.has(value.field)) throw new Refusal();
   return known;
 }
@@ -937,8 +1175,8 @@ export async function typeInputFields(
   if (subject.page.isClosed()) return 'target_gone';
   let began = false;
   try {
-    const known = await checkUnchanged(subject, expected, values);
     const worlds = new IsolatedWorlds();
+    const known = await checkUnchanged(subject, expected, values, worlds);
     let last: InputCdpSession | undefined;
     for (const value of values) {
       const target = known.get(value.field);
@@ -951,6 +1189,8 @@ export async function typeInputFields(
         functionDeclaration: SELECT_CONTENTS,
         returnByValue: true,
       });
+      // The last read of everything the card was drawn from, with the focus proof and the insert right after it.
+      await proveField(target.session, target.field, worlds);
       await proveFocus(subject, expected, target.session, trusted.rootContextId, backendNodeId);
       began = true;
       await target.session.send('Input.insertText', { text: value.text });

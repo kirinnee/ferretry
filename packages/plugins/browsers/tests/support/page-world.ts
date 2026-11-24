@@ -31,6 +31,11 @@ export interface FakeElement {
   /** What Playwright measures for the element it holds, when it is not the box DevTools measures. */
   claimedBox?: { x: number; y: number; width: number; height: number } | null;
   visible: boolean;
+  /** The label the page gives the field and the form that owns it, as the trusted read answers them. */
+  label?: string;
+  form?: { id: string; name: string; action: string } | null;
+  /** The trusted read of the field's label, form and frame throws (a page the browser cannot read). */
+  readFails?: true;
 }
 
 export class FakeFrame implements InputFrame {
@@ -48,6 +53,8 @@ export class FakeFrame implements InputFrame {
   ) {
     this.id = outOfProcess ? sessionName : `frame-${address}`;
   }
+  /** This frame's loader, when it is not the page's (a child document replaced); the main frame's is the world's. */
+  loaderId: string | undefined;
   /** What this frame's own document shows: its visible text, its markup, and whether a read of it succeeds. */
   bodyText = '';
   markup = '<html></html>';
@@ -149,8 +156,11 @@ export class FakeSession implements InputCdpSession {
         const [root, ...inner] = frames;
         return {
           frameTree: {
-            frame: { id: root?.id, loaderId: this.world.loaderId },
-            childFrames: inner.map(frame => ({ frame: { id: frame.id }, childFrames: [] })),
+            frame: { id: root?.id, loaderId: root?.loaderId ?? this.world.loaderId },
+            childFrames: inner.map(frame => ({
+              frame: { id: frame.id, loaderId: frame.loaderId ?? this.world.loaderId },
+              childFrames: [],
+            })),
           },
         };
       }
@@ -185,8 +195,24 @@ export class FakeSession implements InputCdpSession {
         if (hit === undefined) throw new Error('No node found at given location');
         return { backendNodeId: hit.backendNodeId, frameId: hit.frame.id };
       }
+      case 'DOM.getFrameOwner': {
+        const index = this.world.frames.findIndex(frame => frame.id === params.frameId);
+        if (index < 0) throw new Error('Frame with the given id does not belong to the target.');
+        return { backendNodeId: 8000 + index };
+      }
       case 'DOM.describeNode': {
         if (typeof params.objectId === 'string' && params.objectId.startsWith('page-')) throw new Error('not a node');
+        // A document's node id is 9000 + its frame's place in the world; a frame's owner element is 8000 + the same.
+        if (typeof params.objectId === 'string' && params.objectId.startsWith('doc-'))
+          return { node: { nodeName: '#document', backendNodeId: 9000 + Number(params.objectId.slice(4)) } };
+        if (typeof params.backendNodeId === 'number' && params.backendNodeId >= 8000)
+          return {
+            node: {
+              nodeName: 'IFRAME',
+              backendNodeId: params.backendNodeId,
+              contentDocument: { backendNodeId: params.backendNodeId + 1000 },
+            },
+          };
         const id =
           typeof params.nodeId === 'number'
             ? params.nodeId - 1000
@@ -203,6 +229,15 @@ export class FakeSession implements InputCdpSession {
         this.focused = this.focusLandsOn ?? (params.backendNodeId as number);
         return {};
       case 'Runtime.evaluate': {
+        // The root document of the session's frames, from the trusted world.
+        if (
+          params.expression === 'document' &&
+          typeof params.contextId === 'number' &&
+          this.contexts.has(params.contextId)
+        ) {
+          const root = this.world.frames.find(frame => frame.sessionName === this.name);
+          return { result: { objectId: `doc-${String(this.world.frames.indexOf(root as FakeFrame))}` } };
+        }
         if (typeof params.contextId !== 'number' || !this.contexts.has(params.contextId)) {
           this.pageWorld.push('Runtime.evaluate');
           return { result: { objectId: 'page-active' } };
@@ -225,6 +260,15 @@ export class FakeSession implements InputCdpSession {
       case 'Runtime.callFunctionOn': {
         const objectId = String(params.objectId);
         const node = Number(objectId.split('-').at(-1));
+        const declared = String(params.functionDeclaration);
+        // The trusted read of a field's label and form, and of the document it is in.
+        const reads = declared.includes('aria-labelledby');
+        if (reads || declared.includes('"ownerDocument"')) {
+          const element = own.find(candidate => candidate.backendNodeId === node);
+          if (element === undefined || element.readFails === true) throw new Error('the field cannot be read');
+          if (reads) return { result: { value: { label: element.label ?? '', form: element.form ?? null } } };
+          return { result: { objectId: `doc-${String(this.world.frames.indexOf(element.frame))}` } };
+        }
         // The grant fill's pagehide clear, armed from the trusted world only.
         if (String(params.functionDeclaration).includes('pagehide')) {
           if (!this.isolatedObjects.has(objectId)) this.pageWorld.push('Runtime.callFunctionOn');

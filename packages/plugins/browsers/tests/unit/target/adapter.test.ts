@@ -217,17 +217,26 @@ describe('PageInputTarget', () => {
     should(calls).eql(['page:s1:app', 'refind:page-1:loader-1:password={"kind":"ref","ref":"e3"}']);
   });
 
+  it('should carry several look-alikes through to the Vault as facts to SHOW, flagged, and never as a gone target', async () => {
+    const { target } = host({ refound: { ok: true, facts: FACTS_PAGE, ambiguous: true } });
+
+    should(await target.refind(S1, APP, FIELDS, FACTS_PAGE)).eql({
+      ok: true,
+      facts: FACTS_PAGE,
+      names: ['page-1'],
+      ambiguous: true,
+    });
+  });
+
   it('should call a re-find gone for another page, a field not found or not one, and a page that is not there', async () => {
     const elsewhere = host({ pageId: 'page-2' });
     const missing = host({ refound: { ok: false, missing: 'password' } });
-    const ambiguous = host({ refound: { ok: false, ambiguous: 'password' } });
     const wrongPage = host({ refound: { ok: true, facts: { ...FACTS_PAGE, pageId: 'page-9' } } });
     const gone = { ok: false, reason: 'target_gone' };
 
     should(await elsewhere.target.refind(S1, APP, FIELDS, FACTS_PAGE)).eql(gone);
     should(elsewhere.calls).eql(['page:s1:app']);
     should(await missing.target.refind(S1, APP, FIELDS, FACTS_PAGE)).eql(gone);
-    should(await ambiguous.target.refind(S1, APP, FIELDS, FACTS_PAGE)).eql(gone);
     should(await wrongPage.target.refind(S1, APP, FIELDS, FACTS_PAGE)).eql(gone);
     should(await host({ refuse: true }).target.refind(S1, APP, FIELDS, FACTS_PAGE)).eql(gone);
   });

@@ -92,12 +92,22 @@ const PageFieldSchema = z.strictObject({
   maxlength: boundedLine(8).optional(),
   /** The label the page shows the field under, as the browser read it: the page's own word for what it asks. */
   label: boundedLine(128).optional(),
+  /** The id and name of the form that owns the field (the form it submits with), as the browser read them. */
+  formId: boundedLine(128).optional(),
+  formName: boundedLine(128).optional(),
+  /** Where that form sends what is typed: its action (or the default submit button's `formaction`) as origin + path. */
+  formAction: boundedLine(256).optional(),
 });
 
 export const PageFieldFactsSchema = z.strictObject({
   fieldId: InputFieldIdSchema,
   frameOrigin: boundedLine(256),
   frameId: boundedLine(128),
+  /** The DevTools frame (Page frame tree) the node's document is in, and that frame's loader: a move or a replaced document differs. */
+  ownerFrame: boundedLine(128).optional(),
+  ownerLoader: boundedLine(128).optional(),
+  /** What the browser could not read about the field (label, form, frame): absent is not unreadable, and unreadable is never proved. */
+  unread: z.literal(true).optional(),
   backendNodeId: PositiveIntegerSchema,
   field: PageFieldSchema,
   box: z.strictObject({
@@ -194,6 +204,8 @@ export type ObserveResult<F extends InputTargetFacts = InputTargetFacts> =
       readonly names?: readonly string[];
       readonly codeProgram?: true;
       readonly profileProgram?: ProfileProgram;
+      /** A re-find only: several elements could be the field, so these facts are what the card SHOWS and are never typed into. */
+      readonly ambiguous?: true;
     }
   | { readonly ok: false; readonly reason: 'target_gone' | 'unsupported' };
 

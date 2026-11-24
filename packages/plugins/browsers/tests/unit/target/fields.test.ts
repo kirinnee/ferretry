@@ -54,6 +54,15 @@ async function observed(world: FakeWorld, ids: readonly string[]): Promise<Brows
   return result.facts;
 }
 
+/** How many field nodes a session described by their id: not the documents and frame owners looked at to find a field's frame. */
+const nodesDescribed = (session: FakeSession): number =>
+  session.calls.filter(
+    call =>
+      call.method === 'DOM.describeNode' &&
+      typeof call.params.backendNodeId === 'number' &&
+      call.params.backendNodeId < 8000,
+  ).length;
+
 const insertions = (world: FakeWorld): number =>
   [...world.sessions.values()].reduce((sum, session) => sum + session.count('Input.insertText'), 0);
 
@@ -79,16 +88,38 @@ describe('observeInputFields', () => {
     should(password?.field).eql({ tag: 'input', type: 'password', autocomplete: 'current-password', name: 'pw' });
   });
 
+  it('looks at a field all the same when its label cannot be read, and says it is UNREAD: that is not a field with no label', async () => {
+    const { world } = loginWorld();
+    world.session('page-target').failOn = (method, params) =>
+      method === 'Runtime.callFunctionOn' && String(params.functionDeclaration).includes('aria-label')
+        ? new Error('the world is gone')
+        : undefined;
+
+    const facts = await observed(world, ['#user']);
+
+    should(facts.fields[0]?.field).eql({
+      tag: 'input',
+      type: 'text',
+      autocomplete: 'username',
+      name: 'username',
+      id: 'user',
+    });
+    should(facts.fields[0]?.unread).equal(true);
+    // A field the browser read, that has no label at all, is not unread.
+    const clean = await observed(loginWorld().world, ['#user']);
+    should(clean.fields[0]?.unread).be.undefined();
+    should(clean.fields[0]?.field.label).be.undefined();
+  });
+
   it('I110 asks the handle which node it holds, never the page, and disposes every handle', async () => {
     const { world } = loginWorld();
     await observed(world, ['#user', '#pw']);
     const session = world.session('page-target');
     should(world.described).eql([11, 12]);
     should(session.count('DOM.performSearch')).equal(0);
-    should(session.calls.filter(call => call.method === 'DOM.describeNode').map(call => call.params)).eql([
-      { backendNodeId: 11 },
-      { backendNodeId: 12 },
-    ]);
+    // The node is described by id (the identity); the document it is in is described by object, to find its frame.
+    const byNode = session.calls.filter(call => call.method === 'DOM.describeNode' && 'backendNodeId' in call.params);
+    should(byNode.map(call => call.params)).eql([{ backendNodeId: 11 }, { backendNodeId: 12 }]);
     should(world.disposed.length).equal(2);
   });
 
@@ -216,8 +247,8 @@ describe('observeInputFields', () => {
     should(field?.frameOrigin).equal('https://pay.example.com');
     should(field?.backendNodeId).equal(7);
     should(facts.origin).equal('http://localhost:3000');
-    should(world.session('frame-target').count('DOM.describeNode')).equal(1);
-    should(world.session('page-target').count('DOM.describeNode')).equal(0);
+    should(nodesDescribed(world.session('frame-target'))).equal(1);
+    should(nodesDescribed(world.session('page-target'))).equal(0);
     should(world.remembered.get('frame-target')).equal(world.session('frame-target'));
   });
 
@@ -246,7 +277,7 @@ describe('observeInputFields', () => {
     world.element('#inner', 9, ['name', 'inner'], same);
     const facts = await observed(world, ['#inner']);
     should(facts.fields[0]?.frameId).equal('page-target');
-    should(world.session('page-target').count('DOM.describeNode')).equal(1);
+    should(nodesDescribed(world.session('page-target'))).equal(1);
   });
 
   it('lets go of a frame session a later look replaces', async () => {
@@ -345,6 +376,25 @@ describe('inputFieldAttributes', () => {
 
   it('answers a tag for a node that has none', () => {
     should(inputFieldAttributes({}).tag).equal('unknown');
+  });
+
+  it('records the maxlength as written and the label the caller read, each cut and on one line', () => {
+    const node = { nodeName: 'INPUT', attributes: ['maxlength', '6'] };
+    should(inputFieldAttributes(node, 'Verification\ncode')).eql({
+      tag: 'input',
+      maxlength: '6',
+      label: 'Verificationcode',
+    });
+    should(inputFieldAttributes(node, 'l'.repeat(300)).label).equal('l'.repeat(128));
+    should(inputFieldAttributes({ nodeName: 'INPUT', attributes: ['maxlength', '1234567890'] }).maxlength).equal(
+      '12345678',
+    );
+  });
+
+  it('leaves out an empty label, a blank one and a missing one', () => {
+    should(inputFieldAttributes({ nodeName: 'INPUT', attributes: [] }, '')).eql({ tag: 'input' });
+    should(inputFieldAttributes({ nodeName: 'INPUT', attributes: [] }, '   ')).eql({ tag: 'input' });
+    should(inputFieldAttributes({ nodeName: 'INPUT', attributes: [] }, undefined)).eql({ tag: 'input' });
   });
 });
 
@@ -645,28 +695,22 @@ describe('typeInputFields', () => {
       { backendNodeId: 11, text: 'alice@example.com' },
       { backendNodeId: 12, text: SECRET },
     ]);
-    should(session.calls.map(call => call.method)).eql([
-      'Page.getFrameTree',
-      'DOM.describeNode',
-      'DOM.describeNode',
-      'Page.getFrameTree',
-      'Page.createIsolatedWorld',
-      'DOM.resolveNode',
+    const methods = session.calls.map(call => call.method);
+    // Each value is focused, then everything the card was drawn from is read again, then the focus is proved, then it is typed.
+    should(methods.filter(method => method === 'DOM.focus' || method === 'Input.insertText')).eql([
       'DOM.focus',
-      'Runtime.callFunctionOn',
-      'Page.getFrameTree',
-      'Runtime.evaluate',
-      'DOM.describeNode',
       'Input.insertText',
-      'Page.getFrameTree',
-      'DOM.resolveNode',
       'DOM.focus',
-      'Runtime.callFunctionOn',
-      'Page.getFrameTree',
-      'Runtime.evaluate',
-      'DOM.describeNode',
       'Input.insertText',
     ]);
+    const lastReadBefore = (insert: number): number =>
+      session.calls.findLastIndex(
+        (call, index) => index < insert && String(call.params.functionDeclaration ?? '').includes('aria-labelledby'),
+      );
+    methods.forEach((method, index) => {
+      if (method !== 'Input.insertText') return;
+      should(lastReadBefore(index)).be.above(methods.slice(0, index).lastIndexOf('DOM.focus'));
+    });
     should(session.keys).eql([]);
     should(session.pageWorld).eql([]);
   });
@@ -679,11 +723,15 @@ describe('typeInputFields', () => {
     should(created?.params).eql({ frameId: world.main.id, worldName: 'ferretry-input' });
     const resolved = session.calls.find(call => call.method === 'DOM.resolveNode');
     should(resolved?.params.backendNodeId).equal(11);
-    const select = session.calls.find(call => call.method === 'Runtime.callFunctionOn');
+    const select = session.calls.find(call =>
+      String(call.params.functionDeclaration ?? '').includes('p.select.call(this)'),
+    );
     should(select?.params.objectId).equal('iso-node-11');
     should(String(select?.params.functionDeclaration)).containEql('HTMLInputElement.prototype');
     should(String(select?.params.functionDeclaration)).containEql('p.select.call(this)');
-    const evaluated = session.calls.find(call => call.method === 'Runtime.evaluate');
+    const evaluated = session.calls.find(
+      call => call.method === 'Runtime.evaluate' && call.params.expression !== 'document',
+    );
     should(evaluated?.params.contextId).equal(resolved?.params.executionContextId);
     should(session.pageWorld).eql([]);
   });
@@ -755,9 +803,11 @@ describe('typeInputFields', () => {
     should(session.typed).eql([{ backendNodeId: 9, text: 'x' }]);
     should(session.count('Page.createIsolatedWorld')).equal(2);
     const resolves = session.calls.filter(call => call.method === 'DOM.resolveNode');
-    should(resolves.length).equal(2);
-    const evaluated = session.calls.find(call => call.method === 'Runtime.evaluate');
-    should(evaluated?.params.contextId).equal(resolves[0]?.params.executionContextId);
+    should(new Set(resolves.map(call => call.params.executionContextId)).size).equal(2);
+    const proof = session.calls.filter(
+      call => call.method === 'Runtime.evaluate' && call.params.expression !== 'document',
+    );
+    should(proof.at(-1)?.params.contextId).equal(resolves[0]?.params.executionContextId);
     should(session.pageWorld).eql([]);
   });
 
@@ -1230,7 +1280,7 @@ describe('review regressions: the write is bound to the target that holds the ha
     should(field?.frameId).equal('frame-target');
     should(field?.frameOrigin).equal('https://pay.example.com');
     should(world.remembered.get('frame-target')).equal(world.session('frame-target'));
-    should(world.session('page-target').count('DOM.describeNode')).equal(0);
+    should(nodesDescribed(world.session('page-target'))).equal(0);
     const outcome = await typeInputFields(world.subject, facts, [{ field: '#card', text: SECRET }], false);
     should(outcome).equal('typed');
     should(world.session('page-target').typed).eql([]);
@@ -1246,7 +1296,7 @@ describe('review regressions: the write is bound to the target that holds the ha
       () => should.fail(undefined, undefined, 'it should reject'),
       error => should((error as Error).message).equal('the browser could not identify that field on the page'),
     );
-    should(world.session('page-target').count('DOM.describeNode')).equal(0);
+    should(nodesDescribed(world.session('page-target'))).equal(0);
     should(world.session('page-target').typed).eql([]);
   });
 
@@ -1265,6 +1315,163 @@ describe('review regressions: the write is bound to the target that holds the ha
       () => should.fail(undefined, undefined, 'it should reject'),
       () => undefined,
     );
+  });
+});
+
+describe('the write proves what the card was drawn from, read again (B5-A4 fix round)', () => {
+  const FORM = { id: 'login', name: 'login-form', action: 'https://app.example.com/session' };
+  const CODE = ['type', 'text', 'name', 'otp', 'autocomplete', 'one-time-code'];
+
+  function formWorld() {
+    const world = new FakeWorld();
+    const code = world.element('#code', 31, CODE);
+    code.form = { ...FORM };
+    code.label = 'Verification code';
+    return { world, code };
+  }
+  const typeCode = async (world: FakeWorld, facts: BrowserInputFacts) =>
+    await typeInputFields(world.subject, facts, [{ field: '#code', text: '123456' }], false);
+
+  it('reads the form that owns a field and where it sends what is typed, and nothing for a field with no form', async () => {
+    const { world } = formWorld();
+    const facts = await observed(world, ['#code']);
+    should(facts.fields[0]?.field).containEql({
+      label: 'Verification code',
+      formId: 'login',
+      formName: 'login-form',
+      formAction: 'https://app.example.com/session',
+    });
+    const bare = await observed(loginWorld().world, ['#user']);
+    should(bare.fields[0]?.field.formAction).be.undefined();
+    should(bare.fields[0]?.field.formId).be.undefined();
+  });
+
+  it('types nothing when the form it belongs to now sends the value to another action', async () => {
+    const { world, code } = formWorld();
+    const facts = await observed(world, ['#code']);
+    code.form = { ...FORM, action: 'https://evil.example/collect' };
+
+    should(await typeCode(world, facts)).equal('target_changed');
+    should(insertions(world)).equal(0);
+  });
+
+  it('types nothing when another form (a new id or name) now owns the field, or it has no form', async () => {
+    const { world, code } = formWorld();
+    const facts = await observed(world, ['#code']);
+    code.form = { ...FORM, id: 'other' };
+    should(await typeCode(world, facts)).equal('target_changed');
+    code.form = { ...FORM, name: 'other' };
+    should(await typeCode(world, facts)).equal('target_changed');
+    code.form = null;
+    should(await typeCode(world, facts)).equal('target_changed');
+    should(insertions(world)).equal(0);
+  });
+
+  it('types nothing when the label changed to a card or code label after the look', async () => {
+    const { world, code } = formWorld();
+    const facts = await observed(world, ['#code']);
+    code.label = 'Card number';
+
+    should(await typeCode(world, facts)).equal('target_changed');
+    should(insertions(world)).equal(0);
+  });
+
+  it('types nothing into a field whose label, form or frame could not be read, even when nothing changed', async () => {
+    const { world, code } = formWorld();
+    code.readFails = true;
+    const facts = await observed(world, ['#code']);
+    should(facts.fields[0]?.unread).equal(true);
+
+    should(await typeCode(world, facts)).equal('target_changed');
+    delete code.readFails;
+    should(await typeCode(world, facts)).equal('target_changed');
+    should(insertions(world)).equal(0);
+  });
+
+  it('calls a form it cannot state in the protocol bounds unread: a malformed answer, an action that did not resolve, a too-long one', async () => {
+    const odd: readonly unknown[] = [
+      { id: 7, name: '', action: 'https://app.example.com/' },
+      { ...FORM, action: '' },
+      { ...FORM, action: `https://app.example.com/${'p'.repeat(300)}` },
+      { ...FORM, id: 'i'.repeat(200) },
+    ];
+    for (const form of odd) {
+      const { world, code } = formWorld();
+      code.form = form as never;
+      const facts = await observed(world, ['#code']);
+
+      should(facts.fields[0]?.unread).equal(true);
+      should(facts.fields[0]?.field.formAction).be.undefined();
+    }
+  });
+
+  it('types nothing when the label can no longer be read at the write', async () => {
+    const { world, code } = formWorld();
+    const facts = await observed(world, ['#code']);
+    code.readFails = true;
+
+    should(await typeCode(world, facts)).equal('target_changed');
+    should(insertions(world)).equal(0);
+  });
+
+  it('records the DevTools frame and its loader, not the target id, and the same read at the write types', async () => {
+    const { world } = formWorld();
+    const inner = new FakeFrame('http://localhost:3000/inner', 'page-target');
+    inner.loaderId = 'loader-inner';
+    world.element('#inner', 9, ['name', 'inner'], inner);
+    const facts = await observed(world, ['#code', '#inner']);
+
+    should(facts.fields.map(field => [field.frameId, field.ownerFrame, field.ownerLoader])).eql([
+      ['page-target', world.main.id, 'loader-1'],
+      ['page-target', inner.id, 'loader-inner'],
+    ]);
+    should(await typeInputFields(world.subject, facts, [{ field: '#inner', text: 'x' }], false)).equal('typed');
+  });
+
+  it('types nothing when the field moved into a same-origin sibling frame of the same process', async () => {
+    const { world } = formWorld();
+    const first = new FakeFrame('http://localhost:3000/a', 'page-target');
+    const second = new FakeFrame('http://localhost:3000/b', 'page-target');
+    const moved = world.element('#moved', 9, ['name', 'moved'], first);
+    world.element('#other', 10, ['name', 'other'], second);
+    const facts = await observed(world, ['#moved']);
+    (moved as { frame: FakeFrame }).frame = second;
+
+    // The node, its tag, its attributes and its target are all the same; only the document it is in is not.
+    should(await typeInputFields(world.subject, facts, [{ field: '#moved', text: 'x' }], false)).equal(
+      'target_changed',
+    );
+    should(insertions(world)).equal(0);
+  });
+
+  it('types nothing when the document of the frame the field is in was replaced', async () => {
+    const { world } = formWorld();
+    const inner = new FakeFrame('http://localhost:3000/inner', 'page-target');
+    world.element('#inner', 9, ['name', 'inner'], inner);
+    const facts = await observed(world, ['#inner']);
+    inner.loaderId = 'loader-replaced';
+
+    should(await typeInputFields(world.subject, facts, [{ field: '#inner', text: 'x' }], false)).equal(
+      'target_changed',
+    );
+    should(insertions(world)).equal(0);
+  });
+
+  it('re-finds the same node with its new form, label and action in the facts, never dropping it as not there', async () => {
+    const { world, code } = formWorld();
+    const pointer = { id: '#code', target: { kind: 'selector' as const, selector: '#code' } };
+    const before = await observeInputFields(world.subject, [pointer]);
+    if (!before.ok) throw new Error('not observed');
+    code.form = { ...FORM, action: 'https://evil.example/collect' };
+    code.label = 'Card number';
+
+    const again = await refindInputFields(world.subject, before.facts, [pointer]);
+
+    should(again.ok && again.ambiguous).not.equal(true);
+    should(again.ok && again.facts.fields[0]?.field).containEql({
+      label: 'Card number',
+      formAction: 'https://evil.example/collect',
+    });
   });
 });
 
@@ -1346,13 +1553,19 @@ describe('refindInputFields (#B100)', () => {
     should(again.ok && again.facts.fields[0]?.backendNodeId).equal(21);
   });
 
+  /** What a re-find answers when it is only SHOWING a candidate: the one node it chose, flagged so that nothing is written. */
+  const shown = (again: Awaited<ReturnType<typeof refindInputFields>>): [number | undefined, boolean] => [
+    again.ok ? again.facts.fields[0]?.backendNodeId : undefined,
+    again.ok && again.ambiguous === true,
+  ];
+
   it('I56 should call the search ambiguous when a look-alike cannot be held: the page is changing under it', async () => {
     const { world, code } = codeWorld();
     const before = await look(world);
     world.rerender(code, 77);
     world.extra(78, [...code.attributes], { handleFails: true });
 
-    should(await refindInputFields(world.subject, before, [pointer])).eql({ ok: false, ambiguous: 'code' });
+    should(shown(await refindInputFields(world.subject, before, [pointer]))).eql([77, true]);
   });
 
   it('I56 should not let the pointer decide a search the page disturbed', async () => {
@@ -1364,7 +1577,7 @@ describe('refindInputFields (#B100)', () => {
     world.rerender(code, 77);
     world.extra(78, ['type', 'text', 'name', 'otp'], { handleFails: true });
 
-    should(await refindInputFields(world.subject, first.facts, [selector])).eql({ ok: false, ambiguous: 'code' });
+    should(shown(await refindInputFields(world.subject, first.facts, [selector]))).eql([77, true]);
   });
 
   it('should keep the node the owner approved while it is still there, whatever the pointer now names', async () => {
@@ -1380,7 +1593,7 @@ describe('refindInputFields (#B100)', () => {
     should(again.ok && again.facts.fields[0]?.backendNodeId).equal(21);
   });
 
-  it('should follow a selector to the re-rendered node, even beside a look-alike, once the approved node is gone', async () => {
+  it('should let the pointer only choose which look-alike the card SHOWS once the approved node is gone, never what is written', async () => {
     const world = new FakeWorld();
     const code = world.element('#otp', 21, ['type', 'text', 'name', 'otp']);
     const selector = { id: 'code', target: { kind: 'selector' as const, selector: '#otp' } };
@@ -1391,16 +1604,30 @@ describe('refindInputFields (#B100)', () => {
 
     const again = await refindInputFields(world.subject, first.facts, [selector]);
 
-    should(again.ok && again.facts.fields[0]?.backendNodeId).equal(77);
+    // The selector names 77, so the card shows 77. Two elements are the field, so it is flagged and is never typed into.
+    should(shown(again)).eql([77, true]);
   });
 
-  it('should refuse two visible look-alikes as ambiguous, choosing neither', async () => {
+  it('should show the first of two visible look-alikes, flagged ambiguous, when the pointer names neither', async () => {
     const { world, code } = codeWorld();
     const before = await look(world);
     world.rerender(code, 77);
     world.extra(78, [...code.attributes]);
 
-    should(await refindInputFields(world.subject, before, [pointer])).eql({ ok: false, ambiguous: 'code' });
+    should(shown(await refindInputFields(world.subject, before, [pointer]))).eql([77, true]);
+  });
+
+  it('should show the look-alike the pointer names, not the first, and still call it ambiguous', async () => {
+    const world = new FakeWorld();
+    const code = world.element('#otp', 21, ['type', 'text', 'name', 'otp']);
+    const selector = { id: 'code', target: { kind: 'selector' as const, selector: '#otp' } };
+    const first = await observeInputFields(world.subject, [selector]);
+    if (!first.ok) throw new Error('not observed');
+    world.rerender(code, 77);
+    const second = world.extra(78, ['type', 'text', 'name', 'otp']);
+    world.pointers.set('#otp', second);
+
+    should(shown(await refindInputFields(world.subject, first.facts, [selector]))).eql([78, true]);
   });
 
   it('I56 should pass over a hidden look-alike and a look-alike in another frame', async () => {
@@ -1416,14 +1643,23 @@ describe('refindInputFields (#B100)', () => {
     should(again.ok && again.facts.fields[0]?.backendNodeId).equal(77);
   });
 
-  it('I56 should refuse more look-alikes than it will look at', async () => {
+  it('I56 should call it ambiguous when there are more look-alikes than it will look at', async () => {
+    const { world, code } = codeWorld();
+    const before = await look(world);
+    world.rerender(code, 77);
+    for (let n = 0; n < INPUT_REFIND_MAX_CANDIDATES; n += 1) world.extra(100 + n, [...code.attributes]);
+
+    should(shown(await refindInputFields(world.subject, before, [pointer]))).eql([77, true]);
+  });
+
+  it('should answer missing, not ambiguous, when every look-alike is hidden: there is nothing to show', async () => {
     const { world, code } = codeWorld();
     const before = await look(world);
     world.rerender(code, 77, { visible: false });
     for (let n = 0; n < INPUT_REFIND_MAX_CANDIDATES; n += 1)
       world.extra(100 + n, [...code.attributes], { visible: false });
 
-    should(await refindInputFields(world.subject, before, [pointer])).eql({ ok: false, ambiguous: 'code' });
+    should(await refindInputFields(world.subject, before, [pointer])).eql({ ok: false, missing: 'code' });
   });
 
   const changed: readonly [string, Partial<FakeElement>][] = [
@@ -1456,7 +1692,10 @@ describe('refindInputFields (#B100)', () => {
     const first = await observeInputFields(world.subject, pointers);
     if (!first.ok) throw new Error('not observed');
 
-    should(await refindInputFields(world.subject, first.facts, pointers)).eql({ ok: false, ambiguous: 'two' });
+    const again = await refindInputFields(world.subject, first.facts, pointers);
+
+    should(again.ok && again.ambiguous).equal(true);
+    should(again.ok && again.facts.fields.map(field => field.backendNodeId)).eql([41, 41]);
   });
 
   it("should describe the page as it is now: a reload's new document is in the facts", async () => {
@@ -1476,6 +1715,8 @@ describe('refindInputFields (#B100)', () => {
     );
     should(inputFieldSelector({ tag: 'input', name: 'n'.repeat(128) })).equal(`css=input[name^="${'n'.repeat(128)}"]`);
     should(inputFieldSelector({ tag: 'unknown tag' })).equal('css=*');
+    // The maxlength is an attribute and is matched; the label is not one, so it is compared after the match instead.
+    should(inputFieldSelector({ tag: 'input', maxlength: '6', label: 'Code' })).equal('css=input[maxlength="6"]');
   });
 });
 
