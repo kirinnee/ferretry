@@ -2150,7 +2150,13 @@ describe('the gaps the gate found, now closed', () => {
     expect(seen.pageErrors).toEqual([]);
   });
   it('only the expected routes went unanswered (a gap in the fake, not in the product)', () => {
-    expect([...new Set(seen.unanswered)].sort()).toEqual(['GET /v1/input-requests', 'GET /v1/layouts/current']);
+    // `GET /v1/voice/engine` is the Voice step's quiet read of the speech engine: a failed read leaves the step's own
+    // "unreachable" sentence, so the fake leaves it unanswered like the other two.
+    expect([...new Set(seen.unanswered)].sort()).toEqual([
+      'GET /v1/input-requests',
+      'GET /v1/layouts/current',
+      'GET /v1/voice/engine',
+    ]);
   });
   it('the Machine name page draws ONE name form (the shell strip draws a second above the flow)', () => {
     expect(seen.nameForms).toBe(1);
