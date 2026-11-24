@@ -67,9 +67,18 @@ export const isStopped = (ferret: FerretSummary): boolean => statusMark(ferret).
 /** The kind a ferret is: its recorded mode, and an agent when the record names none (as the daemon reads it). */
 const modeOf = (ferret: FerretSummary): 'auto' | 'interactive' => ferret.mode ?? 'auto';
 
-/** Whether the ferret is the kind a segment asks for. */
+/**
+ * Whether the ferret is the owner's — the "Mine" segment: one a person started. The New ferret form starts an `auto`
+ * ferret by default, so a ferret the owner made from the browser is autonomous yet theirs; the record's `birth` says
+ * who first started it. A record that names no birth falls back to its mode (one a person drives is theirs). A start by
+ * an agent or the daemon is never the owner's, so every ferret is exactly Mine or an agent's.
+ */
+const isMine = (ferret: FerretSummary): boolean =>
+  ferret.birth === undefined ? modeOf(ferret) === 'interactive' : ferret.birth === 'person';
+
+/** Whether the ferret is the kind a segment asks for. Mine and Agents split the ferrets by who started them: no overlap. */
 export const matchesMode = (ferret: FerretSummary, mode: ModeFilter): boolean =>
-  mode === 'all' || modeOf(ferret) === mode;
+  mode === 'all' || (mode === 'interactive') === isMine(ferret);
 
 /**
  * Which ferrets the list draws before the kind is chosen: everything live, the stopped ones only when ticked, a pinned
@@ -126,8 +135,8 @@ export const listTallies = (
   return {
     counts: {
       all: listed.length,
-      auto: listed.filter(ferret => modeOf(ferret) === 'auto').length,
-      interactive: listed.filter(ferret => modeOf(ferret) === 'interactive').length,
+      auto: listed.filter(ferret => !isMine(ferret)).length,
+      interactive: listed.filter(isMine).length,
     },
     hiddenStopped: ferrets.filter(
       ferret => !listedBeforeMode(ferret, filter, keep, needing) && matchesMode(ferret, filter.mode),
@@ -272,7 +281,7 @@ export const openByDefault = (
 
 /** The kind segments in the order they are drawn (Mine first: what a new device opens on), in the reader's words. */
 export const MODE_SEGMENTS: readonly { readonly mode: ModeFilter; readonly label: string; readonly hint: string }[] = [
-  { mode: 'interactive', label: 'Mine', hint: 'Mine — the ferrets you drive yourself' },
+  { mode: 'interactive', label: 'Mine', hint: 'Mine — the ferrets you started or drive yourself' },
   { mode: 'all', label: 'All', hint: 'Every ferret' },
   { mode: 'auto', label: 'Agents', hint: 'Agents — autonomous ferrets that work unattended' },
 ];
