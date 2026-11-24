@@ -14,7 +14,18 @@ import {
   McpInventorySchema,
 } from '../../../contract/index.ts';
 import { McpServersPanel } from '../../../app/views/servers-panel.tsx';
-import { type Answers, CALLBACK, type Call, completion, MCP, mcpFlow, NOW, scriptedClient } from './mcp-fixtures.ts';
+import {
+  type Answers,
+  CALLBACK,
+  type Call,
+  CLAUDE_WORK_WORDS,
+  completion,
+  MCP,
+  mcpFlow,
+  NOW,
+  RUNTIMES,
+  scriptedClient,
+} from './mcp-fixtures.ts';
 import { click, mountSettled, settle, text, type } from './mcp-view-support.tsx';
 
 const NOTION_SUBJECT = 'notion..a1b2c3d4e5f6';
@@ -42,7 +53,7 @@ const checked = (overrides: Partial<McpCheckResult> = {}): McpCheckResult => ({
 });
 
 const panel = async (answers: Answers, calls: Call[] = []) => {
-  const client = scriptedClient({ [SERVERS]: MCP, ...answers }, calls);
+  const client = scriptedClient({ [SERVERS]: MCP, 'GET /v1/runtimes': RUNTIMES, ...answers }, calls);
   mounted = await mountSettled(
     <McpServersPanel client={client} ferretId="ferret-a" now={() => NOW} searchDebounceMs={0} />,
   );
@@ -95,7 +106,9 @@ describe('DOM tests — the mcp-servers panel', () => {
     const details = text(root, '[data-mcp-details="notion"]');
     expect(details).toContain('https://notion.example/mcp');
     expect(details).toContain('/work/app/.mcp.json');
-    expect(details).toContain('claude-work (approved)');
+    // The runtime is named in words, never by its stored name.
+    expect(details).toContain(`${CLAUDE_WORK_WORDS} (approved)`);
+    expect(details).not.toContain('claude-work');
     await click(root, '[data-mcp-details-toggle="notion"]');
     expect(root.querySelector('[data-mcp-details]')).toBeNull();
   });
