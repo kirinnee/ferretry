@@ -80,20 +80,27 @@ ferret's id is answered as no job.
 - `audio` (default **false**) asks for generated sound, which doubles the price. Every setting is sent by name, so no
   default of fal's can change what the call costs.
 - **Priced by the second**: Kling $0.07 (sound $0.14), Veo Fast $0.10 (sound $0.15), 720p and 1080p alike, from the
-  pages in `contract/pricing.ts`. fal's own rate is asked first; it is ONE number per endpoint, so the clip is priced at
-  the **higher** of fal's rate and the table's for the choice made (a price that rose is seen; one that fell is not),
+  pages in `contract/pricing.ts`. fal's own rate is asked first; it is ONE number per endpoint, so it is compared with the
+  table for **both** options (sound off and on) and the clip is priced at the **higher** (a price that rose is seen; one
+  that fell is not; a base rate that rose lifts a clip with sound by the table's own sound/silent ratio),
   and a live rate in a unit other than the second refuses the call. So a Kling 5 s silent clip is $0.35, a Veo 8 s silent
   $0.80, and a Veo 8 s clip with sound is **$1.20, over the $1 limit: it asks first**.
 - **The spend is reserved when it is queued**, by the same steps as every tool (cap, ask, reserve). Checking a job never
   reserves or charges again.
-- **A job fal fails is refunded only when fal bills nothing.** fal's pricing page says a request is billed only for a
-  successful output, and that a server error (5xx) and time in the queue are never billed
-  ([Model API pricing](https://fal.ai/docs/documentation/model-apis/pricing.md)). So the refund (the ledger's `refund:
-true` line) is given when fal ends the request with an error (its status `COMPLETED` carries an `error`) or answers
-  its result with 422, 499 or 5xx. A result that has expired (404; fal keeps a result for an hour), a finished answer with
-  no video, a job fal no longer knows, a file on a host that is not fal's storage, or a file over 32 MiB or not a
-  video **stays counted**, and the ferret is told not to retry. A storage that was briefly down, or a clip that could not
-  be saved, leaves the job open: asking again retries for free.
+- **A job fal fails is refunded only on an error fal does not bill, and only from its status.** fal's one statement on
+  billing is that "failed requests that return 5xx status codes are not billed"
+  ([Reliability](https://fal.ai/docs/documentation/model-apis/inference/reliability.md)). So the refund (the ledger's
+  `refund: true` line) is given when the **status** endpoint ends the request (`COMPLETED` carrying an `error`) with an
+  `error_type` of that 5xx class (`request_timeout`, `startup_timeout`, `runner_*`, `internal_error`) or `bad_request`
+  (the same "4xx = no charge" rule a refused submit already follows). A cancel or dropped client (`client_cancelled`,
+  `client_disconnected`, 499), `content_policy_violation`, and any `error_type` Create does not know **stay counted**.
+  A request whose status says `COMPLETED` with no error succeeded and was billed, so a result that will not read (422, 499,
+  5xx, a dropped connection) is **never a refund**: the job stays open and is read again on the next `generation_status`
+  (free), and after 5 failed reads (of the result, or of the file on fal's storage, which also covers a file that has
+  expired) it is closed as counted with "made and paid for, could not be fetched, do NOT retry". A result that has expired
+  (404; fal keeps a result for an hour), a finished answer with no video, a job fal no longer knows, a file on a host that
+  is not fal's storage, or a file over 32 MiB or not a video also **stays counted** at once, and the ferret is told not to
+  retry. A clip that could not be saved leaves the job open: asking again retries for free.
 - **A restart loses nothing and charges nothing twice.** The job (fal's request id and the two queue addresses it
   answered, https on `queue.fal.run` only) is written to `state/create/jobs.jsonl` (`0600`, private) before `generate_video`
   answers; `generation_status` reads it from there. The order is chosen so a crash can only **over-count**: the spend is

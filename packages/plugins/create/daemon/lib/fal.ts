@@ -286,14 +286,37 @@ const StatusReplySchema = z.object({
   status: z.enum(['IN_QUEUE', 'IN_PROGRESS', 'COMPLETED']),
   queue_position: z.number().int().nonnegative().optional(),
   error: z.string().max(2000).optional(),
+  /** fal's class of the failure (`request_timeout`, `runner_disconnected`, `client_cancelled` …); a name this file does not know is read as unknown. */
+  error_type: z.string().max(64).optional(),
 });
+
+/**
+ * Whether fal bills a request that ended with this `error_type`. The only thing fal says (docs/documentation/model-apis/
+ * inference/reliability.md) is that "failed requests that return 5xx status codes are not billed"; the 5xx classes are
+ * the timeouts, the runner's own failures and an internal error. A `bad_request` is a 4xx refused before any work (the
+ * "4xx = no charge" rule Create already holds for a submit). A cancel or a dropped client (499), a content-policy
+ * refusal and any error_type not named here may have been billed, so they are counted.
+ */
+function failureIsFree(errorType: string | undefined): boolean {
+  if (errorType === undefined) return false;
+  return (
+    errorType === 'request_timeout' ||
+    errorType === 'startup_timeout' ||
+    errorType === 'internal_error' ||
+    errorType === 'bad_request' ||
+    errorType.startsWith('runner_')
+  );
+}
 
 /** What fal says of a queued request now. `retry` is a check that did not answer, never a verdict on the request. */
 export type QueuePoll =
   | { readonly kind: 'waiting'; readonly status: 'IN_QUEUE' | 'IN_PROGRESS'; readonly position?: number }
   | { readonly kind: 'completed' }
-  /** fal ended it with an error and no output. Its docs: a request that fails is never billed (only a successful output is). */
-  | { readonly kind: 'failed'; readonly sentence: string }
+  /**
+   * fal ended it with an error and no output. `refund` is true only for an error_type fal does not bill (see
+   * `failureIsFree`); any other failure may have been billed and stays counted.
+   */
+  | { readonly kind: 'failed'; readonly sentence: string; readonly refund: boolean }
   /** fal does not know the request (404): it expired or is not this account's. It may have been billed. */
   | { readonly kind: 'gone' }
   | { readonly kind: 'retry'; readonly sentence: string };
@@ -316,23 +339,31 @@ export async function pollQueued(secrets: SecretsPort, statusUrl: string): Promi
   if ('code' in answer) return { kind: 'retry', sentence: answer.sentence };
   const parsed = StatusReplySchema.safeParse(answer.payload);
   if (!parsed.success) return { kind: 'retry', sentence: 'fal’s answer about the job could not be read' };
-  const { status, error, queue_position: position } = parsed.data;
+  const { status, error, error_type: errorType, queue_position: position } = parsed.data;
   if (status !== 'COMPLETED') return { kind: 'waiting', status, ...(position === undefined ? {} : { position }) };
   return error === undefined
     ? { kind: 'completed' }
-    : { kind: 'failed', sentence: `fal could not make the video (${error.replace(/\s+/gu, ' ').slice(0, 160)})` };
+    : {
+        kind: 'failed',
+        sentence: `fal could not make the video (${error.replace(/\s+/gu, ' ').slice(0, 160)})`,
+        refund: failureIsFree(errorType),
+      };
 }
 
 const VideoReplySchema = z.object({ video: z.object({ url: z.string().max(2048) }) });
 
 export type QueueResult =
   | { readonly kind: 'video'; readonly url: string }
-  /** fal answered the result with a model rejection (422), a cancel (499) or a server error (5xx): no output, so no charge. */
-  | { readonly kind: 'failed'; readonly sentence: string }
   /** The result is gone or holds no video: the clip may have been billed and cannot be had. */
   | { readonly kind: 'lost'; readonly sentence: string }
+  /** The read did not give the result (any non-200 but 404, a dropped connection): the request itself was fine and billed, so this is read again. */
   | { readonly kind: 'retry'; readonly sentence: string };
 
+/**
+ * The result of a request whose status said COMPLETED with no error. That request succeeded and is billed, so NOTHING
+ * here is a refund: a non-200 on the result address (fal's queue answers 500 "An internal error occurred. Retry") is a
+ * failed read, to be made again.
+ */
 export async function fetchQueuedResult(secrets: SecretsPort, resultUrl: string): Promise<QueueResult> {
   if (!isFalQueueUrl(resultUrl)) return { kind: 'retry', sentence: 'the saved address of this job is not fal’s queue' };
   const outcome = await secrets.send(
@@ -346,13 +377,8 @@ export async function fetchQueuedResult(secrets: SecretsPort, resultUrl: string)
     },
     PLACEMENT,
   );
-  if (outcome.kind === 'status') {
-    const { status } = outcome;
-    if (status === 422 || status === 499 || status >= 500)
-      return { kind: 'failed', sentence: `fal could not make the video (its result answered ${status})` };
-    if (status === 404)
-      return { kind: 'lost', sentence: 'fal no longer has the result of this job (results are kept for an hour)' };
-  }
+  if (outcome.kind === 'status' && outcome.status === 404)
+    return { kind: 'lost', sentence: 'fal no longer has the result of this job (results are kept for an hour)' };
   const answer = answerOf(outcome);
   if ('code' in answer) return { kind: 'retry', sentence: answer.sentence };
   const parsed = VideoReplySchema.safeParse(answer.payload);

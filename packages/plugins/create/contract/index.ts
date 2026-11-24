@@ -250,11 +250,17 @@ export const JobRecordSchema = z.discriminatedUnion('kind', [
     alt: z.string().max(200),
     label: z.string().max(200),
   }),
+  /** One read of a made clip (its result, or its file on fal's storage) that failed. Only a count: after a few, the job is closed as counted. */
+  z.strictObject({
+    kind: z.literal('unread'),
+    job: z.string().regex(JOB_ID_PATTERN),
+    at: z.iso.datetime(),
+  }),
   z.strictObject({
     kind: z.literal('finished'),
     job: z.string().regex(JOB_ID_PATTERN),
     at: z.iso.datetime(),
-    /** `delivered`: the file is in the media folder. `refunded`: fal failed it and billed nothing. `counted`: it failed or was lost and may have been billed. */
+    /** `delivered`: the file is in the media folder. `refunded`: fal failed it with an error it does not bill (a 5xx class, or a bad request). `counted`: it failed or was lost and may have been billed. */
     outcome: z.enum(['delivered', 'refunded', 'counted']),
     /** What to tell the ferret on any later call: the media name (delivered) or the sentence (the others). */
     where: z.string().max(300).optional(),

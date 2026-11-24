@@ -287,8 +287,9 @@ export const DEFAULT_VIDEO_RESOLUTION: VideoResolution = '720p';
 
 /**
  * A clip of `seconds` seconds. fal's own rate (asked just now) is ONE number per endpoint, but the table has a price
- * for sound off and on; fal's rate is not known to be for the choice made, so the clip is priced at the HIGHER of the
- * two. A price that fell at fal is therefore not seen, and one that rose is: the estimate is never under the bill.
+ * for sound off and on; fal's rate is not known to be for the choice made, so it is compared with the table for BOTH
+ * options and the clip is priced at the HIGHER. A price that fell at fal is therefore not seen, and one that rose is:
+ * the estimate is never under the bill.
  * A live rate in a unit other than the second is refused.
  */
 export function priceVideo(model: VideoModel, seconds: number, sound: boolean, live?: LiveRate): Priced {
@@ -296,8 +297,13 @@ export function priceVideo(model: VideoModel, seconds: number, sound: boolean, l
   if (live === undefined) return { ok: true, microUsd: Math.ceil(table * seconds), from: 'table' };
   if (unitOf(live.unit) !== 'second' || !Number.isFinite(live.unitPrice) || live.unitPrice < 0)
     return cannotPrice(model.endpoint, 'fal');
+  // fal's one number may be for sound off or for sound on, and fal does not say which. So it is compared with the table
+  // for BOTH options, each as the clip's own rate: as it stands (it IS this choice's rate) and scaled by the table's
+  // sound/silent ratio (it is the sound-off rate, and a sound clip costs that much more). The higher one prices the clip.
   const liveMicro = live.unitPrice * 1_000_000;
-  return liveMicro > table
-    ? { ok: true, microUsd: Math.ceil(liveMicro * seconds), from: 'fal' }
+  const ratio = table / model.tableMicroUsdPerSecond.silent;
+  const fromLive = liveMicro * ratio; // the ratio is 1 for sound off and above 1 for sound on, so this is the higher
+  return fromLive > table
+    ? { ok: true, microUsd: Math.ceil(fromLive * seconds), from: 'fal' }
     : { ok: true, microUsd: Math.ceil(table * seconds), from: 'table' };
 }

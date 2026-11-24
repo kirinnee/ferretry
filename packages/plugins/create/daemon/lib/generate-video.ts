@@ -6,10 +6,16 @@
  *   generation_status ask fal about the job → still waiting (say so), or made (fetch the file from fal's storage with no
  *                     key, hand it to the ferret's media folder, answer with the one piece to paste), or failed.
  *
- * THE MONEY. The spend is reserved at submit, as for every creative tool. A job fal ends with an error and no output is
- * REFUNDED: fal's docs say a request that fails is never billed and that only a successful output is. Anything less
- * certain (a result that has expired, an answer without a video, a file that cannot be fetched) stays counted, and the
- * ferret is told not to ask again. Checking a job never charges: the one reservation is made once, at submit.
+ * THE MONEY. The spend is reserved at submit, as for every creative tool. The ONLY refund comes from the STATUS
+ * endpoint's own error: fal's one statement on billing is "failed requests that return 5xx status codes are not billed"
+ * (docs/documentation/model-apis/inference/reliability.md), so a job ended with an error_type of that class (a timeout,
+ * a runner failure, an internal error), or with a bad_request (the 4xx "no charge" rule a submit already holds), is
+ * REFUNDED. Every other ending (a cancel, a content-policy refusal, an error_type Create does not know, a result that
+ * has expired, an answer without a video) stays counted, and the ferret is told not to ask again. A job whose status
+ * says COMPLETED with no error succeeded and was billed: a failed READ of its result or its file is only a read that
+ * failed. The job stays open and is read again on the next generation_status (free); after `MAX_UNREAD` failed reads it
+ * is closed as counted ("made and paid for, could not be fetched, do NOT retry"). Checking a job never charges: the one
+ * reservation is made once, at submit.
  *
  * A RESTART loses nothing. The job (fal's request id and the two queue addresses) is on disk before the answer, and
  * `generation_status` reads it from there. The order that matters is chosen so a crash can only OVER-count: the
@@ -38,7 +44,6 @@ import {
   download,
   failed,
   falRate,
-  kib,
   paidCall,
   type PaidDeps,
   refusal,
@@ -62,7 +67,12 @@ type Finished = Extract<JobRecord, { kind: 'finished' }>;
 interface Job {
   readonly submitted: Submitted;
   readonly finished?: Finished;
+  /** How many reads of the made clip have failed so far. */
+  readonly unread: number;
 }
+
+/** Failed reads of a made clip (its result, its file) after which the job is closed as counted rather than read forever. */
+const MAX_UNREAD = 5;
 
 const VIDEO_TYPES = ['video/mp4', 'video/webm'];
 const VIDEO_EXTENSION: Readonly<Record<string, string>> = { 'video/mp4': 'mp4', 'video/webm': 'webm' };
@@ -71,15 +81,19 @@ const VIDEO_DOWNLOAD = { maxBytes: MAX_MEDIA_BYTES, timeoutMs: 120_000 } as cons
 
 const defaultJobId = (): string => `vid_${randomBytes(6).toString('hex')}`;
 
-/** Every job the file holds: its `submitted` line, and its `finished` line if it has one (the first one counts). */
+/** Every job the file holds: its `submitted` line, its failed reads, and its `finished` line if it has one (the first one counts). */
 async function loadJobs(state: StatePort): Promise<ReadonlyMap<string, Job>> {
   const { records } = await state.records(VIDEO_JOBS);
   const jobs = new Map<string, Job>();
   for (const record of records) {
-    if (record.kind === 'submitted') jobs.set(record.job, { submitted: record });
+    if (record.kind === 'submitted') jobs.set(record.job, { submitted: record, unread: 0 });
     else {
       const job = jobs.get(record.job);
-      if (job !== undefined && job.finished === undefined) jobs.set(record.job, { ...job, finished: record });
+      if (job === undefined || job.finished !== undefined) continue;
+      jobs.set(
+        record.job,
+        record.kind === 'unread' ? { ...job, unread: job.unread + 1 } : { ...job, finished: record },
+      );
     }
   }
   return jobs;
@@ -120,23 +134,18 @@ function bodyFor(
 }
 
 /** The piece to paste: the cost line and the `fy-render` block that plays the clip. */
-function pasteOf(job: Submitted, where: string, bytes: number | undefined): string[] {
-  return bytes !== undefined && bytes > MAX_MEDIA_BYTES
-    ? [
-        `It is ${kib(bytes)}, over the ${MAX_MEDIA_BYTES / (1024 * 1024)} MB the chat plays, so there is no player block. Put this line in your reply:`,
-        job.costLine,
-        `The file is in your media folder as ${where}.`,
-      ]
-    : [
-        'Put these lines in your reply:',
-        job.costLine,
-        '```fy-render',
-        'type: video',
-        `alt: ${job.alt}`,
-        `src: media:${where}`,
-        '---',
-        '```',
-      ];
+function pasteOf(job: Submitted, where: string): string[] {
+  // A clip over the chat's bound is never delivered (download refuses it), so every delivered clip has a player block.
+  return [
+    'Put these lines in your reply:',
+    job.costLine,
+    '```fy-render',
+    'type: video',
+    `alt: ${job.alt}`,
+    `src: media:${where}`,
+    '---',
+    '```',
+  ];
 }
 
 function generateVideo(deps: GenerateVideoDeps) {
@@ -267,7 +276,11 @@ function generationStatus(deps: GenerateVideoDeps) {
             sentence: `fal does not know job ${submitted.job} any more (it expired), so the clip cannot be fetched. It may have been billed, so ${usdWords(submitted.microUsd)} still counts toward today's limit.`,
           });
         case 'failed':
-          return await end(deps, submitted, 'refunded', { sentence: poll.sentence });
+          return await end(deps, submitted, poll.refund ? 'refunded' : 'counted', {
+            sentence: poll.refund
+              ? poll.sentence
+              : `${poll.sentence}. fal may have billed it, so ${usdWords(submitted.microUsd)} still counts toward today's limit.`,
+          });
         case 'completed':
           break;
       }
@@ -275,11 +288,13 @@ function generationStatus(deps: GenerateVideoDeps) {
       const result = await fetchQueuedResult(deps.secrets, submitted.resultUrl);
       switch (result.kind) {
         case 'retry':
-          return {
-            text: `The clip for job ${submitted.job} is made, but fal's result could not be read yet: ${result.sentence}. Nothing more was spent; call generation_status again in a minute.`,
-          };
-        case 'failed':
-          return await end(deps, submitted, 'refunded', { sentence: result.sentence });
+          // fal said the clip is made: it was billed. A result that will not read is a failed read, never a refund.
+          return (
+            (await unreadAndGiveUp(deps, submitted, found.unread, result.sentence)) ?? {
+              text: `The clip for job ${submitted.job} is made and paid for (${submitted.paid}), but fal's result could not be read yet: ${result.sentence}. Nothing more was spent; call generation_status again in a minute.`,
+              isError: true,
+            }
+          );
         case 'lost':
           return await end(deps, submitted, 'counted', {
             sentence: `${result.sentence}. It may have been billed, so ${usdWords(submitted.microUsd)} still counts toward today's limit.`,
@@ -291,13 +306,13 @@ function generationStatus(deps: GenerateVideoDeps) {
       const got = await download(deps.fetch, result.url, VIDEO_TYPES, 'video', VIDEO_DOWNLOAD);
       if ('why' in got) {
         if (got.hostRefused === true || got.permanent === true)
-          return await end(deps, submitted, 'counted', {
-            sentence: `The clip was made and paid for (${submitted.paid}), but it could not be fetched: ${got.why}. The result was paid for and could not be fetched. Do NOT retry: a retry would be refused the same way, and generate_video again would be charged again. Tell the owner.`,
-          });
-        return {
-          text: `The clip for job ${submitted.job} was made and paid for (${submitted.paid}), but ${got.why}. Nothing more is charged for checking; call generation_status again in a minute.`,
-          isError: true,
-        };
+          return await end(deps, submitted, 'counted', { sentence: unfetchedSentence(submitted, got.why) });
+        return (
+          (await unreadAndGiveUp(deps, submitted, found.unread, got.why)) ?? {
+            text: `The clip for job ${submitted.job} was made and paid for (${submitted.paid}), but ${got.why}. Nothing more is charged for checking; call generation_status again in a minute.`,
+            isError: true,
+          }
+        );
       }
       const name = `create-video-${submitted.model}-${submitted.job.slice(4)}.${VIDEO_EXTENSION[got.type] ?? 'mp4'}`;
       const where = await deps.deliver(ferret, name, got.bytes);
@@ -311,10 +326,35 @@ function generationStatus(deps: GenerateVideoDeps) {
       return {
         text: [
           `The video clip is ready (job ${submitted.job}, ${submitted.label}), paid for: ${submitted.paid}.`,
-          ...pasteOf(submitted, where, got.bytes.byteLength),
+          ...pasteOf(submitted, where),
         ].join('\n'),
       };
     });
+}
+
+const unfetchedSentence = (submitted: Submitted, why: string): string =>
+  `The clip was made and paid for (${submitted.paid}), but it could not be fetched: ${why}. The result was paid for and could not be fetched. Do NOT retry: a retry would be refused the same way, and generate_video again would be charged again. Tell the owner.`;
+
+/**
+ * A read of a made clip failed. It is written down; the `MAX_UNREAD`-th failure closes the job as counted (the answer to
+ * give), an earlier one leaves it open (`undefined`: the caller says "ask again", for free).
+ */
+async function unreadAndGiveUp(
+  deps: GenerateVideoDeps,
+  submitted: Submitted,
+  before: number,
+  why: string,
+): Promise<ToolAnswer | undefined> {
+  if (before + 1 >= MAX_UNREAD)
+    return await end(deps, submitted, 'counted', {
+      sentence: unfetchedSentence(submitted, `${why} (it failed ${MAX_UNREAD} times)`),
+    });
+  try {
+    await deps.state.append(VIDEO_JOBS, { kind: 'unread', job: submitted.job, at: deps.now().toISOString() });
+  } catch {
+    // The count is only a bound: a failed write leaves it where it was, and the job is still read again.
+  }
+  return undefined;
 }
 
 /** Writes a job's end. `undefined` when it was written; an answer to give when it could not be (nothing was refunded). */
@@ -338,7 +378,7 @@ async function closeJob(
   }
 }
 
-/** A job that ended without a clip: its end first, then (only if fal billed nothing) the refund, so a crash can only over-count. */
+/** A job that ended without a clip: its end first, then (only for a failure fal does not bill) the refund, so a crash can only over-count. */
 async function end(
   deps: GenerateVideoDeps,
   submitted: Submitted,
@@ -347,7 +387,7 @@ async function end(
 ): Promise<ToolAnswer> {
   const sentence =
     outcome === 'refunded'
-      ? `${said.sentence}. fal bills only a successful clip, so ${usdWords(submitted.microUsd)} was given back.`
+      ? `${said.sentence}. fal does not bill a request that fails this way, so ${usdWords(submitted.microUsd)} was given back.`
       : said.sentence;
   const failedToClose = await closeJob(deps, submitted, { outcome, sentence });
   if (failedToClose !== undefined) return failedToClose;
@@ -361,7 +401,7 @@ function answerFinished(submitted: Submitted, finished: Finished): ToolAnswer {
     return {
       text: [
         `The video clip is ready (job ${submitted.job}, ${submitted.label}), paid for once: ${submitted.paid}.`,
-        ...pasteOf(submitted, finished.where, finished.bytes),
+        ...pasteOf(submitted, finished.where),
       ].join('\n'),
     };
   return refusal(`Job ${submitted.job} ended without a clip: ${finished.sentence ?? 'it was not made'}`);

@@ -138,11 +138,28 @@ describe('video is priced by the second, and never under what fal bills', () => 
     expect(priceVideo(veo, 8, false)).toEqual({ ok: true, microUsd: 800_000, from: 'table' });
     expect(priceVideo(veo, 8, true)).toEqual({ ok: true, microUsd: 1_200_000, from: 'table' });
   });
-  test('fal’s live per-second rate wins only when it is higher than the table’s for the choice made', () => {
-    expect(priceVideo(kling, 5, true, { unitPrice: 0.2, unit: 'seconds' })).toEqual({
+  test('fal’s one live rate is compared with the table for both options, and the higher prices the clip', () => {
+    // fal raises the base rate: a clip with sound costs that much more than the table's own sound/silent ratio says
+    expect(priceVideo(kling, 5, true, { unitPrice: 0.1, unit: 'second' })).toEqual({
       ok: true,
       microUsd: 1_000_000,
       from: 'fal',
+    });
+    expect(priceVideo(kling, 5, false, { unitPrice: 0.1, unit: 'second' })).toEqual({
+      ok: true,
+      microUsd: 500_000,
+      from: 'fal',
+    });
+    expect(priceVideo(veo, 8, true, { unitPrice: 0.2, unit: 'seconds' })).toEqual({
+      ok: true,
+      microUsd: 2_400_000,
+      from: 'fal',
+    });
+    // a rate that fell is not seen
+    expect(priceVideo(kling, 5, true, { unitPrice: 0.05, unit: 'second' })).toEqual({
+      ok: true,
+      microUsd: 700_000,
+      from: 'table',
     });
     expect(priceVideo(kling, 5, true, { unitPrice: 0.07, unit: 'second' })).toEqual({
       ok: true,

@@ -20,6 +20,8 @@ interface Queued {
   endpoint: string;
   status: 'IN_QUEUE' | 'IN_PROGRESS' | 'COMPLETED' | 'NOT_FOUND';
   error?: string;
+  /** fal's class of the error on the status read (`runner_disconnected`, `client_cancelled` …). */
+  errorType?: string;
   /** The result read: its status, or `ok`. */
   result: 'ok' | number | 'no-video';
   statusDrops: boolean;
@@ -74,7 +76,12 @@ class FakeFal {
       if (match![2] !== undefined) {
         if (job.statusDrops) throw new Error('connection dropped');
         return Response.json(
-          { status: job.status, request_id: match![1], ...(job.error === undefined ? {} : { error: job.error }) },
+          {
+            status: job.status,
+            request_id: match![1],
+            ...(job.error === undefined ? {} : { error: job.error }),
+            ...(job.errorType === undefined ? {} : { error_type: job.errorType }),
+          },
           { status: job.status === 'COMPLETED' ? 200 : 202 },
         );
       }
@@ -469,7 +476,7 @@ describe('a job fal fails is refunded only when fal bills nothing', () => {
   test('fal ends it with an error and no output: refunded, and it says so every time', async () => {
     const w = await world();
     const job = jobOf((await video(w)).text);
-    w.fake.finish('req-1', { error: 'the runner was lost' });
+    w.fake.finish('req-1', { error: 'the runner was lost', errorType: 'runner_disconnected' });
     const answer = await status(w, job);
     expect(answer.isError).toBe(true);
     expect(answer.text).toContain('given back');
@@ -486,15 +493,108 @@ describe('a job fal fails is refunded only when fal bills nothing', () => {
     expect(w.fake.to('queue.fal.run', 'GET')).toHaveLength(reads);
   });
 
-  test('a result that answers 500, 422 or 499 has no output: refunded', async () => {
+  test('an error_type of fal’s 5xx class, or bad_request, is refunded; each is checked on its own', async () => {
+    for (const errorType of [
+      'request_timeout',
+      'startup_timeout',
+      'runner_scheduling_failure',
+      'runner_disconnected',
+      'runner_server_error',
+      'internal_error',
+      'bad_request',
+    ]) {
+      const w = await world();
+      const job = jobOf((await video(w)).text);
+      w.fake.finish('req-1', { error: 'it failed', errorType });
+      const answer = await status(w, job);
+      expect(answer.isError).toBe(true);
+      expect(answer.text).toContain('given back');
+      expect(net(w)).toBe(0);
+      expect(jobLines(w)[1]).toMatchObject({ kind: 'finished', outcome: 'refunded' });
+    }
+  });
+
+  test('a cancel, a dropped client, a content-policy refusal, an unknown error_type or none at all stays counted', async () => {
+    for (const errorType of [
+      'client_cancelled',
+      'client_disconnected',
+      'content_policy_violation',
+      'something_new_fal_added',
+      undefined,
+    ]) {
+      const w = await world();
+      const job = jobOf((await video(w)).text);
+      w.fake.finish('req-1', { error: 'it failed', ...(errorType === undefined ? {} : { errorType }) });
+      const answer = await status(w, job);
+      expect(answer.isError).toBe(true);
+      expect(answer.text).toContain('still counts');
+      expect(answer.text).not.toContain('given back');
+      expect(net(w)).toBe(350_000);
+      expect(ledgerLines(w)).toHaveLength(1);
+      expect(jobLines(w)[1]).toMatchObject({ kind: 'finished', outcome: 'counted' });
+    }
+  });
+
+  test('a clean status then a result that answers 500, 422 or 499 was billed: still charged, re-checked, and delivered when the read recovers', async () => {
     for (const result of [500, 422, 499]) {
       const w = await world();
       const job = jobOf((await video(w)).text);
       w.fake.finish('req-1', { result });
       const answer = await status(w, job);
       expect(answer.isError).toBe(true);
-      expect(net(w)).toBe(0);
+      expect(answer.text).toContain('paid for');
+      expect(answer.text).not.toContain('given back');
+      expect(net(w)).toBe(350_000);
+      expect(ledgerLines(w)).toHaveLength(1);
+      expect(jobLines(w).filter(line => line.kind === 'finished')).toHaveLength(0);
+      // asked again while it still fails: still open, still charged once
+      expect((await status(w, job)).isError).toBe(true);
+      expect(net(w)).toBe(350_000);
+      // the read recovers: the clip is delivered, and the one reservation stands
+      w.fake.queued.get('req-1')!.result = 'ok';
+      const done = await status(w, job);
+      expect(done.isError).toBeUndefined();
+      expect(done.text).toContain('type: video');
+      expect(w.delivered).toHaveLength(1);
+      expect(net(w)).toBe(350_000);
+      expect(jobLines(w).at(-1)).toMatchObject({ kind: 'finished', outcome: 'delivered' });
     }
+  });
+
+  test('a result that never reads is closed as counted after five failed reads, and never read again', async () => {
+    const w = await world();
+    const job = jobOf((await video(w)).text);
+    w.fake.finish('req-1', { result: 500 });
+    for (let attempt = 1; attempt < 5; attempt++) {
+      const open = await status(w, job);
+      expect(open.text).not.toContain('Do NOT retry');
+    }
+    const closed = await status(w, job);
+    expect(closed.isError).toBe(true);
+    expect(closed.text).toContain('made and paid for');
+    expect(closed.text).toContain('could not be fetched');
+    expect(closed.text).toContain('Do NOT retry');
+    expect(net(w)).toBe(350_000);
+    expect(jobLines(w).at(-1)).toMatchObject({ kind: 'finished', outcome: 'counted' });
+    const reads = w.fake.to('queue.fal.run', 'GET').length;
+    expect((await status(w, job)).text).toContain('Do NOT retry');
+    expect(w.fake.to('queue.fal.run', 'GET')).toHaveLength(reads);
+  });
+
+  test('the failed reads are counted across a restart', async () => {
+    const before = await world();
+    const job = jobOf((await video(before)).text);
+    before.fake.finish('req-1', { result: 500 });
+    for (let attempt = 0; attempt < 4; attempt++) await status(before, job);
+    const carried = {
+      ledger: before.host.state('create').files.get('ledger.jsonl')!,
+      jobs: before.host.state('create').files.get('jobs.jsonl')!,
+    };
+    const fake = new FakeFal();
+    fake.queued.set('req-1', { endpoint: KLING, status: 'COMPLETED', result: 500, statusDrops: false });
+    const after = await world({ carried, fake });
+    expect((await status(after, job)).text).toContain('Do NOT retry');
+    expect(net(after)).toBe(350_000);
   });
 
   test('a result that has expired, or that holds no video, may have been billed: it stays counted', async () => {
@@ -549,11 +649,32 @@ describe('a job fal fails is refunded only when fal bills nothing', () => {
     const down = await status(w, job);
     expect(down.isError).toBe(true);
     expect(down.text).toContain('Nothing more is charged');
-    expect(jobLines(w)).toHaveLength(1);
+    expect(jobLines(w).filter(line => line.kind === 'finished')).toHaveLength(0);
     w.fake.cdn = 'ok';
     expect((await status(w, job)).text).toContain('type: video');
     expect(net(w)).toBe(350_000);
     expect(ledgerLines(w)).toHaveLength(1);
+  });
+
+  test('a file that is gone from fal’s storage (404 after it expired) is closed as counted and not retried forever', async () => {
+    const w = await world();
+    const job = jobOf((await video(w)).text);
+    w.fake.finish('req-1');
+    w.fake.cdn = 'not-found';
+    for (let attempt = 1; attempt < 5; attempt++) {
+      const open = await status(w, job);
+      expect(open.text).toContain('Nothing more is charged');
+    }
+    const closed = await status(w, job);
+    expect(closed.isError).toBe(true);
+    expect(closed.text).toContain('Do NOT retry');
+    expect(closed.text).toContain('paid for');
+    expect(net(w)).toBe(350_000);
+    expect(jobLines(w).at(-1)).toMatchObject({ kind: 'finished', outcome: 'counted' });
+    // closed: asking again reads nothing and fetches nothing
+    const fetched = w.fake.to('v3b.fal.media').length;
+    expect((await status(w, job)).text).toContain('Do NOT retry');
+    expect(w.fake.to('v3b.fal.media')).toHaveLength(fetched);
   });
 
   test('a file that is not a video is refused after it was paid for, and not retried', async () => {
@@ -619,7 +740,7 @@ describe('a daemon restart loses no job and charges nothing twice', () => {
   test('a job refunded before the restart is not refunded again after it', async () => {
     const before = await world();
     const job = jobOf((await video(before)).text);
-    before.fake.finish('req-1', { error: 'runner lost' });
+    before.fake.finish('req-1', { error: 'runner lost', errorType: 'runner_disconnected' });
     await status(before, job);
     const carried = {
       ledger: before.host.state('create').files.get('ledger.jsonl')!,
