@@ -191,7 +191,7 @@ export default definePlugin({
         group: 'behaviour',
         label: 'Layout',
         order: 15,
-        scope: 'device',
+        // Filed under the machine: the page's own switch is where a change is said to be saved (all devices, or just this one).
         scopeChip: false,
       }),
     ],

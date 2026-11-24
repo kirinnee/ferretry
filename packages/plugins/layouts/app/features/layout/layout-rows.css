@@ -127,17 +127,6 @@
   font-size: var(--text-cell, 0.8125rem);
   font-weight: 600;
 }
-/* The same chip the Settings header draws for the other tabs. */
-.fy-lr-scope-chip {
-  border: var(--border-width, 1px) solid var(--border);
-  border-radius: 999px;
-  font-size: 0.75rem;
-  padding: 1px 8px;
-}
-.fy-lr-scope-chip[data-scope='device'] {
-  border-color: var(--accent);
-  color: var(--fg);
-}
 /* The page already puts 32px between its groups (`gap` above). The shell's `.fy-page [data-setting-group]` adds its own
    32px under every group, which stacked into a 64px empty band between "In use" and "Navigation"; this page owns its spacing. */
 .fy-lr-page > .fy-lr-group[data-setting-group] {
