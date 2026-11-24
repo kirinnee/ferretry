@@ -353,7 +353,12 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
   const [, stateFile] = manifest.data.state;
   const terminalsState: TerminalsStateFile = stateFile;
   const panes = new StateTerminalPanes(kernel.state, terminalsState);
-  const effectiveLimits = ferrets.effectiveLimits?.bind(ferrets);
+  // A daemon a test booted (the kernel's launch guard is armed) never limits: the machine has ONE fleet slice, and a
+  // test daemon that configured, read or placed ferrets in it would act on the real daemon's ferrets (2026-11-24 outage).
+  const testDaemon = kernel.hostFacts.launchGuard().active;
+  const effectiveLimits = testDaemon
+    ? async (): Promise<{ readonly enabled: false }> => ({ enabled: false })
+    : ferrets.effectiveLimits?.bind(ferrets);
   const processes = buildProcesses({
     kernel,
     tmux,

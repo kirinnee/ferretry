@@ -9,9 +9,9 @@ type BrowserChallengeProvider = BrowserChallenge['provider'];
  * Whether a page appears to be asking the person on it to prove they are human — so the view can say so
  * and hand the page to its owner, who solves it themselves.
  *
- * RECOGNISED, NEVER ANSWERED. This reads only what the browser already knows about a page — its address,
- * its title and the addresses of its frames — and runs nothing inside it. Ferretry does not solve, skip or
- * disguise itself past a challenge; the only thing it does with this is tell a person.
+ * RECOGNISED HERE, ANSWERED ELSEWHERE. This reads only what the browser already knows about a page — its address,
+ * its title and the addresses of its frames — and runs nothing inside it. It does not solve, skip or disguise
+ * itself past a challenge; it tells a person, and only where stealth is in effect does `solver.ts` act on it.
  *
  * A HINT, NOT A VERDICT. A widget that is present but invisible (reCAPTCHA v3, an invisible hCaptcha) is
  * deliberately not flagged, because nothing is being asked of anyone yet; a challenge served in a shape this

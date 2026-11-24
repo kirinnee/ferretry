@@ -1207,8 +1207,10 @@ describe('the browser section follows FY_BROWSER_STEALTH', () => {
     should(AGENT_TOOLS_INSTRUCTION).not.containEql('solve captchas');
     should(BROWSER_INSTRUCTION.off).containEql('Never solve captchas');
     should(BROWSER_INSTRUCTION.off).containEql('spoof a browser or identity');
-    should(BROWSER_INSTRUCTION.on).containEql('never solve or bypass one yourself');
-    should(BROWSER_INSTRUCTION.on).containEql("never change the browser's identity");
+    should(BROWSER_INSTRUCTION.on).equal(
+      "On the owner's identities the browser passes bot checks and solves token checks (Turnstile, reCAPTCHA, hCaptcha) itself. You may try a simple picture puzzle shown in the page yourself; never use outside tools or services to solve or bypass a check, and never change the browser's identity. If a check stays, ask the owner (browser_ask_owner).",
+    );
+    should(BROWSER_INSTRUCTION.on).not.containEql('never solve a captcha');
     should(BROWSER_INSTRUCTION.on).containEql('browser_ask_owner');
   });
 });

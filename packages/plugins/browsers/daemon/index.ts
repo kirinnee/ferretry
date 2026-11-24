@@ -5,6 +5,7 @@ import {
   type BrowsersApi,
   type BrowsersConfig,
   type BrowserStreamHello,
+  CAPTCHA_SECRET_NAME,
   PageChanged,
   stealthOn,
 } from '../contract/index.ts';
@@ -36,7 +37,9 @@ import { SealedGate } from './sealed/gate.ts';
 import { secureCopyReach } from './sealed/reach.ts';
 import type { RecordedSurfaceEvent } from './tools/types.ts';
 import { processHost } from './adapters/host.ts';
+import { CapSolver, CaptchaSolving, captchaProxyOf, SpendLedger } from './challenges/solver.ts';
 import { auditStealthSwitch } from './stealth-audit.ts';
+import { browserLaunchPart } from './launch-parts.ts';
 import { KernelDetachedLauncher } from './open-url/launcher.ts';
 import { systemOpenRoutes } from './open-url/routes.ts';
 import { type DetachedLauncherPort, OpenUrlService } from './open-url/service.ts';
@@ -292,6 +295,26 @@ export function buildBrowsers(
     now: () => kernel.clock.nowMs(),
   });
 
+  // ── solving a token check for the owner (B5 D7): only where stealth is in effect, key and cap judged at each solve ──────
+  const solving = new CaptchaSolving({
+    stealth: () => {
+      const current = config();
+      return current !== undefined && stealthOn(current);
+    },
+    solver: new CapSolver({
+      fetch: async (url, init) => await kernel.fetch.request(url, init),
+      secret: async () => await kernel.secrets.resolve(CAPTCHA_SECRET_NAME),
+      ledger: new SpendLedger(kernel.state, () => kernel.clock.now()),
+      sleep: async delay => await kernel.clock.sleep(milliseconds(delay)),
+    }),
+    onPage: async (sessionId, page, work) => await pages.inputOnPage(sessionId, page, work),
+    // GAP: the solver is given the browser's proxy only when it has no credentials; the Vault hands Browsers none to give.
+    proxy: () => captchaProxyOf(config()?.proxy),
+    audit: async draft => await ctx.needs.gate.audit(draft),
+    nowMs: () => kernel.clock.nowMs(),
+    failed: message => kernel.log.error(message, {}),
+  });
+
   // "What agents may control" is read from core's AgentControlPort on every call; unbound, or an answer that is not a
   // plain yes, refuses (fail closed). ONE policy for the browser tools and the page target.
   const policy = agentControlPolicy(() => ctx.uses.agentControl.current());
@@ -311,6 +334,7 @@ export function buildBrowsers(
       scriptedOn: scriptHost => vault.scriptedOn?.(scriptHost),
     },
     pageActs: { acted: (sessionId, script) => vault.pageActed?.(sessionId as FerretId, script) },
+    captcha: solving,
     sealed: gate,
     // A takeover ends a secure paste still waiting for that page (the Vault refuses it now, P2-5).
     takeovers: { landed: async (sessionId, keys) => await vault.pageTakenOver?.(sessionId as FerretId, keys) },
@@ -346,7 +370,7 @@ export function buildBrowsers(
     platform: host.platform,
   });
 
-  // The ONE stealth switch (no behaviour behind it yet): its real changes are audited, a held `on` only once confirmed.
+  // The ONE stealth switch: its real changes are audited, a held `on` only once confirmed.
   const cancelStealthAudit = auditStealthSwitch({
     read: () => config()?.stealth ?? 'off',
     watch: listener => kernel.config.watch(manifest.data.config[0] as ConfigFileDef<BrowsersConfig>, listener),
@@ -424,6 +448,8 @@ export function buildBrowsers(
     hooks: {
       'input.targets:page': target.adapter,
       'reference.catalog:%browser': new BrowsersReferenceMenu(pages, kernel.redaction),
+      // What a launch says about stealth: FY_BROWSER_STEALTH is 1 only while the machine switch is on in effect.
+      'launch.parts': () => [{ id: 'browsers', item: browserLaunchPart(config) }],
     },
   };
 }

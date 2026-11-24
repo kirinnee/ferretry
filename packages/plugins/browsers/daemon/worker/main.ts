@@ -95,7 +95,7 @@ import type { PushNumberPage } from '../challenges/push-number-read.ts';
 
 const endpoint = process.argv[2];
 /** This worker drives a stealth identity's Chrome (`STEALTH_WORKER_ENVIRONMENT` in `client.ts`): patchright-core, with no `Runtime.enable`. */
-const STEALTH = process.env.FY_BROWSER_STEALTH === '1';
+const STEALTH = process.env.FY_BROWSER_WORKER_STEALTH === '1';
 /** What a stealth page's console log says first: the page's console cannot be read without the DevTools domain a page can detect. */
 export const STEALTH_CONSOLE_NOTE =
   'the page console is not captured in a stealth browser: reading it needs the DevTools Runtime domain, which sites detect';

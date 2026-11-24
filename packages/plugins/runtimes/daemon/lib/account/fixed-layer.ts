@@ -368,7 +368,7 @@ export const BROWSER_STEALTH_ENV = 'FY_BROWSER_STEALTH';
  */
 export const BROWSER_INSTRUCTION = {
   off: 'Never solve captchas, spoof a browser or identity.',
-  on: "On the owner's identities the browser passes bot checks and solves captchas itself; never solve or bypass one yourself or with your own tools, never change the browser's identity; if a check stays, ask the owner (browser_ask_owner).",
+  on: "On the owner's identities the browser passes bot checks and solves token checks (Turnstile, reCAPTCHA, hCaptcha) itself. You may try a simple picture puzzle shown in the page yourself; never use outside tools or services to solve or bypass a check, and never change the browser's identity. If a check stays, ask the owner (browser_ask_owner).",
 } as const;
 
 /** Claude's `--mcp-config` document for the tools server: a JSON string, so no file has to exist. */
