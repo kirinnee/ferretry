@@ -56,3 +56,29 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+
+/* A spoken line of a reply (`voice-line.tsx`): a speaker mark on an accent tint with a soft outline (never a side bar), so said
+   words read differently from written ones. The tint, outline and mark are the palette's accent; the ink stays the message's own (contrast is the page's, not the accent's). */
+.fy-voice-line {
+  align-items: flex-start;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: var(--hm-radius, 0.5rem);
+  color: var(--fg, inherit);
+  display: flex;
+  font-style: italic;
+  gap: 0.5rem;
+  margin-block: 0.75rem;
+  overflow-wrap: anywhere;
+  padding: 0.5rem 0.75rem;
+}
+
+.fy-voice-line__mark {
+  color: var(--accent-strong, var(--accent));
+  flex: none;
+  margin-block-start: 0.2em;
+}
+
+.fy-voice-line[data-fy-voice-line='open'] .fy-voice-line__words::after {
+  content: ' …';
+}

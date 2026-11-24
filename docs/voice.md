@@ -674,6 +674,22 @@ over `speechSynthesis`, with the browser objects injected so every path is teste
 `voice-choice.ts` (voice and rate, pure), `read-aloud.ts` (which message is being read and which sentence). `hooks/use-read-aloud.ts` is
 the composition point and `components/read-aloud.tsx` is the control and captions, drawn by `TranscriptTextRow` for assistant text.
 
+### `<voice>` lines: the words a reply marks as spoken
+
+A reply can mark the words meant to be heard: `<voice>Let me check.</voice>`. The grammar and its parser are Conversation's
+(`packages/plugins/conversation/contract/voice-tag.ts`: `splitVoice`, `spokenLines`), so the chat and the voice cannot disagree on what a
+spoken line is.
+
+- **Drawn:** the chat shows each line as a **speaker line** (a speaker mark, an accent tint with a soft outline, italic words) and never the tag
+  (`app/hypermedia/voice-line.tsx`). A line is plain text, never Markdown or HTML.
+- **Said:** when a reply holds at least one **closed** line, Read aloud and Auto-read say **only those lines** (same sentence splitting,
+  same one-minute cap) and none of the written work around them. A reply with no closed line is read exactly as before.
+- **What is not a line:** a tag inside a code fence, an indented block or an inline `code span` (a reply that _teaches_ the tag); an
+  opening tag whose closing tag is not in the same paragraph; a stray closing tag; an empty line (the tags are dropped). Nested opening
+  tags fold into one line that ends at the first closing tag.
+- **Still arriving:** an unclosed tag at the very end of a message that is streaming is drawn as an open line (with "…") and never
+  said; in a finished message it stays visible as the text it was.
+
 ## Auto-read replies: a finished turn, read aloud
 
 The same reading, started by itself: when a ferret's turn ends, this device reads the reply. It is the second slice of live voice chat
