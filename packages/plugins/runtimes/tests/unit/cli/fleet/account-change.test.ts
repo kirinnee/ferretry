@@ -107,6 +107,39 @@ describe('runChange', () => {
     should(world.out.exitCode).be.undefined();
   });
 
+  it('should say the runtimes a change leaves only after it applied, never before', async () => {
+    // Arrange
+    const world = fakeWorld();
+
+    // Act
+    await runChange(world.deps, { change: removeRuntime, destructive: false, options: {} });
+
+    // Assert
+    const lines = world.out.text('report').split('\n');
+    should(lines.filter(line => line === 'Runtimes after this change:')).have.length(1);
+    should(world.out.text('report')).match(/Add runtime claude-work/);
+    should(lines.indexOf('Runtimes after this change:')).be.above(lines.indexOf('Saves:'));
+  });
+
+  it('should not say the runtimes after a change that was refused', async () => {
+    // Arrange
+    const world = fakeWorld({
+      gateway: {
+        apply: () => ({
+          outcome: 'applied',
+          apply: { outcome: 'rolled-back', failedOperation: 'write profiles/x.yaml', reason: 'refused' },
+        }),
+      },
+    });
+
+    // Act
+    await runChange(world.deps, { change: removeRuntime, destructive: false, options: {} });
+
+    // Assert
+    should(world.out.text('report')).not.match(/Runtimes after this change/);
+    should(world.out.exitCode).equal(1);
+  });
+
   it('should stop after the preview on a dry run', async () => {
     const world = fakeWorld();
     should(
