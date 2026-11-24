@@ -1283,11 +1283,65 @@ pause plus the countdown plus STT and clean-up, an estimated 3.4–5.5 s at the 
 - **Café/TV** — see above.
 - **No screen yet.** The Live bar, the countdown and the loop that uses these events come in later slices.
 
+## The agent gate: do ferrets speak `<voice>` lines?
+
+Voice mode only works if the agent answers in `<voice>` lines ([the tag](#voice-lines-the-words-a-reply-marks-as-spoken) is the
+grammar; the words a lead ferret reads are `packages/plugins/voice/instructions/voice.md`). **Unit 9 measured it** on real ferrets,
+2026-11-24 (PST evening), against the design's pass mark A3: **at least 90 % of tool-needing voice turns per harness**.
+
+**Result.** Claude Code on `claude-sonnet-5-5`, 20 turns each run:
+
+| Wording                                                                                                   | (a) a line before the first tool | (b) a final line of 1-3 sentences | (c) nothing code-like in a line | All three                   |
+| --------------------------------------------------------------------------------------------------------- | -------------------------------- | --------------------------------- | ------------------------------- | --------------------------- |
+| The merged text (PR 2475): "Before any tool, …"                                                           | 16 / 20                          | 19 / 20                           | 20 / 20                         | **15 / 20 (75 %), fails**   |
+| The changed text (this change): "Your very first output must be …, before you call any tool, even a read" | 20 / 20                          | 20 / 20                           | 20 / 20                         | **20 / 20 (100 %), passes** |
+
+**Codex: not run.** Ferretry 5.0 cannot use a host Codex login yet (`store: host` answers "not in 5.0 yet", and a Ferretry-kept login
+refuses a linked or hard-linked sign-in file), so the only way in was to copy the owner's `codex-personal` sign-in file into the test
+home. That was refused on purpose (a copied sign-in can rotate its refresh token and sign the owner out). **A real gap:** the Codex
+half of A3 stays unmeasured until a Codex login can be added to a test daemon without copying a credential. Until then nothing here
+says Codex follows the teaching.
+
+**The five misses of the merged wording** (the exact lines are in the gate folder, `u9-gate/run1-current-wording/`, kept with the unit briefs and not in this repo):
+
+- **Turns 14, 17, 18 and 20** (dependencies, default port, run the build script, total stock): the ferret went straight to its tools and
+  said nothing first, so the first spoken line came after the work. In turn 14 the line it finally said started with the instruction's
+  own words ("Before any tool, one moment while I check …"), so the wording itself was being echoed.
+- **Turn 10** (what the docs notes say): the final line was **four** sentences ("… And ask Dana about the supplier contract.").
+- No turn put code, a path, a file name, an id, a list or a tag inside a line (c: 20 / 20 in both runs).
+
+**The change (one sentence in the instruction, no code):** "Before any tool, reply with `<voice>one short line</voice>`" became "Your very
+first output must be `<voice>one short line</voice>`, before you call any tool, even a read", and "`1-3 plain sentences`" gained
+", never more than three". Same size class (447 characters, under the 450 the unit test allows). One re-run, as the plan allows: 20 / 20.
+**The numbers are small (20 turns a run) and one model:** 20 / 20 says the wording works on Sonnet 5.5 on these tasks, not that it
+always will; the fall-back for a reply with no closed line is still Read aloud of the whole reply (see [the tag](#voice-lines-the-words-a-reply-marks-as-spoken)).
+
+**How it was run.** A throwaway 5.0 daemon on port 7480 (its own `FY_HOME`, limits off, outside `ferretry_fleet.slice`), built from this
+branch so the ferret got the real `voice` instruction section; one fresh lead ferret per turn on `claude-atomi`, working in a tiny
+synthetic project (a CSV, a small TypeScript service, a log, notes, a two-commit git repo). Each ferret first answered a plain "reply
+ready" opener, then `fy send` typed `(voice) <words>` into it verbatim, exactly as the voice stream sends it
+(`daemon/lib/stream/session.ts`). The harness transcript was then read and each turn scored with the merged grammar, `splitVoice`
+(`conversation/contract/voice-tag.ts`):
+
+- **(a)** a **closed** line in a text block before the first tool call of the turn;
+- **(b)** the turn's last message, after the last tool, ends in a closed line of **1-3 sentences**;
+- **(c)** no line holds a backtick, angle bracket or brace, a path, a file name with an extension, a hex id or uuid, a snake or camel
+  case name, a call or flag, or a list marker.
+
+A turn passes only if all three hold. Two of the first twenty prompts (the last commit, today's date) were answered from the context the
+ferret was handed, with no tool, so they were not tool-needing; they were replaced by "how many bytes is the stock csv" and "which version of
+bun is installed here" and the first pass is kept apart in `u9-gate/pass0-excluded-first-pass/`. The scorer and the prompts are in
+`u9-gate/` (`score.ts`, `utterances.txt`); the raw spoken lines for every turn are `u9-gate/<run>/raw/NN-claude.voice.txt`. **Not covered:** a
+voice turn to a ferret deep in a long typed conversation, a second voice turn in the same ferret, a helper ferret (it never talks to the
+person and is not given the section), and any model other than Sonnet 5.5.
+
 ## Not built yet
 
 - **Live voice** (listen, notice the pause, send after a visible countdown, read the reply aloud):
   nothing of it exists (its end-of-turn detector was dropped by the owner, !A525 — see
   [Pause detection](#pause-detection-the-end-of-a-spoken-turn)). There is no Live button, bar or loop.
+- **Codex and the voice teaching:** unmeasured. 5.0 cannot yet use a host Codex login in a test daemon, so the agent gate
+  ([above](#the-agent-gate-do-ferrets-speak-voice-lines)) ran on Claude only.
 - **Voice mode on your machine** (hands-free chat): the machine's speech engine, the audio stream to it, the panel and the
   machine's reply voice are built and measured (see [Voice mode: the machine's speech engine](#voice-mode-the-machines-speech-engine),
   [The voice mode panel](#the-voice-mode-panel) and [The reply voice](#the-reply-voice-kokoro-on-the-machine)); the panel does not
