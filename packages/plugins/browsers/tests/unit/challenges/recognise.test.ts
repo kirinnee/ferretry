@@ -1,8 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { recogniseBrowserChallenge } from '../../../daemon/challenges/recognise.ts';
+import {
+  type BrowserChallengeEvidence,
+  isChallengedSubresource,
+  recogniseBrowserChallenge,
+  SubresourceChallenges,
+} from '../../../daemon/challenges/recognise.ts';
 
-const page = (overrides: Partial<{ url: string; title: string; frameUrls: readonly string[] }> = {}) => ({
+const page = (overrides: Partial<BrowserChallengeEvidence> = {}): BrowserChallengeEvidence => ({
   url: 'https://shop.example/',
   title: 'Shop',
   frameUrls: [],
@@ -74,5 +79,130 @@ describe('recogniseBrowserChallenge', () => {
 
     // Act + Assert
     for (const frame of quiet) should(recogniseBrowserChallenge(page({ frameUrls: [frame] }))).be.undefined();
+  });
+});
+
+describe('recogniseBrowserChallenge: sub-request challenges', () => {
+  const challenged = (...urls: string[]) => ({ challengedSubresources: urls });
+
+  it('should recognise a first-party script or stylesheet answered with a challenge, even on a page with text', () => {
+    // Act + Assert
+    should(
+      recogniseBrowserChallenge(page({ ...challenged('https://shop.example/app.js'), blankBody: true })),
+    ).deepEqual({
+      provider: 'cloudflare',
+    });
+    should(
+      recogniseBrowserChallenge(page({ ...challenged('https://cdn.shop.example/app.css'), blankBody: false })),
+    ).deepEqual({
+      provider: 'cloudflare',
+    });
+    should(
+      recogniseBrowserChallenge(
+        page({ ...challenged('https://static.shop.co.uk/a.js'), url: 'https://www.shop.co.uk/' }),
+      ),
+    ).deepEqual({
+      provider: 'cloudflare',
+    });
+  });
+
+  it('should recognise a challenged third-party script only when the page has nothing to read', () => {
+    // Act + Assert
+    should(
+      recogniseBrowserChallenge(page({ ...challenged('https://cdn.other.example/a.js'), blankBody: true })),
+    ).deepEqual({
+      provider: 'cloudflare',
+    });
+    should(
+      recogniseBrowserChallenge(page({ ...challenged('https://cdn.other.example/a.js'), blankBody: false })),
+    ).be.undefined();
+    should(recogniseBrowserChallenge(page({ ...challenged('https://cdn.other.example/a.js') }))).be.undefined();
+    // A look-alike host, and another registrable name under the same public suffix, are third parties.
+    should(
+      recogniseBrowserChallenge(page({ ...challenged('https://notshop.example/a.js'), blankBody: false })),
+    ).be.undefined();
+    should(
+      recogniseBrowserChallenge(
+        page({ ...challenged('https://other.co.uk/a.js'), url: 'https://shop.co.uk/', blankBody: false }),
+      ),
+    ).be.undefined();
+  });
+
+  it('should see nothing when no sub-request was challenged', () => {
+    // Act + Assert
+    should(recogniseBrowserChallenge(page({ challengedSubresources: [], blankBody: true }))).be.undefined();
+  });
+
+  it('should count only a 403 with a cf-mitigated challenge on a script or stylesheet', () => {
+    // Arrange
+    const answer = (type: string, status: number, headers: Record<string, string>) => ({ type, status, headers });
+
+    // Act + Assert
+    should(isChallengedSubresource(answer('script', 403, { 'cf-mitigated': 'challenge' }))).be.true();
+    should(isChallengedSubresource(answer('stylesheet', 403, { 'CF-Mitigated': ' Challenge ' }))).be.true();
+    should(isChallengedSubresource(answer('script', 403, {}))).be.false();
+    should(isChallengedSubresource(answer('script', 403, { 'cf-mitigated': 'block' }))).be.false();
+    should(isChallengedSubresource(answer('script', 200, { 'cf-mitigated': 'challenge' }))).be.false();
+    should(isChallengedSubresource(answer('image', 403, { 'cf-mitigated': 'challenge' }))).be.false();
+    should(isChallengedSubresource(answer('document', 403, { 'cf-mitigated': 'challenge' }))).be.false();
+  });
+
+  it('should tell sites apart by the public suffix list, private suffixes included', () => {
+    // Arrange
+    const onPage = (url: string, script: string) =>
+      recogniseBrowserChallenge(page({ url, ...challenged(script), blankBody: false }));
+
+    // Act + Assert — independent github.io tenants are third parties of each other
+    should(onPage('https://alice.github.io/', 'https://mallory.github.io/a.js')).be.undefined();
+    should(onPage('https://alice.github.io/', 'https://alice.github.io/a.js')).deepEqual({ provider: 'cloudflare' });
+    // Sibling hosts under one registrable domain are first-party, however long the suffix.
+    should(onPage('https://app.abc.de/', 'https://static.abc.de/a.js')).deepEqual({ provider: 'cloudflare' });
+    should(onPage('https://www.shop.co.uk/', 'https://static.shop.co.uk/a.js')).deepEqual({ provider: 'cloudflare' });
+    should(onPage('https://shop.co.uk/', 'https://other.co.uk/a.js')).be.undefined();
+    // An address that has no registrable domain is only ever the same host.
+    should(onPage('http://127.0.0.1:8080/', 'http://127.0.0.1:8080/a.js')).deepEqual({ provider: 'cloudflare' });
+    should(onPage('http://127.0.0.1:8080/', 'http://localhost:8080/a.js')).be.undefined();
+  });
+
+  it('should keep a bounded record per kind, so trackers cannot hide a later first-party challenge', () => {
+    // Arrange
+    const record = new SubresourceChallenges();
+    const document = 'https://shop.example/';
+
+    // Act
+    for (let each = 0; each < 40; each += 1) record.observe(`https://cdn.track.example/${String(each)}.js`, document);
+    record.observe('https://shop.example/app.js', document);
+    for (let each = 0; each < 40; each += 1) record.observe(`https://shop.example/${String(each % 20)}.css`, document);
+
+    // Assert
+    should(record.urls().length).equal(32);
+    should(record.urls()).containEql('https://shop.example/app.js');
+    should(recogniseBrowserChallenge(page({ challengedSubresources: record.urls(), blankBody: false }))).deepEqual({
+      provider: 'cloudflare',
+    });
+  });
+
+  it('should clear the record when the document a navigation asked for commits, and not before', () => {
+    // Arrange
+    const record = new SubresourceChallenges();
+    const document = 'https://shop.example/';
+    record.observe('https://shop.example/app.js', document);
+
+    // Act + Assert — a navigation that never commits (an HTTP 204) keeps the current page's evidence
+    record.navigating('https://shop.example/nothing', false);
+    should(record.urls()).deepEqual(['https://shop.example/app.js']);
+    // A same-document change (pushState) is no navigation at all
+    record.committed('https://shop.example/route');
+    should(record.urls()).deepEqual(['https://shop.example/app.js']);
+    // A redirected navigation commits at the end of its chain
+    record.navigating('https://shop.example/old', false);
+    record.navigating('https://shop.example/new#top', true);
+    record.committed('https://shop.example/new');
+    should(record.urls()).deepEqual([]);
+    // Chrome's error page is a committed document too
+    record.observe('https://shop.example/b.js', document);
+    record.navigating('https://down.example/', false);
+    record.committed('chrome-error://chromewebdata/');
+    should(record.urls()).deepEqual([]);
   });
 });

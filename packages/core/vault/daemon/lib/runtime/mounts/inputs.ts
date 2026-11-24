@@ -193,6 +193,20 @@ export function inputRequestRoutes(service: InputRequestService) {
       })();
       return jsonResponse(shot);
     },
+    // The card looks at its target again (the Send guard's look, on request). Governed like the list; a page also needs
+    // the browser permission, as its picture does. Changes only the held facts and returns the request, never a value.
+    'POST /v1/ferrets/:ferretId/input-requests/:requestId/observe': async call => {
+      const caller = ownerOf(call);
+      const ferret = ferretOf(call);
+      const id = requestOf(call);
+      const refused =
+        service.targetOf(ferret, id)?.kind === 'page' ? refusedPageInput(call, 'look at a page') : undefined;
+      if (refused !== undefined) return refused;
+      const request = await service.reobserve(ferret, id, caller).catch(answered);
+      const names = refusedAccountNames(call, 'read the accounts an input names') === undefined;
+      const spell = (): PlainApiResponse => jsonResponse(service.resealed(names ? request : nameless(request)));
+      return { ...spell(), late: spell };
+    },
     'POST /v1/ferrets/:ferretId/input-requests/:requestId/deliver': async call => {
       const caller = ownerOf(call);
       // A paste into the secret store changes it, so it needs what `POST /v1/secrets` needs as well.

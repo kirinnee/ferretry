@@ -1,4 +1,5 @@
 import type { PageFacts } from '@ferretry/core-vault/contract';
+import { getDomain } from 'tldts';
 
 /** A challenge a page shows, as the card and the view name it (`PageFacts.challenge`). */
 export type BrowserChallenge = NonNullable<PageFacts['challenge']>;
@@ -16,12 +17,101 @@ type BrowserChallengeProvider = BrowserChallenge['provider'];
  * deliberately not flagged, because nothing is being asked of anyone yet; a challenge served in a shape this
  * list has not seen is not flagged either. The view words it as "appears to be".
  *
- * Pure, and free of runtime imports, because the browser worker program runs it too.
+ * A SUB-REQUEST CHALLENGE counts too. Some sites let the document load but answer every script and stylesheet with
+ * a 403 carrying `cf-mitigated: challenge`: a script load cannot show a challenge, so the page is simply blank. That
+ * is reported as Cloudflare when a first-party script or stylesheet was challenged, or when the page has no visible
+ * text and any was. A page with text and only a blocked third-party tracker is not flagged. The facts are the sub-request's
+ * status, one header and its address; no body is read.
+ *
+ * Pure, and its one runtime import (the public suffix list, to tell one site from another) is bundled, because the
+ * browser worker program runs it too.
  */
 export interface BrowserChallengeEvidence {
   readonly url: string;
   readonly title: string;
   readonly frameUrls: readonly string[];
+  /** Addresses of script and stylesheet sub-requests the page's document made that were answered 403 `cf-mitigated: challenge`. */
+  readonly challengedSubresources?: readonly string[];
+  /** Whether the page shows no (or almost no) visible text; read only when a sub-request was challenged. */
+  readonly blankBody?: boolean;
+}
+
+/** The most challenged sub-request addresses a page's record keeps, first-party and other counted apart. */
+const CHALLENGED_KEEP = 16;
+/** Visible characters or fewer that still count as a blank page. */
+export const BLANK_BODY_CHARS = 20;
+
+/** Whether a sub-request's answer is a challenge in place of the script or stylesheet that was asked for. */
+export function isChallengedSubresource(answer: {
+  readonly type: string;
+  readonly status: number;
+  readonly headers: Readonly<Record<string, string>>;
+}): boolean {
+  if (answer.status !== 403 || (answer.type !== 'script' && answer.type !== 'stylesheet')) return false;
+  for (const [name, value] of Object.entries(answer.headers))
+    if (name.toLowerCase() === 'cf-mitigated') return value.trim().toLowerCase() === 'challenge';
+  return false;
+}
+
+/** An address without its fragment: what a navigation and the document it commits are matched on. */
+function withoutFragment(address: string): string {
+  const at = address.indexOf('#');
+  return at === -1 ? address : address.slice(0, at);
+}
+
+/**
+ * The challenged sub-requests of the page's COMMITTED document.
+ *
+ * First-party ones (same registrable domain as the document, public suffixes included) are kept apart from the
+ * rest, each bounded, so a page that fires a flood of challenged trackers cannot push a first-party challenge out.
+ * A navigation clears the record only when the document it asked for COMMITS: a navigation that never commits (an
+ * HTTP 204, a download) leaves the current page's evidence in place, and a same-document change (a history
+ * `pushState`) is no navigation at all.
+ */
+export class SubresourceChallenges {
+  private readonly first: string[] = [];
+  private readonly other: string[] = [];
+  /** The addresses of the navigation now under way, redirects included, waiting to commit. */
+  private pending: string[] = [];
+
+  /** A main-frame navigation request went out: a fresh one replaces the last, a redirect hop joins its chain. */
+  navigating(url: string, redirect: boolean): void {
+    this.pending = redirect ? [...this.pending, withoutFragment(url)] : [withoutFragment(url)];
+  }
+
+  /** The main frame committed `url`: a new document if a navigation asked for it, otherwise the same one. */
+  committed(url: string): void {
+    // Chrome's own error page stands in for a navigation that failed: it is a committed document too.
+    if (!this.pending.includes(withoutFragment(url)) && !url.startsWith('chrome-error:')) return;
+    this.pending = [];
+    this.first.length = 0;
+    this.other.length = 0;
+  }
+
+  /** A script or stylesheet of the document at `documentUrl` was challenged. */
+  observe(url: string, documentUrl: string): void {
+    const document = parsed(documentUrl);
+    const target = parsed(url);
+    const mine = document !== undefined && target !== undefined && sameSite(target.hostname, document.hostname);
+    const kept = mine ? this.first : this.other;
+    if (kept.length < CHALLENGED_KEEP && !kept.includes(url)) kept.push(url);
+  }
+
+  urls(): readonly string[] {
+    return [...this.first, ...this.other];
+  }
+}
+
+/** The registrable domain of a host under the public suffix list, private suffixes (`github.io`) included. */
+function siteOf(host: string): string | null {
+  return getDomain(host, { allowPrivateDomains: true });
+}
+
+/** Whether two hosts are one site: the same host, or one registrable domain (`app.abc.de` and `static.abc.de`). */
+function sameSite(a: string, b: string): boolean {
+  if (a === b) return true;
+  const site = siteOf(a);
+  return site !== null && site === siteOf(b);
 }
 
 /** Titles a "checking your browser" page or a captcha wall shows while it is up. */
@@ -72,9 +162,23 @@ function pageProvider(url: URL | undefined, title: string): BrowserChallengeProv
   return undefined;
 }
 
+/** A first-party script or stylesheet challenged, or any of them on a page with nothing to read. */
+function subresourceChallenged(evidence: BrowserChallengeEvidence, page: URL | undefined): boolean {
+  const challenged = evidence.challengedSubresources ?? [];
+  if (challenged.length === 0) return false;
+  if (evidence.blankBody === true) return true;
+  if (page === undefined) return false;
+  return challenged.some(address => {
+    const url = parsed(address);
+    return url !== undefined && sameSite(url.hostname, page.hostname);
+  });
+}
+
 export function recogniseBrowserChallenge(evidence: BrowserChallengeEvidence): BrowserChallenge | undefined {
-  const page = pageProvider(parsed(evidence.url), evidence.title);
+  const address = parsed(evidence.url);
+  const page = pageProvider(address, evidence.title);
   if (page !== undefined) return { provider: page };
+  if (subresourceChallenged(evidence, address)) return { provider: 'cloudflare' };
   for (const frame of evidence.frameUrls) {
     const url = parsed(frame);
     const provider = url === undefined ? undefined : frameProvider(url);
