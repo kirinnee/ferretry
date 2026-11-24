@@ -153,8 +153,15 @@ describe('the Browser tab', () => {
 
   it('saves a changed mode against the digest it was read at, keeping the file’s comments', async () => {
     const { calls, view } = await tab({ text: '# the shared browser\nmode: headless\n' });
-    expect(view.container.querySelector('[data-browser-mode-save-panel] [data-change-submit]')).toBeNull();
+    // The Save bar is there from the first paint, clean: nothing to save, so Save is off.
+    const bar = view.container.querySelector('[data-browser-mode-save-panel][data-setting-savebar]');
+    expect(bar?.getAttribute('data-state')).toBe('clean');
+    expect(
+      (view.container.querySelector('[data-browser-mode-save-panel] [data-change-submit]') as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
     await click(view.container.querySelector('input[type="radio"]:not(:checked)'), 'the Real window choice');
+    expect(bar?.getAttribute('data-state')).toBe('dirty');
     await click(
       view.container.querySelector('[data-browser-mode-save-panel] [data-change-submit]'),
       'Save browser mode',

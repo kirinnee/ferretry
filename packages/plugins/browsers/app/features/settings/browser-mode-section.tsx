@@ -1,5 +1,5 @@
-import { ChoiceCards, SettingFieldset, SettingSaveBar, useReportUnsaved } from '@ferretry/app';
-import { Button, type ChangeAuthority, ChangeApplyPanel, SetupNote, SetupSection } from '@ferretry/app/ui';
+import { ChoiceCards, SettingFieldset, SettingSaveBar } from '@ferretry/app';
+import { type ChangeAuthority, changeRefusalExplanation, InlineCode, SetupNote, SetupSection } from '@ferretry/app/ui';
 import { useState } from 'react';
 import type { BrowserMode } from '../../../contract/index.ts';
 
@@ -35,6 +35,36 @@ export type SaveOutcome =
   | { readonly kind: 'pending'; readonly sentence: string }
   | { readonly kind: 'refused'; readonly sentence: string };
 
+/** May a save be sent now? Not while the grant is being read, and not when it is refused (an unreadable one still tries). */
+export const mayChange = (authority: ChangeAuthority | null): boolean =>
+  authority !== null && authority.kind !== 'refused';
+
+/**
+ * What this browser may do with a save, said above the Save bar: the sentence that a passkey will be asked for, or the
+ * grant guidance when it will not be allowed at all. Nothing while the owner's own save is open.
+ */
+export function ChangeAuthorityNote({
+  machineName,
+  authority,
+}: {
+  readonly machineName: string;
+  readonly authority: ChangeAuthority | null;
+}) {
+  if (authority?.kind === 'refused')
+    return (
+      <p role="status" className="m-0 text-cell leading-base text-warn" data-change-grant-refused="">
+        <InlineCode text={changeRefusalExplanation(authority.refusal)} />
+      </p>
+    );
+  if (authority?.kind === 'step-up')
+    return (
+      <p className="m-0 text-meta leading-base text-muted" data-change-step-up="">
+        {machineName} will ask you to confirm with your passkey when you save.
+      </p>
+    );
+  return null;
+}
+
 export function BrowserModeSection({
   machineName,
   authority,
@@ -53,9 +83,6 @@ export function BrowserModeSection({
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<SaveOutcome | null>(null);
   const pending = draft !== mode;
-  // While the staged mode waits for Save this form is dirty, and the panel below is not a Save bar (which reports it by itself):
-  // tell the shell's leave guard, so Back asks before it drops the pick.
-  useReportUnsaved(pending);
   const submit = (): void => {
     setBusy(true);
     void save(draft).then(result => {
@@ -95,31 +122,22 @@ export function BrowserModeSection({
           {outcome.sentence}
         </SetupNote>
       ) : null}
-      {pending ? (
-        <div data-browser-mode-save-panel="">
-          <ChangeApplyPanel
-            machineName={machineName}
-            authority={authority}
-            busy={busy}
-            refusal={null}
-            submitLabel="Save browser mode"
-            onSubmit={submit}
-          >
-            <Button type="button" data-browser-mode-undo="" onClick={() => setDraft(mode)}>
-              Keep {BROWSER_MODE_WORDS[mode].title}
-            </Button>
-          </ChangeApplyPanel>
-        </div>
-      ) : (
-        // The Save bar is there from the first paint, with nothing to save; the panel above replaces it while a mode is staged.
-        <SettingSaveBar
-          dirty={false}
-          saved={outcome?.kind === 'saved'}
-          saveLabel="Save browser mode"
-          onSave={() => undefined}
-          onDiscard={() => undefined}
-        />
-      )}
+      <ChangeAuthorityNote machineName={machineName} authority={authority} />
+      {/* The ONE Save bar, as Security's: in flow while clean, sticky while a mode is staged; the same bar throughout. */}
+      <SettingSaveBar
+        dirty={pending}
+        saving={busy}
+        saved={outcome?.kind === 'saved' && !pending}
+        blocked={!mayChange(authority)}
+        saveLabel="Save browser mode"
+        marks={{ 'data-browser-mode-save-panel': '' }}
+        saveMarks={{ 'data-change-submit': '' }}
+        onSave={submit}
+        onDiscard={() => {
+          setDraft(mode);
+          setOutcome(null);
+        }}
+      />
     </SetupSection>
   );
 }
