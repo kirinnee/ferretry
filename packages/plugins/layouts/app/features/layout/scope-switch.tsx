@@ -17,16 +17,10 @@ export function ScopeSwitch({
 }) {
   return (
     <div className="fy-lr-scope" data-layout-scope={scope}>
-      {/* The page's scope chip, drawn here and not by the shell: it follows the switch, so it can never contradict it. */}
+      {/* The switch and its caption are the ONE place that says where a change is saved: no chip repeats them, and the shell
+          files this tab under the machine (`scopeChip: false`, no `scope: 'device'`), so nothing around the switch can contradict it. */}
       <div className="fy-lr-scope-head">
         <span className="fy-lr-scope-title">Where a change is saved</span>
-        <span
-          className="fy-lr-scope-chip"
-          data-scope={scope === 'all' ? 'machine' : 'device'}
-          data-layout-scope-chip=""
-        >
-          {scope === 'all' ? 'This machine · every device' : 'Only this browser'}
-        </span>
       </div>
       <Segmented
         label="Where a change is saved"
