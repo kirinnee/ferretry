@@ -36,12 +36,12 @@
 
 import type { ClaudeLoginFlow, HarnessLoginLastCode } from '../../contract/index.ts';
 import { CheckCircle2, KeyRound, Link2, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
-import { type FormEvent, useEffect, useId, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { cn, SecretInput, useSecretField } from '../ui.ts';
 import { Button } from '../ui.ts';
-import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../ui.ts';
+import { browserClipboardWriter, type ClipboardWriter } from '../ui.ts';
 import { SignInDemo } from './sign-in-demo.tsx';
-import { ResumedNote, StartOverButton } from './sign-in-restart.tsx';
+import { ResumedNote, SignInAnswers, SignInLink, StartOverButton } from './sign-in-restart.tsx';
 import type { LoginPanelWording } from '../lib/harness-login-model.ts';
 
 export interface ClaudeLoginPanelProps {
@@ -93,49 +93,6 @@ const codeEnding = (
   }
   return null;
 };
-
-/** A link at least this long is shown cut short, with a button for the rest (C59 O5: "the link is too long"). */
-export const LONG_LINK = 48;
-
-/** The sign-in link: one line cut with an ellipsis, and "Show full" / "Show less" to open it. The Copy button always has the whole link. */
-export function SignInLink({ url, copy }: { readonly url: string; readonly copy: ClipboardWriter }) {
-  const [open, setOpen] = useState(false);
-  const id = useId();
-  const long = url.length >= LONG_LINK;
-  const shown = !long || open;
-  return (
-    <div className="mt-2 flex min-w-0 items-start gap-2">
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <code
-          id={id}
-          data-sign-in-link=""
-          data-expanded={shown}
-          className={cn(
-            'block min-w-0 rounded-control border border-border bg-surface px-2 py-2 font-mono text-meta leading-base text-fg',
-            shown ? 'break-all' : 'truncate',
-          )}
-        >
-          {url}
-        </code>
-        {long ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="self-start"
-            aria-expanded={open}
-            aria-controls={id}
-            data-sign-in-link-toggle=""
-            onClick={() => setOpen(value => !value)}
-          >
-            {open ? 'Show less' : 'Show full'}
-          </Button>
-        ) : null}
-      </div>
-      <CopyButton text={url} label="Copy the Claude sign-in link" write={copy} />
-    </div>
-  );
-}
 
 export function ClaudeLoginPanel({
   accountLabel,
@@ -256,27 +213,15 @@ export function ClaudeLoginPanel({
                     className="kt-input w-full font-mono text-meta"
                     required
                   />
-                  <div className="flex flex-col gap-3" data-sign-in-actions="">
-                    <Button
-                      type="submit"
-                      variant="primary"
-                      disabled={!code.filled}
-                      icon={<ShieldCheck size={16} />}
-                      busy={sending && busy}
-                      busyLabel="Sending…"
-                    >
-                      {wording.finishLabel ?? 'Finish sign-in'}
-                    </Button>
-                    <div
-                      className={cn('grid gap-3', onStartOver === undefined ? 'grid-cols-1' : 'grid-cols-2')}
-                      data-sign-in-secondary=""
-                    >
-                      <StartOverButton onStartOver={onStartOver} busy={busy} />
-                      <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
+                  <SignInAnswers
+                    finishLabel={wording.finishLabel ?? 'Finish sign-in'}
+                    finishDisabled={!code.filled}
+                    finishBusy={sending && busy}
+                    finishBusyLabel="Sending…"
+                    busy={busy}
+                    onStartOver={onStartOver}
+                    onCancel={onCancel}
+                  />
                   <p className="m-0 text-meta leading-base text-faint">
                     Goes straight to Claude on this machine. Kept nowhere, never shown back.
                   </p>

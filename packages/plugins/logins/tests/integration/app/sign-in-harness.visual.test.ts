@@ -377,7 +377,7 @@ describe('the link on screen is the daemon’s, and what is pasted back is kept 
   it('a submitted address is cleared the moment it is sent, and is in neither storage, the page nor the console', async () => {
     const { tab, consoleLines, close } = await open(VIEWPORTS[0], 'studio-light', 'codex-link');
     try {
-      const field = tab.locator('[data-codex-login-callback] textarea');
+      const field = tab.locator('[data-codex-login-callback] input[type="password"]');
       await field.waitFor({ state: 'visible' });
       await tab.evaluate(() => {
         localStorage.setItem('probe', '1');
@@ -395,8 +395,8 @@ describe('the link on screen is the daemon’s, and what is pasted back is kept 
       const inFlight = await tab.evaluate(
         secret => ({
           field:
-            (document.querySelector('[data-codex-login-callback] textarea') as HTMLTextAreaElement | null)?.value ??
-            '(gone)',
+            (document.querySelector('[data-codex-login-callback] input[type="password"]') as HTMLInputElement | null)
+              ?.value ?? '(gone)',
           html: document.documentElement.outerHTML.includes(secret),
           text: document.body.innerText.includes(secret),
           values: [...document.querySelectorAll('input, textarea')].some(el =>
