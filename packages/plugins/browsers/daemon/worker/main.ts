@@ -305,14 +305,28 @@ function watch(page: Page, key: string): void {
       const request = response.request();
       const answer = { type: request.resourceType(), status: response.status(), headers: response.headers() };
       if (isChallengedSubresource(answer))
-        logOf(subresourceChallenges, key, () => new SubresourceChallenges()).observe(request.url());
+        logOf(subresourceChallenges, key, () => new SubresourceChallenges()).observe(
+          request.url(),
+          page.mainFrame().url(),
+        );
     }),
   );
+  // The record belongs to the COMMITTED document: a navigation only says what it asks for, and the record is cleared
+  // when the main frame commits it — never for one that does not (an HTTP 204) or a same-document change.
   page.on(
     'request',
     guarded(request => {
       if (request.isNavigationRequest() && request.frame() === page.mainFrame())
-        subresourceChallenges.get(key)?.reset();
+        logOf(subresourceChallenges, key, () => new SubresourceChallenges()).navigating(
+          request.url(),
+          request.redirectedFrom() !== null,
+        );
+    }),
+  );
+  page.on(
+    'framenavigated',
+    guarded(frame => {
+      if (frame === page.mainFrame()) subresourceChallenges.get(key)?.committed(frame.url());
     }),
   );
   page.on(

@@ -1,4 +1,5 @@
 import type { PageFacts } from '@ferretry/core-vault/contract';
+import { getDomain } from 'tldts';
 
 /** A challenge a page shows, as the card and the view name it (`PageFacts.challenge`). */
 export type BrowserChallenge = NonNullable<PageFacts['challenge']>;
@@ -22,7 +23,8 @@ type BrowserChallengeProvider = BrowserChallenge['provider'];
  * text and any was. A page with text and only a blocked third-party tracker is not flagged. The facts are the sub-request's
  * status, one header and its address; no body is read.
  *
- * Pure, and free of runtime imports, because the browser worker program runs it too.
+ * Pure, and its one runtime import (the public suffix list, to tell one site from another) is bundled, because the
+ * browser worker program runs it too.
  */
 export interface BrowserChallengeEvidence {
   readonly url: string;
@@ -34,7 +36,7 @@ export interface BrowserChallengeEvidence {
   readonly blankBody?: boolean;
 }
 
-/** The most challenged sub-request addresses one page's record keeps. */
+/** The most challenged sub-request addresses a page's record keeps, first-party and other counted apart. */
 const CHALLENGED_KEEP = 16;
 /** Visible characters or fewer that still count as a blank page. */
 export const BLANK_BODY_CHARS = 20;
@@ -51,30 +53,65 @@ export function isChallengedSubresource(answer: {
   return false;
 }
 
-/** The challenged sub-requests of the page's current document: cleared when the page navigates. */
+/** An address without its fragment: what a navigation and the document it commits are matched on. */
+function withoutFragment(address: string): string {
+  const at = address.indexOf('#');
+  return at === -1 ? address : address.slice(0, at);
+}
+
+/**
+ * The challenged sub-requests of the page's COMMITTED document.
+ *
+ * First-party ones (same registrable domain as the document, public suffixes included) are kept apart from the
+ * rest, each bounded, so a page that fires a flood of challenged trackers cannot push a first-party challenge out.
+ * A navigation clears the record only when the document it asked for COMMITS: a navigation that never commits (an
+ * HTTP 204, a download) leaves the current page's evidence in place, and a same-document change (a history
+ * `pushState`) is no navigation at all.
+ */
 export class SubresourceChallenges {
-  private readonly seen: string[] = [];
-  observe(url: string): void {
-    if (this.seen.length < CHALLENGED_KEEP && !this.seen.includes(url)) this.seen.push(url);
+  private readonly first: string[] = [];
+  private readonly other: string[] = [];
+  /** The addresses of the navigation now under way, redirects included, waiting to commit. */
+  private pending: string[] = [];
+
+  /** A main-frame navigation request went out: a fresh one replaces the last, a redirect hop joins its chain. */
+  navigating(url: string, redirect: boolean): void {
+    this.pending = redirect ? [...this.pending, withoutFragment(url)] : [withoutFragment(url)];
   }
-  reset(): void {
-    this.seen.length = 0;
+
+  /** The main frame committed `url`: a new document if a navigation asked for it, otherwise the same one. */
+  committed(url: string): void {
+    // Chrome's own error page stands in for a navigation that failed: it is a committed document too.
+    if (!this.pending.includes(withoutFragment(url)) && !url.startsWith('chrome-error:')) return;
+    this.pending = [];
+    this.first.length = 0;
+    this.other.length = 0;
   }
+
+  /** A script or stylesheet of the document at `documentUrl` was challenged. */
+  observe(url: string, documentUrl: string): void {
+    const document = parsed(documentUrl);
+    const target = parsed(url);
+    const mine = document !== undefined && target !== undefined && sameSite(target.hostname, document.hostname);
+    const kept = mine ? this.first : this.other;
+    if (kept.length < CHALLENGED_KEEP && !kept.includes(url)) kept.push(url);
+  }
+
   urls(): readonly string[] {
-    return [...this.seen];
+    return [...this.first, ...this.other];
   }
 }
 
-/** Whether two hosts are one site: the same host, a subdomain of the other, or sharing the registrable name. */
+/** The registrable domain of a host under the public suffix list, private suffixes (`github.io`) included. */
+function siteOf(host: string): string | null {
+  return getDomain(host, { allowPrivateDomains: true });
+}
+
+/** Whether two hosts are one site: the same host, or one registrable domain (`app.abc.de` and `static.abc.de`). */
 function sameSite(a: string, b: string): boolean {
-  if (a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`)) return true;
-  const site = (host: string): string => {
-    const labels = host.split('.');
-    const second = labels[labels.length - 2] ?? '';
-    const tld = labels[labels.length - 1] ?? '';
-    return labels.slice(tld.length === 2 && second.length <= 3 ? -3 : -2).join('.');
-  };
-  return a.includes('.') && b.includes('.') && site(a) === site(b);
+  if (a === b) return true;
+  const site = siteOf(a);
+  return site !== null && site === siteOf(b);
 }
 
 /** Titles a "checking your browser" page or a captcha wall shows while it is up. */

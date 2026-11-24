@@ -744,7 +744,9 @@ export class BrowserTools {
       case 'browser.open': {
         const opener: SurfaceOpener | undefined =
           caller.kind === 'agent' ? { by: 'agent', sessionId } : caller.openedBy;
-        let page: { readonly id: string; readonly url: string; readonly incognito?: boolean } | undefined;
+        let page:
+          | { readonly id: string; readonly url: string; readonly incognito?: boolean; readonly challenge?: unknown }
+          | undefined;
         // Opening is a write on the session's browser; where the new page landed is read back under its own hold.
         await writeAct(this.ports.kernel.act, browserTarget(sessionId), 'open', async () => {
           page = await this.ports.browser.openPage(sessionId, call.name, {
@@ -767,7 +769,7 @@ export class BrowserTools {
         const kind = call.incognito === true ? 'an incognito page, ' : '';
         const read = await this.readBack(surface, { url: page.url });
         return {
-          summary: `Opened ${kind}${surfaceReference(call.name)}${read?.url === undefined ? '' : ` at ${read.url}`}${handedNote(call.askOwner)}.`,
+          summary: `Opened ${kind}${surfaceReference(call.name)}${read?.url === undefined ? '' : ` at ${read.url}`}${handedNote(call.askOwner)}.${page.challenge === undefined ? '' : HUMAN_CHECK_NOTE}`,
         };
       }
       default: {
@@ -1851,9 +1853,12 @@ function browserUnavailable(reason: string): string {
 function humanCheckNote(answer: BrowserActionResult, pageId: string): string {
   if (!('result' in answer)) return '';
   const page = answer.result.pages.find(candidate => candidate.id === (answer.result.actedPageId ?? pageId));
-  if (page?.challenge === undefined) return '';
-  return ' The page appears to be showing a human check (a captcha or a "checking your browser" page). Do not try to solve or get around it: ask your owner to take the page over in Ferretry and solve it themselves, then carry on.';
+  return page?.challenge === undefined ? '' : HUMAN_CHECK_NOTE;
 }
+
+/** The one sentence every tool answer carries when its page appears to be showing a human check. */
+const HUMAN_CHECK_NOTE =
+  ' The page appears to be showing a human check (a captcha or a "checking your browser" page). Do not try to solve or get around it: ask your owner to take the page over in Ferretry and solve it themselves, then carry on.';
 
 /**
  * The host a page is on, as a standing rule's login domains name it (`github.com`, a port when there is one), or
