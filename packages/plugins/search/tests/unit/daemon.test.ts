@@ -6,6 +6,7 @@ import type { DaemonImplementation, Manifest } from '@ferretry/kernel/manifest';
 import { ferret, owner, testHost } from '@ferretry/kernel/testing';
 import {
   SEARCH_CONFIG,
+  SEARCH_LEDGER_STATE,
   SEARCH_PROVIDER_IDS,
   SEARCH_PROVIDERS,
   SearchViewSchema,
@@ -268,6 +269,19 @@ describe('the daily cap', () => {
   });
 });
 
+describe('a damaged daily counter', () => {
+  test('pauses web search with a sentence, sends nothing, and never reads as zero', async () => {
+    const { host, seen } = await hostFor(named('serper'), { vault: stored('serper') });
+    host.state('search').plant(SEARCH_LEDGER_STATE, 'this is not json');
+
+    const result = await host.tool('web_search', { query: 'q' }, asFerret);
+
+    expect(result).toMatchObject({ isError: true, text: 'Web search is paused: its daily counter could not be read.' });
+    expect(seen).toEqual([]);
+    await host.stop();
+  });
+});
+
 describe('Settings › Web search routes', () => {
   test('a ferret may use the tool but may not set up or test: those are a person’s act', async () => {
     const { host, seen } = await hostFor(named('serper'), { vault: stored('serper') });
@@ -327,6 +341,14 @@ describe('Settings › Web search routes', () => {
     const after = SearchViewSchema.parse((await lowered.host.request('GET', '/v1/web-search', { as: owner() })).json());
     expect(after.dailyCap).toBe(50);
     await lowered.host.stop();
+  });
+
+  test('a setup the file’s own rules refuse is a 400 that says why', async () => {
+    const { host } = await hostFor(undefined, { real: realConfig(true) });
+    const response = await host.request('PUT', '/v1/web-search/setup', { as: owner(), body: { dailyCap: 20_000 } });
+    expect(response.status).toBe(400);
+    expect(response.json()).toMatchObject({ code: 'search_setup_refused' });
+    await host.stop();
   });
 
   test('a setup that is not a provider or a cap is a 400', async () => {
