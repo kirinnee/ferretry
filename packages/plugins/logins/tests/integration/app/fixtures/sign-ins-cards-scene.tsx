@@ -9,7 +9,17 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 
 const OPEN = { capabilities: [{ capability: 'fleet', use: true, configure: true, configureRefusal: 'granted' }] };
 
+/** `?long=1` adds two logins whose names are far longer than a phone's card: an environment login's id and an email. */
+const longNames =
+  params.get('long') === '1'
+    ? [
+        login({ id: 'claude-qa-fake-key-for-the-staging-gateway', store: 'environment', email: undefined }),
+        login({ id: 'claude-long-email', email: 'ada.lovelace.the.analytical.engine.programmer@example.test' }),
+      ]
+    : [];
+
 const list = loginList(
+  ...longNames,
   login({ id: 'claude-personal', email: 'ada@example.test', label: 'personal', usedBy: ['main', 'review'] }),
   login({
     id: 'claude-work',

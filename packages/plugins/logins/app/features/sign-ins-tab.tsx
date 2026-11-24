@@ -407,7 +407,7 @@ function LoginRow({
         >
           <AccountStatus word={login.status.word} className="mt-1" />
           <span className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="block min-h-9 break-words pr-24 font-mono text-row text-fg">
+            <span className="block min-h-9 break-words pr-40 font-mono text-row text-fg" data-login-name="">
               {login.store === 'environment' ? login.id : breakAtAt(loginEmail(login))}
             </span>
             <LoginBadges login={login} />

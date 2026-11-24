@@ -60,6 +60,58 @@ const VIEWPORTS = [
 ] as const;
 const THEMES = ['studio-light', 'studio-dark'] as const;
 
+describe('the Logins list: a long login name never runs under the switch', () => {
+  for (const viewport of VIEWPORTS) {
+    for (const theme of THEMES) {
+      it(`keeps the name clear of the switch and Open (${viewport.name}, ${theme})`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          deviceScaleFactor: viewport.phone ? 2 : 1,
+          hasTouch: viewport.phone,
+          isMobile: viewport.phone,
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const tab = await context.newPage();
+        try {
+          await tab.goto(`${origin}/?theme=${theme}&long=1`);
+          await tab.locator('[data-login-card-wrap]').first().waitFor({ state: 'visible' });
+          await tab.waitForTimeout(200);
+          expect(await tab.locator('[data-login-card-wrap]').count()).toBe(5);
+          // The name's text, measured line by line, never meets the card's controls (switch, On and Open).
+          const overlaps = await tab.evaluate(() =>
+            Array.from(document.querySelectorAll('[data-login-card-wrap]')).flatMap(card => {
+              const controls = card.querySelector('[data-login-card-controls]')?.getBoundingClientRect();
+              const name = card.querySelector('[data-login-name]');
+              if (controls === undefined || name === null) return ['missing'];
+              const range = document.createRange();
+              range.selectNodeContents(name);
+              return Array.from(range.getClientRects())
+                .filter(
+                  rect =>
+                    rect.width > 0 &&
+                    rect.left < controls.right &&
+                    rect.right > controls.left &&
+                    rect.top < controls.bottom &&
+                    rect.bottom > controls.top,
+                )
+                .map(() => card.getAttribute('data-login-card-wrap') ?? '');
+            }),
+          );
+          expect(overlaps).toEqual([]);
+          expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-long-names.png`) });
+        } finally {
+          await context.close();
+        }
+      });
+    }
+  }
+});
+
 describe('the Logins list: each card has its switch and its Remove', () => {
   for (const viewport of VIEWPORTS) {
     for (const theme of THEMES) {
