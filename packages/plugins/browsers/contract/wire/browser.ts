@@ -443,6 +443,27 @@ export const BrowserActionSchema = z.discriminatedUnion('action', [
 ]);
 export type BrowserAction = z.infer<typeof BrowserActionSchema>;
 
+/**
+ * THE ONE VIEWER A SCREEN IS. The DAEMON mints a random id when a display stream attaches and tells the stream it is
+ * (`BrowserStreamHelloSchema`, a text frame sent as it opens); the screen then sends it as this query parameter on its
+ * status reads and toolbar acts, so the page it shows is its own: switching tabs in one pane moves no other pane. The id
+ * is only ever the daemon's to give and is bound to the caller whose stream it is, so another caller presenting it is
+ * refused like an id nobody holds. It lives exactly as long as its stream; a call that sends none is the session's own
+ * view (`fy browser`, a screen whose stream is not up yet).
+ */
+export const BROWSER_VIEWER_QUERY = 'viewer';
+export const BROWSER_MAX_VIEWER_ID_LENGTH = 64;
+/** Letters, digits, `-` and `_` only: the id is a key in the daemon's memory and never a path or a command. */
+export const BrowserViewerIdSchema = z
+  .string()
+  .min(1)
+  .max(BROWSER_MAX_VIEWER_ID_LENGTH)
+  .regex(/^[A-Za-z0-9_-]+$/u);
+
+/** The one text frame the daemon sends down a display stream: who this stream is, for the calls that name its screen. */
+export const BrowserStreamHelloSchema = z.object({ viewer: BrowserViewerIdSchema }).strict();
+export type BrowserStreamHello = z.infer<typeof BrowserStreamHelloSchema>;
+
 const BrowserResultPageSchema = BrowserPageSnapshotSchema.safeExtend({
   actedPageId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH).optional(),
   downloads: z.array(BrowserDownloadNoticeSchema).max(BROWSER_MAX_DOWNLOAD_NOTICES).optional(),

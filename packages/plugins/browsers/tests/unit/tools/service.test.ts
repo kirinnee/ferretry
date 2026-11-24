@@ -168,11 +168,11 @@ class FakeBrowser {
     return { result: { url: page.url, pages: [] } } as never;
   };
 
-  dispatchHumanInput = async (_sessionId: string, input: BrowserInputEvent) => {
+  dispatchHumanInput = async (_sessionId: string, input: BrowserInputEvent, _viewer: unknown) => {
     this.inputs.push(input);
   };
 
-  attachViewer = async () => ({ detach: () => undefined }) as never;
+  attachViewer = async () => ({ viewerId: 'v1', detach: () => undefined }) as never;
   scriptOnPage = async (sessionId: string, key: string, script: { source: string }, guard?: BrowserActGuard) => {
     const page = this.page(key, sessionId);
     return await this.guarded(guard, this.guardPage({ host: async () => new URL(page.url).host }), async () => {
@@ -495,11 +495,11 @@ describe('the viewer stream’s input, through the act runner (R549)', () => {
     // Arrange
     const { browser, kernel, tools } = await harness();
     await tools.call(person, { tool: 'browser.open', name: 'app' });
-    const host = heldViewerHost(kernel.kernel, browser as never, { mayType: true });
+    const host = heldViewerHost(kernel.kernel, browser as never, { caller: 'admin', mayType: true });
     const text = 'a whole sentence, typed at once';
 
     // Act
-    await host.dispatchHumanInput('s1', { kind: 'insertText', text });
+    await host.dispatchHumanInput('s1', { kind: 'insertText', text }, 'v1');
 
     // Assert
     should(browser.inputs).deepEqual([{ kind: 'insertText', text }]);
@@ -510,13 +510,13 @@ describe('the viewer stream’s input, through the act runner (R549)', () => {
     const { browser, kernel, tools } = await harness();
     await tools.call(agent, { tool: 'browser.open', name: 'app' });
     kernel.hold(pageTarget((browser.pages[0] as FakePage).id), 'held', ['type', 'press']);
-    const host = heldViewerHost(kernel.kernel, browser as never, { mayType: true });
+    const host = heldViewerHost(kernel.kernel, browser as never, { caller: 'admin', mayType: true });
 
     // Act
     const byAgent = await failure(tools.call(agent, { tool: 'browser.type', name: 'app', selector: '#q', text: 'x' }));
-    await host.dispatchHumanInput('s1', { kind: 'insertText', text: 'owner types' });
-    await host.dispatchHumanInput('s1', { kind: 'key', type: 'keyDown', key: 'Enter', code: 'Enter' });
-    await host.dispatchHumanInput('s1', { kind: 'mouse', type: 'mousePressed', x: 1, y: 2, button: 'left' });
+    await host.dispatchHumanInput('s1', { kind: 'insertText', text: 'owner types' }, 'v1');
+    await host.dispatchHumanInput('s1', { kind: 'key', type: 'keyDown', key: 'Enter', code: 'Enter' }, 'v1');
+    await host.dispatchHumanInput('s1', { kind: 'mouse', type: 'mousePressed', x: 1, y: 2, button: 'left' }, 'v1');
 
     // Assert — the agent's act never reached the page; every one of the owner's inputs did.
     should((byAgent as Error).message).equal(

@@ -299,6 +299,7 @@ describe('the machine agent browser, in a real Chrome', () => {
       's1',
       frame => personFrames.push(frame),
       () => undefined,
+      'owner',
     );
     const status = await browser.status('s1');
     const personsPage = (status as { readonly activePageId: string }).activePageId;
@@ -311,13 +312,18 @@ describe('the machine agent browser, in a real Chrome', () => {
       'watch',
       frame => agentFrames.push(frame),
       () => undefined,
+      'owner',
     );
 
     // Act — at the same time: the person types a password, the agent navigates and types.
     await Promise.all([
       (async () => {
         for (const character of 'hunter2')
-          await browser.dispatchHumanInput('s1', { kind: 'insertText', text: character });
+          await browser.dispatchHumanInput(
+            's1',
+            { kind: 'insertText', text: character },
+            { id: viewer.viewerId, caller: 'owner' },
+          );
       })(),
       (async () => {
         await tools.call(agent('s1'), { tool: 'browser.navigate', name: 'app', url: `${base}/read?again=1` });
