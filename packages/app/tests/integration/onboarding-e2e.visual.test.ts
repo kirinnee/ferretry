@@ -359,7 +359,7 @@ const inspect = async (
   tab: Page,
   variant: Variant,
   key: string,
-  opts: { first?: boolean; held?: boolean; centered?: boolean; later?: string } = {},
+  opts: { first?: boolean; held?: boolean; later?: string } = {},
 ): Promise<void> => {
   const read = await tab.evaluate(chrome => {
     const rect = (el: Element) => el.getBoundingClientRect();
@@ -459,12 +459,9 @@ const inspect = async (
   // populated demo panel is drawn ABOVE the body, so the body alone would count the demo's height as dead space.
   const gap = await gapUnderTitle(tab, '.fy-spf__head', await gapRoot(tab));
   expect(gap.gap, `${key}: something is drawn under the title (first: ${gap.first})`).toBeGreaterThanOrEqual(0);
-  // `centered`: Claude's sign-in block sits in the vertical middle of a wide page on purpose (C59 O5 item 6, onboarding.css).
-  if (!(opts.centered === true && variant.width >= 900))
-    expect(
-      gap.gap,
-      `${key}: no dead gap between the title and the page (first thing: ${gap.first})`,
-    ).toBeLessThanOrEqual(40);
+  expect(gap.gap, `${key}: no dead gap between the title and the page (first thing: ${gap.first})`).toBeLessThanOrEqual(
+    40,
+  );
   const row = await footerButtons(tab);
   expect(
     row.map(button => button.label),
@@ -1160,7 +1157,7 @@ describe('the first run, end to end', () => {
         // ── Claude: sign in (O9-6). The machine has NO login and NO runtime: the sign-in below is what makes them ────────────
         walked.push('claude-code.sign-in');
         expect((await daemonOf(tab, A)).runtimesMade, 'the machine starts with no runtime').toEqual([]);
-        await inspect(tab, variant, 'claude-code.sign-in', { held: true, centered: true });
+        await inspect(tab, variant, 'claude-code.sign-in', { held: true });
         await shot(tab, variant, 'claude-code.sign-in');
         // Next is NOT disabled here: pressing it shows the refusal on the page, stays on the sign-in and records nothing, while
         // Back and Later stay live (O10 Q2, https://github.com/kirinnee/ferretry/pull/2413).
@@ -1181,7 +1178,18 @@ describe('the first run, end to end', () => {
           (await daemonOf(tab, A)).states['claude-code.sign-in'],
           'a refused Next records nothing',
         ).toBeUndefined();
+        // O12 S1: the idle page shows the how-to picture, and the heading stays where it is when the sign-in card replaces it.
+        expect(
+          await tab.locator('[data-harness-sign-in="claude-code"] [data-sign-in-demo]').count(),
+          'the idle sign-in page shows the how-to picture',
+        ).toBe(1);
+        const headTop = (): Promise<number> =>
+          tab.evaluate(() => (document.querySelector('.fy-spf__head') as HTMLElement).getBoundingClientRect().top);
+        const idleHeadTop = await headTop();
         await tab.locator('[data-harness-sign-in="claude-code"] button', { hasText: 'Sign in to Claude Code' }).click();
+        await tab.locator('[data-claude-login-code] input').waitFor({ state: 'visible' });
+        expect(await headTop(), 'the heading does not move when the link is shown').toBe(idleHeadTop);
+        await shot(tab, variant, 'claude-code.sign-in-link');
         await tab.locator('[data-claude-login-code] input').fill('FAKE-CODE-0001');
         await tab.getByRole('button', { name: 'Finish sign-in' }).click();
         // Next is enabled before AND after the sign-in, so the sign-in's end is the machine holding its one runtime.

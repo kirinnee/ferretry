@@ -12,10 +12,11 @@ import type { LoginList } from '../../contract/index.ts';
 import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { useLoginChanges } from '../lib/login-changes.ts';
 import { readLogins } from '../lib/logins-api.ts';
-import { harnessName } from '../../contract/harness-words.ts';
+import { harnessName, harnessWords } from '../../contract/harness-words.ts';
 import { type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
 import { ActionRow, Button, ChangeApplyPanel } from '../ui.ts';
 import { LoginSignIn } from './login-sign-in.tsx';
+import { SignInDemo } from './sign-in-demo.tsx';
 
 export interface HarnessSignInEmbedProps {
   readonly client: LoginsClient;
@@ -120,6 +121,7 @@ export function HarnessSignInEmbed({
   }, [list, harness, signedIn]);
 
   const name = harnessName(harness);
+  const demo = harnessWords(harness)?.demo;
   if (failure !== null)
     return (
       <p role="alert" className="m-0 text-cell leading-base text-warn">
@@ -190,29 +192,36 @@ export function HarnessSignInEmbed({
     await reload();
   };
 
+  // O12 S1: the idle page shows the how-to picture too, in the box the sign-in card gives it (the same layout, the same
+  // picture): Claude's and Codex's idle pages are this one piece, and the heading above never moves when the card replaces it.
   return (
-    <section className="flex flex-col gap-3" data-harness-sign-in={harness}>
-      {blocked.map(sentence => (
-        <p key={sentence} className="m-0 text-cell leading-base text-muted" data-harness-sign-in-blocked="">
-          {sentence}
-        </p>
-      ))}
-      <p className="m-0 text-cell leading-base text-muted">
-        {blocked.length === 0
-          ? `There is no ${name} sign-in on ${list.machine} yet.`
-          : `None of them can be signed in here.`}{' '}
-        This makes one and starts signing it in.
-      </p>
-      {beforeMake}
-      <ChangeApplyPanel
-        machineName={list.machine}
-        authority={changes.authority}
-        busy={changes.busy}
-        busyLabel="Adding…"
-        refusal={changes.refusal}
-        submitLabel={`Sign in to ${name}`}
-        onSubmit={() => void make()}
-      />
+    <section className="fy-sd-host" data-harness-sign-in={harness}>
+      <div className="fy-sd-layout">
+        <div className="fy-sd-steps flex flex-col gap-3">
+          {blocked.map(sentence => (
+            <p key={sentence} className="m-0 text-cell leading-base text-muted" data-harness-sign-in-blocked="">
+              {sentence}
+            </p>
+          ))}
+          <p className="m-0 text-cell leading-base text-muted">
+            {blocked.length === 0
+              ? `There is no ${name} sign-in on ${list.machine} yet.`
+              : `None of them can be signed in here.`}{' '}
+            This makes one and starts signing it in.
+          </p>
+          {beforeMake}
+          <ChangeApplyPanel
+            machineName={list.machine}
+            authority={changes.authority}
+            busy={changes.busy}
+            busyLabel="Adding…"
+            refusal={changes.refusal}
+            submitLabel={`Sign in to ${name}`}
+            onSubmit={() => void make()}
+          />
+        </div>
+        {demo === undefined ? null : <SignInDemo kind={demo} />}
+      </div>
     </section>
   );
 }
