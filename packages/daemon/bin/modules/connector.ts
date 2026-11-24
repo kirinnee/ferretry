@@ -1,7 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { CapabilityGrants } from '@ferretry/protocol';
 import { FileConnectorStore } from '../../src/adapters/connector/file-store.ts';
 import { ConnectorOAuthHttp } from '../../src/adapters/connector/oauth-http.ts';
+import { FileConnectorCallsLog } from '../../src/adapters/connector/mcp/calls-log.ts';
+import { ConnectorMcpEndpoint } from '../../src/adapters/connector/mcp/mcp-endpoint.ts';
 import { webCryptoConnector } from '../../src/adapters/connector/webcrypto.ts';
 import type { ApiRequest, ApiResponse } from '../../src/lib/api/http.ts';
 import type { ApiBindOptions, ApiServerPort } from '../../src/lib/api/server.ts';
@@ -9,13 +12,17 @@ import type { AuditSink } from '../../src/lib/audit/types.ts';
 import { SecurityLogConnectorAudit } from '../../src/lib/connector/audit.ts';
 import { type ConnectorSettings, connectorSettings } from '../../src/lib/connector/config.ts';
 import { connectorListenerSurface, InProcessConnectorDispatch } from '../../src/lib/connector/listener.ts';
+import { ConnectorTextGuard } from '../../src/lib/connector/mcp/redaction.ts';
+import { ConnectorToolbox } from '../../src/lib/connector/mcp/tools.ts';
 import { ConnectorAuthority } from '../../src/lib/connector/oauth/authority.ts';
+import { unauthorizedResponse } from '../../src/lib/connector/oauth/discovery.ts';
 import { ConnectorMemory } from '../../src/lib/connector/oauth/model.ts';
 import { ConnectorRateLimiter } from '../../src/lib/connector/oauth/rate-limiter.ts';
 import type { ConnectorEndpoints, ConnectorHttpHandler } from '../../src/lib/connector/ports.ts';
 import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
 import type { ConnectorAvailability, ConnectorSubsystem } from '../../src/lib/runtime/mounts/connector.ts';
 import type { TextRedactor } from '../../src/lib/secrets/redaction.ts';
+import { daemonVersion } from '../../src/lib/version.ts';
 
 /**
  * The remote MCP connector (docs/mcp-connector.md): the OAuth authorization server, the owner's
@@ -131,10 +138,22 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
       listen: async listenNeeds => {
         // A damaged connector.json refuses here, loudly, rather than serving a listener whose every token fails.
         await store.load();
-        const handlers: ConnectorHttpHandler[] = [new ConnectorOAuthHttp(authorityOf(), endpoints())];
-        void join;
-        void listenNeeds.dispatch;
-        void InProcessConnectorDispatch;
+        const mcp = new ConnectorMcpEndpoint({
+          verifier: authorityOf(),
+          unauthorized: tokenPresented => unauthorizedResponse(endpoints(), { tokenPresented }),
+          dispatch: new InProcessConnectorDispatch({ dispatch: listenNeeds.dispatch, adminToken: listenNeeds.adminToken }),
+          toolbox: new ConnectorToolbox({
+            daemonGrants: needs.daemonGrants,
+            guard: new ConnectorTextGuard(needs.redactor),
+            callsLog: new FileConnectorCallsLog(join(needs.stateDirectory, 'connector')),
+            audit,
+            now: () => needs.clock.now(),
+          }),
+          now: () => needs.clock.now(),
+          newRequestId: () => `connector-${randomUUID()}`,
+          serverVersion: daemonVersion,
+        });
+        const handlers: ConnectorHttpHandler[] = [new ConnectorOAuthHttp(authorityOf(), endpoints()), mcp];
         const listener = await listenNeeds.api.listen(connectorListenerSurface(handlers), {
           host: '127.0.0.1',
           port: settings.port,

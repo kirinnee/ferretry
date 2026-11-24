@@ -42,6 +42,13 @@ export function connectorListenerSurface(handlers: readonly ConnectorHttpHandler
   };
 }
 
+/**
+ * The ONLY header a tool may add to its in-process request: the logical request id that send, start and restart
+ * require for their retry contract. Anything else a tool names is dropped — a tool can never set a credential,
+ * a client identity or a session header.
+ */
+const TOOL_HEADERS: ReadonlySet<string> = new Set(['x-fy-request-id']);
+
 /** The largest route body a tool may send in-process — a message is at most 8 000 characters. */
 const MAX_CALL_BODY_CHARS = 64 * 1024;
 
@@ -68,10 +75,14 @@ export class InProcessConnectorDispatch implements ConnectorApiDispatch {
       throw new Error('a connector tool built a route path outside /v1/');
     const body = call.body === undefined ? '' : JSON.stringify(call.body);
     if (body.length > MAX_CALL_BODY_CHARS) throw new Error('a connector tool built a body over the in-process limit');
-    const headers: Record<string, string> = {
+    const headers: Record<string, string> = {};
+    for (const [name, value] of Object.entries(call.headers ?? {}))
+      if (TOOL_HEADERS.has(name.toLowerCase()) && /^[A-Za-z0-9._:-]{1,128}$/u.test(value))
+        headers[name.toLowerCase()] = value;
+    Object.assign(headers, {
       authorization: `Bearer ${this.deps.adminToken()}`,
       [CLIENT_HEADER]: connectorActor(grantId),
-    };
+    });
     if (call.body !== undefined) headers['content-type'] = 'application/json';
     const request: ApiRequest = {
       method: call.method,
