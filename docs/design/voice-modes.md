@@ -273,8 +273,8 @@ every reply had gaps. The native engine described above is now built for both en
 - **What is fetched, and when.** At Install, like the models: the three files of sherpa-onnx's official npm platform package
   (`sherpa-onnx-<platform>-<arch>`, exact version `2.0.3`, the one the WebAssembly engine pins) from the npm CDN, each checked
   against a pinned size and SHA-256 (linux-x64, linux-arm64, darwin-arm64; every other platform runs WebAssembly and says so).
-  They live in the engine's own folder under `state/voice/models/`, are removed with it, and are hashed AGAIN, once per
-  process, before the first load. **Nothing of them is in the release.** The compiled `fyd` loads the addon by absolute
+  They live in the engine's own folder under `state/voice/models/`, are removed with it, and are hashed AGAIN (size and SHA-256 of the addon and both
+  shared libraries, about 0.1 s next to a 1.4–2 s model load) immediately before EVERY native load, not once per process. **Nothing of them is in the release.** The compiled `fyd` loads the addon by absolute
   path (`process.dlopen`); `fyd --check` prints a `voice` line that loads it from that binary.
 - **Native first, WebAssembly as the fallback.** Install fetches the library alone and loads it in a worker BEFORE the big
   model is downloaded, so a machine that cannot run it (no `libstdc++`, a wrong architecture) learns that in seconds and
@@ -301,6 +301,18 @@ Measured on the build box (AWS Xeon Platinum 8488C, 32 vCPU, shared, `nice 10`, 
 | last word → message sent (stream test, 5 s clip) | 3402 / 3439 ms              | 1480 / 1681 ms                                 |
 | memory while loaded (RSS growth)                 | reply 512 MB, speech 1.8 GB | reply ~0.4–0.7 GB, speech ~1.0 GB              |
 | download                                         | reply 164 MB, speech 699 MB | reply 394 MB, speech 719 MB (library included) |
+
+### Declared gaps of the native engine
+
+- **The addon runs IN the daemon process.** The worker is a Bun Worker thread and the library enters through `process.dlopen`,
+  so a native crash (a fault inside sherpa-onnx or onnxruntime, or an out-of-memory kill) takes the whole `fyd` with it, not
+  just the voice; `fyd --check` also `dlopen`s it, in the check process. Moving the engine to a child process is the later
+  real fix; until then WebAssembly (a worker that can only throw) is the engine with no such reach.
+- **Hash then load is not atomic.** The files are verified and then loaded a moment later by the loader itself, so a process
+  that can write the folder between the two could still swap a library in. Declared, not closed: any program running as the
+  same user can already read the vault (docs/secrets.md), so this adds no reach a same-user agent did not hold.
+- **Install is not an audited act yet.** It puts native code into the daemon, and no audit kind fits it; the route declares
+  that in its `audit.skip` text rather than recording it.
 
 What is NOT measured: Apple silicon and linux-arm64 (the pins are the published files' own hashes, loaded by the same
 code, but neither was run), and a heavily loaded machine. The numbers come from `tests/realworld/` with `FY_*_ENGINE=wasm|native`.

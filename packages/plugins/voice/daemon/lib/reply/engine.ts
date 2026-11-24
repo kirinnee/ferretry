@@ -96,8 +96,6 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
   private generation = 0;
   /** Why the native library is not what runs, once this process saw it fail; forgotten at a restart (the files are then gone or tried again). */
   private nativeFailure: string | undefined;
-  /** Whether the native files were read back and hashed in this process, so they are not hashed on every load. */
-  private nativeVerified = false;
   /** What an install in flight is fetching, so the progress bar's total follows a fall to WebAssembly. */
   private installKind: RuntimeKind | undefined;
 
@@ -249,6 +247,9 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
       await this.proveItSpeaks('wasm');
       return;
     }
+    // A voice that is loaded (the normal case: the WebAssembly one) is ended first, so the proof below loads the NATIVE engine
+    // rather than finding the running WebAssembly thread and mistaking that for a native engine that would not start.
+    await this.unload();
     // The room for the whole native plan is asked for before anything is downloaded, not file by file as it goes.
     await ensureRoom(files, await missingOf(files, this.nativeSet));
     this.nativeFailure = undefined;
@@ -271,7 +272,6 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
       dropNative: async () => {
         await this.unload();
         for (const file of this.nativeOnly) await files.remove(file);
-        this.nativeVerified = false;
       },
       dropWasm: async () => {
         for (const file of this.wasmOnly) await files.remove(file);
@@ -316,6 +316,8 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
    */
   private async proveItSpeaks(kind: RuntimeKind): Promise<void> {
     try {
+      // A native proof starts from nothing loaded: a voice woken meanwhile (it would be WebAssembly) is not the engine on trial.
+      if (kind === 'native') await this.unload();
       const loaded = await this.ensureLoaded();
       if (kind === 'native' && loaded.kind !== 'native')
         throw new NativeUnavailable(this.nativeFailure ?? 'the native engine did not start');
@@ -344,7 +346,6 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
     this.selfTest = undefined;
     this.failure = undefined;
     this.nativeFailure = undefined;
-    this.nativeVerified = false;
     return await this.view();
   }
 
@@ -465,14 +466,13 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
     };
     let call: Parameters<ReplyThread['call']>;
     if (kind === 'native') {
-      if (!this.nativeVerified) {
-        const bad = await unverified(files, this.nativeAddonFiles);
-        if (bad.length > 0) {
-          // Not the pinned bytes: not loaded, and deleted, so the next Install fetches them again.
-          for (const file of bad) await files.remove(file);
-          throw new VoiceEngineError('hash_mismatch', SENTENCES.hash_mismatch);
-        }
-        this.nativeVerified = true;
+      // EVERY native load re-hashes the addon and both shared libraries (about 0.1 s next to the model load): the files sit
+      // in a folder other programs of this user can write, and what is hashed here is what is loaded next.
+      const bad = await unverified(files, this.nativeAddonFiles);
+      if (bad.length > 0) {
+        // Not the pinned bytes: not loaded, and deleted, so the next Install fetches them again.
+        for (const file of bad) await files.remove(file);
+        throw new VoiceEngineError('hash_mismatch', SENTENCES.hash_mismatch);
       }
       const addon = role(NATIVE_ADDON_ROLE);
       call = [

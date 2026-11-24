@@ -98,8 +98,6 @@ export class SpeechEngine implements VoiceEngineApi {
   private generation = 0;
   /** Why the native library is not what runs, once this process saw it fail; forgotten at a restart. */
   private nativeFailure: string | undefined;
-  /** Whether the native files were read back and hashed since this daemon started. */
-  private nativeVerified = false;
   /** What an install in flight is fetching, so the progress bar's total follows a fall to WebAssembly. */
   private installKind: RuntimeKind | undefined;
 
@@ -239,6 +237,9 @@ export class SpeechEngine implements VoiceEngineApi {
       await this.proveItLoads('wasm');
       return;
     }
+    // A voice that is loaded (the normal case: the WebAssembly one) is ended first, so the proof below loads the NATIVE engine
+    // rather than finding the running WebAssembly thread and mistaking that for a native engine that would not start.
+    await this.unload();
     // The room for the whole native plan is asked for before anything is downloaded, not file by file as it goes.
     await ensureRoom(files, await missingOf(files, this.nativeSet));
     this.nativeFailure = undefined;
@@ -260,7 +261,6 @@ export class SpeechEngine implements VoiceEngineApi {
       dropNative: async () => {
         await this.unload();
         for (const file of this.nativeAddonFiles) await files.remove(file);
-        this.nativeVerified = false;
       },
       dropWasm: async () => {
         for (const file of this.wasmOnly) await files.remove(file);
@@ -306,6 +306,8 @@ export class SpeechEngine implements VoiceEngineApi {
    */
   private async proveItLoads(kind: RuntimeKind): Promise<void> {
     try {
+      // A native proof starts from nothing loaded: models woken meanwhile (they would be WebAssembly) are not the engine on trial.
+      if (kind === 'native') await this.unload();
       const loadedAt = await this.ensureLoaded();
       if (kind === 'native' && loadedAt.kind !== 'native')
         throw new NativeUnavailable(this.nativeFailure ?? 'the native engine did not start');
@@ -329,7 +331,6 @@ export class SpeechEngine implements VoiceEngineApi {
     this.selfTest = undefined;
     this.failure = undefined;
     this.nativeFailure = undefined;
-    this.nativeVerified = false;
     return await this.view();
   }
 
@@ -469,14 +470,13 @@ export class SpeechEngine implements VoiceEngineApi {
     const files = this.parts.files;
     let call: Parameters<SpeechThread['call']>;
     if (kind === 'native') {
-      if (!this.nativeVerified) {
-        const bad = await unverified(files, this.nativeAddonFiles);
-        if (bad.length > 0) {
-          // Not the pinned bytes: not loaded, and deleted, so the next Install fetches them again.
-          for (const file of bad) await files.remove(file);
-          throw new VoiceEngineError('hash_mismatch', SENTENCES.hash_mismatch);
-        }
-        this.nativeVerified = true;
+      // EVERY native load re-hashes the addon and both shared libraries (about 0.1 s next to the model load): the files sit
+      // in a folder other programs of this user can write, and what is hashed here is what is loaded next.
+      const bad = await unverified(files, this.nativeAddonFiles);
+      if (bad.length > 0) {
+        // Not the pinned bytes: not loaded, and deleted, so the next Install fetches them again.
+        for (const file of bad) await files.remove(file);
+        throw new VoiceEngineError('hash_mismatch', SENTENCES.hash_mismatch);
       }
       const addon = this.nativeAddonFiles.find(file => file.role === NATIVE_ADDON_ROLE);
       if (addon === undefined) throw new VoiceEngineError('not_ready', 'Speech is not installed on this machine yet.');

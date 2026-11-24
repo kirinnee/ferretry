@@ -368,8 +368,14 @@ Voice › **Voice mode** installs, shows the state, removes, and offers **Talk t
 - **What runs where.** Owner decision O2: the sherpa-onnx **WebAssembly** runtime first (the same `@sherpaw/asr` the
   app ships), in one **worker thread** of the daemon (`daemon/worker/speech.worker.ts`), never in the daemon's own
   event loop. Parakeet TDT 0.6B v3 (int8, multilingual) decodes. **Silero VAD v5** finds the voice, run by
-  onnxruntime-web in the same thread, because sherpa's WebAssembly build has no voice-detector entry point. No native
-  library, no `nix-ld` gap, nothing embedded in `fyd` beyond the worker's JavaScript.
+  onnxruntime-web in the same thread, because sherpa's WebAssembly build has no voice-detector entry point. Where this machine can run it,
+  the **native** sherpa-onnx library (fetched at Install, pinned by size and SHA-256 and hashed again before every load) runs
+  instead; see the next bullet and the declared gaps in `docs/design/voice-modes.md` §2.3.1.
+- **The native engine runs inside the daemon.** Its addon is loaded into the daemon process (a Bun Worker thread,
+  `process.dlopen`), so a native crash kills the whole `fyd`, and `fyd --check` loads it in the check process. A declared GAP:
+  moving it to a child process is the later real fix. The files are verified immediately before each load, but a program of
+  the same user could still swap one between that check and the load (such a program can already read the vault,
+  `docs/secrets.md`).
 - **Install** (`POST /v1/voice/engine/install`, answers 202; Settings › Voice › Voice mode) downloads seven pinned
   files, **698,905,830 bytes** in all, into `state/voice/models/parakeet-tdt-0.6b-v3/`: Parakeet's three graphs and
   vocabulary and Silero (Hugging Face, by commit), and the two WebAssembly runtimes (jsDelivr, by version). Each file

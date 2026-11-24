@@ -665,3 +665,87 @@ describe('the speech engine, native first', () => {
     expect(requests.map(r => r.kind)).toEqual(['load', 'transcribe']);
   });
 });
+
+const loadsOf = (requests: readonly { kind: string }[]): string[] =>
+  requests.flatMap(r => (r.kind === 'load' ? [(r as unknown as { engine: string }).engine] : []));
+
+describe('every native load is hashed, and Switch works on a loaded WebAssembly voice', () => {
+  test('reply voice: a library swapped on disk between two uses of one running daemon is refused, not loaded', async () => {
+    const { engine, files, requests } = replyEngine();
+    await engine.install();
+    await engine.settled();
+    await engine.speak('hello');
+    await engine.unload();
+    expect(loadsOf(requests)).toEqual(['native', 'native']);
+    // Same length, different bytes, while the daemon keeps running: a once-per-process check would never look again.
+    files.held.set('libonnxruntime.so', body('the runtimX'));
+    // With the WebAssembly files there as well, it carries on with them and says why in a plain sentence.
+    for (const file of REPLY_CATALOG) files.held.set(file.role, body(`reply ${file.role}`));
+    requests.length = 0;
+    await engine.speak('hello');
+    expect(loadsOf(requests)).toEqual(['wasm']);
+    expect(files.has('libonnxruntime.so')).toBe(false);
+    const view = await engine.view();
+    expect(view.runtime?.kind).toBe('wasm');
+    expect(view.runtime?.sentence).toContain('were not the pinned ones');
+  });
+
+  test('reply voice: the swapped library alone is refused with hash_mismatch and nothing is loaded', async () => {
+    const { engine, files, requests } = replyEngine();
+    await engine.install();
+    await engine.settled();
+    await engine.speak('hello');
+    await engine.unload();
+    files.held.set('libonnxruntime.so', body('the runtimX'));
+    requests.length = 0;
+    await expect(engine.speak('hello')).rejects.toMatchObject({ code: 'hash_mismatch' });
+    expect(requests).toEqual([]);
+  });
+
+  test('reply voice: Switch to the fast engine with the WebAssembly voice loaded keeps the files and ends native', async () => {
+    const { engine, files, requests } = replyEngine();
+    for (const file of REPLY_CATALOG) files.held.set(file.role, body(`reply ${file.role}`));
+    await engine.speak('hello');
+    expect((await engine.view()).loaded).toBe(true);
+    expect(loadsOf(requests)).toEqual(['wasm']);
+    await engine.install();
+    await engine.settled();
+    const view = await engine.view();
+    expect(view.state).toBe('ready');
+    expect(view.runtime?.kind).toBe('native');
+    expect(view.runtime?.sentence).toContain('native engine');
+    expect(loadsOf(requests)).toEqual(['wasm', 'native']);
+    for (const file of TARGET.files) expect(files.has(file.role)).toBe(true);
+    expect(files.has('model-fp32')).toBe(true);
+  });
+
+  test('speech engine: a library swapped on disk between two uses of one running daemon is refused, not loaded', async () => {
+    const { engine, files, requests } = speechEngine();
+    await engine.install();
+    await engine.settled();
+    await engine.transcribe(new Float32Array(16_000));
+    await engine.unload();
+    expect(loadsOf(requests)).toEqual(['native', 'native']);
+    files.held.set('libonnxruntime.so', body('the runtimX'));
+    requests.length = 0;
+    await expect(engine.transcribe(new Float32Array(16_000))).rejects.toMatchObject({ code: 'hash_mismatch' });
+    expect(requests).toEqual([]);
+    expect(files.has('libonnxruntime.so')).toBe(false);
+  });
+
+  test('speech engine: Switch to the fast engine with the WebAssembly models loaded keeps the files and ends native', async () => {
+    const { engine, files, requests } = speechEngine();
+    for (const file of SPEECH_CATALOG) files.held.set(file.role, body(`speech ${file.role}`));
+    files.held.set('sherpa-wasm', body('speech sherpa-wasm'));
+    await engine.transcribe(new Float32Array(16_000));
+    expect((await engine.view()).loaded).toBe(true);
+    expect(loadsOf(requests)).toEqual(['wasm']);
+    await engine.install();
+    await engine.settled();
+    const view = await engine.view();
+    expect(view.state).toBe('ready');
+    expect(view.runtime?.kind).toBe('native');
+    expect(loadsOf(requests)).toEqual(['wasm', 'native']);
+    for (const file of TARGET.files) expect(files.has(file.role)).toBe(true);
+  });
+});
