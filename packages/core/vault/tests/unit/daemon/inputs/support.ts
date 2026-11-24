@@ -2,7 +2,7 @@ import type { AgendaId } from '../../../../daemon/lib/inputs/wire.ts';
 import type { InputEvent } from '../../../../daemon/lib/inputs/wire.ts';
 import type { InputRaise, InputShot, InputTargetFacts } from '../../../../contract/index.ts';
 import { EphemeralValues } from '../../../../daemon/lib/inputs/ephemeral-values.ts';
-import type { InputAgendaPort, InputLoginPort } from '../../../../daemon/lib/inputs/ports.ts';
+import type { InputAgendaPort, InputJournal, InputLoginPort } from '../../../../daemon/lib/inputs/ports.ts';
 import { QuarantineRegistry } from '../../../../daemon/lib/inputs/quarantine.ts';
 import { InputRequestService, type InputRequestServiceDependencies } from '../../../../daemon/lib/inputs/service.ts';
 import type { ScriptedOriginsView } from '../../../../daemon/lib/inputs/borrowed-grants.ts';
@@ -63,9 +63,11 @@ export function inputRequestService(
     /** Who is told how a request ended; absent: nobody. */
     readonly notifier?: InputRequestServiceDependencies['notifier'];
     /** Called each time the journal is written (a request or a hold), before it answers. */
-    readonly journalled?: (event: unknown) => void;
+    readonly journalled?: (event: unknown) => unknown;
     /** Called with the arguments of every audit record the service writes (record, saved, stored). */
     readonly audited?: (entry: unknown) => void;
+    /** The journal itself, in place of the fake one: lets a test put the real state-journal adapter behind the service. */
+    readonly journal?: InputJournal;
     /** The target port itself, in place of the fake terminal: lets a test put the real adapter in front of it. */
     readonly target?: InputRequestServiceDependencies['target'];
   } = {},
@@ -108,10 +110,10 @@ export function inputRequestService(
       promptOf: async () => 'sudo wants your password',
     },
     notifier: options.notifier ?? { tell: async () => undefined },
-    journal: {
+    journal: options.journal ?? {
       publish: async (_session, event) => {
         events.push(event);
-        options.journalled?.(event);
+        await options.journalled?.(event);
       },
       history: async () => [],
       quarantine: async (_session, event) => void options.journalled?.(event),

@@ -73,6 +73,7 @@ import { GRANT_MISS_CONTEXT_LINE, grantStops, mergeScriptedOrigins, scriptedSinc
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
+import { barredFromLoginPassword, FIELD_LABELS, pickedOnPage } from './field-kinds.ts';
 import { lockFor, lookAlike, matchable, passwordTarget, spellsPassword } from './lock.ts';
 import { type LoginDelivery, type LoginObserver } from './login-observer.ts';
 import type {
@@ -148,6 +149,12 @@ const COMM_TEXT_LIMIT = 64;
 const HIDDEN_PROMPT = '[hidden: part of a value typed here is on this line]';
 const QUARANTINE_NOTICE = '[hidden: a secret was just typed in this terminal]';
 const QUARANTINE_MS = INPUT_QUARANTINE_SECONDS * 1000;
+/** How long after it would have expired a restart still brings an ended request back for `input_wait` (an hour). */
+const FINISHED_KEPT_MS = HOUR_MS;
+
+/** What the ferret reads when a request ended and Ferretry cannot say whether the value was typed. */
+const OUTCOME_UNKNOWN_AGENT_NOTE =
+  "Outcome unknown: the owner's value may have been typed, and Ferretry did not record how this ended. Read the target before you act; raise a fresh request if you still need a value.";
 
 const FINAL = new Set<InputRequest['state']>(['delivered', 'refused', 'expired', 'cancelled']);
 
@@ -158,13 +165,6 @@ const TITLES = {
   plain: 'Needs an answer',
 } as const;
 const LOGIN_TITLE = 'Needs a login';
-/** What a field is called on the card when the agent gave it no label. */
-const FIELD_LABELS: Readonly<Record<InputSensitivity, string>> = {
-  secret: 'Password',
-  private: 'Private value',
-  code: 'Code',
-  plain: 'Value',
-};
 /** The longest a chain is counted: a login is a few steps, not a loop. */
 const MAX_STEP = 16;
 
@@ -208,6 +208,8 @@ interface Held {
   /** Every `deliveryId` seen and what came of it, so a retry gets the first outcome and never types twice. */
   readonly deliveries: Map<string, Promise<InputDeliverResult>>;
   readonly waiters: Set<() => void>;
+  /** `outcome_unknown` once the request ended with its outcome unknown: the one reason the ferret's view carries. */
+  reason?: InputReason;
   /** A page's fields as a picture, taken at raise before anything was typed: the owner's card only, RAM only. */
   shot?: InputShot;
   /** The `code` fields the daemon saw going into a password (`observedAs`): handled as `secret` from then on. */
@@ -897,7 +899,10 @@ export class InputRequestService {
       sessionId,
       facts,
       matchKey: targetMatchKey(facts, this.deps.hostName ?? ''),
-      fields,
+      // A secret the page says is a payment or code field is no sign-in's password: the matcher never covers a `private` value.
+      fields: fields.map(field =>
+        barredFromLoginPassword(facts, field) ? { ...field, sensitivity: 'private' as const } : field,
+      ),
       listing,
       keys,
       // Any page script the ferret EVER ran in this session: stricter than "on this document".
@@ -1150,7 +1155,7 @@ export class InputRequestService {
     const { logins } = this.deps;
     if (logins === undefined || held.request.state !== 'pending') return undefined;
     const listing = await logins.listing().catch((): SavedListing => NO_ACCOUNTS);
-    return savedForFields(held.request.fields, held.matchKey, listing, {
+    return savedForFields(loginFields(held), held.matchKey, listing, {
       ...(await this.choiceOf(held.request.sessionId)),
       hint: held.hint,
       codesHere: codesHere(held.request.observed, held.request.fields),
@@ -1718,6 +1723,7 @@ export class InputRequestService {
 
   private async revive(event: InputEvent, now: number): Promise<void> {
     if (event.type === INPUT_JOURNAL_EVENT_TYPES.delivering) return await this.interrupt(event);
+    if (FINAL.has(event.state)) return await this.revived(event, now);
     if (event.type !== INPUT_JOURNAL_EVENT_TYPES.requested || event.expiresAt === undefined) return;
     if (Date.parse(event.expiresAt) <= now) return;
     const prompt = await this.deps.agenda.promptOf(event.sessionId, event.agendaItemId);
@@ -1806,7 +1812,46 @@ export class InputRequestService {
       upgraded: new Set(),
     };
     this.held.set(request.id, held);
-    await this.finish(held, 'refused', 'interrupted', undefined, { closeCard: true, tellAgent: true, uncertain: true });
+    await this.finish(held, 'cancelled', 'outcome_unknown', undefined, {
+      closeCard: true,
+      tellAgent: true,
+      uncertain: true,
+    });
+  }
+
+  /**
+   * A request a restart finds already ended: its true final state comes back, so `input_wait` after a restart reads what
+   * happened, never `not_found`. Kept for {@link FINISHED_KEPT_MS} after it would have expired, then let go. Only the
+   * state is known: who answered, and how, is not journalled.
+   */
+  private async revived(event: InputEvent, now: number): Promise<void> {
+    if (this.held.has(event.requestId) || event.expiresAt === undefined) return;
+    if (Date.parse(event.expiresAt) <= now - FINISHED_KEPT_MS) return;
+    const prompt = (await this.deps.agenda.promptOf(event.sessionId, event.agendaItemId)) ?? 'input request';
+    const request: InputRequest = {
+      id: event.requestId,
+      sessionId: event.sessionId,
+      agendaItemId: event.agendaItemId,
+      target: { kind: event.target.kind, key: event.target.key },
+      prompt,
+      sensitivity: event.sensitivity,
+      fields: [restoredField(event.sensitivity)],
+      submit: event.submit ?? 'offer-owner',
+      raisedAt: event.at,
+      expiresAt: event.expiresAt,
+      state: event.state,
+    };
+    this.held.set(request.id, {
+      request,
+      names: [request.target.key],
+      checkFailures: 0,
+      rebinds: 0,
+      formerCards: [],
+      deliveries: new Map(),
+      waiters: new Set(),
+      upgraded: new Set(),
+      ...(event.reason === 'outcome_unknown' ? { reason: event.reason } : {}),
+    });
   }
 
   private guardRate(sessionId: string, target: InputTarget, now: number): void {
@@ -2049,7 +2094,7 @@ export class InputRequestService {
           await grant.uncertain(outcome === 'reader_changed' ? 'program-changed' : 'did-not-move-on');
         }
         await stored(true);
-        await this.finish(held, 'refused', 'interrupted', undefined, {
+        await this.finish(held, 'cancelled', 'outcome_unknown', undefined, {
           closeCard: true,
           tellAgent: true,
           uncertain: true,
@@ -2174,6 +2219,11 @@ export class InputRequestService {
     const { request } = held;
     if (this.deps.logins === undefined)
       throw new InputRequestError('bad_request', 'this daemon keeps no accounts; send without saving');
+    if (loginFields(held).some(field => field.barred))
+      throw new InputRequestError(
+        'bad_request',
+        'a payment or code field is not kept as a login password; send without saving',
+      );
     const roles = savedRolesOf(request.fields);
     if (roles === undefined)
       throw new InputRequestError(
@@ -2244,7 +2294,7 @@ export class InputRequestService {
         `there is no account ${save.entry} to update: save it as a new account. Nothing was typed`,
       );
     // Only the account this card offers to update, decided again now from the store and the page (never any handle).
-    const offered = savedForFields(held.request.fields, held.matchKey, listing, {
+    const offered = savedForFields(loginFields(held), held.matchKey, listing, {
       ...(await this.choiceOf(held.request.sessionId)),
       ...(held.typedUsername === undefined ? {} : { typedUsername: held.typedUsername }),
     }).update;
@@ -2352,7 +2402,7 @@ export class InputRequestService {
     if (signIn !== undefined && listing.signIns.find(each => each.id === signIn)?.account !== entry)
       throw new InputRequestError('bad_request', `that sign-in is not one of ${entry}; nothing was typed`);
     // At least one: an `entry` with every field typed was already refused (`typedValues`).
-    const filled = held.request.fields.filter(field => !typed.has(field.id));
+    const filled = loginFields(held).filter(field => !typed.has(field.id));
     const offer = savedForFields(filled, held.matchKey, listing, {
       ...(await this.choiceOf(held.request.sessionId)),
       hint: held.hint,
@@ -2681,14 +2731,13 @@ export class InputRequestService {
         : undefined;
     const seen = held.request;
     const { observed: _seen, observedDigest: _digest, pictured: _pictured, ...rest } = held.request;
-    held.request = {
+    const ended: InputRequest = {
       ...rest,
       state,
       ...(outcome === undefined ? {} : { outcome }),
     };
     // The picture was for the owner deciding; once the request ends nobody may need it, so it is let go.
     delete held.shot;
-    const { request } = held;
     const kind =
       state === 'delivered'
         ? 'delivered'
@@ -2697,8 +2746,21 @@ export class InputRequestService {
           : state === 'refused'
             ? 'refused'
             : 'cancelled';
-    await this.journalQuietly(request, kind, reason, options.submitted);
-    await this.record(request, `input.${kind}`, by ?? { kind: 'daemon' }, {
+    // The final outcome is DURABLE before anyone is told it, in RAM or to a waiter: until the write lands the request still
+    // reads `delivering`, as the journal does, so no reader can see `delivered` that a restart would not find. A value that
+    // WAS typed and whose end could not be recorded is told as it is, an unknown outcome (the journal still says
+    // `delivering`, so a restart reads the same), never as `delivered`. Only the audit, the card and the notice follow.
+    const recorded = await this.journal(ended, kind, reason, options.submitted).then(
+      () => true,
+      () => false,
+    );
+    const unrecorded = !recorded && state === 'delivered';
+    const request: InputRequest = unrecorded ? { ...rest, state: 'cancelled' } : ended;
+    held.request = request;
+    if (unrecorded || reason === 'outcome_unknown') held.reason = 'outcome_unknown';
+    for (const wake of held.waiters) wake();
+    held.waiters.clear();
+    await this.record(ended, `input.${kind}`, by ?? { kind: 'daemon' }, {
       ...this.auditOf(seen),
       ...(reason === undefined ? {} : { reason }),
       ...(state === 'delivered'
@@ -2727,10 +2789,14 @@ export class InputRequestService {
       await this.deps.notifier.tell(
         request.sessionId,
         request.agendaItemId,
-        tellOf(request, state, reason, options.uncertain === true, options.unsettled === true),
+        tellOf(
+          request,
+          request.state,
+          held.reason ?? reason,
+          options.uncertain === true || held.reason === 'outcome_unknown',
+          options.unsettled === true,
+        ),
       );
-    for (const wake of held.waiters) wake();
-    held.waiters.clear();
   }
 
   private byCard(sessionId: string, id: AgendaId): Held | undefined {
@@ -2770,6 +2836,7 @@ export class InputRequestService {
       ...(request.outcome === undefined
         ? {}
         : { submitted: request.outcome.submitted, source: request.outcome.source }),
+      ...(held.reason === 'outcome_unknown' ? { reason: held.reason, note: OUTCOME_UNKNOWN_AGENT_NOTE } : {}),
       ...(pending && page?.challenge !== undefined
         ? {
             note: `The page is showing a captcha: hand it to the owner with browser_ask_owner ("complete the captcha") and wait; never try to solve it. ${request.agendaItemId} waits for the owner too.`,
@@ -2946,10 +3013,9 @@ const AMBER_AT_LEAST: Readonly<Record<InputRisk['level'], InputRisk['level']>> =
 };
 
 /**
- * The fields as the daemon handles them, each with its flag. A `code` field whose target the daemon saw is a password
- * (`passwordTarget`) is handled as a `secret` from then on (`upgraded`, never undone): hidden on the card, locked,
- * masked, blocking the ferret's typing and journalled as `secret`. Its flag says so, at least amber, because the
- * ferret called a password a code.
+ * The fields as the daemon handles them, each with its flag. A page's own word for a field (`pickedOnPage`: a code, a card)
+ * beats the ferret's pick. A `code` field whose target is a password (`passwordTarget`) is a `secret` from then on
+ * (`upgraded`, never undone): hidden, locked, masked, blocking the ferret's typing, journalled as `secret`, flagged amber.
  */
 function observedAs(
   fields: readonly InputRequestField[],
@@ -2959,9 +3025,9 @@ function observedAs(
   /** The daemon saw a code program this account cannot replace in the foreground (`ObserveResult.codeProgram`). */
   codeProgram: boolean,
 ): InputRequestField[] {
-  return fields.map(field => {
-    // The ferret's own words (its prompt, the field's label or id) may only ever RAISE a code to a secret.
-    // Matched as normalised text, and a look-alike spelling counts, as for the pane's own words (lock.ts).
+  return fields.map(raised => {
+    const field = pickedOnPage(facts, raised, FIELD_LABELS);
+    // The ferret's own words (prompt, label, id) only ever RAISE a code to a secret; look-alike spellings count (lock.ts).
     const said = [prompt, field.label, field.id].some(
       word => PASSWORD_WORDS.test(matchable(word)) || spellsPassword(word) || lookAlike(word),
     );
@@ -2970,6 +3036,15 @@ function observedAs(
     const secret = { ...field, sensitivity: 'secret' as const };
     return { ...secret, risk: { level: AMBER_AT_LEAST[riskOf(secret, facts).level], reason: UPGRADED_FLAG } };
   });
+}
+
+/** A held card's fields as the saved-login view reads them: each secret the page says is a card or code field is barred. */
+function loginFields(held: Held): readonly (InputRequestField & { readonly barred: boolean })[] {
+  const facts = held.request.observed;
+  return held.request.fields.map(field => ({
+    ...field,
+    barred: facts !== undefined && barredFromLoginPassword(facts, field),
+  }));
 }
 
 /**

@@ -455,11 +455,19 @@ const projectOf = (context: SavedChoiceContext): Pick<InputSaved, 'project'> => 
  * username.
  */
 export function savedForFields(
-  fields: readonly { readonly id: string; readonly sensitivity: InputSensitivity }[],
+  fields: readonly {
+    readonly id: string;
+    readonly sensitivity: InputSensitivity;
+    /** The page says this secret is a card or code field: no saved login password goes into it ({@link barredFromLoginPassword}). */
+    readonly barred?: boolean;
+  }[],
   matchKey: string | undefined,
   listing: SavedListing,
   context: SavedChoiceContext = {},
 ): InputSaved {
+  // A card with a payment or code box is no sign-in: nothing is offered, and nothing is suggested to be saved as one.
+  if (fields.some(field => field.barred === true))
+    return { ...(matchKey === undefined ? {} : { match: matchKey }), offers: [], ...projectOf(context) };
   const [only] = fields;
   if (fields.length === 1 && only !== undefined) return savedFor(only.sensitivity, matchKey, listing, context);
   const roles = fields.map(field => fillRoleFor(field.sensitivity));

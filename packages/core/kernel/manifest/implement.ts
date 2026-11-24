@@ -447,6 +447,8 @@ export interface ScreenProps {
 export interface PanelIntent {
   readonly id: number;
   readonly action: string;
+  /** What the act is about, when it is about one thing (`show-page`: the page id). */
+  readonly target?: string;
 }
 export interface PanelProps {
   readonly subject?: string;

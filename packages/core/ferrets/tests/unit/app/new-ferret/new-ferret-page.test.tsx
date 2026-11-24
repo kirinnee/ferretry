@@ -431,6 +431,31 @@ describe('NewFerretPage › the offered runtime slot', () => {
     expect(post(harness)?.body).toMatchObject({ runtime: 'claude-a', model: 'haiku' });
   });
 
+  it("offers the models a login's live list adds, and starts on the one chosen from it (the default stays the catalog's)", async () => {
+    const live = {
+      list: { fetchedAt: new Date().toISOString(), complete: true, ids: ['opus', 'haiku', 'fresh-1'] },
+    };
+    const catalog: ChosenFerretAccount = {
+      ...CLAUDE,
+      modelCatalog: { id: 'zai', label: 'Z.ai', customIds: false },
+      live,
+    };
+    const harness = page({ panel: slot => <StubPicker account={catalog} slot={slot} /> });
+    run(() => harness.view.root.findByProps({ 'data-stub-runtime': 'claude-a' }).props.onClick());
+    const select = harness.view.root.find(
+      node =>
+        typeof node.type !== 'string' && node.props.id === 'fy-new-ferret-model' && Array.isArray(node.props.options),
+    );
+    const options = select.props.options as { value: string; group?: string }[];
+    expect(options.map(option => option.value)).toEqual(['', 'opus', 'haiku', 'sonnet-old', 'fresh-1']);
+    expect(options.find(option => option.value === 'fresh-1')?.group).toBe('New from Z.ai');
+    run(() => select.props.onChange('fresh-1'));
+    change(harness.view, 'fy-new-ferret-folder', '/work/x');
+    change(harness.view, 'fy-new-ferret-prompt', 'Go');
+    await runAsync(async () => button(harness.view, 'Create ferret').props.onClick());
+    expect(post(harness)?.body).toMatchObject({ runtime: 'claude-a', model: 'fresh-1' });
+  });
+
   it('takes the Remote Control box away from a Codex runtime, says why, and never sends it', async () => {
     const harness = page({ panel: slot => <StubPicker account={CODEX} slot={slot} /> });
     run(() => harness.view.root.findByProps({ 'data-stub-runtime': 'codex-b' }).props.onClick());

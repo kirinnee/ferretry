@@ -32,6 +32,7 @@ import {
   tabOrChat,
 } from './ferret-workspace-model.ts';
 import { phoneChipId, PhoneTabRow } from './phone-tab-row.tsx';
+import { usePanelReveal } from './panel-reveal.ts';
 import { sidePaneOpen } from './side-pane-open.ts';
 import { PanelSlot, useSlotPanels } from './views.tsx';
 
@@ -92,7 +93,12 @@ function usePanelIntent(select: (key: string) => void) {
     },
     [select],
   );
-  return { intent, choose };
+  /** A panel asked to be shown (`panel-reveal.ts`): the same numbered request, with what it is about. */
+  const ask = useCallback((request: Pick<PanelIntent, 'action' | 'target'>): void => {
+    requests.current += 1;
+    setIntent({ id: requests.current, ...request });
+  }, []);
+  return { intent, choose, ask };
 }
 
 export interface FerretWorkspaceProps {
@@ -118,7 +124,7 @@ export function FerretWorkspace({ daemon, subject, chat, canControl = true }: Fe
   const tabs = useMemo(() => sideTabs(panels), [panels]);
   const [chosenTab, setChosenTab] = useState<string | undefined>(undefined);
   const activeTab = sideTabOrFirst(tabs, chosenTab);
-  const { intent, choose } = usePanelIntent(setChosenTab);
+  const { intent, choose, ask } = usePanelIntent(setChosenTab);
   useEffect(() => {
     if (open) setMounted(true);
   }, [open]);
@@ -139,6 +145,22 @@ export function FerretWorkspace({ daemon, subject, chat, canControl = true }: Fe
     [panels],
   );
   const shows = useCallback((panelId: string): boolean => panelPlaced(panels, panelId), [panels]);
+  // A panel that asks to be shown (the agent opened a browser page) opens the column on it and hands it the request.
+  usePanelReveal({
+    daemon,
+    subject,
+    panels,
+    phone: false,
+    enabled: !phone || panels.length === 0,
+    shown: open ? activeTab : undefined,
+    onShow: useCallback(
+      (panel, request) => {
+        reveal(panel.id);
+        ask(request);
+      },
+      [reveal, ask],
+    ),
+  });
   // An address that names a file (`?file=`, from Projects' file finder) opens the closed side column on Files, once.
   const fileWanted = useRef(addressNamesFile(globalThis.location?.search ?? ''));
   useEffect(() => {
@@ -254,7 +276,7 @@ function PhoneWorkspace({ daemon, subject, chat, canControl = true }: FerretWork
   const tabs = phoneTabs(panels);
   const [chosen, setChosen] = useState(CHAT_TAB);
   const active = tabOrChat(tabs, chosen);
-  const { intent, choose } = usePanelIntent(setChosen);
+  const { intent, choose, ask } = usePanelIntent(setChosen);
 
   /** A panel of this ferret asks for another one (`files`): its chip becomes the one on show. */
   const showPanel = useCallback(
@@ -265,6 +287,22 @@ function PhoneWorkspace({ daemon, subject, chat, canControl = true }: FerretWork
     [panels],
   );
   const shows = useCallback((panelId: string): boolean => panelPlaced(panels, panelId), [panels]);
+  // A panel that asks to be shown moves to its chip, unless a sign-in card modal is open (`panel-reveal.ts`).
+  usePanelReveal({
+    daemon,
+    subject,
+    panels,
+    phone: true,
+    enabled: true,
+    shown: active === CHAT_TAB ? undefined : active,
+    onShow: useCallback(
+      (panel, request) => {
+        showPanel(panel.id);
+        ask(request);
+      },
+      [showPanel, ask],
+    ),
+  });
   // An address that names a file (`?file=`) lands on the Files chip, once.
   const fileWanted = useRef(addressNamesFile(globalThis.location?.search ?? ''));
   useEffect(() => {
