@@ -30,6 +30,8 @@ export interface HarnessWords {
   readonly half: string;
   /** What a sign-in made inside Ferretry is called: "Claude.ai sign-in" (the same words a runtime on it uses). */
   readonly signIn: string;
+  /** What its waiting sign-in shows a person to do: a code on the provider's page (`code`) or the address bar of a page that will not load (`address`). */
+  readonly demo: 'address' | 'code';
 }
 
 /** The harnesses Logins has behaviour for, by plugin key, in the order its surfaces list them (Claude Code first). */
@@ -41,6 +43,7 @@ const HARNESS_WORDS = {
     blurb: 'Anthropic’s coding agent',
     half: 'claude',
     signIn: 'Claude.ai sign-in',
+    demo: 'code',
   },
   codex: {
     name: 'Codex',
@@ -49,6 +52,7 @@ const HARNESS_WORDS = {
     blurb: 'OpenAI’s coding agent',
     half: 'codex',
     signIn: 'ChatGPT sign-in',
+    demo: 'address',
   },
 } as const satisfies Readonly<Record<string, HarnessWords>>;
 
