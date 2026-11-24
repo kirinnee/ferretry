@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import {
   finishSignInLabel,
   hasSharedEmails,
-  loginEmail,
   loginExplanation,
   loginGroups,
   loginName,
@@ -19,11 +18,23 @@ import { login, loginList } from '../cli/fakes.ts';
 const NOW = Date.parse('2026-11-01T10:00:00.000Z');
 
 describe('how a login is worded', () => {
-  it('names a login by its email and label, or by its harness before the email is known', () => {
+  it('names a login by who it is: email, else plan, else where its sign-in comes from; never by its id', () => {
     expect(loginName(login({ label: 'work' }))).toBe('you@example.com (work)');
-    expect(loginEmail(login({ email: undefined }))).toBe('Claude Code login');
-    expect(loginEmail(login({ email: undefined, harnesses: ['claude-code', 'codex'] }))).toBe(
-      'Claude Code + Codex login',
+    expect(loginName(login({ id: 'claude-x', email: undefined, store: 'host' }))).toBe(
+      'Claude · your terminal sign-in',
+    );
+    expect(loginName(login({ id: 'claude-x', email: undefined, store: 'ferretry' }))).toBe(
+      'Claude · Claude.ai sign-in',
+    );
+    expect(
+      loginName(login({ id: 'codex-x', email: undefined, harness: 'codex', harnesses: ['codex'], store: 'ferretry' })),
+    ).toBe('Codex · ChatGPT sign-in');
+    expect(loginName(login({ id: 'k', email: undefined, store: 'environment', label: 'qa' }))).toBe(
+      'Claude · API key (qa)',
+    );
+    const withPlan = login({ id: 'p', email: undefined, store: 'host' });
+    expect(loginName({ ...withPlan, status: { ...withPlan.status, planType: 'Pro' } })).toBe(
+      'Claude · your terminal sign-in — Pro',
     );
   });
 

@@ -5,7 +5,9 @@
  * out would do. This module owns only the prose around them, so every sentence a person reads is pinned by a test, and
  * two screens cannot word one login two ways.
  *
- * - **A login is named by its email and its label** ("you@example.com (work)"), never by an id or a folder.
+ * - **A login is named by who it is** ("you@example.com (work)"): its email, else its plan, else where its sign-in comes
+ *   from, in the words its runtime uses ("Claude · your terminal sign-in", "Claude · Anthropic") — never by an id or a
+ *   folder. The id shows only on an "id" line.
  * - **Unknown is never zero.** A usage window nobody measured is "Not measured yet", not an empty bar.
  * - **Signing in says how many runtimes it changes.**
  */
@@ -48,12 +50,30 @@ const harnessesName = (harnesses: readonly HarnessKind[]): string => harnesses.m
 export const plural = (count: number, one: string, many = `${one}s`): string =>
   `${String(count)} ${count === 1 ? one : many}`;
 
-/** "you@example.com", or "Claude Code login" when the harness has not told us the email yet. */
-export const loginEmail = (login: LoginView): string => login.email ?? `${harnessesName(loginHarnesses(login))} login`;
+/** "Claude", "Codex": the harness as a person says it. */
+const harnessWord = (harness: HarnessKind): string => harnessWords(harness)?.short ?? harness;
 
-/** "you@example.com (work)": how a login is named everywhere. */
-export const loginName = (login: LoginView): string =>
-  login.label === undefined ? loginEmail(login) : `${loginEmail(login)} (${login.label})`;
+/** Where a login's sign-in comes from, in the words its runtime uses (the same table as Runtimes' `runtimeDisplayName`). */
+const signInSource = (login: LoginView): string => {
+  switch (login.store) {
+    case 'host':
+      return 'your terminal sign-in';
+    case 'ferretry':
+      return harnessWords(login.harness)?.signIn ?? 'sign-in';
+    case 'environment':
+      return login.environment?.preset?.label ?? 'API key';
+  }
+};
+
+/** "Claude · your terminal sign-in", "Claude · Anthropic": what kind of login it is, with no id in it. */
+const loginKind = (login: LoginView): string => `${harnessWord(login.harness)} · ${signInSource(login)}`;
+
+/** "you@example.com (work)": how a login is named everywhere — its email, else its plan, else its kind; then the owner's label. */
+export const loginName = (login: LoginView): string => {
+  const plan = login.status.planType;
+  const who = login.email ?? (plan === undefined ? loginKind(login) : `${loginKind(login)} — ${plan}`);
+  return login.label === undefined ? who : `${who} (${login.label})`;
+};
 
 /** "Used by 3 runtimes" or "Not used yet". */
 export const loginUse = (login: LoginView): string =>
