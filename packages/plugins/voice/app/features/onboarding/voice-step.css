@@ -100,8 +100,8 @@
 }
 
 /* The Speed-ups page names itself once: the group's own heading and its intro row repeat the page's line. */
-.fy-voice-step [data-setting-group] > h3,
-.fy-voice-step [data-setting-group] > ul > li:first-child {
+.fy-voice-step[data-speedups-step] [data-setting-group] > h3,
+.fy-voice-step[data-speedups-step] [data-setting-group] > ul > li:first-child {
   display: none;
 }
 
@@ -671,4 +671,26 @@
     clip-path: none;
     overflow-wrap: break-word;
   }
+}
+
+/* Voice mode's set-up under the audio test: a section of its own (a rule above it, its own heading with an "Optional" tag),
+   so it never reads as one more row of the dictation card above. The settings group's own small label repeats the heading. */
+.fy-vm-setup {
+  border-block-start: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm, 8px);
+  margin-block-start: var(--gap-lg, 20px);
+  padding-block-start: var(--gap-lg, 20px);
+}
+.fy-vm-setup-head {
+  align-items: center;
+  display: flex;
+  font-size: var(--text-lg, 1.125rem);
+  font-weight: 600;
+  gap: 8px;
+  margin: 0;
+}
+.fy-vm-setup [data-setting-group] > h3 {
+  display: none;
 }
