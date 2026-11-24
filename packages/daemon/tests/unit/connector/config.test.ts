@@ -64,3 +64,11 @@ describe('connectorSettings', () => {
     ).equal('disabled');
   });
 });
+
+describe('connectorSettings without an address', () => {
+  it('says to set publicUrl when the block is on but names none', () => {
+    const settings = connectorSettings({ enabled: true });
+    should(settings.kind).equal('disabled');
+    if (settings.kind === 'disabled') should(settings.reason).match(/connector\.publicUrl/u);
+  });
+});

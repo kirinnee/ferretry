@@ -31,6 +31,7 @@ describe('connectorListenerSurface', () => {
   it('never switches a socket and admits no browser origin', async () => {
     const surface = connectorListenerSurface([]);
     should(surface.sockets.claims(request('/v1/rendezvous/x/client'))).be.false();
+    should(await surface.sockets.upgrade(request('/v1/rendezvous/x/client'))).deepEqual({ outcome: 'unclaimed' });
     should(surface.corsOrigins).deepEqual([]);
   });
 });
@@ -84,5 +85,27 @@ describe('the connector actor', () => {
     should(resolveApiActor({ tokenClass: 'admin', sessionId: 's1', client: 'connector:cg_abcdefghij' })).equal(
       'peer:s1',
     );
+  });
+});
+
+describe('InProcessConnectorDispatch body bound', () => {
+  it('refuses a body over the route limit the way the transport does', async () => {
+    let refusal: unknown;
+    const dispatch = new InProcessConnectorDispatch({
+      dispatch: async r => {
+        refusal = await r.text(4).catch((error: unknown) => error);
+        return ok('');
+      },
+      adminToken: () => 't',
+    });
+    await dispatch.call('cg_abcdefghij', { method: 'POST', path: '/v1/x', body: { text: 'long enough' } });
+    should((refusal as Error).name).equal('BodyTooLargeError');
+  });
+
+  it('refuses a body over the in-process limit before dispatching', async () => {
+    const dispatch = new InProcessConnectorDispatch({ dispatch: async () => ok(''), adminToken: () => 't' });
+    await should(
+      dispatch.call('cg_abcdefghij', { method: 'POST', path: '/v1/x', body: { text: 'x'.repeat(70_000) } }),
+    ).be.rejected();
   });
 });
