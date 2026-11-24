@@ -57,6 +57,19 @@ export const readPaneSnapshot = async (
   return settled(typeof answer === 'string' ? answer : String(answer ?? ''), signal);
 };
 
+/**
+ * A live capture is the whole pane, so an agent that has said little leaves its last rows empty. The pane follows
+ * the tail, and a tail of blank rows is a view of nothing: the text scrolled up under the header with an empty band
+ * below it (O9-12). The text ends at its last line that has something on it. A capture with nothing on any row is
+ * returned as it came, so a blank pane still reads as blank.
+ */
+export const trimBlankTail = (text: string): string => {
+  const rows = text.split('\n');
+  let last = rows.length - 1;
+  while (last >= 0 && (rows[last] as string).trim() === '') last -= 1;
+  return last < 0 ? text : rows.slice(0, last + 1).join('\n');
+};
+
 /** How the daemon's unreachability is worded when the last good text is kept. */
 export const describeSnapshotError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
