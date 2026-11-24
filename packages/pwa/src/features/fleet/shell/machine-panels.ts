@@ -29,7 +29,7 @@ const PANEL_GROUPS = [
     id: 'devices-access',
     label: 'Devices & access',
     tab: 'machine',
-    panels: ['devices', 'grants', 'security', 'carrier', 'security-log'],
+    panels: ['devices', 'grants', 'security', 'connector', 'carrier', 'security-log'],
   },
   {
     id: 'health',
@@ -76,6 +76,7 @@ export const PANEL_NAMES: Readonly<Record<string, string>> = {
   'resource-limits': 'Ferret limits',
   'agent-clis': 'Agent tools',
   'security-log': 'Security log',
+  connector: 'Claude connector',
   terminals: 'Terminal slots',
   'model-pricing': 'Model pricing',
   files: 'Settings files',
