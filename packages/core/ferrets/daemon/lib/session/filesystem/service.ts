@@ -125,6 +125,13 @@ function hardLinkRefusal(
   );
 }
 
+/** What a caller may ask of the delivery of a working-tree read, beyond the gates every read passes. */
+interface Delivery {
+  readonly raw?: boolean;
+  readonly span?: SpanChooser;
+  readonly afterRead?: (file: ReadTarget) => void;
+}
+
 /**
  * Read-only working-tree access for ONE session, rooted at its own cwd.
  *
@@ -510,11 +517,7 @@ export class SessionFilesystem {
     afterValidation: AfterValidationHook | undefined,
     base64 = false,
     fence?: SessionReadFence,
-    delivery: {
-      readonly raw?: boolean;
-      readonly span?: SpanChooser;
-      readonly afterRead?: (file: ReadTarget) => void;
-    } = {},
+    delivery: Delivery = {},
   ): Promise<FsFileView> {
     // Evaluate policy before the walk and again after it. Retaining both verdicts is what prevents a
     // rename or replacement from evaluating the gate on one tree while the pinned descriptor supplies
