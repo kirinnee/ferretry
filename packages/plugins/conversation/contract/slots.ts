@@ -30,6 +30,14 @@ export const CONVERSATION_ROW_BODY_SLOT = 'conversation.row-body' as const;
  * nothing when the ferret is stopped on nothing.
  */
 export const CONVERSATION_ABOVE_COMPOSER_SLOT = 'conversation.above-composer' as const;
+/**
+ * The composer itself, as a place a panel may stand IN FRONT OF (like `conversation.row-body`, a replace slot): Voice's
+ * voice mode hides the composer and draws its own panel. The chat nests the contributed panels in layout order; each gets
+ * {@link ConversationComposerProps}, and returns `fallback` (the composer) to leave it as it is. A panel that hides the
+ * composer must still RENDER `fallback` (hidden), never drop it, so the person's draft, caret and attachments are the
+ * very ones that come back. Drawn only on the ferret's own chat, never under an agenda item's reply box or form card.
+ */
+export const CONVERSATION_COMPOSER_SLOT = 'conversation.composer' as const;
 
 /**
  * The ferret's MODES menu, one click from its header: the switches that change what a ferret is told or may do (Agenda
@@ -46,6 +54,7 @@ export const CONVERSATION_SLOTS = [
   CONVERSATION_ROW_BODY_SLOT,
   CONVERSATION_ROW_ACTIONS_SLOT,
   CONVERSATION_ABOVE_COMPOSER_SLOT,
+  CONVERSATION_COMPOSER_SLOT,
   CONVERSATION_MODES_SLOT,
 ] as const;
 export type ConversationSlot = (typeof CONVERSATION_SLOTS)[number];
@@ -189,6 +198,16 @@ export interface ConversationAboveComposerProps {
   readonly needsInput: ConversationNeedsInput;
   /** The daemon's send ledger for this ferret, oldest accepted first. */
   readonly sends: readonly ConversationSendAcceptance[];
+}
+
+/**
+ * The props every panel in `conversation.composer` receives, beside its `subject` (the ferret): whose turn it is (the same
+ * reading `conversation.above-composer` gets, so a panel never claims a turn nobody read) and `fallback`, the composer
+ * already drawn (a React node, opaque here: a contract imports no React).
+ */
+export interface ConversationComposerProps {
+  readonly turn: ConversationAboveComposerProps['turn'];
+  readonly fallback: unknown;
 }
 
 /** The slot the composer's context row offers (Voice's dictation, Conversation's attachments, Usage's quota). */

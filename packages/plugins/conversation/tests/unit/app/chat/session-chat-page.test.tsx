@@ -2,15 +2,16 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import {
   createLiveActivityHub,
   deviceControls,
+  PanelReplace,
   PanelSlot,
   ReferenceSurfaceProvider,
   writeMdComposePref,
 } from '@ferretry/app';
 import { ensureDom, render, run, runAsync, WithAppHooks } from '@ferretry/app/testing';
 import { FERRETS_FILE_OPEN_HOOK, FerretsChanged, type FerretLiveActivity } from '@ferretry/core-ferrets/contract';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ReactElement } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
-import { CONVERSATION_ABOVE_COMPOSER_SLOT } from '../../../../contract/index.ts';
+import { CONVERSATION_ABOVE_COMPOSER_SLOT, CONVERSATION_COMPOSER_SLOT } from '../../../../contract/index.ts';
 import { HandoffSourceProvider } from '../../../../app/chat/handoff-message.tsx';
 import { unreadChatSession } from '../../../../app/chat/chat-session.ts';
 import { SessionChatPage } from '../../../../app/chat/session-chat-page.tsx';
@@ -147,17 +148,36 @@ describe('SessionChatPage', () => {
     expect(slots).toContain('conversation.above-composer');
   });
 
-  test('offers the above-composer slot for this ferret, in the input column directly before the composer', () => {
+  test('offers the above-composer slot for this ferret, in the input column directly before the composer slot', () => {
     const page = draw();
 
     const column = page.root.findByProps({ className: 'fy-chat-input__column' });
     const drawn = column.children.filter((child): child is ReactTestInstance => typeof child !== 'string');
-    expect(drawn.map(child => child.type)).toEqual([PanelSlot, Composer]);
+    expect(drawn.map(child => child.type)).toEqual([PanelSlot, PanelReplace]);
     expect(drawn[0]?.props).toMatchObject({
       daemon: 'alpha',
       slot: CONVERSATION_ABOVE_COMPOSER_SLOT,
       subject: 'shared',
     });
+  });
+
+  test('the composer is drawn through the conversation.composer slot: the panels of that slot stand in front of it, and with none it is the composer itself', () => {
+    const page = draw();
+    const replace = page.root.findByType(PanelReplace);
+    expect(replace.props).toMatchObject({
+      daemon: 'alpha',
+      slot: CONVERSATION_COMPOSER_SLOT,
+      subject: 'shared',
+      props: { turn: { live: true } },
+    });
+    expect((replace.props.fallback as ReactElement).type).toBe(Composer);
+    expect(page.root.findAllByType(Composer)).toHaveLength(1);
+  });
+
+  test('under an agenda item the reply box is NOT offered to voice mode: it answers the item, not the ferret', () => {
+    const page = draw({ ask: { id: 'A6' } });
+    expect(page.root.findAllByType(PanelReplace)).toHaveLength(0);
+    expect(page.root.findAllByType(Composer)).toHaveLength(1);
   });
 
   const aboveComposerProps = (page: ReturnType<typeof draw>) =>

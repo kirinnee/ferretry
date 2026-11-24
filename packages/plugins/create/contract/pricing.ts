@@ -224,3 +224,86 @@ export function priceMusic(seconds: number, live?: LiveRate): Priced {
     from: rate.from,
   };
 }
+
+// ─── video: Kling 2.6 Pro and Veo 3.1 Fast through fal's queue ───────────────────────────────────────────────────
+
+export const VIDEO_MODEL_IDS = ['kling', 'veo-fast'] as const;
+export const VideoModelIdSchema = z.enum(VIDEO_MODEL_IDS);
+export type VideoModelId = z.infer<typeof VideoModelIdSchema>;
+export const DEFAULT_VIDEO_MODEL: VideoModelId = 'kling';
+
+export const VIDEO_ASPECTS = ['16:9', '9:16', '1:1'] as const;
+export const VideoAspectSchema = z.enum(VIDEO_ASPECTS);
+export type VideoAspect = z.infer<typeof VideoAspectSchema>;
+
+export const VIDEO_RESOLUTIONS = ['720p', '1080p'] as const;
+export const VideoResolutionSchema = z.enum(VIDEO_RESOLUTIONS);
+export type VideoResolution = z.infer<typeof VideoResolutionSchema>;
+
+export interface VideoModel {
+  readonly id: VideoModelId;
+  /** fal's endpoint id: what a request is sent to and what the live price is asked for. */
+  readonly endpoint: string;
+  readonly summary: string;
+  /** The clip lengths fal takes, in seconds: a length not here is refused before anything is sent. */
+  readonly seconds: readonly number[];
+  readonly defaultSeconds: number;
+  readonly aspects: readonly VideoAspect[];
+  /** Whether the model has a choice of resolution (Kling's is fixed). */
+  readonly resolutions: readonly VideoResolution[];
+  /** The listed price per second of video, in micro-dollars, with the sound off and on (720p and 1080p price alike). */
+  readonly tableMicroUsdPerSecond: { readonly silent: MicroUsd; readonly sound: MicroUsd };
+  readonly source: string;
+}
+
+export const VIDEO_MODELS: Readonly<Record<VideoModelId, VideoModel>> = Object.freeze({
+  kling: {
+    id: 'kling',
+    endpoint: 'fal-ai/kling-video/v2.6/pro/text-to-video',
+    summary: 'Kling 2.6 Pro: cinematic motion, a 5 s or 10 s clip',
+    seconds: [5, 10],
+    defaultSeconds: 5,
+    aspects: ['16:9', '9:16', '1:1'],
+    resolutions: [],
+    tableMicroUsdPerSecond: { silent: 70_000, sound: 140_000 },
+    source:
+      'https://fal.ai/models/fal-ai/kling-video/v2.6/pro/text-to-video/llms.txt ($0.07 per second, $0.14 with audio)',
+  },
+  'veo-fast': {
+    id: 'veo-fast',
+    endpoint: 'fal-ai/veo3.1/fast',
+    summary: 'Veo 3.1 Fast: a 4, 6 or 8 s clip at 720p or 1080p',
+    seconds: [4, 6, 8],
+    defaultSeconds: 8,
+    aspects: ['16:9', '9:16'],
+    resolutions: ['720p', '1080p'],
+    tableMicroUsdPerSecond: { silent: 100_000, sound: 150_000 },
+    source: 'https://fal.ai/models/fal-ai/veo3.1/fast/llms.txt ($0.10 per second, $0.15 with audio, 720p and 1080p)',
+  },
+});
+
+export const DEFAULT_VIDEO_ASPECT: VideoAspect = '16:9';
+export const DEFAULT_VIDEO_RESOLUTION: VideoResolution = '720p';
+
+/**
+ * A clip of `seconds` seconds. fal's own rate (asked just now) is ONE number per endpoint, but the table has a price
+ * for sound off and on; fal's rate is not known to be for the choice made, so it is compared with the table for BOTH
+ * options and the clip is priced at the HIGHER. A price that fell at fal is therefore not seen, and one that rose is:
+ * the estimate is never under the bill.
+ * A live rate in a unit other than the second is refused.
+ */
+export function priceVideo(model: VideoModel, seconds: number, sound: boolean, live?: LiveRate): Priced {
+  const table = sound ? model.tableMicroUsdPerSecond.sound : model.tableMicroUsdPerSecond.silent;
+  if (live === undefined) return { ok: true, microUsd: Math.ceil(table * seconds), from: 'table' };
+  if (unitOf(live.unit) !== 'second' || !Number.isFinite(live.unitPrice) || live.unitPrice < 0)
+    return cannotPrice(model.endpoint, 'fal');
+  // fal's one number may be for sound off or for sound on, and fal does not say which. So it is compared with the table
+  // for BOTH options, each as the clip's own rate: as it stands (it IS this choice's rate) and scaled by the table's
+  // sound/silent ratio (it is the sound-off rate, and a sound clip costs that much more). The higher one prices the clip.
+  const liveMicro = live.unitPrice * 1_000_000;
+  const ratio = table / model.tableMicroUsdPerSecond.silent;
+  const fromLive = liveMicro * ratio; // the ratio is 1 for sound off and above 1 for sound on, so this is the higher
+  return fromLive > table
+    ? { ok: true, microUsd: Math.ceil(fromLive * seconds), from: 'fal' }
+    : { ok: true, microUsd: Math.ceil(table * seconds), from: 'table' };
+}

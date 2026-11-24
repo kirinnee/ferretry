@@ -4,12 +4,14 @@ import { isFalCdn } from '../../daemon/lib/paid-call.ts';
 import manifest from '../../manifest.ts';
 
 describe('what Create may reach and spend', () => {
-  test('four tools, no route, no verb: a ferret’s tools and nothing a browser can call', () => {
+  test('five tools and the status read, no route, no verb: a ferret’s tools and nothing a browser can call', () => {
     expect(manifest.actions.agentTools.map(tool => tool.name)).toEqual([
       'generate_image',
       'generate_speech',
       'generate_sfx',
       'generate_music',
+      'generate_video',
+      'generation_status',
     ]);
     expect('routes' in manifest.actions).toBe(false);
   });
@@ -19,13 +21,14 @@ describe('what Create may reach and spend', () => {
     // a wildcard entry lets no key out (docs/secrets.md): the CDN is fetched with none
     expect(exactNetworkHosts(manifest.permissions?.network ?? [])).toEqual([
       'fal.run',
+      'queue.fal.run',
       'api.fal.ai',
       'api.elevenlabs.io',
     ]);
   });
 
-  test('the ledger is private to the owner and the ask source is registered', () => {
-    expect(manifest.privacy?.private).toEqual(['ledger.jsonl']);
+  test('the ledger and the video jobs are private to the owner and the ask source is registered', () => {
+    expect(manifest.privacy?.private).toEqual(['ledger.jsonl', 'jobs.jsonl']);
     expect(manifest.hooks?.takes.map(take => (take as { key?: string }).key)).toEqual(['create-spend']);
   });
 });
