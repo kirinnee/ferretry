@@ -74,7 +74,7 @@ export default definePlugin({
 
   ui: {
     settings: [
-      settingsTab('search', { icon: 'search', group: 'advanced', label: 'Web search', order: 71, scope: 'machine' }),
+      settingsTab('search', { icon: 'globe', group: 'advanced', label: 'Web search', order: 71, scope: 'machine' }),
     ],
   },
 
