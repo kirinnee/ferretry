@@ -5,7 +5,6 @@ import type { Root } from 'react-dom/client';
 import { type StepHarness, stepHarness } from '@ferretry/plugin-onboarding/contract/testing';
 import app from '../../app/index.ts';
 import manifest from '../../manifest.ts';
-import { historyOf, withHistory } from '../../app/features/onboarding/import/history-config.ts';
 import { ONE_WAY_WORDS } from '../../app/features/onboarding/import/conversations-page.tsx';
 import { createRoot } from '../support/dom.ts';
 import { CHANGE_ID, CODEX_FULL, MACHINE, scanOf, stagedFrom, APPLIED_SENTENCES } from '../support/import-fixtures.ts';
@@ -183,179 +182,52 @@ describe('a kind page (choose what to import)', () => {
 });
 
 describe('conversations', () => {
-  const FILE = (text: string, extra: object = {}) => ({
-    'GET /v1/config/file': {
-      path: 'harness-codex.yaml',
-      text,
-      etag: 'e1',
-      exists: true,
-      absolutePath: '/fake/home/config/harness-codex.yaml',
-      ...extra,
-    },
-  });
-  const writes = (calls: readonly Call[]) => calls.filter(call => call.route === 'PUT /v1/config/file');
-  const pick = async (container: HTMLElement, value: string) => {
-    await act(async () => {
-      container.querySelector<HTMLInputElement>(`input[value="${value}"]`)?.click();
-    });
-  };
-  const next = async (harness: ReturnType<typeof stepHarness>) => {
-    await act(async () => {
-      await harness.runCommit();
-    });
-  };
-
-  test('says the owner’s words, reads the value back from the file (no import mode needed), and writes nothing on opening', async () => {
+  test('is one sentence and no choice: no cards, no button, nothing asked, nothing written, never names Claude', async () => {
     const harness = stepHarness();
-    const { container, calls } = await mount('conversations', harness, machine(FULL, FILE('permissionMode: skip\n')));
+    const { container, calls } = await mount('conversations', harness, machine(FULL));
     expect(container.querySelector('[data-conversations-words]')?.textContent).toBe(ONE_WAY_WORDS);
-    expect(container.querySelector<HTMLInputElement>('input[value="on"]')?.checked).toBe(true);
+    expect(ONE_WAY_WORDS.match(/[.!?]/gu)?.length).toBe(1);
     expect(harness.decision).toBe('shown');
-    expect(writes(calls)).toEqual([]);
     expect(harness.hasCommit).toBe(false);
-    // Stacked cards and nothing to press on the page; the page never names Claude.
-    expect(container.querySelector('[data-choice-cards][data-layout="stack"]')).not.toBeNull();
+    expect(container.querySelector('input[type="radio"]')).toBeNull();
     expect(container.querySelectorAll('button').length).toBe(0);
+    expect(container.textContent).not.toContain('Show them here');
     expect(container.textContent?.toLowerCase()).not.toContain('claude');
+    expect(calls.filter(call => call.route === 'PUT /v1/config/file')).toEqual([]);
+    expect(calls.filter(call => call.route === 'GET /v1/config/file')).toEqual([]);
   });
 
-  test('a file that says off opens on off', async () => {
-    const harness = stepHarness();
-    const { container } = await mount('conversations', harness, machine(FULL, FILE('hostHistory: false\n')));
-    expect(container.querySelector<HTMLInputElement>('input[value="off"]')?.checked).toBe(true);
-  });
-
-  test('picking a card never writes and holds nothing; Next writes only hostHistory, once', async () => {
-    const harness = stepHarness();
-    const text = '# my codex\npermissionMode: skip # keep\n';
-    const { container, calls } = await mount('conversations', harness, machine(FULL, FILE(text)));
-    await pick(container, 'off');
-    expect(writes(calls)).toEqual([]);
-    expect(harness.hasCommit).toBe(true);
-    expect(container.querySelector('[data-demo="conversations-off"]')).not.toBeNull();
-    expect(busyLabels(harness)).toEqual([]);
-    expect(harness.count('done')).toBe(0);
-    await next(harness);
-    expect(writes(calls)).toHaveLength(1);
-    const body = writes(calls)[0]?.options?.body as { path: string; text: string; etag: string };
-    expect(body.path).toBe('harness-codex.yaml');
-    expect(body.text).toContain('hostHistory: false');
-    expect(body.text).toContain('# my codex');
-    expect(body.text).toContain('permissionMode: skip # keep');
-  });
-
-  test('going back to the saved card clears the save: Next writes nothing', async () => {
-    const harness = stepHarness();
-    const { container, calls } = await mount('conversations', harness, machine(FULL, FILE('')));
-    await pick(container, 'off');
-    expect(harness.hasCommit).toBe(true);
-    await pick(container, 'on');
-    expect(harness.hasCommit).toBe(false);
-    await next(harness);
-    expect(writes(calls)).toEqual([]);
-  });
-
-  test('a file the daemon withholds is never written: it says where to change it', async () => {
-    const harness = stepHarness();
-    const hidden =
-      '# ‹hidden›: the text of this file is not shown because it holds a raw secret, which the owner must move into the secret store; edit it at the machine\n';
-    const { container, calls } = await mount('conversations', harness, machine(FULL, FILE(hidden)));
-    expect(container.querySelector('[data-conversations-unknown]')?.textContent).toContain(
-      'Change this at the machine: /fake/home/config/harness-codex.yaml',
-    );
-    // Nothing is offered to pick when the setting cannot be read.
-    expect(container.querySelector('input[value="off"]')).toBeNull();
-    expect(writes(calls)).toEqual([]);
-    expect(harness.hasCommit).toBe(false);
-  });
-
-  test('a file with a held edit waiting (the read is pending): Next writes NOTHING and says why', async () => {
-    const harness = stepHarness();
-    const { container, calls } = await mount(
-      'conversations',
-      harness,
-      machine(FULL, {
-        ...FILE('hostHistory: false\n', { state: 'pending' }),
-        'PUT /v1/config/file': { outcome: 'applied' },
-      }),
-    );
-    await pick(container, 'on');
-    let said = '';
-    await act(async () => {
-      await harness.runCommit().catch((cause: unknown) => {
-        said = cause instanceof Error ? cause.message : String(cause);
-      });
-    });
-    expect(said).toBe(
-      'A change to this file is waiting for your OK — confirm or discard it in Settings > Files first.',
-    );
-    expect(writes(calls)).toEqual([]);
-  });
-
-  test('a held edit cleared in Settings after the page opened: the next Next re-reads the file and sends exactly 1 PUT', async () => {
-    const harness = stepHarness();
-    let held = true;
-    const { container, calls } = await mount(
-      'conversations',
-      harness,
-      machine(FULL, {
-        'GET /v1/config/file': () => ({
-          path: 'harness-codex.yaml',
-          text: 'hostHistory: false\n',
-          etag: 'e1',
-          exists: true,
-          absolutePath: '/fake/home/config/harness-codex.yaml',
-          ...(held ? { state: 'pending' } : {}),
-        }),
-        'PUT /v1/config/file': { outcome: 'applied' },
-      }),
-    );
-    await pick(container, 'on');
-    await act(async () => {
-      await harness.runCommit().catch(() => undefined);
-    });
-    expect(writes(calls)).toEqual([]);
-    held = false;
-    await next(harness);
-    expect(writes(calls)).toHaveLength(1);
-  });
-
-  test('a change the daemon holds is said to be waiting, Next stays, and is never shown as saved', async () => {
-    const harness = stepHarness();
-    const { container } = await mount(
-      'conversations',
-      harness,
-      machine(FULL, { ...FILE('hostHistory: false\n'), 'PUT /v1/config/file': { outcome: 'pending' } }),
-    );
-    await pick(container, 'on');
-    let said = '';
-    await act(async () => {
-      await harness.runCommit().catch((cause: unknown) => {
-        said = cause instanceof Error ? cause.message : String(cause);
-      });
-    });
-    expect(said).toContain('waiting for your confirmation');
-    expect(harness.count('done')).toBe(0);
+  test('its demo is generic words, never a made-up count that reads as found', async () => {
+    const { container } = await mount('conversations', stepHarness(), machine(FULL));
+    const demo = container.querySelector('[data-demo="conversations"]');
+    expect(demo?.textContent).toContain('an example, not your conversations');
+    expect(container.textContent).not.toContain('3 conversations');
   });
 });
 
-describe('the hostHistory key', () => {
-  test('is on unless the file says no, and a value that is not a yes or no is unknown', () => {
-    expect(historyOf('')).toBe(true);
-    expect(historyOf('permissionMode: skip\n')).toBe(true);
-    expect(historyOf('hostHistory: false\n')).toBe(false);
-    expect(historyOf("'hostHistory': false # comment\n")).toBe(false);
-    expect(historyOf('{ hostHistory: true }\n')).toBe(true);
-    expect(historyOf('hostHistory: maybe\n')).toBeNull();
-    expect(historyOf('- a\n- b\n')).toBeNull();
+describe('the what-to-bring-over demo', () => {
+  const demoLines = (container: HTMLElement): string[] =>
+    [...container.querySelectorAll('[data-demo] .ob-demo__line')].map(line => line.textContent ?? '');
+
+  test('shows what the scan really found, kind by kind', async () => {
+    const { container } = await mount('import-choice', stepHarness(), machine(FULL));
+    const lines = demoLines(container);
+    expect(lines[0]).toBe('› import everything');
+    expect(lines).toContain('✓ settings');
+    expect(lines).not.toContain('✓ the kinds Codex keeps');
   });
 
-  test('a write changes only that key and keeps the comments', () => {
-    expect(withHistory('# top\npermissionMode: skip\n', false)).toBe(
-      '# top\npermissionMode: skip\nhostHistory: false\n',
+  test('on an empty machine it says nothing was found, and ticks nothing', async () => {
+    const { container } = await mount('import-choice', stepHarness(), machine(scanOf({})));
+    expect(demoLines(container)).toEqual(['› import everything', '· nothing found on this computer']);
+    expect(container.querySelector('[data-demo]')?.getAttribute('aria-label')).toBe('Nothing was found to bring over');
+  });
+
+  test('before the scan is read it is generic example words, not a found list', async () => {
+    const { container } = await mount('import-choice', stepHarness(), call =>
+      call.route === 'GET /v1/runtimes/setup/scan' ? {} : machine(FULL)(call),
     );
-    expect(withHistory('hostHistory: true # why\nx: 1\n', false)).toContain('hostHistory: false # why');
-    expect(() => withHistory('- a\n', false)).toThrow();
+    expect(demoLines(container).join(' ')).toContain('an example');
   });
 });
 

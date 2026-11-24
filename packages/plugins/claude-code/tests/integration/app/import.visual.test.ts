@@ -171,24 +171,21 @@ describe('the Claude import pages', () => {
 
   for (const viewport of VIEWPORTS)
     for (const mode of ['light', 'dark'] as const) {
-      it(`conversations: the one-way words are on screen and a pick draws no Use/Keep button at ${viewport.name}, ${mode}`, async () => {
+      it(`conversations: the one-way sentence is on screen and there is nothing to pick at ${viewport.name}, ${mode}`, async () => {
         const context = await newContext(viewport, mode);
         const tab = await open(context, 'conversations', mode);
         expect(await tab.locator('.cc-step').innerText()).toContain(
-          'One way: Ferretry reads them and never changes them. A conversation is copied only when you continue it here.',
+          'Ferretry reads the Claude Code conversations on this computer by itself, one way: it never changes them, and copies one only when you continue it here.',
         );
-        await tab.locator('[data-choice="off"]').click();
-        await tab.waitForTimeout(400);
-        // Next saves the pick (r11 O4): the page itself draws no Use / Keep button, and the pick stays inside the screen.
-        expect(await tab.locator('.cc-step button').count()).toBe(0);
-        for (const label of ['Use: don’t show them', 'Keep showing them'])
-          expect(await tab.getByRole('button', { name: label }).count()).toBe(0);
-        const picked = await tab.locator('[data-choice="off"]').boundingBox();
-        expect((picked?.x ?? 0) + (picked?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
+        // No choice (S-19): no card, no radio, no button, and no made-up conversation that reads as found.
+        expect(await tab.locator('.cc-step button, [data-choice], input[type="radio"]').count()).toBe(0);
+        expect(await tab.locator('.cc-step').innerText()).not.toContain('Fix the login bug');
+        expect(await tab.locator('[data-demo-example]').count()).toBe(1);
+        expect(await tab.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
         if (shotsDir !== '')
           await tab.screenshot({
             fullPage: true,
-            path: join(shotsDir, `conversations-pick-${viewport.name}-${mode}.png`),
+            path: join(shotsDir, `conversations-${viewport.name}-${mode}.png`),
           });
         await context.close();
       }, 60_000);
