@@ -297,6 +297,19 @@ describe('generate_image: a picture, priced first, recorded, and handed over', (
     expect(ledgerLines(w)).toHaveLength(0);
   });
 
+  test('a picture on a refused host is paid and lost: the ferret is told NOT to retry, and it says so plainly', async () => {
+    const w = await world();
+    w.fal.pictureUrl = 'https://storage.googleapis.com/falserverless/example/x.jpg';
+    const answer = await ask(w);
+    expect(answer.isError).toBe(true);
+    expect(answer.text).toContain('was made and paid for');
+    expect(answer.text).toContain('could not be fetched');
+    expect(answer.text).toContain('Do NOT retry');
+    expect(answer.text).not.toMatch(/try the same request again/i);
+    expect(w.fal.seen.map(request => request.host)).not.toContain('storage.googleapis.com');
+    expect(ledgerLines(w)).toHaveLength(1);
+  });
+
   test('money spent is recorded even when the picture cannot be fetched or saved', async () => {
     const w = await world();
     w.fal.pictureUrl = 'https://evil.example/x.jpg';

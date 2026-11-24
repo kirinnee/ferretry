@@ -192,11 +192,11 @@ export const MIN_SFX_SECONDS = 0.5;
 export const MAX_SFX_SECONDS = 22;
 export const DEFAULT_SFX_SECONDS = 5;
 
-/** A sound effect of `seconds` seconds. A per-second rate is exact; a per-minute one is read as a whole minute. */
+/** A sound effect of `seconds` seconds. A per-second rate is billed by the whole second, a per-minute one by the whole minute: never under. */
 export function priceSfx(seconds: number, live?: LiveRate): Priced {
   const rate = rateOf(SFX_TABLE, live, ['second', 'minute']);
   if (rate === undefined) return cannotPrice(SFX_ENDPOINT, 'fal');
-  const units = rate.unit === 'second' ? seconds : Math.ceil(seconds / 60);
+  const units = Math.ceil(rate.unit === 'second' ? seconds : seconds / 60);
   return { ok: true, microUsd: Math.ceil(rate.microUsd * units), from: rate.from };
 }
 
