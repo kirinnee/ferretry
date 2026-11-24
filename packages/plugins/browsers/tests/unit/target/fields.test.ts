@@ -1256,6 +1256,12 @@ describe('the Playwright release the identity reach was written against', () => 
     // then move PLAYWRIGHT_REACHED_VERSION.
     should(installed).equal(PLAYWRIGHT_REACHED_VERSION);
   });
+
+  it('is also the release patchright-core, the stealth worker’s engine, is built from: the same private reach', async () => {
+    const manifest = Bun.resolveSync('patchright-core/package.json', import.meta.dir);
+    const installed = (JSON.parse(await Bun.file(manifest).text()) as { version: string }).version;
+    should(installed).equal(PLAYWRIGHT_REACHED_VERSION);
+  });
 });
 
 describe('review regressions: the write is bound to the target that holds the handle', () => {

@@ -47,6 +47,45 @@ async function httpProxy(originPort: number, seen: string[] = []): Promise<numbe
 const through = (port: number, scheme = 'http') => proxyEndpoint(`${scheme}://127.0.0.1:${port}`);
 const CREDENTIALS = { username: 'amy', password: 'hunter2' };
 
+const JSON_OK = (body: unknown): string => {
+  const text = JSON.stringify(body);
+  return `HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${text.length}\r\n\r\n${text}`;
+};
+
+describe('where the proxy exits, read through it', () => {
+  it('reads the country and zone the exit is in, asking the location endpoint through the proxy', async () => {
+    const seen: string[] = [];
+    const port = await httpProxy(
+      await origin(JSON_OK({ ip: '203.0.113.7', country: 'DE', timezone: 'Europe/Berlin' })),
+      seen,
+    );
+
+    should(await plain.locate({ endpoint: through(port), credentials: CREDENTIALS })).eql({
+      country: 'DE',
+      timezone: 'Europe/Berlin',
+    });
+    should(seen[0]).startWith('CONNECT ipinfo.io:443 HTTP/1.1');
+  });
+
+  it('says nothing for an answer that is not a country and a zone this host knows, so nothing is guessed', async () => {
+    for (const body of [
+      { country: 'Germany', timezone: 'Europe/Berlin' },
+      { country: 'DE', timezone: 'Not/AZone' },
+      { country: 'DE', timezone: 'x; rm -rf /' },
+      { country: 'DE' },
+      ['DE', 'Europe/Berlin'],
+    ]) {
+      const port = await httpProxy(await origin(JSON_OK(body)));
+      should(await plain.locate({ endpoint: through(port), credentials: CREDENTIALS })).be.undefined();
+    }
+    const refused = await httpProxy(await origin('HTTP/1.0 429 Too Many Requests\r\n\r\n'));
+    should(await plain.locate({ endpoint: through(refused), credentials: CREDENTIALS })).be.undefined();
+    should(
+      await plain.locate({ endpoint: through(refused), credentials: { username: 'amy', password: 'wrong' } }),
+    ).be.undefined();
+  });
+});
+
 describe('the proxy probe, against loopback fakes', () => {
   it('learns the egress address through an HTTP proxy that wants a sign-in', async () => {
     const seen: string[] = [];

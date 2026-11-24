@@ -83,6 +83,7 @@ describe('browsers: the settings tab refuses a hostile browsers.yaml in one fixe
         text: text(),
         etag: 'e1',
         held: false,
+        stealthHeld: false,
       };
       const started = performance.now();
       const write = writeBrowsersConfig(client, current, { mode: 'window' });

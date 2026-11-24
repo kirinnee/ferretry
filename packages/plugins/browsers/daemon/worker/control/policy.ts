@@ -188,7 +188,68 @@ export interface ChromeLaunchOptions {
   readonly userAgent?: string;
   /** Send the browser's traffic through this proxy (docs/browser-proxy.md). */
   readonly proxy?: { readonly server: string; readonly bypass: readonly string[] };
+  /** A stealth identity's hygiene ({@link StealthLaunch}); `undefined` is every other launch, which is byte for byte as it was. */
+  readonly stealth?: StealthLaunch;
 }
+
+/**
+ * What the hygiene layer adds for a stealth identity (docs/browser-mode.md, "Stealth"). `locale` is the language
+ * the identity's proxy exit speaks (`--lang`) and `timezone` its zone, which is the browser PROCESS's `TZ` and so
+ * not an argument; either absent, the browser keeps the machine's own (a direct launch has no exit to match).
+ */
+export interface StealthLaunch {
+  readonly locale?: string;
+  readonly timezone?: string;
+}
+
+/** Where a proxy's exit address is, as the proxy probe reads it. */
+export interface ProxyExit {
+  readonly country: string;
+  readonly timezone: string;
+}
+
+/** The language a person at that exit most likely browses in. A country not named here is left to the machine's own. */
+const LOCALE_OF_COUNTRY: Readonly<Record<string, string>> = {
+  AU: 'en-AU',
+  AT: 'de-AT',
+  BE: 'nl-BE',
+  BR: 'pt-BR',
+  CA: 'en-CA',
+  CH: 'de-CH',
+  DE: 'de-DE',
+  DK: 'da-DK',
+  ES: 'es-ES',
+  FI: 'fi-FI',
+  FR: 'fr-FR',
+  GB: 'en-GB',
+  IE: 'en-IE',
+  IN: 'en-IN',
+  IT: 'it-IT',
+  JP: 'ja-JP',
+  MX: 'es-MX',
+  NL: 'nl-NL',
+  NO: 'nb-NO',
+  NZ: 'en-NZ',
+  PL: 'pl-PL',
+  PT: 'pt-PT',
+  SE: 'sv-SE',
+  SG: 'en-SG',
+  US: 'en-US',
+};
+
+/** The stealth hygiene for an identity whose proxy exits at `exit`: its zone, and its language where one is known. */
+export function stealthLaunchFor(exit: ProxyExit | undefined): StealthLaunch {
+  if (exit === undefined) return {};
+  const locale = LOCALE_OF_COUNTRY[exit.country];
+  return { timezone: exit.timezone, ...(locale === undefined ? {} : { locale }) };
+}
+
+/**
+ * The one switch a stealth identity passes to HIDE automation: it turns `navigator.webdriver` off. It is passed for a
+ * stealth identity ONLY ({@link StealthLaunch}); {@link AUTOMATION_SWITCH_PATTERN} still names it so every other mode
+ * is held to never passing it.
+ */
+export const STEALTH_BLINK_SWITCH = '--disable-blink-features=AutomationControlled';
 
 /**
  * The DevTools PIPE: Chrome reads requests on its fd 3 and writes replies and events on its fd 4, and only the
@@ -235,8 +296,9 @@ function cdpArguments(endpoint: CdpEndpoint | false): readonly string[] {
 /**
  * Switches Ferretry would pass to ANNOUNCE automation (`--enable-automation`: the "controlled by automated
  * test software" bar) or to HIDE it (the `AutomationControlled` blink switch, which turns
- * `navigator.webdriver` back off). NEITHER kind is ever passed, so the browser a site meets is the Chrome it
- * is — not a disguised one. Named so the tests can hold every mode to it. `--enable-automation` is also what
+ * `navigator.webdriver` back off). NEITHER kind is ever passed for a launch that is not a stealth identity's, so the
+ * browser a site meets is the Chrome it is — not a disguised one. A stealth identity (`stealth: on`, the owner's
+ * held choice) passes the hiding one, {@link STEALTH_BLINK_SWITCH}, and only it; the announcing one is never passed. Named so the tests can hold every mode to it. `--enable-automation` is also what
  * a driver such as Playwright adds by default when IT launches Chrome, which is one reason the daemon
  * launches Chrome itself.
  *
@@ -276,6 +338,17 @@ export function chromeLaunchArguments(
     // grant fill typed included (docs/input-requests.md, "Task plan fills"). One flag: Chrome reads only the last.
     '--disable-features=Translate,MediaRouter,BackForwardCache',
     ...(options.userAgent === undefined ? [] : [`--user-agent=${options.userAgent}`]),
+    ...(options.stealth === undefined
+      ? []
+      : [
+          STEALTH_BLINK_SWITCH,
+          ...(options.stealth.locale === undefined
+            ? []
+            : [
+                `--lang=${options.stealth.locale}`,
+                `--accept-lang=${options.stealth.locale},${options.stealth.locale.split('-')[0] ?? ''}`,
+              ]),
+        ]),
     ...(options.proxy === undefined ? [] : chromeProxyArguments(options.proxy.server, options.proxy.bypass)),
     '--disable-dev-shm-usage',
     ...(options.keepPainting === true
@@ -430,6 +503,8 @@ export interface AgentBrowserExtras {
   /** The honest user agent for a headless Chrome ({@link honestChromeUserAgent}); a real window ignores it. */
   readonly userAgent?: string;
   readonly proxy?: { readonly server: string; readonly bypass: readonly string[] };
+  /** A stealth identity: always a real window ({@link StealthLaunch}), whatever the mode says. */
+  readonly stealth?: StealthLaunch;
 }
 
 /**
@@ -456,12 +531,15 @@ export function agentBrowserArguments(
   mode: BrowserMode,
   extras: AgentBrowserExtras = {},
 ): readonly string[] {
+  // A stealth identity is ALWAYS headful (on Linux, on the private Xvfb): a headless Chrome is the first thing a bot check reads.
+  const headless = mode === 'headless' && extras.stealth === undefined;
   return chromeLaunchArguments(executable, profile, cdp, viewport, platform, {
-    headless: mode === 'headless',
-    keepPainting: mode === 'window',
+    headless,
+    keepPainting: !headless,
     // Only a headless Chrome says "Headless" about itself; a real window already sends the ordinary token.
-    ...(mode === 'headless' && extras.userAgent !== undefined ? { userAgent: extras.userAgent } : {}),
+    ...(headless && extras.userAgent !== undefined ? { userAgent: extras.userAgent } : {}),
     ...(extras.proxy === undefined ? {} : { proxy: extras.proxy }),
+    ...(extras.stealth === undefined ? {} : { stealth: extras.stealth }),
   });
 }
 

@@ -12,6 +12,12 @@ import {
   parseProbeReply,
 } from '../index.ts';
 import { openTunnel, type ProxyCredentials } from './tunnel.ts';
+import type { ProxyExit } from '../../worker/control/policy.ts';
+
+/** The one HTTPS endpoint that says where an address is: asked only to set a stealth identity's time zone and language. */
+const LOCATE_DESTINATION = { host: 'ipinfo.io', port: 443 } as const;
+const TIME_ZONE = /^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+){1,2}$/u;
+const COUNTRY = /^[A-Z]{2}$/u;
 
 const PROBE_TIMEOUT_MS = 10_000;
 const MAX_REPLY_BYTES = 8 * 1024;
@@ -57,27 +63,79 @@ export class TunnelProxyProbe implements ProxyProbe {
     }
   }
 
+  /**
+   * Where the proxy's exit is (country and time zone), asked of {@link LOCATE_DESTINATION} through the same proxy and
+   * under the same deadline. `undefined` for every failure, an answer that is not a country and a zone, and a
+   * zone the host's own tables do not know: the caller then leaves the machine's own zone and language, never a guess.
+   */
+  async locate(request: {
+    readonly endpoint: ProxyEndpoint;
+    readonly credentials?: ProxyCredentials;
+  }): Promise<ProxyExit | undefined> {
+    const timeoutMs = this.options.timeoutMs ?? PROBE_TIMEOUT_MS;
+    const sockets = new Set<Socket>();
+    let cancel: (() => void) | undefined;
+    const deadline = new Promise<undefined>(resolve => {
+      cancel = this.options.clock.after(milliseconds(timeoutMs), () => {
+        for (const socket of sockets) socket.destroy();
+        resolve(undefined);
+      });
+    });
+    try {
+      const answer = await Promise.race([
+        deadline,
+        this.read(request, LOCATE_DESTINATION, '/json', timeoutMs, sockets),
+      ]);
+      if (answer === undefined || !answer.ok) return undefined;
+      const parsed: unknown = JSON.parse(answer.body);
+      const { country, timezone } = (typeof parsed === 'object' && parsed !== null ? parsed : {}) as Record<
+        string,
+        unknown
+      >;
+      if (typeof country !== 'string' || typeof timezone !== 'string') return undefined;
+      if (!COUNTRY.test(country) || !TIME_ZONE.test(timezone)) return undefined;
+      new Intl.DateTimeFormat('en', { timeZone: timezone });
+      return { country, timezone };
+    } catch {
+      return undefined;
+    } finally {
+      cancel?.();
+      for (const socket of sockets) socket.destroy();
+    }
+  }
+
   private async attempt(
     request: { readonly endpoint: ProxyEndpoint; readonly credentials?: ProxyCredentials },
     timeoutMs: number,
     sockets: Set<Socket>,
   ): Promise<ProbeOutcome> {
+    const read = await this.read(request, PROBE_DESTINATION, '/', timeoutMs, sockets);
+    if (!read.ok) return read;
+    return isIP(read.body) === 0 ? { ok: false, errorClass: 'other' } : { ok: true, egressIp: read.body };
+  }
+
+  /** One GET to `destination` through the proxy; the body of a 200, or the class of what went wrong. */
+  private async read(
+    request: { readonly endpoint: ProxyEndpoint; readonly credentials?: ProxyCredentials },
+    destination: { readonly host: string; readonly port: number },
+    path: string,
+    timeoutMs: number,
+    sockets: Set<Socket>,
+  ): Promise<{ readonly ok: true; readonly body: string } | { readonly ok: false; readonly errorClass: ProbeFailure }> {
     const tunnel = await openTunnel({
       upstream: request.endpoint,
       ...(request.credentials === undefined ? {} : { credentials: request.credentials }),
-      destination: PROBE_DESTINATION,
+      destination,
       connectTimeoutMs: timeoutMs,
       track: socket => sockets.add(socket),
     });
     if (!tunnel.ok) return { ok: false, errorClass: tunnel.errorClass };
-    const secured = (this.options.secure ?? verifiedTls)(tunnel.socket, PROBE_DESTINATION.host);
+    const secured = (this.options.secure ?? verifiedTls)(tunnel.socket, destination.host);
     sockets.add(secured);
     try {
-      const reply = await ask(secured);
-      const parsed = parseProbeReply(reply);
-      if (parsed === undefined || parsed.status !== 200 || isIP(parsed.body) === 0)
-        return { ok: false, errorClass: 'other' };
-      return { ok: true, egressIp: parsed.body };
+      const parsed = parseProbeReply(await ask(secured, destination.host, path));
+      if (parsed === undefined || parsed.status !== 200) return { ok: false, errorClass: 'other' };
+      return { ok: true, body: parsed.body };
     } catch (error) {
       const errorClass: ProbeFailure = classifyNetworkError(error);
       return { ok: false, errorClass: errorClass === 'other' ? 'tls' : errorClass };
@@ -86,7 +144,7 @@ export class TunnelProxyProbe implements ProxyProbe {
 }
 
 /** Sends the one request and reads until the endpoint closes, within a small cap. */
-function ask(socket: Socket): Promise<string> {
+function ask(socket: Socket, host: string, path: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -97,8 +155,6 @@ function ask(socket: Socket): Promise<string> {
     });
     socket.once('error', reject);
     socket.once('close', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    socket.write(
-      `GET / HTTP/1.0\r\nHost: ${PROBE_DESTINATION.host}\r\nAccept: text/plain\r\nConnection: close\r\n\r\n`,
-    );
+    socket.write(`GET ${path} HTTP/1.0\r\nHost: ${host}\r\nAccept: */*\r\nConnection: close\r\n\r\n`);
   });
 }

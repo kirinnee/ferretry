@@ -117,6 +117,9 @@ export const FORWARDED_ENVIRONMENT = [
   'DBUS_SESSION_BUS_ADDRESS',
 ] as const;
 
+/** What tells a worker it drives a stealth identity's Chrome: it then connects through patchright-core (`worker/main.ts`). */
+const STEALTH_WORKER_ENVIRONMENT = { FY_BROWSER_STEALTH: '1' } as const;
+
 /**
  * Starts the worker PROCESS with these arguments and exactly this environment: `kernel.spawn.start` of the worker
  * program (Node over the source entry, or the compiled worker), bound by the daemon half. A test hands in its own.
@@ -139,6 +142,8 @@ export interface WorkerClientOptions {
   readonly stageDirectory?: string;
   /** The environment the allowlist is taken from ({@link FORWARDED_ENVIRONMENT}); nothing else is forwarded. */
   readonly environment?: Readonly<Record<string, string | undefined>>;
+  /** A stealth identity's worker drives Chrome without the DevTools `Runtime.enable` leak ({@link STEALTH_WORKER_ENVIRONMENT}). */
+  readonly stealth?: boolean;
   readonly readyTimeoutMs?: number;
   readonly requestTimeoutMs?: number;
   readonly shutdownTimeoutMs?: number;
@@ -311,10 +316,10 @@ export class BrowserWorkerClient implements BrowserAutomation {
   /** Spawns the worker and waits for its ready record, killing it if that never arrives. */
   static async connect(options: WorkerClientOptions): Promise<BrowserWorkerClient> {
     const child = workerChannel(
-      options.start(
-        [options.endpoint, ...(options.stageDirectory === undefined ? [] : [options.stageDirectory])],
-        workerEnvironment(options.environment ?? {}),
-      ),
+      options.start([options.endpoint, ...(options.stageDirectory === undefined ? [] : [options.stageDirectory])], {
+        ...workerEnvironment(options.environment ?? {}),
+        ...(options.stealth === true ? STEALTH_WORKER_ENVIRONMENT : {}),
+      }),
     );
     const client = new BrowserWorkerClient(child, options);
     try {

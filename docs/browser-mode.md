@@ -46,7 +46,7 @@ so a program another account bound there first is refused with one sentence nami
 ("port N is held by another program (uid U), not this browser — …"). macOS has no `/proc` to prove it from
 and starts as before. **Neither mode passes an automation switch** — no `--enable-automation`, and no
 `--disable-blink-features=AutomationControlled` either: Ferretry does not announce automation and does
-not hide it. In a Real window `navigator.webdriver` is `false` because nothing about the browser is
+not hide it — **unless stealth is in effect** ([Stealth](#stealth)). In a Real window `navigator.webdriver` is `false` because nothing about the browser is
 automated until an agent acts on a page.
 
 ## Your input is your own
@@ -86,7 +86,7 @@ verbs: the owner's Browsers switch, its own browser only, a page that is its own
 
 ## Captchas and "checking your browser" pages
 
-With stealth off (the default) Ferretry **never solves, skips or works around** a captcha or a bot check; the switch under [Stealth](#stealth) does nothing yet. What it does:
+With stealth off (the default) Ferretry **never solves, skips or works around** a captcha or a bot check; the switch under [Stealth](#stealth) has no solver behind it yet. What it does:
 
 1. **Recognises** a page that appears to be asking for one, from what the browser already knows about the
    page — its address, title and frame addresses — without running anything inside it: Cloudflare's
@@ -120,8 +120,21 @@ identities:
   changes what the browser does, so the daemon **holds** it until the owner confirms it, and the tighter
   setting (off) stays in effect meanwhile. Dropping an identity's opt-out while the switch is on is held the
   same way. **On → off, and a new opt-out, apply at once.**
-- **Today the switch changes nothing.** It is the one place the later layers (a hardened browser, a stable
-  fingerprint per identity, a proxy per identity, a captcha solver) will read, so each can ship and be measured on its own.
+- **The hygiene layer is the first thing behind it** — and only for an identity whose stealth is in effect (the
+  switch on and the identity not opted out); every other launch is byte for byte what it was:
+  - **A real window, always.** Whatever Browser mode says, a stealth identity runs headful (on Linux, on the private Xvfb): a
+    headless Chrome is the first thing a bot check reads.
+  - **`navigator.webdriver` is turned off** with `--disable-blink-features=AutomationControlled`.
+  - **No `Runtime.enable` trace.** The worker drives Chrome through `patchright-core` — the same Playwright release as
+    the stock worker (one test pins both to `PLAYWRIGHT_REACHED_VERSION`), so the private reach `fields.ts` makes into
+    Playwright, and the sealed pages, work unchanged — instead of `playwright-core`, which enables the DevTools Runtime
+    domain on every page, a thing a page can detect. The price: **the page's console is not captured** in a stealth
+    browser (that needs the same domain), and its console log says so first rather than looking like a quiet page.
+  - **Time zone and language follow the proxy.** With a proxy, the exit's country and zone are read through it
+    (`ipinfo.io`, asked with the same sign-in as the proxy test, once per launch) and set as the browser's `TZ`, `--lang` and
+    `--accept-lang`, so the page's clock and `navigator.languages` match where it appears to be. Only a country the daemon has a
+    language for sets one; an answer it cannot read, or no proxy at all, leaves the machine's own zone and language.
+  - Still to come, each on its own: a patched engine, a stable fingerprint per identity, a proxy per identity, a captcha solver.
 - **The audit log** ([audit.md](audit.md)) records metadata only: `browser.stealth.switched` (from, to) when the switch
   really changes — a held `on` leaves no record until it is confirmed — and, as the layers arrive,
   `browser.stealth.session`, `browser.captcha.solve` and `browser.captcha.cap-reached` (identity key, never an

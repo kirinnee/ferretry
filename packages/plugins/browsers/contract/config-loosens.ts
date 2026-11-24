@@ -2,7 +2,11 @@ import type { Loosens } from '@ferretry/kernel/contract';
 import { type BrowsersConfig, stealthOn } from './wire.ts';
 
 const PROXY_SENTENCE = (url: string): string => `the agent browser now sends its traffic through the proxy at ${url}`;
-const STEALTH_LOOSENING = 'the agent browser now passes bot checks and solves captchas for the owner’s identities';
+/** What a held machine-wide `off` → `on` says; the Browser tab reads it from the kernel's pending list to know the switch is NOT in effect. */
+export const STEALTH_LOOSENING =
+  'the agent browser now passes bot checks and solves captchas for the owner’s identities';
+const IDENTITY_STEALTH_LOOSENING =
+  'an identity that opted out of stealth now passes bot checks and solves captchas too';
 
 /**
  * `browsers.yaml` loosens when a proxy is newly set, pointed somewhere else, or given other credentials: today's
@@ -23,10 +27,17 @@ export const browsersLoosens: Loosens<BrowsersConfig> = (before, after) => {
     proxy === undefined ||
     (was !== undefined && was.url === proxy.url && was.username === proxy.username && was.password === proxy.password);
   if (proxy !== undefined && !same) sentences.push(PROXY_SENTENCE(proxy.url));
-  const identities = new Set([...Object.keys(before?.identities ?? {}), ...Object.keys(after.identities ?? {})]);
-  const newlyOn = [undefined, ...identities].some(
-    identity => stealthOn(after, identity) && (before === undefined || !stealthOn(before, identity)),
-  );
-  if (newlyOn) sentences.push(STEALTH_LOOSENING);
+  const machineNewlyOn = stealthOn(after) && (before === undefined || !stealthOn(before));
+  if (machineNewlyOn) sentences.push(STEALTH_LOOSENING);
+  else {
+    const identities = new Set([...Object.keys(before?.identities ?? {}), ...Object.keys(after.identities ?? {})]);
+    // The machine switch was already on: only an identity coming back in (its opt-out dropped) is new, and it is a different thing to wait for.
+    if (
+      [...identities].some(
+        identity => stealthOn(after, identity) && before !== undefined && !stealthOn(before, identity),
+      )
+    )
+      sentences.push(IDENTITY_STEALTH_LOOSENING);
+  }
   return sentences;
 };

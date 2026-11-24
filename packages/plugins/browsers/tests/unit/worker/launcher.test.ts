@@ -237,6 +237,78 @@ describe('the agent browser launcher, with the worker as a process of its own', 
   });
 });
 
+describe('a stealth identity’s launch', () => {
+  const DISPLAY = { display: async () => ':77', authority: () => '/fake/x11/cookie', close: async () => undefined };
+
+  test('is a real window on the private display with the hygiene switches, the exit’s zone and language, and a worker told so — whatever Browser mode says', async () => {
+    // Arrange — Browser mode is headless; the identity is stealth, with the zone and language its proxy exit gave.
+    const w = world({
+      modes: {
+        mode: async () => 'headless',
+        display: DISPLAY,
+        stealth: async () => ({ timezone: 'Europe/Berlin', locale: 'de-DE' }),
+      },
+    });
+
+    // Act
+    const browser = await w.launcher.launch(VIEWPORT);
+
+    // Assert
+    const chrome = w.spawned[1];
+    expect(chrome?.args).toContain('--disable-blink-features=AutomationControlled');
+    expect(chrome?.args).toContain('--lang=de-DE');
+    expect(chrome?.args.some(argument => argument.startsWith('--headless'))).toBe(false);
+    expect(chrome?.args).toContain('--ozone-platform=x11');
+    expect(chrome?.options?.env).toMatchObject({
+      DISPLAY: ':77',
+      XAUTHORITY: '/fake/x11/cookie',
+      TZ: 'Europe/Berlin',
+      LANGUAGE: 'de_DE',
+    });
+    expect(w.workerStarts[0]?.env).toMatchObject({ FY_BROWSER_STEALTH: '1' });
+    await browser.close();
+  });
+
+  const NOT_STEALTH: readonly [string, SessionBrowserModeOptions['stealth']][] = [
+    ['no answer at all', undefined],
+    ['an answer that cannot be read', async () => await Promise.reject(new Error('unreadable'))],
+  ];
+  test.each(NOT_STEALTH)(
+    'leaves a launch that is not one byte for byte as it was (%s): no switch, no zone, headless, the stock worker',
+    async (_name, stealth) => {
+      // Arrange
+      const w = world({
+        modes: { mode: async () => 'headless', display: DISPLAY, ...(stealth === undefined ? {} : { stealth }) },
+      });
+
+      // Act
+      const browser = await w.launcher.launch(VIEWPORT);
+
+      // Assert
+      const chrome = w.spawned[1];
+      expect(chrome?.args).toContain('--headless=new');
+      expect(chrome?.args.some(argument => /AutomationControlled|^--lang=|^--accept-lang=/u.test(argument))).toBe(
+        false,
+      );
+      expect(chrome?.options?.env).not.toHaveProperty('TZ');
+      expect(chrome?.options?.env).not.toHaveProperty('LANGUAGE');
+      expect(w.workerStarts[0]?.env).not.toHaveProperty('FY_BROWSER_STEALTH');
+      await browser.close();
+    },
+  );
+
+  test('keeps the machine’s own zone and language when its proxy gave no exit to match', async () => {
+    const w = world({ modes: { display: DISPLAY, stealth: async () => ({}) } });
+
+    const browser = await w.launcher.launch(VIEWPORT);
+
+    expect(w.spawned[1]?.args).toContain('--disable-blink-features=AutomationControlled');
+    expect(w.spawned[1]?.options?.env).not.toHaveProperty('TZ');
+    expect(w.spawned[1]?.args.some(argument => argument.startsWith('--lang='))).toBe(false);
+    await browser.close();
+  });
+});
+
 describe('the worker program', () => {
   test('runs the compiled worker directly, and the source entry under Node with the type-transform flags', () => {
     expect(workerCommand({ kind: 'executable', path: '/opt/fy/fyd-browser-worker' }, '/usr/bin/node')).toEqual({
