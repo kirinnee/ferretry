@@ -52,8 +52,8 @@ const rig = (autoRead: boolean) => {
   const store = new LiveVoiceSettingsStore(memory());
   if (autoRead) store.update({ autoRead: true });
   // One panel type per rig: a new `voiceSurfaces` is a new component, which would remount (and forget) on every render.
-  const { AutoReadPanel } = voiceSurfaces({ call: async () => ({}) } as never);
-  return { synth, controller, store, AutoReadPanel };
+  const { AutoReadPanel, voiceMode } = voiceSurfaces({ call: async () => ({}) } as never);
+  return { synth, controller, store, AutoReadPanel, voiceMode };
 };
 
 const tree = (r: ReturnType<typeof rig>, panel: ConversationAboveComposerProps, subject = 'ferret-1'): ReactElement => (
@@ -159,5 +159,27 @@ describe('the Read replies aloud panel above the composer', () => {
       await mounted.unmount();
     }
     mounted = null;
+  });
+});
+
+describe('voice mode forces the replies to be read', () => {
+  test('with Auto-read OFF on this device, a reply that finishes while voice mode is on for the ferret is still read; for another ferret it is not', async () => {
+    const r = rig(false);
+    const store = r.voiceMode;
+    store.start('ferret-1', 'desk');
+    mounted = await mount(tree(r, props()));
+    await mounted.render(tree(r, finished([asked, row('a1', 'assistant', 'The fix is in.', 9000)])));
+    await settle();
+    expect(said(r)).toBe('The fix is in.');
+    await interact(() => r.controller.stop());
+    await interact(() => store.end('ferret-1'));
+    await mounted.render(
+      tree(r, {
+        ...finished([asked, row('a2', 'assistant', 'Another.', 19000)]),
+        turn: { state: 'your-turn', at: iso(20_000), live: true },
+      }),
+    );
+    await settle();
+    expect(r.synth.spoken).toHaveLength(1);
   });
 });

@@ -1,0 +1,112 @@
+/* VOICE MODE panel (voice-mode-panel.tsx): stands where the composer was. A calm surface with the machine's state in
+   words, this turn's words big enough to read at arm's length, and two buttons 44px+ tall (48px on a phone). The state
+   is never colour alone: a word always says it. Theme tokens only. */
+.fy-voice-mode {
+  align-items: stretch;
+  background: var(--surface);
+  border: var(--stroke-control) solid var(--border);
+  border-radius: var(--radius-control);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  min-width: 0;
+  padding: var(--gap-md);
+}
+.fy-voice-mode__status {
+  align-items: center;
+  color: var(--fg);
+  display: flex;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium, 600);
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+.fy-voice-mode__dot {
+  background: var(--faint);
+  border-radius: 50%;
+  flex: none;
+  height: 12px;
+  width: 12px;
+}
+.fy-voice-mode[data-state='listening'] .fy-voice-mode__dot {
+  background: var(--ok);
+}
+.fy-voice-mode[data-state='hearing'] .fy-voice-mode__dot {
+  background: var(--accent-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.fy-voice-mode[data-state='working'] .fy-voice-mode__dot,
+.fy-voice-mode[data-state='loading'] .fy-voice-mode__dot {
+  background: var(--warn);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-voice-mode[data-state='hearing'] .fy-voice-mode__dot {
+    animation: fy-voice-mode-pulse 1.1s ease-in-out infinite;
+  }
+}
+@keyframes fy-voice-mode-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.fy-voice-mode__words {
+  color: var(--fg);
+  font-size: var(--text-lg, 1.125rem);
+  margin: 0;
+  min-height: 1.5em;
+  overflow-wrap: anywhere;
+}
+.fy-voice-mode__words[data-final='false'] {
+  font-style: italic;
+  opacity: 0.6;
+}
+.fy-voice-mode__note {
+  color: var(--muted, var(--faint));
+  font-size: var(--text-sm, 0.875rem);
+  margin: 0;
+}
+.fy-voice-mode__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}
+.fy-voice-mode__actions > button {
+  align-items: center;
+  display: inline-flex;
+  flex: 1 1 8rem;
+  gap: 6px;
+  max-width: 16rem;
+  justify-content: center;
+}
+:root .fy-voice-mode__actions > button {
+  min-height: max(var(--target-floor, 0px), 44px);
+}
+@media (max-width: 640px), (pointer: coarse) {
+  :root .fy-voice-mode__actions > button {
+    min-height: max(var(--target-floor, 0px), 48px);
+  }
+}
+.fy-voice-mode-notice > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fy-voice-mode-notice > button {
+  flex: none;
+  padding-inline: 14px;
+  white-space: nowrap;
+}
+:root .fy-voice-mode-notice > button {
+  min-height: max(var(--target-floor, 0px), 44px);
+}
+.fy-voice-mode-notice {
+  align-items: center;
+  background: var(--warn-bg);
+  border-radius: var(--radius-control);
+  color: var(--warn);
+  display: flex;
+  font-size: var(--text-sm, 0.875rem);
+  gap: var(--gap-sm);
+  justify-content: space-between;
+  margin: 0 0 var(--gap-sm);
+  padding: var(--gap-sm) var(--gap-md);
+}
