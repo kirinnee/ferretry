@@ -11,7 +11,7 @@
 import type { Credential } from '../shared/credential.ts';
 import { cloudCredentialSentence, cloudCredentialVariable, parseCloudCredential } from '../shared/environment.ts';
 import { credentialCodexProvider, credentialVariables } from '../shared/halves.ts';
-import { type HarnessKind, harnessKey } from '../shared/harness.ts';
+import { type HarnessKind, harnessKey, supportedKinds } from '../shared/harness.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
 import { looksLikeRawSecret, looksSecret } from '../../../contract/secret-shape.ts';
 import type { LoginEnvironment, LoginEnvironmentVariable } from '../../../contract/index.ts';
@@ -116,7 +116,7 @@ function variablesView(credential: Credential, held: ReadonlySet<string> | undef
   const shared = Object.entries(credential.env ?? {})
     .toSorted(byName)
     .map(([name, value]) => variableView(name, value, held));
-  const own = (['claude', 'codex'] as const).flatMap(harness =>
+  const own = supportedKinds().flatMap(harness =>
     Object.entries(credential[harness]?.env ?? {})
       .toSorted(byName)
       .map(([name, value]) => variableView(name, value, held, harness)),

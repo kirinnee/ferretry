@@ -1,4 +1,3 @@
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type {
   LoginBudget,
   LoginBudgetPeriodView,
@@ -12,8 +11,13 @@ import type {
   ProviderPresetCatalog,
   ProviderPresetView,
 } from '../../contract/index.ts';
-
-const HARNESS_LABEL: Record<KnownHarnessKey, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+import {
+  harnessHalf,
+  harnessName,
+  harnessWords,
+  type SupportedHarnessKey,
+  supportedHarnessKeys,
+} from '../../contract/harness-words.ts';
 
 /** Two spaces per level, so nested facts read as belonging to the line above. */
 const indent = (lines: readonly string[], depth = 1): string[] => lines.map(line => `${'  '.repeat(depth)}${line}`);
@@ -116,7 +120,7 @@ function environmentLines(login: LoginView): string[] {
 export function renderLoginRow(login: LoginView, binaryName: string): string[] {
   const who = [login.email, login.label].filter(Boolean).join(' · ');
   const off = disabledWords(login.disabled);
-  const head = `${login.id}  ${HARNESS_LABEL[login.harness]}${who ? `  ${who}` : ''}  — ${off ?? login.status.label}`;
+  const head = `${login.id}  ${harnessName(login.harness)}${who ? `  ${who}` : ''}  — ${off ?? login.status.label}`;
   return [
     head,
     ...indent([
@@ -147,28 +151,29 @@ export function renderLoginList(list: LoginList, binaryName: string): string {
 }
 
 /** The harnesses a preset is offered for, Claude Code first. */
-const offeredHarnesses = (preset: ProviderPresetView): readonly KnownHarnessKey[] =>
-  (['claude-code', 'codex'] as const).filter(harness =>
+const offeredHarnesses = (preset: ProviderPresetView): readonly SupportedHarnessKey[] =>
+  supportedHarnessKeys().filter(harness =>
     preset.halves.some(half => half.harness === harness && half.offered.available),
   );
 
-const SCOPE_WORD: Record<KnownHarnessKey, string> = { 'claude-code': 'Claude', codex: 'Codex' };
+/** The short name a scope chip says: "Claude". */
+const scopeWord = (harness: SupportedHarnessKey): string => harnessWords(harness)?.short ?? harness;
 
 /** The scope chip `login presets` shows: "Claude + Codex", "Claude only", "Codex only", or "not offered". */
 function presetScopeChip(preset: ProviderPresetView): string {
   const offered = offeredHarnesses(preset);
-  if (offered.length === 2) return `${SCOPE_WORD['claude-code']} + ${SCOPE_WORD.codex}`;
+  if (offered.length > 1) return offered.map(scopeWord).join(' + ');
   const [only] = offered;
-  return only === undefined ? 'not offered' : `${SCOPE_WORD[only]} only`;
+  return only === undefined ? 'not offered' : `${scopeWord(only)} only`;
 }
 
 /** The provider presets, one line each, grouped by tool, with why a hidden one is not offered. */
 export function renderPresetList(catalog: ProviderPresetCatalog, binaryName: string): string {
   const lines: string[] = [];
-  for (const harness of ['claude-code', 'codex'] as const) {
+  for (const harness of supportedHarnessKeys()) {
     const presets = catalog.presets.filter(preset => preset.harness === harness);
     if (presets.length === 0) continue;
-    lines.push(`${HARNESS_LABEL[harness]}:`);
+    lines.push(`${harnessName(harness)}:`);
     for (const preset of presets) {
       const test = preset.test.available
         ? `test: ${preset.test.spends === 'nothing' ? 'free' : 'one token'}`
@@ -219,10 +224,10 @@ export function renderModelCatalogs(view: ModelCatalogsView): string {
       '',
       `${catalog.id} — ${catalog.label} (${catalog.origin}, verified ${catalog.verified}${catalog.customIds ? ', takes any id' : ''})`,
     );
-    for (const harness of ['claude-code', 'codex'] as const) {
-      const models = harness === 'codex' ? catalog.codex : catalog.claude;
+    for (const harness of supportedHarnessKeys()) {
+      const models = catalog[harnessHalf(harness)];
       if (models === undefined) continue;
-      lines.push(`  ${HARNESS_LABEL[harness]}:`, ...models.map(modelLine));
+      lines.push(`  ${harnessName(harness)}:`, ...models.map(modelLine));
     }
   }
   return lines.join('\n');

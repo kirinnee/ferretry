@@ -35,7 +35,7 @@
  * is computed by the credential-store adapter, which is where every platform fact is applied.
  */
 import { isAbsolute, join } from 'node:path';
-import type { HarnessKind } from '../shared/harness.ts';
+import { byHarness, type HarnessKind, isHarness, refuseHarness } from '../shared/harness.ts';
 import { ferretryCredentialDirectory } from './credential-directory.ts';
 import {
   cloudCredentialEnvironment,
@@ -182,34 +182,39 @@ export function resolveCredentialStore(
 ): CredentialStoreResolution {
   if (credential.store === 'environment') return environmentResolution(credential, harness, paths?.userHome);
   if (paths === undefined) return { harness: credential.harness, store: credential.store, unavailable: NO_STORE_PATHS };
-  const owned = credential.store === 'ferretry' ? ferretryCredentialDirectory(paths.fleetRoot, id) : undefined;
-  if (credential.harness === 'claude') {
-    const secureStorage = owned ?? HOST_CLAUDE_SECURE_STORAGE;
-    const storageDirectory = claudeStorageDirectory(secureStorage, paths.userHome);
-    return {
-      harness: 'claude',
-      store: credential.store,
-      secureStorage,
-      storageDirectory,
-      credentialFile: join(storageDirectory, CLAUDE_CREDENTIAL_FILE),
-      ...(owned === undefined ? {} : { ownedDirectory: owned }),
-    };
-  }
-  if (owned !== undefined) {
-    return {
-      harness: 'codex',
-      store: 'ferretry',
-      canonicalFile: join(owned, CODEX_CREDENTIAL_FILE),
-      ownedDirectory: owned,
-    };
-  }
-  return paths.hostCodexHome === undefined
-    ? {
-        harness: 'codex',
-        store: 'host',
-        unavailable: 'your own Codex home could not be named, because CODEX_HOME is set to a relative path',
+  const store = credential.store;
+  const owned = store === 'ferretry' ? ferretryCredentialDirectory(paths.fleetRoot, id) : undefined;
+  return byHarness<CredentialStoreResolution>(credential.harness, {
+    claude: () => {
+      const secureStorage = owned ?? HOST_CLAUDE_SECURE_STORAGE;
+      const storageDirectory = claudeStorageDirectory(secureStorage, paths.userHome);
+      return {
+        harness: 'claude',
+        store,
+        secureStorage,
+        storageDirectory,
+        credentialFile: join(storageDirectory, CLAUDE_CREDENTIAL_FILE),
+        ...(owned === undefined ? {} : { ownedDirectory: owned }),
+      };
+    },
+    codex: () => {
+      if (owned !== undefined) {
+        return {
+          harness: 'codex',
+          store: 'ferretry',
+          canonicalFile: join(owned, CODEX_CREDENTIAL_FILE),
+          ownedDirectory: owned,
+        };
       }
-    : { harness: 'codex', store: 'host', canonicalFile: join(paths.hostCodexHome, CODEX_CREDENTIAL_FILE) };
+      return paths.hostCodexHome === undefined
+        ? {
+            harness: 'codex',
+            store: 'host',
+            unavailable: 'your own Codex home could not be named, because CODEX_HOME is set to a relative path',
+          }
+        : { harness: 'codex', store: 'host', canonicalFile: join(paths.hostCodexHome, CODEX_CREDENTIAL_FILE) };
+    },
+  });
 }
 
 /**
@@ -222,8 +227,14 @@ export function resolveCredentialStore(
 export function credentialLaunchEnvironment(resolution: CredentialStoreResolution): Readonly<Record<string, string>> {
   if (resolution.store === 'environment') return resolution.env;
   if ('unavailable' in resolution) return {};
-  if (resolution.harness === 'claude') return { [CLAUDE_SECURE_STORAGE_VARIABLE]: resolution.secureStorage };
-  return {};
+  switch (resolution.harness) {
+    case 'claude':
+      return { [CLAUDE_SECURE_STORAGE_VARIABLE]: resolution.secureStorage };
+    case 'codex':
+      return {};
+    default:
+      return refuseHarness(resolution);
+  }
 }
 
 /** The link one Codex runtime's home holds: its own `auth.json`, pointing at the canonical file. */
@@ -237,7 +248,7 @@ export function codexCredentialLink(
   runtimeHome: string,
   resolution: CredentialStoreResolution,
 ): CodexCredentialLink | undefined {
-  if (resolution.harness !== 'codex' || !('canonicalFile' in resolution)) return undefined;
+  if (!isHarness(resolution, 'codex') || !('canonicalFile' in resolution)) return undefined;
   return { path: join(runtimeHome, CODEX_CREDENTIAL_FILE), target: resolution.canonicalFile };
 }
 

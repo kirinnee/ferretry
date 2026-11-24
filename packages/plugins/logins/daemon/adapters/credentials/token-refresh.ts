@@ -2,6 +2,8 @@
 import type { Clock, SpawnPort } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { CODEX_CREDENTIAL_STORE_FILE, CODEX_CREDENTIAL_STORE_KEY } from '../../lib/credentials/credentials.ts';
+import { isKind } from '../../lib/shared/harness.ts';
+import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
 import {
   mergeCodexRefreshEvidence,
   NO_CODEX_REFRESH_EVIDENCE,
@@ -44,8 +46,13 @@ async function scanRefreshStream(
 export function codexTokenRefresh(spawn: SpawnPort, clock: Clock): FleetTokenRefreshPort {
   return {
     refresh: async (target, settled) => {
-      if (target.kind !== 'codex')
-        return { outcome: 'unavailable', reason: 'Claude renews its own login on its next use' };
+      if (!isKind(target.kind, 'codex'))
+        return {
+          outcome: 'unavailable',
+          reason: isKind(target.kind, 'claude')
+            ? 'Claude renews its own login on its next use'
+            : unsupportedHarnessSentence(target.kind),
+        };
       try {
         // File storage is forced, as the sign-in forces it (credentials-service): a refresh must never move the credential into a
         // keyring, where no link in a ferret's home could reach it.

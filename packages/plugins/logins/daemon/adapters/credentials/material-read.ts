@@ -7,7 +7,7 @@
  * and a usage reading, never a blob or a token.
  */
 import type { CredentialMaterial } from '../../lib/shared/identity.ts';
-import type { HarnessKind } from '../../lib/shared/harness.ts';
+import { byHarness, type HarnessKind } from '../../lib/shared/harness.ts';
 import {
   type ActiveUsageRead,
   localCredentialFacts,
@@ -33,17 +33,26 @@ export async function readStoreMaterial<P extends string>(
   path: P,
   harness: HarnessKind,
 ): Promise<CredentialMaterial> {
-  if (harness === 'claude' && (await root.lstat(path))?.kind === 'symlink')
-    return {
-      outcome: 'unreadable',
-      reason:
-        'the Claude credential file is a symbolic link, which Claude replaces with a private copy on its next refresh',
-    };
-  if (harness === 'codex' && ((await root.lstat(path))?.links ?? 1) > 1)
-    return {
-      outcome: 'unreadable',
-      reason: 'the Codex sign-in file has a second name (another link to it exists), so a ferret cannot be given it',
-    };
+  // Each harness has its own rule about what the file may be; a harness with none is refused, never read as Claude's.
+  const unusable = await byHarness<Promise<CredentialMaterial | undefined>>(harness, {
+    claude: async () =>
+      (await root.lstat(path))?.kind === 'symlink'
+        ? {
+            outcome: 'unreadable',
+            reason:
+              'the Claude credential file is a symbolic link, which Claude replaces with a private copy on its next refresh',
+          }
+        : undefined,
+    codex: async () =>
+      ((await root.lstat(path))?.links ?? 1) > 1
+        ? {
+            outcome: 'unreadable',
+            reason:
+              'the Codex sign-in file has a second name (another link to it exists), so a ferret cannot be given it',
+          }
+        : undefined,
+  });
+  if (unusable !== undefined) return unusable;
   if ((await root.stat(path)) === undefined) return { outcome: 'absent' };
   const blob = (await root.readText(path)).trim();
   return blob.length === 0 ? { outcome: 'absent' } : { outcome: 'found', blob };
@@ -72,7 +81,7 @@ export async function activeUsageRead(
 ): Promise<ActiveUsageRead> {
   const local = factsOfMaterial(harness, material);
   try {
-    const probe = harness === 'claude' ? probes.anthropic : probes.codex;
+    const probe = byHarness(harness, { claude: () => probes.anthropic, codex: () => probes.codex });
     return { result: await probe.probeMaterial(material), local };
   } catch {
     return { result: { usageBased: true, ok: false, credentialSignal: 'inconclusive' }, local };

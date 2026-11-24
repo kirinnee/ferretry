@@ -16,7 +16,8 @@
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { parseCloudCredential } from '../shared/environment.ts';
 import type { Credential } from '../shared/credential.ts';
-import type { HarnessKind } from '../shared/harness.ts';
+import { type HarnessKind, harnessKey } from '../shared/harness.ts';
+import { harnessName } from '../../../contract/harness-words.ts';
 import { type PresetVariable, type ProviderPreset, presetHarnesses } from './schema.ts';
 
 /** What a person sends to add a login from a preset. */
@@ -61,7 +62,7 @@ export function presetLoginRefusal(preset: ProviderPreset, input: PresetLoginInp
   const wanted = input.harness ?? input.halves?.[0];
   if (wanted !== undefined && !halves.includes(wanted)) {
     const reason = preset.halves[wanted]?.unavailable;
-    return `${preset.label} does not drive ${wanted === 'claude' ? 'Claude Code' : 'Codex'}${reason === undefined ? '' : `: ${reason}`}`;
+    return `${preset.label} does not drive ${harnessName(harnessKey(wanted))}${reason === undefined ? '' : `: ${reason}`}`;
   }
   for (const [name, variable] of Object.entries(loginVariables(preset, input.halves))) {
     const value = input.env[name];

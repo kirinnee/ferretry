@@ -20,6 +20,8 @@
  * with it in this browser.
  */
 
+import { type HarnessHalf, harnessHalf, supportedHarnessKeys } from './harness-words.ts';
+
 /** A preset's clues, as a preset file declares them under `detect:`. */
 interface DetectClues {
   readonly hosts: readonly string[];
@@ -34,7 +36,7 @@ export interface DetectablePreset {
 }
 
 /** Which CLI a variable speaks to. */
-type DetectedHarness = 'claude' | 'codex';
+type DetectedHarness = HarnessHalf;
 
 /** One thing that pointed at the provider: a variable by its NAME, and how. */
 type DetectionClue =
@@ -128,7 +130,9 @@ export function detectProvider(
       patterns.some(pattern => namesVariable(pattern, name)),
   );
   const said = new Set(names.flatMap(name => harnessOfName(name) ?? []));
-  const harnesses = (['claude', 'codex'] as const).filter(harness => said.has(harness));
+  const harnesses = supportedHarnessKeys()
+    .map(key => harnessHalf(key))
+    .filter(half => said.has(half));
   const scored = table
     .map(row => ({ id: row.id, clues: cluesFor(row, env) }))
     .map(row => ({ ...row, score: score(row.clues) }))

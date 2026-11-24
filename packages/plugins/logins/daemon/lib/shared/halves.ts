@@ -14,7 +14,7 @@
  *
  * Pure.
  */
-import type { HarnessKind } from './harness.ts';
+import { type HarnessKind, supportedKinds } from './harness.ts';
 import type { CodexProvider } from './environment.ts';
 
 /** What one CLI is given by a login: its variables, and — Codex — the model provider it points at. */
@@ -33,7 +33,7 @@ export interface HalvedCredential {
   readonly codex?: { readonly env?: Readonly<Record<string, string>>; readonly codexProvider?: CodexProvider };
 }
 
-const ORDER: readonly HarnessKind[] = ['claude', 'codex'];
+const ORDER: readonly HarnessKind[] = supportedKinds();
 
 /** Whether the login is written with `claude:` / `codex:` halves. */
 export const hasHalves = (credential: HalvedCredential): boolean =>

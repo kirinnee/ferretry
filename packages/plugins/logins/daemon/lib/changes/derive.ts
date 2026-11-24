@@ -12,7 +12,8 @@ import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { LOGIN_NAME, LoginFileSchema, type LoginChange, type LoginFile } from '../../../contract/index.ts';
 import { credentialIssues, credentialOf, type Credential } from '../shared/credential.ts';
 import { credentialHarnesses, credentialVariables, hasHalves } from '../shared/halves.ts';
-import { type HarnessKind, harnessKey } from '../shared/harness.ts';
+import { type HarnessKind, harnessKey, harnessKind } from '../shared/harness.ts';
+import { harnessName, harnessWords } from '../../../contract/harness-words.ts';
 import { storedEnvironmentIssue } from '../../../contract/secret-shape.ts';
 import { credentialFromPreset, presetLoginRefusal } from '../presets/login.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
@@ -29,7 +30,8 @@ const refuse = (message: string): never => {
 };
 
 /** The harness names a sentence uses. */
-const HARNESS_WORDS: Readonly<Record<HarnessKind, string>> = { claude: 'Claude Code', codex: 'Codex' };
+/** What a person reads for a stored harness word: "Claude Code". */
+const harnessWord = (kind: HarnessKind): string => harnessName(harnessKey(kind));
 
 /** One file an edit writes: the changed top-level keys (`undefined` removes a key), or the file removed. */
 type LoginWrite =
@@ -114,7 +116,7 @@ function assertLabelFree(
   if (label === undefined) return;
   for (const [other, file] of files) {
     if (other !== id && credentialOf(file).harness === harness && file.label === label) {
-      refuse(`another ${HARNESS_WORDS[harness]} login is already labelled ${label}; pick a different label`);
+      refuse(`another ${harnessWord(harness)} login is already labelled ${label}; pick a different label`);
     }
   }
 }
@@ -159,7 +161,7 @@ function addLogin(
   if (taken(change.id)) {
     refuse(`${change.id} is already a login on ${facts.machineName}. Use ${freeName(change.id, taken)}?`);
   }
-  const harness: HarnessKind = change.harness === 'claude-code' ? 'claude' : 'codex';
+  const harness: HarnessKind = harnessKind(change.harness);
   assertLabelFree(files, change.id, harness, change.label);
   const store = change.store ?? 'ferretry';
   const consequences: string[] = [];
@@ -178,16 +180,14 @@ function addLogin(
         cloudCredential: change.cloudCredential,
       });
       consequences.push(ENVIRONMENT_CONSEQUENCE);
-      summary = `Add a ${HARNESS_WORDS[harness]} login ${change.id} from its environment`;
+      summary = `Add a ${harnessWord(harness)} login ${change.id} from its environment`;
     } else {
       const preset = facts.presets.find(candidateId => candidateId.id === change.preset);
       if (preset === undefined) return refuse(`there is no preset ${change.preset} on ${facts.machineName}`);
       const input = {
         env,
         harness,
-        ...(change.halves === undefined
-          ? {}
-          : { halves: change.halves.map(half => (half === 'claude-code' ? 'claude' : 'codex')) }),
+        ...(change.halves === undefined ? {} : { halves: change.halves.map(harnessKind) }),
         ...(change.cloudCredential === undefined ? {} : { cloudCredential: change.cloudCredential }),
         ...(change.label === undefined ? {} : { label: change.label }),
       };
@@ -201,10 +201,10 @@ function addLogin(
       consequences.push(ENVIRONMENT_CONSEQUENCE);
       if (harnesses.length > 1) {
         consequences.push(
-          `One login, one secret: runtimes on it can run ${harnesses.map(name => HARNESS_WORDS[name]).join(' or ')}.`,
+          `One login, one secret: runtimes on it can run ${harnesses.map(name => harnessWord(name)).join(' or ')}.`,
         );
       }
-      summary = `Add a ${harnesses.map(name => HARNESS_WORDS[name]).join(' + ')} login ${change.id} from ${preset.label}`;
+      summary = `Add a ${harnesses.map(name => harnessWord(name)).join(' + ')} login ${change.id} from ${preset.label}`;
     }
   } else {
     if (change.preset !== undefined || change.env !== undefined || change.cloudCredential !== undefined) {
@@ -216,17 +216,17 @@ function addLogin(
         ([, file]) => credentialOf(file).harness === harness && file.store === 'host',
       )?.[0];
       if (existing !== undefined)
-        refuse(`${existing} is already your own ${HARNESS_WORDS[harness]} login on this machine`);
+        refuse(`${existing} is already your own ${harnessWord(harness)} login on this machine`);
     }
     candidate = present({ harness: change.harness, store, label: change.label });
     if (store === 'host') {
       consequences.push(
-        `It is your own ${HARNESS_WORDS[harness]} login, shared with ${harness === 'claude' ? 'claude' : 'codex'} in your terminal: signing in here signs that in too.`,
+        `It is your own ${harnessWord(harness)} login, shared with ${harnessWords(harnessKey(harness))?.commandWord ?? harness} in your terminal: signing in here signs that in too.`,
       );
-      summary = `Add your own ${HARNESS_WORDS[harness]} login as ${change.id}`;
+      summary = `Add your own ${harnessWord(harness)} login as ${change.id}`;
     } else {
       consequences.push('It starts as an empty login that needs sign-in.');
-      summary = `Add a ${HARNESS_WORDS[harness]} login ${change.id}`;
+      summary = `Add a ${harnessWord(harness)} login ${change.id}`;
     }
   }
   checked(change.id, candidate);
@@ -328,7 +328,7 @@ function changeEnvironment(
     const written = { ...credential[harness] } as Record<string, unknown>;
     if (Object.keys(half).length === 0) delete written.env;
     else written.env = half;
-    patch[harness === 'claude' ? 'claude' : 'codex'] = written;
+    patch[harness] = written;
   }
   const users = facts.usedBy(change.id);
   const candidate: Record<string, unknown> = { ...lowered(credential) };

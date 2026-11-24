@@ -28,7 +28,7 @@ import { SecretNameSchema } from '@ferretry/core-vault/contract';
 import { z } from 'zod';
 import { CodexProviderSchema } from '../shared/environment.ts';
 import { EnvNameSchema } from '../shared/config.ts';
-import { type HarnessKind, HarnessKindSchema } from '../shared/harness.ts';
+import { type HarnessKind, HarnessKindSchema, isKind, supportedKinds } from '../shared/harness.ts';
 
 const Text = z.string().min(1).max(600);
 
@@ -147,7 +147,8 @@ const PresetHalfSchema = z.strictObject({
   unavailable: Text.optional(),
 });
 
-const HARNESSES = ['claude', 'codex'] as const;
+/** The CLIs a preset can have a half for, Claude Code first. */
+const HARNESSES = supportedKinds();
 
 /**
  * A preset file, as written. Two shapes, both current:
@@ -218,7 +219,7 @@ export const ProviderPresetFileSchema = z
       push('say which CLI the preset is for: "harness: claude|codex", or "claude:" / "codex:" halves', ['harness'], {});
       return;
     }
-    if (preset.codexProvider !== undefined && preset.harness !== 'codex') {
+    if (preset.codexProvider !== undefined && (preset.harness === undefined || !isKind(preset.harness, 'codex'))) {
       push('"codexProvider" belongs only to a Codex preset', ['codexProvider'], preset.codexProvider);
     }
     if (preset.claude?.codexProvider !== undefined) {

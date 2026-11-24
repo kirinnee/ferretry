@@ -1,4 +1,5 @@
 import type { HarnessLoginCodexMethod, HarnessLoginFlow } from '../../contract/index.ts';
+import { isHarnessKey } from '../../contract/harness-words.ts';
 import { requireMayApply } from './authority.ts';
 import { type LoginsCommandDeps, LoginsCommandError } from './ports.ts';
 
@@ -109,7 +110,7 @@ async function attemptSignIn(
       deps.out.setExitCode(1);
       return { kind: 'stopped' };
     }
-    if (flow.harness === 'claude-code' && flow.state === 'awaiting-code') {
+    if (isHarnessKey(flow, 'claude-code') && flow.state === 'awaiting-code') {
       if (shownUrl !== flow.verificationUrl) {
         deps.out.report(`Open this page and sign in:\n  ${flow.verificationUrl}`);
         shownUrl = flow.verificationUrl;
@@ -124,12 +125,12 @@ async function attemptSignIn(
         continue;
       }
     }
-    if (flow.harness === 'codex' && flow.state === 'awaiting-approval' && !shownApproval) {
+    if (isHarnessKey(flow, 'codex') && flow.state === 'awaiting-approval' && !shownApproval) {
       deps.out.report(`Open this page and enter the code ${flow.userCode}:\n  ${flow.verificationUrl}`);
       deps.out.report('Waiting for you to approve it there…');
       shownApproval = true;
     }
-    if (flow.harness === 'codex' && flow.state === 'awaiting-callback') {
+    if (isHarnessKey(flow, 'codex') && flow.state === 'awaiting-callback') {
       linked = true;
       if (shownUrl !== flow.verificationUrl) {
         if (flow.deviceCode === 'unavailable')
@@ -145,7 +146,7 @@ async function attemptSignIn(
       flow = next;
       continue;
     }
-    if (flow.harness === 'codex' && flow.state === 'finishing' && !shownFinishing) {
+    if (isHarnessKey(flow, 'codex') && flow.state === 'finishing' && !shownFinishing) {
       deps.out.report('Codex is finishing the sign-in…');
       shownFinishing = true;
     }
@@ -153,7 +154,7 @@ async function attemptSignIn(
     flow = await deps.gateway.signInStatus(flow.flowId);
   }
   if (flow.state === 'complete') return { kind: 'signed-in' };
-  return { kind: 'failed', flow, device: flow.harness === 'codex' && !linked };
+  return { kind: 'failed', flow, device: isHarnessKey(flow, 'codex') && !linked };
 }
 
 /** Ask for the code the provider's page shows, and hand it to the waiting harness. */

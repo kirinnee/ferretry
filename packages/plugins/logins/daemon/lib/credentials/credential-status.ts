@@ -55,7 +55,7 @@ import {
   credentialShape,
   decodeJwtExpiry,
 } from '../shared/identity.ts';
-import type { HarnessKind } from '../shared/harness.ts';
+import { byHarness, type HarnessKind, isHarness, isKind } from '../shared/harness.ts';
 import {
   type CodexRefreshFailure,
   classifyCodexRefreshFailure,
@@ -310,7 +310,7 @@ export function localCredentialFacts(
   return {
     shape: credentialShape(harness, material),
     ...(fingerprint === undefined ? {} : { fingerprint }),
-    ...(harness === 'codex' ? { codex: readCodexAuthFacts(material) } : {}),
+    ...(isKind(harness, 'codex') ? { codex: readCodexAuthFacts(material) } : {}),
   };
 }
 
@@ -469,7 +469,7 @@ export function decideStorelessStatus(
   held?: ReadonlySet<string>,
 ): CredentialStatus {
   // A Claude login kept in the terminal's own folder launches without being read (as in v4), so it is not "unreachable".
-  if (resolution.store === 'host' && resolution.harness === 'claude') return status('ready', 'host_terminal', {});
+  if (resolution.store === 'host' && isKind(resolution.harness, 'claude')) return status('ready', 'host_terminal', {});
   if (resolution.store !== 'environment') return status('needs_sign_in', 'store_unreachable', {});
   if (held !== undefined) {
     const named = new Set(Object.values(resolution.env).flatMap(value => secretReferencesIn(value)));
@@ -774,7 +774,7 @@ export class CredentialStatusService {
   async checkNow(subject: CredentialSubject): Promise<CredentialStatusView> {
     return await this.#flight.run(subject.id, async () => {
       const resolution = stored(subject.resolution);
-      if (resolution?.harness === 'codex') await this.#codexRefresh(subject.id, resolution);
+      if (resolution !== undefined && isHarness(resolution, 'codex')) await this.#codexRefresh(subject.id, resolution);
       const local = resolution === undefined ? undefined : await this.#activeRead(subject.id, resolution);
       return await this.#view(subject, false, local);
     });
@@ -791,12 +791,16 @@ export class CredentialStatusService {
     const result = read?.result ?? { usageBased: true, ok: false, credentialSignal: 'inconclusive' };
     const at = this.ports.now();
     const head = (await this.ports.heads.read(id)) ?? {};
-    const usage = activeUsageReading(resolution.harness === 'claude' ? 'anthropic-usage' : 'codex-usage', result, at);
+    const usage = activeUsageReading(
+      byHarness(resolution.harness, { claude: () => 'anthropic-usage', codex: () => 'codex-usage' }),
+      result,
+      at,
+    );
     let next: CredentialStatusHead = usage === undefined ? head : { ...head, activeUsage: usage };
     // Codex's usage read is NOT login evidence (it answers for a stale token): it never touches the
     // conclusion. Claude's is the proof, pinned to the digest of the very material whose token it sent —
     // so a login replaced while the read was out is never the one its answer lands on.
-    if (resolution.harness === 'claude') {
+    if (isKind(resolution.harness, 'claude')) {
       next = foldClaudeSignal(next, result.credentialSignal, at, read?.local.fingerprint);
     }
     await this.ports.heads.write(id, next);
@@ -809,7 +813,7 @@ export class CredentialStatusService {
     const before = await this.#codexLocal(resolution, true);
     // The canonical file's directory IS a Codex home: the refresh rewrites the one file every runtime
     // links to, which is what makes an explicit refresh safe now (§9.1).
-    const home = resolution.harness === 'codex' ? dirname(resolution.canonicalFile) : '';
+    const home = isHarness(resolution, 'codex') ? dirname(resolution.canonicalFile) : '';
     let attempt: Awaited<ReturnType<FleetTokenRefreshPort['refresh']>>;
     try {
       attempt = await this.ports.refresh.refresh({ accountId: id, kind: 'codex', home }, async () =>
@@ -851,16 +855,17 @@ export class CredentialStatusService {
     const passive = await this.#passive(subject);
     const local = known ?? (await this.#local(resolution, false));
     const now = this.ports.now();
-    const decided =
-      resolution.harness === 'claude'
-        ? decideClaudeStatus({
-            local: localReadingAt(local, now),
-            head,
-            ...(passive === undefined ? {} : { passive }),
-            checking,
-            now,
-          })
-        : decideCodexStatus({ ...codexLocalOf(local), head, checking, now });
+    const decided = byHarness(resolution.harness, {
+      claude: () =>
+        decideClaudeStatus({
+          local: localReadingAt(local, now),
+          head,
+          ...(passive === undefined ? {} : { passive }),
+          checking,
+          now,
+        }),
+      codex: () => decideCodexStatus({ ...codexLocalOf(local), head, checking, now }),
+    });
     return {
       id: subject.id,
       harness,

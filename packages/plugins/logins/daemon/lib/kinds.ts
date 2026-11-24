@@ -7,7 +7,7 @@
  * second time rather than trust that. `status` and `quota` are words and percentages. The daemon holds no token at all.
  */
 import type {
-  KnownHarnessKey,
+  HarnessKey,
   LoginCredentialAnswer,
   LoginField,
   LoginKind,
@@ -20,7 +20,7 @@ import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import type { LOGIN_KINDS, LoginFile, LoginView } from '../../contract/index.ts';
 import type { HarnessLoginFlow } from '../../contract/index.ts';
 import type { LaunchStore } from './credentials/credentials-service.ts';
-import { harnessKey } from './shared/harness.ts';
+import { byHarness, harnessKey, supportedKindOfKey, unsupportedHarnessSentence } from './shared/harness.ts';
 import { looksLikeRawSecret } from '../../contract/secret-shape.ts';
 
 type KindKey = (typeof LOGIN_KINDS)[number];
@@ -61,7 +61,8 @@ const PROXY_PRESETS: ReadonlySet<string> = new Set(['litellm', 'custom-gateway',
 
 /** Which kind a login file is. A sign-in is its harness's; an environment login is a key, a proxy or an endpoint. */
 export function kindOf(file: LoginFile): KindKey {
-  if (file.store !== 'environment') return file.harness === 'codex' ? 'openai' : 'anthropic';
+  if (file.store !== 'environment')
+    return byHarness(file.harness, { claude: () => 'anthropic', codex: () => 'openai' });
   if (file.preset !== undefined && PROXY_PRESETS.has(file.preset)) return 'proxy';
   if (file.preset !== undefined && file.preset.endsWith('api-key')) return 'api-key';
   return 'endpoint';
@@ -78,7 +79,7 @@ const FIELDS: Readonly<Record<KindKey, readonly LoginField[]>> = {
   endpoint: [URL_FIELD, KEY_FIELD],
 };
 
-const HARNESSES: Readonly<Record<KindKey, readonly KnownHarnessKey[]>> = {
+const HARNESSES: Readonly<Record<KindKey, readonly HarnessKey[]>> = {
   anthropic: [harnessKey('claude')],
   openai: [harnessKey('codex')],
   'api-key': [harnessKey('claude'), harnessKey('codex')],
@@ -145,9 +146,17 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
    */
   const claudeLaunch = async (
     login: string,
-    harness: KnownHarnessKey,
+    harness: HarnessKey,
   ): Promise<Result<Readonly<Record<string, string>>, string>> => {
-    if (harness !== harnessKey('claude')) return ok({});
+    // Only Claude's sign-in reaches a ferret as environment; Codex reads a file instead, and any other harness is refused.
+    switch (supportedKindOfKey(harness)) {
+      case 'claude':
+        break;
+      case 'codex':
+        return ok({});
+      default:
+        return err(unsupportedHarnessSentence(harness));
+    }
     const view = await viewOf(login, 'anthropic');
     const store = await deps.launchStore(login);
     if (store.kind === 'host') return ok(store.variables);
@@ -187,7 +196,7 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
     quota: async login => quotaOf(await viewOf(login, key)),
     ...(key === 'anthropic'
       ? {
-          launchEnvironment: async (login: string, harness: KnownHarnessKey) => {
+          launchEnvironment: async (login: string, harness: HarnessKey) => {
             try {
               return await claudeLaunch(login, harness);
             } catch {
@@ -199,7 +208,7 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
     // Only a Codex sign-in is a FILE a harness reads. Claude's reaches a ferret as environment (`env`/launch environment).
     ...(key === 'openai'
       ? {
-          credential: async (login: string, harness: KnownHarnessKey): Promise<LoginCredentialAnswer> => {
+          credential: async (login: string, harness: HarnessKey): Promise<LoginCredentialAnswer> => {
             const unavailable = (sentence: string): LoginCredentialAnswer => ({ kind: 'unavailable', sentence });
             known(login, key);
             if (harness !== harnessKey('codex')) return unavailable(`the login ${login} is spent by Codex only`);
@@ -234,7 +243,7 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
       : {}),
     async env(login, harness) {
       const file = known(login, key);
-      const half = harness === harnessKey('codex') ? file.codex : file.claude;
+      const half = byHarness(harness, { claude: () => file.claude, codex: () => file.codex });
       const merged = { ...(file.env ?? {}), ...(half?.env ?? {}) };
       const out: Record<string, string> = {};
       for (const [name, value] of Object.entries(merged)) {

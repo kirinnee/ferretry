@@ -33,7 +33,7 @@
  * takes material a caller already holds and returns a verdict; the material itself stays behind
  * {@link LoginStore}, in an adapter, and never reaches a log line.
  */
-import type { HarnessKind } from './harness.ts';
+import { byHarness, type HarnessKind } from './harness.ts';
 
 /**
  * How close to expiry an access token still counts as expired.
@@ -195,7 +195,7 @@ function codexShape(material: CredentialMaterial): CredentialShape {
 
 /** Whichever credential this harness keeps, reduced to the facts a classification needs at any instant. */
 export function credentialShape(kind: HarnessKind, material: CredentialMaterial): CredentialShape {
-  return kind === 'claude' ? claudeShape(material) : codexShape(material);
+  return byHarness(kind, { claude: () => claudeShape(material), codex: () => codexShape(material) });
 }
 
 /** Classify whichever credential shape this harness keeps. */

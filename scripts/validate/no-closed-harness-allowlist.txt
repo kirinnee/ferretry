@@ -10,7 +10,7 @@
 #   path::branch=N   a harness-named operand compared with === or !== to 'claude', 'claude-code' or 'codex'
 #
 # Parts: 1a = the check + runtimes daemon (done); 1b = runtimes contract, cli and app (done: no runtimes row stands);
-# 2 = logins; 3 = core ferrets, conversation,
+# 2 = logins (done: no logins row stands); 3 = core ferrets, conversation,
 # mailbox, kernel and the cli; 4 = mcp, skills, packs, catalogs, warden, terminals, lessons, usage, onboarding.
 
 packages/cli/src/lib/machine/flags.ts::branch=3  # part 3
@@ -80,41 +80,6 @@ packages/plugins/lessons/daemon/adapters/ferret-sessions.ts::branch=1  # part 4
 packages/plugins/lessons/daemon/lib/apply.ts::branch=1  # part 4
 packages/plugins/lessons/daemon/lib/apply.ts::literal=1  # part 4
 packages/plugins/lessons/daemon/lib/lessons.ts::literal=2  # part 4
-packages/plugins/logins/app/features/add-runtime-slots.tsx::branch=2  # part 2
-packages/plugins/logins/app/features/login-sign-in-panel.tsx::known=2  # part 2
-packages/plugins/logins/app/features/login-sign-in.tsx::branch=5  # part 2
-packages/plugins/logins/app/lib/logins-view.ts::branch=1  # part 2
-packages/plugins/logins/app/lib/logins-view.ts::known=2  # part 2
-packages/plugins/logins/app/lib/logins-view.ts::literal=1  # part 2
-packages/plugins/logins/cli/lib/commands.ts::branch=1  # part 2
-packages/plugins/logins/cli/lib/commands.ts::known=6  # part 2
-packages/plugins/logins/cli/lib/render.ts::branch=1  # part 2
-packages/plugins/logins/cli/lib/render.ts::known=4  # part 2
-packages/plugins/logins/cli/lib/render.ts::literal=3  # part 2
-packages/plugins/logins/cli/lib/sign-in.ts::branch=5  # part 2
-packages/plugins/logins/contract/detect.ts::literal=2  # part 2
-packages/plugins/logins/contract/wire.ts::known=3  # part 2
-packages/plugins/logins/daemon/adapters/credentials/codex-credential.ts::branch=1  # part 2
-packages/plugins/logins/daemon/adapters/credentials/material-read.ts::branch=3  # part 2
-packages/plugins/logins/daemon/adapters/credentials/owned-store.ts::branch=4  # part 2
-packages/plugins/logins/daemon/index.ts::branch=3  # part 2
-packages/plugins/logins/daemon/lib/catalog/catalog.ts::literal=1  # part 2
-packages/plugins/logins/daemon/lib/changes/derive.ts::branch=3  # part 2
-packages/plugins/logins/daemon/lib/credentials/credential-status.ts::branch=7  # part 2
-packages/plugins/logins/daemon/lib/credentials/credentials-service.ts::branch=5  # part 2
-packages/plugins/logins/daemon/lib/credentials/credentials.ts::branch=3  # part 2
-packages/plugins/logins/daemon/lib/credentials/housekeeping-protocol.ts::literal=1  # part 2
-packages/plugins/logins/daemon/lib/harness-login/service.ts::branch=19  # part 2
-packages/plugins/logins/daemon/lib/kinds.ts::branch=1  # part 2
-packages/plugins/logins/daemon/lib/kinds.ts::known=5  # part 2
-packages/plugins/logins/daemon/lib/presets/schema.ts::branch=1  # part 2
-packages/plugins/logins/daemon/lib/presets/schema.ts::literal=1  # part 2
-packages/plugins/logins/daemon/lib/provider-probe/environment-view.ts::literal=1  # part 2
-packages/plugins/logins/daemon/lib/provider-probe/presets.ts::literal=1  # part 2
-packages/plugins/logins/daemon/lib/shared/credential.ts::branch=1  # part 2
-packages/plugins/logins/daemon/lib/shared/halves.ts::literal=1  # part 2
-packages/plugins/logins/daemon/lib/shared/harness.ts::known=3  # part 2
-packages/plugins/logins/daemon/lib/shared/harness.ts::literal=1  # part 2
 packages/plugins/mcp/cli/lib/servers.ts::branch=1  # part 4
 packages/plugins/mcp/contract/wire.ts::known=3  # part 4
 packages/plugins/mcp/daemon/features/host-import/put.ts::known=2  # part 4

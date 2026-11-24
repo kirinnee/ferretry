@@ -1,5 +1,6 @@
 import type { VerbInvocation } from '@ferretry/kernel/manifest';
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import { harnessCommandWord, harnessKeyOfWord, harnessName } from '../../contract/harness-words.ts';
 import type { ProviderPresetView } from '../../contract/index.ts';
 import { requireMayApply } from './authority.ts';
 import { type ChangeFlags, parseReason, parseUntil, runChange } from './change.ts';
@@ -114,15 +115,8 @@ const slug = (value: string): string =>
     .replace(/^-+|-+$/gu, '');
 
 /** The id a new login gets when nobody names one: `<harness>-<label>`, or `<harness>-login`, then `-2`, `-3`… until free. */
-export function suggestLoginId(
-  harness: KnownHarnessKey,
-  label: string | undefined,
-  taken: ReadonlySet<string>,
-): string {
-  const base = `${harness === 'claude-code' ? 'claude' : 'codex'}-${slug(label ?? '') || 'login'}`.slice(
-    0,
-    LOGIN_ID_LIMIT - 3,
-  );
+export function suggestLoginId(harness: HarnessKey, label: string | undefined, taken: ReadonlySet<string>): string {
+  const base = `${harnessCommandWord(harness)}-${slug(label ?? '') || 'login'}`.slice(0, LOGIN_ID_LIMIT - 3);
   if (!taken.has(base)) return base;
   for (let n = 2; ; n += 1) {
     const candidate = `${base}-${String(n)}`;
@@ -131,10 +125,8 @@ export function suggestLoginId(
 }
 
 /** A tool as a person typed it. */
-function toolOf(word: string): KnownHarnessKey | undefined {
-  const tool = word.trim().toLowerCase();
-  if (tool === 'claude' || tool === 'claude-code') return 'claude-code';
-  return tool === 'codex' ? 'codex' : undefined;
+function toolOf(word: string): HarnessKey | undefined {
+  return harnessKeyOfWord(word);
 }
 
 /** Every `--env NAME=VALUE`, repeated or not. */
@@ -157,7 +149,7 @@ function envOptions(invocation: VerbInvocation): Record<string, string> {
  */
 async function environmentLogin(
   deps: LoginsCommandDeps,
-  harness: KnownHarnessKey,
+  harness: HarnessKey,
   invocation: VerbInvocation,
   presetId: string | undefined,
   shell: Readonly<Record<string, string>>,
@@ -175,7 +167,7 @@ async function environmentLogin(
   }
   if (preset?.offered.available === false) throw new LoginsCommandError(preset.offered.reason);
   if (preset !== undefined && !preset.halves.some(half => half.harness === harness && half.offered.available)) {
-    throw new LoginsCommandError(`${preset.label} does not drive ${HARNESS_WORDS[harness]}`);
+    throw new LoginsCommandError(`${preset.label} does not drive ${harnessName(harness)}`);
   }
   const defaults = Object.fromEntries(
     (preset?.variables ?? []).map(variable => [
@@ -202,8 +194,6 @@ async function environmentLogin(
   };
 }
 
-const HARNESS_WORDS: Readonly<Record<KnownHarnessKey, string>> = { 'claude-code': 'Claude Code', codex: 'Codex' };
-
 /**
  * `login add claude|codex [--label X] [--id X] [--no-sign-in] [--preset X] [--env NAME=VALUE] [--cloud-credential X]`,
  * or `login add <provider>` for a provider on `login presets`: a sign-in, or an environment login from a preset.
@@ -228,7 +218,7 @@ export const loginAdd: VerbBody = async (deps, invocation) => {
   if (tool === undefined && provider === undefined) {
     throw new LoginsCommandError(`There is no provider "${presetId}": see \`${deps.binaryName} login presets\``);
   }
-  const harness = (tool ?? provider?.harness) as KnownHarnessKey;
+  const harness = (tool ?? provider?.harness) as HarnessKey;
   const label = textOption(invocation, 'label');
   const taken = new Set((await deps.gateway.logins()).logins.map(entry => entry.id));
   const id = textOption(invocation, 'id') ?? suggestLoginId(harness, label ?? presetId, taken);

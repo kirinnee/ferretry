@@ -3,6 +3,7 @@
  * the daemon writes and answers the way the real app-server was measured to. Only closed-set evidence comes out.
  */
 import { afterEach, describe, it } from 'bun:test';
+import { THIRD_HARNESS_KEY } from '@ferretry/core-ferrets/contract/testing';
 import { bunSpawn, systemClock } from '@ferretry/kernel/host';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -35,6 +36,14 @@ describe('the Codex renewal path', () => {
     const attempt = await refresh.refresh({ kind: 'claude' } as never, never);
 
     should(attempt.outcome).equal('unavailable');
+  });
+
+  it('should refuse a harness it has no renewal for by name, and never start a command for it', async () => {
+    const refresh = codexTokenRefresh(bunSpawn({ PATH: '/usr/bin:/bin' }), clock);
+
+    const attempt = await refresh.refresh({ kind: THIRD_HARNESS_KEY } as never, never);
+
+    should(attempt).deepEqual({ outcome: 'unavailable', reason: `${THIRD_HARNESS_KEY} is not supported here` });
   });
 
   it('should hand back the closed-set words the app-server printed, and nothing else it said', async () => {

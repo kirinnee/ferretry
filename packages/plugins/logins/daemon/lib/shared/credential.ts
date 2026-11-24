@@ -1,6 +1,6 @@
 /**
  * A login as the code reasons about it: the parsed `config/logins/<id>.yaml` (`LoginFile`, parsed by the kernel's
- * config layer) with its harness as the code's kind (`claude` | `codex`) rather than the harness plugin's key.
+ * config layer) with its harness as the code's kind (the stored word, `claude`, `codex`) rather than the harness plugin's key.
  *
  * The cross-field rules today's `CredentialSchema.check` holds are ported as {@link credentialIssues}: the contract's
  * `LoginFileSchema` is shape only (its header says the port brings the rules), so a file that parses but breaks one is
@@ -9,6 +9,7 @@
  * Pure.
  */
 import type { LoginFile } from '../../../contract/index.ts';
+import { harnessName } from '../../../contract/harness-words.ts';
 import { cloudCredentialVariable, parseCloudCredential, templatePlaceholders } from './environment.ts';
 import {
   credentialCodexProvider,
@@ -17,7 +18,7 @@ import {
   credentialVariables,
   hasHalves,
 } from './halves.ts';
-import { type HarnessKind, harnessKind } from './harness.ts';
+import { type HarnessKind, harnessKey, harnessKind, isKind } from './harness.ts';
 
 export type Credential = Omit<LoginFile, 'harness'> & { readonly harness: HarnessKind };
 
@@ -51,8 +52,10 @@ export function credentialIssues(credential: Credential): readonly string[] {
     if (credential.claude?.codexProvider !== undefined) {
       issues.push('"codexProvider" points Codex at a model provider — it goes in "codex:", not "claude:"');
     }
-  } else if (credential.codexProvider !== undefined && credential.harness !== 'codex') {
-    issues.push('"codexProvider" points Codex at a model provider — this login is for Claude Code');
+  } else if (credential.codexProvider !== undefined && !isKind(credential.harness, 'codex')) {
+    issues.push(
+      `"codexProvider" points Codex at a model provider — this login is for ${harnessName(harnessKey(credential.harness))}`,
+    );
   }
   const all = credentialVariables(credential);
   if (

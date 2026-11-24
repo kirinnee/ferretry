@@ -4,14 +4,19 @@
  * the locked tool, and any later sentence that still names the other tool (MiniMax's "Codex 0.146.0 or newer …") is dropped.
  * Pure: the daemon's own text is never changed, so Settings keeps the both-tools sentence.
  */
-import { HARNESS_NAMES, type HarnessKind } from './logins-view.ts';
+import { harnessName, supportedHarnessKeys } from '../../contract/harness-words.ts';
+import type { HarnessKind } from './logins-view.ts';
 
 const BOTH = 'Claude Code and Codex';
 
 export function lockedSummary(summary: string, lock: HarnessKind): string {
-  const other = HARNESS_NAMES[lock === 'codex' ? 'claude-code' : 'codex'];
-  const own = HARNESS_NAMES[lock];
+  const others = supportedHarnessKeys()
+    .filter(key => key !== lock)
+    .map(harnessName);
+  const own = harnessName(lock);
   const sentences = summary.replaceAll(BOTH, own).split(/(?<=\.)\s+/u);
-  const kept = sentences.filter(sentence => !sentence.includes(other));
-  return kept.length === 0 ? (sentences[0]?.replaceAll(other, own) ?? summary) : kept.join(' ');
+  const kept = sentences.filter(sentence => !others.some(other => sentence.includes(other)));
+  return kept.length === 0
+    ? others.reduce((text, other) => text.replaceAll(other, own), sentences[0] ?? summary)
+    : kept.join(' ');
 }

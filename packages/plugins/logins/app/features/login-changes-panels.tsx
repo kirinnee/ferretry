@@ -9,7 +9,7 @@ import { changeRefusalExplanation, cn } from '../ui.ts';
 import type { LoginChangeView, LoginView } from '../../contract/index.ts';
 import type { LoginChanges } from '../lib/login-changes.ts';
 import { Button, ChangeApplyPanel, Segmented } from '../ui.ts';
-import { HARNESS_NAMES } from '../lib/logins-view.ts';
+import { harnessName } from '../../contract/harness-words.ts';
 
 const SIGN_OUT_VERSUS_REMOVE = 'Sign out keeps the login but it needs sign-in again. Remove deletes it.';
 
@@ -56,7 +56,7 @@ export function LabelEditor({ login, machineName, changes, reload }: PanelProps)
       </div>
       {login.needsLabel ? (
         <span className="text-meta leading-base text-warn" data-login-needs-label="">
-          Another {HARNESS_NAMES[login.harness]} login here has the same email. Give each a different label.
+          Another {harnessName(login.harness)} login here has the same email. Give each a different label.
         </span>
       ) : null}
       {unchanged ? null : (

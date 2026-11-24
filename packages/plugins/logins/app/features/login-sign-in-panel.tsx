@@ -7,15 +7,15 @@
 import { Loading } from '@ferretry/app/ui';
 import { useCallback, useEffect, useState } from 'react';
 import type { LoginList } from '../../contract/index.ts';
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import { harnessName } from '../../contract/harness-words.ts';
 import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { readLogins } from '../lib/logins-api.ts';
-import { HARNESS_NAMES } from '../lib/logins-view.ts';
 import { LoginSignIn } from './login-sign-in.tsx';
 
 export interface LoginSignInPanelProps {
   readonly client: LoginsClient;
-  readonly harness: KnownHarnessKey;
+  readonly harness: HarnessKey;
   /** The login's id. */
   readonly subject?: string;
   readonly pollMs?: number;
@@ -51,8 +51,8 @@ export function LoginSignInPanel({ client, harness, subject, pollMs, onSignedIn 
     return (
       <p className="m-0 text-cell leading-base text-muted" data-login-sign-in-panel="none">
         {subject === undefined
-          ? `Name a ${HARNESS_NAMES[harness]} login to sign in.`
-          : `There is no ${HARNESS_NAMES[harness]} login ${subject} on ${list.machine}.`}
+          ? `Name a ${harnessName(harness)} login to sign in.`
+          : `There is no ${harnessName(harness)} login ${subject} on ${list.machine}.`}
       </p>
     );
   return (

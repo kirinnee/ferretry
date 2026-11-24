@@ -38,7 +38,7 @@ import zai from '../../data/models/zai.yaml' with { type: 'text' };
 import type { LocalModels } from '../../../contract/index.ts';
 import type { Credential } from '../shared/credential.ts';
 import { readConfigText } from '@ferretry/std/yaml';
-import type { HarnessKind } from '../shared/harness.ts';
+import { type HarnessKind, supportedKinds } from '../shared/harness.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
 import { type CatalogHalf, type ModelCatalog, type ModelCatalogFile, ModelCatalogFileSchema } from './schema.ts';
 
@@ -115,7 +115,7 @@ export function builtInModelCatalogs(): Readonly<Record<string, ModelCatalog>> {
  */
 function withBuiltInPrices(published: ModelCatalog, builtIn: ModelCatalog | undefined): ModelCatalog {
   if (builtIn === undefined) return published;
-  const fill = (half: 'claude' | 'codex'): { readonly claude?: CatalogHalf; readonly codex?: CatalogHalf } => {
+  const fill = (half: HarnessKind): Partial<Record<HarnessKind, CatalogHalf>> => {
     const listed = published[half];
     if (listed === undefined) return {};
     const models = listed.models.map(model => {
@@ -125,7 +125,7 @@ function withBuiltInPrices(published: ModelCatalog, builtIn: ModelCatalog | unde
     });
     return { [half]: { ...listed, models } };
   };
-  return { ...published, ...fill('claude'), ...fill('codex') };
+  return Object.assign({ ...published }, ...supportedKinds().map(fill));
 }
 
 /** The catalogs a machine reads: each id from the most owned source that has it (module doc). */
