@@ -132,6 +132,26 @@ describe('the cleanup deadline of a grant fill is independent of what the ferret
     should(w.timers.map(timer => timer.ms)).eql([118_000]);
   });
 
+  it('should keep the full window when the saved logins cannot be read at the write: nothing is proven', async () => {
+    let filled = false;
+    const port = {
+      listing: async () => {
+        if (filled) throw new Error('the store could not be read');
+        return proven();
+      },
+      fill: async (_entry: string, role: string) => {
+        filled = true;
+        return role === 'username' ? USERNAME : PASSWORD;
+      },
+      save: async () => undefined,
+    };
+    const w = world({ facts: page(), grants: [planLine()], accounts: proven(), loginPort: port as never });
+
+    await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(w.timers.map(timer => timer.ms)).eql([118_000]);
+  });
+
   it('should hold nothing from a read of the page while the deadline runs', async () => {
     const w = world({ facts: page(), grants: [planLine()], accounts: proven() });
 
