@@ -1388,6 +1388,23 @@ describe('the write proves what the card was drawn from, read again (B5-A4 fix r
     should(insertions(world)).equal(0);
   });
 
+  it('calls a form it cannot state in the protocol bounds unread: a malformed answer, an action that did not resolve, a too-long one', async () => {
+    const odd: readonly unknown[] = [
+      { id: 7, name: '', action: 'https://app.example.com/' },
+      { ...FORM, action: '' },
+      { ...FORM, action: `https://app.example.com/${'p'.repeat(300)}` },
+      { ...FORM, id: 'i'.repeat(200) },
+    ];
+    for (const form of odd) {
+      const { world, code } = formWorld();
+      code.form = form as never;
+      const facts = await observed(world, ['#code']);
+
+      should(facts.fields[0]?.unread).equal(true);
+      should(facts.fields[0]?.field.formAction).be.undefined();
+    }
+  });
+
   it('types nothing when the label can no longer be read at the write', async () => {
     const { world, code } = formWorld();
     const facts = await observed(world, ['#code']);
