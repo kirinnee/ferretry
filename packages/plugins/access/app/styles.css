@@ -56,21 +56,16 @@
 .fy-pair-hero {
   position: relative;
   width: min(100%, 260px);
-  margin: 0 auto -4px;
+  margin: 0 0 -4px;
 }
 @media (min-width: 640px) {
   .fy-pair-hero {
     width: min(100%, 300px);
   }
 }
-/* C59 O8-2: ONE READING COLUMN, LEFT-ALIGNED, on a desktop (the page is a 600px column: `SHELL`). The words start at the column's left
-   edge and the buttons sit on its two edges, so everything hangs off the same two lines; the mascot starts at that left edge too
-   instead of floating in the middle of text that starts at the edge. A phone keeps its centred, stacked screen. */
-@media (min-width: 640px) {
-  .fy-pair-hero {
-    margin-inline: 0;
-  }
-}
+/* ONE READING COLUMN, LEFT-ALIGNED, on every width (C59 O8-2; S-8 at 390): the words start at the column's left edge and the buttons hang off
+   the same line, so the mascot starts there too. Nothing on this screen is centred while the buttons sit at the start (a phone no
+   longer keeps a centred heading over start-aligned buttons). */
 /* A short screen (a laptop) keeps the confirm answers above the fold: the hero is smaller until the success screen, which
    has the room. */
 @media (min-width: 640px) and (max-height: 900px) {

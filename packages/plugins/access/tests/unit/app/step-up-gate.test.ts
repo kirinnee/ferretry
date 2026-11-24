@@ -861,3 +861,40 @@ describe('A555 r7 kasen (c): the passkeys read is tried again only while its pro
     should(reads).equal(1);
   });
 });
+
+describe('confirming from a card, with no prompt (S-11)', () => {
+  it('should answer every waiting request true when the ceremony finishes, and say nothing', async () => {
+    // Arrange
+    const { ceremony, pending } = manualCeremony();
+    const gate = gateWith(ceremony);
+    const waiting = gate.require(first, undefined, 'background');
+
+    // Act
+    const unlocking = gate.confirmInline(first);
+    pending[0]?.resolve();
+
+    // Assert
+    should(await unlocking).be.undefined();
+    should(await waiting).be.true();
+    should(gate.snapshot()).be.null();
+  });
+
+  it('should hand back the failure sentence and keep the requests waiting when the ceremony fails', async () => {
+    // Arrange
+    const { ceremony, pending } = manualCeremony();
+    const gate = gateWith(ceremony);
+    let settled: boolean | undefined;
+    void gate.require(first, undefined, 'background').then(answer => {
+      settled = answer;
+    });
+
+    // Act
+    const unlocking = gate.confirmInline(first);
+    pending[0]?.reject(new Error('nope'));
+
+    // Assert
+    should(await unlocking).equal('described: Error: nope');
+    await flush();
+    should(settled).be.undefined();
+  });
+});

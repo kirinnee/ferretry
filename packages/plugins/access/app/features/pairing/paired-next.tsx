@@ -36,6 +36,8 @@ export interface PairedNextProps {
 
 export function PairedNext({ connection, createClient, offer, onContinue }: PairedNextProps) {
   const [phase, setPhase] = useState<'checking' | 'offered' | 'added'>('checking');
+  // An unlock is the next step on the card: it is the one way on, and "Continue" stands back from it (a quiet answer, not a second primary).
+  const [unlockNext, setUnlockNext] = useState(false);
   // Called once, whatever the number of renders or effect runs: a second navigation would be a second history entry.
   const next = useRef(onContinue);
   next.current = onContinue;
@@ -72,16 +74,33 @@ export function PairedNext({ connection, createClient, offer, onContinue }: Pair
           connection={connection}
           createClient={createClient}
           onSettled={settled}
+          onUnlockPending={setUnlockNext}
           actions={phase === 'offered' ? notNow : undefined}
         />
       ) : null}
       {phase === 'added' ? (
         <ActionRow
-          primary={
-            <button type="button" className="kt-btn" data-variant="primary" data-paired-continue="" onClick={move}>
-              Continue
-            </button>
-          }
+          {...(unlockNext
+            ? {
+                secondary: (
+                  <button type="button" className="kt-btn" data-paired-continue="" onClick={move}>
+                    Continue
+                  </button>
+                ),
+              }
+            : {
+                primary: (
+                  <button
+                    type="button"
+                    className="kt-btn"
+                    data-variant="primary"
+                    data-paired-continue=""
+                    onClick={move}
+                  >
+                    Continue
+                  </button>
+                ),
+              })}
         />
       ) : phase === 'checking' && offerable ? (
         <ActionRow secondary={notNow} />

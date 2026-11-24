@@ -6,7 +6,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { PairedDaemon, PasskeyNeed, PasskeyPorts } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { toBase64Url } from '../../../app/shell-grants.ts';
+import { currentInlineUnlock } from '../../../app/lib/inline-passkey-offer.ts';
+import { daemonConnection, toBase64Url } from '../../../app/shell-grants.ts';
 import { accessPasskey, PASSKEY_UNREACHABLE, passkeyNeed } from '../../../app/step-up-shell.tsx';
 import { interact, mount, must } from '../../support/app/dom.ts';
 
@@ -382,5 +383,32 @@ describe('G100 the browser holds no replayable value', () => {
       Object.assign(console, original);
       await view.unmount();
     }
+  });
+});
+
+describe('the unlock a card runs after "Passkey added" (S-11)', () => {
+  it('should run the unlock ceremony through the unlock gate, answering the request waiting on that machine, with no prompt', async () => {
+    const { provision, routes } = harness([ONE]);
+    const inline = currentInlineUnlock();
+    expect(inline).toBeDefined();
+    const screen = await mount(<provision.Prompts />);
+    try {
+      const waiting = provision.handler.confirm(ONE, UNLOCK, 'unasked');
+      await settle();
+      expect(dialogs(screen.container)).toHaveLength(0);
+      const connection = daemonConnection({ daemonId: 'd1', baseUrl: ONE.address, deviceId: ONE.deviceId });
+      expect(await inline?.run(connection)).toBeUndefined();
+      expect(await waiting).toBe(true);
+      expect(routes).toContain('POST /v1/unlock');
+      expect(dialogs(screen.container)).toHaveLength(0);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it('should say an unlock is needed when the machine cannot say whether it asks (the unlock is harmless)', async () => {
+    harness([ONE]);
+    const connection = daemonConnection({ daemonId: 'd1', baseUrl: ONE.address, deviceId: ONE.deviceId });
+    expect(await currentInlineUnlock()?.needed(connection)).toBe(true);
   });
 });

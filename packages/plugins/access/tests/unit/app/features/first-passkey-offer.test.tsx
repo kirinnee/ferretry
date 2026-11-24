@@ -11,7 +11,7 @@ import type { StepUpClient } from '../../../../app/lib/step-up-client.ts';
 import type { PairingArrival, PairingSeed } from '../../../../app/lib/pairing.ts';
 import { toBase64Url } from '../../../../app/shell-grants.ts';
 import { daemonConnection } from '../../../../app/shell-pairing.ts';
-import { inlinePasskeyOffered } from '../../../../app/lib/inline-passkey-offer.ts';
+import { inlinePasskeyOffered, provideInlineUnlock } from '../../../../app/lib/inline-passkey-offer.ts';
 import { interact, mount, must } from '../../../support/app/dom.ts';
 
 const SEED: PairingSeed = { daemonUrl: 'https://daemon.example.test', daemonId: 'daemon-a', code: 'single-use' };
@@ -232,6 +232,78 @@ describe('the passkey offer as a page (A565 shot 01 spacing)', () => {
       await interact(() => notNow.click());
       expect(moved).toBe(1);
     } finally {
+      await screen.unmount();
+    }
+  });
+});
+
+describe('the unlock that follows "Passkey added" (S-11)', () => {
+  const pressAdd = async (screen: Awaited<ReturnType<typeof pairedScreen>>) => {
+    await interact(() =>
+      (must(screen.container.querySelector('[data-first-passkey-add]'), 'the button') as HTMLElement).click(),
+    );
+    await interact(async () => await Promise.resolve());
+  };
+
+  it('S-11 should say the unlock is the next step on the same card, keep holding the machine, and unlock from its own button', async () => {
+    const ran: string[] = [];
+    const withdraw = provideInlineUnlock({
+      needed: async () => true,
+      run: async daemon => {
+        ran.push(daemon.daemonId);
+        return undefined;
+      },
+    });
+    const screen = await pairedScreen(machine(OPEN).client);
+    try {
+      await pressAdd(screen);
+      await interact(async () => await Promise.resolve());
+      expect(screen.container.textContent).toContain('Passkey added. Touch it once more to unlock this device.');
+      // Held: the unlock gate raises no second modal over this card.
+      expect(inlinePasskeyOffered('daemon-a')).toBe(true);
+      await interact(() =>
+        (must(screen.container.querySelector('[data-passkey-unlock]'), 'the Unlock button') as HTMLElement).click(),
+      );
+      await interact(async () => await Promise.resolve());
+      expect(ran).toEqual(['daemon-a']);
+      expect(screen.container.querySelector('[data-passkey-unlocked]')).not.toBeNull();
+      expect(inlinePasskeyOffered('daemon-a')).toBe(false);
+    } finally {
+      withdraw();
+      await screen.unmount();
+    }
+  });
+
+  it('S-11 should show the failure sentence and keep the Unlock button when the unlock did not finish', async () => {
+    const withdraw = provideInlineUnlock({ needed: async () => true, run: async () => 'The passkey did not finish.' });
+    const screen = await pairedScreen(machine(OPEN).client);
+    try {
+      await pressAdd(screen);
+      await interact(async () => await Promise.resolve());
+      await interact(() =>
+        (must(screen.container.querySelector('[data-passkey-unlock]'), 'the Unlock button') as HTMLElement).click(),
+      );
+      await interact(async () => await Promise.resolve());
+      expect(screen.container.textContent).toContain('The passkey did not finish.');
+      expect(screen.container.querySelector('[data-passkey-unlock]')).not.toBeNull();
+      expect(inlinePasskeyOffered('daemon-a')).toBe(true);
+    } finally {
+      withdraw();
+      await screen.unmount();
+    }
+  });
+
+  it('S-11 should draw the plain line and let go of the machine when it does not unlock on opening', async () => {
+    const withdraw = provideInlineUnlock({ needed: async () => false, run: async () => undefined });
+    const screen = await pairedScreen(machine(OPEN).client);
+    try {
+      await pressAdd(screen);
+      await interact(async () => await Promise.resolve());
+      expect(screen.container.textContent).toContain('Passkey added. This device can confirm changes on this machine.');
+      expect(screen.container.querySelector('[data-passkey-unlock]')).toBeNull();
+      expect(inlinePasskeyOffered('daemon-a')).toBe(false);
+    } finally {
+      withdraw();
       await screen.unmount();
     }
   });

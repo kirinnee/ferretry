@@ -198,7 +198,7 @@ describe('The pair page: mascot and night sky', () => {
         expect(await tab.locator('main .kt-panel').count(), 'no card for the machine').toBe(0);
         // Measured against the FINAL TEXT LINE, not the paragraph: Details wrapped onto a line of its own is still inside the paragraph.
         await expectDetailsOnFinalLine(tab, '[data-daemon-path]', 'the pair confirm line');
-        // C59 O8-2: one left-aligned column on a desktop (the heading starts where the buttons start); centred on a phone.
+        // C59 O8-2 / S-8: one left-aligned column on every width (the heading starts where the buttons start, a phone included).
         const column = must(await tab.locator('main').boundingBox(), 'the column');
         const notNowBox = must(await tab.getByRole('button', { name: 'Not now' }).boundingBox(), 'Not now');
         const titleBox = await tab.locator('#pairing-title').evaluate(node => {
@@ -206,7 +206,11 @@ describe('The pair page: mascot and night sky', () => {
           range.selectNodeContents(node);
           return range.getBoundingClientRect().x;
         });
-        if (variant.phone) expect(titleBox, 'phone: the heading is centred').toBeGreaterThan(notNowBox.x + 24);
+        if (variant.phone)
+          expect(
+            Math.abs(titleBox - notNowBox.x),
+            'phone: the heading starts where the buttons start',
+          ).toBeLessThanOrEqual(1);
         else {
           // One reading width per page type: the column is capped by the step frame's `--fy-reading-w` token, not a literal.
           const readingWidth = await tab.evaluate(() =>

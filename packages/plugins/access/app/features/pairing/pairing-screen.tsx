@@ -686,7 +686,7 @@ function PairingFocus({
         stage="paired"
         announce={`Connected. Paired with ${stage.path.title}, ${stage.path.path}.`}
       >
-        <div className="fy-pair-arrive flex flex-col items-center gap-2 pb-8 text-center sm:items-start sm:text-left">
+        <div className="fy-pair-arrive flex flex-col items-start gap-2 pb-8 text-left">
           <Title id="pairing-title" ref={doneTitle} tabIndex={-1} className={`${titleClass} outline-none`}>
             Connected
           </Title>
@@ -765,9 +765,9 @@ function PairingFocus({
       onClose={onClose}
       announce={busy ? 'Exchanging the one-time code with this daemon…' : ''}
     >
-      <header className={embedded ? 'min-w-0' : 'min-w-0 text-center sm:text-left'}>
+      <header className="min-w-0 text-left">
         {!embedded && (
-          <div className="mb-2 flex items-center justify-center gap-2 text-accent sm:justify-start">
+          <div className="mb-2 flex items-center gap-2 text-accent">
             <BrandMark size={20} />
             <span className="text-meta font-semibold uppercase tracking-label">Ferretry</span>
           </div>
