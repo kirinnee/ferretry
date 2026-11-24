@@ -1,6 +1,7 @@
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type VoiceApi, VOICE_CONFIG } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { voiceNativeSelftest } from './adapters/native-selftest.ts';
 import { OutboundProviderAuthorizer } from './adapters/outbound-provider-authorizer.ts';
 import { StateSpeedupTestLedger } from './adapters/state-speedup-test-ledger.ts';
 import { JevProbe } from './lib/speedups/jev-probe.ts';
@@ -15,6 +16,7 @@ import {
   startSpeechThread,
   SPEECH_WORKER_URL,
 } from './adapters/worker-speech-thread.ts';
+import { nativeTargetFor, nativeThreads, type NativeParts } from './lib/native/catalog.ts';
 import { REPLY_DIR } from './lib/reply/catalog.ts';
 import { ReplyVoiceEngine } from './lib/reply/engine.ts';
 import { SpeechEngine } from './lib/engine/engine.ts';
@@ -32,6 +34,7 @@ import { voiceRoutes } from './routes.ts';
 export default implementDaemon(manifest, {
   // The machine speech engine's thread: `fyd --check` starts and stops it, and a compiled binary embeds it.
   workers: { speech: SPEECH_WORKER_URL, reply: REPLY_WORKER_URL },
+  selftest: { voice: voiceNativeSelftest() },
   build(ctx) {
     const { kernel } = ctx;
     const { vault, gate, ferrets } = ctx.needs;
@@ -52,12 +55,20 @@ export default implementDaemon(manifest, {
       guard: new JevProbe(authorizer),
     });
 
+    // The native engine: this machine's pinned library (none for a platform we pin nothing for), and four threads at most.
+    const native: NativeParts = {
+      target: nativeTargetFor(kernel.hostFacts.platform, process.arch),
+      threads: () => nativeThreads(kernel.hostFacts.cpus),
+      platform: `${kernel.hostFacts.platform}-${process.arch}`,
+    };
+
     const engineLog = kernel.log.child('engine');
     const engine = new SpeechEngine({
       http: { request: async (url, init) => await kernel.fetch.request(url, init) },
       files: new StateEngineFiles(kernel.state, kernel.hostFacts),
       clock: kernel.clock,
       machine: () => kernel.identity.daemonName,
+      native,
       start: () => startSpeechThread(kernel.workers),
       availableMemory: () => freemem(),
       log: {
@@ -74,6 +85,7 @@ export default implementDaemon(manifest, {
       files: new StateEngineFiles(kernel.state, kernel.hostFacts, REPLY_DIR),
       clock: kernel.clock,
       machine: () => kernel.identity.daemonName,
+      native,
       start: () => startReplyThread(kernel.workers),
       availableMemory: () => freemem(),
       log: {

@@ -9,9 +9,9 @@ import { bunWorkers } from '../../../../core/kernel/host/adapters/process.ts';
 import type { SocketDownstream } from '@ferretry/kernel/contract';
 import { startSpeechThread } from '../../daemon/adapters/worker-speech-thread.ts';
 import { SpeechEngine } from '../../daemon/lib/engine/engine.ts';
-import type { EngineFilesPort } from '../../daemon/lib/engine/ports.ts';
 import { decodeDownlinkUnit } from '../../contract/index.ts';
 import { VoiceStream } from '../../daemon/lib/stream/session.ts';
+import { DiskFiles, nativeFor } from './disk-files.ts';
 
 /**
  * The red/green proof of voice mode (unit 5) with the real engine and a real browser: Chrome's fake microphone plays a
@@ -60,25 +60,6 @@ function wavOf(clip: Int16Array, lead: number, tail: number): Uint8Array {
   return out;
 }
 
-class MemoryFiles implements EngineFilesPort {
-  private readonly held = new Map<string, Uint8Array>();
-  async size(file: { role: string }) {
-    return this.held.get(file.role)?.byteLength;
-  }
-  async read(file: { role: string }) {
-    return this.held.get(file.role)?.slice();
-  }
-  async write(file: { role: string }, bytes: Uint8Array) {
-    this.held.set(file.role, bytes);
-  }
-  async remove(file: { role: string }) {
-    this.held.delete(file.role);
-  }
-  async freeBytes() {
-    return undefined;
-  }
-}
-
 const realClock = {
   nowMs: () => performance.now(),
   every: (interval: number, fn: () => void) => {
@@ -95,7 +76,8 @@ describe.skipIf(!ASKED)('voice mode in a real browser with the real speech engin
   test('a recorded clip through the real microphone path: live words in the panel, ONE send at the pause, composer back on End', async () => {
     const engine = new SpeechEngine({
       http: { request: async url => await fetch(url, { redirect: 'manual' }) },
-      files: new MemoryFiles(),
+      files: new DiskFiles(process.env.FY_VOICE_ENGINE_DIR ?? '/tmp/claude-1000/vc-native-bench/real/speech'),
+      native: nativeFor(process.env.FY_STT_ENGINE),
       clock: { after: (delay, fn) => realClock.after(delay as number, fn) },
       machine: () => 'this box',
       start: () => startSpeechThread(bunWorkers()),

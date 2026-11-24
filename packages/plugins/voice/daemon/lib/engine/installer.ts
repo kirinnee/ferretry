@@ -78,6 +78,28 @@ function sized(bytes: number): string {
   return bytes >= 1_000_000_000 ? `${(bytes / 1_000_000_000).toFixed(1)} GB` : `${Math.round(bytes / 1_000_000)} MB`;
 }
 
+/** The files of `catalog` that are not on disk at their pinned size. */
+export async function missingOf(files: EngineFilesPort, catalog: readonly EngineFile[]): Promise<EngineFile[]> {
+  const missing: EngineFile[] = [];
+  for (const file of catalog) if ((await files.size(file)) !== file.bytes) missing.push(file);
+  return missing;
+}
+
+/**
+ * Refuses with `no_disk` (and a sentence that says how much is needed and how much is free) unless the models folder has
+ * room for `missing` plus {@link DISK_MARGIN_BYTES}. A host that cannot say how much is free is not blocked on a guess.
+ */
+export async function ensureRoom(files: EngineFilesPort, missing: readonly EngineFile[]): Promise<void> {
+  const downloadBytes = missing.reduce((sum, file) => sum + file.bytes, 0);
+  if (downloadBytes === 0) return;
+  const free = await files.freeBytes();
+  if (free !== undefined && free < downloadBytes + DISK_MARGIN_BYTES)
+    throw new VoiceEngineError(
+      'no_disk',
+      `There is not enough free disk space for speech. It needs ${sized(downloadBytes + DISK_MARGIN_BYTES)} free (${sized(downloadBytes)} to download plus ${sized(DISK_MARGIN_BYTES)} to spare) and this machine has ${sized(free)} free.`,
+    );
+}
+
 /**
  * Installs every missing file, one at a time (peak memory is the largest file, 652 MB), writing each only after it
  * verified. A file already present at its pinned size is kept: it was verified when written. Before anything is
@@ -91,19 +113,10 @@ export async function installFiles(
   onBytes: (received: number) => void,
   catalog: readonly EngineFile[] = ENGINE_FILES,
 ): Promise<void> {
-  const missing: EngineFile[] = [];
-  for (const file of catalog) {
-    if ((await files.size(file)) === file.bytes) onBytes(file.bytes);
-    else missing.push(file);
-  }
+  const missing = await missingOf(files, catalog);
+  for (const file of catalog) if (!missing.includes(file)) onBytes(file.bytes);
   if (missing.length === 0) return;
-  const downloadBytes = missing.reduce((sum, file) => sum + file.bytes, 0);
-  const free = await files.freeBytes();
-  if (free !== undefined && free < downloadBytes + DISK_MARGIN_BYTES)
-    throw new VoiceEngineError(
-      'no_disk',
-      `There is not enough free disk space for speech. It needs ${sized(downloadBytes + DISK_MARGIN_BYTES)} free (${sized(downloadBytes)} to download plus ${sized(DISK_MARGIN_BYTES)} to spare) and this machine has ${sized(free)} free.`,
-    );
+  await ensureRoom(files, missing);
   for (const file of missing) {
     const bytes = await download(http, file, onBytes);
     try {

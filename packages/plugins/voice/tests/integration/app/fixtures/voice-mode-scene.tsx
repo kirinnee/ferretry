@@ -25,7 +25,48 @@ import { daemonConnection } from '../../../../app/shell-voice.ts';
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 
-const SIZE = 698_905_830;
+/**
+ * `&runtime=native|nobuild|failed|upgrade` says which engine the machine runs once an engine is Ready, and sizes the downloads
+ * as the native plan (without it the scene is the WebAssembly engine, as before, and the views carry no `runtime`):
+ * `native` the fast engine; `nobuild` the slower one because this platform has no native build; `failed` the slower one
+ * because the native library would not start; `upgrade` the slower one on a machine that could run the fast one, with the
+ * button that switches (Install then ends on `native`).
+ */
+const runtime = params.get('runtime');
+/** Which rows the person has switched to the fast engine in the `upgrade` scenario. */
+const upgraded = { speech: false, voice: false };
+const sentenceOf = (
+  what: 'speech' | 'voice',
+): { kind: 'native' | 'wasm'; threads: number; sentence: string; upgradeBytes?: number } => {
+  const doing = what === 'speech' ? 'turns your speech into words' : 'speaks';
+  if (runtime === 'native' || (runtime === 'upgrade' && upgraded[what]))
+    return {
+      kind: 'native',
+      threads: 4,
+      sentence: `The fast native engine ${what === 'speech' ? 'is turning your speech into words' : 'is running it'} on Studio Mac, on up to 4 threads.`,
+    };
+  if (runtime === 'nobuild')
+    return {
+      kind: 'wasm',
+      threads: 1,
+      sentence: `There is no native engine for freebsd-x64, so Studio Mac ${doing} on the slower built-in engine.`,
+    };
+  if (runtime === 'failed')
+    return {
+      kind: 'wasm',
+      threads: 1,
+      sentence:
+        'The fast native engine could not start on Studio Mac (libstdc++.so.6: cannot open shared object file), so it runs on the slower built-in engine.',
+    };
+  return {
+    kind: 'wasm',
+    threads: 1,
+    sentence: 'Studio Mac runs it on the slower built-in engine. The fast native engine can be installed in its place.',
+    upgradeBytes: what === 'speech' ? 33_839_377 : 359_399_933,
+  };
+};
+
+const SIZE = runtime === null ? 698_905_830 : 718_956_269;
 const fake = {
   installs: 0,
   removes: 0,
@@ -61,16 +102,21 @@ const view = () => ({
         },
       }
     : {}),
-  ...(state === 'ready' ? { selfTest: { loadMs: 1865, decodeMs: 650, memoryMb: 819 } } : {}),
+  ...(state === 'ready'
+    ? {
+        selfTest: { loadMs: 1865, decodeMs: 650, memoryMb: 819 },
+        ...(runtime === null ? {} : { runtime: sentenceOf('speech') }),
+      }
+    : {}),
 });
 
-const REPLY_SIZE = 164_022_376;
+const REPLY_SIZE = runtime === null ? 164_022_376 : 393_558_465;
 let replyState = (params.get('reply') ?? 'not_installed') as 'not_installed' | 'installing' | 'ready' | 'failed';
 let replyDone = replyState === 'ready' ? REPLY_SIZE : 0;
 const replyView = () => ({
   state: replyState,
   machine: 'Studio Mac',
-  label: 'Kokoro 82M (int8), a natural English reply voice',
+  label: 'Kokoro 82M, a natural English reply voice',
   sizeBytes: REPLY_SIZE,
   doneBytes: replyDone,
   loaded: false,
@@ -83,7 +129,10 @@ const replyView = () => ({
       }
     : {}),
   ...(replyState === 'ready'
-    ? { selfTest: { loadMs: 1765, speakMs: 5163, audioMs: 1618, realTimeFactor: 3.19, memoryMb: 512 } }
+    ? {
+        selfTest: { loadMs: 1765, speakMs: 5163, audioMs: 1618, realTimeFactor: 3.19, memoryMb: 512 },
+        ...(runtime === null ? {} : { runtime: sentenceOf('voice') }),
+      }
     : {}),
 });
 
@@ -100,7 +149,10 @@ const client = {
         replyDone = 0;
       } else if (replyState === 'installing') {
         replyDone = Math.min(REPLY_SIZE, replyDone + Math.round(REPLY_SIZE * 0.5));
-        if (replyDone >= REPLY_SIZE) replyState = 'ready';
+        if (replyDone >= REPLY_SIZE) {
+          replyState = 'ready';
+          upgraded.voice = true;
+        }
       }
       return schema.parse(replyView());
     }
@@ -116,7 +168,10 @@ const client = {
       fake.reads += 1;
       if (state === 'installing') {
         done = Math.min(SIZE, done + Math.round(SIZE * 0.35));
-        if (done >= SIZE) state = 'ready';
+        if (done >= SIZE) {
+          state = 'ready';
+          upgraded.speech = true;
+        }
       }
     }
     return schema.parse(view());

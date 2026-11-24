@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { NonNegativeFiniteSchema } from '@ferretry/std';
-import { VoiceEngineFailureCodeSchema, VoiceEngineStateSchema } from './engine.ts';
+import { VoiceEngineFailureCodeSchema, VoiceEngineStateSchema, VoiceRuntimeSchema } from './engine.ts';
 
 /**
  * The reply voice: the machine speaks a ferret's `<voice>` lines with Kokoro-82M (owner decision O2: the sherpa-onnx
@@ -39,6 +39,8 @@ export const ReplyVoiceViewSchema = z.strictObject({
   loaded: z.boolean(),
   failure: z.strictObject({ code: VoiceEngineFailureCodeSchema, sentence: z.string().min(1).max(400) }).optional(),
   selfTest: ReplyVoiceSelfTestSchema.optional(),
+  /** Which engine runs the voice; present once it is installed. */
+  runtime: VoiceRuntimeSchema.optional(),
 });
 export type ReplyVoiceView = z.infer<typeof ReplyVoiceViewSchema>;
 

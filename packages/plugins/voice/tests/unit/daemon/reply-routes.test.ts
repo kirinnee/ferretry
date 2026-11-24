@@ -7,7 +7,8 @@ import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { ReplyVoiceViewSchema } from '../../../contract/index.ts';
 import voice from '../../../daemon/index.ts';
-import { REPLY_FILES } from '../../../daemon/lib/reply/catalog.ts';
+import { nativeTargetFor } from '../../../daemon/lib/native/catalog.ts';
+import { REPLY_FILES, REPLY_NATIVE_MODEL } from '../../../daemon/lib/reply/catalog.ts';
 import manifest from '../../../manifest.ts';
 
 const refused = (url: URL): Response => new Response(`no ${url.pathname}`, { status: 503 });
@@ -55,7 +56,18 @@ describe('the reply voice routes', () => {
     expect(response.status).toBe(200);
     const view = ReplyVoiceViewSchema.parse(response.json());
     expect(view).toMatchObject({ state: 'not_installed', doneBytes: 0, loaded: false });
-    expect(view.sizeBytes).toBe(REPLY_FILES.reduce((sum, file) => sum + file.bytes, 0));
+    // The native engine's plan where this machine has one (the library, the fp32 model, the shared files), else WebAssembly's.
+    const target = nativeTargetFor(process.platform, process.arch);
+    expect(view.sizeBytes).toBe(
+      target === undefined
+        ? REPLY_FILES.reduce((total, file) => total + file.bytes, 0)
+        : REPLY_FILES.filter(file => ['voices', 'tokens', 'lexicon'].includes(file.role)).reduce(
+            (total, file) => total + file.bytes,
+            0,
+          ) +
+            REPLY_NATIVE_MODEL.bytes +
+            target.files.reduce((total, file) => total + file.bytes, 0),
+    );
   });
 
   test('Install answers 202 at once; a server that is down reads back as failed, with a sentence', async () => {

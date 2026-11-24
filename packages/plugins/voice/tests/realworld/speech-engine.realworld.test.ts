@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { bunWorkers } from '../../../../core/kernel/host/adapters/process.ts';
 import { ENGINE_FILES } from '../../daemon/lib/engine/catalog.ts';
 import { SpeechEngine } from '../../daemon/lib/engine/engine.ts';
-import type { EngineFilesPort, HttpPort } from '../../daemon/lib/engine/ports.ts';
+import type { EnginePathsPort, HttpPort } from '../../daemon/lib/engine/ports.ts';
 import { startSpeechThread } from '../../daemon/adapters/worker-speech-thread.ts';
 
 /**
@@ -29,8 +29,11 @@ function samplesOf(wav: Uint8Array): Float32Array {
   return Float32Array.from({ length: count }, (_, index) => view.getInt16(at + index * 2, true) / 32768);
 }
 
-class MemoryFiles implements EngineFilesPort {
+class MemoryFiles implements EnginePathsPort {
   readonly held = new Map<string, Uint8Array>();
+  pathOf(file: { role: string }) {
+    return `/memory/${file.role}`;
+  }
   async size(file: { role: string }) {
     return this.held.get(file.role)?.byteLength;
   }

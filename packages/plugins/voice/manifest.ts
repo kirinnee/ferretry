@@ -39,6 +39,8 @@ export default definePlugin({
 
   // The machine speech engine's worker thread (voice mode): `fyd --check` starts it, so a binary without it is seen at once.
   workers: ['speech', 'reply'],
+  // `fyd --check` loads the native speech engine (once Install has fetched it) from this binary: the `voice` line.
+  selftest: ['voice'],
 
   // Gate to record the messages the stream sends; Ferrets to say which ferret a name means (as a typed send does).
   needs: { vault: VaultPort, gate: GatePort, ferrets: FerretsPort },

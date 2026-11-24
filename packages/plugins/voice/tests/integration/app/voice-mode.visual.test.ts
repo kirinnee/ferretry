@@ -395,6 +395,98 @@ describe('Voice mode settings', () => {
           await context.close();
         }
       });
+
+      // Which engine runs, in plain words, on both rows (speech and the reply voice): native, no build, would not start, upgradable.
+      for (const scenario of [
+        {
+          runtime: 'native',
+          kind: 'native',
+          says: /The fast native engine is (turning your speech into words|running it) on Studio Mac, on up to 4 threads\./u,
+        },
+        {
+          runtime: 'nobuild',
+          kind: 'wasm',
+          says: /There is no native engine for freebsd-x64, so Studio Mac .* on the slower built-in engine\./u,
+        },
+        {
+          runtime: 'failed',
+          kind: 'wasm',
+          says: /The fast native engine could not start on Studio Mac \(libstdc\+\+\.so\.6: cannot open shared object file\), so it runs on the slower built-in engine\./u,
+        },
+        {
+          runtime: 'upgrade',
+          kind: 'wasm',
+          says: /runs it on the slower built-in engine\. The fast native engine can be installed in its place\./u,
+        },
+      ] as const) {
+        it(`both rows say which engine runs: ${scenario.runtime} (${viewport.name}, ${theme})`, async () => {
+          const { context, tab } = await open('ready', `&reply=ready&runtime=${scenario.runtime}`);
+          try {
+            const lines = tab.locator('[data-voice-runtime]');
+            await lines.first().waitFor({ state: 'visible' });
+            expect(await lines.count()).toBe(2);
+            for (const index of [0, 1]) {
+              const line = lines.nth(index);
+              expect(await line.getAttribute('data-voice-runtime')).toBe(scenario.kind);
+              expect(((await line.textContent()) ?? '').trim()).toMatch(scenario.says);
+            }
+            // Only the slower engine on a machine that could run the fast one offers the switch, on each row, with its size.
+            const upgrades = tab.locator('[data-voice-upgrade]');
+            expect(await upgrades.count()).toBe(scenario.runtime === 'upgrade' ? 2 : 0);
+            const geometry = await tab.evaluate(() => ({
+              scrollX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+              buttons: [...document.querySelectorAll('[data-voice-engine] button, [data-voice-reply] button')].map(
+                el => ({
+                  h: el.getBoundingClientRect().height,
+                  clipped: (el as HTMLElement).scrollWidth > (el as HTMLElement).clientWidth + 1,
+                }),
+              ),
+              lines: [...document.querySelectorAll('[data-voice-runtime]')].map(el => ({
+                right: el.getBoundingClientRect().right,
+                rowRight: (el.closest('[data-voice-engine], [data-voice-reply]') as Element).getBoundingClientRect()
+                  .right,
+              })),
+            }));
+            expect(geometry.scrollX).toBeLessThanOrEqual(0);
+            for (const button of geometry.buttons) {
+              expect(button.h).toBeGreaterThanOrEqual(43.5);
+              expect(button.clipped).toBe(false);
+            }
+            for (const line of geometry.lines) expect(line.right).toBeLessThanOrEqual(line.rowRight + 1);
+            if (shotsDir !== '')
+              await tab.screenshot({
+                path: join(shotsDir, `${viewport.name}-${theme}-runtime-${scenario.runtime}.png`),
+                fullPage: true,
+              });
+          } finally {
+            await context.close();
+          }
+        });
+      }
+
+      it(`Switch to the fast engine is the person's press: one install call per row, and the row then says native (${viewport.name}, ${theme})`, async () => {
+        const { context, tab } = await open('ready', '&reply=ready&runtime=upgrade');
+        try {
+          const speech = tab
+            .locator('[data-voice-engine]')
+            .getByRole('button', { name: 'Switch to the fast engine (34 MB)' });
+          const voice = tab
+            .locator('[data-voice-reply]')
+            .getByRole('button', { name: 'Switch to the fast engine (359 MB)' });
+          await speech.waitFor({ state: 'visible' });
+          await voice.waitFor({ state: 'visible' });
+          expect((await fakeOf(tab)).installs).toBe(0);
+          await speech.click();
+          await tab.locator('[data-voice-engine] [data-voice-runtime="native"]').waitFor({ state: 'visible' });
+          await voice.click();
+          await tab.locator('[data-voice-reply] [data-voice-runtime="native"]').waitFor({ state: 'visible' });
+          const fake = await fakeOf(tab);
+          expect([fake.installs, fake.replyInstalls]).toEqual([1, 1]);
+          expect(await tab.locator('[data-voice-upgrade]').count()).toBe(0);
+        } finally {
+          await context.close();
+        }
+      });
     }
   }
 });
