@@ -82,7 +82,7 @@ const client = scripted({
           outcome: 'executed',
           executor: 'setup',
           summary:
-            'Runtimes: claude-code-default. Written by the parts that own them: mcp/notes.yaml, mcp/issues.yaml, skills/review.yaml, claude-code/settings/default.yaml. Not written: skills/release-notes.yaml (a name it does not accept).',
+            '1 runtime created on Studio: Claude · your terminal sign-in. Saved: your MCP servers, your Claude skills. Not written: your Claude settings (a name it does not accept).',
         },
   [`GET /v1/runtimes/proposals/${CHANGE_ID}`]: Object.assign(
     new Error(

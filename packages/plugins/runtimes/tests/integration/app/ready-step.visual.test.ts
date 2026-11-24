@@ -64,7 +64,8 @@ const VARIANTS = [
 type Variant = (typeof VARIANTS)[number];
 
 const CASES = [
-  { name: 'ready', query: '', headline: 'Claude Code is ready', kind: 'ready' },
+  { name: 'ready-terminal', query: '', headline: 'Claude Code uses your terminal sign-in', kind: 'ready' },
+  { name: 'ready', query: '&state=own', headline: 'Claude Code is ready', kind: 'ready' },
   { name: 'codex-many', query: '&tool=codex&state=many', headline: 'Codex is ready', kind: 'ready' },
   { name: 'none', query: '&tool=codex&state=none', headline: 'No runtime was made for Codex', kind: 'none' },
   {

@@ -125,6 +125,20 @@ describe('Runtimes tab list', () => {
     await view.unmount();
   });
 
+  it('O9-5 names the profile an import made in words on the row and on the runtime’s page, never claude-default', async () => {
+    const imported = runtime({ name: 'claude-default', profile: 'claude-default' });
+    const list = await open({ routes: reads([imported]) });
+    expect(text(list.container, '[data-runtime-card="claude-default"]')).toContain(
+      'you@example.com (personal) · Your Claude setup profile',
+    );
+    expect(text(list.container, '[data-runtime-card="claude-default"]')).not.toContain('claude-default profile');
+    await list.unmount();
+    const own = await pageWith({ name: 'claude-default', profile: 'claude-default' });
+    expect(text(own.container, '[data-runtime-profile]')).toContain('Your Claude setup');
+    expect(text(own.container, '[data-runtime-profile]')).not.toContain('claude-default');
+    await own.unmount();
+  });
+
   it('says on the row when the tool is not installed here, with a link to Settings', async () => {
     const view = await open({
       machine: machine({
@@ -200,11 +214,9 @@ describe('Runtimes tab list', () => {
 describe('Add runtime from the tab', () => {
   const journey = async (view: Awaited<ReturnType<typeof open>>): Promise<void> => {
     await click(view.container, '[data-add-runtime]');
-    // Blank name: named after its login, with the id it will get on the id line.
-    expect(must(view.container.querySelector<HTMLInputElement>('#add-runtime-name'), 'name').value).toBe('');
-    expect(must(view.container.querySelector('[data-add-runtime-id]'), 'id').textContent).toBe(
-      'id claude-claude-hooks',
-    );
+    // No name to type: the id the runtime gets is made for it and never drawn.
+    expect(view.container.querySelector('#add-runtime-name')).toBeNull();
+    expect(view.container.querySelector('[data-add-runtime-id]')).toBeNull();
     await click(view.container, '[data-change-submit]');
     await settle();
   };
