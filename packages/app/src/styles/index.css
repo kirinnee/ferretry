@@ -22,6 +22,67 @@
   box-sizing: border-box;
 }
 
+/* ---- THE app's scrollbar, ONE place (O9-7) -------------------------------------------------------------------------------
+   Every scroll area — the page, panes, modals, lists, code blocks, tables, the xterm viewport — is thin and takes its colours from
+   the palette: the thumb is the palette's `--muted`, so light, dark and every palette pack follow with no per-palette rule. The tokens
+   are written on `:root` AND on a swatch so a look preview recolours its own. The standard properties are what Chromium and current
+   Safari/Firefox read; the `::-webkit-scrollbar` rules below are for older Safari (Chromium ignores them once `scrollbar-color` is set).
+   A component that must hide its own strip (a tab row) names `scrollbar-width: none` itself; nothing else restyles a scrollbar.
+   No `scrollbar-gutter` on the page: the shell does not scroll, so a reserved strip would be an empty margin; the chat transcript measures
+   and reserves its own (`use-chat-scrollbar-gutter`). */
+:root,
+[data-swatch] {
+  --scrollbar-thumb: color-mix(in srgb, var(--muted) 55%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--muted) 80%, transparent);
+  --scrollbar-track: transparent;
+  /* The same thumb for a surface that paints its OWN background (below): drawn from that surface's ink, not the page's. The terminal
+     reads these two (its slider is xterm's own element, not a native bar), so they are named on the root as well. */
+  --scrollbar-code-thumb: color-mix(in srgb, var(--code-fg) 60%, transparent);
+  --scrollbar-code-thumb-hover: color-mix(in srgb, var(--code-fg) 85%, transparent);
+}
+
+/* A code block, a terminal, a diff or process body is dark in a light page (and the reverse): the page's `--muted` thumb sinks into
+   it (1.5:1 on Briefing light's navy), so each takes its thumb from its own `--code-fg`, which is the ink drawn on that fill. */
+.hljs,
+.md pre,
+.kt-code-block,
+.bg-code-bg,
+.kt-fs-code,
+.fy-diff,
+.fy-proc-body-wrap,
+.kt-webterm__stage {
+  --scrollbar-thumb: var(--scrollbar-code-thumb);
+  --scrollbar-thumb-hover: var(--scrollbar-code-thumb-hover);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  /* theme-literal-ok: a transparent inset that insets the thumb inside the track; not a drawn stroke */
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--radius-dot);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
 html {
   -webkit-text-size-adjust: 100%;
 }

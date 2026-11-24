@@ -81,18 +81,14 @@ describe('a ferret waiting with input_wait when the owner answers', () => {
     should(told.length).equal(1);
   });
 
-  it('should still have the journal event written, after the wake', async () => {
-    const order: string[] = [];
-    const world = inputRequestService({
-      journalled: event => void order.push(`journal:${(event as { type: string }).type}`),
-    });
+  const answer = async (world: ReturnType<typeof inputRequestService>) => {
     await world.service.raise(SESSION, RAISE);
     const [request] = await world.service.list(OWNER);
     if (request === undefined) throw new Error('no request');
-
-    const waiting = world.service.agentView(SESSION, 'A1' as AgendaId, 60_000).then(() => void order.push('woken'));
-    await settle();
-    await world.service.deliver(
+    return request;
+  };
+  const owner = (request: { id: string; observedDigest?: string | undefined }) =>
+    [
       SESSION,
       request.id,
       {
@@ -102,11 +98,77 @@ describe('a ferret waiting with input_wait when the owner answers', () => {
         submit: true,
       },
       OWNER,
-    );
+    ] as const;
+
+  it('should write the final outcome durably BEFORE the wait is woken, so a restart reads the true outcome', async () => {
+    const time = fakeTime();
+    const stored: string[] = [];
+    const world = inputRequestService({
+      journalled: async event => {
+        const { type } = event as { type: string };
+        // The final write is slow: 30 ms of fake time.
+        if (type === 'surface.input_delivered') await time.takes(30);
+        stored.push(type);
+      },
+    });
+    const request = await answer(world);
+
+    let woke: { at: number; stored: string[] } | undefined;
+    const waiting = world.service.agentView(SESSION, 'A1' as AgendaId, 60_000).then(() => {
+      woke = { at: time.clock.now, stored: [...stored] };
+    });
+    await settle();
+    const answered = world.service.deliver(...owner(request));
+    await settle();
+
+    // Typed, but the outcome is not durable yet, so the ferret has not been told "delivered".
+    should(world.writes).eql(['hunter2-UNIQUE']);
+    should(stored.includes('surface.input_delivered')).be.false();
+    should(woke).be.undefined();
+
+    time.advance(30);
+    await Promise.all([answered, waiting]);
+
+    // Woken at fake time 30 (the journal write is the wake's whole cost), and `delivered` was already stored: the last
+    // journal word a restart would find for this request is the true outcome, never `delivering`.
+    should(woke?.at).equal(30);
+    should(woke?.stored.at(-1)).equal('surface.input_delivered');
+  });
+
+  it('should still wake the wait with the true outcome when the final journal write fails', async () => {
+    const world = inputRequestService({
+      journalled: event => {
+        if ((event as { type: string }).type === 'surface.input_delivered') throw new Error('disk full');
+      },
+    });
+    const request = await answer(world);
+
+    let seen: string | undefined;
+    const waiting = world.service.agentView(SESSION, 'A1' as AgendaId, 60_000).then(view => {
+      seen = view.state;
+    });
+    await settle();
+    const result = await world.service.deliver(...owner(request));
+    await waiting;
+
+    should(world.writes).eql(['hunter2-UNIQUE']);
+    should(result.state).equal('delivered');
+    should(seen).equal('delivered');
+  });
+
+  it('should still have the journal event written exactly once, before the wake', async () => {
+    const order: string[] = [];
+    const world = inputRequestService({
+      journalled: event => void order.push(`journal:${(event as { type: string }).type}`),
+    });
+    const request = await answer(world);
+
+    const waiting = world.service.agentView(SESSION, 'A1' as AgendaId, 60_000).then(() => void order.push('woken'));
+    await settle();
+    await world.service.deliver(...owner(request));
     await waiting;
 
     should(order.filter(entry => entry === 'journal:surface.input_delivered').length).equal(1);
-    // The delivered journal event is still written before deliver returns.
-    should(order.includes('journal:surface.input_delivered')).be.true();
+    should(order.indexOf('journal:surface.input_delivered')).be.below(order.indexOf('woken'));
   });
 });

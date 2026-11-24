@@ -20,6 +20,7 @@ import {
 } from './borrowed.ts';
 import { type ClearJob, codeTargetProblem, type InputTargetFacts } from '../../../contract/index.ts';
 import type { InputRequestField } from './wire.ts';
+import { barredFromLoginPassword } from './field-kinds.ts';
 import { identityOf, SECOND_FACTOR_WINDOW_MS } from './login-observer.ts';
 import { terminalHides } from './lock.ts';
 import type { SavedListing } from './saved-logins.ts';
@@ -679,6 +680,8 @@ export function matchSignInGrant(
   // 6. Every field is a role the grant covers.
   const roles = rolesUnder(grant, seen.fields);
   if (typeof roles === 'string') return miss(roles);
+  // A saved password never goes into a card or code box, a grant's fill included.
+  if (seen.fields.some(field => barredFromLoginPassword(facts, field))) return miss('field-not-covered');
   // 7. The ferret's words can only prevent: a hint naming another sign-in or account stops the fill.
   if (seen.hint !== undefined && seen.hint !== grant.signIn && seen.hint !== account.id)
     return miss('ferret-named-another');

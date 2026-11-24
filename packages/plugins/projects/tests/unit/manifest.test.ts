@@ -29,6 +29,17 @@ describe('projects manifest', () => {
   });
 });
 
+describe('projects first-run steps', () => {
+  test('project setup is followed by Connect GitHub: two device pages in one "Projects" segment', () => {
+    expect(manifest.onboarding.map(step => [step.id, step.order, step.side, step.group, step.stepHost])).toEqual([
+      ['folders', 90, 'client', 'Projects', true],
+      ['github', 91, 'client', 'Projects', true],
+    ]);
+    const slots = manifest.ui.panels.filter(panel => panel.slot === 'onboarding.step').map(panel => panel.id);
+    expect(slots).toEqual(['onboarding-step', 'github-step']);
+  });
+});
+
 describe('projects launch roots', () => {
   test('takes launch.roots under its one key: the known projects are what Ferrets reads', () => {
     expect(manifest.hooks.takes.map(take => [take.hook.name, take.key])).toEqual([['launch.roots', 'projects']]);
