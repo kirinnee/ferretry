@@ -88,7 +88,9 @@ ungoverned — docs/grants.md). That is also how the automated end-to-end test a
 `https://claude.ai/api/mcp/auth_callback` (verbatim from Anthropic's documentation, see "Sources"), plus
 `extraRedirectUris`. Dynamic client registration REFUSES (`invalid_redirect_uri`) a client whose
 `redirect_uris` contains anything else, and `/oauth/authorize` matches the redirect URI by exact string against
-the client's registered list. A redirect URI problem is shown as an error page and NEVER redirected to.
+the client's registered list AND re-checks it against the CURRENT allow-list (configuration can shrink between
+restarts, so a URI removed from `extraRedirectUris` stops authorizing even for a client registered with it). An
+unknown client or a redirect URI problem is shown as an error page and NEVER redirected to.
 
 ## OAuth 2.1 details
 
@@ -96,12 +98,19 @@ the client's registered list. A redirect URI problem is shown as an error page a
   `redirect_uris` 1–5 allowed URIs, `grant_types` ⊆ {`authorization_code`, `refresh_token`},
   `response_types` = [`code`], `token_endpoint_auth_method` ∈ {`none` (default), `client_secret_post`,
   `client_secret_basic`}; a secret is issued only for the latter two and stored as a SHA-256 hash.
-  Limits: at most 20 registered clients (a client with no live grant that is older than 24 h is pruned first),
-  10 registrations per hour per daemon, request body ≤ 8 KiB.
+  Limits: at most 20 registered clients, 10 registrations per hour per source address (200 per hour overall),
+  request body ≤ 8 KiB. A client with no grant, no waiting sign-in and no redeemable code is reclaimable 1 h after it
+  registered, a client whose grants are all dead 24 h after, and reclaimable clients are dropped first when the cap is
+  reached; only if none is reclaimable is a registration refused.
 - **Authorize**: `response_type=code`, `client_id`, `redirect_uri` (required, exact), `code_challenge` +
   `code_challenge_method=S256` (required — `plain` and absent are refused), `state` (passed through),
   `scope` (⊆ `fleet:read fleet:write`; absent means both), `resource` (if present, must equal the resource
-  URI after canonicalisation — lowercase scheme and host, default port dropped, one trailing `/` ignored). At most 5 pending requests at once; a request lives 10 minutes.
+  URI after canonicalisation — lowercase scheme and host, default port dropped, one trailing `/` ignored). A request lives 10 minutes. Undecided sign-ins are capped at 2 per client, 3 per source address and 10 overall; a new
+  one over a cap EVICTS the oldest undecided request of the client or source over its share (overall: of the busiest
+  source), so a flood displaces only itself and nobody is refused. After the client and `redirect_uri` are
+  validated, a protocol error (`invalid_request` for a missing or non-S256 challenge, `unsupported_response_type`,
+  `unauthorized_client`, `invalid_scope`, `invalid_target`) is a `302` to the `redirect_uri` with `error`,
+  `error_description`, `state` (when sent) and `iss` (RFC 6749 §4.1.2.1).
 - **Codes**: 256 random bits, stored hashed, single-use, 60 s. A second use revokes the grant it minted.
   The redirect carries `code`, `state` and `iss` (RFC 9207).
 - **Tokens**: opaque, `fyc_at_` + 43 base64url (access, 1 h) and `fyc_rt_` + 43 base64url (refresh, 30 days,
@@ -111,9 +120,21 @@ the client's registered list. A redirect URI problem is shown as an error page a
   `resource` is `invalid_target`.
 - **Revocation**: `POST /oauth/revoke` (RFC 7009, always `200`), `fy connector revoke <grant>`, and the app's
   Connectors panel. A revoked grant's access token is refused on the very next call.
-- **Rate limits** (per listener, in memory): token endpoint 30/min per client and 120/min overall; authorize
-  30/min overall; `/mcp` 60 calls/min per grant, of which write tools 10/min. Over the limit is `429` with
-  `Retry-After`.
+- **Rate limits** (per listener, in memory; "source" is the request's `clientAddress`, which the listener sets from
+  CF-Connecting-IP — absent shares one `unknown` bucket): register 10/h per source, 200/h overall; authorize 20/min
+  per source, 300/min overall; waiting-page polls 60/min per source, 1200/min overall; token and revoke 120/min per
+  source with NO overall ceiling, plus 30 failed attempts per source per 5 min and 30 successful exchanges per
+  authenticated client per minute (only a holder of a valid credential spends the latter, so anonymous traffic can
+  never starve a valid refresh); `/mcp` 60 calls/min per grant, of which write tools 10/min. Over the limit is `429`
+  with `Retry-After`.
+- **No public path waits on the owner, and the owner never waits on the public.** All writes share one transaction
+  queue with three lanes: owner acts (approve, deny, revoke, lists) run first, then token exchanges for a credential
+  the daemon issued to the authenticated client, then anonymous writes (registration, last-use bookkeeping). The
+  token lane holds at most 64 waiting writes and the anonymous lane 32; beyond that the answer is `503`
+  `temporarily_unavailable` with `Retry-After: 5`. A bearer check, a waiting-page poll, an unknown authorization code
+  or refresh token, and an unknown revocation token are answered from an in-memory digest index that every write
+  keeps current, and never enter the queue. The index is built from storage once; if storage is unreadable on a cold
+  start, bearer checks fail closed, and afterwards the last persisted state keeps serving.
 
 ## Discovery and the 401
 
@@ -143,6 +164,9 @@ authorization server metadata names the endpoints above, `code_challenge_methods
 - The security log (docs/audit.md) records `connector.client.registered`, `connector.grant.approved`,
   `connector.grant.denied`, `connector.grant.revoked`, `connector.refresh.reused` and `connector.tool` (write
   tools: tool name, grant id, the ferret's session id), names and ids only.
+  `connector.grant.revoked` carries who ended the grant: an owner act names the device or this computer; the client's own
+  RFC 7009 revocation is logged as `anonymous` with `via: oauth-revoke`; a replayed code or rotated refresh token as
+  `anonymous` with `via: reuse`.
 
 ## Scopes and tools
 

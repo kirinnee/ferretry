@@ -236,10 +236,93 @@ describe('connector OAuth HTTP boundary', () => {
     expect(JSON.parse(response?.body ?? '').error).toBe('slow_down');
   });
 
+  test('budgets are per arriving address: one source cannot lock another out', async () => {
+    const f = fixture();
+    const http = new ConnectorOAuthHttp(f.authority, endpoints);
+    const from = (address: string, method: string, path: string, body?: string, type?: string): ApiRequest => ({
+      ...request(method, path, body, type),
+      clientAddress: address,
+    });
+    for (let i = 0; i < 20; i++) await http.handle(from('203.0.113.9', 'GET', '/oauth/authorize'));
+    expect((await http.handle(from('203.0.113.9', 'GET', '/oauth/authorize')))?.status).toBe(429);
+    expect((await http.handle(from('198.51.100.4', 'GET', '/oauth/authorize')))?.status).toBe(400);
+    for (let i = 0; i < 60; i++) await http.handle(from('203.0.113.9', 'GET', '/oauth/authorize/wait?h=x'));
+    const polled = await http.handle(from('203.0.113.9', 'GET', '/oauth/authorize/wait?h=x'));
+    expect(polled?.status).toBe(429);
+    expect(polled?.headers.get('retry-after')).toBeDefined();
+    expect((await http.handle(from('198.51.100.4', 'GET', '/oauth/authorize/wait?h=x')))?.status).toBe(400);
+  });
+
+  test('a busy write queue answers 503 temporarily_unavailable with Retry-After', async () => {
+    const f = fixture();
+    const http = new ConnectorOAuthHttp(f.authority, endpoints);
+    let release!: () => void;
+    const held = f.memory.run(() => new Promise<void>(resolve => (release = resolve)), 'owner');
+    const body = JSON.stringify({ redirect_uris: [redirectUri] });
+    const answers = Array.from({ length: 34 }, (_, i) =>
+      http.handle({ ...request('POST', '/oauth/register', body, 'application/json'), clientAddress: `10.0.0.${i}` }),
+    );
+    const refused = (await Promise.all(answers.slice(32))).filter(r => r?.status === 503);
+    expect(refused).toHaveLength(2);
+    expect(JSON.parse(refused[0]?.body ?? '').error).toBe('temporarily_unavailable');
+    expect(refused[0]?.headers.get('retry-after')).toBe('5');
+    release();
+    await held;
+    expect((await Promise.all(answers.slice(0, 32))).every(r => r?.status === 201 || r?.status === 400)).toBe(true);
+  });
+
+  test('protocol errors after a trusted client and redirect go back to the client; others stay local', async () => {
+    const f = fixture();
+    const http = new ConnectorOAuthHttp(f.authority, endpoints);
+    const client = await f.register();
+    const query = (extra: Record<string, string>) =>
+      '/oauth/authorize?' +
+      new URLSearchParams({
+        response_type: 'code',
+        client_id: client.client_id,
+        redirect_uri: redirectUri,
+        code_challenge: 'c'.repeat(43),
+        code_challenge_method: 'S256',
+        state: 'abc',
+        ...extra,
+      });
+    const bad = await http.handle(request('GET', query({ scope: 'admin' })));
+    expect(bad?.status).toBe(302);
+    const location = new URL(bad?.headers.get('location') ?? '');
+    expect(Object.fromEntries(location.searchParams)).toMatchObject({
+      error: 'invalid_scope',
+      state: 'abc',
+      iss: endpoints.issuer,
+    });
+    expect(location.searchParams.get('error_description')).toBeTruthy();
+    const local = await http.handle(request('GET', query({ redirect_uri: 'https://evil.example/cb' })));
+    expect(local?.status).toBe(400);
+    expect(local?.headers.get('content-type')).toContain('text/html');
+  });
+
+  test('malformed or mismatched Basic credentials are refused as invalid_client', async () => {
+    const f = fixture();
+    const http = new ConnectorOAuthHttp(f.authority, endpoints);
+    const client = await f.register();
+    for (const header of ['Basic !!!', `Basic ${btoa('no-separator')}`, `Basic ${btoa('other:secret')}`]) {
+      const response = await http.handle(
+        request(
+          'POST',
+          '/oauth/token',
+          new URLSearchParams({ client_id: client.client_id, grant_type: 'refresh_token' }).toString(),
+          undefined,
+          new Map([['authorization', header]]),
+        ),
+      );
+      expect(response?.status).toBe(401);
+      expect(JSON.parse(response?.body ?? '').error).toBe('invalid_client');
+    }
+  });
+
   test('malformed requests spend endpoint budgets before parsing or reading their bodies', async () => {
     const f = fixture();
     const http = new ConnectorOAuthHttp(f.authority, endpoints);
-    for (let i = 0; i < 30; i++) expect((await http.handle(request('GET', '/oauth/authorize')))?.status).toBe(400);
+    for (let i = 0; i < 20; i++) expect((await http.handle(request('GET', '/oauth/authorize')))?.status).toBe(400);
     expect((await http.handle(request('GET', '/oauth/authorize')))?.status).toBe(429);
     for (let i = 0; i < 120; i++)
       expect((await http.handle(request('POST', '/oauth/token', '{}', 'application/json')))?.status).toBe(415);

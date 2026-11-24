@@ -219,9 +219,11 @@ describe('connector authority', () => {
     await f.authority.verify(flow.tokens.access_token);
     f.advance(59_999);
     await f.authority.verify(flow.tokens.access_token);
+    await f.memory.idle();
     expect(f.saves()).toBe(before + 1);
     f.advance(1);
     await f.authority.verify(flow.tokens.access_token);
+    await f.memory.idle();
     expect(f.saves()).toBe(before + 2);
   });
 
@@ -251,12 +253,10 @@ describe('connector authority', () => {
     expect(await f.authority.verify(flow.tokens.access_token)).toBeUndefined();
   });
 
-  test('limits pending requests to five; expired handles never redirect', async () => {
+  test('expired sign-ins can no longer be approved or redirected, and free their place', async () => {
     const f = fixture();
     const client = await f.register();
-    const handles: string[] = [];
-    for (let i = 0; i < 5; i++) handles.push(await f.authorize(client.client_id));
-    await expect(f.authorize(client.client_id)).rejects.toMatchObject({ status: 429 });
+    const handles = [await f.authorize(client.client_id), await f.authorize(client.client_id)];
     f.advance(600_000);
     expect(
       await f.authority.approve((await f.options.memory.pending.values().next().value)?.view.id ?? '', 'admin-cli'),
@@ -378,17 +378,13 @@ describe('connector authority', () => {
     expect(f.events[0]).toMatchObject({ clientName: 'MyClient' });
   });
 
-  test('DCR admits 10 registrations per hour and caps retained clients at 20', async () => {
+  test('DCR admits 10 registrations per hour per source', async () => {
     const f = fixture();
     for (let i = 0; i < 10; i++) await f.register();
     await expect(f.register()).rejects.toMatchObject({ status: 429, retryAfter: 3600 });
+    await f.authority.register({ redirect_uris: [redirectUri] }, { source: '198.51.100.7' });
     f.advance(3_600_000);
-    for (let i = 0; i < 10; i++) await f.register();
-    f.advance(3_600_000);
-    await expect(f.register()).rejects.toMatchObject({ error: 'invalid_client_metadata' });
-    f.advance(24 * 3_600_000);
     await f.register();
-    expect(f.state().clients).toHaveLength(1);
   });
 
   test('pruning keeps an older client with a live refresh grant', async () => {
@@ -419,42 +415,24 @@ describe('connector authority', () => {
     expect(await f.authority.verify(answer.access_token)).toBeDefined();
   });
 
-  test('token endpoint admits 30 per client and 120 overall per minute', async () => {
+  test('authorize admits 20 per source per minute, and a rejected request still spends it', async () => {
     const f = fixture();
-    const clients = await Promise.all(Array.from({ length: 5 }, () => f.register()));
-    for (const client of clients.slice(0, 4)) {
-      for (let i = 0; i < 30; i++)
-        await expect(
-          f.authority.exchange({ client_id: client.client_id, grant_type: 'unknown' }),
-        ).rejects.toMatchObject({ error: 'unsupported_grant_type' });
-    }
-    await expect(
-      f.authority.exchange({ client_id: clients[4]?.client_id ?? '', grant_type: 'unknown' }),
-    ).rejects.toMatchObject({ status: 429 });
-    f.advance(60_000);
-    for (let i = 0; i < 30; i++)
-      await expect(
-        f.authority.exchange({ client_id: clients[0]?.client_id ?? '', grant_type: 'unknown' }),
-      ).rejects.toMatchObject({ error: 'unsupported_grant_type' });
-    await expect(
-      f.authority.exchange({ client_id: clients[0]?.client_id ?? '', grant_type: 'unknown' }),
-    ).rejects.toMatchObject({ status: 429 });
-  });
-
-  test('authorize admission budget survives rejected requests', async () => {
-    const f = fixture();
-    for (let i = 0; i < 30; i++)
+    for (let i = 0; i < 20; i++)
       await expect(f.authorize('unknown')).rejects.toMatchObject({ error: 'invalid_request' });
     await expect(f.authorize('unknown')).rejects.toMatchObject({ status: 429 });
     f.advance(60_000);
     await expect(f.authorize('unknown')).rejects.toMatchObject({ error: 'invalid_request' });
   });
 
-  test('unreadable storage and malformed access tokens fail closed without throwing', async () => {
+  test('unreadable storage fails closed on a cold start; malformed access tokens never throw', async () => {
     const f = fixture();
     const flow = await f.flow();
     f.breakStore();
-    expect(await f.authority.verify(flow.tokens.access_token)).toBeUndefined();
+    const cold = new ConnectorAuthority({ ...f.options, memory: new ConnectorMemory() });
+    expect(await cold.verify(flow.tokens.access_token)).toBeUndefined();
+    await expect(
+      cold.startAuthorization({ response_type: 'code', client_id: 'x', redirect_uri: redirectUri }),
+    ).rejects.toThrow();
     for (const token of ['', 'anything', 'fyc_at_short', `fyc_rt_${verifier}`])
       expect(await f.authority.verify(token)).toBeUndefined();
   });

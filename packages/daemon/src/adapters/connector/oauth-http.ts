@@ -138,20 +138,23 @@ export class ConnectorOAuthHttp implements ConnectorHttpHandler {
       return json(200, authorizationServerMetadata(this.endpoints));
     const html = get && (path === '/oauth/authorize' || path === '/oauth/authorize/wait');
     if (!html && !(post && ['/oauth/register', '/oauth/token', '/oauth/revoke'].includes(path))) return undefined;
+    // One bucket per arriving address (the listener sets it from CF-Connecting-IP); absent is a shared bucket.
+    const arrival = { source: request.clientAddress ?? 'unknown', admitted: true };
     try {
-      if (path === '/oauth/register') this.authority.admit('register');
-      if (path === '/oauth/authorize') this.authority.admit('authorize');
-      if (path === '/oauth/token' || path === '/oauth/revoke') this.authority.admit('token');
+      if (path === '/oauth/register') this.authority.admit('register', arrival.source);
+      if (path === '/oauth/authorize') this.authority.admit('authorize', arrival.source);
+      if (path === '/oauth/authorize/wait') this.authority.admit('wait', arrival.source);
+      if (path === '/oauth/token' || path === '/oauth/revoke') this.authority.admit('token', arrival.source);
       if (get && path === '/oauth/authorize') {
         const parsed = authorize.safeParse(oneValues(request.query));
         if (!parsed.success) throw new OAuthError('invalid_request', 'Missing or invalid authorization parameters.');
-        return redirect(await this.authority.startAuthorization(parsed.data, true));
+        return redirect(await this.authority.startAuthorization(parsed.data, arrival));
       }
       if (get && path === '/oauth/authorize/wait') {
         const query = oneValues(request.query);
         if (!query.h || !/^[A-Za-z0-9_-]{43}$/.test(query.h))
           throw new OAuthError('invalid_request', 'This sign-in is unknown or expired.');
-        const result = await this.authority.waitPage(query.h);
+        const result = await this.authority.waitPage(query.h, arrival);
         if (result.kind === 'redirect') return redirect(result.location);
         const pending = result.pending;
         const app = new URL('/', this.endpoints.appOrigin);
@@ -199,17 +202,17 @@ export class ConnectorOAuthHttp implements ConnectorHttpHandler {
         }
         const parsed = registration.safeParse(value);
         if (!parsed.success) throw new OAuthError('invalid_client_metadata', 'Invalid registration document.');
-        return json(201, await this.authority.register(parsed.data, true));
+        return json(201, await this.authority.register(parsed.data, arrival));
       }
       const auth = credentials(request, formValues(text));
       if (path === '/oauth/token') {
         const parsed = exchange.safeParse(auth.body);
         if (!parsed.success) throw new OAuthError('invalid_request', 'Missing or invalid token parameters.');
-        return json(200, await this.authority.exchange({ ...parsed.data, authMethod: auth.authMethod }, true));
+        return json(200, await this.authority.exchange({ ...parsed.data, authMethod: auth.authMethod }, arrival));
       }
       const parsed = revocation.safeParse(auth.body);
       if (!parsed.success) throw new OAuthError('invalid_request', 'Missing or invalid revocation parameters.');
-      await this.authority.revokeToken({ ...parsed.data, authMethod: auth.authMethod }, true);
+      await this.authority.revokeToken({ ...parsed.data, authMethod: auth.authMethod }, arrival);
       return json(200, {});
     } catch (error) {
       const failure =
@@ -218,8 +221,10 @@ export class ConnectorOAuthHttp implements ConnectorHttpHandler {
           : error instanceof BodyTooLargeError
             ? new OAuthError('invalid_request', 'Request body exceeds 8 KiB.', 413)
             : new OAuthError('server_error', 'The connector could not complete this request.', 503);
-      if (failure.status === 429)
-        return json(429, { error: failure.error, error_description: failure.description }, [
+      // RFC 6749 §4.1.2.1: a protocol error after client and redirect_uri are trusted goes back to the client.
+      if (failure.redirectTo !== undefined) return redirect(failure.redirectTo);
+      if (failure.status === 429 || failure.retryAfter !== undefined)
+        return json(failure.status, { error: failure.error, error_description: failure.description }, [
           ['retry-after', String(failure.retryAfter ?? 60)],
         ]);
       return html

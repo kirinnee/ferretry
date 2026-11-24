@@ -93,6 +93,8 @@ export interface ConnectorOwnerActs {
   revoke(grantId: string, revokedBy: string): Promise<ConnectorActResult<ConnectorGrantView>>;
 }
 
+export type ConnectorRevocationInitiator = 'owner' | 'client' | 'reuse-detected';
+
 /** The connector's security-log events (docs/audit.md). Names and ids only. */
 export type ConnectorAuditEvent =
   | { readonly kind: 'connector.client.registered'; readonly clientId: string; readonly clientName: string }
@@ -108,7 +110,17 @@ export type ConnectorAuditEvent =
       readonly clientName: string;
       readonly actor: string;
     }
-  | { readonly kind: 'connector.grant.revoked'; readonly grantId: string; readonly actor: string }
+  | {
+      readonly kind: 'connector.grant.revoked';
+      readonly grantId: string;
+      /** The route's actor for an owner act; for the other initiators, a label only (never trusted as a person). */
+      readonly actor: string;
+      /**
+       * WHO ended the grant: `owner` (an owner act — `actor` names them; the default when absent), `client` (the OAuth
+       * client's own RFC 7009 revocation) or `reuse-detected` (a replayed authorization code or rotated refresh token).
+       */
+      readonly initiator?: ConnectorRevocationInitiator;
+    }
   | { readonly kind: 'connector.refresh.reused'; readonly grantId: string }
   | { readonly kind: 'connector.tool'; readonly grantId: string; readonly tool: string; readonly sessionId?: string };
 
