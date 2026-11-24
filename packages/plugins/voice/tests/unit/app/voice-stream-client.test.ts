@@ -23,8 +23,12 @@ function rig() {
   let micOn: ((pcm: Int16Array) => void) | undefined;
   let micFails = false;
   let micStopped = 0;
+  let broken = false;
   const socket: PluginSocket = {
-    send: frame => void sent.push(frame),
+    send: frame => {
+      if (broken) throw new Error('the socket is gone');
+      sent.push(frame);
+    },
     close: (code, reason) =>
       void closes.push({ ...(code === undefined ? {} : { code }), ...(reason === undefined ? {} : { reason }) }),
   };
@@ -64,6 +68,9 @@ function rig() {
     events,
     handle,
     listeners: () => listeners,
+    breakSend: () => {
+      broken = true;
+    },
     failMic: () => {
       micFails = true;
     },
@@ -160,6 +167,16 @@ describe('the browser end of the voice stream', () => {
     r.listeners().onOpen?.();
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(r.events.micFailed).toBe(1);
+    expect(r.events.ended).toHaveLength(1);
+  });
+
+  test('Stop still closes when the socket was already gone', async () => {
+    const r = rig();
+    r.listeners().onOpen?.();
+    await Promise.resolve();
+    r.breakSend();
+    r.handle.stop();
+    expect(r.closes).toHaveLength(1);
     expect(r.events.ended).toHaveLength(1);
   });
 

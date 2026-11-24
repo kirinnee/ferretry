@@ -14,6 +14,7 @@ import {
 import { VoiceEngineError } from '../../../contract/index.ts';
 import { spansFromProbabilities, VAD_CHUNK } from '../../../daemon/lib/engine/spans.ts';
 import { StreamRegistry } from '../../../daemon/lib/stream/registry.ts';
+import { SampleBuffer } from '../../../daemon/lib/stream/samples.ts';
 import { VoiceStream, type StreamParts } from '../../../daemon/lib/stream/session.ts';
 
 /** A voice is any audio louder than this; the fake VAD runs the REAL span rules over per-chunk loudness. */
@@ -57,6 +58,7 @@ async function rig(
     engine?: Partial<StreamParts['engine']>;
     claimFerret?: StreamParts['claimFerret'];
     registry?: StreamRegistry;
+    buffered?: number;
   } = {},
 ): Promise<Rig> {
   const clock = fixedClock();
@@ -73,7 +75,7 @@ async function rig(
     close(code, reason) {
       closes.push({ code, reason });
     },
-    bufferedBytes: () => 0,
+    bufferedBytes: () => overrides.buffered ?? 0,
   };
   const registry = overrides.registry ?? new StreamRegistry();
   let ended = 0;
@@ -449,5 +451,78 @@ describe('the voice stream: malformed is fatal', () => {
     r.stream.fromClient(joined.slice(0, 700));
     r.stream.fromClient(joined.slice(700));
     expect(r.closes).toEqual([]);
+  });
+});
+
+describe('the voice stream: edges', () => {
+  test('a start record that is not JSON closes with a protocol error', async () => {
+    const r = await rig();
+    r.stream.fromClient('{nope');
+    expect(r.closes.at(-1)).toEqual(STREAM_CLOSES.protocol);
+  });
+
+  test('a unit may arrive as an ArrayBuffer as well as a view', async () => {
+    const r = await rig();
+    r.start(test_);
+    const unit = encodeUplinkUnit({ pcm: new Int16Array(UNIT_SAMPLES).fill(5), control: 'none', echo: undefined });
+    r.stream.fromClient(unit.buffer.slice(unit.byteOffset, unit.byteOffset + unit.byteLength) as ArrayBuffer);
+    expect(r.closes).toEqual([]);
+  });
+
+  test("a failure that is not the wire's (a defect) is not hidden as a protocol error", async () => {
+    const r = await rig({
+      claimFerret: () => {
+        throw new Error('the registry broke');
+      },
+    });
+    expect(() => r.start(chat)).toThrow('the registry broke');
+    expect(r.closes).toEqual([]);
+  });
+
+  test('an engine failure of an unknown kind ends the stream as engine_failed', async () => {
+    const r = await rig({
+      engine: {
+        transcribe: async () => {
+          throw new Error('the worker died');
+        },
+      },
+    });
+    r.start(test_);
+    await r.talk(1_500);
+    await r.talk(2_500, { loud: true });
+    await r.talk(3_000);
+    expect(r.snapshots().some(snapshot => snapshot.error?.code === 'engine_failed')).toBe(true);
+    expect(r.closes.at(-1)).toEqual(STREAM_CLOSES.failed);
+  });
+
+  test('a socket the browser stopped reading ends the stream instead of growing', async () => {
+    const r = await rig({ buffered: 1_000_000 });
+    r.start(test_);
+    await r.clock.advance(400);
+    expect(r.closes.at(-1)).toEqual(STREAM_CLOSES.overloaded);
+  });
+
+  test('three turns lost to a hung engine in a row end the stream as engine_overloaded', async () => {
+    const r = await rig({ engine: { transcribe: () => new Promise(() => undefined) } });
+    r.start(test_);
+    for (let turn = 0; turn < 3; turn += 1) {
+      await r.talk(1_500);
+      await r.talk(2_500, { loud: true });
+      await r.talk(7_000);
+    }
+    expect(r.snapshots().some(snapshot => snapshot.error?.code === 'engine_overloaded')).toBe(true);
+    expect(r.closes.at(-1)).toEqual(STREAM_CLOSES.overloaded);
+  });
+});
+
+describe('the sample buffer', () => {
+  test('holds more than its first ten seconds, hands back slices, and forgets from the front', () => {
+    const buffer = new SampleBuffer();
+    for (let second = 0; second < 12; second += 1) buffer.append(new Int16Array(16_000).fill(16_384));
+    expect(buffer.length).toBe(12 * 16_000);
+    expect(buffer.slice(0, 2)[0]).toBe(0.5);
+    expect(buffer.slice(5, 7)).toHaveLength(2);
+    expect(buffer.dropBefore(16_000)).toBe(16_000);
+    expect(buffer.length).toBe(11 * 16_000);
   });
 });

@@ -41,6 +41,11 @@ const SENTENCES: Readonly<Record<string, string>> = {
   phone_silent: 'The device stopped answering, so that message was not sent.',
   no_words: 'No words were heard.',
 };
+/** The close each refusal ends the stream with; any other refusal is a failure on the machine. */
+const CLOSE_FOR: Readonly<Record<string, { readonly code: number; readonly reason: string }>> = {
+  engine_overloaded: STREAM_CLOSES.overloaded,
+  voice_busy: STREAM_CLOSES.busy,
+};
 const sentenceOf = (code: string): string => SENTENCES[code] ?? 'Something went wrong on the machine.';
 
 /** What the stream needs from the rest of the daemon. Everything outside the audio is a port, so each is faked in tests. */
@@ -498,13 +503,7 @@ export class VoiceStream implements SocketHandler {
     if (this.ended) return;
     this.fatal = { code, message: sentenceOf(code) };
     this.emit();
-    this.endWith(
-      code === 'engine_overloaded'
-        ? STREAM_CLOSES.overloaded
-        : code === 'voice_busy'
-          ? STREAM_CLOSES.busy
-          : STREAM_CLOSES.failed,
-    );
+    this.endWith(CLOSE_FOR[code] ?? STREAM_CLOSES.failed);
   }
 
   private endWith(close: { readonly code: number; readonly reason: string }): void {

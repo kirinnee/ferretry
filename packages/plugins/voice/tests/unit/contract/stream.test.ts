@@ -73,6 +73,22 @@ describe('the voice stream units', () => {
     expect(() => decodeDownlinkUnit(bytes)).toThrow(StreamProtocolError);
   });
 
+  test('a snapshot too big for its unit is refused, and a unit whose bytes are not JSON is malformed', () => {
+    expect(() =>
+      encodeDownlinkUnit({
+        v: 1,
+        state: 'hearing',
+        nonce: '0123456789abcdef',
+        turn: 1,
+        words: { turn: 1, rev: 0, offset: 0, total: 2_000, text: 'x'.repeat(2_000), final: false },
+      }),
+    ).toThrow(StreamProtocolError);
+    const bytes = new Uint8Array(DOWNLINK_UNIT_BYTES);
+    new DataView(bytes.buffer).setUint16(0, 5);
+    bytes.set(new TextEncoder().encode('{nope'), 2);
+    expect(() => decodeDownlinkUnit(bytes)).toThrow(StreamProtocolError);
+  });
+
   test('the assembler cuts fixed units out of any chunking and holds a partial one', () => {
     const assembler = new UnitAssembler(4);
     expect(assembler.push(Uint8Array.of(1, 2, 3))).toEqual([]);
