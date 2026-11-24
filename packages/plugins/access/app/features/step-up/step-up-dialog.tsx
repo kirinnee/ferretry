@@ -296,7 +296,7 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
             </Button>
           }
           secondary={
-            <Button type="button" variant="ghost" disabled={prompt.busy} onClick={dismiss}>
+            <Button type="button" disabled={prompt.busy} onClick={dismiss}>
               Cancel
             </Button>
           }
