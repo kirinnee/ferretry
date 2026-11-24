@@ -32,6 +32,7 @@ export const LAUNCH_SWITCH_VARIABLES = [
   SESSION_MODE_ENV,
   SUB_FERRET_ENV,
   ...SECTIONS.map(section => section.env),
+  'FY_BROWSER_STEALTH',
 ] as const;
 
 /** One per-ferret section, in the order the wrapper appends them. */

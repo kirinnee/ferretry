@@ -87,10 +87,11 @@ describe('browsers manifest', () => {
       expect(loosens(undefined, { mode: 'headless' })).toEqual([]);
     });
   });
-  test('takes the page input target and the %browser reference menu', () => {
-    expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual([
+  test('takes the page input target, the %browser reference menu and the launch parts hook', () => {
+    expect(manifest.hooks.takes.map(take => `${take.hook.name}:${'key' in take ? take.key : ''}`)).toEqual([
       'input.targets:page',
       'reference.catalog:%browser',
+      'launch.parts:',
     ]);
   });
 });
