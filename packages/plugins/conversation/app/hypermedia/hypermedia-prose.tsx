@@ -12,6 +12,7 @@ import { useDurianReading } from './use-durian-reading.ts';
 import { hypermediaUrlPolicy } from './url-policy.ts';
 import { withIdPrefix } from './with-id-prefix.ts';
 import { REFERENCE_INLINE } from './with-references.ts';
+import { VoicePieces } from './voice-pieces.tsx';
 
 /**
  * AN ASSISTANT MESSAGE, READ AS DURIAN HYPERMEDIA: Markdown plus fenced parts (` ```terminal `, tabs, charts…), with
@@ -72,7 +73,7 @@ export interface HypermediaProseProps {
   readonly arriving?: boolean;
 }
 
-export const HypermediaProse = memo(function HypermediaProse({
+const HypermediaDocument = memo(function HypermediaDocument({
   text,
   className,
   arriving = false,
@@ -119,4 +120,12 @@ export const HypermediaProse = memo(function HypermediaProse({
       </div>
     </ReferenceProofProvider>
   );
+});
+
+/**
+ * A MESSAGE, WITH ITS SPOKEN LINES DRAWN AS SPEAKER LINES (`voice-pieces.tsx`): one document, as above, unless the message
+ * holds a `<voice>` line.
+ */
+export const HypermediaProse = memo(function HypermediaProse(props: HypermediaProseProps) {
+  return <VoicePieces {...props} Document={HypermediaDocument} />;
 });

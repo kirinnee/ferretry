@@ -47,6 +47,7 @@
 import remarkGfm from 'remark-gfm';
 import remarkParse from 'remark-parse';
 import { unified } from 'unified';
+import { spokenLines } from '@ferretry/plugin-conversation/contract';
 import { FY_RENDER_FENCE_LANGUAGE, parseFyRender } from '../../shell-voice.ts';
 import { findReferences, parseReferenceToken, type Reference } from '../../shell-voice.ts';
 
@@ -749,19 +750,32 @@ export function speakableSegments(markdown: string, options: SpeakableOptions = 
     const limit = options.maxCharacters ?? READING_CHARACTERS_PER_MINUTE;
     const cap = Number.isFinite(limit) && limit >= 1 ? Math.floor(limit) : READING_CHARACTERS_PER_MINUTE;
     const scanned = scanWindow(source);
+    // A reply that marks words as spoken (`<voice>…</voice>`, Conversation's grammar) says ONLY those words.
+    const lines = spokenLines(scanned);
     let tamed = tame(scanned);
-    let root = parse(tamed);
-    // A window that ends before the reply does can end inside a code span: stop before it, never read it raw.
-    const open = scanned.length < source.length ? openCodeSpan(root, tamed) : -1;
-    if (open !== -1) {
-      tamed = tamed.slice(0, open);
-      root = parse(tamed);
+    let all: SpeakableSegment[];
+    if (lines.length > 0) {
+      all = lines.flatMap(line => {
+        const words = tame(line.text);
+        return segmentsOf(blocksOf(parse(words))).map(segment => ({
+          ...segment,
+          sourceRange: { start: line.contentStart, end: line.end },
+        }));
+      });
+    } else {
+      let root = parse(tamed);
+      // A window that ends before the reply does can end inside a code span: stop before it, never read it raw.
+      const open = scanned.length < source.length ? openCodeSpan(root, tamed) : -1;
+      if (open !== -1) {
+        tamed = tamed.slice(0, open);
+        root = parse(tamed);
+      }
+      all = segmentsOf(blocksOf(root));
     }
-    const all = segmentsOf(blocksOf(root));
 
     const out: SpeakableSegment[] = [];
     let used = 0;
-    let truncated = tamed.length < source.length;
+    let truncated = lines.length > 0 ? scanned.length < source.length : tamed.length < source.length;
     for (const segment of all) {
       if (out.length > 0 && used + segment.text.length + 1 > cap) {
         truncated = true;

@@ -27,4 +27,5 @@ export * from './fy-render-caps.ts';
 export * from './fy-render.ts';
 export * from './reference-catalog.ts';
 export * from './slots.ts';
+export * from './voice-tag.ts';
 export * from './app-hooks.ts';
