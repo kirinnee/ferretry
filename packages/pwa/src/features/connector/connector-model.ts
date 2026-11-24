@@ -12,7 +12,7 @@ import type { ConnectorGrant, ConnectorPending, ConnectorScope } from './connect
 export const CONNECTOR_POLL_MS = 2000;
 
 /** The query word of the deep link the daemon's waiting page opens: `/?connector=<daemonId>`. */
-export const CONNECTOR_LINK_PARAM = 'connector';
+const CONNECTOR_LINK_PARAM = 'connector';
 
 /** The panel id on the machine's Machine tab. */
 export const CONNECTOR_PANEL = 'connector';
@@ -23,7 +23,7 @@ export const NOT_ENABLED_NOTE =
   'The connector is off. It can only be turned on at the machine, in its config/daemon.json — a phone cannot do it. See docs/mcp-connector.md.';
 
 /** What a scope lets the app do, in the words a person decides by. */
-export const SCOPE_WORDS: Readonly<Record<ConnectorScope, string>> = {
+const SCOPE_WORDS: Readonly<Record<ConnectorScope, string>> = {
   'fleet:read': 'read your fleet',
   'fleet:write': 'control your ferrets',
 };

@@ -26,15 +26,20 @@ export class SecurityLogConnectorAudit implements ConnectorAuditSink {
 const ANONYMOUS: AuditActor = { kind: 'anonymous' };
 const CONNECTOR: AuditActor = { kind: 'connector' };
 /** Untrusted text, one line, within the log's 160-character field. */
-const name = (text: string): string => text.replace(/[\p{Cc}\p{Cf}]/gu, ' ').trim().slice(0, 100) || 'unnamed';
+const name = (text: string): string =>
+  text
+    .replace(/[\p{Cc}\p{Cf}]/gu, ' ')
+    .trim()
+    .slice(0, 100) || 'unnamed';
 
 function personOf(actor: string): AuditActor {
   const parsed = parseActor(actor);
-  if (parsed.kind === 'device' && parsed.id !== undefined && parsed.id !== '') return { kind: 'device', deviceId: parsed.id };
+  if (parsed.kind === 'device' && parsed.id !== undefined && parsed.id !== '')
+    return { kind: 'device', deviceId: parsed.id };
   return { kind: 'host' };
 }
 
-export function entryOf(event: ConnectorAuditEvent): AuditEntry {
+function entryOf(event: ConnectorAuditEvent): AuditEntry {
   switch (event.kind) {
     case 'connector.client.registered':
       return {

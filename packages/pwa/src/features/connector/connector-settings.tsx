@@ -275,7 +275,7 @@ function AddressRow({ mcpUrl }: { readonly mcpUrl: string }) {
 }
 
 /** The panel's content for a loaded view. Pure over its props so every state is one render. */
-export function ConnectorCard({
+function ConnectorCard({
   view,
   now,
   busyId,

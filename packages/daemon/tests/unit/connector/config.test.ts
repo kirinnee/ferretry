@@ -56,8 +56,11 @@ describe('connectorSettings', () => {
   it('refuses an unknown key or an http redirect off loopback rather than guessing', () => {
     should(connectorSettings({ enabled: true, publicUrl: 'https://a.example', extra: 1 }).kind).equal('disabled');
     should(
-      connectorSettings({ enabled: true, publicUrl: 'https://a.example', extraRedirectUris: ['http://evil.example/cb'] })
-        .kind,
+      connectorSettings({
+        enabled: true,
+        publicUrl: 'https://a.example',
+        extraRedirectUris: ['http://evil.example/cb'],
+      }).kind,
     ).equal('disabled');
   });
 });

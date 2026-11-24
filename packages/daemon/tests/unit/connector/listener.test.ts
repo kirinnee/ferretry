@@ -81,8 +81,8 @@ describe('the connector actor', () => {
       'peer:s1',
     );
     // A session header still names the ferret: the connector client cannot hide an agent.
-    should(
-      resolveApiActor({ tokenClass: 'admin', sessionId: 's1', client: 'connector:cg_abcdefghij' }),
-    ).equal('peer:s1');
+    should(resolveApiActor({ tokenClass: 'admin', sessionId: 's1', client: 'connector:cg_abcdefghij' })).equal(
+      'peer:s1',
+    );
   });
 });

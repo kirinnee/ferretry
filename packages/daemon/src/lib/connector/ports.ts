@@ -74,7 +74,9 @@ export type ConnectorActRefusal =
   | { readonly code: 'expired'; readonly message: string }
   | { readonly code: 'already_decided'; readonly message: string };
 
-export type ConnectorActResult<T> = { readonly ok: true; readonly value: T } | ({ readonly ok: false } & ConnectorActRefusal);
+export type ConnectorActResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | ({ readonly ok: false } & ConnectorActRefusal);
 
 /**
  * The owner's half of the authorization server — what the `/v1/connector/*` routes and `fy connector` call.
@@ -94,8 +96,18 @@ export interface ConnectorOwnerActs {
 /** The connector's security-log events (docs/audit.md). Names and ids only. */
 export type ConnectorAuditEvent =
   | { readonly kind: 'connector.client.registered'; readonly clientId: string; readonly clientName: string }
-  | { readonly kind: 'connector.grant.approved'; readonly grantId: string; readonly clientName: string; readonly actor: string }
-  | { readonly kind: 'connector.grant.denied'; readonly requestId: string; readonly clientName: string; readonly actor: string }
+  | {
+      readonly kind: 'connector.grant.approved';
+      readonly grantId: string;
+      readonly clientName: string;
+      readonly actor: string;
+    }
+  | {
+      readonly kind: 'connector.grant.denied';
+      readonly requestId: string;
+      readonly clientName: string;
+      readonly actor: string;
+    }
   | { readonly kind: 'connector.grant.revoked'; readonly grantId: string; readonly actor: string }
   | { readonly kind: 'connector.refresh.reused'; readonly grantId: string }
   | { readonly kind: 'connector.tool'; readonly grantId: string; readonly tool: string; readonly sessionId?: string };

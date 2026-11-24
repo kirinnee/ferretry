@@ -53,7 +53,8 @@ function urlProblem(text: string, what: string, origin: boolean): string | undef
 }
 
 export function connectorSettings(block: unknown): ConnectorSettings {
-  if (block === undefined) return { kind: 'disabled', reason: 'The connector is off: config/daemon.json has no "connector" block.' };
+  if (block === undefined)
+    return { kind: 'disabled', reason: 'The connector is off: config/daemon.json has no "connector" block.' };
   const parsed = ConnectorBlockSchema.safeParse(block);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
@@ -64,9 +65,13 @@ export function connectorSettings(block: unknown): ConnectorSettings {
     };
   }
   const value = parsed.data;
-  if (!value.enabled) return { kind: 'disabled', reason: 'The connector is off: config/daemon.json "connector.enabled" is not true.' };
+  if (!value.enabled)
+    return { kind: 'disabled', reason: 'The connector is off: config/daemon.json "connector.enabled" is not true.' };
   if (value.publicUrl === undefined)
-    return { kind: 'disabled', reason: 'The connector is off: set config/daemon.json "connector.publicUrl" to the public https:// address.' };
+    return {
+      kind: 'disabled',
+      reason: 'The connector is off: set config/daemon.json "connector.publicUrl" to the public https:// address.',
+    };
   const publicProblem = urlProblem(value.publicUrl, '"connector.publicUrl"', true);
   if (publicProblem !== undefined) return { kind: 'disabled', reason: `The connector is off: ${publicProblem}.` };
   for (const extra of value.extraRedirectUris) {

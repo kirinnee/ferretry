@@ -45,7 +45,7 @@ export interface ConnectorNeeds {
   readonly redactor: TextRedactor;
 }
 
-export interface ConnectorListenNeeds {
+interface ConnectorListenNeeds {
   readonly api: ApiServerPort;
   readonly dispatch: (request: ApiRequest) => Promise<ApiResponse>;
   readonly adminToken: () => string;
@@ -69,7 +69,7 @@ const OFF_ACTS: ConnectorSubsystem['acts'] = {
   revoke: async () => ({ ok: false, code: 'not_found', message: 'The connector is off.' }),
 };
 
-export function connectorEndpoints(publicUrl: string, appOrigin: string, daemonId: string): ConnectorEndpoints {
+function connectorEndpoints(publicUrl: string, appOrigin: string, daemonId: string): ConnectorEndpoints {
   return {
     issuer: publicUrl,
     resource: `${publicUrl}/mcp`,

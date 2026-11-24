@@ -21,12 +21,12 @@ import { z } from 'zod';
 
 export type ConnectorClient = Pick<IFyApiClient, 'request'>;
 
-export const CONNECTOR_PATH = '/v1/connector';
+const CONNECTOR_PATH = '/v1/connector';
 
 const ScopeSchema = z.enum(['fleet:read', 'fleet:write']);
 export type ConnectorScope = z.infer<typeof ScopeSchema>;
 
-export const ConnectorPendingSchema = z.object({
+const ConnectorPendingSchema = z.object({
   id: z.string(),
   matchCode: z.string(),
   clientName: z.string(),
@@ -37,7 +37,7 @@ export const ConnectorPendingSchema = z.object({
 });
 export type ConnectorPending = z.infer<typeof ConnectorPendingSchema>;
 
-export const ConnectorGrantSchema = z.object({
+const ConnectorGrantSchema = z.object({
   id: z.string(),
   clientName: z.string(),
   redirectHost: z.string(),
@@ -49,7 +49,7 @@ export const ConnectorGrantSchema = z.object({
 });
 export type ConnectorGrant = z.infer<typeof ConnectorGrantSchema>;
 
-export const ConnectorViewSchema = z.object({
+const ConnectorViewSchema = z.object({
   enabled: z.boolean(),
   publicUrl: z.string().optional(),
   mcpUrl: z.string().optional(),

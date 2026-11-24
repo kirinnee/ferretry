@@ -23,7 +23,7 @@ passkeys on the tunnel hostname would be a second, weaker login nobody asked for
 1. Claude opens `<publicUrl>/oauth/authorize?...` (in a browser, a popup, or an in-app browser on a phone).
 2. The daemon validates the request and shows a **waiting page**: the client's name, the scopes, a short
    **match code** (`K7Q-2MF`) and an **Open Ferretry** link. The page refreshes itself every 2 s (`<meta
-   http-equiv="refresh">`, no script).
+http-equiv="refresh">`, no script).
 3. The owner opens Ferretry on any paired device (the link deep-links to the Connectors panel), sees the same
    client, scopes and match code, and taps **Approve** — a passkey step-up for the `approve-connector` act.
 4. The waiting page's next refresh redirects to Claude's callback with a one-time code.
@@ -49,17 +49,17 @@ ungoverned — docs/grants.md). That is also how the automated end-to-end test a
   nothing for being local. The only credential `/mcp` accepts is a connector access token.
 - It serves exactly these paths and answers `404` to everything else (no `405` that maps the surface):
 
-| method | path                                                                                   | what                                      |
-| ------ | -------------------------------------------------------------------------------------- | ----------------------------------------- |
-| GET    | `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-protected-resource` | RFC 9728 protected resource metadata      |
-| GET    | `/.well-known/oauth-authorization-server`                                              | RFC 8414 authorization server metadata    |
-| POST   | `/oauth/register`                                                                      | RFC 7591 dynamic client registration      |
-| GET    | `/oauth/authorize`                                                                     | starts a sign-in, 302 to the waiting page |
-| GET    | `/oauth/authorize/wait?h=<handle>`                                                     | the waiting page / the final redirect     |
-| POST   | `/oauth/token`                                                                         | `authorization_code`, `refresh_token`     |
-| POST   | `/oauth/revoke`                                                                        | RFC 7009                                  |
-| POST   | `/mcp`                                                                                 | MCP Streamable HTTP, stateless, JSON      |
-| GET/DELETE | `/mcp`                                                                             | `405` (no server-initiated stream, no sessions) |
+| method     | path                                                                                    | what                                            |
+| ---------- | --------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| GET        | `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-protected-resource` | RFC 9728 protected resource metadata            |
+| GET        | `/.well-known/oauth-authorization-server`                                               | RFC 8414 authorization server metadata          |
+| POST       | `/oauth/register`                                                                       | RFC 7591 dynamic client registration            |
+| GET        | `/oauth/authorize`                                                                      | starts a sign-in, 302 to the waiting page       |
+| GET        | `/oauth/authorize/wait?h=<handle>`                                                      | the waiting page / the final redirect           |
+| POST       | `/oauth/token`                                                                          | `authorization_code`, `refresh_token`           |
+| POST       | `/oauth/revoke`                                                                         | RFC 7009                                        |
+| POST       | `/mcp`                                                                                  | MCP Streamable HTTP, stateless, JSON            |
+| GET/DELETE | `/mcp`                                                                                  | `405` (no server-initiated stream, no sessions) |
 
 ## Configuration
 
@@ -151,20 +151,20 @@ authorization server metadata names the endpoints above, `code_challenge_methods
 - Every tool that takes a ferret takes `ferret`: its call sign, its session id or short id, or its task name —
   case-insensitive, ignoring spaces, hyphens and a leading `:`. Nothing matching is a tool error that lists
   up to three close matches (names come from speech recognition), e.g. `No ferret called "lizet". Did you
-  mean lizzette (Build MCP Connector)?` More than one match lists them and asks which.
+mean lizzette (Build MCP Connector)?` More than one match lists them and asks which.
 - Results are SHORT PLAIN TEXT, because they are often read aloud. No JSON blobs.
 
-| tool                | scope | annotations              | does                                                                 |
-| ------------------- | ----- | ------------------------ | -------------------------------------------------------------------- |
-| `list_ferrets`      | read  | readOnly                 | live ferrets: call sign, task name, state, last activity             |
-| `get_ferret`        | read  | readOnly                 | one ferret: state, current task, recent-activity summary, last error |
-| `get_ferret_output` | read  | readOnly                 | tail of recent output; `lines` default 40, hard cap 200 lines / 8 000 chars |
-| `list_attention`    | read  | readOnly                 | open agenda items (`!A12`): who asks, title, question                |
-| `send_to_ferret`    | write | not readOnly             | send a message to a ferret, exactly as the app's composer does       |
-| `answer_attention`  | write | not readOnly             | answer one open agenda item                                          |
-| `restart_ferret`    | write | destructive              | restart a ferret, as the app's Restart does                          |
-| `stop_ferret`       | write | destructive              | stop a ferret, as `fy stop` does                                     |
-| `spawn_ferret`      | write | not readOnly             | start a new ferret with a task description, as `fy new` does         |
+| tool                | scope | annotations  | does                                                                        |
+| ------------------- | ----- | ------------ | --------------------------------------------------------------------------- |
+| `list_ferrets`      | read  | readOnly     | live ferrets: call sign, task name, state, last activity                    |
+| `get_ferret`        | read  | readOnly     | one ferret: state, current task, recent-activity summary, last error        |
+| `get_ferret_output` | read  | readOnly     | tail of recent output; `lines` default 40, hard cap 200 lines / 8 000 chars |
+| `list_attention`    | read  | readOnly     | open agenda items (`!A12`): who asks, title, question                       |
+| `send_to_ferret`    | write | not readOnly | send a message to a ferret, exactly as the app's composer does              |
+| `answer_attention`  | write | not readOnly | answer one open agenda item                                                 |
+| `restart_ferret`    | write | destructive  | restart a ferret, as the app's Restart does                                 |
+| `stop_ferret`       | write | destructive  | stop a ferret, as `fy stop` does                                            |
+| `spawn_ferret`      | write | not readOnly | start a new ferret with a task description, as `fy new` does                |
 
 ## What a tool may do, and how
 
@@ -224,7 +224,7 @@ connector listener. `fy.example.com` below stands for the hostname you choose.
 4. In Claude: Settings › Connectors › Add custom connector, URL `https://fy.example.com/mcp`, then Connect. A
    Ferretry page opens with a match code. Open Ferretry on any paired device (the page links to it), check the code
    matches, and tap Approve (passkey). The Claude page continues by itself. At the machine, `fy connector approve
-   <code>` does the same.
+<code>` does the same.
 
 5. Revoke any time: the app's Connectors panel, or `fy connector revoke <grant>`. To turn it off, set `enabled` to
    `false` (or stop the tunnel) and restart the daemon.
