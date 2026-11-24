@@ -257,6 +257,21 @@ export interface SecuritySettingsBlockProps {
   readonly createClient: SecuritySettingsClientFactory;
 }
 
+/**
+ * Tells the stylesheet how tall the Limits Save bar is (`--fy-acc-savebar-height`), so the rows keep exactly that much room at
+ * their foot and the last of them ends clear of the bar. The bar wraps on a phone, so the height is read, not assumed.
+ */
+function keepClearOfSaveBar(block: HTMLElement | null): (() => void) | undefined {
+  const bar = block?.querySelector<HTMLElement>('[data-setting-savebar]');
+  if (block === null || bar === null || bar === undefined || typeof ResizeObserver === 'undefined') return undefined;
+  const measure = (): void =>
+    block.style.setProperty('--fy-acc-savebar-height', `${bar.getBoundingClientRect().height}px`);
+  measure();
+  const watch = new ResizeObserver(measure);
+  watch.observe(bar);
+  return () => watch.disconnect();
+}
+
 /** The live block for one machine. Reads once, never polls, and sends only the field that changed. */
 export function SecuritySettingsBlock({ connection, createClient }: SecuritySettingsBlockProps) {
   const [loaded, setLoaded] = useState<Loaded>({ kind: 'loading' });
@@ -369,7 +384,7 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
 
   return (
     <AccessTab name="security-settings">
-      <div data-security-settings="">
+      <div data-security-settings="" ref={keepClearOfSaveBar}>
         <SettingGroup label="Prompts" saves="now">
           {view.source === 'damaged' ? (
             <li className="min-w-0">
