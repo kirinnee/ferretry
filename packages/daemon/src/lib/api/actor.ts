@@ -23,6 +23,13 @@ export type ApiActor = string;
 export const WARDEN_ACTOR_PREFIX = 'warden:';
 export const PEER_ACTOR_PREFIX = 'peer:';
 export const DEVICE_ACTOR_PREFIX = 'device:';
+export const CONNECTOR_ACTOR_PREFIX = 'connector:';
+
+/**
+ * The shape of a connector grant id (`cg_` + 10 lowercase base32 characters, docs/mcp-connector.md). The ONLY
+ * client self-identification that becomes a connector actor; anything else in the header stays `admin-ui`.
+ */
+const CONNECTOR_CLIENT = /^connector:cg_[a-z2-7]{10}$/u;
 
 /** A warden's action, tagged with the warden's OWN session id. */
 export function wardenActor(sessionId: string): `warden:${string}` {
@@ -37,6 +44,15 @@ export function peerActor(sessionId: string): `peer:${string}` {
 /** A paired browser acting under its own revocable credential. */
 export function deviceActor(deviceId: string): `device:${string}` {
   return `${DEVICE_ACTOR_PREFIX}${deviceId}`;
+}
+
+/**
+ * A remote MCP connector grant acting for the owner (docs/mcp-connector.md). Only the daemon's own in-process
+ * connector dispatch sends it, under the host admin token — so, like `admin-cli`, it is attribution for an
+ * honest client, not a credential: whoever holds the admin token is already the owner at the machine.
+ */
+export function connectorActor(grantId: string): `connector:${string}` {
+  return `${CONNECTOR_ACTOR_PREFIX}${grantId}`;
 }
 
 /** Which credential authenticated the request. `session` is a ferret's own session credential. */
@@ -72,7 +88,9 @@ export function resolveApiActor(input: ApiActorInput): ApiActor {
   if (input.tokenClass === 'warden')
     return sessionId === undefined || sessionId === '' ? 'warden' : wardenActor(sessionId);
   if (sessionId !== undefined && sessionId !== '') return peerActor(sessionId);
-  return input.client?.trim() === 'cli' ? 'admin-cli' : 'admin-ui';
+  const client = input.client?.trim();
+  if (client !== undefined && CONNECTOR_CLIENT.test(client)) return client;
+  return client === 'cli' ? 'admin-cli' : 'admin-ui';
 }
 
 export interface ParsedActor {
@@ -101,5 +119,5 @@ export function parseActor(source: string): ParsedActor {
  */
 export function isHumanAdminActor(actor: ApiActor | undefined): boolean {
   const { kind } = parseActor(actor ?? '');
-  return kind === 'admin-ui' || kind === 'admin-cli';
+  return kind === 'admin-ui' || kind === 'admin-cli' || kind === 'connector';
 }

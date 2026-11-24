@@ -499,6 +499,14 @@ export const DaemonConfigDocumentSchema = z
      * which is exactly the journey a verifier must not make.
      */
     grants: CapabilityGrantsDocumentSchema,
+    /**
+     * The remote MCP connector (docs/mcp-connector.md): OFF unless this block says `enabled: true`.
+     *
+     * Read as `unknown` HERE and parsed by `connectorSettings` (lib/connector/config.ts) on purpose: a mistake in
+     * this block switches the connector off with a sentence saying why, and never refuses the daemon's boot — the
+     * one thing a connector typo must not do is take the whole machine off the network.
+     */
+    connector: z.unknown().optional(),
   })
   .strict();
 

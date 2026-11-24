@@ -85,7 +85,9 @@ export const boardCaller = (actor: ApiActor | undefined): BoardCaller => {
     return { kind: 'ferret', sessionId: parsed.id };
   // The host's admin token with no ferret's credential: the owner at the machine OR a ferret that left its
   // session out, and the daemon cannot tell which. It keeps the owner's authority and is RECORDED as the token.
-  if (parsed.kind === 'admin-cli' || parsed.kind === 'admin-ui') return { kind: 'owner', via: 'admin-token' };
+  // A remote MCP connector grant acts for the owner through the admin token in-process (docs/mcp-connector.md).
+  if (parsed.kind === 'admin-cli' || parsed.kind === 'admin-ui' || parsed.kind === 'connector')
+    return { kind: 'owner', via: 'admin-token' };
   if (parsed.kind === 'device' && parsed.id !== undefined && parsed.id !== '') return { kind: 'owner' };
   throw new ApiError(403, 'only a ferret in its own pane or the owner may write to the board', 'forbidden');
 };
