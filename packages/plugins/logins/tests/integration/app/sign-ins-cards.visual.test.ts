@@ -55,7 +55,7 @@ afterAll(async () => {
 });
 
 const VIEWPORTS = [
-  { name: '1280', width: 1_280, height: 900, phone: false },
+  { name: '1440', width: 1_440, height: 900, phone: false },
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 const THEMES = ['studio-light', 'studio-dark'] as const;
@@ -158,6 +158,53 @@ describe('the Logins list: each card has its switch and its Remove', () => {
           await tab.waitForTimeout(200);
           expect(await tab.locator('[data-login-remove]').textContent()).toContain('saved sign-in stays');
           if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-remove.png`) });
+        } finally {
+          await context.close();
+        }
+      });
+    }
+  }
+});
+
+describe('the Logins list names every login in words, never by its stored id (Q8a)', () => {
+  for (const viewport of VIEWPORTS) {
+    for (const theme of THEMES) {
+      it(`shows plain names and keeps ids off the cards (${viewport.name}, ${theme})`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          deviceScaleFactor: viewport.phone ? 2 : 1,
+          hasTouch: viewport.phone,
+          isMobile: viewport.phone,
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const tab = await context.newPage();
+        try {
+          await tab.goto(`${origin}/?theme=${theme}&names=1`);
+          await tab.locator('[data-login-card-wrap]').first().waitFor({ state: 'visible' });
+          await tab.waitForTimeout(200);
+          const cards = await tab.locator('[data-login-card-wrap]').allInnerTexts();
+          expect(cards).toHaveLength(3);
+          expect(cards[0]).toContain('Claude · Anthropic API key (qa-fake-key)');
+          expect(cards[1]).toContain('Claude · your terminal sign-in (qaclaude)');
+          expect(cards[2]).toContain('Codex · your terminal sign-in');
+          // No card says a stored id, and a label is part of the name, not a separate tag.
+          for (const card of cards)
+            for (const slug of ['claude-qa-fake-key', 'claude-code-login', 'codex-login'])
+              expect(card).not.toContain(slug);
+          expect(await tab.locator('[data-login-label-badge]').count()).toBe(0);
+          expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-names-list.png`) });
+          await tab.locator('[data-login-row="claude-qa-fake-key"]').click();
+          await tab.locator('[data-login-page]').waitFor({ state: 'visible' });
+          await tab.waitForTimeout(200);
+          expect(await tab.locator('[data-login-page-name]').textContent()).toBe('Claude · Anthropic API key (qa-fake-key)');
+          expect(await tab.locator('[data-login-id]').textContent()).toBe('id claude-qa-fake-key');
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-names-page.png`) });
         } finally {
           await context.close();
         }
