@@ -25,11 +25,15 @@
   background: var(--faint);
   border-radius: 50%;
   flex: none;
-  height: 10px;
-  width: 10px;
+  height: 12px;
+  width: 12px;
+}
+.fy-voice-mode[data-state='listening'] .fy-voice-mode__dot {
+  background: var(--ok);
 }
 .fy-voice-mode[data-state='hearing'] .fy-voice-mode__dot {
-  background: var(--accent);
+  background: var(--accent-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .fy-voice-mode[data-state='working'] .fy-voice-mode__dot,
 .fy-voice-mode[data-state='loading'] .fy-voice-mode__dot {
@@ -71,6 +75,7 @@
   display: inline-flex;
   flex: 1 1 8rem;
   gap: 6px;
+  max-width: 16rem;
   justify-content: center;
 }
 :root .fy-voice-mode__actions > button {
@@ -81,8 +86,20 @@
     min-height: max(var(--target-floor, 0px), 48px);
   }
 }
+.fy-voice-mode-notice > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fy-voice-mode-notice > button {
+  flex: none;
+  padding-inline: 14px;
+  white-space: nowrap;
+}
+:root .fy-voice-mode-notice > button {
+  min-height: max(var(--target-floor, 0px), 44px);
+}
 .fy-voice-mode-notice {
-  align-items: flex-start;
+  align-items: center;
   background: var(--warn-bg);
   border-radius: var(--radius-control);
   color: var(--warn);
@@ -90,6 +107,6 @@
   font-size: var(--text-sm, 0.875rem);
   gap: var(--gap-sm);
   justify-content: space-between;
-  margin: 0;
+  margin: 0 0 var(--gap-sm);
   padding: var(--gap-sm) var(--gap-md);
 }

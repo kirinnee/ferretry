@@ -116,6 +116,8 @@ describe('the Voice app half', () => {
       'dictation',
       'read-aloud',
       'auto-read',
+      'voice-mode-button',
+      'voice-mode',
       'speedup-key',
       'onboarding-speedups',
       'onboarding-voice',

@@ -485,6 +485,19 @@ under an agenda item's reply box). Voice's own code is `app/components/voice-mod
   composer back. A refusal (the machine's own sentence, or one for its close code), a lost machine, a refused microphone, or a
   browser that cannot open a stream also give the composer back and leave one sentence above it until dismissed. Leaving the
   chat, or a question taking the composer's place, ends it; it never restarts by itself on return.
+- **Measured here (2026-11-24, real Chrome, real engine).** Chrome's fake microphone plays `clip-5s.wav` ("Please fix the
+  login redirect and run the tests again", with 1 s of silence before it) into the shipped `browserMic`; the panel's stream
+  runs over a WebSocket to the daemon's real `VoiceStream` and the real Parakeet + Silero (`tests/realworld/voice-mode.realworld.test.ts`,
+  `FY_VOICE_MODE_REAL=1`). The panel showed interim words while the clip played and firm words at the end; the machine sent
+  **one** message, `(voice) Please fix the login redirect, and run the tests again.`, id `<stream>:1`, and nothing more over
+  3 s of trailing silence and End. **From the last word to the send: 3.1–3.2 s** in four runs (the 1.5 s pause, then the
+  final decode, then the nonce echo). The ferret was a recorder, not a live one: a real ferret needs a harness login and spends a
+  turn, and the send is the same function the daemon hands the stream.
+  **A finding about the stream, not the panel:** on a busy box (load average 7–10) **6 of 12 runs lost the turn** with
+  `engine_behind` and the sentence "This machine is too busy to keep up": an interim decode that takes over 2 s trips the
+  stream's "more than 2 s of unseen audio" rule, so the panel says "The machine could not turn that into words. Try again." and
+  sends nothing (it never sends a lost turn). The panel is honest about it; whether the rule should wait for the decode is the
+  stream's to decide (unit 4's latency follow-up).
 - **Declared gaps.** No barge-in (unit 7) and no machine reply voice (unit 6): the device voice reads, the microphone is muted
   meanwhile. No phone-fallback engine (unit 8): a machine that cannot be reached means voice mode ends, not a different engine.
   A keyboard shortcut and a palette entry for it are not built.

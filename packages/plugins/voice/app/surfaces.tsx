@@ -259,7 +259,7 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
 
   /**
    * Voice mode's panel in front of the composer (`conversation.composer`): the composer as it was while voice mode is off, hidden
-   * (never dropped) while it is on. It needs the chat's own composer to stand in front of, so it draws nothing without one.
+   * (never dropped) while it is on. Without a ferret to speak of it hands the composer back as it is.
    */
   const VoiceModePanel = ({
     subject,
