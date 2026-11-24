@@ -497,3 +497,34 @@ describe('audit row: the Codex timeout alert wraps cleanly', () => {
         }
       });
 });
+
+describe('q8b S-25: the how-to picture is on screen at full strength nearly all the time it plays', () => {
+  for (const viewport of VIEWPORTS)
+    for (const theme of THEMES)
+      it(`the visible frame is at least 90% opaque for 92% of the 12 s it plays (${viewport.name}, ${theme})`, async () => {
+        const { tab, close } = await open(viewport, theme, 'claude-code');
+        try {
+          await tab.locator('[data-sign-in-demo]').waitFor({ state: 'visible' });
+          // Scrub the demo's own animations to each instant instead of waiting on the clock: a still taken in a fade is what
+          // the QA walk caught (washed out), so what counts is how much of the play is spent in one.
+          const share = await tab.evaluate(() => {
+            const demo = document.querySelector('[data-sign-in-demo]') as HTMLElement;
+            const frames = [...demo.querySelectorAll<HTMLElement>('[data-frame]')];
+            for (const animation of document.getAnimations()) animation.pause();
+            let dim = 0;
+            let steps = 0;
+            for (let time = 0; time < 12_000; time += 20) {
+              for (const animation of document.getAnimations()) animation.currentTime = time;
+              const visible = Math.max(...frames.map(frame => Number(getComputedStyle(frame).opacity)));
+              if (visible < 0.9) dim += 1;
+              steps += 1;
+            }
+            return dim / steps;
+          });
+          measured[`demo-dim-share-${viewport.name}-${theme}`] = share;
+          expect(share).toBeLessThanOrEqual(0.08);
+        } finally {
+          await close();
+        }
+      });
+});
