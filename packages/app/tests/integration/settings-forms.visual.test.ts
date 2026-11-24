@@ -103,7 +103,7 @@ const measure = () => {
   const savesWithoutWords: string[] = [];
   const barsHidden: string[] = [];
   const barStates: string[] = [];
-  let firstBarBottom: number | null = null;
+  const barsRidingTheScroll: string[] = [];
   if (root !== null) {
     for (const el of root.querySelectorAll<HTMLElement>(
       'input:not([type=radio]):not([type=checkbox]):not([type=range]):not(.sr-only), textarea',
@@ -125,10 +125,9 @@ const measure = () => {
       else {
         if (!shown(bar)) barsHidden.push(form.getAttribute('data-setting-group') ?? 'a form');
         barStates.push(bar.getAttribute('data-state') ?? '');
-        // A form that is on screen keeps its Save bar on screen too (it sticks to the foot while the form is in view); a form still
-        // below the fold has nothing to keep. The first form that starts on screen is the one measured.
-        if (firstBarBottom === null && form.getBoundingClientRect().top < window.innerHeight)
-          firstBarBottom = bar.getBoundingClientRect().bottom;
+        // The bar is IN FLOW (C59 O11 R6): a sticky or fixed one rides over the scroll area and covers the row under it.
+        if (getComputedStyle(bar).position !== 'static')
+          barsRidingTheScroll.push(form.getAttribute('data-setting-group') ?? 'a form');
       }
     }
     for (const group of root.querySelectorAll<HTMLElement>('[data-setting-saves]')) {
@@ -149,8 +148,7 @@ const measure = () => {
     savesWithoutWords,
     barsHidden,
     barStates,
-    firstBarBottom,
-    windowHeight: window.innerHeight,
+    barsRidingTheScroll,
     forms: root?.querySelectorAll('[data-setting-saves="on-save"]').length ?? 0,
   };
 };
@@ -224,10 +222,9 @@ describe('Settings forms: one save model, said out loud', () => {
             measured.barStates.every(state => state === 'clean'),
             'every Save bar starts clean',
           ).toBe(true);
-          expect(
-            measured.firstBarBottom ?? 0,
-            `${plugin}/${tab}: the Save bar is on screen without scrolling (a long form keeps it in view): bar bottom ${measured.firstBarBottom}, window ${measured.windowHeight}`,
-          ).toBeLessThanOrEqual(measured.windowHeight + 1);
+          expect(measured.barsRidingTheScroll, 'a Save bar that rides over the scroll area and covers rows').toEqual(
+            [],
+          );
           expect(measured.switchesInForm, 'a switch inside a form that is saved with a button').toEqual([]);
           expect(measured.switchesOutsideNow, 'a switch in a group that does not say it saves at once').toEqual([]);
           expect(measured.savesWithoutWords, 'a group that does not say when it saves').toEqual([]);

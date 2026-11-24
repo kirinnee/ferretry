@@ -9,8 +9,10 @@
  * A switch never sits in a form that a button saves (a switch takes effect now; a checkbox is saved with the form).
  *
  *   SettingSaveBar  the form's foot, drawn from the first paint: what state the form is in (nothing to save / unsaved / saving / saved /
- *                   the sentence that says why it did not save) on the left, Discard and Save on the right. Sticky at the foot of the
- *                   scroll area while its form is on screen, so a long form never hides its own Save.
+ *                   the sentence that says why it did not save) on the left, Discard and Save on the right. While nothing is
+ *                   unsaved it sits IN FLOW at the end of its form and covers nothing at any scroll position (C59 O11 R6: a resting
+ *                   sticky bar covered the row the owner was reading); only while there are UNSAVED changes does it stick to the foot of
+ *                   the scroll area, so a long form never loses its Save while it is being edited.
  *   SettingField    one value field: its label above, the one-line help below, and the error IN PLACE of the help (no layout shift).
  */
 
@@ -92,9 +94,10 @@ export function SettingSaveBar(props: SettingSaveBarProps) {
       data-state={state}
       {...props.marks}
       className={cn(
-        // Sticky at the foot of the scroll area while its form is on screen, so a long form (the Warden's) never hides its own Save; the
-        // hairline above it is the form's edge. A short form simply ends with it.
-        'sticky bottom-0 z-10 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-border bg-bg px-panel py-2',
+        // In flow while clean, so a resting bar covers no row. Sticky at the foot only while something is unsaved (the owner is editing and
+        // needs Save in reach). The hairline above it is the form's edge.
+        'flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-border bg-bg px-panel py-2',
+        dirty && 'sticky bottom-0 z-10',
       )}
     >
       <span
