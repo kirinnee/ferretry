@@ -186,31 +186,49 @@ export function isFalCdn(url: string): boolean {
   }
 }
 
-/** One file from fal's storage, of one of the `types` asked for, or a sentence that says why it was not taken. */
+/** Why a made file was not taken: a sentence, and whether its host was refused (every retry is refused the same way). */
+export interface Unfetched {
+  readonly why: string;
+  readonly hostRefused?: true;
+}
+
+/**
+ * The answer when a made, PAID file could not be fetched. A refused host is the same on every retry and every retry is
+ * charged again, so the ferret is told NOT to retry; any other failure keeps the "try again, charged again" line.
+ */
+export const unfetched = (noun: string, paid: string, got: Unfetched): ToolAnswer =>
+  refusal(
+    got.hostRefused === true
+      ? `The ${noun} was made and paid for (${paid}), but it could not be fetched: ${got.why}. The result was paid for and could not be fetched. Do NOT retry: a retry would be charged again and be refused the same way. Tell the owner.`
+      : `The ${noun} was made and paid for (${paid}), but ${got.why}. Nothing more was spent; try the same request again and it will be charged again.`,
+  );
+
+/** One file from fal's storage, of one of the `types` asked for, or why it was not taken. */
 export async function download(
   fetcher: FetchPort,
   url: string,
   types: readonly string[],
   noun: 'picture' | 'sound',
-): Promise<{ readonly bytes: Uint8Array; readonly type: string } | string> {
-  if (!isFalCdn(url)) return `the ${noun} was not on fal’s own storage, so it was not fetched`;
+): Promise<{ readonly bytes: Uint8Array; readonly type: string } | Unfetched> {
+  if (!isFalCdn(url))
+    return { why: `the ${noun} was not on fal’s own storage, so it was not fetched`, hostRefused: true };
   try {
     const response = await fetcher.request(url, {
       method: 'GET',
       redirect: 'error',
       signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
     });
-    if (!response.ok) return `fal’s storage answered ${response.status}`;
+    if (!response.ok) return { why: `fal’s storage answered ${response.status}` };
     const declared = Number(response.headers.get('content-length') ?? 0);
-    if (declared > MAX_DOWNLOAD_BYTES) return `the ${noun} is larger than Create will fetch`;
+    if (declared > MAX_DOWNLOAD_BYTES) return { why: `the ${noun} is larger than Create will fetch` };
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength === 0) return 'fal’s storage sent an empty file';
-    if (bytes.byteLength > MAX_DOWNLOAD_BYTES) return `the ${noun} is larger than Create will fetch`;
+    if (bytes.byteLength === 0) return { why: 'fal’s storage sent an empty file' };
+    if (bytes.byteLength > MAX_DOWNLOAD_BYTES) return { why: `the ${noun} is larger than Create will fetch` };
     const type = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
-    if (!types.includes(type)) return `what fal’s storage sent was not a ${noun}`;
+    if (!types.includes(type)) return { why: `what fal’s storage sent was not a ${noun}` };
     return { bytes, type };
   } catch {
-    return `the ${noun} could not be fetched from fal’s storage`;
+    return { why: `the ${noun} could not be fetched from fal’s storage` };
   }
 }
 

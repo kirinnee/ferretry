@@ -424,6 +424,33 @@ describe('generate_sfx: fal’s sound-effects endpoint, priced by the second', (
       expect(net(w)).toBe(10_000);
     }
   });
+
+  test('a result on a refused host (fal’s documented storage.googleapis.com) is paid and lost: the ferret is told NOT to retry', async () => {
+    for (const url of [
+      'https://storage.googleapis.com/falserverless/example/sound.mp3',
+      'https://evil.example/a.mp3',
+    ]) {
+      const w = await world();
+      w.fake.audioUrl = url;
+      const answer = await sfx(w);
+      expect(answer.isError).toBe(true);
+      expect(answer.text).toContain('was made and paid for');
+      expect(answer.text).toContain('could not be fetched');
+      expect(answer.text).toContain('Do NOT retry');
+      expect(answer.text).not.toMatch(/try the same request again/i);
+      // the host stays refused: nothing was fetched from it, and the spend is recorded once
+      expect(w.fake.seen.map(request => request.host)).not.toContain(new URL(url).host);
+      expect(net(w)).toBe(10_000);
+    }
+  });
+
+  test('any other fetch failure keeps its own answer: it was paid, nothing more was spent', async () => {
+    const w = await world();
+    w.fake.cdn = 'not-found';
+    const answer = await sfx(w);
+    expect(answer.text).toContain('try the same request again');
+    expect(answer.text).not.toContain('Do NOT retry');
+  });
 });
 
 describe('generate_music: fal’s ElevenLabs music, billed by the whole minute', () => {
