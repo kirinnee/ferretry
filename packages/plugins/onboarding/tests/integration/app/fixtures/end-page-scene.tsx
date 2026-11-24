@@ -19,11 +19,13 @@ import { LivingBackground } from '@ferretry/app/ui';
 import { createRoot } from 'react-dom/client';
 import '../../../../app/features/setup-flow/flow.css';
 import { EndPage } from '../../../../app/features/setup-flow/end-page.tsx';
+import type { RuntimesRead } from '../../../../app/features/setup-flow/runtimes-made.ts';
 import type { SummaryStep } from '../../../../app/views/steps-screen.tsx';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const scene = params.get('case') ?? 'later';
+const readParam = params.get('read') as RuntimesRead | null;
 
 const machine = (plugin: string, group: string, state: SummaryStep['state'], id = plugin): SummaryStep => ({
   plugin,
@@ -85,6 +87,9 @@ const STEPS: Record<string, readonly SummaryStep[]> = {
     device('appearance', 'Appearance', 'done'),
     device('layout', 'Layout', 'done'),
   ],
+  // The runtime check is out (the real flow turns Runtimes pending until it answers) or failed (the summary is then as the pages left it).
+  checking: [machine('onboarding', 'Machine', 'done'), machine('runtimes', 'Runtimes', 'pending')],
+  unread: [machine('onboarding', 'Machine', 'done'), machine('runtimes', 'Runtimes', 'done')],
   device: [device('passkey', 'Passkey', 'done')],
   bare: [machine('runtimes', 'Runtimes', 'done'), machine('voice', 'Voice', 'later')],
 };
@@ -131,6 +136,7 @@ if (root !== null)
                 : {})}
               onBack={noop}
               summary={STEPS[scene] ?? STEPS.later ?? []}
+              {...(readParam === null ? {} : { runtimesRead: readParam })}
               picture={PICTURE}
             />
           </div>

@@ -59,6 +59,15 @@ export function GithubStep({ step, client, connectAccount }: GithubStepProps) {
     if (answered) host.current?.ready();
   }, [answered]);
 
+  // With nothing connected there is nothing for Next to answer: the footer's one exit is "Skip for now" (it returns when one is).
+  const nothingConnected = answered && (accounts.accounts ?? []).length === 0 && justConnected === 0;
+  useEffect(() => {
+    if (!nothingConnected) return;
+    const held = host.current;
+    held?.holdNext?.(true);
+    return () => held?.holdNext?.(false);
+  }, [nothingConnected]);
+
   // What Next saves: the ticked accounts added to the one project, when something visible is ticked; otherwise Next only moves on.
   const projectId = project?.id;
   const visible = (accounts.accounts ?? []).map(account => account.id);

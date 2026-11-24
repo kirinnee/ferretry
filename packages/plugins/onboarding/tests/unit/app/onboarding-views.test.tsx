@@ -138,6 +138,23 @@ describe('S14 the steps screen is now a way into the setup flow', () => {
     }
   });
 
+  it('E166 a machine that is already set up with no recorded answers gets the review text, a new one its true waiting count', async () => {
+    const steps = [VIEW.steps[0], { ...VIEW.steps[0], id: 'b' }];
+    for (const [setUp, sentence, link] of [
+      [true, 'Every setup step on this machine has an answer.', 'Review the setup steps'],
+      [false, '2 setup steps on this machine have not been looked at yet.', 'Open the setup steps'],
+    ] as const) {
+      const one = clientOf(() => ({ steps, complete: false, setUp }));
+      noteClientDaemon(one.client, 'd1');
+      const OneTab = createSetupTab(one.client);
+      const drawn = await mount(<OneTab />);
+      await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+      expect(drawn.container.textContent).toContain(sentence);
+      expect(drawn.container.querySelector('[data-onboarding-open-steps]')?.textContent).toBe(link);
+      await drawn.unmount();
+    }
+  });
+
   it('the Setup tab draws nothing outside a machine, says it is looking, and says a failed read failed', async () => {
     const outside = clientOf(() => VIEW);
     const Outside = createSetupTab(outside.client);

@@ -149,14 +149,15 @@ const proposals = (calls: readonly Call[]) => calls.filter(call => call.route ==
 describe('the import run', () => {
   it('"everything" is the only import page: it sends one setup.import with nothing left out', async () => {
     const { view, run, calls } = await open(ImportRunPage, { importMode: 'everything' });
-    expect(run.events).toEqual(['ready']);
+    // L270: the footer's Next is held while the page waits for its own Import.
+    expect(run.events).toEqual(['ready', 'holdNext:true']);
     expect(proposals(calls)).toHaveLength(0);
     await click(view, '[data-import-run]');
     await settle();
     expect(proposals(calls).map(call => call.init?.body)).toEqual([
       { change: { kind: 'setup.import', include: ['claude-code'], names: { 'claude-code': 'claude-code-default' } } },
     ]);
-    expect(run.events.slice(-3)).toEqual(['busy:Importing…', 'busy:null', 'done']);
+    expect(run.events.slice(-4)).toEqual(['busy:Importing…', 'busy:null', 'done', 'holdNext:false']);
     expect(view.container.querySelector('[data-import-answer] ul')?.textContent).toContain('mcp/notes.yaml');
   });
 
@@ -235,7 +236,7 @@ describe('the import run', () => {
 
   it('the run never holds the footer before a write: busy is only for the request in flight', async () => {
     const { run } = await open(ImportRunPage, { importMode: 'choose' });
-    expect(run.events).toEqual(['ready']);
+    expect(run.events).toEqual(['ready', 'holdNext:true']);
     const lost = await open(ImportRunPage, {});
     expect(lost.run.events).toEqual(['ready']);
   });
@@ -300,7 +301,7 @@ describe('the import run', () => {
     await click(view, '[data-import-press]');
     await settle();
     expect(proposals(calls)).toHaveLength(2);
-    expect(run.events.at(-1)).toBe('done');
+    expect(run.events.slice(-2)).toEqual(['done', 'holdNext:false']);
   });
 
   it('writes nothing to localStorage or sessionStorage', async () => {

@@ -18,7 +18,6 @@ import {
   IMPORT_KINDS,
   ImportResultList,
   kindItemIds,
-  NEXT_LEAVES,
   RuntimeNameField,
   StepBody,
   StepLine,
@@ -106,6 +105,13 @@ function RunBody({
   };
 
   const nothingToImport = total === 0 && (plan?.updates ?? 0) === 0;
+  // While the import waits for its own button, the footer draws no Next: Import and Later are the only exits.
+  const awaitingImport = model !== null && plan !== null && applied === null && !nothingToImport;
+  useEffect(() => {
+    if (!awaitingImport) return;
+    step.holdNext?.(true);
+    return () => step.holdNext?.(false);
+  }, [awaitingImport, step]);
   return (
     <StepBody step="codex.import-run" label="Bring Codex over" data-codex-step="import-run">
       <ScanProblem read={scan.read} look={scan.look} />
@@ -130,7 +136,6 @@ function RunBody({
                 over as found. Go back to look at them first.
               </StepLine>
             )}
-            <StepLine data-import-next="">{NEXT_LEAVES}</StepLine>
             {nothingToImport ? null : model.duplicateOf === null ? (
               <RuntimeNameField value={typed} invalid={problem !== null} disabled={changes.busy} onChange={setName} />
             ) : (

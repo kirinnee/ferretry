@@ -51,6 +51,10 @@
  *      stays, the error's message is shown on it, and Next stays enabled so pressing it again runs the save again. A page never
  *      calls `busy()` just to hold Next for a pending pick (rule 5: only `ready()` and an act in flight lock it). `Later`
  *      never runs the commit, and Back drops it: nothing is saved by leaving a page. A page with no commit behaves as before.
+ *   9. A PAGE WITH ITS OWN ANSWER HOLDS NEXT: a page whose primary act is its own button (an import waiting for "Import", a GitHub
+ *      page with nothing connected) calls `holdNext(true)`; the footer then draws no Next, so Back, Later and the page's own
+ *      button are the only exits, and `holdNext(false)` (or leaving the page) brings Next back. It never disables Next: a hidden
+ *      Next cannot be pressed past an answer the page did not name.
  */
 export type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
 
@@ -68,6 +72,7 @@ export type StepCall =
   | { readonly kind: 'done' }
   | { readonly kind: 'busy'; readonly label: string | null }
   | { readonly kind: 'commit' }
+  | { readonly kind: 'holdNext'; readonly held: boolean }
   | { readonly kind: 'remember'; readonly patch: Readonly<Record<string, string | number | boolean | undefined>> }
   | { readonly kind: 'next' }
   | { readonly kind: 'back' };

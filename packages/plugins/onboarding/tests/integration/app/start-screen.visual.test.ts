@@ -197,6 +197,27 @@ describe('the install stage', () => {
   }
 });
 
+describe('L263 the first-run picture speaks the product, not the binaries', () => {
+  for (const variant of VARIANTS) {
+    for (const [view, words] of [
+      ['install', 'Installing Ferretry'],
+      ['daemon', 'Daemon running'],
+    ] as const) {
+      it(`${variant.name} ${view}: the diagram says "${words}", never "installing fy" or "fyd running"`, async () => {
+        const { tab, close } = await open(variant, view, '[data-onboarding-diagram]');
+        try {
+          const text = (await tab.locator('[data-onboarding-diagram]').first().innerText()).toLowerCase();
+          expect(text).toContain(words.toLowerCase());
+          expect(text).not.toContain('installing fy ');
+          expect(text).not.toContain('fyd');
+        } finally {
+          await close();
+        }
+      });
+    }
+  }
+});
+
 describe('the other computer page', () => {
   for (const variant of VARIANTS) {
     it(`${variant.name}: the link to open there, and no agent entry point`, async () => {
