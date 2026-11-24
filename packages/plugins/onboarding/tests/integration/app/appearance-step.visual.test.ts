@@ -804,3 +804,38 @@ describe('the pinned Appearance strip at 650 px (O9 round 2)', () => {
     });
   }
 });
+
+// Ruling C-5 (O10 Q4): a style's default palette applies only until the owner picks a palette; a chosen one is never overridden.
+describe('a picked palette survives a later style change (C-5, O10 Q4)', () => {
+  // Shot at 390 and 1440, light and dark.
+  for (const base of VARIANTS) {
+    const variant: Variant = base.phone
+      ? base
+      : { ...base, name: base.name.replace('1280', '1440'), width: 1_440, height: 900 };
+    it(`Neo-Brutalism → Terminal → Geist keeps Terminal (${variant.name})`, async () => {
+      const { tab, problems, close } = await open(variant);
+      try {
+        const axes = async () =>
+          await tab.evaluate(() => ({
+            style: document.documentElement.dataset.style ?? '',
+            palette: document.documentElement.dataset.palette ?? '',
+          }));
+        await tab.locator('[aria-label="Style"] .fy-cc__card[data-choice="neo"]').click();
+        expect(await axes()).toEqual({ style: 'neo', palette: 'neo' });
+        await tab.locator('[aria-label="Palette"] .fy-cc__card[data-choice="hacker"]').click();
+        expect(await axes()).toEqual({ style: 'neo', palette: 'hacker' });
+        await tab.locator('[aria-label="Style"] .fy-cc__card[data-choice="geist"]').click();
+        await tab.waitForTimeout(300);
+        expect(await axes()).toEqual({ style: 'geist', palette: 'hacker' });
+        // Two shots, so each pick is in view on a phone: the style that was last picked, then the palette that was kept.
+        await tab.locator('[aria-label="Style"] .fy-cc__card[data-choice="geist"]').scrollIntoViewIfNeeded();
+        await shot(tab, variant, 'q4-style-geist');
+        await tab.locator('[aria-label="Palette"] .fy-cc__card[data-choice="hacker"]').scrollIntoViewIfNeeded();
+        await shot(tab, variant, 'q4-palette-terminal-kept');
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+  }
+});
