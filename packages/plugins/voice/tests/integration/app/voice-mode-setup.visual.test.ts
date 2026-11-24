@@ -198,6 +198,9 @@ describe('Voice mode set-up in the first-run Voice step', () => {
       await tab.locator('[data-voice-engine-ready]').waitFor({ state: 'visible' });
       expect(await tab.getByRole('button', { name: /^Install on/u }).count()).toBe(0);
       expect(await tab.getByRole('button', { name: 'Remove from Studio Mac' }).count()).toBe(2);
+      // ElevenLabs is offered as the optional reply voice source; the default stays on the machine.
+      await tab.getByText('ElevenLabs', { exact: true }).first().waitFor({ state: 'visible' });
+      expect(await tab.getByText('On this machine', { exact: true }).count()).toBeGreaterThan(0);
     } finally {
       await context.close();
     }
