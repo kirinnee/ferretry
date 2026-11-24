@@ -9,6 +9,7 @@
  *   ?scene=inline  a StepDemo OUTSIDE a frame (renders inline)
  *   ?scene=long    the ending's footer: Back + a long Next label ("Open this machine"), no Later
  *   ?scene=busy&busyMs=N  the stack page whose Next is busy (the footer's busy mark) for N ms after it is pressed (r11-1c C3)
+ *   ?scene=covered a step checked behind its page loader (onboarding's cover): the loader sits in the middle of the area (O8-4c)
  *   ?scene=pending a FlowPage-shaped page: its slot is `hidden` behind a loading cover until the button is pressed
  */
 
@@ -18,6 +19,7 @@ import { createRoot } from 'react-dom/client';
 import { ChoiceCards } from '../../../src/compose/choice-cards.tsx';
 import { StepDemo } from '../../../src/compose/step-demo.tsx';
 import { StepPageFrame } from '../../../src/compose/step-page-frame.tsx';
+import { Loading } from '../../../src/ui/loading.tsx';
 import { Button } from '../../../src/ui/primitives.tsx';
 
 const params = new URLSearchParams(window.location.search);
@@ -73,6 +75,24 @@ const Pending = () => {
   );
 };
 
+/** The shape onboarding draws while a step is checked (O8-4c): the page loader inside the plugin's page and cover boxes, in the frame's body. */
+const Covered = () => (
+  <div style={{ height: '100vh', overflow: 'auto' }} data-scroller="">
+    <StepPageFrame
+      title="Checking"
+      line="Ferretry is looking at this machine."
+      back={{ onClick: () => undefined }}
+      next={{ label: 'Next', busy: true, onClick: () => undefined }}
+    >
+      <div data-flow-page="">
+        <div data-flow-cover="">
+          <Loading kind="page" label="Checking what this step needs…" />
+        </div>
+      </div>
+    </StepPageFrame>
+  </div>
+);
+
 const Page = () => {
   const [value, setValue] = useState<string | null>('auto');
   const [busy, setBusy] = useState(false);
@@ -117,6 +137,8 @@ if (root !== null)
       </div>
     ) : scene === 'pending' ? (
       <Pending />
+    ) : scene === 'covered' ? (
+      <Covered />
     ) : (
       <Page />
     ),
