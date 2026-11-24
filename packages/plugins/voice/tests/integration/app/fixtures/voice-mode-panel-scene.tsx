@@ -1,6 +1,9 @@
 /**
  * Voice mode's panel (`VoiceModeSlot` and the Voice mode button) in front of a stand-in composer, over a fake machine.
- * `?theme=<family>-<mode>&talk=hearing|working|refused|notinstalled`. The stand-in composer is a text box holding the draft
+ * `?theme=<family>-<mode>&talk=hearing|working|refused|notinstalled|lost|unreachable`. `lost`: the machine drops the stream
+ * mid-chat and the panel carries on with the phone's own engine; `unreachable`: the machine cannot be reached on press. The
+ * phone's engine is a scripted recognition (it "hears" one sentence, then a pause) and its send route is a fake that records
+ * the messages in `window.__fake.sent`. The stand-in composer is a text box holding the draft
  * "half a thought" and a Send button, so the page can prove the composer is hidden while voice mode is on and that the SAME
  * box (draft intact) is back after End. A fake microphone sends silent units; nothing here records or plays audio.
  * `window.__fake` records what the machine was sent.
@@ -10,6 +13,11 @@ import { useState } from 'react';
 import { encodeDownlinkUnit, type StreamSnapshot } from '../../../../contract/index.ts';
 import { VoiceModeButton } from '../../../../app/components/voice-mode-button.tsx';
 import { VoiceModeSlot } from '../../../../app/components/voice-mode-panel.tsx';
+import { PhoneSession } from '../../../../app/components/voice-mode-phone.tsx';
+import { DEFAULT_STT_SETTINGS } from '../../../../app/lib/stt/stt-settings.ts';
+import type { CaptureMonitor, MicMeterPort } from '../../../../app/lib/stt/level-monitor.ts';
+import { daemonConnection } from '../../../../app/shell-voice.ts';
+import { fakeRecognitionProvider } from '../../../support/app/browser-recognition.ts';
 import { createVoiceModeStore } from '../../../../app/lib/voice-mode/voice-mode-store.ts';
 import type { MicSource } from '../../../../app/lib/stream/voice-stream.ts';
 
@@ -17,7 +25,14 @@ const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const talk = params.get('talk') ?? 'hearing';
 
-const fake = { starts: [] as string[], units: 0, closed: [] as unknown[], micStopped: 0, reads: 0 };
+const fake = {
+  starts: [] as string[],
+  units: 0,
+  closed: [] as unknown[],
+  micStopped: 0,
+  reads: 0,
+  sent: [] as string[],
+};
 (window as unknown as { __fake: typeof fake }).__fake = fake;
 
 const snapshot = (patch: Partial<StreamSnapshot>): Uint8Array =>
@@ -54,9 +69,40 @@ const view = {
   loaded: false,
 };
 
+/** The phone's own engine, scripted: each take "hears" one sentence while the microphone level is up, then goes quiet. */
+const recognition = fakeRecognitionProvider({ endsOnStop: true });
+let level = 0;
+const analyser = {
+  fftSize: 32,
+  smoothingTimeConstant: 0,
+  minDecibels: -90,
+  maxDecibels: -10,
+  getFloatTimeDomainData: (target: Float32Array) => target.fill(level),
+};
+const monitor: CaptureMonitor = { createAnalyser: () => ({ analyser, disconnect: () => undefined }) };
+const meter: MicMeterPort = { open: async () => ({ monitor, release: () => undefined }) };
+let takes = 0;
+setInterval(() => {
+  if (recognition.created <= takes) return;
+  takes = recognition.created;
+  recognition.begin();
+  setTimeout(() => {
+    level = 0.1;
+    recognition.speak('Please check the build');
+  }, 150);
+  setTimeout(() => {
+    level = 0;
+  }, 700);
+}, 50);
+
 const client = {
-  call: async () => {
+  call: async (route: string, init?: { body?: { message?: string } }) => {
+    if (route === 'POST /v1/ferrets/:ferretId/send') {
+      fake.sent.push(init?.body?.message ?? '');
+      return { ferret: 'ferret-1', disposition: 'delivered' };
+    }
     fake.reads += 1;
+    if (talk === 'unreachable') throw new Error('offline');
     return view;
   },
   socket: (
@@ -86,6 +132,11 @@ const client = {
             );
             listeners.onClose('voice chat needs the fleet permission as well', 4403);
           });
+          return;
+        }
+        if (talk === 'lost') {
+          listeners.onFrame(snapshot({ state: 'listening' }));
+          at(600, () => listeners.onClose('lost', 1006));
           return;
         }
         listeners.onFrame(snapshot({ state: 'loading' }));
@@ -151,6 +202,15 @@ function Scene() {
             </div>
           }
           ferretId="ferret-1"
+          renderPhone={props => (
+            <PhoneSession
+              {...props}
+              client={client as never}
+              daemon={daemonConnection({ daemonId: 'd', baseUrl: 'http://127.0.0.1:1', deviceId: 'x' })}
+              dictation={{ recognition, meter }}
+              settings={{ ...DEFAULT_STT_SETTINGS, engine: 'browser', enhancement: false }}
+            />
+          )}
           store={store}
           turn={{ state: working ? 'working' : 'your-turn', live: true }}
         />
