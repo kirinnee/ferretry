@@ -381,6 +381,36 @@ export function decodeSpeakFrame(text: string): SpeakFrame {
 }
 
 /**
+ * BARGE-IN (unit 7): the person talked over the reply. The browser stops its own sound at once, and this tells the machine
+ * to drop every line it has not yet spoken and to throw away the one it is making, so a long reply is not made and sent to
+ * a device that has already stopped listening. It is a text frame of the same fixed size as a `speak` frame, so a relay
+ * sees the same thing whichever it is.
+ */
+export const HushFrameSchema = z.strictObject({ t: z.literal('hush') });
+export type HushFrame = z.infer<typeof HushFrameSchema>;
+
+export function encodeHushFrame(): string {
+  const json = JSON.stringify({ t: 'hush' });
+  return json + ' '.repeat(SPEAK_FRAME_BYTES - byteLength(json));
+}
+
+const LineFrameSchema = z.discriminatedUnion('t', [SpeakFrameSchema, HushFrameSchema]);
+
+/** What a text frame after the start record can be: a line to speak, or "stop speaking". */
+export function decodeLineFrame(text: string): SpeakFrame | HushFrame {
+  if (byteLength(text) !== SPEAK_FRAME_BYTES) throw new StreamProtocolError('a speak frame is the wrong size');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new StreamProtocolError('a speak frame is not valid JSON');
+  }
+  const frame = LineFrameSchema.safeParse(parsed);
+  if (!frame.success) throw new StreamProtocolError('a speak frame is not one the stream defines');
+  return frame.data;
+}
+
+/**
  * Cuts a line into pieces that each fit one frame, at a space where it can. A `<voice>` line is one to three plain
  * sentences, so this is rare; a line that does not fit is spoken in pieces, in order, under one id each.
  */

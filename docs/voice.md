@@ -360,10 +360,10 @@ choosing Browser voice there sends no audio anywhere and Record says to pick an 
 
 ## Voice mode: the machine's speech engine
 
-**Built (voice mode units 3, 4 and 5):** the machine can install, load and run the speech models voice mode needs, a
-device can stream its microphone to them (below), and a chat has a **Voice mode** panel ([below](#the-voice-mode-panel)).
-The reply voice (6) and barge-in (7) come next, so Settings › Voice › **Voice mode** installs, shows the state, removes,
-and offers **Talk to test**.
+**Built (voice mode units 3 to 7):** the machine can install, load and run the speech models voice mode needs, a
+device can stream its microphone to them (below), a chat has a **Voice mode** panel ([below](#the-voice-mode-panel)) that
+speaks replies in the machine's reply voice and can be talked over ([Barge-in](#barge-in-talking-over-a-reply)), and Settings ›
+Voice › **Voice mode** installs, shows the state, removes, and offers **Talk to test**.
 
 - **What runs where.** Owner decision O2: the sherpa-onnx **WebAssembly** runtime first (the same `@sherpaw/asr` the
   app ships), in one **worker thread** of the daemon (`daemon/worker/speech.worker.ts`), never in the daemon's own
@@ -489,10 +489,17 @@ under an agenda item's reply box). Voice's own code is `app/components/voice-mod
   you…** with the live words (greyed while they may still change, firm when final), **Muted**, and **Working…** while the
   ferret's turn runs. The ferret's turn is the chat's own live reading, handed to the slot, so an unread or cached turn is
   never claimed as working.
-- **Replies are read aloud by the device's voice, and the microphone is muted while they are.** Voice mode turns **Auto-read**
-  on for that ferret whatever the device's switch says (the switch itself is untouched); a `<voice>` reply is what it reads
-  (unit 1). Until barge-in exists the microphone under the speaker would hear the reply and the machine would send it back as
-  the person's own words, so the panel mutes (zero samples) while a reading goes on and unmutes after. The panel says so.
+- **Replies are spoken, by the machine's voice when it has one.** Voice mode turns **Auto-read** on for that ferret whatever the
+  device's switch says (the switch itself is untouched); a `<voice>` reply is what it reads (unit 1). While the panel is on, the
+  page's read-aloud controller speaks through the machine's reply voice over the same stream (`createMachineSpeaker`,
+  attached with `ReadAloudController.attach`), and the stream is opened with `reply: 'machine'`. A machine with no reply voice
+  (`absent`), or one that fails on the first line before any sound, hands the same words to **the device's own voice** instead;
+  a line that fails after it was heard is never read again by another voice. A reply voice that is still **loading** takes the
+  line and speaks when it is ready (a Kokoro load is seconds; switching voices mid-conversation would be worse). The sound
+  output is made inside the tap on the Voice mode button and handed to the panel (iOS lets sound start only from a tap).
+  **The microphone stays open under the machine's voice** (echo cancellation is on in the capture) **and is muted under the
+  device's voice**: a speech-synthesis voice is not part of the page's audio graph, so nothing proves the browser removes it
+  from the microphone, and the machine would send the reply back as the person's own words. The panel says which is on.
 - **It ends, and says why.** **End voice mode** tells the machine, closes the stream, stops the microphone and gives the
   composer back. A refusal (the machine's own sentence, or one for its close code), a lost machine, a refused microphone, or a
   browser that cannot open a stream also give the composer back and leave one sentence above it until dismissed. Leaving the
@@ -510,9 +517,34 @@ under an agenda item's reply box). Voice's own code is `app/components/voice-mod
   stream's "more than 2 s of unseen audio" rule, so the panel says "The machine could not turn that into words. Try again." and
   sends nothing (it never sends a lost turn). The panel is honest about it; whether the rule should wait for the decode is the
   stream's to decide (unit 4's latency follow-up).
-- **Declared gaps.** No barge-in (unit 7), and the panel does not yet ask the machine's reply voice (unit 6, built: [The reply voice](#the-reply-voice-kokoro-on-the-machine)) to speak: the device voice reads, the microphone is muted
-  meanwhile. No phone-fallback engine (unit 8): a machine that cannot be reached means voice mode ends, not a different engine.
+- **Declared gaps.** No phone-fallback engine (unit 8): a machine that cannot be reached means voice mode ends, not a different engine.
   A keyboard shortcut and a palette entry for it are not built.
+
+### Barge-in: talking over a reply
+
+While the **machine's** voice speaks, the microphone stays open and the page listens for the person: **300 ms of speech**
+(`BARGE_IN_MS`) stops the sound at once, hushes the machine, and the panel says **Stopped. Go ahead, I am listening.** The
+machine hears the same speech and sends it after the pause as usual, so the person just carries on.
+
+- **The detector** (`app/lib/voice-mode/barge-in.ts`) is pure: it is fed the microphone's 40 ms units exactly as they are sent
+  (zeros while muted, so a muted person never interrupts and nothing of the room is heard here). A unit is **speech** when its
+  RMS is at least **0.02** and at least **3× the room's level** (the quietest tenth of the last 3 s, which includes whatever
+  echo is left under the reply). A quiet stretch of under **120 ms** inside speech does not restart the count. It fires once,
+  at the unit that completes 300 ms (the eighth, 320 ms of audio), then starts over; it only fires while a reply is playing.
+- **The hush.** `VoiceStreamHandle.hush()` stops the player, sends a **`hush` text frame** (the same fixed 1,024 bytes as a
+  `speak` frame, `encodeHushFrame`; `decodeLineFrame` reads either) and ignores the sound of every line sent before it that
+  is still on the wire. The machine drops every line not yet spoken and every sound not yet sent, and throws away the line it
+  is making when it finishes (it cannot be interrupted mid-sentence). Nothing is reported back. A stream that did not ask for
+  the reply voice that sends one is a protocol error, like a `speak`.
+- **Measured here (2026-11-24).** On the recorded clip (`clip-5s.wav`) over a faint room hiss, the detector fires at the
+  ninth unit, **360 ms into the clip** (its first words are at the third unit: about 300 ms of speech). In the panel harness
+  (real panel, stream client, speaker, controller and detector; fake machine, microphone and sound) seven loud units change
+  nothing and the **eighth stops the sound in that very unit**, with the hush frame sent and the speech reaching the machine
+  untouched. The same speech at a tenth of the volume (a faint echo) does not fire.
+- **Declared gaps.** Echo is the risk: with the reply on speakers, whether the browser's echo cancellation leaves the
+  reply under the bar can only be proved on the owner's laptop and phone (a headless browser has no echo); the two numbers to
+  tune are 0.02 and 3×. The detector is energy, not words: a loud noise held for 300 ms stops a reply. The device's own voice
+  is not talked over (see above).
 
 ### The reply voice (Kokoro, on the machine)
 
@@ -540,7 +572,8 @@ Without it voice mode still listens, and the device's own voice reads the reply,
   (`queue_full`), and no more than 30 s of sound waits to be sent before the next line is made.
 - **The device voice is the fallback, never both.** A line the machine could not speak (`reply_voice_absent`,
   `reply_voice_failed`, `queue_full`) comes back `failed`, and the browser's `createReplySpeaker` reads it with the device's
-  voice **only if no sound of it had begun** (a person would otherwise hear its start twice). `absent` is also what a stream
+  voice **only if no sound of it had begun** (a person would otherwise hear its start twice). Voice mode's panel gets the same
+  rule through `createMachineSpeaker` (a whole reading, not one line). `absent` is also what a stream
   is told when the voice is not installed or did not start.
 - **Playing it.** `createReplyPlayer` schedules each 200 ms piece to start where the last one ends (a gapless queue on one
   WebAudio context created inside the tap that starts voice mode, because iOS lets sound start only from a gesture), and a
@@ -551,8 +584,8 @@ Without it voice mode still listens, and the device's own voice reads the reply,
   how long the first sound took. It is the whole path, so what a person hears and what it costs are the same test.
 - **Declared gaps.** The reply voice's English front end is sherpa-onnx's lexicon (sherpa-onnx 2.x dropped espeak-ng): a
   word that is not in the lexicon (a product name such as Kubernetes) is skipped, not spelled out; numbers are written out first
-  (`spokenNumbers`: "1,204" is "one thousand two hundred four") because the lexicon has no digits. Voices other than `af_heart`, speed and stopping a line
-  mid-way (barge-in) are not here (barge-in is unit 7). The browser cannot yet tell the machine to stop speaking.
+  (`spokenNumbers`: "1,204" is "one thousand two hundred four") because the lexicon has no digits. Voices other than `af_heart` and speed are not here. The
+  browser tells the machine to stop with a **`hush`** frame ([Barge-in](#barge-in-talking-over-a-reply)); a line already being made is made to its end and thrown away.
 
 **Measured here (2026-11-24; the same 32-core Linux x64 box, load average 9–12 from other agents, run under `nice`; one
 WebAssembly thread; `speak` times include the resample):**
@@ -1205,8 +1238,8 @@ pause plus the countdown plus STT and clean-up, an estimated 3.4–5.5 s at the 
 - **Voice mode on your machine** (hands-free chat): the machine's speech engine, the audio stream to it, the panel and the
   machine's reply voice are built and measured (see [Voice mode: the machine's speech engine](#voice-mode-the-machines-speech-engine),
   [The voice mode panel](#the-voice-mode-panel) and [The reply voice](#the-reply-voice-kokoro-on-the-machine)); the panel does not
-  yet send its reply lines to the machine's voice (the device voice still reads them), and barge-in (unit 7) and the phone
-  fallback are not built.
+  speak its replies in the machine's voice (the device voice reads when the machine has none) and can be talked over; the phone
+  fallback (unit 8) is not built.
 - ~~A machine-wide default chosen during onboarding~~ — done: New machine setup's Voice step renders
   `VoiceEngineChoice` and saves the choice as `voice.yaml`'s `defaultEngine`; a device that has not picked an
   engine dictates with it until it picks its own. Settings › Dictation still shows the device's own choice

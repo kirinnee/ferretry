@@ -26,7 +26,7 @@ import {
   WORDS_MAX_CHARS,
   type VoiceEngineApi,
   VoiceEngineError,
-  decodeSpeakFrame,
+  decodeLineFrame,
   decodeUplinkUnit,
   encodeDownlinkUnit,
   encodeReplyDownlinkUnit,
@@ -206,6 +206,8 @@ export class VoiceStream implements SocketHandler {
   private readonly outgoing: Outgoing[] = [];
   private outgoingSamples = 0;
   private draining = false;
+  /** Bumped by every hush: a line being made when it changed is thrown away, never queued. */
+  private hushes = 0;
 
   constructor(private readonly parts: StreamParts) {}
 
@@ -318,7 +320,11 @@ export class VoiceStream implements SocketHandler {
   /** One line to speak. A device that did not ask for the voice has no business sending one: that is a protocol error. */
   private onSpeak(text: string): void {
     if (this.start?.reply !== 'machine') throw new StreamProtocolError('this stream did not ask for the reply voice');
-    const frame = decodeSpeakFrame(text);
+    const frame = decodeLineFrame(text);
+    if (frame.t === 'hush') {
+      this.hush();
+      return;
+    }
     const refusal =
       this.replyState === 'absent'
         ? LINE_ABSENT
@@ -331,6 +337,18 @@ export class VoiceStream implements SocketHandler {
     }
     this.spokenQueue.push({ id: frame.id, text: frame.text });
     void this.drain();
+  }
+
+  /**
+   * The person talked over the reply (barge-in): every line not yet spoken, and every sound not yet sent, is dropped, and the
+   * line being made is thrown away when it finishes. Nothing is reported back: the device has already stopped playing, and
+   * ignores any sound of a line it sent before it hushed.
+   */
+  private hush(): void {
+    this.hushes += 1;
+    this.spokenQueue.length = 0;
+    this.outgoing.length = 0;
+    this.outgoingSamples = 0;
   }
 
   private failQueued(code: string): void {
@@ -366,6 +384,7 @@ export class VoiceStream implements SocketHandler {
 
   private async speakLine(id: number, text: string): Promise<void> {
     const reply = this.parts.reply;
+    const hushes = this.hushes;
     const pieces = splitForSpeech(text);
     if (reply === undefined || pieces.length === 0) {
       this.queueSound({
@@ -382,10 +401,11 @@ export class VoiceStream implements SocketHandler {
       try {
         made = await reply.speak(piece);
       } catch {
-        if (!this.ended) this.queueSound({ id, pcm: new Int16Array(0), offset: 0, last: true, failed: LINE_FAILED });
+        if (!this.ended && hushes === this.hushes)
+          this.queueSound({ id, pcm: new Int16Array(0), offset: 0, last: true, failed: LINE_FAILED });
         return;
       }
-      if (this.ended) return;
+      if (this.ended || hushes !== this.hushes) return;
       const pcm = toPcm16(made.samples);
       // Milliseconds and counts only: what was said never reaches a log.
       this.parts.log.info('voice.stream.spoke', {

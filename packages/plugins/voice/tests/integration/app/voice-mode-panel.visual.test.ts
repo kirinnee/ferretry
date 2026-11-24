@@ -3,7 +3,8 @@
  * computed geometry, at 390 and 1440 px in light and dark: pressing Voice mode hides the composer (the same box, draft
  * intact), draws the panel with the machine's state and live words, opens ONE chat stream for the ferret, units leave the
  * page, End gives the composer back with its draft, a machine without speech leaves the composer and says so, and a refusal
- * is said in the machine's own sentence. 44 px controls, no sideways scroll, nothing outside the column.
+ * is said in the machine's own sentence, a reply is spoken by the machine's voice and talking over it stops it and hushes the
+ * machine. 44 px controls, no sideways scroll, nothing outside the column.
  * Set `FY_VOICE_MODE_PANEL_SHOTS_DIR` to keep the pictures.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
@@ -65,6 +66,8 @@ interface Fake {
   closed: unknown[];
   micStopped: number;
   reads: number;
+  lines: string[];
+  hushes: number;
 }
 
 describe('Voice mode panel', () => {
@@ -110,6 +113,7 @@ describe('Voice mode panel', () => {
             v: 1,
             purpose: 'chat',
             ferretId: 'ferret-1',
+            reply: 'machine',
           });
           await tab.locator('[data-voice-mode-words]').filter({ hasText: 'please check the build' }).waitFor();
           expect(await tab.locator('[data-voice-mode-status]').innerText()).toContain('Hearing you');
@@ -142,6 +146,33 @@ describe('Voice mode panel', () => {
           expect(await tab.locator('[data-voice-mode-outcome]').innerText()).toBe('Sent.');
           expect(await tab.locator('[data-voice-mode-status]').innerText()).toContain('Working');
           await shot(tab, 'on-working');
+        } finally {
+          await context.close();
+        }
+      });
+
+      it(`a reply is spoken by the machine's voice, and talking over it stops it and hushes the machine (${viewport.name}, ${theme})`, async () => {
+        const { context, tab } = await open('speaking');
+        try {
+          await tab.locator('[data-voice-mode-start]').click();
+          await tab.locator('[data-voice-mode="on"]').waitFor({ state: 'visible' });
+          await tab.evaluate(() => (window as unknown as { __read: () => void }).__read());
+          await tab.locator('[data-voice-mode][data-reply-voice="machine"]').waitFor({ state: 'visible' });
+          expect((await fakeOf(tab)).lines).toEqual(['Let me check the build.']);
+          expect(await tab.locator('[data-voice-mode-status]').innerText()).toContain('Talk any time to interrupt');
+          expect(await overflow(tab)).toBeLessThanOrEqual(0);
+          await shot(tab, 'on-speaking');
+          // The person starts talking: the loud units reach the page like the microphone's.
+          await tab.evaluate(() => {
+            (window as unknown as { __loud: boolean }).__loud = true;
+          });
+          await tab.getByText('Stopped. Go ahead, I am listening.').waitFor({ state: 'visible' });
+          expect(await tab.evaluate(() => (window as unknown as { __reading: () => string }).__reading())).toBe(
+            'stopped',
+          );
+          expect((await fakeOf(tab)).hushes).toBe(1);
+          expect(await overflow(tab)).toBeLessThanOrEqual(0);
+          await shot(tab, 'on-interrupted');
         } finally {
           await context.close();
         }

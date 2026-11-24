@@ -3,9 +3,12 @@
  *
  * Voice mode is drawn in two places that cannot see each other: the Voice button in the composer's tools (which starts it)
  * and the panel that stands in front of the composer (which runs it). This store is the one fact they share, held per page
- * by `voiceSurfaces`. It holds no audio, no words and no secret: only "on or off", the machine's name, and a sentence.
+ * by `voiceSurfaces`. It holds no audio, no words and no secret: only "on or off", the machine's name, a sentence, and the
+ * speaker the button opened inside the tap (a browser lets sound start only from one, so the panel that runs later takes it
+ * from here instead of making its own).
  */
 import { useSyncExternalStore } from 'react';
+import type { ReplyPlayer } from '../stream/voice-stream.ts';
 
 export interface VoiceModeState {
   readonly active: boolean;
@@ -13,13 +16,15 @@ export interface VoiceModeState {
   readonly machine: string;
   /** Why voice mode is not running, when it stopped by itself or could not start. Cleared by Dismiss or the next start. */
   readonly notice: string | null;
+  /** The sound output created inside the tap that started voice mode; the panel plays the machine's voice through it. */
+  readonly player?: ReplyPlayer;
 }
 
 const OFF: VoiceModeState = { active: false, machine: '', notice: null };
 
 export interface VoiceModeStore {
   get(ferretId: string): VoiceModeState;
-  start(ferretId: string, machine: string): void;
+  start(ferretId: string, machine: string, player?: ReplyPlayer): void;
   /** Ends voice mode for the ferret. `notice` is shown above the composer until it is dismissed. */
   end(ferretId: string, notice?: string): void;
   dismiss(ferretId: string): void;
@@ -38,7 +43,8 @@ export function createVoiceModeStore(): VoiceModeStore {
   };
   return {
     get: ferretId => states.get(ferretId) ?? OFF,
-    start: (ferretId, machine) => set(ferretId, { active: true, machine, notice: null }),
+    start: (ferretId, machine, player) =>
+      set(ferretId, { active: true, machine, notice: null, ...(player === undefined ? {} : { player }) }),
     end: (ferretId, notice) => {
       const current = states.get(ferretId);
       if (current === undefined && notice === undefined) return;
