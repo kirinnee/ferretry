@@ -17,7 +17,7 @@ import { LayeredProfileCatalogSchema, RuntimeCatalogSchema } from '../../../../c
 import type { PanelProps } from '@ferretry/kernel/manifest';
 import { type FunctionComponent, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { credential, PROFILES, runtime } from '../../../unit/app/features/fleet/account-support.ts';
+import { credential, PROFILES, profile, runtime } from '../../../unit/app/features/fleet/account-support.ts';
 import { credentialsOf } from '../../../unit/app/features/fleet/runtimes/support-b.ts';
 
 const params = new URLSearchParams(window.location.search);
@@ -68,7 +68,11 @@ const runtimes = RuntimeCatalogSchema.parse({
   ],
 });
 
-const profiles = LayeredProfileCatalogSchema.parse({ ...PROFILES });
+// The built-in profiles carry a plumbing name; the form says them in words ("Ferretry standard").
+const profiles = LayeredProfileCatalogSchema.parse({
+  ...PROFILES,
+  profiles: [...PROFILES.profiles, profile({ name: 'ferretry-claude' }), profile({ name: 'ferretry-codex' })],
+});
 
 const runtimesClient = {
   call: async (route: string) => {

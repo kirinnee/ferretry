@@ -200,8 +200,10 @@ describe('Runtimes tab list', () => {
 describe('Add runtime from the tab', () => {
   const journey = async (view: Awaited<ReturnType<typeof open>>): Promise<void> => {
     await click(view.container, '[data-add-runtime]');
-    expect(must(view.container.querySelector<HTMLInputElement>('#add-runtime-name'), 'name').value).toBe(
-      'claude-claude-hooks',
+    // Blank name: named after its login, with the id it will get on the id line.
+    expect(must(view.container.querySelector<HTMLInputElement>('#add-runtime-name'), 'name').value).toBe('');
+    expect(must(view.container.querySelector('[data-add-runtime-id]'), 'id').textContent).toBe(
+      'id claude-claude-hooks',
     );
     await click(view.container, '[data-change-submit]');
     await settle();
@@ -235,7 +237,7 @@ describe('Add runtime from the tab', () => {
       },
     });
     await journey(view);
-    expect(text(view.container, '[data-add-runtime-done]')).toContain('claude-claude-hooks is ready to launch');
+    expect(text(view.container, '[data-add-runtime-done]')).toContain('is ready to launch');
     await click(view.container, '[data-add-runtime-finish="open"]');
     expect(view.container.querySelector('[data-runtime-page="claude-claude-hooks"]')).not.toBeNull();
     expect(window.location.hash).toBe('#machines/studio-mac/runtimes/claude-claude-hooks');

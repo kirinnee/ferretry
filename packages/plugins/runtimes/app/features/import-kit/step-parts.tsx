@@ -82,7 +82,10 @@ export function StepCommand({ children }: { readonly children: string }) {
   );
 }
 
-/** The runtime-name field of the import page. */
+/**
+ * The runtime-name field of the import page. The stored name (`codex-default`) is an id, not a name a person picks, so it
+ * sits under "More" as the id the runtime is launched by; the page shows the runtime in plain words everywhere else.
+ */
 export function RuntimeNameField({
   value,
   invalid,
@@ -95,19 +98,25 @@ export function RuntimeNameField({
   readonly onChange: (next: string) => void;
 }) {
   return (
-    <label className="ob-field">
-      Runtime name
-      <input
-        type="text"
-        className="ob-input"
-        value={value}
-        maxLength={200}
-        disabled={disabled === true}
-        aria-invalid={invalid}
-        data-runtime-name=""
-        onChange={event => onChange(event.currentTarget.value)}
-      />
-    </label>
+    <details className="ob-field" data-runtime-name-more="" open={invalid}>
+      <summary>More</summary>
+      <label className="ob-field">
+        Runtime id
+        <input
+          type="text"
+          className="ob-input"
+          value={value}
+          maxLength={200}
+          disabled={disabled === true}
+          aria-invalid={invalid}
+          data-runtime-name=""
+          onChange={event => onChange(event.currentTarget.value)}
+        />
+      </label>
+      <span data-runtime-name-help="">
+        You type this id to launch it. Ferretry shows it in plain words everywhere else.
+      </span>
+    </details>
   );
 }
 
