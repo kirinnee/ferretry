@@ -15,6 +15,12 @@ export interface RunSpec {
   readonly command: readonly string[];
   readonly cwd: FencedPath;
   readonly env: ChildEnvironment;
+  /**
+   * The programs `command` execs through at the pane's one pid, in order, by the name the kernel reports for each,
+   * ending in the harness itself (Claude: `env`, `sh`, `claude`). A runner may bind a first turn to the pane while it is
+   * still on this chain and pin the harness once it runs; absent, a pane is bound to whatever it runs when first read.
+   */
+  readonly execChain?: readonly string[];
   /** The ferret's limits (`limits.yaml`), as the kernel's spawn port applies them. */
   readonly limits?: JsonValue;
 }
@@ -206,6 +212,15 @@ export interface Runner {
    * reads: no key is ever written. Absent: the runner cannot tell, and a start does not wait.
    */
   settled?(handle: RunnerHandle, ferret?: FerretId): Promise<'settled' | 'timed-out'>;
+  /**
+   * Additive (P0): Claude Code's "WARNING: Loading development channels" confirm, which every launch that loads
+   * Ferretry's channel shows, answered with its first row ("I am using this for local development") and NOTHING else.
+   * Watches the pane behind `handle`, boundedly, from its launch: `answered` once that exact dialog took its one key,
+   * `absent` when the pane reached its prompt, showed any OTHER screen that asks something, or the bound passed (nothing
+   * pressed). Rejects when the pane is gone. The key goes through the runner's guarded binding like any write. Absent:
+   * the confirm waits for a first turn's delivery, or a person, to answer it.
+   */
+  answerDevChannels?(handle: RunnerHandle, ferret?: FerretId): Promise<'answered' | 'absent'>;
   /**
    * Additive (U3, today's `PaneScreenReader.text`): what the pane behind `handle` last showed, dead or alive, so a
    * harness can explain a start that failed ({@link Harness.startFailure}). It only reads, and the text is handed to the

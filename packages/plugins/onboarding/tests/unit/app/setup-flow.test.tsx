@@ -168,6 +168,41 @@ function RunLikePage({ step }: { readonly step: StepHost }): ReactNode {
   return <p>run</p>;
 }
 
+/**
+ * The last page of a harness segment as the real ones draw it (the shared body is Runtimes' kit, tested there): it reads the
+ * machine's runtimes afresh and says what the tool ended with.
+ */
+function RuntimeReadyLikePage({
+  step,
+  harness,
+  label,
+}: {
+  readonly step: StepHost;
+  readonly harness: string;
+  readonly label: string;
+}): ReactNode {
+  const [names, setNames] = useState<readonly string[] | undefined>(undefined);
+  useEffect(() => {
+    void must(flowClient, 'a client')
+      .call<{ runtimes: { name: string; harness: string }[] }>('GET /v1/runtimes')
+      .then(answer => {
+        setNames(answer.runtimes.filter(runtime => runtime.harness === harness).map(runtime => runtime.name));
+        step.ready();
+      });
+  }, [harness, step]);
+  if (names === undefined) return null;
+  return (
+    <div>
+      <p data-ready-headline="">{names.length > 0 ? `${label} is ready` : `No runtime was made for ${label}`}</p>
+      {names.length > 0 ? (
+        <p data-ready-names="">{`Runtime: ${names.join(', ')}.`}</p>
+      ) : (
+        <p data-ready-later="">Settings › Logins</p>
+      )}
+    </div>
+  );
+}
+
 /** The machine the flow under test talks to, set by `setup`: the real picker and the scan reader below talk through its client. */
 let flowClient: PluginClient | undefined;
 /** The real AI picker (what the shell mounts), made for the flow's own client. */
@@ -206,6 +241,20 @@ const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
   'fake-pack.legacy': () => <p>an old page that never calls ready</p>,
   'fake-pack.forgot': step => <ReadyPage step={step} />,
   'projects.folders': step => <ProjectSetupPage step={step} />,
+  // A pick's own pages (the real ones are the harness plugins'): each is ready at once; the Ready page is the real shared body.
+  ...Object.fromEntries(
+    ['claude-code', 'codex'].flatMap(plugin => [
+      ...['sign-in', 'import-choice', 'import-run', 'permission'].map(
+        id => [`${plugin}.${id}`, (step: StepHost) => <ReadyPage step={step} />] as const,
+      ),
+      [
+        `${plugin}.ready`,
+        (step: StepHost) => (
+          <RuntimeReadyLikePage harness={plugin} label={plugin === 'codex' ? 'Codex' : 'Claude Code'} step={step} />
+        ),
+      ] as const,
+    ]),
+  ),
 };
 
 /**
@@ -253,6 +302,8 @@ function setup(options: {
   /** What the machine's scan answers: nothing useful (the default), a refusal, or a Claude Code found here. */
   readonly scan?: 'fails' | 'finds';
   readonly report?: (message: string) => void;
+  /** What `GET /v1/runtimes` answers: the runtimes this machine has (none by default). */
+  readonly runtimes?: readonly { readonly id: string; readonly name: string; readonly harness: string }[];
   /** Holds a daemon answer until the returned promise settles (the test releases it). */
   readonly gate?: (state: string, step: string) => Promise<void> | undefined;
 }) {
@@ -273,6 +324,8 @@ function setup(options: {
         }
         if (route === 'GET /v1/claude-code/update' || route === 'GET /v1/codex/update') return null;
         if (route === 'GET /v1/logins/presets') return REAL_PROVIDER_PRESET_CATALOG;
+        if (route === 'GET /v1/runtimes')
+          return { runtimes: (options.runtimes ?? []).map(runtime => ({ ...runtime, launch: { available: true } })) };
         if (route === 'GET /v1/onboarding') {
           reads.push({ daemon: machine.id, init: request });
           if (options.hangReads?.has(machine.id) === true) return new Promise(() => undefined);
@@ -531,6 +584,18 @@ describe('the setup flow', () => {
     await next();
     await settle();
     expect(view.container.querySelector('[data-flow-end]')).not.toBeNull();
+  });
+
+  it('sends a skipped device page, and the closing Settings link of a device-only run, INSIDE the machine’s Settings', async () => {
+    view = await mount(setup({ search: '?phase=client' }).tree);
+    await settle();
+    await click('Later'); // appearance: later
+    await next(); // look
+    await next(); // finish
+    await settle();
+    const hrefOf = (selector: string) => view?.container.querySelector(selector)?.getAttribute('href');
+    expect(hrefOf('[data-onboarding-later-link="onboarding"]')).toBe('/d/fy_daemon_a/settings/device');
+    expect(hrefOf('[data-onboarding-open-settings]')).toBe('/d/fy_daemon_a/settings/device');
   });
 });
 
@@ -1397,6 +1462,130 @@ describe("the machine's own setup is read the moment the flow opens (C59 O8-15)"
     view = await mount(run.tree);
     await settle();
     expect(run.scans).toEqual([]);
+  });
+});
+
+describe("a pick leads through each tool's sign-in, import and runtime (O9-6)", () => {
+  const STEPS = ['installed', 'sign-in', 'import-choice', 'import-run', 'permission', 'ready'];
+  const walk = (plugin: string, first: number): Machine['steps'] =>
+    STEPS.map((id, index) => ({
+      plugin,
+      id,
+      title: id,
+      order: first + index,
+      side: 'daemon' as const,
+      group: plugin,
+      stepHost: true as const,
+      state: 'pending' as const,
+    }));
+  const machine = (): Machine => ({
+    id: A,
+    name: 'Studio',
+    harnesses: [
+      { key: 'claude-code', label: 'Claude Code' },
+      { key: 'codex', label: 'Codex' },
+    ],
+    steps: [
+      ...['agents', 'name'].map((id, index) => ({
+        plugin: 'onboarding',
+        id,
+        title: id,
+        order: index === 0 ? 2 : 5,
+        side: 'daemon' as const,
+        group: 'onboarding',
+        stepHost: true as const,
+        state: 'pending' as const,
+      })),
+      ...walk('claude-code', 20),
+      ...walk('codex', 40),
+    ],
+  });
+  const box = (name: string): HTMLInputElement | null | undefined =>
+    view?.container.querySelector<HTMLInputElement>(`[data-agent-row="${name}"] > label input`);
+  const headline = (): string | undefined =>
+    view?.container.querySelector('[data-ready-headline]')?.textContent ?? undefined;
+  /** Next until the flow reaches `key`, collecting every page it passed. */
+  const walkTo = async (key: string): Promise<string[]> => {
+    const seen: string[] = [];
+    for (let guard = 0; guard < 30 && pageKey() !== key; guard += 1) {
+      seen.push(String(pageKey()));
+      await next();
+      await settle();
+    }
+    return seen;
+  };
+
+  it('Claude + Codex: each tool\'s sign-in, import and Ready page is walked in order, and each ends "is ready" with its runtime', async () => {
+    const run = setup({
+      machines: [machine()],
+      runtimes: [
+        { id: 'claude-code-default', name: 'Claude (you)', harness: 'claude-code' },
+        { id: 'codex-default', name: 'Codex (you)', harness: 'codex' },
+      ],
+    });
+    view = await mount(run.tree);
+    await settle();
+    await interact(() => box('codex')?.click());
+    const seen = await walkTo('claude-code.ready');
+    expect(seen).toEqual([
+      'onboarding.agents',
+      'onboarding.name',
+      'claude-code.installed',
+      'claude-code.sign-in',
+      'claude-code.import-choice',
+      'claude-code.import-run',
+      'claude-code.permission',
+    ]);
+    expect(headline()).toBe('Claude Code is ready');
+    expect(view?.container.querySelector('[data-ready-names]')?.textContent).toBe('Runtime: Claude (you).');
+    const rest = await walkTo('codex.ready');
+    expect(rest).toEqual([
+      'claude-code.ready',
+      'codex.installed',
+      'codex.sign-in',
+      'codex.import-choice',
+      'codex.import-run',
+      'codex.permission',
+    ]);
+    expect(headline()).toBe('Codex is ready');
+    expect(view?.container.querySelector('[data-ready-names]')?.textContent).toBe('Runtime: Codex (you).');
+    // Back goes to the page the person came from.
+    await press('[data-step-back]');
+    await settle();
+    expect(pageKey()).toBe('codex.permission');
+  });
+
+  it('a tool whose sign-in was left for later ends with "No runtime was made" and how to add one; the other tool is still ready', async () => {
+    const run = setup({
+      machines: [machine()],
+      runtimes: [{ id: 'claude-code-default', name: 'Claude (you)', harness: 'claude-code' }],
+    });
+    view = await mount(run.tree);
+    await settle();
+    await interact(() => box('codex')?.click());
+    await walkTo('claude-code.ready');
+    expect(headline()).toBe('Claude Code is ready');
+    await walkTo('codex.sign-in');
+    await click('Later');
+    await settle();
+    await walkTo('codex.ready');
+    expect(headline()).toBe('No runtime was made for Codex');
+    expect(view?.container.querySelector('[data-ready-later]')?.textContent).toContain('Settings › Logins');
+  });
+
+  it('the default pick (Claude only) never reaches a Codex page, its Ready page included', async () => {
+    const run = setup({
+      machines: [machine()],
+      runtimes: [{ id: 'claude-code-default', name: 'Claude (you)', harness: 'claude-code' }],
+    });
+    view = await mount(run.tree);
+    await settle();
+    const seen = await walkTo('claude-code.ready');
+    expect(seen).toContain('claude-code.sign-in');
+    expect(seen).toContain('claude-code.import-run');
+    await next();
+    await settle();
+    expect(String(pageKey()).startsWith('codex.')).toBe(false);
   });
 });
 

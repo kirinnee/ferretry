@@ -190,10 +190,11 @@ describe('the settings pages: `/settings` and `/d/<id>/settings[/<plugin>[/<tab>
     }
   });
 
-  test('S-0355 `/settings` is this device’s settings page, a separate page from any daemon’s', async () => {
+  test('S-0355 `/settings` is this device’s settings, which a paired device opens inside the machine’s Settings', async () => {
     expect(table.parse('/settings')).toEqual({ kind: 'device-settings' });
     const view = await drawn('/settings');
-    expect(view.container.querySelector('nav[aria-label="Plugin settings"]')).toBeNull();
+    expect(window.location.pathname).toBe('/d/d1/settings/device');
+    expect(view.container.querySelector('nav[aria-label="Plugin settings"]')).not.toBeNull();
     await view.unmount();
   });
 });

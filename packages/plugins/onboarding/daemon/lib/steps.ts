@@ -47,7 +47,9 @@ export function joinProgress(entries: readonly OnboardingEntry[], progress: Prog
 
 /**
  * Complete = no daemon step pending. No steps at all is complete: there is nothing left to ask. A client step is
- * answered on the device, never here, so it is always 'pending' to the daemon and never holds the run open.
+ * answered on the device, never here, so it is always 'pending' to the daemon and never holds the run open. An
+ * informational step (a tool's Ready page) is left out by `viewOf`: it only shows something, so a step added to a
+ * finished setup never makes it unfinished.
  */
 export const isComplete = (steps: readonly StepView[]): boolean =>
   steps.every(step => sideOf(step) === 'client' || step.state !== 'pending');
@@ -59,10 +61,13 @@ export function viewOf(
   harnesses: readonly HarnessView[] = [],
 ): OnboardingView {
   const steps = joinProgress(entries, progress);
+  const informational = new Set(
+    entries.filter(entry => entry.informational === true).map(e => stepKey(e.plugin, e.id)),
+  );
   return {
     steps: [...steps],
     ...(harnesses.length === 0 ? {} : { harnesses: [...harnesses] }),
-    complete: isComplete(steps),
+    complete: isComplete(steps.filter(step => !informational.has(stepKey(step.plugin, step.id)))),
     setUp,
   };
 }

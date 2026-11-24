@@ -102,6 +102,7 @@ describe.if(process.platform === 'linux')('the agent browser as a real window, i
       's1',
       frame => frames.push(frame),
       () => undefined,
+      'owner',
     );
 
     // Act

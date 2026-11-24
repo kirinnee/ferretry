@@ -368,7 +368,7 @@
   overflow-wrap: anywhere;
 }
 
-@container (max-width: 519.98px) {
+@container fy-spf (max-width: 899.98px) {
   .fy-wd {
     align-items: center;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -619,5 +619,51 @@
   }
   to {
     opacity: 1;
+  }
+}
+
+/* O9-1, a phone's strip: the example words wrap onto two or three lines in their half, and a typed reveal (a clip that grows from the left)
+   cuts every line at the same x, so mid-take the words read as clipped at the right edge. Here they ARRIVE (a fade) at the same moments
+   instead, and are never clipped. The wide column keeps the typed reveal: one line, nothing to cut across. */
+@keyframes fy-wd-words-live {
+  0%,
+  6% {
+    opacity: 0;
+  }
+  22%,
+  88% {
+    opacity: 1;
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes fy-wd-words-after {
+  0%,
+  56% {
+    opacity: 0;
+  }
+  66%,
+  88% {
+    opacity: 1;
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
+}
+@container fy-spf (max-width: 899.98px) {
+  @media (prefers-reduced-motion: no-preference) {
+    :root:not([data-motion='reduced']) .fy-wd[data-voice-demo='live'] .fy-wd__text {
+      animation-name: fy-wd-words-live;
+    }
+    :root:not([data-motion='reduced']) .fy-wd[data-voice-demo='after'] .fy-wd__text {
+      animation-name: fy-wd-words-after;
+    }
+  }
+  .fy-wd__text {
+    clip-path: none;
+    overflow-wrap: break-word;
   }
 }

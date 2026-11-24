@@ -4,6 +4,7 @@ import {
   RuntimeEffortControls,
   RuntimeModelChoices,
   RuntimeModelControls,
+  RuntimeSpeedControls,
 } from '../../../app/components/runtime-controls.tsx';
 import { runsHarness, profileFit, profilesFitFirst } from '../../../app/features/fleet/runtimes/runtimes-model.ts';
 import { HARNESSES } from '../../../app/features/import-kit/model.ts';
@@ -52,6 +53,22 @@ describe('a running ferret on a harness the app has no behaviour for', () => {
   test('the reasoning picker says the sentence and shows neither the Claude levels nor the Codex step', async () => {
     const screen = await mount(
       <RuntimeEffortControls api={api} canControl catalogs={noCatalogs} onClose={() => undefined} view={thirdView()} />,
+    );
+    expect(screen.container.textContent).toContain(SENTENCE);
+    expect(screen.container.querySelector('button')).toBeNull();
+    await screen.unmount();
+  });
+
+  test('the speed picker says the sentence, offers no speed and fetches nothing', async () => {
+    const screen = await mount(
+      <RuntimeSpeedControls
+        api={api}
+        canControl
+        catalogs={noCatalogs}
+        fast={false}
+        onClose={() => undefined}
+        view={thirdView()}
+      />,
     );
     expect(screen.container.textContent).toContain(SENTENCE);
     expect(screen.container.querySelector('button')).toBeNull();

@@ -12,7 +12,7 @@
 
 import { Loading } from '@ferretry/app/ui';
 import { daemonHomeHref } from '@ferretry/app';
-import type { MachineView, RuntimeView } from '../../../../contract/index.ts';
+import { type MachineView, type RuntimeView, runtimeAccounts, runtimeDisplayName } from '../../../../contract/index.ts';
 import { ChevronLeft, ChevronRight, Lock, Plus, TriangleAlert } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { cn } from '../../../ui.ts';
@@ -166,6 +166,7 @@ function RuntimePage({
   const layers = profile === undefined ? [] : layerRows(profile, data.components, runtime.harness);
   const models = modelRows(runtime);
   const canLaunch = online && runtime.launch.available;
+  const shownName = runtimeDisplayName(runtime, data.runtimes.runtimes, runtimeAccounts(data.credentials.logins));
   return (
     <section className="flex min-w-0 flex-col gap-4" data-runtime-page={runtime.name}>
       <div>
@@ -180,10 +181,17 @@ function RuntimePage({
           <ChevronLeft size={16} aria-hidden="true" />
           Runtimes
         </Button>
-        <h3 className="m-0 mt-2 break-all font-mono text-title font-semibold text-fg">{runtime.name}</h3>
+        <h3 className="m-0 mt-2 break-words text-title font-semibold text-fg" data-runtime-title="">
+          {shownName}
+        </h3>
         <p className="m-0 mt-1 flex items-center gap-2 text-cell text-muted">
           <AccountStatus word={word} showLabel />
         </p>
+        {shownName === runtime.name ? null : (
+          <p className="m-0 mt-1 text-meta text-muted" data-runtime-stored-name="">
+            Command name: <span className="font-mono break-all">{runtime.name}</span>
+          </p>
+        )}
         <div className="mt-3 flex flex-col gap-1">
           <RuntimeActionButtons
             runtime={runtime}
@@ -379,11 +387,11 @@ function RuntimePage({
             data-variant="primary"
             data-runtime-launch=""
           >
-            {launchLabel(runtime, machineName, online)}
+            {launchLabel(runtime, machineName, online, shownName)}
           </a>
         ) : (
           <Button type="button" variant="primary" className="w-full" disabled data-runtime-launch="">
-            {launchLabel(runtime, machineName, online)}
+            {launchLabel(runtime, machineName, online, shownName)}
           </Button>
         )}
       </div>
@@ -438,7 +446,7 @@ function RuntimeRow({
               <div className="flex min-w-0 flex-wrap items-center gap-x-2">
                 <a
                   href={machineDetailHash(machineName, 'runtimes', runtime.name)}
-                  className="flex min-h-control min-w-[min(11rem,100%)] flex-1 items-start gap-2 py-1 text-left no-underline after:absolute after:inset-0 after:content-[''] hover:no-underline"
+                  className="flex min-h-control basis-[min(18rem,100%)] grow items-start gap-2 py-1 text-left no-underline after:absolute after:inset-0 after:content-[''] hover:no-underline"
                   data-runtime-row={runtime.name}
                 >
                   <AccountStatus
@@ -450,10 +458,11 @@ function RuntimeRow({
                     data-runtime-name-row=""
                   >
                     <span
-                      className="max-w-full shrink-0 break-words font-mono text-row font-semibold text-fg"
+                      className="max-w-full shrink-0 break-words text-row font-semibold text-fg"
                       data-runtime-name=""
+                      title={runtime.name}
                     >
-                      {runtime.name}
+                      {runtimeDisplayName(runtime, data.runtimes.runtimes, runtimeAccounts(data.credentials.logins))}
                     </span>
                     {isDefaultRuntime(machine, runtime) ? (
                       <Badge tone="ok" className="shrink-0" data-runtime-default-badge="">
@@ -586,6 +595,7 @@ export function RuntimesTab({
       <RenameRuntimeDialog
         runtime={acting}
         runtimes={data.runtimes.runtimes}
+        accounts={runtimeAccounts(data.credentials.logins)}
         machineName={machineName}
         changes={changes}
         onClose={() => setAct(null)}
@@ -600,6 +610,7 @@ export function RuntimesTab({
       <RemoveRuntimeDialog
         runtime={acting}
         runtimes={data.runtimes.runtimes}
+        accounts={runtimeAccounts(data.credentials.logins)}
         machine={machine}
         machineName={machineName}
         changes={changes}
@@ -671,6 +682,7 @@ export function RuntimesTab({
                 machine={machine}
                 machineName={machineName}
                 runtimes={runtimes}
+                accounts={runtimeAccounts(data.credentials.logins)}
                 changes={changes}
                 picked={pickedDefault}
                 onPick={setPickedDefault}

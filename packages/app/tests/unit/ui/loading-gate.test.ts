@@ -33,11 +33,8 @@ describe('the loader threshold', () => {
   });
 });
 
-describe('the minimum display time', () => {
-  test('a ghost of a loader that was shown is drawn at once, over the gate and the reduced-motion restatement', () => {
-    expect(css).toContain('.fy-loading-ghost');
-    expect(css).toMatch(
-      /\.fy-loading-ghost(\.fy-loading-ghost){4,}\s*{[^}]*animation: none !important;[^}]*opacity: 1 !important;/,
-    );
+describe('nothing is left drawn over what a wait was replaced by', () => {
+  test('the stylesheet has no leftover-copy (ghost) rule', () => {
+    expect(css).not.toContain('loading-ghost');
   });
 });

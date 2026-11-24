@@ -348,6 +348,68 @@
   max-width: 100%;
   overflow-x: auto;
 }
+/* THE OPEN SIDE COLUMN beside the chat (`ferret-workspace.tsx`): one aside holding a row of tabs and ONE panel at a time, so the
+   panels no longer stack and crowd each other (a terminal deck and a browser, both cut off, in a 360px strip). The reader drags its
+   left edge (`ui/resize-handle.tsx`, `--fy-w-ferret-side`, saved per device); the chat always keeps `--fy-chat-min` of the row. */
+.fy-ferret-side {
+  --fy-chat-min: 320px;
+  box-sizing: border-box;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  width: var(--fy-w-ferret-side, 400px);
+  min-width: 300px;
+  max-width: calc(100% - var(--fy-chat-min));
+  min-height: 0;
+  border-left: var(--border-width) solid var(--border);
+}
+/* THE CHAT FLOOR: the row that holds the chat and the column is a size container. Where it cannot hold the column's minimum (300)
+   AND the chat's (320) the column does not squeeze the chat: it overlays it from the right edge, as the phone's drawer does, and
+   its divider goes (there is no edge to drag). 620 = 300 + 320. */
+.fy-ferret-row {
+  position: relative;
+  container-type: inline-size;
+  container-name: ferret-row;
+}
+@container ferret-row (max-width: 619.98px) {
+  .fy-ferret-side {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: 0;
+    z-index: 6;
+    width: min(var(--fy-w-ferret-side, 400px), 100%);
+    min-width: 0;
+    max-width: 100%;
+    background: var(--surface);
+    box-shadow: -8px 0 24px rgb(0 0 0 / 0.18);
+  }
+  .fy-resize--ferret-side {
+    display: none;
+  }
+}
+.fy-ferret-side > .fy-slot[data-slot='ferret.side'] {
+  flex: 1 1 0;
+  gap: 0;
+  width: auto;
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border-left: 0;
+  overflow: hidden;
+}
+.fy-ferret-side > .fy-slot[data-slot='ferret.side'] > .fy-panel {
+  display: none;
+}
+.fy-ferret-side > .fy-slot[data-slot='ferret.side'] > .fy-panel[data-phone-shown] {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: auto;
+  padding: 8px;
+}
 /* On a phone the pane is not drawn BESIDE the chat: the page's chip row (`ferret-workspace.tsx`) shows one panel at a time,
    full width, in the same host. `data-phone-active` is set while a panel (not the chat) is on show; every panel stays
    mounted and only the one marked `data-phone-shown` is drawn. */
@@ -388,6 +450,34 @@
   margin: 0;
   padding: 6px 12px;
   border-bottom: var(--border-width) solid var(--border);
+}
+/* A STATUS OVERLAY (the install offer): an offer is never part of the page, so it hangs from the strip's bottom edge, over the
+   top of the page, and takes no height from the frame — the page and the composer keep every pixel they had. The strip is
+   already under the top bar, so the notch and the sides are paid; the overlay sits above the page's own sticky heads. */
+.fy-status {
+  position: relative;
+}
+.fy-status > .fy-status-overlay {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  margin: 4px 8px 0;
+}
+/* On a ferret's page the strip's bottom edge IS the top of the chat: its header row (the Menu button, the name, Modes) sits right
+   there, and under it the page's own controls — on a phone the row of tab chips (one 44px chip, ferret-workspace's phone-tab-row),
+   wide the slim rail holding the side-panel toggle (40px, at the right edge). The overlay hangs below the header row and the chip
+   row and stops short of the rail, so it never covers a hit target of the chat's chrome. */
+.fy-frame[data-chat-chrome] .fy-status > .fy-status-overlay {
+  top: calc(100% + var(--chat-head-h) + var(--chat-tabs-h, 0px));
+  right: 48px;
+}
+@media (max-width: 767.98px) {
+  .fy-frame[data-chat-chrome] .fy-status > .fy-status-overlay {
+    --chat-tabs-h: 49px;
+    right: 0;
+  }
 }
 
 /* The page scroll region adds a node to listen on, never a box (scroll/page-scroll-region.tsx). */
@@ -501,18 +591,11 @@
   overflow-y: auto;
   margin: 0;
   gap: 2px;
-  /* A list longer than the window scrolls inside itself and says so: a thin themed scrollbar plus a soft fade that shows only
-     while there is more above or below (the two `local` layers cover the two `scroll` shadows once an end is reached). Keyboard
-     focus on a link scrolls it natively. */
+  /* A list longer than the window scrolls inside itself with a thin themed scrollbar. No painted fade: a `var(--bg)` cover is
+     white over a tinted page and read as a bar behind the first heading. Keyboard focus on a link scrolls it natively. */
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
-  --fy-scroll-cue:
-    linear-gradient(var(--bg) 30%, transparent) top / 100% 24px no-repeat local,
-    linear-gradient(transparent, var(--bg) 70%) bottom / 100% 24px no-repeat local,
-    linear-gradient(color-mix(in srgb, var(--fg) 14%, transparent), transparent) top / 100% 10px no-repeat scroll,
-    linear-gradient(transparent, color-mix(in srgb, var(--fg) 14%, transparent)) bottom / 100% 10px no-repeat scroll;
-  background: var(--fy-scroll-cue);
 }
 .fy-tabs--grouped {
   flex-direction: column;

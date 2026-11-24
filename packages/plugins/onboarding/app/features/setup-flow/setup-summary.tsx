@@ -5,7 +5,7 @@
  * nothing left undone is lost. It names plugins ("Claude Code") and device pages ("Passkey"), never the pages inside a
  * plugin. Nothing here is a box: no border, no card, only spacing (`end-page.css`).
  */
-import { DEVICE_SETTINGS_HREF, daemonSettingsHref } from '@ferretry/app';
+import { daemonSettingsHref, deviceSettingsHref } from '@ferretry/app';
 import { Check, Minus } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { RouterLink, type SummaryStep } from '../../views/steps-screen.tsx';
@@ -74,7 +74,7 @@ function Row({ daemon, segment }: { readonly daemon: string; readonly segment: S
       </span>
       {done ? null : (
         <RouterLink
-          href={segment.phase === 'client' ? DEVICE_SETTINGS_HREF : daemonSettingsHref(daemon, segment.plugin)}
+          href={segment.phase === 'client' ? deviceSettingsHref(daemon) : daemonSettingsHref(daemon, segment.plugin)}
           aria-label={`Finish ${segment.name}`}
           data-onboarding-later-link={segment.plugin}
         >
@@ -136,7 +136,7 @@ export function SetupSummary({
       </div>
       <p className="fy-end__where" data-onboarding-summary-where="">
         <RouterLink
-          href={deviceOnly ? DEVICE_SETTINGS_HREF : daemonSettingsHref(daemon)}
+          href={deviceOnly ? deviceSettingsHref(daemon) : daemonSettingsHref(daemon)}
           data-onboarding-open-settings=""
         >
           Change any of this later in Settings

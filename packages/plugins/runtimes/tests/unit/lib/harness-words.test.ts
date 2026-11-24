@@ -7,6 +7,7 @@ import {
   supportedHarnessKeys,
   unsupportedHarnessSentence,
 } from '../../../contract/harness-words.ts';
+import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { ImportItemIdSchema, importItemId } from '../../../contract/wire/import-items.ts';
 import { ToolInstallRequestSchema } from '../../../contract/wire/setup.ts';
 import { unsupportedHarnessSentence as daemonSentence, supportedKinds } from '../../../daemon/lib/harness-kind.ts';
@@ -53,6 +54,13 @@ describe('the wire is open to a harness key', () => {
     expect(ImportItemIdSchema.safeParse(importItemId(THIRD_HARNESS_KEY, 'instructions')).success).toBe(true);
     expect(ImportItemIdSchema.safeParse(importItemId('codex', 'settings')).success).toBe(true);
     expect(ImportItemIdSchema.safeParse('codex:nothing').success).toBe(false);
+  });
+
+  test('an import item names its harness by the harness grammar, so a prefix HarnessKeySchema refuses is refused here too', () => {
+    for (const prefix of ['1x', 'a-', 'a--b', 'x'.repeat(41)]) {
+      expect(HarnessKeySchema.safeParse(prefix).success).toBe(false);
+      expect(ImportItemIdSchema.safeParse(`${prefix}:env`).success).toBe(false);
+    }
   });
 });
 

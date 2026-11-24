@@ -464,24 +464,3 @@
     auto,
     auto;
 }
-
-/* ON A PHONE the sample is pinned to the top of the screen while the options scroll under it, so every pick is seen working. It is
-   opaque (the frame's own fill) and carries a soft shadow so a card passing under it reads as passing under. Beside the choices
-   (a frame of 900px or more) the frame already pins it. */
-@container (max-width: 899.98px) {
-  .fy-spf__demo:has(.fy-ad) {
-    box-shadow: 0 8px 14px -8px var(--shadow-lg-2);
-    inset-block-start: 8px;
-    position: sticky;
-    z-index: 6;
-  }
-  /* A KEY (Tab, Home, End, an arrow) scrolls a card into view; without a margin it came to rest UNDER the pinned sample or the pinned
-     footer. The top margin is the sample's whole reach (its 8px offset, its 140px at most, a gap); the bottom one is the footer (a
-     row of 44px buttons that may wrap at Larger text, its padding, the safe area, a gap). Both the card and its (sr-only) radio carry
-     it: a click and `scrollIntoView` read the card, the browser's own focus scroll reads the radio. */
-  .fy-astep .fy-cc__card,
-  .fy-astep .fy-cc__card > input {
-    scroll-margin-block-end: calc(104px + env(safe-area-inset-bottom, 0px));
-    scroll-margin-block-start: 160px;
-  }
-}

@@ -15,7 +15,7 @@
 
 import { type Manifest, type PanelProps, implementApp } from '@ferretry/kernel/manifest';
 import { DEFAULT_LAYOUT } from '@ferretry/plugin-layouts/contract';
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { TransportAnswer, TransportRequest } from '../../../src/client/transport.ts';
 import { type DaemonlessPorts, provideToShell, registeredDaemonless } from '../../../src/connect/provides.ts';
@@ -31,6 +31,7 @@ import { useFerretWorkspace } from '../../../src/shell/ferret-workspace-actions.
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
+import { Loading } from '../../../src/ui/loading.tsx';
 import { CORE, FakeTransport, inventoryOf, json } from '../../unit/client/fixtures.ts';
 
 const params = new URLSearchParams(window.location.search);
@@ -81,6 +82,41 @@ function AgendaScreen(): ReactNode {
 // What Connections' relay-fallback watcher draws while the direct address stands in for the relay: a status line, IN FLOW
 // (`connections/app/features/carrier/relay-fallback-notice.tsx`: the same markup, hosted by a stub plugin).
 const RELAY_FALLBACK_LINE = 'Couldn’t reach it through the relay, using the direct connection.';
+
+// A stand-in for Ferrets' New ferret page (`/d/ws/new`): a form about the size of the real one, so a loader drawn over it shows.
+function NewFerretStand(): ReactNode {
+  return (
+    <form
+      aria-label="New ferret"
+      data-new-ferret=""
+      style={{ display: 'grid', gap: 14, maxWidth: 720, margin: '0 auto', padding: 16 }}
+    >
+      <h1 style={{ margin: 0, fontSize: 22 }}>New ferret</h1>
+      {['Runtime', 'Where it works', 'Model', 'Label'].map(label => (
+        <label key={label} style={{ display: 'grid', gap: 4, fontWeight: 600 }}>
+          {label}
+          <input placeholder={`Fake ${label.toLowerCase()}`} style={{ font: 'inherit', padding: 8 }} />
+        </label>
+      ))}
+      <label style={{ display: 'grid', gap: 4, fontWeight: 600 }}>
+        Opening prompt
+        <textarea
+          placeholder="Describe what you want the agent to do…"
+          rows={6}
+          style={{ font: 'inherit', padding: 8 }}
+        />
+      </label>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button className="kt-btn" type="button">
+          Cancel
+        </button>
+        <button className="kt-btn" data-variant="primary" type="button">
+          Create ferret
+        </button>
+      </div>
+    </form>
+  );
+}
 
 // ─── stand-ins: the ferret list (the side column), the chat beside the side pane, the side panels ─────────────────────
 
@@ -349,6 +385,7 @@ const ferretsManifest = manifestOf('ferrets', {
     screens: [
       { id: 'ferrets', path: 'ferrets', nav: { label: 'Ferrets', icon: 'list', order: 5 } },
       { id: 'ferret', path: 'ferrets/:ferret' },
+      { id: 'new-ferret', path: 'new' },
     ],
   },
 });
@@ -393,6 +430,85 @@ function RelayFallbackWatcher(): ReactNode {
   );
 }
 
+// `?install=1`: a stand-in for Updates' install toast (`plugins/updates/app/views/install-offer.tsx`, which this package cannot import):
+// the same contract the real one meets — a `role="status"` line carrying the shell's `fy-status-overlay` class — with its words and
+// buttons, drawn from the theme's own tokens. A suite there pins that the real toast carries the class.
+function InstallToastStand(): ReactNode {
+  if (params.get('install') !== '1') return null;
+  return (
+    <div
+      role="status"
+      data-install-toast="prompt"
+      className="fy-status-overlay"
+      style={{
+        alignItems: 'center',
+        background: 'var(--accent-soft)',
+        border: '1px solid var(--accent-border)',
+        borderRadius: 6,
+        boxShadow: '0 2px 8px rgba(0,0,0,.18)',
+        color: 'var(--fg)',
+        display: 'flex',
+        gap: 8,
+        padding: '6px 12px',
+      }}
+    >
+      <p style={{ flex: 1, margin: 0 }}>
+        <strong>Install Ferretry</strong> <span style={{ color: 'var(--muted)' }}>as an app</span>
+      </p>
+      <button className="kt-btn" data-install-accept="" type="button">
+        Install
+      </button>
+      <button
+        aria-label="Dismiss — don’t offer to install again on this device"
+        className="kt-btn"
+        data-install-dismiss=""
+        type="button"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+// A stand-in for the Board page: the same shape as the real one (`plugins/board/app/views/board.css` `.fy-board`): a flex column
+// that is the page's height and scrolls itself, a header (title, views, filters) ABOVE a read that draws its own page loader.
+// `?boardSlow=<ms>`: that read answers that many ms late.
+const BOARD_SLOW = Number(params.get('boardSlow') ?? '0');
+function BoardStand(): ReactNode {
+  const [reading, setReading] = useState(BOARD_SLOW > 0);
+  useEffect(() => {
+    if (BOARD_SLOW <= 0) return undefined;
+    const timer = setTimeout(() => setReading(false), BOARD_SLOW);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <section
+      aria-label="Board"
+      data-board-stand=""
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        height: '100%',
+        minHeight: 0,
+        overflowY: 'auto',
+        width: '100%',
+      }}
+    >
+      <header style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        <h1 style={{ margin: 0, fontSize: 22 }}>Board</h1>
+        <nav aria-label="Board views" style={{ display: 'flex', gap: 6 }}>
+          {['Kanban', 'List'].map(view => (
+            <button className="kt-btn" key={view} type="button">
+              {view}
+            </button>
+          ))}
+        </nav>
+      </header>
+      {reading ? <Loading kind="page" label="Reading the board…" /> : <p>Fake board: three fake cards.</p>}
+    </section>
+  );
+}
 const page = (text: string) => () => <p style={{ padding: 16 }}>{text}</p>;
 const surfaces: readonly SurfaceEntry[] = [
   ...CORE.filter(entry => entry.id !== 'ferrets' && entry.id !== 'kernel'),
@@ -409,7 +525,9 @@ const surfaces: readonly SurfaceEntry[] = [
     ferretsManifest,
     provideToShell(
       implementApp(ferretsManifest, {
-        build: () => ({ screens: { ferrets: FerretListScreen, ferret: FerretPageScreen } }),
+        build: () => ({
+          screens: { ferrets: FerretListScreen, ferret: FerretPageScreen, 'new-ferret': NewFerretStand },
+        }),
       } as never),
       {},
     ),
@@ -421,7 +539,7 @@ const surfaces: readonly SurfaceEntry[] = [
   ),
   entryOf(
     boardManifest,
-    provideToShell(implementApp(boardManifest, { build: () => ({ screens: { board: page('Board') } }) } as never), {}),
+    provideToShell(implementApp(boardManifest, { build: () => ({ screens: { board: BoardStand } }) } as never), {}),
   ),
   entryOf(
     projectsManifest,
@@ -440,7 +558,7 @@ const surfaces: readonly SurfaceEntry[] = [
   entryOf(
     connectionsManifest,
     provideToShell(implementApp(connectionsManifest, { build: () => ({}) } as never), {
-      background: { 'relay-fallback': RelayFallbackWatcher },
+      background: { 'relay-fallback': RelayFallbackWatcher, 'install-offer': InstallToastStand },
     }),
   ),
   entryOf(
@@ -483,8 +601,16 @@ const grants = {
 // SECOND machine (`ws2`) that has the switch ON while `ws` has it off: each machine's own nav answers for itself.
 const WORK = params.get('work');
 const workIsOff = (machine: string): boolean => WORK === 'off' || (WORK === 'split' && machine === 'ws');
+// `?slow=<ms>`: the daemon answers its plugin list that many ms late (a slow machine), so the shell's waiting state shows.
+const SLOW = Number(params.get('slow') ?? '0');
 const transportOf = (machine: string) =>
-  new FakeTransport((request: TransportRequest): TransportAnswer => {
+  new FakeTransport((request: TransportRequest): Promise<TransportAnswer> | TransportAnswer => {
+    if (request.path === '/v1/plugins' && SLOW > 0) {
+      const answer = json(
+        inventoryOf(surfaces, workIsOff(machine) ? { agenda: { on: false }, board: { on: false } } : {}),
+      );
+      return new Promise<TransportAnswer>(resolve => setTimeout(() => resolve(answer), SLOW));
+    }
     if (request.path === '/v1/plugins')
       return json(inventoryOf(surfaces, workIsOff(machine) ? { agenda: { on: false }, board: { on: false } } : {}));
     if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });

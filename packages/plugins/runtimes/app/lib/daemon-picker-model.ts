@@ -26,6 +26,8 @@ export interface AccountPickerOption {
   /** The value a caller types as `agent` when starting or migrating a session. */
   readonly value: string;
   readonly id: string;
+  /** The stored runtime name: plumbing a launch link may match, never words for a person. */
+  readonly name: string;
   readonly wrapper: string;
   readonly displayName: string;
   readonly kind: PickerAccount['kind'];
@@ -102,6 +104,7 @@ const accountPickerOption = (
   key: account.id,
   value: account.wrapper,
   id: account.id,
+  name: account.name,
   wrapper: account.wrapper,
   displayName: account.displayName,
   kind: account.kind,
@@ -152,7 +155,8 @@ export const firstUsableAccountOption = (options: readonly AccountPickerOption[]
   options?.find(option => option.available) ?? null;
 
 /**
- * The runtime a launch hint names (`?agent=<name>`), by wrapper or by runtime name, honoured only
+ * The runtime a launch hint names (`?agent=<name>`), by wrapper or by stored runtime name and never by the words a
+ * person reads (a label edit or a new twin must not break a link), honoured only
  * when it is offered AND can launch — a hint never pre-fills a row the daemon would refuse.
  */
 export const hintedAccountOption = (
@@ -161,7 +165,7 @@ export const hintedAccountOption = (
 ): AccountPickerOption | null =>
   hint === undefined
     ? null
-    : (options?.find(option => option.available && (option.wrapper === hint || option.displayName === hint)) ?? null);
+    : (options?.find(option => option.available && (option.wrapper === hint || option.name === hint)) ?? null);
 
 /** How a harness reads on screen. */
 export const fleetHarnessLabel = (harness: PickerAccount['kind']): string => harnessWords(harness)?.short ?? harness;

@@ -333,12 +333,13 @@ describe('when the dummy probe may run', () => {
 describe('a one-time code (`code`)', () => {
   const CODE = [field('code', 'code')];
 
-  it('I90 should hold nothing for a card of codes and plain values, and hold a private value or a secret', () => {
-    // Act / Assert — the ferret may see a code, so no lock would hide anything it is not allowed to read.
+  it('should hold nothing for any card: no lock after an answer, whatever the values are', () => {
+    // Act / Assert — the owner's call: once answered, the ferret reads at once, a secret or private value included.
     should(heldFromView(CODE)).be.false();
     should(heldFromView([field('email', 'plain'), field('code', 'code')])).be.false();
-    should(heldFromView([field('code', 'private')])).be.true();
-    should(heldFromView([field('password', 'secret'), field('code', 'code')])).be.true();
+    should(heldFromView([field('code', 'private')])).be.false();
+    should(heldFromView([field('password', 'secret')])).be.false();
+    should(heldFromView([field('password', 'secret'), field('code', 'code')])).be.false();
   });
 
   it('should lock a password beside a code by the password alone, and still never probe such a card', () => {

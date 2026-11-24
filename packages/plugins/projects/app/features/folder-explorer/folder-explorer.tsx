@@ -14,7 +14,7 @@
  */
 import { ArrowUp, ChevronRight, FolderPlus, LayoutGrid, List, TriangleAlert } from 'lucide-react';
 import { useId, useRef, useState } from 'react';
-import { cn, Spinner } from '@ferretry/app/ui';
+import { Button, cn, Spinner } from '@ferretry/app/ui';
 import type { FolderEntry, FolderListing } from '../../../contract/index.ts';
 import { BROAD_ROOT_WARNING } from '../../lib/registration-model.ts';
 import { ExplorerEntries } from './explorer-entries.tsx';
@@ -129,10 +129,24 @@ export function FolderExplorer(props: FolderExplorerProps) {
   };
 
   return (
-    <div className="grid min-h-0 gap-sm" data-explorer-state="ready" aria-busy={loading}>
+    <div className="grid min-h-0 gap-sm" data-compact-controls="" data-explorer-state="ready" aria-busy={loading}>
       <PathBox
         current={displayPath(listing)}
         refusal={pathRefusal}
+        lead={
+          up !== null && (
+            <Button
+              type="button"
+              icon={<ArrowUp size={14} aria-hidden="true" />}
+              aria-label="Up one folder"
+              title="Up one folder"
+              data-explorer-up={up}
+              onClick={() => open(up)}
+            >
+              <span className="max-sm:sr-only">Up</span>
+            </Button>
+          )
+        }
         onGo={typed => {
           setTypedIn(listing.path);
           onOpen(typed);
@@ -143,90 +157,44 @@ export function FolderExplorer(props: FolderExplorerProps) {
           if (pathRefusal !== null) onOpen(listing.path);
         }}
       />
-      <div className="flex flex-wrap items-center justify-between gap-xs">
-        <div className="flex min-w-0 items-center gap-xs">
-          {up !== null && (
-            <button
-              type="button"
-              className="kt-btn min-h-control shrink-0"
-              aria-label="Up one folder"
-              data-explorer-up={up}
-              onClick={() => open(up)}
-            >
-              <ArrowUp size={14} aria-hidden="true" />
-              Up
-            </button>
-          )}
-          <nav aria-label="Folder path" className="min-w-0">
-            <ol className="m-0 flex min-w-0 list-none flex-wrap items-center gap-0.5 p-0 text-ui" id={headingId}>
-              {listing.crumbs.map((crumb, index) => {
-                const last = index === listing.crumbs.length - 1;
-                return (
-                  <li key={crumb.path} className="flex items-center gap-0.5">
-                    {index > 0 && <ChevronRight className="text-faint" size={12} aria-hidden="true" />}
-                    <button
-                      type="button"
-                      className={cn(
-                        'min-h-control rounded-control px-1.5 hover:bg-surface-2',
-                        last ? 'font-semibold text-fg' : 'text-muted',
-                      )}
-                      aria-current={last ? 'page' : undefined}
-                      data-explorer-crumb={crumb.path}
-                      onClick={() => open(crumb.path)}
-                    >
-                      {crumb.name}
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          </nav>
-        </div>
-        <div className="flex items-center gap-xs">
-          <fieldset className="relative m-0 flex gap-0.5 border-0 p-0">
-            <legend className="sr-only">How to show folders</legend>
-            {(
-              [
-                ['card', 'Cards', LayoutGrid],
-                ['list', 'List', List],
-              ] as const
-            ).map(([choice, label, Icon]) => (
-              <label
-                key={choice}
-                data-explorer-view-choice={choice}
-                className={cn(
-                  'inline-flex min-h-control cursor-pointer items-center gap-1 rounded-control border px-2 text-meta has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus',
-                  view === choice
-                    ? 'border-accent bg-accent-soft text-accent'
-                    : 'border-border text-muted hover:border-accent',
-                )}
-              >
-                <input
-                  type="radio"
-                  name={`explorer-view-${listId}`}
-                  className="sr-only"
-                  checked={view === choice}
-                  onChange={() => onViewChange(choice)}
-                />
-                <Icon size={14} aria-hidden="true" />
-                {label}
-              </label>
-            ))}
-          </fieldset>
-        </div>
-      </div>
+      <nav aria-label="Folder path" className="min-w-0">
+        <ol className="-ms-1.5 m-0 flex min-w-0 list-none flex-wrap items-center gap-0.5 p-0 text-ui" id={headingId}>
+          {listing.crumbs.map((crumb, index) => {
+            const last = index === listing.crumbs.length - 1;
+            return (
+              <li key={crumb.path} className="flex items-center gap-0.5">
+                {index > 0 && <ChevronRight className="text-faint" size={12} aria-hidden="true" />}
+                <button
+                  type="button"
+                  className={cn(
+                    'min-h-control rounded-control px-1.5 hover:bg-surface-2',
+                    last ? 'font-semibold text-fg' : 'text-muted',
+                  )}
+                  aria-current={last ? 'page' : undefined}
+                  data-explorer-crumb={crumb.path}
+                  onClick={() => open(crumb.path)}
+                >
+                  {crumb.name}
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </nav>
 
-      <div className="flex flex-wrap items-center gap-xs">
-        <button
+      {/* ONE toolbar row where it fits: New folder, the hidden switch, and the view choice pushed to the end. A style with wider
+          controls wraps the row as a fallback rather than push a control off the screen. */}
+      <div className="flex flex-wrap items-center gap-sm" data-explorer-toolbar="">
+        <Button
           type="button"
-          className="kt-btn min-h-control"
+          className="shrink-0"
+          icon={<FolderPlus size={14} aria-hidden="true" />}
           onClick={() => setCreating(open => !open)}
           aria-expanded={creating}
         >
-          <FolderPlus size={14} aria-hidden="true" />
           New folder
-        </button>
-        <label className="flex min-h-control items-center gap-xs text-meta text-muted">
+        </Button>
+        <label className="flex min-h-control min-w-0 items-center gap-xs text-meta text-muted">
           <input
             type="checkbox"
             role="switch"
@@ -235,8 +203,41 @@ export function FolderExplorer(props: FolderExplorerProps) {
             checked={showHidden}
             onChange={event => onShowHiddenChange(event.target.checked)}
           />
-          Show hidden folders
+          <span className="truncate">
+            Show hidden<span className="max-sm:sr-only"> folders</span>
+          </span>
         </label>
+        <fieldset className="relative m-0 ms-auto flex shrink-0 gap-0.5 border-0 p-0">
+          <legend className="sr-only">How to show folders</legend>
+          {(
+            [
+              ['card', 'Cards', LayoutGrid],
+              ['list', 'List', List],
+            ] as const
+          ).map(([choice, label, Icon]) => (
+            <label
+              key={choice}
+              data-explorer-view-choice={choice}
+              title={label}
+              className={cn(
+                'inline-flex min-h-control min-w-[var(--target-floor,0px)] cursor-pointer items-center justify-center gap-1 rounded-control border px-2 text-meta has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus',
+                view === choice
+                  ? 'border-accent bg-accent-soft text-accent'
+                  : 'border-border text-muted hover:border-accent',
+              )}
+            >
+              <input
+                type="radio"
+                name={`explorer-view-${listId}`}
+                className="sr-only"
+                checked={view === choice}
+                onChange={() => onViewChange(choice)}
+              />
+              <Icon size={14} aria-hidden="true" />
+              <span className="max-sm:sr-only">{label}</span>
+            </label>
+          ))}
+        </fieldset>
       </div>
 
       {up === null && (
@@ -301,14 +302,9 @@ export function FolderExplorer(props: FolderExplorerProps) {
 
       {onChoose !== undefined && (
         <div className="flex flex-wrap items-center gap-sm">
-          <button
-            type="button"
-            className="kt-btn min-h-control"
-            data-variant="primary"
-            onClick={() => onChoose(listing.path)}
-          >
+          <Button type="button" variant="primary" onClick={() => onChoose(listing.path)}>
             {props.chooseLabel ?? 'Use this folder'}
-          </button>
+          </Button>
           <span className="mono min-w-0 break-all text-meta text-muted" data-explorer-path="">
             {listing.path}
           </span>

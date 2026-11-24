@@ -324,7 +324,7 @@ P134	kept	access	-	behaviour as written	pairing	P134
 P135	kept	connections	access,kernel	behaviour as written	pairing	P135
 I1	kept	vault	-	behaviour as written	input-requests	I1
 I2	kept	vault	-	behaviour as written	input-requests	I2
-I3	kept	vault	terminals	quarantine	input-requests	I3
+I3	removed	vault	-	-	input-requests	-
 I4	kept	vault	-	behaviour as written	input-requests	I4
 I5	kept	vault	-	behaviour as written	input-requests	I5
 I6	kept	vault	-	behaviour as written	input-requests	I6
@@ -391,8 +391,8 @@ I66	kept	vault	-	behaviour as written	input-requests	I66
 I67	kept	vault	-	behaviour as written	input-requests	I67
 I68	kept	terminals	vault	`terminal_request_input`	input-requests	I68
 I69	kept	vault	-	`padInputValue`, `unpadInputValue`	input-requests	I69
-I70	kept	vault	-	behaviour as written	input-requests	I70
-I71	kept	vault	terminals	`INPUT_QUARANTINE_SECONDS`, `INPUT_SHORT_LOCK_SECONDS`	input-requests	I71
+I70	removed	vault	-	-	input-requests	-
+I71	removed	vault	-	-	input-requests	-
 I72	kept	vault	terminals	`conflict` error	input-requests	I72
 I73	kept	vault	terminals	behaviour as written	input-requests	I73
 I74	kept	kernel	vault	`ApiResponse.late`, `finalised`	input-requests	I74
@@ -411,15 +411,15 @@ I86	kept	vault	-	`lock.ts`, `InputHoldSchema`, `lockSeconds`	input-requests	I86
 I87	kept	vault	-	`hidden-terminal`	input-requests	I87
 I88	kept	vault	-	`proven-field`, `probed-field`	input-requests	I88
 I89	kept	vault	-	`INPUT_LOCK_WORDS`	input-requests	I89
-I90	kept	vault	-	`heldFromView`	input-requests	I90
-I91	kept	vault	-	behaviour as written	input-requests	I91
+I90	removed	vault	-	-	input-requests	-
+I91	removed	vault	-	-	input-requests	-
 I92	kept	vault	-	behaviour as written	input-requests	I92
 I93	kept	vault	-	behaviour as written	input-requests	I93
 I94	kept	vault	-	`until-moved-on`	input-requests	I94
 I95	kept	vault	-	behaviour as written	input-requests	I95
 I96	kept	browsers	vault	dummy probe, `aborted`	input-requests	I96
 I97	kept	browsers	vault	`siteOf`	input-requests	I97
-I98	kept	vault	browsers	`LoginObserver.pageSteer`, `steerOf`	input-requests	I98
+I98	kept	vault	browsers	`LoginObserver.pageSteer`	input-requests	I98
 I99	kept	browsers	vault	behaviour as written	input-requests	I99
 I100	kept	browsers	vault	behaviour as written	input-requests	I100
 I101	kept	vault	-	`[redacted:input !A7]`	input-requests	I101

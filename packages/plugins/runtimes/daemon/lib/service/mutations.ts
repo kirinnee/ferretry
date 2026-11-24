@@ -29,7 +29,7 @@ import {
 } from '../account/scope.ts';
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from '../account/layering.ts';
 import type { HarnessKind } from '../manifest.ts';
-import { byHarness, isSupportedKind, unsupportedHarnessSentence } from '../harness-kind.ts';
+import { byHarness, isSupportedKind, UnsupportedHarnessError, unsupportedHarnessSentence } from '../harness-kind.ts';
 import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
 import { refusedIndexes, type ShownWord, shownWords, shownWordsEtag } from './command-line.ts';
 import { slugName } from '../account/document.ts';
@@ -162,6 +162,16 @@ const componentExtension = (input: ComponentInput): string | undefined => {
 
 const refuse = (message: string): never => {
   throw new FleetMutationRefusal(message);
+};
+
+/** The change with its wire harness keys lowered; a key Runtimes has no behaviour for is a refusal with the one sentence. */
+const lowerWireChange = <T>(change: T): LoweredHarness<T> => {
+  try {
+    return lowerHarness(change);
+  } catch (error) {
+    if (error instanceof UnsupportedHarnessError) return refuse(error.message);
+    throw error;
+  }
 };
 
 /**
@@ -462,7 +472,7 @@ export function deriveAccountChange(
   const draft = structuredClone(model) as unknown as Draft;
   const files: AccountComponentFile[] = [];
   const consequences: string[] = [];
-  const summary = applyAccountChange(model, draft, lowerHarness(change), facts, files, consequences);
+  const summary = applyAccountChange(model, draft, lowerWireChange(change), facts, files, consequences);
   const parsed = AccountModelSchema.safeParse(draft);
   if (!parsed.success) {
     refuse(`this change would leave the setup invalid: ${parsed.error.issues.map(issue => issue.message).join('; ')}`);

@@ -44,12 +44,15 @@ const client: FerretsClient = {
   },
 } as FerretsClient;
 
-/** Stands in for Projects' panel: a row per project that proposes its folder through the slot's `onPick`. */
+/**
+ * Stands in for Projects' panel: a box that carries the label id the page hands it and shows the folder the page holds,
+ * and a row per project that proposes its folder through the slot's `onPick`.
+ */
 const projectsPanel = (props: Record<string, unknown>): ReactNode => {
   const slot = props as unknown as NewFerretProjectSlotProps;
-  if (FOLDERS.length === 0) return null;
   return (
     <section data-new-ferret-projects="">
+      <input className="kt-input w-full font-mono" id={slot.id} readOnly value={slot.value} />
       <h3>Your projects</h3>
       <ul>
         {FOLDERS.map((folder, index) => (

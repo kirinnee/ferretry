@@ -16,7 +16,14 @@
 
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { type LoginStatus, LoginListSchema, LoginViewSchema } from '@ferretry/plugin-logins/contract';
-import { type LocalModels, RuntimeCatalogSchema, type RuntimeView } from '../../contract/index.ts';
+import {
+  type LocalModels,
+  RuntimeCatalogSchema,
+  type RuntimeAccounts,
+  type RuntimeView,
+  runtimeAccountsFrom,
+  runtimeDisplayName,
+} from '../../contract/index.ts';
 import { isSupportedHarnessKey, unsupportedHarnessSentence } from '../../contract/harness-words.ts';
 import type { RuntimesClient } from './client.ts';
 import type { PickerModel } from './picker-model.ts';
@@ -25,6 +32,8 @@ import type { PickerModel } from './picker-model.ts';
 export interface PickerAccount {
   /** The runtime's stable id. */
   readonly id: string;
+  /** The runtime's stored name (what `--agent` takes). Plumbing: a launch link matches it, a person never reads it. */
+  readonly name: string;
   /** The value a caller types as `agent` when starting or moving a ferret. */
   readonly wrapper: string;
   /** The runtime's name, as the Runtimes tab shows it. */
@@ -69,10 +78,15 @@ const PICKER_LOGINS_ROUTE = 'GET /v1/logins' as const;
 const PICKER_CHECK_ROUTE = 'POST /v1/logins/:loginId/check' as const;
 
 /** One runtime as the picker reads it. A model set's models are offered; the harness default offers none. */
-export const pickerAccount = (runtime: RuntimeView): PickerAccount => ({
+export const pickerAccount = (
+  runtime: RuntimeView,
+  others: readonly RuntimeView[] = [],
+  accounts: RuntimeAccounts = new Map(),
+): PickerAccount => ({
   id: runtime.id,
+  name: runtime.name,
   wrapper: runtime.wrapper,
-  displayName: runtime.name,
+  displayName: runtimeDisplayName(runtime, others, accounts),
   kind: runtime.harness,
   credentialId: runtime.credential.id,
   ...(runtime.models === undefined
@@ -111,9 +125,12 @@ export const pickerAccount = (runtime: RuntimeView): PickerAccount => ({
 });
 
 /** Read this machine's runtimes through the client bound to it. */
-export const readAccountPickerCatalog = async (client: RuntimesClient): Promise<AccountPickerCatalog> => ({
-  accounts: RuntimeCatalogSchema.parse(await client.call('GET /v1/runtimes')).runtimes.map(pickerAccount),
-});
+export const readAccountPickerCatalog = async (client: RuntimesClient): Promise<AccountPickerCatalog> => {
+  const runtimes = RuntimeCatalogSchema.parse(await client.call('GET /v1/runtimes')).runtimes;
+  // Who each login is tells two runtimes of one kind apart; a read that fails only leaves them told apart by profile.
+  const accounts = runtimeAccountsFrom(await client.call(PICKER_LOGINS_ROUTE).catch(() => undefined));
+  return { accounts: runtimes.map(runtime => pickerAccount(runtime, runtimes, accounts)) };
+};
 
 const healthRow = (credentialId: string, status: LoginStatus): PickerAccountHealth => ({
   ...status,

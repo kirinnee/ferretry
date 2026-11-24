@@ -17,6 +17,7 @@
  */
 
 import { type ReactNode, useState } from 'react';
+import { useHeldLoading } from '../ui/loading.tsx';
 import { Button } from '../ui/primitives.tsx';
 import { Spinner } from '../ui/spinner.tsx';
 import { StepDemoSlotContext } from './step-demo.tsx';
@@ -68,6 +69,8 @@ export interface StepPageFrameProps {
 
 export function StepPageFrame({ title, line, demo, children, back, next, later, note, progress }: StepPageFrameProps) {
   const locked = next.disabled === true || next.busy === true;
+  // The in-button mark keeps its minimum on screen once shown (the same hold as the page loader); it sits in the button, over nothing.
+  const marked = useHeldLoading(next.busy === true);
   // The demo column always exists so a StepDemo can portal into it; `:empty` (css) hides it while nothing is drawn there.
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   return (
@@ -75,15 +78,18 @@ export function StepPageFrame({ title, line, demo, children, back, next, later, 
       <section className="fy-spf" data-step-page="" aria-busy={next.busy === true || undefined}>
         <div className="fy-spf__page">
           {progress === undefined ? null : <StepProgress {...progress} />}
-          <header className="fy-spf__head">
-            <h1 className="fy-spf__title">{title}</h1>
-            {line === undefined ? null : <p className="fy-spf__line">{line}</p>}
-          </header>
-          <div className="fy-spf__main">
-            <div className="fy-spf__body">{children}</div>
+          {/* The pin holds the heading and the demo: on a phone a pinned demo (`<StepDemo pinned>`) keeps both on screen. */}
+          <div className="fy-spf__pin">
+            <header className="fy-spf__head">
+              <h1 className="fy-spf__title">{title}</h1>
+              {line === undefined ? null : <p className="fy-spf__line">{line}</p>}
+            </header>
             <aside className="fy-spf__demo" aria-hidden="true" data-step-demo="" ref={setSlot}>
               {demo}
             </aside>
+          </div>
+          <div className="fy-spf__main">
+            <div className="fy-spf__body">{children}</div>
           </div>
         </div>
         <footer className="fy-spf__footer" data-step-footer="">
@@ -120,7 +126,7 @@ export function StepPageFrame({ title, line, demo, children, back, next, later, 
               onClick={next.onClick}
               data-step-next=""
             >
-              {next.busy === true ? <Spinner size={14} wait /> : null}
+              {marked ? <Spinner size={14} wait /> : null}
               {next.label}
             </Button>
           </div>

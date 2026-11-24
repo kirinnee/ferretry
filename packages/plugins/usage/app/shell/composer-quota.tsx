@@ -28,8 +28,7 @@ export const composerQuotaSpoken = (quota?: Quota | null): string => {
   const limit = quota?.atLimit === true ? ' Account is at limit; work is blocked until the window resets.' : '';
   const money = quotaMoneyText(quota);
   if (!known(five) && !known(week) && money !== null) return `Account usage: ${money}.${limit}`;
-  if (!known(five) && !known(week))
-    return `Account usage unknown: the daemon has no reading for this account yet.${limit}`;
+  if (!known(five) && !known(week)) return `Usage not available for this login.${limit}`;
   const fiveCopy = known(five) ? `${composerQuotaPercent(five)} used` : 'unknown';
   const weekCopy = known(week) ? `${composerQuotaPercent(week)} used` : 'unknown';
   return `Account usage: 5-hour window ${fiveCopy}; weekly window ${weekCopy}.${limit}`;
@@ -40,8 +39,8 @@ export const composerQuotaSpoken = (quota?: Quota | null): string => {
  *
  * ONLY WHAT IS KNOWN IS DRAWN. A window the daemon has no number for is left out rather than drawn as
  * `—`: a dash beside a label reads as "nothing used", the one confident claim nobody made. With no
- * number for either window (and no money to say) NOTHING is drawn: `usage unknown` is a daemon-side state, not a thing to
- * read on every message box, so the status line goes without it and only the spoken form says why.
+ * number for either window (and no money to say) NOTHING is drawn, not even an empty tooltip carrier: `usage unknown` is a daemon-side state, not a thing to
+ * read on every message box, so the status line goes without it.
  */
 export function ComposerQuota({ quota }: ComposerQuotaProps) {
   const authFailed = quota?.authOk === false;
@@ -50,17 +49,15 @@ export function ComposerQuota({ quota }: ComposerQuotaProps) {
   const week = authFailed ? undefined : quota?.weeklyPercent;
   const spoken = composerQuotaSpoken(quota);
   const money = quotaMoneyText(quota);
+  // NOTHING KNOWN, NOTHING DRAWN: not even an empty element with a tooltip on it.
+  if (!authFailed && !atLimit && money === null && !known(five) && !known(week)) return null;
   const windows = [
     ...(known(five) ? [{ key: '5h', value: five }] : []),
     ...(known(week) ? [{ key: 'wk', value: week }] : []),
   ];
 
   return (
-    <span
-      className="fy-composer-quota"
-      data-quota={authFailed ? 'auth' : windows.length === 0 && money === null ? 'unknown' : 'known'}
-      title={spoken}
-    >
+    <span className="fy-composer-quota" data-quota={authFailed ? 'auth' : 'known'} title={spoken}>
       <span className="sr-only">{spoken}</span>
       {authFailed ? (
         <span aria-hidden="true" className="fy-quota-warning">

@@ -34,7 +34,14 @@
  */
 
 import { Check, Terminal } from 'lucide-react';
-import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  type KeyboardEvent as ReactKeyboardEvent,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   type RuntimeModelCatalog,
   type RuntimeModelChoice,
@@ -155,6 +162,8 @@ export const codexPickerFallbackNeeded = (
  */
 interface RuntimeSwitchCallbacks extends Partial<Omit<RuntimeSwitchLifecycle, 'onClose' | 'open'>> {
   readonly onClose: RuntimeSwitchLifecycle['onClose'];
+  /** A model command was accepted (and, for Codex, its level): the host names it on its chip. Not an observation. */
+  readonly onModelSent?: (model: string, effort?: string) => void;
 }
 
 interface RuntimeControlBase extends RuntimeSwitchCallbacks {
@@ -240,6 +249,7 @@ export function RuntimeModelControls({
   catalogs,
   newRequestId = defaultRequestId,
   onClose,
+  onModelSent,
   onSwitchFailed,
   onSwitchSubmitted,
   onOpenTerminal,
@@ -304,6 +314,7 @@ export function RuntimeModelControls({
         }
         setNotice('Codex opened its native picker in Terminal. No switch is claimed until Codex reports one.');
       } else if (twoStep) {
+        if (model) onModelSent?.(model, effort);
         setSelectedCodexModel(null);
         setNotice(
           effort
@@ -311,7 +322,8 @@ export function RuntimeModelControls({
             : `Codex confirmed ${model} from its runtime settings.`,
         );
       } else {
-        setNotice('Model command sent. The model chip updates when Claude confirms the switch.');
+        if (model) onModelSent?.(model, effort);
+        setNotice('Model command sent. The bar names it as sent; Claude does not echo the model back.');
       }
     } catch (cause) {
       if (targeted) onSwitchFailed?.();
@@ -498,6 +510,8 @@ export interface RuntimeChoiceItem {
   readonly description?: string;
   /** The heading of the group it is listed under (a model catalog's tier); items of one group are adjacent. */
   readonly group?: string;
+  /** Not choosable now, whatever the rest of the list is doing; its `description` says why. */
+  readonly disabled?: boolean;
   readonly onSelect: () => void;
 }
 
@@ -523,6 +537,13 @@ export interface RuntimeChoiceMenuProps {
 const MENU_ITEM = '[role="menuitemradio"]:not(:disabled)';
 
 /**
+ * Whether a list may take focus when it appears. A host that draws several lists at once (the composer's popover holds
+ * model, reasoning and speed) says which one the reader asked for, so a list that finishes loading later does not pull
+ * focus away from it. Everywhere else a list takes focus on the value in force, as it always has.
+ */
+export const RuntimeMenuFocusContext = createContext(true);
+
+/**
  * The single-choice list both pickers draw, in both shells.
  *
  * A `menu` of `menuitemradio`s rather than a radiogroup, because choosing here is
@@ -538,12 +559,14 @@ const MENU_ITEM = '[role="menuitemradio"]:not(:disabled)';
 export function RuntimeChoiceMenu({ ariaLabel, items, disabled, presentation = 'sheet' }: RuntimeChoiceMenuProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const initial = items.find(item => item.checked)?.key ?? items[0]?.key;
+  const mayFocus = useContext(RuntimeMenuFocusContext);
   const [activeKey, setActiveKey] = useState(initial);
   const stop = items.some(item => item.key === activeKey) ? activeKey : initial;
 
   // Land on the value in force when the list first appears.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on first appearance only
   useEffect(() => {
-    listRef.current?.querySelector<HTMLElement>('[tabindex="0"]')?.focus();
+    if (mayFocus) listRef.current?.querySelector<HTMLElement>('[tabindex="0"]')?.focus();
   }, []);
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -596,7 +619,7 @@ export function RuntimeChoiceMenu({ ariaLabel, items, disabled, presentation = '
             aria-checked={item.checked}
             aria-label={item.ariaLabel}
             className={cn('kt-menu-item', dense ? '[--menu-item-py:4px]' : '[--menu-item-py:6px] [--menu-item-h:44px]')}
-            disabled={disabled}
+            disabled={disabled || item.disabled === true}
             key={item.key}
             onClick={item.onSelect}
             onFocus={() => setActiveKey(item.key)}
@@ -956,7 +979,7 @@ export function ClaudeEffortChoices({
       />
       {presentation === 'popover' ? (
         <p className="mt-1 mb-0 border-border-soft border-t px-cell-x pt-1.5 pb-0.5 text-meta text-muted leading-base">
-          Also saved as this account’s default for new sessions.
+          The thinking level is also saved as this account’s default for new sessions.
         </p>
       ) : null}
     </div>
@@ -978,6 +1001,7 @@ export function RuntimeEffortControls({
   newRequestId = defaultRequestId,
   onClaudeEffortSent,
   onClose,
+  onModelSent,
   onSwitchFailed,
   onSwitchSubmitted,
   onOpenTerminal,
@@ -1046,6 +1070,7 @@ export function RuntimeEffortControls({
     onSwitchSubmitted?.();
     try {
       await api.runtime(config.id, { action: 'model', model: model.value, effort }, newRequestId());
+      onModelSent?.(model.value, effort);
       setNotice(`Codex confirmed ${model.value} · ${effort} from its runtime settings.`);
     } catch (cause) {
       onSwitchFailed?.();
@@ -1163,6 +1188,133 @@ export function RuntimeEffortControls({
       )}
 
       <RuntimeOutcome failure={failure} notice={notice} />
+    </div>
+  );
+}
+
+export interface RuntimeSpeedControlsProps extends RuntimeControlBase {
+  /** Whether the ferret runs in fast mode now: what the harness last reported, else what it launched with. */
+  readonly fast: boolean;
+  /** A switch was accepted: the host shows the new speed on its chip. */
+  readonly onFastSent?: (fast: boolean) => void;
+}
+
+/**
+ * The speed sibling of the model and effort controls: Normal or Fast, on the `fast` action the daemon already takes.
+ * Fast is offered only where the catalog CONFIRMS the model in force has it. Where the catalog says it has not (or the
+ * ferret is finished, or the origin is read-only) the control says so in a plain sentence instead of drawing a choice
+ * that could only be refused; while the catalog is still loading, cannot be read, or does not list the model, Fast is
+ * drawn disabled with the reason beside it, never offered on a guess. Normal stays choosable throughout.
+ */
+export function RuntimeSpeedControls({
+  api,
+  canControl,
+  catalogs,
+  fast,
+  newRequestId = defaultRequestId,
+  onClose,
+  onFastSent,
+  presentation = 'sheet',
+  view,
+}: RuntimeSpeedControlsProps) {
+  const popover = presentation === 'popover';
+  const { config, state } = view;
+  const terminal = TERMINAL_STATUSES.has(state.status);
+  const promptRefused = isPromptKnownBusy(state);
+  const [submitting, setSubmitting] = useState<boolean | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  // The speed is the harness's own to change: a harness Runtimes has no behaviour for gets the sentence, and no request.
+  const usable = harnessWords(config.harness) !== undefined;
+  const { catalog, error: catalogError } = useRuntimeModelCatalog(
+    catalogs,
+    config.id,
+    canControl && !terminal && usable,
+    config.harness,
+  );
+
+  // A session switch clears the result that belonged to the previous session.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scope reset trigger, see above
+  useEffect(() => {
+    setFailure(null);
+  }, [config.id]);
+
+  const running = runtimeModelInForce(view);
+  const supported = catalog?.choices.find(choice => choice.value === running)?.fast;
+  // Why Fast cannot be offered yet, said plainly; absent only when the catalog confirmed the model has it.
+  const unconfirmed =
+    supported === true
+      ? undefined
+      : catalogError
+        ? 'Not offered: the model list is unavailable'
+        : catalog === null
+          ? 'Checking whether this model has Fast…'
+          : 'Not offered: this model is not in the list';
+
+  async function choose(next: boolean) {
+    if (!canControl || terminal || promptRefused || submitting !== null || (next && supported !== true)) return;
+    setSubmitting(next);
+    setFailure(null);
+    try {
+      await api.runtime(config.id, { action: 'fast', fast: next }, newRequestId());
+      onFastSent?.(next);
+      onClose();
+    } catch (cause) {
+      setFailure(failureMessage(cause));
+    } finally {
+      setSubmitting(null);
+    }
+  }
+
+  const lead = popover
+    ? 'm-0 px-cell-x py-1 text-meta text-muted leading-base'
+    : 'mt-3 text-meta text-muted leading-base';
+  if (!usable)
+    return (
+      <p className={lead} data-harness-unusable={config.harness} role="status">
+        {unsupportedHarnessSentence(config.harness)}
+      </p>
+    );
+  if (terminal)
+    return <p className={lead}>Changing the speed requires a running session. Resume this session first.</p>;
+  if (!canControl)
+    return <p className={lead}>This daemon is read-only, so it cannot change the running session’s speed.</p>;
+  if (supported === false)
+    return <p className={lead}>{running ?? 'This model'} has no fast mode, so it always runs at normal speed.</p>;
+
+  return (
+    <div className={popover ? undefined : 'mt-3'}>
+      {promptRefused ? (
+        <p className="mt-2 text-meta text-warn leading-base">
+          Wait for an idle prompt before changing the speed. The daemon refuses a busy pane instead of queueing this
+          command.
+        </p>
+      ) : null}
+      <RuntimeChoiceMenu
+        ariaLabel="Set speed"
+        disabled={submitting !== null || promptRefused}
+        items={[
+          {
+            key: 'normal',
+            label: 'Normal',
+            ariaLabel: `Set speed to normal${fast ? '' : ', current'}`,
+            checked: !fast,
+            pending: submitting === false,
+            onSelect: () => void choose(false),
+          },
+          {
+            key: 'fast',
+            label: 'Fast',
+            ariaLabel: `Set speed to fast${fast ? ', current' : ''}`,
+            checked: fast,
+            pending: submitting === true,
+            description: unconfirmed ?? 'Quicker output, at a higher rate',
+            disabled: unconfirmed !== undefined,
+            onSelect: () => void choose(true),
+          },
+        ]}
+        presentation={presentation}
+      />
+      <RuntimeOutcome failure={failure} notice={null} />
     </div>
   );
 }

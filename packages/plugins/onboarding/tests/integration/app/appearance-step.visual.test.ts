@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { PALETTES, STYLES } from '@ferretry/app';
-import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { demoScroll, pinnedStrip, sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
 setDefaultTimeout(60_000);
 
@@ -689,4 +689,118 @@ describe('the onboarding Appearance step (r11 G2)', () => {
       await close();
     }
   });
+});
+
+/**
+ * O9 item 2: on a phone the heading and the sample are ONE pinned strip (the frame's own pin layout, the one Voice uses), opaque and as
+ * wide as the screen, with nothing of the option cards showing over, above or behind it at the top, halfway down and at the end, in the
+ * Pixel art style the owner's walk used (its hard card shadows were the worst offender). At 1440 the sample stays beside the cards.
+ */
+describe('the pinned Appearance strip (O9)', () => {
+  const WIDE = (scheme: 'light' | 'dark'): Variant => ({
+    name: `1440-${scheme}`,
+    width: 1_440,
+    height: 900,
+    phone: false,
+    scheme,
+  });
+  for (const scheme of ['light', 'dark'] as const) {
+    const phone = VARIANTS.find(v => v.phone && v.scheme === scheme) as Variant;
+    for (const where of ['top', 'mid', 'bottom'] as const)
+      it(`keeps nothing behind the pinned heading and sample (390 ${scheme}, scrolled to ${where})`, async () => {
+        const { tab, close } = await open(phone);
+        try {
+          await tab.locator('[aria-label="Style"] .fy-cc__card[data-choice="pixel"]').click();
+          await tab.waitForTimeout(450);
+          const strip = await pinnedStrip(tab, where);
+          await tab.waitForTimeout(150);
+          expect(strip.scrollable, 'the page scrolls').toBeGreaterThan(200);
+          expect(strip.opaque, 'the strip is opaque').toBe(true);
+          expect(strip.pin.left, 'the strip starts at the screen edge').toBeLessThanOrEqual(0.5);
+          expect(strip.pin.right, 'the strip runs to the other edge').toBeGreaterThanOrEqual(strip.screenWidth - 0.5);
+          expect(strip.headingInside, 'the heading is inside the strip').toBe(true);
+          expect(strip.behind, 'nothing of the page shows over the strip').toEqual([]);
+          expect(strip.above, 'nothing of the page shows above the strip').toEqual([]);
+          if (where !== 'top') expect(strip.pin.top, 'the strip is pinned at the top').toBeLessThanOrEqual(0.5);
+          await shot(tab, phone, `pinned-${where}`);
+        } finally {
+          await close();
+        }
+      });
+    it(`keeps the sample beside the cards and pinned (1440 ${scheme})`, async () => {
+      const { tab, close } = await open(WIDE(scheme));
+      try {
+        const g = await tab.evaluate(() => {
+          const demo = document.querySelector('.fy-spf__demo') as HTMLElement;
+          const card = document.querySelector('.fy-cc__card') as HTMLElement;
+          return {
+            demoX: demo.getBoundingClientRect().x,
+            cardRight: card.getBoundingClientRect().right,
+            position: getComputedStyle(demo).position,
+          };
+        });
+        expect(g.demoX).toBeGreaterThan(g.cardRight);
+        expect(g.position).toBe('sticky');
+        await shot(tab, WIDE(scheme), 'appearance');
+      } finally {
+        await close();
+      }
+    });
+  }
+});
+
+/** O9 round 2: a wide screen under 560 px tall pins no sample (it scrolls away with the page); at 900 px tall it stays pinned. */
+describe('the Appearance sample and the height guard (O9 round 2)', () => {
+  for (const scheme of ['light', 'dark'] as const) {
+    it(`does not pin the sample on a 559 px tall wide screen (${scheme})`, async () => {
+      const variant: Variant = { name: `1440x559-${scheme}`, width: 1_440, height: 559, phone: false, scheme };
+      const { tab, close } = await open(variant);
+      try {
+        const scroll = await demoScroll(tab);
+        expect(scroll.scrollable, 'the page scrolls').toBeGreaterThan(150);
+        expect(scroll.position, 'the sample is not sticky').not.toBe('sticky');
+        expect(scroll.topBefore - scroll.topAfter, 'the sample scrolls away with the page').toBeGreaterThan(
+          scroll.moved - 2,
+        );
+        await shot(tab, variant, 'scrolled');
+      } finally {
+        await close();
+      }
+    });
+    it(`keeps the sample pinned on a 900 px tall wide screen (${scheme})`, async () => {
+      const variant: Variant = { name: `1440x900-${scheme}`, width: 1_440, height: 900, phone: false, scheme };
+      const { tab, close } = await open(variant);
+      try {
+        const scroll = await demoScroll(tab);
+        expect(scroll.scrollable, 'the page scrolls').toBeGreaterThan(150);
+        expect(scroll.position).toBe('sticky');
+        expect(Math.abs(scroll.topAfter - 16), 'the sample stays 16 px from the top').toBeLessThanOrEqual(1);
+        await shot(tab, variant, 'scrolled');
+      } finally {
+        await close();
+      }
+    });
+  }
+});
+
+/** O9 round 2: the stacked layout holds above a phone's width too (650 px): the strip is pinned, opaque and clean at the end of the page. */
+describe('the pinned Appearance strip at 650 px (O9 round 2)', () => {
+  for (const scheme of ['light', 'dark'] as const) {
+    it(`pins the heading and sample over an opaque strip (650 ${scheme}, scrolled to the end)`, async () => {
+      const variant: Variant = { name: `650x844-${scheme}`, width: 650, height: 844, phone: false, scheme };
+      const { tab, close } = await open(variant);
+      try {
+        const strip = await pinnedStrip(tab, 'bottom');
+        await tab.waitForTimeout(150);
+        expect(strip.scrollable, 'the page scrolls').toBeGreaterThan(200);
+        expect(strip.opaque, 'the strip is opaque').toBe(true);
+        expect(strip.pin.top, 'the strip is pinned at the top').toBeLessThanOrEqual(0.5);
+        expect(strip.headingInside, 'the heading is inside the strip').toBe(true);
+        expect(strip.behind, 'nothing of the page shows over the strip').toEqual([]);
+        await shot(tab, variant, 'pinned-bottom');
+      } finally {
+        await close();
+      }
+    });
+  }
 });

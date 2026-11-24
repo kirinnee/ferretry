@@ -147,6 +147,18 @@ describe('runtime.put', () => {
     should(refusalOf(put({ harness: 'fake-third' }))).equal('fake-third is not supported here');
   });
 
+  it("should refuse the library's own word `claude` as a wire key, and still take the keys claude-code and codex", () => {
+    should(refusalOf(put({ credential: 'both', harness: 'claude' }))).equal('claude is not supported here');
+    should(derive(put({ credential: 'both', harness: 'claude-code' })).model.runtimes.fresh).containEql({
+      credential: 'both',
+      harness: 'claude',
+    });
+    should(derive(put({ credential: 'both', harness: 'codex' })).model.runtimes.fresh).containEql({
+      credential: 'both',
+      harness: 'codex',
+    });
+  });
+
   it('should refuse a CLI the login does not drive', () => {
     should(refusalOf(put({ harness: 'codex' }))).equal('claude-b does not drive Codex: it is a Claude Code login.');
   });
@@ -660,6 +672,16 @@ describe('component.put', () => {
     should(toml.files[0]?.file).equal('components/settings/fresh.toml');
     const empty = derive(put({ kind: 'settings', harness: 'codex', flags: [], env: { A: 'b' } }));
     should(empty.model.components.settings.fresh).not.have.property('flags');
+  });
+
+  it('should refuse `claude` as the wire key of a nested component input, before it is lowered', () => {
+    should(refusalOf(put({ kind: 'settings', harness: 'claude' }, { content: '{}' }))).equal(
+      'claude is not supported here',
+    );
+    should(refusalOf(put({ kind: 'hooks', harness: 'claude' }))).equal('claude is not supported here');
+    should(refusalOf(put({ kind: 'settings', harness: 'fake-third' }, { content: '{}' }))).equal(
+      'fake-third is not supported here',
+    );
   });
 
   it('should refuse settings text that is not a valid document', () => {

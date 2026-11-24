@@ -164,7 +164,7 @@ describe('the places on a phone (r11 S1, owner C2: in the drawer at its foot, no
 
 describe('the composer on a phone', () => {
   for (const width of WIDTHS)
-    it(`at ${width}: the longest model readout is cut short, the ring and quota stay on screen`, async () => {
+    it(`at ${width}: the longest model readout is cut short, the thinking and speed readouts, the ring and quota stay on screen on one line`, async () => {
       const { tab, close } = await open(
         width,
         'light',
@@ -176,11 +176,16 @@ describe('the composer on a phone', () => {
         const line = await tab.evaluate(() => {
           const actions = document.querySelector('.fy-composer-actions')?.getBoundingClientRect();
           const quota = document.querySelector('.fy-composer-quota')?.getBoundingClientRect();
-          const chip = document.querySelector('[data-runtime-chip]')?.getBoundingClientRect();
-          return { actions, quota, chip, wide: document.documentElement.clientWidth };
+          const chip = [...document.querySelectorAll('[data-runtime-chip]')].at(-1)?.getBoundingClientRect();
+          const tops = [...document.querySelectorAll('[data-runtime-chip]')].map(node =>
+            Math.round(node.getBoundingClientRect().top),
+          );
+          return { actions, quota, chip, tops, wide: document.documentElement.clientWidth };
         });
         expect(line.quota?.right ?? Number.POSITIVE_INFINITY, 'the quota is on screen').toBeLessThanOrEqual(line.wide);
-        expect(line.chip?.right ?? 0, 'the model name ends before the quota').toBeLessThanOrEqual(
+        expect(line.tops, 'model, thinking and speed: three readouts').toHaveLength(3);
+        expect(new Set(line.tops).size, 'on one line').toBe(1);
+        expect(line.chip?.right ?? 0, 'the last readout ends before the quota').toBeLessThanOrEqual(
           (line.quota?.left ?? 0) + 1,
         );
         expect(line.actions?.height ?? 0, 'the status line is one line').toBeLessThan(40);

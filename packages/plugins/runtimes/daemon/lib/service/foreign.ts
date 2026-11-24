@@ -17,7 +17,7 @@ import {
   UnsupportedHarnessError,
 } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
-import { type BrowserModeSchema, type BrowserPortsSettingSchema } from '../../../contract/index.ts';
+import type { BrowserModeSchema, BrowserPortsSettingSchema } from '../../../contract/index.ts';
 
 /** A runtime's old name and its new one (the edits that re-point every other file that names it). */
 // GAP(kernel): `fleet/src/lib/config-files/render.ts`.
@@ -159,7 +159,13 @@ export type LoweredHarness<T> = T extends 'claude-code'
         ? { -readonly [K in keyof T]: LoweredHarness<T[K]> }
         : T;
 
-/** A change body read off the wire, with its harness values in the library's words. Pure; copies what it changes. */
+/**
+ * A change body read off the wire, with its harness values in the library's words. Pure; copies what it changes.
+ *
+ * Every `harness` it meets, nested component inputs included, is a WIRE key and is checked here, BEFORE it is lowered: the
+ * library's word `claude` is not a wire key, and once lowered it could no longer be told from the key `claude-code`. A key
+ * Runtimes has no behaviour for (`claude` included) throws {@link UnsupportedHarnessError}, the one sentence.
+ */
 export function lowerHarness<T>(value: T): LoweredHarness<T> {
   const lower = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(lower);
@@ -167,7 +173,7 @@ export function lowerHarness<T>(value: T): LoweredHarness<T> {
     return Object.fromEntries(
       Object.entries(node).map(([key, item]) => [
         key,
-        key === 'harness' && item === 'claude-code' ? 'claude' : lower(item),
+        key === 'harness' && typeof item === 'string' ? harnessKind(item) : lower(item),
       ]),
     );
   };

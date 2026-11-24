@@ -161,6 +161,103 @@ describe('the agenda page with a status line drawn in flow', () => {
   });
 });
 
+/** What the app's height and the page's room are, measured: the document, the frame, the main column and the nav. */
+const heights = async (tab: Page) =>
+  await tab.evaluate(() => {
+    const box = (query: string) => document.querySelector(query)?.getBoundingClientRect();
+    return {
+      documentHeight: document.documentElement.scrollHeight,
+      overflowY: document.documentElement.scrollHeight - document.documentElement.clientHeight,
+      overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      frame: box('.fy-frame')?.height ?? -1,
+      main: box('.fy-main')?.height ?? -1,
+      mainTop: box('.fy-main')?.top ?? -1,
+    };
+  });
+
+describe('the install-as-app banner never changes the app’s height (O9-3)', () => {
+  const BANNER_VIEWPORTS = [
+    { name: '390', width: 390, height: 844, phone: true },
+    { name: '1440', width: 1_440, height: 900, phone: false },
+  ] as const;
+  for (const viewport of BANNER_VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`at ${viewport.name} in ${mode}: the document, the frame and the page keep their height with the banner shown`, async () => {
+        const theme = `studio-${mode}`;
+        const hidden = await open(viewport, '/d/ws/agenda', '.fy-main', '&relay=0', theme);
+        const before = await heights(hidden.tab);
+        await hidden.close();
+        const shown = await open(viewport, '/d/ws/agenda', '[data-install-toast]', '&relay=0&install=1', theme);
+        try {
+          const after = await heights(shown.tab);
+          await shotOf(shown.tab, `${viewport.name}-install-banner-${mode}`);
+          expect(after.documentHeight, 'the document is as tall as without the banner').toBe(before.documentHeight);
+          expect(after.overflowY, 'the page does not scroll vertically').toBeLessThanOrEqual(0);
+          expect(after.overflowX, 'the page does not scroll sideways').toBeLessThanOrEqual(0);
+          expect(after.frame, 'the app is as tall as without the banner').toBe(before.frame);
+          expect(after.main, 'the page keeps every pixel it had').toBe(before.main);
+          expect(after.mainTop, 'the page does not move down').toBe(before.mainTop);
+          // It floats: over the top of the page, inside the window, clear of the bottom edge where the composer is.
+          const banner = await shown.tab.evaluate(() => {
+            const box = document.querySelector('[data-install-toast]')?.getBoundingClientRect();
+            return { top: box?.top ?? -1, bottom: box?.bottom ?? -1, left: box?.left ?? -1, right: box?.right ?? -1 };
+          });
+          expect(banner.left).toBeGreaterThanOrEqual(0);
+          expect(banner.right).toBeLessThanOrEqual(viewport.width);
+          expect(banner.bottom).toBeLessThan(viewport.height / 2);
+          // Install and dismiss are still real, named buttons a press reaches (not covered by anything).
+          for (const selector of ['[data-install-accept]', '[data-install-dismiss]'])
+            expect((await hitsItself(shown.tab, selector)).hit, `${selector} is reachable`).toBe(true);
+          expect(await shown.tab.locator('[data-install-dismiss]').getAttribute('aria-label')).toContain('Dismiss');
+        } finally {
+          await shown.close();
+        }
+      });
+});
+
+describe('the install-as-app banner on a ferret’s chat covers none of its chrome (O9-3)', () => {
+  const CHAT_VIEWPORTS = [
+    { name: '390', width: 390, height: 844, phone: true },
+    { name: '1440', width: 1_440, height: 900, phone: false },
+  ] as const;
+  for (const viewport of CHAT_VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`at ${viewport.name} in ${mode}: the header, Menu, Modes, composer and nav still take the press`, async () => {
+        const { tab, close } = await open(
+          viewport,
+          '/d/ws/ferrets/zoe',
+          '[data-install-toast]',
+          '&relay=0&header=modes&install=1',
+          `studio-${mode}`,
+        );
+        try {
+          await tab.waitForSelector('[data-ferret-header] [data-modes-trigger]');
+          await shotOf(tab, `${viewport.name}-install-banner-chat-${mode}`);
+          const controls = ['[data-modes-trigger]', '[data-composer]'];
+          // The page's own controls under the header: the phone's tab chips, the wide page's side-panel toggle.
+          controls.push(viewport.phone ? '[data-phone-tab-row] [role=tab]' : '[data-side-toggle]');
+          if (viewport.phone) controls.push('[data-chat-menu]');
+          // The phone's bottom bar, where the scene draws one, is below the banner as well.
+          if ((await tab.locator('.fy-nav--bottom a').count()) > 0) controls.push('.fy-nav--bottom a');
+          for (const selector of controls)
+            expect((await hitsItself(tab, selector)).hit, `${selector} is not covered by the banner`).toBe(true);
+          // Nothing of the header row is under the banner at all: it hangs below the row.
+          const rows = await tab.evaluate(() => {
+            const box = (query: string) => document.querySelector(query)?.getBoundingClientRect();
+            return {
+              header: box('[data-ferret-header]')?.bottom ?? -1,
+              banner: box('[data-install-toast]')?.top ?? -1,
+            };
+          });
+          expect(rows.banner, 'the banner starts below the header row').toBeGreaterThanOrEqual(rows.header);
+          for (const selector of ['[data-install-accept]', '[data-install-dismiss]'])
+            expect((await hitsItself(tab, selector)).hit, `${selector} is reachable`).toBe(true);
+        } finally {
+          await close();
+        }
+      });
+});
+
 describe('the ferrets page (the screen the side column holds)', () => {
   for (const viewport of VIEWPORTS)
     for (const mode of ['light', 'dark'] as const)
@@ -199,7 +296,7 @@ describe('the ferret page', () => {
       const rail = await width(tab, '[data-side-rail]');
       expect(rail, 'a closed column costs a slim rail, not a column').toBeLessThanOrEqual(40);
       await toggle.click();
-      await tab.waitForSelector('[data-slot="ferret.side"] [data-side-panel]');
+      await tab.waitForSelector('[data-ferret-side] [data-side-panel]', { state: 'attached' });
       expect(await toggle.getAttribute('aria-expanded')).toBe('true');
       await toggle.click();
       expect(await tab.locator('[data-side-panel]:visible').count(), 'pressed again, it closes').toBe(0);
@@ -208,41 +305,42 @@ describe('the ferret page', () => {
     }
   });
 
-  it('at 1280 gives the side pane its own scrolling column and keeps the chat most of the row', async () => {
+  it('at 1280 gives the open side column a row of tabs over ONE panel and keeps the chat most of the row', async () => {
     const { tab, close } = await open(VIEWPORTS[0], '/d/ws/ferrets/zoe', '[data-chat]');
     try {
       await tab.click('[data-side-toggle]');
-      await tab.waitForSelector('[data-slot="ferret.side"] [data-side-panel]');
-      const panels = await tab.locator('[data-slot="ferret.side"] [data-side-panel]').count();
-      expect(panels, 'every panel the default layout lists is drawn').toBe(15);
-      const slot = await tab.evaluate(() => {
-        const element = document.querySelector('[data-slot="ferret.side"]') as HTMLElement;
+      await tab.waitForSelector('[data-ferret-side] [data-side-panel]', { state: 'attached' });
+      const tabs = await tab.locator('[data-ferret-side] [role="tab"]').count();
+      expect(tabs, 'one tab per panel the default layout lists').toBe(15);
+      expect(await tab.locator('[data-side-panel]:visible').count(), 'one panel on screen at a time').toBe(1);
+      const column = await tab.evaluate(() => {
+        const element = document.querySelector('[data-ferret-side]') as HTMLElement;
         const box = element.getBoundingClientRect();
-        return {
-          width: box.width,
-          height: box.height,
-          scrolls: getComputedStyle(element).overflowY === 'auto' || getComputedStyle(element).overflowY === 'scroll',
-        };
+        return { width: box.width, height: box.height };
       });
-      expect(slot.width, 'the pane is a column, not the chat’s width').toBeLessThanOrEqual(420);
-      expect(slot.scrolls, 'the pane scrolls on its own').toBe(true);
-      expect(slot.height, 'the pane is never taller than the window').toBeLessThanOrEqual(VIEWPORTS[0].height);
+      expect(column.width, 'the column is a column, not the chat’s width').toBeLessThanOrEqual(420);
+      expect(column.height, 'the column is never taller than the window').toBeLessThanOrEqual(VIEWPORTS[0].height);
       expect(await width(tab, '[data-chat]'), 'the chat keeps the row').toBeGreaterThanOrEqual(400);
       if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, '1280-ferret-side-panels.png') });
-      // The last panel is reachable: scrolled into its column it is on screen.
-      await tab.locator('[data-side-panel="insights"]').scrollIntoViewIfNeeded();
-      const insights = await hitsItself(tab, '[data-side-panel="insights"]');
-      expect(insights.hit, 'the last panel can be reached').toBe(true);
-      if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, '1280-ferret-side-panels-scrolled.png') });
+      // The last panel is reachable: its tab scrolled into the row is pressed and the panel is on screen.
+      await tab.locator('[data-ferret-side] [data-phone-chip="stubs.insights"]').scrollIntoViewIfNeeded();
+      await tab.click('[data-ferret-side] [data-phone-chip="stubs.insights"]');
+      expect((await hitsItself(tab, '[data-side-panel="insights"]')).hit, 'the last panel can be reached').toBe(true);
+      expect(await tab.locator('[data-side-panel]:visible').count(), 'still one panel').toBe(1);
+      if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, '1280-ferret-side-panels-last.png') });
     } finally {
       await close();
     }
   });
 
-  it('at 1280 there is no chip row: the panels are beside the chat', async () => {
+  it('at 1280 the page has no phone chip row: the tabs live inside the side column, and only while it is open', async () => {
     const { tab, close } = await open(VIEWPORTS[0], '/d/ws/ferrets/zoe', '[data-chat]');
     try {
-      expect(await tab.locator('[data-phone-tab-row]').count()).toBe(0);
+      expect(await tab.locator('[data-phone-tab-row]').count(), 'closed: no tab row at all').toBe(0);
+      await tab.click('[data-side-toggle]');
+      await tab.waitForSelector('[data-ferret-side] [data-phone-tab-row]');
+      expect(await tab.locator('[data-phone-tab-row]').count()).toBe(1);
+      expect(await tab.locator('[data-phone-chip="chat"]').count(), 'no Chat tab beside the chat').toBe(0);
     } finally {
       await close();
     }
@@ -630,4 +728,140 @@ describe('the left drawer collapses to a rail and opens over a phone', () => {
         await close();
       }
     });
+});
+
+describe('a slow daemon: ONE centred loader, never drawn over what is already drawn (o9-11, /new)', () => {
+  const SLOW_MS = 1_500;
+  for (const viewport of [
+    { name: '1440', width: 1_440, height: 900, phone: false },
+    { name: '390', width: 390, height: 844, phone: true },
+  ] as const)
+    for (const mode of ['light', 'dark'] as const)
+      it(`${viewport.name} ${mode}: one loader while it waits, the form with nothing over it once it has drawn`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          colorScheme: mode,
+          deviceScaleFactor: viewport.phone ? 2 : 1,
+          hasTouch: viewport.phone,
+          isMobile: viewport.phone,
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const tab = await context.newPage();
+        try {
+          await tab.goto(`${origin}/d/ws/new?theme=studio-${mode}&relay=0&slow=${SLOW_MS}`);
+          // In the page, in the body of the window: counted by what a person sees, not by which component drew it.
+          await tab.waitForSelector('[data-loading="page"]', { timeout: 5_000 });
+          await tab.waitForTimeout(650); // past the 300 ms threshold and the fade
+          const waiting = await tab.evaluate(() => {
+            const visible = (element: Element): boolean => {
+              for (let node: Element | null = element; node !== null; node = node.parentElement)
+                if (Number(getComputedStyle(node).opacity) <= 0.01) return false;
+              return element.getBoundingClientRect().width > 0;
+            };
+            // EVERY visible indicator counts: a page loader and the top bar alike (two at once is two loading states).
+            const indicators = [...document.querySelectorAll('[data-loading="page"], [data-loading="bar"]')].filter(
+              visible,
+            );
+            const loaders = indicators.filter(element => element.getAttribute('data-loading') === 'page');
+            const main = document.querySelector('.fy-main')?.getBoundingClientRect();
+            const box = loaders[0]?.getBoundingClientRect();
+            return {
+              count: indicators.length,
+              inMain:
+                box !== undefined && main !== undefined && box.left >= main.left - 1 && box.right <= main.right + 1,
+              form: document.querySelectorAll('[data-new-ferret]').length,
+              // The loader fills the area, it must not make the page scroll.
+              scrolls:
+                (document.querySelector('.fy-main')?.scrollHeight ?? 0) >
+                (document.querySelector('.fy-main')?.clientHeight ?? 0) + 1,
+              // How far the mark sits from the vertical middle of the page area (under the top bar), as a share of that area.
+              offCentre:
+                box !== undefined && main !== undefined
+                  ? Math.abs((box.top + box.bottom) / 2 - (main.top + main.bottom) / 2) / main.height
+                  : 1,
+            };
+          });
+          await shotOf(tab, `o9-11-${viewport.name}-${mode}-1-waiting`);
+          expect(waiting.count, 'one loading indicator on screen: the page loader, not the bar as well').toBe(1);
+          expect(waiting.inMain, 'centred in the page, not in the side column').toBe(true);
+          expect(waiting.offCentre, 'centred vertically in the page area, not top-heavy').toBeLessThan(0.06);
+          expect(waiting.scrolls, 'the loader does not make the page scroll').toBe(false);
+          expect(waiting.form, 'nothing drawn yet').toBe(0);
+          // Watch every 25 ms from the answer on: a loader (or a leftover copy of one) must never share the screen with the form.
+          await tab.waitForSelector('[data-new-ferret]', { timeout: 6_000 });
+          await shotOf(tab, `o9-11-${viewport.name}-${mode}-2-just-drawn`);
+          const seen = await tab.evaluate(async () => {
+            const overlaps: string[] = [];
+            for (let at = 0; at < 1_500; at += 25) {
+              const loader = document.querySelectorAll(
+                '[data-loading], [data-loading-ghost], .fy-loading-ghost',
+              ).length;
+              const form = document.querySelectorAll('[data-new-ferret]').length;
+              if (loader > 0 && form > 0) overlaps.push(`${at} ms: ${loader} loader(s) over the form`);
+              await new Promise(resolve => setTimeout(resolve, 25));
+            }
+            return overlaps;
+          });
+          await shotOf(tab, `o9-11-${viewport.name}-${mode}-3-settled`);
+          expect(seen).toEqual([]);
+        } finally {
+          await context.close();
+        }
+      }, 40_000);
+
+  // Item 15 (no jumps): the loader fills the area it loads but adds no height of its own, so a slow read on a real page
+  // (the Board) never makes the page scroll while it waits.
+  for (const viewport of [
+    { name: '1440', width: 1_440, height: 900, phone: false },
+    { name: '390', width: 390, height: 844, phone: true },
+  ] as const)
+    for (const mode of ['light', 'dark'] as const)
+      it(`${viewport.name} ${mode}: a slow Board read draws one loader and adds no vertical overflow`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          colorScheme: mode,
+          deviceScaleFactor: viewport.phone ? 2 : 1,
+          hasTouch: viewport.phone,
+          isMobile: viewport.phone,
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const tab = await context.newPage();
+        try {
+          await tab.goto(`${origin}/d/ws/board?theme=studio-${mode}&relay=0&boardSlow=${SLOW_MS}`);
+          // The shell is ready at once; it is the Board's OWN read that is slow, so its own loader is the one drawn.
+          await tab.waitForSelector('[data-board-stand] [data-loading="page"]', { timeout: 5_000 });
+          await tab.waitForTimeout(650);
+          const state = await tab.evaluate(() => {
+            const visible = (element: Element): boolean => {
+              for (let node: Element | null = element; node !== null; node = node.parentElement)
+                if (Number(getComputedStyle(node).opacity) <= 0.01) return false;
+              return element.getBoundingClientRect().width > 0;
+            };
+            const scroller = (selector: string): number => {
+              const node = document.querySelector(selector);
+              return node === null ? 0 : node.scrollHeight - node.clientHeight;
+            };
+            return {
+              count: [...document.querySelectorAll('[data-loading="page"], [data-loading="bar"]')].filter(visible)
+                .length,
+              mainOverflow: scroller('.fy-main'),
+              boardOverflow: scroller('[data-board-stand]'),
+              pageOverflow: scroller('html'),
+            };
+          });
+          await shotOf(tab, `o9-11-board-${viewport.name}-${mode}-waiting`);
+          expect(state.count, 'one loading indicator').toBe(1);
+          expect(state.boardOverflow, 'the Board does not scroll itself while its read loads').toBeLessThanOrEqual(1);
+          expect(state.mainOverflow, 'the page area does not scroll while it loads').toBeLessThanOrEqual(1);
+          expect(state.pageOverflow, 'the window does not scroll while it loads').toBeLessThanOrEqual(1);
+        } finally {
+          await context.close();
+        }
+      }, 40_000);
 });

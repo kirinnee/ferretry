@@ -3,6 +3,8 @@ import type { LoginUsage, ProviderQuotaReading } from '../../../../contract/inde
 import { instantFromEpochMs } from '@ferretry/std';
 import should from 'should';
 import { providerAccountFields, withProviderQuota } from '../../../../daemon/lib/usage/provider-quota/account.ts';
+import { parseOpenRouterKey } from '../../../../daemon/lib/usage/provider-quota/parse.ts';
+import { OPENROUTER_KEY, OPENROUTER_KEY_UNLIMITED } from './fixtures.ts';
 
 const AT = instantFromEpochMs(Date.parse('2026-10-16T09:00:00.000Z'));
 const RESET = instantFromEpochMs(Date.parse('2026-10-16T11:00:00.000Z'));
@@ -74,5 +76,34 @@ describe('providerAccountFields', () => {
   it('should state nothing a transcript reading cannot know', () => {
     // Act & Assert
     should(providerAccountFields(reading({ via: 'unknown', windows: [], exhausted: false }))).deepEqual({});
+  });
+});
+
+describe('providerAccountFields — an OpenRouter endpoint reading', () => {
+  it('should state the month the endpoint reported as the spend, beside the balance it also read', () => {
+    // Arrange: `GET /api/v1/key` for a key with a limit: the month window and the remainder both came from the endpoint
+    const parsed = parseOpenRouterKey(OPENROUTER_KEY);
+    if (parsed.kind !== 'quota') throw new Error('the fixture should parse');
+    const endpoint = reading({ source: 'openrouter-key', ...parsed.quota });
+
+    // Act
+    const actual = providerAccountFields(endpoint);
+
+    // Assert
+    should(actual.spendUsd).equal(4.2);
+    should(actual.balance).deepEqual({ amount: 5.8, currency: 'USD' });
+  });
+
+  it('should state the month spend of a key with no limit, and no balance', () => {
+    // Arrange
+    const parsed = parseOpenRouterKey(OPENROUTER_KEY_UNLIMITED);
+    if (parsed.kind !== 'quota') throw new Error('the fixture should parse');
+
+    // Act
+    const actual = providerAccountFields(reading({ source: 'openrouter-key', ...parsed.quota }));
+
+    // Assert
+    should(actual.spendUsd).equal(8.25);
+    should(actual.balance).equal(undefined);
   });
 });

@@ -94,6 +94,27 @@ const QUESTION = {
   questions: [{ question: 'Ship it?', options: [{ label: 'Yes' }, { label: 'No' }], multiSelect: false }],
 };
 
+describe('the account the composer’s tools are given', () => {
+  const accountOf = (config: Record<string, unknown>, state: Record<string, unknown> = {}) =>
+    draw({ session: ferretView('shared', { config, state } as never) }).root.findByType(Composer).props.account;
+
+  test('is the ferret’s LOGIN (the name Usage’s feed is keyed by), never its runtime’s name', () => {
+    expect(accountOf({ login: 'llm1', runtime: 'claude-llm1' })).toEqual({ agent: 'llm1' });
+  });
+
+  test('carries the usage the ferret’s own monitor stamped, with or without a login', () => {
+    expect(accountOf({ login: 'llm1' }, { usage5hPercent: 12, usageWeeklyPercent: 38 })).toEqual({
+      agent: 'llm1',
+      usage: { usage5hPercent: 12, usageWeeklyPercent: 38 },
+    });
+    expect(accountOf({}, { usage5hPercent: 12 })).toEqual({ usage: { usage5hPercent: 12 } });
+  });
+
+  test('is nothing for a ferret with neither: no login to look up and no usage to show', () => {
+    expect(accountOf({})).toBeUndefined();
+  });
+});
+
 describe('SessionChatPage', () => {
   test('draws the transcript and the composer on this daemon, with the slots the ferret screen is drawn in', () => {
     const page = draw({

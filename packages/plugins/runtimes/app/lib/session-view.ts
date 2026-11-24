@@ -11,6 +11,8 @@ export interface RuntimeSessionView {
   readonly config: {
     readonly id: string;
     readonly harness: HarnessKey;
+    /** The runtime it was started on, by its wrapper: the key the roster names it by. */
+    readonly runtime?: string | undefined;
     readonly model?: string | undefined;
     readonly modelHint?: string | undefined;
     readonly harnessFlags?: readonly string[] | undefined;
@@ -66,15 +68,32 @@ export const launchedModel = (config: RuntimeSessionView['config']): string | un
   return flagged ?? present(config.model) ?? present(config.modelHint);
 };
 
-/**
- * What the composer's status line says about the ferret's runtime: the model in force (else the one it was launched on,
- * else a plain word), then its thinking level and — only when it is on — `fast`, joined by ` · `. The level and speed are
- * the harness's own report when it gave one, else what the ferret was launched with; one the ferret has not got is left
- * out, never drawn as a guess.
- */
-export const runtimeReadout = (view: RuntimeSessionView): string => {
-  const model = present(view.state.observedModel) ?? launchedModel(view.config) ?? 'Model';
+/** What a ferret's runtime is, one fact each; a fact it has not got is absent, never guessed. */
+export interface RuntimeParts {
+  readonly model?: string;
+  readonly effort?: string;
+  /** Fast mode on; `false` when the harness or the launch said it is off, absent when neither did. */
+  readonly fast?: boolean;
+}
+
+/** The model in force (the harness's own report, else the one it launched on), its thinking level and its speed. */
+export const runtimeParts = (view: RuntimeSessionView): RuntimeParts => {
+  const model = present(view.state.observedModel) ?? launchedModel(view.config);
   const effort = present(view.state.observedReasoningEffort) ?? present(view.config.launchReasoningEffort);
   const fast = view.state.observedFast ?? view.config.launchFast;
-  return [model, effort, fast === true ? 'fast' : undefined].filter(part => part !== undefined).join(' · ');
+  return {
+    ...(model === undefined ? {} : { model }),
+    ...(effort === undefined ? {} : { effort }),
+    ...(fast === undefined ? {} : { fast }),
+  };
+};
+
+/**
+ * What the composer's status line says about the ferret's runtime, as one phrase (the chips' accessible name): the model in
+ * force (else the one it was launched on, else a plain word), then its thinking level and — only when it is on — `fast`,
+ * joined by ` · `. One the ferret has not got is left out, never drawn as a guess.
+ */
+export const runtimeReadout = (view: RuntimeSessionView): string => {
+  const { model, effort, fast } = runtimeParts(view);
+  return [model ?? 'Model', effort, fast === true ? 'fast' : undefined].filter(part => part !== undefined).join(' · ');
 };

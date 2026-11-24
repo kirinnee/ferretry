@@ -7,7 +7,7 @@ import {
   startupModelArguments,
 } from '../../daemon/lib/startup.ts';
 import { launchReasoningEffort } from '../../daemon/lib/launch-effort.ts';
-import { buildCodexLaunchArgv } from '../../daemon/lib/launch.ts';
+import { buildCodexLaunchArgv, codexExecChain } from '../../daemon/lib/launch.ts';
 
 describe('startupModelArguments', () => {
   it('renders a validated model id as the stable startup argv pair', () => {
@@ -167,6 +167,13 @@ describe('the plan for a start’s reasoning level', () => {
       cause: 'unservable',
       reason: 'xhigh is not advertised for Codex model gpt-6.1-sol',
     });
+  });
+});
+
+describe('the programs a Codex launch execs through', () => {
+  it('ends in the located binary by its own name, after env and the interpreters an installed script runs on', () => {
+    expect(codexExecChain('/nix/store/x-codex-0.170.0/bin/codex')).toEqual(['env', 'bash', 'sh', 'node', 'codex']);
+    expect(codexExecChain('/fleet/bin/codex-work').at(-1)).toBe('codex-work');
   });
 });
 

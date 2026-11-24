@@ -54,6 +54,11 @@ export interface CgroupLaunchPorts {
   readonly slice?: string;
   /** Said out loud when a ferret had to start unconfined (the daemon log). */
   readonly warn?: (message: string) => void;
+  /**
+   * The daemon's own user-manager names, the SAME ones its scope proof ran with. Every scope wrapper is started with
+   * them (`env NAME=value systemd-run …`), whatever the pane, the tmux server or the caller's environment holds.
+   */
+  readonly managerEnvironment?: () => Readonly<Record<string, string>>;
 }
 
 /** What kind of process a launch is, so the scope it gets says so. */
@@ -166,6 +171,7 @@ export class CgroupLaunchPlanner {
       slice: allowance,
       properties: [],
       command: [...ionice, ...command],
+      ...(this.ports.managerEnvironment === undefined ? {} : { environment: this.ports.managerEnvironment() }),
     });
   }
 

@@ -8,8 +8,9 @@
  * default" fills the same pick, so there is one way to apply it.
  */
 
-import type { MachineView, RuntimeView } from '../../../../contract/index.ts';
+import type { MachineView, RuntimeAccounts, RuntimeView } from '../../../../contract/index.ts';
 import { useId } from 'react';
+import { WRAPPING_SELECT } from '../../../components/runtime-select.tsx';
 import { Badge, Button, SelectBox } from '../../../ui.ts';
 import { machineSettings } from '../machine/machine-settings.ts';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
@@ -27,6 +28,8 @@ export interface DefaultRuntimeControlProps {
   readonly machine: MachineView;
   readonly machineName: string;
   readonly runtimes: readonly RuntimeView[];
+  /** Who each login is: what tells two runtimes of one kind apart in the words a person reads. */
+  readonly accounts: RuntimeAccounts;
   readonly changes: AccountChanges;
   /** The runtime picked but not saved, or `null` while the select shows what is saved. */
   readonly picked: string | null;
@@ -39,6 +42,7 @@ export function DefaultRuntimeControl({
   machine,
   machineName,
   runtimes,
+  accounts,
   changes,
   picked,
   onPick,
@@ -50,6 +54,10 @@ export function DefaultRuntimeControl({
   const shown = picked ?? current ?? '';
   const pending = picked !== null && picked !== current;
   const shownRuntime = candidates.find(runtime => runtime.name === shown);
+  const currentRuntime = candidates.find(runtime => runtime.name === current);
+  // "Keep" says the runtime in the words the list shows it in; a default the roster no longer holds is named as stored.
+  const currentWords =
+    currentRuntime === undefined ? current : defaultOptionLabel(currentRuntime, candidates, accounts);
   const stateWords = shownRuntime === undefined ? null : runtimeStateWords(shownRuntime, machine);
   const save = (): void => {
     if (picked === null) return;
@@ -78,7 +86,7 @@ export function DefaultRuntimeControl({
                 id={id}
                 label={DEFAULT_RUNTIME_LABEL}
                 aria-describedby={`${id}-hint`}
-                className="min-w-0 w-full max-w-sm"
+                className={`min-w-0 w-full max-w-sm ${WRAPPING_SELECT}`}
                 value={shown}
                 onChange={value => {
                   changes.clear();
@@ -88,7 +96,7 @@ export function DefaultRuntimeControl({
                   ...(current === null ? [{ value: '', label: AUTOMATIC_DEFAULT }] : []),
                   ...candidates.map(runtime => ({
                     value: runtime.name,
-                    label: defaultOptionLabel(runtime),
+                    label: defaultOptionLabel(runtime, candidates, accounts),
                     disabled: runtime.disabled !== undefined && runtime.name !== shown,
                   })),
                 ]}
@@ -134,7 +142,7 @@ export function DefaultRuntimeControl({
                   onPick(null);
                 }}
               >
-                {keepDefaultLabel(current)}
+                {keepDefaultLabel(currentWords)}
               </Button>
             </ChangeApplyPanel>
           ) : null}

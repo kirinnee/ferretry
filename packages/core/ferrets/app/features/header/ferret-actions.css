@@ -585,3 +585,55 @@
   width: 44px;
   height: 44px;
 }
+/* Start / Stop beside the status word (status-panel.tsx): small, quiet buttons; Resume is the one filled with the accent. */
+.fy-ferret-statusline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.fy-ferret-lifecycle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.fy-ferret-lifecycle__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: var(--border-width, 1px) solid var(--border-strong);
+  border-radius: var(--radius-control, 6px);
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  line-height: 1;
+  cursor: pointer;
+}
+.fy-ferret-lifecycle__btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.fy-ferret-lifecycle__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.fy-ferret-lifecycle__btn--start {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+}
+.fy-ferret-lifecycle__btn--start:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+.fy-ferret-lifecycle__btn--danger {
+  border-color: var(--err);
+  color: var(--err);
+}
+.fy-ferret-lifecycle__failure {
+  color: var(--err);
+  font-size: var(--text-sm);
+  white-space: normal;
+}

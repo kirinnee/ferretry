@@ -127,7 +127,7 @@ export function VoiceStep({
       </details>
       {/* Keyed by the pick: a new pick starts a new test, so what the last engine heard is never shown under this one. */}
       <VoiceTest key={pick ?? 'none'} pick={pick} voices={voices} mic={mic} />
-      <StepDemo>
+      <StepDemo pinned>
         <VoiceDemo pick={pick} />
       </StepDemo>
     </section>

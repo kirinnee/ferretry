@@ -407,9 +407,14 @@ export interface EdgeRings {
  * The cases a scroll cannot be trusted to hide. Among the `cards` (each holding a radio `radio`), take the first one the frame can place
  * 2 px under its top, press it with the pointer, then press Shift (so keyboard modality turns the ring on where the card stands); and
  * the first one the frame can leave at least `hidden` px above its top, focus it with `focus({ preventScroll: true })` after Shift.
- * Neither measurement scrolls anything.
+ * Neither measurement scrolls anything. On a phone with a pinned strip, "the frame top" is the strip's bottom edge (what a person sees as the top of the choices).
  */
 export const edgeRings = async (tab: Page, cards: string, radio: string, hidden = 14): Promise<EdgeRings> => {
+  // A pinned strip (heading + demo, `.fy-spf__pin`) covers the top of the frame on a phone: every gap below is read from its bottom edge.
+  const inset = await tab.evaluate(() => {
+    const pin = document.querySelector('.fy-spf__pin');
+    return pin !== null && getComputedStyle(pin).position === 'sticky' ? pin.getBoundingClientRect().bottom : 0;
+  });
   const count = await tab.locator(cards).count();
   const attempt = async (
     wanted: number,
@@ -424,7 +429,7 @@ export const edgeRings = async (tab: Page, cards: string, radio: string, hidden 
     }
     return last;
   };
-  const near = await attempt(2, gap => Math.abs(gap - 2) < 1);
+  const near = await attempt(inset + 2, gap => Math.abs(gap - inset - 2) < 1);
   // A raw mouse press where the card stands (Playwright's own click would scroll the card to a better place first, which is the very thing
   // this case must not have): the press has to land on the card's radio, or the case proves nothing.
   const box = await near.locator.locator(radio).boundingBox();
@@ -443,14 +448,14 @@ export const edgeRings = async (tab: Page, cards: string, radio: string, hidden 
   const nearStop = await ringOfFocused(tab);
   const nearGap = await placeFromFrameTop(near.locator, null);
   await tab.mouse.up();
-  const half = await attempt(-hidden, gap => gap <= -hidden + 1 && gap >= -hidden - 1);
+  const half = await attempt(inset - hidden, gap => gap <= inset - hidden + 1 && gap >= inset - hidden - 1);
   await tab.keyboard.press('Shift');
   await half.locator.locator(radio).evaluate(node => (node as HTMLElement).focus({ preventScroll: true }));
   const halfStop = await ringOfFocused(tab);
   const halfGap = await placeFromFrameTop(half.locator, null);
   return {
-    nearTop: { card: near.card, gap: near.gap, gapAtRing: nearGap, stop: nearStop },
-    partlyHidden: { card: half.card, gap: half.gap, gapAtRing: halfGap, stop: halfStop },
+    nearTop: { card: near.card, gap: near.gap - inset, gapAtRing: nearGap - inset, stop: nearStop },
+    partlyHidden: { card: half.card, gap: half.gap - inset, gapAtRing: halfGap - inset, stop: halfStop },
   };
 };
 
