@@ -1,7 +1,7 @@
 import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { GatePort } from '@ferretry/core-gate/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
-import { AgentControlPort, FerretsPort } from '@ferretry/core-ferrets/contract';
+import { AgentControlPort, FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { browsersLoosens } from './contract/config-loosens.ts';
 import { InputTargets, VaultPort } from '@ferretry/core-vault/contract';
 import { PairingWindowPort } from '@ferretry/plugin-access/contract';
@@ -769,6 +769,8 @@ export default definePlugin({
       { hook: InputTargets, key: 'page' },
       /** The composer's `%browser` menu is this plugin's: the pages the ferret's browser holds (reference.catalog). */
       { hook: ReferenceCatalog, key: '%browser' },
+      /** What a launch says about stealth: `FY_BROWSER_STEALTH` follows the one switch (daemon/launch-parts.ts). */
+      { hook: LaunchParts },
     ],
   },
 

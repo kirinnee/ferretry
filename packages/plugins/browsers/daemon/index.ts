@@ -37,6 +37,7 @@ import { secureCopyReach } from './sealed/reach.ts';
 import type { RecordedSurfaceEvent } from './tools/types.ts';
 import { processHost } from './adapters/host.ts';
 import { auditStealthSwitch } from './stealth-audit.ts';
+import { browserLaunchPart } from './launch-parts.ts';
 import { KernelDetachedLauncher } from './open-url/launcher.ts';
 import { systemOpenRoutes } from './open-url/routes.ts';
 import { type DetachedLauncherPort, OpenUrlService } from './open-url/service.ts';
@@ -440,6 +441,8 @@ export function buildBrowsers(
     hooks: {
       'input.targets:page': target.adapter,
       'reference.catalog:%browser': new BrowsersReferenceMenu(pages, kernel.redaction),
+      // What a launch says about stealth: FY_BROWSER_STEALTH is 1 only while the machine switch is on in effect.
+      'launch.parts': () => [{ id: 'browsers', item: browserLaunchPart(config) }],
     },
   };
 }
