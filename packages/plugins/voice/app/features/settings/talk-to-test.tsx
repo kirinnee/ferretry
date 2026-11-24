@@ -117,7 +117,7 @@ export function TalkToTest({ machine, client: injected, createMic = browserMic }
           className="fy-vs-note text-fg"
           aria-live="polite"
           data-voice-heard={heard === null ? 'none' : heard.final ? 'final' : 'interim'}
-          style={heard !== null && !heard.final ? { opacity: 0.7 } : undefined}
+          style={heard === null ? undefined : heard.final ? { fontWeight: 600 } : { fontStyle: 'italic', opacity: 0.6 }}
         >
           {heard?.text ?? ''}
         </p>
