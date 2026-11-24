@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+oversize	manifest.ts	300	2026-12-31	the voice manifest declares every route, worker, selftest and permission of the plugin; five voice PRs in a row each added a line, split by feature when the voice settings land
