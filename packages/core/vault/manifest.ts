@@ -87,6 +87,11 @@ export default definePlugin({
         capability: INPUT_USE_BROWSER,
         audit: INPUT_READ,
       }),
+      route('POST /v1/ferrets/:ferretId/input-requests/:requestId/observe', {
+        ...INPUT_PERSON,
+        capability: INPUT_USE_TERMINAL,
+        audit: INPUT_READ,
+      }),
       route('POST /v1/ferrets/:ferretId/input-requests/:requestId/deliver', {
         ...INPUT_PERSON,
         capability: INPUT_USE_TERMINAL,

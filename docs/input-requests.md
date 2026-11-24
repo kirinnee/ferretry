@@ -472,6 +472,11 @@ What is different is how the daemon looks and types, and what it holds back afte
 - **A picture of the fields** is taken at raise, before anything is typed, and kept in RAM for the input
   (`GET /v1/ferrets/:ferretId/input-requests/:requestId/shot`, owner only; `request.pictured` says there is one). The
   input draws each field's box on it from the browser's facts. It is let go when the request ends.
+- **An input left open is looked at again** (`POST /v1/ferrets/:ferretId/input-requests/:requestId/observe`, owner only,
+  governed like the list): the daemon takes the same look the Send guard takes, and a target that is still the same
+  but redrawn replaces the held facts (counted nowhere); a target that is gone or changed is left for the Send to
+  refuse. It types nothing and returns the request as the list does, never a value. The app calls it for an input
+  raised over a minute ago, then reads the list again.
 
 - **The field's identity is the node Playwright holds.** Playwright resolves the agent's ref or selector in its
   own isolated world and holds the element; the node is the one Playwright's own DevTools session names for that

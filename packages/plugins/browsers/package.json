@@ -26,6 +26,7 @@
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
     "playwright-core": "1.62.1",
+    "tldts": "7.5.5",
     "zod": "4.4.3",
     "@ferretry/plugin-conversation": "workspace:*",
     "@ferretry/plugin-terminals": "workspace:*",

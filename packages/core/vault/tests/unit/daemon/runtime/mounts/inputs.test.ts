@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
-import { deviceStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
+import { deviceStanding, ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
 import type { ApiResponse, CallContext } from '@ferretry/kernel/contract';
 import should from 'should';
 import { InputRequestError } from '../../../../../daemon/lib/inputs/errors.ts';
@@ -17,6 +17,7 @@ const DELIVER = 'POST /v1/ferrets/:ferretId/input-requests/:requestId/deliver';
 const QUARANTINES = 'GET /v1/ferrets/:ferretId/input-quarantines';
 const END = 'POST /v1/ferrets/:ferretId/input-quarantines/:key/end';
 const CANCEL = 'POST /v1/ferrets/:ferretId/input-requests/:requestId/cancel';
+const OBSERVE = 'POST /v1/ferrets/:ferretId/input-requests/:requestId/observe';
 
 type Params = Record<string, string>;
 
@@ -312,5 +313,73 @@ describe('the input routes: a deliver that needs more than the route’s own per
     );
 
     should(spent).equal(0);
+  });
+});
+
+describe('the input routes: looking at a card’s target again', () => {
+  const allow: CallerGovernance['decide'] = () => ({ allowed: true, refusal: 'granted' });
+
+  it('should hand the service the owner, answer the request it returns, and take no body', async () => {
+    const seen: unknown[][] = [];
+    const { service } = serviceOf({
+      reobserve: async (ferret: string, id: string, caller: unknown) => {
+        seen.push([ferret, id, caller]);
+        return { id, state: 'pending' };
+      },
+    });
+    const response = await inputRequestRoutes(service)[OBSERVE](callOf(ownerStanding(), undefined));
+
+    should(json(response)).eql({ id: REQUEST_ID, state: 'pending' });
+    should(seen).eql([[FERRET, REQUEST_ID, { kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' }]]);
+  });
+
+  it('should refuse a ferret before the service is asked, in the owner-only words', async () => {
+    const { service } = serviceOf({
+      reobserve: async () => {
+        throw new Error('the service must not be asked');
+      },
+    });
+
+    const error = await refusal(inputRequestRoutes(service)[OBSERVE](callOf(ferretStanding('f-1' as never), {})));
+
+    should(error?.status).equal(403);
+  });
+
+  it('should carry the service’s refusal as its HTTP status', async () => {
+    const { service } = serviceOf({
+      reobserve: async () => {
+        throw new InputRequestError('gone', 'the request is already cancelled');
+      },
+    });
+
+    const error = await refusal(inputRequestRoutes(service)[OBSERVE](callOf(ownerStanding(), {})));
+
+    should([error?.status, error?.code]).eql([410, 'gone']);
+  });
+
+  it('should need the browser permission to look at a page, and not to look at a terminal', async () => {
+    const asked: string[] = [];
+    const reobserve = async (_ferret: string, id: string) => {
+      asked.push(id);
+      return { id, state: 'pending' };
+    };
+    const deny: CallerGovernance['decide'] = demand =>
+      demand.capability === 'browser'
+        ? { allowed: false, refusal: 'step-up-required' }
+        : { allowed: true, refusal: 'granted' };
+    const spent = { fresh: 0 };
+
+    const page = serviceOf({ targetOf: () => ({ kind: 'page', key: 'app' }), reobserve }).service;
+    const refused = await inputRequestRoutes(page)[OBSERVE](callOf(governedDevice(deny, spent), {}));
+    const terminal = serviceOf({ reobserve }).service;
+    const allowed = await inputRequestRoutes(terminal)[OBSERVE](callOf(governedDevice(deny, spent), {}));
+    const pageAllowed = await inputRequestRoutes(page)[OBSERVE](callOf(governedDevice(allow, spent), {}));
+
+    should(refused.status).equal(403);
+    should(json(refused).demand).eql({ capability: 'browser', axis: 'use' });
+    should(allowed.status).equal(200);
+    should(pageAllowed.status).equal(200);
+    should(asked).eql([REQUEST_ID, REQUEST_ID]);
+    should(spent.fresh).equal(0);
   });
 });
