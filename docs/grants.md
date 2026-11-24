@@ -451,7 +451,10 @@ with the unlock turned off always asks per act. **Narrowing never asks again** (
 widening another device, and turning "what agents may control" (terminals/browsers/files, T) back ON
 want a passkey proved for that one act, from any device, unlocked or not
 ([design/zero-trust.md](design/zero-trust.md) B6) — turning one of those three OFF never does. So does
-**installing from a catalog** (act `catalog-install`, [catalogs.md](catalogs.md)). **An unlock is never a
+**installing from a catalog** (act `catalog-install`, [catalogs.md](catalogs.md)) and **approving a Claude connector sign-in**
+(act `approve-connector`, `POST /v1/connector/requests/:id/approve`, `pairing.configure`; [mcp-connector.md](mcp-connector.md) — the
+machine's own `fy connector approve` is skipped like the other machine-skippable acts, and denying or revoking a grant never
+asks). **An unlock is never a
 fresh proof for any act**: it opens the machine and holds the step-up for ordinary acts, but minting a
 pairing code, widening a device, agent control, a daemon update and an install each ask for a passkey even
 right after an unlock. **A fresh proof is stamped with the act it was proved for** (the app names the act when

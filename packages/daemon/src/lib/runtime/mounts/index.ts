@@ -54,6 +54,7 @@ import { type CatalogLinkSubsystem, catalogLinkRoutes } from './catalog-links.ts
 import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-members.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type ConfigFilesSubsystem, configFilesRoutes } from './config-files.ts';
+import { type ConnectorSubsystem, connectorRoutes } from './connector.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetCatalogSubsystem, fleetCatalogRoutes } from './fleet-catalog.ts';
 import { type FleetCredentialsSubsystem, fleetCredentialRoutes } from './fleet-credentials.ts';
@@ -402,6 +403,11 @@ export interface MountedSubsystems {
   readonly catalogMembers: CatalogMemberSubsystem;
   /** The one-item download links this machine has on, and the link store they sit in. */
   readonly catalogLinks: CatalogLinkSubsystem;
+  /**
+   * The owner's `/v1/connector/*` routes over the remote MCP connector's acts (docs/mcp-connector.md). Absent where the
+   * daemon builds no connector (a test world), in which case the routes are not mounted at all.
+   */
+  readonly connector?: ConnectorSubsystem;
   /** Fleet supervision: the deterministic anomaly sweep, the wardens it spawns to judge a suspect
    *  session, and the operator configuration that decides whether it may spend a session at all. The
    *  subsystem owns the sweep TIMER as well as the routes — a supervision loop with no route would be
@@ -535,6 +541,7 @@ export function legacyModule(
               ...sharedCatalogRoutes(subsystems.sharedCatalogs),
               ...catalogMemberRoutes(subsystems.catalogMembers),
               ...catalogLinkRoutes(subsystems.catalogLinks),
+              ...(subsystems.connector === undefined ? [] : connectorRoutes(subsystems.connector)),
               // The session read comes first among the subsystems: `/v1/sessions` is a fixed literal, and the
               // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
               // deeper per-session routes that follow.
