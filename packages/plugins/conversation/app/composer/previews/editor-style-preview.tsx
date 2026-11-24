@@ -1,35 +1,15 @@
 /**
- * Editor style preview — the same two typed lines, raw while they go in, then drawn the way the chosen style draws
- * them: Markdown keeps its markers faintly visible, Rich text hides them and shows a toolbar, a plain text box
- * leaves the text exactly as typed.
+ * Editor style samples — the same two lines drawn the way each style draws them, for the Editor style cards
+ * (`ChoiceSample`, `@ferretry/app`): Markdown keeps its markers faintly visible, Rich text hides them and shows a toolbar, a
+ * plain text box leaves the text exactly as typed. Every card rests on its own style; choosing one plays the card's one fade.
  */
 
-import { SettingPreview } from '@ferretry/app';
+import { ChoiceSample, type ChoiceSampleSize } from '@ferretry/app';
 import type { MdComposePref } from '@ferretry/app';
 import './previews.css';
 
-const LABEL: Readonly<Record<MdComposePref, string>> = {
-  on: 'Formats as you type, markers kept faintly visible',
-  rich: 'Formats as you type, markers hidden, with a toolbar',
-  off: 'Plain text, exactly as typed',
-};
-
-/** What is typed, before any style has touched it. */
-function Raw() {
-  return (
-    <div className="fy-cvp">
-      <div className="fy-cvp-page fy-cvp-mono">
-        <div className="fy-cvp-line">
-          <span className="fy-cvp-typed fy-cvp-typed--first"># Plan</span>
-        </div>
-        <div className="fy-cvp-line">
-          <span className="fy-cvp-typed fy-cvp-typed--mid">**ship** it</span>
-          <span className="fy-cvp-caret" />
-        </div>
-      </div>
-    </div>
-  );
-}
+/** The shape every Editor style sample is drawn in. */
+const EDITOR_SAMPLE_SIZE: ChoiceSampleSize = { width: 160, height: 100 };
 
 function Styled({ pref }: { readonly pref: MdComposePref }) {
   if (pref === 'off') {
@@ -68,6 +48,10 @@ function Styled({ pref }: { readonly pref: MdComposePref }) {
   );
 }
 
-export function EditorStylePreview({ pref }: { readonly pref: MdComposePref }) {
-  return <SettingPreview label={LABEL[pref]} value={pref} before={<Raw />} after={<Styled pref={pref} />} />;
+export function EditorStyleSample({ pref }: { readonly pref: MdComposePref }) {
+  return (
+    <ChoiceSample size={EDITOR_SAMPLE_SIZE}>
+      <Styled pref={pref} />
+    </ChoiceSample>
+  );
 }

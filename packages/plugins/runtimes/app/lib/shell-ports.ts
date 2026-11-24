@@ -3,7 +3,6 @@
  * copy each (never the whole file) until that owner publishes them through a contract.
  */
 
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { GrantRefusal, RuntimeView } from '../../contract/index.ts';
 
 // ─── GAP(access): `grantGuidance` (the grant vocabulary's sentences) is in the Access app half ─────────────────────
@@ -79,12 +78,4 @@ export const runtimeNameProblem = (
   if (taken.has(name))
     return { message: `${name} is already a runtime on ${machineName}.`, suggestion: uniqueName(name, taken) };
   return null;
-};
-
-// ─── GAP(ferrets): `HARNESS_NAMES` is in the unplaced fleet UI (components/component-model.ts) ───────────────────────
-
-/** A harness's name as a person reads it. */
-export const HARNESS_NAMES: Readonly<Record<KnownHarnessKey, string>> = {
-  'claude-code': 'Claude Code',
-  codex: 'Codex',
 };

@@ -100,7 +100,13 @@ import {
   type LoginRuntimePreview,
   type LoginsApi,
 } from '@ferretry/plugin-logins/contract';
-import { loginChangeOf, modelAfterLoginChange, movedSentence, REFUSAL_CODES } from './login-changes.ts';
+import {
+  loginChangeOf,
+  loginRuntimePreview,
+  modelAfterLoginChange,
+  movedSentence,
+  REFUSAL_CODES,
+} from './login-changes.ts';
 import type { RuntimeConfigWriter } from './ports.ts';
 import {
   type AccountChangeFacts,
@@ -525,15 +531,7 @@ export class FleetCatalogService {
     if (onIt.size === 0) return [];
     const candidate = modelAfterLoginChange(reading.model, change);
     const catalog = runtimeCatalog(candidate, await this.#facts({ ...reading, model: candidate }));
-    return catalog.runtimes
-      .filter(runtime => onIt.has(runtime.name))
-      .map(runtime => ({
-        name: runtime.name,
-        harness: runtime.harness,
-        launch: runtime.launch.available
-          ? { available: true }
-          : { available: false, ...(runtime.launch.reason === undefined ? {} : { reason: runtime.launch.reason }) },
-      }));
+    return catalog.runtimes.filter(runtime => onIt.has(runtime.name)).map(loginRuntimePreview);
   }
 
   /** `GET /v1/fleet/machine`, with what this caller may do to it. */

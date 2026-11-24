@@ -14,7 +14,7 @@
  * represented by the store's error slice and never converted into that empty array.
  */
 
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { type LoginStatus, LoginListSchema, LoginViewSchema } from '@ferretry/plugin-logins/contract';
 import {
   type LocalModels,
@@ -24,6 +24,7 @@ import {
   runtimeAccountsFrom,
   runtimeDisplayName,
 } from '../../contract/index.ts';
+import { isSupportedHarnessKey, unsupportedHarnessSentence } from '../../contract/harness-words.ts';
 import type { RuntimesClient } from './client.ts';
 import type { PickerModel } from './picker-model.ts';
 
@@ -37,7 +38,7 @@ export interface PickerAccount {
   readonly wrapper: string;
   /** The runtime's name, as the Runtimes tab shows it. */
   readonly displayName: string;
-  readonly kind: KnownHarnessKey;
+  readonly kind: HarnessKey;
   /** The login it uses, which is what its health is read from. */
   readonly credentialId: string;
   /** `null` = the harness's own default. */
@@ -114,8 +115,13 @@ export const pickerAccount = (
           ...(runtime.models.local === undefined ? {} : { local: runtime.models.local }),
         },
       }),
-  available: runtime.launch.available,
-  unavailableReason: runtime.launch.available ? null : runtime.launch.reason,
+  // A runtime on a harness Runtimes has no behaviour for is never offered to start on, whatever the daemon said.
+  available: runtime.launch.available && isSupportedHarnessKey(runtime.harness),
+  unavailableReason: !isSupportedHarnessKey(runtime.harness)
+    ? unsupportedHarnessSentence(runtime.harness)
+    : runtime.launch.available
+      ? null
+      : runtime.launch.reason,
 });
 
 /** Read this machine's runtimes through the client bound to it. */

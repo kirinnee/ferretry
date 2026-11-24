@@ -13,7 +13,12 @@
  *
  * Pure: the fleet's facts and the routing prompt in, the list out.
  */
-import type { MachineTool, RuntimeView } from '@ferretry/plugin-runtimes/contract';
+import {
+  isSupportedHarnessKey,
+  type MachineTool,
+  type RuntimeView,
+  type SupportedHarnessKey,
+} from '@ferretry/plugin-runtimes/contract';
 import {
   modelVocabulary,
   namedModels,
@@ -154,6 +159,7 @@ export function offers(runtime: RuntimeView, model: string): boolean {
 /** One model one runtime offers, as the list reads it. */
 interface Offer {
   readonly runtime: RuntimeView;
+  readonly harness: SupportedHarnessKey;
   readonly id: string;
   readonly label: string;
   readonly tier?: PackModelOption['tier'];
@@ -162,9 +168,13 @@ interface Offer {
 
 /** What an agent runtime offers: its catalog's choices, else its model set's available models. */
 function offersOf(runtime: RuntimeView): readonly Offer[] {
+  // A runtime on a harness Packs has no routing for offers nothing: it is never read as one of the two it knows.
+  const harness = runtime.harness;
+  if (!isSupportedHarnessKey(harness)) return [];
   if (runtime.models !== undefined)
     return runtime.models.choices.map(choice => ({
       runtime,
+      harness,
       id: choice.id,
       label: choice.label,
       ...(choice.tier === undefined ? {} : { tier: choice.tier }),
@@ -173,7 +183,7 @@ function offersOf(runtime: RuntimeView): readonly Offer[] {
   if (runtime.modelSet.source !== 'model-set') return [];
   return runtime.modelSet.models
     .filter(entry => entry.available)
-    .map(entry => ({ runtime, id: entry.id, label: entry.id, efforts: [] }));
+    .map(entry => ({ runtime, harness, id: entry.id, label: entry.id, efforts: [] }));
 }
 
 /** The key one row of the list gathers its offers under: the same model resold is one row. */
@@ -231,7 +241,7 @@ export function availableModels(
       ...(offer.runtime.models === undefined ? {} : { provider: offer.runtime.models.catalog.id }),
       model: offer.id,
       modelLabel: offer.label,
-      harness: offer.runtime.harness,
+      harness: offer.harness,
       ...(offer.tier === undefined ? {} : { tier: offer.tier }),
       efforts: [...offer.efforts],
       runtime: offer.runtime.name,

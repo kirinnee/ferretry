@@ -4,6 +4,7 @@
  */
 
 import {
+  HarnessScopeSchema,
   type AccountChange,
   type ComponentCatalog,
   ComponentCatalogSchema,
@@ -28,7 +29,7 @@ type ComponentInput = Omit<ComponentView, 'partial' | 'warnings' | 'usedBy' | 'e
 
 /** A component's scope defaults to the harness it names, as the daemon derives it for every kind but a model set. */
 export const component = (input: ComponentInput): ComponentView => ({
-  scope: input.harness ?? 'generic',
+  scope: HarnessScopeSchema.parse(input.harness ?? 'generic'),
   partial: [],
   warnings: [],
   usedBy: { profiles: [], runtimes: [] },

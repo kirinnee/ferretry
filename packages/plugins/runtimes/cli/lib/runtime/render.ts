@@ -1,7 +1,8 @@
 import type { RuntimeCatalog, RuntimeView, StackView } from '../../../contract/index.ts';
-import { disabledWords, HARNESS_LABEL, indent, listOrNone, unavailable } from '../fleet/account-render.ts';
+import { disabledWords, indent, listOrNone, unavailable } from '../fleet/account-render.ts';
+import { harnessName } from '../../../contract/harness-words.ts';
 
-const kind = (runtime: RuntimeView): string => HARNESS_LABEL[runtime.harness];
+const kind = (runtime: RuntimeView): string => harnessName(runtime.harness);
 
 const login = (runtime: RuntimeView): string => {
   const status = runtime.credential.status === undefined ? '' : ` (${runtime.credential.status.replace(/_/gu, ' ')})`;
@@ -51,7 +52,7 @@ export function renderRuntime(runtime: RuntimeView): string {
   ];
   const models = runtime.modelSet;
   if (models.source === 'harness-default')
-    lines.push(...indent([`Models: the ${HARNESS_LABEL[runtime.harness]} default`]));
+    lines.push(...indent([`Models: the ${harnessName(runtime.harness)} default`]));
   else {
     const offered = models.models.map(model =>
       model.available ? model.id : `${model.id} (not available on this login)`,

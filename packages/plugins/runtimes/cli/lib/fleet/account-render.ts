@@ -1,4 +1,3 @@
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import type {
   AccountChangeOutcome,
   AccountChangeView,
@@ -7,13 +6,12 @@ import type {
   Disabled,
   HarnessScope,
 } from '../../../contract/index.ts';
+import { harnessName } from '../../../contract/harness-words.ts';
 
 /**
  * Words shared by every account-model rendering. Plain language only: "home", "lane", "layer" as a
  * file concept and "manifest" never reach a person.
  */
-
-export const HARNESS_LABEL: Record<KnownHarnessKey, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
 
 /** Two spaces per level, so nested facts read as belonging to the line above. */
 export const indent = (lines: readonly string[], depth = 1): string[] =>
@@ -57,7 +55,7 @@ export function renderChangeView(view: AccountChangeView): string {
         'Runtimes after this change:',
         ...indent(
           preview.runtimes.map(runtime => {
-            return `${runtime.name} (${HARNESS_LABEL[runtime.harness]}) — ${unavailable(runtime.launch) ?? 'ready to launch'}`;
+            return `${runtime.name} (${harnessName(runtime.harness)}) — ${unavailable(runtime.launch) ?? 'ready to launch'}`;
           }),
         ),
       );
@@ -66,7 +64,7 @@ export function renderChangeView(view: AccountChangeView): string {
     if (running.length > 0) {
       lines.push(
         'Running on it now:',
-        ...indent(running.map(session => `${session.name} (${HARNESS_LABEL[session.harness]}) · ${session.id}`)),
+        ...indent(running.map(session => `${session.name} (${harnessName(session.harness)}) · ${session.id}`)),
       );
     }
   } else if (preview.kind === 'sign-out') {

@@ -28,7 +28,7 @@ import type { LiveRuntimesClient, RuntimesClient } from '../../../lib/client.ts'
 import { Button } from '../../../ui.ts';
 import type { AccountCatalog } from '../components/account-catalog.ts';
 import { CatalogNote, ComponentBadges, Hint } from '../components/catalog-ui.tsx';
-import { type CatalogHarness, counted, HARNESS_NAMES } from '../components/component-model.ts';
+import { type CatalogHarness, counted } from '../components/component-model.ts';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { ContentsList, ResolvedTable } from './profile-contents.tsx';
 import { AddPicker, type LibraryFilter, LibraryPanel, NO_FILTER } from './profile-library.tsx';
@@ -50,6 +50,7 @@ import {
   sameContents,
   scopeWord,
 } from './profile-model.ts';
+import { harnessName } from '../../../../contract/harness-words.ts';
 
 /** What a file editor is handed: the file's path under `config/`, and how to tell the editor it closed or saved. */
 export interface FileEditorProps {
@@ -311,7 +312,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
         />
         <span className="text-muted">
           derived from the contents
-          {harness === undefined ? '' : ` · for a ${HARNESS_NAMES[harness]} login`}
+          {harness === undefined ? '' : ` · for a ${harnessName(harness)} login`}
         </span>
       </p>
       {refusal === null ? null : (

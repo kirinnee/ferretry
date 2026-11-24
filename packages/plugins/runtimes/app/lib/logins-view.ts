@@ -3,26 +3,30 @@
  * (cross-plugin imports go through contracts only, and a login's wire shape is `LoginView`).
  */
 
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
-import { HARNESS_NAMES } from './shell-ports.ts';
+import { harnessName, harnessWords, supportedHarnessKeys } from '../../contract/harness-words.ts';
 
-export type HarnessKind = KnownHarnessKey;
+export type HarnessKind = HarnessKey;
 
-export const HARNESSES: readonly HarnessKind[] = ['claude-code', 'codex'];
+/** The harnesses Runtimes has behaviour for: the ones its screens offer. */
+export const HARNESSES: readonly HarnessKind[] = supportedHarnessKeys();
 
-/** The short names used in "Claude settings will be skipped on Codex". */
-export const HARNESS_SHORT: Readonly<Record<HarnessKind, string>> = { 'claude-code': 'Claude', codex: 'Codex' };
+/** The short name used in "Claude settings will be skipped on Codex". */
+const harnessShort = (harness: HarnessKind): string => harnessWords(harness)?.short ?? harness;
 
-export const otherHarness = (harness: HarnessKind): HarnessKind =>
-  harness === 'claude-code' ? 'codex' : 'claude-code';
+/** The words for what a harness skips: the short names of the other harnesses Runtimes runs ("Claude"; "Claude and Codex"). */
+export const otherHarnessesShort = (harness: HarnessKind): string =>
+  HARNESSES.filter(other => other !== harness)
+    .map(harnessShort)
+    .join(' and ');
 
 /** Every CLI a login drives, Claude Code first: both for an environment login with a `claude-code:` and a `codex:` half, else its one. */
 export const credentialHarnesses = (credential: LoginView): readonly HarnessKind[] => credential.harnesses;
 
 /** "Claude Code", or "Claude Code + Codex" for a login that drives both. */
 export const harnessesName = (harnesses: readonly HarnessKind[]): string =>
-  harnesses.map(harness => HARNESS_NAMES[harness]).join(' + ');
+  harnesses.map(harness => harnessName(harness)).join(' + ');
 
 export const plural = (count: number, one: string, many = `${one}s`): string =>
   `${String(count)} ${count === 1 ? one : many}`;

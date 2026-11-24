@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { useState } from 'react';
-import { ChoiceCards } from '../../../src/compose/choice-cards.tsx';
+import { ChoiceCards, ChoiceSample } from '../../../src/compose/choice-cards.tsx';
 import { barFill, OptionBars, optionBarsText } from '../../../src/compose/option-bars.tsx';
 import { StepPageFrame, type StepPageBack, type StepPageNext } from '../../../src/compose/step-page-frame.tsx';
 import { Segmented } from '../../../src/compose/setting-row.tsx';
@@ -117,6 +117,39 @@ describe('ChoiceCards', () => {
     await interact(() => radios(mounted!.container)[1]?.click());
     expect(cardOf(mounted.container, 'b').getAttribute('data-selected')).toBe('true');
     expect(cardOf(mounted.container, 'b').getAttribute('data-pulse')).toBe('false');
+  });
+
+  it('should draw a sample in a fixed-shape box in EVERY card, the unchosen ones too, and keep it when the choice moves', async () => {
+    const SIZE = { width: 200, height: 80 };
+    const options = ['a', 'b'].map(id => ({
+      id,
+      title: id,
+      demo: (
+        <ChoiceSample size={SIZE}>
+          <b data-scene={id}>{id}</b>
+        </ChoiceSample>
+      ),
+    }));
+    function Samples() {
+      const [value, setValue] = useState<string | null>('a');
+      return <ChoiceCards label="Pick" options={options} value={value} onChange={setValue} />;
+    }
+    mounted = await mount(<Samples />);
+    const boxes = () => [...mounted!.container.querySelectorAll<HTMLElement>('[data-choice-sample]')];
+    expect(boxes().length).toBe(2);
+    for (const box of boxes()) {
+      expect(box.getAttribute('aria-hidden')).toBe('true');
+      expect(box.style.aspectRatio).toBe('200 / 80');
+      expect(box.closest('.fy-cc__demo')).not.toBeNull();
+    }
+    expect(cardOf(mounted.container, 'b').querySelector('[data-scene="b"]')).not.toBeNull();
+    const before = boxes().map(box => box.outerHTML.length);
+    await interact(() => radios(mounted!.container)[1]?.click());
+    expect(boxes().length).toBe(2);
+    expect(boxes().map(box => box.style.aspectRatio)).toEqual(['200 / 80', '200 / 80']);
+    expect(boxes().map(box => box.outerHTML.length)).toEqual(before);
+    // The sample hangs its movement off the card's own pulse, which is set once, on the card just chosen.
+    expect(cardOf(mounted.container, 'b').getAttribute('data-pulse')).toBe('true');
   });
 
   it('should not let a disabled card be chosen', async () => {

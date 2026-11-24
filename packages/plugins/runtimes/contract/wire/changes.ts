@@ -4,7 +4,7 @@
  * `catalog.ts`. Absence is never silence: an apply says what it left behind, a rollback what it could not verify.
  */
 import { z } from 'zod';
-import { KnownHarnessKeySchema, InstantSchema } from './shared.ts';
+import { HarnessKeySchema, InstantSchema } from './shared.ts';
 
 /**
  * A non-secret handle for one staged change. Safe in a path and in a log.
@@ -138,7 +138,7 @@ export const ManifestModelSummarySchema = z.discriminatedUnion('available', [
 export const ManifestAccountSummarySchema = z
   .strictObject({
     id: z.uuid(),
-    kind: KnownHarnessKeySchema,
+    kind: HarnessKeySchema,
     mode: z.enum(['interactive', 'auto']),
     wrapper: z.string().min(1),
     home: z.string().min(1),
@@ -209,7 +209,7 @@ export type ManifestSummary = z.infer<typeof ManifestSummarySchema>;
 
 /** What moving shared history would carry, per harness. Reported, never inferred from a total. */
 export const SharedHistorySummarySchema = z.strictObject({
-  kind: KnownHarnessKeySchema,
+  kind: HarnessKeySchema,
   pool: z.string().min(1),
   moved: z.number().int().nonnegative(),
   conflicts: z.number().int().nonnegative(),
