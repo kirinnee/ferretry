@@ -665,6 +665,26 @@ model, dailyChars }`). It is read **at each line**, so a change is heard from th
   to the audit log (a line a minute would drown it): counts and milliseconds only go to the daemon log. The model and the daily
   limit are edited in `voice.yaml`, not on the page.
 
+### Setting voice mode up on first run (the Voice step)
+
+First-run onboarding's **Voice** step (a client step: it configures this browser) carries a **Voice mode** section under
+"Test your audio", so a fresh install walks the whole of it: **install** the machine's speech engine, **pick the reply
+voice** (Kokoro on the machine is the default; ElevenLabs shows only with the person's own key) and a **Talk to test that
+stops by itself after 10 seconds**. It is not a second implementation: it is Settings › Voice › Voice mode drawn inside the
+step (`features/onboarding/voice-mode-setup.tsx`, handed to the step as its `voiceMode` slot), so what Install calls is the
+engine's own public route (`POST /v1/voice/engine/install`), and a machine whose engine is fetched natively or falls back to
+WebAssembly needs nothing different here.
+
+It is **optional and skippable**. The section says so ("Finish later in Settings › Voice"); the step's Next never waits for
+it (the machine downloads on its own, and the step is not held busy), and the frame's **Later** leaves the whole step for
+Settings. It writes nothing to this device: each press is the machine's own install or setting, and what Next saves
+(this device's dictation engine) is exactly what it was without the section. Talk to test takes `limitMs` (10 s here, and
+none in Settings): at the limit it ends the stream, tells the machine, and says "Stopped after 10 s."
+
+Proof: `tests/integration/app/voice-mode-setup.visual.test.ts` over a fake machine (`fixtures/fake-machine.ts`) at 390 and
+1440 px, light and dark: install is one call and ends Ready, the reply voice installs and Hear it speaks, the device is
+written nothing and Next's commit is unchanged, the test stops itself in about 10 s, no sideways scroll, 44 px controls.
+
 ## Speed: which path each engine runs on
 
 **Short version.** On-device speech runs on single-thread WebAssembly today, and the app picks that for

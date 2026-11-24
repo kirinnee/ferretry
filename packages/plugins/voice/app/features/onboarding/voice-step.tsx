@@ -15,12 +15,14 @@
  *     Next waits for it.
  *   - "Test your audio" (`voice-test.tsx`) is the step that asks for the microphone and lets the person record a line, see it
  *     transcribed by the pick, and hear a sample read aloud. It changes nothing and is never needed to go on.
+ *   - "Voice mode" (`voiceMode`, `voice-mode-setup.tsx`) is the optional set-up of hands-free chat on the machine: its speech
+ *     engine, the reply voice, a 10 s test. The person can leave it for Settings › Voice; Next never waits for it.
  *   - The list is short on purpose: this device's default first, then the fastest, a balanced one, the browser's own and
  *     Off. "Show every engine" (a disclosure, not a button) opens the whole catalog, the same cards Settings › Voice draws.
  */
 
 import { StepDemo } from '@ferretry/app';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import type { SttSettings, SttSettingsPatch } from '../../lib/stt/stt-settings.ts';
 import type { BrowserRecognitionSupport } from '../../lib/stt/browser-recognition.ts';
 import { DEFAULT_ON_DEVICE_ENGINE, type DeviceClass } from '../../lib/stt/engine-defaults.ts';
@@ -62,6 +64,11 @@ export interface VoiceStepProps {
   readonly step?: StepHost | undefined;
   /** The microphone's permission. Left out, the page's own; suites and shots hand a fake. */
   readonly mic?: MicPort | undefined;
+  /**
+   * Voice mode's setup on the machine (`voice-mode-setup.tsx`), drawn under the audio test. Left out, the page is the
+   * device's dictation alone. It is optional for the person and changes nothing this page commits.
+   */
+  readonly voiceMode?: ReactNode;
 }
 
 const NOT_KEPT = 'This device would not keep that choice. Allow site storage for this page, then press Next again.';
@@ -75,6 +82,7 @@ export function VoiceStep({
   persisted,
   step,
   mic,
+  voiceMode,
 }: VoiceStepProps) {
   useStepReady(step);
   const [all, setAll] = useState(false);
@@ -127,6 +135,7 @@ export function VoiceStep({
       </details>
       {/* Keyed by the pick: a new pick starts a new test, so what the last engine heard is never shown under this one. */}
       <VoiceTest key={pick ?? 'none'} pick={pick} voices={voices} mic={mic} />
+      {voiceMode}
       <StepDemo pinned>
         <VoiceDemo pick={pick} />
       </StepDemo>

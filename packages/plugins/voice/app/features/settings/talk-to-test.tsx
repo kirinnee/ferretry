@@ -36,9 +36,13 @@ export interface TalkToTestProps {
   /** A suite supplies a client with a fake socket; the page uses the shell's. */
   readonly client?: Pick<VoicePluginClient, 'socket'>;
   readonly createMic?: () => MicSource;
+  /** Stop listening by itself after this long (first-run's test is 10 s); left out, it runs until Stop. */
+  readonly limitMs?: number;
 }
 
-export function TalkToTest({ machine, client: injected, createMic = browserMic }: TalkToTestProps) {
+const wholeSeconds = (ms: number): string => `${Math.round(ms / 1000)} s`;
+
+export function TalkToTest({ machine, client: injected, createMic = browserMic, limitMs }: TalkToTestProps) {
   const routed = useOptionalVoiceClient();
   const client: Pick<VoicePluginClient, 'socket'> | null = injected ?? routed;
   const [running, setRunning] = useState(false);
@@ -48,14 +52,27 @@ export function TalkToTest({ machine, client: injected, createMic = browserMic }
   const [problem, setProblem] = useState<string | null>(null);
   const handle = useRef<VoiceStreamHandle | null>(null);
 
+  const limit = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearLimit = useCallback(() => {
+    if (limit.current !== null) clearTimeout(limit.current);
+    limit.current = null;
+  }, []);
+
   const stop = useCallback(() => {
+    clearLimit();
     handle.current?.stop();
     handle.current = null;
     setRunning(false);
     setState(null);
-  }, []);
+  }, [clearLimit]);
 
-  useEffect(() => () => handle.current?.stop(), []);
+  useEffect(
+    () => () => {
+      clearLimit();
+      handle.current?.stop();
+    },
+    [clearLimit],
+  );
 
   const start = useCallback(() => {
     if (client?.socket === undefined) {
@@ -79,6 +96,7 @@ export function TalkToTest({ machine, client: injected, createMic = browserMic }
       },
       onWords: words => setHeard({ text: words.text, final: words.final }),
       onEnded: ended => {
+        clearLimit();
         handle.current = null;
         setRunning(false);
         setState(null);
@@ -87,12 +105,24 @@ export function TalkToTest({ machine, client: injected, createMic = browserMic }
       },
       onMicFailed: () => setProblem('The microphone could not be opened. Allow it for this site and try again.'),
     });
-  }, [client, createMic, machine]);
+    clearLimit();
+    if (limitMs !== undefined)
+      limit.current = setTimeout(() => {
+        stop();
+        setOutcome(previous => previous ?? `Stopped after ${wholeSeconds(limitMs)}.`);
+      }, limitMs);
+  }, [client, clearLimit, createMic, limitMs, machine, stop]);
 
   return (
     <SettingRow
       name="Talk to test"
-      hint={running && state !== null ? STATE_SENTENCE[state](machine) : 'Speech check'}
+      hint={
+        running && state !== null
+          ? STATE_SENTENCE[state](machine)
+          : limitMs === undefined
+            ? 'Speech check'
+            : `Speech check, up to ${wholeSeconds(limitMs)}`
+      }
       wide
       dataAttributes={{ 'data-voice-talk-to-test': running ? 'on' : 'off' }}
       explanation={
