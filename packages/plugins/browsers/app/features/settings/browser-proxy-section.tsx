@@ -1,17 +1,10 @@
-import {
-  Button,
-  type ChangeAuthority,
-  ChangeApplyPanel,
-  SetupNote,
-  SetupSection,
-  useSecretField,
-} from '@ferretry/app/ui';
-import { SettingFieldset, SettingSaveBar, useReportUnsaved } from '@ferretry/app';
+import { type ChangeAuthority, SetupNote, SetupSection, useSecretField } from '@ferretry/app/ui';
+import { SettingFieldset, SettingSaveBar } from '@ferretry/app';
 import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { BrowserProxySetting } from '../../../contract/index.ts';
 import { type CallClient, listSecretNames, putSecret, reasonOf } from '../../lib/clients.ts';
-import { machineInSentence, type SaveOutcome } from './browser-mode-section.tsx';
+import { ChangeAuthorityNote, machineInSentence, mayChange, type SaveOutcome } from './browser-mode-section.tsx';
 import { testBrowserProxy } from './browser-proxy-api.ts';
 import { type BrowserProxyDraft, draftOf, isSecretName, nameTyped, settingOf } from './browser-proxy-draft.ts';
 import { BrowserProxyCredential } from './browser-proxy-credential.tsx';
@@ -113,9 +106,6 @@ export function BrowserProxySection({
   const wanted = typed ? settingOf(filed) : ({ ok: true, setting: null } as const);
   const before = JSON.stringify(draftOf(saved));
   const dirty = JSON.stringify(filed) !== before || pendingFields.username.filled || pendingFields.password.filled;
-  // The change panel that replaces the Save bar while something valid is staged is not a Save bar, so it cannot report this
-  // form by itself: tell the shell's leave guard, so Back asks before it drops the draft.
-  useReportUnsaved(dirty);
   // What to test: nothing is sent for the saved proxy (`{}`); the edited setting is sent only when it differs.
   const testBody: { readonly proxy?: BrowserProxySetting } | null = !typed
     ? saved === null
@@ -408,58 +398,37 @@ export function BrowserProxySection({
         shown={shown}
         onTest={test}
       />
-      {wanted.ok && dirty ? (
-        <div className="flex min-w-0 flex-col gap-2" data-browser-proxy-save-panel="">
-          {saveOutcome?.kind === 'refused' ? (
-            <SetupNote live tone="warn" name="browser-proxy-save-refusal">
-              {saveOutcome.sentence}
-            </SetupNote>
-          ) : null}
-          {saveOutcome?.kind === 'pending' ? (
-            <SetupNote live tone="warn" name="browser-proxy-held">
-              {saveOutcome.sentence}
-            </SetupNote>
-          ) : null}
-          <ChangeApplyPanel
-            machineName={machineName}
-            authority={authority}
-            busy={saving}
-            refusal={null}
-            submitLabel={wanted.setting === null ? 'Turn the browser proxy off' : 'Save and test'}
-            onSubmit={() => saveAndTest(wanted.setting)}
-          >
-            <Button
-              type="button"
-              data-browser-proxy-undo=""
-              onClick={() => {
-                setDraft(draftOf(saved));
-                pendingFields.username.clear();
-                pendingFields.password.clear();
-                setProblems({ username: null, password: null });
-                forgetTest();
-              }}
-            >
-              Keep what is saved
-            </Button>
-          </ChangeApplyPanel>
-        </div>
-      ) : (
-        // The Save bar is there from the first paint; the panel above replaces it once there is something valid to save.
-        <SettingSaveBar
-          dirty={dirty}
-          blocked
-          saved={saveOutcome?.kind === 'saved' && !dirty}
-          saveLabel="Save and test"
-          onSave={() => undefined}
-          onDiscard={() => {
-            setDraft(draftOf(saved));
-            pendingFields.username.clear();
-            pendingFields.password.clear();
-            setProblems({ username: null, password: null });
-            forgetTest();
-          }}
-        />
-      )}
+      {saveOutcome?.kind === 'refused' ? (
+        <SetupNote live tone="warn" name="browser-proxy-save-refusal">
+          {saveOutcome.sentence}
+        </SetupNote>
+      ) : null}
+      {saveOutcome?.kind === 'pending' ? (
+        <SetupNote live tone="warn" name="browser-proxy-held">
+          {saveOutcome.sentence}
+        </SetupNote>
+      ) : null}
+      <ChangeAuthorityNote machineName={machineName} authority={authority} />
+      {/* The ONE Save bar, as Security's: in flow while clean, sticky while something is typed; the same bar throughout. */}
+      <SettingSaveBar
+        dirty={dirty}
+        saving={saving}
+        saved={saveOutcome?.kind === 'saved' && !dirty}
+        blocked={!wanted.ok || !mayChange(authority)}
+        saveLabel={wanted.ok && wanted.setting === null ? 'Turn the browser proxy off' : 'Save and test'}
+        marks={{ 'data-browser-proxy-save-panel': '' }}
+        saveMarks={{ 'data-change-submit': '' }}
+        onSave={() => {
+          if (wanted.ok) saveAndTest(wanted.setting);
+        }}
+        onDiscard={() => {
+          setDraft(draftOf(saved));
+          pendingFields.username.clear();
+          pendingFields.password.clear();
+          setProblems({ username: null, password: null });
+          forgetTest();
+        }}
+      />
       <p className="m-0 text-meta leading-base text-muted" data-browser-proxy-hint="">
         Applies the next time the browser on {machineInSentence(machineName)} starts.
       </p>
