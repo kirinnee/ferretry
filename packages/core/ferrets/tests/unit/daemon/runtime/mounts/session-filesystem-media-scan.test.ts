@@ -141,6 +141,65 @@ describe('the media scan: a file is scanned once, not once per piece', () => {
   });
 });
 
+describe('the media scan: a small file asked for whole', () => {
+  it('should be answered whole from the verdict the second time, opening the vault once and not scanning again', async () => {
+    // Arrange
+    const small = patterned(2_000);
+    const redaction = new FakeRedaction(new Map());
+    const { ask } = fixture(file(small), { redaction });
+    const first = await ask();
+    const opensAfterFirst = redaction.opens;
+
+    // Act
+    const second = await ask();
+
+    // Assert
+    should(bytesOf(first)).eql(small);
+    should(bytesOf(second)).eql(small);
+    should(second.status).eql(200);
+    should(opensAfterFirst).eql(2); // which vault, then the scan
+    should(redaction.opens - opensAfterFirst).eql(1); // which vault only: the verdict answers the rest
+  });
+});
+
+describe('the media scan: a request that meets a scan in flight', () => {
+  it('should wait for it, serve from its verdict, and never read the whole file itself', async () => {
+    // Arrange: the leader's scan (the vault's second open) is held until the follower has reached the file
+    const inner = new FakeRedaction(new Map());
+    let opens = 0;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const gated: Pick<Redaction, 'read'> = {
+      read: async fn => {
+        opens += 1;
+        if (opens === 2) await held;
+        return await inner.read(fn);
+      },
+    };
+    const { ask, scans } = fixture(file(CLIP), { redaction: gated });
+    const settle = async (until: () => boolean): Promise<void> => {
+      while (!until()) await new Promise<void>(resolve => setImmediate(resolve));
+    };
+
+    // Act
+    const leader = ask('bytes=0-9');
+    await settle(() => opens === 2); // the leader owes the scan and is inside it
+    const follower = ask('bytes=100-109');
+    await settle(() => opens === 3); // the follower has asked which vault it is under, and now waits
+    const reads = scans().length;
+    release();
+    const [first, second] = await Promise.all([leader, follower]);
+
+    // Assert
+    should(reads).eql(1); // nothing but the leader had read the file when the follower arrived
+    should(scans().length).eql(1);
+    should(bytesOf(first)).eql(CLIP.subarray(0, 10));
+    should(bytesOf(second)).eql(CLIP.subarray(100, 110));
+  });
+});
+
 describe('the media scan: what makes a verdict stale', () => {
   it('should scan again when the vault changes, and refuse a file that holds a value stored since', async () => {
     // Arrange
@@ -250,6 +309,21 @@ describe('the media scan: what makes a verdict stale', () => {
 
     // Assert
     should(refused).eql({ code: 'holds_secret', status: 403 });
+  });
+});
+
+describe('the media scan: a file cut short after it was judged', () => {
+  it('should refuse a piece shorter than the range it named, never serve it short', async () => {
+    // Arrange: the descriptor says the file is whole, and the bytes under it have gone (a truncation under the read)
+    const { ask, tree } = fixture(file(CLIP));
+    await ask('bytes=0-9');
+    tree.set('clip.mp4', file(CLIP.subarray(0, 100), { size: CLIP.byteLength }));
+
+    // Act
+    const refused = await refusalOf(ask('bytes=1000-1999'));
+
+    // Assert
+    should(refused).eql({ code: 'changed', status: 409 });
   });
 });
 
