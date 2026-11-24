@@ -141,6 +141,11 @@ export interface UnifiedBrowserSurfaceProps {
   readonly dependencies?: UnifiedBrowserDependencies;
   /** What the session workspace knows that this surface cannot: the page's name, who drives it, its pages. */
   readonly host?: BrowserBarHost;
+  /**
+   * A one-shot ask to show one of the session's pages (the agent opened it): the surface goes to the real browser and selects
+   * that page for THIS viewer, once the daemon has named the viewer. Acted on once per `request`, a mount's own included.
+   */
+  readonly showPage?: { readonly request: number; readonly pageId: string };
 }
 
 /**
@@ -208,6 +213,7 @@ export function UnifiedBrowserSurface({
   onConfirmLoginWindow,
   dependencies = DEFAULT_UNIFIED_BROWSER_DEPENDENCIES,
   host,
+  showPage,
 }: UnifiedBrowserSurfaceProps) {
   // Fail here rather than deep inside a request: a mismatched pair would drive
   // one daemon's Chrome under another daemon's name, which is the exact bug the
@@ -330,6 +336,32 @@ export function UnifiedBrowserSurface({
     pendingRemoteRef.current = null;
     state.runAction(pending);
   }, []);
+
+  // The agent opened a page and asked to see it. Preview has no page of the session to show, so the surface goes to the real
+  // browser first; the page is then selected with THIS viewer's id, which the daemon names once the display stream is up (a
+  // select sent before that falls back to the session's own view, and another viewer's page would move with it).
+  const shownRequest = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (showPage === undefined || shownRequest.current === showPage.request) return undefined;
+    if (engine !== 'remote') {
+      setEngine('remote');
+      rememberBrowserEngine(scope, 'remote');
+      return undefined;
+    }
+    const select = (): void => {
+      if (shownRequest.current === showPage.request) return;
+      shownRequest.current = showPage.request;
+      dispatchRemote({ action: 'activate-page', pageId: showPage.pageId });
+    };
+    const viewer = scope.viewer;
+    if (viewer === undefined || viewer.current() !== undefined) {
+      select();
+      return undefined;
+    }
+    return viewer.subscribe(() => {
+      if (viewer.current() !== undefined) select();
+    });
+  }, [showPage, engine, scope, dispatchRemote]);
 
   // A surface that has gone away must not be told anything by a request it
   // launched. Assigned on mount rather than only at declaration, because a

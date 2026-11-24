@@ -37,6 +37,7 @@ const summary = {
   name: 'zoe',
   role: 'lead',
   harness: 'claude-code',
+  runtime: 'main',
   runner: 'tmux',
   folder: '/work/project',
   state: params.get('state') ?? 'idle',
@@ -136,11 +137,33 @@ const transport = new FakeTransport((request: TransportRequest): TransportAnswer
       terminals: [],
       limits: { perSession: 4, global: 12, runningGlobal: 0, idleTimeoutSeconds: 1_800, scrollbackLines: 5_000 },
     });
+  // The ferret's Browser panel reads this: one running page, so the revealed panel shows a page rather than an error.
+  if (path === '/v1/ferrets/zoe/browser' && request.method === 'GET')
+    return json({
+      sessionId: 'zoe',
+      state: 'running',
+      url: 'https://example.invalid/invoices/88',
+      title: 'Invoice 88',
+      pages: [{ id: 'p2', url: 'https://example.invalid/invoices/88', title: 'Invoice 88' }],
+      activePageId: 'p2',
+      canGoBack: false,
+      canGoForward: false,
+      pageState: 'ready',
+      viewport: { width: 640, height: 480 },
+      viewers: 1,
+      persistentProfile: true,
+      idleTimeoutSeconds: 900,
+      capacity: { running: 1, maximum: 3 },
+    });
+  if (path === '/v1/browser/login' && request.method === 'GET') return json({ state: 'closed', profilePrimed: true });
   if (path === '/v1/ferrets/zoe/log-page')
     return json({ v: 1, ferret: 'zoe', log: '', start: 0, file: 'zoe.jsonl', offsets: [] });
   (window as unknown as { __unanswered: string[] }).__unanswered.push(`${request.method} ${path}`);
   return json({ ok: true });
 });
+/** A test reaches the fake daemon's event feed from the page (`ferret-page-reveal.visual.test.ts`). */
+(window as unknown as { __emit: (name: string, payload: unknown) => void }).__emit = (name, payload) =>
+  transport.emit({ name, payload });
 const handler: PasskeyHandler = {
   need: () => undefined,
   confirm: async () => true,
