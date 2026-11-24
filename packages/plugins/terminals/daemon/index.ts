@@ -621,6 +621,8 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     wrap: async (ferret, command) => await processes.limits.command(ferret, command),
     // `identify` and `signalDescendant` (c58-37): the pane's root start, and the one proved-descendant signal.
     processes: paneProcessHost(kernel.spawn),
+    // A stop waits on this clock for the session and every process under it to be gone before it says so.
+    sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
     remember: async (ferret, running) => await remember(ferret, running.handle, running.pid),
     delivery: {
       act: kernel.act.bind(kernel),

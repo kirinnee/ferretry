@@ -28,8 +28,10 @@
  * It runs ONLY when the launch said Claude was given the channel flag (`FERRETRY_CHANNEL`, set in the same `--mcp-config`
  * the flag rides with): a server polling for a channel Claude never loaded would make the daemon think it was listening.
  *
- * A FAILURE NEVER STOPS IT. A poll that fails (the daemon restarting, a refused call) backs off, capped, and tries
- * again; a message whose claim failed or was refused is not written.
+ * A FAILURE NEVER STOPS IT, EXCEPT A REVOKED CREDENTIAL. A poll that fails (the daemon restarting, a refused call, a 5xx)
+ * backs off, capped, and tries again; a message whose claim failed or was refused is not written. But a 401 is the
+ * daemon saying this ferret's pane credential is no longer good (it ended, or was restarted, and the token rotated): no
+ * retry can ever change that answer, so the pump says so once and stops, and the server ends with it (`serve.ts`).
  */
 import { z } from 'zod';
 
@@ -56,6 +58,28 @@ interface ChannelClaim {
 
 /** How long one poll waits at the daemon: under the tool door's own limit, so no request outlives the transport. */
 export const CHANNEL_POLL_WAIT_MS = 20_000;
+/**
+ * A call the daemon REFUSED, with the refusal's status and code kept (the port throws this for any refusal; a failure that
+ * is not a refusal, a network error or an unreadable answer, stays a plain Error). The pump tells a revoked credential
+ * (401) from a refusal that may pass.
+ */
+export class ChannelRefusal extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'ChannelRefusal';
+  }
+}
+
+/** Said once, on the way out, when the daemon answers 401: the same sentence for a poll and a claim. */
+export const CREDENTIAL_REVOKED_SENTENCE =
+  'this ferret’s credential was revoked (it ended or was restarted); channel stopped — restart the ferret';
+
+const credentialRevoked = (error: unknown): boolean => error instanceof ChannelRefusal && error.status === 401;
+
 /** The first and the longest wait after a failed poll. */
 export const CHANNEL_BACKOFF_START_MS = 2_000;
 export const CHANNEL_BACKOFF_MAX_MS = 30_000;
@@ -112,6 +136,7 @@ export interface ChannelSeams {
 export class ChannelPump {
   private running = false;
   private stopped = false;
+  private revoked = false;
 
   constructor(
     private readonly port: ChannelPort,
@@ -119,11 +144,24 @@ export class ChannelPump {
     private readonly seams: ChannelSeams,
   ) {}
 
-  /** Starts the loop once; a second call (a client that sends `initialized` twice) is ignored. Resolves when stopped. */
-  start(): Promise<void> {
-    if (this.running) return Promise.resolve();
-    this.running = true;
-    return this.loop();
+  /**
+   * Starts the loop once; a second call (a client that sends `initialized` twice) is ignored. Resolves when stopped:
+   * `credential_revoked` when the daemon refused this ferret's credential (the loop has ended and said so once).
+   */
+  async start(): Promise<'stopped' | 'credential_revoked'> {
+    if (!this.running) {
+      this.running = true;
+      await this.loop();
+    }
+    return this.revoked ? 'credential_revoked' : 'stopped';
+  }
+
+  /** Ends the loop for good because the daemon no longer knows this ferret's credential; says so once. */
+  private revoke(): void {
+    if (this.revoked) return;
+    this.revoked = true;
+    this.stopped = true;
+    this.seams.onError?.(CREDENTIAL_REVOKED_SENTENCE);
   }
 
   /** Ends the loop after the poll now in flight. */
@@ -149,7 +187,8 @@ export class ChannelPump {
       );
       return false;
     } catch (error) {
-      this.seams.onError?.(`channel claim failed: ${error instanceof Error ? error.message : String(error)}`);
+      if (credentialRevoked(error)) this.revoke();
+      else this.seams.onError?.(`channel claim failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }
@@ -161,6 +200,7 @@ export class ChannelPump {
       try {
         messages = await this.port.poll(this.seams.generation, CHANNEL_POLL_WAIT_MS);
       } catch (error) {
+        if (credentialRevoked(error)) return this.revoke();
         this.seams.onError?.(`channel poll failed: ${error instanceof Error ? error.message : String(error)}`);
         await this.seams.sleep(backoff);
         backoff = Math.min(backoff * 2, CHANNEL_BACKOFF_MAX_MS);

@@ -42,6 +42,7 @@ function runner(ownSession = false) {
       },
     },
     socketPath: '/fixture/tmux.sock',
+    politeGraceMs: 0,
     instantOf: () => '2026-11-08T10:00:00.000Z' as never,
     now: () => '2026-11-08T10:00:00.000Z' as never,
   });
@@ -73,7 +74,10 @@ describe('TmuxRunner stop and signal through a stale pane id', () => {
 
     const polite = runner(true);
     await polite.subject.stop(PANE, 'polite', STALE_OWNER);
-    expect(polite.writes()).toEqual([['send-keys', '-t', `=fy-${STALE_OWNER}:`, 'C-c']]);
+    expect(polite.writes()).toEqual([
+      ['send-keys', '-t', `=fy-${STALE_OWNER}:`, 'C-c'],
+      ['kill-session', '-t', `=fy-${STALE_OWNER}`],
+    ]);
     // Never the pane id that names the other ferret.
     expect([...now.writes(), ...polite.writes()].some(args => args.includes(PANE))).toBe(false);
   });
@@ -101,6 +105,7 @@ describe('TmuxRunner stop and signal through a stale pane id', () => {
           },
         },
         socketPath: '/fixture/tmux.sock',
+        politeGraceMs: 0,
         instantOf: () => '2026-11-08T10:00:00.000Z' as never,
         now: () => '2026-11-08T10:00:00.000Z' as never,
       });
@@ -140,6 +145,7 @@ describe('TmuxRunner stop and signal through a stale pane id', () => {
           },
         },
         socketPath: '/fixture/tmux.sock',
+        politeGraceMs: 0,
         instantOf: () => '2026-11-08T10:00:00.000Z' as never,
         now: () => '2026-11-08T10:00:00.000Z' as never,
         log: { warn: message => void warnings.push(message) },
@@ -176,6 +182,7 @@ describe('TmuxRunner stop and signal through a stale pane id', () => {
         },
       },
       socketPath: '/fixture/tmux.sock',
+      politeGraceMs: 0,
       instantOf: () => '2026-11-08T10:00:00.000Z' as never,
       now: () => '2026-11-08T10:00:00.000Z' as never,
     });

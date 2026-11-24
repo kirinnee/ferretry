@@ -94,6 +94,7 @@ function subject(
       },
     },
     socketPath: '/fixture/tmux.sock',
+    politeGraceMs: 0,
     instantOf: () => NOW as never,
     now: () => NOW as never,
     ...(options.watched === false

@@ -36,6 +36,21 @@ export interface ServeContext {
   readonly isOn?: ((plugin: string) => Promise<boolean>) | undefined;
 }
 
+/** `input` until it ends or `ended` settles, whichever is first. Never waits on the source after `ended`. */
+async function* endedBy(input: AsyncIterable<Uint8Array>, ended: Promise<'revoked'>): AsyncGenerator<Uint8Array> {
+  const iterator = input[Symbol.asyncIterator]();
+  try {
+    for (;;) {
+      const next = await Promise.race([iterator.next(), ended]);
+      if (next === 'revoked' || next.done === true) return;
+      yield next.value;
+    }
+  } finally {
+    // Not awaited: a source blocked on a read (standard input) would hold the exit open.
+    void Promise.resolve(iterator.return?.()).catch(() => undefined);
+  }
+}
+
 /**
  * `mcp serve`: the agent tools as an MCP server over standard input and output. Its own module, importing neither the
  * manifest nor the servers controller, so the shell can run it without loading the rest of this plugin's CLI half (a
@@ -72,6 +87,14 @@ export async function serveTools({
             io.err(`${message}\n`);
           },
         });
+  // Set when the daemon refuses this ferret's credential: the input is then cut off so the server ends, and fails.
+  let ended: (() => void) | undefined;
+  const revoked = new Promise<'revoked'>(resolve => {
+    ended = () => {
+      resolve('revoked');
+    };
+  });
+  let credentialRevoked = false;
   await serveMcpOverStdio(
     new McpServer(
       isOn === undefined ? clientToolsPort(client) : { ...clientToolsPort(client), isOn },
@@ -84,12 +107,20 @@ export async function serveTools({
       },
       () => {
         // Never awaited: it ends when stopped, and a poll still waiting at the daemon must not hold the process open.
-        pump?.start().catch(() => undefined);
+        void pump
+          ?.start()
+          .then(outcome => {
+            if (outcome !== 'credential_revoked') return;
+            credentialRevoked = true;
+            ended?.();
+          })
+          .catch(() => undefined);
       },
     ),
-    stdin(),
+    endedBy(stdin(), revoked),
     write,
   );
   pump?.stop();
-  return 0;
+  // A server whose credential is gone exits non-zero, so Claude shows it as failed instead of a zombie that answers nothing.
+  return credentialRevoked ? 1 : 0;
 }

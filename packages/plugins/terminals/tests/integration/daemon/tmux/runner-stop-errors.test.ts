@@ -42,6 +42,7 @@ function runner(script: Script) {
       },
     },
     socketPath: '/fixture/tmux.sock',
+    politeGraceMs: 0,
     instantOf: () => '2026-11-08T10:00:00.000Z' as never,
     now: () => '2026-11-08T10:00:00.000Z' as never,
   });
@@ -108,7 +109,8 @@ describe('TmuxRunner.stop on a handle the ferret owns', () => {
   test('a stop that works still stops', async () => {
     const polite = runner({});
     await polite.subject.stop(PANE, 'polite', LIVE_OWNER);
-    expect(polite.writes().map(args => args[0])).toEqual(['send-keys']);
+    // The interrupt is not the stop: a session still there after the grace is killed too.
+    expect(polite.writes().map(args => args[0])).toEqual(['send-keys', 'kill-session']);
     const now = runner({});
     await now.subject.stop(PANE, 'now', LIVE_OWNER);
     expect(now.writes().map(args => args[0])).toEqual(['kill-session']);

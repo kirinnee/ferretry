@@ -1,6 +1,6 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
-import { type ChannelPort, parseChannelMessages } from './channel.ts';
+import { type ChannelPort, ChannelRefusal, parseChannelMessages } from './channel.ts';
 import type { McpToolResult, McpToolsPort } from './server.ts';
 import { AGENT_TOOL_DEFAULT_WAIT_MS, AGENT_TOOL_MAX_TOTAL_WAIT_MS, AGENT_TOOL_MAX_WAIT_MS } from './tools.ts';
 
@@ -82,6 +82,13 @@ export function clientToolsPort(client: PluginClient): McpToolsPort {
   };
 }
 
+/** A refusal the daemon gave (an error carrying its HTTP `status`) as a {@link ChannelRefusal}; anything else as it was. */
+function refusalOf(error: unknown): unknown {
+  const { status, code } = (error ?? {}) as { status?: unknown; code?: unknown };
+  if (!(error instanceof Error) || typeof status !== 'number') return error;
+  return new ChannelRefusal(error.message, status, typeof code === 'string' ? code : undefined);
+}
+
 /**
  * The channel pump's one way to the daemon: the same tool door, two tools only this server calls (`channel_poll`,
  * `channel_claim`; Conversation serves them as the session). A call the daemon refuses, or answers in a shape this build
@@ -90,7 +97,10 @@ export function clientToolsPort(client: PluginClient): McpToolsPort {
 export function clientChannelPort(client: PluginClient): ChannelPort {
   const once = async (name: string, args: Readonly<Record<string, unknown>>): Promise<unknown> => {
     if (client.tool === undefined) throw new Error('this build cannot reach the daemon’s tool door');
-    const answer = ToolResultSchema.safeParse(await client.tool(name, args));
+    const reply = await client.tool(name, args).catch((error: unknown) => {
+      throw refusalOf(error);
+    });
+    const answer = ToolResultSchema.safeParse(reply);
     if (!answer.success) throw new Error(`the daemon answered ${name} in a shape this build does not read`);
     if (answer.data.isError === true) throw new Error(answer.data.text);
     return answer.data.data;

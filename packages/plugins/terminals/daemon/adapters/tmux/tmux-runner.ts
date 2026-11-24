@@ -57,6 +57,7 @@ import { paneBlockingDialog } from '../../lib/tmux/harness-dialog.ts';
 import { paneBlockingPermission } from '../../lib/tmux/permission-prompt.ts';
 import { LaunchGuardRefusal, RealHarnessRefusedError, type TmuxLaunchGuard } from '../../lib/tmux/harness-guard.ts';
 import { TMUX_PROGRAM } from './kernel-tmux-process.ts';
+import { DEFAULT_TREE_END_TIMES, type DoomedProcess, endDoomed, nameDoomed } from './session-tree-end.ts';
 import { captureFrame, ComposerUnconfirmedError, type DeliverySleep } from './composer-fill.ts';
 import {
   type CapturedFrame,
@@ -324,6 +325,15 @@ export interface TmuxRunnerOptions {
    * signal). Absent: `identify` names the pane without a start, and `signalDescendant` signals nothing.
    */
   readonly processes?: PaneProcessHost;
+  /** Waits `ms` (the kernel clock in the daemon). Absent: no waiting, so a stop's grace and steps pass at once (a fixture). Only a stop's waits use it. */
+  readonly sleep?: (ms: number) => Promise<void>;
+  /**
+   * How long a POLITE stop waits, after the harness's interrupt, for the session to end by itself before it ends it as a
+   * `now` stop does (default 5 s). A stop is only ever reported done once the session and every process under it are gone.
+   */
+  readonly politeGraceMs?: number;
+  /** How long each step of ending a stubborn process tree waits (default 2 s per step); tests shorten it. */
+  readonly treeEnd?: { readonly stepMs: number; readonly pollMs: number };
   /** Where a refused launch is said. */
   readonly log?: Pick<Log, 'warn'>;
   /**
@@ -1077,24 +1087,30 @@ export class TmuxRunner implements Runner {
         if (ferret !== undefined) await this.stopByName(ferret, how);
         return;
       }
+      // Only a ferret's session is ever ended through a handle: a pane id of a person's shell is not ours to end.
+      const ours = isFerretSession(facts.session);
+      // Every process under the session's panes is NAMED before anything is signalled: afterwards they are children of init.
+      let doomed = ours ? await this.nameSession(facts.session, facts.pid) : [];
       if (how === 'polite' && !facts.dead) {
-        // The harness's own interrupt first; the session goes once the pane is dead or the caller asks again `now`.
-        // A refusal is thrown: a polite stop that reached nothing is never taken for one that did.
+        // The harness's own interrupt first, then a bounded wait for the session to end by itself. A refusal is thrown:
+        // a polite stop that reached nothing is never taken for one that did. A session still there after the grace is
+        // ended as a `now` stop ends it: a stop is only reported once the ferret is really gone.
         const pressed = await this.options.tmux.execute(['send-keys', '-t', handle, 'C-c']);
         if (pressed.code !== 0)
           throw new Error(
             `could not interrupt ${facts.session}: ${pressed.stderr.trim() || `tmux exited ${String(pressed.code)}`}`,
           );
-        return;
+        if (!ours) return;
+        doomed = await this.untilSessionEnds(facts.session, doomed);
       }
-      // Only a ferret's session is ever killed through a handle: a pane id of a person's shell is not ours to end.
-      if (isFerretSession(facts.session)) {
+      if (ours) {
         const killed = await this.options.tmux.execute(killSessionArguments(facts.session));
         // A session that went away between the read and the kill is the stop already made; any other refusal is not.
         if (killed.code !== 0 && !/can't find session/iu.test(killed.stderr) && !isTmuxServerAbsent(killed.stderr))
           throw new Error(
             `could not stop ${facts.session}: ${killed.stderr.trim() || `tmux exited ${String(killed.code)}`}`,
           );
+        await this.endProcesses(facts.session, doomed);
       }
     } finally {
       this.#stopEpoch += 1;
@@ -1137,6 +1153,7 @@ export class TmuxRunner implements Runner {
         `could not check whether ${session} is running (${why}), so it was not stopped; it may still be running`,
       );
     }
+    let doomed = await this.nameSession(session);
     if (how === 'polite') {
       const panes = await this.options.tmux
         .execute(['list-panes', '-s', '-t', exact, '-F', '#{pane_dead}'])
@@ -1163,13 +1180,65 @@ export class TmuxRunner implements Runner {
         const pressed = await this.options.tmux.execute(['send-keys', '-t', `${exact}:`, 'C-c']);
         if (pressed.code !== 0)
           throw new Error(`could not interrupt ${session}: ${pressed.stderr.trim() || `tmux exited ${pressed.code}`}`);
-        return;
+        doomed = await this.untilSessionEnds(session, doomed);
       }
     }
     const killed = await this.options.tmux.execute(['kill-session', '-t', exact]);
     // A session that went away between the check and the kill is the stop already made; any other refusal is not.
     if (killed.code !== 0 && !/can't find session/iu.test(killed.stderr) && !isTmuxServerAbsent(killed.stderr))
       throw new Error(`could not stop ${session}: ${killed.stderr.trim() || `tmux exited ${killed.code}`}`);
+    await this.endProcesses(session, doomed);
+  }
+
+  private async sleepFor(ms: number): Promise<void> {
+    await this.options.sleep?.(ms);
+  }
+
+  /**
+   * Every process under `session`'s panes (its pane roots, `first` among them, and their descendants), named now. Nothing
+   * without a process host: a fixture that cannot read processes cannot prove them gone either.
+   */
+  private async nameSession(session: string, first?: number): Promise<readonly DoomedProcess[]> {
+    const host = this.options.processes;
+    if (host === undefined) return [];
+    const listed = await this.options.tmux
+      .execute(['list-panes', '-s', '-t', `=${session}`, '-F', '#{pane_pid}'])
+      .catch(() => undefined);
+    const roots = [
+      ...(first === undefined ? [] : [first]),
+      ...(listed === undefined || listed.code !== 0
+        ? []
+        : listed.stdout
+            .split('\n')
+            .map(line => Number(line.trim()))
+            .filter(pid => Number.isSafeInteger(pid) && pid > 1)),
+    ];
+    return await nameDoomed(host, [...new Set(roots)]);
+  }
+
+  /**
+   * After a polite stop's interrupt: waits up to the grace for the session to end by itself and answers what was named
+   * (the processes named again, so one that started meanwhile is not missed). A session that is still there is the
+   * caller's to end.
+   */
+  private async untilSessionEnds(session: string, named: readonly DoomedProcess[]): Promise<readonly DoomedProcess[]> {
+    const grace = this.options.politeGraceMs ?? 5_000;
+    const poll = this.options.treeEnd?.pollMs ?? DEFAULT_TREE_END_TIMES.pollMs;
+    for (let waited = 0; waited < grace; waited += poll) {
+      const present = await this.options.tmux.execute(['has-session', '-t', `=${session}`]).catch(() => undefined);
+      if (present !== undefined && present.code !== 0) break;
+      await this.sleepFor(poll);
+    }
+    const again = await this.nameSession(session);
+    const seen = new Set(named.map(process => `${process.pid}:${process.start}`));
+    return [...named, ...again.filter(process => !seen.has(`${process.pid}:${process.start}`))];
+  }
+
+  /** Once the session is killed: ends every process that was named under it, or throws that one could not be ended. */
+  private async endProcesses(session: string, doomed: readonly DoomedProcess[]): Promise<void> {
+    const host = this.options.processes;
+    if (host === undefined || doomed.length === 0) return;
+    await endDoomed(host, doomed, session, ms => this.sleepFor(ms), this.options.treeEnd ?? DEFAULT_TREE_END_TIMES);
   }
 
   async signal(handle: RunnerHandle, signal: 'interrupt' | 'terminate', ferret?: FerretId): Promise<void> {
