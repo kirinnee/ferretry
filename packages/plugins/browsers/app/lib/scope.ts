@@ -29,7 +29,33 @@ export const sameBrowserDaemon = (left: BrowserDaemon, right: BrowserDaemon): bo
 export interface BrowserSessionScope {
   readonly daemonId: string;
   readonly sessionId: string;
+  /**
+   * Where the ONE screen this scope speaks for keeps the id its display stream was given (`BROWSER_VIEWER_QUERY`): while a
+   * stream is up its status reads and acts carry that id, so the page it shows is its own. Absent, or empty, the scope is
+   * the session's own view.
+   */
+  readonly viewer?: BrowserViewerSlot;
 }
+
+/**
+ * The id the DAEMON gave one screen's display stream, kept for the calls that name that screen. The stream sets it when
+ * the daemon says who it is and clears it when the stream ends; nothing else ever writes it, and the client never makes
+ * one up.
+ */
+export interface BrowserViewerSlot {
+  current(): string | undefined;
+  set(id: string | undefined): void;
+}
+
+export const browserViewerSlot = (): BrowserViewerSlot => {
+  let held: string | undefined;
+  return {
+    current: () => held,
+    set: id => {
+      held = id;
+    },
+  };
+};
 
 const requireSessionId = (value: string): string => {
   if (value.trim() === '') throw new Error('sessionId must not be empty');
@@ -40,9 +66,11 @@ const requireSessionId = (value: string): string => {
 export const browserSessionScope = (
   daemon: Pick<BrowserDaemon, 'daemonId'>,
   sessionId: string,
+  viewer?: BrowserViewerSlot,
 ): BrowserSessionScope => ({
   daemonId: daemon.daemonId,
   sessionId: requireSessionId(sessionId),
+  ...(viewer === undefined ? {} : { viewer }),
 });
 
 /** A collision-safe key for in-memory session state. */

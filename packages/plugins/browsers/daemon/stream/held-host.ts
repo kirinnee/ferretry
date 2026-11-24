@@ -20,6 +20,8 @@ import {
  * every frame of it passes. A person's viewer has none and is never asked.
  */
 export interface HeldViewer {
+  /** Whose stream this is, as the daemon authenticated it: the only caller that may name the display this stream opens. */
+  readonly caller: string;
   readonly mayType: boolean;
   readonly delivery?: ViewerDeliveryGuard | undefined;
 }
@@ -44,7 +46,7 @@ export function heldViewerHost(
   host: BrowserSubsystem,
   viewer: HeldViewer,
 ): BrowserViewerHost {
-  const { mayType, delivery } = viewer;
+  const { caller, mayType, delivery } = viewer;
   return {
     attachViewer: async (sessionId, onFrame, onTerminal) => {
       /** Ends the stream with the guard's sentence, once. */
@@ -84,21 +86,23 @@ export function heldViewerHost(
             })().catch(() => undefined);
           },
           onTerminal,
+          caller,
         );
       } catch (error) {
         unwatch?.();
         throw error;
       }
       return {
+        viewerId: attachment.viewerId,
         detach: () => {
           unwatch?.();
           attachment.detach();
         },
       };
     },
-    dispatchHumanInput: async (sessionId, input) => {
+    dispatchHumanInput: async (sessionId, input, viewerId) => {
       if (!mayType) throw new ViewerInputRefused();
-      await host.dispatchHumanInput(sessionId, input);
+      await host.dispatchHumanInput(sessionId, input, { id: viewerId, caller });
     },
   };
 }

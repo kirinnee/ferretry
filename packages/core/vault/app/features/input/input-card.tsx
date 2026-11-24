@@ -808,14 +808,6 @@ export function InputCard({
           {request.risk.reason}
         </p>
       )}
-      {request.lock === undefined ? null : (
-        <p className="m-0 text-meta text-muted" data-input-lock="">
-          Hidden from the ferret for{' '}
-          {request.lock.seconds >= 60 ? `${Math.round(request.lock.seconds / 60)} min` : `${request.lock.seconds} s`}{' '}
-          after you type.
-        </p>
-      )}
-
       {settled !== null ? (
         <>
           <p className="m-0 text-ui text-fg" data-input-settled="" role="status">

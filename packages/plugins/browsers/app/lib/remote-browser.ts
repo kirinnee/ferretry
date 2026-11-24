@@ -1,5 +1,5 @@
 import { FY_REQUEST_ID_HEADER } from '@ferretry/app';
-import { BROWSER_MAX_PAGE_ID_LENGTH } from '../../contract/index.ts';
+import { BROWSER_MAX_PAGE_ID_LENGTH, BROWSER_VIEWER_QUERY, BrowserStreamHelloSchema } from '../../contract/index.ts';
 import {
   type BrowserAction,
   type BrowserActionResult,
@@ -14,7 +14,7 @@ import {
   type BrowserStreamAssembly,
   EMPTY_BROWSER_STREAM_ASSEMBLY,
 } from '../../contract/wire/stream.ts';
-import { type BrowserDaemon, type BrowserSessionScope, canOpenSocket } from './scope.ts';
+import { type BrowserDaemon, type BrowserSessionScope, type BrowserViewerSlot, canOpenSocket } from './scope.ts';
 
 /**
  * The daemon's browser frame envelope, v1: magic, version, page-id byte length,
@@ -52,6 +52,12 @@ const SESSION_BROWSER_ROUTES = {
 const sessionParams = (scope: BrowserSessionScope): Readonly<Record<string, string>> => ({
   ferretId: scope.sessionId,
 });
+
+/** The id the daemon gave the screen's stream, as the query its calls carry; nothing while no stream of it is up. */
+const viewerQuery = (scope: BrowserSessionScope): { readonly query?: Readonly<Record<string, string>> } => {
+  const viewer = scope.viewer?.current();
+  return viewer === undefined ? {} : { query: { [BROWSER_VIEWER_QUERY]: viewer } };
+};
 
 const assertScopeDaemon = (daemon: BrowserDaemon, scope: BrowserSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('browser scope must belong to the requested daemon');
@@ -91,7 +97,11 @@ export const fetchRemoteBrowserStatus = async (
   assertScopeDaemon(daemon, scope);
   return parseBrowserStatus(
     scope,
-    await daemon.client.call(SESSION_BROWSER_ROUTES.status, { params: sessionParams(scope), quiet: true }),
+    await daemon.client.call(SESSION_BROWSER_ROUTES.status, {
+      params: sessionParams(scope),
+      ...viewerQuery(scope),
+      quiet: true,
+    }),
   );
 };
 
@@ -106,6 +116,7 @@ export const runRemoteBrowserAction = async (
     scope,
     await daemon.client.call(SESSION_BROWSER_ROUTES.act, {
       params: sessionParams(scope),
+      ...viewerQuery(scope),
       body: action,
       headers: { [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
     }),
@@ -160,6 +171,13 @@ class RemoteBrowserStreamSocket implements RemoteBrowserSocket {
   readonly #unheard = new Map<string, Event[]>();
   #handle: { send(frame: string): void; close(code?: number, reason?: string): void } | undefined;
   #assembly: BrowserStreamAssembly = EMPTY_BROWSER_STREAM_ASSEMBLY;
+  /** The slot this stream's screen keeps its id in, and the id this stream was given (cleared only if it is still that). */
+  readonly #slot: BrowserViewerSlot | undefined;
+  #viewer: string | undefined;
+
+  constructor(slot?: BrowserViewerSlot) {
+    this.#slot = slot;
+  }
 
   addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: Event) => void): void {
     this.#listeners.set(type, [...(this.#listeners.get(type) ?? []), listener]);
@@ -181,6 +199,7 @@ class RemoteBrowserStreamSocket implements RemoteBrowserSocket {
   close(code = 1000, reason = 'viewer detached'): void {
     if (this.readyState === SOCKET_CLOSED) return;
     this.readyState = SOCKET_CLOSED;
+    this.#forget();
     this.#handle?.close(code, reason);
   }
 
@@ -197,8 +216,13 @@ class RemoteBrowserStreamSocket implements RemoteBrowserSocket {
   }
 
   receive(frame: string | Uint8Array): void {
-    // The display is server-to-client bytes; text from the daemon is a shape this stream does not have.
-    if (this.readyState === SOCKET_CLOSED || typeof frame === 'string') return;
+    if (this.readyState === SOCKET_CLOSED) return;
+    // The display is server-to-client bytes, but for one text frame: the daemon saying which screen this stream is.
+    // Anything else in text is a shape this stream does not have.
+    if (typeof frame === 'string') {
+      this.#hello(frame);
+      return;
+    }
     this.opened();
     const step = assembleBrowserStream(this.#assembly, frame);
     if (!step.ok) {
@@ -242,7 +266,29 @@ class RemoteBrowserStreamSocket implements RemoteBrowserSocket {
   #ended(code: number, reason: string): void {
     if (this.readyState === SOCKET_CLOSED) return;
     this.readyState = SOCKET_CLOSED;
+    this.#forget();
     this.#emit('close', new CloseEvent('close', { code, reason }));
+  }
+
+  /** The daemon named this stream's screen: its calls carry that id for as long as this stream is up. */
+  #hello(text: string): void {
+    let parsed: ReturnType<typeof BrowserStreamHelloSchema.safeParse>;
+    try {
+      parsed = BrowserStreamHelloSchema.safeParse(JSON.parse(text));
+    } catch {
+      return;
+    }
+    if (!parsed.success) return;
+    this.opened();
+    if (this.#slot === undefined) return;
+    this.#viewer = parsed.data.viewer;
+    this.#slot.set(this.#viewer);
+  }
+
+  /** The stream is over, and so is the daemon's selection for it: a call must not name an id that is gone. */
+  #forget(): void {
+    if (this.#viewer !== undefined && this.#slot?.current() === this.#viewer) this.#slot.set(undefined);
+    this.#viewer = undefined;
   }
 
   #emit(type: string, event: Event): void {
@@ -258,7 +304,7 @@ class RemoteBrowserStreamSocket implements RemoteBrowserSocket {
  */
 export const remoteBrowserSocketFactory: RemoteBrowserSocketFactory = (daemon, scope) => {
   assertScopeDaemon(daemon, scope);
-  const socket = new RemoteBrowserStreamSocket();
+  const socket = new RemoteBrowserStreamSocket(scope.viewer);
   if (!canOpenSocket(daemon.client)) {
     socket.failed('this client cannot open the browser display');
     return socket;

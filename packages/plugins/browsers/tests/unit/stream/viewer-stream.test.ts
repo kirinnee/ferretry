@@ -96,6 +96,9 @@ class FakeHost implements BrowserViewerHost {
   onTerminal?: (signal: ViewerTerminalSignal) => void;
   /** Emitted during the attach round trip, before the stream object exists. */
   early?: { readonly frame?: BrowserScreencastFrame; readonly terminal?: ViewerTerminalSignal };
+  /** The viewer id this host minted on attach, and the one each input was dispatched for. */
+  readonly minted = 'minted-viewer-1';
+  readonly dispatchedAs: string[] = [];
 
   attachViewer(
     _sessionId: string,
@@ -107,13 +110,15 @@ class FakeHost implements BrowserViewerHost {
     if (this.early?.frame) onFrame(this.early.frame);
     if (this.early?.terminal) onTerminal(this.early.terminal);
     return Promise.resolve({
+      viewerId: this.minted,
       detach: () => {
         this.detachments += 1;
       },
     });
   }
 
-  dispatchHumanInput(_sessionId: string, input: BrowserInputEvent): Promise<void> {
+  dispatchHumanInput(_sessionId: string, input: BrowserInputEvent, viewerId: string): Promise<void> {
+    this.dispatchedAs.push(viewerId);
     if (this.failNextDispatch) {
       this.failNextDispatch = false;
       return Promise.reject(new Error('page detached'));
@@ -392,6 +397,19 @@ describe('browser viewer stream — upstream input', () => {
       { kind: 'insertText', text: 'hi' },
       { kind: 'insertText', text: 'there' },
     ]);
+  });
+
+  it('B1 should be the viewer the host minted on attach, and type as that viewer alone', async () => {
+    // Arrange
+    const { host, stream } = await connect();
+
+    // Act
+    stream.fromClient(message(mouseMove));
+    await stream.settled;
+
+    // Assert — the id is the host's to give; the stream only carries it, to the display's hello and to every input.
+    should(stream.viewerId).equal(host.minted);
+    should(host.dispatchedAs).deepEqual([host.minted]);
   });
 
   it('should reject a malformed or unparseable client message as a policy violation', async () => {

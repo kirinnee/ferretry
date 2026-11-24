@@ -36,7 +36,6 @@
   min-width: 0;
   align-items: stretch;
   overflow-x: auto;
-  scrollbar-width: thin;
 }
 
 .kt-webterm__tab,
@@ -343,11 +342,6 @@
 
 .kt-webterm__xterm .xterm {
   height: 100%;
-}
-
-.kt-webterm__xterm .xterm-viewport {
-  scrollbar-color: var(--muted) transparent;
-  scrollbar-width: thin;
 }
 
 .kt-webterm__empty {

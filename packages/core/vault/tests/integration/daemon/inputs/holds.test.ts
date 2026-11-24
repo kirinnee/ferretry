@@ -1,7 +1,12 @@
 import { describe, it } from 'bun:test';
 import type { RevealGrant, TargetKind, TargetRef } from '@ferretry/kernel/contract';
 import should from 'should';
+import type { InputRaise } from '../../../../contract/index.ts';
+import { FakeInputTarget } from '../../../../contract/testing/index.ts';
 import { HeardActs, InputHoldsOverService } from '../../../../daemon/adapters/inputs/holds.ts';
+import { PageTargetThroughHook, TerminalTargetThroughHook } from '../../../../daemon/adapters/inputs/targets.ts';
+import type { InputTargetPort } from '../../../../daemon/lib/inputs/ports.ts';
+import { padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import { LoginObserver } from '../../../../daemon/lib/inputs/login-observer.ts';
 import { QuarantineRegistry } from '../../../../daemon/lib/inputs/quarantine.ts';
 import { FACTS, inputRequestService, RAISE, SESSION } from '../../../unit/daemon/inputs/support.ts';
@@ -190,5 +195,71 @@ describe('the observer view, once a script has run on a page', () => {
     ).observed({ kind: 'page' as TargetKind, key: 'page-1' }, 'script', 'ferret');
     should(steer.tainted?.(SESSION, 'browser', NOW)).equal(true);
     should(steer.tainted?.(SESSION, 'terminal', NOW)).equal(false);
+  });
+});
+
+describe('no lock after an answer, through the real input path (adapters, service and hold decider)', () => {
+  const HOST = { kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' } as const;
+
+  it('should let the ferret read the terminal at once after an answered secret card', async () => {
+    const adapter = new FakeInputTarget('terminal', 'dev');
+    const target = new TerminalTargetThroughHook(() => adapter) as unknown as InputTargetPort;
+    const { service, quarantine } = inputRequestService({ target });
+    const holds = new InputHoldsOverService(service, quarantine, () => NOW);
+    await service.raise(SESSION, RAISE);
+    const [card] = await service.list(HOST);
+    if (card === undefined) throw new Error('no card');
+    should(card.lock).be.undefined();
+
+    await service.deliver(
+      SESSION,
+      card.id,
+      {
+        deliveryId: crypto.randomUUID(),
+        observedDigest: card.observedDigest as string,
+        padded: padInputValue('fake-hunter2-UNIQUE'),
+        submit: true,
+      },
+      HOST,
+    );
+
+    should(adapter.live.writes()).equal(1);
+    for (const actor of ['ferret', 'owner-tools', 'owner-viewer'] as const)
+      should(holds.decide(DEV, 'read', actor)).equal('allow');
+    should(holds.decide(DEV, 'wait', 'ferret')).equal('allow');
+    should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
+  });
+
+  it('should let the ferret read, script and picture the page at once after an answered password card', async () => {
+    const adapter = new FakeInputTarget('page', 'page-1');
+    const target = new PageTargetThroughHook(() => adapter) as unknown as InputTargetPort;
+    const { service, quarantine } = inputRequestService({ target });
+    const holds = new InputHoldsOverService(service, quarantine, () => NOW);
+    await service.raise(SESSION, {
+      target: { kind: 'page', key: 'page-1' },
+      prompt: 'the password',
+      submit: 'owner-default',
+      fields: [{ id: 'value', sensitivity: 'secret', element: { kind: 'ref', ref: 'e3' } }],
+    } as InputRaise);
+    const [card] = await service.list(HOST);
+    if (card === undefined) throw new Error('no card');
+    should(card.lock).be.undefined();
+
+    await service.deliver(
+      SESSION,
+      card.id,
+      {
+        deliveryId: crypto.randomUUID(),
+        observedDigest: card.observedDigest as string,
+        fields: [{ field: 'value', padded: padInputValue('fake-hunter2-UNIQUE') }],
+        submit: true,
+      } as never,
+      HOST,
+    );
+    await holds.prepare(PAGE, 'read', 'ferret');
+
+    should(adapter.live.writes()).equal(1);
+    for (const act of ['read', 'script', 'picture'] as const) should(holds.decide(PAGE, act, 'ferret')).equal('allow');
+    should(service.quarantines(HOST, SESSION)).eql([]);
   });
 });

@@ -32,7 +32,7 @@ import type { BrowserCopyPort } from './copy-contracts.ts';
 import type { BrowserInputFieldsPort } from '../target/lib/contracts.ts';
 import type { BrowserUploadMode } from './page-acts.ts';
 import type { PageScript } from '../../contract/wire/page-script.ts';
-import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../stream/viewer-contracts.ts';
+import type { ViewerAttachment, ViewerRef, ViewerTerminalSignal } from '../stream/viewer-contracts.ts';
 import type { WorkerStagedFile } from '../worker/protocol.ts';
 import { type BrowserSignInWatch, pageActLeavesSignIn, toolbarActLeavesSignIn } from '../target/sign-in/watch.ts';
 
@@ -148,6 +148,11 @@ export interface BrowserActOptions {
   readonly pinned?: string;
   /** Who a page this act opens belongs to, as the daemon attests it: a ferret's own page is its own, never a person's. */
   readonly openedBy?: SurfaceOpener;
+  /**
+   * The screen this act comes from (`BROWSER_VIEWER_QUERY`), as its own caller holds it: its own page moves and answers,
+   * no other screen's. A screen that is not attached to this session as this caller is refused before anything runs.
+   */
+  readonly viewer?: ViewerRef;
 }
 
 /** Told when a page of a session closes, whoever closed it (a tool, the toolbar, the session's end, the browser stopping). */
@@ -232,9 +237,24 @@ export interface BrowserOpenOptions {
   readonly incognito?: boolean;
 }
 
-export interface BrowserSubsystem extends BrowserViewerHost {
-  /** This session's view of the machine's browser: its own pages, and the one its person is viewing. */
-  status(sessionId: string): Promise<BrowserStatus>;
+export interface BrowserSubsystem {
+  /**
+   * This session's view of the machine's browser: its own pages, and the one its person is viewing — the one the named
+   * screen is viewing, when a screen is named (it must be attached to this session as the caller that holds it).
+   */
+  status(sessionId: string, viewer?: ViewerRef): Promise<BrowserStatus>;
+  /**
+   * Opens one live display for `caller` (the authenticated credential or device behind the stream) and mints its viewer
+   * id: the screen is its own page from here, bound to that caller, and gone the moment the attachment is.
+   */
+  attachViewer(
+    sessionId: string,
+    onFrame: (frame: BrowserScreencastFrame) => void,
+    onTerminal: (signal: ViewerTerminalSignal) => void,
+    caller: string,
+  ): Promise<ViewerAttachment>;
+  /** A person's input goes to the page the NAMED live display is showing, and nowhere else. */
+  dispatchHumanInput(sessionId: string, input: BrowserInputEvent, viewer: ViewerRef): Promise<void>;
   /** A person's toolbar: everything acts on the page this session's person is viewing. */
   /**
    * One toolbar act. `options` carries the ferret's whole-browser guard and the page its caller resolved; `content` is the
@@ -320,8 +340,17 @@ export interface BrowserSubsystem extends BrowserViewerHost {
   closeAll(): Promise<void>;
 }
 
+/**
+ * One live display, and with it the screen's whole selection: the page it shows is `pageId`, moved only together with
+ * the screencast (`view`), so the page typed into is always the page being shown. It exists exactly as long as its
+ * attachment — nothing of it outlives a detach.
+ */
 interface Viewer {
   readonly sessionId: string;
+  /** Minted by the daemon on attach; the only handle a call has on this screen. */
+  readonly id: string;
+  /** Whose stream it is (the authenticated credential or device): the only caller that may name `id`. */
+  readonly caller: string;
   pageId: string;
   readonly frame: (frame: BrowserScreencastFrame) => void;
   readonly terminal: (signal: ViewerTerminalSignal) => void;
@@ -346,7 +375,7 @@ interface Running {
   readonly names: Map<string, string>;
   /** Page id → who opened it by name. */
   readonly openers: Map<string, SurfaceOpener>;
-  /** Session id → the page that session's person is viewing — where their input and view go. */
+  /** Session id → the page that session's own view shows (a call that names no screen): where its toolbar goes. */
   readonly viewed: Map<string, string>;
   /** Page id → viewport. */
   readonly viewports: Map<string, BrowserViewport>;
@@ -366,6 +395,9 @@ interface Running {
  * password into one tab and an agent driving another never cross, and neither waits for the other:
  * acts are serialized per PAGE, not per session or per browser.
  */
+/** Most live displays one session has at once: a full session refuses the next attach, it never drops one that is watching. */
+export const MAX_VIEWERS_PER_SESSION = 64;
+
 export class BrowserSessionService implements BrowserSubsystem {
   private run: Running | undefined;
   private starting: Promise<Running> | undefined;
@@ -386,17 +418,17 @@ export class BrowserSessionService implements BrowserSubsystem {
     private readonly pageClosed?: BrowserPageClosed,
   ) {}
 
-  async status(sessionId: string): Promise<BrowserStatus> {
+  async status(sessionId: string, viewer?: ViewerRef): Promise<BrowserStatus> {
     await this.requireSession(sessionId);
     const run = this.run;
     if (run === undefined) return this.stopped(sessionId);
-    const viewed = this.viewedPage(run, sessionId);
+    const viewed = this.viewedPage(run, sessionId, viewer);
     if (viewed !== undefined) {
       // A viewed page that closed inside Chrome cannot describe the list: ask for the list itself.
       const listed = await run.driver.location(viewed).catch(async () => await run.driver.location());
       this.observe(run, pageOf(listed), true);
     }
-    return this.project(run, sessionId);
+    return this.project(run, sessionId, viewer);
   }
 
   async act(
@@ -406,7 +438,9 @@ export class BrowserSessionService implements BrowserSubsystem {
     content?: BrowserActGuard,
   ): Promise<BrowserActionResult> {
     await this.requireSession(sessionId);
-    const { guard, pinned, openedBy } = options;
+    const { guard, pinned, openedBy, viewer } = options;
+    // A screen that is not this caller's, or no longer attached, is refused before anything runs or moves.
+    if (viewer !== undefined) this.requireScreen(this.run, sessionId, viewer);
     if (action.action === 'stop') {
       // Every page the stop will close is asked FIRST: one that is not the caller's to close refuses the whole stop and
       // nothing is closed. Each is asked again in its own queue as it closes.
@@ -430,7 +464,7 @@ export class BrowserSessionService implements BrowserSubsystem {
       this.opening += 1;
       try {
         const run = await this.ensure();
-        const viewed = this.viewedPage(run, sessionId);
+        const viewed = this.viewedPage(run, sessionId, viewer);
         if (action.action !== 'new-page' && viewed !== undefined) this.assertPinned(pinned, viewed);
         if (action.action === 'new-page' || viewed === undefined) {
           const opened = await this.openIn(run, sessionId, {
@@ -438,10 +472,11 @@ export class BrowserSessionService implements BrowserSubsystem {
             ...(action.action === 'new-page' && action.incognito === true ? { incognito: true } : {}),
           });
           if (openedBy !== undefined) run.openers.set(opened.actedPageId, openedBy);
-          await this.view(run, sessionId, opened.actedPageId);
-          return { status: this.project(run, sessionId), result: opened };
+          await this.view(run, sessionId, opened.actedPageId, viewer);
+          return { status: this.project(run, sessionId, viewer), result: opened };
         }
-        if (action.action === 'start' || action.url === undefined) return { status: this.project(run, sessionId) };
+        if (action.action === 'start' || action.url === undefined)
+          return { status: this.project(run, sessionId, viewer) };
         const url = action.url;
         return await this.onPage(
           run,
@@ -452,6 +487,8 @@ export class BrowserSessionService implements BrowserSubsystem {
           },
           sessionId,
           guard,
+          undefined,
+          viewer,
         );
       } finally {
         this.opening -= 1;
@@ -466,18 +503,18 @@ export class BrowserSessionService implements BrowserSubsystem {
       if (action.action === 'activate-page') {
         await turn(async () => {
           await guard?.(page.id, this.guardPage(run, page.id));
-          await this.view(run, sessionId, page.id);
+          await this.view(run, sessionId, page.id, viewer);
         });
-        return { status: await this.status(sessionId), result: { ...run.snapshot, actedPageId: page.id } };
+        return { status: await this.status(sessionId, viewer), result: { ...run.snapshot, actedPageId: page.id } };
       }
       await turn(async () => {
         await guard?.(page.id, this.guardPage(run, page.id));
         this.signIns?.cleared(sessionId, page.id);
         await this.closeIn(run, sessionId, page.id);
       });
-      return { status: await this.status(sessionId) };
+      return { status: await this.status(sessionId, this.stillShown(sessionId, viewer)) };
     }
-    const viewed = this.viewedPage(run, sessionId);
+    const viewed = this.viewedPage(run, sessionId, viewer);
     if (viewed === undefined) throw new BrowserSessionError('not_running', 'this session has no browser page open');
     this.assertPinned(pinned, viewed);
     // Who posted it is not known (the owner's address bar or a ferret's `fy browser`): anything but a read clears who
@@ -492,6 +529,7 @@ export class BrowserSessionService implements BrowserSubsystem {
       sessionId,
       guard,
       content,
+      viewer,
     );
   }
 
@@ -706,12 +744,20 @@ export class BrowserSessionService implements BrowserSubsystem {
     sessionId: string,
     frame: (frame: BrowserScreencastFrame) => void,
     terminal: (signal: ViewerTerminalSignal) => void,
+    caller: string,
   ): Promise<ViewerAttachment> {
     await this.requireSession(sessionId);
     const run = this.requireRunning();
+    // A new screen starts on the page the session's own view shows; from here its page is its own.
     const pageId = this.viewedPage(run, sessionId);
     if (pageId === undefined) throw new BrowserSessionError('not_running', 'this session has no browser page open');
-    const viewer: Viewer = { sessionId, pageId, frame, terminal };
+    // A full session refuses the newcomer. A screen that is watching is never the one that pays for it.
+    if ([...run.viewers].filter(each => each.sessionId === sessionId).length >= MAX_VIEWERS_PER_SESSION)
+      throw new BrowserSessionError(
+        'capacity',
+        `this ferret's browser already has ${MAX_VIEWERS_PER_SESSION} screens watching it; close one to open another`,
+      );
+    const viewer: Viewer = { sessionId, id: crypto.randomUUID(), caller, pageId, frame, terminal };
     run.viewers.add(viewer);
     try {
       await this.cast(run, viewer);
@@ -721,6 +767,7 @@ export class BrowserSessionService implements BrowserSubsystem {
     }
     let detached = false;
     return {
+      viewerId: viewer.id,
       detach: () => {
         if (detached) return;
         detached = true;
@@ -731,11 +778,13 @@ export class BrowserSessionService implements BrowserSubsystem {
     };
   }
 
-  /** A person's input goes to the page THEIR session is viewing, and nowhere else. */
-  async dispatchHumanInput(sessionId: string, input: BrowserInputEvent): Promise<void> {
+  /**
+   * A person's input goes to the page the NAMED live display is showing — the very page its screencast is on, read from the
+   * attachment itself and never worked out again from what the session or a newer page says — and nowhere else.
+   */
+  async dispatchHumanInput(sessionId: string, input: BrowserInputEvent, viewer: ViewerRef): Promise<void> {
     const run = this.requireRunning();
-    const pageId = this.viewedPage(run, sessionId);
-    if (pageId === undefined) throw new BrowserSessionError('not_running', 'this session has no browser page open');
+    const { pageId } = this.requireScreen(run, sessionId, viewer);
     // A person typing or pressing in the live view (an account tile in a chooser, the "pick the account" hand-off) may be
     // signing someone else in: who the session's pages sign in is no longer known. A move, a wheel or a release is not.
     if (input.kind !== 'mouse' || input.type === 'mousePressed') this.signIns?.forget(sessionId);
@@ -879,6 +928,7 @@ export class BrowserSessionService implements BrowserSubsystem {
         viewer.terminal({ code: 1000, reason: 'the page closed' });
       }
     if (sessionId === undefined) return;
+    // The session's own view moves to the newest page left, or goes. A screen watching it was ended above, with its selection.
     if (run.viewed.get(sessionId) === pageId) {
       const next = this.owned(run, sessionId)
         .filter(page => page.id !== pageId)
@@ -908,15 +958,22 @@ export class BrowserSessionService implements BrowserSubsystem {
     for (const [pageId, sessionId] of owned) this.told(sessionId, pageId);
   }
 
-  /** Points this session's person at another of its pages, and moves its live viewers there. */
-  private async view(run: Running, sessionId: string, pageId: string): Promise<void> {
-    run.viewed.set(sessionId, pageId);
-    for (const viewer of run.viewers)
-      if (viewer.sessionId === sessionId && viewer.pageId !== pageId) {
-        await run.driver.stopScreencast(viewer.pageId, viewer.frame).catch(() => undefined);
-        viewer.pageId = pageId;
-        await this.cast(run, viewer);
-      }
+  /**
+   * Points ONE screen at another of its session's pages, and moves its live display there — no other screen's. A call
+   * that names no screen moves the session's own view and no display.
+   */
+  private async view(run: Running, sessionId: string, pageId: string, viewer?: ViewerRef): Promise<void> {
+    const screen = viewer === undefined ? undefined : this.requireScreen(run, sessionId, viewer);
+    if (screen === undefined) {
+      run.viewed.set(sessionId, pageId);
+      return;
+    }
+    if (screen.pageId === pageId) return;
+    await run.driver.stopScreencast(screen.pageId, screen.frame).catch(() => undefined);
+    // A screen that left while its stream was being moved is not cast to again.
+    if (!run.viewers.has(screen)) return;
+    screen.pageId = pageId;
+    await this.cast(run, screen);
   }
 
   private async cast(run: Running, viewer: Viewer): Promise<void> {
@@ -934,6 +991,7 @@ export class BrowserSessionService implements BrowserSubsystem {
     sessionId: string,
     guard?: BrowserPageGuard,
     content?: BrowserActGuard,
+    viewer?: ViewerRef,
   ): Promise<BrowserActionResult> {
     return await this.exclusive(pageId, async () => {
       // The page this act was resolved to, asked in ITS queue right before the act: nothing lands between the two. The
@@ -943,7 +1001,7 @@ export class BrowserSessionService implements BrowserSubsystem {
       const result = withoutDialog(await this.guarded(content, run, pageId, work));
       this.observe(run, pageOf(result));
       this.touch(run);
-      return { status: this.project(run, sessionId), result };
+      return { status: this.project(run, sessionId, this.stillShown(sessionId, viewer)), result };
     });
   }
 
@@ -1073,14 +1131,40 @@ export class BrowserSessionService implements BrowserSubsystem {
     return run;
   }
 
-  /** The page this session's person is viewing, if it still exists. */
-  private viewedPage(run: Running, sessionId: string): string | undefined {
+  /**
+   * The page this call is viewing, if it still exists: the named screen's own page, else the session's own view — which,
+   * when its page went, falls back to the session's newest.
+   */
+  private viewedPage(run: Running, sessionId: string, viewer?: ViewerRef): string | undefined {
+    if (viewer !== undefined) {
+      const { pageId } = this.requireScreen(run, sessionId, viewer);
+      return this.owned(run, sessionId).some(page => page.id === pageId) ? pageId : undefined;
+    }
     const viewed = run.viewed.get(sessionId);
     if (viewed !== undefined && this.owned(run, sessionId).some(page => page.id === viewed)) return viewed;
     const fallback = this.owned(run, sessionId).at(-1)?.id;
     if (fallback === undefined) run.viewed.delete(sessionId);
     else run.viewed.set(sessionId, fallback);
     return fallback;
+  }
+
+  /** The live display a call names, if it is attached to this session and is this caller's. */
+  private screenOf(run: Running | undefined, sessionId: string, viewer: ViewerRef): Viewer | undefined {
+    return [...(run?.viewers ?? [])].find(
+      each => each.id === viewer.id && each.sessionId === sessionId && each.caller === viewer.caller,
+    );
+  }
+
+  /** The same, refused alike whether the id is nobody's, another caller's, another session's or already gone. */
+  private requireScreen(run: Running | undefined, sessionId: string, viewer: ViewerRef): Viewer {
+    const screen = this.screenOf(run, sessionId, viewer);
+    if (screen === undefined) throw new BrowserSessionError('not_found', 'this viewer is not attached');
+    return screen;
+  }
+
+  /** The screen a call named, while it is still attached: an act that ended its own display answers for the session. */
+  private stillShown(sessionId: string, viewer: ViewerRef | undefined): ViewerRef | undefined {
+    return viewer !== undefined && this.screenOf(this.run, sessionId, viewer) !== undefined ? viewer : undefined;
   }
 
   /** One page as the wire shows it, carrying its name and opener when it has them. */
@@ -1187,7 +1271,7 @@ export class BrowserSessionService implements BrowserSubsystem {
     };
   }
 
-  private project(run: Running, sessionId: string): BrowserStatus & { readonly state: 'running' } {
+  private project(run: Running, sessionId: string, viewer?: ViewerRef): BrowserStatus & { readonly state: 'running' } {
     const pages = this.owned(run, sessionId).map(page => this.named(run, page.id));
     const base = {
       state: 'running' as const,
@@ -1201,7 +1285,7 @@ export class BrowserSessionService implements BrowserSubsystem {
       capacity: { running: this.sessionPages(run), maximum: BROWSER_MAX_MACHINE_PAGES },
       ...(run.driver.proxy === undefined ? {} : { proxy: run.driver.proxy }),
     };
-    const viewed = this.viewedPage(run, sessionId);
+    const viewed = this.viewedPage(run, sessionId, viewer);
     const active = pages.find(page => page.id === viewed);
     if (active === undefined) return { ...base, pages: [] };
     const described = run.snapshot.activePageId === active.id;

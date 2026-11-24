@@ -1,14 +1,20 @@
 import { describe, it } from 'bun:test';
-import type { BrowserAction, BrowserScreencastFrame } from '../../../contract/wire/browser.ts';
+import {
+  type BrowserAction,
+  type BrowserScreencastFrame,
+  BrowserViewerIdSchema,
+} from '../../../contract/wire/browser.ts';
 import should from 'should';
 import {
   type BrowserIdlePolicy,
   type BrowserPageAction,
   BrowserSessionError,
   BrowserSessionService,
+  MAX_VIEWERS_PER_SESSION,
   pendingDialogOf,
 } from '../../../daemon/pages/service.ts';
 import { TypedIdentities } from '../../../daemon/target/sign-in/identities.ts';
+import type { ViewerTerminalSignal } from '../../../daemon/stream/viewer-contracts.ts';
 import { Tabs } from '../../support/tabs.ts';
 
 const known = new Set(['s1', 's2']);
@@ -38,6 +44,20 @@ const failure = async (work: Promise<unknown>): Promise<BrowserSessionError> =>
     () => undefined,
     (error: unknown) => error,
   )) as BrowserSessionError;
+
+const MAX_VIEWERS = MAX_VIEWERS_PER_SESSION;
+
+/** One screen attaching as one authenticated caller: the attachment carries the viewer the daemon minted for it. */
+const attach = async (
+  service: BrowserSessionService,
+  sessionId: string,
+  onFrame: (frame: BrowserScreencastFrame) => void = () => undefined,
+  onTerminal: (signal: ViewerTerminalSignal) => void = () => undefined,
+  caller = 'admin',
+) => {
+  const attachment = await service.attachViewer(sessionId, onFrame, onTerminal, caller);
+  return { ...attachment, viewer: { id: attachment.viewerId, caller } };
+};
 
 describe('the machine agent browser — one Chrome, pages by session', () => {
   it('should start one browser for every session, and show each session only its own pages', async () => {
@@ -406,15 +426,11 @@ describe('the machine agent browser — a person and an agent at once', () => {
     const persons = activeOf(await service.status('s1'));
     const agents = await service.openPage('s1', 'app', { openedBy: { by: 'agent', sessionId: 's1' } });
     const frames: BrowserScreencastFrame[] = [];
-    const attachment = await service.attachViewer(
-      's1',
-      frame => frames.push(frame),
-      () => undefined,
-    );
+    const attachment = await attach(service, 's1', frame => frames.push(frame));
 
     // Act — the agent drives its page while the person types into theirs.
     await service.actOnPage('s1', 'app', { action: 'type', selector: '#q', text: 'agent' });
-    await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'hunter2' });
+    await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'hunter2' }, attachment.viewer);
     tabs.emit(agents.id);
     tabs.emit(persons);
 
@@ -437,19 +453,11 @@ describe('the machine agent browser — a person and an agent at once', () => {
     await service.openPage('s2', 'theirs');
     const mine: string[] = [];
     const theirs: string[] = [];
-    await service.attachViewer(
-      's1',
-      frame => mine.push(frame.pageId),
-      () => undefined,
-    );
-    await service.attachViewer(
-      's2',
-      frame => theirs.push(frame.pageId),
-      () => undefined,
-    );
+    const viewing = await attach(service, 's1', frame => mine.push(frame.pageId));
+    await attach(service, 's2', frame => theirs.push(frame.pageId));
 
     // Act
-    await service.act('s1', { action: 'activate-page', pageId: first });
+    await service.act('s1', { action: 'activate-page', pageId: first }, { viewer: viewing.viewer });
     tabs.emit(first);
     tabs.emit(second);
 
@@ -458,6 +466,204 @@ describe('the machine agent browser — a person and an agent at once', () => {
     should(mine).deepEqual([first]);
     should(theirs).deepEqual([]);
     should((await service.status('s1')).viewers).equal(1);
+  });
+
+  it('B1 should give each screen its own page: a tab switch in one screen moves no other screen, its stream or its input', async () => {
+    // Arrange — one ferret, two pages, and two screens (a desktop pane and a phone) of the same person.
+    const { tabs, service } = harness();
+    await service.act('s1', { action: 'new-page' });
+    const first = activeOf(await service.status('s1'));
+    await service.act('s1', { action: 'new-page' });
+    const second = activeOf(await service.status('s1'));
+    const desktop: string[] = [];
+    const phone: string[] = [];
+    const onDesktop = await attach(service, 's1', frame => desktop.push(frame.pageId));
+    const onPhone = await attach(service, 's1', frame => phone.push(frame.pageId));
+
+    // Act — the desktop switches to the first page, then every page paints.
+    const answer = await service.act('s1', { action: 'activate-page', pageId: first }, { viewer: onDesktop.viewer });
+    tabs.emit(first);
+    tabs.emit(second);
+    await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'd' }, onDesktop.viewer);
+    await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'p' }, onPhone.viewer);
+    await service.act('s1', { action: 'navigate', url: 'https://desk.test/' }, { viewer: onDesktop.viewer });
+    await service.act('s1', { action: 'navigate', url: 'https://phone.test/' }, { viewer: onPhone.viewer });
+
+    // Assert — only the desktop moved: its status, stream, typing and toolbar are on the first page; the phone stayed.
+    should(onDesktop.viewer.id).not.equal(onPhone.viewer.id);
+    should(activeOf((answer as { status: unknown }).status)).equal(first);
+    should(activeOf(await service.status('s1', onDesktop.viewer))).equal(first);
+    should(activeOf(await service.status('s1', onPhone.viewer))).equal(second);
+    should(desktop).deepEqual([first]);
+    should(phone).deepEqual([second]);
+    should(tabs.inputs).deepEqual([
+      { pageId: first, input: { kind: 'insertText', text: 'd' } },
+      { pageId: second, input: { kind: 'insertText', text: 'p' } },
+    ]);
+    should(tabs.calls.slice(-2)).deepEqual([`navigate:${first}`, `navigate:${second}`]);
+  });
+
+  it('B1 should leave every screen alone when a call with no screen switches the session’s own view, and the other way round', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    await service.act('s1', { action: 'new-page' });
+    const first = activeOf(await service.status('s1'));
+    await service.act('s1', { action: 'new-page' });
+    const second = activeOf(await service.status('s1'));
+    const screen: string[] = [];
+    const onScreen = await attach(service, 's1', frame => screen.push(frame.pageId));
+
+    // Act — `fy browser activate-page` carries no screen; then the screen does the opposite, and back.
+    await service.act('s1', { action: 'activate-page', pageId: first });
+    tabs.emit(first);
+    tabs.emit(second);
+    const before = [...screen];
+    await service.act('s1', { action: 'activate-page', pageId: first }, { viewer: onScreen.viewer });
+    tabs.emit(first);
+    tabs.emit(second);
+    await service.act('s1', { action: 'activate-page', pageId: second }, { viewer: onScreen.viewer });
+    tabs.emit(first);
+    tabs.emit(second);
+
+    // Assert
+    should(before).deepEqual([second]);
+    should(screen).deepEqual([second, first, second]);
+    should(activeOf(await service.status('s1'))).equal(first);
+    should(activeOf(await service.status('s1', onScreen.viewer))).equal(second);
+  });
+
+  it('B1 should start a new screen on the page the session is showing, and end its stream when its own page closes', async () => {
+    // Arrange — the session's own view is on the first page; the second is the newest.
+    const { service } = harness();
+    await service.act('s1', { action: 'new-page' });
+    const first = activeOf(await service.status('s1'));
+    await service.act('s1', { action: 'new-page' });
+    const second = activeOf(await service.status('s1'));
+    await service.act('s1', { action: 'activate-page', pageId: first });
+    const ended: string[] = [];
+
+    // Act
+    const arrival = await attach(service, 's1', undefined, signal => ended.push(signal.reason));
+    await service.act('s1', { action: 'activate-page', pageId: second }, { viewer: arrival.viewer });
+    await service.act('s1', { action: 'close-page', pageId: second }, { viewer: arrival.viewer });
+
+    // Assert — it arrived where the session was, and when its page closed its stream was told and its selection went.
+    should(ended).deepEqual(['the page closed']);
+    should(await failure(service.status('s1', arrival.viewer))).match({ code: 'not_found' });
+    should(activeOf(await service.status('s1'))).equal(first);
+  });
+
+  it('B1 should refuse a caller that presents another caller’s viewer, and leave the selection and the stream where they were', async () => {
+    // Arrange — a device's screen on the first page, a second page open.
+    const { tabs, service } = harness();
+    await service.act('s1', { action: 'new-page' });
+    const first = activeOf(await service.status('s1'));
+    await service.act('s1', { action: 'new-page' });
+    const second = activeOf(await service.status('s1'));
+    const frames: string[] = [];
+    const mine = await attach(service, 's1', frame => frames.push(frame.pageId), undefined, 'device:phone');
+    await service.act('s1', { action: 'activate-page', pageId: first }, { viewer: mine.viewer });
+    const stolen = { id: mine.viewer.id, caller: 'device:laptop' };
+    const calls = tabs.calls.length;
+
+    // Act — another device and the owner each present the id, to read, to switch, to type and to ask for input.
+    const refused = [
+      await failure(service.status('s1', stolen)),
+      await failure(service.act('s1', { action: 'activate-page', pageId: second }, { viewer: stolen })),
+      await failure(service.act('s1', { action: 'navigate', url: 'https://evil.test/' }, { viewer: stolen })),
+      await failure(service.dispatchHumanInput('s1', { kind: 'insertText', text: 'x' }, stolen)),
+      await failure(service.status('s1', { id: mine.viewer.id, caller: 'admin' })),
+      await failure(service.status('s2', mine.viewer)),
+    ];
+    tabs.emit(first);
+    tabs.emit(second);
+
+    // Assert — every one refused alike, nothing ran, and the owner of the viewer still sees and streams its own page.
+    for (const error of refused) should(error).match({ code: 'not_found' });
+    should(tabs.calls.length).equal(calls);
+    should(tabs.inputs).deepEqual([]);
+    should(frames).deepEqual([first]);
+    should(activeOf(await service.status('s1', mine.viewer))).equal(first);
+  });
+
+  it('B1 should mint the viewer id on attach, never take one, and drop the selection with the attachment', async () => {
+    // Arrange
+    const { service } = harness();
+    await service.openPage('s1', 'app');
+
+    // Act
+    const one = await attach(service, 's1');
+    const two = await attach(service, 's1');
+    const status = await service.status('s1', one.viewer);
+    one.detach();
+    one.detach();
+    const gone = await failure(service.status('s1', one.viewer));
+    const again = await attach(service, 's1');
+
+    // Assert — each attach is its own plain, unguessable-length id; a detached one is gone; a new attach is a new id.
+    should(BrowserViewerIdSchema.safeParse(one.viewer.id).success).be.true();
+    should(one.viewer.id).not.equal(two.viewer.id);
+    should(one.viewer.id.length).be.aboveOrEqual(32);
+    should(status).match({ viewers: 2 });
+    should(gone).match({ code: 'not_found' });
+    should(again.viewer.id).not.equal(one.viewer.id);
+    should((await service.status('s1')).viewers).equal(2);
+    should(await service.status('s1', two.viewer)).match({ state: 'running' });
+  });
+
+  it('B1 should refuse a new attach when every slot of the session is attached, and never evict an attached viewer', async () => {
+    // Arrange — one page, then the session's whole allowance of screens, each streaming it.
+    const { tabs, service } = harness();
+    const page = await service.openPage('s1', 'app');
+    const other = await service.openPage('s1', 'other');
+    const seen = new Map<string, string[]>();
+    const attached = [];
+    for (let each = 0; each < MAX_VIEWERS; each += 1) {
+      const frames: string[] = [];
+      const one = await attach(service, 's1', frame => frames.push(frame.pageId));
+      seen.set(one.viewer.id, frames);
+      attached.push(one);
+    }
+
+    // Act — one more asks, and is refused; then every screen types and the page paints.
+    const refused = await failure(attach(service, 's1'));
+    for (const one of attached) await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'k' }, one.viewer);
+    tabs.emit(page.id);
+    tabs.emit(other.id);
+
+    // Assert — the refusal says why; every attached screen still has its selection, its stream and its input.
+    should(refused).match({ code: 'capacity' });
+    should(refused.message).match(/screens/u);
+    should(tabs.inputs.length).equal(MAX_VIEWERS);
+    for (const one of attached) {
+      should(await service.status('s1', one.viewer)).match({ state: 'running' });
+      should(seen.get(one.viewer.id)).deepEqual([page.id]);
+    }
+    // A slot freed by a detach is taken by the next screen, and another session is not counted.
+    attached[0]?.detach();
+    await attach(service, 's1');
+    await service.openPage('s2', 'theirs');
+    await attach(service, 's2');
+  });
+
+  it('B1 should type into the page the stream is showing, even when the session’s own view or an eviction attempt says otherwise', async () => {
+    // Arrange — a screen streaming the first page; the session's own view moves to a newer page.
+    const { tabs, service } = harness();
+    await service.act('s1', { action: 'new-page' });
+    const first = activeOf(await service.status('s1'));
+    const shown = await attach(service, 's1');
+    await service.act('s1', { action: 'new-page' });
+    const newest = activeOf(await service.status('s1'));
+
+    // Act — a call with no screen moves the session's view, a full house refuses an attach, and the person types.
+    await service.act('s1', { action: 'activate-page', pageId: newest });
+    for (let each = 1; each < MAX_VIEWERS; each += 1) await attach(service, 's1');
+    await failure(attach(service, 's1'));
+    await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'secret' }, shown.viewer);
+
+    // Assert — it landed on the page the stream was showing, never the newest.
+    should(first).not.equal(newest);
+    should(tabs.inputs).deepEqual([{ pageId: first, input: { kind: 'insertText', text: 'secret' } }]);
   });
 
   it('should drive the person’s toolbar on the page they view', async () => {
@@ -510,11 +716,7 @@ describe('the machine agent browser — a person and an agent at once', () => {
     await service.act('s1', { action: 'new-page' });
     const second = activeOf(await service.status('s1'));
     const ended: string[] = [];
-    await service.attachViewer(
-      's1',
-      () => undefined,
-      signal => ended.push(signal.reason),
-    );
+    const viewing = await attach(service, 's1', undefined, signal => ended.push(signal.reason));
 
     // Act
     await service.act('s1', { action: 'close-page', pageId: second });
@@ -526,18 +728,10 @@ describe('the machine agent browser — a person and an agent at once', () => {
     should(activeOf(after)).equal(first);
     should((await service.status('s1')).pages).deepEqual([]);
     should(await failure(service.act('s1', { action: 'click', selector: 'a' }))).match({ code: 'not_running' });
-    should(await failure(service.dispatchHumanInput('s1', { kind: 'insertText', text: 'x' }))).match({
+    should(await failure(service.dispatchHumanInput('s1', { kind: 'insertText', text: 'x' }, viewing.viewer))).match({
       code: 'not_running',
     });
-    should(
-      await failure(
-        service.attachViewer(
-          's1',
-          () => undefined,
-          () => undefined,
-        ),
-      ),
-    ).match({ code: 'not_running' });
+    should(await failure(attach(service, 's1'))).match({ code: 'not_running' });
   });
 
   it('should move a person’s view to the session’s newest page when the page they viewed vanished from the browser', async () => {
@@ -568,13 +762,7 @@ describe('the machine agent browser — a person and an agent at once', () => {
     const { tabs, service } = harness();
     await service.openPage('s1', 'app');
     tabs.castFailure = new Error('no frames');
-    await should(
-      service.attachViewer(
-        's1',
-        () => undefined,
-        () => undefined,
-      ),
-    ).be.rejectedWith('no frames');
+    await should(attach(service, 's1')).be.rejectedWith('no frames');
     should((await service.status('s1')).viewers).equal(0);
   });
 });
@@ -585,19 +773,11 @@ describe('the machine agent browser — its life', () => {
     const stopped = harness();
     await stopped.service.openPage('s1', 'app');
     const stops: number[] = [];
-    await stopped.service.attachViewer(
-      's1',
-      () => undefined,
-      signal => stops.push(signal.code),
-    );
+    await attach(stopped.service, 's1', undefined, signal => stops.push(signal.code));
     const died = harness();
     await died.service.openPage('s1', 'app');
     const deaths: number[] = [];
-    await died.service.attachViewer(
-      's1',
-      () => undefined,
-      signal => deaths.push(signal.code),
-    );
+    await attach(died.service, 's1', undefined, signal => deaths.push(signal.code));
 
     // Act
     await stopped.service.closeAll();
@@ -692,11 +872,7 @@ describe('the machine agent browser — its life', () => {
     };
     const { tabs, service } = harness(new Tabs(), idle);
     await service.openPage('s1', 'app');
-    const attachment = await service.attachViewer(
-      's1',
-      () => undefined,
-      () => undefined,
-    );
+    const attachment = await attach(service, 's1');
 
     // Act — the clock runs out with a viewer: nothing stops. Then without one: the browser stops.
     (timers.at(-1) as () => void)();
@@ -970,7 +1146,8 @@ describe('I154 I155 the machine agent browser — who a page signs in (secrev-13
     const plant = (): void => identities.typed('s1', page.id, HOST, 'kirinnee97@gmail.com');
     const who = (): string | undefined => identities.at('s1', page.id, HOST);
     plant();
-    return { tabs, service, page, plant, who };
+    const live = await attach(service, 's1');
+    return { tabs, service, page, plant, who, viewer: live.viewer };
   }
 
   it('should forget who the page signs in on every toolbar act but a read: the owner’s address bar, a ferret’s fy browser', async () => {
@@ -1018,23 +1195,21 @@ describe('I154 I155 the machine agent browser — who a page signs in (secrev-13
   });
 
   it('should forget who the session’s pages sign in on a press in the live view, never on a move, a wheel or a release', async () => {
-    const { service, plant, who } = await signingIn();
+    const { service, plant, who, viewer } = await signingIn();
     const at = { x: 10, y: 10 } as const;
 
     for (const type of ['mouseMoved', 'mouseWheel', 'mouseReleased'] as const)
-      await service.dispatchHumanInput('s1', { kind: 'mouse', type, ...at });
+      await service.dispatchHumanInput('s1', { kind: 'mouse', type, ...at }, viewer);
     const afterMoves = who();
     // The owner clicks ernest's tile in the account chooser: the "pick the account" hand-off.
-    await service.dispatchHumanInput('s1', {
-      kind: 'mouse',
-      type: 'mousePressed',
-      button: 'left',
-      clickCount: 1,
-      ...at,
-    });
+    await service.dispatchHumanInput(
+      's1',
+      { kind: 'mouse', type: 'mousePressed', button: 'left', clickCount: 1, ...at },
+      viewer,
+    );
     const afterPress = who();
     plant();
-    await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'ernest@atomi.tech' });
+    await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'ernest@atomi.tech' }, viewer);
 
     should(afterMoves).equal('kirinnee97@gmail.com');
     should(afterPress).be.undefined();
