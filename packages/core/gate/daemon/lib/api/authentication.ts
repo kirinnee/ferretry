@@ -76,6 +76,20 @@ export interface Presented {
 }
 
 /**
+ * Whether this call carries a ferret token the directory cannot judge YET (its tokens are still being read at boot).
+ * Such a call is refused 503 "still starting", never 401: a 401 tells a polling pane its credential is dead.
+ */
+export function ferretBearerUndecided(ferrets: FerretBearerDirectory | undefined, presented: Presented): boolean {
+  if (ferrets?.judgeable === undefined) return false;
+  if (!presented.privilegedLocal || !isFerretToken(presented.bearer)) return false;
+  try {
+    return !ferrets.judgeable();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Classifies a call's credentials (today's `authenticate`).
  *
  * A blank configured token authenticates NOTHING: a daemon that failed to mint a token would otherwise accept

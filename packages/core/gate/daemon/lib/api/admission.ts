@@ -73,6 +73,7 @@ import {
   type Authentication,
   authenticate,
   bearerToken,
+  ferretBearerUndecided,
   type FerretTokenRefusal,
   type GateTokens,
 } from './authentication.ts';
@@ -375,6 +376,20 @@ export class GateAdmission implements Admission {
     }
   }
 
+  /** A ferret bearer Ferrets has not loaded its tokens to judge yet: retryable, and never the 401 a pane's pump counts. */
+  #stillStarting(request: ApiRequest): ApiResponse | undefined {
+    const bearer = bearerToken(headerValue(request, 'authorization'));
+    const undecided = ferretBearerUndecided(this.deps.ferrets(), {
+      ...(bearer === undefined ? {} : { bearer }),
+      privilegedLocal: request.arrival.kind === 'local' && request.arrival.privileged,
+    });
+    return undecided
+      ? jsonResponse({ error: 'the daemon is still starting; try again in a moment', code: 'daemon_starting' }, 503, {
+          'retry-after': '2',
+        })
+      : undefined;
+  }
+
   #authenticate(request: ApiRequest): Authentication {
     const principal = request.principal;
     if (principal !== undefined) {
@@ -416,7 +431,7 @@ export class GateAdmission implements Admission {
     }
 
     const authentication = this.#authenticate(request);
-    if (authentication.kind === 'anonymous') return refused(UNAUTHORIZED());
+    if (authentication.kind === 'anonymous') return refused(this.#stillStarting(request) ?? UNAUTHORIZED());
 
     // A FERRET TOKEN NAMES ITS OWN FERRET, so a header naming any other one is a forged attribution.
     if (authentication.tokenClass === 'ferret') {
