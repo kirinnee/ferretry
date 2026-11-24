@@ -451,33 +451,21 @@
   padding: 6px 12px;
   border-bottom: var(--border-width) solid var(--border);
 }
-/* A STATUS OVERLAY (the install offer): an offer is never part of the page, so it hangs from the strip's bottom edge, over the
-   top of the page, and takes no height from the frame — the page and the composer keep every pixel they had. The strip is
-   already under the top bar, so the notch and the sides are paid; the overlay sits above the page's own sticky heads. */
+/* A STATUS DOCK (the install offer): an offer is never part of the page's top, where the page's own title, counter and back link
+   live. It is the LAST row of the body, just above the phone's bottom bar (or the frame's safe-area padding), so it has nothing to
+   cover. It is a row of the body's own column — the page above it is that much shorter, which is the page "padding for it" — and
+   the frame keeps its height: the document, the frame and the nav do not move. The strip stops being a box (`display: contents`)
+   so a dock inside it can take its place in the body's column by `order`; the strip's quiet lines stay on top (order 0, document order). */
 .fy-status {
-  position: relative;
+  display: contents;
 }
-.fy-status > .fy-status-overlay {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  z-index: 5;
-  margin: 4px 8px 0;
+.fy-status > .fy-status-dock {
+  order: 1;
+  flex: none;
+  margin: 4px 8px;
 }
-/* On a ferret's page the strip's bottom edge IS the top of the chat: its header row (the Menu button, the name, Modes) sits right
-   there, and under it the page's own controls — on a phone the row of tab chips (one 44px chip, ferret-workspace's phone-tab-row),
-   wide the slim rail holding the side-panel toggle (40px, at the right edge). The overlay hangs below the header row and the chip
-   row and stops short of the rail, so it never covers a hit target of the chat's chrome. */
-.fy-frame[data-chat-chrome] .fy-status > .fy-status-overlay {
-  top: calc(100% + var(--chat-head-h) + var(--chat-tabs-h, 0px));
-  right: 48px;
-}
-@media (max-width: 767.98px) {
-  .fy-frame[data-chat-chrome] .fy-status > .fy-status-overlay {
-    --chat-tabs-h: 49px;
-    right: 0;
-  }
+.fy-body > .fy-nav--bottom {
+  order: 2;
 }
 
 /* The page scroll region adds a node to listen on, never a box (scroll/page-scroll-region.tsx). */

@@ -172,17 +172,19 @@ const heights = async (tab: Page) =>
       frame: box('.fy-frame')?.height ?? -1,
       main: box('.fy-main')?.height ?? -1,
       mainTop: box('.fy-main')?.top ?? -1,
+      mainBottom: box('.fy-main')?.bottom ?? -1,
+      navTop: box('.fy-nav--bottom')?.top ?? -1,
     };
   });
 
-describe('the install-as-app banner never changes the app’s height (O9-3)', () => {
+describe('the install-as-app banner never changes the app’s height (O9-3, Q8c)', () => {
   const BANNER_VIEWPORTS = [
     { name: '390', width: 390, height: 844, phone: true },
     { name: '1440', width: 1_440, height: 900, phone: false },
   ] as const;
   for (const viewport of BANNER_VIEWPORTS)
     for (const mode of ['light', 'dark'] as const)
-      it(`at ${viewport.name} in ${mode}: the document, the frame and the page keep their height with the banner shown`, async () => {
+      it(`at ${viewport.name} in ${mode}: the document and the frame keep their height with the banner shown, and the page makes room for it`, async () => {
         const theme = `studio-${mode}`;
         const hidden = await open(viewport, '/d/ws/agenda', '.fy-main', '&relay=0', theme);
         const before = await heights(hidden.tab);
@@ -195,16 +197,24 @@ describe('the install-as-app banner never changes the app’s height (O9-3)', ()
           expect(after.overflowY, 'the page does not scroll vertically').toBeLessThanOrEqual(0);
           expect(after.overflowX, 'the page does not scroll sideways').toBeLessThanOrEqual(0);
           expect(after.frame, 'the app is as tall as without the banner').toBe(before.frame);
-          expect(after.main, 'the page keeps every pixel it had').toBe(before.main);
           expect(after.mainTop, 'the page does not move down').toBe(before.mainTop);
-          // It floats: over the top of the page, inside the window, clear of the bottom edge where the composer is.
+          expect(after.navTop, 'the bottom bar stays where it was').toBe(before.navTop);
+          // It is docked at the bottom, above the bottom bar: the page above it is exactly that much shorter, so the dock
+          // sits on no pixel of the page, and the page's top (counter, title, back link, headings) is as it was.
           const banner = await shown.tab.evaluate(() => {
             const box = document.querySelector('[data-install-toast]')?.getBoundingClientRect();
             return { top: box?.top ?? -1, bottom: box?.bottom ?? -1, left: box?.left ?? -1, right: box?.right ?? -1 };
           });
           expect(banner.left).toBeGreaterThanOrEqual(0);
           expect(banner.right).toBeLessThanOrEqual(viewport.width);
-          expect(banner.bottom).toBeLessThan(viewport.height / 2);
+          expect(banner.top, 'the dock starts below the page').toBeGreaterThanOrEqual(after.mainBottom);
+          expect(after.main, 'the page is shorter by the dock, no more').toBeLessThanOrEqual(before.main);
+          expect(before.main - after.main, 'only the dock’s own room (row plus margins)').toBeLessThanOrEqual(
+            banner.bottom - banner.top + 8,
+          );
+          if (after.navTop > 0)
+            expect(banner.bottom, 'the dock is above the bottom bar').toBeLessThanOrEqual(after.navTop);
+          expect(banner.bottom, 'the dock is inside the window').toBeLessThanOrEqual(viewport.height);
           // Install and dismiss are still real, named buttons a press reaches (not covered by anything).
           for (const selector of ['[data-install-accept]', '[data-install-dismiss]'])
             expect((await hitsItself(shown.tab, selector)).hit, `${selector} is reachable`).toBe(true);
@@ -213,6 +223,75 @@ describe('the install-as-app banner never changes the app’s height (O9-3)', ()
           await shown.close();
         }
       });
+});
+
+/** Every interactive element and heading on the page, with its box, for "is anything under the banner". */
+const reachables = async (
+  tab: Page,
+): Promise<
+  readonly {
+    readonly what: string;
+    readonly top: number;
+    readonly bottom: number;
+    readonly left: number;
+    readonly right: number;
+  }[]
+> =>
+  await tab.evaluate(() => {
+    const dock = document.querySelector('[data-install-toast]')?.getBoundingClientRect();
+    if (dock === undefined) throw new Error('no banner');
+    const query =
+      'a[href], button, input, select, textarea, summary, [role=button], [role=tab], [role=link], [tabindex]:not([tabindex="-1"]), h1, h2, h3, h4, h5, h6, [data-page-counter], [data-step-counter]';
+    return [...document.querySelectorAll<HTMLElement>(query)]
+      .filter(element => !element.closest('[data-install-toast]'))
+      .map(element => ({ element, box: element.getBoundingClientRect() }))
+      .filter(
+        ({ element, box }) => box.width > 0 && box.height > 0 && getComputedStyle(element).visibility !== 'hidden',
+      )
+      .filter(
+        ({ box }) => box.left < dock.right && box.right > dock.left && box.top < dock.bottom && box.bottom > dock.top,
+      )
+      .map(({ element, box }) => ({
+        what: `${element.tagName.toLowerCase()} "${(element.textContent ?? '').trim().slice(0, 30)}"`,
+        top: box.top,
+        bottom: box.bottom,
+        left: box.left,
+        right: box.right,
+      }));
+  });
+
+describe('the install-as-app banner covers nothing at 390 (Q8c)', () => {
+  const PAGES = ['/d/ws/agenda', '/d/ws/ferrets', '/d/ws/ferrets/zoe'] as const;
+  // With and without the phone's bottom bar: the dock sits above it, never under it.
+  for (const bar of ['', '&phonenav=bottom'] as const)
+    for (const mode of ['light', 'dark'] as const)
+      for (const path of PAGES)
+        it(`at 390 in ${mode} on ${path}${bar === '' ? '' : ' with the bottom bar'}: no button, link, field or heading is under the banner's box`, async () => {
+          const { tab, close } = await open(
+            VIEWPORTS[1],
+            path,
+            '[data-install-toast]',
+            `&relay=0&install=1${bar}`,
+            `studio-${mode}`,
+          );
+          try {
+            await shotOf(
+              tab,
+              `390-install-banner-covers-nothing${bar === '' ? '' : '-navbottom'}${path.replaceAll('/', '_')}-${mode}`,
+            );
+            expect(await reachables(tab), 'what is under the banner').toEqual([]);
+            if (bar !== '') {
+              const rows = await heights(tab);
+              const dock = await tab.evaluate(
+                () => document.querySelector('[data-install-toast]')?.getBoundingClientRect().bottom ?? -1,
+              );
+              expect(rows.navTop, 'the bottom bar is drawn').toBeGreaterThan(0);
+              expect(dock, 'the banner is above the bottom bar').toBeLessThanOrEqual(rows.navTop);
+            }
+          } finally {
+            await close();
+          }
+        });
 });
 
 describe('the install-as-app banner on a ferret’s chat covers none of its chrome (O9-3)', () => {
