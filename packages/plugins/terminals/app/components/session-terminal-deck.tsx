@@ -235,8 +235,24 @@ const failure = (error: unknown): string => {
 
 const ownershipOf = (terminal: TerminalView | null): SurfaceOwnership => terminal?.openedBy ?? { by: 'unrecorded' };
 
+/**
+ * A colour the stylesheet computes (a `color-mix`) as the `rgba()` text xterm's parser reads. xterm takes hex and `rgb()`; it ignores
+ * a `color-mix(...)` or `color(srgb ...)` and falls back to its own default, so the page's computed colour is read back through a pixel.
+ */
+const rgbaOf = (value: string | undefined): string | undefined => {
+  if (value === undefined) return undefined;
+  const context = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  if (context === null) return undefined;
+  context.canvas.width = 1;
+  context.canvas.height = 1;
+  context.fillStyle = value;
+  context.fillRect(0, 0, 1, 1);
+  const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
+  return `rgba(${red}, ${green}, ${blue}, ${((alpha ?? 255) / 255).toFixed(3)})`;
+};
+
 /** The theme, read from the live tokens so a theme switch repaints the pane. */
-function terminalTheme(): import('@xterm/xterm').ITheme {
+export function terminalTheme(): import('@xterm/xterm').ITheme {
   const style = getComputedStyle(document.documentElement);
   // An unset token yields `undefined`, which leaves xterm's own default in place rather than a literal here.
   const token = (name: string): string | undefined => style.getPropertyValue(name).trim() || undefined;
@@ -251,6 +267,10 @@ function terminalTheme(): import('@xterm/xterm').ITheme {
     brightBlack: token('--muted'),
     white: token('--surface-3'),
     brightWhite: token('--fg'),
+    // xterm draws its own slider (a DOM element, not a native bar); its default is the ink at 20%, which sinks into the surface.
+    scrollbarSliderBackground: rgbaOf(token('--scrollbar-code-thumb')),
+    scrollbarSliderHoverBackground: rgbaOf(token('--scrollbar-code-thumb-hover')),
+    scrollbarSliderActiveBackground: rgbaOf(token('--scrollbar-code-thumb-hover')),
   };
 }
 

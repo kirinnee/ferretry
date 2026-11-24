@@ -35,6 +35,24 @@
   --scrollbar-thumb: color-mix(in srgb, var(--muted) 55%, transparent);
   --scrollbar-thumb-hover: color-mix(in srgb, var(--muted) 80%, transparent);
   --scrollbar-track: transparent;
+  /* The same thumb for a surface that paints its OWN background (below): drawn from that surface's ink, not the page's. The terminal
+     reads these two (its slider is xterm's own element, not a native bar), so they are named on the root as well. */
+  --scrollbar-code-thumb: color-mix(in srgb, var(--code-fg) 60%, transparent);
+  --scrollbar-code-thumb-hover: color-mix(in srgb, var(--code-fg) 85%, transparent);
+}
+
+/* A code block, a terminal, a diff or process body is dark in a light page (and the reverse): the page's `--muted` thumb sinks into
+   it (1.5:1 on Briefing light's navy), so each takes its thumb from its own `--code-fg`, which is the ink drawn on that fill. */
+.hljs,
+.md pre,
+.kt-code-block,
+.bg-code-bg,
+.kt-fs-code,
+.fy-diff,
+.fy-proc-body-wrap,
+.kt-webterm__stage {
+  --scrollbar-thumb: var(--scrollbar-code-thumb);
+  --scrollbar-thumb-hover: var(--scrollbar-code-thumb-hover);
 }
 
 * {
