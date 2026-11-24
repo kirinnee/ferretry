@@ -28,7 +28,7 @@ const MOTION_OPTIONS: readonly { readonly id: MotionPreference; readonly label: 
 ];
 
 const MOTION_HINT: Readonly<Record<MotionPreference, string>> = {
-  system: 'Follows this device’s reduced-motion setting',
+  system: 'Follows this device’s motion setting',
   reduced: 'Spinners and transitions stay still here',
 };
 

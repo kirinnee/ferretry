@@ -20,7 +20,7 @@ import { ChoiceCards, SettingRow, SettingSwitch } from '@ferretry/app';
 import type { ReactNode } from 'react';
 import { type ComposerDockLayout, useComposerDockLayout, writeComposerDockLayout } from './composer-dock-layout.ts';
 import { type MdComposePref, useMdComposePref, writeMdComposePref } from '@ferretry/app';
-import { EditorStylePreview } from './previews/index.ts';
+import { DockLayoutSample, EditorStyleSample } from './previews/index.ts';
 import './markdown-composer-settings.css';
 
 export const MARKDOWN_COMPOSER_EXPLANATION =
@@ -56,24 +56,30 @@ export const VIM_COMPOSER_EXPLANATION =
   'Modal Vim keys — normal and insert — in every editor style, with the mode shown under the message box. Off by default. Leaving insert mode is Escape, which a phone’s on-screen keyboard does not offer, so this is only useful with a physical keyboard (the mode indicator also switches modes).';
 
 /** The cards' options, and the one line under them that says what the chosen card does (only what is selected). */
-const EDITOR_OPTIONS = EDITOR_STYLES.map(style => ({ id: style.pref, title: style.label }));
-const DOCK_OPTIONS = DOCK_LAYOUTS.map(layout => ({ id: layout.value, title: layout.label }));
+const EDITOR_OPTIONS = EDITOR_STYLES.map(style => ({
+  id: style.pref,
+  title: style.label,
+  demo: <EditorStyleSample pref={style.pref} />,
+}));
+const DOCK_OPTIONS = DOCK_LAYOUTS.map(layout => ({
+  id: layout.value,
+  title: layout.label,
+  demo: <DockLayoutSample layout={layout.value} />,
+}));
 
 /** The group's one-paragraph intro, which was the section's description and now sits behind the Style row's (i). */
 const EDITOR_STYLE_INTRO =
   'Markdown, Notion-style (the default) formats as you type — headings at their real size, bold, lists that continue on Enter, checklists, quotes, code — with the markers kept faintly visible; Rich text hides the markers and adds a toolbar; or choose a plain text box. Whichever style, you send markdown. Optional Vim-style modal keys live here too.';
 
-/** The cards (one row), the line for the chosen one, and, when a row has one, the preview beside them. */
+/** The cards (one row, each with its own sample) and the line for the chosen one under them. */
 function CardsBody({
   caption,
   captionAttribute,
   children,
-  preview,
 }: {
   readonly caption: string;
   readonly captionAttribute: `data-${string}`;
   readonly children: ReactNode;
-  readonly preview?: ReactNode;
 }) {
   return (
     <div className="fy-cm-body">
@@ -83,10 +89,6 @@ function CardsBody({
           {caption}
         </p>
       </div>
-      {preview === undefined ? null : (
-        // An illustration drawn in its own mini-frame; its parts keep to one border level too (the sweep counts them).
-        <div className="contents">{preview}</div>
-      )}
     </div>
   );
 }
@@ -116,11 +118,7 @@ export function MarkdownComposerSettings({
           </>
         }
       >
-        <CardsBody
-          caption={style?.detail ?? ''}
-          captionAttribute="data-editor-style-detail"
-          preview={<EditorStylePreview pref={pref} />}
-        >
+        <CardsBody caption={style?.detail ?? ''} captionAttribute="data-editor-style-detail">
           <ChoiceCards
             label="Editor style"
             onChange={next => writeMdComposePref(next as MdComposePref)}

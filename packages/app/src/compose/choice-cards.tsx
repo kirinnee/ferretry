@@ -14,13 +14,72 @@
  * plays it, and with motion off (the OS query or Settings › Motion = reduced) `data-pulse` is never set.
  * `layout="stack"` is the onboarding page's list: one vertical column filling its parent, each card an icon, a title and
  * ONE line (clamped to 2), 64-80px tall, the same select animation. The default `"row"` is unchanged.
- * `option.demo` is an optional mini-scene drawn above the text (a `SettingPreview`, a lottie); it is decorative.
+ * `option.demo` is an optional mini-scene drawn above the text (a `SettingPreview`, a lottie, or a `ChoiceSample`: the
+ * fixed-box, real-component picture a Settings row gives each of its visual choices); it is decorative.
  */
 
 import { Check } from 'lucide-react';
-import { type CSSProperties, type KeyboardEvent, type ReactNode, useId, useState } from 'react';
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useMotionAllowed } from '../ui/use-motion-allowed.ts';
 import './choice-cards.css';
+
+/** The size a sample scene is authored at: the box it is drawn in is this shape, whatever width the card has. */
+export interface ChoiceSampleSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * A SAMPLE OF WHAT A CHOICE DOES, for `ChoiceOption.demo`: a FIXED-SHAPE box (CSS `aspect-ratio`, so it holds its height
+ * before the scene has drawn and nothing around it reflows) holding a scene authored at `size` and scaled to the card's
+ * width. Give EVERY option of one group the same `size`, so the cards stay level.
+ *
+ * Draw the scene with the REAL component's own classes, not a look-alike, so it cannot drift from what the setting does.
+ * It rests on the option's own final state (an unchosen card shows its picture too). To play ONE movement when the card is
+ * chosen, hang a CSS animation off `.fy-cc__card[data-pulse='true']`: that attribute is set only on a NEW choice and
+ * never under reduced motion (OS or Settings), so the scene needs no motion check of its own. The box is decorative
+ * (`aria-hidden`): the card's title is the label.
+ */
+export function ChoiceSample({ size, children }: { readonly size: ChoiceSampleSize; readonly children: ReactNode }) {
+  const box = useRef<HTMLSpanElement | null>(null);
+  const [scale, setScale] = useState(1);
+  useLayoutEffect(() => {
+    const target = box.current;
+    if (target === null) return undefined;
+    const measure = (): void => {
+      if (target.clientWidth > 0) setScale(target.clientWidth / size.width);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [size.width]);
+  return (
+    <span
+      ref={box}
+      aria-hidden="true"
+      className="fy-cs"
+      data-choice-sample=""
+      style={{ aspectRatio: `${size.width} / ${size.height}` }}
+    >
+      <span
+        className="fy-cs__stage"
+        style={{ width: size.width, height: size.height, transform: `translate(-50%, -50%) scale(${scale})` }}
+      >
+        {children}
+      </span>
+    </span>
+  );
+}
 
 export interface ChoiceOption {
   readonly id: string;

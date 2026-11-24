@@ -179,7 +179,7 @@ describe('Conversation tab previews', () => {
         const { tab, problems, close } = await open(viewport, scheme);
         try {
           const frames = tab.locator('[data-setting-preview]');
-          expect(await frames.count()).toBe(4);
+          expect(await frames.count()).toBe(3);
           for (const box of await frames.evaluateAll(nodes =>
             nodes.map(node => {
               const { width, height } = node.getBoundingClientRect();
@@ -313,7 +313,12 @@ describe('Conversation tab previews', () => {
             const page = (await tab.locator('.fy-settings-page').boundingBox())?.width ?? 0;
             expect(page).toBeGreaterThan(700);
             for (const box of boxes) expect(box.width).toBeLessThanOrEqual(320);
-            expect(new Set(boxes.map(box => Math.round(box.top))).size, '3 cards in ONE row').toBe(1);
+            // Layout position, not the painted box: `nudge` leaves the chosen card held at the start of its pop (scale 0.98), which
+            // moves its painted top by a fraction of a pixel and, after rounding, would read as a second row.
+            const rows = await tab
+              .locator('[data-scene="suggestions"] .fy-cc__card')
+              .evaluateAll(cards => cards.map(card => (card as HTMLElement).offsetTop));
+            expect(new Set(rows).size, '3 cards in ONE row').toBe(1);
             expect(boxes[2]!.right - boxes[0]!.left).toBeLessThanOrEqual(group + 1);
           } else {
             // Below 480px of the group's own width the cards stack, and stay short.
@@ -368,7 +373,7 @@ describe('Conversation tab previews', () => {
           const states = await tab
             .locator('[data-setting-preview]')
             .evaluateAll(nodes => nodes.map(node => node.getAttribute('data-sp-state')));
-          expect(states).toEqual(['still', 'still', 'still', 'still']);
+          expect(states).toEqual(['still', 'still', 'still']);
           expect(await tab.locator('.fy-sp__layer--before').count()).toBe(0);
           expect(await tab.evaluate(() => document.getAnimations().length)).toBe(0);
           expect(await tab.locator('[data-cvp-motion="still"]').count()).toBe(1);
