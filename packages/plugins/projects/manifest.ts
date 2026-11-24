@@ -168,13 +168,17 @@ export default definePlugin({
       panel(NEW_FERRET_PROJECT_SLOT, { id: 'new-ferret-projects', order: 10 }),
       // The setup flow's last page: pick the folders you work in (the same registration "Add project" sends).
       panel('onboarding.step', { id: 'onboarding-step', order: 90 }),
+      // The page after it: connect GitHub accounts (Git accounts' own card, mounted through `projects.connect-account`).
+      panel('onboarding.step', { id: 'github-step', order: 91 }),
     ],
   },
 
   // The setup flow ends in project setup: a device page (so it is the LAST page, after the machine's and this device's own),
-  // with its own bar segment. It is left unasked on a machine that already has a project.
+  // with its own bar segment. It is left unasked on a machine that already has a project. "Connect GitHub" follows it in the
+  // same segment: a device step, so it never counts toward the machine's `complete` and cannot reopen a finished setup.
   onboarding: [
     { id: 'folders', title: 'Add your projects', order: 90, side: 'client', group: 'Projects', stepHost: true },
+    { id: 'github', title: 'Connect GitHub', order: 91, side: 'client', group: 'Projects', stepHost: true },
   ],
 
   data: {

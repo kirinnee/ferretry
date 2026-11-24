@@ -111,10 +111,86 @@ const matcher = (table: Readonly<Record<string, Handler>>) => {
   };
 };
 
+/** `?projects=fresh`: the machine holds NO project until the Projects page registers one (and one account is already connected). */
+const FRESH = new URLSearchParams(globalThis.location?.search ?? '').get('projects') === 'fresh';
+/** The registry of a fresh machine: what the Projects page registered, and the accounts a link put on it. */
+const registry = new WeakMap<FakeDaemon, { projects: Record<string, unknown>[] }>();
+const MADE_PROJECT = {
+  id: '55555555-5555-4555-8555-555555555555',
+  name: 'atlas',
+  path: '/home/sam/atlas',
+  source: 'existing-folder',
+  createdAt: '2026-11-20T10:00:00.000Z',
+};
+/** The Projects page's routes on a fresh machine: an empty registry, one folder to pick, the registration, and the account link. */
+const projectRoutes = (fake: FakeDaemon): Record<string, Handler> => {
+  const state = registry.get(fake) ?? { projects: [] };
+  registry.set(fake, state);
+  return {
+    'GET /v1/projects': () => state.projects,
+    'GET /v1/projects/folders': (request: TransportRequest) => ({
+      path: String(request.query?.path ?? '/home/sam/atlas'),
+      crumbs: [{ name: '~', path: '/home/sam' }],
+      entries: [],
+      truncated: false,
+    }),
+    'POST /v1/projects': (request: TransportRequest) => {
+      fake.writes.push({ route: 'POST /v1/projects', body: request.body });
+      if (!state.projects.some(project => project.id === MADE_PROJECT.id)) state.projects.push({ ...MADE_PROJECT });
+      return MADE_PROJECT;
+    },
+    'PUT /v1/projects/:id/accounts': (request: TransportRequest) => {
+      fake.writes.push({ route: 'PUT /v1/projects/:id/accounts', body: request.body });
+      const row = state.projects[0] ?? { ...MADE_PROJECT };
+      state.projects[0] = { ...row, accounts: (request.body as { accounts: string[] }).accounts };
+      return state.projects[0];
+    },
+  };
+};
+
+/** The made-up GitHub accounts a machine holds: none at the start (one on a fresh machine); the device flow below adds one. Never a token. */
+const github = new WeakMap<FakeDaemon, { accounts: object[]; polls: number }>();
+const FAKE_ACCOUNT = {
+  id: 'gha_7',
+  provider: 'github',
+  githubId: 4_242,
+  login: 'hubot-fake',
+  scopes: ['repo'],
+  keys: {},
+  createdAt: '2026-11-20T10:00:00.000Z',
+};
+/** Git accounts' routes on a fake machine: list, start the device flow, and a poll that is pending once, then approved. */
+const githubRoutes = (fake: FakeDaemon): Record<string, Handler> => {
+  const state = github.get(fake) ?? { accounts: FRESH ? [{ ...FAKE_ACCOUNT }] : [], polls: 0 };
+  github.set(fake, state);
+  return {
+    'GET /v1/git-accounts': () => state.accounts,
+    'POST /v1/git-accounts/github/device': () => {
+      state.polls = 0;
+      return {
+        flowId: 'flow_0123456789abcdef',
+        provider: 'github',
+        userCode: 'ABCD-1234',
+        verificationUri: 'https://github.com/login/device',
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+        interval: 1,
+      };
+    },
+    'GET /v1/git-accounts/github/device/:flowId': () => {
+      state.polls += 1;
+      if (state.polls < 2) return { status: 'pending', interval: 1 };
+      if (state.accounts.length === 0) state.accounts.push(FAKE_ACCOUNT);
+      return { status: 'done', accountId: FAKE_ACCOUNT.id, login: FAKE_ACCOUNT.login };
+    },
+  };
+};
+
 export const extraRoutes = (fake: FakeDaemon) => {
   const table = importRoutes();
   const answer = matcher({
     ...table,
+    ...githubRoutes(fake),
+    ...(FRESH ? projectRoutes(fake) : {}),
     'GET /v1/codex/update': { installed: { state: 'ok', version: '0.166.0' }, location: { state: 'found' } },
     'GET /v1/claude-code/update': { installed: { state: 'ok', version: '2.1.0' }, location: { state: 'found' } },
     // Only the second machine has no passkey yet and its first window open: its Passkey step is asked.

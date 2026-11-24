@@ -138,6 +138,13 @@ describe('a step added after the setup was finished (O9-6 upgrade)', () => {
     expect(viewOf([...ENTRIES, entry('claude-code', 'ask', 31)], finished, true).complete).toBe(false);
   });
 
+  test("a new device step (projects' Connect GitHub) leaves a finished setup complete: only this device answers it", () => {
+    const github: OnboardingEntry = { ...entry('projects', 'github', 91), side: 'client' };
+    const view = viewOf([...ENTRIES, github], finished, true);
+    expect(view.steps.find(step => step.id === 'github')?.state).toBe('pending');
+    expect(view.complete).toBe(true);
+  });
+
   test('an informational step does not make an unfinished setup complete either', () => {
     const view = viewOf([...ENTRIES, ready('codex', 51)], undefined, false);
     expect(view.complete).toBe(false);
