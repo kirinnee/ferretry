@@ -39,7 +39,9 @@ import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
  * `link.opened` is a web address handed to this computer’s own browser, named by host only. The
  * `phone-approval.*` events are a push the owner approves on their phone (docs/input-requests.md, "Approve on your
  * phone"): asked for, refused with "Not me — stop", and how it ended, named by the account, the site and the ferret,
- * never by the number on the card.
+ * never by the number on the card. The `connector.*` events are the remote MCP connector (docs/mcp-connector.md): a
+ * client registered, a sign-in approved or denied, a grant revoked, a rotated-away refresh token presented again
+ * (which revokes the grant), and one write tool call — named by tool, grant and ferret, never by its arguments.
  */
 export const AUDIT_EVENTS = [
   'device.paired',
@@ -108,6 +110,12 @@ export const AUDIT_EVENTS = [
   'phone-approval.raised',
   'phone-approval.refused',
   'phone-approval.settled',
+  'connector.client-registered',
+  'connector.grant-approved',
+  'connector.grant-denied',
+  'connector.grant-revoked',
+  'connector.refresh-reused',
+  'connector.tool',
 ] as const;
 export const AuditEventSchema = z.enum(AUDIT_EVENTS);
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
@@ -154,6 +162,8 @@ export const AUDIT_KEPT_EVENTS: readonly AuditEvent[] = [
   'catalog.link.changed',
   'security.changed',
   'warden.configured',
+  'connector.grant-approved',
+  'connector.grant-revoked',
 ];
 
 /**
@@ -165,8 +175,10 @@ export const AUDIT_KEPT_EVENTS: readonly AuditEvent[] = [
  * supervising session acting under the authority it was handed. `anonymous` is a caller who has not
  * proved who they are — the only one is somebody presenting a pairing code, and it appears only on a
  * refused `pairing.refused` record, because a successful redemption is recorded as the new device.
+ * `connector` is a remote MCP connector grant acting for the owner (docs/mcp-connector.md); its grant id is the
+ * record's `detail.grant`, never `deviceId`.
  */
-export const AUDIT_ACTOR_KINDS = ['host', 'device', 'warden', 'anonymous'] as const;
+export const AUDIT_ACTOR_KINDS = ['host', 'device', 'warden', 'anonymous', 'connector'] as const;
 export const AuditActorKindSchema = z.enum(AUDIT_ACTOR_KINDS);
 export type AuditActorKind = z.infer<typeof AuditActorKindSchema>;
 
@@ -200,6 +212,7 @@ export const AUDIT_RESERVED_ACTOR_PHRASES = [
   'a supervising agent',
   'someone who is not paired',
   'a paired device',
+  'a connected app',
 ] as const;
 
 /** Whether a device name would read as one of the fixed actor phrases, ignoring case and spacing. */
