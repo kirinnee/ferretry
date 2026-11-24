@@ -836,14 +836,23 @@ describe('O8 item 8: the Voice picture', () => {
               ]),
               bars: document.querySelectorAll('.fy-wd__bar').length,
               moreShown: getComputedStyle(document.querySelector('.fy-wd__more') as Element).display !== 'none',
+              // What a person reads in the left label, as laid out (a hidden tail is not in innerText), and where it ends.
+              liveWords: (document.querySelector('.fy-wd__axis[data-at="left"]') as HTMLElement).innerText
+                .replace(/\s+/g, ' ')
+                .trim(),
+              liveMore: box('.fy-wd__axis[data-at="left"] .fy-wd__more'),
               hidden: radar.closest('[aria-hidden="true"]') !== null,
               scrollX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
             };
           });
           expect(g.bars).toBe(28);
           expect(g.axes.map(text => (text ?? '').trim())).toEqual(['Speed', 'Accuracy', 'Light', 'Live words']);
-          // A phone's strip is too narrow for "Live words" at a readable size: the tail of the label is not drawn there.
-          expect(g.moreShown).toBe(!viewport.phone);
+          // The whole name "Live words" is drawn on every width (on a phone its second word wraps under the first), inside the strip.
+          expect(g.moreShown).toBe(true);
+          expect(g.liveWords).toBe('Live words');
+          expect(g.liveMore.w, 'the tail of "Live words" has a box').toBeGreaterThan(0);
+          expect(g.liveMore.x).toBeGreaterThanOrEqual(g.demo.x);
+          expect(g.liveMore.right, 'and ends before the radar').toBeLessThanOrEqual(g.radar.x + 1);
           expect(g.hidden, 'the picture is decorative: the cards and the test carry the words').toBe(true);
           expect(g.scrollX).toBeLessThanOrEqual(0);
           // The radar IS Sherpa's numbers: the top vertex is speed 0.97 of the radius (46) above the centre (120, 66), the left one is
