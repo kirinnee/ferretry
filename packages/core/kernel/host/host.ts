@@ -163,7 +163,8 @@ import { composePrivateFiles, privacyRefusals } from '../manifest/privacy.ts';
 import { ensureInternalRootBases, ensureWorktreesBase, ownFolderSpellings, rootsPortFor } from './roots.ts';
 import { NO_PROCESS_TABLE, type ProcessTable, processesPortFor } from './processes.ts';
 import { PinRegistry } from './pins.ts';
-import { dedupedWarnings, describeRefusal, type RefusalNote } from './refusal-log.ts';
+import { dedupedWarnings, describeRefusal, onceEach, type RefusalNote } from './refusal-log.ts';
+import { describeFailure, failureKey, type FailureNote } from './responses.ts';
 import { FsError, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
 import type { PathsPort, ScratchPort } from '../contract/ports.ts';
 
@@ -1477,6 +1478,7 @@ async function bootLocked(
   // refused device were "could not be read" and the log was silent, so nobody could say which check had said no.
   const warnings = dedupedWarnings(log, () => clock.nowMs());
   const refusalLog = warnings.child('refusals');
+  const sayFailure = onceEach(log.child('dispatch'), 'error', () => clock.nowMs());
   const bindings = {
     admission: () => bound.admission,
     outputGuard: () => bound.outputGuard,
@@ -1485,6 +1487,13 @@ async function bootLocked(
     refused: (note: RefusalNote) => {
       const line = describeRefusal(note);
       refusalLog.warn(line.message, line.fields);
+    },
+    // A handler that threw is a 500 the caller cannot explain: say why here, with no secret value. Said once a minute per
+    // method + template + error class (the log file is synchronous and never rotated, so a route that throws on every
+    // poll must not fill it), and the next line that gets through carries how many were held back.
+    failed: (note: FailureNote) => {
+      const line = describeFailure(note);
+      sayFailure(failureKey(note), line.message, line.fields);
     },
     ...(adapters.compressor === undefined ? {} : { compressor: adapters.compressor }),
   };

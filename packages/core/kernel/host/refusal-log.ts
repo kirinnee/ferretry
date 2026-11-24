@@ -90,14 +90,19 @@ export const REFUSAL_WINDOW_MS = 60_000;
 const REFUSAL_KEYS_MAX = 512;
 
 /**
- * `log` with its `warn` said once per identical line per {@link REFUSAL_WINDOW_MS}: the first occurrence at once, and
- * the next one after the window carrying how many were held back (`suppressed`). Every other level passes through.
- * The line and its fields ARE the identity, so two devices refused for the same reason are two lines.
+ * One line said at most once per `windowMs` per key, at `level`: the first occurrence at once, and the next one after
+ * the window carrying how many were held back (`suppressed`). The caller picks the key, so a line whose text varies
+ * (an error's message) can still be one identity. The memory is bounded: past {@link REFUSAL_KEYS_MAX} keys it starts
+ * over, and the repeats it held are still counted in one line, so none goes uncounted.
  */
-export function dedupedWarnings(log: Log, nowMs: () => number, windowMs: number = REFUSAL_WINDOW_MS): Log {
+export function onceEach(
+  log: Log,
+  level: 'warn' | 'error',
+  nowMs: () => number,
+  windowMs: number = REFUSAL_WINDOW_MS,
+): (key: string, message: string, fields?: LogFields) => void {
   const seen = new Map<string, { at: number; held: number }>();
-  const warn = (message: string, fields?: LogFields): void => {
-    const key = `${message}\u0000${fields === undefined ? '' : JSON.stringify(Object.entries(fields))}`;
+  return (key, message, fields) => {
     const now = nowMs();
     const prior = seen.get(key);
     if (prior !== undefined && now - prior.at < windowMs) {
@@ -105,16 +110,25 @@ export function dedupedWarnings(log: Log, nowMs: () => number, windowMs: number 
       return;
     }
     if (prior === undefined && seen.size >= REFUSAL_KEYS_MAX) {
-      // The memory starts over, but the repeats it held are still counted: said once, so none goes uncounted.
       let lost = 0;
       for (const entry of seen.values()) lost += entry.held;
       seen.clear();
-      if (lost > 0) log.warn('refusal memory was reset', { suppressed: lost });
+      if (lost > 0) log[level](`${level === 'warn' ? 'refusal' : 'failure'} memory was reset`, { suppressed: lost });
     }
     const held = prior?.held ?? 0;
     seen.set(key, { at: now, held: 0 });
-    log.warn(message, held === 0 ? fields : { ...fields, suppressed: held });
+    log[level](message, held === 0 ? fields : { ...fields, suppressed: held });
   };
+}
+
+/**
+ * `log` with its `warn` said once per identical line per {@link REFUSAL_WINDOW_MS}. Every other level passes through.
+ * The line and its fields ARE the identity, so two devices refused for the same reason are two lines.
+ */
+export function dedupedWarnings(log: Log, nowMs: () => number, windowMs: number = REFUSAL_WINDOW_MS): Log {
+  const once = onceEach(log, 'warn', nowMs, windowMs);
+  const warn = (message: string, fields?: LogFields): void =>
+    once(`${message}\u0000${fields === undefined ? '' : JSON.stringify(Object.entries(fields))}`, message, fields);
   return {
     debug: (message, fields) => log.debug(message, fields),
     info: (message, fields) => log.info(message, fields),
