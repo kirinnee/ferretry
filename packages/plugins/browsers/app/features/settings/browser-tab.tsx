@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { BrowserMode, BrowserProxySetting } from '../../../contract/index.ts';
+import type { BrowserMode, BrowserProxySetting, StealthSwitch } from '../../../contract/index.ts';
 import { type CallClient, reasonOf } from '../../lib/clients.ts';
 import {
   type BrowsersChange,
@@ -26,6 +26,7 @@ import {
   UNNAMED_MACHINE,
 } from './browser-mode-section.tsx';
 import { BrowserProxySection } from './browser-proxy-section.tsx';
+import { BrowserStealthSection } from './browser-stealth-section.tsx';
 import { BrowserStateLine } from './browser-state-line.tsx';
 import { useViewPlace } from '@ferretry/app';
 import { Loading, SetupNote, SetupSection, useChangeAuthority } from '@ferretry/app/ui';
@@ -101,6 +102,11 @@ export function BrowserTab({ client }: { readonly client: CallClient }) {
             key={reading.document.config.mode}
             mode={reading.document.config.mode}
             save={(mode: BrowserMode) => save({ mode })}
+          />
+          <BrowserStealthSection
+            key={reading.document.config.stealth}
+            stealth={reading.document.config.stealth}
+            save={(stealth: StealthSwitch) => save({ stealth })}
           />
           <BrowserProxySection
             client={client}

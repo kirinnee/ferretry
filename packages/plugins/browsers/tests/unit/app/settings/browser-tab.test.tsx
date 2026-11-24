@@ -3,6 +3,7 @@ import type { ViewPlace } from '@ferretry/app';
 import { interact, mount, must, WithViewPlace } from '@ferretry/app/testing';
 import browsersManifest from '../../../../manifest.ts';
 import { BROWSER_USER_AGENT_WORDS, BrowserTab } from '../../../../app/features/settings/browser-tab.tsx';
+import { STEALTH_HELD_NOTE, STEALTH_TERMS_NOTE } from '../../../../app/features/settings/browser-stealth-section.tsx';
 import { PROXY_ERROR_WORDS } from '../../../../app/features/settings/browser-proxy-test-result.tsx';
 import { BROWSER_OFFLINE_WORDS, browserStateSentence } from '../../../../app/features/settings/browser-state-line.tsx';
 import type { RecordedCall } from '../../../support/app/client.ts';
@@ -373,5 +374,54 @@ describe('the Browser tab', () => {
     expect(online.calls.map(call => call.route)).toContain(STATE);
     expect(text(online.view.container, '[data-browser-state]')).toContain('Stopped');
     await online.view.unmount();
+  });
+});
+
+describe('the Stealth switch on the Browser tab', () => {
+  const stealthSwitch = (container: HTMLElement): HTMLButtonElement =>
+    must(
+      container.querySelector('[data-setup-section="browser-stealth"] [role="switch"]') as HTMLButtonElement,
+      'the stealth switch',
+    );
+
+  it('is off by default, with the terms note beside it', async () => {
+    const { view } = await tab();
+    expect(stealthSwitch(view.container).getAttribute('aria-checked')).toBe('false');
+    expect(text(view.container, '[data-browser-stealth-note]')).toBe(STEALTH_TERMS_NOTE);
+    await view.unmount();
+  });
+
+  it('writes stealth: on against the digest it was read at, keeping the file’s comments', async () => {
+    const { calls, view } = await tab({ text: '# the shared browser\nmode: headless\n' });
+    await click(stealthSwitch(view.container), 'the stealth switch');
+    const sent = body(calls, CONFIG_PUT) as { text: string; etag: string };
+    expect(sent.etag).toBe('etag-1');
+    expect(sent.text).toContain('# the shared browser');
+    expect(sent.text).toContain('stealth: on');
+    await view.unmount();
+  });
+
+  it('says a held on is saved but not in effect, and shows the switch still off', async () => {
+    const { view } = await tab({ put: { path: 'browsers.yaml', etag: 'etag-2', outcome: 'pending' } });
+    await click(stealthSwitch(view.container), 'the stealth switch');
+    expect(text(view.container, '[data-setup-note="browser-stealth-held"]')).toBe(STEALTH_HELD_NOTE);
+    expect(stealthSwitch(view.container).getAttribute('aria-checked')).toBe('false');
+    await view.unmount();
+  });
+
+  it('turns it off with one write, nothing held', async () => {
+    const { calls, view } = await tab({ text: 'mode: headless\nstealth: on\n' });
+    expect(stealthSwitch(view.container).getAttribute('aria-checked')).toBe('true');
+    await click(stealthSwitch(view.container), 'the stealth switch');
+    expect((body(calls, CONFIG_PUT) as { text: string }).text).toContain('stealth: off');
+    expect(view.container.querySelector('[data-setup-note="browser-stealth-held"]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('puts a refusal in front of the person', async () => {
+    const { view } = await tab({ put: new Error('browsers.yaml changed since you read it') });
+    await click(stealthSwitch(view.container), 'the stealth switch');
+    expect(text(view.container, '[data-setup-note="browser-stealth-refusal"]')).toContain('changed since you read it');
+    await view.unmount();
   });
 });

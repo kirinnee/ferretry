@@ -48,6 +48,35 @@ describe('browsers manifest', () => {
         1,
       );
     });
+    const stealthSentence = 'the agent browser now passes bot checks and solves captchas for the owner’s identities';
+    test('stealth going off → on is held, on a first file or an existing one', () => {
+      expect(loosens(undefined, { mode: 'headless', stealth: 'on' })).toEqual([stealthSentence]);
+      expect(loosens({ mode: 'headless', stealth: 'off' }, { mode: 'headless', stealth: 'on' })).toEqual([
+        stealthSentence,
+      ]);
+      expect(loosens({ mode: 'headless' }, { mode: 'headless', stealth: 'on' })).toEqual([stealthSentence]);
+    });
+    test('stealth going on → off, or staying where it was, applies at once', () => {
+      expect(loosens({ mode: 'headless', stealth: 'on' }, { mode: 'headless', stealth: 'off' })).toEqual([]);
+      expect(loosens({ mode: 'headless', stealth: 'on' }, { mode: 'window', stealth: 'on' })).toEqual([]);
+      expect(loosens(undefined, { mode: 'headless', stealth: 'off' })).toEqual([]);
+    });
+    test('an identity opting out is a tightening; dropping the opt-out while stealth is on is held', () => {
+      const optedOut = { mode: 'headless', stealth: 'on', identities: { work: { stealth: false } } };
+      expect(loosens({ mode: 'headless', stealth: 'on' }, optedOut)).toEqual([]);
+      expect(loosens(optedOut, { mode: 'headless', stealth: 'on' })).toEqual([stealthSentence]);
+      expect(loosens(optedOut, { mode: 'headless', stealth: 'on', identities: { work: {} } })).toEqual([
+        stealthSentence,
+      ]);
+      // Off overall, an identity entry changes nothing.
+      expect(loosens(optedOut, { mode: 'headless', stealth: 'off' })).toEqual([]);
+    });
+    test('a proxy and stealth newly set together are two sentences', () => {
+      expect(loosens(undefined, { mode: 'headless', proxy, stealth: 'on' })).toEqual([
+        `${sentence}${proxy.url}`,
+        stealthSentence,
+      ]);
+    });
     test('removing the proxy, or editing only its bypass list or the mode, hands an agent nothing', () => {
       const before = { mode: 'headless', proxy };
       expect(loosens(before, { mode: 'headless' })).toEqual([]);

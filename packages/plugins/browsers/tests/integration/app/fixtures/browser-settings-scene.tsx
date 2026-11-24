@@ -1,5 +1,5 @@
 /**
- * The browser entry for the Browser tab's visual tests (browser-mode, browser-proxy, browser-tab): the REAL tab, sections,
+ * The browser entry for the Browser scene=mode|stealth|stealth-on|proxy|tab's visual tests (browser-mode, browser-proxy, browser-tab): the REAL tab, sections,
  * status line and banners over a scripted client — no daemon, no network. Every name, address and secret name is fake.
  *
  *   ?theme=<family>-<mode>&scene=mode|proxy|tab|status|firewall|invalid|proxy-test
@@ -13,6 +13,7 @@ import { BrowserChallengeBanner } from '../../../../app/features/browser/browser
 import { RemoteBrowserStatusBar } from '../../../../app/features/browser/remote-browser-chrome.tsx';
 import { BrowserModeSection } from '../../../../app/features/settings/browser-mode-section.tsx';
 import { BrowserProxySection } from '../../../../app/features/settings/browser-proxy-section.tsx';
+import { BrowserStealthSection } from '../../../../app/features/settings/browser-stealth-section.tsx';
 import { BrowserProxyTestBlock } from '../../../../app/features/settings/browser-proxy-test-block.tsx';
 import type { ProxyTestShown } from '../../../../app/features/settings/browser-proxy-test-result.tsx';
 import { BrowserStateLine } from '../../../../app/features/settings/browser-state-line.tsx';
@@ -90,6 +91,7 @@ const FIREWALL_VIEWS: readonly BrowserStateView[] = [
 /** Only `changes` is read while nothing is pending: the state a settled section shows. */
 const OPEN = { kind: 'open' } as const;
 const saved = async () => ({ kind: 'saved' }) as const;
+const held = async () => ({ kind: 'pending', sentence: 'Saved, but not in effect until you confirm it.' }) as const;
 
 const status = {
   sessionId: 'session-a',
@@ -180,6 +182,11 @@ const body = (): React.ReactNode => {
           </section>
         </>
       );
+    case 'stealth':
+      // Off, and the owner turning it on: the daemon holds the loosening, so the page says it waits.
+      return <BrowserStealthSection stealth="off" save={held} />;
+    case 'stealth-on':
+      return <BrowserStealthSection stealth="on" save={saved} />;
     case 'proxy':
       return (
         <>

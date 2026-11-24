@@ -14,6 +14,7 @@ import { z } from 'zod';
 import {
   type BrowserMode,
   type BrowserProxySetting,
+  type StealthSwitch,
   BrowsersConfigSchema,
   type BrowsersConfig,
 } from '../../contract/index.ts';
@@ -49,6 +50,8 @@ export async function readBrowsersConfig(client: CallClient): Promise<BrowsersDo
 
 export interface BrowsersChange {
   readonly mode?: BrowserMode;
+  /** The one stealth switch; `on` waits for the owner (browsers.yaml loosens). */
+  readonly stealth?: StealthSwitch;
   /** `null` turns the proxy off. */
   readonly proxy?: BrowserProxySetting | null;
 }
@@ -56,8 +59,9 @@ export interface BrowsersChange {
 /** The document with the change made, comments and order kept. Pure. */
 function editedBrowsersText(text: string, change: BrowsersChange): string {
   const withMode = change.mode === undefined ? text : setConfigKey(text, 'mode', change.mode);
-  if (change.proxy === undefined) return withMode;
-  return setConfigKey(withMode, 'proxy', change.proxy === null ? undefined : change.proxy);
+  const withStealth = change.stealth === undefined ? withMode : setConfigKey(withMode, 'stealth', change.stealth);
+  if (change.proxy === undefined) return withStealth;
+  return setConfigKey(withStealth, 'proxy', change.proxy === null ? undefined : change.proxy);
 }
 
 /** Writes the change against the digest it was read at; the daemon refuses a file changed since. */

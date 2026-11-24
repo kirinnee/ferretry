@@ -223,12 +223,72 @@ export type BrowserLoginAction = z.infer<typeof BrowserLoginActionSchema>;
 
 // ─── config/browsers.yaml ─────────────────────────────────────────────────────────────────────────────────────────
 
+// ─── stealth (docs/browser-mode.md, "Stealth") ──────────────────────────────────────────────────────────────────
+
+export const StealthSwitchSchema = z.enum(['off', 'on']);
+export type StealthSwitch = z.infer<typeof StealthSwitchSchema>;
+
+/** The key a per-identity entry is written under: a short name, never an email address. */
+export const BROWSER_IDENTITY_KEY_PATTERN = /^[a-z][a-z0-9-]{0,31}$/u;
+
+/**
+ * An identity's own stealth entry. The only thing it can say is `stealth: false`, the opt-out: turning stealth ON is the
+ * one machine-wide switch, so no identity can opt itself in on its own.
+ */
+export const BrowserIdentitySettingSchema = z.strictObject({ stealth: z.literal(false).optional() });
+
+/** Whether stealth is in effect for one identity (`undefined`: the machine-wide answer, with no identity named). */
+export function stealthOn(config: Pick<BrowsersConfig, 'stealth' | 'identities'>, identity?: string): boolean {
+  return config.stealth === 'on' && (identity === undefined || config.identities?.[identity]?.stealth !== false);
+}
+
 /** How the agent browser runs and where it egresses. Credentials only as `${secret:NAME}`; no edit widens authority. */
 export const BrowsersConfigSchema = z.strictObject({
   mode: BrowserModeSchema.default('headless'),
   proxy: BrowserProxySettingSchema.optional(),
+  /** The ONE stealth switch: `on` opts in every identity on this machine (except one that opted out). Off → on is held for the owner. */
+  stealth: StealthSwitchSchema.default('off'),
+  identities: z.record(z.string().regex(BROWSER_IDENTITY_KEY_PATTERN), BrowserIdentitySettingSchema).optional(),
 });
 export type BrowsersConfig = z.infer<typeof BrowsersConfigSchema>;
+
+// ─── what stealth records in the audit log: metadata only, never a secret ───────────────────────────────────────────
+
+/** An identity in an audit record: its short key, or `id-` and sixteen hex of a hash, never an email address. */
+export const AuditIdentitySchema = z.string().regex(/^(?:[a-z][a-z0-9-]{0,31}|id-[0-9a-f]{16})$/u);
+const AuditHostSchema = z.string().regex(/^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/u);
+const AuditHashSchema = z.string().regex(/^[0-9a-f]{16}$/u);
+const AuditNameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/u);
+
+/**
+ * The `detail` of each stealth audit record (`policy.ts` names the kinds). Each is a strict object of closed words,
+ * numbers, flags, hashes and bare hosts: a token, a site key, a page address (a path, a query), a cookie or a
+ * `${secret:NAME}` reference has no field and no value that fits one.
+ */
+export const StealthAuditDetailSchemas = {
+  switched: z.strictObject({ from: StealthSwitchSchema, to: StealthSwitchSchema }),
+  session: z.strictObject({
+    identity: AuditIdentitySchema,
+    engine: AuditNameSchema,
+    fingerprint: AuditHashSchema,
+    proxyHost: AuditHostSchema.optional(),
+    proxyCountry: z
+      .string()
+      .regex(/^[A-Z]{2}$/u)
+      .optional(),
+    phase: z.enum(['started', 'stopped']),
+  }),
+  captchaSolve: z.strictObject({
+    identity: AuditIdentitySchema,
+    siteHost: AuditHostSchema,
+    kind: z.enum(['turnstile', 'recaptcha-v2', 'recaptcha-v3', 'hcaptcha']),
+    vendor: AuditNameSchema,
+    outcome: z.enum(['solved', 'refused', 'failed']),
+    ms: NonNegativeIntegerSchema,
+    estimatedCostMicros: NonNegativeIntegerSchema,
+  }),
+  captchaCapReached: z.strictObject({ vendor: AuditNameSchema, capMicros: NonNegativeIntegerSchema }),
+} as const;
 
 // ─── handing a link to this computer's own browser (today's `protocol/src/lib/open-url.ts`) ─────────────────────────
 
