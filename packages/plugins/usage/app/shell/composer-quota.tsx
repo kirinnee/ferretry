@@ -7,6 +7,8 @@ type Quota = Pick<ResolvedQuota, 'fiveHourPercent' | 'weeklyPercent' | 'atLimit'
 export interface ComposerQuotaProps {
   /** Account use supplied by this session's paired daemon; it is never global. `null` is unknown. */
   readonly quota?: Quota | null;
+  /** The feed's first read has not answered yet: with nothing else known, draw nothing rather than "No usage data". */
+  readonly pending?: boolean;
 }
 
 /** Display form for one known quota window. */
@@ -40,9 +42,10 @@ export const composerQuotaSpoken = (quota?: Quota | null): string => {
  * ONLY WHAT IS KNOWN IS DRAWN. A window the daemon has no number for is left out rather than drawn as
  * `—`: a dash beside a label reads as "nothing used", the one confident claim nobody made. With no
  * number for either window (and no money to say) the line says "No usage data" in words: silence cannot be told from a
- * broken readout, and the owner asked to be told (O9-17).
+ * broken readout, and the owner asked to be told (O9-17). While the feed's FIRST read is still loading it says nothing at all:
+ * "No usage data" would be a claim nobody has checked yet, and it flashed before the real numbers.
  */
-export function ComposerQuota({ quota }: ComposerQuotaProps) {
+export function ComposerQuota({ quota, pending = false }: ComposerQuotaProps) {
   const authFailed = quota?.authOk === false;
   const atLimit = !authFailed && quota?.atLimit === true;
   const five = authFailed ? undefined : quota?.fiveHourPercent;
@@ -50,7 +53,8 @@ export function ComposerQuota({ quota }: ComposerQuotaProps) {
   const spoken = composerQuotaSpoken(quota);
   const money = quotaMoneyText(quota);
   // NOTHING KNOWN: say so in plain words. A silent status line reads as "not measured" or "broken" and the person cannot tell which.
-  if (!authFailed && !atLimit && money === null && !known(five) && !known(week))
+  if (!authFailed && !atLimit && money === null && !known(five) && !known(week)) {
+    if (pending) return null;
     return (
       <span className="fy-composer-quota" data-quota="none" title={spoken}>
         <span className="sr-only">{spoken}</span>
@@ -59,6 +63,7 @@ export function ComposerQuota({ quota }: ComposerQuotaProps) {
         </span>
       </span>
     );
+  }
   const windows = [
     ...(known(five) ? [{ key: '5h', value: five }] : []),
     ...(known(week) ? [{ key: 'wk', value: week }] : []),

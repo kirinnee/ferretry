@@ -286,7 +286,7 @@ describe('terminal snapshot view', () => {
     const toggle = (container: HTMLElement): HTMLButtonElement =>
       must(container.querySelector<HTMLButtonElement>('[data-terminal-fit]'), 'the Fit / Scroll toggle');
 
-    it('fits the widest line to the pane by default, and scrolls at full size after one tap', async () => {
+    it('opens in Scroll at full size when fitting would shrink the text below 10px, and fits after one tap', async () => {
       setHidden(false);
       asPhone();
       try {
@@ -294,17 +294,42 @@ describe('terminal snapshot view', () => {
           <TerminalSnapshotView daemon={daemon} scope={scope} live now={() => 0} readSnapshot={async () => PANE} />,
         );
         try {
-          // 366px less the pre's 24px of padding, over 80 columns.
-          expect(pre(view.container).style.fontSize).toBe('7px');
-          expect(toggle(view.container).getAttribute('aria-pressed')).toBe('true');
-          expect(toggle(view.container).textContent).toBe('Fit');
+          // 366px less the pre's 24px of padding, over 80 columns would be 7px: unreadable, so the default is Scroll.
+          expect(pre(view.container).style.fontSize).toBe('');
+          expect(toggle(view.container).getAttribute('aria-pressed')).toBe('false');
+          expect(toggle(view.container).textContent).toBe('Scroll');
           expect(view.container.querySelector('[data-terminal-live-dot]')).not.toBeNull();
 
           await interact(() => toggle(view.container).click());
 
-          expect(pre(view.container).style.fontSize).toBe('');
-          expect(toggle(view.container).getAttribute('aria-pressed')).toBe('false');
-          expect(toggle(view.container).textContent).toBe('Scroll');
+          expect(pre(view.container).style.fontSize).toBe('7px');
+          expect(toggle(view.container).getAttribute('aria-pressed')).toBe('true');
+          expect(toggle(view.container).textContent).toBe('Fit');
+        } finally {
+          await view.unmount();
+        }
+      } finally {
+        restore();
+      }
+    });
+
+    it('defaults to Fit when the fitted text stays at 10px or more', async () => {
+      setHidden(false);
+      asPhone();
+      try {
+        // 342px of text over 30 columns is 12px (the cap), well above the 10px floor.
+        const view = await mount(
+          <TerminalSnapshotView
+            daemon={daemon}
+            scope={scope}
+            now={() => 0}
+            readSnapshot={async () => 'x'.repeat(30)}
+          />,
+        );
+        try {
+          expect(pre(view.container).style.fontSize).toBe('12px');
+          expect(toggle(view.container).getAttribute('aria-pressed')).toBe('true');
+          expect(toggle(view.container).textContent).toBe('Fit');
         } finally {
           await view.unmount();
         }
@@ -323,6 +348,8 @@ describe('terminal snapshot view', () => {
           <TerminalSnapshotView daemon={daemon} scope={scope} now={() => 0} readSnapshot={async () => PANE} />,
         );
         try {
+          expect(pre(view.container).style.fontSize).toBe('');
+          await interact(() => toggle(view.container).click());
           expect(pre(view.container).style.fontSize).toBe('7px');
         } finally {
           await view.unmount();

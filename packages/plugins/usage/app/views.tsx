@@ -68,7 +68,8 @@ export function QuotaPanel({ store, login }: { readonly store: DaemonUsageStore;
  * composer read it from the session itself: the usage the ferret's monitor stamped, else the feed row of `config.agent`.
  * Conversation's composer hands both as `account` (`ComposerToolsProps`; `subject` is the ferret id, which no feed row
  * is named after). Without an account, or when the feed does not name it, it says "No usage data": the account nearest
- * its limit is not that ferret's, so it is never drawn as the composer's own (unknown is not a confident number).
+ * its limit is not that ferret's, so it is never drawn as the composer's own (unknown is not a confident number). Until the feed's first
+ * read answers it draws nothing, so the words do not flash before the numbers.
  */
 export function ComposerQuotaPanel({
   store,
@@ -78,12 +79,14 @@ export function ComposerQuotaPanel({
   readonly account?: ComposerAccount;
 }) {
   const connection = useDaemonConnection();
-  useUsage(store, connection);
+  const slice = useUsage(store, connection);
+  // Not answered yet: no read has succeeded or failed. A failed read is an answer ("No usage data" is then true).
+  const pending = slice.feed === null && slice.status !== 'error';
   const quota =
     account === undefined
       ? null
       : store.quotaFor(connection.daemonId, { state: account.usage ?? {}, config: { agent: account.agent } });
-  return createElement(ComposerQuota, { quota });
+  return createElement(ComposerQuota, { quota, pending });
 }
 
 export function BudgetsTab({ client }: { readonly client: UsageClient }): ReactNode {

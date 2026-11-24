@@ -4,6 +4,7 @@ import {
   FIT_MAX_FONT_PX,
   FIT_MIN_FONT_PX,
   fitFontPx,
+  fitIsReadable,
   formatSnapshotAge,
   formatSnapshotClock,
   paneColumns,
@@ -122,5 +123,17 @@ describe('fit to width', () => {
     expect(fitFontPx(400, 342)).toBe(FIT_MIN_FONT_PX);
     expect(fitFontPx(0, 342)).toBe(FIT_MAX_FONT_PX);
     expect(fitFontPx(80, 0)).toBe(FIT_MAX_FONT_PX);
+  });
+});
+
+describe('when Fit is the default', () => {
+  it('is the default only while the fitted text stays at 10px or more', () => {
+    expect(fitIsReadable(80, 342)).toBe(false); // 7px on a phone
+    expect(fitIsReadable(160, 480)).toBe(false); // ~4.9px, clamped to the 6.5px floor: still not readable
+    expect(fitIsReadable(30, 342)).toBe(true); // capped at 12px
+    expect(fitIsReadable(56, 342)).toBe(true); // exactly >= 10px
+    expect(fitIsReadable(57, 342)).toBe(false);
+    expect(fitIsReadable(0, 342)).toBe(true); // nothing to fit
+    expect(fitIsReadable(80, 0)).toBe(true); // not measured yet
   });
 });
