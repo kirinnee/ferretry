@@ -134,7 +134,29 @@ identities:
     (`ipinfo.io`, asked with the same sign-in as the proxy test, once per launch) and set as the browser's `TZ`, `--lang` and
     `--accept-lang`, so the page's clock and `navigator.languages` match where it appears to be. Only a country the daemon has a
     language for sets one; an answer it cannot read, or no proxy at all, leaves the machine's own zone and language.
-  - Still to come, each on its own: a patched engine, a stable fingerprint per identity, a proxy per identity, a captcha solver.
+  - **What it needs.** Linux needs Xvfb (a launch without it is refused with the one-line fix, never started headless); on macOS
+    the window is visible on the desktop. The stealth worker is about 13 MB larger (it carries `patchright-core` beside `playwright-core`).
+  - **Turning it off does not touch a running browser.** `on` → `off` applies to the next launch: a stealth Chrome that is
+    already running keeps running as it was until it closes or the machine's browser is restarted.
+  - **GAP: the per-identity opt-out has no target yet.** `identities.<key>.stealth: false` is read and held to its rules, but
+    the machine has ONE agent browser and it carries no identity key, so nothing asks the question per identity until
+    identities get a browser each (Group C of the browser rework).
+  - Still to come, each on its own: a stable fingerprint per identity, a proxy per identity, a captcha solver.
+- **The engine** (`engine:` in the same file, one choice for the whole machine) is which browser build runs:
+  `chromium` (the default: the Chrome or Chromium the machine has), `fingerprint-chromium` or `cloakbrowser`. Choosing anything but
+  `chromium` is a loosening too — it is a different program — so it is **held for the owner**; going back applies at once.
+  - **`fingerprint-chromium`** is a patched Chromium ([adryfish/fingerprint-chromium](https://github.com/adryfish/fingerprint-chromium),
+    BSD-3-Clause). The first launch with it chosen **fetches one pinned release** — Linux on x86-64 only — from its exact address,
+    checks its size and SHA-256, unpacks it into `state/browsers/engines/fingerprint-chromium/<version>/` and says so in the
+    daemon log (address, hash, size) before it starts. It is never fetched at build time, never a newer release, and a download that
+    does not match is thrown away and the launch refused. It starts with `--fingerprint=<seed>` and `--fingerprint-platform` set to
+    the machine's own OS: an honest platform, never another one. The seed comes from this machine's browser state folder, so it is
+    the same on every launch; a record per identity replaces it later.
+  - **`cloakbrowser`** is named so the choice exists and is **refused** in this build, with a sentence: its browser is proprietary, wants a
+    licence key on every launch and may not be redistributed, so Ferretry neither downloads nor starts it.
+  - There is no fallback: an engine that cannot be had refuses the launch before anything is leased; it never quietly runs Chromium.
+  - Whether a patched engine passes more checks than the stock one is measured, not assumed: `task test:stealth -- --engine <name>`
+    runs the same suite on it (the D4 pull request carries the numbers).
 - **The audit log** ([audit.md](audit.md)) records metadata only: `browser.stealth.switched` (from, to) when the switch
   really changes — a held `on` leaves no record until it is confirmed — and, as the layers arrive,
   `browser.stealth.session`, `browser.captcha.solve` and `browser.captcha.cap-reached` (identity key, never an

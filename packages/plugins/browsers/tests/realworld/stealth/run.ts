@@ -9,6 +9,11 @@
  *
  *   task test:stealth -- [--modes headless,window] [--runs 3] [--only sannysoft,navia] [--label stock-5.0]
  *                        [--out scorecard.json] [--save-raw <dir>] [--settle <ms>]
+ *                        [--engine chromium|fingerprint-chromium] [--engine-state <dir>]
+ *
+ * `--engine` runs the same suite on another browser build (B5 unit D4, the bake-off): the engine is resolved exactly as
+ * the daemon resolves it, so `fingerprint-chromium` is fetched by its pinned address and hash into `--engine-state`
+ * (a throwaway folder unless named; name one to keep the fetched build between runs) and the fetch is announced.
  *
  * What it never does: type into a field, submit, sign in, solve a captcha, or open a host that is not in the check
  * list. Browser state is a throwaway directory per run; nothing of the host's own `HOME` or Ferretry state is read.
@@ -21,6 +26,9 @@ import { XvfbDisplay } from '../../../daemon/worker/control/adapters/login-runti
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
 import { NodeSessionBrowserLauncher } from '../../../daemon/worker/launcher.ts';
 import { hostListenerProver } from '../../support/listener-prover.ts';
+import { type EnginePorts, EngineResolver } from '../../../daemon/worker/control/engines.ts';
+import { BROWSER_ENGINES, type BrowserEngine } from '../../../contract/index.ts';
+import { processHost } from '../../../daemon/adapters/host.ts';
 import { launcherPorts, loginProcesses, REAL_WORKER } from '../../support/process-workers.ts';
 import { CAPTURE_SOURCE, withChallenge } from '../../support/stealth/capture.ts';
 import { CHECKS, type Check, allowedHost } from '../../support/stealth/checks.ts';
@@ -40,6 +48,8 @@ interface Options {
   readonly out: string | undefined;
   readonly saveRaw: string | undefined;
   readonly settleMs: number | undefined;
+  readonly engine: BrowserEngine;
+  readonly engineState: string | undefined;
 }
 
 function parseOptions(argv: readonly string[]): Options {
@@ -51,7 +61,7 @@ function parseOptions(argv: readonly string[]): Options {
       throw new Error(`unreadable arguments near "${flag ?? ''}": every option is --name value`);
     flags.set(flag.slice(2), value);
   }
-  const known = ['modes', 'runs', 'only', 'label', 'out', 'save-raw', 'settle'];
+  const known = ['modes', 'runs', 'only', 'label', 'out', 'save-raw', 'settle', 'engine', 'engine-state'];
   for (const name of flags.keys()) if (!known.includes(name)) throw new Error(`unknown option --${name}`);
   const modes = (flags.get('modes') ?? 'headless,window').split(',').map(mode => {
     if (mode !== 'headless' && mode !== 'window' && mode !== 'stealth')
@@ -63,7 +73,11 @@ function parseOptions(argv: readonly string[]): Options {
   const only = (flags.get('only') ?? '').split(',').filter(id => id !== '');
   for (const id of only) if (!CHECKS.some(check => check.id === id)) throw new Error(`--only names no check "${id}"`);
   const settle = flags.get('settle');
+  const engine = BROWSER_ENGINES.find(name => name === (flags.get('engine') ?? 'chromium'));
+  if (engine === undefined) throw new Error(`--engine takes one of ${BROWSER_ENGINES.join(', ')}`);
   return {
+    engine,
+    engineState: flags.get('engine-state'),
     modes,
     runs,
     only,
@@ -77,8 +91,32 @@ function parseOptions(argv: readonly string[]): Options {
 const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
 const xvfb = Bun.which('Xvfb');
 
+/** The daemon's own engine resolver over real ports, so the suite fetches and starts an engine exactly as the daemon would. */
+function engineResolver(stateDirectory: string): EngineResolver {
+  const ports = launcherPorts();
+  const host = processHost();
+  const enginePorts: EnginePorts = {
+    platform: host.platform,
+    arch: host.arch,
+    stateDirectory,
+    path: process.env.PATH,
+    exists: host.exists,
+    fetch: ports.fetch,
+    spawn: ports.spawn,
+    writeFile: host.writeFile,
+    rename: host.rename,
+    remove: host.remove,
+    info: (message, fields) => console.error(`note: ${message} ${JSON.stringify(fields)}`),
+  };
+  return new EngineResolver(enginePorts);
+}
+
 /** One throwaway browser in `mode`, torn down by `close`. */
-async function startBrowser(mode: Layer): Promise<{ browser: BrowserSessionService; close: () => Promise<void> }> {
+async function startBrowser(
+  mode: Layer,
+  engines: EngineResolver,
+  engine: BrowserEngine,
+): Promise<{ browser: BrowserSessionService; close: () => Promise<void> }> {
   if (chrome === null || (mode !== 'headless' && xvfb === null))
     throw new Error('the suite needs a real Chrome on PATH, and Xvfb for window and stealth (the dev shell has both)');
   const root = await mkdtemp(join(tmpdir(), 'ferretry-stealth-'));
@@ -98,6 +136,7 @@ async function startBrowser(mode: Layer): Promise<{ browser: BrowserSessionServi
       undefined,
       {
         mode: async () => (mode === 'window' ? 'window' : 'headless'),
+        engine: async () => await engines.resolve(engine),
         // No proxy here, so the layer has no exit to take a zone or language from: it keeps the machine's own.
         ...(mode === 'stealth' ? { stealth: async () => ({}) } : {}),
         display,
@@ -165,10 +204,12 @@ if (process.platform === 'linux' && process.env.FONTCONFIG_FILE === undefined)
 const checks = options.only.length === 0 ? CHECKS : CHECKS.filter(check => options.only.includes(check.id));
 const observations: { mode: Layer; run: number; observation: Observation }[] = [];
 if (options.saveRaw !== undefined) await mkdir(options.saveRaw, { recursive: true });
+const engineState = options.engineState ?? (await mkdtemp(join(tmpdir(), 'ferretry-stealth-engine-')));
+const engines = engineResolver(engineState);
 
 for (const mode of options.modes) {
   for (let run = 1; run <= options.runs; run += 1) {
-    const { browser, close } = await startBrowser(mode);
+    const { browser, close } = await startBrowser(mode, engines, options.engine);
     try {
       for (const check of checks) {
         const { observation, html } = await observe(browser, check, options);
@@ -185,6 +226,7 @@ for (const mode of options.modes) {
   }
 }
 
+if (options.engineState === undefined) await rm(engineState, { recursive: true, force: true }).catch(() => undefined);
 const card = scorecard(options.label, observations);
 if (options.out !== undefined) await writeFile(options.out, `${JSON.stringify(card, null, 2)}\n`);
 console.log(JSON.stringify(card, null, 2));
