@@ -228,7 +228,7 @@ describe('the media byte route: the bytes and how they leave', () => {
       `bytes ${MAX_MEDIA_BYTES - 3}-${MAX_MEDIA_BYTES - 1}/${MAX_MEDIA_BYTES}`,
     );
     should(over).eql({ code: 'too_large', status: 413 });
-  });
+  }, 30_000); // one real 32 MiB scan: 3.5 s on a quiet CI box, over the 5 s default on a busy one
 
   it('should answer an empty file whole and refuse any range of it with 416', async () => {
     // Arrange
