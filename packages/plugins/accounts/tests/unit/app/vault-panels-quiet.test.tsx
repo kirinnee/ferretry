@@ -15,7 +15,7 @@ import { InputCodesPanel } from '../../../app/features/two-factor/input-codes-pa
 import { TwoFactorSeedHost } from '../../../app/features/two-factor/two-factor-seed-host.tsx';
 import { CONFIRM_TO_SEE_WORDS } from '../../../app/lib/step-up-refusal.ts';
 import { list as accountList, SI_GITHUB } from '../../support/app/accounts-fixtures.ts';
-import { mount, type Mounted, must } from '../../support/app/dom.ts';
+import { interact, mount, type Mounted, must } from '../../support/app/dom.ts';
 import { click, settle } from '../../support/app/dom-form.ts';
 import { boxNamed } from '../../support/app/select-box.ts';
 import { codesSlot, savedPrimary, settledSlot } from '../../support/app/input-card-fixtures.ts';
@@ -126,17 +126,26 @@ describe('the Vault slot panels read quietly on mount', () => {
 describe('a quiet read that relocks a card clears what it held', () => {
   it('task plan: the plan is gone behind the button when a poll is refused, and the press draws it from a fresh read', async () => {
     const { client, seen, state } = daemon({ 'GET /v1/accounts/plans': { plans: [mixedPlan()] } }, false);
-    // The 3 s poll is the thing under test: let it fire at once.
+    // The 3 s poll is the thing under test: hold it, then fire it by hand once the unlock has run out. (Shrinking its
+    // delay to 0 instead made the poll re-arm itself inside every act() and the act never settled on a loaded runner.)
     const real = globalThis.setTimeout;
-    globalThis.setTimeout = ((fn: () => void, ms?: number, ...rest: unknown[]) =>
-      real(fn, ms !== undefined && ms >= 1_000 ? 0 : ms, ...rest)) as typeof setTimeout;
+    const held: Array<() => void> = [];
+    globalThis.setTimeout = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+      if (ms === undefined || ms < 1_000) return real(fn, ms, ...rest);
+      held.push(() => fn(...(rest as [])));
+      return 0;
+    }) as unknown as typeof setTimeout;
     let view: Mounted;
     try {
       view = await mount(<TaskPlanHost client={client} ferret={SESSION} planId={PLAN_ID} />);
       mounted.push(view);
       // Shown while the unlock holds: the first read answers, and the next poll is the one the lock stops.
+      expect(view.container.querySelector(`[data-task-plan="${PLAN_ID}"]`)).not.toBeNull();
       state.lock = true;
-      for (let turn = 0; turn < 4; turn += 1) await settle();
+      await interact(async () => {
+        for (const poll of held.splice(0)) poll();
+      });
+      await settle();
     } finally {
       globalThis.setTimeout = real;
     }
