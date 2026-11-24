@@ -74,7 +74,7 @@ describe('a sign-in on a terminal under a grant', () => {
 
     const view = await w.service.raise(SESSION, SUDO_RAISE);
 
-    should(view.state).equal('refused');
+    should(view.state).equal('cancelled');
     should(w.grantLog.stopped).eql([{ id: rule.id, because: 'program-changed' }]);
     should(w.grantLog.used).have.length(1);
     should(w.told.at(-1)).containEql(
@@ -106,11 +106,11 @@ describe('a write under a grant that may be partial', () => {
     for (const timer of w.timers) timer.fire();
     await tick();
 
-    should(view.state).equal('refused');
+    should(view.state).equal('cancelled');
     should(w.grantLog.used).have.length(1);
     should(w.cleared).have.length(1);
     should(w.grantLog.stopped.map(each => each.because)).eql(['did-not-move-on']);
-    should(w.audits.at(-1)?.event).equal('input.refused');
+    should(w.audits.at(-1)?.event).equal('input.cancelled');
   });
 
   it('should not fill a card whose accounts a rule cannot read, and not suspend the rule for it', async () => {

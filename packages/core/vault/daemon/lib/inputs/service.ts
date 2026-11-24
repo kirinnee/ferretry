@@ -149,6 +149,12 @@ const COMM_TEXT_LIMIT = 64;
 const HIDDEN_PROMPT = '[hidden: part of a value typed here is on this line]';
 const QUARANTINE_NOTICE = '[hidden: a secret was just typed in this terminal]';
 const QUARANTINE_MS = INPUT_QUARANTINE_SECONDS * 1000;
+/** How long after it would have expired a restart still brings an ended request back for `input_wait` (an hour). */
+const FINISHED_KEPT_MS = HOUR_MS;
+
+/** What the ferret reads when a request ended and Ferretry cannot say whether the value was typed. */
+const OUTCOME_UNKNOWN_AGENT_NOTE =
+  "Outcome unknown: the owner's value may have been typed, and Ferretry did not record how this ended. Read the target before you act; raise a fresh request if you still need a value.";
 
 const FINAL = new Set<InputRequest['state']>(['delivered', 'refused', 'expired', 'cancelled']);
 
@@ -202,6 +208,8 @@ interface Held {
   /** Every `deliveryId` seen and what came of it, so a retry gets the first outcome and never types twice. */
   readonly deliveries: Map<string, Promise<InputDeliverResult>>;
   readonly waiters: Set<() => void>;
+  /** `outcome_unknown` once the request ended with its outcome unknown: the one reason the ferret's view carries. */
+  reason?: InputReason;
   /** A page's fields as a picture, taken at raise before anything was typed: the owner's card only, RAM only. */
   shot?: InputShot;
   /** The `code` fields the daemon saw going into a password (`observedAs`): handled as `secret` from then on. */
@@ -1715,6 +1723,7 @@ export class InputRequestService {
 
   private async revive(event: InputEvent, now: number): Promise<void> {
     if (event.type === INPUT_JOURNAL_EVENT_TYPES.delivering) return await this.interrupt(event);
+    if (FINAL.has(event.state)) return await this.revived(event, now);
     if (event.type !== INPUT_JOURNAL_EVENT_TYPES.requested || event.expiresAt === undefined) return;
     if (Date.parse(event.expiresAt) <= now) return;
     const prompt = await this.deps.agenda.promptOf(event.sessionId, event.agendaItemId);
@@ -1803,7 +1812,46 @@ export class InputRequestService {
       upgraded: new Set(),
     };
     this.held.set(request.id, held);
-    await this.finish(held, 'refused', 'interrupted', undefined, { closeCard: true, tellAgent: true, uncertain: true });
+    await this.finish(held, 'cancelled', 'outcome_unknown', undefined, {
+      closeCard: true,
+      tellAgent: true,
+      uncertain: true,
+    });
+  }
+
+  /**
+   * A request a restart finds already ended: its true final state comes back, so `input_wait` after a restart reads what
+   * happened, never `not_found`. Kept for {@link FINISHED_KEPT_MS} after it would have expired, then let go. Only the
+   * state is known: who answered, and how, is not journalled.
+   */
+  private async revived(event: InputEvent, now: number): Promise<void> {
+    if (this.held.has(event.requestId) || event.expiresAt === undefined) return;
+    if (Date.parse(event.expiresAt) <= now - FINISHED_KEPT_MS) return;
+    const prompt = (await this.deps.agenda.promptOf(event.sessionId, event.agendaItemId)) ?? 'input request';
+    const request: InputRequest = {
+      id: event.requestId,
+      sessionId: event.sessionId,
+      agendaItemId: event.agendaItemId,
+      target: { kind: event.target.kind, key: event.target.key },
+      prompt,
+      sensitivity: event.sensitivity,
+      fields: [restoredField(event.sensitivity)],
+      submit: event.submit ?? 'offer-owner',
+      raisedAt: event.at,
+      expiresAt: event.expiresAt,
+      state: event.state,
+    };
+    this.held.set(request.id, {
+      request,
+      names: [request.target.key],
+      checkFailures: 0,
+      rebinds: 0,
+      formerCards: [],
+      deliveries: new Map(),
+      waiters: new Set(),
+      upgraded: new Set(),
+      ...(event.reason === 'outcome_unknown' ? { reason: event.reason } : {}),
+    });
   }
 
   private guardRate(sessionId: string, target: InputTarget, now: number): void {
@@ -2046,7 +2094,7 @@ export class InputRequestService {
           await grant.uncertain(outcome === 'reader_changed' ? 'program-changed' : 'did-not-move-on');
         }
         await stored(true);
-        await this.finish(held, 'refused', 'interrupted', undefined, {
+        await this.finish(held, 'cancelled', 'outcome_unknown', undefined, {
           closeCard: true,
           tellAgent: true,
           uncertain: true,
@@ -2683,14 +2731,13 @@ export class InputRequestService {
         : undefined;
     const seen = held.request;
     const { observed: _seen, observedDigest: _digest, pictured: _pictured, ...rest } = held.request;
-    held.request = {
+    const ended: InputRequest = {
       ...rest,
       state,
       ...(outcome === undefined ? {} : { outcome }),
     };
     // The picture was for the owner deciding; once the request ends nobody may need it, so it is let go.
     delete held.shot;
-    const { request } = held;
     const kind =
       state === 'delivered'
         ? 'delivered'
@@ -2699,12 +2746,21 @@ export class InputRequestService {
           : state === 'refused'
             ? 'refused'
             : 'cancelled';
-    // The final outcome is DURABLE before anyone is told it: a restart then finds the true outcome, never `delivering`
-    // (which a restore reads as refused). Only the audit, the card and the notice follow the wake.
-    await this.journalQuietly(request, kind, reason, options.submitted);
+    // The final outcome is DURABLE before anyone is told it, in RAM or to a waiter: until the write lands the request still
+    // reads `delivering`, as the journal does, so no reader can see `delivered` that a restart would not find. A value that
+    // WAS typed and whose end could not be recorded is told as it is, an unknown outcome (the journal still says
+    // `delivering`, so a restart reads the same), never as `delivered`. Only the audit, the card and the notice follow.
+    const recorded = await this.journal(ended, kind, reason, options.submitted).then(
+      () => true,
+      () => false,
+    );
+    const unrecorded = !recorded && state === 'delivered';
+    const request: InputRequest = unrecorded ? { ...rest, state: 'cancelled' } : ended;
+    held.request = request;
+    if (unrecorded || reason === 'outcome_unknown') held.reason = 'outcome_unknown';
     for (const wake of held.waiters) wake();
     held.waiters.clear();
-    await this.record(request, `input.${kind}`, by ?? { kind: 'daemon' }, {
+    await this.record(ended, `input.${kind}`, by ?? { kind: 'daemon' }, {
       ...this.auditOf(seen),
       ...(reason === undefined ? {} : { reason }),
       ...(state === 'delivered'
@@ -2733,7 +2789,13 @@ export class InputRequestService {
       await this.deps.notifier.tell(
         request.sessionId,
         request.agendaItemId,
-        tellOf(request, state, reason, options.uncertain === true, options.unsettled === true),
+        tellOf(
+          request,
+          request.state,
+          held.reason ?? reason,
+          options.uncertain === true || held.reason === 'outcome_unknown',
+          options.unsettled === true,
+        ),
       );
   }
 
@@ -2774,6 +2836,7 @@ export class InputRequestService {
       ...(request.outcome === undefined
         ? {}
         : { submitted: request.outcome.submitted, source: request.outcome.source }),
+      ...(held.reason === 'outcome_unknown' ? { reason: held.reason, note: OUTCOME_UNKNOWN_AGENT_NOTE } : {}),
       ...(pending && page?.challenge !== undefined
         ? {
             note: `The page is showing a captcha: hand it to the owner with browser_ask_owner ("complete the captcha") and wait; never try to solve it. ${request.agendaItemId} waits for the owner too.`,
