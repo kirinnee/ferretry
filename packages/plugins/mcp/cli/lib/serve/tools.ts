@@ -937,8 +937,9 @@ const TASK_TOOLS: readonly McpToolDefinition[] = [
 ];
 
 /**
- * Create's `generate_image` (docs/create.md): one picture from a written description through the owner's own fal key,
- * priced before it is sent, under a daily cap and an ask over one dollar. Listed only while Create is on.
+ * Create's tools (docs/create.md): a picture, a voiceover, a sound effect or a short piece of music through the owner's
+ * own fal or ElevenLabs key, priced before it is sent, under one daily cap and an ask over one dollar. Listed only
+ * while Create is on.
  */
 const CREATE_TOOLS: readonly McpToolDefinition[] = [
   {
@@ -959,6 +960,59 @@ const CREATE_TOOLS: readonly McpToolDefinition[] = [
           enum: ['square_hd', 'square', 'portrait_4_3', 'portrait_16_9', 'landscape_4_3', 'landscape_16_9'],
           description: 'The shape; default landscape_4_3.',
         },
+      },
+      ['prompt'],
+    ),
+  },
+  {
+    name: 'generate_speech',
+    plugin: 'create',
+    description:
+      'Read a text aloud as one audio file with ElevenLabs, on the owner’s key and budget (1 500 characters at most). It is priced first; a call over the owner’s one-call limit asks them and sends nothing until they approve. The answer gives the block that plays it in chat.',
+    inputSchema: object(
+      {
+        text: { type: 'string', minLength: 1, maxLength: 1_500, description: 'What to say.' },
+        voice: {
+          type: 'string',
+          description: 'An ElevenLabs voice id (letters and digits). Default: the premade voice Rachel.',
+        },
+        model: {
+          type: 'string',
+          enum: ['flash', 'multilingual'],
+          description: 'flash (default, cheapest) or multilingual (richer, twice the price).',
+        },
+      },
+      ['text'],
+    ),
+  },
+  {
+    name: 'generate_sfx',
+    plugin: 'create',
+    description:
+      'Make one short sound effect from a description with fal, on the owner’s key and budget. It is priced first by its length; a call over the owner’s one-call limit asks them and sends nothing until they approve. The answer gives the block that plays it in chat.',
+    inputSchema: object(
+      {
+        prompt: { type: 'string', minLength: 1, maxLength: 500, description: 'The sound, in words.' },
+        seconds: {
+          type: 'number',
+          minimum: 0.5,
+          maximum: 22,
+          description: 'How long it is; default 5. Billed by the second.',
+        },
+      },
+      ['prompt'],
+    ),
+  },
+  {
+    name: 'generate_music',
+    plugin: 'create',
+    description:
+      'Make a short piece of music from a description with fal, on the owner’s key and budget. fal bills it by the whole minute, so a 10 s jingle costs what a 60 s one does. It is priced first; a call over the owner’s one-call limit asks them and sends nothing until they approve. The answer gives the block that plays it in chat.',
+    inputSchema: object(
+      {
+        prompt: { type: 'string', minLength: 1, maxLength: 2_000, description: 'The music, in words.' },
+        seconds: { type: 'integer', minimum: 3, maximum: 60, description: 'How long it is; default 30.' },
+        instrumental: { type: 'boolean', description: 'True for no singing; default false.' },
       },
       ['prompt'],
     ),

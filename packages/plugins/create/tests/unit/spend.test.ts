@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { CreateConfigSchema } from '../../contract/index.ts';
-import { approvalFor, dayOf, judgeSpend, requestDigest } from '../../daemon/lib/spend.ts';
+import { requestDigest } from '../../daemon/lib/paid-call.ts';
+import { approvalFor, dayOf, judgeSpend } from '../../daemon/lib/spend.ts';
 
 const config = { ...CreateConfigSchema.parse({}), timeZone: 'UTC' };
 const facts = (spentToday: number) => ({ spentToday, earlierSpends: 0 });
@@ -35,16 +36,34 @@ describe('dayOf is the owner’s day', () => {
 describe('requestDigest', () => {
   test('is the same for the same words, and differs by model, size and words', () => {
     const base = { prompt: 'a fox', model: 'flux-dev', size: 'square' } as const;
-    expect(requestDigest(base)).toBe(requestDigest({ ...base }));
-    expect(requestDigest(base)).toMatch(/^[0-9a-f]{16}$/u);
-    expect(requestDigest({ ...base, model: 'flux-pro' })).not.toBe(requestDigest(base));
-    expect(requestDigest({ ...base, size: 'square_hd' })).not.toBe(requestDigest(base));
-    expect(requestDigest({ ...base, prompt: 'a cat' })).not.toBe(requestDigest(base));
+    const digest = (parts: Record<string, string | number | boolean>) => requestDigest('generate_image', parts);
+    expect(digest(base)).toBe(digest({ ...base }));
+    expect(digest(base)).toMatch(/^[0-9a-f]{16}$/u);
+    expect(digest({ ...base, model: 'flux-pro' })).not.toBe(digest(base));
+    expect(digest({ ...base, size: 'square_hd' })).not.toBe(digest(base));
+    expect(digest({ ...base, prompt: 'a cat' })).not.toBe(digest(base));
+  });
+  test('does not depend on the order the settings are written in, and differs by tool, number and flag', () => {
+    expect(requestDigest('generate_sfx', { prompt: 'a bell', seconds: 5 })).toBe(
+      requestDigest('generate_sfx', { seconds: 5, prompt: 'a bell' }),
+    );
+    expect(requestDigest('generate_sfx', { prompt: 'a bell', seconds: 6 })).not.toBe(
+      requestDigest('generate_sfx', { prompt: 'a bell', seconds: 5 }),
+    );
+    expect(requestDigest('generate_music', { prompt: 'a bell', seconds: 5 })).not.toBe(
+      requestDigest('generate_sfx', { prompt: 'a bell', seconds: 5 }),
+    );
+    expect(requestDigest('generate_music', { prompt: 'x', instrumental: true })).not.toBe(
+      requestDigest('generate_music', { prompt: 'x', instrumental: false }),
+    );
   });
 });
 
 describe('approvalFor goes through Asks, and only the owner’s answer approves', () => {
   const details = {
+    tool: 'generate_image' as const,
+    what: 'one picture',
+    promptLabel: 'Prompt',
     ferret: 'f1',
     request: 'abcdef0123456789',
     earlierSpends: 0,
@@ -61,6 +80,7 @@ describe('approvalFor goes through Asks, and only the owner’s answer approves'
     const [open] = await asks.open({});
     expect(open).toMatchObject({ source: 'create-spend', kind: 'permission', ferret: 'f1', blocking: true });
     expect(open?.subject).toContain('$1.20');
+    expect(open?.subject).toContain('one picture');
     asks.answerAs({ ferret: 'f1', id: open!.id }, 'approve');
     expect(await approvalFor(asks, details)).toEqual({ kind: 'approved' });
     // a paid-for request is a NEW question the next time: the entry carries how many times it was spent

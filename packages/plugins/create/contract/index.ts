@@ -7,18 +7,37 @@ import { audit } from '@ferretry/core-gate/contract';
 import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import type { Word } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { DEFAULT_IMAGE_MODEL, DEFAULT_IMAGE_SIZE, ImageModelIdSchema, ImageSizeIdSchema } from './pricing.ts';
+import {
+  DEFAULT_IMAGE_MODEL,
+  DEFAULT_IMAGE_SIZE,
+  DEFAULT_MUSIC_SECONDS,
+  DEFAULT_SFX_SECONDS,
+  DEFAULT_SPEECH_MODEL,
+  DEFAULT_VOICE_ID,
+  ImageModelIdSchema,
+  ImageSizeIdSchema,
+  MAX_MUSIC_SECONDS,
+  MAX_SFX_SECONDS,
+  MAX_SPEECH_CHARS,
+  MIN_MUSIC_SECONDS,
+  MIN_SFX_SECONDS,
+  SpeechModelIdSchema,
+} from './pricing.ts';
 
 export * from './pricing.ts';
 
 export const CREATE_WORDS: readonly Word[] = [
   { word: 'creative tool', means: 'an agent tool that makes an image, sound or video by calling a paid service' },
+  { word: 'voiceover', means: 'speech read aloud from a ferret’s text by ElevenLabs, saved as one audio file' },
 ];
 
 // ─── the key and the limits (config/create.yaml) ─────────────────────────────────────────────────────────────────
 
 /** The ONE spelling `fal.key` takes: a reference to the secret the manifest declares, never a value. */
 export const FAL_KEY_REFERENCE = '${secret:FAL_KEY}';
+
+/** The ONE spelling `elevenlabs.key` takes: a reference to the secret the manifest declares, never a value. */
+export const ELEVENLABS_KEY_REFERENCE = '${secret:ELEVENLABS_API_KEY}';
 
 /** Owner decisions of 2026-11-23 (!A616): $5 a day in all, and a single call over $1 asks the owner first. */
 export const DEFAULT_DAILY_USD = 5;
@@ -38,6 +57,7 @@ const UsdSchema = z.number().positive().max(1000);
 
 export const CreateConfigSchema = z.strictObject({
   fal: z.strictObject({ key: z.literal(FAL_KEY_REFERENCE).optional() }).default({}),
+  elevenlabs: z.strictObject({ key: z.literal(ELEVENLABS_KEY_REFERENCE).optional() }).default({}),
   limits: z
     .strictObject({
       dailyUsd: UsdSchema.default(DEFAULT_DAILY_USD),
@@ -75,16 +95,22 @@ export const CreateConfigDef = CreateConfigFile as ConfigDef;
 
 // ─── the ledger (state/create/ledger.jsonl) ──────────────────────────────────────────────────────────────────────
 
+/** The tools that spend: one ledger and one daily cap hold them all. */
+export const SPEND_TOOLS = ['generate_image', 'generate_speech', 'generate_sfx', 'generate_music'] as const;
+export const SpendToolSchema = z.enum(SPEND_TOOLS);
+export type SpendTool = z.infer<typeof SpendToolSchema>;
+
 /** One spend: what, with which model, for which ferret, and what it cost. Never a prompt, a key or an answer from fal. */
 export const SpendRecordSchema = z.strictObject({
   at: z.iso.datetime(),
   /** The spending day in the configured zone at the time, `YYYY-MM-DD`: what the daily cap adds up. */
   day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
-  tool: z.literal('generate_image'),
-  model: ImageModelIdSchema,
+  tool: SpendToolSchema,
+  /** The model's short name (`flux-schnell`, `flash`, `sound-effects`, `music`): what the line was spent on. */
+  model: z.string().min(1).max(64),
   ferret: z.string().min(1).max(128),
   microUsd: z.number().int().nonnegative(),
-  /** Where the price came from: fal's own endpoint, or the table in `pricing.ts`. */
+  /** Where the price came from: the provider's own price endpoint (fal), or the table in `pricing.ts`. */
   priced: z.enum(['fal', 'table']),
   /** The request's digest, so an owner's approval is spent once and only on the request it was given for. */
   request: z.string().regex(/^[0-9a-f]{16}$/u),
@@ -116,15 +142,45 @@ export const GenerateImageInputSchema = z.strictObject({
 });
 export type GenerateImageInput = z.infer<typeof GenerateImageInputSchema>;
 
+const SecondsSchema = (min: number, max: number, fallback: number) => z.number().min(min).max(max).default(fallback);
+
+/** A voiceover: the text to read, the ElevenLabs voice (a premade id) and the model. */
+export const GenerateSpeechInputSchema = z.strictObject({
+  text: z.string().trim().min(1).max(MAX_SPEECH_CHARS),
+  voice: z
+    .string()
+    .regex(/^[A-Za-z0-9]{10,40}$/u, 'voice is an ElevenLabs voice id: letters and digits only')
+    .default(DEFAULT_VOICE_ID),
+  model: SpeechModelIdSchema.default(DEFAULT_SPEECH_MODEL),
+});
+export type GenerateSpeechInput = z.infer<typeof GenerateSpeechInputSchema>;
+
+/** One sound effect: a description and how long it is (billed by the second, so the length is part of the request). */
+export const GenerateSfxInputSchema = z.strictObject({
+  prompt: z.string().trim().min(1).max(500),
+  seconds: SecondsSchema(MIN_SFX_SECONDS, MAX_SFX_SECONDS, DEFAULT_SFX_SECONDS),
+});
+export type GenerateSfxInput = z.infer<typeof GenerateSfxInputSchema>;
+
+/** A short piece of music: billed by the minute rounded up, so a 10 s jingle costs what a 60 s one does. */
+export const GenerateMusicInputSchema = z.strictObject({
+  prompt: z.string().trim().min(1).max(MAX_PROMPT_CHARS),
+  seconds: z.number().int().min(MIN_MUSIC_SECONDS).max(MAX_MUSIC_SECONDS).default(DEFAULT_MUSIC_SECONDS),
+  instrumental: z.boolean().default(false),
+});
+export type GenerateMusicInput = z.infer<typeof GenerateMusicInputSchema>;
+
 /** What Chat shows inline: the media folder's own image bound (docs/fy-render.md rule 11). */
 export const MAX_CHAT_IMAGE_BYTES = 1024 * 1024;
+/** The same bound for sound: the session media folder's own, which a player in the chat reads (docs/fy-render.md rule 11). */
+export const MAX_CHAT_MEDIA_BYTES = 1024 * 1024;
 
 // ─── the ask over the limit ──────────────────────────────────────────────────────────────────────────────────────
 
 /** The ask source Create registers (`ask.sources:create-spend`): one ask per dear call, answered Approve or Reject. */
 export const CREATE_SPEND_SOURCE = 'create-spend';
 export const CreateSpendRefSchema = z.strictObject({
-  tool: z.literal('generate_image'),
+  tool: SpendToolSchema,
   request: z.string().regex(/^[0-9a-f]{16}$/u),
 });
 
@@ -132,5 +188,5 @@ export const CreateSpendRefSchema = z.strictObject({
 
 export const CREATE_AUDIT = audit('create.generated');
 export const CREATE_GUARD = {
-  none: 'a price, a model name and a picture’s path; never a key, a prompt’s hidden text or a body fal sent',
+  none: 'a price, a model name and a picture’s path; never a key, a prompt’s hidden text or a body fal or ElevenLabs sent',
 } as const;
