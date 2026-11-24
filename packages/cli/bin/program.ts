@@ -131,6 +131,9 @@ import { registerProfileCommands } from '../src/lib/daemon/profile/commands';
 import { ProfileController, ProtocolProfileGateway } from '../src/lib/daemon/profile/controller';
 import { MachineSetupNotice } from '../src/lib/daemon/setup-notice';
 import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../src/lib/daemon/supervisor';
+import { registerConnectorCommands } from '../src/lib/connector/commands';
+import { ConnectorController } from '../src/lib/connector/controller';
+import { ProtocolConnectorGateway } from '../src/lib/connector/gateway';
 import { registerDeviceCommands } from '../src/lib/device/commands';
 import { DeviceController } from '../src/lib/device/controller';
 import { ProtocolDeviceGateway } from '../src/lib/device/gateway';
@@ -1187,6 +1190,19 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
           out: world.io,
           prompt: world.prompt,
           interactive: world.interactive,
+          clientName: BINARY_NAME,
+        }),
+    ),
+  // `fy connector` shows and decides the Claude connector's sign-ins and grants through the running daemon. At the
+  // machine the admin token is the owner, so `approve` asks no passkey (docs/mcp-connector.md).
+  ({ program, world, client }) =>
+    registerConnectorCommands(
+      program,
+      () =>
+        new ConnectorController({
+          gateway: new ProtocolConnectorGateway(client),
+          out: world.io,
+          now: () => Date.now(),
           clientName: BINARY_NAME,
         }),
     ),

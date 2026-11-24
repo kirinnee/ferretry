@@ -76,6 +76,7 @@ export const callers: readonly string[] = [
   'GET /v1/catalogs operator any',
   'GET /v1/config/file operator any',
   'GET /v1/config/status operator any',
+  'GET /v1/connector operator person',
   'GET /v1/copy-plans operator person',
   'GET /v1/copy-rules operator person',
   'GET /v1/copy-rules/settings operator person',
@@ -221,6 +222,9 @@ export const callers: readonly string[] = [
   'POST /v1/catalogs/:id/items/:itemId/versions operator person',
   'POST /v1/catalogs/:id/items/preview operator any',
   'POST /v1/config/confirm operator person',
+  'POST /v1/connector/grants/:id/revoke operator person',
+  'POST /v1/connector/requests/:id/approve operator person',
+  'POST /v1/connector/requests/:id/deny operator person',
   'POST /v1/copy-rules operator person',
   'POST /v1/copy-rules/settings/stages operator person',
   'POST /v1/copy-rules/settings/stages/:stage/commit operator person',
@@ -352,6 +356,12 @@ export const notAudited: Readonly<Record<string, string>> = {
     'a read with a body: previews what a publish would carry and writes nothing; the add it precedes is audited',
   'POST /v1/catalog-links/preview':
     'a read with a body: previews what a link would hold and signs, uploads and writes nothing; the mint it precedes is audited',
+  'POST /v1/connector/requests/:id/approve':
+    'recorded by the connector itself as connector.grant.approved, which names the approving actor (docs/mcp-connector.md); a second route rule would write the same fact twice',
+  'POST /v1/connector/requests/:id/deny':
+    'recorded by the connector itself as connector.grant.denied, which names the denying actor (docs/mcp-connector.md); a second route rule would write the same fact twice',
+  'POST /v1/connector/grants/:id/revoke':
+    'recorded by the connector itself as connector.grant.revoked, which names the revoking actor (docs/mcp-connector.md); a second route rule would write the same fact twice',
   'POST /v1/passkeys/options': 'mints a one-time challenge; the registration that spends it is audited',
   'POST /v1/step-up/options': 'mints a one-time challenge; the step-up that spends it is audited',
   'POST /v1/unlock/options': 'mints a one-time challenge; the unlock that spends it is audited',

@@ -207,7 +207,7 @@ function personOf(context: RouteContext): AgentToolCaller & { readonly kind: 'pe
   return {
     kind: 'person',
     sessionId: sessionOf(context),
-    actor: auditActorOf(credential, undefined),
+    actor: auditActorOf(credential, undefined, context.actor),
     ...(opener.outcome === 'attributed' ? { openedBy: opener.openedBy } : {}),
   };
 }

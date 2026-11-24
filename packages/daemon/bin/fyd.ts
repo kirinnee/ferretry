@@ -45,6 +45,7 @@ import {
   AccountKeySchema,
   type Advertisement,
   type AgendaItem,
+  appOriginChoice,
   type AskToStopJobsResult,
   type AutoResumeSummary,
   type BoardTaskStartResponse,
@@ -1274,6 +1275,7 @@ import { createMcpFoundations, mcpModule } from './modules/mcp.ts';
 import { modelsModule } from './modules/models.ts';
 import { conversationImportModule } from './modules/conversation-import.ts';
 import { type CallsignClaims, namesModule } from './modules/names.ts';
+import { connectorModule } from './modules/connector.ts';
 import { rendersModule } from './modules/renders.ts';
 import { type ModuleHandles, seamsOf } from './modules/seams.ts';
 import { transferModule, type TransferProvides } from './modules/transfer.ts';
@@ -6891,6 +6893,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // What a share link points at: read from the same advertisement pairing mints from, kept here for the same
   // reason as the id above. Unset until pairing opens, which no request can precede.
   let shareAdvertisement: Advertisement | undefined;
+  /** The `connector` block of the configuration this boot loaded, captured with the pairing state like the advertisement. */
+  let connectorBlock: unknown;
   // The rendezvous another person's browser can find for itself, the value pairing's QR is drawn from: beside a
   // loopback advertisement it is what makes a share link openable at all.
   let shareDiscoveredRelayUrl: () => string | undefined = () => undefined;
@@ -8592,6 +8596,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       pairingLive.useClock(pairingClock);
       appOrigins = () => browserOrigins(config);
       shareAdvertisement = config.advertisement;
+      connectorBlock = config.connector;
       shareDiscoveredRelayUrl = discoveredRelayUrl;
       memberFacts = {
         daemonName: state.daemonName,
@@ -11873,6 +11878,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         seamsOf.worktrees(world),
         lifecycle,
       );
+      // The remote MCP connector (docs/mcp-connector.md): its OAuth server and the owner's routes now, its listener once serving.
+      const connector = connectorModule.build(
+        {
+          block: connectorBlock,
+          stateDirectory: paths.state,
+          daemonId: () => attachmentDaemonId,
+          appOrigin: appOriginChoice(process.env.FY_APP_URL).origin,
+          clock: millisecondClock,
+          audit: auditLog,
+          daemonGrants: () => grants.enforced(),
+          redactor: secretRedactor,
+        },
+        undefined,
+        lifecycle,
+      );
       // Saved pictures: svg and html a ferret keeps as daemon files (docs/renders.md): inert until a request.
       const renders = rendersModule.build({ paths, stateFiles, clock }, seamsOf.renders(world), lifecycle);
       // Dictation enhancement: the enhancer is the world's seam, so a test substitutes it and keeps the route.
@@ -12941,6 +12961,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sharedCatalogs: { catalogs: sharedCatalogs },
         catalogMembers: { members: catalogMembers },
         catalogLinks: { links: catalogLinks },
+        connector: connector.provides.subsystem,
       };
       return {
         mounted: builtSubsystems,
@@ -12966,6 +12987,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           terminal,
           browser,
           transfer,
+          connector,
         },
       };
     },
@@ -13867,6 +13889,30 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
       notices: world.notices,
     }),
   );
+  // The remote MCP connector's own listener (docs/mcp-connector.md), bound only when config/daemon.json turns it on.
+  // Every tool acts through THIS dispatcher, as the owner, so it is bound after the dispatcher exists. A connector
+  // that cannot listen (its port taken, a damaged connector.json) is said out loud and leaves the daemon serving.
+  if (modules.connector.provides.settings.kind === 'enabled') {
+    try {
+      const listening = await modules.connector.provides.listen({
+        api: world.api,
+        dispatch: async request => await dispatcher.dispatch(request),
+        adminToken: () => base.credentials.admin,
+        wardenToken: () => base.credentials.warden,
+        remotePeer: tunnelPeer,
+      });
+      if (listening !== undefined) {
+        cleanups.push(async () => await listening.close());
+        world.notices.state(
+          `connector listening on ${listening.url} for ${modules.connector.provides.settings.publicUrl}/mcp`,
+        );
+      }
+    } catch (error) {
+      world.notices.state(`! connector not started: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  } else {
+    world.notices.state(modules.connector.provides.settings.reason);
+  }
   // The self-check tick, armed only once the daemon is actually serving. Its cadence IS the number
   // the wedge detector measures lateness against, so it comes from the same settings object the
   // service reasons with rather than a constant here — a timer that fired on a different period

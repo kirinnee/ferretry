@@ -70,6 +70,12 @@ const EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'phone-approval.raised': 'A ferret asked you to approve a sign-in on your phone',
   'phone-approval.refused': 'A sign-in to approve on your phone was refused: "Not me"',
   'phone-approval.settled': 'A sign-in to approve on your phone ended',
+  'connector.client-registered': 'A connected app registered with this machine',
+  'connector.grant-approved': 'A connected app was approved',
+  'connector.grant-denied': 'A connected app sign-in was denied',
+  'connector.grant-revoked': 'A connected app was revoked',
+  'connector.refresh-reused': 'A connected app presented an old token, so it was revoked',
+  'connector.tool': 'A connected app acted on a ferret',
 };
 
 const pad = (value: number): string => String(value).padStart(2, '0');
@@ -92,6 +98,8 @@ export function describeActor(actor: AuditActor): string {
   if (actor.kind === 'host') return 'this computer';
   if (actor.kind === 'warden') return 'a supervising agent';
   if (actor.kind === 'anonymous') return 'someone who is not paired';
+  // A remote MCP connector grant acting for the owner (docs/mcp-connector.md); its grant id is in the details.
+  if (actor.kind === 'connector') return 'a connected app';
   const id = actor.deviceId === undefined ? '' : ` (${auditShortId(actor.deviceId)})`;
   if (actor.deviceName !== undefined) return `device “${actor.deviceName}”${id}`;
   return actor.deviceId === undefined ? 'a paired device' : `device ${auditShortId(actor.deviceId)}`;

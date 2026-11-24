@@ -17,6 +17,7 @@
     "@ferretry/fleet": "workspace:*",
     "@ferretry/protocol": "workspace:*",
     "@ferretry/relay": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@neslinesli93/qpdf-wasm": "0.3.0",
     "node-datachannel": "0.33.4",
     "playwright-core": "1.62.1",

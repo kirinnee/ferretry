@@ -37,6 +37,7 @@ import {
   recordHandlerAct,
   withinAuditBounds,
 } from '../../../src/lib/audit/index.ts';
+import { InProcessConnectorDispatch } from '../../../src/lib/connector/listener.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../src/lib/grants/index.ts';
 import {
   type PairingCryptography,
@@ -125,6 +126,28 @@ describe('audit policy', () => {
     should(auditActorOf({ kind: 'authenticated', tokenClass: 'device', deviceId: DEVICE_ID }, undefined)).deepEqual({
       kind: 'device',
       deviceId: DEVICE_ID,
+    });
+  });
+
+  it('should log a connector grant as the connector, never as this host, and name the grant in the detail', () => {
+    // Arrange
+    const admin = { kind: 'authenticated', tokenClass: 'admin' } as const;
+    const grant = 'connector:cg_abcdefghij';
+
+    // Act / Assert — only the admin token can carry it, and only in the shape `resolveApiActor` lets through.
+    should(auditActorOf(admin, undefined, grant)).deepEqual({ kind: 'connector' });
+    should(agentAuditDetail(admin, grant)).deepEqual({ grant: 'cg_abcdefghij' });
+    should(auditActorOf(admin, undefined, 'admin-ui')).deepEqual({ kind: 'host' });
+    should(auditActorOf(admin, undefined, 'connector:../x')).deepEqual({ kind: 'host' });
+    should(agentAuditDetail(admin, 'connector:../x')).deepEqual({});
+    const device = { kind: 'authenticated', tokenClass: 'device', deviceId: DEVICE_ID } as const;
+    should(auditActorOf(device, undefined, grant)).deepEqual({ kind: 'device', deviceId: DEVICE_ID });
+    should(agentAuditDetail(device, grant)).deepEqual({});
+    const own = { kind: 'authenticated', tokenClass: 'session', sessionId: 's1' } as const;
+    should(auditActorOf(own, undefined, grant)).deepEqual({ kind: 'host' });
+    should(agentAuditDetail(own, grant)).deepEqual({ by: 'agent', session: 's1' });
+    should(auditActorOf({ kind: 'authenticated', tokenClass: 'warden' }, undefined, grant)).deepEqual({
+      kind: 'warden',
     });
   });
 
@@ -319,6 +342,28 @@ describe('recordHandlerAct', () => {
         detail: { by: 'agent', session: 's1' },
       },
       { event: 'fleet.configured', actor: { kind: 'host' }, outcome: 'refused' },
+    ]);
+  });
+
+  it('should record a connector grant’s act as the connector, with the grant in the detail', async () => {
+    // Arrange
+    const { recorded, sink } = subsystem();
+
+    // Act
+    await recordHandlerAct(
+      sink,
+      { ...context({ kind: 'authenticated', tokenClass: 'admin' }), actor: 'connector:cg_abcdefghij' },
+      { event: 'fleet.configured', outcome: 'refused', detail: { action: 'config-confirm' } },
+    );
+
+    // Assert
+    should(recorded).deepEqual([
+      {
+        event: 'fleet.configured',
+        actor: { kind: 'connector' },
+        outcome: 'refused',
+        detail: { action: 'config-confirm', grant: 'cg_abcdefghij' },
+      },
     ]);
   });
 
@@ -745,6 +790,45 @@ describe('auditedRoutes', () => {
         subject: 'p-1',
         outcome: 'succeeded',
         detail: { action: 'apply', status: 200 },
+      },
+    ]);
+  });
+
+  it('should read a prompt a connector sent as the connector, not as this host', async () => {
+    // Arrange — the connector's own in-process door into the daemon's route table, audit decorator included.
+    const { journal, routes } = decorated({});
+    const api = await dispatcher(routes);
+    const connector = new InProcessConnectorDispatch({
+      dispatch: async incoming => await api.dispatch(incoming),
+      adminToken: () => 'admin-secret',
+    });
+
+    // Act
+    const answer = await connector.call('cg_abcdefghij', {
+      method: 'POST',
+      path: '/v1/sessions/s-1/send',
+      body: { text: 'hello' },
+    });
+    await api.dispatch(request({ method: 'POST', path: '/v1/sessions/s-1/send', headers: ADMIN, loopback: true }));
+
+    // Assert — the owner at the keyboard is still the host; the grant is named, never the token.
+    should(answer.status).equal(200);
+    should(records(journal)).deepEqual([
+      {
+        at: AT,
+        event: 'agent.prompted',
+        actor: { kind: 'connector' },
+        subject: 's-1',
+        outcome: 'succeeded',
+        detail: { action: 'send', grant: 'cg_abcdefghij', status: 200 },
+      },
+      {
+        at: AT,
+        event: 'agent.prompted',
+        actor: { kind: 'host' },
+        subject: 's-1',
+        outcome: 'succeeded',
+        detail: { action: 'send', status: 200 },
       },
     ]);
   });

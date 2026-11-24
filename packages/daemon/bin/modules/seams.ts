@@ -7,6 +7,7 @@ import type { WorkSearchService } from '../../src/lib/work-search/index.ts';
 import type { AnalyticsJobs, AnalyticsProvides } from './analytics.ts';
 import type { AgentToolsProvides } from './agent-tools.ts';
 import type { BrowserProvides } from './browser.ts';
+import type { ConnectorModule } from './connector.ts';
 import type { ConversationImportProvides } from './conversation-import.ts';
 import type { HousekeepingProvides } from './housekeeping.ts';
 import type { InputRequestsProvides } from './input-requests.ts';
@@ -86,6 +87,7 @@ export interface ModuleHandles {
   readonly analytics: BuiltModule<AnalyticsProvides, AnalyticsJobs>;
   readonly browser: BuiltModule<BrowserProvides>;
   readonly cgroups: BuiltModule<LimitsService>;
+  readonly connector: BuiltModule<ConnectorModule>;
   readonly conversationImport: BuiltModule<ConversationImportProvides>;
   readonly fleetLogin: BuiltModule<HarnessLoginService>;
   readonly housekeeping: BuiltModule<HousekeepingProvides>;

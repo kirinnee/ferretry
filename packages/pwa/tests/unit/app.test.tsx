@@ -5716,3 +5716,26 @@ describe('a notification tap', () => {
     }
   });
 });
+
+describe('the Claude connector link from the daemon’s waiting page', () => {
+  it('opens the Connectors panel of the machine it names, when this browser is paired with it', async () => {
+    const { view } = await renderShell(`/?connector=${encodeURIComponent(beta.daemonId)}`, [
+      alpha.daemonId,
+      beta.daemonId,
+    ]);
+    await settle();
+
+    expect(window.location.pathname).toBe(`/d/${beta.daemonId}/settings`);
+    expect(window.location.hash).toEndWith('/machine/connector');
+    await view.unmount();
+  });
+
+  it('stays where it is for a machine this browser is not paired with', async () => {
+    const { view } = await renderShell('/?connector=stranger', [alpha.daemonId]);
+    await settle();
+
+    expect(window.location.pathname).not.toContain('/settings');
+    expect(window.location.hash).not.toContain('connector');
+    await view.unmount();
+  });
+});

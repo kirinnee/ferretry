@@ -25,6 +25,7 @@ import {
   Gauge,
   GraduationCap,
   KeyRound,
+  Link2,
   Lock,
   PawPrint,
   Radar,
@@ -114,6 +115,8 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   'resource-limits': <Gauge size={16} aria-hidden="true" />,
   doctor: <Stethoscope size={16} aria-hidden="true" />,
   'model-pricing': <CircleDollarSign size={16} aria-hidden="true" />,
+  // A link, because the panel is where another app is joined to this machine.
+  connector: <Link2 size={16} aria-hidden="true" />,
   // A written record, because the panel is the machine's log of who reached it and what they did.
   'security-log': <ScrollText size={16} aria-hidden="true" />,
   // The measured PATH the traffic is on, which is exactly what a route is.

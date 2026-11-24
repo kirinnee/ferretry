@@ -39,7 +39,7 @@ describe('panelGroup', () => {
 
 describe('panelsOnTab', () => {
   it.each<[MachineTabId, number]>([
-    ['machine', 15],
+    ['machine', 16],
     ['agents', 3],
     ['sign-ins', 3],
     ['runtimes', 0],

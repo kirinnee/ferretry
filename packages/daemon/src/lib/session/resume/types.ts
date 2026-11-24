@@ -41,7 +41,16 @@ export const TERMINAL_RESUME_STATUSES: ReadonlySet<ResumableSessionStatus> = new
  * get the same policy: only the automated path may be suppressed by a duplicate-work heuristic.
  * `device` is the owner in the app on a paired device (`device:<id>`): a person, like `admin-ui`.
  */
-export const ResumeActorSchema = z.enum(['admin-cli', 'admin-ui', 'device', 'peer', 'warden', 'daemon', 'unknown']);
+export const ResumeActorSchema = z.enum([
+  'admin-cli',
+  'admin-ui',
+  'connector',
+  'device',
+  'peer',
+  'warden',
+  'daemon',
+  'unknown',
+]);
 export type ResumeActor = z.infer<typeof ResumeActorSchema>;
 
 export interface ResumePolicy {

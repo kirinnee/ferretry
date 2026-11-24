@@ -267,7 +267,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 101, desktop: 98 };
+const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 102, desktop: 99 };
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`), per
@@ -2974,6 +2974,8 @@ try {
               ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]', 'machine'],
               // The performance report, recorded: the broken budget first, then both reports as text.
               ['Performance', 'performance', '[data-performance]', 'machine'],
+              // The Claude connector: its address, one waiting sign-in under a fake match code, one connected app.
+              ['Claude connector', 'connector', '[data-connector-card]', 'machine'],
               // The security log, with a gap warning, both badges and "Show older" on it: its widest rows.
               ['Security log', 'security-log', '[data-security-log-panel]', 'machine'],
               // The configuration files: an invalid file, a held loosening and a login naming its key by reference.

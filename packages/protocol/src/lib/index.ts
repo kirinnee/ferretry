@@ -55,6 +55,7 @@ export * from './common.ts';
 export * from './compact-at.ts';
 export * from './config-changes.ts';
 export * from './config-files.ts';
+export * from './connector.ts';
 export * from './conversation-import.ts';
 export * from './daemon-features/index.ts';
 export * from './daemon-restart.ts';
