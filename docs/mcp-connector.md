@@ -1,0 +1,208 @@
+# Remote MCP connector — Ferretry as a Claude connector
+
+Read this before changing anything under `packages/daemon/src/lib/connector/`, the connector listener, the
+`/v1/connector/*` routes, `fy connector` or the app's Connectors panel. It is the contract; implement against it,
+not against the code.
+
+## The one-sentence version
+
+**The daemon can expose ONE remote MCP endpoint (`<publicUrl>/mcp`) on its own loopback-only listener, behind
+a public HTTPS tunnel the owner runs, protected by an OAuth 2.1 authorization server the daemon itself runs;
+a sign-in is approved by the owner inside the paired Ferretry app with a passkey, and every tool acts through
+the daemon's own API with exactly the nine tools below.**
+
+It is **off by default**. Turning it on is an edit to `<FY_HOME>/config/daemon.json` on the host — a phone cannot
+turn it on.
+
+## Why the approval happens in the app, not on the sign-in page
+
+A passkey is bound to the origin it was registered on (WebAuthn `rpId`). The owner's passkeys belong to the
+Ferretry app (`https://ferretry.pages.dev`, or `FY_APP_URL`), not to whatever hostname serves `/mcp`. Registering
+passkeys on the tunnel hostname would be a second, weaker login nobody asked for. So:
+
+1. Claude opens `<publicUrl>/oauth/authorize?...` (in a browser, a popup, or an in-app browser on a phone).
+2. The daemon validates the request and shows a **waiting page**: the client's name, the scopes, a short
+   **match code** (`K7Q-2MF`) and an **Open Ferretry** link. The page refreshes itself every 2 s (`<meta
+   http-equiv="refresh">`, no script).
+3. The owner opens Ferretry on any paired device (the link deep-links to the Connectors panel), sees the same
+   client, scopes and match code, and taps **Approve** — a passkey step-up for the `approve-connector` act.
+4. The waiting page's next refresh redirects to Claude's callback with a one-time code.
+
+This is the device-authorization shape on purpose: on iOS the Claude app opens sign-in in an in-app browser whose
+storage is NOT the installed Ferretry app's, so a same-browser hand-off into the app would find no paired device.
+The match code is the phishing defence the shape needs: approve only a request whose code is the one on the
+page you yourself just opened from Claude.
+
+The waiting page holds a **handle** (256 random bits) the approval side never sees; the app refers to a request
+by a separate public id. The authorization code is only ever handed to the holder of the handle, and only by
+redirect to the request's registered, allow-listed `redirect_uri`.
+
+At the machine, `fy connector approve <id|match code>` approves without a passkey (the host's admin token is
+ungoverned — docs/grants.md). That is also how the automated end-to-end test approves.
+
+## Where it listens
+
+- A **dedicated listener** on `127.0.0.1:<connector.port>` (default `7461`). It is never the API listener and
+  never the tunnel listener. `cloudflared` (or any reverse proxy) forwards the public hostname to it.
+- Every arrival on it is **remote and unprivileged**, whatever its peer address says: a tunnel terminating on
+  this host looks loopback (docs/grants.md "Loopback means how the request arrived"), so this listener grants
+  nothing for being local. The only credential `/mcp` accepts is a connector access token.
+- It serves exactly these paths and answers `404` to everything else (no `405` that maps the surface):
+
+| method | path                                                                                   | what                                      |
+| ------ | -------------------------------------------------------------------------------------- | ----------------------------------------- |
+| GET    | `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-protected-resource` | RFC 9728 protected resource metadata      |
+| GET    | `/.well-known/oauth-authorization-server`                                              | RFC 8414 authorization server metadata    |
+| POST   | `/oauth/register`                                                                      | RFC 7591 dynamic client registration      |
+| GET    | `/oauth/authorize`                                                                     | starts a sign-in, 302 to the waiting page |
+| GET    | `/oauth/authorize/wait?h=<handle>`                                                     | the waiting page / the final redirect     |
+| POST   | `/oauth/token`                                                                         | `authorization_code`, `refresh_token`     |
+| POST   | `/oauth/revoke`                                                                        | RFC 7009                                  |
+| POST   | `/mcp`                                                                                 | MCP Streamable HTTP, stateless, JSON      |
+| GET/DELETE | `/mcp`                                                                             | `405` (no server-initiated stream, no sessions) |
+
+## Configuration
+
+`<FY_HOME>/config/daemon.json`:
+
+```json
+{
+  "connector": {
+    "enabled": true,
+    "publicUrl": "https://ferretry-mcp.example.com",
+    "port": 7461,
+    "extraRedirectUris": []
+  }
+}
+```
+
+- `publicUrl` — `https://` origin (no path, no query, no credentials); the issuer and the resource are derived
+  from it: issuer = `publicUrl`, resource = `publicUrl + "/mcp"`. `http://127.0.0.1:<port>` / `http://localhost`
+  is accepted only for local testing.
+- `extraRedirectUris` — exact redirect URIs allowed IN ADDITION to Claude's (for MCP Inspector or a test client,
+  e.g. `http://localhost:6274/oauth/callback`). Each must be `https://`, or `http://` on a loopback host.
+- Absent, `enabled: false`, or an invalid `publicUrl` → no listener, and `fy connector` says why.
+
+## Allowed redirect URIs
+
+`https://claude.ai/api/mcp/auth_callback` (verbatim from Anthropic's documentation, see "Sources"), plus
+`extraRedirectUris`. Dynamic client registration REFUSES (`invalid_redirect_uri`) a client whose
+`redirect_uris` contains anything else, and `/oauth/authorize` matches the redirect URI by exact string against
+the client's registered list. A redirect URI problem is shown as an error page and NEVER redirected to.
+
+## OAuth 2.1 details
+
+- **Clients** (DCR): `client_name` ≤ 100 chars (shown on every screen, control characters stripped),
+  `redirect_uris` 1–5 allowed URIs, `grant_types` ⊆ {`authorization_code`, `refresh_token`},
+  `response_types` = [`code`], `token_endpoint_auth_method` ∈ {`none` (default), `client_secret_post`,
+  `client_secret_basic`}; a secret is issued only for the latter two and stored as a SHA-256 hash.
+  Limits: at most 20 registered clients (a client with no live grant that is older than 24 h is pruned first),
+  10 registrations per hour per daemon, request body ≤ 8 KiB.
+- **Authorize**: `response_type=code`, `client_id`, `redirect_uri` (required, exact), `code_challenge` +
+  `code_challenge_method=S256` (required — `plain` and absent are refused), `state` (passed through),
+  `scope` (⊆ `fleet:read fleet:write`; absent means both), `resource` (if present, must equal the resource
+  URI after canonicalisation — lowercase scheme and host, default port dropped, one trailing `/` ignored). At most 5 pending requests at once; a request lives 10 minutes.
+- **Codes**: 256 random bits, stored hashed, single-use, 60 s. A second use revokes the grant it minted.
+  The redirect carries `code`, `state` and `iss` (RFC 9207).
+- **Tokens**: opaque, `fyc_at_` + 43 base64url (access, 1 h) and `fyc_rt_` + 43 base64url (refresh, 30 days,
+  rotated on every use). Only SHA-256 digests are stored. Presenting a rotated-away refresh token revokes the
+  whole grant (reuse detection). The token response is `Cache-Control: no-store`.
+- **Resource / audience**: every token is bound to the one resource URI; a token request naming another
+  `resource` is `invalid_target`.
+- **Revocation**: `POST /oauth/revoke` (RFC 7009, always `200`), `fy connector revoke <grant>`, and the app's
+  Connectors panel. A revoked grant's access token is refused on the very next call.
+- **Rate limits** (per listener, in memory): token endpoint 30/min per client and 120/min overall; authorize
+  30/min overall; `/mcp` 60 calls/min per grant, of which write tools 10/min. Over the limit is `429` with
+  `Retry-After`.
+
+## Discovery and the 401
+
+An unauthenticated or invalid-token `/mcp` request gets `401` and
+
+```
+WWW-Authenticate: Bearer resource_metadata="<publicUrl>/.well-known/oauth-protected-resource/mcp", scope="fleet:read fleet:write"
+```
+
+(`error="invalid_token"` added when a token was presented). The protected resource metadata names `resource`,
+`authorization_servers: [publicUrl]`, `scopes_supported`, `bearer_methods_supported: ["header"]`. The
+authorization server metadata names the endpoints above, `code_challenge_methods_supported: ["S256"]`,
+`grant_types_supported`, `response_types_supported: ["code"]`, `token_endpoint_auth_methods_supported`,
+`revocation_endpoint`, `registration_endpoint`, `scopes_supported` and
+`authorization_response_iss_parameter_supported: true`.
+
+## Storage
+
+- `<FY_HOME>/state/connector/connector.json`, `0600` in a `0700` directory, written atomically: clients (secret
+  hashes only), grants (scopes, who approved, created/last used, revoked), the digests of live access and refresh
+  tokens and the rotated-away refresh digests of each grant. **No token, code or secret is ever written, logged,
+  journalled or returned after the response that minted it.**
+- Pending requests, handles and codes live in memory only; a restart drops them (the sign-in is simply retried).
+- `<FY_HOME>/state/connector/calls.jsonl`, `0600`, rotated to `.1.jsonl` at 1 MiB: one line per **write** tool
+  call — time, tool, arguments (passed through the secret redactor, message text cut to 500 characters), grant id,
+  the access token's id (the first 12 hex characters of its digest — never the token), and the outcome.
+- The security log (docs/audit.md) records `connector.client.registered`, `connector.grant.approved`,
+  `connector.grant.denied`, `connector.grant.revoked`, `connector.refresh.reused` and `connector.tool` (write
+  tools: tool name, grant id, the ferret's session id), names and ids only.
+
+## Scopes and tools
+
+- `fleet:read` — the four read tools. `fleet:write` — the five write tools. A token without `fleet:write` is
+  never offered the write tools in `tools/list`, and a call to one is a tool error saying so.
+- Every tool that takes a ferret takes `ferret`: its call sign, its session id or short id, or its task name —
+  case-insensitive, ignoring spaces, hyphens and a leading `:`. Nothing matching is a tool error that lists
+  up to three close matches (names come from speech recognition), e.g. `No ferret called "lizet". Did you
+  mean lizzette (Build MCP Connector)?` More than one match lists them and asks which.
+- Results are SHORT PLAIN TEXT, because they are often read aloud. No JSON blobs.
+
+| tool                | scope | annotations              | does                                                                 |
+| ------------------- | ----- | ------------------------ | -------------------------------------------------------------------- |
+| `list_ferrets`      | read  | readOnly                 | live ferrets: call sign, task name, state, last activity             |
+| `get_ferret`        | read  | readOnly                 | one ferret: state, current task, recent-activity summary, last error |
+| `get_ferret_output` | read  | readOnly                 | tail of recent output; `lines` default 40, hard cap 200 lines / 8 000 chars |
+| `list_attention`    | read  | readOnly                 | open agenda items (`!A12`): who asks, title, question                |
+| `send_to_ferret`    | write | not readOnly             | send a message to a ferret, exactly as the app's composer does       |
+| `answer_attention`  | write | not readOnly             | answer one open agenda item                                          |
+| `restart_ferret`    | write | destructive              | restart a ferret, as the app's Restart does                          |
+| `stop_ferret`       | write | destructive              | stop a ferret, as `fy stop` does                                     |
+| `spawn_ferret`      | write | not readOnly             | start a new ferret with a task description, as `fy new` does         |
+
+## What a tool may do, and how
+
+- **Through the daemon's own API, never beside it.** Each tool is one or more ordinary requests to the daemon's
+  own route table, dispatched in-process as the owner (the host admin credential), with the actor
+  `connector:<grantId>` so the journal and the security log say who acted. There is no second control path:
+  validation, ledgers, journalling and every route's own checks apply.
+- **Why the owner's authority, and what bounds it.** A connector grant is approved by the owner with a passkey
+  (or at the machine), so it acts for the owner — but ONLY through the nine tools, whose arguments are fixed
+  schemas: no tool takes a path, a command, a URL, an environment variable or a raw route. Device grants
+  (docs/grants.md) govern paired devices and do not apply; the connector's own switch, scopes and revocation do.
+  **GAP**: the operator's daemon-wide narrowing of `fleet.use` does not narrow the connector.
+- **No secrets.** No tool returns a secret, an environment, a credential or a token. Every text a tool returns
+  that came from a ferret (output, summaries, errors, agenda questions) passes the daemon's fail-closed secret
+  redactor first; if it cannot run, the text is `[output withheld]`.
+- **No shell.** No tool runs a command. Control is only through ferrets.
+
+## Not in this version
+
+Voice inside Ferretry; more than one owner / team permissions; Client ID Metadata Documents; a daemon-managed
+tunnel (the owner runs `cloudflared` — see "Morning steps" in the PR); per-tool consent.
+
+## Sources
+
+Checked 2026-11-24. Where they disagree with the owner's spec, these win.
+
+- MCP specification **2025-11-25** — Authorization
+  (https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) and Streamable HTTP
+  (https://modelcontextprotocol.io/specification/2025-11-25/basic/transports). A newer 2026-07-28 revision
+  exists, but Claude lists support only up to 2025-11-25 and `@modelcontextprotocol/sdk` 1.32.2 implements up
+  to 2025-11-25, so that is the target.
+- Anthropic, connector authentication (https://claude.com/docs/connectors/building/authentication.md): the
+  hosted Claude apps (claude.ai, Desktop, mobile) use exactly `https://claude.ai/api/mcp/auth_callback`; Claude
+  supports DCR and CIMD (CIMD only when advertised — we do not); it sends RFC 8707 `resource` on authorize and
+  token requests (canonical MCP URL, compared canonically, not byte-for-byte); it refreshes on `401` and up to
+  five minutes before expiry; a dead refresh token must be `invalid_grant`; `/token` is form-urlencoded; a `403`
+  re-authorizes only with `error="insufficient_scope"`; it tries `/.well-known/oauth-authorization-server`
+  first; its traffic comes from `160.79.104.0/21` (not enforced — GAP).
+- Claude Code uses a loopback redirect (`http://localhost:<port>/callback`); it is NOT allowed by default — add
+  it to `extraRedirectUris` to use the connector from Claude Code.
+- `https://claude.com/api/mcp/auth_callback` appears in third-party docs only; it is not allowed by default.
