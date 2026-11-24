@@ -550,17 +550,16 @@ describe('unbuilt adapters: provenance', () => {
   });
 
   /**
-   * GAP(provenance), pinned. In 5.0 every ferret Ferrets' own service has stopped or resumed holds ONLY history.jsonl
-   * (daemon/index.ts `appendHistory` writes it; nothing writes config.json), and DaemonStorage indexes a folder holding
-   * only a journal on any sweep, replay or append. Today's strict rule then refuses every stamp. The read stays STRICT
-   * (relaxing it brings back the fail-open for a vanished document); the document writer that closes GAP(provenance)
-   * must write config.json before the first history event and give every ferret that already has a journal a
-   * document, or the first documented start after it lands is refused fleet-wide.
+   * In 5.0 every ferret Ferrets' own service has stopped or resumed holds ONLY history.jsonl (daemon/index.ts
+   * `appendHistory` writes it; nothing writes config.json), and DaemonStorage indexes a folder holding only a journal on
+   * any sweep, replay or append. That one unproven session is SKIPPED and said once in the log (2026-11-24: it used to
+   * refuse EVERY stamp fleet-wide); only a walk that reaches it is refused, and a start with no parent never does.
    */
-  test('GAP(provenance) an indexed session with no config.json refuses every stamp: a ferret holding only history.jsonl, once indexed, refuses a documented start and its resume writes nothing', async () => {
+  test('an indexed session with no config.json is skipped and logged once: a documented start and its resume still go on', async () => {
     // Arrange: OTHER is a registered service ferret whose folder holds only a journal, written as appendHistory does
     const kernel = await wired();
-    const { subject, storage, folder } = await files(kernel.roots, [], [{ id: OTHER, label: 'team' }]);
+    const warnings: string[] = [];
+    const { subject, storage, folder } = await files(kernel.roots, warnings, [{ id: OTHER, label: 'team' }]);
     await folder
       .port([FerretHistoryFiles])
       .append(FerretHistoryFiles, encodeSessionEvent(createSessionEvent(OTHER, 0, NOW, 'ferret.stopped', {})), OTHER);
@@ -580,10 +579,12 @@ describe('unbuilt adapters: provenance', () => {
       (error: unknown) => (error instanceof Error ? error.message : String(error)),
     );
 
-    // Assert: both refused by today's "disappeared" rule, and the documented ferret was stamped neither way
-    expect(start).toBe(`indexed session ${OTHER} disappeared while its spawn ancestry was being read`);
-    expect(resume).toBe(start);
-    expect(await storage.readConfig(FERRET)).toEqual(before);
+    // Assert: neither is refused, and the skipped session is said once, by id, however many snapshots were taken
+    expect(start).toBeUndefined();
+    expect(resume).toBeUndefined();
+    expect(await storage.readConfig(FERRET)).toBeDefined();
+    expect(before).toBeDefined();
+    expect(warnings.filter(line => line.includes(`indexed session ${OTHER} disappeared`))).toHaveLength(1);
   });
 
   /**
