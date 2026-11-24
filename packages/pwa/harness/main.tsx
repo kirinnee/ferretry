@@ -172,6 +172,8 @@ import { MarkdownComposerSettings } from '../src/features/settings/markdown-comp
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
 import { PerformanceSettings } from '../src/features/settings/performance-settings.tsx';
 import { pricingSettingsTab } from '../src/features/settings/pricing-settings.tsx';
+import type { ConnectorClient, ConnectorView } from '../src/features/connector/connector-api.ts';
+import { ConnectorSurface } from '../src/features/connector/connector-settings.tsx';
 import type { SecurityLogClient } from '../src/features/settings/security-api.ts';
 import { SecurityLogSurface } from '../src/features/settings/security-log-settings.tsx';
 import type { PasskeyClientFactory } from '../src/features/settings/security-settings.tsx';
@@ -844,6 +846,14 @@ const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
     ),
   },
   {
+    id: 'connector',
+    label: 'Claude connector',
+    description: 'Let Claude read and control your fleet: approve a sign-in with your passkey, and revoke an app.',
+    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+      <ConnectorSurface connection={connection} createClient={harnessConnectorClient} />
+    ),
+  },
+  {
     id: 'security-log',
     label: 'Security log',
     description: 'Recent pairings, removals, refused attempts and other security events on this machine.',
@@ -898,6 +908,46 @@ const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
 
 /** Minutes before this page loaded, so the relative times in a capture read as a real recent history. */
 const harnessMinutesAgo = (minutes: number): string => new Date(Date.now() - minutes * 60_000).toISOString();
+
+/**
+ * SETTINGS › MACHINE › CLAUDE CONNECTOR, answered in the page (docs/mcp-connector.md): the connector is on, one
+ * Claude sign-in is waiting under a FAKE match code (a pending sign-in is a live credential on a real machine),
+ * and one app is already connected. Approving, denying and revoking change nothing here.
+ */
+const HARNESS_CONNECTOR_VIEW: ConnectorView = {
+  enabled: true,
+  publicUrl: 'https://mcp.example.test',
+  mcpUrl: 'https://mcp.example.test/mcp',
+  pending: [
+    {
+      id: 'cr_harness0001',
+      matchCode: 'K7Q-2MF',
+      clientName: 'Claude',
+      redirectHost: 'claude.ai',
+      scopes: ['fleet:read', 'fleet:write'],
+      createdAt: harnessMinutesAgo(1),
+      expiresAt: new Date(Date.now() + 9 * 60_000).toISOString(),
+    },
+  ],
+  grants: [
+    {
+      id: 'cg_harness0001',
+      clientName: 'Claude',
+      redirectHost: 'claude.ai',
+      scopes: ['fleet:read'],
+      createdAt: harnessMinutesAgo(3 * 60),
+      approvedBy: 'admin-cli',
+      lastUsedAt: harnessMinutesAgo(2),
+    },
+  ],
+};
+const harnessConnectorClient = async (connection: DaemonConnection): Promise<ConnectorClient> => {
+  if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+  return {
+    request: (async (_path: string, _schema: unknown, init?: RequestInit) =>
+      init?.method === undefined || init.method === 'GET' ? HARNESS_CONNECTOR_VIEW : {}) as ConnectorClient['request'],
+  };
+};
 
 /**
  * SETTINGS › MACHINE › ABOUT, answered in the page (`docs/updating.md`). `?about=manual` makes the

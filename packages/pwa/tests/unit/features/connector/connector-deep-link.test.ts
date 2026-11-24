@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import { connectorLinkPath } from '../../../../src/features/connector/connector-deep-link.ts';
-import { bannerSentence, connectorTargetFromSearch } from '../../../../src/features/connector/connector-model.ts';
+import { FyHttpError } from '@ferretry/protocol/client';
+import {
+  actFailureSentence,
+  bannerSentence,
+  connectorTargetFromSearch,
+  scopeSentence,
+} from '../../../../src/features/connector/connector-model.ts';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
 
 const records = [{ daemonId: 'alpha' }, { daemonId: 'beta' }] as unknown as readonly DaemonConnectionRecord[];
@@ -38,5 +44,26 @@ describe('the exact link the daemon builds', () => {
     expect(path).not.toBeNull();
     expect(path).not.toContain('?');
     expect(path?.endsWith('/machine/connector')).toBe(true);
+  });
+});
+
+describe('connector wording that has no machine answer', () => {
+  it('says "do nothing" for no scopes and lists several in plain words', () => {
+    expect(scopeSentence([])).toBe('do nothing');
+    expect(scopeSentence(['fleet:read', 'fleet:write'])).toBe('read your fleet and control your ferrets');
+  });
+
+  it('turns a refusal into one sentence, whatever the daemon said', () => {
+    expect(actFailureSentence(new FyHttpError('x', 403, 'grant_step_up_required'))).toContain('passkey');
+    expect(actFailureSentence(new FyHttpError('x', 403, undefined))).toBe(
+      'This machine did not allow that from this device.',
+    );
+    expect(actFailureSentence(new FyHttpError('x', 403, 'something_new'))).toBe(
+      'This machine did not allow that from this device.',
+    );
+    expect(actFailureSentence(new FyHttpError('x', 500, undefined))).toBe(
+      'This machine did not answer. Try again in a moment.',
+    );
+    expect(actFailureSentence(new Error('socket hang up'))).toBe('This machine did not answer. Try again in a moment.');
   });
 });

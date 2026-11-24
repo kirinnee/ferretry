@@ -1,11 +1,11 @@
 import { DAEMON_CAPABILITIES, type CapabilityGrants } from '@ferretry/protocol';
-import type { ApiRequest, ApiResponse } from '../../../../src/lib/api/http.ts';
-import type { ConnectorAccess } from '../../../../src/lib/connector/ports.ts';
-import { ConnectorToolbox } from '../../../../src/lib/connector/mcp/tools.ts';
-import type { ConnectorCallRecord, ConnectorCallsLog } from '../../../../src/lib/connector/mcp/ports.ts';
-import { ConnectorTextGuard } from '../../../../src/lib/connector/mcp/redaction.ts';
-import { ConnectorMcpEndpoint } from '../../../../src/adapters/connector/mcp/mcp-endpoint.ts';
-import { AuditSpy, FakeDispatch, NOW, WRITE_ACCESS } from './fixtures.ts';
+import type { ApiRequest, ApiResponse } from '../../../src/lib/api/http.ts';
+import type { ConnectorAccess } from '../../../src/lib/connector/ports.ts';
+import { ConnectorToolbox } from '../../../src/lib/connector/mcp/tools.ts';
+import type { ConnectorCallRecord, ConnectorCallsLog } from '../../../src/lib/connector/mcp/ports.ts';
+import { ConnectorTextGuard } from '../../../src/lib/connector/mcp/redaction.ts';
+import { ConnectorMcpEndpoint } from '../../../src/adapters/connector/mcp/mcp-endpoint.ts';
+import { AuditSpy, FakeDispatch, NOW, WRITE_ACCESS } from './mcp-fixtures.ts';
 
 export const ALL_GRANTS: CapabilityGrants = Object.fromEntries(
   DAEMON_CAPABILITIES.map(capability => [capability, { use: true, configure: true }]),
@@ -30,6 +30,7 @@ export interface Rig {
     now: number;
     access: ConnectorAccess | undefined;
     verifications: number;
+    verifierFails: boolean;
   };
 }
 
@@ -37,7 +38,13 @@ export function rig(options: { redact?: (text: string) => Promise<string>; allow
   const dispatch = new FakeDispatch();
   const audit = new AuditSpy();
   const calls = new CallsSpy();
-  const state: Rig['state'] = { grants: ALL_GRANTS, now: NOW, access: WRITE_ACCESS, verifications: 0 };
+  const state: Rig['state'] = {
+    grants: ALL_GRANTS,
+    now: NOW,
+    access: WRITE_ACCESS,
+    verifications: 0,
+    verifierFails: false,
+  };
   const toolbox = new ConnectorToolbox({
     daemonGrants: () => state.grants,
     guard: new ConnectorTextGuard({ redact: options.redact ?? (async text => text) }),
@@ -50,6 +57,7 @@ export function rig(options: { redact?: (text: string) => Promise<string>; allow
     verifier: {
       verify: async bearer => {
         state.verifications += 1;
+        if (state.verifierFails) throw new Error('the token store is unreadable');
         return bearer === TOKEN ? state.access : undefined;
       },
     },
@@ -74,6 +82,11 @@ export interface PostOptions {
   readonly method?: string;
   readonly path?: string;
   readonly contentType?: string;
+  /** `null` sends no Accept header at all. */
+  readonly accept?: string | null;
+  readonly protocolVersion?: string;
+  /** Replaces reading the body, to say what a transport that refuses it does. */
+  readonly readBody?: () => Promise<string>;
 }
 
 export function post(
@@ -83,11 +96,14 @@ export function post(
 ): Promise<ApiResponse | undefined> {
   const headers = new Map<string, string>([
     ['content-type', options.contentType ?? 'application/json'],
-    ['accept', 'application/json, text/event-stream'],
+    ...(options.accept === null
+      ? []
+      : [['accept', options.accept ?? 'application/json, text/event-stream'] as [string, string]]),
   ]);
   const token = options.token === undefined ? TOKEN : options.token;
   if (token !== null) headers.set('authorization', `Bearer ${token}`);
   if (options.origin !== undefined) headers.set('origin', options.origin);
+  if (options.protocolVersion !== undefined) headers.set('mcp-protocol-version', options.protocolVersion);
   const raw = typeof body === 'string' ? body : JSON.stringify(body);
   const request: ApiRequest = {
     method: options.method ?? 'POST',
@@ -95,7 +111,7 @@ export function post(
     query: new Map(),
     headers,
     loopback: true,
-    text: async () => raw,
+    text: options.readBody ?? (async () => raw),
   };
   return endpoint.handle(request);
 }

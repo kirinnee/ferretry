@@ -284,3 +284,104 @@ describe('Settings › Claude connector', () => {
     expect(tab.label).toBe('Claude connector');
   });
 });
+
+describe('Settings › Claude connector — the rest of the behaviour', () => {
+  const clipboardRefusing = (): void => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async () => {
+          throw new Error('denied');
+        },
+      },
+    });
+  };
+
+  it('says copying was not allowed, and shows the address to copy by hand', async () => {
+    clipboardRefusing();
+    const shown = await mount(surface(fake(() => on())));
+    await settled(shown.container, '[data-connector-copy]');
+    await interact(() => (must(shown.container.querySelector('[data-connector-copy]'), 'copy') as HTMLElement).click());
+    await settled(shown.container, '[data-connector-copied="failed"]');
+    expect(must(shown.container.querySelector('[data-connector-copied]'), 'status').textContent).toContain(
+      'Copying was not allowed here',
+    );
+    expect(must(shown.container.querySelector('[data-connector-url]'), 'url').textContent).toBe(
+      'https://mcp.example.test/mcp',
+    );
+    await shown.unmount();
+  });
+
+  it('says a connected app was never used when it has not been', async () => {
+    const { lastUsedAt: _unused, ...never } = grantRow;
+    const shown = await mount(surface(fake(() => on({ grants: [never] }))));
+    await settled(shown.container, '[data-connector-grant]');
+    expect(must(shown.container.querySelector('[data-connector-grant]'), 'grant').textContent).toContain('never used');
+    await shown.unmount();
+  });
+
+  it('reads again as soon as the page becomes visible after being hidden', async () => {
+    let reads = 0;
+    let visible = false;
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => (visible ? 'visible' : 'hidden'),
+    });
+    const shown = await mount(
+      surface(
+        fake(() => {
+          reads += 1;
+          return on();
+        }),
+      ),
+    );
+    try {
+      // Hidden: the panel waits and reads nothing.
+      await runAsync(async () => undefined);
+      expect(reads).toBe(0);
+      visible = true;
+      await interact(() => void document.dispatchEvent(new Event('visibilitychange')));
+      await settled(shown.container, '[data-connector-card]');
+      expect(reads).toBeGreaterThanOrEqual(1);
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState');
+      await shown.unmount();
+    }
+  });
+
+  it('keeps the failure sentence when the re-read after an act also fails', async () => {
+    let healthy = true;
+    const client: ConnectorClient = {
+      request: (async (_path: string, _schema: unknown, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          healthy = false;
+          throw new FyHttpError('gone', 404, 'not_found');
+        }
+        if (!healthy) throw new Error('down');
+        return on({ pending: [pendingRow] });
+      }) as ConnectorClient['request'],
+    };
+    const shown = await mount(surface(async () => client));
+    await settled(shown.container, '[data-connector-approve]');
+    await interact(() =>
+      (must(shown.container.querySelector('[data-connector-approve]'), 'approve') as HTMLElement).click(),
+    );
+    await settled(shown.container, '[data-connector-failure]');
+    expect(must(shown.container.querySelector('[data-connector-failure]'), 'failure').textContent).toContain(
+      'not waiting any more',
+    );
+    // What was on screen stays on screen.
+    expect(shown.container.querySelector('[data-connector-pending]')).not.toBeNull();
+    await shown.unmount();
+  });
+
+  it('renders the panel its Settings tab names, for the machine it is opened on', async () => {
+    const tab = connectorSettingsTab(fake(() => on()));
+    const shown = await mount(<tab.Surface connection={alpha} />);
+    await settled(shown.container, '[data-connector-card]');
+    expect(must(shown.container.querySelector('[data-connector-url]'), 'url').textContent).toBe(
+      'https://mcp.example.test/mcp',
+    );
+    await shown.unmount();
+  });
+});

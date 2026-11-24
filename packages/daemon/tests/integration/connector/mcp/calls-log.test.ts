@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -54,5 +54,34 @@ describe('FileConnectorCallsLog', () => {
     await Promise.all([1, 2, 3, 4, 5].map(async n => await log.append(record(n))));
     const lines = (await readFile(join(dir, 'calls.jsonl'), 'utf8')).trimEnd().split('\n');
     should(lines.map(line => JSON.parse(line).args.message)).eql(['m1', 'm2', 'm3', 'm4', 'm5']);
+  });
+});
+
+describe('FileConnectorCallsLog — when the disk refuses', () => {
+  it('fails the append that could not be written, and the next one still goes through once the disk allows it', async () => {
+    const dir = await fresh();
+    const log = new FileConnectorCallsLog(dir);
+    // A directory where the log file belongs: opening it for append is refused.
+    await mkdir(join(dir, 'calls.jsonl'), { recursive: true });
+    await should(log.append(record(1))).be.rejected();
+    await rm(join(dir, 'calls.jsonl'), { recursive: true });
+    await log.append(record(2));
+    const lines = (await readFile(join(dir, 'calls.jsonl'), 'utf8')).trimEnd().split('\n');
+    should(lines.map(line => JSON.parse(line).args.message)).eql(['m2']);
+  });
+
+  // A root user is not refused by directory permissions, so there is nothing to prove for one.
+  it.skipIf(process.getuid?.() === 0)('does not treat an unreadable log as an empty one', async () => {
+    const dir = await fresh();
+    const log = new FileConnectorCallsLog(dir);
+    await log.append(record(1));
+    await chmod(dir, 0o000);
+    try {
+      await should(log.append(record(2))).be.rejected();
+    } finally {
+      await chmod(dir, 0o700);
+    }
+    const lines = (await readFile(join(dir, 'calls.jsonl'), 'utf8')).trimEnd().split('\n');
+    should(lines).have.length(1);
   });
 });

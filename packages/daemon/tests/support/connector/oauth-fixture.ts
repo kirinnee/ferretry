@@ -3,16 +3,16 @@ import {
   type AuthorizeInput,
   type ExchangeInput,
   type RegisterInput,
-} from '../../../../src/lib/connector/oauth/authority.ts';
+} from '../../../src/lib/connector/oauth/authority.ts';
 import {
   ConnectorMemory,
   type ConnectorState,
   type ConnectorStore,
   base64url,
   connectorStateSchema,
-} from '../../../../src/lib/connector/oauth/model.ts';
-import { ConnectorRateLimiter } from '../../../../src/lib/connector/oauth/rate-limiter.ts';
-import type { ConnectorAuditEvent, ConnectorEndpoints } from '../../../../src/lib/connector/ports.ts';
+} from '../../../src/lib/connector/oauth/model.ts';
+import { ConnectorRateLimiter } from '../../../src/lib/connector/oauth/rate-limiter.ts';
+import type { ConnectorAuditEvent, ConnectorEndpoints } from '../../../src/lib/connector/ports.ts';
 
 export const endpoints: ConnectorEndpoints = {
   issuer: 'https://connector.example',

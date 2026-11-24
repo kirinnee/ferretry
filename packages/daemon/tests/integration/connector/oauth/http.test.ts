@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { ConnectorOAuthHttp } from '../../../../src/adapters/connector/oauth-http.ts';
 import { BodyTooLargeError, type ApiRequest } from '../../../../src/lib/api/http.ts';
 import { unauthorizedResponse } from '../../../../src/lib/connector/oauth/discovery.ts';
-import { endpoints, fixture, redirectUri } from './fixture.ts';
+import { endpoints, fixture, redirectUri } from '../../../support/connector/oauth-fixture.ts';
 
 function request(
   method: string,
@@ -253,5 +253,33 @@ describe('connector OAuth HTTP boundary', () => {
     for (let i = 0; i < 10; i++)
       expect((await http.handle(request('POST', '/oauth/register', '{', 'application/json')))?.status).toBe(400);
     expect((await http.handle(request('POST', '/oauth/register', '{', 'application/json')))?.status).toBe(429);
+  });
+});
+
+describe('connector OAuth HTTP boundary — a Basic header that cannot be trusted', () => {
+  test('refuses one that is not base64, has no separator, or names another client than the body', async () => {
+    const f = fixture();
+    const http = new ConnectorOAuthHttp(f.authority, endpoints);
+    const flow = await f.approved({ token_endpoint_auth_method: 'client_secret_basic' });
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: flow.code,
+      redirect_uri: redirectUri,
+      code_verifier: flow.exchange.code_verifier ?? '',
+    });
+    const refused = async (authorization: string, extra = ''): Promise<number | undefined> =>
+      (
+        await http.handle(
+          request('POST', '/oauth/token', `${body}${extra}`, undefined, new Map([['authorization', authorization]])),
+        )
+      )?.status;
+    expect(await refused('Basic !!!not-base64!!!')).toBe(401);
+    expect(await refused(`Basic ${btoa('no-separator-here')}`)).toBe(401);
+    expect(
+      await refused(
+        `Basic ${btoa(`${flow.client.client_id}:${flow.client.client_secret}`)}`,
+        '&client_id=fycl_someoneelse',
+      ),
+    ).toBe(401);
   });
 });

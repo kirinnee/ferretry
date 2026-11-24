@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ConnectorAuthority } from '../../../../src/lib/connector/oauth/authority.ts';
 import { ConnectorMemory, OAuthError, canonicalResource } from '../../../../src/lib/connector/oauth/model.ts';
-import { endpoints, fixture, redirectUri, verifier } from './fixture.ts';
+import { endpoints, fixture, redirectUri, verifier } from '../../../support/connector/oauth-fixture.ts';
 
 describe('connector authority', () => {
   test('mints only digest-backed tokens, codes, handles and client secrets', async () => {
@@ -457,5 +457,123 @@ describe('connector authority', () => {
     expect(await f.authority.verify(flow.tokens.access_token)).toBeUndefined();
     for (const token of ['', 'anything', 'fyc_at_short', `fyc_rt_${verifier}`])
       expect(await f.authority.verify(token)).toBeUndefined();
+  });
+});
+
+describe('connector authority — edges of the sign-in flow', () => {
+  test('a failing audit sink never stops a sign-in being approved', async () => {
+    const f = fixture();
+    const authority = new ConnectorAuthority({
+      ...f.options,
+      audit: {
+        record: async () => {
+          throw new Error('log unwritable');
+        },
+      },
+    });
+    const client = await authority.register({ redirect_uris: [redirectUri] });
+    const challenge = (await import('../../../../src/lib/connector/oauth/model.ts')).base64url(
+      await f.options.crypto.sha256(verifier),
+    );
+    await authority.startAuthorization({
+      response_type: 'code',
+      client_id: client.client_id,
+      redirect_uri: redirectUri,
+      code_challenge_method: 'S256',
+      code_challenge: challenge,
+    });
+    const pending = (await authority.pending())[0];
+    const approval = await authority.approve(pending?.id ?? '', 'admin-cli');
+    expect(approval.ok).toBe(true);
+  });
+
+  test('refuses any response type but code', async () => {
+    const f = fixture();
+    const client = await f.register();
+    await expect(f.authorize(client.client_id, { response_type: 'token' })).rejects.toMatchObject({
+      error: 'unsupported_response_type',
+    });
+  });
+
+  test('draws a new request id and match code when the first draw is already waiting', async () => {
+    const f = fixture();
+    const draws: Record<number, number[]> = { 10: [5, 1, 1, 2], 6: [1, 1, 2] };
+    let unique = 0;
+    const authority = new ConnectorAuthority({
+      ...f.options,
+      crypto: {
+        sha256: f.options.crypto.sha256,
+        randomBytes: length => {
+          const queued = draws[length]?.shift();
+          if (queued !== undefined) return new Uint8Array(length).fill(queued);
+          unique += 1;
+          return Uint8Array.from({ length }, (_, index) => (unique * 7 + index) % 251);
+        },
+      },
+    });
+    const client = await authority.register({ redirect_uris: [redirectUri] });
+    const { base64url } = await import('../../../../src/lib/connector/oauth/model.ts');
+    const challenge = base64url(await f.options.crypto.sha256(verifier));
+    const ask = () =>
+      authority.startAuthorization({
+        response_type: 'code',
+        client_id: client.client_id,
+        redirect_uri: redirectUri,
+        code_challenge_method: 'S256',
+        code_challenge: challenge,
+      });
+    await ask();
+    await ask();
+    const waiting = await authority.pending();
+    expect(waiting).toHaveLength(2);
+    expect(new Set(waiting.map(p => p.id)).size).toBe(2);
+    expect(new Set(waiting.map(p => p.matchCode)).size).toBe(2);
+  });
+
+  test('a day-old client with nothing live is dropped to make room, while another sign-in is waiting', async () => {
+    const f = fixture();
+    await f.register();
+    f.advance(25 * 3_600_000);
+    const fresh = await f.register();
+    await f.authorize(fresh.client_id);
+    await f.register();
+    const stored = f.state().clients.map(client => client.id);
+    expect(stored).toContain(fresh.client_id);
+    expect(stored).toHaveLength(2);
+  });
+
+  test('cannot deny a sign-in that expired while it waited', async () => {
+    const f = fixture();
+    const client = await f.register();
+    await f.authorize(client.client_id);
+    const pending = (await f.authority.pending())[0];
+    f.advance(11 * 60_000);
+    expect(await f.authority.deny(pending?.id ?? '', 'admin-cli')).toMatchObject({ ok: false });
+  });
+
+  test('cannot revoke a grant that does not exist', async () => {
+    const f = fixture();
+    expect(await f.authority.revoke('cg_nonexistent', 'admin-cli')).toMatchObject({
+      ok: false,
+      code: 'not_found',
+    });
+  });
+
+  test('refuses a token request for a grant type the client was not registered for', async () => {
+    const f = fixture();
+    const refreshOnly = await f.register({ grant_types: ['refresh_token'] });
+    await expect(
+      f.authority.exchange({
+        grant_type: 'authorization_code',
+        client_id: refreshOnly.client_id,
+        code: 'a-code',
+        code_verifier: verifier,
+        redirect_uri: redirectUri,
+      }),
+    ).rejects.toMatchObject({ error: 'unauthorized_client' });
+    const codeOnly = await f.register({ grant_types: ['authorization_code'] });
+    await expect(
+      f.authority.exchange({ grant_type: 'refresh_token', client_id: codeOnly.client_id, refresh_token: 'fyc_rt_x' }),
+    ).rejects.toMatchObject({ error: 'unauthorized_client' });
   });
 });

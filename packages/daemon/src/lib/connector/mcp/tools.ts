@@ -22,17 +22,16 @@ import { type FleetGateway, ToolFailure } from './gateway.ts';
 import { matchName, titleVariants } from './names.ts';
 import type { ConnectorCallsLog, DaemonGrantsSource } from './ports.ts';
 import type { ConnectorTextGuard } from './redaction.ts';
-import { WITHHELD } from './redaction.ts';
 
-export const LIST_CAP = 50;
-export const ATTENTION_CAP = 30;
-export const OUTPUT_DEFAULT_LINES = 40;
-export const OUTPUT_MAX_LINES = 200;
-export const OUTPUT_MAX_CHARS = 8000;
-export const MESSAGE_MAX_CHARS = 8000;
+const LIST_CAP = 50;
+const ATTENTION_CAP = 30;
+const OUTPUT_DEFAULT_LINES = 40;
+const OUTPUT_MAX_LINES = 200;
+const OUTPUT_MAX_CHARS = 8000;
+const MESSAGE_MAX_CHARS = 8000;
 const LOG_ARG_CUT = 500;
 
-export interface ToolAnnotations {
+interface ToolAnnotations {
   readonly readOnlyHint: boolean;
   readonly destructiveHint: boolean;
   readonly idempotentHint: boolean;
@@ -40,13 +39,13 @@ export interface ToolAnnotations {
 }
 
 /** What a tool says back: the sentence(s), and the session it touched (for the security log). */
-export interface ToolOutput {
+interface ToolOutput {
   readonly text: string;
   readonly isError?: true;
   readonly sessionId?: string;
 }
 
-export interface ToolEnvironment {
+interface ToolEnvironment {
   readonly gateway: FleetGateway;
   readonly now: () => number;
   /** The redaction door, for a tool that must cut text AFTER it is clean (output tails). */
@@ -87,7 +86,7 @@ const isLive = (view: SessionView): boolean => !TERMINAL_STATUSES.includes(view.
 
 const titleCase = (word: string): string => (word === '' ? word : word.charAt(0).toUpperCase() + word.slice(1));
 /** The name people say: the callsign, else the task title. */
-export const callsignOf = (view: SessionView): string => titleCase(view.config.teammate ?? view.config.name);
+const callsignOf = (view: SessionView): string => titleCase(view.config.teammate ?? view.config.name);
 
 function stateOf(view: SessionView): string {
   const { state } = view;
@@ -135,7 +134,7 @@ const describeShort = (view: SessionView): string => `${callsignOf(view)} (${cli
  * The one live ferret a spoken name means, or a {@link ToolFailure} that says what to try. Live ones are asked
  * first; a stopped one is found only when no live one matches (so "restart lizzette" can wake a stopped one).
  */
-export async function resolveFerret(gateway: FleetGateway, query: string): Promise<SessionView> {
+async function resolveFerret(gateway: FleetGateway, query: string): Promise<SessionView> {
   const all = await gateway.sessions();
   const live = all.filter(isLive);
   for (const pool of [live, all.filter(view => !isLive(view))]) {
@@ -616,5 +615,3 @@ function cutLongStrings(value: unknown): unknown {
     Object.entries(value).map(([key, entry]) => [key, typeof entry === 'string' ? clip(entry, LOG_ARG_CUT) : entry]),
   );
 }
-
-export { WITHHELD };

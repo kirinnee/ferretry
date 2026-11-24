@@ -58,3 +58,16 @@ describe('parseAttentionRef', () => {
     for (const ref of ['', 'A', 'B12', '12x', 'A-1', '0']) should(parseAttentionRef(ref)).be.undefined();
   });
 });
+
+describe('SlidingWindowLimiter — forgetting idle keys', () => {
+  it('drops the keys whose hits have all left the window once many keys pile up', () => {
+    let now = 0;
+    const limiter = new SlidingWindowLimiter(() => now);
+    for (let n = 0; n < 300; n += 1) should(limiter.take(`grant-${n}`, 1).ok).be.true();
+    now = 61_000;
+    // One more hit sweeps the 300 idle keys; the key that is still live keeps its count.
+    should(limiter.take('fresh', 1).ok).be.true();
+    should(limiter.take('fresh', 1).ok).be.false();
+    should(limiter.take('grant-0', 1).ok).be.true();
+  });
+});

@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import type { ConnectorCallRecord, ConnectorCallsLog } from '../../../lib/connector/mcp/ports.ts';
 
 /** docs/mcp-connector.md "Storage": rotate to `calls.1.jsonl` at 1 MiB. */
-export const CALLS_LOG_MAX_BYTES = 1024 * 1024;
+const CALLS_LOG_MAX_BYTES = 1024 * 1024;
 
 /**
  * `<stateHome>/connector/calls.jsonl`: one line per WRITE tool call, `0600` in a `0700` directory.

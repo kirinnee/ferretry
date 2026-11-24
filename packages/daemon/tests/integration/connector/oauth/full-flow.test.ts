@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FileConnectorStore, ConnectorStoreError } from '../../../../src/adapters/connector/file-store.ts';
@@ -175,5 +175,15 @@ describe('connector OAuth with real crypto and atomic files', () => {
     const f = await setup();
     await Promise.all(Array.from({ length: 20 }, () => f.store.save({ version: 1, clients: [], grants: [] })));
     expect(await f.store.load()).toEqual({ version: 1, clients: [], grants: [] });
+  });
+});
+
+describe('FileConnectorStore — a state file that cannot be read', () => {
+  test('refuses to start empty when the file exists but cannot be read, rather than forgetting every grant', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'connector-store-'));
+    directories.push(directory);
+    // A directory where the state file should be: the read fails with something other than "not found".
+    await mkdir(join(directory, 'connector', 'connector.json'), { recursive: true });
+    await expect(new FileConnectorStore(directory).load()).rejects.toBeInstanceOf(ConnectorStoreError);
   });
 });

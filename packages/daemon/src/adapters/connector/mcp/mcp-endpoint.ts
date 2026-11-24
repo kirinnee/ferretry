@@ -12,12 +12,12 @@ import { SlidingWindowLimiter } from '../../../lib/connector/mcp/rate-limit.ts';
 import { CONNECTOR_TOOLS, type ConnectorToolbox, type ConnectorToolSpec } from '../../../lib/connector/mcp/tools.ts';
 
 /** The one path this handler answers. */
-export const MCP_PATH = '/mcp';
+const MCP_PATH = '/mcp';
 /** A tools/call body is a few kilobytes; a megabyte is already generous. */
-export const MCP_MAX_BODY_BYTES = 1024 * 1024;
+const MCP_MAX_BODY_BYTES = 1024 * 1024;
 /** docs/mcp-connector.md "Rate limits": per grant, per minute. */
-export const CALLS_PER_MINUTE = 60;
-export const WRITE_CALLS_PER_MINUTE = 10;
+const CALLS_PER_MINUTE = 60;
+const WRITE_CALLS_PER_MINUTE = 10;
 
 export interface ConnectorMcpEndpointOptions {
   readonly verifier: ConnectorAccessVerifier;
