@@ -1,7 +1,8 @@
 import { defineState } from '@ferretry/kernel/contract';
 import { InstantSchema, NonNegativeFiniteSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { SearchProviderSchema } from './providers.ts';
+import { providersAreDistinct } from './config.ts';
+import { SEARCH_PROVIDER_IDS, SearchProviderSchema } from './providers.ts';
 
 /** The most results one search may ask for, and the default. */
 export const SEARCH_MAX_RESULTS = 10;
@@ -52,27 +53,39 @@ export const SearchTestResultSchema = z.strictObject({
 });
 export type SearchTestResult = z.infer<typeof SearchTestResultSchema>;
 
+/** One provider in the list, with what its last Test proved. */
+export const SearchProviderViewSchema = z.strictObject({
+  provider: SearchProviderSchema,
+  lastTest: SearchTestResultSchema.optional(),
+});
+export type SearchProviderView = z.infer<typeof SearchProviderViewSchema>;
+
 /** `GET /v1/web-search`: what Settings › Web search draws. Names, numbers and sentences; never a key. */
 export const SearchViewSchema = z.strictObject({
-  /** The provider `search.yaml` names; absent while web search is off. */
-  provider: SearchProviderSchema.optional(),
-  /** Whether `search.yaml` names that provider's key. Without it nothing is ever sent. */
-  keyNamed: z.boolean(),
+  /** The providers `search.yaml` names, in the order a search tries them; empty while web search is off. A provider is listed only with its key named. */
+  providers: z.array(SearchProviderViewSchema),
   dailyCap: z.number().int().positive(),
-  /** Searches counted today (a Test counts too). */
+  /** Searches counted today, over every provider (a Test counts too, and so does each fall-through). */
   usedToday: z.number().int().nonnegative(),
   /** What an edit waiting for the owner would change; empty when none waits. */
   held: z.array(z.string()),
-  lastTest: SearchTestResultSchema.optional(),
 });
 export type SearchView = z.infer<typeof SearchViewSchema>;
 
-/** `PUT /v1/web-search/setup`: the provider (naming its key) and/or the daily cap. */
+/** `PUT /v1/web-search/setup`: the whole ordered provider list (each naming its key) and/or the daily cap. */
 export const SearchSetupRequestSchema = z.strictObject({
-  provider: SearchProviderSchema.optional(),
+  providers: z
+    .array(SearchProviderSchema)
+    .max(SEARCH_PROVIDER_IDS.length)
+    .refine(providersAreDistinct, 'each provider may be listed once')
+    .optional(),
   dailyCap: z.number().int().min(1).optional(),
 });
 export type SearchSetupRequest = z.infer<typeof SearchSetupRequestSchema>;
+
+/** `POST /v1/web-search/test`: which listed provider to try, on its own, with no fall-through. */
+export const SearchTestRequestSchema = z.strictObject({ provider: SearchProviderSchema });
+export type SearchTestRequest = z.infer<typeof SearchTestRequestSchema>;
 
 /** What a setup came to: `applied`, or `held` with the sentences of what now waits for the owner. */
 export const SearchSetupResultSchema = z.strictObject({
@@ -82,7 +95,7 @@ export const SearchSetupResultSchema = z.strictObject({
 export type SearchSetupResult = z.infer<typeof SearchSetupResultSchema>;
 
 /**
- * `state/search/ledger.json`: the day, how many searches went out that day, and the last Test. Counted BEFORE a search
+ * `state/search/ledger.json`: the day, how many searches went out that day (one count over every provider), and each provider's last Test. Counted BEFORE a search
  * is sent, so a crash between the count and the answer never gives a free call. A damaged file stops search for the
  * subsystem (the default policy) rather than reading as zero: a ledger that forgets would forget the cap.
  */
@@ -94,6 +107,6 @@ export const SEARCH_LEDGER_STATE = defineState({
   schema: z.strictObject({
     day: z.string(),
     calls: z.number().int().nonnegative(),
-    lastTest: SearchTestResultSchema.optional(),
+    tests: z.array(SearchTestResultSchema),
   }),
 });
