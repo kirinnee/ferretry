@@ -73,6 +73,8 @@ const SINGLE_ONLY: readonly SpeedPath[] = ['wasm-single'];
  *     worker core has a WebGPU-first path, but it is inert until the build ships a runtime for it.
  *   - Everything on sherpa-onnx (Parakeet 110M, Moonshine, Zipformer) and Vosk: prebuilt single-thread
  *     WebAssembly with no WebGPU provider.
+ *   - The Google transcriber (MediaPipe's audio runtime): its worker runs the CPU delegate on a single-thread WebAssembly
+ *     build; its GPU delegate is not offered until it has been measured.
  */
 export const MODEL_PATHS: Readonly<Record<OnDeviceModelId, readonly SpeedPath[]>> = {
   parakeet: ['wasm-threads', 'wasm-single'],
@@ -83,6 +85,7 @@ export const MODEL_PATHS: Readonly<Record<OnDeviceModelId, readonly SpeedPath[]>
   'moonshine-tiny-en': SINGLE_ONLY,
   'moonshine-base-en': SINGLE_ONLY,
   'vosk-small-en': SINGLE_ONLY,
+  'google-audio-transcriber': SINGLE_ONLY,
 };
 
 /** What the device offers right now. `null` means the browser does not say. */

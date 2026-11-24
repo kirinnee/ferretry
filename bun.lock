@@ -841,6 +841,7 @@
         "@ferretry/std": "workspace:*",
         "@huggingface/transformers": "4.3.1",
         "@lichess-org/vosk-browser": "0.0.3",
+        "@mediapipe/tasks-audio": "1.2.3",
         "@sherpaw/asr": "0.3.0",
         "lucide-react": "^0.468.0",
         "onnxruntime-web": "1.24.1",
@@ -1056,6 +1057,8 @@
     "@kurkle/color": ["@kurkle/color@0.3.4", "", {}, "sha512-M5UknZPHRu3DEDWoipU6sE8PdkZ6Z/S+v4dD+Ke8IaNlpdSQah50lz1KtcFBa2vsdOnwbbnxJwVM4wty6udA5w=="],
 
     "@lichess-org/vosk-browser": ["@lichess-org/vosk-browser@0.0.3", "", { "dependencies": { "uuid": "11.1.0" } }, "sha512-kgxU346dZC/YbtVhqQTJbjZupUjuvwR3R270mGF5LJLmKAUCLRAQFhkRAqv4eUK1dmzu47ywN/SwrL5QrV7tCg=="],
+
+    "@mediapipe/tasks-audio": ["@mediapipe/tasks-audio@1.2.3", "", {}, "sha512-GAJ/6BcnX8RDCwJgug76vBBKr3qEu1PbfRB8rB1bemHhEbUu8ikNMLJU84ZAnnBuA/1iaJwRE7I3wjeJuHRPSQ=="],
 
     "@mermaid-js/parser": ["@mermaid-js/parser@1.2.1", "", { "dependencies": { "@chevrotain/types": "~11.1.2" } }, "sha512-n12NohV3mrUyUL2o93IgG/ifeW9FTyeJn3zDxkhwa8MJ9Fxg3HQMlA3RiGmD/3UnJvheztkjjQAjA2T4LmUcpw=="],
 

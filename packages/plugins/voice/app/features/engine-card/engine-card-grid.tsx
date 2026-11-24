@@ -34,6 +34,7 @@ const FAMILY_LABELS: Readonly<Record<OnDeviceModel['family'], string>> = {
   moonshine: 'Moonshine',
   whisper: 'OpenAI Whisper',
   vosk: 'Vosk',
+  google: 'Google AudioTranscriber (NVIDIA Parakeet)',
 };
 
 /** The card's name: the short name, with the two Parakeets told apart. */

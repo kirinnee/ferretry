@@ -20,6 +20,7 @@ import {
   type ParakeetAssets,
   type ParakeetGlobalLike,
 } from '../../../../app/lib/stt/parakeet-voice.ts';
+import { browserGoogleVoice, type GoogleAssets } from '../../../../app/lib/stt/google-voice.ts';
 import { SherpaEngine, type SherpaWorkerLike } from '../../../../app/lib/stt/sherpa-engine.ts';
 import { browserSherpaVoice, type SherpaAssets, type SherpaGlobalLike } from '../../../../app/lib/stt/sherpa-voice.ts';
 import {
@@ -45,6 +46,7 @@ import { browserWhisperVoice, type WhisperAssets } from '../../../../app/lib/stt
 export interface BenchAssets {
   readonly parakeet: ParakeetAssets;
   readonly sherpa: SherpaAssets;
+  readonly google: GoogleAssets;
   readonly vosk: VoskAssets;
   readonly whisper: WhisperAssets;
 }
@@ -204,6 +206,7 @@ async function prepare(
   let voice: OnDeviceVoice;
   if (model.runtime === 'onnxruntime-web') voice = browserParakeetVoice(global, assets.parakeet);
   else if (model.runtime === 'sherpa-onnx') voice = browserSherpaVoice(model, global, assets.sherpa, () => false);
+  else if (model.runtime === 'mediapipe-audio') voice = browserGoogleVoice(global, assets.google, () => false);
   else if (model.runtime === 'vosk-wasm') voice = browserVoskVoice(global, assets.vosk);
   else if (model.runtime === 'transformers-js') voice = browserWhisperVoice(global, assets.whisper, model, () => false);
   else return null;
@@ -227,9 +230,11 @@ async function prepare(
             ? assets.parakeet.workerUrl
             : model.runtime === 'sherpa-onnx'
               ? assets.sherpa.workerUrl
-              : model.runtime === 'vosk-wasm'
-                ? assets.vosk.workerUrl
-                : assets.whisper.workerUrl,
+              : model.runtime === 'mediapipe-audio'
+                ? assets.google.workerUrl
+                : model.runtime === 'vosk-wasm'
+                  ? assets.vosk.workerUrl
+                  : assets.whisper.workerUrl,
         ),
         { type: 'module', name },
       );
@@ -287,6 +292,33 @@ async function prepare(
           consumeLoadMs: () => engine.consumeLoadMs(),
           decode: async (samples, signal) => void (await engine.transcribe(samples, signal)),
           stream: null,
+          unload: () => engine.unload(),
+          fellBack: () => false,
+        };
+      },
+    };
+  if (model.runtime === 'mediapipe-audio')
+    return {
+      threadable: false,
+      rig: () => {
+        const engine = new SherpaEngine(spawn<SherpaWorkerLike>('fy-bench-google'), id);
+        return {
+          preload: () => engine.preload(),
+          consumeLoadMs: () => engine.consumeLoadMs(),
+          decode: async () => undefined,
+          // Feed the clip in real time, 0.25 s at a time (the dictation session's pump), then time `close()`.
+          stream: async samples => {
+            const piece = 4_000;
+            const stream = engine.openStream({ onPartial: () => undefined, onFailure: () => undefined });
+            const began = performance.now();
+            for (let offset = 0; offset < samples.length; offset += piece) {
+              stream.push(samples.slice(offset, offset + piece));
+              await sleep(250);
+            }
+            const stopped = performance.now();
+            await stream.close();
+            return { finishMs: performance.now() - stopped, totalMs: performance.now() - began };
+          },
           unload: () => engine.unload(),
           fellBack: () => false,
         };
@@ -384,6 +416,7 @@ async function runOne(
       fellBack: rig.fellBack(),
     };
   } catch (error) {
+    say(`  failed: ${error instanceof Error ? error.message : String(error)}`);
     return { ...empty(base), failure: failureCode(error), fellBack: rig.fellBack() };
   } finally {
     rig.unload();

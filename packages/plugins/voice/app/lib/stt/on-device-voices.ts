@@ -7,6 +7,7 @@
  * never a branch in the hook or the screen.
  */
 
+import { browserGoogleVoice, type GoogleAssets } from './google-voice.ts';
 import { ON_DEVICE_MODELS, type OnDeviceModel, type SpeechRuntimeId } from './model-catalog.ts';
 import type { OnDeviceVoice } from './on-device-voice.ts';
 import {
@@ -54,6 +55,8 @@ export class OnDeviceVoices {
 /** Where the build put every runtime's worker and binary (bound in `src/main.tsx`). */
 export interface SpeechAssets extends ParakeetAssets {
   readonly sherpa?: SherpaAssets;
+  /** The Google transcriber's worker and MediaPipe WebAssembly runtime; absent from a build without them. */
+  readonly google?: GoogleAssets;
   /** Vosk's worker and WebAssembly runtime; absent from a build without them. */
   readonly vosk?: VoskAssets;
   /** The Whisper worker and the transformers.js runtime binary; absent from a build without them. */
@@ -76,6 +79,8 @@ export function browserOnDeviceVoices(
     registry?.runtimeInUse(model.runtime, model.id) ?? false;
   const voiceFor = (model: OnDeviceModel): OnDeviceVoice => {
     if (model.runtime === 'onnxruntime-web') return parakeet;
+    if (model.runtime === 'mediapipe-audio')
+      return browserGoogleVoice(global, assets?.google ?? null, runtimeInUse(model));
     if (model.runtime === 'vosk-wasm') return browserVoskVoice(global, assets?.vosk ?? null);
     if (model.runtime === 'transformers-js')
       return browserWhisperVoice(global, assets?.whisper, model, runtimeInUse(model), planner);

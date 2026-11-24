@@ -71,10 +71,12 @@ export const UNLISTED_RELEASE_FILES: readonly string[] = [
 const DEFERRED_RELEASE_FILE = /^assets\/(?:ort-wasm-simd-threaded|asr)[A-Za-z0-9._-]*\.wasm$/u;
 /** Vosk's WebAssembly runtime (~3 MB), deferred for the same reason: only a Vosk install fetches it. */
 const DEFERRED_VOSK_RUNTIME = /^assets\/vosk-[A-Za-z0-9_-]+\.wasm$/u;
+/** MediaPipe's audio runtime (~22 MB), the Google transcriber's: only an install of that engine fetches it. */
+const DEFERRED_MEDIAPIPE_RUNTIME = /^assets\/audio_wasm_module_internal-[A-Za-z0-9_-]+\.wasm$/u;
 
 /** Whether the keeper leaves this listed file to be fetched, verified, when something asks for it. */
 export const isDeferredReleaseFile = (path: string): boolean =>
-  DEFERRED_RELEASE_FILE.test(path) || DEFERRED_VOSK_RUNTIME.test(path);
+  DEFERRED_RELEASE_FILE.test(path) || DEFERRED_VOSK_RUNTIME.test(path) || DEFERRED_MEDIAPIPE_RUNTIME.test(path);
 
 const SEGMENT = '[A-Za-z0-9_-][A-Za-z0-9._-]*';
 /** A relative site path: no leading slash, no `.`/`..` segment, nothing a URL would re-interpret. */
