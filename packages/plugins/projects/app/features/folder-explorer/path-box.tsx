@@ -48,7 +48,7 @@ export function PathBox({ current, refusal, onGo, onRestore, lead }: PathBoxProp
         <div className="relative min-w-0 flex-1">
           <input
             type="text"
-            className="kt-input mono min-h-control w-full min-w-0 pe-14"
+            className="kt-input mono min-h-control w-full min-w-0 pe-16"
             aria-label="Folder path"
             aria-invalid={refusal === null ? undefined : true}
             aria-describedby={refusal === null ? undefined : errorId}
@@ -69,7 +69,7 @@ export function PathBox({ current, refusal, onGo, onRestore, lead }: PathBoxProp
               }
             }}
           />
-          <Button type="submit" size="sm" className="absolute end-0 top-0 !h-full rounded-s-none border-y-0 border-e-0">
+          <Button type="submit" className="absolute end-0 top-0 !h-full rounded-s-none border-y-0 border-e-0">
             Go
           </Button>
         </div>
