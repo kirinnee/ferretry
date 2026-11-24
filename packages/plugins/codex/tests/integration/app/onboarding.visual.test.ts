@@ -255,7 +255,9 @@ describe("r11 O5: the sign-in page is Codex's own (production PanelSlot, the rea
       'auth.example.test/oauth/authorize?response_type=code&state=unique-3c9d1e7a',
     );
     expect(await tab.locator('[data-sign-in-steps]').count()).toBe(1);
-    expect(await tab.locator('textarea').count()).toBe(1);
+    // The paste field is Claude's own: one single-line masked input, never a textarea.
+    expect(await tab.locator('[data-codex-login-callback] input[type="password"]').count()).toBe(1);
+    expect(await tab.locator('textarea').count()).toBe(0);
     // The sign-in was started ONCE, link method, for the login the add made; the idle replacement panel never drew.
     const started = await starts(tab);
     expect(started).toHaveLength(1);
