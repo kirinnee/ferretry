@@ -4,16 +4,15 @@
  * Reject by the owner); Create raises it as the `create-spend` source and reads the owner's answer back. Nothing here
  * can spend: it says go, ask or refuse, and the caller does the one thing it says.
  */
-import { createHash } from 'node:crypto';
 import { type AskDraft, type AsksApi, type EntryId, EntryIdSchema, type SourceKey } from '@ferretry/core-asks/contract';
 import type { StatePort } from '@ferretry/kernel/contract';
 import {
   CREATE_SPEND_SOURCE,
-  type GenerateImageInput,
   type MicroUsd,
   type ResolvedCreateConfig,
   SPEND_LEDGER,
   type SpendRecord,
+  type SpendTool,
   usdWords,
 } from '../../contract/index.ts';
 
@@ -22,14 +21,6 @@ const MICRO = 1_000_000;
 const LEDGER_WINDOW_BYTES = 4 * 1024 * 1024;
 
 const SOURCE = CREATE_SPEND_SOURCE as SourceKey;
-
-/** A request's identity: what it asks for, nothing about who. The same words on the same model and size are one request. */
-export function requestDigest(input: GenerateImageInput): string {
-  return createHash('sha256')
-    .update(['generate_image', input.model, input.size, input.prompt].join('\0'))
-    .digest('hex')
-    .slice(0, 16);
-}
 
 /** `YYYY-MM-DD` of an instant in an IANA zone. */
 export function dayOf(instant: Date, timeZone: string): string {
@@ -105,13 +96,18 @@ export type Approval =
 export type SpendAsks = Pick<AsksApi, 'raise' | 'answers'>;
 
 export interface AskDetails {
+  readonly tool: SpendTool;
   readonly ferret: string;
   readonly request: string;
   readonly earlierSpends: number;
   readonly cost: MicroUsd;
   readonly model: string;
+  /** What is being bought, in the owner's words: `one picture`, `a voiceover`. */
+  readonly what: string;
   readonly threshold: MicroUsd;
-  /** The ferret's own words for the picture, shown so the owner knows what they are paying for. */
+  /** `Prompt` or `Text`: the heading over the ferret's own words. */
+  readonly promptLabel: string;
+  /** The ferret's own words for it, shown so the owner knows what they are paying for. */
   readonly prompt: string;
 }
 
@@ -130,14 +126,14 @@ export async function approvalFor(asks: SpendAsks, details: AskDetails): Promise
   const shown = details.prompt.length > PROMPT_SHOWN ? `${details.prompt.slice(0, PROMPT_SHOWN - 1)}…` : details.prompt;
   const draft: AskDraft = {
     source: SOURCE,
-    ref: { tool: 'generate_image', request: details.request },
+    ref: { tool: details.tool, request: details.request },
     entry: entry.data as EntryId,
     kind: 'permission',
-    subject: `Spend ${usdWords(details.cost)} on one picture (${details.model})?`,
-    why: `A ferret asked for one picture that costs ${usdWords(details.cost)}, over your ${usdWords(details.threshold)} limit for one creative call. Nothing is spent until you approve.`,
+    subject: `Spend ${usdWords(details.cost)} on ${details.what} (${details.model})?`,
+    why: `A ferret asked for ${details.what} that costs ${usdWords(details.cost)}, over your ${usdWords(details.threshold)} limit for one creative call. Nothing is spent until you approve.`,
     howToResolve:
       'Approve to let the ferret make it, or reject to refuse. Approving spends once; asking again asks again.',
-    context: `Prompt:\n${shown}`,
+    context: `${details.promptLabel}:\n${shown}`,
     raisedBy: { kind: 'daemon' },
     ferret: details.ferret,
     blocking: true,

@@ -1,18 +1,27 @@
 import { describe, expect, test } from 'bun:test';
 import { exactNetworkHosts } from '../../../../core/kernel/host/secrets.ts';
-import { isFalCdn } from '../../daemon/lib/generate-image.ts';
+import { isFalCdn } from '../../daemon/lib/paid-call.ts';
 import manifest from '../../manifest.ts';
 
 describe('what Create may reach and spend', () => {
-  test('one tool, no route, no verb: a ferret’s tool and nothing a browser can call', () => {
-    expect(manifest.actions.agentTools.map(tool => tool.name)).toEqual(['generate_image']);
+  test('four tools, no route, no verb: a ferret’s tools and nothing a browser can call', () => {
+    expect(manifest.actions.agentTools.map(tool => tool.name)).toEqual([
+      'generate_image',
+      'generate_speech',
+      'generate_sfx',
+      'generate_music',
+    ]);
     expect('routes' in manifest.actions).toBe(false);
   });
 
-  test('the key is declared by name and can only be placed on fal’s two API hosts', () => {
-    expect(manifest.permissions?.secrets).toEqual(['FAL_KEY']);
+  test('the keys are declared by name and can only be placed on the API hosts, never on the CDN', () => {
+    expect(manifest.permissions?.secrets).toEqual(['FAL_KEY', 'ELEVENLABS_API_KEY']);
     // a wildcard entry lets no key out (docs/secrets.md): the CDN is fetched with none
-    expect(exactNetworkHosts(manifest.permissions?.network ?? [])).toEqual(['fal.run', 'api.fal.ai']);
+    expect(exactNetworkHosts(manifest.permissions?.network ?? [])).toEqual([
+      'fal.run',
+      'api.fal.ai',
+      'api.elevenlabs.io',
+    ]);
   });
 
   test('the ledger is private to the owner and the ask source is registered', () => {
