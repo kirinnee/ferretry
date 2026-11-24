@@ -1,4 +1,6 @@
 import type { WorkersPort } from '@ferretry/kernel/contract';
+import { fileURLToPath } from 'node:url';
+import type { HostCommand } from './child-speech-thread.ts';
 import type { SpeechReply, SpeechRequest } from '../lib/engine/protocol.ts';
 import type { ReplyReply, ReplyRequest } from '../lib/reply/protocol.ts';
 import type { RequestThread, ReplyThread, SpeechThread } from '../lib/engine/ports.ts';
@@ -75,3 +77,17 @@ export const startReplyThread = (workers: Pick<WorkersPort, 'start'>): ReplyThre
     'reply',
     'reply voice',
   ) as ReplyThread;
+
+/** The native host's program: the same module a compiled `fyd` embeds beside its entry as `speech-host.js`. */
+export const SPEECH_HOST_URL = new URL('../worker/speech-host.ts', import.meta.url);
+
+/**
+ * What to run for one native engine's host. From source the daemon's own runtime (`bun`) runs the module; compiled, the
+ * executable is `fyd` itself and its `--plugin-child` mode runs the embedded program (`packages/core/kernel/host/plugin-child.ts`).
+ * Either way the program is `process.execPath`, which the manifest's `$daemon` spawn permission allows and nothing else.
+ */
+export function nativeHostCommand(engine: 'speech' | 'reply'): HostCommand {
+  return import.meta.url.endsWith('.ts')
+    ? { program: process.execPath, args: [fileURLToPath(SPEECH_HOST_URL), engine] }
+    : { program: process.execPath, args: ['--plugin-child', 'speech-host', engine] };
+}

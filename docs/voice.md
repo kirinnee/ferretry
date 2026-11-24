@@ -371,11 +371,13 @@ Voice › **Voice mode** installs, shows the state, removes, and offers **Talk t
   onnxruntime-web in the same thread, because sherpa's WebAssembly build has no voice-detector entry point. Where this machine can run it,
   the **native** sherpa-onnx library (fetched at Install, pinned by size and SHA-256 and hashed again before every load) runs
   instead; see the next bullet and the declared gaps in `docs/design/voice-modes.md` §2.3.1.
-- **The native engine runs inside the daemon.** Its addon is loaded into the daemon process (a Bun Worker thread,
-  `process.dlopen`), so a native crash kills the whole `fyd`, and `fyd --check` loads it in the check process. A declared GAP:
-  moving it to a child process is the later real fix. The files are verified immediately before each load, but a program of
-  the same user could still swap one between that check and the load (such a program can already read the vault,
-  `docs/secrets.md`).
+- **The native engine runs in a child process of the daemon, one per loaded engine** (`daemon/worker/speech-host.ts`), so a native
+  crash (a fault in sherpa-onnx or onnxruntime) ends that engine and not `fyd`: it reports itself stopped in Settings, the turn
+  fails cleanly, the next use starts a new child, and three stops in a row fall back to WebAssembly. The child is sealed with an
+  environment of `{}`, speaks in bounded frames with a deadline on every call, and is ended on unload, idle and daemon stop;
+  `fyd --check` loads the library in a throwaway child as well. The files are verified immediately before each spawn, but a
+  program of the same user could still swap one between that check and the load (such a program can already read the vault,
+  `docs/secrets.md`). The design and the declared gaps are `docs/design/voice-modes.md` §2.3.1.
 - **Install** (`POST /v1/voice/engine/install`, answers 202; Settings › Voice › Voice mode) downloads seven pinned
   files, **698,905,830 bytes** in all, into `state/voice/models/parakeet-tdt-0.6b-v3/`: Parakeet's three graphs and
   vocabulary and Silero (Hugging Face, by commit), and the two WebAssembly runtimes (jsDelivr, by version). Each file
@@ -392,8 +394,8 @@ Voice › **Voice mode** installs, shows the state, removes, and offers **Talk t
 - **Memory.** The models load on the first call and the thread ends **10 idle minutes** after the last one, which
   returns its memory. A load is refused (`no_memory`) when the machine's available memory is under the files plus
   1.5 GB.
-  The worker is a thread **inside the daemon process**, not a child: a process-level out-of-memory kill takes the daemon
-  down with it, and the free-memory check reads the machine's free memory (`os.freemem()`), which ignores a cgroup
+  The WebAssembly worker is a thread **inside the daemon process**: a process-level out-of-memory kill takes the daemon
+  down with it (the native engine is a child, so one takes only that child), and the free-memory check reads the machine's free memory (`os.freemem()`), which ignores a cgroup
   `MemoryMax` the daemon may be running under.
 - **The port.** Other plugins use `VoiceApi.engine`: `transcribe(samples)` (16 kHz mono, one whole take; returns the
   text and the real-time factor) and `detectSpeech(samples)` (spans in samples). No route takes audio.

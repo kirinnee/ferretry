@@ -42,7 +42,7 @@ describe('the reply voice routes', () => {
     expect(remove?.capability).toMatchObject({ capability: 'voice', axis: 'configure' });
     expect([install?.caller, remove?.caller]).toEqual(['person', 'person']);
     expect(routes.every(candidate => candidate.noStore === true)).toBe(true);
-    expect(manifest.workers).toEqual(['speech', 'reply']);
+    expect(manifest.workers).toEqual(['speech', 'reply', 'speech-host']);
   });
 
   test('the files it downloads come only from hosts the manifest declares', () => {

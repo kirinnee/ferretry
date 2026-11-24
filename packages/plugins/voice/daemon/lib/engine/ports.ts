@@ -31,7 +31,8 @@ export interface RequestThread<Call, Reply> {
   /** Sends one request and answers its reply; rejects when the thread ends first. */
   call(request: Call, transfer?: readonly ArrayBuffer[]): Promise<Reply>;
   terminate(): Promise<void>;
-  onEnd(listener: () => void): void;
+  /** Called once when the thread ends. A host that ended on its own says why in a plain sentence; one that was ended on purpose says nothing. */
+  onEnd(listener: (stopped?: string) => void): void;
 }
 
 /** One running speech thread, as the engine drives it. */

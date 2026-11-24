@@ -42,7 +42,7 @@ describe('the machine speech engine routes', () => {
   test('the hosts Install may reach are declared, and no file is fetched from anywhere else', () => {
     const declared = manifest.permissions?.network ?? [];
     for (const entry of ENGINE_HOSTS) expect(declared).toContain(entry);
-    expect(manifest.workers).toEqual(['speech', 'reply']);
+    expect(manifest.workers).toEqual(['speech', 'reply', 'speech-host']);
     expect(
       ENGINE_FILES.every(file => ['huggingface.co', 'cdn.jsdelivr.net'].includes(new URL(file.url).hostname)),
     ).toBe(true);

@@ -27,3 +27,4 @@ packages/plugins/conversation/app/render/fy-render-map-model.ts  # app side: a m
 packages/plugins/conversation/app/render/fy-render-map-model.ts::readMap  <- packages/plugins/conversation/app/render/fy-render-map.tsx  # the map renderer, in the viewer's own browser
 
 packages/app/src/prose/highlight.ts  # highlight.js's YAML grammar: it colours code for display and never builds a value from the text
+packages/core/kernel/host/plugin-child.ts  # loads a declared worker program by the embedded name the REGISTRY gave it (a bare stem matched against it, never a path or text read from disk), so it cannot be pointed at a .yaml
