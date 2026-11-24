@@ -90,7 +90,7 @@ import { setupHandoffUrl, setupPageUrl } from './setup-handoff.ts';
 import { SetupHandoffPanel, type SetupSharePort } from './setup-handoff-panel.tsx';
 
 const SHELL =
-  'mx-auto flex min-h-full w-full max-w-[880px] flex-col gap-3 py-5 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-8';
+  'mx-auto flex min-h-full w-full max-w-[var(--fy-reading-w)] flex-col gap-3 py-5 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:py-8';
 
 interface OnboardingPairingHost {
   /** The daemon answered and this browser is paired; the journey is finished. */

@@ -445,7 +445,7 @@ describe('the setup flow', () => {
     expect(view.container.querySelector('[data-step-back]')).toBeNull();
     await next();
     expect(pageKey()).toBe('fake-pack.welcome');
-    expect(progressText()).toBe('Fake Pack · page 1 of 3');
+    expect(progressText()).toBe('Fake Pack · page 2 of 6');
     await next();
     expect(pageKey()).toBe('fake-pack.choose');
     await press('[data-step-back]');
@@ -468,7 +468,7 @@ describe('the setup flow', () => {
     await next(); // welcome -> choose, which sees mode "everything" and skips
     await settle();
     expect(pageKey()).toBe('fake-pack.finish');
-    expect(progressText()).toBe('Fake Pack · page 2 of 2');
+    expect(progressText()).toBe('Fake Pack · page 3 of 5');
     // Back never lands on the skipped page.
     await press('[data-step-back]');
     expect(pageKey()).toBe('fake-pack.welcome');
@@ -1689,7 +1689,7 @@ describe('the flow ends in project setup (C59 O8-13)', () => {
     await next();
     await settle();
     expect(pageKey()).toBe('projects.folders');
-    expect(progressText()).toBe('Projects · page 1 of 1');
+    expect(progressText()).toBe('Projects · page 2 of 2');
     expect(buttonText('Skip for now')).toBeDefined();
     expect(buttonText('Later')).toBeUndefined();
   });
@@ -1853,7 +1853,7 @@ describe('Connect GitHub never pulls a finished setup back (O9-10)', () => {
     await next();
     await settle();
     expect(pageKey()).toBe('projects.github');
-    expect(progressText()).toBe('Projects · page 2 of 2');
+    expect(progressText()).toBe('Projects · page 3 of 3');
   });
 
   it('a machine with a project still offers it to a run that drew an earlier page', async () => {

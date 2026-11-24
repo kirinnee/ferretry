@@ -320,6 +320,40 @@ const shot = async (tab: Page, variant: Variant, name: string): Promise<void> =>
   });
 };
 
+/**
+ * C59 Q7 (O8-2): ONE desktop reading column per page type. The page's words are measured inside its gutters and compared with the
+ * two tokens the step frame owns (`--fy-reading-w`, `--fy-reading-w-wide`): a single-column page (get-started, pairing, a setup
+ * page with no preview) is the first, a page with a pinned preview beside it the second. Only a desktop is measured.
+ */
+const readingWidths: { key: string; kind: 'single' | 'wide'; w: number }[] = [];
+const assertReadingWidth = async (tab: Page, variant: Variant, key: string): Promise<void> => {
+  if (variant.width < 1100) return;
+  const read = await tab.evaluate(() => {
+    const column = document.querySelector<HTMLElement>(
+      '.fy-spf__page, [data-onboarding="setup"], main[data-pairing-stage]',
+    );
+    if (column === null) return null;
+    const style = getComputedStyle(column);
+    const token = (name: string): number =>
+      Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+    return {
+      content: column.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight),
+      wide: column.classList.contains('fy-spf__page') && style.display === 'grid',
+      single: token('--fy-reading-w'),
+      two: token('--fy-reading-w-wide'),
+    };
+  });
+  expect(read, `${key}: a reading column`).not.toBeNull();
+  if (read === null) return;
+  const kind = read.wide ? 'wide' : 'single';
+  readingWidths.push({ key, kind, w: read.content });
+  const gutter = 32;
+  expect(read.content, `${key}: the ${kind} reading column is the step frame's token minus its gutters`).toBeCloseTo(
+    (read.wide ? read.two : read.single) - gutter,
+    0,
+  );
+};
+
 /** What every flow page must satisfy, whatever it is. */
 const inspect = async (
   tab: Page,
@@ -358,17 +392,14 @@ const inspect = async (
           now: Number(bar?.getAttribute('aria-valuenow')),
           max: Number(bar?.getAttribute('aria-valuemax')),
           states: segments.map(segment => segment.dataset.state ?? ''),
+          ids: segments.map(segment => segment.dataset.segment ?? ''),
           label: here?.textContent ?? '',
-          fill:
-            here === undefined
-              ? Number.NaN
-              : Number.parseFloat(getComputedStyle(here).getPropertyValue('--fy-sp-fill')),
         };
       })(),
     };
   }, CHROME);
-  // ONE counter meaning on every page: "<segment> · n of m" says what the bar draws (one lit segment, the ones before it
-  // done, the current one filled n of m), and n is never past m.
+  // ONE counter meaning on every page: "<stage> · page n of m" says what the bar draws: m segments, one per page, the lit one
+  // the n-th, the ones before it done. So the words and the bar are one reading, and n is never past m.
   const said = /^(.*) · page (\d+) of (\d+)$/u.exec(read.counter.text);
   expect(said, `${key}: the counter reads '<segment> · page n of m' (read '${read.counter.text}')`).not.toBeNull();
   const [, , saidN = '', saidM = ''] = said ?? [];
@@ -387,16 +418,17 @@ const inspect = async (
     `${key}: the bar reads left to right (${read.counter.states.join(',')})`,
   ).toBe(true);
   expect(read.counter.text.startsWith(read.counter.label), `${key}: the counter names the lit segment`).toBe(true);
-  expect(read.counter.fill, `${key}: the lit segment is filled n of m`).toBeCloseTo(
-    read.counter.now / read.counter.max,
-    3,
-  );
+  expect(read.counter.states.length, `${key}: the bar has one segment per counted page (m)`).toBe(read.counter.max);
+  expect(at + 1, `${key}: the lit segment is the n-th`).toBe(read.counter.now);
   if (shotsDir !== '')
     appendFileSync(
       join(shotsDir, `${variant.name}-counters.txt`),
-      `${key}: ${read.counter.text} [${read.counter.states.length} segments]\n`,
+      `${key}: ${read.counter.text} [${read.counter.states.length} segments] ${read.counter.ids.join(' ')}\n`,
     );
-  seen.counters.push(`${variant.name}:${key}: ${read.counter.text} [${read.counter.states.length} segments]`);
+  seen.counters.push(
+    `${variant.name}:${key}: ${read.counter.text} [${read.counter.states.length} segments] ${read.counter.ids.join(' ')}`,
+  );
+  await assertReadingWidth(tab, variant, key);
   expect(read.chrome, `${key}: no sidebar or app chrome`).toBe(0);
   expect(read.unsaved, `${key}: no "answer was not saved" notice`).toBe(0);
   expect(read.overflow, `${key}: no sideways scroll`).toBeLessThanOrEqual(0);
@@ -454,6 +486,7 @@ const inspect = async (
 
 /** The get-started pages (install, daemon, open): 44px choices and buttons, the command fully on screen, nothing under the footer. */
 const stagePage = async (tab: Page, variant: Variant, key: string): Promise<void> => {
+  await assertReadingWidth(tab, variant, key);
   // The proof picture: the page scrolled to its very end (the first-screen shot cannot show what the footer covers).
   if (shotsDir !== '') {
     await tab.evaluate(() => {
@@ -678,15 +711,23 @@ const expectReady = async (tab: Page, daemon: string, tool: string, index: numbe
   );
 };
 
-const counterOf = async (tab: Page): Promise<string> =>
-  (await tab.locator('.fy-sp-progress__text').textContent()) ?? '';
+/** The counter's words and the bar, read as numbers: "page n of m" and how many segments the bar draws. */
+const counterNumbers = async (tab: Page): Promise<{ n: number; of: number; bar: number }> => {
+  const words = (await tab.locator('.fy-sp-progress__text').textContent()) ?? '';
+  const read = /page (\d+) of (\d+)$/u.exec(words);
+  return {
+    n: Number(read?.[1]),
+    of: Number(read?.[2]),
+    bar: await tab.locator('[data-step-progress] [data-segment]').count(),
+  };
+};
 
 /** The counters one variant printed so far, as `{ key, n, of, bar }` (see `inspect`). */
 const countersOf = (variant: Variant): { key: string; n: number; of: number; bar: number }[] =>
   seen.counters
     .filter(line => line.startsWith(`${variant.name}:`))
     .map(line => {
-      const read = /^[^:]+:(\S+): .* · page (\d+) of (\d+) \[(\d+) segments\]$/u.exec(line);
+      const read = /^[^:]+:(\S+): .* · page (\d+) of (\d+) \[(\d+) segments\]/u.exec(line);
       return { key: read?.[1] ?? '', n: Number(read?.[2]), of: Number(read?.[3]), bar: Number(read?.[4]) };
     });
 
@@ -966,6 +1007,7 @@ describe('the first run, end to end', () => {
         await tab.getByText('Use this link').click();
         await tab.locator('[data-pair-confirm]').waitFor();
         await shot(tab, variant, 'pair-confirm');
+        await assertReadingWidth(tab, variant, 'pair-confirm');
         await measureButton(tab, variant, 'Pair this device', '[data-pair-confirm]', 2);
         // Item 4: "Not now" is a real, bordered 44px button, not an underlined text link.
         const notNow = await tab.getByRole('button', { name: 'Not now' }).evaluate(node => {
@@ -1116,10 +1158,9 @@ describe('the first run, end to end', () => {
         // ── Claude: installed is never asked; Choose what to import ─────────────────────────────────────────────────
         walked.push('claude-code.import-choice');
         await inspect(tab, variant, 'claude-code.import-choice');
-        // Item 1: the count is known from the answer BEFORE the next page: Import everything (the default) will show 6 pages (sign-in first), not 11.
-        expect(await counterOf(tab), 'Claude: Import everything counts the pages it will show').toBe(
-          'Claude Code · page 2 of 6',
-        );
+        // Q7: the count holds only the pages known at this point: Import everything (the default) shows no checklist page, so the
+        // total has none of the five; choosing "Choose" below ADDS them (the total grows by five, this page's place stays).
+        const everything = await counterNumbers(tab);
         await shot(tab, variant, 'claude-code.import-choice');
         // Back from here lands on the sign-in, which is already done and so passes itself over (`not-needed`): there is no back-and-forth to walk to it.
         await laterThenBack(tab, A, 'claude-code.import-choice');
@@ -1143,10 +1184,11 @@ describe('the first run, end to end', () => {
         expect(await tab.locator('label[data-choice="choose"]').getAttribute('data-selected'), 'Enter chose it').toBe(
           'true',
         );
-        // Item 1 (continued): Enter picked Choose, so the count is already 9 on this very page, not a page later.
-        expect(await counterOf(tab), 'Claude: Choose counts all of its pages as soon as it is picked').toBe(
-          'Claude Code · page 2 of 11',
-        );
+        // Enter picked Choose: the five checklist pages join the total on this very page, and the place does not move.
+        expect(
+          await counterNumbers(tab),
+          'Claude: Choose adds its five checklist pages to the total as soon as it is picked',
+        ).toEqual({ n: everything.n, of: everything.of + 5, bar: everything.bar + 5 });
         await tab.locator('label[data-choice="choose"]').click();
         await shot(tab, variant, 'claude-code.import-choice-chosen');
         await next(tab, 'claude-code.import-settings');
@@ -1518,52 +1560,37 @@ describe('the first run, end to end', () => {
         await endHeadingInView(tab, variant, 'voice -> end');
         expect(Object.keys(await ledgerOf(tab))).toContain('voice.voice');
 
-        // ── ONE counter model for the whole run (item 1) ──
-        const run = countersOf(variant);
-        expect(
-          new Set(run.map(counter => counter.bar)).size,
-          `the bar has the same number of segments on every page (${run.map(counter => counter.bar).join(',')})`,
-        ).toBe(1);
-        // A tool's sign-in comes BEFORE its import choice, so it counts every page (the mode is not answered yet): it is left out
-        // of the "n never changes" rows below, which start at the choice.
-        const answered = run.filter(counter => !['claude-code.sign-in', 'codex.sign-in'].includes(counter.key));
-        for (const plugin of ['codex', 'warden', 'lessons'])
+        // ── ONE reading width per page type (Q7) ──
+        if (variant.width >= 1100) {
+          for (const kind of ['single', 'wide'] as const)
+            expect(
+              new Set(readingWidths.filter(read => read.kind === kind).map(read => read.w)).size,
+              `one reading width for every ${kind} page (${readingWidths
+                .filter(read => read.kind === kind)
+                .map(read => `${read.key}=${read.w}`)
+                .join(', ')})`,
+            ).toBe(1);
           expect(
-            new Set(answered.filter(counter => counter.key.startsWith(`${plugin}.`)).map(counter => counter.of)).size,
-            `${plugin}: n never changes while its answers stand`,
-          ).toBe(1);
-        expect(
-          answered.filter(counter => counter.key.startsWith('codex.')).map(counter => [counter.n, counter.of]),
-          'Codex: Import everything walks pages 2 to 6 of 6 after its sign-in (the last is Codex is ready)',
-        ).toEqual([
-          [2, 6],
-          [3, 6],
-          [4, 6],
-          [5, 6],
-          [6, 6],
-        ]);
-        expect(
-          new Set(
-            run
-              .filter(
-                counter =>
-                  counter.key.startsWith('claude-code.') &&
-                  !['claude-code.sign-in', 'claude-code.import-choice'].includes(counter.key),
-              )
-              .map(counter => counter.of),
-          ).size,
-          'Claude: after Choose is picked n stays 11 on every later page',
-        ).toBe(1);
-        expect(
-          run
-            .filter(counter => ['onboarding.appearance', 'layouts.layout', 'voice.voice'].includes(counter.key))
-            .map(counter => [counter.n, counter.of]),
-          'This device: pages 1, 2, 3 of 3',
-        ).toEqual([
-          [1, 3],
-          [2, 3],
-          [3, 3],
-        ]);
+            readingWidths.some(read => read.key === 'pair-confirm'),
+            'the pairing page was measured',
+          ).toBe(true);
+          expect(
+            readingWidths.some(read => read.kind === 'wide'),
+            'a page with a preview was measured',
+          ).toBe(true);
+        }
+
+        // ── ONE counter model for the whole run (item 1): the number never goes backwards, and the bar says the same ──
+        const run = countersOf(variant);
+        for (const [index, counter] of run.entries()) {
+          expect(counter.of, `${counter.key}: the bar has m segments`).toBe(counter.bar);
+          expect(counter.n, `${counter.key}: n is not past m`).toBeLessThanOrEqual(counter.of);
+          const before = run[index - 1];
+          if (before !== undefined)
+            expect(counter.n, `${before.key} -> ${counter.key}: going forward n only goes up`).toBeGreaterThan(
+              before.n,
+            );
+        }
 
         // ── the end page ────────────────────────────────────────────────────────────────────────────────────────────
         expect(await tab.locator(CHROME).count(), 'the end page has no app chrome').toBe(0);
@@ -1953,9 +1980,12 @@ describe('the Connect GitHub step of the setup flow', () => {
             expect(await tab.locator('[data-step-later]').innerText(), 'Skip for now is on the page').toBe(
               'Skip for now',
             );
-            expect(await counterOf(tab), 'the counter counts Connect GitHub as a page of Projects').toMatch(
-              /page 1 of 1$/u,
-            );
+            const github = await counterNumbers(tab);
+            expect(
+              github.n,
+              'Connect GitHub is the last page the counter reaches (an offer counts only when it is on screen)',
+            ).toBe(github.of);
+            expect(github.bar, 'the bar has one segment per page').toBe(github.of);
             expect(
               await tab.locator('[data-projects-step="github"] input[type="checkbox"]').count(),
               'no project made: no tick',
@@ -2089,7 +2119,7 @@ describe('the gaps the gate found, now closed', () => {
     expect(seen.pageErrors).toEqual([]);
   });
   it('only the expected routes went unanswered (a gap in the fake, not in the product)', () => {
-    expect([...new Set(seen.unanswered)].sort()).toEqual(['GET /v1/layouts/current']);
+    expect([...new Set(seen.unanswered)].sort()).toEqual(['GET /v1/input-requests', 'GET /v1/layouts/current']);
   });
   it('the Machine name page draws ONE name form (the shell strip draws a second above the flow)', () => {
     expect(seen.nameForms).toBe(1);

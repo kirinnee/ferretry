@@ -49,7 +49,7 @@ const isAnsweredBefore = (step: FlowStep, later: ReadonlySet<string>): boolean =
   step.phase === 'daemon' ? step.state !== undefined && step.state !== 'pending' : later.has(step.key);
 
 /** "Which AI do you want to use?": its answer (the pick) is memory of one run, never stored (see `answeredBefore`). */
-const AGENTS_KEY = 'onboarding.agents';
+export const AGENTS_KEY = 'onboarding.agents';
 
 /**
  * The keys of the pages answered before the run starts.
@@ -234,68 +234,79 @@ export function applyPicked(
   return sameOf(marks, state.notNeeded) && sameOf(aside, state.aside) ? state : { ...state, notNeeded: marks, aside };
 }
 
-/** The progress bar's one segment for the whole client phase (every plugin's client pages read as "This device"). */
-const DEVICE_SEGMENT = { id: 'device', label: 'This device' } as const;
+/** The bar's label for every client page: they read as one stage, "This device". */
+const DEVICE_LABEL = 'This device';
 
-/** Device pages of these plugins are not "This device": project setup (the flow's last page) is its own segment, named by its group. */
+/** Device pages of these plugins are not "This device": project setup (the flow's last page) is named by its own group. */
 const OWN_DEVICE_SEGMENT: ReadonlySet<string> = new Set(['projects']);
 
 export interface ProgressRead {
   readonly segments: readonly { readonly id: string; readonly label: string }[];
+  /** The id of the segment (page) on screen: the key of the page. */
   readonly current: string;
-  /** The place of the page on screen among the segment's pages that will be SHOWN. */
+  /** The place of the page on screen among the pages counted so far. */
   readonly step: number;
-  /** The segment's pages that will be shown (see `progressOf`). */
+  /** The pages counted so far (the ones walked, this one, and the ones known to come). */
   readonly of: number;
-  /** The counter is the current segment's own pages, so the bar fills that segment `step` of `of` (see `StepProgress`). */
-  readonly fills: true;
+  /** Every segment is one page, so the words say "page n of m" (see `StepProgress`). */
+  readonly pages: true;
 }
 
 /**
- * The bar for the page on screen, in ONE model for the whole run:
- *   - THE BAR is the run's segments: one per plugin that has a page this run does not already hold an answer for, then one
- *     for this device. Its count never changes while the run goes (a segment whose pages all pass over stays in it).
- *   - THE WORDS are "<segment> · page i of n": n counts the segment's pages that WILL BE SHOWN, i is the page on screen's place
- *     among them. A page passed over (it said so, or gave up), a page answered before the run, and a page the answers already
- *     given foresee passing over (`foreseen`, see foresight.ts) are never counted, so n shrinks only when a page learns it is
- *     not needed and grows back only when an answer changes. The page on screen always counts.
+ * The counter for the page on screen: ONE reading for the words and the bar. The bar has one segment per counted page, so
+ * "page n of m" is the lit segment's place among m segments, and the two can never disagree.
+ *   - n is the pages the person walked through (the trail, minus any that passed themselves over) plus this one: going
+ *     forward it is always one more than before, and only Back lowers it.
+ *   - m is n plus the pages known to come: the ones after this page that are not answered, not passed over and not in
+ *     `unknown` (the pages the answers so far foresee passing over, plus the pages whose need the person has not decided yet:
+ *     a harness not picked yet, an import mode not chosen yet). So m never falls below n; a later answer that adds pages
+ *     grows it, and a page that learns it is not needed is simply never counted.
+ *   - an OFFER page (see `isOffer`) never counts, unless it is the page on screen: it is held out to a run that goes on anyway.
+ * The page on screen always counts.
  */
 export function progressOf(
   flow: Flow,
   pages: readonly FlowStep[],
   answered: ReadonlySet<string>,
   passed: ReadonlySet<string>,
-  foreseen: ReadonlySet<string>,
+  unknown: ReadonlySet<string>,
   at: string,
-  leftOut: ReadonlySet<string> = NONE,
+  trail: readonly string[],
 ): ProgressRead | undefined {
   const here = pages.find(page => page.key === at);
   if (here === undefined) return undefined;
-  const asked = pages.filter(page => !answered.has(page.key));
-  const segmentOf = (step: FlowStep): string =>
-    step.phase === 'client' && !OWN_DEVICE_SEGMENT.has(step.plugin) ? DEVICE_SEGMENT.id : step.plugin;
+  const byKey = new Map(pages.map(page => [page.key, page] as const));
+  const walked = trail
+    .map(key => byKey.get(key))
+    .filter(
+      (page): page is FlowStep => page !== undefined && page.key !== at && !passed.has(page.key) && !isOffer(page.key),
+    );
+  const seen = new Set(walked.map(page => page.key));
+  const index = pages.indexOf(here);
+  const ahead = pages
+    .slice(index + 1)
+    .filter(
+      page =>
+        !seen.has(page.key) &&
+        !answered.has(page.key) &&
+        !passed.has(page.key) &&
+        !unknown.has(page.key) &&
+        !isOffer(page.key),
+    );
   const labels = new Map<string, string>();
   for (const segment of flow.daemon) labels.set(segment.plugin, segment.group);
   for (const segment of flow.client)
     if (OWN_DEVICE_SEGMENT.has(segment.plugin)) labels.set(segment.plugin, segment.group);
-  const segments: { id: string; label: string }[] = [];
-  for (const page of asked) {
-    // A harness the person did not pick has no segment in the bar: its pages are never drawn.
-    if (leftOut.has(page.plugin)) continue;
-    const id = segmentOf(page);
-    if (!segments.some(segment => segment.id === id))
-      segments.push({ id, label: id === DEVICE_SEGMENT.id ? DEVICE_SEGMENT.label : (labels.get(id) ?? id) });
-  }
-  const id = segmentOf(here);
-  const shown = asked.filter(
-    page => segmentOf(page) === id && (page.key === at || !(passed.has(page.key) || foreseen.has(page.key))),
-  );
-  const place = shown.findIndex(page => page.key === at);
+  const labelOf = (page: FlowStep): string =>
+    page.phase === 'client' && !OWN_DEVICE_SEGMENT.has(page.plugin)
+      ? DEVICE_LABEL
+      : (labels.get(page.plugin) ?? page.plugin);
+  const counted = [...walked, here, ...ahead];
   return {
-    segments,
-    current: id,
-    step: Math.max(1, place + 1),
-    of: Math.max(1, shown.length),
-    fills: true,
+    segments: counted.map(page => ({ id: page.key, label: labelOf(page) })),
+    current: here.key,
+    step: walked.length + 1,
+    of: counted.length,
+    pages: true,
   };
 }

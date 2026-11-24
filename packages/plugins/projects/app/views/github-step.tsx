@@ -89,7 +89,7 @@ export function GithubStep({ step, client, connectAccount }: GithubStepProps) {
 
   const rows = accounts.accounts ?? [];
   return (
-    <div className="grid max-w-[660px] gap-md" data-projects-step="github">
+    <div className="grid gap-md" data-projects-step="github">
       <p className="m-0 text-ui text-muted">
         Ferrets push and sign commits as a GitHub account. Connect one or several here, or skip and do it later from
         Settings or a project&apos;s own page.
