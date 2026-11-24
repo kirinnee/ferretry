@@ -462,6 +462,13 @@ describe('an app opened cold by a notification tap', () => {
       await mounted.unmount();
     }
   });
+
+  it('opens nothing, and does not throw, when the machine in the address is not readable', () => {
+    window.history.replaceState(null, '', '/d/%E0%A4%A/ferrets/f/chat?ask=A7');
+    forgetColdAsk();
+    expect(takeColdAsk('m')).toBeUndefined();
+    expect(window.location.search).toBe('?ask=A7');
+  });
 });
 
 describe('a card that settles late', () => {

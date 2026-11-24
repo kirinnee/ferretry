@@ -141,11 +141,7 @@ export function InputModalHost({ daemon, client }: BackgroundViewProps) {
   // Join the queue while there is something to show; leave when there is not (a passive effect, so a closing card has
   // put the focus back before the next machine's modal opens).
   useEffect(() => (wants ? modalSeat.join(daemon) : undefined), [wants, daemon]);
-  const seated = useSyncExternalStore(
-    modalSeat.subscribe,
-    () => modalSeat.holds(daemon),
-    () => false,
-  );
+  const seated = useSyncExternalStore(modalSeat.subscribe, () => modalSeat.holds(daemon));
   const open = wants && seated;
 
   // The one plain signal that a modal is up (read by the parts of the app that must not move the screen under it).
