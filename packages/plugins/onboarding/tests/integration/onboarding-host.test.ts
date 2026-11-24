@@ -44,6 +44,7 @@ describe('onboarding daemon half', () => {
       'onboarding:appearance',
       'onboarding:agents',
       'onboarding:name',
+      'onboarding:permissions',
       'claude-code:harness',
       'logins:login',
       'shells:nix',
