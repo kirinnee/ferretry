@@ -27,16 +27,11 @@ export function ShellAccountSlot({ daemon, slot, fallback }: AccountSlotProps): 
     const next = holdsPicker(root.current, NEW_FERRET_ACCOUNT_SLOT);
     if (next !== picker) setPicker(next);
   });
-  // ONE reserved block from the first paint (O9-15): the loading bar, the roster's box with its wrapped status and quota rows,
-  // the typed fallback and the "no runtime" notice all draw INSIDE it, so the roster arriving moves nothing below Runtime.
-  // Sized for the tallest resolved readout the fake machine gives (a phone wraps the runtime's words and its quota warning).
-  // It is drawn as a quiet well, so the room a shorter readout leaves reads as the well's own padding, not as a hole.
+  // The page draws nothing of the form until this machine has been read (`formDrawn`), so the roster arriving moves
+  // nothing below Runtime; the well can therefore be exactly as tall as what it holds: the picker, the typed fallback
+  // or the "no runtime" notice. It is a quiet well so a short readout still reads as one field.
   return (
-    <div
-      className="min-h-[12.25rem] rounded-control border border-border bg-surface-2 p-2 sm:min-h-[7.5rem]"
-      data-runtime-slot=""
-      ref={root}
-    >
+    <div className="rounded-control border border-border bg-surface-2 p-2" data-runtime-slot="" ref={root}>
       <PanelSlot daemon={daemon} props={{ ...slot }} slot={NEW_FERRET_ACCOUNT_SLOT} />
       {picker ? null : fallback}
     </div>
