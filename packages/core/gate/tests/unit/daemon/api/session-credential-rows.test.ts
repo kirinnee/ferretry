@@ -82,6 +82,12 @@ describe('what the daemon does with the credential a shell presents', () => {
     expect(admit(w, fleetUse, { bearer: ADMIN, arrival: local() }).outcome).toBe('admitted');
     expect(admit(w, fleetUse, { bearer: FERRET_TOKEN, arrival: carried() }).outcome).toBe('401 unauthorized');
     expect(admit(w, fleetUse, { arrival: local(true) }).outcome).toBe('401 unauthorized');
+    // a directory that cannot even say whether it can judge is no reason to invent a 503: the stranger stays a 401
+    (w.ferrets as { judgeable?: () => boolean }).judgeable = () => {
+      throw new Error('the directory cannot say');
+    };
+    expect(admit(w, fleetUse, { bearer: STRANGER, arrival: local(true) }).outcome).toBe('401 unauthorized');
+    (w.ferrets as { judgeable?: () => boolean }).judgeable = () => judgeable;
     // once it can judge, the answers are exactly the old ones
     judgeable = true;
     expect(admit(w, fleetUse, ferretCall).outcome).toBe('admitted');
