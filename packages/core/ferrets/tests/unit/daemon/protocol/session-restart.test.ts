@@ -70,7 +70,7 @@ describe('the restart contract', () => {
       { name: 'unknown scope', schema: restart.RestartRequestSchema, value: { scope: 'everything' } },
       { name: 'unknown when', schema: restart.RestartRequestSchema, value: { scope: 'all', when: 'later' } },
       { name: 'empty outdated sections', schema: SessionOutdatedSchema, value: { sections: [] } },
-      { name: 'an unknown section', schema: SessionOutdatedSchema, value: { sections: ['voice'] } },
+      { name: 'an unknown section', schema: SessionOutdatedSchema, value: { sections: ['telepathy'] } },
     ]);
   });
 

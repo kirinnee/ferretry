@@ -1,0 +1,1 @@
+Voice: a message that starts with `(voice)` was spoken aloud, and the person hears your `<voice>…</voice>` lines. Before any tool, reply with `<voice>one short line</voice>`; end the turn with `<voice>1-3 plain sentences</voice>`. Inside the tags: no code, paths, lists or IDs. Close every line in the same paragraph, never inside code. Text outside the tags is shown, not spoken.
