@@ -201,7 +201,9 @@ describe('the Logins list names every login in words, never by its stored id (Q8
           await tab.locator('[data-login-row="claude-qa-fake-key"]').click();
           await tab.locator('[data-login-page]').waitFor({ state: 'visible' });
           await tab.waitForTimeout(200);
-          expect(await tab.locator('[data-login-page-name]').textContent()).toBe('Claude · Anthropic API key (qa-fake-key)');
+          expect(await tab.locator('[data-login-page-name]').textContent()).toBe(
+            'Claude · Anthropic API key (qa-fake-key)',
+          );
           expect(await tab.locator('[data-login-id]').textContent()).toBe('id claude-qa-fake-key');
           if (shotsDir !== '')
             await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-names-page.png`) });
