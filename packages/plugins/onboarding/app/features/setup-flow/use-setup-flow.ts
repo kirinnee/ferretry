@@ -50,6 +50,7 @@ import { readLater, rememberLater } from './client-later.ts';
 import { markProjectSetupShown, PROJECT_SETUP_STEP } from './project-resume.ts';
 import {
   advance,
+  AGENTS_KEY,
   applyPicked,
   answeredBefore,
   clearNotNeeded,
@@ -68,7 +69,7 @@ import {
   retreat,
   startRun,
 } from './flow-model.ts';
-import { foreseenPassedOver } from './foresight.ts';
+import { foreseenPassedOver, undecidedPages } from './foresight.ts';
 import { readFlowAddress } from './flow-href.ts';
 
 /** What the flow needs from its surroundings; the defaults are the browser's. Tests hand in fakes. */
@@ -478,6 +479,8 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       (step, index, all): step is FlowStep =>
         step !== undefined && step.key !== page?.key && all.indexOf(step) === index,
     );
+  const memoryOf = (plugin: string) => memory.current.get(plugin) ?? {};
+  const picked = pickedOf(memoryOf('onboarding'));
   const progress =
     ready === undefined || page === undefined
       ? undefined
@@ -486,9 +489,23 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
           pages,
           answered,
           hidden,
-          foreseenPassedOver(pages, plugin => memory.current.get(plugin) ?? {}),
+          // The pages not counted ahead: the ones the answers foresee passing over, the ones not decided yet (a harness before
+          // "Which AI" is answered, an import mode not chosen) and the ones of a harness the person left out.
+          new Set([
+            ...foreseenPassedOver(pages, memoryOf),
+            ...undecidedPages(
+              pages,
+              memoryOf,
+              new Set(ready.flow.harnesses.map(harness => harness.key)),
+              picked === undefined &&
+                pages.some(candidate => candidate.key === AGENTS_KEY && !answered.has(candidate.key)),
+            ),
+            ...pages
+              .filter(candidate => picked?.off.includes(candidate.plugin) === true)
+              .map(candidate => candidate.key),
+          ]),
           page.key,
-          new Set(pickedOf(memory.current.get('onboarding') ?? {})?.off ?? []),
+          live.trail,
         );
   return {
     loading: loading.kind,

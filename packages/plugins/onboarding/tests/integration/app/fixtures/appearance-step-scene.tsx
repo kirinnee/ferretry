@@ -40,7 +40,7 @@ const PROGRESS = {
   current: 'device',
   step: 1,
   of: 4,
-  fills: true as const,
+  pages: true as const,
 };
 const noop = (): void => undefined;
 

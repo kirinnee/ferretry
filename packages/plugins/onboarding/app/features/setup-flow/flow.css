@@ -122,7 +122,7 @@
   flex-direction: column;
   gap: 8px;
   margin-inline: auto;
-  max-width: 880px;
+  max-width: var(--fy-reading-w);
   padding: 24px 16px;
 }
 

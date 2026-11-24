@@ -71,7 +71,7 @@ const PROGRESS = {
   current: 'onboarding',
   step: 1,
   of: 2,
-  fills: true as const,
+  pages: true as const,
 };
 const noop = (): void => undefined;
 
