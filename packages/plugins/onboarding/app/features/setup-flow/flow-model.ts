@@ -263,7 +263,8 @@ export interface ProgressRead {
  *     only Back lowers it.
  *   - m changes ONLY when the person changes an answer that adds or removes pages (ticking Codex in "Which AI", choosing what to
  *     bring over). Until "Which AI" is answered the pick that is ticked by default is counted.
- *   - an OFFER page (see `isOffer`) never counts, unless it is the page on screen: it is held out to a run that goes on anyway.
+ *   - an OFFER page (see `isOffer`) counts like any other page, but only when the run has a page of its own to draw before it
+ *     (otherwise the run passes it over, `passesOffer`): so the total is the same before and after the person walks up to it.
  * The page on screen always counts.
  */
 export function progressOf(
@@ -283,8 +284,16 @@ export function progressOf(
     page.phase === 'client' && !OWN_DEVICE_SEGMENT.has(page.plugin)
       ? DEVICE_LABEL
       : (labels.get(page.plugin) ?? page.plugin);
+  const asked = (page: FlowStep): boolean =>
+    page.key === here.key || (!answered.has(page.key) && !excluded.has(page.key));
+  // An offer is decided by the answers like any page: it counts when the run has a page of its own to draw before it (the run
+  // would walk it), never by whether the person has reached it yet, so the total does not move when they walk up to it.
   const counted = pages.filter(
-    page => page.key === here.key || (!answered.has(page.key) && !excluded.has(page.key) && !isOffer(page.key)),
+    (page, index) =>
+      asked(page) &&
+      (!isOffer(page.key) ||
+        page.key === here.key ||
+        pages.slice(0, index).some(earlier => !isOffer(earlier.key) && asked(earlier))),
   );
   return {
     segments: counted.map(page => ({ id: page.key, label: labelOf(page) })),

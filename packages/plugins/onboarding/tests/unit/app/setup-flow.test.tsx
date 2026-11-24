@@ -1889,10 +1889,15 @@ describe('Connect GitHub never pulls a finished setup back (O9-10)', () => {
     await next();
     await settle();
     expect(pageKey()).toBe('projects.folders');
+    // Connect GitHub is counted up front (O12 S3): the total on Projects is already the total on GitHub.
+    expect(progressText()).toBe('Projects · page 2 of 3');
     await next();
     await settle();
     expect(pageKey()).toBe('projects.github');
     expect(progressText()).toBe('Projects · page 3 of 3');
+    await press('[data-step-back]');
+    await settle();
+    expect(progressText()).toBe('Projects · page 2 of 3');
   });
 
   it('a machine with a project still offers it to a run that drew an earlier page', async () => {
