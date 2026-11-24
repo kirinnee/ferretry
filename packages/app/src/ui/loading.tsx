@@ -38,9 +38,11 @@ export function useHeldLoading(active: boolean, gate: LoadingGate = {}): boolean
   const fade = gate.fade ?? LOADING_FADE_MS;
   const began = useRef<number | undefined>(undefined);
   const [held, setHeld] = useState(active);
-  if (active && began.current === undefined) began.current = Date.now();
   useEffect(() => {
     if (active) {
+      // The clock starts once the loader is IN the document, not when React first rendered it: a slow commit between the two would
+      // otherwise be taken out of the minimum the person gets to see (a hold that ends a few ms short of its minimum).
+      began.current ??= Date.now();
       setHeld(true);
       return undefined;
     }
