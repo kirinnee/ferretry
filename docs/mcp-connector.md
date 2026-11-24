@@ -23,7 +23,7 @@ passkeys on the tunnel hostname would be a second, weaker login nobody asked for
 1. Claude opens `<publicUrl>/oauth/authorize?...` (in a browser, a popup, or an in-app browser on a phone).
 2. The daemon validates the request and shows a **waiting page**: the client's name, the scopes, a short
    **match code** (`K7Q-2MF`) and an **Open Ferretry** link. The page refreshes itself every 2 s (`<meta
-   http-equiv="refresh">`, no script).
+http-equiv="refresh">`, no script).
 3. The owner opens Ferretry on any paired device (the link deep-links to the Connectors panel), sees the same
    client, scopes and match code, and taps **Approve** — a passkey step-up for the `approve-connector` act.
 4. The waiting page's next refresh redirects to Claude's callback with a one-time code.
@@ -49,17 +49,17 @@ ungoverned — docs/grants.md). That is also how the automated end-to-end test a
   nothing for being local. The only credential `/mcp` accepts is a connector access token.
 - It serves exactly these paths and answers `404` to everything else (no `405` that maps the surface):
 
-| method | path                                                                                   | what                                      |
-| ------ | -------------------------------------------------------------------------------------- | ----------------------------------------- |
-| GET    | `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-protected-resource` | RFC 9728 protected resource metadata      |
-| GET    | `/.well-known/oauth-authorization-server`                                              | RFC 8414 authorization server metadata    |
-| POST   | `/oauth/register`                                                                      | RFC 7591 dynamic client registration      |
-| GET    | `/oauth/authorize`                                                                     | starts a sign-in, 302 to the waiting page |
-| GET    | `/oauth/authorize/wait?h=<handle>`                                                     | the waiting page / the final redirect     |
-| POST   | `/oauth/token`                                                                         | `authorization_code`, `refresh_token`     |
-| POST   | `/oauth/revoke`                                                                        | RFC 7009                                  |
-| POST   | `/mcp`                                                                                 | MCP Streamable HTTP, stateless, JSON      |
-| GET/DELETE | `/mcp`                                                                             | `405` (no server-initiated stream, no sessions) |
+| method     | path                                                                                    | what                                            |
+| ---------- | --------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| GET        | `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-protected-resource` | RFC 9728 protected resource metadata            |
+| GET        | `/.well-known/oauth-authorization-server`                                               | RFC 8414 authorization server metadata          |
+| POST       | `/oauth/register`                                                                       | RFC 7591 dynamic client registration            |
+| GET        | `/oauth/authorize`                                                                      | starts a sign-in, 302 to the waiting page       |
+| GET        | `/oauth/authorize/wait?h=<handle>`                                                      | the waiting page / the final redirect           |
+| POST       | `/oauth/token`                                                                          | `authorization_code`, `refresh_token`           |
+| POST       | `/oauth/revoke`                                                                         | RFC 7009                                        |
+| POST       | `/mcp`                                                                                  | MCP Streamable HTTP, stateless, JSON            |
+| GET/DELETE | `/mcp`                                                                                  | `405` (no server-initiated stream, no sessions) |
 
 ## Configuration
 
@@ -151,20 +151,20 @@ authorization server metadata names the endpoints above, `code_challenge_methods
 - Every tool that takes a ferret takes `ferret`: its call sign, its session id or short id, or its task name —
   case-insensitive, ignoring spaces, hyphens and a leading `:`. Nothing matching is a tool error that lists
   up to three close matches (names come from speech recognition), e.g. `No ferret called "lizet". Did you
-  mean lizzette (Build MCP Connector)?` More than one match lists them and asks which.
+mean lizzette (Build MCP Connector)?` More than one match lists them and asks which.
 - Results are SHORT PLAIN TEXT, because they are often read aloud. No JSON blobs.
 
-| tool                | scope | annotations              | does                                                                 |
-| ------------------- | ----- | ------------------------ | -------------------------------------------------------------------- |
-| `list_ferrets`      | read  | readOnly                 | live ferrets: call sign, task name, state, last activity             |
-| `get_ferret`        | read  | readOnly                 | one ferret: state, current task, recent-activity summary, last error |
-| `get_ferret_output` | read  | readOnly                 | tail of recent output; `lines` default 40, hard cap 200 lines / 8 000 chars |
-| `list_attention`    | read  | readOnly                 | open agenda items (`!A12`): who asks, title, question                |
-| `send_to_ferret`    | write | not readOnly             | send a message to a ferret, exactly as the app's composer does       |
-| `answer_attention`  | write | not readOnly             | answer one open agenda item                                          |
-| `restart_ferret`    | write | destructive              | restart a ferret, as the app's Restart does                          |
-| `stop_ferret`       | write | destructive              | stop a ferret, as `fy stop` does                                     |
-| `spawn_ferret`      | write | not readOnly             | start a new ferret with a task description, as `fy new` does         |
+| tool                | scope | annotations  | does                                                                        |
+| ------------------- | ----- | ------------ | --------------------------------------------------------------------------- |
+| `list_ferrets`      | read  | readOnly     | live ferrets: call sign, task name, state, last activity                    |
+| `get_ferret`        | read  | readOnly     | one ferret: state, current task, recent-activity summary, last error        |
+| `get_ferret_output` | read  | readOnly     | tail of recent output; `lines` default 40, hard cap 200 lines / 8 000 chars |
+| `list_attention`    | read  | readOnly     | open agenda items (`!A12`): who asks, title, question                       |
+| `send_to_ferret`    | write | not readOnly | send a message to a ferret, exactly as the app's composer does              |
+| `answer_attention`  | write | not readOnly | answer one open agenda item                                                 |
+| `restart_ferret`    | write | destructive  | restart a ferret, as the app's Restart does                                 |
+| `stop_ferret`       | write | destructive  | stop a ferret, as `fy stop` does                                            |
+| `spawn_ferret`      | write | not readOnly | start a new ferret with a task description, as `fy new` does                |
 
 ## What a tool may do, and how
 
@@ -181,6 +181,41 @@ authorization server metadata names the endpoints above, `code_challenge_methods
   that came from a ferret (output, summaries, errors, agenda questions) passes the daemon's fail-closed secret
   redactor first; if it cannot run, the text is `[output withheld]`.
 - **No shell.** No tool runs a command. Control is only through ferrets.
+
+### How the tools are built (`packages/daemon/src/{lib,adapters}/connector/mcp/`)
+
+- **Order of gates** on `POST /mcp`: path → method (`GET`/`DELETE` are `405`, `Allow: POST`) → `Origin` (any
+  `Origin` header not in the injected allow-list, default empty, is `403`) → bearer (`401` from the OAuth part's
+  builder, nothing else runs) → `application/json` → body ≤ 1 MiB → JSON (no batches) → rate limit → the SDK
+  (stateless, `enableJsonResponse`, a fresh server and transport per request, protocol `2025-11-25`). Write tools
+  are registered only for a token with `fleet:write`; calling one without it is a tool error saying the
+  connection is read-only.
+- **The operator's daemon-wide grants are read before EVERY tool call** (`demands.ts`, one table). Undetermined
+  grants refuse with "This machine cannot say what remote callers may do right now, so the connector is
+  refusing."; `fleet.use` off refuses with "The machine owner has turned off remote fleet access (fleet.use)."
+  `tools/list` still lists the tools — the refusal is per call. Every tool demands `fleet.use`; the table also
+  demands whatever the routes it calls declare, and today none declares one (the output tool reads the scrubbed
+  transcript through `/logs`, which is not `terminal.use`; a start with a registered project and no harness
+  flags is an ordinary act).
+- **Rate limit is HTTP-level**: `429` with `Retry-After`, 60 `tools/call`s a minute per grant, 10 of them write
+  tools. `initialize` and `tools/list` are free. (A tool-level error would be read aloud as one more sentence and
+  would not tell the client to back off.)
+- **Naming** (`names.ts`): normalised (case, spaces, hyphens, leading `:`, doubled letters, `ph`/`ck`/`y`
+  folded) and matched in tiers — exact, then unique prefix/substring (3+ characters), which may act; a close
+  edit distance only ever SUGGESTS ("Did you mean …?"), because the next sentence may be "stop it". Ambiguity is a
+  question. Live ferrets are searched first; a stopped one only when no live one matches.
+- **Routes the tools call**: `GET /v1/sessions`, `GET /v1/sessions/:id/logs`, `POST /v1/sessions/:id/send`,
+  `POST /v1/sessions/:id/stop`, `POST /v1/restarts` (`scope: ids`), `GET /v1/projects`,
+  `POST /v1/sessions` (`mode: auto`, `cwd` = a REGISTERED project's path — never a caller's string),
+  `GET /v1/agenda/open` and `POST /v1/sessions/:id/agenda` (`action: resolve`). `ConnectorApiCall` gained an
+  optional `headers` map for `x-fy-request-id`, which send, start and restart require; the listener wiring must
+  forward exactly those and nothing else.
+- **Redaction**: every returned text passes the daemon's stored-secret redactor AND a credential-shape redactor
+  (`fys_`/`fyc_`, `sk-ant-`, `sk-`, GitHub, AWS, Slack, Google, JWTs, `Bearer`/`Basic`, PEM private keys,
+  `password=`-style assignments (value only), URL userinfo). If either throws the text is `[output withheld]`.
+- **Calls log**: write calls only, args redacted and message/answer/task cut to 500 characters, appended with
+  `O_APPEND | O_NOFOLLOW`, `0600`, rotated to `calls.1.jsonl` at 1 MiB. A refused write (scope or grants) is in
+  the calls log with outcome `refused` but not in the security log.
 
 ## Not in this version
 
