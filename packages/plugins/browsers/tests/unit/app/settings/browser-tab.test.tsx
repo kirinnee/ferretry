@@ -3,6 +3,7 @@ import type { ViewPlace } from '@ferretry/app';
 import { interact, mount, must, WithViewPlace } from '@ferretry/app/testing';
 import browsersManifest from '../../../../manifest.ts';
 import { BROWSER_USER_AGENT_WORDS, BrowserTab } from '../../../../app/features/settings/browser-tab.tsx';
+import { STEALTH_HELD_NOTE, STEALTH_TERMS_NOTE } from '../../../../app/features/settings/browser-stealth-section.tsx';
 import { PROXY_ERROR_WORDS } from '../../../../app/features/settings/browser-proxy-test-result.tsx';
 import { BROWSER_OFFLINE_WORDS, browserStateSentence } from '../../../../app/features/settings/browser-state-line.tsx';
 import type { RecordedCall } from '../../../support/app/client.ts';
@@ -51,13 +52,24 @@ interface Script {
   readonly put?: unknown;
   readonly test?: unknown;
   readonly grants?: unknown;
+  /** The kernel's way: after a held write the file on disk is the written text, read back with state `pending`. */
+  readonly readsBackWhatWasWritten?: boolean;
+  /** The file is already waiting for the owner when the tab opens (a held edit from before). */
+  readonly heldAtLoad?: boolean;
 }
 
 const tab = async (script: Script = {}, place?: ViewPlace) => {
-  const text = script.text ?? 'mode: headless\n';
-  const recorded = recordingClient(route => {
-    if (route === CONFIG_GET) return file(text);
-    if (route === CONFIG_PUT) return script.put ?? applied();
+  let text = script.text ?? 'mode: headless\n';
+  let state: 'ok' | 'pending' = script.heldAtLoad === true ? 'pending' : 'ok';
+  const recorded = recordingClient((route, init) => {
+    if (route === CONFIG_GET) return { ...file(text), state };
+    if (route === CONFIG_PUT) {
+      if (script.readsBackWhatWasWritten === true) {
+        text = ((init?.body ?? { text }) as { text: string }).text;
+        state = 'pending';
+      }
+      return script.put ?? applied();
+    }
     if (route === STATE) return script.state ?? { state: 'stopped' };
     if (route === GRANTS) return script.grants ?? OPEN;
     if (route === 'GET /v1/secrets') return { secrets: [] };
@@ -373,5 +385,66 @@ describe('the Browser tab', () => {
     expect(online.calls.map(call => call.route)).toContain(STATE);
     expect(text(online.view.container, '[data-browser-state]')).toContain('Stopped');
     await online.view.unmount();
+  });
+});
+
+describe('the Stealth switch on the Browser tab', () => {
+  const stealthSwitch = (container: HTMLElement): HTMLButtonElement =>
+    must(
+      container.querySelector('[data-setup-section="browser-stealth"] [role="switch"]') as HTMLButtonElement,
+      'the stealth switch',
+    );
+
+  it('is off by default, with the terms note beside it', async () => {
+    const { view } = await tab();
+    expect(stealthSwitch(view.container).getAttribute('aria-checked')).toBe('false');
+    expect(text(view.container, '[data-browser-stealth-note]')).toBe(STEALTH_TERMS_NOTE);
+    await view.unmount();
+  });
+
+  it('writes stealth: on against the digest it was read at, keeping the file’s comments', async () => {
+    const { calls, view } = await tab({ text: '# the shared browser\nmode: headless\n' });
+    await click(stealthSwitch(view.container), 'the stealth switch');
+    const sent = body(calls, CONFIG_PUT) as { text: string; etag: string };
+    expect(sent.etag).toBe('etag-1');
+    expect(sent.text).toContain('# the shared browser');
+    expect(sent.text).toContain('stealth: on');
+    await view.unmount();
+  });
+
+  it('keeps a held on as a lasting waiting note with the switch off, after the file is read back as the kernel serves it', async () => {
+    const { calls, view } = await tab({
+      put: { path: 'browsers.yaml', etag: 'etag-2', outcome: 'pending' },
+      readsBackWhatWasWritten: true,
+    });
+    await click(stealthSwitch(view.container), 'the stealth switch');
+    // The re-read after the write returned the disk text (`stealth: on`) with state `pending`.
+    expect(calls.filter(call => call.route === CONFIG_GET).length).toBeGreaterThan(1);
+    expect(text(view.container, '[data-setup-note="browser-stealth-held"]')).toBe(STEALTH_HELD_NOTE);
+    expect(stealthSwitch(view.container).getAttribute('aria-checked')).toBe('false');
+    await view.unmount();
+  });
+
+  it('shows the held note and the switch off on a fresh load of a file holding an unconfirmed on, from the daemon alone', async () => {
+    const { view } = await tab({ text: 'mode: headless\nstealth: on\n', heldAtLoad: true });
+    expect(stealthSwitch(view.container).getAttribute('aria-checked')).toBe('false');
+    expect(text(view.container, '[data-setup-note="browser-stealth-held"]')).toBe(STEALTH_HELD_NOTE);
+    await view.unmount();
+  });
+
+  it('turns it off with one write, nothing held', async () => {
+    const { calls, view } = await tab({ text: 'mode: headless\nstealth: on\n' });
+    expect(stealthSwitch(view.container).getAttribute('aria-checked')).toBe('true');
+    await click(stealthSwitch(view.container), 'the stealth switch');
+    expect((body(calls, CONFIG_PUT) as { text: string }).text).toContain('stealth: off');
+    expect(view.container.querySelector('[data-setup-note="browser-stealth-held"]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('puts a refusal in front of the person', async () => {
+    const { view } = await tab({ put: new Error('browsers.yaml changed since you read it') });
+    await click(stealthSwitch(view.container), 'the stealth switch');
+    expect(text(view.container, '[data-setup-note="browser-stealth-refusal"]')).toContain('changed since you read it');
+    await view.unmount();
   });
 });

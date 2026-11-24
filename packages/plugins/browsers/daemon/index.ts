@@ -30,6 +30,7 @@ import { SealedGate } from './sealed/gate.ts';
 import { secureCopyReach } from './sealed/reach.ts';
 import type { RecordedSurfaceEvent } from './tools/types.ts';
 import { processHost } from './adapters/host.ts';
+import { auditStealthSwitch } from './stealth-audit.ts';
 import { KernelDetachedLauncher } from './open-url/launcher.ts';
 import { systemOpenRoutes } from './open-url/routes.ts';
 import { type DetachedLauncherPort, OpenUrlService } from './open-url/service.ts';
@@ -323,7 +324,19 @@ export function buildBrowsers(
     platform: host.platform,
   });
 
+  // The ONE stealth switch (no behaviour behind it yet): its real changes are audited, a held `on` only once confirmed.
+  const cancelStealthAudit = auditStealthSwitch({
+    read: () => config()?.stealth ?? 'off',
+    watch: listener => kernel.config.watch(manifest.data.config[0] as ConfigFileDef<BrowsersConfig>, listener),
+    record: async draft => await ctx.needs.gate.audit(draft),
+    failed: error =>
+      kernel.log.error('the stealth switch audit record was not written', {
+        reason: error instanceof Error ? error.message : 'unknown',
+      }),
+  });
+
   kernel.lifecycle.onStop(async () => {
+    cancelStealthAudit();
     await pages.closeAll().catch(() => undefined);
     await loginRuntime.close().catch(() => undefined);
   });

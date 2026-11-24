@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { BrowserMode, BrowserProxySetting } from '../../../contract/index.ts';
+import type { BrowserMode, BrowserProxySetting, StealthSwitch } from '../../../contract/index.ts';
 import { type CallClient, reasonOf } from '../../lib/clients.ts';
 import {
   type BrowsersChange,
@@ -26,6 +26,7 @@ import {
   UNNAMED_MACHINE,
 } from './browser-mode-section.tsx';
 import { BrowserProxySection } from './browser-proxy-section.tsx';
+import { BrowserStealthSection } from './browser-stealth-section.tsx';
 import { BrowserStateLine } from './browser-state-line.tsx';
 import { useViewPlace } from '@ferretry/app';
 import { Loading, SetupNote, SetupSection, useChangeAuthority } from '@ferretry/app/ui';
@@ -38,6 +39,10 @@ type Reading =
   | { readonly kind: 'reading' }
   | { readonly kind: 'shown'; readonly document: BrowsersDocument }
   | { readonly kind: 'unavailable'; readonly sentence: string };
+
+/** The switch in effect: an `on` the daemon holds for the owner is not in effect yet, so it reads off. */
+const stealthInEffect = (document: BrowsersDocument): StealthSwitch =>
+  document.held && document.config.stealth === 'on' ? 'off' : document.config.stealth;
 
 export function BrowserTab({ client }: { readonly client: CallClient }) {
   // Which machine this tab is for, and whether it answers: the view's place (shell contract S1).
@@ -101,6 +106,12 @@ export function BrowserTab({ client }: { readonly client: CallClient }) {
             key={reading.document.config.mode}
             mode={reading.document.config.mode}
             save={(mode: BrowserMode) => save({ mode })}
+          />
+          <BrowserStealthSection
+            key={stealthInEffect(reading.document)}
+            stealth={stealthInEffect(reading.document)}
+            held={reading.document.held && reading.document.config.stealth === 'on'}
+            save={(stealth: StealthSwitch) => save({ stealth })}
           />
           <BrowserProxySection
             client={client}

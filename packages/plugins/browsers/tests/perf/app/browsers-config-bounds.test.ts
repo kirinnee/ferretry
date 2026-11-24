@@ -78,7 +78,12 @@ describe('browsers: the settings tab refuses a hostile browsers.yaml in one fixe
 
     test(`browsers writeBrowsersConfig, ${shape}`, async () => {
       const { client, calls } = serving('');
-      const current: BrowsersDocument = { config: BrowsersConfigSchema.parse({}), text: text(), etag: 'e1' };
+      const current: BrowsersDocument = {
+        config: BrowsersConfigSchema.parse({}),
+        text: text(),
+        etag: 'e1',
+        held: false,
+      };
       const started = performance.now();
       const write = writeBrowsersConfig(client, current, { mode: 'window' });
       if (editsRefused) {

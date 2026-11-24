@@ -86,7 +86,7 @@ verbs: the owner's Browsers switch, its own browser only, a page that is its own
 
 ## Captchas and "checking your browser" pages
 
-Ferretry **never solves, skips or works around** a captcha or a bot check. What it does:
+With stealth off (the default) Ferretry **never solves, skips or works around** a captcha or a bot check; the switch under [Stealth](#stealth) does nothing yet. What it does:
 
 1. **Recognises** a page that appears to be asking for one, from what the browser already knows about the
    page — its address, title and frame addresses — without running anything inside it: Cloudflare's
@@ -101,6 +101,35 @@ Ferretry **never solves, skips or works around** a captcha or a bot check. What 
 
 The recognition is a hint, not a verdict: a check in a shape it has not seen is not flagged, and a page
 that merely embeds a widget can be.
+
+## Stealth
+
+`config/browsers.yaml` has **one** stealth switch:
+
+```yaml
+stealth: off # off (the default) | on
+identities:
+  work:
+    stealth: false # optional: this identity opts out while the switch is on
+```
+
+`on` opts in every identity on this machine (all of them are the owner's); an identity can only opt **out**
+(`stealth: false`), never in by itself. Settings › a machine › **Browser** › **Stealth** is the same switch.
+
+- **Off → on is a loosening** ([config-files.md](config-files.md)): it spends money (a captcha solver) and
+  changes what the browser does, so the daemon **holds** it until the owner confirms it, and the tighter
+  setting (off) stays in effect meanwhile. Dropping an identity's opt-out while the switch is on is held the
+  same way. **On → off, and a new opt-out, apply at once.**
+- **Today the switch changes nothing.** It is the one place the later layers (a hardened browser, a stable
+  fingerprint per identity, a proxy per identity, a captcha solver) will read, so each can ship and be measured on its own.
+- **The audit log** ([audit.md](audit.md)) records metadata only: `browser.stealth.switched` (from, to) when the switch
+  really changes — a held `on` leaves no record until it is confirmed — and, as the layers arrive,
+  `browser.stealth.session`, `browser.captcha.solve` and `browser.captcha.cap-reached` (identity key, never an
+  email; hosts, kinds, outcomes, times, estimated cost). **Never** a token, a site key, a page, a cookie or a
+  secret: the shapes are closed and tested for that.
+- **Site terms.** Hiding that a browser is automated, and solving captchas, can break a site's terms of use.
+  It is your call, site by site. Ferretry never signs in anywhere on its own beyond what you set up, and a bank
+  can lock an account for unusual access.
 
 ## Honest limits
 

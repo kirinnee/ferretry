@@ -14,6 +14,7 @@ import { z } from 'zod';
 import {
   type BrowserMode,
   type BrowserProxySetting,
+  type StealthSwitch,
   BrowsersConfigSchema,
   type BrowsersConfig,
 } from '../../contract/index.ts';
@@ -24,7 +25,14 @@ const BROWSERS_FILE = 'browsers.yaml';
 const NonEmpty = z.string().min(1);
 
 /** One file as it is on disk, with its digest to edit against. */
-const ConfigFileViewSchema = z.looseObject({ path: NonEmpty, exists: z.boolean(), text: z.string(), etag: NonEmpty });
+const ConfigFileViewSchema = z.looseObject({
+  path: NonEmpty,
+  exists: z.boolean(),
+  text: z.string(),
+  etag: NonEmpty,
+  /** `pending`: the file on disk holds an edit the owner has not confirmed, so it is not what is in effect. */
+  state: z.enum(['ok', 'pending', 'invalid']).optional(),
+});
 
 const ConfigPutResultSchema = z.looseObject({
   path: NonEmpty,
@@ -36,6 +44,8 @@ export interface BrowsersDocument {
   readonly config: BrowsersConfig;
   readonly text: string;
   readonly etag: string;
+  /** The disk text waits for the owner's confirmation (the kernel's `pending`), so it is not yet what is in effect. */
+  readonly held: boolean;
 }
 
 /** The saved browser settings and the digest they were read at. A file that does not parse is not guessed at. */
@@ -44,11 +54,18 @@ export async function readBrowsersConfig(client: CallClient): Promise<BrowsersDo
   const read = readConfigText(file.text);
   if (!read.ok)
     throw new Error(`browsers.yaml cannot be read: ${read.errors[0]?.message ?? 'the text cannot be read as YAML'}`);
-  return { config: BrowsersConfigSchema.parse(read.read.value ?? {}), text: file.text, etag: file.etag };
+  return {
+    config: BrowsersConfigSchema.parse(read.read.value ?? {}),
+    text: file.text,
+    etag: file.etag,
+    held: file.state === 'pending',
+  };
 }
 
 export interface BrowsersChange {
   readonly mode?: BrowserMode;
+  /** The one stealth switch; `on` waits for the owner (browsers.yaml loosens). */
+  readonly stealth?: StealthSwitch;
   /** `null` turns the proxy off. */
   readonly proxy?: BrowserProxySetting | null;
 }
@@ -56,8 +73,9 @@ export interface BrowsersChange {
 /** The document with the change made, comments and order kept. Pure. */
 function editedBrowsersText(text: string, change: BrowsersChange): string {
   const withMode = change.mode === undefined ? text : setConfigKey(text, 'mode', change.mode);
-  if (change.proxy === undefined) return withMode;
-  return setConfigKey(withMode, 'proxy', change.proxy === null ? undefined : change.proxy);
+  const withStealth = change.stealth === undefined ? withMode : setConfigKey(withMode, 'stealth', change.stealth);
+  if (change.proxy === undefined) return withStealth;
+  return setConfigKey(withStealth, 'proxy', change.proxy === null ? undefined : change.proxy);
 }
 
 /** Writes the change against the digest it was read at; the daemon refuses a file changed since. */

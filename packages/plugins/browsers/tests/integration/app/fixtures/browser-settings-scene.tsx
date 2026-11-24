@@ -1,5 +1,5 @@
 /**
- * The browser entry for the Browser tab's visual tests (browser-mode, browser-proxy, browser-tab): the REAL tab, sections,
+ * The browser entry for the Browser scene=mode|stealth|stealth-held|stealth-on|proxy|tab's visual tests (browser-mode, browser-proxy, browser-tab): the REAL tab, sections,
  * status line and banners over a scripted client — no daemon, no network. Every name, address and secret name is fake.
  *
  *   ?theme=<family>-<mode>&scene=mode|proxy|tab|status|firewall|invalid|proxy-test
@@ -13,6 +13,7 @@ import { BrowserChallengeBanner } from '../../../../app/features/browser/browser
 import { RemoteBrowserStatusBar } from '../../../../app/features/browser/remote-browser-chrome.tsx';
 import { BrowserModeSection } from '../../../../app/features/settings/browser-mode-section.tsx';
 import { BrowserProxySection } from '../../../../app/features/settings/browser-proxy-section.tsx';
+import { BrowserStealthSection } from '../../../../app/features/settings/browser-stealth-section.tsx';
 import { BrowserProxyTestBlock } from '../../../../app/features/settings/browser-proxy-test-block.tsx';
 import type { ProxyTestShown } from '../../../../app/features/settings/browser-proxy-test-result.tsx';
 import { BrowserStateLine } from '../../../../app/features/settings/browser-state-line.tsx';
@@ -180,6 +181,14 @@ const body = (): React.ReactNode => {
           </section>
         </>
       );
+    case 'stealth':
+      // Off, nothing waiting.
+      return <BrowserStealthSection stealth="off" held={false} save={saved} />;
+    case 'stealth-held':
+      // The file holds an on the owner has not confirmed: the value in effect is off, and the page says it waits.
+      return <BrowserStealthSection stealth="off" held save={saved} />;
+    case 'stealth-on':
+      return <BrowserStealthSection stealth="on" held={false} save={saved} />;
     case 'proxy':
       return (
         <>

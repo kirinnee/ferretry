@@ -21,6 +21,11 @@ export const AUDIT = {
   agentTool: auditKind('agent.tool'),
   browserOpened: auditKind('browser.opened'),
   browserProxyTested: auditKind('browser.proxy-tested'),
+  /** Stealth (docs/browser-mode.md): metadata only, shaped by `StealthAuditDetailSchemas` (wire.ts). */
+  captchaCapReached: auditKind('browser.captcha.cap-reached'),
+  captchaSolve: auditKind('browser.captcha.solve'),
+  stealthSession: auditKind('browser.stealth.session'),
+  stealthSwitched: auditKind('browser.stealth.switched'),
   linkOpened: auditKind('link.opened'),
   surfaceControl: auditKind('surface.control'),
 } as const;
