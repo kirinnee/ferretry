@@ -386,7 +386,12 @@ describe('C59 O8-1 review: the shared answer row fits the PANEL it is in, not th
               }
               return { width: own.width, visible: Math.max(0, right - left) };
             };
-            const rows = [...document.querySelectorAll<HTMLElement>('[data-login-sign-in] [data-action-row]')];
+            // R4: Start over / Cancel are the shared SignInAnswers grid row (data-sign-in-secondary), not an ActionRow.
+            const rows = [
+              ...document.querySelectorAll<HTMLElement>(
+                '[data-login-sign-in] [data-action-row], [data-login-sign-in] [data-sign-in-secondary]',
+              ),
+            ];
             return {
               rows: rows.map(row => {
                 const rowBox = row.getBoundingClientRect();
