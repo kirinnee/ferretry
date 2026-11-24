@@ -1076,6 +1076,40 @@ export class InputRequestService {
   }
 
   /**
+   * The owner's card looks at its target again (`POST …/observe`): the same look the Send guard takes, run on request, so
+   * a card left open a while is redrawn from what the target shows NOW before anything is typed. The held facts are the
+   * only thing that changes: the SAME target with something else changed is redrawn (a new picture, digest and risk),
+   * which does not count against the Send's redraw budget; a target that is gone, or no longer the same, is left as it
+   * was (the Send that follows refuses it and counts it, as before). Nothing is typed and nothing is counted. The
+   * answer is the request as `list` shows it: facts and prompts, never a value.
+   */
+  async reobserve(sessionId: string, requestId: string, caller: InputCaller): Promise<InputRequest> {
+    requireOwner(caller);
+    await this.sweep();
+    const held = this.held.get(requestId);
+    if (held === undefined || held.request.sessionId !== sessionId)
+      throw new InputRequestError('not_found', 'no such input request');
+    if (isFinal(held.request)) throw new InputRequestError('gone', `the request is already ${held.request.state}`);
+    await this.lock.run(sessionId, async () => {
+      // A Send in flight (or one that ended while this waited for the lock) is not redrawn under itself.
+      if (held.request.state !== 'pending') return;
+      const { request } = held;
+      const gone = (): ObserveResult => ({ ok: false, reason: 'target_gone' });
+      const looked = await this.deps.target
+        .observe(sessionId, request.target, request.fields.map(pointerOf))
+        .catch(gone);
+      if (looked.ok && digestFacts(looked.facts) === request.observedDigest) return;
+      const again = await this.refound(held, looked).catch(gone);
+      if (!again.ok || digestFacts(again.facts) === request.observedDigest) return;
+      if (held.binding === undefined || !mayRebind(held.binding, again.facts) || held.rebinds >= INPUT_MAX_REBINDS)
+        return;
+      await this.rebind(held, again);
+      held.rebinds -= 1;
+    });
+    return this.sealed(held, await this.exposed(held));
+  }
+
+  /**
    * The request as the owner's client may read it: the prompt line the terminal showed and the program's
    * command line pass the redactor (a screen can echo a value, and an argv can carry one), and are cut to
    * their limits again. Nothing here is the held copy, so the raw binding material stays in RAM.
