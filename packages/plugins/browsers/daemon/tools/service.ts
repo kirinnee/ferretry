@@ -744,9 +744,7 @@ export class BrowserTools {
       case 'browser.open': {
         const opener: SurfaceOpener | undefined =
           caller.kind === 'agent' ? { by: 'agent', sessionId } : caller.openedBy;
-        let page:
-          | { readonly id: string; readonly url: string; readonly incognito?: boolean; readonly challenge?: unknown }
-          | undefined;
+        let page: Awaited<ReturnType<BrowserToolPorts['browser']['openPage']>> | undefined;
         // Opening is a write on the session's browser; where the new page landed is read back under its own hold.
         await writeAct(this.ports.kernel.act, browserTarget(sessionId), 'open', async () => {
           page = await this.ports.browser.openPage(sessionId, call.name, {
@@ -1846,17 +1844,13 @@ function browserUnavailable(reason: string): string {
   return `Browser tools could not start a browser on this machine (${first || 'no reason given'}): install Google Chrome or set FY_CHROME_BIN to a Chrome binary, then try again.`;
 }
 
-/**
- * What an agent is told when the page it just acted on appears to be asking for a human check: that it is one, and
- * that the owner solves it — never the agent. Empty otherwise.
- */
+/** What an agent is told when its page appears to be asking for a human check: it is one, and the owner solves it. */
 function humanCheckNote(answer: BrowserActionResult, pageId: string): string {
   if (!('result' in answer)) return '';
   const page = answer.result.pages.find(candidate => candidate.id === (answer.result.actedPageId ?? pageId));
   return page?.challenge === undefined ? '' : HUMAN_CHECK_NOTE;
 }
 
-/** The one sentence every tool answer carries when its page appears to be showing a human check. */
 const HUMAN_CHECK_NOTE =
   ' The page appears to be showing a human check (a captcha or a "checking your browser" page). Do not try to solve or get around it: ask your owner to take the page over in Ferretry and solve it themselves, then carry on.';
 
