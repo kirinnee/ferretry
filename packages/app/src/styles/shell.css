@@ -493,8 +493,8 @@
 .fy-side-toggle__count {
   position: absolute;
   top: -6px;
-  /* -4, not -6: on the chat page the toggle is at the window's own edge, and a badge hung 6px off it ran past the screen. */
-  right: -4px;
+  /* -3, not -6: on the chat page the toggle is at the window's own edge (its button ends 3.5px short of it), so -4 ran 0.5px past the screen. */
+  right: -3px;
   min-width: 1.25em;
   padding: 0 4px;
   border-radius: 999px;

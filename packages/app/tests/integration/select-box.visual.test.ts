@@ -594,12 +594,11 @@ for (const variant of [PHONE, PHONE_DARK, NARROW]) {
             );
             const list = document.querySelector<HTMLElement>('[role=listbox]');
             const body = dialog?.querySelector<HTMLElement>('[data-dialog-body]');
-            // A touch scroll bar overlays and takes no width, so the gutter proves nothing there: the COMPUTED overflow mode
-            // is what says "a bar only when needed" (`auto`), and a list forced to `scroll` fails it.
+            // The list reserves its scrollbar gutter (PR 2398: the selected row's check must not jump), so a bar's width proves nothing:
+            // "no bar for 5 options" is the list FITTING with the COMPUTED overflow mode `auto` (a bar only when needed).
             return {
               scrollers: scrollers.length,
               listFits: list !== null && list.scrollHeight <= list.clientHeight,
-              bar: list === null ? -1 : list.offsetWidth - list.clientWidth,
               listOverflow:
                 list === null ? '' : `${getComputedStyle(list).overflowY}/${getComputedStyle(list).overflowX}`,
               bodyOverflow: body === null || body === undefined ? '' : getComputedStyle(body).overflowY,
@@ -608,7 +607,6 @@ for (const variant of [PHONE, PHONE_DARK, NARROW]) {
         expect(await measure(few.tab)).toEqual({
           scrollers: 0,
           listFits: true,
-          bar: 0,
           listOverflow: 'auto/hidden',
           bodyOverflow: expect.stringMatching(/^(auto|hidden)$/),
         });

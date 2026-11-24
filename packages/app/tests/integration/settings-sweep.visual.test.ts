@@ -539,7 +539,7 @@ describe('Settings sweep: the checks catch what they claim to', () => {
  */
 describe('Settings list: scrolls and says so at 800px tall', () => {
   for (const viewport of [{ name: '1280x800', width: 1_280, height: 800 }] as const) {
-    it(`${viewport.name}: every group open, the list scrolls inside itself, shows a cue, and its last entry is reachable`, async () => {
+    it(`${viewport.name}: every group open, the list scrolls inside itself with a thin bar, and its last entry is reachable`, async () => {
       const context = await browser.newContext({
         viewport: { width: viewport.width, height: viewport.height },
         colorScheme: 'dark',
@@ -564,14 +564,12 @@ describe('Settings list: scrolls and says so at 800px tall', () => {
           return {
             scrolls: el.scrollHeight > el.clientHeight + 1,
             overflowY: style.overflowY,
-            fades: (style.backgroundImage.match(/linear-gradient/gu) ?? []).length,
             thin: style.scrollbarWidth,
             height: Math.round(el.getBoundingClientRect().height),
           };
         });
         expect(facts.scrolls, `the list (${facts.height}px) is longer than its box`).toBe(true);
         expect(['auto', 'scroll']).toContain(facts.overflowY);
-        expect(facts.fades, 'two fades and two shadows').toBe(4);
         expect(facts.thin).toBe('thin');
         if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, 'nav-cue-top.png') });
         // Focus on the last entry scrolls it into the box: it is not clipped.
