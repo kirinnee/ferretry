@@ -118,25 +118,25 @@ for (const mode of ['light', 'dark'] as const)
         }
       });
 
-      it(`at ${size.name}: the Advanced form shows Login and Name first, in plain words, with the rest under one More`, async () => {
+      it(`at ${size.name}: the Advanced form shows Login first, in plain words, with the rest under one More`, async () => {
         const { tab, close } = await openScene(size, mode, 'view=advanced&logins=4&codex=1');
         try {
-          await tab.waitForSelector('#add-runtime-name');
+          await tab.waitForSelector('[data-add-runtime-credential-select]');
           await tab.waitForTimeout(600);
           await shot(tab, `${size.name}-${mode}-advanced`);
-          // Login and Name, then the one "More" that holds the new-login block, sign-in and Profile.
+          // Login, then the one "More" that holds the new-login block, sign-in and Profile.
           expect(await tab.locator('[data-add-runtime-more]').count()).toBe(1);
           expect(
             await tab.locator('[data-add-runtime-more]').evaluate(element => (element as HTMLDetailsElement).open),
           ).toBe(false);
-          expect(await tab.locator('[data-add-runtime-more] #add-runtime-name').count()).toBe(0);
+          expect(await tab.locator('#add-runtime-name').count()).toBe(0);
           expect(await tab.locator('[data-add-runtime-profile-select]').isVisible()).toBe(false);
           const first = (await tab.locator('[data-add-runtime]').innerText()).replaceAll('\n', ' ');
-          // The login reads as words (never its stored id), and the id has its own line.
+          // The login reads as words (never its stored id), and no id is drawn anywhere on the form.
           expect(first).toContain('Claude · Claude.ai sign-in (atomi)');
-          expect(await tab.locator('[data-add-runtime-id]').textContent()).toMatch(/^id /u);
+          expect(await tab.locator('[data-add-runtime-id]').count()).toBe(0);
           for (const slug of ['ferretry-claude', 'ferretry-codex', 'codex-ferretry-codex', 'claude-ferretry-claude'])
-            expect(first.replace(/id [a-z-]+/u, '')).not.toContain(slug);
+            expect(first).not.toContain(slug);
           await tab.locator('[data-add-runtime-more] summary').click();
           await tab.waitForTimeout(300);
           await shot(tab, `${size.name}-${mode}-advanced-more`);
@@ -147,6 +147,10 @@ for (const mode of ['light', 'dark'] as const)
           const labels = await tab.locator('[role="option"] [data-label]').allTextContents();
           expect(labels).toContain('Ferretry standard for Claude');
           expect(labels.filter(label => label.startsWith('ferretry-'))).toEqual([]);
+          // The profiles an import makes are words too, never claude-default / codex-default.
+          expect(labels).toContain('Your Claude setup');
+          expect(labels.filter(label => /^(claude|codex)-default/u.test(label))).toEqual([]);
+          expect((await tab.locator('[role="listbox"]').innerText()).includes('claude-default')).toBe(false);
           await tab.keyboard.press('Escape');
           expect(await tab.locator('[data-change-submit]').count()).toBeGreaterThan(0);
           await noSideways(tab);

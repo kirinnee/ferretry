@@ -187,10 +187,16 @@ export const loginDisplayName = (
   );
 
 /**
- * A profile in words. The built-ins carry a plumbing name (`ferretry-codex`, `ferretry-claude-pinned-opus-4`); a profile
- * the owner made is shown as they named it.
+ * A profile in words. The built-ins carry a plumbing name (`ferretry-codex`, `ferretry-claude-pinned-opus-4`) and so do the
+ * two an import makes per tool (`claude-default`, `codex-starter`); a profile the owner made is shown as they named it.
  */
 export const profileDisplayName = (name: string): string => {
+  const imported = /^(claude|codex)-(default|starter)(?:-(\d+))?$/u.exec(name);
+  if (imported?.[1] !== undefined && imported[2] !== undefined) {
+    const tool = imported[1] === 'codex' ? 'Codex' : 'Claude';
+    const words = imported[2] === 'default' ? `Your ${tool} setup` : `${tool} starter`;
+    return imported[3] === undefined ? words : `${words} (${imported[3]})`;
+  }
   const standard = /^ferretry-(claude-code|claude|codex)$/u.exec(name);
   if (standard?.[1] !== undefined) return `Ferretry standard for ${standard[1] === 'codex' ? 'Codex' : 'Claude'}`;
   const pinned = /^ferretry-(claude-code|claude|codex)-pinned-(.+)$/u.exec(name);
