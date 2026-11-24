@@ -1,6 +1,7 @@
 import { HarnessKeySchema, type HarnessKey } from '@ferretry/core-ferrets/contract';
 import type { RuntimesClient } from './client.ts';
 import { asModelTier, type ModelTier } from '@ferretry/app/ui';
+import { harnessName, harnessWords } from '../../contract/harness-words.ts';
 
 interface RuntimeReasoningChoice {
   readonly value: string;
@@ -114,12 +115,19 @@ export const parseRuntimeModelCatalog = (value: unknown): RuntimeModelCatalog =>
   };
 };
 
+/**
+ * The daemon names a catalog by the harness's catalog half (`claude`), a session by its plugin key (`claude-code`):
+ * they match when the key's own half is the catalog's. A key Runtimes has no words for matches nothing.
+ */
 export const requireRuntimeModelCatalogHarness = (
   catalog: RuntimeModelCatalog,
-  expected: RuntimeModelCatalog['harness'],
+  expectedKey: string,
 ): RuntimeModelCatalog => {
-  if (catalog.harness !== expected)
-    throw new DaemonResponseError(502, `daemon returned a ${catalog.harness} model catalog for a ${expected} session`);
+  if (harnessWords(expectedKey)?.catalogHalf !== catalog.harness)
+    throw new DaemonResponseError(
+      502,
+      `This model list belongs to another assistant, not ${harnessName(expectedKey)}.`,
+    );
   return catalog;
 };
 

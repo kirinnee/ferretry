@@ -12,7 +12,7 @@
  *  - the header states the tmux session plus a "cached · updated <n>s ago"
  *    hint, so freshness is never a guess.
  *
- * ON A PHONE (the drawer layout) two more things hold. The pane FITS ITS WIDTH by default — the text
+ * ON EVERY SCREEN two more things hold. The pane FITS ITS WIDTH by default — the text
  * is sized so the widest captured line fits (`fitFontPx`), instead of being cut at the right edge
  * behind a sideways scroll — with a Fit / Scroll toggle in the header for the reader who wants 12px
  * and a scrollbar. And the header is one short row: the terminal glyph and a "live" dot, its words
@@ -26,7 +26,7 @@
 import { Terminal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useStickToBottom } from '@ferretry/app';
-import { JumpToLatest, useLayoutMode, useLinkBehaviour } from '@ferretry/app/ui';
+import { JumpToLatest, useLinkBehaviour } from '@ferretry/app/ui';
 import { type DaemonConnection, type DaemonSessionScope, daemonSessionKey } from '../shell.ts';
 import { splitLinkedRuns } from '../lib/terminal-links.ts';
 import {
@@ -157,12 +157,11 @@ export const TerminalSnapshotView = ({
     return () => clearInterval(timer);
   }, [now]);
 
-  // FIT TO WIDTH: the phone's default, the reader's choice after one tap. The pane's width is measured
+  // FIT TO WIDTH: the default on every screen (a line cut at the right edge reads as lost text), the reader's choice after one tap. The pane's width is measured
   // and re-measured as it resizes (rotation, the keyboard); a browser without ResizeObserver keeps the
   // first measurement.
-  const phone = useLayoutMode() === 'drawer';
   const [fitChoice, setFitChoice] = useState<boolean | null>(null);
-  const fit = fitChoice ?? phone;
+  const fit = fitChoice ?? true;
   const [paneWidth, setPaneWidth] = useState(0);
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -227,7 +226,7 @@ export const TerminalSnapshotView = ({
           type="button"
           aria-pressed={fit}
           aria-label="Fit the pane to the screen width"
-          className="mono h-6 rounded-sm border border-border-soft px-2 text-[11px] text-muted hover:text-fg md:hidden"
+          className="mono h-6 rounded-sm border border-border-soft px-2 text-[11px] text-muted hover:text-fg"
           data-terminal-fit=""
           onClick={() => setFitChoice(!fit)}
           title={

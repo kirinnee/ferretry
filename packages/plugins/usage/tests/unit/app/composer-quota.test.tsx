@@ -19,10 +19,13 @@ describe('the composer quota', () => {
       'Account usage: 5-hour window 12% used; weekly window unknown.',
     );
 
-    // Nothing known: NOTHING is drawn: no element, so no tooltip on an empty one, and never the words `usage unknown`.
+    // Nothing known: it says so, in plain words, rather than leaving the status line silent (the owner's O9-17 ask).
     for (const quota of [undefined, null, {}, { fiveHourPercent: Number.NaN }]) {
       const unknown = render(<ComposerQuota quota={quota} />);
-      expect(unknown.toJSON()).toBeNull();
+      const element = unknown.root.findByProps({ className: 'fy-composer-quota' });
+      expect(element.props['data-quota']).toBe('none');
+      expect(findText(unknown.root, 'No usage data')).toHaveLength(1);
+      expect(element.props.title).toBe('Usage not available for this login.');
     }
     const limited = render(<ComposerQuota quota={{ atLimit: true }} />);
     expect(findText(limited.root, 'at limit')).toHaveLength(1);

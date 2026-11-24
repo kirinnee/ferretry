@@ -30,7 +30,7 @@ describe('the composer status line reads the runtime as model · thinking · spe
   });
 
   it('is a plain word, never blank or `undefined`, when nothing is known', () => {
-    expect(runtimeReadout(view())).toBe('Model');
-    expect(runtimeReadout(view({}, { observedModel: '  ', observedReasoningEffort: ' ' }))).toBe('Model');
+    expect(runtimeReadout(view())).toBe('Default model');
+    expect(runtimeReadout(view({}, { observedModel: '  ', observedReasoningEffort: ' ' }))).toBe('Default model');
   });
 });

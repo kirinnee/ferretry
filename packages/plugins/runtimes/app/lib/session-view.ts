@@ -95,5 +95,7 @@ export const runtimeParts = (view: RuntimeSessionView): RuntimeParts => {
  */
 export const runtimeReadout = (view: RuntimeSessionView): string => {
   const { model, effort, fast } = runtimeParts(view);
-  return [model ?? 'Model', effort, fast === true ? 'fast' : undefined].filter(part => part !== undefined).join(' · ');
+  return [model ?? 'Default model', effort, fast === true ? 'fast' : undefined]
+    .filter(part => part !== undefined)
+    .join(' · ');
 };

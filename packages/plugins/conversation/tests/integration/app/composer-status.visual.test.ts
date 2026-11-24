@@ -10,7 +10,7 @@
  *    keeping most of it;
  *  - the status line sits UNDER the row (model chip, usage), never in it, and is a line high, not a block;
  *  - the status line is ONE line (the model's name gives way, never the line wrapping), at a phone too;
- *  - a subscription login shows 5h and weekly, a key login the money spent, an unknown usage NOTHING (no element, no
+ *  - a subscription login shows 5h and weekly, a key login the money spent, an unknown usage "No usage data" (in words, no
  *    raw `usage unknown`);
  *  - the mic carries no offset shadow at rest, in the loud theme families too.
  *
@@ -187,7 +187,7 @@ for (const mode of ['light', 'dark'] as const)
             expect(idle.lastChipRight, 'the readouts stay inside the window').toBeLessThanOrEqual(size.width);
 
             if (usage === 'unknown') {
-              expect(idle.quotaPresent, 'unknown usage draws nothing at all').toBe(false);
+              expect(idle.quotaVisibleText, 'unknown usage says so in words').toBe('No usage data');
               expect(idle.bodyText).not.toMatch(/usage unknown/iu);
             } else if (usage === 'key') {
               expect(idle.quotaVisibleText).toMatch(/\$12\.40/u);

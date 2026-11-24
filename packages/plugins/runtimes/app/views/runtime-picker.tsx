@@ -5,7 +5,7 @@
  * THREE QUIET READOUTS ON THE COMPOSER'S STATUS LINE, ONE POPOVER BEHIND THEM (v4's bar: the values are ON the bar, and a
  * tap on one changes it). The bar reads `<model> · <thinking> · <Normal|Fast>`; each is a real button that opens the same
  * popover on its own list (Model, Reasoning, Speed), reusing this plugin's model and effort controls and adding only the
- * speed list beside them. A value the ferret has not reported reads as a plain word (`Model`, `Thinking`), never a guess.
+ * speed list beside them. A value the ferret has not reported reads as the plain word `Default` (it runs on the harness's own choice; the tooltip names the field), never a guess.
  * The composer draws this panel on its status line, under the row (Conversation's `STATUS_PANELS`), because anything it
  * drew in the row would take the text box's room. The popover is a portal with fixed placement, so nothing it holds can
  * make the composer taller, and it asks for the model catalog only once opened.
@@ -252,10 +252,10 @@ export const createRuntimePicker = (client: LiveRuntimesClient): AppComponent<Pa
       readonly title: string;
       readonly icon?: ReactNode;
     }[] = [
-      { key: 'model', text: parts.model ?? 'Model', title: 'Change the model' },
+      { key: 'model', text: parts.model ?? 'Default', title: 'Change the model' },
       {
         key: 'effort',
-        text: parts.effort ?? 'Thinking',
+        text: parts.effort ?? 'Default',
         title: 'Change the thinking level',
         icon: <Brain aria-hidden="true" className="shrink-0" size={12} />,
       },

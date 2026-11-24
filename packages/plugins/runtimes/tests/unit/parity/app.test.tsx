@@ -297,7 +297,7 @@ describe('the runtime picker above the composer', () => {
   it('S-0207 the runtime-picker panel draws the model choices as a menu with the current one checked, focused first, and moved by the arrow keys, Home, End and Enter', async () => {
     expect(manifest.ui?.panels?.find(entry => entry.id === 'runtime-picker')?.slot).toBe('composer.tools');
     const catalog = {
-      harness: 'claude-code',
+      harness: 'claude',
       source: 'wrapper-inventory',
       choices: [
         { value: 'claude-opus-5', label: 'Opus 5', description: 'The big one', isDefault: true, reasoningEfforts: [] },
