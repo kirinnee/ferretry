@@ -169,8 +169,10 @@ mean lizzette (Build MCP Connector)?` More than one match lists them and asks wh
 ## What a tool may do, and how
 
 - **Through the daemon's own API, never beside it.** Each tool is one or more ordinary requests to the daemon's
-  own route table, dispatched in-process as the owner (the host admin credential), with the actor
-  `connector:<grantId>` so the journal and the security log say who acted. There is no second control path:
+  own route table, dispatched in-process under the host admin credential, with the actor `connector:<grantId>` so
+  the journal and the security log say who acted. The request is stamped as arriving REMOTE, so the daemon governs
+  it like the admin token off loopback: the boundary applies the daemon-wide grants, and every act that needs a
+  passkey step-up (confirming a held configuration change, restoring a cut-off ferret, any widen) is refused. There is no second control path:
   validation, ledgers, journalling and every route's own checks apply.
 - **Why the owner's authority, and what bounds it.** A connector grant is approved by the owner with a passkey
   (or at the machine), so it acts for the owner — but ONLY through the nine tools, whose arguments are fixed

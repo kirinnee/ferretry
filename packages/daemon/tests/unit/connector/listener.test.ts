@@ -109,3 +109,50 @@ describe('InProcessConnectorDispatch body bound', () => {
     ).be.rejected();
   });
 });
+
+describe('InProcessConnectorDispatch headers', () => {
+  it('forwards only the request id a tool may set, and only when it is well formed', async () => {
+    const seen: ApiRequest[] = [];
+    const dispatch = new InProcessConnectorDispatch({
+      dispatch: async r => {
+        seen.push(r);
+        return ok('{}');
+      },
+      adminToken: () => 'admin-token-value',
+    });
+    await dispatch.call('cg_abcdefghij', {
+      method: 'POST',
+      path: '/v1/x',
+      headers: { 'X-Fy-Request-Id': 'req-1', authorization: 'Bearer stolen', 'x-forwarded-for': '1.2.3.4' },
+    });
+    await dispatch.call('cg_abcdefghij', { method: 'POST', path: '/v1/x', headers: { 'x-fy-request-id': 'bad id\n' } });
+    should(seen[0]?.headers.get('x-fy-request-id')).equal('req-1');
+    // A header a tool names cannot replace the grant's own credentials or add a forwarding claim.
+    should(seen[0]?.headers.get('authorization')).equal('Bearer admin-token-value');
+    should(seen[0]?.headers.get('x-forwarded-for')).be.undefined();
+    should(seen[1]?.headers.get('x-fy-request-id')).be.undefined();
+  });
+});
+
+describe('InProcessConnectorDispatch arrival', () => {
+  it('arrives remote and unprivileged, so the boundary governs it', async () => {
+    let seen: ApiRequest | undefined;
+    const dispatch = new InProcessConnectorDispatch({
+      dispatch: async r => {
+        seen = r;
+        return ok('');
+      },
+      adminToken: () => 't',
+    });
+    await dispatch.call('cg_abcdefghij', {
+      method: 'POST',
+      path: '/v1/x',
+      headers: { 'X-Fy-Request-Id': 'connector-1', authorization: 'Bearer forged', 'x-ferretry-session-id': 's1' },
+    });
+    should(seen?.loopback).be.false();
+    should(seen?.privilegedLoopback).be.false();
+    should(seen?.headers.get('x-fy-request-id')).equal('connector-1');
+    should(seen?.headers.get('authorization')).equal('Bearer t');
+    should(seen?.headers.has('x-ferretry-session-id')).be.false();
+  });
+});

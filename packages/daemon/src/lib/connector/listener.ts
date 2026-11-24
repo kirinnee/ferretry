@@ -53,13 +53,17 @@ const TOOL_HEADERS: ReadonlySet<string> = new Set(['x-fy-request-id']);
 const MAX_CALL_BODY_CHARS = 64 * 1024;
 
 /**
- * The tools' one door into the daemon: an ordinary request to the daemon's OWN route table, dispatched in-process as
- * the owner at the machine (the host admin token, a loopback, host-proven arrival) and self-identified as
- * `connector:<grantId>` so the journal and the security log name who acted (`resolveApiActor`).
+ * The tools' one door into the daemon: an ordinary request to the daemon's OWN route table, dispatched in-process
+ * under the host admin token and self-identified as `connector:<grantId>` so the journal and the security log name
+ * who acted (`resolveApiActor`).
  *
- * This is exactly the request `fy` at the machine sends, minus the socket: every route's own validation, ledgers,
- * journalling and person/agent rules apply unchanged. What bounds it is upstream — the nine tools, whose argument
- * schemas build `call.path` from fixed templates, and the operator's daemon-wide grants each tool checks first.
+ * IT ARRIVES REMOTE, NOT AT THE MACHINE (`loopback: false`, no privileged arrival). The admin token off loopback is
+ * a GOVERNED caller (docs/grants.md, `arrivedOnHost`), so the boundary applies the operator's daemon-wide grants to
+ * every route the tools reach, and every act that wants a passkey step-up — confirming a held configuration change,
+ * restoring a cut-off ferret, widening anything — is refused, because a connector holds no device and so no step-up.
+ * Stamping it host-local instead would make it the ungoverned owner at the keyboard, which it is not. Every route's
+ * own validation, ledgers, journalling and person/agent rules apply unchanged; the nine tools' fixed schemas bound
+ * what is asked.
  */
 export class InProcessConnectorDispatch implements ConnectorApiDispatch {
   constructor(
@@ -89,8 +93,8 @@ export class InProcessConnectorDispatch implements ConnectorApiDispatch {
       path: call.path,
       query: queryFrom(Object.entries(call.query ?? {})),
       headers: headersFrom(headers),
-      loopback: true,
-      privilegedLoopback: true,
+      loopback: false,
+      privilegedLoopback: false,
       text: async limitBytes => {
         if (limitBytes !== undefined && new TextEncoder().encode(body).byteLength > limitBytes)
           throw new BodyTooLargeError(limitBytes);
