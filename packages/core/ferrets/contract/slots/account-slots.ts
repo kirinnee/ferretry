@@ -28,6 +28,17 @@ export interface ChosenFerretAccount {
   }[];
   /** The login's model catalog, when it reads one; `customIds` means the model box also takes a typed id. */
   readonly modelCatalog?: { readonly id: string; readonly label: string; readonly customIds: boolean };
+  /**
+   * The login's live model list (docs/model-catalog.md § Live model list), once the panel has read it: the ids its provider
+   * listed and, where this browser may press it, "Refresh list". Absent when the login has no list to give. Information only:
+   * it never changes `defaultModel`.
+   */
+  readonly live?: {
+    readonly list:
+      | { readonly fetchedAt: string; readonly complete: boolean; readonly ids: readonly string[] }
+      | undefined;
+    readonly refresh?: { readonly run: () => void; readonly busy: boolean };
+  };
 }
 
 /** What every account slot's page hands its panels, besides the shell's `subject`. */

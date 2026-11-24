@@ -16,8 +16,9 @@ import {
   isNewFerretAccountSlotProps,
 } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
-import { type ReactNode, useCallback, useRef } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { type ChosenRuntime, RuntimeSelect } from '../components/runtime-select.tsx';
+import { useLiveModelList, type LiveModelListState } from '../hooks/use-live-model-list.ts';
 import { useUsageRows } from '../hooks/use-usage-rows.ts';
 import {
   checkAccountPickerHealth,
@@ -39,7 +40,10 @@ const pickerStore = (client: LiveRuntimesClient): AccountPickerStore =>
   });
 
 /** What the page needs to know about the runtime picked: Ferrets' words, not this half's option record. */
-export const chosenFerretAccount = (chosen: ChosenRuntime | null): ChosenFerretAccount | null => {
+export const chosenFerretAccount = (
+  chosen: ChosenRuntime | null,
+  live?: LiveModelListState,
+): ChosenFerretAccount | null => {
   if (chosen === null) return null;
   const { account } = chosen;
   return {
@@ -62,6 +66,7 @@ export const chosenFerretAccount = (chosen: ChosenRuntime | null): ChosenFerretA
             customIds: account.modelCatalog.customIds,
           },
         }),
+    ...(live === undefined ? {} : { live }),
   };
 };
 
@@ -82,7 +87,16 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
   // callback is therefore stable and reads the page's latest one from a ref.
   const proposed = useRef(slot.onChosen);
   proposed.current = slot.onChosen;
-  const onChosen = useCallback((chosen: ChosenRuntime | null) => proposed.current(chosenFerretAccount(chosen)), []);
+  // The live model list follows the runtime chosen: the page is told the choice again when the list arrives or changes.
+  const [chosen, setChosen] = useState<ChosenRuntime | null>(null);
+  const live = useLiveModelList(
+    client,
+    chosen?.account.modelCatalog === undefined ? undefined : chosen.account.credentialId,
+  );
+  const onChosen = useCallback((next: ChosenRuntime | null) => setChosen(next), []);
+  useEffect(() => {
+    proposed.current(chosenFerretAccount(chosen, live));
+  }, [chosen, live]);
   // Stable for the same reason; `onOffered` is optional, so what the page hands over is read at call time.
   const told = useRef(slot.onOffered);
   told.current = slot.onOffered;
