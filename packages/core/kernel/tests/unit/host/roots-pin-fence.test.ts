@@ -171,6 +171,7 @@ describe('S40 S47 a pinned work root that is an ancestor of the state home', () 
                 { dev: homeIdentity.device, ino: homeIdentity.inode, ctimeNs: 0n, mode: homeIdentity.mode },
               ],
               read: max => target.read(max),
+              restat: () => target.restat(),
               list: (max, budget) => target.list(max, budget),
               close: () => target.close(),
             };
@@ -211,6 +212,7 @@ function aliasingPinner(
               ? [...target.identities, { dev: home.device, ino: home.inode, ctimeNs: 0n, mode: home.mode }]
               : target.identities,
             read: max => target.read(max),
+            restat: () => target.restat(),
             list: (max, budget) => target.list(max, budget),
             close: () => target.close(),
           };

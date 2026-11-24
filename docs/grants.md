@@ -427,9 +427,37 @@ make one fact two switches. The review, one row per risk:
 
 What it does NOT do, stated: it is not an HTTP URL a `<video>` can point at — a device has no bearer value to put in one
 (zero-trust) — so the app reads the pieces over its sealed session and plays a `blob:`; a file is loaded whole before it
-plays (a 32 MiB file is eight requests), and each request reads and scans the whole file again (a verdict cache is
-a declared gap, [below](#declared-gaps)). `GET` only; `HEAD` is not routed. The working tree keeps its mebibyte: only the
+plays (a 32 MiB file is eight requests), and the first request scans the whole file once for vault values while the
+others read only their range ([a file is scanned once](#media-scan-once)). `GET` only; `HEAD` is not routed. The working tree keeps its mebibyte: only the
 media folder has this route.
+
+<a id="media-scan-once"></a>
+
+**A media file is scanned for vault values once, not once per piece.** The scan reads every byte, so doing it for each
+4 MiB range of a 32 MiB clip held the daemon's event loop for about 0.35 s and took about 280 MiB more memory,
+eight times over, and parallel requests multiplied the memory. The verdict (holds a value, or does not) is now kept in
+memory (`core/ferrets/daemon/lib/runtime/mounts/media-scan-cache.ts`, at most 64 files, least recently used out) under
+**both** halves of what it is a fact about:
+
+- **The file**: device, inode, size, mtime and ctime of the open descriptor the bytes come from. A rewrite in place, a
+  replacement or a longer file is a different key and is scanned again.
+- **The vault**: a keyed digest of every value the read would mask (`RedactionScope.fingerprint`: the stored secrets, the
+  contributed ones and the typed ones still held), made fresh for every daemon process and never leaving it. A value
+  stored, rotated, removed, typed or expired changes it, so every verdict made under the old set stops matching at once. A
+  redactor that cannot give one keeps nothing and scans every request, as before.
+
+A request that finds a verdict reads **only its range** (`PinnedTarget.read(maxBytes, window)` on the descriptor it just
+gated); one for a file nobody has judged reads and scans all of it, and requests that arrive meanwhile wait for that scan
+rather than reading the file beside it. **A range is never served from a file whose scan is unfinished, failed or
+refused**: a refused file is refused again for every range without being read, and a failed scan is retried by the next
+request, never assumed clean. The gates (ignore, denylist, fence, hard links, descriptor walk) still run on every request.
+
+**The key is checked again after the read.** The verdict's key is the descriptor's stat at open, but the range is read later
+(the vault opens in between, and a waiter sits through another request's whole scan), so a same-size write in that gap
+would otherwise be served from the old clean verdict. After the windowed read the route stats the **same descriptor**
+again (`PinnedTarget.restat`) and serves the bytes only if device, inode, size, mtime and ctime still equal the key; if
+not, the verdict is dropped, nothing is served (`409 changed`) and the next request scans the file as it is. ctime is set
+by the kernel and a write moves it, so this closes the gap down to one clock tick (the declared residue below).
 
 One consequence: agenda actions are gated by **who acts** (the human or a ferret), never by a capability.
 `POST /v1/agenda/clear-agents` is owner-only on that axis — an agent credential gets 403 — and has no grant.
@@ -1094,12 +1122,12 @@ command says so at the moment somebody might be tempted to do that instead.
 
 ## Declared GAPs
 
-- **The media byte route reads and scans the whole file for every piece it serves**
-  ([above](#media-bytes)). A 32 MiB file is eight requests of one full read and one vault scan each (about a second
-  apiece on this box with a fake scope; the real vault's cost is not measured). Nothing is cached, because a cached
-  "holds no secret" verdict would outlive a secret stored a moment later; a short, vault-versioned verdict cache is
-  the fix and is not built. A file that changes between two pieces is read as it is each time; the app checks the
-  pieces add up to the size the JSON read named and shows "could not be read" when they do not.
+- **The first request for a media file still scans all of it in one block.** The scan is synchronous, so a 32 MiB clip
+  holds the daemon's event loop for about 0.35 s once, and about 280 MiB more memory while it does, then never again until
+  the file or the vault changes ([a file is scanned once](#media-scan-once)). It is not yet cut into pieces that yield the
+  loop between them. A verdict is keyed on the file's device, inode, size, mtime and ctime, so a rewrite inside one clock
+  tick of the open `fstat` (or of the re-check after the read) that keeps the size and mtime is not seen; a file that changes between two pieces is
+  read as it is each time, and the app checks the pieces add up to the size the JSON read named.
 - **A file plays only once it has all arrived.** The app joins the pieces into one `blob:`; there is no
   progressive play, and a 32 MiB file over a slow relay is a wait with a quiet placeholder.
 - **An SSH tunnel to the daemon port is a governed caller**, like any browser: it is a loopback peer, and a
