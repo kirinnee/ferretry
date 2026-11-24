@@ -164,6 +164,7 @@ import { ensureInternalRootBases, ensureWorktreesBase, ownFolderSpellings, roots
 import { NO_PROCESS_TABLE, type ProcessTable, processesPortFor } from './processes.ts';
 import { PinRegistry } from './pins.ts';
 import { dedupedWarnings, describeRefusal, type RefusalNote } from './refusal-log.ts';
+import { describeFailure, type FailureNote } from './responses.ts';
 import { FsError, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
 import type { PathsPort, ScratchPort } from '../contract/ports.ts';
 
@@ -1485,6 +1486,11 @@ async function bootLocked(
     refused: (note: RefusalNote) => {
       const line = describeRefusal(note);
       refusalLog.warn(line.message, line.fields);
+    },
+    // A handler that threw is a 500 the caller cannot explain: say why here, once per call, with no secret value.
+    failed: (note: FailureNote) => {
+      const line = describeFailure(note);
+      log.child('dispatch').error(line.message, line.fields);
     },
     ...(adapters.compressor === undefined ? {} : { compressor: adapters.compressor }),
   };

@@ -1,5 +1,6 @@
 import type { ApiResponse, PlainApiResponse } from '../contract/http.ts';
 import { ApiError, errorResponse, jsonResponse } from '../contract/http.ts';
+import type { LogFields } from '../contract/ports.ts';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
 
 /** The header every response carries so a client can name a skew instead of guessing (today's `FY_VERSION_HEADER`). */
@@ -38,6 +39,36 @@ export function failureResponse(error: unknown): PlainApiResponse {
   return error instanceof ApiError
     ? errorResponse(error.status, error.message, error.code, error.extra)
     : errorResponse(500, 'the daemon failed to handle this request', 'internal_error');
+}
+
+/** One handler throw that became a 500, as the dispatcher hands it to the host's log. */
+export interface FailureNote {
+  readonly table: 'route' | 'socket' | 'member';
+  readonly method: string;
+  /** The declared template, never the caller's path. */
+  readonly route: string;
+  readonly error: unknown;
+  /** A `guard: 'secrets'` route: the error's message may carry what the guard masks, so only its class is said. */
+  readonly secretGuarded: boolean;
+}
+
+const FAILURE_REASON_MAX = 200;
+
+/** The one `error` line for a 500: the route template, the error's class and (unless guarded) a short message. Total. */
+export function describeFailure(note: FailureNote): {
+  readonly message: string;
+  readonly fields: LogFields;
+} {
+  const error = note.error;
+  const name = error instanceof Error ? error.name : typeof error;
+  const reason =
+    note.secretGuarded || !(error instanceof Error)
+      ? ''
+      : `: ${error.message.replace(/\s+/gu, ' ').trim().slice(0, FAILURE_REASON_MAX)}`;
+  return {
+    message: `failed ${note.method} ${note.route} (500): ${name}${reason}`,
+    fields: { table: note.table, status: 500 },
+  };
 }
 
 /** D10: a skeleton half's declared route. */

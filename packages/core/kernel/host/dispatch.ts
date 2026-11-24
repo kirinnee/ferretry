@@ -9,7 +9,7 @@ import type {
   PublishedApiResponse,
   RouteParameters,
 } from '../contract/http.ts';
-import { errorResponse } from '../contract/http.ts';
+import { ApiError, errorResponse } from '../contract/http.ts';
 import type { PluginId } from '../contract/ids.ts';
 import type {
   CallContext,
@@ -24,6 +24,7 @@ import type { SocketAccept, SocketDescriptor, SocketUpgradeDecision } from '../c
 import { SOCKET_CLOSES } from '../contract/socket.ts';
 import { DEFAULT_ACTOR, runInCall } from './call-scope.ts';
 import {
+  type FailureNote,
   failureResponse,
   isPublishedResponse,
   methodNotAllowedResponse,
@@ -81,6 +82,11 @@ export interface DispatchBindings {
    * the main table). The host turns it into one `warn` line; a throw here never changes the answer.
    */
   readonly refused?: (note: RefusalNote) => void;
+  /**
+   * Told of every handler throw that became a 5xx, so the daemon log says why (a bare 500 told the caller nothing and
+   * the log nothing either). The host turns it into one `error` line; a throw here never changes the answer.
+   */
+  readonly failed?: (note: FailureNote) => void;
 }
 
 /**
@@ -114,6 +120,27 @@ function noteRefusal(
 ): void {
   try {
     bindings.refused?.({ table, method: request.method, route, request, response });
+  } catch {
+    // The log is the host's; the answer stands.
+  }
+}
+
+/** Says one handler failure to the host's log, if it listens. A typed refusal below 500 is not a failure. Never throws. */
+function noteFailure(
+  bindings: DispatchBindings,
+  table: FailureNote['table'],
+  descriptor: { readonly method: string; readonly path: string; readonly guard?: unknown },
+  error: unknown,
+): void {
+  if (error instanceof ApiError && error.status < 500) return;
+  try {
+    bindings.failed?.({
+      table,
+      method: descriptor.method,
+      route: descriptor.path,
+      error,
+      secretGuarded: descriptor.guard === 'secrets',
+    });
   } catch {
     // The log is the host's; the answer stands.
   }
@@ -171,6 +198,7 @@ export function notServing(owner: Owner): PlainApiResponse | undefined {
  */
 async function run(
   bindings: DispatchBindings,
+  table: 'route' | 'member',
   descriptor: RouteDescriptor | MemberRouteDescriptor,
   build: () => Promise<ApiResponse>,
   owner?: Owner,
@@ -194,6 +222,7 @@ async function run(
   try {
     built = await build();
   } catch (error) {
+    noteFailure(bindings, table, descriptor, error);
     built = failureResponse(error);
   }
   // Never a guarded answer: its body is chosen by the final check.
@@ -228,6 +257,7 @@ async function run(
       if (cached?.source !== next) cached = { source: next, answer: publishResponse(policy(next)) };
       return cached.answer;
     } catch (error) {
+      noteFailure(bindings, table, descriptor, error);
       return policy(showable() ? failureResponse(error) : withheld());
     }
   };
@@ -295,6 +325,7 @@ export class Dispatcher {
     const response = await runInCall({ actor: decision.actor, standing: decision.standing }, () =>
       run(
         this.bindings,
+        'route',
         found.route,
         () => {
           executed = true;
@@ -391,6 +422,7 @@ export class Dispatcher {
     const response = await runInCall({ actor: decision.actor }, () =>
       run(
         this.bindings,
+        'member',
         found.route,
         () => {
           executed = true;
@@ -505,6 +537,7 @@ export class Dispatcher {
         },
       };
     } catch (error) {
+      noteFailure(this.bindings, 'socket', found.route, error);
       const response = failureResponse(error);
       this.recorded({
         table: 'socket',
