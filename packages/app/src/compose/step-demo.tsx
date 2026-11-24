@@ -56,7 +56,12 @@ export function StepDemo({ children, pinned = false }: StepDemoProps) {
   if (slot === undefined) return <div data-step-demo-inline="">{children}</div>;
   return (
     <>
-      <span ref={mark} data-step-demo-mark="" style={{ display: 'none' }} />
+      <span
+        ref={mark}
+        data-step-demo-mark=""
+        {...(pinned ? { 'data-step-demo-pinned-mark': '' } : {})}
+        style={{ display: 'none' }}
+      />
       {slot === null || covered
         ? null
         : createPortal(
