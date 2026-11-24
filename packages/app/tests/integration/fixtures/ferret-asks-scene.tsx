@@ -114,6 +114,20 @@ const grants = {
   steppedUp: false,
 };
 
+/** What the Console pane shows: a made-up agent screen whose lines are as wide as a real pane's (a long path included). */
+const consolePane = [
+  'Fake Agent v0.0.0',
+  '~/projects/demo-app',
+  '',
+  '> Read the file /work/fixture/state/session-0001/turns/turn-001.md now, then carefully follow every instruction in',
+  '  it. This is your complete task for this turn.',
+  '  Waiting for the fixture to answer.',
+  '',
+  '────────────────────────────────────────────────────────────────────────────────────────────────────',
+  '> Once fixed, resend your message',
+  '────────────────────────────────────────────────────────────────────────────────────────────────────',
+].join('\n');
+
 (window as unknown as { __unanswered: string[] }).__unanswered = [];
 const transport = new FakeTransport((request: TransportRequest): TransportAnswer => {
   const path = request.path.split('?')[0] ?? request.path;
@@ -130,6 +144,7 @@ const transport = new FakeTransport((request: TransportRequest): TransportAnswer
     });
   if (path === '/v1/ferrets/zoe/agenda') return json(board);
   if (path === '/v1/agenda/open') return json({ sessions: [{ sessionId: 'zoe', items: board.items }] });
+  if (path === '/v1/ferrets/zoe/snapshot') return json(consolePane);
   if (path === '/v1/ferrets/zoe/processes') return json(processes);
   if (path === '/v1/ferrets/zoe/terminals')
     return json({

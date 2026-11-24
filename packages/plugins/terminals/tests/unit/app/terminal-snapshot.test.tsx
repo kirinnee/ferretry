@@ -313,6 +313,39 @@ describe('terminal snapshot view', () => {
       }
     });
 
+    it('opens in Wrap where lines may wrap and fitting would be unreadable: nothing runs past the edge, and a tap steps Wrap, Scroll, Fit', async () => {
+      setHidden(false);
+      asPhone();
+      try {
+        const view = await mount(
+          <TerminalSnapshotView
+            daemon={daemon}
+            scope={scope}
+            live
+            now={() => 0}
+            readSnapshot={async () => PANE}
+            wrapLines
+          />,
+        );
+        try {
+          expect(toggle(view.container).textContent).toBe('Wrap');
+          expect(pre(view.container).className).toContain('whitespace-pre-wrap');
+          expect(pre(view.container).style.fontSize).toBe('');
+          await interact(() => toggle(view.container).click());
+          expect(toggle(view.container).textContent).toBe('Scroll');
+          expect(pre(view.container).className).toContain('whitespace-pre');
+          expect(pre(view.container).className).not.toContain('whitespace-pre-wrap');
+          await interact(() => toggle(view.container).click());
+          expect(toggle(view.container).textContent).toBe('Fit');
+          expect(pre(view.container).style.fontSize).toBe('7px');
+        } finally {
+          await view.unmount();
+        }
+      } finally {
+        restore();
+      }
+    });
+
     it('defaults to Fit when the fitted text stays at 10px or more', async () => {
       setHidden(false);
       asPhone();
