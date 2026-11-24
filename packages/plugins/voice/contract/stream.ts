@@ -263,6 +263,7 @@ export const STREAM_CLOSES = {
   protocol: { code: 4400, reason: 'voice stream protocol error' },
   silentPhone: { code: 4408, reason: 'the device went silent' },
   busy: { code: 4429, reason: 'voice stream is busy' },
+  forbidden: { code: 4403, reason: 'voice chat needs the fleet permission as well' },
   tooFast: { code: 1008, reason: 'audio arrived faster than real time' },
   overloaded: { code: 4450, reason: 'the machine could not keep up' },
   failed: { code: 1011, reason: 'speech failed on the machine' },

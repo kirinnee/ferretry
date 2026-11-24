@@ -5,6 +5,8 @@ import {
   type SecretName,
   allowedDestination,
 } from '@ferretry/core-vault/contract';
+import { FakeGate } from '@ferretry/core-gate/contract/testing';
+import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { FakeVault, type FakeTransport } from '@ferretry/core-vault/contract/testing';
 import { device, ferret, owner, testHost, warden } from '@ferretry/kernel/testing';
 import {
@@ -46,7 +48,7 @@ async function vaultWith(
 async function hostOf(vault: FakeVault, config: Record<string, unknown> = {}) {
   return await testHost({
     plugins: [voice],
-    fakes: { vault },
+    fakes: { vault, gate: new FakeGate(), ferrets: new FakeFerrets() },
     config: { 'voice.yaml': { postProcessing: { provider: 'groq' }, ...config } },
   });
 }

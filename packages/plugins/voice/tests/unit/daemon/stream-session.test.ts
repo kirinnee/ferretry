@@ -37,6 +37,8 @@ interface Rig {
   readonly frames: Uint8Array[];
   readonly closes: { code: number; reason: string }[];
   readonly sent: { ferretId: string; message: string; sendId: string }[];
+  /** The ferret ids a send was audited for. */
+  readonly audited: string[];
   readonly transcribed: number[];
   readonly stream: VoiceStream;
   snapshot(): StreamSnapshot;
@@ -57,6 +59,8 @@ async function rig(
     send?: StreamParts['send'];
     engine?: Partial<StreamParts['engine']>;
     claimFerret?: StreamParts['claimFerret'];
+    mayChat?: StreamParts['mayChat'];
+    resolveFerret?: StreamParts['resolveFerret'];
     registry?: StreamRegistry;
     buffered?: number;
   } = {},
@@ -65,6 +69,7 @@ async function rig(
   const frames: Uint8Array[] = [];
   const closes: { code: number; reason: string }[] = [];
   const sent: Rig['sent'] = [];
+  const audited: string[] = [];
   const transcribed: number[] = [];
   let counter = 0;
   const downstream: SocketDownstream = {
@@ -104,6 +109,9 @@ async function rig(
             sent.push({ ferretId, message, sendId });
             return { ok: true };
           },
+    mayChat: overrides.mayChat ?? (() => true),
+    resolveFerret: overrides.resolveFerret ?? (async reference => reference),
+    recordSent: ferretId => void audited.push(ferretId),
     claimFerret: overrides.claimFerret ?? (ferret => registry.claimFerret(ferret)),
     onEnd: () => {
       ended += 1;
@@ -118,6 +126,7 @@ async function rig(
     frames,
     closes,
     sent,
+    audited,
     transcribed,
     stream,
     snapshot: () => snapshots().at(-1) as StreamSnapshot,
@@ -471,11 +480,11 @@ describe('the voice stream: edges', () => {
 
   test("a failure that is not the wire's (a defect) is not hidden as a protocol error", async () => {
     const r = await rig({
-      claimFerret: () => {
-        throw new Error('the registry broke');
+      mayChat: () => {
+        throw new Error('the grant check broke');
       },
     });
-    expect(() => r.start(chat)).toThrow('the registry broke');
+    expect(() => r.start(chat)).toThrow('the grant check broke');
     expect(r.closes).toEqual([]);
   });
 
@@ -524,5 +533,181 @@ describe('the sample buffer', () => {
     expect(buffer.slice(5, 7)).toHaveLength(2);
     expect(buffer.dropBefore(16_000)).toBe(16_000);
     expect(buffer.length).toBe(11 * 16_000);
+  });
+});
+
+/** The final decode answers when the test says so: the moment between "the pause was heard" and "the words are known". */
+const gatedFinal = () => {
+  let hold = false;
+  let release: () => void = () => undefined;
+  return {
+    hold: () => {
+      hold = true;
+    },
+    release: () => {
+      hold = false;
+      release();
+    },
+    transcribe: async (samples: Float32Array) => {
+      if (hold) await new Promise<void>(resolve => (release = resolve));
+      return { text: samples.length > 0 ? 'please check the build' : '', decodeMs: 1, realTimeFactor: 0 };
+    },
+  };
+};
+
+const turn = async (r: Rig): Promise<void> => {
+  await r.talk(1_500);
+  await r.talk(2_500, { loud: true });
+  await r.talk(3_000);
+};
+
+describe('the voice stream: voice chat needs the fleet permission as well (review 2481, blocking 1)', () => {
+  test('RED→GREEN: a chat start without fleet.use is refused in a plain sentence, and nothing is sent or audited', async () => {
+    const r = await rig({ mayChat: () => false });
+    r.start(chat);
+    expect(r.snapshot().error).toMatchObject({ code: 'fleet_not_granted' });
+    expect(r.snapshot().error?.message).toContain('fleet');
+    expect(r.closes.at(-1)).toEqual(STREAM_CLOSES.forbidden);
+    await turn(r);
+    expect(r.sent).toEqual([]);
+    expect(r.audited).toEqual([]);
+  });
+
+  test('Talk to test needs only voice.use: it still works without fleet.use', async () => {
+    const r = await rig({ mayChat: () => false });
+    r.start(test_);
+    await turn(r);
+    expect(r.snapshot().last).toMatchObject({ turn: 1, outcome: 'heard' });
+    expect(r.closes).toEqual([]);
+  });
+
+  test('RED→GREEN: a grant narrowed mid-stream refuses the NEXT turn; the one before it was sent and audited once', async () => {
+    let granted = true;
+    const r = await rig({ mayChat: () => granted });
+    r.start(chat);
+    await turn(r);
+    expect(r.sent).toHaveLength(1);
+    expect(r.audited).toEqual(['fer-1']);
+    granted = false;
+    await r.talk(2_500, { loud: true });
+    await r.talk(3_000);
+    expect(r.sent).toHaveLength(1);
+    expect(r.audited).toEqual(['fer-1']);
+    expect(r.snapshot().last).toMatchObject({ turn: 2, outcome: 'failed', code: 'fleet_not_granted' });
+  });
+
+  test('a send the mailbox refused leaves no audit record', async () => {
+    const r = await rig({ send: async () => ({ ok: false, code: 'send_refused' }) });
+    r.start(chat);
+    await turn(r);
+    expect(r.audited).toEqual([]);
+  });
+});
+
+describe('the voice stream: a phone that is gone, or an End, during the final decode must not send (review 2481, c)', () => {
+  test('RED→GREEN: End pressed while the final words are being decoded sends nothing', async () => {
+    const gate = gatedFinal();
+    const r = await rig({ engine: { transcribe: gate.transcribe } });
+    r.start(chat);
+    await r.talk(1_500);
+    await r.talk(2_500, { loud: true });
+    gate.hold();
+    await r.talk(2_000); // the pause is heard; the final decode now waits
+    await r.talk(1_000); // the phone still answers every unit while it waits
+    await r.talk(40, { control: 'end' });
+    gate.release();
+    await settle();
+    await r.talk(40);
+    expect(r.sent).toEqual([]);
+    expect(r.audited).toEqual([]);
+  });
+
+  test('RED→GREEN: a phone that answered during the decode but died before it ended is not proof; nothing is sent', async () => {
+    const gate = gatedFinal();
+    const r = await rig({ engine: { transcribe: gate.transcribe } });
+    r.start(chat);
+    await r.talk(1_500);
+    await r.talk(2_500, { loud: true });
+    gate.hold();
+    await r.talk(3_000); // the pause is heard; still answering every unit while the decode waits
+    gate.release();
+    await settle();
+    await r.talk(3_000, { dead: true });
+    expect(r.sent).toEqual([]);
+    expect(r.snapshot().last).toMatchObject({ outcome: 'cancelled', code: 'phone_silent' });
+  });
+});
+
+describe('the voice stream: bounded memory and empty words (review 2481, d and b)', () => {
+  test('RED→GREEN: audio piling up behind a stuck engine call is capped, not kept without bound', async () => {
+    let calls = 0;
+    const r = await rig({
+      engine: {
+        detectSpeech: async samples => {
+          calls += 1;
+          return calls === 1 ? [] : await new Promise<readonly VoiceSpan[]>(() => fakeSpans(samples));
+        },
+      },
+    });
+    r.start(test_);
+    for (let at = 0; at < 140_000; at += 200) await r.talk(200, { loud: true });
+    const held = (r.stream as unknown as { samples: SampleBuffer }).samples.length;
+    expect(held).toBeLessThanOrEqual((120 + 5) * 16_000);
+    expect(held).toBeGreaterThan(100 * 16_000);
+  }, 60_000);
+
+  test('RED→GREEN: a decode that is only punctuation is no words, and nothing is sent', async () => {
+    const r = await rig({ engine: { transcribe: async () => ({ text: ' . ', decodeMs: 1, realTimeFactor: 0 }) } });
+    r.start(chat);
+    await turn(r);
+    expect(r.sent).toEqual([]);
+    expect(r.snapshot().last).toMatchObject({ outcome: 'dropped', code: 'no_words' });
+  });
+});
+
+describe('the voice stream: one chat per FERRET, however it is named (review 2481, a)', () => {
+  const names = async (reference: string): Promise<string | undefined> =>
+    reference === 'joslin' || reference === 'fer-1' ? 'fer-1' : undefined;
+
+  test('RED→GREEN: a callsign and the id are the same ferret: the second stream is voice_busy', async () => {
+    const registry = new StreamRegistry();
+    const first = await rig({ registry, resolveFerret: names });
+    first.start({ ...chat, ferretId: 'fer-1' });
+    await first.talk(400);
+    const second = await rig({ registry, resolveFerret: names });
+    second.start({ ...chat, ferretId: 'joslin' });
+    await second.talk(200);
+    expect(second.snapshot().error).toMatchObject({ code: 'voice_busy' });
+    expect(second.closes.at(-1)).toEqual(STREAM_CLOSES.busy);
+  });
+
+  test('the message goes to the resolved id, and that id is what is audited', async () => {
+    const r = await rig({ resolveFerret: names });
+    r.start({ ...chat, ferretId: 'joslin' });
+    await turn(r);
+    expect(r.sent[0]).toMatchObject({ ferretId: 'fer-1' });
+    expect(r.audited).toEqual(['fer-1']);
+  });
+
+  test('a name no single ferret goes by is refused out loud', async () => {
+    const r = await rig({ resolveFerret: names });
+    r.start({ ...chat, ferretId: 'nobody' });
+    await settle();
+    expect(r.snapshot().error).toMatchObject({ code: 'ferret_unknown' });
+    expect(r.closes).toHaveLength(1);
+  });
+
+  test('a stream that ended while the name was being resolved does not keep the ferret', async () => {
+    const registry = new StreamRegistry();
+    let answer: (id: string) => void = () => undefined;
+    const slow = await rig({
+      registry,
+      resolveFerret: () => new Promise<string>(resolve => (answer = resolve)),
+    });
+    slow.start(chat);
+    slow.stream.close();
+    answer('fer-1');
+    await settle();
+    expect(registry.claimFerret('fer-1')).toBeDefined();
   });
 });

@@ -27,7 +27,7 @@ export default implementDaemon(manifest, {
   workers: { speech: SPEECH_WORKER_URL },
   build(ctx) {
     const { kernel } = ctx;
-    const { vault } = ctx.needs;
+    const { vault, gate, ferrets } = ctx.needs;
     const authorizer = new OutboundProviderAuthorizer(vault);
     const stopwatch = { monotonicMs: () => kernel.clock.nowMs() };
     const log = kernel.log.child('stt');
@@ -86,6 +86,12 @@ export default implementDaemon(manifest, {
             return sent.ok ? { ok: true } : { ok: false, code: 'send_refused' };
           };
         },
+        resolveFerret: async reference => {
+          const address = await ferrets.resolve(reference);
+          return address.kind === 'ferret' ? address.id : undefined;
+        },
+        fleetUseGranted: () => gate.policy()?.grants.fleet.use === true,
+        audit: async draft => await gate.audit(draft),
         log: { info: (message, fields) => streamLog.info(message, fields) },
       }),
     };

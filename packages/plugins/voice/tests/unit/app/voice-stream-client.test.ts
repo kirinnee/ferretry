@@ -190,6 +190,22 @@ describe('the browser end of the voice stream', () => {
     expect(decodeUplinkUnit(r.sent[1] as Uint8Array).control).toBe('muted');
     expect(decodeUplinkUnit(r.sent[2] as Uint8Array).control).toBe('none');
   });
+
+  test('muted time uploads zero samples, and audio returns on unmute', async () => {
+    const r = rig();
+    r.listeners().onOpen?.();
+    await Promise.resolve();
+    r.handle.setMuted(true);
+    r.pcm(500);
+    r.pcm(500);
+    for (const index of [1, 2]) {
+      const pcm = decodeUplinkUnit(r.sent[index] as Uint8Array).pcm;
+      expect(pcm.every(sample => sample === 0)).toBe(true);
+    }
+    r.handle.setMuted(false);
+    r.pcm(500);
+    expect(decodeUplinkUnit(r.sent[3] as Uint8Array).pcm[0]).toBe(500);
+  });
 });
 
 describe('the 16 kHz resampler', () => {

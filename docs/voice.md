@@ -339,8 +339,11 @@ closes an open stream at once** (4401). `contract/stream.ts` is the wire; `daemo
 - **Open.** Before the protocol switches the machine answers with a status: `409 voice_not_ready` (speech not installed),
   `429 voice_busy` (one stream per device, two per machine). The first record is a text frame
   `{t:'start', v:1, purpose:'test'|'chat', ferretId?, style?}`; anything else first, or a second start, is a protocol
-  error (4400). `test` shows live words and sends nothing. `chat` sends each finished turn to `ferretId`, and a second
-  stream for the same ferret is refused `voice_busy` in its first unit.
+  error (4400). `test` shows live words and sends nothing. `chat` sends each finished turn to `ferretId` (an id or a
+  callsign, resolved as a typed send resolves it), and a second stream for the same ferret, however it is named, is refused
+  `voice_busy` in its first unit. **A chat needs `fleet.use` as well as `voice.use`**: without it the start is refused in
+  a plain sentence (`fleet_not_granted`, close 4403), the grant is asked again before every message, and each message
+  sent leaves the same `agent.prompted` audit record a typed send does.
 - **Up: a constant 1,344-byte unit every 40 ms** — 640 samples of 16 kHz PCM16, then a 64-byte control slot (`none`,
   `muted`, `unmuted`, `end`, and the newest nonce echoed). Silence and muted time are zero samples, so a relay never sees
   when anyone speaks. More than 1.25× the nominal rate over 5 s is closed (1008).

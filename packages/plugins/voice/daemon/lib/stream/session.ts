@@ -40,11 +40,15 @@ const SENTENCES: Readonly<Record<string, string>> = {
   send_refused: 'The machine could not hand that message to the ferret.',
   phone_silent: 'The device stopped answering, so that message was not sent.',
   no_words: 'No words were heard.',
+  fleet_not_granted:
+    'This device may not use the agent fleet, so voice chat cannot send to a ferret. Voice chat needs both the voice and the fleet permissions.',
+  ferret_unknown: 'No single ferret goes by that name on this machine.',
 };
 /** The close each refusal ends the stream with; any other refusal is a failure on the machine. */
 const CLOSE_FOR: Readonly<Record<string, { readonly code: number; readonly reason: string }>> = {
   engine_overloaded: STREAM_CLOSES.overloaded,
   voice_busy: STREAM_CLOSES.busy,
+  fleet_not_granted: STREAM_CLOSES.forbidden,
 };
 const sentenceOf = (code: string): string => SENTENCES[code] ?? 'Something went wrong on the machine.';
 
@@ -66,6 +70,15 @@ export interface StreamParts {
         sendId: string,
       ) => Promise<{ readonly ok: true } | { readonly ok: false; readonly code: string }>)
     | undefined;
+  /**
+   * Whether this caller may use the agent fleet RIGHT NOW (`fleet.use`, the grant a typed send needs). Voice chat sends to
+   * a ferret, so it needs this as well as `voice.use`; asked at the start and again before every send.
+   */
+  readonly mayChat: () => boolean;
+  /** The ferret a name or an id means (the same rule a typed send's path uses); `undefined` when none or several do. */
+  readonly resolveFerret: (reference: string) => Promise<string | undefined>;
+  /** Writes the audit record a typed send leaves, once per message handed over. */
+  readonly recordSent: (ferretId: string) => void;
   /** Takes the one voice chat a ferret may have; `undefined` when another stream holds it. Returns the release. */
   readonly claimFerret: (ferretId: string) => (() => void) | undefined;
   /** Called once when the stream is over, whatever ended it. */
@@ -91,6 +104,8 @@ const RATE_WINDOW_MS = 5_000;
 const RATE_LIMIT = Math.floor((RATE_WINDOW_MS / UNIT_MS) * 1.25);
 const OVERLOAD_AFTER = 3;
 const ISSUED_KEPT = 32;
+/** The most audio ever held: a whole turn plus the backlog; a stuck engine call cannot grow it further. */
+const SAMPLES_CAP = Math.round((TURN_MAX_MS / 1000) * SECOND) + BACKLOG_KEEP;
 /** A backed-up socket (the browser stopped reading) ends the stream rather than growing without bound. */
 const MAX_BUFFERED = 64 * 1024;
 
@@ -115,6 +130,7 @@ export class VoiceStream implements SocketHandler {
 
   private start: StreamStart | undefined;
   private releaseFerret: (() => void) | undefined;
+  private ferretId: string | undefined;
   private phase: Phase = 'loading';
   private muted = false;
   private ended = false;
@@ -183,13 +199,34 @@ export class VoiceStream implements SocketHandler {
         this.refuse('voice_unavailable');
         return;
       }
-      this.releaseFerret = this.parts.claimFerret(start.data.ferretId);
-      if (this.releaseFerret === undefined) {
-        this.refuse('voice_busy');
+      if (!this.parts.mayChat()) {
+        this.refuse('fleet_not_granted');
         return;
       }
+      void this.beginChat(start.data.ferretId);
+      return;
     }
-    this.parts.log.info('voice.stream.start', { purpose: start.data.purpose, stream: this.parts.streamId });
+    this.begin(start.data.purpose);
+  }
+
+  /** A chat stream is for ONE ferret: its id (an id and its callsign are the same ferret) is the one claimed. */
+  private async beginChat(reference: string): Promise<void> {
+    let id: string | undefined;
+    try {
+      id = await this.parts.resolveFerret(reference);
+    } catch {
+      id = undefined;
+    }
+    if (this.ended) return;
+    if (id === undefined) return this.refuse('ferret_unknown');
+    this.releaseFerret = this.parts.claimFerret(id);
+    if (this.releaseFerret === undefined) return this.refuse('voice_busy');
+    this.ferretId = id;
+    this.begin('chat');
+  }
+
+  private begin(purpose: string): void {
+    this.parts.log.info('voice.stream.start', { purpose, stream: this.parts.streamId });
     void this.warmUp();
   }
 
@@ -229,7 +266,12 @@ export class VoiceStream implements SocketHandler {
     if (unit.control === 'muted') this.muted = true;
     if (unit.control === 'unmuted') this.muted = false;
     // Muted time is zero samples by contract, so it is dropped here rather than listened to.
-    if (!this.muted && unit.control !== 'muted') this.samples.append(unit.pcm);
+    // The buffer is capped, so a stuck engine call cannot grow memory without bound: the excess is dropped.
+    if (!this.muted && unit.control !== 'muted') {
+      const room = SAMPLES_CAP - this.samples.length;
+      if (room >= unit.pcm.length) this.samples.append(unit.pcm);
+      else if (room > 0) this.samples.append(unit.pcm.subarray(0, room));
+    }
   }
 
   // ─── the loop ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -322,29 +364,37 @@ export class VoiceStream implements SocketHandler {
   private async finishTurn(cut: number): Promise<void> {
     this.phase = 'working';
     const turn = this.turn;
-    // The pause is heard NOW: only an echo of a nonce issued after this moment can prove the phone is still there.
-    const pausedAfter = this.emitSeq;
     const audio = this.samples.slice(this.turnStart, cut);
     this.samples.dropBefore(cut);
     if (this.samples.length > BACKLOG_KEEP) this.samples.dropBefore(this.samples.length - BACKLOG_KEEP);
     this.seenLength = 0;
     const seconds = audio.length / SECOND;
     const heard = await this.decodeWithin(audio, FINAL_BASE_MS + (seconds * 1000) / 2);
+    // A phone that died or pressed End during the decode must not send.
+    if (this.ended) return;
+    // Noise the model wrote as punctuation (".") is not words either.
     const text = heard.text.trim().slice(0, WORDS_MAX_CHARS);
-    if (text === '') return this.settle({ turn, outcome: 'dropped', code: 'no_words' });
+    if (!/[\p{L}\p{N}]/u.test(text)) return this.settle({ turn, outcome: 'dropped', code: 'no_words' });
+    // Only an echo of a nonce issued after the decode, just before the send, proves the phone is still there.
+    const pausedAfter = this.emitSeq;
     this.setWords(text, true);
     const start = this.start;
     if (start === undefined || start.purpose === 'test') return this.settle({ turn, outcome: 'heard' });
-    if (!(await this.proof(pausedAfter))) {
+    const proved = await this.proof(pausedAfter);
+    if (this.ended) return;
+    if (!proved) {
       this.parts.log.info('voice.stream.cancelled', { stream: this.parts.streamId, turn, code: 'phone_silent' });
       return this.settle({ turn, outcome: 'cancelled', code: 'phone_silent' });
     }
-    await this.deliver(start.ferretId, text, turn);
+    await this.deliver(text, turn);
   }
 
-  private async deliver(ferretId: string, text: string, turn: number): Promise<void> {
+  private async deliver(text: string, turn: number): Promise<void> {
     // A turn is handed over once. The send id is stable, so even a repeat of this very call would be ONE message.
-    if (this.sentTurns.has(turn) || this.parts.send === undefined) return;
+    const ferretId = this.ferretId;
+    if (this.ended || ferretId === undefined || this.sentTurns.has(turn) || this.parts.send === undefined) return;
+    // A grant can narrow while the stream is open: it is asked again for every message.
+    if (!this.parts.mayChat()) return this.settle({ turn, outcome: 'failed', code: 'fleet_not_granted' });
     this.sentTurns.add(turn);
     const sendId = `${this.parts.streamId}:${turn}`;
     let result: Awaited<ReturnType<NonNullable<StreamParts['send']>>>;
@@ -354,6 +404,7 @@ export class VoiceStream implements SocketHandler {
       result = { ok: false, code: 'send_refused' };
     }
     if (!result.ok) return this.settle({ turn, outcome: 'failed', code: result.code });
+    this.parts.recordSent(ferretId);
     this.parts.log.info('voice.stream.sent', { stream: this.parts.streamId, turn });
     this.settle({ turn, outcome: 'sent', sendId });
   }

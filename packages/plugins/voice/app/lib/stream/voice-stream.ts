@@ -68,6 +68,7 @@ export function openVoiceStream(
   const words = new WordsAssembler();
   let echo: string | undefined;
   let control: StreamControl = 'none';
+  let muted = false;
   let ended = false;
   let sentence: string | undefined;
 
@@ -87,7 +88,8 @@ export function openVoiceStream(
         mic
           .start(pcm => {
             if (ended || pcm.length !== UNIT_SAMPLES) return;
-            socket.send(encodeUplinkUnit({ pcm, control, echo }));
+            // Muted time is zero samples by contract: the microphone's audio never leaves the device while muted.
+            socket.send(encodeUplinkUnit({ pcm: muted ? new Int16Array(UNIT_SAMPLES) : pcm, control, echo }));
             // A control rides ONE unit; the next is plain audio again.
             if (control === 'unmuted' || control === 'muted') control = 'none';
           })
@@ -131,8 +133,9 @@ export function openVoiceStream(
       socket.close(STREAM_CLOSES.ended.code, STREAM_CLOSES.ended.reason);
       finish(STREAM_CLOSES.ended.code, STREAM_CLOSES.ended.reason);
     },
-    setMuted: muted => {
-      control = muted ? 'muted' : 'unmuted';
+    setMuted: next => {
+      muted = next;
+      control = next ? 'muted' : 'unmuted';
     },
   };
   return handle;

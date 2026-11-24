@@ -95,6 +95,9 @@ describe.skipIf(!ASKED)('the voice stream with the real speech engine', () => {
           sent.push({ at: performance.now(), message, sendId });
           return { ok: true };
         },
+        mayChat: () => true,
+        resolveFerret: async reference => reference,
+        recordSent: () => undefined,
         claimFerret: () => () => undefined,
         onEnd: () => undefined,
         log: { info: () => undefined },

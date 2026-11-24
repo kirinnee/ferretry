@@ -1,4 +1,6 @@
 import { ApiError, type SocketAccept } from '@ferretry/kernel/contract';
+import { AUDIT_KINDS, type AuditDraft, cap } from '@ferretry/core-gate/contract';
+import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import type { Clock } from '@ferretry/kernel/contract';
 import type { VoiceEngineApi } from '../../../contract/index.ts';
 import { StreamRegistry } from './registry.ts';
@@ -11,6 +13,16 @@ export interface VoiceStreamDeps {
   /** Read at each stream, so Conversation loading or unloading later is seen. `undefined` = Conversation is off. */
   readonly send: () => StreamParts['send'];
   readonly log: StreamParts['log'];
+  /** Which ferret a name or an id means; `undefined` when none or several do. */
+  readonly resolveFerret: StreamParts['resolveFerret'];
+  /**
+   * The machine-wide `fleet.use`, read LIVE (`gate.yaml` in effect now; `false` while undetermined). The caller's own
+   * governance is a snapshot taken when the stream opened, so this is what lets a narrowing of the machine's grant stop
+   * the next message of a stream that is already open.
+   */
+  readonly fleetUseGranted: () => boolean;
+  /** Writes one audit record (Gate's). */
+  readonly audit: (draft: AuditDraft) => Promise<void>;
   readonly registry?: StreamRegistry;
   readonly nonce?: () => string;
   readonly streamId?: () => string;
@@ -28,6 +40,29 @@ function deviceKeyOf(call: {
   return credential?.tokenClass === 'device' && credential.principal !== undefined
     ? `device:${credential.principal.holder}`
     : 'host';
+}
+
+const FLEET_USE = cap('fleet', 'use');
+
+/** The record a typed send leaves (`POST /v1/ferrets/:ferretId/send`): the ferret is the subject, never the words. */
+export function sentAuditDraft(actor: AuditDraft['actor'], ferretId: string): AuditDraft {
+  return {
+    event: AUDIT_KINDS['agent.prompted'],
+    actor,
+    subject: ferretId,
+    outcome: 'succeeded',
+    detail: { action: 'send', status: 200, via: 'voice' },
+  };
+}
+
+/** Who the audit log names for this caller, as it names the same caller on a typed send. */
+function auditActorOf(call: {
+  readonly credential?: { readonly tokenClass: string; readonly principal?: { readonly holder: string } };
+}): AuditDraft['actor'] {
+  const credential = call.credential;
+  return credential?.tokenClass === 'device' && credential.principal !== undefined
+    ? { kind: 'device', deviceId: credential.principal.holder }
+    : { kind: 'host' };
 }
 
 /**
@@ -50,16 +85,27 @@ export function voiceStreamAccept(deps: VoiceStreamDeps): SocketAccept {
           : `${view.machine} is already serving voice chats.`,
         'voice_busy',
       );
+    const governance = (call as { readonly governance?: CallerGovernance }).governance;
+    const auditActor = auditActorOf(call);
     return async downstream => {
+      const streamId = (deps.streamId ?? randomStreamId)();
       const slot = registry.admit(device);
       if (!slot.ok) throw new ApiError(429, 'This machine is busy with voice chats.', 'voice_busy');
       return new VoiceStream({
         engine: deps.engine,
         clock: deps.clock,
         downstream,
-        streamId: (deps.streamId ?? randomStreamId)(),
+        streamId,
         nonce: deps.nonce ?? randomNonce,
         send: deps.send(),
+        mayChat: () =>
+          governance?.decide(FLEET_USE).allowed === true && (!governance.governed || deps.fleetUseGranted()),
+        resolveFerret: deps.resolveFerret,
+        recordSent: ferretId => {
+          deps
+            .audit(sentAuditDraft(auditActor, ferretId))
+            .catch(() => deps.log.info('voice.stream.audit_failed', { stream: streamId }));
+        },
         claimFerret: ferret => registry.claimFerret(ferret),
         onEnd: slot.release,
         log: deps.log,
