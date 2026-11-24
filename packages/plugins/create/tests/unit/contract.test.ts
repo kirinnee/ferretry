@@ -5,13 +5,22 @@ const config = (patch: Record<string, unknown> = {}) => CreateConfigSchema.parse
 
 describe('create.yaml', () => {
   test('the defaults are the owner’s decision: $5 a day, ask over $1, and no zone of its own (the host’s)', () => {
-    expect(config()).toEqual({ fal: {}, limits: { dailyUsd: 5, askAboveUsd: 1 } });
+    expect(config()).toEqual({ fal: {}, elevenlabs: {}, limits: { dailyUsd: 5, askAboveUsd: 1 } });
   });
 
   test('only the one reference may name the key; a raw key or another secret is refused', () => {
     expect(config({ fal: { key: '${secret:FAL_KEY}' } }).fal.key).toBe('${secret:FAL_KEY}');
     expect(CreateConfigSchema.safeParse({ fal: { key: 'fal-0123456789' } }).success).toBe(false);
     expect(CreateConfigSchema.safeParse({ fal: { key: '${secret:OTHER}' } }).success).toBe(false);
+  });
+
+  test('ElevenLabs takes its own one reference too, and not fal’s', () => {
+    expect(config({ elevenlabs: { key: '${secret:ELEVENLABS_API_KEY}' } }).elevenlabs.key).toBe(
+      '${secret:ELEVENLABS_API_KEY}',
+    );
+    expect(CreateConfigSchema.safeParse({ elevenlabs: { key: 'xi-0123456789' } }).success).toBe(false);
+    expect(CreateConfigSchema.safeParse({ elevenlabs: { key: '${secret:FAL_KEY}' } }).success).toBe(false);
+    expect(CreateConfigSchema.safeParse({ fal: { key: '${secret:ELEVENLABS_API_KEY}' } }).success).toBe(false);
   });
 
   test('a limit is a positive number, the zone is a real one, and an unknown key is refused', () => {

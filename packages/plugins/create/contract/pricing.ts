@@ -18,7 +18,7 @@ export function usdWords(micro: MicroUsd): string {
 }
 
 /** What fal bills an image model by. */
-export type FalUnit = 'megapixel' | 'image';
+export type FalUnit = 'megapixel' | 'image' | 'second' | 'minute';
 
 export const IMAGE_MODEL_IDS = ['flux-schnell', 'flux-dev', 'flux-pro'] as const;
 export const ImageModelIdSchema = z.enum(IMAGE_MODEL_IDS);
@@ -94,11 +94,31 @@ export type Priced =
   | { readonly ok: false; readonly why: string };
 
 const unitOf = (text: string): FalUnit | undefined => {
-  const lower = text.toLowerCase();
+  const lower = text.toLowerCase().trim();
   if (lower.includes('megapixel')) return 'megapixel';
   if (lower === 'image' || lower === 'images') return 'image';
+  if (lower === 'second' || lower === 'seconds') return 'second';
+  if (lower === 'minute' || lower === 'minutes' || lower === 'audio minute' || lower === 'audio minutes')
+    return 'minute';
   return undefined;
 };
+
+/** A rate read as micro-dollars per unit, from the table or from fal, or `undefined` when it cannot be priced. */
+const rateOf = (
+  table: { readonly unit: FalUnit; readonly tableMicroUsd: MicroUsd },
+  live: LiveRate | undefined,
+  allowed: readonly FalUnit[],
+): { readonly unit: FalUnit; readonly microUsd: number; readonly from: PriceSource } | undefined => {
+  const unit = live === undefined ? table.unit : unitOf(live.unit);
+  const microUsd = live === undefined ? table.tableMicroUsd : live.unitPrice * 1_000_000;
+  if (unit === undefined || !allowed.includes(unit) || !Number.isFinite(microUsd) || microUsd < 0) return undefined;
+  return { unit, microUsd, from: live === undefined ? 'table' : 'fal' };
+};
+
+const cannotPrice = (endpoint: string, who: string): Priced => ({
+  ok: false,
+  why: `${who} prices ${endpoint} in a unit Create cannot price, so nothing was sent`,
+});
 
 /**
  * The cost of ONE image of this size on this model, rounded UP to a micro-dollar. A megapixel rate is proportional
@@ -109,12 +129,98 @@ const unitOf = (text: string): FalUnit | undefined => {
 export function priceImage(model: ImageModel, size: ImageSizeId, live?: LiveRate): Priced {
   const { width, height } = IMAGE_SIZES[size];
   const megapixels = (width * height) / 1_000_000;
-  const rate =
-    live === undefined
-      ? { unit: model.unit as FalUnit | undefined, microUsd: model.tableMicroUsd, from: 'table' as const }
-      : { unit: unitOf(live.unit), microUsd: live.unitPrice * 1_000_000, from: 'fal' as const };
-  if (rate.unit === undefined || !Number.isFinite(rate.microUsd) || rate.microUsd < 0)
-    return { ok: false, why: `fal prices ${model.endpoint} in a unit Create cannot price, so nothing was sent` };
+  const rate = rateOf(model, live, ['megapixel', 'image']);
+  if (rate === undefined) return cannotPrice(model.endpoint, 'fal');
   const area = rate.unit === 'megapixel' ? megapixels : Math.max(1, megapixels);
   return { ok: true, microUsd: Math.ceil(rate.microUsd * area), from: rate.from };
+}
+
+// ─── sound: speech, effects, music ───────────────────────────────────────────────────────────────────────────────
+
+/** Speech is cut off here so an answer is about 100 s of audio, which fits the chat's 1 MiB at 64 kbit/s. */
+export const MAX_SPEECH_CHARS = 1_500;
+/** The voice a ferret gets when it names none: ElevenLabs' premade "Rachel" (a public, stable id). */
+export const DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8ikWAM';
+/** The audio format every sound is asked for: MP3 at 64 kbit/s, 8 000 bytes a second, so a minute is under 0.5 MiB. */
+export const AUDIO_FORMAT = 'mp3_44100_64';
+
+export const SPEECH_MODEL_IDS = ['flash', 'multilingual'] as const;
+export const SpeechModelIdSchema = z.enum(SPEECH_MODEL_IDS);
+export type SpeechModelId = z.infer<typeof SpeechModelIdSchema>;
+export const DEFAULT_SPEECH_MODEL: SpeechModelId = 'flash';
+
+export interface SpeechModel {
+  readonly id: SpeechModelId;
+  /** ElevenLabs' own `model_id`. */
+  readonly modelId: string;
+  readonly summary: string;
+  /** The listed price per 1 000 characters of TEXT, in micro-dollars. ElevenLabs has no price endpoint: this is the price. */
+  readonly tableMicroUsdPer1kChars: MicroUsd;
+  readonly source: string;
+}
+
+export const SPEECH_MODELS: Readonly<Record<SpeechModelId, SpeechModel>> = Object.freeze({
+  flash: {
+    id: 'flash',
+    modelId: 'eleven_flash_v2_5',
+    summary: 'fast and cheap; good for a voiceover or a reply read aloud',
+    tableMicroUsdPer1kChars: 50_000,
+    source: 'https://elevenlabs.io/pricing/api (Flash / Turbo, $0.05 per 1 000 characters)',
+  },
+  multilingual: {
+    id: 'multilingual',
+    modelId: 'eleven_multilingual_v2',
+    summary: 'richer voice, many languages; twice the price of flash',
+    // The pages differ ($0.08 on one, $0.10 on others): the table keeps the higher, so a price is never under.
+    tableMicroUsdPer1kChars: 100_000,
+    source: 'https://elevenlabs.io/pricing/api (Multilingual v2, $0.10 per 1 000 characters; one page says $0.08)',
+  },
+});
+
+/** What reading `characters` characters costs: rounded UP, never below the listed price. */
+export function priceSpeech(model: SpeechModel, characters: number): Priced {
+  return { ok: true, microUsd: Math.ceil((model.tableMicroUsdPer1kChars * characters) / 1_000), from: 'table' };
+}
+
+export const SFX_ENDPOINT = 'fal-ai/elevenlabs/sound-effects/v2';
+export const SFX_TABLE = {
+  unit: 'second',
+  tableMicroUsd: 2_000,
+  source: 'https://fal.ai/models/fal-ai/elevenlabs/sound-effects/v2/llms.txt ($0.002 per second)',
+} as const;
+export const MIN_SFX_SECONDS = 0.5;
+export const MAX_SFX_SECONDS = 22;
+export const DEFAULT_SFX_SECONDS = 5;
+
+/** A sound effect of `seconds` seconds. A per-second rate is exact; a per-minute one is read as a whole minute. */
+export function priceSfx(seconds: number, live?: LiveRate): Priced {
+  const rate = rateOf(SFX_TABLE, live, ['second', 'minute']);
+  if (rate === undefined) return cannotPrice(SFX_ENDPOINT, 'fal');
+  const units = rate.unit === 'second' ? seconds : Math.ceil(seconds / 60);
+  return { ok: true, microUsd: Math.ceil(rate.microUsd * units), from: rate.from };
+}
+
+export const MUSIC_ENDPOINT = 'fal-ai/elevenlabs/music';
+export const MUSIC_TABLE = {
+  unit: 'minute',
+  tableMicroUsd: 600_000,
+  source: 'https://fal.ai/models/fal-ai/elevenlabs/music/llms.txt ($0.60 per output audio minute, rounded up)',
+} as const;
+export const MIN_MUSIC_SECONDS = 3;
+export const MAX_MUSIC_SECONDS = 60;
+export const DEFAULT_MUSIC_SECONDS = 30;
+
+/**
+ * A short piece of music. fal bills it by the audio minute, ROUNDED UP to the whole minute (30 s is billed as 60 s), so
+ * a per-second live rate is also priced from the whole minute: the estimate is never under what fal bills.
+ */
+export function priceMusic(seconds: number, live?: LiveRate): Priced {
+  const rate = rateOf(MUSIC_TABLE, live, ['second', 'minute']);
+  if (rate === undefined) return cannotPrice(MUSIC_ENDPOINT, 'fal');
+  const minutes = Math.ceil(seconds / 60);
+  return {
+    ok: true,
+    microUsd: Math.ceil(rate.microUsd * (rate.unit === 'minute' ? minutes : minutes * 60)),
+    from: rate.from,
+  };
 }

@@ -1,18 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 import type { OutboundSecretOutcome, SecretsPort } from '@ferretry/kernel/contract';
-import { isFailure, readPrice, runImage } from '../../daemon/lib/fal.ts';
+import { ELEVENLABS, runSpeech } from '../../daemon/lib/elevenlabs.ts';
+import { isFailure, readPrice, runImage, runMusic, runSfx } from '../../daemon/lib/fal.ts';
 
 /** A kernel that answers every send with one outcome, and remembers what it was asked. */
 function kernelAnswering(outcome: OutboundSecretOutcome) {
   const sent: { name: string; url: string; placement: unknown }[] = [];
+  const bodies: string[] = [];
   const secrets = {
     resolve: async () => ({ refused: 'unknown' as const }),
-    send: async (name: string, request: { url: string }, placement?: unknown) => {
+    send: async (name: string, request: { url: string; body?: string }, placement?: unknown) => {
       sent.push({ name, url: request.url, placement });
+      bodies.push(request.body ?? '');
       return outcome;
     },
   } as unknown as SecretsPort;
-  return { secrets, sent };
+  return { secrets, sent, bodies };
 }
 
 const sentenceOf = async (outcome: OutboundSecretOutcome): Promise<string> => {
@@ -104,5 +107,89 @@ describe('reading fal’s price', () => {
         payload: { prices: [{ endpoint_id: 'fal-ai/flux/dev', unit_price: -1, unit: 'image' }] },
       }),
     ).toBeUndefined();
+  });
+});
+
+describe('a sound run on fal', () => {
+  const link = { kind: 'completion', status: 200, payload: { audio: { url: 'https://v3.fal.media/s.mp3' } } } as const;
+
+  test('a sound effect goes to its own endpoint with the length and the format, and the link comes back', async () => {
+    const { secrets, sent, bodies } = kernelAnswering(link);
+    expect(await runSfx(secrets, 'a bell', 4)).toEqual({ url: 'https://v3.fal.media/s.mp3' });
+    expect(sent[0]).toMatchObject({
+      name: 'FAL_KEY',
+      url: 'https://fal.run/fal-ai/elevenlabs/sound-effects/v2',
+      placement: { header: 'authorization', scheme: 'Key' },
+    });
+    expect(JSON.parse(bodies[0]!)).toEqual({
+      text: 'a bell',
+      duration_seconds: 4,
+      output_format: 'mp3_44100_64',
+      enable_safety_checker: true,
+    });
+  });
+
+  test('music goes to its own endpoint, with the length in milliseconds', async () => {
+    const { secrets, sent, bodies } = kernelAnswering(link);
+    expect(await runMusic(secrets, 'a song', 12, true)).toEqual({ url: 'https://v3.fal.media/s.mp3' });
+    expect(sent[0]!.url).toBe('https://fal.run/fal-ai/elevenlabs/music');
+    expect(JSON.parse(bodies[0]!)).toMatchObject({
+      prompt: 'a song',
+      music_length_ms: 12_000,
+      force_instrumental: true,
+    });
+  });
+
+  test('an answer with no sound in it is a failure, not a link to nothing', async () => {
+    for (const payload of [{}, { audio: {} }, 'nope', { images: [{ url: 'https://v3.fal.media/a.jpg' }] }]) {
+      const made = await runSfx(kernelAnswering({ kind: 'completion', status: 200, payload }).secrets, 'a bell', 4);
+      expect(isFailure(made) && made.sentence).toContain('made no sound');
+    }
+  });
+
+  test('a missing key and a dropped line are said as for a picture', async () => {
+    const none = await runMusic(kernelAnswering({ kind: 'refused', refused: 'not_configured' }).secrets, 'x', 5, false);
+    expect(isFailure(none) && none.sentence).toContain('fy secret set FAL_KEY');
+    const slow = await runSfx(kernelAnswering({ kind: 'timeout' }).secrets, 'x', 5);
+    expect(isFailure(slow) && slow.noCharge).toBeUndefined();
+  });
+});
+
+describe('ElevenLabs speech through the Vault', () => {
+  const speech = async (outcome: OutboundSecretOutcome) => {
+    const kernel = kernelAnswering(outcome);
+    return { made: await runSpeech(kernel.secrets, 'voice0123456789', 'eleven_flash_v2_5', 'hi'), sent: kernel.sent };
+  };
+
+  test('the key is placed as xi-api-key, on the one host, at the JSON endpoint', async () => {
+    const { made, sent } = await speech({ kind: 'completion', status: 200, payload: { audio_base64: 'SUQz' } });
+    expect(made).toEqual({ bytes: new Uint8Array([0x49, 0x44, 0x33]) });
+    expect(sent[0]).toMatchObject({
+      name: 'ELEVENLABS_API_KEY',
+      url: 'https://api.elevenlabs.io/v1/text-to-speech/voice0123456789/with-timestamps?output_format=mp3_44100_64',
+      placement: { header: 'xi-api-key' },
+    });
+  });
+
+  test('every failure names ElevenLabs, and a missing key says how to add one', async () => {
+    const sentence = async (outcome: OutboundSecretOutcome) => {
+      const { made } = await speech(outcome);
+      if (!isFailure(made)) throw new Error('expected a failure');
+      return made.sentence;
+    };
+    expect(await sentence({ kind: 'refused', refused: 'not_configured' })).toBe(ELEVENLABS.noKey);
+    expect(ELEVENLABS.noKey).toContain('fy secret set ELEVENLABS_API_KEY');
+    expect(await sentence({ kind: 'status', status: 401 })).toContain('ElevenLabs refused the key');
+    expect(await sentence({ kind: 'status', status: 429 })).toContain('ElevenLabs says too many requests');
+    expect(await sentence({ kind: 'status', status: 500 })).toBe('ElevenLabs answered 500');
+    expect(await sentence({ kind: 'timeout' })).toContain('ElevenLabs did not answer in time');
+    expect(await sentence({ kind: 'unreadable' })).toContain('ElevenLabs answered something Create could not read');
+  });
+
+  test('audio that is not base64, is empty, or is too long to keep is no speech', async () => {
+    for (const audio_base64 of ['', 'not base64!', 'AAAA'.repeat(1100 * 1024)]) {
+      const { made } = await speech({ kind: 'completion', status: 200, payload: { audio_base64 } });
+      expect(isFailure(made)).toBe(true);
+    }
   });
 });
