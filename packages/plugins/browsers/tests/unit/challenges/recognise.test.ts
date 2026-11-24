@@ -1,8 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { recogniseBrowserChallenge } from '../../../daemon/challenges/recognise.ts';
+import {
+  type BrowserChallengeEvidence,
+  isChallengedSubresource,
+  recogniseBrowserChallenge,
+  SubresourceChallenges,
+} from '../../../daemon/challenges/recognise.ts';
 
-const page = (overrides: Partial<{ url: string; title: string; frameUrls: readonly string[] }> = {}) => ({
+const page = (overrides: Partial<BrowserChallengeEvidence> = {}): BrowserChallengeEvidence => ({
   url: 'https://shop.example/',
   title: 'Shop',
   frameUrls: [],
@@ -74,5 +79,84 @@ describe('recogniseBrowserChallenge', () => {
 
     // Act + Assert
     for (const frame of quiet) should(recogniseBrowserChallenge(page({ frameUrls: [frame] }))).be.undefined();
+  });
+});
+
+describe('recogniseBrowserChallenge: sub-request challenges', () => {
+  const challenged = (...urls: string[]) => ({ challengedSubresources: urls });
+
+  it('should recognise a first-party script or stylesheet answered with a challenge, even on a page with text', () => {
+    // Act + Assert
+    should(
+      recogniseBrowserChallenge(page({ ...challenged('https://shop.example/app.js'), blankBody: true })),
+    ).deepEqual({
+      provider: 'cloudflare',
+    });
+    should(
+      recogniseBrowserChallenge(page({ ...challenged('https://cdn.shop.example/app.css'), blankBody: false })),
+    ).deepEqual({
+      provider: 'cloudflare',
+    });
+    should(
+      recogniseBrowserChallenge(
+        page({ ...challenged('https://static.shop.co.uk/a.js'), url: 'https://www.shop.co.uk/' }),
+      ),
+    ).deepEqual({
+      provider: 'cloudflare',
+    });
+  });
+
+  it('should recognise a challenged third-party script only when the page has nothing to read', () => {
+    // Act + Assert
+    should(
+      recogniseBrowserChallenge(page({ ...challenged('https://cdn.other.example/a.js'), blankBody: true })),
+    ).deepEqual({
+      provider: 'cloudflare',
+    });
+    should(
+      recogniseBrowserChallenge(page({ ...challenged('https://cdn.other.example/a.js'), blankBody: false })),
+    ).be.undefined();
+    should(recogniseBrowserChallenge(page({ ...challenged('https://cdn.other.example/a.js') }))).be.undefined();
+    // A look-alike host, and another registrable name under the same public suffix, are third parties.
+    should(
+      recogniseBrowserChallenge(page({ ...challenged('https://notshop.example/a.js'), blankBody: false })),
+    ).be.undefined();
+    should(
+      recogniseBrowserChallenge(
+        page({ ...challenged('https://other.co.uk/a.js'), url: 'https://shop.co.uk/', blankBody: false }),
+      ),
+    ).be.undefined();
+  });
+
+  it('should see nothing when no sub-request was challenged', () => {
+    // Act + Assert
+    should(recogniseBrowserChallenge(page({ challengedSubresources: [], blankBody: true }))).be.undefined();
+  });
+
+  it('should count only a 403 with a cf-mitigated challenge on a script or stylesheet', () => {
+    // Arrange
+    const answer = (type: string, status: number, headers: Record<string, string>) => ({ type, status, headers });
+
+    // Act + Assert
+    should(isChallengedSubresource(answer('script', 403, { 'cf-mitigated': 'challenge' }))).be.true();
+    should(isChallengedSubresource(answer('stylesheet', 403, { 'CF-Mitigated': ' Challenge ' }))).be.true();
+    should(isChallengedSubresource(answer('script', 403, {}))).be.false();
+    should(isChallengedSubresource(answer('script', 403, { 'cf-mitigated': 'block' }))).be.false();
+    should(isChallengedSubresource(answer('script', 200, { 'cf-mitigated': 'challenge' }))).be.false();
+    should(isChallengedSubresource(answer('image', 403, { 'cf-mitigated': 'challenge' }))).be.false();
+    should(isChallengedSubresource(answer('document', 403, { 'cf-mitigated': 'challenge' }))).be.false();
+  });
+
+  it('should keep a bounded record per document and forget it on navigation', () => {
+    // Arrange
+    const record = new SubresourceChallenges();
+
+    // Act
+    for (let each = 0; each < 40; each += 1) record.observe(`https://shop.example/${String(each % 20)}.js`);
+
+    // Assert
+    should(record.urls().length).equal(16);
+    record.reset();
+    should(record.urls()).deepEqual([]);
   });
 });
