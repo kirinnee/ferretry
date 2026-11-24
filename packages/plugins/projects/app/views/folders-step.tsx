@@ -16,7 +16,7 @@ import { daemonOfClient } from '@ferretry/app';
 import type { StepHost } from '@ferretry/kernel/contract';
 import type { AppComponent, PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ProjectInfo } from '../../contract/index.ts';
 import { FolderPicker } from '../features/folder-explorer/folder-picker.tsx';
 import { type ProjectsClient, reasonOf } from '../lib/client.ts';
@@ -45,6 +45,8 @@ const openOf = (daemon: string, made: readonly ProjectInfo[]): Record<string, st
 
 export function FoldersStep({ step, client, daemon }: FoldersStepProps) {
   const [picks, setPicks] = useState<readonly string[]>([]);
+  /** The list as the save reads it (the save outlives the render it was made in). */
+  const picked = useRef<readonly string[]>([]);
   const host = useRef(step);
   host.current = step;
   const made = useRef<readonly ProjectInfo[]>([]);
@@ -72,46 +74,56 @@ export function FoldersStep({ step, client, daemon }: FoldersStepProps) {
   }, [client]);
 
   // What Next saves: every picked folder, one by one; a refusal keeps the page, with the folders not yet registered still picked.
-  useEffect(() => {
-    host.current?.commit(async () => {
-      const earlier = idsOf(host.current?.segment.madeIds);
-      // Nothing new picked, but this run already made projects (Back brought the person here): keep them and move on.
-      if (picks.length === 0 && earlier.length > 0) return;
-      if (picks.length === 0) throw new Error('Pick a folder, or choose Skip for now.');
-      // What the registry held BEFORE: the only proof that a project was made here. A registry that cannot be read proves nothing.
-      const held = await fetchProjects(client).then(
-        rows => new Set(rows.map(project => project.id)),
-        () => undefined,
-      );
-      const created = new Set(earlier);
-      const left = [...picks];
-      for (const path of picks) {
-        try {
-          const project = await registerProject(client, { kind: 'existing-folder', path });
-          if (!made.current.some(each => each.id === project.id)) made.current = [...made.current, project];
-          if (held !== undefined && !held.has(project.id)) created.add(project.id);
-        } catch (cause) {
-          setPicks(left);
-          throw new Error(`${path}: ${reasonOf(cause)}`);
-        }
-        left.shift();
+  // The save is registered again only when the PERSON changes the list (`change`): that clears the footer's old message, and a
+  // refusal's own trim of the list (below) must not clear the message it is raising.
+  const save = useCallback(async (): Promise<void> => {
+    const picks = picked.current;
+    const earlier = idsOf(host.current?.segment.madeIds);
+    // Nothing new picked, but this run already made projects (Back brought the person here): keep them and move on.
+    if (picks.length === 0 && earlier.length > 0) return;
+    if (picks.length === 0) throw new Error('Pick a folder, or choose Skip for now.');
+    // What the registry held BEFORE: the only proof that a project was made here. A registry that cannot be read proves nothing.
+    const held = await fetchProjects(client).then(
+      rows => new Set(rows.map(project => project.id)),
+      () => undefined,
+    );
+    const created = new Set(earlier);
+    const left = [...picks];
+    for (const path of picks) {
+      try {
+        const project = await registerProject(client, { kind: 'existing-folder', path });
+        if (!made.current.some(each => each.id === project.id)) made.current = [...made.current, project];
+        if (held !== undefined && !held.has(project.id)) created.add(project.id);
+      } catch (cause) {
+        picked.current = left;
+        setPicks(left);
+        throw new Error(`${path}: ${reasonOf(cause)}`);
       }
-      const [only] = made.current;
-      if (daemon !== undefined) host.current?.remember(openOf(daemon, made.current));
-      host.current?.remember({ madeIds: [...created].join(',') });
-      // The next page ("Connect GitHub") may offer to link an account to the one project made here, and only a project proven new.
-      host.current?.remember(
-        made.current.length === 1 && only !== undefined && created.has(only.id)
-          ? { linkProjectId: only.id, linkProjectName: only.name }
-          : { linkProjectId: undefined, linkProjectName: undefined },
-      );
-      await projectsStoreFor(client)
-        .refresh()
-        .catch(() => undefined);
-    });
-  }, [picks, client, daemon]);
+      left.shift();
+    }
+    const [only] = made.current;
+    if (daemon !== undefined) host.current?.remember(openOf(daemon, made.current));
+    host.current?.remember({ madeIds: [...created].join(',') });
+    // The next page ("Connect GitHub") may offer to link an account to the one project made here, and only a project proven new.
+    host.current?.remember(
+      made.current.length === 1 && only !== undefined && created.has(only.id)
+        ? { linkProjectId: only.id, linkProjectName: only.name }
+        : { linkProjectId: undefined, linkProjectName: undefined },
+    );
+    await projectsStoreFor(client)
+      .refresh()
+      .catch(() => undefined);
+  }, [client, daemon]);
+  useEffect(() => host.current?.commit(save), [save]);
 
-  const add = (path: string): void => setPicks(known => (known.includes(path) ? known : [...known, path]));
+  const change = (next: readonly string[]): void => {
+    picked.current = next;
+    setPicks(next);
+    host.current?.commit(save);
+  };
+  const add = (path: string): void => {
+    if (!picked.current.includes(path)) change([...picked.current, path]);
+  };
 
   return (
     <div className="grid gap-md" data-projects-step="folders">
@@ -139,7 +151,7 @@ export function FoldersStep({ step, client, daemon }: FoldersStepProps) {
                 type="button"
                 className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center text-muted hover:text-fg"
                 aria-label={`Remove ${path}`}
-                onClick={() => setPicks(known => known.filter(each => each !== path))}
+                onClick={() => change(picked.current.filter(each => each !== path))}
               >
                 <X size={14} aria-hidden="true" />
               </button>

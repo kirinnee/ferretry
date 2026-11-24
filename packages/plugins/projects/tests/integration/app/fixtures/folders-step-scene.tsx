@@ -8,6 +8,7 @@
 import { StepPageFrame } from '@ferretry/app';
 import type { StepHost } from '@ferretry/kernel/contract';
 import { applyTheme } from './explorer-toolbar.ts';
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { explorerViewPreference } from '../../../../app/features/folder-explorer/explorer-view-preference.ts';
 import type { ProjectsClient } from '../../../../app/lib/client.ts';
@@ -81,6 +82,9 @@ const client: ProjectsClient = {
   },
 };
 
+let setNote: (note: string) => void = () => undefined;
+
+/** The footer's note, set the way the real step frame sets it: a refused save shows its message, a save registered again clears it. */
 const host: StepHost = {
   phase: 'client',
   appliesTo: [],
@@ -93,6 +97,7 @@ const host: StepHost = {
   notNeeded: () => undefined,
   commit: save => {
     window.__save = save;
+    setNote('');
   },
   done: () => undefined,
   busy: () => undefined,
@@ -101,6 +106,8 @@ const host: StepHost = {
 };
 
 function Scene() {
+  const [note, setNoteState] = useState('');
+  setNote = setNoteState;
   return (
     <div style={{ height: '100vh', overflow: 'auto' }} data-scene-ready="">
       <StepPageFrame
@@ -118,9 +125,19 @@ function Scene() {
             window.__error = '';
             void window.__save?.().catch((cause: unknown) => {
               window.__error = cause instanceof Error ? cause.message : String(cause);
+              setNote(window.__error);
             });
           },
         }}
+        {...(note === ''
+          ? {}
+          : {
+              note: (
+                <p role="alert" data-flow-commit-error="" style={{ color: 'var(--err)', margin: 0 }}>
+                  {note}
+                </p>
+              ),
+            })}
         progress={{
           segments: [
             { id: 'onboarding', label: 'This machine' },
