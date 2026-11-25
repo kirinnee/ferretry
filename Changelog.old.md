@@ -1,3 +1,14 @@
+## [4.294.0](https://github.com/kirinnee/ferretry/compare/v4.293.0...v4.294.0) (2026-11-25)
+
+### Features
+
+* **connector:** serve the connector over the built-in tunnel, switched on in the app ([593284e](https://github.com/kirinnee/ferretry/commit/593284ed1f71413fe12e9543a994bac1981958d6))
+
+### Fixes
+
+* **connector:** epoch-gate in-flight requests, keep grants revocable beside a damaged block ([f31ad94](https://github.com/kirinnee/ferretry/commit/f31ad9482c5cff348da7787751f1e2d29ff4dac4))
+* **connector:** gate the connector on its switch, keep grants revocable while off ([ddad0d9](https://github.com/kirinnee/ferretry/commit/ddad0d90fd3f7bfcbbfc601a9166ac76e784deaf))
+
 ## [4.293.0](https://github.com/kirinnee/ferretry/compare/v4.292.0...v4.293.0) (2026-11-25)
 
 ### Features
