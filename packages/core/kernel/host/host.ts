@@ -151,6 +151,7 @@ import {
   hostPermitted,
   effectivePermissions,
   openChildEnvironments,
+  refusedPermission,
   restrictFetch,
   restrictSpawn,
   type ResolverOf,
@@ -1136,7 +1137,7 @@ async function bootLocked(
       continue;
     }
     const record = records.get(manifest.id) as PluginRecord;
-    if (record.status === 'failed') continue;
+    if (record.status === 'failed' || (await refusedPermission(manifest, failed))) continue;
     phases.mark(`build:${manifest.id}`);
     const implementation = implementations.get(manifest.id);
     if (implementation === undefined || implementation.skeleton === true || implementation.build === undefined) {

@@ -62,7 +62,7 @@ export type PutNewOutcome = 'stored' | 'exists';
 
 /**
  * THE ONE GETTER (docs/secrets.md › The one exception), and so NOT a member of {@link VaultApi}: a type that every caller
- * holds cannot carry a getter. Only MCP may declare `permissions.revealMinted` (the Vault's boot check refuses any other
+ * holds cannot carry a getter. Only MCP may declare `permissions.revealMinted` (the kernel's boot refuses any other
  * plugin that does) and is handed it; it reads {@link mintedValueOf} to find out. It answers the current value of
  * a secret the Vault's mint ledger says THIS caller filed (`put` / `putNew`), or `undefined` for a name not held, an
  * owner's value, another plugin's and a value written since by anybody else. It adds nothing the caller did not already

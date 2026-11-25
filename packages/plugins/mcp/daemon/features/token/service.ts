@@ -12,7 +12,7 @@
  * (the documented GAP), and this hands it that token renewed. It never names a secret (only a variable of the sign-in
  * shape), it answers only for a server the ferret's OWN launch holds now (`McpLaunchParts.bindings`, so another ferret's
  * folder, runtime or project can never be asked about), and the Vault gives the value back only for a secret THIS plugin
- * minted (`VaultApi.mintedValue`). It writes nothing, and an error never carries provider text or the token.
+ * minted (the Vault's `MintedValueReader`). It writes nothing, and an error never carries provider text or the token.
  */
 import type { FerretId, FencedPath } from '@ferretry/kernel/contract';
 import type { SecretName } from '@ferretry/core-vault/contract';
@@ -49,7 +49,7 @@ export interface FerretMcpTokensDeps {
   now(): number;
   /** `McpOAuthService.signInRequired`: the sign-in (a component or a project subject) whose refresh was rejected. */
   signInRequired(name: SecretName): Promise<string | undefined>;
-  /** `VaultApi.mintedValue`: the value of a secret this plugin minted; absent where the Vault does not offer it. */
+  /** `MintedValueReader.mintedValue`, read through `mintedValueOf`: the value of a secret this plugin minted; absent where the Vault does not offer it. */
   value(name: SecretName): Promise<string | undefined>;
 }
 

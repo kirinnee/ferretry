@@ -8,7 +8,7 @@ import vault from '../../../daemon/index.ts';
 
 /**
  * THE ONE GETTER (docs/secrets.md › The one exception): `VaultApi.mintedValue` exists only for a plugin whose manifest
- * declares `permissions.revealMinted` (and the Vault boots only for MCP declaring it), and answers only a secret THAT plugin wrote (the Vault's
+ * declares `permissions.revealMinted` (and the kernel's boot lets only MCP declare it: `packages/core/kernel/tests/integration/host/reveal-minted.test.ts`), and answers only a secret THAT plugin wrote (the Vault's
  * mint ledger). Every other plugin, and the core, has no such method at all: the type-level "no getter" stays true.
  */
 const FAKE_TOKEN = 'FAKE-MCP-TOKEN-0123456789';
@@ -99,16 +99,5 @@ describe('mintedValue: the one getter, for what the plugin itself wrote', () => 
     const { of } = await world();
 
     expect(await mintedValueOf(of('mcp'))?.mintedValue(ACCESS)).toBeUndefined();
-  });
-});
-
-describe('revealMinted is MCP’s alone', () => {
-  test('the Vault refuses to boot with any other plugin that declares it', async () => {
-    const booted = testHost({
-      plugins: [vault, tenant('other', { ...MINTS, revealMinted: true })],
-      fakes: { asks: new FakeAsks(), gate: new FakeGate() },
-    });
-
-    await expect(booted).rejects.toThrow(/permissions\.revealMinted is not allowed/);
   });
 });

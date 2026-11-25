@@ -99,8 +99,6 @@ const PHONE_APPROVAL_RAISERS: readonly string[] = ['browsers', 'terminals'];
  *
  * The routes are handed `SecretDirectory` and the services, never a `SecretVault` (S6).
  */
-/** The one plugin the Vault hands its one getter to (`permissions.revealMinted`, docs/secrets.md › The one exception). */
-const REVEAL_MINTED_PLUGIN = 'mcp';
 
 export default implementDaemon(manifest, {
   build(ctx) {
@@ -440,11 +438,6 @@ export default implementDaemon(manifest, {
      * today's Vault refuses a host, secret or program it does not allow.
      */
     const apiFor = (needer: Needer): VaultApi => {
-      // The ONE getter is MCP's alone: any other plugin that declares it stops the boot here, where the operation lives.
-      if (needer.permissions.revealMinted === true && needer.id !== REVEAL_MINTED_PLUGIN)
-        throw new Error(
-          `plugin ${needer.id}: permissions.revealMinted is not allowed (only ${REVEAL_MINTED_PLUGIN} may read back what it minted)`,
-        );
       // Every needer's handles name it as their requester (`searchPathOf`), the core ones included.
       const ownChildEnvironment: VaultApi['childEnvironment'] = async (_ferret, env) =>
         await mintChildEnvironment(env, needer.id);
@@ -521,7 +514,7 @@ export default implementDaemon(manifest, {
           return removed;
         },
         fetchMinted: async (name, asked, placement) => await fetchMinted(needer, name, asked, placement),
-        // The ONE getter: only for the plugin that declares `permissions.revealMinted` (MCP alone, checked above), and only for a value the
+        // The ONE getter: only for the plugin that declares `permissions.revealMinted` (the kernel's boot lets MCP alone declare it), and only for a value the
         // mint ledger says it wrote itself (`openOwnMint`, the same word `fetchMinted` takes).
         ...(needer.permissions.revealMinted === true
           ? { mintedValue: async (name: SecretName) => (await openOwnMint(needer.id, name))?.value }

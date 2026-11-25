@@ -6,7 +6,7 @@ import { WORKER_STATE_KEY } from '../worker.ts';
 import { embeddedWorkerFile, isCompiledModule } from './adapters/embedded-worker.ts';
 import { serveWorkerGrants, type WorkerGrantSources } from './worker-grants/serve.ts';
 import { WORKER_GRANTS_KEY } from './worker-grants/wire.ts';
-import type { ItemKind, PermissionEntry } from '../manifest/types.ts';
+import type { ItemKind, Manifest, PermissionEntry } from '../manifest/types.ts';
 import { hostAllowed, programAmong, programName, WILDCARD } from '../manifest/reach.ts';
 import type { PinRegistry } from './pins.ts';
 import { type DetachedCall, detachedAsked, detachedNotOffered, detachedRefusal } from './detached.ts';
@@ -125,6 +125,26 @@ export function hostPermitted(
 /** What the host hands the restrict wrappers: a non-core manifest's `'*'` is dropped, so it grants nothing. */
 export function effectivePermissions(plugin: string, declared: readonly PermissionEntry[]): readonly PermissionEntry[] {
   return (CORE_IDS as readonly string[]).includes(plugin) ? declared : declared.filter(entry => entry !== WILDCARD);
+}
+
+/** The one plugin that may declare `permissions.revealMinted` (the Vault's one getter, docs/secrets.md › The one exception). */
+export const REVEAL_MINTED_PLUGIN = 'mcp';
+
+/**
+ * Refuses, at boot and before the plugin builds, a manifest that declares a permission only one plugin may hold: marks
+ * it failed with the reason and answers `true`. It reads the manifest alone, so it holds whether the plugin needs the
+ * Vault, only uses it, or names no Vault at all.
+ */
+export async function refusedPermission(
+  manifest: Pick<Manifest, 'id' | 'title' | 'permissions'>,
+  failed: (id: string, why: string) => Promise<void>,
+): Promise<boolean> {
+  if (manifest.permissions?.revealMinted !== true || manifest.id === REVEAL_MINTED_PLUGIN) return false;
+  await failed(
+    manifest.id,
+    `${manifest.title} declares permissions.revealMinted, which only ${REVEAL_MINTED_PLUGIN} may hold.`,
+  );
+  return true;
 }
 
 /** Only programs the manifest declared in `permissions.spawn` (§3.7); refused before anything starts. */

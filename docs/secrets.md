@@ -1666,17 +1666,19 @@ Claude ferret the renewed access token of an MCP server its own launch already h
   it adds nothing beyond the documented GAP ([mcp-oauth.md](mcp-oauth.md#what-this-does-not-protect-against): an agent
   can read its own environment). It extends that boundary in time (the renewed token), not in kind.
 - **One Vault operation, for what the caller itself wrote.** The Vault has no general getter and none may be added.
-  `VaultApi.mintedValue(name)` is the single exception: it is not a member of `VaultApi` at all
-  (the type `MintedValueReader`, read through `mintedValueOf`) and exists only for a plugin whose manifest declares
-  `permissions.revealMinted`, which the Vault allows to MCP alone (any other plugin that declares it stops the daemon's boot at
-  the Vault, naming the plugin). It answers only a secret the Vault's own mint ledger says THAT plugin wrote the
+  `MintedValueReader.mintedValue(name)` is the single exception: it is not a member of `VaultApi` at all
+  (read through `mintedValueOf`) and exists only for a plugin whose manifest declares
+  `permissions.revealMinted`, which only MCP may declare. The kernel enforces that at boot, from the manifest alone and before
+  the plugin builds, so it holds whether the other plugin needs the Vault, only uses it (optional) or names no Vault at all:
+  any such plugin is marked failed, naming the permission (the Vault builds a port only for a plugin that asks for one, so
+  it could not be the place that refuses the optional and absent cases). The getter itself reads only what MCP's own ledger entries say MCP wrote. It answers only a secret the Vault's own mint ledger says THAT plugin wrote the
   current value of (the same word `fetchMinted` takes, [above](#a-secret-a-plugin-minted-placed-on-its-request-by-the-vault)).
   An owner's value, another plugin's, one replaced since and a name merely declared answer nothing; a plugin without the
   permission, and the core, are handed no such method. It gives MCP back a token MCP itself received from the provider and
   put, so it reveals nothing MCP did not hold when it minted it.
 - **`noStore`, audited by name.** The answer is never cached; the security log records `secrets.used` `mcp-token` with the
   ferret and the variable NAME, never the token. Tests:
-  `packages/core/vault/tests/unit/daemon/minted-value.test.ts` (the getter's reach), `packages/plugins/mcp/tests/unit/ferret-token.test.ts`
+  `packages/core/vault/tests/unit/daemon/minted-value.test.ts` (the getter's reach), `packages/core/kernel/tests/integration/host/reveal-minted.test.ts` (a real `bootHost`: refused with the Vault required, optional and absent), `packages/plugins/mcp/tests/unit/ferret-token.test.ts`
   and `packages/plugins/mcp/tests/integration/ferret-token-e2e.test.ts` (the real `claude` runs the helper and the server sees a fresh
   token after each rotation; another ferret, the owner and a ferret without the server get nothing).
 

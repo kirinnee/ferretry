@@ -329,7 +329,7 @@ export interface Permissions extends PublicDoorPermission {
   readonly secretNamePicker?: true;
   /** It may CREATE a secret under a name the Vault does not hold yet (`VaultApi.putNew`: Runtimes' import); never replace, remove or read one. */
   readonly createSecrets?: true;
-  /** It may read back a secret IT MINTED, and only that (`VaultApi.mintedValue`: MCP's one exception, docs/secrets.md). */
+  /** It may read back a secret IT MINTED, and only that (the Vault's `mintedValueOf` reader: MCP's one exception, docs/secrets.md); the kernel's boot refuses any other plugin that declares it. */
   readonly revealMinted?: true;
   /**
    * It starts a command for a RUNTIME (MCP's check) and may put into that one child exactly the secrets the runtime's

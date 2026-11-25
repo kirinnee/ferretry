@@ -338,7 +338,7 @@ export default definePlugin({
     secrets: [],
     // The OAuth access tokens a sign-in files in the Vault (`mcpOAuthSecretNames`): today's exact names, and no others.
     mintedSecrets: [SIGN_IN_SECRET_NAME],
-    // Reads back ONLY a sign-in's access token this plugin itself minted, for the one route above (`VaultApi.mintedValue`).
+    // Reads back ONLY a sign-in's access token this plugin itself minted, for the one route above (the Vault's `mintedValueOf` reader).
     revealMinted: true,
   },
 });
