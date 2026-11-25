@@ -381,3 +381,48 @@
     animation-play-state: paused;
   }
 }
+
+/* ---- the theme preview: panes painted with the theme's own colours -------- */
+.fy-ls-theme {
+  gap: 0;
+}
+.fy-ls-theme-pane {
+  background: var(--bg);
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px;
+}
+.fy-ls-theme-bar {
+  background: var(--accent);
+  border-radius: 2px;
+  flex: none;
+  height: 8px;
+  width: 38%;
+}
+.fy-ls-theme-line {
+  background: var(--fg);
+  border-radius: 2px;
+  flex: none;
+  height: 4px;
+  opacity: 0.7;
+  width: 86%;
+}
+.fy-ls-theme-line--short {
+  background: var(--fg-soft);
+  width: 58%;
+}
+.fy-ls-theme-chip {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 3px;
+  flex: none;
+  height: 12px;
+  margin-top: auto;
+  width: 46%;
+}
+.fy-ls-theme-pane + .fy-ls-theme-pane {
+  border-left: 1px solid var(--border);
+}

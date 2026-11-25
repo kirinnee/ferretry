@@ -13,7 +13,8 @@
  *   - on a phone the drawer is shut behind a menu button, so a phone's side `left` draws the menu button alone;
  *     only side `bottom` adds the bar of places. A phone has no style row.
  */
-import type { ChoiceSetting } from '../../../lib/layout-model.ts';
+import type { Layout } from '../../../../contract/index.ts';
+import { choiceOf, type ChoiceSetting } from '../../../lib/layout-model.ts';
 
 /** The drawer's form: a slim icon `rail`, `open` (icon and name), or `none` (a phone: shut behind its menu button). */
 type Drawer = 'rail' | 'open' | 'none';
@@ -85,6 +86,19 @@ export function stateFor(path: ChoiceSetting['path'], word: string): MiniShellSt
     default:
       return base;
   }
+}
+
+/** The whole little app a layout draws: its navigation, its second column and its density at once. */
+export function stateOfLayout(layout: Layout): MiniShellState {
+  const nav = stateFor('nav.form', choiceOf(layout, 'nav.form'));
+  const show = choiceOf(layout, 'side.show');
+  return {
+    ...nav,
+    column: show !== 'never',
+    density: density(choiceOf(layout, 'density')),
+    pair: show === 'wide-only',
+    narrowColumn: false,
+  };
 }
 
 /** The word the loop starts from: the one before `word` in the list, wrapping round. */
