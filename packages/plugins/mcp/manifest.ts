@@ -4,6 +4,7 @@ import { ACTIONS_ROW_SLOT, FerretsPort, LaunchParts } from '@ferretry/core-ferre
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import { CatalogItems } from '@ferretry/plugin-catalogs/contract';
 import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
+import { LoginsPort } from '@ferretry/plugin-logins/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import { CHANNEL_LAUNCH_ENV } from '@ferretry/plugin-runtimes/contract';
 import {
@@ -55,9 +56,10 @@ export default definePlugin({
   // (today handed a Codex launch nothing), so MCP answers that itself, whether or not Codex's daemon half is built.
   // Runtimes answers the published accounts (a runtime's home, read through its bounded reader), the profile layers
   // that say which items a runtime carries, a launch's runtime, and a login add's runtime and profile (it also takes
-  // the one `mcp/<name>` layer). Off = no accounts and no item on any launch. None of the three uses MCP, so the graph
-  // stays acyclic.
-  uses: { claudeCode: ClaudeCodePort, projects: ProjectsPort, runtimes: RuntimesPort },
+  // the one `mcp/<name>` layer). Off = no accounts and no item on any launch. Logins answers the account (email or plan)
+  // that tells two look-alike runtimes apart in "Seen by" (the app half reads `GET /v1/logins`; off = the profile words).
+  // None of the four uses MCP, so the graph stays acyclic.
+  uses: { claudeCode: ClaudeCodePort, logins: LoginsPort, projects: ProjectsPort, runtimes: RuntimesPort },
 
   provides: { mcp: McpPort },
 

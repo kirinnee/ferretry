@@ -25,6 +25,7 @@
     "@ferretry/core-vault": "workspace:*",
     "@ferretry/plugin-catalogs": "workspace:*",
     "@ferretry/plugin-claude-code": "workspace:*",
+    "@ferretry/plugin-logins": "workspace:*",
     "@ferretry/plugin-projects": "workspace:*",
     "@ferretry/plugin-runtimes": "workspace:*",
     "react": "^19.0.0",

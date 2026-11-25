@@ -286,6 +286,7 @@ describe('MCP launch renewal through the daemon half', () => {
       needs: { ferrets, vault, sealed },
       uses: {
         claudeCode: { current: () => undefined },
+        logins: { current: () => undefined },
         projects: { current: () => undefined },
         // The launch's runtime carries both items, so the sign-in is renewed.
         runtimes: { current: () => runtimes },

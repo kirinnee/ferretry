@@ -15,6 +15,7 @@ test('G177 the daemon refuses project preview and add when Projects answers no r
     needs: { ferrets, vault: new FakeVault(), sealed: new FakeSealedDocuments() },
     uses: {
       claudeCode: { current: () => undefined },
+      logins: { current: () => undefined },
       projects: { current: () => undefined },
       runtimes: { current: () => undefined },
     },
