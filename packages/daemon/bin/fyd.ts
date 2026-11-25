@@ -4474,7 +4474,7 @@ interface WardenParts {
   readonly resume: Pick<SessionResumeService, 'resume'>;
   readonly migrate: SessionMigrateSubsystem & AgentJobControl;
   /** Analytics, for pricing a finished warden from its own transcript. */
-  readonly analytics: Pick<AnalyticsIngestionService, 'read'>;
+  readonly analytics: Pick<AnalyticsIngestionService, 'readOne'>;
   /** The live journal append edge, for the events that bring a sweep forward. */
   readonly events: (listener: (event: { readonly type: string; readonly data: unknown }) => void) => () => void;
   /**
@@ -4734,9 +4734,9 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       },
       costs: {
         costUsd: async wardenSessionId => {
-          const micros = parts.analytics
-            .read()
-            .rows.find(row => row.id === wardenSessionId)?.equivalentApiCostUsdMicros;
+          // ONE row by id. A full read here re-priced the whole index once per unpriced investigation
+          // and stalled the event loop ~12 s every Warden sweep.
+          const micros = parts.analytics.readOne(wardenSessionId)?.equivalentApiCostUsdMicros;
           return micros === null || micros === undefined ? undefined : micros / 1_000_000;
         },
       },

@@ -91,6 +91,23 @@ describe('the analytics store on disk', () => {
     should(second.store.rows()).deepEqual([storedSession()]);
   });
 
+  it('should read one stored row by id, and nothing for an id it does not hold', async () => {
+    // Arrange
+    const paths = await temporaryPaths();
+    const { store } = await open(paths);
+    store.upsert([storedSession(), refusedSession('s9')]);
+
+    // Act
+    const found = store.row(storedSession().raw.id);
+    const refused = store.row('s9');
+    const missing = store.row('nobody');
+
+    // Assert
+    should(found).deepEqual(storedSession());
+    should(refused).deepEqual(store.rows().find(row => row.raw.id === 's9'));
+    should(missing).be.undefined();
+  });
+
   it('should keep a refused token total as unknown rather than as a free session', async () => {
     // Arrange
     const paths = await temporaryPaths();

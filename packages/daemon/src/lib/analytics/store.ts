@@ -85,6 +85,14 @@ export interface AnalyticsIndexStore {
   forget(ids: readonly string[]): void;
   /** Every stored row, for the query surface to filter and aggregate. */
   rows(): readonly AnalyticsStoredSession[];
+  /**
+   * One stored row by session id, or undefined when none is stored.
+   *
+   * A keyed read, not a filter over {@link rows}: a caller asking about ONE session must not pay for
+   * the whole fleet. The Warden priced each finished investigation through a full read and blocked
+   * the event loop ~12 s per sweep on an index of 11.5k rows.
+   */
+  row(id: string): AnalyticsStoredSession | undefined;
   status(): AnalyticsStoreStatus;
   /** Discard the whole materialization. The next pass rebuilds it from the durable records. */
   drop(): void;

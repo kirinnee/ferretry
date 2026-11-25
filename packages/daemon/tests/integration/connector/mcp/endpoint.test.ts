@@ -197,6 +197,42 @@ describe('/mcp — rate limits', () => {
     should((await post(r.endpoint, INIT))?.status).equal(200);
   });
 
+  it('lets an agenda clean-up burst of 30 answers and snoozes through beside the 10 other writes, and 429s the 31st', async () => {
+    const r = rig();
+    r.dispatch.on(sessionsRoute()).on(call => (call.path.endsWith('/stop') ? ok(LIZ) : undefined));
+    for (let n = 0; n < 10; n += 1)
+      should((await post(r.endpoint, callTool('stop_ferret', { ferret: 'lizzette' })))?.status).equal(200);
+    for (let n = 0; n < 15; n += 1) {
+      should((await post(r.endpoint, callTool('answer_attention', { item: `A${n}`, answer: 'done' })))?.status).equal(
+        200,
+      );
+      should((await post(r.endpoint, callTool('snooze_attention', { item: `B${n}`, duration: '1h' })))?.status).equal(
+        200,
+      );
+    }
+    const over = await post(r.endpoint, callTool('answer_attention', { item: 'A99', answer: 'done' }));
+    should(over?.status).equal(429);
+    should(over?.body).containEql('Too many changes in a minute');
+    should(Number(over?.headers.get('retry-after'))).be.above(0);
+    // The other writes keep their own, tighter budget.
+    should((await post(r.endpoint, callTool('stop_ferret', { ferret: 'lizzette' })))?.status).equal(429);
+    r.state.now += 61_000;
+    should((await post(r.endpoint, callTool('answer_attention', { item: 'A100', answer: 'done' })))?.status).equal(200);
+  });
+
+  it('counts agenda acts toward the 60 calls a minute', async () => {
+    const r = rig();
+    r.dispatch.on(sessionsRoute());
+    for (let n = 0; n < 40; n += 1) await post(r.endpoint, callTool('list_ferrets', {}));
+    for (let n = 0; n < 20; n += 1)
+      should((await post(r.endpoint, callTool('answer_attention', { item: `A${n}`, answer: 'done' })))?.status).equal(
+        200,
+      );
+    const over = await post(r.endpoint, callTool('answer_attention', { item: 'A99', answer: 'done' }));
+    should(over?.status).equal(429);
+    should(over?.body).containEql('Too many calls in a minute');
+  });
+
   it('counts per grant, not per client', async () => {
     const r = rig();
     r.dispatch.on(sessionsRoute());

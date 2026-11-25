@@ -198,7 +198,9 @@ unknown client or a redirect URI problem is shown as an error page and NEVER red
   per source, 300/min overall; waiting-page polls 60/min per source, 1200/min overall; token and revoke 120/min per
   source with NO overall ceiling, plus 30 failed attempts per source per 5 min and 30 successful exchanges per
   authenticated client per minute (only a holder of a valid credential spends the latter, so anonymous traffic can
-  never starve a valid refresh); `/mcp` 60 calls/min per grant, of which write tools 10/min. Over the limit is `429`
+  never starve a valid refresh); `/mcp` 60 calls/min per grant, of which write tools 10/min — except the two agenda
+  acts (`answer_attention`, `snooze_attention`), which have their own 30/min so an agenda clean-up burst fits; they
+  still count toward the 60. Over the limit is `429`
   with `Retry-After`. Only the per-source counters are kept in a bounded table (10,000 sources; at the bound the
   oldest source's counter is forgotten). The overall ceilings and the per-client budgets are never evicted, so a flood
   of sources cannot reset them.
@@ -419,7 +421,7 @@ Hides one open agenda item until a time and lists it again afterwards — the da
   transcript through `/logs`, which is not `terminal.use`; a start with a registered project and no harness
   flags is an ordinary act).
 - **Rate limit is HTTP-level**: `429` with `Retry-After`, 60 `tools/call`s a minute per grant, 10 of them write
-  tools. `initialize` and `tools/list` are free. (A tool-level error would be read aloud as one more sentence and
+  tools other than the agenda acts, which have their own 30. `initialize` and `tools/list` are free. (A tool-level error would be read aloud as one more sentence and
   would not tell the client to back off.)
 - **Naming** (`names.ts`, `resolveFerret`): normalised (case, spaces, hyphens, leading `:`, doubled letters,
   `ph`/`ck`/`y` folded) and matched in tiers — EXACT IDENTITIES FIRST, over every ferret whatever its state (call

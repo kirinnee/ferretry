@@ -82,6 +82,10 @@ class MemoryStore implements AnalyticsIndexStore {
     return [...this.saved.values()];
   }
 
+  row(id: string): AnalyticsStoredSession | undefined {
+    return this.saved.get(id);
+  }
+
   status(): AnalyticsStoreStatus {
     const rows = this.rows();
     const ingestedAt = rows.map(row => row.ingestedAt).toSorted();
@@ -719,6 +723,23 @@ describe('AnalyticsIngestionService.ingest', () => {
 });
 
 describe('AnalyticsIngestionService.read', () => {
+  it('should answer one session by id exactly as the full read lists it, and nothing for an unknown id', async () => {
+    // Arrange
+    const test = harness([candidate({ id: 's1' }), candidate({ id: 's2' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 1_000, 500)]),
+    );
+    await test.service.ingest();
+
+    // Act
+    const one = test.service.readOne('s2');
+    const missing = test.service.readOne('nobody');
+
+    // Assert
+    should(one).deepEqual(test.service.read().rows.find(row => row.id === 's2'));
+    should(one?.equivalentApiCostUsdMicros).equal(52_500);
+    should(missing).be.undefined();
+  });
+
   it('should report an unproven fold as a pending source rather than an indexed one', async () => {
     // Arrange
     const test = harness([candidate({ id: 's1' }), candidate({ id: 's2' })], async id =>
