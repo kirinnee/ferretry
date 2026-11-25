@@ -95,6 +95,7 @@ const STATE: KeeperState = {
   previous: null,
   endorsements: [],
   lastOutcome: null,
+  checkedAt: null,
 };
 
 describe('IndexedDbReleaseState', () => {

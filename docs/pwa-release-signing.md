@@ -39,15 +39,27 @@ and what to do when something goes wrong.
   A page load first finishes that check, but for **at most 2.5 seconds** (`RELEASE_CHECK_DEADLINE_MS`), so one
   reload after a newer signed release was published shows it. A site that is down, slow or serving something the
   worker refuses is waited for no longer than that: the installed release answers, exactly as an offline start
-  does, the check finishes behind the load, and the refusal is shown by the same notice. The wait changes nothing
-  about what is trusted — the answer is still chosen by `respond`, from bytes re-verified from the compiled-in key.
+  does, and the check finishes behind the load (so the reload after it shows the new release). The wait changes
+  nothing about what is trusted — the answer is still chosen by `respond`, from bytes re-verified from the
+  compiled-in key.
+  **The wait is paid only when a check is due.** The check runs on every page load, but a load waits for it only if
+  the site has not answered a check in the last **10 minutes** (`RELEASE_RECENT_CHECK_MS`). The worker keeps the time
+  of the last answered check (`checkedAt`, any answer but "unreachable") in its one IndexedDB record, so a phone on a
+  slow-but-connected network pays up to 2.5 seconds on the first open after a while, not on every open. The price:
+  a release published within 10 minutes of the last answered check is shown by the second reload, not the first.
+  Like everything else in that record the time can be written by any page on the origin, which can only shorten or
+  lengthen a wait — never change what is trusted — and a missing, unreadable or future-dated time counts as "due".
+  **Refusals are recorded, not shown.** What the check concluded (`lastOutcome`: current, updated, unverified,
+  unreachable, or refused with its reason) is stored in that record and answered to a page that asks the worker
+  (`fy-release-status`, `fy-release-check`). 5.0's page does not ask and has no release notice, so a refusal today
+  is visible only in that record: the installed release keeps running and nothing is weakened.
 - **Speech runtimes are listed but fetched later.** The speech runtimes (`assets/ort-wasm-simd-threaded-*.wasm`,
   12 MB, and Vosk's `assets/vosk-*.wasm`, 3 MB) are used only by people who install an on-device
   engine ([voice.md](voice.md)), so the update skips downloading them (`isDeferredReleaseFile`). It is still in the signed list: a request for it is
   answered only with bytes that hash to that list, fetched at that moment and not kept in the release
   cache.
-- **A failed check changes nothing.** The installed version keeps running, and the app says, in one
-  sentence, that an update was blocked and why.
+- **A failed check changes nothing.** The installed version keeps running, and the worker records why
+  (`lastOutcome`). 5.0 shows the reader no sentence about it yet: there is no release notice.
 - **Every machine's push worker is the same signed file.** Each paired machine gets its own
   registration of `sw.verified.js` at `/push/<daemonId>/` for its own push subscription
   ([cross-daemon.md](cross-daemon.md) §4b). Those copies run the same release check over the same
@@ -77,7 +89,6 @@ No second key exists for it.
 | `packages/pwa/src/lib/release-storage.ts`         | IndexedDB, Cache Storage and same-origin fetch, behind small ports    |
 | `packages/pwa/src/worker/service-worker.ts`       | the worker's composition root (wiring only)                           |
 | `packages/pwa/src/hooks/use-release-integrity.ts` | the page side: asks for checks, audits a new worker                   |
-| `packages/pwa/src/shell/release-notice.tsx`       | the notice the reader sees                                            |
 | `packages/pwa/scripts/build-release.ts`           | builds the worker, writes the list and the UNSIGNED marker            |
 | `scripts/ci/sign-pwa-release.sh`                  | signs the list with openssl; the key arrives on stdin                 |
 | `scripts/ci/check-pwa-release.sh`                 | proves the list says only what the run decided, before signing/deploy |

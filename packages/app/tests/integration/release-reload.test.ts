@@ -5,11 +5,13 @@
  * The update path (docs/pwa-release-signing.md): a newer signed release is published over a running install, and the
  * reader reloads ONCE. Before this, that reload was answered from the installed release while the check ran behind it,
  * so only the SECOND reload showed the new app. Now a navigation finishes a BOUNDED check first
- * (`RELEASE_CHECK_DEADLINE_MS`), then answers from whatever release is installed:
- *   - N installed, N+1 published, one reload → N+1;
+ * (`RELEASE_CHECK_DEADLINE_MS`), then answers from whatever release is installed — but only when no check was answered
+ * recently (`RELEASE_RECENT_CHECK_MS`), so a slow phone does not pay the wait on every open:
+ *   - N installed, N+1 published, a check due, one reload → N+1;
  *   - the site is down (offline start) → the installed release, at once;
- *   - the site answers the list slower than the deadline → the installed release within the deadline, and the check
- *     still lands behind it, so the next reload is N+1;
+ *   - the site answers the list slower than the deadline, a check due → the installed release within the deadline, and
+ *     the check still lands behind it, so the next reload is N+1;
+ *   - the same slow site, a check answered just now → the installed release at once, no wait at all;
  *   - N+1 signed by a key the worker does not trust → N stays, the refusal is reported, nothing is weakened.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -98,6 +100,40 @@ const install = async (): Promise<{ context: BrowserContext; tab: Page }> => {
   return { context, tab };
 };
 
+/**
+ * Lets the load's own check finish, then forgets that any check was answered — the state of a reader who last opened the
+ * app a while ago, so the next load is the one that may wait. (The record is the origin's: a page may write it.)
+ */
+const makeCheckDue = async (tab: Page): Promise<void> => {
+  await outcomeOfCheck(tab);
+  await tab.evaluate(
+    () =>
+      new Promise<void>((done, fail) => {
+        const open = indexedDB.open('fy-app', 1);
+        open.onerror = () => fail(open.error);
+        open.onsuccess = () => {
+          const transaction = open.result.transaction('state', 'readwrite');
+          const store = transaction.objectStore('state');
+          const read = store.get('keeper');
+          read.onsuccess = () => store.put({ ...(read.result as object), checkedAt: null }, 'keeper');
+          transaction.oncomplete = () => done();
+          transaction.onerror = () => fail(transaction.error);
+        };
+      }),
+  );
+};
+
+/** Asks the worker for a check and waits for its answer (a check already running is shared). */
+const outcomeOfCheck = async (tab: Page): Promise<unknown> =>
+  await tab.evaluate(
+    () =>
+      new Promise(done => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = event => done((event.data as { outcome: unknown }).outcome);
+        navigator.serviceWorker.controller?.postMessage({ type: 'fy-release-check' }, [channel.port2]);
+      }),
+  );
+
 const shown = async (tab: Page): Promise<string | null> => await tab.textContent('#release');
 
 /** The outcome the worker last recorded, as the page asks for it. */
@@ -117,6 +153,7 @@ describe('a reload after a newer signed release was published', () => {
     const { context, tab } = await install();
     try {
       expect(await shown(tab)).toBe('release-1');
+      await makeCheckDue(tab);
       await publish('release-2', 2);
       await tab.reload();
       expect(await shown(tab)).toBe('release-2');
@@ -141,6 +178,7 @@ describe('a reload after a newer signed release was published', () => {
     await publish('release-1', 1);
     const { context, tab } = await install();
     try {
+      await makeCheckDue(tab);
       await publish('release-2', 2);
       knobs.listDelayMs = RELEASE_CHECK_DEADLINE_MS + 2_000;
       await tab.reload();
@@ -161,10 +199,34 @@ describe('a reload after a newer signed release was published', () => {
     }
   }, 90_000);
 
+  test('a slow site, with a check answered recently, still shows the installed release and lands behind the load', async () => {
+    await publish('release-1', 1);
+    const { context, tab } = await install();
+    try {
+      await outcomeOfCheck(tab);
+      await publish('release-2', 2);
+      knobs.listDelayMs = RELEASE_CHECK_DEADLINE_MS + 2_000;
+      await tab.reload();
+      expect(await shown(tab)).toBe('release-1');
+      // How long it took is `tests/realworld/release-reload.test.ts`. The check still runs behind the load, so the reload after it is the new release.
+      await waitFor(
+        async () => ((await outcome(tab)) as { status?: string } | null)?.status === 'updated',
+        'the late check to land',
+        { within: 30_000 },
+      );
+      knobs.listDelayMs = 0;
+      await tab.reload();
+      expect(await shown(tab)).toBe('release-2');
+    } finally {
+      await context.close();
+    }
+  }, 90_000);
+
   test('a release signed by a key the worker does not trust is never shown, and the refusal is said', async () => {
     await publish('release-1', 1);
     const { context, tab } = await install();
     try {
+      await makeCheckDue(tab);
       await publish('release-evil', 2, stranger);
       await tab.reload();
       expect(await shown(tab)).toBe('release-1');
