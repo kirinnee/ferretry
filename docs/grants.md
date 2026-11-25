@@ -87,6 +87,35 @@ it the machine.
   route and stamps every arrival `loopback: false` and unprivileged, exactly like a relayed one.
 
 Nothing re-derives it, and no header can move it.
+
+### Public connector arrivals
+
+In 5.0 the kernel stamps `ApiRequest.arrival`. A public HTTP arrival is
+`{ kind: 'door', door: 'own', plugin: 'connector' }` on the connector's own listener,
+or `{ kind: 'door', door: 'tunnel' }` on a tunnel listener that explicitly serves public doors.
+**Both are REMOTE, never loopback, and never privileged.** No peer address, `Host`, URL,
+forwarded header or bearer changes that classification. The surface's `peer` supplies only
+`clientAddress` for rate limiting; it supplies no authority.
+
+Gate parses **no credential** on either door: an admin token, warden token, ferret bearer,
+device credential or connector bearer in `Authorization` never establishes a Gate principal,
+an owner exemption, a device unlock or a passkey proof. The public handler receives no Gate
+standing. It may read its own protocol's bearer; that does not authenticate the arrival to Gate.
+
+Only `connector` may declare `door: 'public'` routes, and those routes must ask for
+`minimum: 'none'`, `caller: 'any'`, no capability, no grant consultation, no warden remedy
+and no privileged arrival. Its own listener also requires `permissions.publicDoor: true`
+and binds only `127.0.0.1`. It serves only that plugin's public routes; the opted-in tunnel
+serves only allow-listed public routes. A door reaches no ordinary daemon route, including
+`/v1/*`, `/healthz` and `/metrics`; unknown paths and wrong methods answer 404, never a 405
+method map. Public routes likewise answer 404 on the API listener and in direct, relay,
+tunnel or WebRTC sessions. Availability is checked on every request, so an unavailable
+public route is unrouted immediately.
+
+The public arrival grants no fleet authority. A connector's later tool action needs a
+separate governed admission through the daemon's route dispatcher; receiving an OAuth or
+MCP request at a public door never grants access to `/v1/*`.
+
 `packages/daemon/tests/unit/grants/policy.test.ts` asserts exactly this with a relayed request that
 presents every loopback-looking signal it can.
 

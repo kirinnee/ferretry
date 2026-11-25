@@ -11,6 +11,7 @@ import type {
 } from '../contract/http.ts';
 import { ApiError, errorResponse } from '../contract/http.ts';
 import type { PluginId } from '../contract/ids.ts';
+import { PUBLIC_DOOR_PLUGINS } from '../contract/ports/public-door.ts';
 import type {
   CallContext,
   MemberRouteDescriptor,
@@ -18,6 +19,7 @@ import type {
   MemberRouteHandler,
   RouteDescriptor,
   RouteHandler,
+  RoutePattern,
   ScopedRoute,
 } from '../contract/route.ts';
 import type { SocketAccept, SocketDescriptor, SocketUpgradeDecision } from '../contract/socket.ts';
@@ -271,6 +273,10 @@ async function run(
  */
 export class Dispatcher {
   private readonly routes: Router<MountedRoute>;
+  private readonly publicRoutes: Router<MountedRoute>;
+  private readonly publicClaims: Router<RoutePattern>;
+  private readonly apiRoutes: Router<MountedRoute>;
+  private readonly ownDoors: ReadonlyMap<string, Router<MountedRoute>>;
   private readonly sockets: Router<MountedSocket>;
   private readonly members: Router<MountedMemberRoute>;
   private readonly streams = new Set<() => void>();
@@ -284,6 +290,21 @@ export class Dispatcher {
     },
   ) {
     this.routes = new Router(orderRoutesBySpecificity(tables.routes));
+    this.apiRoutes = new Router(this.routes.routes.filter(route => route.door === undefined));
+    this.publicRoutes = new Router(
+      this.routes.routes.filter(
+        route => route.door === 'public' && (PUBLIC_DOOR_PLUGINS as readonly string[]).includes(route.owner.plugin),
+      ),
+    );
+    this.publicClaims = new Router(
+      this.routes.routes.filter(route => route.door === 'public').map(({ method, path }) => ({ method, path })),
+    );
+    this.ownDoors = new Map(
+      PUBLIC_DOOR_PLUGINS.map(plugin => [
+        plugin,
+        new Router(this.publicRoutes.routes.filter(route => route.owner.plugin === plugin)),
+      ]),
+    );
     this.sockets = new Router(orderRoutesBySpecificity(tables.sockets));
     this.members = new Router(orderRoutesBySpecificity(tables.memberRoutes));
   }
@@ -294,9 +315,23 @@ export class Dispatcher {
 
   async dispatch(incoming: ApiRequest): Promise<ApiResponse> {
     const request = this.stamped(incoming);
-    if (request.principal?.kind === 'member') return await this.dispatchMember(request);
-    const found = this.routes.lookup(request.method, request.path);
+    const door = request.arrival.kind === 'door';
+    if (!door && request.principal?.kind === 'member') {
+      if (this.publicClaims.lookup(request.method, request.path).kind !== 'not-found')
+        return withVersion(unknownRouteResponse(request.method, request.path), this.bindings.version);
+      return await this.dispatchMember(request);
+    }
+    const routes =
+      request.arrival.kind === 'door'
+        ? request.arrival.door === 'own'
+          ? this.ownDoors.get(request.arrival.plugin)
+          : this.publicRoutes
+        : this.apiRoutes;
+    const found = routes?.lookup(request.method, request.path) ?? { kind: 'not-found' as const };
     if (found.kind !== 'matched') {
+      // Public and API tables do not reveal each other's paths or methods. Unknown public paths also bypass Gate.
+      if (door || this.publicClaims.lookup(request.method, request.path).kind !== 'not-found')
+        return withVersion(unknownRouteResponse(request.method, request.path), this.bindings.version);
       const decision = admit(
         this.bindings,
         'route',
@@ -458,6 +493,7 @@ export class Dispatcher {
 
   /** The socket upgrade: the same admission, asked before `accept`. `unclaimed` lets the caller serve plain HTTP. */
   async upgrade(request: ApiRequest): Promise<SocketUpgradeDecision> {
+    if (request.arrival.kind === 'door') return { outcome: 'unclaimed' };
     const found = this.sockets.lookup(request.method, request.path);
     if (found.kind !== 'matched') return { outcome: 'unclaimed' };
     const decision = admit(this.bindings, 'socket', found.route, request, found.params);

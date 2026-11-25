@@ -11,7 +11,8 @@ import type { CarrierListenerHandle } from '../../../contract/ports.ts';
 import { Carriers } from '../../../contract/kernel.ts';
 import type { CallStanding } from '../../../contract/route.ts';
 import { carrierListenerPort, CARRIER_SHARED_PEER } from '../../../host/carrier-listener.ts';
-import { Dispatcher, type MountedSocket } from '../../../host/dispatch.ts';
+import { Dispatcher, type MountedRoute, type MountedSocket } from '../../../host/dispatch.ts';
+import { jsonResponse } from '../../../contract/http.ts';
 import { definePlugin, socket } from '../../../manifest/index.ts';
 
 const CARRIED: Arrival = { kind: 'carried', carrier: 'tunnel' as CarrierKey };
@@ -45,7 +46,7 @@ interface Asked {
   readonly clientAddress: string | undefined;
 }
 
-function world(extra: readonly MountedSocket[] = [], refuse = false) {
+function world(extra: readonly MountedSocket[] = [], refuse = false, routes: readonly MountedRoute[] = []) {
   const asked: Asked[] = [];
   const attached: string[] = [];
   const admission: Admission = {
@@ -83,7 +84,7 @@ function world(extra: readonly MountedSocket[] = [], refuse = false) {
   };
   const dispatcher = new Dispatcher(
     { admission: () => admission, outputGuard: () => undefined, version: '5.0.0' },
-    { routes: [], sockets: [mounted, ...extra], memberRoutes: [] },
+    { routes, sockets: [mounted, ...extra], memberRoutes: [] },
   );
   const stops: (() => void | Promise<void>)[] = [];
   const lifecycle = { stopped: false };
@@ -109,6 +110,7 @@ async function listen(
     socket: string;
     peer?: (headers: ReadonlyMap<string, string>) => string;
     origins?: readonly string[];
+    doors?: true;
   } = { socket: ROUTE },
   carrier: CarrierKey = 'tunnel' as CarrierKey,
 ) {
@@ -241,6 +243,46 @@ describe('G15 G16 R625 the carrier listener: relayed loopback is remote', () => 
     expect(fixture.asked[0]?.arrival).toEqual(CARRIED);
     expect(fixture.attached).toEqual([]);
   });
+});
+
+test('an opted-in tunnel serves only public routes as remote door arrivals, with the surface peer', async () => {
+  let available = true;
+  const make = (path: string, plugin: string, isDoor: boolean): MountedRoute => ({
+    method: 'GET',
+    path,
+    minimum: 'none',
+    caller: 'any',
+    ...(isDoor ? { door: 'public' } : {}),
+    available: () => available,
+    audit: { skip: 'fixture' },
+    guard: { none: 'fixture' },
+    owner: { plugin: plugin as PluginId, title: plugin, serving: () => ({ kind: 'serving' }) },
+    handle: async call => jsonResponse({ arrival: call.request.arrival, peer: call.request.clientAddress }),
+  });
+  const fixture = world([], false, [
+    make('/oauth/authorize', 'connector', true),
+    make('/v1/private', 'carrierfix', false),
+    make('/foreign', 'other', true),
+  ]);
+  const handle = await listen(fixture, {
+    socket: ROUTE,
+    doors: true,
+    peer: headers => headers.get('cf-connecting-ip') ?? 'shared',
+  });
+  const base = `http://127.0.0.1:${String(handle.port)}`;
+  const headers = { authorization: 'Bearer fixture-admin', 'cf-connecting-ip': '203.0.113.9', host: '127.0.0.1' };
+  const answer = await fetch(`${base}/oauth/authorize`, { headers });
+  expect(answer.status).toBe(200);
+  expect(await answer.json()).toEqual({ arrival: { kind: 'door', door: 'tunnel' }, peer: '203.0.113.9' });
+  for (const path of ['/v1/private', '/healthz', '/metrics', '/foreign', '/unknown'])
+    expect((await fetch(`${base}${path}`, { headers })).status).toBe(404);
+  expect((await fetch(`${base}/oauth/authorize`, { method: 'POST', headers })).status).toBe(404);
+  available = false;
+  expect((await fetch(`${base}/oauth/authorize`)).status).toBe(404);
+  expect(await dial(handle.port)).toBe('open');
+  expect(fixture.asked.at(-1)?.arrival).toEqual(CARRIED);
+  const off = await listen(fixture);
+  expect((await fetch(`http://127.0.0.1:${String(off.port)}/oauth/authorize`)).status).toBe(404);
 });
 
 describe('who may open a carrier listener', () => {

@@ -116,7 +116,7 @@ export function routeAuditDraft(
   call: {
     readonly credential?: AuthenticatedCredential;
     readonly params: ReadonlyMap<string, string>;
-    readonly request: { readonly arrival: { readonly kind: 'local' | 'carried'; readonly carrier?: string } };
+    readonly request: { readonly arrival: { readonly kind: 'local' | 'carried' | 'door'; readonly carrier?: string } };
   },
   status: number | undefined,
 ): AuditDraft {

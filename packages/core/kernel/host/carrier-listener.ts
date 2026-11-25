@@ -52,6 +52,8 @@ export function carrierListenerPort(deps: CarrierListenerDeps): CarrierListenerP
   return {
     open: async ({ carrier, surface }) => {
       const declared = declaredSocket(manifest, carrier, surface);
+      if (surface.doors === true && carrier !== 'tunnel')
+        throw new PermissionError(`${manifest.title}: public doors are served only by the tunnel carrier.`);
       if (deps.stopping())
         throw new PermissionError(`${manifest.title} has stopped, so it cannot open a carrier listener.`);
       if (!watching) {
@@ -68,6 +70,16 @@ export function carrierListenerPort(deps: CarrierListenerDeps): CarrierListenerP
         fetch: async (request, bound) => {
           try {
             const notServed = (): Response => toResponse(NOT_SERVED, false);
+            if (surface.doors === true && !request.headers.has('upgrade')) {
+              const api = toApiRequest(request, { kind: 'door', door: 'tunnel' }, undefined);
+              return toResponse(
+                await deps.dispatcher().dispatch({
+                  ...api,
+                  clientAddress: surface.peer?.(api.headers) ?? CARRIER_SHARED_PEER,
+                }),
+                false,
+              );
+            }
             if (request.method !== 'GET' || request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
               return notServed();
             if (!originAllowed(request, surface.origins)) return notServed();
