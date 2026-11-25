@@ -1,4 +1,5 @@
 import {
+  type HarnessKey,
   isKnownHarnessKey,
   type KnownHarnessKey,
   type LaunchPart,
@@ -8,7 +9,11 @@ import {
 import { optionalSecretReference, type SecretName, secretReferencesIn } from '@ferretry/core-vault/contract';
 import type { JsonValue } from '@ferretry/std';
 import { McpEnvSchema, type McpItem, type McpOAuthSecretNames, mcpOAuthSecretNames } from '../../contract/index.ts';
+import { isSseAddress } from './inventory/declarations.ts';
 import type { ProjectMcpLaunchShare } from './inventory/project-sign-in.ts';
+
+/** The document a harness takes its MCP servers in (`HarnessFacts.mcp.format`). */
+type McpDocumentFormat = 'json' | 'toml';
 
 /** One configured server as a launch part. */
 type McpLaunchPart = Extract<LaunchPart, { readonly kind: 'mcp' }>;
@@ -32,6 +37,17 @@ export function mcpParts(items: ReadonlyMap<string, McpItem>, harness: KnownHarn
   return parts;
 }
 
+/**
+ * A signed-in server as the harness reads it (both harnesses write `part.config` verbatim, so it is made harness-ready
+ * here). The token's VARIABLE is named, never its value (the Vault binds it into the child): Claude expands `${VAR}` in
+ * a header (the shape `project-sign-in.ts` writes and the inventory recognises, a JSON document), Codex reads
+ * `bearer_token_env_var` (a TOML table). The harness says which it takes (`HarnessFacts.mcp.format`). None of `auth`, `oauth` or `bearer` is a key either harness reads.
+ */
+function signedInConfig(url: string, variable: string, format: McpDocumentFormat): JsonValue {
+  if (format === 'toml') return { url, bearer_token_env_var: variable };
+  return { type: isSseAddress(url) ? 'sse' : 'http', url, headers: { Authorization: `Bearer \${${variable}}` } };
+}
+
 /** The launch's share of the sign-in service: make due tokens current. Never throws (`McpOAuthService.refreshForLaunch`). */
 interface McpLaunchRenewal {
   refreshForLaunch(names: readonly SecretName[]): Promise<void>;
@@ -42,6 +58,8 @@ export interface McpLaunchPartsDeps {
   /** Which secret NAMES the Vault holds — never a value (use, never read). */
   held(): Promise<ReadonlySet<SecretName>>;
   readonly renewal: McpLaunchRenewal;
+  /** The document format a harness takes MCP servers in; undefined for a harness this machine does not know. */
+  mcpFormat(harness: HarnessKey): McpDocumentFormat | undefined;
   /**
    * The item names the launch's runtime profile stack carries (D10). A launch with no runtime, or a runtime whose
    * stack cannot be resolved, carries none.
@@ -59,7 +77,7 @@ export interface McpLaunchPartsDeps {
  *    service, which never throws. A refresh that fails leaves the old token where it was (the server then says it
  *    needs a new sign-in) and the launch goes ahead.
  * 2. One `mcp` part per item the runtime's profile stack names ({@link mcpParts}); a signed-in one names its `bearer`
- *    VARIABLE (today's `adapt.ts`: Claude renders it as an `Authorization` header, Codex as `bearer_token_env_var`).
+ *    VARIABLE (rendered by {@link signedInConfig}: Claude as an `Authorization` header, Codex as `bearer_token_env_var`).
  * 3. One `mcp` part per signed-in project server, as the local-scope entry for its project root.
  * 4. One `env` part binding each sign-in variable to its OPTIONAL `${secret?:NAME}` reference. The Vault opens the
  *    references into the child as it starts, so no part holds a value. Only a token the Vault HOLDS is bound: an
@@ -79,14 +97,14 @@ export class McpLaunchParts implements LaunchPartSource {
     const items = new Map([...this.deps.items()].filter(([name]) => layered.has(name)));
     // A harness whose MCP format this plugin does not write gets no servers from it: never another harness's.
     const servers = isKnownHarnessKey(spec.harness) ? mcpParts(items, spec.harness) : [];
-    const signedIn = new Map<string, McpOAuthSecretNames>();
+    const signedIn = new Map<string, { readonly names: McpOAuthSecretNames; readonly url: string }>();
     const named = new Set<SecretName>();
     for (const part of servers) {
       const item = items.get(part.name);
       if (item === undefined) continue;
       if (item.auth === 'oauth' && item.url !== undefined) {
         const names = mcpOAuthSecretNames(part.name, item.url);
-        signedIn.set(part.name, names);
+        signedIn.set(part.name, { names, url: item.url });
         named.add(names.access);
       }
       for (const value of Object.values(item.env ?? {})) for (const name of secretReferencesIn(value)) named.add(name);
@@ -95,13 +113,17 @@ export class McpLaunchParts implements LaunchPartSource {
       this.deps.project(spec),
       named.size === 0 ? undefined : this.deps.renewal.refreshForLaunch([...named]),
     ]);
+    const format = signedIn.size === 0 ? undefined : this.deps.mcpFormat(spec.harness);
     const held = signedIn.size === 0 ? new Set<SecretName>() : await this.deps.held();
     const env: Record<string, string> = { ...project.env };
     const parts: LaunchPart[] = servers.map(part => {
-      const names = signedIn.get(part.name);
-      if (names === undefined || !held.has(names.access)) return part;
-      env[names.variable] = optionalSecretReference(names.access);
-      return { ...part, config: { ...(part.config as Record<string, JsonValue>), bearer: names.variable } };
+      const server = signedIn.get(part.name);
+      if (server === undefined || !held.has(server.names.access)) return part;
+      env[server.names.variable] = optionalSecretReference(server.names.access);
+      // A harness with no MCP format on record is written no sign-in it could not read: the entry stays as configured.
+      return format === undefined
+        ? part
+        : { ...part, config: signedInConfig(server.url, server.names.variable, format) };
     });
     for (const [name, server] of Object.entries(project.servers))
       parts.push({

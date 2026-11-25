@@ -58,7 +58,7 @@ const stringRecord = (value: unknown): Readonly<Record<string, string>> =>
     : {};
 
 /** An address ending in `/sse` is the legacy SSE transport, as both harnesses and the fleet adapter read it. */
-const isSseAddress = (url: string): boolean => /\/sse\/?(?:[?#].*)?$/iu.test(url);
+export const isSseAddress = (url: string): boolean => /\/sse\/?(?:[?#].*)?$/iu.test(url);
 
 /** What a person may be shown of an address: no credentials, no query, no fragment. */
 export function displayAddress(url: string): string {
