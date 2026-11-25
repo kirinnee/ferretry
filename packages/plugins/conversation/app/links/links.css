@@ -169,6 +169,19 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* ON A PHONE THE TITLE WRAPS. Two conversations that start alike differ only at the end of their titles, which an ellipsis
+   hides, so the rows looked identical; the title takes as many lines as it needs and the age stays one compact line. */
+@media (max-width: 640px) {
+  .fy-convo-title {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
+  .fy-convo-age {
+    white-space: nowrap;
+  }
+}
 .fy-convo-age {
   flex: 0 0 auto;
   color: var(--muted);

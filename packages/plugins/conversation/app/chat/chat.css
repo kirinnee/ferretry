@@ -1549,13 +1549,20 @@ button.fy-receipt {
   display: contents;
 }
 /* KEYBOARD UP ON A PHONE: the reader is writing and needs the turn they are answering, so the
-   readouts step aside and the status line goes entirely when nothing else is on it (the Vim
-   indicator and New line stay). `display: none`, not an unmount, so an open chip keeps its state. */
+   readouts step aside — all but the MODEL chip, which stays on the line (the reader changing model mid-sentence must not
+   have to close the keyboard and lose their place). The thinking and speed chips, the context ring and the quota go;
+   the line goes entirely when nothing else is on it (the Vim indicator and New line stay). `display: none`, not an
+   unmount, so an open chip keeps its state. */
 @media (pointer: coarse), (max-width: 767px) {
-  html[data-keyboard='open'] .fy-composer-status-chrome {
+  html[data-keyboard='open'] .fy-composer-status-chrome .fy-context-ring,
+  html[data-keyboard='open'] .fy-composer-status-chrome .fy-composer-quota,
+  html[data-keyboard='open']
+    .fy-composer-status-chrome
+    .fy-runtime-chip[data-runtime-chip]:not([data-runtime-chip='model']) {
     display: none;
   }
-  html[data-keyboard='open'] .fy-composer-actions:not(:has(.fy-composer-vim, .fy-composer-chip)) {
+  html[data-keyboard='open']
+    .fy-composer-actions:not(:has(.fy-composer-vim, .fy-composer-chip, [data-runtime-chip='model'])) {
     display: none;
   }
   html[data-keyboard='open'] .fy-composer {
@@ -1990,6 +1997,8 @@ button.fy-receipt {
   min-height: 24px;
   padding: 0 4px;
   position: relative;
+  /* A model's name is a name: the loud looks (Antiposh) shout every control, and capitals leave fewer letters before the ellipsis. */
+  text-transform: none;
 }
 /* The status line has the room the row does not: the name shows on a phone too (the picker hides it below `sm` for a row).
    It is a block the line can cut short (an inline span ignores `overflow`), so a long readout — model, effort, fast — ends in

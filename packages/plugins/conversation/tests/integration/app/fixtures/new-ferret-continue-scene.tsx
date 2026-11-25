@@ -8,6 +8,7 @@
  *
  *   ?theme=<family>-<mode>
  *   ?empty=1   the daemon holds no conversation
+ *   ?similar=1   the test's server answers with two titles that share a long prefix (see `/rows.json`)
  */
 import { NEW_FERRET_ACCOUNT_SLOT, NEW_FERRET_CONTINUE_SLOT } from '@ferretry/core-ferrets/contract';
 import { RouterProvider } from '@ferretry/app/testing/router';
@@ -25,7 +26,9 @@ const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const empty = params.get('empty') === '1';
 
-const rows = empty ? [] : ((await (await fetch('/rows.json')).json()) as readonly LinkableConversation[]);
+const rows = empty
+  ? []
+  : ((await (await fetch(`/rows.json${window.location.search}`)).json()) as readonly LinkableConversation[]);
 
 interface Recorded {
   route: string;
