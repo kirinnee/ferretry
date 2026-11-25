@@ -1177,10 +1177,15 @@ a.fy-inbox-row:focus-visible {
   min-width: 0;
 }
 /* On a phone the open item is as wide as the screen, exactly as wide as it is in the chat, so its quick-reply row
-   gets the chat's room; the bar above and the composer below keep the page's gutter. */
+   gets the chat's room; the bar above keeps the page's gutter, and the composer below sits 4px inside the card's edges, so
+   its empty field shows the whole placeholder even when a busy ferret adds the Interrupt button to the row. */
 .fy-attn-inbox[data-agenda-inbox='card'][data-phone] {
   padding-right: 0;
   padding-left: 0;
+  /* The shell's own 16px page gutter is given back, so the open item really is as wide as the screen. */
+  margin-right: -16px;
+  margin-left: -16px;
+  width: calc(100% + 32px);
 }
 .fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-attn-inbox__cardbar,
 .fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-inbox-step {
@@ -1196,7 +1201,7 @@ a.fy-inbox-row:focus-visible {
 }
 .fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-attn-inbox__deck--open {
   --fy-deck-card-inset: 8px;
-  --fy-deck-foot-inset: 16px;
+  --fy-deck-foot-inset: 4px;
 }
 .fy-attn-inbox__deck--open > .fy-attn-deck {
   margin: var(--gap-sm) var(--fy-deck-card-inset) 0;
