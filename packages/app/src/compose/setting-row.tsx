@@ -16,7 +16,7 @@
  * palette deep link can scroll to and focus it. Long text is never deleted: it moves behind the (i), a real
  * `aria-expanded` disclosure like `fleet/machine/switch-row.tsx`.
  *
- * On a phone (`max-md`) a `wide` control (a segmented one) wraps under the name at full width; a switch or
+ * In a narrow row (under 520px of its own width, `design-system.css`) a `wide` control (a segmented one) wraps under the name at full width; a switch or
  * small button stays on the name's line. Every target keeps the 44px touch floor.
  */
 
@@ -150,14 +150,8 @@ export function SettingRow({
       className="fy-setting-row min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
       <div className="flex min-h-[52px] min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-1 pl-panel pr-1">
-        {/* The label column: 40 % of the row (never under 220 px), so the control sits beside it, not at the far edge. */}
-        <span
-          className={cn(
-            'flex min-w-[min(220px,100%)] flex-col min-[900px]:basis-[40%] min-[900px]:flex-none',
-            'max-[899px]:min-w-0 max-[899px]:flex-1 max-[899px]:basis-40',
-            wide && 'max-md:basis-full',
-          )}
-        >
+        {/* The label column, laid out by the row's own width (`design-system.css`, `.fy-setting-row`): 40 % of a wide row (never under 220 px), so the control sits beside it, not at the far edge. */}
+        <span className="flex flex-col" data-setting-label="" data-wide={wide || undefined}>
           <span id={labelId} className="text-ui font-semibold text-fg">
             {name}
           </span>
@@ -173,11 +167,7 @@ export function SettingRow({
           )}
         </span>
         {!hasPreview ? null : (
-          <span
-            className="order-last flex shrink-0 py-1 max-[899px]:basis-full min-[900px]:ml-2"
-            aria-hidden="true"
-            data-setting-preview-slot=""
-          >
+          <span className="order-last flex shrink-0 py-1" aria-hidden="true" data-setting-preview-slot="">
             {preview}
           </span>
         )}
@@ -185,13 +175,11 @@ export function SettingRow({
           className={cn(
             // With a preview the control and the preview stay together beside the label; without one the (i) sits at the end.
             'flex items-center gap-1',
-            hasPreview ? 'min-w-0 min-[900px]:flex-none' : 'min-w-fit flex-1',
-            !wide && 'max-md:shrink-0 max-md:flex-none',
-            // `wide` fills the phone's width under the name; the (i) stays beside it.
-            wide && 'max-md:basis-full',
+            hasPreview ? 'min-w-0' : 'min-w-fit flex-1',
           )}
           data-setting-controls=""
           data-wide={wide || undefined}
+          data-has-preview={hasPreview || undefined}
         >
           {control?.(labelId)}
           {/* The (i) is always the last thing on the row, in a slot of its own: a row with no explanation keeps the
@@ -200,8 +188,9 @@ export function SettingRow({
             (control === undefined ? null : (
               <span
                 aria-hidden="true"
-                // A wide control wraps under the name on a phone and takes the whole row, so the empty slot is not kept there.
-                className={cn('ml-auto min-h-[44px] w-[44px] shrink-0', wide && 'max-md:hidden')}
+                // A wide control wraps under the name in a narrow row and takes the whole row, so the empty slot is not kept there (`design-system.css`).
+                className="ml-auto min-h-[44px] w-[44px] shrink-0"
+                data-setting-spacer=""
               />
             ))}
         </span>
