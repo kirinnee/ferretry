@@ -2,16 +2,11 @@ import { expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { z } from 'zod';
-import { LIMITED_DEVICE_GRANTS } from '../../../../gate/contract/policy.ts';
-import { projectInventory } from '../../../../gate/contract/inventory.ts';
-import { AdmissionPort, type Admission } from '../../../contract/bound.ts';
-import { defineEvent } from '../../../contract/define.ts';
-import { jsonResponse } from '../../../contract/http.ts';
-import { bootHost } from '../../../host/host.ts';
-import { inventorySurfacesOf } from '../../../host/kernel-half.ts';
-import { realAdapters } from '../../../host/wiring.ts';
-import { definePlugin, implementDaemon, route } from '../../../manifest/index.ts';
-import { recordingAdmission, request } from '../../unit/host/fixtures.ts';
+import { LIMITED_DEVICE_GRANTS } from '../../../contract/policy.ts';
+import { request, world } from '../../unit/daemon/support.ts';
+import { AdmissionPort, defineEvent, jsonResponse } from '@ferretry/kernel/contract';
+import { bootHost, inventorySurfacesOf, realAdapters } from '@ferretry/kernel/host';
+import { definePlugin, implementDaemon, route } from '@ferretry/kernel/manifest';
 
 const changed = defineEvent('connector.changed', z.strictObject({ enabled: z.boolean() }));
 const connector = definePlugin({
@@ -51,18 +46,9 @@ test('public-only descriptors never enter the API or bus inventory projection', 
 test('a device denied private connector routes sees no new inventory entry or bus events', async () => {
   const home = await mkdtemp(`${tmpdir()}/fy-door-inventory-`);
   let publish = () => {};
-  const admission: Admission = {
-    ...recordingAdmission(),
-    inventory: (_request, entries, surfaces) => {
-      const result = projectInventory(
-        { protocol: 1, plugins: [...entries] },
-        { kind: 'device', grants: LIMITED_DEVICE_GRANTS },
-        surfaces,
-      );
-      if (result.outcome !== 'shown') return [];
-      return entries.filter(entry => result.inventory.plugins.some(shown => shown.id === entry.id));
-    },
-  };
+  const gate = world();
+  gate.enrol('limited', LIMITED_DEVICE_GRANTS);
+  const admission = gate.gate;
   const boot = await bootHost({
     home,
     version: '5.0.0',
@@ -95,8 +81,10 @@ test('a device denied private connector routes sees no new inventory entry or bu
   });
   if (boot.kind !== 'running') throw new Error(boot.sentence);
   try {
-    const response = await boot.host.dispatch(request('GET', '/v1/plugins'));
-    const feed = await boot.host.dispatcher.upgrade(request('GET', '/v1/bus'));
+    expect((await boot.host.dispatch(request({ device: 'limited', path: '/v1/connector' }))).status).toBe(403);
+    const response = await boot.host.dispatch(request({ device: 'limited', path: '/v1/plugins' }));
+    expect(response.status).toBe(200);
+    const feed = await boot.host.dispatcher.upgrade(request({ device: 'limited', path: '/v1/bus' }));
     if (feed.outcome !== 'accepted') throw new Error('bus not accepted');
     const sent: string[] = [];
     const handler = await feed.attach({
