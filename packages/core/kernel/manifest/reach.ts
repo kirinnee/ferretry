@@ -19,13 +19,22 @@ export function hostAllowed(host: string, declared: readonly string[]): boolean 
 }
 
 /**
+ * `'$daemon'` in `permissions.spawn`: the daemon's OWN executable (`process.execPath`, exactly), for a plugin that runs a
+ * program of its own in a child process (Voice's native speech host: `fyd --plugin-child`). It is a name no program has, so it
+ * cannot be matched by a basename, and it never allows a path other than the one this process was started from.
+ */
+export const DAEMON_PROGRAM = '$daemon';
+
+/**
  * Whether a program is among `named` program names (no installed items): a declared name matches the program or its
- * basename, a declared path only that exact path, and `'*'` anything. The kernel's own spawn check reads the same rule.
+ * basename, a declared path only that exact path, `'$daemon'` the daemon's own executable, and `'*'` anything. The kernel's
+ * own spawn check reads the same rule.
  */
 export function programAmong(named: readonly string[], program: string): boolean {
   if (named.includes(WILDCARD)) return true;
+  if (named.includes(DAEMON_PROGRAM) && program === process.execPath) return true;
   const exact = new Set(named.filter(entry => entry.includes('/')));
-  const allowed = new Set(named.filter(entry => !entry.includes('/')));
+  const allowed = new Set(named.filter(entry => !entry.includes('/') && entry !== DAEMON_PROGRAM));
   return exact.has(program) || allowed.has(program) || allowed.has(programName(program));
 }
 

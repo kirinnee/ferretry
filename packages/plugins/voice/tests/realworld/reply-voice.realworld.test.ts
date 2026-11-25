@@ -1,4 +1,6 @@
 // Realworld: downloads the real Kokoro files (165 MB, public, SHA-256 checked) and speaks through the real worker.
+import type { ReplyThread } from '../../daemon/lib/engine/ports.ts';
+import { nativeHost } from './disk-files.ts';
 import { describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { availableParallelism, tmpdir } from 'node:os';
@@ -101,7 +103,7 @@ describe.skipIf(!ASKED)('the reply voice, with the real model', () => {
         files,
         clock: { after: () => () => undefined },
         machine: () => 'this box',
-        start: () => startReplyThread(bunWorkers()),
+        start: kind => (kind === 'native' ? (nativeHost('reply') as ReplyThread) : startReplyThread(bunWorkers())),
         availableMemory: () => undefined,
         log: { info: log, warn: log },
         catalog,

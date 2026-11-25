@@ -1,4 +1,6 @@
 // Realworld: loads the real 650 MB Parakeet v3 model; its speed and memory depend on the machine, not the code.
+import type { SpeechThread } from '../../daemon/lib/engine/ports.ts';
+import { nativeHost } from './disk-files.ts';
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -72,7 +74,7 @@ describe.skipIf(FILES === undefined)('the machine speech engine, with the real m
       files,
       clock: { after: () => () => undefined },
       machine: () => 'this box',
-      start: () => startSpeechThread(bunWorkers()),
+      start: kind => (kind === 'native' ? (nativeHost('speech') as SpeechThread) : startSpeechThread(bunWorkers())),
       availableMemory: () => undefined,
       log: {
         info: (message, fields) => console.log(message, fields ?? ''),

@@ -274,8 +274,9 @@ every reply had gaps. The native engine described above is now built for both en
   (`sherpa-onnx-<platform>-<arch>`, exact version `2.0.3`, the one the WebAssembly engine pins) from the npm CDN, each checked
   against a pinned size and SHA-256 (linux-x64, linux-arm64, darwin-arm64; every other platform runs WebAssembly and says so).
   They live in the engine's own folder under `state/voice/models/`, are removed with it, and are hashed AGAIN (size and SHA-256 of the addon and both
-  shared libraries, about 0.1 s next to a 1.4–2 s model load) immediately before EVERY native load, not once per process. **Nothing of them is in the release.** The compiled `fyd` loads the addon by absolute
-  path (`process.dlopen`); `fyd --check` prints a `voice` line that loads it from that binary.
+  shared libraries, about 0.1 s next to a 1.4–2 s model load) immediately before EVERY native load, not once per process. **Nothing of them is in the release.** The library is loaded by absolute
+  path by a CHILD PROCESS of the daemon (next bullet), never by `fyd` itself; `fyd --check` prints a `voice` line that loads it in a
+  throwaway child of that binary.
 - **Native first, WebAssembly as the fallback.** Install fetches the library alone and loads it in a worker BEFORE the big
   model is downloaded, so a machine that cannot run it (no `libstdc++`, a wrong architecture) learns that in seconds and
   fetches the WebAssembly files instead; it then proves the engine by speaking or decoding once, and falls back the same way
@@ -286,9 +287,24 @@ every reply had gaps. The native engine described above is now built for both en
   **Parakeet** decodes with the native recognizer; **Silero stays on onnxruntime-web** (20 s of audio: 195 ms there, 107 ms in
   sherpa's detector, which also does not expose the per-chunk probabilities the pause decision reads).
 - **Threads:** four at most, never more than the cores less one (`nativeThreads`).
-- **A worker that is only terminated keeps its native models** (Bun frees a handle in a finalizer that needs the collector
-  to run on a later turn of the loop): every load and unload added 0.5–0.7 GB. Unloading a native engine first asks its
-  worker to drop the handles and collect (`collectNative`), then ends the thread; memory is flat across cycles.
+- **Each native engine runs in its own child process, the speech host** (`daemon/worker/speech-host.ts`, `daemon/adapters/child-speech-thread.ts`).
+  The daemon starts one per loaded native engine (the reply voice and the speech engine each have theirs) through its spawn port: the
+  daemon's own executable (`$daemon` in the manifest's `permissions.spawn`; a compiled `fyd` runs it as `fyd --plugin-child speech-host
+<engine>`, which accepts only a declared worker program by its bare name, starts no daemon and reads no `FY_HOME`), SEALED with an
+  environment of `{}` (no `LD_LIBRARY_PATH` or `DYLD_*` of the daemon's; the library finds its two neighbours by its own run-path).
+  The host holds the engine's own worker program in a thread of ITS process, so the decode, speak and voice-detection code is the
+  same one WebAssembly runs. They speak in **bounded frames** over stdin and stdout (`lib/native/frames.ts`: a 4-byte magic, a
+  length, a JSON header and the binary parts; at most 128 MiB, the length checked before one more byte is kept; bytes that are not a
+  frame end the host). Every call has a **deadline** (load 180 s, decode and detect 120 s, speak 60 s, probe 30 s); a host that
+  misses it is killed. The size and SHA-256 of the addon and both libraries are checked immediately before every spawn, as they were
+  before every load. The host is ended (SIGTERM, SIGKILL after 2 s) on unload, after 10 idle minutes and when the daemon stops, and it
+  ends itself when its stdin closes, so a daemon killed outright leaves none behind. Ending a process returns ALL of its memory, so
+  there is nothing to collect: the 0.5–0.7 GB a load used to keep when only a worker thread was ended is gone with the process.
+- **A native crash stops that engine and nothing else.** A segfault or abort inside sherpa-onnx or onnxruntime (or an out-of-memory
+  kill) ends the host; the call that was waiting fails with a plain sentence (`The reply voice stopped: it crashed (SIGSEGV).`), the
+  turn or line fails cleanly, and Settings says `The fast native engine stopped on <machine>: …. It starts again the next time it is needed.`
+  The next use starts a new host. After **three stops in a row** (an answered call clears the count) the engine is given up for
+  WebAssembly until Install is run again, and Settings says why.
 
 Measured on the build box (AWS Xeon Platinum 8488C, 32 vCPU, shared, `nice 10`, load 8–15), same clip and same lines before and after:
 
@@ -304,15 +320,16 @@ Measured on the build box (AWS Xeon Platinum 8488C, 32 vCPU, shared, `nice 10`, 
 
 ### Declared gaps of the native engine
 
-- **The addon runs IN the daemon process.** The worker is a Bun Worker thread and the library enters through `process.dlopen`,
-  so a native crash (a fault inside sherpa-onnx or onnxruntime, or an out-of-memory kill) takes the whole `fyd` with it, not
-  just the voice; `fyd --check` also `dlopen`s it, in the check process. Moving the engine to a child process is the later
-  real fix; until then WebAssembly (a worker that can only throw) is the engine with no such reach.
+- **The blast radius of a native fault is that ENGINE, not the daemon.** The library is loaded in a child process, so a crash
+  ends that child only (the other native engine, the WebAssembly engines and `fyd` carry on), and `fyd --check` loads it in a
+  throwaway child too. What is still shared: the child runs as the same user with the same files, so it is a fault boundary, not a
+  sandbox; and a daemon killed with SIGKILL while its host is inside a native call leaves that host to notice the closed stdin,
+  which it does from a thread that never runs native code, so it ends at once.
 - **Hash then load is not atomic.** The files are verified and then loaded a moment later by the loader itself, so a process
   that can write the folder between the two could still swap a library in. Declared, not closed: any program running as the
   same user can already read the vault (docs/secrets.md), so this adds no reach a same-user agent did not hold.
-- **Install is not an audited act yet.** It puts native code into the daemon, and no audit kind fits it; the route declares
-  that in its `audit.skip` text rather than recording it.
+- **Install is not an audited act yet.** It puts native code on the machine (run in a child, no longer in the daemon), and no audit
+  kind fits it; the route declares that in its `audit.skip` text rather than recording it.
 
 What is NOT measured: Apple silicon and linux-arm64 (the pins are the published files' own hashes, loaded by the same
 code, but neither was run), and a heavily loaded machine. The numbers come from `tests/realworld/` with `FY_*_ENGINE=wasm|native`.

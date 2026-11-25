@@ -1,4 +1,5 @@
 // Realworld: loads the real native library and models (already installed by the other realworld tests) and counts memory.
+import type { ReplyThread, SpeechThread } from '../../daemon/lib/engine/ports.ts';
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -6,7 +7,7 @@ import { bunWorkers } from '../../../../core/kernel/host/adapters/process.ts';
 import { startReplyThread, startSpeechThread } from '../../daemon/adapters/worker-speech-thread.ts';
 import { SpeechEngine } from '../../daemon/lib/engine/engine.ts';
 import { ReplyVoiceEngine } from '../../daemon/lib/reply/engine.ts';
-import { DiskFiles, nativeFor } from './disk-files.ts';
+import { DiskFiles, liveHosts, nativeFor, nativeHost } from './disk-files.ts';
 
 /**
  * THE MEMORY GUARANTEE OF AN UNLOAD, with the real native engine. A worker thread that is only terminated keeps the native
@@ -45,7 +46,7 @@ describe.skipIf(!ASKED)('the native engines give their memory back on unload', (
       files: new DiskFiles(process.env.FY_REPLY_VOICE_DIR ?? ''),
       clock,
       machine: () => 'this box',
-      start: () => startReplyThread(bunWorkers()),
+      start: kind => (kind === 'native' ? (nativeHost('reply') as ReplyThread) : startReplyThread(bunWorkers())),
       availableMemory: () => undefined,
       log: { info: quiet, warn: quiet },
       native,
@@ -55,6 +56,9 @@ describe.skipIf(!ASKED)('the native engines give their memory back on unload', (
     for (let cycle = 0; cycle < 3; cycle += 1) {
       await engine.speak('I found the bug, it was a missing await.');
       await engine.unload();
+      // The host is a child process: unloading ends it, and nothing of it is left behind.
+      await Bun.sleep(300);
+      expect(liveHosts()).toEqual([]);
       after.push(await settledMb());
     }
     console.log('reply voice: process MB after each unload', after);
@@ -68,7 +72,7 @@ describe.skipIf(!ASKED)('the native engines give their memory back on unload', (
       files: new DiskFiles(process.env.FY_VOICE_ENGINE_DIR ?? ''),
       clock,
       machine: () => 'this box',
-      start: () => startSpeechThread(bunWorkers()),
+      start: kind => (kind === 'native' ? (nativeHost('speech') as SpeechThread) : startSpeechThread(bunWorkers())),
       availableMemory: () => undefined,
       log: { info: quiet, warn: quiet },
       native,
@@ -85,6 +89,9 @@ describe.skipIf(!ASKED)('the native engines give their memory back on unload', (
     for (let cycle = 0; cycle < 3; cycle += 1) {
       expect((await engine.transcribe(clip)).text.toLowerCase()).toContain('login redirect');
       await engine.unload();
+      // The host is a child process: unloading ends it, and nothing of it is left behind.
+      await Bun.sleep(300);
+      expect(liveHosts()).toEqual([]);
       after.push(await settledMb());
     }
     console.log('speech engine: process MB after each unload', after);

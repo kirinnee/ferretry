@@ -16,6 +16,7 @@ import type { EnginePathsPort, HttpPort, ReplyThread } from '../engine/ports.ts'
 import { NATIVE_ADDON_ROLE, type NativeParts } from '../native/catalog.ts';
 import { asUnavailable, installNativeFirst, NativeUnavailable, reasonOf, type RuntimeKind } from '../native/install.ts';
 import { unverified } from '../native/verify.ts';
+import { MAX_CONSECUTIVE_STOPS, StopLedger, wasStopped } from '../native/stopped.ts';
 import { REPLY_FILES, REPLY_LABEL, REPLY_NATIVE_MODEL, REPLY_SHARED_ROLES, type ReplyFile } from './catalog.ts';
 
 /** The voice leaves memory this long after the last use. */
@@ -41,7 +42,7 @@ export interface ReplyEngineParts {
   /** What this machine is called, read at each use (the owner can rename it while the daemon runs). */
   readonly machine: () => string;
   /** Starts one reply thread. */
-  readonly start: () => ReplyThread;
+  readonly start: (kind: RuntimeKind) => ReplyThread;
   /** Memory the machine could give a new process, in bytes. `undefined` when it cannot say (no check is made). */
   readonly availableMemory: () => number | undefined;
   readonly log: {
@@ -96,6 +97,8 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
   private generation = 0;
   /** Why the native library is not what runs, once this process saw it fail; forgotten at a restart (the files are then gone or tried again). */
   private nativeFailure: string | undefined;
+  /** The native host's stops since a call last succeeded: a few in a row give the voice up for the WebAssembly one. */
+  private readonly stops = new StopLedger();
   /** What an install in flight is fetching, so the progress bar's total follows a fall to WebAssembly. */
   private installKind: RuntimeKind | undefined;
 
@@ -157,7 +160,10 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
       return {
         kind,
         threads,
-        sentence: `The fast native engine is running it on ${machine}, on up to ${threads} ${threads === 1 ? 'thread' : 'threads'}.`,
+        sentence:
+          this.stops.latest !== undefined
+            ? `The fast native engine stopped on ${machine}: ${this.stops.latest}. It starts again the next time the voice is needed.`
+            : `The fast native engine is running it on ${machine}, on up to ${threads} ${threads === 1 ? 'thread' : 'threads'}.`,
       };
     }
     const native = this.parts.native;
@@ -253,6 +259,7 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
     // The room for the whole native plan is asked for before anything is downloaded, not file by file as it goes.
     await ensureRoom(files, await missingOf(files, this.nativeSet));
     this.nativeFailure = undefined;
+    this.stops.clear();
     const result = await installNativeFirst({
       fetchAddon: async () => {
         // The library (and the unrelated bytes already there) count toward the bar; the model follows.
@@ -295,7 +302,7 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
       for (const file of bad) await this.parts.files.remove(file);
       throw new VoiceEngineError('hash_mismatch', SENTENCES.hash_mismatch);
     }
-    const thread = this.parts.start();
+    const thread = this.parts.start('native');
     try {
       const addon = this.nativeAddonFiles.find(file => file.role === NATIVE_ADDON_ROLE);
       if (addon === undefined) throw new Error('this machine has no native engine');
@@ -346,6 +353,7 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
     this.selfTest = undefined;
     this.failure = undefined;
     this.nativeFailure = undefined;
+    this.stops.clear();
     return await this.view();
   }
 
@@ -365,6 +373,7 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
   private async speakOn(loaded: Loaded, text: string): Promise<ReplySpeech> {
     const reply = await loaded.thread.call({ kind: 'speak', text, speaker: REPLY_SPEAKER_ID });
     if (reply.kind !== 'speak') throw new VoiceEngineError('load_failed', SENTENCES.load_failed);
+    this.stops.clear();
     return { samples: reply.samples, speakMs: reply.speakMs };
   }
 
@@ -395,6 +404,15 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
       late,
     ]);
     cancel?.();
+  }
+
+  /** A native host ended on its own: said in Settings, and after too many in a row the slower voice takes over. */
+  private noteStopped(reason: string): void {
+    this.parts.log.warn('voice.reply.native_stopped', { reason });
+    if (this.stops.note(reason)) {
+      this.nativeFailure = `it stopped ${MAX_CONSECUTIVE_STOPS} times in a row; the last time ${reason}`;
+      this.parts.log.warn('voice.reply.native_given_up', { reason: this.nativeFailure });
+    }
   }
 
   private touch(): void {
@@ -440,7 +458,9 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
       } catch (error) {
         // The native library failed to start here: the WebAssembly files, when they are there, carry on.
         if (error instanceof VoiceEngineError && error.code === 'not_ready') throw error;
-        this.nativeFailure = reasonFor(error);
+        // A host that STOPPED (a crash, a deadline) is given another start at the next use, until it has stopped too often in a row.
+        if (wasStopped(error) && this.nativeFailure === undefined) throw error;
+        this.nativeFailure ??= reasonFor(error);
         this.parts.log.warn('voice.reply.native_failed', { reason: this.nativeFailure });
         if (!(await this.has(this.catalog))) throw error;
       }
@@ -495,12 +515,13 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
       call = [{ kind: 'load', engine: 'wasm', runtime: bytes, paths }, [bytes]];
     }
     if (generation !== this.generation) throw new VoiceEngineError('not_ready', SUPERSEDED);
-    const thread = this.parts.start();
-    thread.onEnd(() => {
+    const thread = this.parts.start(kind);
+    thread.onEnd(stopped => {
       if (this.loaded?.thread === thread) {
         this.loaded = undefined;
         this.loading = undefined;
       }
+      if (stopped !== undefined && kind === 'native') this.noteStopped(stopped);
     });
     try {
       const reply = await thread.call(...call);

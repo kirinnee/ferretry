@@ -10,12 +10,16 @@ import { type CleanupSettings, DEFAULT_CLEANUP_SETTINGS } from './lib/stt/enhanc
 import { SttEnhancementService } from './lib/stt/enhancer.ts';
 import { freemem } from 'node:os';
 import { StateEngineFiles } from './adapters/state-engine-files.ts';
+import { startChildThread } from './adapters/child-speech-thread.ts';
 import {
+  nativeHostCommand,
   REPLY_WORKER_URL,
+  SPEECH_HOST_URL,
   startReplyThread,
   startSpeechThread,
   SPEECH_WORKER_URL,
 } from './adapters/worker-speech-thread.ts';
+import type { ReplyThread, SpeechThread } from './lib/engine/ports.ts';
 import { nativeTargetFor, nativeThreads, type NativeParts } from './lib/native/catalog.ts';
 import { REPLY_DIR } from './lib/reply/catalog.ts';
 import { ReplyVoiceEngine } from './lib/reply/engine.ts';
@@ -36,7 +40,7 @@ import { voiceRoutes } from './routes.ts';
  */
 export default implementDaemon(manifest, {
   // The machine speech engine's thread: `fyd --check` starts and stops it, and a compiled binary embeds it.
-  workers: { speech: SPEECH_WORKER_URL, reply: REPLY_WORKER_URL },
+  workers: { speech: SPEECH_WORKER_URL, reply: REPLY_WORKER_URL, 'speech-host': SPEECH_HOST_URL },
   selftest: { voice: voiceNativeSelftest() },
   build(ctx) {
     const { kernel } = ctx;
@@ -72,7 +76,17 @@ export default implementDaemon(manifest, {
       clock: kernel.clock,
       machine: () => kernel.identity.daemonName,
       native,
-      start: () => startSpeechThread(kernel.workers),
+      // The WebAssembly engine is a worker thread; the NATIVE engine is a child process, so a fault in its library ends that
+      // child and not this daemon.
+      start: kind =>
+        kind === 'native'
+          ? (startChildThread({
+              spawn: kernel.spawn,
+              clock: kernel.clock,
+              command: nativeHostCommand('speech'),
+              words: 'speech engine',
+            }) as SpeechThread)
+          : startSpeechThread(kernel.workers),
       availableMemory: () => freemem(),
       log: {
         info: (message, fields) => engineLog.info(message, fields),
@@ -89,7 +103,15 @@ export default implementDaemon(manifest, {
       clock: kernel.clock,
       machine: () => kernel.identity.daemonName,
       native,
-      start: () => startReplyThread(kernel.workers),
+      start: kind =>
+        kind === 'native'
+          ? (startChildThread({
+              spawn: kernel.spawn,
+              clock: kernel.clock,
+              command: nativeHostCommand('reply'),
+              words: 'reply voice',
+            }) as ReplyThread)
+          : startReplyThread(kernel.workers),
       availableMemory: () => freemem(),
       log: {
         info: (message, fields) => replyLog.info(message, fields),

@@ -1,4 +1,5 @@
 // Realworld: downloads the real 700 MB speech models (public files, hash-checked) and talks to them from a real browser.
+import type { SpeechThread } from '../../daemon/lib/engine/ports.ts';
 import { describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,7 +12,7 @@ import { startSpeechThread } from '../../daemon/adapters/worker-speech-thread.ts
 import { SpeechEngine } from '../../daemon/lib/engine/engine.ts';
 import { decodeDownlinkUnit } from '../../contract/index.ts';
 import { VoiceStream } from '../../daemon/lib/stream/session.ts';
-import { DiskFiles, nativeFor } from './disk-files.ts';
+import { DiskFiles, nativeFor, nativeHost } from './disk-files.ts';
 
 /**
  * The red/green proof of voice mode (unit 5) with the real engine and a real browser: Chrome's fake microphone plays a
@@ -80,7 +81,7 @@ describe.skipIf(!ASKED)('voice mode in a real browser with the real speech engin
       native: nativeFor(process.env.FY_STT_ENGINE),
       clock: { after: (delay, fn) => realClock.after(delay as number, fn) },
       machine: () => 'this box',
-      start: () => startSpeechThread(bunWorkers()),
+      start: kind => (kind === 'native' ? (nativeHost('speech') as SpeechThread) : startSpeechThread(bunWorkers())),
       availableMemory: () => undefined,
       log: { info: () => undefined, warn: () => undefined },
     });

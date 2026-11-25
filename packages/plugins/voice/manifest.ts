@@ -41,7 +41,7 @@ export default definePlugin({
   words: [{ word: 'dictate', means: 'speak a message', insteadOf: ['STT'] }],
 
   // The machine speech engine's worker thread (voice mode): `fyd --check` starts it, so a binary without it is seen at once.
-  workers: ['speech', 'reply'],
+  workers: ['speech', 'reply', 'speech-host'],
   // `fyd --check` loads the native speech engine (once Install has fetched it) from this binary: the `voice` line.
   selftest: ['voice'],
 
@@ -243,6 +243,9 @@ export default definePlugin({
   instructions: [{ id: 'voice', text: 'instructions/voice.md', when: { role: 'lead' } }],
 
   permissions: {
+    // The native speech engines run in a child process of the daemon's own executable (`speech-host`), so a fault in the
+    // native library ends that child and not the daemon (docs/design/voice-modes.md §2.3.1).
+    spawn: ['$daemon'],
     // Keys ride only on requests the Vault's outbound holder builds; the hosts are the provider table's.
     network: [
       CLEANUP_PROVIDERS.groq.host,
