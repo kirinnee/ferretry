@@ -120,6 +120,8 @@ export function composeOtherConnections(input: ComposeInput): OtherConnections {
           surface: {
             socket: TUNNEL_SOCKET,
             peer: tunnelPeer,
+            // Also the connector's public door paths, while it serves them (kernel `public-door`; a door reaches no /v1 route).
+            doors: true,
             ...(input.origins === undefined ? {} : { origins: input.origins() }),
           },
         }),
