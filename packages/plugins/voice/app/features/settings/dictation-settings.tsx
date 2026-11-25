@@ -136,13 +136,6 @@ export const CLEANUP_PROMPTS_POINTER =
 export const SPEEDUP_KEY_HINT =
   'The key lives on the machine, not in this browser: paste it under Settings › This machine › Speed-ups, where Test checks it works. Only the recognised text is sent for clean-up, never audio.';
 
-/**
- * Using one of the machine's own logins for clean-up needs a login that can answer a plain chat
- * request, which arrives with environment-based logins. Shown, disabled, so the choice is not a
- * surprise when it lands — and so nobody picks an option that would fail every time.
- */
-export const LOGIN_CLEANUP_UNAVAILABLE = 'One of your logins (not available yet)';
-
 const REMOTE_EXPLANATIONS: Readonly<Record<'groq' | 'cerebras', string>> = {
   groq: GROQ_ENHANCEMENT_EXPLANATION,
   cerebras: CEREBRAS_ENHANCEMENT_EXPLANATION,
@@ -381,10 +374,7 @@ export function DictationSettings({
                       id="stt-enhancement-provider"
                       label="Correction provider"
                       onChange={chooseProvider}
-                      options={[
-                        ...ENHANCEMENT_PROVIDERS.map(entry => ({ value: entry.id, label: entry.label })),
-                        { value: 'login', label: LOGIN_CLEANUP_UNAVAILABLE, disabled: true },
-                      ]}
+                      options={ENHANCEMENT_PROVIDERS.map(entry => ({ value: entry.id, label: entry.label }))}
                       value={staged?.enhancementProvider ?? settings.enhancementProvider}
                     />
                   )}
