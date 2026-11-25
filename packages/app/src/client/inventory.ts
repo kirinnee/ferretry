@@ -1,6 +1,7 @@
 import { CORE_IDS, PROTOCOL } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
+import { isVersionUnsupported } from './transport.ts';
 
 /**
  * THE INVENTORY AND THE PER-PACKAGE CHECK (§9.6), pure.
@@ -38,8 +39,14 @@ export type Inventory =
   /**
    * The answer was not an inventory, or never arrived. Damaged is not empty: everything stays blocked. `cause` is the
    * session's own sentence when the read failed on the way (which carrier could not carry it), capped, never a body.
+   * `versionUnsupported` is the machine ending the session with its own "update this app" (`4426`): a newer build, not a fault.
    */
-  | { readonly kind: 'unreadable'; readonly cause?: string; readonly refusal?: InventoryRefusal };
+  | {
+      readonly kind: 'unreadable';
+      readonly cause?: string;
+      readonly refusal?: InventoryRefusal;
+      readonly versionUnsupported?: true;
+    };
 
 /**
  * The daemon ANSWERED the plugin list with a refusal (`401` or `403`): which device it was, whether it was told it
@@ -56,12 +63,17 @@ const CAUSE_MAX = 240;
 
 /** An unreadable list because the read itself failed: the failure's sentence is kept, capped, so the screen can name it. */
 export function unreadableBecause(error: unknown): Inventory {
+  const versionUnsupported = isVersionUnsupported(error) ? { versionUnsupported: true as const } : {};
   const message = error instanceof Error ? error.message.trim().replace(/\s+/gu, ' ') : '';
-  if (message !== '') return { kind: 'unreadable', cause: message.slice(0, CAUSE_MAX) };
+  if (message !== '') return { kind: 'unreadable', cause: message.slice(0, CAUSE_MAX), ...versionUnsupported };
   // A failure with no sentence of its own (a bare browser event, a rejected string, an empty message) is still
   // a failure ON THE WAY, and says so with its kind, rather than the sentence for a damaged list.
   const kind = error instanceof Error ? error.name : error === null ? 'null' : typeof error;
-  return { kind: 'unreadable', cause: `the read failed before an answer came (${kind.slice(0, 40)})` };
+  return {
+    kind: 'unreadable',
+    cause: `the read failed before an answer came (${kind.slice(0, 40)})`,
+    ...versionUnsupported,
+  };
 }
 
 /** The daemon's own sentence and code out of a refusal's `{ error, code }` body; anything else says nothing. Total. */
