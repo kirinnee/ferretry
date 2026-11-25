@@ -94,7 +94,9 @@ then deletes every token, client secret and record the sign-in left.
   The access token is short-lived and scoped to one MCP server, and redaction masks it in transcripts,
   but **treat an agent that uses a signed-in server as holding that server's access token.** Moving the
   value out of the agent's environment needs a harness header helper (Claude's `headersHelper`) calling
-  a daemon `use`-style command; not built.
+  a daemon `use`-style command; not built. The `headersHelper` that IS built
+  ([below](#a-ferret-that-outlives-its-token)) does not do that: it keeps the same token fresh for a long-lived ferret,
+  and hands it only to that ferret.
 - **A slow or hostile authorization server delaying launches. — partial.** Expiring tokens are
   refreshed in parallel, each bounded by the 15-second request timeout, so a launch waits at most about
   15 seconds for them; there is no separate overall deadline.
@@ -325,7 +327,8 @@ The materialiser writes, for an `auth: oauth` server named `linear`:
 
 - **Claude** (`.claude.json`):
   `"linear": { "type": "http", "url": "…", "headers": { "Authorization": "Bearer ${FY_MCP_LINEAR_<HASH>_TOKEN}" } }`
-  — Claude Code expands `${VAR}` in an MCP server's headers from its own environment.
+  — Claude Code expands `${VAR}` in an MCP server's headers from its own environment. The entry also carries a
+  `headersHelper` that keeps the token fresh in a long-lived ferret ([below](#a-ferret-that-outlives-its-token)).
 - **Codex** (`config.toml`): `[mcp_servers.linear] url = "…"` and
   `bearer_token_env_var = "FY_MCP_LINEAR_<HASH>_TOKEN"`.
 
@@ -361,15 +364,76 @@ sign-in** — because one expired server should not keep an agent from starting.
 REJECTS (`invalid_grant`), or a stored endpoint that no longer passes the endpoint rules, marks the
 sign-in as needing a new one.
 
+## A ferret that outlives its token
+
+**The bug.** The access token is resolved into the launch environment ONCE, at launch, and Claude expands
+`${FY_MCP_<NAME>_<HASH>_TOKEN}` from that environment. An access token lives hours (Slack's lives twelve), a
+ferret can live weeks, and `/mcp` reconnects with the same stale variable. From the first expiry on, every call
+to that server failed with `MCP server "…" rejected the Authorization header in its config`.
+
+**The fix, for Claude.** Both writers of a Claude `Authorization` header — a component signed in to from Ferretry
+and a project server delivered as a local-scope entry (`McpLaunchParts`, [mcp-scopes.md](mcp-scopes.md#signing-in-to-a-project-server))
+— also write a `headersHelper`, spelled once (`mcpTokenCommand`):
+
+```json
+"linear": {
+  "type": "http", "url": "…",
+  "headers": { "Authorization": "Bearer ${FY_MCP_LINEAR_<HASH>_TOKEN}" },
+  "headersHelper": "fy mcp token FY_MCP_LINEAR_<HASH>_TOKEN"
+}
+```
+
+Claude Code runs a server's `headersHelper` at connect time and again after an HTTP 401 on a tool call, then
+reconnects and retries the call; the helper's JSON headers override the static ones. **The static header stays**
+as the fallback for a Claude that does not run the helper (it then sends the launch-time token).
+
+**`fy mcp token <variable>`** is that helper. It runs inside the ferret, asks the daemon, and prints EXACTLY the
+headers object on stdout (`{"Authorization":"Bearer …"}`) and nothing else — a helper's whole stdout is parsed.
+Outside a ferret it exits 2; when the daemon refuses it prints the daemon's sentence on stderr and exits 1.
+
+**The route.** `POST /v1/ferrets/:ferretId/mcp/token`, body `{ "variable": "FY_MCP_…_TOKEN" }`, answer
+`{ "variable": "…", "headers": { "Authorization": "Bearer …" } }` (`variable` echoes the NAME so the security log
+can record it; the token is only in `headers`). `noStore`, `operator` minimum, `caller: any`, governed as `secrets.use`
+— and then **only the ferret itself**: the handler requires the CALLER's credential to be the session credential of the
+ferret the path names (`tokenClass: ferret`; the admin token with a session header is refused, because anyone holding that
+token can write the header). A person, the warden, a paired device, another ferret and the admin token all get 403
+`not_this_ferret`. The daemon works out what THIS ferret's launch holds right now (`McpLaunchParts.bindings`: its
+runtime's profile and its folder's project, the same code as a launch, writing nothing and renewing nothing) and **only
+then** renews the ONE sign-in the asked variable is bound to, and answers it. The bindings are what the launch would hold
+NOW: a server added to the profile after the ferret launched is answerable before any restart, and one removed is not. A
+request for a variable the launch does not hold starts no provider work at all. The route is budgeted per ferret (30
+requests a minute, refusals included; the 31st is 429 `too_many_requests`) and reads at most 1 KiB of body:
+
+| Answer                        | When                                                                                                                         |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 200 headers                   | the ferret's launch binds the variable (a component, or a signed-in, not-disabled project server)                            |
+| 404 `not_this_ferrets_server` | it does not: a ferret cannot ask for a server its own launch did not hold (no provider is asked)                             |
+| 429 `too_many_requests`       | this ferret used its budget; wait a minute                                                                                   |
+| 409 `mcp_needs_sign_in`       | the provider rejected the refresh, or no token is stored: the owner must sign in to that server again (`fy mcp ls` shows it) |
+
+An error never carries provider text or the token. The security log records the ferret and the variable NAME
+(`secrets.used`, `mcp-token`), never the token.
+
+**The boundary does not move; it extends in time.** A ferret can already read the token in its own environment (the
+[documented GAP](#what-this-does-not-protect-against)). This route hands it ONLY that same token, renewed. It names
+no secret (the variable must match `^FY_MCP_[A-Z0-9_]+_TOKEN$`), serves no other ferret, and is the **one named
+exception** to "no route returns a secret value": the Vault gives MCP the value back only through
+the Vault's `MintedValueReader` (`mintedValueOf`), for a secret MCP itself minted ([secrets.md](secrets.md#the-one-exception-a-running-ferret-gets-its-own-renewed-mcp-token)).
+
+**Codex is unchanged — GAP.** Codex has no `headersHelper` hook: `bearer_token_env_var` is read once from the
+launch environment. A Codex ferret still gets its token only at launch and **needs a restart after the token's
+lifetime** (or `codex mcp login` in the ferret).
+
 ## Governance
 
-| Route                                     | Capability / axis   | Audited as                                        |
-| ----------------------------------------- | ------------------- | ------------------------------------------------- |
-| `GET /v1/fleet/mcp-auth`                  | `fleet` / use       | —                                                 |
-| `POST /v1/fleet/mcp-auth/:component`      | `fleet` / configure | `fleet.configured` `mcp-sign-in`, subject = name  |
-| `POST /v1/fleet/mcp-auth/flows/:flowId`   | `fleet` / configure | `fleet.configured` `mcp-sign-in-finish`, + name   |
-| `DELETE /v1/fleet/mcp-auth/flows/:flowId` | `fleet` / configure | `fleet.configured` `mcp-sign-in-cancel`           |
-| `DELETE /v1/fleet/mcp-auth/:component`    | `fleet` / configure | `fleet.configured` `mcp-sign-out`, subject = name |
+| Route                                     | Capability / axis                     | Audited as                                                    |
+| ----------------------------------------- | ------------------------------------- | ------------------------------------------------------------- |
+| `GET /v1/fleet/mcp-auth`                  | `fleet` / use                         | —                                                             |
+| `POST /v1/fleet/mcp-auth/:component`      | `fleet` / configure                   | `fleet.configured` `mcp-sign-in`, subject = name              |
+| `POST /v1/fleet/mcp-auth/flows/:flowId`   | `fleet` / configure                   | `fleet.configured` `mcp-sign-in-finish`, + name               |
+| `DELETE /v1/fleet/mcp-auth/flows/:flowId` | `fleet` / configure                   | `fleet.configured` `mcp-sign-in-cancel`                       |
+| `DELETE /v1/fleet/mcp-auth/:component`    | `fleet` / configure                   | `fleet.configured` `mcp-sign-out`, subject = name             |
+| `POST /v1/ferrets/:ferretId/mcp/token`    | `secrets` / use, and only that ferret | `secrets.used` `mcp-token`, subject = ferret, + variable NAME |
 
 `:component` is a component's name, or a project server's subject (`<name>..<project key>`,
 [mcp-scopes.md](mcp-scopes.md#signing-in-to-a-project-server)).
@@ -385,32 +449,38 @@ because an audit rule can read only path parameters and named response fields.
 
 Paths are under `packages/daemon/tests/` unless they name another package.
 
-| Property                                                                                                | Test                                                                                                                                                      |
-| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PKCE S256 (RFC 7636 Appendix B vector), state and verifier shape                                        | `unit/mcp-oauth/pkce-tokens.test.ts`                                                                                                                      |
-| Discovery order, issuer match, S256 required, https/loopback rule, private literals incl. mapped/CGNAT  | `unit/mcp-oauth/discovery.test.ts`                                                                                                                        |
-| A callback address is checked strictly, `iss` required when advertised, no refusal quotes it            | `unit/mcp-oauth/callback.test.ts`                                                                                                                         |
-| Single-use state, expiry, replay refused                                                                | `unit/mcp-oauth/service.test.ts` › "finishing a sign-in"                                                                                                  |
-| H1: a moved component's launch names a secret nobody holds; nothing is sent                             | `unit/mcp-oauth/service.test.ts` › "H1: …", `integration/mcp-oauth/mcp-oauth-routes.test.ts` › "H1: …", `packages/fleet/tests/unit/account-adapt.test.ts` |
-| M1: a code at another provider's path cannot finish the flow; `iss` required when advertised            | `unit/mcp-oauth/service.test.ts` › "M1: …"                                                                                                                |
-| M2: no sign-in to a plain-HTTP remote server                                                            | `unit/mcp-oauth/service.test.ts` › "M2: …", `packages/fleet/tests/unit/account-schema.test.ts`                                                            |
-| M4: the refresh token is not usable through `use` or `${secret:}`                                       | `integration/mcp-oauth/mcp-oauth-routes.test.ts` › "M4: …"                                                                                                |
-| M5: concurrent launches spend the refresh token once                                                    | `unit/mcp-oauth/service.test.ts` › "M5: …"                                                                                                                |
-| A sign-out (or a new sign-in elsewhere) during an in-flight refresh is not undone by it                 | `unit/mcp-oauth/service.test.ts` › "M-A: …", "L-A: …"                                                                                                     |
-| The registration cap never evicts the live sign-in's registration                                       | `unit/mcp-oauth/service.test.ts` › "L-B: …"                                                                                                               |
-| No token in any response, console line, audit entry or state file, end to end on loopback               | `integration/mcp-oauth/mcp-oauth-routes.test.ts` › "…and leak no token anywhere"                                                                          |
-| Every act needs the unlock from a remote device and never reaches the service before it                 | `unit/runtime/mounts/unlock-gate.test.ts` › "the MCP sign-in behind the unlock"                                                                           |
-| The materialised runtime config holds a variable name, never a value                                    | `packages/fleet/tests/unit/account-adapt.test.ts`                                                                                                         |
-| Registration asks the way Claude Code does, retries a 4xx at most four ways, never a 5xx                | `unit/mcp-oauth/registration.test.ts`, `unit/mcp-oauth/service.test.ts` › "registering the way real clients do"                                           |
-| A registration refusal says the host, status and provider reason, with credential-shaped text masked    | `unit/mcp-oauth/registration.test.ts` › "providerText", `integration/mcp-oauth/mcp-oauth-routes.test.ts` › "…refuses every registration…"                 |
-| A secret registered for `client_secret_basic` is sent as Basic on the code, refresh and revoke requests | `unit/mcp-oauth/service.test.ts` › "…client_secret_basic…"                                                                                                |
-| A hand-registered client registers nothing; its secret is read by name and survives sign-out            | `unit/mcp-oauth/service.test.ts` › "a client registered by hand", `packages/pwa/tests/integration/mcp-project-sign-in.test.ts`                            |
-| A client secret in configuration is only ever a `${secret:NAME}` reference                              | `packages/fleet/tests/unit/account-schema.test.ts`                                                                                                        |
-| No answer names the host and the transport's code, never the address                                    | `unit/mcp-oauth/service.test.ts`, `integration/mcp-oauth/mcp-oauth-routes.test.ts` › "…a dead host…"                                                      |
+| Property                                                                                                                                                   | Test                                                                                                                                                      |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PKCE S256 (RFC 7636 Appendix B vector), state and verifier shape                                                                                           | `unit/mcp-oauth/pkce-tokens.test.ts`                                                                                                                      |
+| Discovery order, issuer match, S256 required, https/loopback rule, private literals incl. mapped/CGNAT                                                     | `unit/mcp-oauth/discovery.test.ts`                                                                                                                        |
+| A callback address is checked strictly, `iss` required when advertised, no refusal quotes it                                                               | `unit/mcp-oauth/callback.test.ts`                                                                                                                         |
+| Single-use state, expiry, replay refused                                                                                                                   | `unit/mcp-oauth/service.test.ts` › "finishing a sign-in"                                                                                                  |
+| H1: a moved component's launch names a secret nobody holds; nothing is sent                                                                                | `unit/mcp-oauth/service.test.ts` › "H1: …", `integration/mcp-oauth/mcp-oauth-routes.test.ts` › "H1: …", `packages/fleet/tests/unit/account-adapt.test.ts` |
+| M1: a code at another provider's path cannot finish the flow; `iss` required when advertised                                                               | `unit/mcp-oauth/service.test.ts` › "M1: …"                                                                                                                |
+| M2: no sign-in to a plain-HTTP remote server                                                                                                               | `unit/mcp-oauth/service.test.ts` › "M2: …", `packages/fleet/tests/unit/account-schema.test.ts`                                                            |
+| M4: the refresh token is not usable through `use` or `${secret:}`                                                                                          | `integration/mcp-oauth/mcp-oauth-routes.test.ts` › "M4: …"                                                                                                |
+| A running ferret gets its own server's renewed token, and no other ferret, person or warden does; an unknown variable is 404, a rejected sign-in 409       | `packages/plugins/mcp/tests/unit/ferret-token.test.ts`, `packages/plugins/mcp/tests/integration/ferret-token-e2e.test.ts` (real `claude`, real `fy`)      |
+| Both writers of a Claude Authorization header also write the `headersHelper`, keeping the static header                                                    | `packages/plugins/mcp/tests/unit/launch-renewal.test.ts`, `launch-bearer-render.test.ts`                                                                  |
+| A request for a variable the ferret does not hold starts NO provider work; only the one bound sign-in is renewed; a per-ferret budget and a 1 KiB body cap | `packages/plugins/mcp/tests/unit/ferret-token-renewal.test.ts`, `ferret-token.test.ts`, `project-launch.test.ts`                                          |
+| Only the MCP plugin may declare `revealMinted`: the kernel's boot refuses any other, with the Vault required, optional or absent                           | `packages/core/kernel/tests/integration/host/reveal-minted.test.ts`                                                                                       |
+| The Vault reads a value back only for a plugin that declares `revealMinted`, and only what that plugin minted                                              | `packages/core/vault/tests/unit/daemon/minted-value.test.ts`                                                                                              |
+| M5: concurrent launches spend the refresh token once                                                                                                       | `unit/mcp-oauth/service.test.ts` › "M5: …"                                                                                                                |
+| A sign-out (or a new sign-in elsewhere) during an in-flight refresh is not undone by it                                                                    | `unit/mcp-oauth/service.test.ts` › "M-A: …", "L-A: …"                                                                                                     |
+| The registration cap never evicts the live sign-in's registration                                                                                          | `unit/mcp-oauth/service.test.ts` › "L-B: …"                                                                                                               |
+| No token in any response, console line, audit entry or state file, end to end on loopback                                                                  | `integration/mcp-oauth/mcp-oauth-routes.test.ts` › "…and leak no token anywhere"                                                                          |
+| Every act needs the unlock from a remote device and never reaches the service before it                                                                    | `unit/runtime/mounts/unlock-gate.test.ts` › "the MCP sign-in behind the unlock"                                                                           |
+| The materialised runtime config holds a variable name, never a value                                                                                       | `packages/fleet/tests/unit/account-adapt.test.ts`                                                                                                         |
+| Registration asks the way Claude Code does, retries a 4xx at most four ways, never a 5xx                                                                   | `unit/mcp-oauth/registration.test.ts`, `unit/mcp-oauth/service.test.ts` › "registering the way real clients do"                                           |
+| A registration refusal says the host, status and provider reason, with credential-shaped text masked                                                       | `unit/mcp-oauth/registration.test.ts` › "providerText", `integration/mcp-oauth/mcp-oauth-routes.test.ts` › "…refuses every registration…"                 |
+| A secret registered for `client_secret_basic` is sent as Basic on the code, refresh and revoke requests                                                    | `unit/mcp-oauth/service.test.ts` › "…client_secret_basic…"                                                                                                |
+| A hand-registered client registers nothing; its secret is read by name and survives sign-out                                                               | `unit/mcp-oauth/service.test.ts` › "a client registered by hand", `packages/pwa/tests/integration/mcp-project-sign-in.test.ts`                            |
+| A client secret in configuration is only ever a `${secret:NAME}` reference                                                                                 | `packages/fleet/tests/unit/account-schema.test.ts`                                                                                                        |
+| No answer names the host and the transport's code, never the address                                                                                       | `unit/mcp-oauth/service.test.ts`, `integration/mcp-oauth/mcp-oauth-routes.test.ts` › "…a dead host…"                                                      |
 
 ## What is not built
 
 - **Keeping the access token out of the agent's environment — GAP.** See the threat model.
+- **A Codex ferret's token past its lifetime — GAP.** No `headersHelper` equivalent ([above](#a-ferret-that-outlives-its-token)).
 - **A project server's hand-registered client SECRET — GAP.** Claude Code keeps it in its own keychain,
   out of `.mcp.json`, where Ferretry cannot read it; a project server's `oauth.clientId` works as a public
   client only. Give the server a Ferretry component with `oauth.clientSecret` instead.

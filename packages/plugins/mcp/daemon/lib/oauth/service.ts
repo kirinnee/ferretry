@@ -866,6 +866,23 @@ export class McpOAuthService {
     }
   }
 
+  /**
+   * The component (or project-server subject) whose sign-in filed this ACCESS secret and has been marked as needing a
+   * new one: its refresh was rejected, so what the store holds can never be renewed. `undefined` for a sign-in that is
+   * fine, for a name no sign-in filed, and for any fault: a caller treats "unknown" as "go ahead", as
+   * {@link refreshForLaunch} does.
+   */
+  async signInRequired(name: SecretName): Promise<string | undefined> {
+    try {
+      return Object.entries((await this.deps.state.read()).connections).find(
+        ([component, record]) =>
+          record.needsSignIn === true && mcpOAuthSecretNames(component, record.serverUrl).access === name,
+      )?.[0];
+    } catch {
+      return undefined;
+    }
+  }
+
   /** `missing`: the store holds no access token for it, so there is nothing to wait for the expiry of. */
   private due(record: McpOAuthRecord, missing = false): boolean {
     if (!record.renewable || record.needsSignIn === true) return false;

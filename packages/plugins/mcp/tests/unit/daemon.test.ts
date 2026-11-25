@@ -21,6 +21,7 @@ test('G177 the daemon refuses project preview and add when Projects answers no r
     },
     hooks: {} as never,
     kernel: {
+      identity: { binaries: { client: 'fy' } },
       config: { collection: () => new Map() },
       roots: {
         root: () => {

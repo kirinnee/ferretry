@@ -176,7 +176,7 @@ its scope, and the declared gaps are [docs/fy-render.md](docs/fy-render.md). It 
 
 `packages/daemon` owns a secret store whose contract is **use, never read**: an agent names a secret
 and Ferretry runs a command with the value in _that child's_ environment, so the agent never holds a
-credential. **No route, command or API returns a secret value** — that is enforced by the types, and
+credential. **No route, command or API returns a secret value** (one named exception, a running ferret's own renewed MCP token, in docs/secrets.md) — that is enforced by the types, and
 adding a getter would delete the feature. The threat model, the `${secret:NAME}` grammar and the
 declared GAPs are [docs/secrets.md](docs/secrets.md); read it before describing what this protects
 against, because the useful property is narrower than people assume.

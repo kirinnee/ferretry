@@ -178,9 +178,12 @@ describe('MCP sign-in secrets: the use path', () => {
         runtimes: { current: () => undefined },
       },
       hooks: {} as never,
-      kernel: { state: own, config: { collection: () => new Map() } } as unknown as DaemonContext<
-        typeof manifest
-      >['kernel'],
+      kernel: {
+        state: own,
+        // U7: the launch's headersHelper names the product's client binary, read when the half is built.
+        identity: { binaries: { client: 'fy' } },
+        config: { collection: () => new Map() },
+      } as unknown as DaemonContext<typeof manifest>['kernel'],
     } as DaemonContext<typeof manifest>);
 
     expect(sealed.opened.map(entry => entry.document)).toEqual([MCP_OAUTH_SECRETS]);
@@ -189,5 +192,9 @@ describe('MCP sign-in secrets: the use path', () => {
     expect(sealed.reads).toEqual([]);
     expect(Object.keys(half?.provides?.mcp ?? {}).sort()).toEqual(['check', 'connections', 'inventory']);
     expect(Object.keys(half?.routes ?? {}).some(key => /secret|sealed/u.test(key))).toBe(false);
+    // The one named exception (docs/secrets.md): a running ferret's own renewed token, over its self-only route.
+    expect(Object.keys(half?.routes ?? {}).filter(key => /token/u.test(key))).toEqual([
+      'POST /v1/ferrets/:ferretId/mcp/token',
+    ]);
   });
 });

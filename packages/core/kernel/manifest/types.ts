@@ -327,12 +327,10 @@ export interface Permissions extends PublicDoorPermission {
    * other non-core plugin lists only the names it may use or mints.
    */
   readonly secretNamePicker?: true;
-  /**
-   * It may CREATE a secret under any name the Vault does not hold yet (`VaultApi.putNew`: Runtimes' import of a machine's
-   * own API keys). Create-only: it can never replace, remove or read a secret, and a name already held is refused with
-   * nothing changed. Only a non-core plugin that declares it is handed the method.
-   */
+  /** It may CREATE a secret under a name the Vault does not hold yet (`VaultApi.putNew`: Runtimes' import); never replace, remove or read one. */
   readonly createSecrets?: true;
+  /** It may read back a secret IT MINTED, and only that (the Vault's `mintedValueOf` reader: MCP's one exception, docs/secrets.md); the kernel's boot refuses any other plugin that declares it. */
+  readonly revealMinted?: true;
   /**
    * It starts a command for a RUNTIME (MCP's check) and may put into that one child exactly the secrets the runtime's
    * profile references (`VaultApi.childEnvironmentForRuntime`; Runtimes answers which). Not a general grant: no other name,

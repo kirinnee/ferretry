@@ -48,7 +48,7 @@ simply be false, and only redaction would keep the transcript clean.
 resolves it and spawns a child with the value in _that child's_ environment; only the child's output
 comes back, scrubbed. There is nothing in the agent's own process to echo into its conversation.
 
-**There is no route, command or API that returns a secret value.** Not to an agent, not to `fy`, not
+**There is no route, command or API that returns a secret value** (one named, narrow exception: [a running ferret gets its own renewed MCP token](#the-one-exception-a-running-ferret-gets-its-own-renewed-mcp-token)). Not to an agent, not to `fy`, not
 to the browser, not to a debug endpoint. This is enforced by the types rather than by a check: the
 route table is handed a `SecretDirectory`, which has no method that opens ciphertext. Only six
 things hold a `SecretVault` — the redactor, the use executor, the fleet launch environment that
@@ -1649,6 +1649,40 @@ answers a SANITIZED reply, so the plugin never holds it.
   server that reflects the token into its own name has that name replaced, and a check says so). A large binary blob
   inside JSON can pass a bound and drop the whole body. The Vault keeps the status and the allowlisted headers of a
   dropped body.
+
+## The one exception: a running ferret gets its own renewed MCP token
+
+"No route returns a secret value" has **exactly one** exception, and it is narrow in four ways at once:
+`POST /v1/ferrets/:ferretId/mcp/token` (MCP, [mcp-oauth.md](mcp-oauth.md#a-ferret-that-outlives-its-token)) hands a RUNNING
+Claude ferret the renewed access token of an MCP server its own launch already holds, so Claude's `headersHelper`
+(`fy mcp token <VARIABLE>`) can keep a ferret that outlives a twelve-hour token working.
+
+- **Self only.** The handler requires the caller's credential to be the SESSION credential of the ferret the path names.
+  The admin token (with or without a session header), a paired device, the warden and every other ferret get 403
+  `not_this_ferret`; the route is also governed as `secrets.use` and `secrets` is a capability a narrowed caller may lack.
+- **Only what its own launch holds.** The variable must match `^FY_MCP_[A-Z0-9_]+_TOKEN$` (a variable NAME, never a secret
+  name) and be one this ferret's launch binds now (its runtime's profile and its folder's project): otherwise 404
+  `not_this_ferrets_server`. The route cannot be pointed at a secret the launch did not already put in the ferret's environment, so
+  it adds nothing beyond the documented GAP ([mcp-oauth.md](mcp-oauth.md#what-this-does-not-protect-against): an agent
+  can read its own environment). It extends that boundary in time (the renewed token), not in kind.
+- **One Vault operation, for what the caller itself wrote.** The Vault has no general getter and none may be added.
+  `MintedValueReader.mintedValue(name)` is the single exception: it is not a member of `VaultApi` at all
+  (read through `mintedValueOf`) and exists only for a plugin whose manifest declares
+  `permissions.revealMinted`, which only MCP may declare. The kernel enforces that at boot, from the manifest alone and before
+  the plugin builds, so it holds whether the other plugin needs the Vault, only uses it (optional) or names no Vault at all:
+  any such plugin is marked failed, naming the permission (the Vault builds a port only for a plugin that asks for one, so
+  it could not be the place that refuses the optional and absent cases). The getter itself reads only what MCP's own ledger entries say MCP wrote. It answers only a secret the Vault's own mint ledger says THAT plugin wrote the
+  current value of (the same word `fetchMinted` takes, [above](#a-secret-a-plugin-minted-placed-on-its-request-by-the-vault)).
+  An owner's value, another plugin's, one replaced since and a name merely declared answer nothing; a plugin without the
+  permission, and the core, are handed no such method. It gives MCP back a token MCP itself received from the provider and
+  put, so it reveals nothing MCP did not hold when it minted it.
+- **`noStore`, audited by name.** The answer is never cached; the security log records `secrets.used` `mcp-token` with the
+  ferret and the variable NAME, never the token. Tests:
+  `packages/core/vault/tests/unit/daemon/minted-value.test.ts` (the getter's reach), `packages/core/kernel/tests/integration/host/reveal-minted.test.ts` (a real `bootHost`: refused with the Vault required, optional and absent), `packages/plugins/mcp/tests/unit/ferret-token.test.ts`
+  and `packages/plugins/mcp/tests/integration/ferret-token-e2e.test.ts` (the real `claude` runs the helper and the server sees a fresh
+  token after each rotation; another ferret, the owner and a ferret without the server get nothing).
+
+Declared GAP: **Codex has no helper hook**, so a Codex ferret's token is its launch-time one.
 
 ## Device-held speed-up keys
 
