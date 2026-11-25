@@ -111,6 +111,32 @@ describe('the browser end of the reply voice', () => {
     expect(long.map(piece => piece.id)).toEqual(long.map((_, index) => 2 + index));
   });
 
+  test('a line spoken before the stream opened is held, then sent right after the start record, timed from then', () => {
+    const r = rig();
+    // A transport drops a frame sent before it opened, and the machine reads a stream's first record as its start.
+    expect(r.handle.speak('Let me check the build.')).toEqual([{ id: 0, text: 'Let me check the build.' }]);
+    expect(r.sent).toEqual([]);
+    r.advance(400);
+    r.listeners().onOpen?.();
+    expect(JSON.parse(r.sent[0] as string)).toMatchObject({ t: 'start', reply: 'machine' });
+    expect(decodeSpeakFrame(r.sent[1] as string)).toEqual({ t: 'speak', id: 0, text: 'Let me check the build.' });
+    r.advance(900);
+    r.listeners().onFrame?.(
+      unit({ reply: 'ready', audio: { id: 0, samples: 100, last: false } }, new Int16Array(100).fill(5)),
+    );
+    expect(r.events.lines).toEqual([{ id: 0, event: 'started', firstSoundMs: 900 }]);
+  });
+
+  test('a hush before the stream opened drops the held lines and sends nothing for them', () => {
+    const r = rig();
+    r.handle.speak('First.');
+    r.handle.hush();
+    expect(r.sent).toEqual([]);
+    r.listeners().onOpen?.();
+    expect(r.sent).toHaveLength(1);
+    expect(JSON.parse(r.sent[0] as string)).toMatchObject({ t: 'start' });
+  });
+
   test('a stream that did not ask sends nothing for speak', () => {
     const r = rig({ reply: false });
     expect(r.handle.speak('Hello.')).toEqual([]);

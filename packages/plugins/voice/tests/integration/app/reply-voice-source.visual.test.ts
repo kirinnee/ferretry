@@ -229,6 +229,10 @@ describe('the reply voice source', () => {
           await hear.waitFor({ state: 'visible' });
           await hear.click();
           await tab.locator('[data-voice-first-sound]').waitFor({ state: 'visible', timeout: 10_000 });
+          // The first-sound note shows while it speaks; who spoke it is said once the sound has been heard to its end.
+          await tab
+            .getByText('Spoken by ElevenLabs, through Studio Mac.', { exact: false })
+            .waitFor({ state: 'visible', timeout: 10_000 });
           const fake = (await tab.evaluate(() => (window as unknown as { __fake: Fake }).__fake)) as Fake;
           expect(fake.hearStarts).toHaveLength(1);
           expect(JSON.parse(fake.hearStarts[0] as string)).toMatchObject({ reply: 'machine' });

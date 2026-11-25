@@ -90,7 +90,8 @@ export interface VoiceStreamOptions {
 export interface VoiceStreamHandle {
   /**
    * Sends a reply line to the machine to be spoken, cut into pieces that each fit one frame. Each piece is a line of its
-   * own with its own id, in order; the ids and their words are returned so the caller can read a failed one itself.
+   * own with its own id, in order; the ids and their words are returned so the caller can read a failed one itself. A line
+   * spoken before the stream has opened is held and sent right after the start record (a frame sent earlier is dropped).
    */
   speak(text: string): readonly { readonly id: number; readonly text: string }[];
   /**
@@ -127,6 +128,9 @@ export function openVoiceStream(
   /** Sound of a line numbered below this is from before a hush and is never played. */
   let hushedBelow = 0;
   let nextLine = 0;
+  /** Whether the start record has gone: a line spoken before then waits in `held`, since the transport drops it. */
+  let opened = false;
+  let held: { readonly id: number; readonly text: string }[] = [];
   let replyState: ReplyState | undefined;
   const words = new WordsAssembler();
   let echo: string | undefined;
@@ -154,6 +158,12 @@ export function openVoiceStream(
     if (audio.last) sentAt.delete(audio.id);
   };
 
+  /** Sends one line to be spoken; its first sound is timed from now, when it really left. */
+  const sendLine = (id: number, text: string): void => {
+    sentAt.set(id, now());
+    socket.send(encodeSpeakFrame({ t: 'speak', id, text }));
+  };
+
   const finish = (code: number | undefined, reason: string): void => {
     if (ended) return;
     ended = true;
@@ -168,6 +178,10 @@ export function openVoiceStream(
     {
       onOpen: () => {
         socket.send(JSON.stringify(start));
+        opened = true;
+        const waiting = held;
+        held = [];
+        for (const line of waiting) sendLine(line.id, line.text);
         mic
           .start(pcm => {
             if (ended || pcm.length !== UNIT_SAMPLES) return;
@@ -221,8 +235,8 @@ export function openVoiceStream(
       for (const piece of fitSpeakText(text)) {
         const id = nextLine;
         nextLine += 1;
-        sentAt.set(id, now());
-        socket.send(encodeSpeakFrame({ t: 'speak', id, text: piece }));
+        if (opened) sendLine(id, piece);
+        else held.push({ id, text: piece });
         lines.push({ id, text: piece });
       }
       return lines;
@@ -233,7 +247,9 @@ export function openVoiceStream(
       hushedBelow = nextLine;
       sentAt.clear();
       began.clear();
-      if (wantsReply) socket.send(encodeHushFrame());
+      // Lines still held never reached the machine: dropping them is the whole hush.
+      held = [];
+      if (wantsReply && opened) socket.send(encodeHushFrame());
     },
     stop: () => {
       if (ended) return;

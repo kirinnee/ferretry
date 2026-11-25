@@ -159,6 +159,8 @@ describe('Voice mode panel', () => {
           await tab.locator('[data-voice-mode="on"]').waitFor({ state: 'visible' });
           await tab.evaluate(() => (window as unknown as { __read: () => void }).__read());
           await tab.locator('[data-voice-mode][data-reply-voice="machine"]').waitFor({ state: 'visible' });
+          // The reply was read before the stream opened: its line reaches the machine once it has, after the start record.
+          await tab.waitForFunction(() => (window as unknown as { __fake: Fake }).__fake.lines.length > 0);
           expect((await fakeOf(tab)).lines).toEqual(['Let me check the build.']);
           expect(await tab.locator('[data-voice-mode-status]').innerText()).toContain('Talk any time to interrupt');
           expect(await overflow(tab)).toBeLessThanOrEqual(0);
