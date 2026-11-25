@@ -22,7 +22,6 @@ import type { ConnectorClient } from '../lib/client.ts';
 import { type Connector, useConnector } from '../lib/use-connector.ts';
 import {
   addressSourceWords,
-  CONFIG_WINS_NOTE,
   LOAD_FAILURE,
   NEEDS_UPDATE,
   NO_GRANTS,
@@ -32,7 +31,6 @@ import {
   SWITCH_HINT_OFF,
   SWITCH_HINT_ON,
   SWITCH_NAME,
-  TUNNEL_RECONNECT_NOTE,
 } from '../lib/words.ts';
 import { AddressRow } from './address-row.tsx';
 import { GrantRow } from './grant-row.tsx';
@@ -105,7 +103,7 @@ function Body({
             className="px-panel py-2 text-meta leading-base text-faint"
             data-connector-source={status.publicUrlSource}
           >
-            {source} {status.publicUrlSource === 'tunnel' ? TUNNEL_RECONNECT_NOTE : CONFIG_WINS_NOTE}
+            {source}
           </li>
         ) : null}
       </SettingGroup>

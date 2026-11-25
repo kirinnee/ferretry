@@ -43,9 +43,17 @@ export function GrantRow({
         )}
       </div>
       <p className="m-0 text-cell leading-base text-muted">Can {scopeSentence(grant.scopes)}.</p>
-      <p className="m-0 text-meta leading-base text-faint">
-        Approved by {approvedByWords(grant.approvedBy)} · connected {agoWords(grant.createdAt, now)} ·{' '}
-        {grant.lastUsedAt === undefined ? 'never used' : `last used ${agoWords(grant.lastUsedAt, now)}`}
+      <p className="m-0 flex flex-wrap gap-x-1 text-meta leading-base text-faint" data-connector-grant-facts="">
+        {[
+          approvedByWords(grant.approvedBy),
+          `connected ${agoWords(grant.createdAt, now)}`,
+          grant.lastUsedAt === undefined ? 'never used' : `last used ${agoWords(grant.lastUsedAt, now)}`,
+        ].map((fact, at, all) => (
+          // A fact keeps its own separator, so a wrapped line never starts with a dot.
+          <span key={fact} className="whitespace-nowrap">
+            {at < all.length - 1 ? `${fact} ·` : fact}
+          </span>
+        ))}
       </p>
     </li>
   );

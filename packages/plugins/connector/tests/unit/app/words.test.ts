@@ -23,8 +23,8 @@ describe('the connector tab’s words', () => {
   });
 
   it('says who approved: a paired device, or somebody at the machine', () => {
-    expect(approvedByWords('admin-cli')).toBe('at the machine');
-    expect(approvedByWords('device:dev_fixture')).toBe('a paired device');
+    expect(approvedByWords('admin-cli')).toBe('Approved at the machine');
+    expect(approvedByWords('device:dev_fixture')).toBe('Approved by a paired device');
   });
 
   it('says how long ago in plain words, and never negative', () => {

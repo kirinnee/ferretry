@@ -18,19 +18,17 @@ export const MATCH_CODE_WARNING = 'Only approve if this code is on the page you 
 export const NO_PENDING = 'No sign-in is waiting. When Claude asks to connect, it shows up here with a match code.';
 export const NO_GRANTS = 'Nothing is connected.';
 export const ADDRESS_HELP = 'Add this address in Claude as a custom connector (Settings › Connectors).';
-export const CONFIG_WINS_NOTE = 'An address set in config/connector.yaml always wins over the built-in tunnel.';
-export const TUNNEL_RECONNECT_NOTE = 'If the tunnel’s hostname ever changes, Claude must be reconnected.';
 /** A machine that does not have the connector yet: the app ships before the daemon (architecture, "The app ships before the daemon"). */
 export const NEEDS_UPDATE = 'This machine needs an update to use the Claude connector.';
 export const LOAD_FAILURE =
   'This machine did not answer the list of connected apps. It will be tried again in a moment.';
 
-/** Where the address Claude is given comes from. */
+/** Where the address Claude is given comes from, and the one thing to know about it. */
 export const addressSourceWords = (source: 'configured' | 'tunnel' | undefined): string | null =>
   source === 'tunnel'
-    ? 'This address is this machine’s built-in tunnel.'
+    ? 'This address is this machine’s built-in tunnel. If its hostname changes, Claude must be reconnected.'
     : source === 'configured'
-      ? 'This address is the one set on this machine (config/connector.yaml).'
+      ? 'This address is set in config/connector.yaml, which always wins over the built-in tunnel.'
       : null;
 
 /** What a scope lets the app do, in the words a person decides by. */
@@ -45,9 +43,13 @@ export const scopeSentence = (scopes: readonly ConnectorScope[]): string =>
     ? 'do nothing'
     : new Intl.ListFormat('en', { style: 'long', type: 'conjunction' }).format(scopes.map(scope => SCOPE_WORDS[scope]));
 
-/** Who approved a grant, as words: `device:<id>` is a paired device, `admin-cli` is somebody at the machine. */
+/** Who approved a grant, as a whole phrase: a paired device, or somebody at the machine. */
 export const approvedByWords = (approvedBy: string): string =>
-  approvedBy === 'admin-cli' ? 'at the machine' : approvedBy.startsWith('device:') ? 'a paired device' : approvedBy;
+  approvedBy === 'admin-cli'
+    ? 'Approved at the machine'
+    : approvedBy.startsWith('device:')
+      ? 'Approved by a paired device'
+      : `Approved by ${approvedBy}`;
 
 export const revokeConsequence = (grant: ConnectorGrantView): string =>
   `${grant.clientName} stops working on its very next call. To use it again it has to sign in and be approved again.`;
