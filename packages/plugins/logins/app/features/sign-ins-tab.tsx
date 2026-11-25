@@ -11,7 +11,7 @@
 import { Loading } from '@ferretry/app/ui';
 import { daemonOfClient, PanelSlot, useSlotHasUsablePanels } from '@ferretry/app';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { LOGIN_METER_SLOT, type LoginView } from '../../contract/index.ts';
 import { AccountStatus, ProviderQuota } from '../components/account-status.tsx';
 import { LoginScopeChip } from '../components/login-scope-chip.tsx';
@@ -51,16 +51,23 @@ import { environmentChip, LoginEnvironmentSection } from './login-environment.ts
 import { LoginSignIn } from './login-sign-in.tsx';
 import { useLocalModels } from './use-local-models.ts';
 
-/** An email that may wrap AFTER its "@" (and nowhere inside a word) when the card is narrow. */
+/** A name that may wrap AFTER an "@" or a "." (and nowhere inside a word) when the card is narrow. */
 function breakAtAt(email: string) {
-  const at = email.indexOf('@');
-  return at < 0 ? (
-    email
-  ) : (
+  // Each part is keyed by where it starts in the name, which is unique and does not depend on the array.
+  let start = 0;
+  const parts = email.split(/(?<=[@.])/u).map(part => {
+    const at = start;
+    start += part.length;
+    return { at, part };
+  });
+  return (
     <>
-      {email.slice(0, at + 1)}
-      <wbr />
-      {email.slice(at + 1)}
+      {parts.map(({ at, part }) => (
+        <Fragment key={at}>
+          {at === 0 ? null : <wbr />}
+          {part}
+        </Fragment>
+      ))}
     </>
   );
 }
@@ -334,6 +341,15 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
         >
           {login.usedBy.length === 0 ? 'No runtime uses this login yet.' : loginUse(login)}
         </p>
+        {login.usedBy.length === 0 && login.cliMissing === true ? (
+          <p className="mb-0 mt-1 text-cell text-muted" data-login-no-cli="">
+            Install{' '}
+            {loginHarnesses(login)
+              .map(harness => harnessName(harness))
+              .join(' or ')}{' '}
+            on {machineName} to use this login.
+          </p>
+        ) : null}
       </div>
 
       <div className="fy-lg-group">
@@ -402,7 +418,7 @@ function LoginRow({
         >
           <AccountStatus word={login.status.word} className="mt-1" />
           <span className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="block min-h-9 break-words pr-40 font-mono text-row text-fg" data-login-name="">
+            <span className="block min-h-9 break-words pr-40 text-row text-fg" data-login-name="">
               {breakAtAt(loginName(login))}
             </span>
             <LoginBadges login={login} />

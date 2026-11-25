@@ -915,6 +915,9 @@ export class FleetCredentialsService {
         entry.credential.store === 'environment' ? this.deps.providerQuota?.peek(entry.id) : undefined,
       ),
       usedBy: entry.usedBy,
+      ...(credentialHarnesses(entry.credential).some(harness => this.deps.locate(harness) !== undefined)
+        ? {}
+        : { cliMissing: true as const }),
       signIn: signInAct(this.deps.catalog.signInTarget(entry)),
       checkNow: checkAct(entry),
       signOut: signOutSentence(entry, email, this.deps.machineName()),

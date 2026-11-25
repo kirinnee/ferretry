@@ -9,6 +9,7 @@
  *   needs-codex  a Codex login that needs signing in; its sign-in answers with the link flow (C59 O8-1 review: the 604px panel)
  *   add     the add-a-login panel: the sign-in form and the provider tiles
  *
+ *   ?tools=none  the machine has no harness CLI (L195)
  *   ?theme=<family>-<mode>   ?panel=<px>  the width of the Settings panel the tab sits in (default: fills the window)
  */
 import { createRoot } from 'react-dom/client';
@@ -21,6 +22,8 @@ const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const view = params.get('view') ?? 'list';
 const panel = Number(params.get('panel') ?? 0);
+/** `?tools=none`: this machine has no harness CLI, so a login that nothing uses says what to install (L195). */
+const noCli = params.get('tools') === 'none';
 
 const OPEN = { capabilities: [{ capability: 'fleet', use: true, configure: true, configureRefusal: 'granted' }] };
 
@@ -66,7 +69,13 @@ const logins = [
     usedBy: [],
     usage: { fiveHour: {}, weekly: {} },
   }),
-  login({ id: 'claude-slot', email: undefined, usedBy: [], status: needsSignIn }),
+  login({
+    id: 'claude-slot',
+    email: undefined,
+    usedBy: [],
+    status: needsSignIn,
+    ...(noCli ? { cliMissing: true as const } : {}),
+  }),
   // Only on its own view, so no other view's list or count changes.
   ...(view === 'needs-codex'
     ? [
@@ -77,6 +86,7 @@ const logins = [
           email: undefined,
           usedBy: [],
           status: needsSignIn,
+          ...(noCli ? { cliMissing: true as const } : {}),
         }),
       ]
     : []),
