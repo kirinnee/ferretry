@@ -146,6 +146,12 @@ export function reinstructionMessage(passive: boolean, binaryName: string): stri
     : `Passive learning is now OFF for you (the owner switched it off): stop filing lessons with \`${binaryName} lesson suggest\` unless the owner asks for one. No reply is needed; carry on with your work.`;
 }
 
+/** The name a record keeps: the ferret's own, else the one it was last recorded with. */
+const nameOf = (facts: LessonSessionFacts | undefined, previous?: StoredFerretLessons): { readonly name?: string } => {
+  const name = facts?.name ?? facts?.teammate ?? previous?.name;
+  return name === undefined || name.trim() === '' ? {} : { name };
+};
+
 export class LessonsService {
   constructor(private readonly deps: LessonsDependencies) {}
 
@@ -170,8 +176,10 @@ export class LessonsService {
    * pane launches, so the launch environment already says whether it is instructed.
    */
   async adopt(ferretId: string): Promise<FerretLessons> {
+    const named = await this.deps.sessions.facts(ferretId);
     const record: StoredFerretLessons = {
       ferretId,
+      ...nameOf(named),
       passive: this.deps.config().passiveDefault,
       since: this.deps.now(),
       setBy: 'default',
@@ -197,7 +205,13 @@ export class LessonsService {
     const facts = await this.deps.sessions.facts(ferretId);
     if (facts === undefined) throw new LessonsError('not-found', `no session ${ferretId}`);
     const previous = (await this.deps.store.loadFerretLessons()).find(entry => entry.ferretId === ferretId);
-    const record: StoredFerretLessons = { ferretId, passive, since: this.deps.now(), setBy: 'owner' };
+    const record: StoredFerretLessons = {
+      ferretId,
+      ...nameOf(facts, previous),
+      passive,
+      since: this.deps.now(),
+      setBy: 'owner',
+    };
     await this.save(record);
     await this.deps.passive.setEnvironment(ferretId, passive);
     const unchanged = (previous?.passive ?? false) === passive;

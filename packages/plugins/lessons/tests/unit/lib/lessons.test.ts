@@ -127,6 +127,19 @@ describe('LessonsService', () => {
       should(record.setBy).equal('default');
     });
 
+    it('should record the ferret’s name so a gone ferret is still named', async () => {
+      // Arrange
+      const world = lessonsWorld();
+      world.sessions.sessions = [lessonFacts({ ferretId: 's1', name: 'Hildred' })];
+
+      // Act
+      const record = await world.service.adopt('s1');
+
+      // Assert
+      should(record.name).equal('Hildred');
+      should(world.store.sessionLessons).deepEqual([record]);
+    });
+
     it('should replace an existing record for the same session rather than adding a second one', async () => {
       // Arrange
       const world = lessonsWorld();
@@ -173,6 +186,19 @@ describe('LessonsService', () => {
       should(result.sendId).be.undefined();
       should(result.note).containEql('already');
       should(world.passive.sends).have.length(0);
+    });
+
+    it('should keep the last recorded name when the ferret no longer carries one', async () => {
+      // Arrange
+      const world = lessonsWorld();
+      world.sessions.sessions = [lessonFacts({ ferretId: 's1', running: false })];
+      world.store.sessionLessons = [{ ferretId: 's1', name: 'Hildred', passive: false, since: AT, setBy: 'default' }];
+
+      // Act
+      const result = await world.service.setPassive('s1', true);
+
+      // Assert
+      should(result.lessons.name).equal('Hildred');
     });
 
     it('should note the next launch and send nothing when the ferret is not running', async () => {

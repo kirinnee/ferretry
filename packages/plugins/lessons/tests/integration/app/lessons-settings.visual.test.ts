@@ -101,11 +101,21 @@ describe('Settings › Lessons, drawn in a browser', () => {
               chipLeft: chip?.left ?? 0,
             };
           });
+          const names = [...document.querySelectorAll<HTMLElement>('[data-lessons-ferret]')].map(row =>
+            (row.querySelector('[id$="-label"]')?.textContent ?? '').trim(),
+          );
           const area = document.querySelector<HTMLTextAreaElement>('[data-global-lessons] textarea');
           const line = parseFloat(getComputedStyle(area as Element).lineHeight);
-          return { rows, areaHeight: area?.getBoundingClientRect().height ?? 0, line };
+          return { rows, names, areaHeight: area?.getBoundingClientRect().height ?? 0, line };
         });
-        expect(measured.rows.length).toBe(3);
+        expect(measured.rows.length).toBe(5);
+        expect(measured.names, 'a gone ferret shows its stored name, not its id').toEqual([
+          'Hadi',
+          'Mira',
+          'Oden',
+          'Zed',
+          'ferret-g…',
+        ]);
         for (const row of measured.rows) {
           expect(Math.abs(row.buttonCenter - row.rowCenter), 'the button is level with its row').toBeLessThanOrEqual(1);
           expect(Math.abs(row.buttonCenter - row.chipCenter), 'the button is level with its chip').toBeLessThanOrEqual(
