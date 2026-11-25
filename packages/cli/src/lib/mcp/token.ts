@@ -5,7 +5,7 @@
  *
  * Fleet writes it into every signed-in MCP server's entry, so Claude runs it at connect time and again after a 401:
  * a ferret that outlives its twelve-hour access token keeps working instead of sending the one it was launched
- * with. It acts only as THIS ferret (`FY_SESSION_ID`) — the daemon refuses anyone else — and on success prints the
+ * with. It acts only as THIS ferret (`FY_SESSION_ID`), presenting only its own session credential — never `FY_TOKEN` or the admin token; the daemon refuses anyone else — and on success prints the
  * headers object and NOTHING else, because a helper's whole stdout is parsed. On failure the daemon's own sentence
  * goes to stderr and the exit code is 1.
  */
@@ -48,11 +48,20 @@ export class McpTokenController {
     private readonly out: IMcpTokenOutput,
     /** The ferret this command runs in, when it runs in one. */
     private readonly ownSessionId: string | undefined,
+    /** Whether this process holds the ferret's own `fys_` session credential — the only one the route accepts. */
+    private readonly hasSessionCredential: boolean,
   ) {}
 
   async token(variable: string): Promise<void> {
     if (this.ownSessionId === undefined) {
       this.out.diagnostic('fy mcp token only works inside a ferret: it gives that ferret its own MCP sign-in token.');
+      this.out.setExitCode(2);
+      return;
+    }
+    if (!this.hasSessionCredential) {
+      this.out.diagnostic(
+        'fy mcp token needs this ferret’s own session credential (FY_SESSION_TOKEN), which is not in this environment; it never uses FY_TOKEN or the admin token.',
+      );
       this.out.setExitCode(2);
       return;
     }

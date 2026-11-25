@@ -43,7 +43,12 @@ class RecordingOutput implements IMcpTokenOutput {
 function cli(gateway: IMcpTokenGateway, own: string | null = 's-own') {
   const out = new RecordingOutput();
   const program = new Command().exitOverride().configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  registerMcpCommands(program, async () => {}, {} as never, new McpTokenController(gateway, out, own ?? undefined));
+  registerMcpCommands(
+    program,
+    async () => {},
+    {} as never,
+    new McpTokenController(gateway, out, own ?? undefined, true),
+  );
   const run = async (...argv: string[]) => await program.parseAsync(['node', 'fy', 'mcp', ...argv]);
   return { out, run, program };
 }
@@ -77,6 +82,23 @@ describe('fy mcp token', () => {
     should(gateway.asked).deepEqual([]);
     should(out.stdout).deepEqual([]);
     should(out.stderr[0]).match(/only works inside a ferret/u);
+    should(out.exitCode).equal(2);
+  });
+
+  it('should refuse with exit 2, never asking the daemon, when the ferret has no session credential', async () => {
+    // Arrange
+    const gateway = new FakeGateway();
+    const out = new RecordingOutput();
+    const program = new Command().exitOverride().configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    registerMcpCommands(program, async () => {}, {} as never, new McpTokenController(gateway, out, 's-own', false));
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'mcp', 'token', VARIABLE]);
+
+    // Assert
+    should(gateway.asked).deepEqual([]);
+    should(out.stdout).deepEqual([]);
+    should(out.stderr[0]).match(/needs this ferret’s own session credential/u);
     should(out.exitCode).equal(2);
   });
 

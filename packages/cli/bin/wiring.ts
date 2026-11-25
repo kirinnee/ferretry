@@ -386,6 +386,48 @@ export function agentToolsGateways(
   };
 }
 
+/**
+ * A client that presents THIS ferret's session bearer and nothing else: `FY_TOKEN`, `--as-owner` and the
+ * host's `api-token` are never consulted, because the routes it serves (`fy mcp token`) answer only the
+ * ferret itself and refuse the admin token. Lazy, like the shared client, and local-only: the credential
+ * never leaves this machine.
+ */
+export function sessionBearerClient(
+  world: ConnectionWorld,
+  bearer: string,
+  patience: DaemonRestartPatience,
+  /** The seams a test replaces: the socket tables the loopback guard reads, and the wire. */
+  seams: { readonly listeners?: LoopbackListenerGuardPorts; readonly transport?: IFyHttpTransport } = {},
+): Pick<IFyApiClient, 'request'> {
+  let connected: Promise<FyApiClient> | undefined;
+  const connect = async (): Promise<FyApiClient> => {
+    const baseUrl = await daemonBaseUrl(
+      world.environment,
+      resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME),
+    );
+    if (!isLocalDaemonUrl(baseUrl))
+      throw new Error(`the session credential is sent only to the daemon on this machine, and ${baseUrl} is not on it`);
+    await assertOwnLoopbackListener(baseUrl, 'the session credential', seams.listeners);
+    return await FyApiClient.connect({
+      baseUrl,
+      token: bearer,
+      version: assertSemver(pkg.version),
+      ...(seams.transport === undefined ? {} : { transport: seams.transport }),
+      restartPatience: patience,
+    });
+  };
+  return {
+    request: async (path, schema, init, timeoutMs) => {
+      connected ??= connect();
+      const client = await connected.catch((error: unknown) => {
+        connected = undefined;
+        throw error;
+      });
+      return await client.request(path, schema, init, timeoutMs);
+    },
+  };
+}
+
 /** What every command group of one invocation shares: the lazy client and how it was chosen. */
 export interface DaemonWiring {
   readonly client: SharedDaemonClient;

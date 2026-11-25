@@ -12,7 +12,7 @@ import type { Command } from 'commander';
 import pkg from '../package.json' with { type: 'json' };
 import { serveMcpOverStdio } from '../src/adapters/mcp/stdio';
 import { AgentToolsClient } from '../src/lib/agent-tools/client';
-import { paneCredentialValue } from '../src/lib/daemon/credential';
+import { paneCredential, paneCredentialValue } from '../src/lib/daemon/credential';
 import { McpServer } from '../src/lib/mcp/server';
 import { ProtocolMcpServersGateway, McpServersController } from '../src/lib/mcp/servers';
 import { McpTokenController, ProtocolMcpTokenGateway } from '../src/lib/mcp/token';
@@ -25,6 +25,7 @@ import {
   type DaemonWiring,
   executeSlice,
   PRODUCT_NAME,
+  sessionBearerClient,
 } from './wiring';
 
 /**
@@ -41,6 +42,36 @@ export function agentToolsClient(
     ...(capability === undefined ? {} : { capability }),
     ...(ownSessionId === undefined ? {} : { ownSessionId }),
   });
+}
+
+/**
+ * `fy mcp token` acts as THIS ferret and only with its own `fys_` session credential: the daemon route
+ * refuses the admin token, so the shared client — where `FY_TOKEN` wins over the ferret's credential —
+ * would fail in a ferret that has both. With no such credential the command says so instead of falling
+ * back to `FY_TOKEN` or the host's admin token.
+ */
+export function mcpTokenController(
+  world: ConnectionWorld,
+  wiring: DaemonWiring,
+  seams?: Parameters<typeof sessionBearerClient>[3],
+): McpTokenController {
+  const pane = paneCredential(world.environment);
+  const bearer = pane.kind === 'bearer' ? pane.value : undefined;
+  return new McpTokenController(
+    new ProtocolMcpTokenGateway(
+      bearer === undefined
+        ? {
+            // Never reached: the controller refuses before asking. Present so no other client can be used by mistake.
+            request: async () => {
+              throw new Error('fy mcp token has no session credential');
+            },
+          }
+        : sessionBearerClient(world, bearer, wiring.restartPatience, seams),
+    ),
+    world.io,
+    wiring.ownSessionId,
+    bearer !== undefined,
+  );
 }
 
 /**
@@ -78,7 +109,7 @@ export function registerMcpGroup(
       );
     },
     new McpServersController(new ProtocolMcpServersGateway(wiring.client), world.io, wiring.ownSessionId),
-    new McpTokenController(new ProtocolMcpTokenGateway(wiring.client), world.io, wiring.ownSessionId),
+    mcpTokenController(world, wiring),
   );
 }
 
