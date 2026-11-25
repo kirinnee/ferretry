@@ -227,16 +227,47 @@ describe('a lost refresh response costs a retry, not the grant (finding 4)', () 
     expect(await f.authority.verify(retried.access_token)).toBeDefined();
     // The pair the client never saw is dead, but nothing was revoked or reported as theft.
     expect(await f.authority.verify(lost.access_token)).toBeUndefined();
-    await expect(
-      f.authority.exchange(...refresh(flow.client.client_id, lost.refresh_token ?? '')),
-    ).rejects.toMatchObject({
-      error: 'invalid_grant',
-    });
     expect(f.state().grants[0]?.revokedAt).toBeUndefined();
     expect(f.events.some(e => e.kind === 'connector.refresh.reused')).toBe(false);
     // The client then carries on with the new pair.
     const onward = await f.authority.exchange(...refresh(flow.client.client_id, retried.refresh_token ?? ''));
     expect(await f.authority.verify(onward.access_token)).toBeDefined();
+  });
+
+  test('the superseded pair is not forgotten: the client that DID receive it presents it and the grant is revoked', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    const received = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    f.advance(5_000);
+    const replayed = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    expect(await f.authority.verify(received.access_token)).toBeUndefined();
+    await expect(
+      f.authority.exchange(...refresh(flow.client.client_id, received.refresh_token ?? '')),
+    ).rejects.toMatchObject({ error: 'invalid_grant' });
+    expect(f.state().grants[0]?.revokedAt).toBeDefined();
+    expect(await f.authority.verify(replayed.access_token)).toBeUndefined();
+    expect(f.events).toContainEqual({ kind: 'connector.refresh.reused', grantId: flow.grant.id });
+  });
+
+  test('a record without the retry marker (retried, or written before the retry was one-shot) can never be retried', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    await f.authority.exchange(...refresh(flow.client.client_id, first));
+    const old = f.state();
+    const unmarked = {
+      ...old,
+      grants: old.grants.map(g => ({ ...g, usedRefresh: g.usedRefresh.map(({ retryable: _marker, ...u }) => u) })),
+    };
+    await f.store.save(unmarked as never);
+    f.memory.index.replace(await f.store.load());
+    f.advance(1_000);
+    await expect(f.authority.exchange(...refresh(flow.client.client_id, first))).rejects.toMatchObject({
+      error: 'invalid_grant',
+    });
+    expect(f.state().grants[0]?.revokedAt).toBeDefined();
+    expect(f.events).toContainEqual({ kind: 'connector.refresh.reused', grantId: flow.grant.id });
   });
 
   test('the window admits ONE retry: a second replay inside it mints no pair, revokes the grant and is audited', async () => {

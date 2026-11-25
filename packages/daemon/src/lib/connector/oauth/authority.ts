@@ -663,10 +663,19 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         throw new OAuthError('invalid_scope', 'A refresh cannot increase its granted scopes.');
       // On a retry the pair the first rotation issued is superseded: the client never saw it, so it dies here.
       const superseded = used?.successors;
+      const supersededRefresh = grant.refresh.find(t => t.digest === superseded?.refresh);
       grant = {
         ...grant,
         access: grant.access.filter(t => t.digest !== superseded?.access),
         refresh: grant.refresh.filter(t => t.digest !== key && t.digest !== superseded?.refresh),
+        // The superseded refresh token is remembered as used, with no retry: a client that DID receive that pair
+        // and presents it proves the retry came from someone else, and that reuse revokes the grant.
+        usedRefresh: supersededRefresh
+          ? [
+              ...grant.usedRefresh.filter(u => u.digest !== supersededRefresh.digest),
+              { digest: supersededRefresh.digest, expiresAt: supersededRefresh.expiresAt, rotatedAt: this.now() },
+            ]
+          : grant.usedRefresh,
       };
       rotating ??= { used: { digest: key, expiresAt: token.expiresAt, rotatedAt: this.now() }, retry: false };
     }
@@ -682,6 +691,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       ? {
           ...rotating.used,
           successors: refreshDigest && !rotating.retry ? { access: accessDigest, refresh: refreshDigest } : undefined,
+          retryable: refreshDigest && !rotating.retry ? (true as const) : undefined,
         }
       : undefined;
     const updated: ConnectorGrant = {
@@ -717,7 +727,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
    * no such successor and revokes.
    */
   private retryable(grant: ConnectorGrant, used: UsedRefresh): ConnectorGrant['refresh'][number] | undefined {
-    if (used.rotatedAt === undefined || used.successors === undefined) return undefined;
+    if (used.retryable !== true || used.rotatedAt === undefined || used.successors === undefined) return undefined;
     if (this.now() - used.rotatedAt > REFRESH_RETRY_MS) return undefined;
     const successor = used.successors.refresh;
     return grant.refresh.find(t => t.digest === successor);

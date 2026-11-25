@@ -190,6 +190,9 @@ unknown client or a redirect URI problem is shown as an error page and NEVER red
   window. Tokens are stored as digests only, so the first pair cannot be handed out again; instead the second
   presentation of the same rotated token, inside the window or not, issues nothing, revokes the grant (every access
   and refresh token) and emits `connector.refresh.reused`, so a stolen token cannot be replayed for live pairs.
+  The pair the retry superseded is remembered as used too, so a client that did receive it and presents it later
+  revokes the grant as well. Only a first rotation marks its token retryable: a state file written before the retry
+  was one-shot has no mark, so reuse of those tokens revokes without a retry.
   Outside the window, or for a token rotated two generations ago, reuse revokes the grant as before. A rotated-away token
   that has passed its own 30-day expiry is simply `invalid_grant`. The token response is `Cache-Control: no-store`.
 - **Resource / audience**: every token is bound to the one resource URI; a token request naming another
