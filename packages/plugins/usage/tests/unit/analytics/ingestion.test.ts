@@ -79,12 +79,22 @@ class MemoryStore implements AnalyticsIndexStore {
     for (const id of ids) this.saved.delete(id);
   }
 
+  /** How many times the whole history was read, and how many keyed reads were made. */
+  fullReads = 0;
+  keyedReads = 0;
+
   rows(): readonly AnalyticsStoredSession[] {
+    this.fullReads += 1;
     return [...this.saved.values()];
   }
 
+  row(id: string): AnalyticsStoredSession | undefined {
+    this.keyedReads += 1;
+    return this.saved.get(id);
+  }
+
   status(): AnalyticsStoreStatus {
-    const rows = this.rows();
+    const rows = [...this.saved.values()];
     const ingestedAt = rows.map(row => row.ingestedAt).toSorted();
     return {
       schemaVersion: ANALYTICS_INDEX_SCHEMA_VERSION,
@@ -193,6 +203,62 @@ function harness(
     },
   };
 }
+
+describe('AnalyticsIngestionService.costUsdMicrosOf', () => {
+  it('should price one session by a keyed read, however many rows the index holds', async () => {
+    // Arrange: the Warden asks once per unpriced investigation, every sweep. A read of the whole history per ask is
+    // what stalled v4 for 12 s at 11.5k rows.
+    const test = harness(
+      Array.from({ length: 50 }, (_, index) => candidate({ id: `s${String(index)}` })),
+      async () => readEvidence([usageEvent('claude-opus-5', 1_000, 500)]),
+    );
+    await test.service.ingest();
+    const fullReadsBefore = test.store.fullReads;
+
+    // Act
+    const priced = ['s0', 's7', 's49'].map(id => test.service.costUsdMicrosOf(id));
+    const absent = test.service.costUsdMicrosOf('never-ingested');
+
+    // Assert
+    should(priced).deepEqual([52_500, 52_500, 52_500]);
+    should(absent).be.undefined();
+    should(test.store.keyedReads).equal(4);
+    should(test.store.fullReads).equal(fullReadsBefore);
+  });
+
+  it('should say undefined, not zero, for a session whose tokens could not be priced', async () => {
+    // Arrange
+    const test = harness([candidate({ id: 's1' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 1_000, 500), usageEvent('claude-sonnet-5', 1_000, 500)]),
+    );
+    await test.service.ingest();
+
+    // Act
+    const cost = test.service.costUsdMicrosOf('s1');
+
+    // Assert
+    should(cost).be.undefined();
+  });
+});
+
+describe('AnalyticsIngestionService.rawRows', () => {
+  it('should hand back every row as it was priced at ingest, in one read of the store', async () => {
+    // Arrange
+    const test = harness([candidate({ id: 's1' }), candidate({ id: 's2' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 1_000, 500)]),
+    );
+    await test.service.ingest();
+    const before = test.store.fullReads;
+
+    // Act
+    const rows = test.service.rawRows();
+
+    // Assert
+    should(rows.map(row => row.id).toSorted()).deepEqual(['s1', 's2']);
+    should(rows.every(row => row.equivalentApiCostUsdMicros === 52_500)).be.true();
+    should(test.store.fullReads).equal(before + 1);
+  });
+});
 
 describe('AnalyticsIngestionService.ingest', () => {
   it('should price a session addressed by two spellings the catalog calls one model', async () => {

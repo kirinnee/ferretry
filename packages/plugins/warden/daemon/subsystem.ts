@@ -460,7 +460,9 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
       evidence: { evidence: async () => ({ recentTurns: [] }) },
       redactor: { batch: async work => await kernel.redaction.read(scope => work({ text: text => scope.text(text) })) },
       remedies,
-      costs: { costUsd: async () => undefined },
+      // An investigation is priced from its OWN analytics row — one keyed read per investigation, never a read of the
+      // whole history per item. Unpriced (or Usage off) is `undefined`, and the sweep asks again for a day.
+      costs: { costUsd: async investigator => await host.usage()?.sessionCostUsd?.(investigator) },
       feed: { board: async ferret => await agenda.feed(ferret) },
       fleet: {
         fleet: async () => {

@@ -51,6 +51,11 @@ export interface UsageApi {
   pauseOf(login: LoginId): LoginPause | undefined;
   /** The limits live panes prove, by login (see {@link PaneLimitView}); none when Ferrets cannot say. */
   paneLimits(): Promise<readonly PaneLimitView[]>;
+  /**
+   * What one finished session cost in dollars, priced from its own transcript, or `undefined` when it has no priced row
+   * yet (analytics reads a transcript some time after it ends). A keyed read of that session only.
+   */
+  sessionCostUsd(session: string): Promise<number | undefined>;
   /** Every budgeted login's standing. */
   budgets(): Promise<BudgetsView>;
   /** The last provider quota reading for a login, when it has one. */

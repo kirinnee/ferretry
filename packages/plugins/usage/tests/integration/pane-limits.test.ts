@@ -75,6 +75,15 @@ describe('the pane limits the usage daemon half owns', () => {
     await h.stop();
   });
 
+  test('sessionCostUsd() is undefined for a session the index holds no row for, never zero', async () => {
+    const { h } = await host();
+
+    const cost = await h.provided(UsagePort).sessionCostUsd('never-ingested');
+
+    expect(cost).toBeUndefined();
+    await h.stop();
+  });
+
   test('where several ferrets prove one login, the one with no reset time outranks a timed one, then the latest reset wins', async () => {
     const { h, ferrets } = await host();
     ferrets.setPaneLimits([

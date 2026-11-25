@@ -524,6 +524,10 @@ export default implementDaemon(manifest, {
           headroomPercent: async login => headroomOf((await feedView(feed)).accounts.find(row => row.agent === login)),
           feed: async read => await feedView(read.watched ? feed : scraped),
           paneLimits,
+          sessionCostUsd: async session => {
+            const micros = ingestion.costUsdMicrosOf(session);
+            return micros === undefined ? undefined : micros / 1_000_000;
+          },
           pauses: () => Object.keys(budget.holds()).flatMap(login => pauseOf(login) ?? []),
           pauseOf: login => pauseOf(login),
           budgets: async () => budgetsView(),

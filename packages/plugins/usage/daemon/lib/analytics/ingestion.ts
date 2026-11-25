@@ -331,6 +331,15 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
   }
 
   /**
+   * What one session cost, as it was priced when ingested: one KEYED read of that session's row. `undefined` when the
+   * session has no row yet or its tokens could not be priced; a caller that asks again later (the Warden does, for a day)
+   * gets the price once the pass has ingested the transcript.
+   */
+  costUsdMicrosOf(sessionId: string): number | undefined {
+    return this.parts.store.row(sessionId)?.raw.equivalentApiCostUsdMicros ?? undefined;
+  }
+
+  /**
    * The stored rows as they were priced when ingested: one read of the store, and no re-pricing at today's rates (which
    * {@link read} does for every row). For a caller that sums what the rows already say.
    */
