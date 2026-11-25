@@ -142,7 +142,8 @@ export function FileFinder({
       </div>
 
       <p className="m-0 text-meta text-muted" data-finder-built="">
-        {answer.index.indexed.toLocaleString('en-US')} files indexed · updated {built}
+        {answer.index.indexed.toLocaleString('en-US')} {answer.index.indexed === 1 ? 'file' : 'files'} indexed · updated{' '}
+        {built}
       </p>
 
       {banner !== null && (

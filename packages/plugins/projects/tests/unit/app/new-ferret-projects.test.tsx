@@ -104,6 +104,7 @@ describe('the New ferret where-it-works panel', () => {
       told,
     );
     expect(q(view, '[data-new-ferret-where-reading]')).not.toBeNull();
+    expect(q(view, '[data-new-ferret-where-switch]'), 'no Folder | Project choice before the first read').toBeNull();
     expect(told).toEqual([]);
     await interact(async () => answer([PROJECT]));
     await settleUntil(() => told.length > 0, 'the registry read', interact);
@@ -287,6 +288,13 @@ describe('projectLine', () => {
     expect(projectLine(SECOND)).toBe('acme/website');
     const two = { ...SECOND, repos: [...(SECOND.repos ?? []), { path: 'api', remote: 'https://github.com/acme/api' }] };
     expect(projectLine(two)).toBe('acme/website + 1 more');
+  });
+
+  it('shortens a long folder to its last two names, so like-named projects still differ', () => {
+    const at = (path: string) => ({ ...PROJECT, path });
+    expect(projectLine(at('/tmp/claude-1000/runA/site'))).toBe('…/runA/site');
+    expect(projectLine(at('/tmp/claude-1000/runB/site'))).toBe('…/runB/site');
+    expect(projectLine(at('/work/ferretry'))).toBe('/work/ferretry');
   });
 
   it('names another host with its host, and shows a remote that is not a URL as written', () => {
