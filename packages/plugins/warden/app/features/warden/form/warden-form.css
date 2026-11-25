@@ -334,3 +334,12 @@ label.fy-wf-slider.fy-wf-slider {
 .fy-wf-switch input {
   accent-color: var(--accent);
 }
+
+/* The login picker names a login in full: its closed value wraps and the box grows to hold it, instead of ending in an ellipsis
+   that hides the part (the account, the machine) that tells two logins apart. */
+.fy-wf-login .fy-sb__value {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}

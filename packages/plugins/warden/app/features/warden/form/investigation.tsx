@@ -62,6 +62,7 @@ export function InvestigationSection({
     onChange(withLogin(value, model === '' ? agent : { ...agent, model }));
   };
   const fieldClass = 'kt-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg';
+  const loginClass = `${fieldClass} fy-wf-login`;
 
   return (
     <Section title="Investigation (the assigned warden)">
@@ -74,7 +75,7 @@ export function InvestigationSection({
           <div className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
             <label htmlFor={loginId}>Login</label>
             <SelectBox
-              className={fieldClass}
+              className={loginClass}
               id={loginId}
               label="Login"
               value={head?.agent ?? ''}
