@@ -144,3 +144,44 @@
   background: var(--surface-2);
   color: var(--muted);
 }
+
+/* The preview beside "<Tool> is ready" (the frame's demo column): the runtime a ferret would start on, with this tool's answer. The frame
+   draws the box; this is only what is in it. Decorative: the words are on the page. */
+.ob-ready-demo {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px 16px;
+  width: 100%;
+}
+.ob-ready-demo__head {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+.ob-ready-demo__row {
+  align-items: center;
+  background: var(--surface-2);
+  border-radius: var(--radius-control);
+  color: var(--fg);
+  display: flex;
+  font-size: 0.875rem;
+  gap: 8px;
+  line-height: 1.3;
+  margin: 0;
+  min-width: 0;
+  padding: 8px 10px;
+}
+.ob-ready-demo__row > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ob-ready-demo__row[data-state='off'] {
+  color: var(--muted);
+}
+.ob-ready-demo__row[data-state='none'] {
+  border: 1px dashed var(--border);
+  color: var(--muted);
+}

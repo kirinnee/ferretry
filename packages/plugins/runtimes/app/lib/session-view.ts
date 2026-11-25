@@ -93,9 +93,9 @@ export const runtimeParts = (view: RuntimeSessionView): RuntimeParts => {
  * force (else the one it was launched on, else a plain word), then its thinking level and — only when it is on — `fast`,
  * joined by ` · `. One the ferret has not got is left out, never drawn as a guess.
  */
-export const runtimeReadout = (view: RuntimeSessionView): string => {
+export const runtimeReadout = (view: RuntimeSessionView, modelName: (id: string) => string = id => id): string => {
   const { model, effort, fast } = runtimeParts(view);
-  return [model ?? 'Default model', effort, fast === true ? 'fast' : undefined]
+  return [model === undefined ? 'Default model' : modelName(model), effort, fast === true ? 'fast' : undefined]
     .filter(part => part !== undefined)
     .join(' · ');
 };

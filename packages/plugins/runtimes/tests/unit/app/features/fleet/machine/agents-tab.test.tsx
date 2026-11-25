@@ -207,6 +207,29 @@ describe('the Agents tab', () => {
     expect(changes(calls)).toEqual([{ ...UNCHANGED, autoResume: false }]);
   });
 
+  it('E65b names a ferret auto-resume could not resume by its callsign, else by a short id, never the whole session id', async () => {
+    const view = await open({
+      machine: machine({
+        lastAutoResume: {
+          at: '2026-10-13T07:00:00.000Z',
+          resumed: 1,
+          skipped: [
+            { sessionId: 'mwgba16i-32ad7af6', reason: 'its folder is gone' },
+            { sessionId: 'mwzzzzzz-11112222', reason: 'its login is signed out' },
+          ],
+        },
+      } as unknown as Partial<MachineView>),
+      routes: {
+        'GET /v1/ferrets': [{ id: 'mwgba16i-32ad7af6', name: 'ms-98', harness: 'claude-code', state: 'idle' }],
+      },
+    });
+    const lines = [...view.container.querySelectorAll('[data-auto-resume-skipped]')].map(line => line.textContent);
+    expect(lines).toEqual([
+      'Couldn’t auto-resume Ms-98: its folder is gone',
+      'Couldn’t auto-resume mwzzzzzz: its login is signed out',
+    ]);
+  });
+
   it('agenda mode saves on its own', async () => {
     const calls: Call[] = [];
     const view = await open({ calls });

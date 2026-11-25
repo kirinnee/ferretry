@@ -66,12 +66,18 @@ const WINDOWS = [
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 
-const openScene = async (size: (typeof WINDOWS)[number], mode: 'light' | 'dark', query: string) => {
+const openScene = async (
+  size: (typeof WINDOWS)[number],
+  mode: 'light' | 'dark',
+  query: string,
+  /** A narrow window under a MOUSE (a desktop window dragged narrow): the pointer is not coarse, so the touch floor does not apply. */
+  mouse = false,
+) => {
   const context = await browser.newContext({
     viewport: { width: size.width, height: size.height },
     colorScheme: mode,
     deviceScaleFactor: size.phone ? 2 : 1,
-    ...(size.phone ? { isMobile: true, hasTouch: true } : {}),
+    ...(size.phone && !mouse ? { isMobile: true, hasTouch: true } : {}),
   });
   const origin = server?.url.origin ?? '';
   await context.route('**/*', async route =>
@@ -227,3 +233,40 @@ for (const mode of ['light', 'dark'] as const)
       });
     }
   });
+
+// L84c: the Catalog's "Try again" is a 44px target on a phone-wide window under a mouse too (a status region, not an alert).
+for (const mode of ['light', 'dark'] as const)
+  it(`at 390 under a mouse (${mode}): a catalog read failure's Try again is at least 44px tall`, async () => {
+    const phone = WINDOWS[1];
+    const { tab, close } = await openScene(phone, mode, 'view=failed', true);
+    try {
+      await tab.waitForSelector('[data-catalog-retry]');
+      const height = await tab
+        .locator('[data-catalog-retry]')
+        .evaluate(element => element.getBoundingClientRect().height);
+      expect(height).toBeGreaterThanOrEqual(44);
+      await shot(tab, `390-${mode}-catalog-retry`);
+      await noSideways(tab);
+    } finally {
+      await close();
+    }
+  });
+
+// L268: an enabled runtime whose login needs sign-in says so in words on its row, not by a hollow ring alone.
+for (const mode of ['light', 'dark'] as const)
+  for (const size of WINDOWS)
+    it(`at ${size.name} (${mode}): a runtime that needs sign-in says so in words on its row`, async () => {
+      const { tab, close } = await openScene(size, mode, 'view=runtimes&logins=1&codex=1&signin=1');
+      try {
+        await tab.waitForSelector('[data-runtime-row="codex-personal"]');
+        await tab.waitForTimeout(400);
+        const row = tab.locator('[data-runtime-row="codex-personal"]');
+        expect((await row.innerText()).replaceAll('\n', ' ')).toContain('Needs sign-in');
+        const readyRow = tab.locator('[data-runtime-row="atomi"]');
+        expect(await readyRow.innerText()).not.toContain('Needs sign-in');
+        await shot(tab, `${size.name}-${mode}-runtime-needs-sign-in`);
+        await noSideways(tab);
+      } finally {
+        await close();
+      }
+    });
