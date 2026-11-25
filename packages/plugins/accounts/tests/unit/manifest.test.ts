@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { AUDIT, CONFIGURE, NARROW_CONFIGURE, SKIP_READ, USE } from '../../contract/index.ts';
+import { STEP_UP_ACTS } from '@ferretry/core-gate/contract';
 import manifest from '../../manifest.ts';
 
 const routes = manifest.actions.routes;
@@ -67,5 +68,9 @@ describe('accounts manifest', () => {
       'step-up.stages:approve-sign-in-rule',
       'step-up.stages:approve-paste-rule',
     ]);
+  });
+  test('viewing sign-in plans asks to show them, never to open a terminal', () => {
+    const claim = routes.find(route => route.key === 'GET /v1/accounts/plans')?.capability;
+    expect(claim?.act).toBe(STEP_UP_ACTS.showSignInPlans);
   });
 });

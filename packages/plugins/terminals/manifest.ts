@@ -1,4 +1,5 @@
 import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
+import { STEP_UP_ACTS } from '@ferretry/core-gate/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { HoldsChanged, InputTargets, VaultPort } from '@ferretry/core-vault/contract';
 import { AgentControlPort, FerretsPort, JobKeeper, Runners } from '@ferretry/core-ferrets/contract';
@@ -201,7 +202,7 @@ export default definePlugin({
       route('GET /v1/terminals', {
         minimum: 'operator',
         caller: 'any',
-        capability: USE.terminal,
+        capability: { ...USE.terminal, act: STEP_UP_ACTS.showTerminals },
         noStore: true,
         audit: SKIP_READ,
         guard: 'secrets',

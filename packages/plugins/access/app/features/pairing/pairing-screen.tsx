@@ -794,10 +794,10 @@ function PairingFocus({
         }
       >
         {target.address === undefined ? (
-          // No address means the machine is reached through the relay (a loopback address seen from another device is never
-          // shown), so the line names the target and never claims it is THIS device. On the daemon's own machine the line is
-          // the direct one below, with its address.
-          `Connecting to the machine ${target.path}.`
+          // No address means a loopback address seen from another device (never shown). Nothing has been measured yet (the
+          // path is only known once the exchange ran, and it can turn out direct), so the line names the target and claims
+          // neither this device nor a carrier. On the daemon's own machine the line is the direct one below, with its address.
+          'Connecting to the machine.'
         ) : (
           <>
             Pairing directly with <span className="break-all font-mono font-semibold">{target.address}</span>

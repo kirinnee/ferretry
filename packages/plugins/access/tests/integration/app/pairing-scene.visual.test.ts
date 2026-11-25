@@ -232,10 +232,8 @@ describe('The pair page: mascot and night sky', () => {
             'desktop: Not now sits right beside it, one 12px gap',
           ).toBeCloseTo(12, 0);
         }
-        // Another device is not "this computer": the relayed line names the target and how it is reached, word for word.
-        expect(await tab.locator('[data-daemon-path]').innerText()).toBe(
-          'Connecting to the machine through the relay. Details',
-        );
+        // Another device is not "this computer", and no path is measured before the exchange: the line names the target and claims no carrier, word for word.
+        expect(await tab.locator('[data-daemon-path]').innerText()).toBe('Connecting to the machine. Details');
         await shot(tab, variant, 'pair');
         await tab.locator('[data-pair-details] button', { hasText: 'Details' }).click();
         await shot(tab, variant, 'details');

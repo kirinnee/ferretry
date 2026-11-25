@@ -773,12 +773,12 @@ describe('PairingScreen never shows the loopback address of a relayed daemon', (
   };
   const loopbackArrival: PairingArrival = { kind: 'seed', seed: LOOPBACK_SEED };
 
-  it('confirms with "through the relay" and no address, and keeps the fingerprint behind Details', async () => {
+  it('confirms with no carrier claimed and no address, and keeps the fingerprint behind Details', async () => {
     const screen = await screenWith({ arrival: loopbackArrival, sameMachine: false });
 
-    // Another device is not "this computer": the line names the target and says how it is reached, nothing more.
+    // Another device is not "this computer": the line names the target and claims no carrier before one is measured.
     const line = must(screen.container.querySelector('[data-daemon-path]'), 'the machine line');
-    expect(line.textContent).toBe('Connecting to the machine through the relay. Details');
+    expect(line.textContent).toBe('Connecting to the machine. Details');
     expect(screen.container.textContent).not.toContain('this computer');
     expect(screen.container.textContent).not.toContain('127.0.0.1');
     expect(screen.container.textContent).not.toContain('7617');

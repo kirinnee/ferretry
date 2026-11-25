@@ -4,6 +4,8 @@
  *
  *   ?theme=<family>-<mode>
  *
+ * Every ferret is an agent (`auto`) except Release train, the one interactive one the Agents filter hides.
+ *
  * A viewport under 768px draws the phone's page, as the shell does.
  */
 
@@ -41,7 +43,8 @@ const needsYou = [
   ),
   inboxCard(
     agendaItem('A3', { subject: 'Ship the relay fix today?', ask: choices('Ship', 'Hold') }),
-    sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train' } }),
+    // The one interactive ferret: the Agents filter hides it.
+    sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train', mode: 'interactive' } }),
   ),
 ];
 const withFerret = inboxCard(
