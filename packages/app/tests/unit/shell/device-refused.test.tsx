@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { implementApp, type Manifest } from '@ferretry/kernel/manifest';
-import { DEVICE_NOT_ACCEPTED_SENTENCE } from '../../../src/client/sentences.ts';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { pairAgainHref } from '../../../src/router/routes.ts';
@@ -85,7 +84,17 @@ describe('C1 a machine that answered 4403', () => {
     const rig = setup();
     const view = await render(rig);
     await settle();
-    expect(view.container.querySelector('main')?.textContent).toContain(DEVICE_NOT_ACCEPTED_SENTENCE);
+    // ONE full page, not a line over an empty shell: the headline names the machine in plain words, nothing of the chrome is left.
+    const headline = view.container.querySelector('h1') as HTMLElement;
+    expect(headline.textContent).toBe("This browser isn't connected to laptop any more");
+    expect(view.container.querySelectorAll('h1').length).toBe(1);
+    expect(
+      view.container.querySelector('.fy-drawer, [data-slot="bottom"], [data-slot="phone-title"], [data-drawer-find]'),
+    ).toBeNull();
+    expect(document.activeElement).toBe(headline);
+    // Announced once, from the focus: the page draws no live region of its own.
+    expect(view.container.querySelector('[role="status"], [role="alert"], [aria-live]')).toBeNull();
+    expect(view.container.querySelector('main')?.textContent).toContain('went unused for too long');
     expect(view.container.textContent).not.toContain('The board screen');
     const pairAgain = view.container.querySelector('[data-device-refused-pair]') as HTMLButtonElement;
     expect(pairAgain.textContent).toBe('Pair again');

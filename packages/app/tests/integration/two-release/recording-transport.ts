@@ -11,6 +11,7 @@ export class RecordingTransport implements DaemonTransport {
   readonly #requests: string[] = [];
   readonly #sockets: string[] = [];
   #eventOpens = 0;
+  #closed = false;
 
   constructor(private readonly inner: DaemonTransport) {}
 
@@ -41,6 +42,9 @@ export class RecordingTransport implements DaemonTransport {
   }
 
   request: DaemonTransport['request'] = request => {
+    // A read the client had already decided on (a re-read after a reconnect) can land after the runtime closed this
+    // transport; it must not dial a session nothing would ever close.
+    if (this.#closed) return Promise.reject(new Error('the transport was closed'));
     this.#requests.push(`${(request as TransportRequest).method} ${request.path}`);
     return this.inner.request(request);
   };
@@ -56,4 +60,10 @@ export class RecordingTransport implements DaemonTransport {
   };
 
   onReconnect: DaemonTransport['onReconnect'] = listener => this.inner.onReconnect(listener);
+
+  /** The runtime ends a connection it holds by calling this on the transport IT holds, which is this wrapper: pass it on. */
+  close(): void {
+    this.#closed = true;
+    this.inner.close?.();
+  }
 }

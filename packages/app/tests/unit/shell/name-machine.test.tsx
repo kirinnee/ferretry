@@ -422,10 +422,11 @@ describe('Name this machine', () => {
     expect(open.writes()).toHaveLength(1);
   });
 
-  test('the machine picker keeps the name it learned while the machine refuses its plugin list', async () => {
+  test('the page keeps the name it learned while the machine refuses its plugin list', async () => {
     open = await boot({ learned: 'pebox' });
-    const shown = open.view.container.querySelector('[data-daemon-picker] .fy-daemon-picker__name')?.textContent;
-    expect(shown).toBe('pebox');
-    expect(shown).not.toBe(HOST);
+    // The machine turned this browser away: the one full page names it by what this device learned, never by its host name.
+    const shown = open.view.container.querySelector('h1')?.textContent;
+    expect(shown).toBe('This browser was turned away by pebox');
+    expect(shown).not.toContain(HOST);
   });
 });

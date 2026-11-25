@@ -5,6 +5,8 @@ import {
   CARRIER_OUTAGE_CODE,
   DaemonCallError,
   DEVICE_REFUSED_CLOSE_CODE,
+  VERSION_UNSUPPORTED_CLOSE_CODE,
+  isVersionUnsupported,
   DEVICE_REFUSED_CODE,
   isCarrierGone,
   isCarrierOutage,
@@ -211,6 +213,14 @@ describe('S12 a daemon that refuses this device', () => {
     expect(isDeviceRefusal(new RelaySessionError('no', RELAY_CLOSE_CODES.daemonAbsent))).toBe(false);
     expect(isDeviceRefusal(new Error('4403'))).toBe(false);
     expect(isDeviceRefusal(undefined)).toBe(false);
+  });
+
+  test('the version-unsupported code the client reads is the wire’s own', () => {
+    expect(VERSION_UNSUPPORTED_CLOSE_CODE).toBe(RELAY_CLOSE_CODES.versionUnsupported);
+    expect(isVersionUnsupported(new RelaySessionError('no', RELAY_CLOSE_CODES.versionUnsupported))).toBe(true);
+    expect(isVersionUnsupported(new RelaySessionError('no', RELAY_CLOSE_CODES.authRejected))).toBe(false);
+    expect(isVersionUnsupported(new Error('4426'))).toBe(false);
+    expect(isVersionUnsupported(undefined)).toBe(false);
   });
 
   test('a refused call is device_refused (not an outage) and tells the shell ONCE', async () => {
