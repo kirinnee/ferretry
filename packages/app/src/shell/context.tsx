@@ -72,6 +72,11 @@ export function WithoutShell({ children }: { readonly children: ReactNode }) {
   return <ShellContext.Provider value={null}>{children}</ShellContext.Provider>;
 }
 
+/** The app build this browser runs; `undefined` outside a shell (a harness, a test), where nothing says which build it is. */
+export function useAppVersion(): string | undefined {
+  return useOptionalShell()?.runtime.appVersion;
+}
+
 export function useShell(): ShellModel {
   const model = useContext(ShellContext);
   if (model === null) throw new Error('useShell must be rendered inside ShellProvider');

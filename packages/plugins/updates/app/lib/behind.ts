@@ -1,11 +1,12 @@
 /**
  * What the app says of a daemon that is behind, and the request each button sends. Pure: the views draw it.
- * The daemon decides what is behind (`available`); the app never compares versions itself.
+ * The daemon decides what is behind (`available`); the app compares only its own build with the machine's.
  */
 import {
   type DaemonUpdateStartRequest,
   type DaemonUpdateView,
   DAEMON_UPDATE_CODES,
+  compareVersions,
   knownLatestRelease,
 } from '../../contract/index.ts';
 
@@ -74,4 +75,50 @@ export function headlineSentence(view: DaemonUpdateView): string {
       : `This daemon is up to date as of the last good check; the newest check failed (${check.reason}).`;
   }
   return 'This daemon is up to date.';
+}
+
+/** How the build running in this browser stands against the installed machine. */
+export type AppStanding =
+  | { readonly kind: 'matches' }
+  | { readonly kind: 'newer' }
+  | { readonly kind: 'older' }
+  | { readonly kind: 'unknown'; readonly why: 'no-build' | 'unreadable' };
+
+export function appStanding(appVersion: string | undefined, machineVersion: string): AppStanding {
+  if (appVersion === undefined) return { kind: 'unknown', why: 'no-build' };
+  const order = compareVersions(appVersion, machineVersion);
+  if (order === undefined) return { kind: 'unknown', why: 'unreadable' };
+  return { kind: order === 0 ? 'matches' : order > 0 ? 'newer' : 'older' };
+}
+
+/** The badge and the sentence for one standing: what to do when the two differ. */
+export function appStandingWords(standing: AppStanding): {
+  readonly tone: 'ok' | 'warn' | 'pend';
+  readonly text: string;
+  readonly hint: string;
+} {
+  switch (standing.kind) {
+    case 'matches':
+      return { tone: 'ok', text: 'Matches this machine', hint: 'This app and the machine run the same version.' };
+    case 'newer':
+      return {
+        tone: 'warn',
+        text: 'Newer than this machine',
+        hint: 'Update the machine so it matches this app.',
+      };
+    case 'older':
+      return {
+        tone: 'warn',
+        text: 'Older than this machine',
+        hint: 'Reload to get the app that matches this machine.',
+      };
+    case 'unknown':
+      return standing.why === 'no-build'
+        ? { tone: 'pend', text: 'Unknown', hint: 'This page did not say which build it runs.' }
+        : {
+            tone: 'pend',
+            text: 'Cannot compare',
+            hint: 'This build’s version is not one the machine’s can be compared with.',
+          };
+  }
 }

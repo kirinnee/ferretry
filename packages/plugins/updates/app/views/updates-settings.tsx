@@ -4,7 +4,7 @@
  * the daemon answers `202` with the sentence and the switch stays off until then.
  */
 
-import { Badge, Button, SettingGroup, SettingRow, SettingSwitch, viewerTime } from '@ferretry/app';
+import { Badge, Button, SettingGroup, SettingRow, SettingSwitch, useAppVersion, viewerTime } from '@ferretry/app';
 import { Loading } from '@ferretry/app/ui';
 import type { AppComponent, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { useEffect, useState } from 'react';
@@ -15,11 +15,19 @@ import {
   describeInstallMethod,
   knownLatestRelease,
 } from '../../contract/index.ts';
-import { headlineSentence, refusalSentence, updateOffer, updateRequest } from '../lib/behind.ts';
+import {
+  appStanding,
+  appStandingWords,
+  headlineSentence,
+  refusalSentence,
+  updateOffer,
+  updateRequest,
+} from '../lib/behind.ts';
 import { pollUpdateStatus } from '../lib/poll-status.ts';
 
 export const createSettings = (client: PluginClient): AppComponent<SettingsProps> =>
   function UpdatesSettings() {
+    const appVersion = useAppVersion();
     const [view, setView] = useState<DaemonUpdateView | null>(null);
     const [note, setNote] = useState<string | null>(null);
     const [readError, setReadError] = useState<string | null>(null);
@@ -78,6 +86,7 @@ export const createSettings = (client: PluginClient): AppComponent<SettingsProps
     return (
       <UpdatesView
         view={view}
+        appVersion={appVersion}
         note={note}
         readError={readError}
         onStart={(target, when) => void start(target, when)}
@@ -88,6 +97,8 @@ export const createSettings = (client: PluginClient): AppComponent<SettingsProps
 
 export interface UpdatesViewProps {
   readonly view: DaemonUpdateView;
+  /** The build this browser runs; `undefined` where the page cannot say. */
+  readonly appVersion?: string | undefined;
   readonly note: string | null;
   readonly readError: string | null;
   readonly onStart: (target: string, when: 'now' | 'when-idle') => void;
@@ -109,10 +120,11 @@ function lastCheckedWords(check: DaemonUpdateView['check']): string {
 }
 
 /** Settings › Updates, drawn from the daemon's own view: what runs, how it was installed, what is newer, and the switch. */
-export function UpdatesView({ view, note, readError, onStart, onAutoInstall }: UpdatesViewProps) {
+export function UpdatesView({ view, appVersion, note, readError, onStart, onAutoInstall }: UpdatesViewProps) {
   const offer = updateOffer(view);
   const badge = statusBadge(view);
   const latest = knownLatestRelease(view.check);
+  const app = appStandingWords(appStanding(appVersion, view.current));
   return (
     <section
       aria-label="Updates"
@@ -167,6 +179,14 @@ export function UpdatesView({ view, note, readError, onStart, onAutoInstall }: U
           </SettingRow>
         ) : null}
         {view.job?.state === 'finished' ? <SettingRow name="Last update" hint={view.job.report.message} /> : null}
+      </SettingGroup>
+      <SettingGroup label="This app">
+        <SettingRow
+          name="Version"
+          hint="The build running in this browser"
+          control={() => <span className="text-ui font-semibold text-fg">{appVersion ?? 'Unknown'}</span>}
+        />
+        <SettingRow name="Match" hint={app.hint} control={() => <Badge tone={app.tone}>{app.text}</Badge>} />
       </SettingGroup>
       <SettingGroup label="Automatic updates">
         <SettingRow
