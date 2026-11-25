@@ -265,7 +265,14 @@ export async function openApp(
   }
 
   let latest: RecordingTransport | undefined;
-  let opened: (DaemonTransport & { close?: () => void }) | undefined;
+  // EVERY session the app opened, not only the latest: a reconnect that races a close would otherwise leave a live socket the
+  // daemon's stop then waits on. After `close` nothing new is kept: a late connect is closed on the spot.
+  const opened = new Set<DaemonTransport & { close?: () => void }>();
+  let closed = false;
+  const closeAll = (): void => {
+    for (const transport of [...opened]) transport.close?.();
+    opened.clear();
+  };
   const runtime = new ShellRuntime({
     appVersion: app.appVersion,
     surfaces: app.surfaces,
@@ -273,7 +280,11 @@ export async function openApp(
     connect: async paired => {
       const transport: DaemonTransport | undefined = await connect(paired);
       if (transport === undefined) return undefined;
-      opened = transport;
+      if (closed) {
+        (transport as { close?: () => void }).close?.();
+        return undefined;
+      }
+      opened.add(transport);
       latest = new RecordingTransport(transport);
       return latest;
     },
@@ -285,8 +296,9 @@ export async function openApp(
     storage,
     daemonId,
     close: () => {
+      closed = true;
       daemons.remove(daemonId);
-      opened?.close?.();
+      closeAll();
       for (const undo of restore) undo();
     },
     dialled,
@@ -294,7 +306,7 @@ export async function openApp(
       relayState.up = up;
     },
     endAppSessions: () => {
-      opened?.close?.();
+      closeAll();
     },
     probe: async () => {
       const paired = daemons.get(daemonId);

@@ -40,7 +40,8 @@ afterEach(() => {
 
 const CAUSE = 'Relay only — there is no relay for this machine right now.';
 
-async function render() {
+/** `unreachable`: the only paired machine has no carrier to open a session over (no key kept for it, or no route). */
+async function render(options: { readonly unreachable?: boolean } = {}) {
   const transport = new FakeTransport(() => {
     throw new RelaySessionError(CAUSE, RELAY_CLOSE_CODES.daemonAbsent);
   });
@@ -52,7 +53,7 @@ async function render() {
     appVersion: '5.0.0',
     surfaces: [...CORE],
     daemons,
-    connect: async () => transport,
+    connect: async () => (options.unreachable === true ? undefined : transport),
   });
   go('/d/d1');
   const view = await mount(
@@ -87,6 +88,22 @@ describe('a machine whose plugin list could not be read through its carrier', ()
     await settle();
     expect(window.location.pathname).toBe(DEVICE_SETTINGS_HREF);
     expect(view.container.querySelector('[data-whole-daemon-connection]')).toBeNull();
+    await view.unmount();
+  });
+});
+
+describe('a machine this browser cannot reach at all (no key kept, no carrier)', () => {
+  test('Connection settings leaves the stop page for This device’s settings, not back into the machine', async () => {
+    const view = await render({ unreachable: true });
+    expect(view.container.querySelector('[data-machine-stop]')?.getAttribute('data-machine-stop')).toBe('no-key');
+    const link = view.container.querySelector('[data-whole-daemon-connection] a') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe(DEVICE_SETTINGS_HREF);
+    await interact(async () => link.click());
+    await settle();
+    // The recovery page stays: it must not treat the unreachable machine as usable and bounce to /d/d1/settings/device.
+    expect(window.location.pathname).toBe(DEVICE_SETTINGS_HREF);
+    expect(view.container.querySelector('[data-machine-stop]')).toBeNull();
+    expect(view.container.querySelector('h1')?.textContent).toBe('This device');
     await view.unmount();
   });
 });

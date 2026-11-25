@@ -87,7 +87,7 @@ export function describeStop(facts: StopFacts): MachineStop {
       return {
         kind: 'no-key',
         headline: `This browser can't reach ${name}`,
-        why: `It has no saved key for ${name} here, which happens when this browser's site data was cleared. Pair it again.`,
+        why: `This browser has no working way in to ${name}: its saved key may be gone (site data cleared) or unreadable, or no route to it is available. Pairing it again usually fixes it.`,
         primary: { action: 'pair-again', label: 'Pair again' },
         reference: 'Reference: no session could be opened for this pairing.',
       };
@@ -144,6 +144,9 @@ export function stopOf(runtime: ShellRuntime, daemon: string): StopFacts | undef
   const inventory = connection.client.inventory;
   const detail = runtime.wholeDaemonDetail(daemon);
   const withDetail = detail === undefined ? {} : { detail };
+  // The machine ended the session with its own "update this app" (`4426`): the same answer as a newer build, not a failed read.
+  if (inventory?.kind === 'unreadable' && inventory.versionUnsupported === true)
+    return { kind: 'needs-reload', machine, ...withDetail };
   if (inventory?.kind === 'unreadable') {
     const refusal = inventory.refusal;
     return refusal === undefined

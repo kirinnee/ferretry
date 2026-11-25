@@ -83,6 +83,14 @@ describe('which end state a machine is in', () => {
     expect(stopOf(runtime, 'd1')).toEqual({ kind: 'unreadable', machine: 'laptop', detail: 'the carrier dropped' });
   });
 
+  test('the machine’s own "update this app" (4426) is "needs-reload", not an unreadable list with a Reload button', async () => {
+    const message = 'this app speaks a version the daemon does not';
+    const runtime = await runtimeOf({
+      plugins: () => Promise.reject(new RelaySessionError(message, RELAY_CLOSE_CODES.versionUnsupported)),
+    });
+    expect(stopOf(runtime, 'd1')).toEqual({ kind: 'needs-reload', machine: 'laptop', detail: message });
+  });
+
   test('a 200 that is not a plugin list is "unreadable" too', async () => {
     const runtime = await runtimeOf({ plugins: () => json({ protocol: 1, plugins: 'nope' }) });
     expect(stopOf(runtime, 'd1')?.kind).toBe('unreadable');
@@ -151,6 +159,12 @@ describe('the words of each page', () => {
     expect(stop.why).toContain('removed');
     expect(stop.why).toContain('unused for too long');
     expect(stop.primary).toEqual({ action: 'pair-again', label: 'Pair again' });
+  });
+
+  test('the no-key sentence fits all three causes: key gone, key unreadable, no route to the machine', () => {
+    const why = describeStop({ kind: 'no-key', machine: 'laptop' }).why;
+    expect(why).toContain('gone (site data cleared) or unreadable');
+    expect(why).toContain('no route to it is available');
   });
 
   test('a machine’s own sentence ends in exactly one full stop', () => {
