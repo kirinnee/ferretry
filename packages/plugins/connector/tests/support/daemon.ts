@@ -1,6 +1,9 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { FerretRecordSchema } from '../../../../core/ferrets/contract/ids.ts';
+import { FerretTokensSchema } from '../../../../core/ferrets/contract/state.ts';
 
 /**
  * A REAL 5.0 daemon for the connector's end-to-end test: the production `fyd` (every real plugin, the real route spine,
@@ -20,8 +23,15 @@ interface RanFy {
   readonly json: unknown;
 }
 
+/** The one ferret every real daemon here is seeded with, so a test can present a REAL ferret credential. */
+export const SEEDED_FERRET = 'e2e-ferret';
+
 export interface RealDaemon {
   readonly home: string;
+  /** The seeded ferret's own session credential (a fake value the daemon holds only the digest of). */
+  readonly ferretToken: string;
+  /** Everything the daemon has written to stdout and stderr so far. */
+  output(): string;
   dispose(): Promise<void>;
   /** One owner request to the daemon's API (the admin bearer from the home's own token file). */
   call(
@@ -44,6 +54,41 @@ export async function bootRealDaemon(seed: Readonly<Record<string, string>> = {}
   await writeFile(
     join(home, 'home.json'),
     JSON.stringify({ format: 1, createdBy: 'connector-real-daemon', createdAt: '2026-11-13T00:00:00.000Z' }),
+  );
+  // A schema-validated ferret record plus its bearer's digest, as the CLI's real-daemon tier seeds one: no harness or pane.
+  const ferretToken = `fys_${randomBytes(32).toString('base64url')}`;
+  const stamp = '2026-11-13T00:00:00.000Z';
+  await mkdir(join(home, 'state/ferrets', SEEDED_FERRET), { recursive: true });
+  await writeFile(
+    join(home, 'state/ferrets', SEEDED_FERRET, 'ferret.json'),
+    JSON.stringify(
+      FerretRecordSchema.parse({
+        format: 1,
+        id: SEEDED_FERRET,
+        name: SEEDED_FERRET,
+        role: 'lead',
+        mode: 'auto',
+        harness: 'codex',
+        runner: 'tmux',
+        folder: root,
+        state: 'starting',
+        birth: 'person',
+        createdAt: stamp,
+        stateAt: stamp,
+      }),
+    ),
+  );
+  await writeFile(
+    join(home, 'state/ferrets/tokens.json'),
+    JSON.stringify(
+      FerretTokensSchema.parse({
+        format: 1,
+        tokens: [
+          { ferret: SEEDED_FERRET, digest: createHash('sha256').update(ferretToken).digest('hex'), issuedAt: stamp },
+        ],
+      }),
+    ),
+    { mode: 0o600 },
   );
   for (const [path, text] of Object.entries(seed)) {
     await mkdir(join(home, path, '..'), { recursive: true });
@@ -101,6 +146,8 @@ export async function bootRealDaemon(seed: Readonly<Record<string, string>> = {}
   const url = `http://127.0.0.1:${String(run.port)}`;
   return {
     home,
+    ferretToken,
+    output: () => log.join(''),
     async dispose() {
       await stop();
       await rm(root, { recursive: true, force: true });

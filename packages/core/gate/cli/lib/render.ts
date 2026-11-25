@@ -88,7 +88,18 @@ const EVENT_WORDS: Readonly<Record<AuditKindName, string>> = {
   'phone-approval.settled': 'A sign-in to approve on your phone ended',
 };
 
-const eventWords = (event: string): string => (EVENT_WORDS as Readonly<Record<string, string>>)[event] ?? event;
+/** What a plugin's own kinds are called to a person (the Claude connector's: `packages/plugins/connector`). */
+const PLUGIN_EVENT_WORDS: Readonly<Record<string, string>> = {
+  'connector.client-registered': 'A Claude connector client registered',
+  'connector.grant-approved': 'A Claude connector sign-in was approved',
+  'connector.grant-denied': 'A Claude connector sign-in was turned down',
+  'connector.grant-revoked': 'A Claude connector grant was ended',
+  'connector.refresh-reused': 'A used Claude connector refresh token was presented again, so its grant was ended',
+  'connector.tool': 'A Claude connector tool was called',
+};
+
+const eventWords = (event: string): string =>
+  (EVENT_WORDS as Readonly<Record<string, string>>)[event] ?? PLUGIN_EVENT_WORDS[event] ?? event;
 
 const pad = (value: number): string => String(value).padStart(2, '0');
 

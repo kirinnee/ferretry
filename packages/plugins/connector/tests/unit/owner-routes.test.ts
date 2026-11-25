@@ -150,12 +150,15 @@ describe('approving (S7)', () => {
     const handlers = ownerRoutes(w.service);
     const first = await waiting(w);
     await signIn(w, 'Second app');
-    const call = owner({ params: { id: first.id }, governed: true, actor: 'device:d1', proofs: ['approve-connector'] });
+    // One proof ledger for both calls: the first spends the proof, so the second holds a STALE one.
+    const proofs = ['approve-connector'];
+    const call = owner({ params: { id: first.id }, governed: true, actor: 'device:d1', proofs });
     expect((await handlers['POST /v1/connector/requests/:id/approve'](call)).status).toBe(200);
+    expect(proofs).toEqual([]);
     expect(w.events).toContainEqual(expect.objectContaining({ kind: 'connector.grant.approved', actor: 'device:d1' }));
     const [second] = await w.service.authority.pending();
     const again = await handlers['POST /v1/connector/requests/:id/approve'](
-      owner({ params: { id: second?.id ?? '' }, governed: true, actor: 'device:d1' }),
+      owner({ params: { id: second?.id ?? '' }, governed: true, actor: 'device:d1', proofs }),
     );
     expect(again.status).toBe(403);
   });

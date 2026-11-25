@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { bootRealDaemon, type RealDaemon } from '../support/daemon.ts';
+import { bootRealDaemon, SEEDED_FERRET, type RealDaemon } from '../support/daemon.ts';
 
 /**
  * The connector END TO END on a REAL daemon: the production `fyd` (every real plugin, the real route spine, Gate and the
@@ -194,6 +194,8 @@ describe('the connector on a real daemon, at its own address', () => {
     expect((await stat(join(dir, 'connector.json'))).mode & 0o777).toBe(0o600);
     const audit = await daemon.call('GET', '/v1/audit');
     for (const secret of secrets) expect(audit.text).not.toContain(secret);
+    // ... nor does anything the daemon printed.
+    for (const secret of secrets) expect(daemon.output()).not.toContain(secret);
     expect(audit.text).toContain('connector.grant-approved');
   }, 60_000);
 
@@ -230,14 +232,26 @@ describe('the connector on a real daemon, at its own address', () => {
     expect(again.code).toBe(1);
   }, 60_000);
 
-  test("a ferret cannot approve its own client: the owner routes are a person's", async () => {
-    const refused = await daemon.call(
-      'POST',
-      '/v1/connector/requests/ZZZ-ZZZ/approve',
-      {},
-      { authorization: 'Bearer fys_not-a-real-session-credential' },
-    );
-    expect([401, 403]).toContain(refused.status);
+  test("a ferret cannot approve its own client: its REAL credential is refused by the person's route, not by a bad bearer", async () => {
+    // The seeded ferret's own credential authenticates (it can read its own record) ...
+    const own = await daemon.call('GET', `/v1/ferrets/${SEEDED_FERRET}`, undefined, {
+      authorization: `Bearer ${daemon.ferretToken}`,
+    });
+    expect(own.status, own.text).toBe(200);
+    // ... and the owner routes still refuse it as a ferret (never 401 bad credential), with nothing approved.
+    for (const [method, path] of [
+      ['POST', '/v1/connector/requests/ZZZ-ZZZ/approve'],
+      ['POST', '/v1/connector/requests/ZZZ-ZZZ/deny'],
+      ['PUT', '/v1/connector'],
+    ] as const) {
+      const refused = await daemon.call(method, path, method === 'PUT' ? { enabled: false } : {}, {
+        authorization: `Bearer ${daemon.ferretToken}`,
+      });
+      expect(refused.status, `${method} ${path}: ${refused.text}`).toBe(403);
+      expect(refused.text).not.toContain('bad_credential');
+    }
+    const after = await daemon.fy(['connector', '--json']);
+    expect(after.json).toMatchObject({ enabled: true, switchedOn: true });
   });
 
   test('a page for a sign-in that is gone says how to connect again, and is 400 HTML', async () => {

@@ -23,6 +23,8 @@ export interface ConnectorCrypto {
 export interface PendingAuthorization {
   readonly view: ConnectorPendingView;
   readonly clientId: string;
+  /** The origin (OAuth issuer) this sign-in was started under; it is good for no other (see `ConnectorAuthority.trusted`). */
+  readonly issuer: string;
   /** Where the sign-in came from (`ApiRequest.clientAddress`); absent counts as the shared `unknown` source. */
   readonly source?: string;
   readonly redirectUri: string;
@@ -35,6 +37,8 @@ export interface PendingAuthorization {
 export interface AuthorizationCode {
   readonly grantId: string;
   readonly clientId: string;
+  /** The origin (OAuth issuer) that issued this code; redeemed under any other it mints nothing. */
+  readonly issuer: string;
   readonly redirectUri: string;
   readonly challenge: string;
   readonly expiresAt: number;

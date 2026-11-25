@@ -163,9 +163,18 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     const chars = Array.from(this.ports.crypto.randomBytes(6), n => alphabet[n % alphabet.length]).join('');
     return `${chars.slice(0, 3)}-${chars.slice(3)}`;
   }
+  /**
+   * A sign-in or code is good only under the trust it was issued under. The origin and the callback allow-list are
+   * both read LIVE, so a new `publicUrl`, a re-provisioned tunnel or a callback removed from `extraRedirectUris`
+   * ends every flow already in the air — at the next poll, approval or redemption, whichever comes first.
+   */
+  private trusted(issued: { readonly issuer: string; readonly redirectUri: string }): boolean {
+    return issued.issuer === this.ports.endpoints.issuer && this.redirectAllowed(issued.redirectUri);
+  }
   private prune(): void {
     for (const [key, request] of this.ports.memory.pending) {
-      if (Date.parse(request.view.expiresAt) <= this.now()) this.ports.memory.pending.delete(key);
+      if (Date.parse(request.view.expiresAt) <= this.now() || !this.trusted(request))
+        this.ports.memory.pending.delete(key);
     }
     // Used-code tombstones survive expiry for the live grant, so replay still revokes that grant.
     for (const [key, code] of this.ports.memory.codes) {
@@ -431,6 +440,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     this.ports.memory.pending.set(handleDigest, {
       handleDigest,
       clientId: client.id,
+      issuer: this.ports.endpoints.issuer,
       source,
       redirectUri: input.redirect_uri,
       state: input.state,
@@ -468,7 +478,8 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       const found = this.findRequest(id);
       if (!found) return { ok: false, code: 'not_found', message: 'No matching sign-in.' };
       const [key, request] = found;
-      if (Date.parse(request.view.expiresAt) <= this.now())
+      // A sign-in whose origin or callback is no longer trusted is dead: nothing is approved for the new trust.
+      if (Date.parse(request.view.expiresAt) <= this.now() || !this.trusted(request))
         return { ok: false, code: 'expired', message: 'This sign-in expired.' };
       if (request.decision) return { ok: false, code: 'already_decided', message: 'This sign-in was already decided.' };
       const state = await this.ports.store.load();
@@ -500,7 +511,8 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       const found = this.findRequest(id);
       if (!found) return { ok: false, code: 'not_found', message: 'No matching sign-in.' };
       const [key, request] = found;
-      if (Date.parse(request.view.expiresAt) <= this.now())
+      // A sign-in whose origin or callback is no longer trusted is dead: nothing is approved for the new trust.
+      if (Date.parse(request.view.expiresAt) <= this.now() || !this.trusted(request))
         return { ok: false, code: 'expired', message: 'This sign-in expired.' };
       if (request.decision) return { ok: false, code: 'already_decided', message: 'This sign-in was already decided.' };
       this.ports.memory.pending.set(key, { ...request, decision: 'denied' });
@@ -530,7 +542,9 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     this.prune();
     const key = await digest(this.ports.crypto, handle);
     const request = this.ports.memory.pending.get(key);
-    if (!request)
+    // Judged again after the digest await: trust that changed in between still ends the flow here.
+    if (request && !this.trusted(request)) this.ports.memory.pending.delete(key);
+    if (!request || !this.trusted(request))
       throw new OAuthError(
         'invalid_request',
         'This sign-in is unknown or expired. Start again.',
@@ -563,6 +577,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       this.ports.memory.codes.set(await digest(this.ports.crypto, code), {
         grantId: request.grantId,
         clientId: request.clientId,
+        issuer: request.issuer,
         redirectUri: request.redirectUri,
         challenge: request.challenge,
         expiresAt: this.now() + 60_000,
@@ -667,6 +682,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       if (
         !grant ||
         grant.revokedAt ||
+        !this.trusted(code) ||
         code.expiresAt <= this.now() ||
         !input.code_verifier ||
         !/^[A-Za-z0-9._~-]{43,128}$/.test(input.code_verifier) ||

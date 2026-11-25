@@ -19,7 +19,8 @@ The settings panel in the app is a later unit too; until then the switch is `con
    `cloudflared` set up for v4 keeps working), `extraRedirectUris`.
 2. **Live config.** The file is watched. A changed `publicUrl` or `port` re-opens the listener at once, and a change to
    `enabled` is served at once. v4's "restart it so they apply" and "still starting" refusals are gone. The issuer changes
-   with the address, so tokens for the old address stop working **by design** (unchanged).
+   with the address, so tokens for the old address stop working **by design** (unchanged), and so do the pending sign-ins
+   and codes of the old address (v4 lost them to the restart this edit used to need; 5.0 drops them explicitly).
 3. **A file edit that loosens is held.** Switching it on, a redirect URI that was not allowed before, and a new `publicUrl`
    are each a loosening: an agent's `fy config write`, or a hand edit, is **held for the owner** and the tighter version
    stays in effect ([config-files.md](config-files.md)). The app's switch and the machine's own admin token apply at once.
@@ -208,10 +209,24 @@ are only good while it is on) and needs no restart; **grants stay listed and rev
 one never means switching the connector back on. The config is watched, so a changed `publicUrl`, `port` or
 `extraRedirectUris` applies live; there is no "restart it" refusal.
 
-**Declared gap.** An authorization code the owner has approved but Claude has not yet redeemed (at most 60 s) is not bound to
-the origin it was approved for. If the tunnel hostname changed inside that window, redeeming it would issue a token for the
-new hostname. The sign-in is still the owner's own approved one, and the window needs a re-provision at exactly that moment;
-binding pending sign-ins to their resource is deferred. `GET /v1/connector` also says `switchedOn` (the owner's decision) beside `enabled` (reachable
+**Trust that changes while a sign-in is in the air.** The address and the callback allow-list apply LIVE (above), so a
+flow already under way must not outlive the trust it was started under. Every pending sign-in and every unredeemed code is
+**bound to the origin (issuer) that issued it**, and the CURRENT callback policy is enforced again at every later step:
+
+- a sign-in whose origin is no longer the issuer, or whose callback is no longer allowed, is dropped — it leaves the
+  owner's pending list, `approve` and `deny` answer `expired` and approve nothing, and its waiting page is "no longer
+  waiting";
+- at the waiting page's continuation, the code is minted only if the origin still matches and the callback is still
+  allowed; otherwise nothing is minted;
+- at redemption, a code issued under another origin, or for a callback no longer allowed, is `invalid_grant` and mints no
+  token (a code that was already spent still revokes its grant on replay, as always).
+
+**v4's 60-second tunnel-hostname exception no longer holds, and is removed.** v4 declared that a code approved but not yet
+redeemed (at most 60 s) was not bound to its origin, so a tunnel hostname that changed inside that window would have issued a token
+for the new hostname. v4 could say that because an explicit address or an allow-list edit needed a restart, which lost every
+pending flow anyway. 5.0 applies those edits live, so the binding above is what stops it: there is no window in which an
+old sign-in or code is good for a new origin. A re-provisioned tunnel therefore costs a sign-in in flight a retry, never
+a token for an address the owner did not approve it for. `GET /v1/connector` also says `switchedOn` (the owner's decision) beside `enabled` (reachable
 now) and `publicUrlSource` (`tunnel` or `configured`).
 
 ## Allowed redirect URIs
@@ -219,8 +234,9 @@ now) and `publicUrlSource` (`tunnel` or `configured`).
 `https://claude.ai/api/mcp/auth_callback` (verbatim from Anthropic's documentation, see "Sources"), plus
 `extraRedirectUris`. Dynamic client registration REFUSES (`invalid_redirect_uri`) a client whose
 `redirect_uris` contains anything else, and `/oauth/authorize` matches the redirect URI by exact string against
-the client's registered list AND re-checks it against the CURRENT allow-list (configuration can shrink between
-restarts, so a URI removed from `extraRedirectUris` stops authorizing even for a client registered with it). An
+the client's registered list AND re-checks it against the CURRENT allow-list (configuration shrinks live, so a URI removed from `extraRedirectUris` stops authorizing even for a client registered with it). The same
+current list is enforced again when a sign-in continues and when its code is redeemed (see "Trust that changes while a sign-in
+is in the air"). An
 unknown client or a redirect URI problem is shown as an error page (see "Pages a person sees") and NEVER redirected to.
 
 ## OAuth 2.1 details
@@ -247,7 +263,8 @@ unknown client or a redirect URI problem is shown as an error page (see "Pages a
   validated, a protocol error (`invalid_request` for a missing or non-S256 challenge, `unsupported_response_type`,
   `unauthorized_client`, `invalid_scope`, `invalid_target`) is a `302` to the `redirect_uri` with `error`,
   `error_description`, `state` (when sent) and `iss` (RFC 6749 §4.1.2.1).
-- **Codes**: 256 random bits, stored hashed, single-use, 60 s. A second use revokes the grant it minted.
+- **Codes**: 256 random bits, stored hashed, single-use, 60 s, bound to the issuing origin and checked against the current
+  callback allow-list at redemption. A second use revokes the grant it minted.
   The redirect carries `code`, `state` and `iss` (RFC 9207).
 - **Tokens**: opaque, `fyc_at_` + 43 base64url (access, 1 h) and `fyc_rt_` + 43 base64url (refresh, 30 days,
   rotated on every use). Only SHA-256 digests are stored. Presenting a rotated-away refresh token revokes the
@@ -343,7 +360,8 @@ the account safe and that connecting again is safe. Protocol errors redirected t
   fails the connector closed (every bearer check refuses, and the switch-on refuses with "restore connector.json") and is
   never read as "nobody is signed in" and rewritten. There is no reader for any older spelling. **No token, code or secret is ever written, logged,
   journalled or returned after the response that minted it.**
-- Pending requests, handles and codes live in memory only; a restart drops them (the sign-in is simply retried).
+- Pending requests, handles and codes live in memory only, each with the origin it was issued under; a restart or a change of
+  origin or callback drops them (the sign-in is simply retried).
 - `<FY_HOME>/state/connector/calls.jsonl`, `0600`, rotated to `.1.jsonl` at 1 MiB: one line per **write** tool
   call — time, tool, arguments (passed through the secret redactor, message text cut to 500 characters), grant id,
   the access token's id (the first 12 hex characters of its digest — never the token), and the outcome.

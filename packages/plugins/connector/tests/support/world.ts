@@ -177,11 +177,11 @@ export function owner(
     readonly body?: unknown;
     readonly actor?: string;
     readonly governed?: boolean;
-    /** The acts this caller holds a fresh passkey proof for (claimed once). */
+    /** The acts this caller holds a fresh passkey proof for (claimed once). Shared by reference: pass one array to two calls and a proof the first spent is gone for the second. */
     readonly proofs?: string[];
   } = {},
 ): CallContext {
-  const proofs = [...(options.proofs ?? [])];
+  const proofs = options.proofs ?? [];
   return {
     request: {
       method: 'POST',
