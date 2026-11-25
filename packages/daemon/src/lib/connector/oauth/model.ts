@@ -243,6 +243,7 @@ export type ReconnectReason = 'sign_in_gone' | 'cancelled' | 'unrecognised' | 'b
 /** The sentence every error Claude may show ends with: exactly where to connect again. */
 export const RECONNECT_HINT = 'Reconnect in Claude: Settings > Connectors > Ferretry > Connect.';
 /** The one description every `invalid_client` refusal carries, whatever made the client unacceptable. */
+export const DEAD_CONNECTION_TEXT = `This connection is no longer valid: it expired or was disconnected. ${RECONNECT_HINT}`;
 export const INVALID_CLIENT_TEXT = `Ferretry does not recognise this connection. ${RECONNECT_HINT}`;
 
 export class OAuthError extends Error {

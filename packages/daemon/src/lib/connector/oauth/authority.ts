@@ -22,6 +22,7 @@ import {
   type ConnectorStore,
   OAuthError,
   type PendingAuthorization,
+  DEAD_CONNECTION_TEXT,
   INVALID_CLIENT_TEXT,
   RECONNECT_HINT,
   type UsedRefresh,
@@ -623,18 +624,11 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       // A credential the daemon has never issued to this client is refused here, without taking a queue slot.
       if (grantType === 'authorization_code') {
         const code = this.ports.memory.codes.get(await digest(this.ports.crypto, input.code ?? ''));
-        if (!code || code.clientId !== client.id)
-          throw new OAuthError(
-            'invalid_grant',
-            `This connection is no longer valid: it expired or was disconnected. ${RECONNECT_HINT}`,
-          );
+        if (!code || code.clientId !== client.id) throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       } else {
         const known = this.ports.memory.index.token(await digest(this.ports.crypto, input.refresh_token ?? ''));
         if (!known || known.kind === 'access' || known.clientId !== client.id)
-          throw new OAuthError(
-            'invalid_grant',
-            `This connection is no longer valid: it expired or was disconnected. ${RECONNECT_HINT}`,
-          );
+          throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       }
       const tokens = await this.ports.memory.run(() => this.redeem(input, grantType, client.id), 'token');
       this.ports.limiter.record(`token:${client.id}`);
@@ -655,10 +649,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       const key = await digest(this.ports.crypto, input.code ?? '');
       const code = this.ports.memory.codes.get(key);
       if (!code || code.clientId !== client.id || code.redirectUri !== input.redirect_uri)
-        throw new OAuthError(
-          'invalid_grant',
-          `This connection is no longer valid: it expired or was disconnected. ${RECONNECT_HINT}`,
-        );
+        throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       grant = state.grants.find(g => g.id === code.grantId);
       if (code.used) {
         if (grant) await this.revokeGrant(state, grant, 'code-reuse', 'reuse-detected');
@@ -675,10 +666,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         !/^[A-Za-z0-9._~-]{43,128}$/.test(input.code_verifier) ||
         !secretsMatch(base64url(await this.ports.crypto.sha256(input.code_verifier)), code.challenge)
       )
-        throw new OAuthError(
-          'invalid_grant',
-          `This connection is no longer valid: it expired or was disconnected. ${RECONNECT_HINT}`,
-        );
+        throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       this.ports.limiter.check(`token:${client.id}`, CLIENT_TOKENS_PER_MINUTE);
       // Spend before any await that might fail; even failed persistence cannot make a code reusable.
       this.ports.memory.codes.set(key, { ...code, used: true });
@@ -690,20 +678,13 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
           g.clientId === client.id &&
           (g.refresh.some(t => t.digest === key) || g.usedRefresh.some(u => u.digest === key)),
       );
-      if (!grant || grant.revokedAt)
-        throw new OAuthError(
-          'invalid_grant',
-          `This connection is no longer valid: it expired or was disconnected. ${RECONNECT_HINT}`,
-        );
+      if (!grant || grant.revokedAt) throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       const used = grant.usedRefresh.find(u => u.digest === key);
       let token: ConnectorGrant['refresh'][number] | undefined;
       if (used) {
         // Past its own expiry a rotated-away token is just an invalid one; it is not evidence of theft.
         if (used.expiresAt !== undefined && used.expiresAt <= this.now())
-          throw new OAuthError(
-            'invalid_grant',
-            `This connection is no longer valid: it expired or was disconnected. ${RECONNECT_HINT}`,
-          );
+          throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
         // A lost response: the token rotated moments ago and nothing has used its successor yet.
         const successor = this.retryable(grant, used);
         if (!successor) {
@@ -718,10 +699,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         rotating = { used, retry: true };
       } else token = grant.refresh.find(t => t.digest === key);
       if (!token || token.expiresAt <= this.now() || token.audience !== this.ports.endpoints.resource)
-        throw new OAuthError(
-          'invalid_grant',
-          `This connection is no longer valid: it expired or was disconnected. ${RECONNECT_HINT}`,
-        );
+        throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       scopes =
         input.scope === undefined
           ? token.scopes
