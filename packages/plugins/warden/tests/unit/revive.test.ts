@@ -131,7 +131,7 @@ describe('which deaths are revivable', () => {
 describe('the plain words for a death', () => {
   it('should word each cause', () => {
     // Act / Assert
-    should(causeText({ kind: 'tmux_crashed' })).equal('the tmux server crashed');
+    should(causeText({ kind: 'tmux_crashed' })).equal('several terminals ended together');
     should(causeText({ kind: 'terminal_gone' })).equal('its terminal disappeared');
     should(causeText({ kind: 'signal', signal: 9 })).equal('it was killed by a signal (SIGKILL)');
     should(causeText({ kind: 'signal', signal: 15 })).equal('it was killed by a signal (SIGTERM)');
@@ -154,10 +154,10 @@ describe('the plain words for a death', () => {
 
     // Assert
     should(message).startWith(
-      'Ferretry started your terminal again: it ended because it was killed by a signal (SIGKILL) at 2026-10-30 11:59 UTC.',
+      'Ferretry started your terminal again: it ended because it was killed by a signal (SIGKILL) at Oct 30, 4:59 AM PDT.',
     );
     should(message).equal(
-      'Ferretry started your terminal again: it ended because it was killed by a signal (SIGKILL) at 2026-10-30 11:59 UTC. Your conversation was resumed as it was. Re-read your last turn, then continue from where you stopped.',
+      'Ferretry started your terminal again: it ended because it was killed by a signal (SIGKILL) at Oct 30, 4:59 AM PDT. Your conversation was resumed as it was. Re-read your last turn, then continue from where you stopped.',
     );
   });
 
@@ -181,7 +181,7 @@ describe('the plain words for a death', () => {
 
     // Assert
     should(message).equal(
-      'Ferretry started your terminal again: it ended because the tmux server crashed at 2026-10-30 11:59 UTC.',
+      'Ferretry started your terminal again: it ended because several terminals ended together at Oct 30, 4:59 AM PDT.',
     );
   });
 });

@@ -790,7 +790,7 @@ revive, one that exited 0, a Warden investigator, or a ferret whose lead was sto
   back on: only deaths after the switch-on count. A switch that cannot be read counts as neither on nor off.
   The switch going off and coming back on are each journalled once (`fleet.warden_revive_switched_off` /
   `fleet.warden_revive_switched_on`), so a gap in revives has a trace.
-- 3 or more deaths within 10 s are a fleet-wide death ("the tmux server crashed"): the Warden waits until the
+- 3 or more deaths within 10 s are a fleet-wide death (a guess at a tmux crash, so the notice says only that "several terminals ended together"): the Warden waits until the
   tmux server answers, then revives in waves of `waveSize` (max 3), at least `waveGapSeconds` (min 10) apart.
   Interactive ferrets and leads go first; children of a revived lead go in a later wave.
 - **Circuit breaker:** if a revived ferret dies abnormally again within 2 minutes, or more than half of a wave
@@ -798,7 +798,7 @@ revive, one that exited 0, a Warden investigator, or a ferret whose lead was sto
   (`fleet.warden_revive_breaker_opened` / `_closed`).
 
 **What the ferret is told.** An automatic ferret is told why in plain words and to re-read its last turn file and
-continue. An interactive one gets only a notice ("Ferretry started your terminal again: it ended because ...") and
+continue. An interactive one gets only a notice ("Ferretry started your terminal again: it ended because ...", with the time in Pacific) and
 its turn, with no instruction to act. Each ferret's own log gets `warden.revive_planned`, `warden.revived` or
 `warden.revive_refused` (`stopped`, `cooldown`, `breaker_open`, `too_old`, `parent_stopped`, `refused:<reason>`);
 each revive is a row under Recent triggers and a `fleet.warden_revived` line.
