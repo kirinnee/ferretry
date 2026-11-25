@@ -314,7 +314,9 @@ describe('Access settings, in the real Settings shell, over a fake machine', () 
             entry =>
               !entry.line.includes('fp=') && !entry.line.startsWith('fy_daemon') && !entry.line.startsWith('aaa'),
           );
-        for (const entry of breaks) expect(`${entry.end}|${entry.next}`).toMatch(/^[/?&#;=.]\||\|%/u);
+        // The hyphen inside the code ("7F3K-Q2ND") is a break the browser may take on its own (it does, at some font
+        // metrics); a break inside a word is the only one that is never allowed.
+        for (const entry of breaks) expect(`${entry.end}|${entry.next}`).toMatch(/^[/?&#;=.-]\||\|%/u);
         await page.setViewportSize({ width: 390, height: 3_000 });
         if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, `pair-address-390-${theme}.png`) });
       } finally {
