@@ -22,6 +22,9 @@ import {
   type ConnectorStore,
   OAuthError,
   type PendingAuthorization,
+  DEAD_CONNECTION_TEXT,
+  INVALID_CLIENT_TEXT,
+  RECONNECT_HINT,
   type UsedRefresh,
   base64url,
   canonicalResource,
@@ -366,6 +369,9 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
           'temporarily_unavailable',
           'Too many sign-ins are waiting for approval. Please try again in a few minutes.',
           503,
+          undefined,
+          undefined,
+          'busy',
         );
       this.evictOldest(p => sourceOf(p) === heaviest[0]);
     }
@@ -377,9 +383,24 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     if (!arrival.admitted) this.admit('authorize', source);
     await this.ready();
     const client = this.ports.memory.index.client(input.client_id);
-    if (!client) throw new OAuthError('invalid_request', 'Unknown client.');
+    if (!client)
+      throw new OAuthError(
+        'invalid_request',
+        `Ferretry does not recognise this connection request. ${RECONNECT_HINT}`,
+        400,
+        undefined,
+        undefined,
+        'unrecognised',
+      );
     if (!client.redirectUris.includes(input.redirect_uri) || !this.redirectAllowed(input.redirect_uri))
-      throw new OAuthError('invalid_request', 'The redirect URI does not exactly match the registered client.');
+      throw new OAuthError(
+        'invalid_request',
+        'The redirect URI does not exactly match the registered client.',
+        400,
+        undefined,
+        undefined,
+        'unrecognised',
+      );
     const scopes = this.redirecting(input, () => {
       if (!client.grantTypes.includes('authorization_code'))
         throw new OAuthError('unauthorized_client', 'This client may not request authorization codes.');
@@ -509,18 +530,35 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     this.prune();
     const key = await digest(this.ports.crypto, handle);
     const request = this.ports.memory.pending.get(key);
-    if (!request) throw new OAuthError('invalid_request', 'This sign-in is unknown or expired. Start again.');
+    if (!request)
+      throw new OAuthError(
+        'invalid_request',
+        'This sign-in is unknown or expired. Start again.',
+        400,
+        undefined,
+        undefined,
+        'sign_in_gone',
+      );
     if (!request.decision) return { kind: 'pending', pending: structuredClone(request.view) };
     // The handle is spent before anything else can run, so two polls never both mint a code.
     this.ports.memory.pending.delete(key);
     const url = new URL(request.redirectUri);
     if (request.state !== undefined) url.searchParams.set('state', request.state);
     url.searchParams.set('iss', this.ports.endpoints.issuer);
-    if (request.decision === 'denied') url.searchParams.set('error', 'access_denied');
-    else {
+    if (request.decision === 'denied') {
+      url.searchParams.set('error', 'access_denied');
+      url.searchParams.set('error_description', `You declined this connection in Ferretry. ${RECONNECT_HINT}`);
+    } else {
       // An approval persisted before it was recorded, so the index already knows whether its grant is live.
       if (!request.grantId || !this.ports.memory.index.grantLive(request.grantId))
-        throw new OAuthError('invalid_request', 'The approved grant is no longer valid.');
+        throw new OAuthError(
+          'invalid_request',
+          'The approved grant is no longer valid.',
+          400,
+          undefined,
+          undefined,
+          'cancelled',
+        );
       const code = this.random();
       this.ports.memory.codes.set(await digest(this.ports.crypto, code), {
         grantId: request.grantId,
@@ -538,7 +576,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
   /** Authenticates against the index, so a bad client never reaches the queue. */
   private async authenticate(input: Pick<ExchangeInput, 'client_id' | 'client_secret' | 'authMethod'>) {
     const client = this.ports.memory.index.client(input.client_id);
-    if (!client) throw new OAuthError('invalid_client', 'Client authentication failed.', 401);
+    if (!client) throw new OAuthError('invalid_client', INVALID_CLIENT_TEXT, 401);
     const method = input.authMethod ?? (input.client_secret === undefined ? 'none' : 'client_secret_post');
     if (
       method !== client.authMethod ||
@@ -547,7 +585,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
           !client.secretDigest ||
           !secretsMatch(await digest(this.ports.crypto, input.client_secret), client.secretDigest)))
     ) {
-      throw new OAuthError('invalid_client', 'Client authentication failed.', 401);
+      throw new OAuthError('invalid_client', INVALID_CLIENT_TEXT, 401);
     }
     return client;
   }
@@ -586,11 +624,11 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       // A credential the daemon has never issued to this client is refused here, without taking a queue slot.
       if (grantType === 'authorization_code') {
         const code = this.ports.memory.codes.get(await digest(this.ports.crypto, input.code ?? ''));
-        if (!code || code.clientId !== client.id) throw new OAuthError('invalid_grant', 'Invalid authorization code.');
+        if (!code || code.clientId !== client.id) throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       } else {
         const known = this.ports.memory.index.token(await digest(this.ports.crypto, input.refresh_token ?? ''));
         if (!known || known.kind === 'access' || known.clientId !== client.id)
-          throw new OAuthError('invalid_grant', 'Invalid refresh token.');
+          throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       }
       const tokens = await this.ports.memory.run(() => this.redeem(input, grantType, client.id), 'token');
       this.ports.limiter.record(`token:${client.id}`);
@@ -602,7 +640,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     this.prune();
     const state = await this.ports.store.load();
     const client = state.clients.find(c => c.id === clientId);
-    if (!client) throw new OAuthError('invalid_client', 'Client authentication failed.', 401);
+    if (!client) throw new OAuthError('invalid_client', INVALID_CLIENT_TEXT, 401);
     let grant: ConnectorGrant | undefined;
     let scopes: readonly ConnectorScope[];
     /** The refresh token being rotated, and (on a retry inside its window) the pair its first rotation issued. */
@@ -611,11 +649,14 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       const key = await digest(this.ports.crypto, input.code ?? '');
       const code = this.ports.memory.codes.get(key);
       if (!code || code.clientId !== client.id || code.redirectUri !== input.redirect_uri)
-        throw new OAuthError('invalid_grant', 'Invalid authorization code.');
+        throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       grant = state.grants.find(g => g.id === code.grantId);
       if (code.used) {
         if (grant) await this.revokeGrant(state, grant, 'code-reuse', 'reuse-detected');
-        throw new OAuthError('invalid_grant', 'Authorization code was already used.');
+        throw new OAuthError(
+          'invalid_grant',
+          `Ferretry cancelled this connection to keep your account safe; connecting again is safe. ${RECONNECT_HINT}`,
+        );
       }
       if (
         !grant ||
@@ -625,7 +666,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         !/^[A-Za-z0-9._~-]{43,128}$/.test(input.code_verifier) ||
         !secretsMatch(base64url(await this.ports.crypto.sha256(input.code_verifier)), code.challenge)
       )
-        throw new OAuthError('invalid_grant', 'Invalid or expired authorization code or verifier.');
+        throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       this.ports.limiter.check(`token:${client.id}`, CLIENT_TOKENS_PER_MINUTE);
       // Spend before any await that might fail; even failed persistence cannot make a code reusable.
       this.ports.memory.codes.set(key, { ...code, used: true });
@@ -637,25 +678,28 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
           g.clientId === client.id &&
           (g.refresh.some(t => t.digest === key) || g.usedRefresh.some(u => u.digest === key)),
       );
-      if (!grant || grant.revokedAt) throw new OAuthError('invalid_grant', 'Invalid refresh token.');
+      if (!grant || grant.revokedAt) throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       const used = grant.usedRefresh.find(u => u.digest === key);
       let token: ConnectorGrant['refresh'][number] | undefined;
       if (used) {
         // Past its own expiry a rotated-away token is just an invalid one; it is not evidence of theft.
         if (used.expiresAt !== undefined && used.expiresAt <= this.now())
-          throw new OAuthError('invalid_grant', 'Invalid or expired refresh token.');
+          throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
         // A lost response: the token rotated moments ago and nothing has used its successor yet.
         const successor = this.retryable(grant, used);
         if (!successor) {
           await this.revokeGrant(state, grant, 'refresh-reuse', 'reuse-detected');
           await this.audit({ kind: 'connector.refresh.reused', grantId: grant.id });
-          throw new OAuthError('invalid_grant', 'Refresh token was already used.');
+          throw new OAuthError(
+            'invalid_grant',
+            `Ferretry cancelled this connection to keep your account safe; connecting again is safe. ${RECONNECT_HINT}`,
+          );
         }
         token = successor;
         rotating = { used, retry: true };
       } else token = grant.refresh.find(t => t.digest === key);
       if (!token || token.expiresAt <= this.now() || token.audience !== this.ports.endpoints.resource)
-        throw new OAuthError('invalid_grant', 'Invalid or expired refresh token.');
+        throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       scopes =
         input.scope === undefined
           ? token.scopes

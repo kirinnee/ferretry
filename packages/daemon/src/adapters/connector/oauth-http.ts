@@ -2,8 +2,9 @@ import { z } from 'zod';
 import { BodyTooLargeError, type ApiRequest, type ApiResponse } from '../../lib/api/http.ts';
 import type { ConnectorAuthority, ExchangeInput } from '../../lib/connector/oauth/authority.ts';
 import { authorizationServerMetadata, protectedResourceMetadata } from '../../lib/connector/oauth/discovery.ts';
-import { OAuthError } from '../../lib/connector/oauth/model.ts';
+import { INVALID_CLIENT_TEXT, OAuthError, RECONNECT_HINT } from '../../lib/connector/oauth/model.ts';
 import type { ConnectorEndpoints, ConnectorHttpHandler } from '../../lib/connector/ports.ts';
+import { appPanelUrl, escapeHtml, failurePage, page } from './pages.ts';
 
 const registration = z.object({
   client_name: z.string().max(100).optional(),
@@ -43,22 +44,6 @@ const revocation = z.object({
   client_secret: boundedString.optional(),
   token: boundedString,
 });
-const htmlHeaders: ReadonlyMap<string, string> = new Map([
-  ['content-type', 'text/html; charset=utf-8'],
-  ['cache-control', 'no-store'],
-  [
-    'content-security-policy',
-    "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-  ],
-  ['referrer-policy', 'no-referrer'],
-  ['x-frame-options', 'DENY'],
-]);
-function escapeHtml(value: string): string {
-  return value.replace(
-    /[&<>"']/g,
-    char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? '',
-  );
-}
 function json(status: number, value: unknown, extra: readonly [string, string][] = []): ApiResponse {
   return {
     status,
@@ -75,13 +60,6 @@ function redirect(location: string): ApiResponse {
       ['referrer-policy', 'no-referrer'],
     ]),
     body: '',
-  };
-}
-function page(title: string, content: string, refresh = false, status = 200): ApiResponse {
-  return {
-    status,
-    headers: htmlHeaders,
-    body: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${refresh ? '<meta http-equiv="refresh" content="2">' : ''}<title>${escapeHtml(title)}</title><style>body{font:18px system-ui;max-width:36rem;margin:4rem auto;padding:1rem;line-height:1.5}strong{font-size:2.5rem;letter-spacing:.15em}</style></head><body><h1>${escapeHtml(title)}</h1>${content}</body></html>`,
   };
 }
 function oneValues(entries: Iterable<readonly [string, readonly string[]]>): Record<string, string> {
@@ -104,7 +82,7 @@ function credentials(
   const authorization = request.headers.get('authorization');
   if (!authorization) return { body, authMethod: body.client_secret === undefined ? 'none' : 'client_secret_post' };
   if (!/^Basic /i.test(authorization) || body.client_secret !== undefined)
-    throw new OAuthError('invalid_client', 'Use exactly one client authentication method.', 401);
+    throw new OAuthError('invalid_client', `Use exactly one client authentication method. ${RECONNECT_HINT}`, 401);
   try {
     const decoded = atob(authorization.slice(6).trim());
     const colon = decoded.indexOf(':');
@@ -114,7 +92,7 @@ function credentials(
     if (body.client_id !== undefined && body.client_id !== clientId) throw new Error('Mismatched client');
     return { body: { ...body, client_id: clientId, client_secret: secret }, authMethod: 'client_secret_basic' };
   } catch {
-    throw new OAuthError('invalid_client', 'Invalid client authentication.', 401);
+    throw new OAuthError('invalid_client', INVALID_CLIENT_TEXT, 401);
   }
 }
 
@@ -153,13 +131,17 @@ export class ConnectorOAuthHttp implements ConnectorHttpHandler {
       if (get && path === '/oauth/authorize/wait') {
         const query = oneValues(request.query);
         if (!query.h || !/^[A-Za-z0-9_-]{43}$/.test(query.h))
-          throw new OAuthError('invalid_request', 'This sign-in is unknown or expired.');
+          throw new OAuthError(
+            'invalid_request',
+            'This sign-in is unknown or expired.',
+            400,
+            undefined,
+            undefined,
+            'sign_in_gone',
+          );
         const result = await this.authority.waitPage(query.h, arrival);
         if (result.kind === 'redirect') return redirect(result.location);
         const pending = result.pending;
-        const app = new URL('/', this.endpoints.appOrigin);
-        app.searchParams.set('connector', this.endpoints.daemonId);
-        app.hash = 'connector';
         const scopes = pending.scopes.map(scope =>
           scope === 'fleet:read'
             ? 'Read your ferrets and attention inbox'
@@ -167,8 +149,8 @@ export class ConnectorOAuthHttp implements ConnectorHttpHandler {
         );
         return page(
           'Approve this connection in Ferretry',
-          `<p>${escapeHtml(pending.clientName)} wants to connect.</p><p>${escapeHtml(scopes.join('. '))}</p><p>Match this code in Ferretry:</p><p><strong>${escapeHtml(pending.matchCode)}</strong></p><p><a href="${escapeHtml(app.href)}">Open Ferretry</a></p><p>Waiting for your decision. This page refreshes automatically.</p>`,
-          true,
+          `<p>${escapeHtml(pending.clientName)} wants to connect.</p><p>${escapeHtml(scopes.join('. '))}</p><p>Match this code in Ferretry:</p><strong class="code">${escapeHtml(pending.matchCode)}</strong><p><a class="button" href="${escapeHtml(appPanelUrl(this.endpoints))}">Open Ferretry</a></p><p>Waiting for your decision. This page refreshes by itself, so you can leave it open.</p><h2>If nothing happens</h2><p>This sign-in expires after 10 minutes. To start again, in Claude open Settings &gt; Connectors &gt; Ferretry &gt; Connect.</p>`,
+          { refresh: true },
         );
       }
       const contentType = request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
@@ -223,12 +205,12 @@ export class ConnectorOAuthHttp implements ConnectorHttpHandler {
             : new OAuthError('server_error', 'The connector could not complete this request.', 503);
       // RFC 6749 §4.1.2.1: a protocol error after client and redirect_uri are trusted goes back to the client.
       if (failure.redirectTo !== undefined) return redirect(failure.redirectTo);
-      if (failure.status === 429 || failure.retryAfter !== undefined)
+      if (!html && (failure.status === 429 || failure.retryAfter !== undefined))
         return json(failure.status, { error: failure.error, error_description: failure.description }, [
           ['retry-after', String(failure.retryAfter ?? 60)],
         ]);
       return html
-        ? page('Connection could not continue', `<p>${escapeHtml(failure.description)}</p>`, false, failure.status)
+        ? failurePage(failure, this.endpoints)
         : json(failure.status, { error: failure.error, error_description: failure.description });
     }
   }

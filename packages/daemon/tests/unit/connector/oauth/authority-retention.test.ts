@@ -100,7 +100,7 @@ describe('rotated refresh digests are bounded (finding 2)', () => {
     f.advance(31 * DAY);
     await expect(f.authority.exchange(...refresh(flow.client.client_id, first))).rejects.toMatchObject({
       error: 'invalid_grant',
-      description: 'Invalid or expired refresh token.',
+      description: expect.stringContaining('Settings > Connectors > Ferretry > Connect'),
     });
     expect(f.state().grants[0]?.revokedAt).toBeUndefined();
   });
