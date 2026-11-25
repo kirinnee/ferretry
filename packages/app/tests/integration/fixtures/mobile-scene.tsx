@@ -9,6 +9,7 @@
  *   ?noRuntimes=1           GET /v1/runtimes lists none (a machine with no login yet: New ferret offers "Add a login")
  *   ?holdProjects=<ms>      GET /v1/projects answers that many ms late (a machine that is slow to say what is registered)
  *   ?project=1              the ferret page's ferret is filed under the registered project (Info › Project)
+ *   ?busy=<ferret>          that ferret's turn is running (its composer is the busy one: Interrupt & send)
  *   ?theme=<family>-<mode>      ?style=<id>&palette=<id>&mode=light|dark (open wearing a look)      ?longProject=1 (one project named by a single long word)
  *
  * `window.__fakeRequests` lists every path the page asked for that the fake daemon has no answer for (a probe aid).
@@ -75,6 +76,9 @@ const transport = new FakeTransport((request: TransportRequest): TransportAnswer
         askedAt: new Date(Date.UTC(2026, 10, 17, 19, 55)).toISOString(),
       },
     });
+  // `?busy=<ferret>`: that ferret is mid-turn, so its composer is the busy one.
+  if (request.method === 'GET' && request.path === `/v1/ferrets/${params.get('busy') ?? ''}/prompt`)
+    return json({ turnState: 'working', turnStateAt: new Date().toISOString() });
   const answer = answerFor(request);
   // `?model=<id>&effort=<word>&fast=1` re-words the ferret's model readout, so a phone can be shown the longest one.
   if (answer !== undefined && /^\/v1\/ferrets\/[^/]+$/u.test(request.path) && typeof answer.body === 'object') {
