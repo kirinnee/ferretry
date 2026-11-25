@@ -1,5 +1,5 @@
 import { AskSources, AsksPort, type SourceKey } from '@ferretry/core-asks/contract';
-import { GatePort } from '@ferretry/core-gate/contract';
+import { GatePort, STEP_UP_ACTS } from '@ferretry/core-gate/contract';
 import { accountDefaultsDifferences } from './contract/defaults-differences.ts';
 import { AccessPort, DevicesChanged, StepUpStages } from '@ferretry/plugin-access/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
@@ -570,7 +570,7 @@ export default definePlugin({
       route('GET /v1/accounts/plans', {
         minimum: 'operator',
         caller: 'person',
-        capability: USE.terminal,
+        capability: { ...USE.terminal, act: STEP_UP_ACTS.showSignInPlans },
         noStore: true,
         audit: SKIP_READ,
         guard: GUARD_NONE,

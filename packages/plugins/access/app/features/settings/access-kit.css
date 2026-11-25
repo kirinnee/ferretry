@@ -182,7 +182,7 @@
   font-size: var(--text-xs);
   padding: 6px 8px;
   user-select: all;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 @container fy-acc (min-width: 560px) {
   .fy-acc-invite__main[data-has-qr='yes'] {

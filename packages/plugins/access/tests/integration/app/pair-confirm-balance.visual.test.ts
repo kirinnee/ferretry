@@ -213,11 +213,11 @@ describe('the Connected screen is balanced (C59 O3)', () => {
         await tab.waitForSelector('[data-pair-device-rename]');
         // Progress is on the confirm page, in the same bar the setup pages draw.
         expect(await tab.locator('[data-step-progress]').count(), 'progress on the confirm page').toBe(1);
-        expect(await tab.locator('[data-step-progress]').innerText()).toContain('Pair · 1 of 3');
+        expect(await tab.locator('[data-step-progress]').innerText()).toContain('Pair · 1 of 2');
         await tab.getByRole('button', { name: 'Pair this device' }).click();
         await tab.waitForSelector('[data-pairing-stage="paired"]');
         await tab.waitForSelector('[data-first-passkey-offer]');
-        expect(await tab.locator('[data-step-progress]').innerText()).toContain('Connected · 2 of 3');
+        expect(await tab.locator('[data-step-progress]').innerText()).toContain('Connected · 2 of 2');
         // One heading, one supporting line.
         expect(await tab.locator('main h1, main h2').allInnerTexts()).toEqual(['Connected']);
         const lines = await tab.locator('[data-paired-with]').allInnerTexts();
@@ -262,7 +262,7 @@ describe('the Connected screen is balanced (C59 O3)', () => {
 
 describe('the FIRST pairing screen draws the same progress bar (C59 O3 review)', () => {
   for (const variant of VARIANTS) {
-    it(`${variant.name}: "Pair · 1 of 3" on the cold open, the paste state and the camera state`, async () => {
+    it(`${variant.name}: "Pair · 1 of 2" on the cold open, the paste state and the camera state`, async () => {
       const context = await browser.newContext({
         viewport: { width: variant.width, height: variant.height },
         deviceScaleFactor: variant.phone ? 2 : 1,
@@ -281,7 +281,7 @@ describe('the FIRST pairing screen draws the same progress bar (C59 O3 review)',
         await tab.waitForSelector('[data-pair-ways]');
         const progress = tab.locator('[data-step-progress]');
         expect(await progress.count(), 'progress on the cold open').toBe(1);
-        expect(await progress.innerText()).toContain('Pair · 1 of 3');
+        expect(await progress.innerText()).toContain('Pair · 1 of 2');
         // The bar is above the heading, inside the screen.
         const bar = (await progress.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
         const heading = (await tab.locator('main h1').boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
@@ -291,14 +291,14 @@ describe('the FIRST pairing screen draws the same progress bar (C59 O3 review)',
         await tab.locator('[data-pair-ways] label').nth(2).click();
         await tab.waitForSelector('input[aria-label="Pairing link"]');
         expect(await progress.count(), 'progress on the paste state').toBe(1);
-        expect(await progress.innerText()).toContain('Pair · 1 of 3');
+        expect(await progress.innerText()).toContain('Pair · 1 of 2');
         // The camera (scan) state.
         await tab.reload();
         await tab.waitForSelector('[data-pair-ways]');
         await tab.locator('[data-pair-ways] label').nth(0).click();
         await tab.waitForTimeout(300);
         expect(await progress.count(), 'progress on the scan state').toBe(1);
-        expect(await progress.innerText()).toContain('Pair · 1 of 3');
+        expect(await progress.innerText()).toContain('Pair · 1 of 2');
       } finally {
         await context.close();
       }

@@ -9,7 +9,7 @@
  * A refusal or a local-only link is a `Notice`, never a box.
  */
 
-import { type ReactNode, useState } from 'react';
+import { Fragment, type ReactNode, useState } from 'react';
 import { CircleAlert, Check, Trash2 } from 'lucide-react';
 import { localQr, QrEncodeError, type QrMatrix } from '@ferretry/app';
 import {
@@ -108,15 +108,24 @@ function InviteOffer({ outcome, code }: { readonly outcome: PairingMintOutcome; 
             <p className="fy-acc-fine">{local.remedy}</p>
           </>
         )}
-        {/* `select-all` and `break-all`: this is meant to be selected and retyped, on a phone. */}
+        {/* `select-all`: this is meant to be selected and retyped, on a phone. A line breaks at a separator (`<wbr>` adds no character, so the copied address is the minted one); a piece wider than the box still breaks inside. */}
         <code data-pair-url="" className="fy-acc-invite__url">
-          {outcome.pairUrl}
+          {pairUrlPieces(outcome.pairUrl).map(({ at, text }) => (
+            <Fragment key={at}>
+              {at === 0 ? null : <wbr />}
+              {text}
+            </Fragment>
+          ))}
         </code>
         <CodeLine code={code} />
       </div>
     </div>
   );
 }
+
+/** The pairing address cut where a line may break: after a URL separator, and before a "%"-escape. */
+const pairUrlPieces = (url: string): readonly { readonly at: number; readonly text: string }[] =>
+  url.split(/(?<=[/?&#;=])|(?=%)/u).map((text, index, all) => ({ at: all.slice(0, index).join('').length, text }));
 
 /** The code in words as well as in the link: a person reading a QR out loud reads this. */
 function CodeLine({ code }: { readonly code: string }) {
