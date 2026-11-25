@@ -51,8 +51,14 @@ export interface CarriedArrival {
 }
 
 /** How a call arrived; today's `loopback` / `privilegedLoopback` / `carrier` folded into one value. */
-export type Arrival = LocalArrival | CarriedArrival | DoorArrival;
+export type Arrival = LocalArrival | CarriedArrival | DelegatedArrival | DoorArrival;
 
+/** A connector tool acting for a passkey-approved grant. Always remote; carries no host or device credential. */
+export interface DelegatedArrival {
+  readonly kind: 'delegated';
+  readonly by: 'connector';
+  readonly grant: string;
+}
 /** Public HTTP: always remote and unprivileged, even behind a forwarder on loopback. Gate parses no credential. */
 export type DoorArrival =
   | { readonly kind: 'door'; readonly door: 'own'; readonly plugin: PluginId }

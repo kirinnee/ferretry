@@ -53,6 +53,7 @@ export function grantGuard(daemonWide: () => CapabilityGrants | undefined, clien
       governed,
       hostLocal: !governed,
       stepUp: presentation.stepUp,
+      ...(presentation.connector === undefined ? {} : { connector: presentation.connector }),
       ...(presentation.useAsksStepUp === undefined ? {} : { useAsksStepUp: presentation.useAsksStepUp }),
       ...(governed && presentation.deviceGrants !== undefined ? { device: presentation.deviceGrants } : {}),
     };

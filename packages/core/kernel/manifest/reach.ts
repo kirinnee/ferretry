@@ -1,4 +1,5 @@
 import { historyPoolFault } from './history-pool.ts';
+import { delegateProblems } from './delegate.ts';
 import type { ItemKind, Manifest, Needer } from './types.ts';
 
 /** `'*'` in `permissions.spawn` / `network`: any program or host. A core piece's alone: `effectivePermissions` drops it from any other manifest. */
@@ -72,7 +73,7 @@ export function itemOwnersOf(manifests: readonly Manifest[], kind: ItemKind): re
 /** One way a manifest's reach declarations are wrong; the plugin is not started (boot) and the graph fails (build). */
 export interface ReachFault {
   readonly plugin: string;
-  readonly code: 'item-owner' | 'resolver-axes' | 'history-pool';
+  readonly code: 'item-owner' | 'resolver-axes' | 'history-pool' | 'delegate';
   /** A sentence that starts with a verb, to follow the plugin's name. */
   readonly sentence: string;
 }
@@ -90,6 +91,8 @@ export interface ReachFault {
 export function reachFaults(manifests: readonly Manifest[]): readonly ReachFault[] {
   const faults: ReachFault[] = [];
   for (const manifest of manifests) {
+    for (const sentence of delegateProblems(manifest, manifests))
+      faults.push({ plugin: manifest.id, code: 'delegate', sentence });
     if (!manifest.kinds.includes('item'))
       for (const def of manifest.data?.config ?? [])
         if (def.shape === 'collection' && def.itemKind !== undefined)

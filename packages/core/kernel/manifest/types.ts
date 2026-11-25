@@ -2,7 +2,7 @@ import type { z } from 'zod';
 import type { Op } from '../contract/act.ts';
 import type { ConfigDef, EventDef, HookDef, PortToken, StateFileDef } from '../contract/define.ts';
 import type { ItemKind, PluginApi } from '../contract/ids.ts';
-import type { PublicDoorPermission, RootName } from '../contract/ports.ts';
+import type { PublicDoorPermission, RootName, RouteKey } from '../contract/ports.ts';
 import type { MemberRouteDescriptor, RouteDescriptor, ScopedRoute } from '../contract/route.ts';
 import type { SocketDescriptor } from '../contract/socket.ts';
 import type { InstructionWhen, Word } from '../contract/snapshot.ts';
@@ -310,15 +310,15 @@ export interface HistoryPoolPermission {
 
 /** What it may touch outside its own folder (§3.7). Anything undeclared is refused by the kernel ports. */
 export interface Permissions extends PublicDoorPermission {
+  /** Only the allow-listed connector may call these declared route templates through Gate. */
+  readonly delegate?: readonly RouteKey[];
   readonly roots?: readonly RootName[];
   readonly network?: readonly PermissionEntry[];
   readonly spawn?: readonly SpawnEntry[];
   /** Vault secret names it may use by name (never read). */
   readonly secrets?: readonly string[];
-  /**
-   * The names of Vault secrets this plugin MINTS itself (an OAuth sign-in's access token), each a pattern the whole
-   * name must match (written without anchors). The Vault lets the plugin put, remove and list a name matching one, and
-   * nothing else it was not already given by `secrets` or a credential record of its own.
+  /** Whole-name patterns (no anchors) for secrets this plugin mints, e.g. OAuth tokens.
+   * Vault put/remove/list stays limited to these, explicit `secrets`, or its own credential records.
    */
   readonly mintedSecrets?: readonly string[];
   /**

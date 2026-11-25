@@ -35,6 +35,7 @@ import { TerminalPolicyError } from '../../terminal/policy.ts';
 export function openerCredential(call: CallContext): TerminalOpenerCredential | undefined {
   const credential = (call as { readonly credential?: AuthenticatedCredential }).credential;
   if (credential === undefined) return undefined;
+  if (credential.tokenClass === 'connector') return undefined;
   if (credential.tokenClass === 'ferret') return { tokenClass: 'session', sessionId: credential.ferret };
   if (credential.tokenClass === 'device') return { tokenClass: 'device', deviceId: credential.principal.holder };
   return { tokenClass: credential.tokenClass };

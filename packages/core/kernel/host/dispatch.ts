@@ -164,7 +164,7 @@ function admit(
   };
   const admission = bindings.admission();
   if (admission === undefined) {
-    return servableWithoutAdmission(descriptor)
+    return request.arrival.kind !== 'delegated' && servableWithoutAdmission(descriptor)
       ? { outcome: 'admitted', standing: {}, actor: DEFAULT_ACTOR }
       : refuse(ADMISSION_UNAVAILABLE());
   }
@@ -315,7 +315,10 @@ export class Dispatcher {
     return this.routes.routes;
   }
 
-  async dispatch(incoming: ApiRequest): Promise<ApiResponse> {
+  async dispatch(
+    incoming: ApiRequest,
+    delegation?: { readonly allowed: ReadonlySet<string>; readonly refused: (key: string) => void },
+  ): Promise<ApiResponse> {
     const request = this.stamped(incoming);
     const door = request.arrival.kind === 'door';
     if (!door && request.principal?.kind === 'member') return await this.dispatchMember(request);
@@ -326,6 +329,18 @@ export class Dispatcher {
           : this.publicRoutes
         : this.apiRoutes;
     const found = routes?.lookup(request.method, request.path) ?? { kind: 'not-found' as const };
+    if (request.arrival.kind === 'delegated') {
+      const key =
+        found.kind === 'matched' ? `${found.route.method} ${found.route.path}` : `${request.method} [unrouted]`;
+      if (found.kind !== 'matched' || delegation?.allowed.has(key) !== true) {
+        try {
+          delegation?.refused(key);
+        } catch {
+          /* The refusal stands if its log fails. */
+        }
+        return errorResponse(500, 'This plugin may not delegate that route.', 'delegate_refused');
+      }
+    }
     if (found.kind !== 'matched') {
       // Public and API tables do not reveal each other's paths or methods. Unknown public paths also bypass Gate.
       if (door) return withVersion(unknownRouteResponse(request.method, request.path), this.bindings.version);

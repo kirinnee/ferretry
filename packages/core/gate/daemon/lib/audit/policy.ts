@@ -27,6 +27,8 @@ export function auditActorOf(credential: AuthenticatedCredential | undefined): A
       return { kind: 'host' };
     case 'warden':
       return { kind: 'warden' };
+    case 'connector':
+      return { kind: 'connector' };
     case 'device':
       return { kind: 'device', deviceId: credential.principal.holder };
   }
@@ -34,6 +36,7 @@ export function auditActorOf(credential: AuthenticatedCredential | undefined): A
 
 /** The detail that names the ferret behind a record its own token caused: `by: 'agent'` and the ferret, never the token. */
 export function agentAuditDetail(credential: AuthenticatedCredential | undefined): AuditDetail {
+  if (credential?.tokenClass === 'connector') return { grant: credential.grant };
   return credential?.tokenClass === 'ferret' ? { by: 'agent', ferret: credential.ferret } : {};
 }
 
