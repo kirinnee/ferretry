@@ -117,7 +117,10 @@ describe('a message handed to the agent through a file', () => {
 
     const via = must(view.container.querySelector<HTMLButtonElement>('.fy-handoff-via-button'), 'via turn file');
     expect(via.title).toBe(TURN_FILE_EXPLANATION);
-    expect(via.textContent).toBe('via turn file');
+    // Icon only (owner L262 B): no words drawn on the line; they live on the label, the hover title and the tap detail.
+    expect(via.textContent).toBe('');
+    expect(via.getAttribute('aria-label')).toBe(`Sent via turn file. ${TURN_FILE_EXPLANATION}`);
+    expect(via.querySelector('svg')).not.toBeNull();
     expect(view.container.querySelector('[data-handoff-note]')).toBeNull();
     await interact(() => via.click());
     expect(must(view.container.querySelector('[data-handoff-note="explained"]'), 'the note').textContent).toBe(
