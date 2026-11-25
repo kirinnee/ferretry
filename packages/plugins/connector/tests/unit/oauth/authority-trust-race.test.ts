@@ -22,6 +22,7 @@ function world() {
   const live = { issuer: endpoints.issuer, resource: endpoints.resource, extra: [extraCallback] };
   let hold: { readonly matches: (text: string) => boolean; reached: () => void; released: Promise<void> } | undefined;
   let holdLoad: { reached: () => void; released: Promise<void> } | undefined;
+  let holdSave: { reached: () => void; released: Promise<void> } | undefined;
 
   const arm = (matches: (text: string) => boolean): Gate => {
     let reached!: () => void;
@@ -40,6 +41,15 @@ function world() {
     return { reached: reachedPromise, release };
   };
 
+  const armSave = (): Gate => {
+    let reached!: () => void;
+    let release!: () => void;
+    const reachedPromise = new Promise<void>(resolve => (reached = resolve));
+    const released = new Promise<void>(resolve => (release = resolve));
+    holdSave = { reached, released };
+    return { reached: reachedPromise, release };
+  };
+
   const crypto = {
     randomBytes: f.options.crypto.randomBytes,
     sha256: async (text: string) => {
@@ -53,7 +63,17 @@ function world() {
     },
   };
   const store = {
-    save: f.options.store.save,
+    save: async (value: Parameters<typeof f.options.store.save>[0]) => {
+      const current = holdSave;
+      if (current) {
+        holdSave = undefined;
+        await f.options.store.save(value);
+        current.reached();
+        await current.released;
+        return;
+      }
+      await f.options.store.save(value);
+    },
     load: async () => {
       const current = holdLoad;
       if (current) {
@@ -133,6 +153,7 @@ function world() {
     authority,
     arm,
     armLoad,
+    armSave,
     start,
     pendingId,
     approve,
@@ -209,6 +230,25 @@ describe('connector authority — trust that changes inside an await', () => {
     expect(w.f.state().grants).toEqual([]);
     expect(w.f.events.some(event => event.kind === 'connector.grant.approved')).toBe(false);
     expect([...w.f.memory.pending.values()].some(request => request.decision)).toBe(false);
+  });
+
+  test('approve: trust lost while the grant is being saved takes the grant back out and audits no approval', async () => {
+    const w = world();
+    await w.start();
+    const id = await w.pendingId();
+    const registered = w.f.state();
+    const gate = w.armSave();
+    const outcome = w.authority.approve(id, 'admin-cli');
+    await gate.reached;
+    expect(w.f.state().grants).toHaveLength(1); // the grant is durable for the moment the trust is lost
+    w.removeCallback();
+    gate.release();
+    expect(await outcome).toMatchObject({ ok: false, code: 'expired' });
+    expect(w.f.state().grants).toEqual([]); // no durable grant remains
+    expect(w.f.state()).toEqual(registered); // the store is exactly as before the approval
+    expect(w.f.saves()).toBe(3); // registration, the grant, and the rollback
+    expect(w.f.events.some(event => event.kind === 'connector.grant.approved')).toBe(false);
+    expect([...w.f.memory.pending.values()].some(request => request.decision)).toBe(false); // nothing was approved in memory
   });
 
   test('redeem: a callback removed during the PKCE digest mints no token', async () => {
