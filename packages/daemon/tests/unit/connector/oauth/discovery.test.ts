@@ -51,6 +51,9 @@ describe('the 401 a client with no usable token is sent', () => {
   test('says invalid_token when a token was presented and refused', () => {
     const answer = unauthorizedResponse(endpoints, { tokenPresented: true });
     expect(answer.headers.get('www-authenticate')).toEndWith(', error="invalid_token"');
-    expect(JSON.parse(answer.body)).toEqual({ error: 'invalid_token' });
+    expect(JSON.parse(answer.body)).toMatchObject({
+      error: 'invalid_token',
+      error_description: expect.stringContaining('Settings > Connectors > Ferretry > Connect'),
+    });
   });
 });

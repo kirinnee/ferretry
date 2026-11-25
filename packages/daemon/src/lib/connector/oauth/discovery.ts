@@ -1,5 +1,6 @@
 import type { ApiResponse } from '../../api/http.ts';
 import { CONNECTOR_SCOPES, type ConnectorEndpoints } from '../ports.ts';
+import { RECONNECT_HINT } from './model.ts';
 
 export function protectedResourceMetadata(endpoints: ConnectorEndpoints) {
   return {
@@ -40,6 +41,13 @@ export function unauthorizedResponse(
       ['cache-control', 'no-store'],
       ['content-type', 'application/json'],
     ]),
-    body: JSON.stringify({ error: options.tokenPresented ? 'invalid_token' : 'unauthorized' }),
+    body: JSON.stringify(
+      options.tokenPresented
+        ? {
+            error: 'invalid_token',
+            error_description: `This connection is no longer valid: it expired or was disconnected. ${RECONNECT_HINT}`,
+          }
+        : { error: 'unauthorized' },
+    ),
   };
 }

@@ -235,6 +235,14 @@ export class ConnectorMemory {
   }
 }
 
+/**
+ * Why a sign-in could not continue, in the person's terms. Each reason has one page (adapters/connector/pages.ts) that says
+ * what happened and how to connect again; the OAuth error code stays for Claude and for the small print.
+ */
+export type ReconnectReason = 'sign_in_gone' | 'cancelled' | 'unrecognised' | 'busy' | 'slow_down' | 'trouble';
+/** The sentence every error Claude may show ends with: exactly where to connect again. */
+export const RECONNECT_HINT = 'Reconnect in Claude: Settings > Connectors > Ferretry > Connect.';
+
 export class OAuthError extends Error {
   constructor(
     readonly error: string,
@@ -243,6 +251,8 @@ export class OAuthError extends Error {
     readonly retryAfter?: number,
     /** RFC 6749 §4.1.2.1: where the user agent goes with this error, once client and redirect_uri are trusted. */
     readonly redirectTo?: string,
+    /** Which "connect again" page a person sees for this failure; absent means it is chosen from the status. */
+    readonly reason?: ReconnectReason,
   ) {
     super(description);
   }

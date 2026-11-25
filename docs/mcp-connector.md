@@ -154,7 +154,7 @@ now) and `publicUrlSource` (`tunnel` or `configured`).
 `redirect_uris` contains anything else, and `/oauth/authorize` matches the redirect URI by exact string against
 the client's registered list AND re-checks it against the CURRENT allow-list (configuration can shrink between
 restarts, so a URI removed from `extraRedirectUris` stops authorizing even for a client registered with it). An
-unknown client or a redirect URI problem is shown as an error page and NEVER redirected to.
+unknown client or a redirect URI problem is shown as an error page (see "Pages a person sees") and NEVER redirected to.
 
 ## OAuth 2.1 details
 
@@ -234,6 +234,38 @@ authorization server metadata names the endpoints above, `code_challenge_methods
 `grant_types_supported`, `response_types_supported: ["code"]`, `token_endpoint_auth_methods_supported`,
 `revocation_endpoint`, `registration_endpoint`, `scopes_supported` and
 `authorization_response_iss_parameter_supported: true`.
+
+## Pages a person sees, and what Claude is told
+
+Whenever a sign-in cannot continue, the person lands on a plain page that says what happened in one sentence, gives
+one obvious button ("Open Claude connector settings"), lists the steps to connect again, and links Ferretry's Claude
+connector panel. The OAuth error code sits in small print as `Reference: …` for support, never in the headline. All
+of them are built by one template (`packages/daemon/src/adapters/connector/pages.ts`): no script, no external asset,
+no token, secret or handle in the page or in any URL it links, dark mode by `prefers-color-scheme`, readable at phone
+width. The steps always read **Settings > Connectors > Ferretry > Connect**, plus "open Ferretry and approve the new
+code" where an approval is involved.
+
+| What happened                                                                                           | Where                       | Page headline                                                                                           | Status |
+| ------------------------------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------- | ------ |
+| Waiting for the owner                                                                                   | `GET /oauth/authorize/wait` | Approve this connection in Ferretry (code, Open Ferretry, "If nothing happens" steps; refreshes itself) | 200    |
+| Handle unknown, malformed, missing, past 10 minutes, already finished, or forgotten by a daemon restart | `/oauth/authorize/wait`     | This sign-in is no longer waiting                                                                       | 400    |
+| Grant revoked (owner, or reuse detection) between approval and redemption                               | `/oauth/authorize/wait`     | This connection was cancelled ("connecting again is safe")                                              | 400    |
+| Unknown client, redirect URI mismatch, missing or invalid parameters (never redirected)                 | `/oauth/authorize`          | Ferretry does not recognise this connection request                                                     | 400    |
+| Too many sign-ins already waiting                                                                       | `/oauth/authorize`          | Ferretry has too many sign-ins waiting                                                                  | 503    |
+| Rate limit on either page path                                                                          | both                        | Too many tries in a short time (`Retry-After`)                                                          | 429    |
+| Storage or other internal failure                                                                       | both                        | Ferretry could not finish this sign-in                                                                  | 503    |
+| Connector switched off                                                                                  | both, GET only              | The Claude connector is turned off                                                                      | 503    |
+
+A switched-off connector answers every other path, and every other method, with the same bare `404` as before; only a
+browser's `GET` of the two page paths gets the page, which names no daemon detail beyond the app link.
+
+**What Claude is told.** A denied sign-in still redirects to Claude with `error=access_denied`, and now an
+`error_description`. Every JSON error Claude may show carries an `error_description` ending in "Reconnect in Claude:
+Settings > Connectors > Ferretry > Connect.": `invalid_grant` (dead, expired or disconnected token or code),
+`invalid_client` (a client this daemon no longer knows), and the `401` for an invalid bearer (`invalid_token`). When
+reuse detection cancelled the grant (a replayed code or rotated refresh token) the text says it was cancelled to keep
+the account safe and that connecting again is safe. Protocol errors redirected to Claude after the client is trusted
+(bad scope, missing PKCE and the like) keep their descriptions, which are about the request, not the person.
 
 ## Storage
 

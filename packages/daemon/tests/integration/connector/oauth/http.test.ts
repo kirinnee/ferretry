@@ -224,7 +224,7 @@ describe('connector OAuth HTTP boundary', () => {
     expect(await f.authority.verify(flow.tokens.access_token)).toBeUndefined();
   });
 
-  test('HTTP rate refusal includes Retry-After and no-store OAuth JSON', async () => {
+  test('HTTP rate refusal on a page path shows a wait-and-retry page with Retry-After and no-store', async () => {
     const f = fixture();
     const http = new ConnectorOAuthHttp(f.authority, endpoints);
     const query = new URLSearchParams({ response_type: 'code', client_id: 'unknown', redirect_uri: redirectUri });
@@ -233,7 +233,8 @@ describe('connector OAuth HTTP boundary', () => {
     expect(response?.status).toBe(429);
     expect(response?.headers.get('retry-after')).toBe('60');
     expect(response?.headers.get('cache-control')).toBe('no-store');
-    expect(JSON.parse(response?.body ?? '').error).toBe('slow_down');
+    expect(response?.headers.get('content-type')).toContain('text/html');
+    expect(response?.body).toContain('Too many tries in a short time');
   });
 
   test('budgets are per arriving address: one source cannot lock another out', async () => {

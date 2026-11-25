@@ -297,6 +297,7 @@ describe('connector authority', () => {
       state: 'state&value',
       iss: endpoints.issuer,
       error: 'access_denied',
+      error_description: expect.stringContaining('Settings > Connectors > Ferretry > Connect'),
     });
     expect(f.events.some(event => event.kind === 'connector.grant.denied')).toBe(true);
     await expect(f.authority.waitPage(handle)).rejects.toMatchObject({ error: 'invalid_request' });
