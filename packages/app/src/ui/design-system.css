@@ -841,25 +841,53 @@ html[data-keyboard='open'] {
   .fy-frame:has([data-safe-bottom]:not([hidden] *)) {
     padding-bottom: 0;
   }
+  /* With the phone's Bottom bar setting the bar under the screen owns the inset (shell.css), so the bar above it pays only its own padding. */
+  .fy-frame--nav-bottom [data-safe-bottom] {
+    padding-bottom: var(--own-pad-bottom, 0px);
+  }
 }
 
 /* WIDE LAYOUTS (iPad, desktop): the columns meet the bottom edge side by side, and each one owns its own
    surface. The shell paying the inset around them left the page ground showing as an empty band under the
    sidebar's surface, on the very strip the home indicator sits in. So the shell pays nothing and every
-   column pads its CONTENT by the inset, once, while its surface runs on to the edge. */
+   column pads its CONTENT by the inset, once (`max(own padding, inset)`), while its surface runs on to the edge.
+   The page and side columns pay it unless the Bottom bar setting puts a bar under them (it pays its own). */
 @media (min-width: 768px) {
-  .kt-shell:has(> [data-sessions-bar]) {
+  .fy-frame {
     padding-bottom: 0;
   }
-  .fy-sbar--column,
-  .fy-sbar--rail {
+  .fy-drawer:not(.fy-drawer--overlay) {
+    padding-bottom: max(8px, var(--safe-bottom));
+  }
+  .fy-frame:not(.fy-frame--nav-bottom) .fy-main,
+  .fy-frame:not(.fy-frame--nav-bottom) .fy-side {
+    padding-bottom: max(16px, var(--safe-bottom));
+  }
+  /* A chrome-less screen runs to the window's edges: its own padding is 0 (shell.css), so it pays the inset itself. */
+  .fy-frame:not(.fy-frame--nav-bottom)[data-chrome='none'] .fy-main {
     padding-bottom: var(--safe-bottom);
   }
-  .fy-sbar--rail {
-    padding-bottom: calc(var(--gap-sm) + var(--safe-bottom));
+  /* The chat page holds its own columns (the chat, and beside it the slim rail or the open side pane — in a narrow row, under it), so the page
+     column pays nothing and each pays for itself: the composer is the bar the chat ends in, and the rail or pane pays its own foot. In the
+     narrow row the rail or pane is the last row and the composer above it keeps only its own padding. */
+  .fy-frame:not(.fy-frame--nav-bottom)[data-chat-chrome] .fy-main {
+    padding-bottom: 0;
   }
-  [data-shell-main] {
+  .fy-frame:not(.fy-frame--nav-bottom)[data-chat-chrome] [data-safe-bottom] {
+    padding-bottom: max(var(--own-pad-bottom, 0px), var(--safe-bottom));
+  }
+  .fy-frame:not(.fy-frame--nav-bottom)[data-chat-chrome] .fy-ferret-side {
     padding-bottom: var(--safe-bottom);
+  }
+  .fy-frame:not(.fy-frame--nav-bottom)[data-chat-chrome] [data-side-rail] {
+    padding-bottom: max(8px, var(--safe-bottom));
+  }
+  @container ferret-row (max-width: 619.98px) {
+    .fy-frame:not(.fy-frame--nav-bottom)[data-chat-chrome]
+      .fy-ferret-row:has(> :is([data-side-rail], .fy-ferret-side:not([style*='display'])))
+      [data-safe-bottom] {
+      padding-bottom: var(--own-pad-bottom, 0px);
+    }
   }
 }
 
