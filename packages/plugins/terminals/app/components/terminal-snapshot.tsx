@@ -84,8 +84,8 @@ export const TerminalSnapshotView = ({
   wrapLines = false,
 }: TerminalSnapshotViewProps) => {
   const [text, setText] = useState('');
-  // `stale` only ever turns true after a successful snapshot, so the initial
-  // load cannot flash a "stale" chip before the first poll lands.
+  // `stale` is a failed read; whether it is "stale" or "unreadable" depends on whether a snapshot was ever read
+  // (`lastUpdatedAt`): a failure before the first one has nothing to be stale.
   const [stale, setStale] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
@@ -126,9 +126,9 @@ export const TerminalSnapshotView = ({
       // Keep the last good content and say so: a momentarily unreachable
       // daemon is not an empty terminal.
       setStale(true);
-      setErrorMessage(describeSnapshotError(error));
+      setErrorMessage(describeSnapshotError(error, live ? 'the Console' : 'this terminal'));
     }
-  }, [daemon, now, readSnapshot, scope]);
+  }, [daemon, live, now, readSnapshot, scope]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
@@ -215,13 +215,13 @@ export const TerminalSnapshotView = ({
             tmux: {tmuxSession}
           </span>
         )}
-        <span className="mono ml-auto inline-flex shrink-0 items-center gap-1.5 text-[11px]" role="status">
+        <span className="mono ml-auto inline-flex min-w-0 max-w-full items-center gap-1.5 text-[11px]" role="status">
           {stale ? (
             <span className="text-warn" title={errorMessage ?? 'stale'}>
-              stale
+              {lastUpdatedAt === null ? 'unreadable' : 'stale'}
               <span className="max-md:sr-only">
-                {' '}
-                · last update {age} ago{errorMessage ? ` · ${errorMessage}` : ''}
+                {lastUpdatedAt === null ? '' : ` · last update ${age} ago`}
+                {errorMessage ? ` · ${errorMessage}` : ''}
               </span>
             </span>
           ) : (

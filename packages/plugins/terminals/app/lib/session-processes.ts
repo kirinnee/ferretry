@@ -17,7 +17,13 @@ import {
   type SessionProcessStopResult,
   SessionProcessStopResultSchema,
 } from './protocol/session-processes.ts';
-import { assertScopeDaemon, type DaemonConnection, type DaemonSessionScope, grantRefusalNotice } from '../shell.ts';
+import {
+  assertScopeDaemon,
+  type DaemonConnection,
+  type DaemonSessionScope,
+  grantRefusalNotice,
+  grantRefusalText,
+} from '../shell.ts';
 
 /** What a 403 means to the reader: the grant is the answer, in the words the brief fixes. */
 export const PROCESSES_FORBIDDEN_TEXT =
@@ -106,10 +112,7 @@ export const stopSessionProcess = async (
  * capability, a device not given it, or a missing passkey each want a different remedy), else the plain 403 copy.
  */
 export const processForbiddenText = (error: unknown): string => {
-  const grant = grantRefusalNotice(error);
-  if (grant !== null)
-    return grant.detail === '' ? grant.guidance.explanation : `${grant.guidance.explanation} ${grant.detail}`;
-  return PROCESSES_FORBIDDEN_TEXT;
+  return grantRefusalText(error, 'Processes') ?? PROCESSES_FORBIDDEN_TEXT;
 };
 
 /** A failure, in the words the reader should see: the 403 copy, the changed-process copy, else the daemon's. */

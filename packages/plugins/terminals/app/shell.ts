@@ -88,3 +88,19 @@ export function grantRefusalNotice(error: unknown): GrantRefusalNotice | null {
   const detail = typeof failure.message === 'string' ? failure.message : '';
   return { refusal, detail, guidance: { explanation: EXPLANATION[refusal] } };
 }
+
+/**
+ * A refused call in the words the reader sees, or `null` when this failure is about something else. `panel` is how the sentence
+ * names the place that was refused ("Processes", "the Console"), so each panel says its own name.
+ *
+ * A step-up refusal is ONE sentence: the daemon's own line for it ("using session terminals needs a passkey confirmation from this
+ * device.") says the same thing in the capability's name and was being run on after ours, so it is not repeated. Every other refusal
+ * keeps its explanation and the daemon's sentence after it, whole — that one names the command a person runs.
+ */
+export function grantRefusalText(error: unknown, panel: string): string | null {
+  const grant = grantRefusalNotice(error);
+  if (grant === null) return null;
+  if (grant.refusal === 'step-up-required')
+    return `Using ${panel} needs your passkey — confirm on this device and it goes ahead.`;
+  return grant.detail === '' ? grant.guidance.explanation : `${grant.guidance.explanation} ${grant.detail}`;
+}
