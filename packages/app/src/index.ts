@@ -197,6 +197,8 @@ export {
   useDevicePaired,
   useDeviceTheme,
 } from './shell/device-context.tsx';
+/** @public §5.2: the app build this browser runs, so Updates can say whether it matches the machine. */
+export { useAppVersion } from './shell/context.tsx';
 /** @public Where a per-daemon view is drawn — its machine, feed and authority — and how a control shows for it (§5.2; shell contract S1). */
 export {
   type Authority,

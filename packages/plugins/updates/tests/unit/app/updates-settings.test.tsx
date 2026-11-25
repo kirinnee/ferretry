@@ -53,3 +53,32 @@ describe('Settings › Updates', () => {
     expect(markup).toContain('Waiting for your confirmation: x.');
   });
 });
+
+describe('Settings › Updates › This app', () => {
+  const withApp = (appVersion: string | undefined, overrides: Record<string, unknown> = {}) =>
+    renderToStaticMarkup(
+      <UpdatesView
+        view={view(overrides)}
+        appVersion={appVersion}
+        note={null}
+        readError={null}
+        onStart={() => {}}
+        onAutoInstall={() => {}}
+      />,
+    );
+
+  test('says which build this browser runs and that it matches the machine', () => {
+    const markup = withApp('4.28.0');
+    expect(markup).toContain('This app');
+    expect(markup).toContain('The build running in this browser');
+    expect(markup).toContain('Matches this machine');
+  });
+  test('says the machine is behind this app, and the app is behind the machine, in their own words', () => {
+    expect(withApp('4.30.0')).toContain('Newer than this machine');
+    expect(withApp('4.27.0')).toContain('Older than this machine');
+  });
+  test('says it does not know when the build or the comparison is unknown', () => {
+    expect(withApp(undefined)).toContain('Unknown');
+    expect(withApp('not-a-version')).toContain('Cannot compare');
+  });
+});
