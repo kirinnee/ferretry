@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ConnectorAuthority } from '../../../daemon/lib/oauth/authority.ts';
-import { ConnectorMemory, OAuthError, canonicalResource } from '../../../daemon/lib/oauth/model.ts';
+import { ConnectorMemory, OAuthError, RECONNECT_HINT, canonicalResource } from '../../../daemon/lib/oauth/model.ts';
 import { endpoints, fixture, redirectUri, verifier } from '../../support/oauth-fixture.ts';
 
 describe('connector authority', () => {
@@ -297,6 +297,7 @@ describe('connector authority', () => {
       state: 'state&value',
       iss: endpoints.issuer,
       error: 'access_denied',
+      error_description: `You declined this connection in Ferretry. ${RECONNECT_HINT}`,
     });
     expect(f.events.some(event => event.kind === 'connector.grant.denied')).toBe(true);
     await expect(f.authority.waitPage(handle)).rejects.toMatchObject({ error: 'invalid_request' });

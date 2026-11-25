@@ -1,6 +1,6 @@
 import type { AuditActor, AuditDraft, GateApi } from '@ferretry/core-gate/contract';
 import { parseActor } from '@ferretry/core-gate/contract';
-import { CONNECTOR_AUDIT } from '../../contract/index.ts';
+import { CONNECTOR_AUDIT, SECURITY_CHANGED } from '../../contract/index.ts';
 import type { ConnectorAuditEvent, ConnectorAuditSink } from './ports.ts';
 
 /**
@@ -24,6 +24,7 @@ export class GateConnectorAudit implements ConnectorAuditSink {
 }
 
 const ANONYMOUS: AuditActor = { kind: 'anonymous' };
+const SECURITY_CHANGED_KIND = SECURITY_CHANGED.record;
 /** Untrusted text, one line, within the log's 160-character field. */
 const name = (text: string): string =>
   text
@@ -79,6 +80,14 @@ function draftOf(event: ConnectorAuditEvent): AuditDraft {
         actor: personOf(event.actor),
         subject: event.grantId,
         outcome: 'succeeded',
+      };
+    case 'connector.switched':
+      return {
+        event: SECURITY_CHANGED_KIND,
+        actor: personOf(event.actor),
+        subject: 'connector',
+        outcome: 'succeeded',
+        detail: { enabled: event.enabled },
       };
     case 'connector.refresh.reused':
       return {

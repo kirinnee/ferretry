@@ -42,10 +42,10 @@ import { CircleAlert, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import {
-  AUDIT_EVENT_WORDS,
   absoluteWords,
   auditActorWords,
   auditDetailWords,
+  auditEventWords,
   auditOutcomeBadge,
   pairedDevicesShown,
   relativeWords,
@@ -141,7 +141,7 @@ function SecurityRow({ record, nowMs }: { readonly record: AuditRecord; readonly
       <div className="fy-acc-log__head">
         <span className="fy-acc-log__what">
           {/* An event this build has no words for is shown as its raw name, never dropped. */}
-          {(AUDIT_EVENT_WORDS as Readonly<Record<string, string>>)[record.event] ?? record.event}
+          {auditEventWords(record.event)}
         </span>
         {badge === null ? null : (
           <span className="fy-acc-chip" data-tone="plain" data-security-log-outcome={record.outcome}>

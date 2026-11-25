@@ -126,6 +126,7 @@ const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']>, string>> = 
   'show-terminals': 'show open terminals',
   'test-browser-proxy': 'test the browser proxy',
   'show-sign-in-plans': 'show sign-in plans',
+  'approve-connector': 'approve a Claude connector',
 };
 
 /**
