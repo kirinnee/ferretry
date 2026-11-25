@@ -8,13 +8,15 @@ import { CachedDataSetting } from './device-cached-data.tsx';
 import { DeviceAppearance } from './device-appearance.tsx';
 import { DevicePanels } from './device-panels.tsx';
 import { Link } from './link.tsx';
+import { cameFromStop, stopOf } from './machine-stop.ts';
 import { useEffect } from 'react';
 
 /**
  * This device's settings as a page of their own (§5.2): theme, mode, text size, motion; saved in this browser, never on a daemon.
  * This is the RECOVERY page: it is drawn only when there is no machine to put them inside of (an unpaired device, or a
- * selected machine whose pages are blocked, whose Connection link comes here). Everywhere else `/settings` (an old
- * bookmark) REPLACES itself with the section of the selected machine's Settings, `/d/<daemon>/settings/device`.
+ * selected machine this browser cannot use at all, by the same `stopOf` answer the stop page is drawn on, whose Connection
+ * link comes here). Everywhere else `/settings` (an old bookmark) REPLACES itself with the section of the selected
+ * machine's Settings, `/d/<daemon>/settings/device`.
  */
 export function DeviceSettingsPage() {
   const { runtime } = useShell();
@@ -25,7 +27,10 @@ export function DeviceSettingsPage() {
   // never guessed at (the list below names each machine), as Home does.
   const { selected } = runtime.daemons.snapshot();
   const inside =
-    selected !== null && runtime.daemons.get(selected) !== undefined && runtime.wholeDaemonLine(selected) === undefined
+    !cameFromStop(window.location.search) &&
+    selected !== null &&
+    runtime.daemons.get(selected) !== undefined &&
+    stopOf(runtime, selected) === undefined
       ? deviceSettingsHref(selected)
       : undefined;
   useEffect(() => {

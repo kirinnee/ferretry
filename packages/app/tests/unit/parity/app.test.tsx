@@ -136,7 +136,7 @@ describe('the daemon home: `/d/<id>`', () => {
 
   test('S-0113 the daemon home of a daemon this device is not paired with says so and draws no panel', async () => {
     const view = await drawn('/d/unknown');
-    expect(view.container.textContent).toContain('This device is not paired with that daemon.');
+    expect(view.container.querySelector('h1')?.textContent).toBe("This browser isn't paired with that machine");
     expect(view.container.querySelector('[data-testid="status"]')).toBeNull();
     await view.unmount();
   });

@@ -96,6 +96,8 @@ export interface StartDaemonOptions {
    * the person at the machine), and the plugins it starts are chosen at boot, so the daemon boots a second time on it.
    */
   readonly workOn?: boolean;
+  /** The loopback port to listen on, for a leg that must own one named range (7480-7499); omitted, the system picks a free one. */
+  readonly port?: number;
 }
 
 /**
@@ -131,7 +133,7 @@ export async function startDaemon(release: Release, options: StartDaemonOptions)
       listen: async host =>
         await listenLocal(host, {
           home,
-          port: 0,
+          port: options.port ?? 0,
           pid: process.pid,
           version: options.version,
           write: (path, text) => writeFile(path, text, { mode: 0o600 }),

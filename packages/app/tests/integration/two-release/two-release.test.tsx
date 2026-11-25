@@ -460,12 +460,12 @@ describe('(d) a core contract changed: daemon B_d', () => {
           expect(standing(scenario, id)).toEqual({ state: 'blocked', reason: 'core' });
       });
 
-      test('the mounted app draws the full-screen sentence instead of the screen, with no side panel', async () => {
+      test('the mounted app draws the one full page instead of the screen, with no side panel', async () => {
         const view = await drawApp(scenario, `/d/${scenario.session.daemonId}/delta`);
-        await until(
-          () => view.container.querySelector('main')?.textContent?.includes(sentence) === true,
-          'the sentence',
-        );
+        const machine = scenario.session.daemons.get(scenario.session.daemonId)?.machine ?? '';
+        const headline =
+          direction === 'older' ? `Update ${machine} to keep using it` : `This app needs a reload to use ${machine}`;
+        await until(() => view.container.querySelector('h1')?.textContent === headline, 'the full page');
         expect(view.container.querySelector('[data-testid="delta"]')).toBeNull();
         expect(view.container.querySelector('[data-slot="side"]')).toBeNull();
         await view.unmount();
