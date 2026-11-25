@@ -221,6 +221,8 @@ describe('connections daemon half: tunnel and WebRTC composed', () => {
     );
     expect(opened?.surface.peer?.(headersFrom({ 'cf-connecting-ip': '203.0.113.9' }))).toBe('203.0.113.9');
     expect(opened?.surface.peer?.(headersFrom({}))).toBe('tunnel');
+    // It also serves the connector's public door paths (kernel public door), which reach no /v1 route.
+    expect(opened?.surface.doors).toBe(true);
     // The Origin gate is the daemon's own browser origins (today's browserOrigins(config)), handed to the kernel.
     expect(opened?.surface.origins).toEqual([HOSTED_APP_ORIGIN]);
     await world.stop();

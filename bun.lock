@@ -397,6 +397,16 @@
         "react-dom": "^19.0.0",
       },
     },
+    "packages/plugins/connector": {
+      "name": "@ferretry/plugin-connector",
+      "version": "5.0.0",
+      "dependencies": {
+        "@ferretry/core-gate": "workspace:*",
+        "@ferretry/kernel": "workspace:*",
+        "@ferretry/std": "workspace:*",
+        "zod": "4.4.3",
+      },
+    },
     "packages/plugins/conversation": {
       "name": "@ferretry/plugin-conversation",
       "version": "5.0.0",
@@ -992,6 +1002,8 @@
     "@ferretry/plugin-codex": ["@ferretry/plugin-codex@workspace:packages/plugins/codex"],
 
     "@ferretry/plugin-connections": ["@ferretry/plugin-connections@workspace:packages/plugins/connections"],
+
+    "@ferretry/plugin-connector": ["@ferretry/plugin-connector@workspace:packages/plugins/connector"],
 
     "@ferretry/plugin-conversation": ["@ferretry/plugin-conversation@workspace:packages/plugins/conversation"],
 
