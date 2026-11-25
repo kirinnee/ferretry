@@ -185,9 +185,12 @@ unknown client or a redirect URI problem is shown as an error page and NEVER red
 - **Tokens**: opaque, `fyc_at_` + 43 base64url (access, 1 h) and `fyc_rt_` + 43 base64url (refresh, 30 days,
   rotated on every use). Only SHA-256 digests are stored. Presenting a rotated-away refresh token revokes the
   whole grant (reuse detection), with one exception for a lost response: the token just rotated is accepted again for
-  60 s after its rotation, as long as nothing has yet been rotated from its successor. That retry issues a fresh pair
-  (rotating again) and revokes the pair the first exchange issued; it does not extend the window. Outside the
-  window, or for a token rotated two generations ago, reuse revokes the grant as before. A rotated-away token
+  60 s after its rotation, as long as nothing has yet been rotated from its successor. **That retry is one-shot**
+  (RFC 9700 §4.14.2): it issues one fresh pair and revokes the pair the first exchange issued, and does not extend the
+  window. Tokens are stored as digests only, so the first pair cannot be handed out again; instead the second
+  presentation of the same rotated token, inside the window or not, issues nothing, revokes the grant (every access
+  and refresh token) and emits `connector.refresh.reused`, so a stolen token cannot be replayed for live pairs.
+  Outside the window, or for a token rotated two generations ago, reuse revokes the grant as before. A rotated-away token
   that has passed its own 30-day expiry is simply `invalid_grant`. The token response is `Cache-Control: no-store`.
 - **Resource / audience**: every token is bound to the one resource URI; a token request naming another
   `resource` is `invalid_target`.

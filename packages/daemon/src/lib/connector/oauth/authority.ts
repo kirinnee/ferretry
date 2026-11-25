@@ -675,11 +675,13 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     const audience = this.ports.endpoints.resource;
     const accessDigest = await digest(this.ports.crypto, access);
     const refreshDigest = refresh ? await digest(this.ports.crypto, refresh) : undefined;
-    // Rotation is recorded with the digests of what it issued, so a retry can supersede exactly that pair.
+    // Rotation is recorded with the digests of what it issued, so a retry can supersede exactly that pair. A RETRY
+    // records none: the retry window is one-shot (RFC 9700 §4.14.2), so presenting this token a third time finds no
+    // successor to hand out and revokes the grant, instead of minting yet another live pair for whoever replays it.
     const rotated: UsedRefresh | undefined = rotating
       ? {
           ...rotating.used,
-          successors: refreshDigest ? { access: accessDigest, refresh: refreshDigest } : undefined,
+          successors: refreshDigest && !rotating.retry ? { access: accessDigest, refresh: refreshDigest } : undefined,
         }
       : undefined;
     const updated: ConnectorGrant = {
@@ -710,8 +712,9 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
 
   /**
    * The live refresh token a rotated-away one handed out, when presenting the old one again is a retry rather than
-   * a theft: within a minute of the rotation and with nothing yet rotated from its successor. A token rotated two
-   * generations ago, or one outside the window, has no such successor and revokes.
+   * a theft: within a minute of the rotation, with nothing yet rotated from its successor, and not yet retried — the
+   * window admits ONE retry. A token rotated two generations ago, one already retried, or one outside the window has
+   * no such successor and revokes.
    */
   private retryable(grant: ConnectorGrant, used: UsedRefresh): ConnectorGrant['refresh'][number] | undefined {
     if (used.rotatedAt === undefined || used.successors === undefined) return undefined;

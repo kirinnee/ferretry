@@ -239,6 +239,49 @@ describe('a lost refresh response costs a retry, not the grant (finding 4)', () 
     expect(await f.authority.verify(onward.access_token)).toBeDefined();
   });
 
+  test('the window admits ONE retry: a second replay inside it mints no pair, revokes the grant and is audited', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    await f.authority.exchange(...refresh(flow.client.client_id, first));
+    f.advance(10_000);
+    const retried = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    expect(await f.authority.verify(retried.access_token)).toBeDefined();
+    f.advance(10_000);
+    await expect(f.authority.exchange(...refresh(flow.client.client_id, first))).rejects.toMatchObject({
+      error: 'invalid_grant',
+    });
+    // No new pair was written, and the retry's pair died with the grant.
+    expect(f.state().grants[0]?.refresh).toEqual([]);
+    expect(f.state().grants[0]?.access).toEqual([]);
+    expect(f.state().grants[0]?.revokedAt).toBeDefined();
+    expect(await f.authority.verify(retried.access_token)).toBeUndefined();
+    await expect(
+      f.authority.exchange(...refresh(flow.client.client_id, retried.refresh_token ?? '')),
+    ).rejects.toMatchObject({ error: 'invalid_grant' });
+    expect(f.events.filter(e => e.kind === 'connector.refresh.reused')).toEqual([
+      { kind: 'connector.refresh.reused', grantId: flow.grant.id },
+    ]);
+  });
+
+  test('a replay hammered repeatedly inside the window never yields a live pair after the first retry', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    await f.authority.exchange(...refresh(flow.client.client_id, first));
+    const live: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      f.advance(1000);
+      try {
+        live.push((await f.authority.exchange(...refresh(flow.client.client_id, first))).access_token);
+      } catch {
+        // every attempt after the one retry is refused
+      }
+    }
+    expect(live).toHaveLength(1);
+    expect(await f.authority.verify(live[0] ?? '')).toBeUndefined();
+  });
+
   test('a retry never extends the window: past a minute from the rotation the reuse revokes', async () => {
     const f = fixture();
     const flow = await f.flow();
