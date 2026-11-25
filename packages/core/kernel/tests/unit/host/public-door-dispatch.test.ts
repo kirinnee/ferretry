@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { jsonResponse } from '../../../contract/http.ts';
+import { finalised, jsonResponse } from '../../../contract/http.ts';
 import type { PluginId } from '../../../contract/ids.ts';
 import type { Arrival } from '../../../contract/session.ts';
 import { Dispatcher, type MountedRoute } from '../../../host/dispatch.ts';
@@ -101,6 +101,24 @@ describe('public door routing is isolated from every API arrival', () => {
         (await table({ ...publicRoute, handle: undefined }).dispatch({ ...request('GET', publicRoute.path), arrival }))
           .status,
       ).toBe(404);
+    }
+  });
+  test('a public plugin that stops during a handler or before publication still answers 404', async () => {
+    for (const arrival of [door(), { kind: 'door', door: 'tunnel' } as Arrival]) {
+      for (const duringHandler of [true, false]) {
+        let serving = true;
+        const route: MountedRoute = {
+          ...publicRoute,
+          owner: { ...publicRoute.owner, serving: () => ({ kind: serving ? 'serving' : 'skeleton' }) },
+          handle: async () => {
+            if (duringHandler) serving = false;
+            return jsonResponse({ ok: true });
+          },
+        };
+        const answer = await table(route).dispatch({ ...request('GET', publicRoute.path), arrival });
+        serving = false;
+        expect(finalised(answer).status).toBe(404);
+      }
     }
   });
   test('unauthenticated API misses do not disclose public path claims', async () => {

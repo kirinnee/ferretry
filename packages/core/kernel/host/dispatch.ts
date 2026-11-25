@@ -209,6 +209,12 @@ async function run(
 ): Promise<ApiResponse> {
   const policy = <R extends ApiResponse>(response: R): R =>
     withVersion(descriptor.noStore === true ? noStore(response) : response, bindings.version);
+  const unavailable = (): PlainApiResponse | undefined => {
+    const refusal = owner === undefined ? undefined : notServing(owner);
+    return refusal !== undefined && table === 'route' && 'door' in descriptor && descriptor.door === 'public'
+      ? unknownRouteResponse(descriptor.method, descriptor.path)
+      : refusal;
+  };
   const guarded = descriptor.guard === 'secrets';
   const guard = guarded ? bindings.outputGuard() : undefined;
   let stamp: ReturnType<OutputGuard['stamp']> | undefined;
@@ -243,7 +249,7 @@ async function run(
   let cached: { readonly source: PublishedApiResponse; readonly answer: PublishedApiResponse } | undefined;
   let prepared: PublishedApiResponse | undefined;
   const last = (): PlainApiResponse | PublishedApiResponse => {
-    const refusal = owner === undefined ? undefined : notServing(owner);
+    const refusal = unavailable();
     if (refusal !== undefined) return policy(refusal);
     if (!showable()) return policy(withheld());
     if (spell === undefined) {
@@ -252,8 +258,8 @@ async function run(
     }
     try {
       const next = spell();
-      const unavailable = owner === undefined ? undefined : notServing(owner);
-      if (unavailable !== undefined) return policy(unavailable);
+      const stopped = unavailable();
+      if (stopped !== undefined) return policy(stopped);
       if (!showable()) return policy(withheld());
       if (!isPublishedResponse(next)) return policy(next);
       if (cached?.source !== next) cached = { source: next, answer: publishResponse(policy(next)) };
@@ -347,7 +353,12 @@ export class Dispatcher {
     const refusal = notServing(found.route.owner);
     const handle = found.route.handle;
     if (refusal !== undefined || handle === undefined)
-      return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
+      return withVersion(
+        door
+          ? unknownRouteResponse(request.method, request.path)
+          : (refusal ?? skeletonResponse(found.route.owner.title)),
+        this.bindings.version,
+      );
     const call = { request, params: found.params, ...decision.standing } as CallContext;
     let executed = false;
     const response = await runInCall({ actor: decision.actor, standing: decision.standing }, () =>
