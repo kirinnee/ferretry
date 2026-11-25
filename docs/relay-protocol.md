@@ -3388,6 +3388,11 @@ partial one. The operator runbook is
   when the connector is down or the tunnel was released, in the order direct → tunnel → relays. The
   published set's union **skips kinds a reader does not know** rather than refusing the set
   (`KNOWN_CARRIER_KINDS`), so this is the last carrier kind whose addition is a breaking change.
+  **A switched-off relay is published too:** when no relay is dialled because the relay is off (an operator block with
+  `enabled: false`, or Ferretry's hosted relay disabled) the set carries `{ "kind": "relay-off" }`, which is not an
+  address and is never dialled. A device that reads it does not try the hosted relay it discovered for itself and says
+  no relay failed; a set that names no relay and no `relay-off` (an older daemon, or discovery that merely failed) keeps
+  today's hosted fallback.
   **The published set is no longer constant for the life of the process.** §13's rule that pairing
   redemption and `GET /v1/carriers` give one answer is kept by ONE OWNER
   (`packages/daemon/src/lib/runtime/published-carriers.ts`) that both read, and every change replaces

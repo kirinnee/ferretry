@@ -61,14 +61,21 @@ export const PART_TITLES: Readonly<Record<Exclude<ItemViewPart, 'head' | 'premis
 
 /** Where the item stands, in the owner's words: who it waits on. */
 export interface StateChip {
-  readonly state: 'needs-you' | 'resting' | 'snoozed' | 'done';
-  /** "Needs you", "Resting · waiting on Zoe", "Resting · working", "Snoozed until Thu 09:00", "Done". */
+  readonly state: 'needs-you' | 'resting' | 'snoozed' | 'notice' | 'done';
+  /** "Needs you", "Resting · waiting on Zoe", "Resting · working", "Snoozed until Thu 09:00", "Notice", "Done". */
   readonly label: string;
 }
 
 /** The STATE chip: the protocol's one state, said the way the owner reads it. */
 export const stateChip = (item: AgendaItem, ferret: string, now: number): StateChip => {
   const view = agendaState(item);
+  // An FYI still open is not finished: it is read, and Got it is still on offer, so it is a Notice, never "Done".
+  if (
+    view.state === 'done' &&
+    item.notice === true &&
+    (item as { readonly resolvedAt?: string }).resolvedAt === undefined
+  )
+    return { state: 'notice', label: 'Notice' };
   switch (view.state) {
     case 'needs-you':
       return { state: 'needs-you', label: 'Needs you' };

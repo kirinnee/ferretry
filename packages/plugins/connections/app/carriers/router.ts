@@ -189,9 +189,14 @@ export function daemonCarriers(daemon: PairedDaemon, hostedRelayUrl?: string): r
   return DaemonIdSchema.safeParse(daemon.daemon).success ? set : set.filter(method => method.kind === 'direct');
 }
 
+/** Did this daemon publish that its relay is switched OFF? Then no relay — hosted included — is ever dialled for it. */
+const relaySwitchedOff = (daemon: PairedDaemon): boolean =>
+  daemon.carriers.some(entry => (entry as { kind?: unknown } | null)?.kind === 'relay-off');
+
 /** The hosted rendezvous for a daemon that authored none — dialled, never stored (`hostedRelayFallbackCarrier`). */
 function hostedRelayFallback(daemon: PairedDaemon, hostedRelayUrl: string | undefined): ConnectionMethod | undefined {
   if (hostedRelayUrl === undefined) return undefined;
+  if (relaySwitchedOff(daemon)) return undefined;
   if (!DaemonIdSchema.safeParse(daemon.daemon).success) return undefined;
   if (daemonCarriers(daemon).some(carrier => carrier.kind === 'relay')) return undefined;
   const parsed = ConnectionMethodSchema.safeParse({ kind: 'relay', relayUrl: hostedRelayUrl, operator: 'hosted' });
@@ -668,6 +673,12 @@ export class CarrierRouter {
         continue;
       }
       if (ofKind.length > 0 || kind === 'direct') continue;
+      if (relaySwitchedOff(daemon)) {
+        // The machine said its relay is off: nothing is dialled, and nothing is undetermined about it.
+        plan.why = RELAY_UNAVAILABLE;
+        plan.relayUndetermined = false;
+        continue;
+      }
       const hosted = hostedRelayFallback(daemon, await this.deps.hostedRelay());
       if (hosted !== undefined) {
         if (winner === undefined || !sameCarrier(hosted, winner)) yield this.#leg(daemon, hosted);

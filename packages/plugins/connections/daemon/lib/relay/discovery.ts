@@ -211,7 +211,7 @@ export type RelayCarrierSource =
   /** Ferretry's advertised carrier, read this boot and held no longer than this boot. */
   | { readonly kind: 'discovered'; readonly config: DaemonRelayConfig }
   /** Nothing to dial, and the sentence saying why. */
-  | { readonly kind: 'direct-only'; readonly reason: string; readonly retrying?: true };
+  | { readonly kind: 'direct-only'; readonly reason: string; readonly retrying?: true; readonly switchedOff?: true };
 
 /**
  * Choose the carrier, with the operator's own choice winning unconditionally.
@@ -230,6 +230,7 @@ export function chooseRelayCarrierSource(
     return {
       kind: 'direct-only',
       reason: 'Ferretry’s relay is switched off right now, so there is no carrier to fall back to',
+      switchedOff: true,
     };
   }
   if (advertised.kind === 'undetermined') {
@@ -344,6 +345,7 @@ function resolveEachRelayCarrier(
       return {
         kind: 'direct-only' as const,
         reason: 'the discovery relay entry is switched off in this daemon’s configuration',
+        switchedOff: true,
       };
     }
     const source = chooseRelayCarrierSource(undefined, advertised);
@@ -394,9 +396,16 @@ export function publishedDaemonCarriers(
   sources: readonly RelayCarrierSource[],
   tunnelUrl?: string,
 ): ReturnType<typeof PublishedCarriersSchema.parse> {
+  // A relay that is SWITCHED OFF (not merely undiscovered) while no other relay is dialled is said out loud, so a device
+  // stops trying the hosted relay it discovered for itself. An undetermined directory says nothing: that may recover.
+  const relayOff =
+    sources.every(source => dialledRelayUrl(source) === undefined) && sources.some(relaySwitchedOff)
+      ? [{ kind: 'relay-off' as const }]
+      : [];
   return PublishedCarriersSchema.parse([
     ...(directUrl === undefined ? [] : [{ kind: 'direct' as const, url: directUrl }]),
     ...(tunnelUrl === undefined ? [] : [{ kind: 'tunnel' as const, url: tunnelUrl }]),
+    ...relayOff,
     ...sources.flatMap(source => {
       const url = dialledRelayUrl(source);
       return url === undefined
@@ -409,6 +418,10 @@ export function publishedDaemonCarriers(
     }),
   ]);
 }
+
+/** Whether this source is a relay somebody switched OFF (the operator's block, or Ferretry's disabled relay). */
+const relaySwitchedOff = (source: RelayCarrierSource): boolean =>
+  source.kind === 'configured' ? !source.config.enabled : source.kind === 'direct-only' && source.switchedOff === true;
 
 /** The address this daemon will actually dial, or nothing. A switched-off block dials nothing. */
 export function dialledRelayUrl(source: RelayCarrierSource): string | undefined {
