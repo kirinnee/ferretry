@@ -130,3 +130,26 @@ describe('Add MCP server: reload now or when each ferret is idle', () => {
     await context.close();
   }, 60_000);
 });
+
+describe('Add MCP server: the login preview speaks in names (L231a)', () => {
+  for (const viewport of VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`names the runtime and the profile, not their ids, at ${viewport.name}, ${mode}`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await context.newPage();
+        await tab.goto(`${server?.url.origin ?? ''}/?theme=studio-${mode}`);
+        await tab.getByRole('textbox', { name: 'Name' }).fill('sentry');
+        await tab.getByRole('textbox', { name: 'Command' }).fill('npx -y @example/mcp-server');
+        await tab.waitForSelector('[data-add-mcp-preview="login"]');
+        await tab.waitForTimeout(300);
+        const preview = (await tab.locator('[data-add-mcp-preview="login"]').innerText()).replaceAll('\n', ' ');
+        expect(preview).toContain('Your Claude setup');
+        expect(preview).toContain('Claude · your terminal sign-in');
+        expect(preview).not.toContain('claude-default');
+        expect(preview).not.toContain('claude-you');
+        await insideTheScreen(tab, '[data-add-mcp-preview="login"]', viewport.width);
+        if (shotsDir !== '')
+          await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${mode}-preview.png`), fullPage: true });
+        await context.close();
+      }, 60_000);
+});

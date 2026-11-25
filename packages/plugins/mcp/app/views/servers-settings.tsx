@@ -58,8 +58,13 @@ export function McpSettings({ client, now = Date.now, origin }: McpSettingsProps
   const servers = sortedMcpServers(load.value.servers);
   const chips = mcpChips(servers, query, actions.checks, nowMs);
   const visible = visibleMcpServers(servers, query, chip, actions.checks, nowMs);
-  const total = visibleMcpServers(servers, '', chip, actions.checks, nowMs).length;
+  // Every server the machine has, whatever chip is on: a chip that shows none is not a machine that has none.
+  const total = servers.length;
   const chipLabel = chip === 'all' ? 'All' : 'Needs attention';
+  const emptyCopy =
+    total > 0 && chip === 'attention' && query.trim() === ''
+      ? 'No servers need attention.'
+      : contextEmptyCopy('No runtime on this machine sees an MCP server.', total, query, chipLabel);
 
   return (
     <section aria-label="MCP servers" className="flex min-w-0 flex-col gap-sm" data-settings="mcp">
@@ -83,9 +88,7 @@ export function McpSettings({ client, now = Date.now, origin }: McpSettingsProps
         </p>
       ))}
       {visible.length === 0 ? (
-        <ContextNote>
-          {contextEmptyCopy('No runtime on this machine sees an MCP server.', total, query, chipLabel)}
-        </ContextNote>
+        <ContextNote>{emptyCopy}</ContextNote>
       ) : (
         <ul className="m-0 flex list-none flex-col p-0" data-context-list="mcp">
           {visible.map(server => {
