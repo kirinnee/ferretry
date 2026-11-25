@@ -57,6 +57,20 @@ describe('the state chip', () => {
       label: 'Done',
     });
   });
+
+  test('says an open FYI is a Notice, and Done only once it is closed', () => {
+    expect(stateChip(item({ notice: true } as Partial<AgendaItem>), 'Zoe', NOW)).toEqual({
+      state: 'notice',
+      label: 'Notice',
+    });
+    expect(
+      stateChip(
+        { ...item({ notice: true } as Partial<AgendaItem>), resolvedAt: '2026-08-01T11:59:00.000Z' } as never,
+        'Zoe',
+        NOW,
+      ).label,
+    ).toBe('Done');
+  });
 });
 
 describe('the stage', () => {
