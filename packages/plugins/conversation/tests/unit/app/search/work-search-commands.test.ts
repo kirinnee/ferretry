@@ -541,3 +541,40 @@ describe('S11 the work search rows are named by Projects and Ferrets', () => {
     }
   });
 });
+
+describe('L253 the work search follows what is installed: Board for tasks, Agenda for asks', () => {
+  const without =
+    (...off: readonly string[]): PluginCommandContext['screenHref'] =>
+    (daemon, plugin, screen, params) =>
+      off.includes(plugin) ? undefined : testHref(daemon, plugin, screen, params);
+  const labels = (filters: readonly { readonly id: string }[] | undefined) => filters?.map(filter => filter.id);
+
+  it('offers the Tasks/Agenda chip only while both Board and Agenda are on', () => {
+    expect(labels(harness().built.filters)).toEqual(['kind', 'state']);
+  });
+
+  it('with the Agenda off, offers no Tasks/Agenda chip and asks the daemon for tasks alone, whatever chip was left set', () => {
+    const { built, pending, pause } = harness(without('agenda'));
+    expect(labels(built.filters)).toEqual(['state']);
+    built.list('relay', { kind: 'ask', state: 'everything' });
+    pause();
+    expect(pending.map(each => each.request.kind)).toEqual(['card']);
+  });
+
+  it('with the Board off, offers no Tasks/Agenda chip and asks the daemon for asks alone', () => {
+    const { built, pending, pause } = harness(without('board'));
+    expect(labels(built.filters)).toEqual(['state']);
+    built.list('relay', RESTING);
+    pause();
+    expect(pending.map(each => each.request.kind)).toEqual(['ask']);
+  });
+
+  it('with both off, offers no chips and searches nothing', () => {
+    const { built, pending, pause, timers } = harness(without('board', 'agenda'));
+    expect(built.filters).toEqual([]);
+    expect(built.list('relay', RESTING)).toEqual({ entries: [] });
+    pause();
+    expect(pending).toEqual([]);
+    expect(timers).toEqual([]);
+  });
+});

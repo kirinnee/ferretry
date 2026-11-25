@@ -43,24 +43,33 @@ const WORK_PENDING_LINE = 'Searching tasks and agenda…';
  * The chips the bar draws for this source (S11), as today's palette drew them: which kind, and whether closed work is
  * among the answer. The first option of each is the resting one: everything, so a finished task is still findable.
  */
-const WORK_FILTERS: readonly CommandBarFilter[] = [
-  {
-    id: 'kind',
-    label: 'Kind of work',
-    options: [
-      { id: 'all', label: 'All' },
-      { id: 'card', label: 'Tasks' },
-      { id: 'ask', label: 'Agenda' },
-    ],
-  },
-  {
-    id: 'state',
-    label: 'State of work',
-    options: [
-      { id: 'everything', label: 'Everything' },
-      { id: 'open', label: 'Open' },
-    ],
-  },
+const KIND_FILTER: CommandBarFilter = {
+  id: 'kind',
+  label: 'Kind of work',
+  options: [
+    { id: 'all', label: 'All' },
+    { id: 'card', label: 'Tasks' },
+    { id: 'ask', label: 'Agenda' },
+  ],
+};
+const STATE_FILTER: CommandBarFilter = {
+  id: 'state',
+  label: 'State of work',
+  options: [
+    { id: 'everything', label: 'Everything' },
+    { id: 'open', label: 'Open' },
+  ],
+};
+
+/**
+ * The kinds of work this daemon can open: a Task opens in the Board and an ask in the Agenda, so a kind whose plugin is
+ * off (or has no screen here) is neither offered as a chip nor searched for. Asked when the bar opens and builds the source.
+ */
+const openableKinds = (context: Pick<PluginCommandContext, 'daemon' | 'screenHref'>): readonly WorkKind[] => [
+  ...(context.screenHref(context.daemon, 'board', 'card', { id: 'F0' }) === undefined ? [] : (['card'] as const)),
+  ...(context.screenHref(context.daemon, 'agenda', 'agenda-ask', { ferret: 'f0', ask: 'A0' }) === undefined
+    ? []
+    : (['ask'] as const)),
 ];
 
 /** The heading each kind is listed under. */
@@ -146,6 +155,9 @@ export function workSearchCommandSource(
   readonly list: (query: string, filters: Readonly<Record<string, string>>) => CommandBarAnswer;
 } {
   const port = options.port ?? workSearchPort(context.client);
+  const kinds = openableKinds(context);
+  // Both kinds: the Tasks/Agenda chip; one: no chip to choose by, and the search asks for that kind alone; none: no chips and no search.
+  const filters = kinds.length === 0 ? [] : kinds.length === 1 ? [STATE_FILTER] : [KIND_FILTER, STATE_FILTER];
   const debounceMs = options.debounceMs ?? WORK_SEARCH_DEBOUNCE_MS;
   const schedule =
     options.schedule ??
@@ -220,17 +232,18 @@ export function workSearchCommandSource(
   };
 
   return {
-    filters: WORK_FILTERS,
-    list: (query, filters): CommandBarAnswer => {
+    filters,
+    list: (query, chosen): CommandBarAnswer => {
       const trimmed = query.trim();
-      if (trimmed.length < WORK_SEARCH_MIN_LENGTH) {
+      if (kinds.length === 0 || trimmed.length < WORK_SEARCH_MIN_LENGTH) {
         cancel?.();
         cancel = undefined;
         asked = null;
         return { entries: [] };
       }
-      const kind = filters.kind === 'card' || filters.kind === 'ask' ? filters.kind : undefined;
-      const open = filters.state === 'open';
+      const chosenKind = chosen.kind === 'card' || chosen.kind === 'ask' ? chosen.kind : undefined;
+      const kind = kinds.length === 1 ? kinds[0] : chosenKind;
+      const open = chosen.state === 'open';
       const key = `${trimmed}\u0000${kind ?? ''}\u0000${open}`;
       if (key !== asked) {
         asked = key;
