@@ -46,7 +46,9 @@ import {
   startMcpSignIn,
 } from '../lib/client.ts';
 import type { RestartWhen } from '@ferretry/core-ferrets/contract';
+import { profileDisplayName } from '@ferretry/plugin-runtimes/contract';
 import { changeRefusalSentence } from '../lib/refusal.ts';
+import { type RuntimeNames, useRuntimeNames } from '../lib/runtime-names.ts';
 import { mcpRedirectUri } from '../lib/sign-in-model.ts';
 import { FormFailure, FormField, FormFoot } from './form-parts.tsx';
 import { type McpSignInChannelFactory, McpSignInSheet } from './sign-in-sheet.tsx';
@@ -107,6 +109,8 @@ export function AddMcpForm({
   const [failure, setFailure] = useState<string | null>(null);
   const [added, setAdded] = useState<SessionMcpAdded | null>(null);
   const live = useRef('');
+  // The preview names the runtime in words; the read waits until a login add is chosen.
+  const runtimeNames = useRuntimeNames(client, draft.scope === 'login');
 
   // Whether a project write is possible here at all: read once.
   useEffect(() => {
@@ -334,7 +338,7 @@ export function AddMcpForm({
           {reason}
         </p>
       )}
-      <PreviewView preview={preview} currentKey={key} />
+      <PreviewView preview={preview} currentKey={key} runtimeNames={runtimeNames} />
       <FormFailure message={failure} />
       <FormFoot
         disabled={fresh === null}
@@ -379,7 +383,15 @@ function ChoiceCard({
 const numbered = (diff: readonly SessionMcpDiffLine[]) =>
   diff.map((line, position) => ({ id: `line-${position}`, line }));
 
-function PreviewView({ preview, currentKey }: { readonly preview: Preview; readonly currentKey: string }) {
+function PreviewView({
+  preview,
+  currentKey,
+  runtimeNames,
+}: {
+  readonly preview: Preview;
+  readonly currentKey: string;
+  readonly runtimeNames: RuntimeNames;
+}) {
   if (preview.kind === 'idle' || currentKey === '') return null;
   if (preview.kind === 'loading' || preview.key !== currentKey)
     return <Loading kind="bar" label="Reading what this would change…" />;
@@ -393,8 +405,9 @@ function PreviewView({ preview, currentKey }: { readonly preview: Preview; reado
   if (shown.scope === 'login')
     return (
       <p className="fy-action-form__note" data-add-mcp-preview="login">
-        {shown.replaces ? 'Replaces' : 'Adds'} the server in profile <span className="font-mono">{shown.profile}</span>,
-        used by <span className="font-mono">{shown.runtime}</span>
+        {shown.replaces ? 'Replaces' : 'Adds'} the server in profile{' '}
+        <strong>{profileDisplayName(shown.profile)}</strong>, used by{' '}
+        <strong>{runtimeNames.get(shown.runtime) ?? 'this ferret’s runtime'}</strong>
         {shown.ferrets > 1 ? ` — ${shown.ferrets} ferrets run on it` : ''}.
       </p>
     );

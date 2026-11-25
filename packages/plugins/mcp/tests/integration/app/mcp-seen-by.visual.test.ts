@@ -89,3 +89,61 @@ describe('Settings › MCP servers: "Seen by" names runtimes in words (Q8a)', ()
     }
   }
 });
+
+/** The tab on one fake inventory, at one size and theme; hands the page to `check`, then keeps the picture. */
+const withScene = async (
+  viewport: (typeof VIEWPORTS)[number],
+  theme: 'studio-light' | 'studio-dark',
+  data: 'healthy' | 'builtins',
+  name: string,
+  check: (tab: Awaited<ReturnType<Browser['newPage']>>) => Promise<void>,
+): Promise<void> => {
+  const context = await browser.newContext({
+    viewport: { width: viewport.width, height: viewport.height },
+    deviceScaleFactor: viewport.phone ? 2 : 1,
+    hasTouch: viewport.phone,
+    isMobile: viewport.phone,
+  });
+  const origin = server?.url.origin ?? '';
+  await context.route('**/*', async route =>
+    new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+  );
+  const tab = await context.newPage();
+  try {
+    await tab.goto(`${origin}/?theme=${theme}&data=${data}`);
+    await tab.locator('[data-scene-ready]').waitFor({ state: 'visible' });
+    await tab.waitForTimeout(400);
+    await check(tab);
+    expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-${name}.png`) });
+  } finally {
+    await context.close();
+  }
+};
+
+describe('Settings › MCP servers: the Needs attention chip with nothing to attend to (E204)', () => {
+  for (const viewport of VIEWPORTS)
+    for (const theme of ['studio-light', 'studio-dark'] as const)
+      it(`says no server needs attention, not that there is no server (${viewport.name}, ${theme})`, async () => {
+        await withScene(viewport, theme, 'healthy', 'needs-attention-empty', async tab => {
+          await tab.getByRole('button', { name: /Needs attention/u }).click();
+          const note = await tab.locator('[data-context-note]').innerText();
+          expect(note).toBe('No servers need attention.');
+          expect(await tab.locator('[data-settings="mcp"]').innerText()).not.toContain('No runtime on this machine');
+        });
+      });
+});
+
+describe('Settings › MCP servers: two built-in servers named ferretry (L278)', () => {
+  for (const viewport of VIEWPORTS)
+    for (const theme of ['studio-light', 'studio-dark'] as const)
+      it(`names the harness on each row (${viewport.name}, ${theme})`, async () => {
+        await withScene(viewport, theme, 'builtins', 'builtins', async tab => {
+          const titles = await tab.locator('[data-mcp-row] [data-mcp-title]').allInnerTexts();
+          expect(titles.map(title => title.replaceAll('\n', ' ').trim()).sort()).toEqual([
+            'ferretry · Claude',
+            'ferretry · Codex',
+          ]);
+        });
+      });
+});

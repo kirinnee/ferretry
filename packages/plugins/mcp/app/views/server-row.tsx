@@ -9,6 +9,7 @@
  * owns the provider page, the callback hand-over and the paste way.
  */
 import { Button, cn, type PlainFailure, plainFailure } from '@ferretry/app/ui';
+import { harnessWord } from '@ferretry/plugin-runtimes/contract';
 import { type ReactNode, useCallback, useState } from 'react';
 import type { McpInventoryServer, McpOAuthFlow } from '../../contract/index.ts';
 import { checkMcpServer, type McpClient, startMcpSignIn } from '../lib/client.ts';
@@ -191,7 +192,10 @@ export function McpServerRow({
     >
       {compact ? null : (
         <div className="flex min-w-0 flex-wrap items-center gap-x-sm gap-y-xs">
-          <span className="min-w-0 flex-1 truncate font-mono text-cell text-fg">{server.name}</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-cell text-fg" data-mcp-title="">
+            {/* Each tool carries its own built-in server, so two rows share the name; the harness tells them apart. */}
+            {server.scope === 'ferretry' ? `${server.name} · ${harnessWord(server.harness)}` : server.name}
+          </span>
           <span
             className="fy-mcp-chip"
             data-tone={server.scope === 'project' || server.scope === 'local' ? 'accent' : 'muted'}
