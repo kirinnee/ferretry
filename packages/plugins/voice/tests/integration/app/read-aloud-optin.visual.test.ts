@@ -8,6 +8,7 @@
  *   3. A reload keeps it on (it is stored on this device).
  *   4. A settings record stored BEFORE this field existed (format 1, no `readAloudButton`) shows no button.
  *   5. Turning the switch off again removes the buttons.
+ *   6. On a computer known to run an older Ferretry, the note names the switch by its exact on-screen label (L96).
  *
  * Set `FY_READ_ALOUD_OPTIN_SHOTS_DIR` to keep `<viewport>-<scheme>-<step>.png`.
  */
@@ -149,6 +150,47 @@ describe('r11 S12: Read aloud is opt-in', () => {
           await open('chat');
           await page.waitForTimeout(250);
           expect(await readAloudButtons(page)).toBe(0);
+          expect(problems).toEqual([]);
+        } finally {
+          await context.close();
+        }
+      });
+    }
+  }
+});
+
+describe('L96: the older-computer note names the Read aloud switch', () => {
+  for (const viewport of VIEWPORTS) {
+    for (const scheme of ['light', 'dark'] as const) {
+      it(`${viewport.name} ${scheme}: the note quotes the label of the switch that is on screen`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          deviceScaleFactor: viewport.phone ? 2 : 1,
+          hasTouch: viewport.phone,
+          isMobile: viewport.phone,
+          colorScheme: scheme,
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const page = await context.newPage();
+        page.setDefaultTimeout(8_000);
+        const problems: string[] = [];
+        page.on('pageerror', error => problems.push(error.message));
+        try {
+          await page.goto(`${origin}/?view=settings&older=1&theme=studio-${scheme}`);
+          await page.waitForSelector('[data-auto-read-needs-update]');
+          const note = (await page.locator('[data-auto-read-needs-update]').textContent()) ?? '';
+          const switchLabel = 'Show Read aloud on each reply';
+          expect(await page.getByRole('switch', { name: switchLabel }).count()).toBe(1);
+          expect(note).toContain(`“${switchLabel}”`);
+          expect(note).not.toContain('still works');
+          // The note is whole on screen: not clipped sideways and not wider than the viewport.
+          const box = await page.locator('[data-auto-read-needs-update]').boundingBox();
+          expect(box === null ? 0 : box.x + box.width).toBeLessThanOrEqual(viewport.width);
+          expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+          await shoot(page, viewport, scheme, '6-older-machine-note');
           expect(problems).toEqual([]);
         } finally {
           await context.close();

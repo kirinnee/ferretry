@@ -38,8 +38,10 @@ const AUTO_READ_EXPLANATION =
 
 const AUTO_READ_OFF_EXPLANATION = 'Off by default. Nothing is read aloud on its own.';
 
-const OLDER_MACHINE_NOTE =
-  'Auto-read needs a newer Ferretry on your computer. Until you update the Ferretry app on your computer, nothing is read on its own, but Read aloud on a message still works.';
+/** One name for the switch, so the old-machine note points at exactly the row below it. */
+const READ_ALOUD_SWITCH = 'Show Read aloud on each reply';
+
+const OLDER_MACHINE_NOTE = `Auto-read needs a newer Ferretry on your computer. Until you update the Ferretry app on your computer, nothing is read on its own. To have a reply read aloud now, turn on “${READ_ALOUD_SWITCH}” below, then tap Read aloud on a message.`;
 
 const READ_ALOUD_PRIVACY_NOTE =
   'Replies are spoken with the voices built into this device. Nothing is sent to your machine or stored. A voice marked “sends text away” hands the words to its maker to speak them.';
@@ -185,7 +187,7 @@ function Supported({
 
         <SettingRow
           settingId="read-aloud-button"
-          name="Show Read aloud on each reply"
+          name={READ_ALOUD_SWITCH}
           hint="Off by default."
           control={labelId => (
             <SettingSwitch

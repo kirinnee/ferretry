@@ -4,6 +4,7 @@
  *
  *   ?view=chat       three assistant messages, each with Voice's real `conversation.row-actions` panel (`ReadAloudPanel`)
  *   ?view=settings   the real Voice › Read replies aloud section (`AutoReadSettings`), including "Show Read aloud on each reply"
+ *   ?older=1         with `view=settings`: the connected computer is known to run an older Ferretry (the note names the switch)
  *   ?theme=<family>-<mode>
  *
  * The voice is a fake that speaks nothing; the storage is the browser's own `localStorage` (the real `fy:voice:live-settings` key).
@@ -78,7 +79,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
       <StoreProvider store={store}>
         <ReadAloudProvider controller={controller}>
           <div className="fy-vs">
-            <AutoReadSettings />
+            <AutoReadSettings olderMachine={params.get('older') === '1'} />
           </div>
         </ReadAloudProvider>
       </StoreProvider>
