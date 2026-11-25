@@ -279,7 +279,8 @@ function HandoffGoneNote() {
 }
 
 /**
- * "via turn file": a hover tooltip on a desktop, a tap that reads the line out on a phone (which has no
+ * "via turn file", drawn as the ⓘ icon alone (owner L262): the words are the button's accessible label, a hover
+ * tooltip on a desktop, and a tap or keypress that reads the line out on a phone (which has no
  * hover) — the same contract the message foot's time follows. It is NOT drawn by the hand-off itself: the
  * bubble hands it to its foot (`MessageFooter`'s `lead`) so it shares the line the time and ticks are on.
  */
@@ -294,7 +295,6 @@ export function HandoffVia({ open, onToggle }: { readonly open: boolean; readonl
       type="button"
     >
       <Info aria-hidden="true" size={12} />
-      <span aria-hidden="true">via turn file</span>
     </button>
   );
 }

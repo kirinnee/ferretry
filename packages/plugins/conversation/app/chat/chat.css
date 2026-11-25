@@ -158,7 +158,7 @@
   opacity: 0.6;
 }
 /* A message handed to the agent through a file (`handoff-message.tsx`): the file's text as Markdown,
-   its attachments under it, and a small faded "via turn file" line that explains on hover or tap. */
+   its attachments under it, and a small faded ⓘ (icon only) that says "via turn file" on hover or tap. */
 .fy-handoff {
   display: grid;
   gap: 6px;
