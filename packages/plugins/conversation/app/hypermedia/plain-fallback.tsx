@@ -5,6 +5,12 @@
  * message is not dressed. A message over the size cap (`limits.ts`) is shown the same way without the line, as before.
  */
 
+/**
+ * On a message whose reading is still awaited: its plain text is drawn now and the read document, usually shorter, replaces
+ * it. The transcript holds an older page back while any of its rows carries it (`chat/transcript-staging.ts`).
+ */
+export const PENDING_READING_ATTRIBUTE = 'data-fy-hm-pending';
+
 /** What the note says. One string, so the worker and the belt say the same thing. */
 export const PLAIN_TEXT_NOTE = 'shown as plain text';
 

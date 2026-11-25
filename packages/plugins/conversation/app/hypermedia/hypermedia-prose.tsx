@@ -4,7 +4,7 @@ import { memo, useId, useMemo, useSyncExternalStore } from 'react';
 import { DrawableFyRenderBodies } from './fy-render-host.tsx';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
 import { readLook, serverLook, subscribeToLook, variantOf } from './look.ts';
-import { PlainFallback } from './plain-fallback.tsx';
+import { PENDING_READING_ATTRIBUTE, PlainFallback } from './plain-fallback.tsx';
 import { HYPERMEDIA_COMPONENT_BLOCKS, HYPERMEDIA_PART_SLOTS, HYPERMEDIA_PARTS } from './parts.tsx';
 import { ReferenceChip } from './reference-chip.tsx';
 import { ReferenceProofProvider } from './reference-proof.tsx';
@@ -94,7 +94,12 @@ const HypermediaDocument = memo(function HypermediaDocument({
   );
   return (
     <ReferenceProofProvider text={text}>
-      <div className={`fy-hm min-w-0 max-w-full ${className ?? ''}`} data-fy-hypermedia="" data-hm-header={header}>
+      <div
+        className={`fy-hm min-w-0 max-w-full ${className ?? ''}`}
+        data-fy-hypermedia=""
+        data-hm-header={header}
+        {...(reading.kind === 'pending' ? { [PENDING_READING_ATTRIBUTE]: '' } : {})}
+      >
         {rich !== null ? (
           <DrawableFyRenderBodies value={rich.drawable}>
             <DocumentView

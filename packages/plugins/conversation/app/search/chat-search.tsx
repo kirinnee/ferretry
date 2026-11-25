@@ -15,6 +15,7 @@ import {
   stepMatch,
   withResults,
 } from './chat-search-model.ts';
+import { isStaged, STAGED_MARKER_CLASS } from '../chat/transcript-staging.ts';
 import './chat-search.css';
 
 /** What the chat's search needs from the daemon and from the chat's history. */
@@ -43,14 +44,22 @@ const highlights = (): { set(name: string, value: unknown): void; delete(name: s
     : undefined;
 };
 
-/** The transcript's rows that say where they begin, in order. */
+/** Are rows of the transcript in `root` held back, not yet on screen? */
+const rowsStaged = (root: HTMLElement): boolean => root.querySelector(`.${STAGED_MARKER_CLASS}`) !== null;
+
+/** The transcript's rows that say where they begin, in order: only those on screen, never a page still held back. */
 const placedRows = (root: HTMLElement): { readonly offset: number; readonly row: HTMLElement }[] =>
   rowAnchors(
-    [...root.querySelectorAll<HTMLElement>('[data-transcript-offset]')].map(row => ({
-      offset: Number(row.dataset.transcriptOffset),
-      also: (row.dataset.transcriptAlso ?? '').split(' ').filter(Boolean).map(Number),
-      row,
-    })),
+    [...root.querySelectorAll<HTMLElement>('[data-transcript-offset]')]
+      .filter(row => {
+        const content = row.closest('.fy-transcript-content');
+        return content === null || !isStaged(row, content);
+      })
+      .map(row => ({
+        offset: Number(row.dataset.transcriptOffset),
+        also: (row.dataset.transcriptAlso ?? '').split(' ').filter(Boolean).map(Number),
+        row,
+      })),
   );
 
 /**
@@ -186,7 +195,9 @@ export function ChatSearch({ port, transcript, agentName, onClose, focusSignal =
           const rows = placedRows(root);
           const drawn = reached && (rows[0]?.offset ?? Number.POSITIVE_INFINITY) <= match.offset;
           if (!drawn && reached && frames < ROW_WAIT_FRAMES) {
-            frames += 1;
+            // A page held back until its rows are read (`transcript-staging.ts`) is waited for without counting: it is shown
+            // within its own patience.
+            if (!rowsStaged(root)) frames += 1;
             requestAnimationFrame(look);
             return;
           }
