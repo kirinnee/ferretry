@@ -91,6 +91,7 @@ export type ScanRecord = z.infer<typeof ScanRecordSchema>;
 /** Whether one ferret is instructed to learn, as the daemon stores it. */
 export const StoredFerretLessonsSchema = z.object({
   ferretId: z.string().min(1),
+  name: z.string().min(1).optional(),
   passive: z.boolean(),
   since: z.string(),
   setBy: z.enum(['default', 'owner']),

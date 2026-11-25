@@ -166,7 +166,7 @@ export function LessonsSettingsSurface({ connection, ferrets = null }: LessonsSe
             return (
               <SettingRow
                 key={entry.ferretId}
-                name={sessionName(entry.ferretId, byId)}
+                name={sessionName(entry.ferretId, byId, entry.name)}
                 {...(cwd === undefined ? {} : { hint: basename(cwd) })}
                 dataAttributes={{ 'data-lessons-ferret': entry.ferretId }}
                 control={() => (

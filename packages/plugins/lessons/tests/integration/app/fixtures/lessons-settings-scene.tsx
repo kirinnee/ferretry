@@ -22,6 +22,8 @@ const connection: LessonsConnection = {
           { ferretId: 'ferret-hadi', passive: true, since: AT, setBy: 'default' },
           { ferretId: 'ferret-mira', passive: false, since: AT, setBy: 'owner' },
           { ferretId: 'ferret-oden', passive: true, since: AT, setBy: 'default' },
+          { ferretId: 'ferret-gone-4f2a9c1e77', name: 'zed', passive: false, since: AT, setBy: 'default' },
+          { ferretId: 'ferret-gone-91b3d0aa42', passive: false, since: AT, setBy: 'default' },
         ],
         'GET /v1/lessons/global': {
           name: GLOBAL_LESSONS_DOCUMENT,
