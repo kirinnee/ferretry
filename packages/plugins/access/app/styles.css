@@ -53,19 +53,23 @@
 }
 
 /* ───────── the hero: the mascot, and the check badge on success ───────── */
+/* CENTRED over the column in every state (owner &B211: "why isn't the ferret centered?"). The hero is a fixed-width item of a
+   flex COLUMN whose items stretch, and a fixed-width item that is not told otherwise sits at the START: with no `auto` margins
+   it hung off the column's left edge on every width and in every state (Back, banner, plain). The heading, the list and the tiles
+   under it are centred or fill the column, so the ferret is the one thing that read as off-centre. `margin-inline: auto` centres it
+   and the width rules below only size it. */
 .fy-pair-hero {
   position: relative;
   width: min(100%, 260px);
-  margin: 0 0 -4px;
+  margin: 0 auto -4px;
 }
 @media (min-width: 640px) {
   .fy-pair-hero {
     width: min(100%, 300px);
   }
 }
-/* ONE READING COLUMN, LEFT-ALIGNED, on every width (C59 O8-2; S-8 at 390): the words start at the column's left edge and the buttons hang off
-   the same line, so the mascot starts there too. Nothing on this screen is centred while the buttons sit at the start (a phone no
-   longer keeps a centred heading over start-aligned buttons). */
+/* ONE READING COLUMN (C59 O8-2; S-8 at 390): the words and the buttons start at the column's left edge; the mascot is the one
+   centred figure above them (see the hero rule above), so it is centred over the column and not over the words. */
 /* A short screen (a laptop) keeps the confirm answers above the fold: the hero is smaller until the success screen, which
    has the room. */
 @media (min-width: 640px) and (max-height: 900px) {

@@ -5,6 +5,7 @@
  */
 export { sharedChromium } from './chromium.ts';
 export { boundedContext, gate, overlapped } from './overlap.ts';
+export { describeRoundMisses, roundSafeMisses } from './round-safe.ts';
 export { type ReleaseKey, releaseKey, run, type SignedReleaseOptions, signedRelease } from './signed-release.ts';
 export { type WaitForOptions, waitFor } from './wait-for.ts';
 

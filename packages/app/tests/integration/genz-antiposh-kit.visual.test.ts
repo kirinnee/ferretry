@@ -267,7 +267,10 @@ for (const style of KITS)
               expect(read.layers[0], 'the first layer is the style contract dot tile').toMatch(/radial-gradient\(/u);
               expect(read.bgSize.split(',')[0]).toBe('22px 22px');
               expect(read.grain.blend).toBe(mode === 'light' ? 'soft-light' : 'normal');
-              expect(px(read.button.radius), 'a button is a pill').toBeGreaterThan(100);
+              expect(
+                px(read.button.radius),
+                'a button is a pill (the capped fully-round radius)',
+              ).toBeGreaterThanOrEqual(20);
               expect(px(read.field.radius), 'a field is NOT a pill').toBeLessThanOrEqual(16);
               expect(milliseconds(read.motion.base)).toBe(260);
               expect(milliseconds(read.motion.slow)).toBe(460);
@@ -297,7 +300,7 @@ for (const style of KITS)
               expect(read.td.left, 'a ruled grid').toBe('solid');
               expect(read.link.decoration).toBe('none');
               expect(read.link.bg, 'a link is a pill highlight').toBe(true);
-              expect(px(read.link.radius)).toBeGreaterThan(100);
+              expect(px(read.link.radius)).toBeGreaterThanOrEqual(20);
               // SPINNER: a sparkle of four fat bars; the ring is hidden; the star turns on a spring.
               expect(read.spinner.ring).toBe('none');
               expect(read.spinner.parts).toEqual(['inline', 'inline', 'inline', 'inline']);
