@@ -88,6 +88,20 @@ it the machine.
 
 Nothing re-derives it, and no header can move it.
 
+`packages/daemon/tests/unit/grants/policy.test.ts` asserts exactly this with a relayed request that
+presents every loopback-looking signal it can.
+
+**A loopback peer is not proof of the owner.** A remote caller forwarded through a locally bound proxy
+(`tailscale serve`, `cloudflared`, `ssh -L`) arrives from a loopback peer too, so every owner rule — widening
+(`hostLocal`), whether a caller is governed, and the owner's passkey recovery — reads `arrivedOnHost` in
+`packages/daemon/src/lib/api/http.ts` instead of `loopback`. It admits **only the host's admin token over a
+loopback peer**: reading that token already needs this machine's disk, so nobody can present it who did not
+already have the machine.
+
+The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises no foreign address,
+`mayTrustDirectLoopback`) is now about the **place**, never the owner: it admits only `privilegedOnly` routes
+— a local terminal attach — through `arrivedPrivileged`, and grants nothing.
+
 ### Public connector arrivals
 
 In 5.0 the kernel stamps `ApiRequest.arrival`. A public HTTP arrival is
@@ -115,20 +129,6 @@ public route is unrouted immediately.
 The public arrival grants no fleet authority. A connector's later tool action needs a
 separate governed admission through the daemon's route dispatcher; receiving an OAuth or
 MCP request at a public door never grants access to `/v1/*`.
-
-`packages/daemon/tests/unit/grants/policy.test.ts` asserts exactly this with a relayed request that
-presents every loopback-looking signal it can.
-
-**A loopback peer is not proof of the owner.** A remote caller forwarded through a locally bound proxy
-(`tailscale serve`, `cloudflared`, `ssh -L`) arrives from a loopback peer too, so every owner rule — widening
-(`hostLocal`), whether a caller is governed, and the owner's passkey recovery — reads `arrivedOnHost` in
-`packages/daemon/src/lib/api/http.ts` instead of `loopback`. It admits **only the host's admin token over a
-loopback peer**: reading that token already needs this machine's disk, so nobody can present it who did not
-already have the machine.
-
-The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises no foreign address,
-`mayTrustDirectLoopback`) is now about the **place**, never the owner: it admits only `privilegedOnly` routes
-— a local terminal attach — through `arrivedPrivileged`, and grants nothing.
 
 ## Nine capabilities, two axes
 
