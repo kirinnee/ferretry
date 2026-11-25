@@ -185,9 +185,15 @@ unknown client or a redirect URI problem is shown as an error page and NEVER red
 - **Tokens**: opaque, `fyc_at_` + 43 base64url (access, 1 h) and `fyc_rt_` + 43 base64url (refresh, 30 days,
   rotated on every use). Only SHA-256 digests are stored. Presenting a rotated-away refresh token revokes the
   whole grant (reuse detection), with one exception for a lost response: the token just rotated is accepted again for
-  60 s after its rotation, as long as nothing has yet been rotated from its successor. That retry issues a fresh pair
-  (rotating again) and revokes the pair the first exchange issued; it does not extend the window. Outside the
-  window, or for a token rotated two generations ago, reuse revokes the grant as before. A rotated-away token
+  60 s after its rotation, as long as nothing has yet been rotated from its successor. **That retry is one-shot**
+  (RFC 9700 §4.14.2): it issues one fresh pair and revokes the pair the first exchange issued, and does not extend the
+  window. Tokens are stored as digests only, so the first pair cannot be handed out again; instead the second
+  presentation of the same rotated token, inside the window or not, issues nothing, revokes the grant (every access
+  and refresh token) and emits `connector.refresh.reused`, so a stolen token cannot be replayed for live pairs.
+  The pair the retry superseded is remembered as used too, so a client that did receive it and presents it later
+  revokes the grant as well. Only a first rotation marks its token retryable: a state file written before the retry
+  was one-shot has no mark, so reuse of those tokens revokes without a retry.
+  Outside the window, or for a token rotated two generations ago, reuse revokes the grant as before. A rotated-away token
   that has passed its own 30-day expiry is simply `invalid_grant`. The token response is `Cache-Control: no-store`.
 - **Resource / audience**: every token is bound to the one resource URI; a token request naming another
   `resource` is `invalid_target`.
@@ -198,7 +204,8 @@ unknown client or a redirect URI problem is shown as an error page and NEVER red
   per source, 300/min overall; waiting-page polls 60/min per source, 1200/min overall; token and revoke 120/min per
   source with NO overall ceiling, plus 30 failed attempts per source per 5 min and 30 successful exchanges per
   authenticated client per minute (only a holder of a valid credential spends the latter, so anonymous traffic can
-  never starve a valid refresh); `/mcp` 60 calls/min per grant, of which write tools 10/min — except the two agenda
+  never starve a valid refresh; the budget is judged AFTER the reuse decision and just before minting, so a replayed
+  code or rotated refresh token still revokes the grant at a full budget); `/mcp` 60 calls/min per grant, of which write tools 10/min — except the two agenda
   acts (`answer_attention`, `snooze_attention`), which have their own 30/min so an agenda clean-up burst fits; they
   still count toward the 60. Over the limit is `429`
   with `Retry-After`. Only the per-source counters are kept in a bounded table (10,000 sources; at the bound the

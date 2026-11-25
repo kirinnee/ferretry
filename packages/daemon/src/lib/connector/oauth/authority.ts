@@ -581,8 +581,8 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         throw new OAuthError('unsupported_grant_type', 'Unsupported grant type.');
       if (!client.grantTypes.includes(grantType))
         throw new OAuthError('unauthorized_client', 'This client may not use this grant type.');
-      const budget = `token:${client.id}`;
-      this.ports.limiter.check(budget, CLIENT_TOKENS_PER_MINUTE);
+      // The success budget is judged inside `redeem`, after the reuse decision and just before a token is minted: a
+      // replayed code or rotated refresh token must still revoke (and be audited) when the budget is full.
       // A credential the daemon has never issued to this client is refused here, without taking a queue slot.
       if (grantType === 'authorization_code') {
         const code = this.ports.memory.codes.get(await digest(this.ports.crypto, input.code ?? ''));
@@ -593,7 +593,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
           throw new OAuthError('invalid_grant', 'Invalid refresh token.');
       }
       const tokens = await this.ports.memory.run(() => this.redeem(input, grantType, client.id), 'token');
-      this.ports.limiter.record(budget);
+      this.ports.limiter.record(`token:${client.id}`);
       return tokens;
     });
   }
@@ -626,6 +626,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         !secretsMatch(base64url(await this.ports.crypto.sha256(input.code_verifier)), code.challenge)
       )
         throw new OAuthError('invalid_grant', 'Invalid or expired authorization code or verifier.');
+      this.ports.limiter.check(`token:${client.id}`, CLIENT_TOKENS_PER_MINUTE);
       // Spend before any await that might fail; even failed persistence cannot make a code reusable.
       this.ports.memory.codes.set(key, { ...code, used: true });
       scopes = grant.scopes;
@@ -661,12 +662,22 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
           : ([...new Set(input.scope.split(' ').filter(Boolean))] as ConnectorScope[]);
       if (scopes.some(scope => !token.scopes.includes(scope)))
         throw new OAuthError('invalid_scope', 'A refresh cannot increase its granted scopes.');
+      this.ports.limiter.check(`token:${client.id}`, CLIENT_TOKENS_PER_MINUTE);
       // On a retry the pair the first rotation issued is superseded: the client never saw it, so it dies here.
       const superseded = used?.successors;
+      const supersededRefresh = grant.refresh.find(t => t.digest === superseded?.refresh);
       grant = {
         ...grant,
         access: grant.access.filter(t => t.digest !== superseded?.access),
         refresh: grant.refresh.filter(t => t.digest !== key && t.digest !== superseded?.refresh),
+        // The superseded refresh token is remembered as used, with no retry: a client that DID receive that pair
+        // and presents it proves the retry came from someone else, and that reuse revokes the grant.
+        usedRefresh: supersededRefresh
+          ? [
+              ...grant.usedRefresh.filter(u => u.digest !== supersededRefresh.digest),
+              { digest: supersededRefresh.digest, expiresAt: supersededRefresh.expiresAt, rotatedAt: this.now() },
+            ]
+          : grant.usedRefresh,
       };
       rotating ??= { used: { digest: key, expiresAt: token.expiresAt, rotatedAt: this.now() }, retry: false };
     }
@@ -675,11 +686,14 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     const audience = this.ports.endpoints.resource;
     const accessDigest = await digest(this.ports.crypto, access);
     const refreshDigest = refresh ? await digest(this.ports.crypto, refresh) : undefined;
-    // Rotation is recorded with the digests of what it issued, so a retry can supersede exactly that pair.
+    // Rotation is recorded with the digests of what it issued, so a retry can supersede exactly that pair. A RETRY
+    // records none: the retry window is one-shot (RFC 9700 §4.14.2), so presenting this token a third time finds no
+    // successor to hand out and revokes the grant, instead of minting yet another live pair for whoever replays it.
     const rotated: UsedRefresh | undefined = rotating
       ? {
           ...rotating.used,
-          successors: refreshDigest ? { access: accessDigest, refresh: refreshDigest } : undefined,
+          successors: refreshDigest && !rotating.retry ? { access: accessDigest, refresh: refreshDigest } : undefined,
+          retryable: refreshDigest && !rotating.retry ? (true as const) : undefined,
         }
       : undefined;
     const updated: ConnectorGrant = {
@@ -710,11 +724,12 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
 
   /**
    * The live refresh token a rotated-away one handed out, when presenting the old one again is a retry rather than
-   * a theft: within a minute of the rotation and with nothing yet rotated from its successor. A token rotated two
-   * generations ago, or one outside the window, has no such successor and revokes.
+   * a theft: within a minute of the rotation, with nothing yet rotated from its successor, and not yet retried — the
+   * window admits ONE retry. A token rotated two generations ago, one already retried, or one outside the window has
+   * no such successor and revokes.
    */
   private retryable(grant: ConnectorGrant, used: UsedRefresh): ConnectorGrant['refresh'][number] | undefined {
-    if (used.rotatedAt === undefined || used.successors === undefined) return undefined;
+    if (used.retryable !== true || used.rotatedAt === undefined || used.successors === undefined) return undefined;
     if (this.now() - used.rotatedAt > REFRESH_RETRY_MS) return undefined;
     const successor = used.successors.refresh;
     return grant.refresh.find(t => t.digest === successor);

@@ -101,6 +101,30 @@ describe('shared limits cannot be exhausted by one source (finding 1)', () => {
     ).toBeDefined();
   });
 
+  test('a replayed refresh token at a full success budget still revokes the grant and is audited, never a bare 429', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    let token = (await f.authority.exchange(...refresh(flow.client.client_id, first, 'claude'))).refresh_token ?? '';
+    // Fill the minute: the sign-in and the first rotation are two successes, so 28 more.
+    for (let i = 0; i < 28; i++)
+      token = (await f.authority.exchange(...refresh(flow.client.client_id, token, 'claude'))).refresh_token ?? '';
+    // A legitimate refresh is told to slow down...
+    await expect(f.authority.exchange(...refresh(flow.client.client_id, token, 'claude'))).rejects.toMatchObject({
+      status: 429,
+    });
+    expect(f.state().grants[0]?.revokedAt).toBeUndefined();
+    // ...but a known reuse is a theft signal and is decided before the budget.
+    f.advance(61_000);
+    for (let i = 0; i < 30; i++) f.options.limiter.record(`token:${flow.client.client_id}`);
+    await expect(f.authority.exchange(...refresh(flow.client.client_id, first, 'attacker'))).rejects.toMatchObject({
+      error: 'invalid_grant',
+      status: 400,
+    });
+    expect(f.state().grants[0]?.revokedAt).toBeDefined();
+    expect(f.events).toContainEqual({ kind: 'connector.refresh.reused', grantId: flow.grant.id });
+  });
+
   test('a client with no grant, sign-in or code is reclaimable after an hour, and reclaimed first at the cap', async () => {
     const f = fixture();
     const make = (i: number) => f.authority.register({ redirect_uris: [redirectUri] }, { source: `s${i}` });

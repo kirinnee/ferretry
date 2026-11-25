@@ -27,12 +27,13 @@ async function setup() {
     appOrigin: 'https://app.example',
     daemonId: 'daemon-integration',
   };
+  const events: unknown[] = [];
   const authority = new ConnectorAuthority({
     clock,
     crypto: webCryptoConnector,
     store,
     endpoints,
-    audit: { record: async () => {} },
+    audit: { record: async event => void events.push(event) },
     allowedRedirectUris: [],
     memory: new ConnectorMemory(),
     limiter: new ConnectorRateLimiter(clock),
@@ -62,7 +63,7 @@ async function setup() {
     if (!response) throw new Error('Unclaimed request');
     return response;
   };
-  return { directory, store, authority, http, call };
+  return { directory, store, authority, http, call, events };
 }
 
 describe('connector OAuth with real crypto and atomic files', () => {
@@ -150,6 +151,77 @@ describe('connector OAuth with real crypto and atomic files', () => {
       expect(serialized).not.toContain(value);
     expect((await stat(file)).mode & 0o777).toBe(0o600);
     expect((await stat(join(f.directory, 'connector'))).mode & 0o777).toBe(0o700);
+  });
+
+  test('a replayed rotated refresh token gets one retry pair, then revokes the grant and is audited', async () => {
+    const f = await setup();
+    const redirectUri = 'https://claude.ai/api/mcp/auth_callback';
+    const client = JSON.parse(
+      (
+        await f.call('POST', '/oauth/register', {
+          client_name: 'Replay client',
+          redirect_uris: [redirectUri],
+          token_endpoint_auth_method: 'client_secret_post',
+        })
+      ).body,
+    );
+    const verifier = base64url(webCryptoConnector.randomBytes(32));
+    const query = new URLSearchParams({
+      response_type: 'code',
+      client_id: client.client_id,
+      redirect_uri: redirectUri,
+      code_challenge: base64url(await webCryptoConnector.sha256(verifier)),
+      code_challenge_method: 'S256',
+      resource: 'https://connector.example/mcp',
+    });
+    const waitingUrl = (await f.call('GET', `/oauth/authorize?${query}`)).headers.get('location') ?? '';
+    await f.call('GET', waitingUrl);
+    await f.authority.approve((await f.authority.pending())[0]?.id ?? '', 'admin-cli');
+    const code =
+      new URL((await f.call('GET', waitingUrl)).headers.get('location') ?? '').searchParams.get('code') ?? '';
+    const credentials = { client_id: client.client_id, client_secret: client.client_secret };
+    const original = JSON.parse(
+      (
+        await f.call('POST', '/oauth/token', {
+          ...credentials,
+          grant_type: 'authorization_code',
+          redirect_uri: redirectUri,
+          code,
+          code_verifier: verifier,
+          resource: 'https://connector.example/mcp',
+        })
+      ).body,
+    );
+    const replay = () =>
+      f.call('POST', '/oauth/token', {
+        ...credentials,
+        grant_type: 'refresh_token',
+        refresh_token: original.refresh_token,
+      });
+    // The client's rotation; its response is "lost", so it presents the same token again inside the window.
+    const lost = JSON.parse((await replay()).body);
+    const retried = await replay();
+    expect(retried.status).toBe(200);
+    const retriedTokens = JSON.parse(retried.body);
+    expect(retriedTokens.refresh_token).not.toBe(lost.refresh_token);
+    expect(await f.authority.verify(retriedTokens.access_token)).toBeDefined();
+    expect(await f.authority.verify(lost.access_token)).toBeUndefined();
+    // Every further replay is refused, mints nothing and revokes the grant.
+    const third = await replay();
+    expect(third.status).toBe(400);
+    expect(JSON.parse(third.body).error).toBe('invalid_grant');
+    expect(third.body).not.toContain('access_token');
+    expect(await f.authority.verify(retriedTokens.access_token)).toBeUndefined();
+    const refused = await f.call('POST', '/oauth/token', {
+      ...credentials,
+      grant_type: 'refresh_token',
+      refresh_token: retriedTokens.refresh_token,
+    });
+    expect(refused.status).toBe(400);
+    const state = JSON.parse(await readFile(join(f.directory, 'connector', 'connector.json'), 'utf8'));
+    expect(state.grants[0].revokedAt).toBeDefined();
+    expect(state.grants[0].refresh).toEqual([]);
+    expect(f.events.filter(e => (e as { kind: string }).kind === 'connector.refresh.reused')).toHaveLength(1);
   });
 
   test('damaged JSON and foreign shapes close every store operation without resetting the file', async () => {

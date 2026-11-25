@@ -37,6 +37,11 @@ const usedRefreshSchema = z.preprocess(
     expiresAt: z.number().finite().optional(),
     rotatedAt: z.number().finite().optional(),
     successors: z.object({ access: digestSchema, refresh: digestSchema }).optional(),
+    /**
+     * Written only by a first rotation, and absent once the token's one retry is spent. A record without it (a retried
+     * token, or one written before the retry was one-shot) can never be retried: reuse revokes.
+     */
+    retryable: z.literal(true).optional(),
   }),
 );
 export type UsedRefresh = z.infer<typeof usedRefreshSchema>;
