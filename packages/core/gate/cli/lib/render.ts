@@ -101,6 +101,7 @@ function localTime(at: string): string {
 /** Who did it, in words. A device's name is untrusted text: quoted, marked as a device, with a short id. */
 export function describeActor(actor: AuditActor): string {
   if (actor.kind === 'host') return 'this computer';
+  if (actor.kind === 'connector') return 'a remote MCP connector';
   if (actor.kind === 'warden') return 'a supervising agent';
   if (actor.kind === 'anonymous') return 'someone who is not paired';
   const id = actor.deviceId === undefined ? '' : ` (${auditShortId(actor.deviceId)})`;

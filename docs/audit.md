@@ -61,7 +61,8 @@ bound.
 `{ at, event, actor: { kind, deviceId?, deviceName? }, subject?, outcome, detail? }`
 
 - `actor.kind`: `host` (admin token / command line), `device` (a paired device, by id and name),
-  `warden`, or `anonymous` (an unpaired caller — only on `pairing.refused`).
+  `connector` (a delegated connector, with its grant id in `detail.grant`), `warden`, or `anonymous`
+  (an unpaired caller — only on `pairing.refused`).
 - `outcome`: `succeeded`, `refused` (a 4xx), `failed` (a 5xx or a thrown error).
 - `detail`: at most twelve short scalar facts. There is no field that can hold a nested document,
   an argv or a multi-line value. A subject or name that is not short single-line text is written as

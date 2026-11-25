@@ -13,6 +13,8 @@ import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { RUNTIME_START_KEY, RuntimeStart } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
 import { as, fakeLogins, host } from './route-fixture.ts';
+import { connectorActor } from '@ferretry/core-gate/contract';
+import { ownerStanding } from '@ferretry/core-gate/contract/testing';
 
 /**
  * R-0323, R-0128, R-0023 (today's `mounts/session-restart.ts`): restart ferrets on the same login with their
@@ -317,6 +319,46 @@ describe('restarting ferrets', () => {
 });
 
 describe('who a restart is journalled as (G12), through the real route, adapter and files', () => {
+  test('a connector is preserved in both immediate and queued session.restarted journal writes', async () => {
+    const grant = 'cg_abcdefghij';
+    const h = await host([], {
+      harness: new FakeHarness(),
+      runner: new FakeRunner(),
+      standing: () => ({
+        ...ownerStanding(),
+        actor: connectorActor(grant),
+        credential: { kind: 'authenticated', tokenClass: 'connector', grant },
+      }),
+    });
+    try {
+      const start = await h.request('POST', '/v1/ferrets', {
+        body: { name: 'aniya', folder: '/work/aniya' },
+        headers: { 'x-fy-request-id': randomUUID() },
+      });
+      expect(start.status).toBe(201);
+      const { id } = start.json<{ id: string }>();
+      const queued = await ask(h, { scope: 'ids', ids: [id] });
+      expect(queued.json<RestartResult>().queued).toHaveLength(1);
+      expect(JSON.parse(h.state('ferrets').raw(RestartsFile) as string).queued[0].requestedBy).toBe(
+        `connector:${grant}`,
+      );
+      await h.request('POST', `/v1/ferrets/${id}/signal`, { body: { kind: 'waiting' } });
+      await h.runJob('restart-drain');
+      await h.request('POST', `/v1/ferrets/${id}/signal`, { body: { kind: 'waiting' } });
+      expect((await ask(h, { scope: 'ids', ids: [id] })).json<RestartResult>().restarted).toHaveLength(1);
+      const rows = (h.state('ferrets').raw(FerretHistoryFiles, id) as string)
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line));
+      expect(rows.filter(row => row.type === 'session.restarted').map(row => row.data.requestedBy)).toEqual([
+        `connector:${grant}`,
+        `connector:${grant}`,
+      ]);
+    } finally {
+      await h.stop();
+    }
+  });
+
   test('G12 an immediate restart by the owner is journalled as the owner', async () => {
     const { h, start } = await running();
     const id = await start('aniya');

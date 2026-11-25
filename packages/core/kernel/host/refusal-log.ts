@@ -56,12 +56,14 @@ function readReason(response: ApiResponse): { readonly reason?: string; readonly
 
 /** Who was refused, as a phrase that holds no credential: a proved holder's id, else what kind of bearer arrived. */
 function whoOf(request: ApiRequest): string {
+  if (request.arrival.kind === 'delegated') return 'connector';
   const principal = request.principal;
   if (principal !== undefined) return `${principal.kind} ${principal.holder}`;
   return request.headers.has('authorization') ? 'a bearer that matched no credential' : 'a caller with no credential';
 }
 
 function arrivalOf(request: ApiRequest): string {
+  if (request.arrival.kind === 'delegated') return 'delegated:connector';
   if (request.arrival.kind === 'door') return `door:${request.arrival.door}`;
   return request.arrival.kind === 'carried' ? `carried:${request.arrival.carrier}` : 'local';
 }

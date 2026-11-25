@@ -113,6 +113,7 @@ export const SECURITY_LOG_EMPTY = 'Nothing has happened yet.';
  */
 export function auditActorWords(actor: AuditActor): string {
   if (actor.kind === 'host') return 'this computer';
+  if (actor.kind === 'connector') return 'a remote MCP connector';
   if (actor.kind === 'warden') return 'a supervising agent';
   // Somebody presenting a pairing code from a device that is not paired: only ever on a refusal.
   if (actor.kind === 'anonymous') return 'someone who is not paired';

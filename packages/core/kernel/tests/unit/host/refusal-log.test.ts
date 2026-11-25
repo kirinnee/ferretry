@@ -61,6 +61,20 @@ const device = (): ApiRequest => ({
 });
 
 describe('a refused call is said at warn, with its reason', () => {
+  test('a refused connector is logged as delegated, never local or a host credential', () => {
+    const { fields } = describeRefusal({
+      table: 'route',
+      method: 'GET',
+      route: '/v1/plugins',
+      request: {
+        ...request('GET', '/v1/plugins'),
+        arrival: { kind: 'delegated', by: 'connector', grant: 'cg_abcdefghij' },
+      },
+      response: errorResponse(403, 'fleet use is not granted', 'grant_not_granted'),
+    });
+    expect(fields).toMatchObject({ who: 'connector', arrival: 'delegated:connector', status: 403 });
+  });
+
   test('public door refusals name their remote arrival instead of local', () => {
     for (const arrival of [
       { kind: 'door', door: 'own', plugin: 'connector' },

@@ -12,6 +12,7 @@ import {
   type ConfigAccessJudgement,
   type ConfigAccessVerdict,
   type ConfigWriteJudgement,
+  CONNECTOR_GRANT_PATTERN,
   errorResponse,
   headerValue,
   type InventoryEntry,
@@ -37,6 +38,7 @@ import {
   type ClaimStoredProof,
   type CredentialProvider,
   callerIsAgent,
+  cap,
   type DeviceHolderStanding,
   type EveryCallerStepUpAct,
   type FerretBearerDirectory,
@@ -178,6 +180,16 @@ export class GateAdmission implements Admission {
 
   constructor(private readonly deps: GateAdmissionDeps) {
     this.#guard = grantGuard(() => deps.policy()?.grants, deps.clientName);
+  }
+
+  /** The kernel asks after the route's final check; neither token is handed to the connector. */
+  maskHostCredentials(text: string): string | undefined {
+    const tokens = this.deps.tokens();
+    if (tokens === undefined || tokens.admin === '') return undefined;
+    let masked = text;
+    for (const token of [tokens.admin, tokens.warden])
+      if (token !== undefined && token !== '') masked = masked.split(token).join('[redacted]');
+    return masked;
   }
 
   admit(input: AdmissionInput & { readonly table: 'route' | 'socket' | 'tool' }): AdmissionDecision {
@@ -343,6 +355,8 @@ export class GateAdmission implements Admission {
     const authentication = this.#authenticate(request);
     if (authentication.kind === 'anonymous') return { kind: 'none' };
     switch (authentication.tokenClass) {
+      case 'connector':
+        return this.#governedViewer();
       case 'admin':
         return arrivedOnHost(request, true) ? { kind: 'owner' } : this.#governedViewer();
       case 'ferret':
@@ -394,6 +408,10 @@ export class GateAdmission implements Admission {
 
   #authenticate(request: ApiRequest): Authentication {
     if (request.arrival.kind === 'door') return { kind: 'anonymous' };
+    if (request.arrival.kind === 'delegated')
+      return request.arrival.by === 'connector' && CONNECTOR_GRANT_PATTERN.test(request.arrival.grant)
+        ? { kind: 'authenticated', tokenClass: 'connector', grant: request.arrival.grant }
+        : { kind: 'anonymous' };
     const principal = request.principal;
     if (principal !== undefined) {
       // A DEVICE IS WHOEVER ITS SESSION PROVED, while its provider still holds it. A session's call carries no
@@ -432,7 +450,7 @@ export class GateAdmission implements Admission {
         : refused(UNAUTHORIZED());
     // A MEMBER IS REFUSED BY THE MAIN TABLE BEFORE ANYTHING ELSE, the public shortcut included.
     if (request.principal?.kind === 'member') return forbidden(request);
-    if (servedPublicly(descriptor)) {
+    if (request.arrival.kind !== 'delegated' && servedPublicly(descriptor)) {
       if (descriptor.privilegedOnly === true && !(request.arrival.kind === 'local' && request.arrival.privileged))
         return forbidden(request);
       return { outcome: 'admitted', standing: {}, actor: 'owner-viewer' };
@@ -477,6 +495,7 @@ export class GateAdmission implements Admission {
 
     const actor = resolveApiActor({
       tokenClass: authentication.tokenClass,
+      ...(authentication.tokenClass === 'connector' ? { grant: authentication.grant } : {}),
       ...(authentication.tokenClass === 'device' ? { holder: authentication.principal.holder } : {}),
       ...(authentication.tokenClass === 'ferret'
         ? { ferret: authentication.ferret }
@@ -551,6 +570,9 @@ export class GateAdmission implements Admission {
     // asked for one per act (G47, G79). The SESSION's proven device, never a header's claim.
     const stepUp = subject !== undefined && this.deps.stepUps.held(subject);
     const presentation: CapabilityPresentation = {
+      ...(authentication.tokenClass === 'connector'
+        ? { connector: { route: `${descriptor.method} ${descriptor.path}` } }
+        : {}),
       // The CARRIER's proof, never a header's. A ferret's own token is on the host too, and is looked up only for a
       // call on the privileged local listener, so grants never govern it.
       local: onHost || authentication.tokenClass === 'ferret',
@@ -562,6 +584,15 @@ export class GateAdmission implements Admission {
       ...(device === undefined ? {} : { deviceGrants: device.grants }),
     };
 
+    // Even capability-free/public parity reads must pass a real fleet.use verdict before their handler runs.
+    if (authentication.tokenClass === 'connector') {
+      const fleet = cap('fleet', 'use');
+      const decision = this.#guard.decide(fleet, presentation);
+      if (!decision.allowed)
+        return refused(
+          errorResponse(403, this.#guard.explain(fleet, decision.refusal), grantRefusalCode(decision.refusal)),
+        );
+    }
     const demand = descriptor.capability;
     let governance: CallerGovernance | undefined;
     // Whether THIS admission spent the step-up it rode on (a window of `0`): its claim then still takes the proof it was
@@ -595,7 +626,7 @@ export class GateAdmission implements Admission {
         spentStepUp = true;
       }
       governance = this.#guard.governance(presentation);
-    } else if (descriptor.consultsGrants === true) {
+    } else if (descriptor.consultsGrants === true || authentication.tokenClass === 'connector') {
       governance = this.#guard.governance(presentation);
     }
 

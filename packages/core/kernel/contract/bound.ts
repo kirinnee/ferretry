@@ -42,6 +42,8 @@ export type AdmissionDecision<Standing extends object = CallStanding> =
  * without a remedy is refused.
  */
 export interface Admission<Standing extends object = CallStanding, Member extends object = MemberStanding> {
+  /** Kernel-only delegated egress: masks the host's credential literals without exporting them. Absent refuses output. */
+  maskHostCredentials?(text: string): string | undefined;
   admit(input: AdmissionInput & { readonly table: 'route' | 'socket' | 'tool' }): AdmissionDecision<Standing>;
   admitMember(input: AdmissionInput & { readonly table: 'member' }): AdmissionDecision<Member>;
   /** Re-admits an open stream after a provider's `generation()` moved; false closes it (`4401`). */
