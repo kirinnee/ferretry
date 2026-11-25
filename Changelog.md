@@ -1,3 +1,11 @@
+## [4.294.3](https://github.com/kirinnee/ferretry/compare/v4.294.2...v4.294.3) (2026-11-25)
+
+### Fixes
+
+* **connector:** judge the client success budget after the reuse decision ([ff0f7be](https://github.com/kirinnee/ferretry/commit/ff0f7bebe2f9ef37abbdbf372feb3f7371ade704))
+* **connector:** make the refresh-token retry window one-shot ([85a97a5](https://github.com/kirinnee/ferretry/commit/85a97a57a0e9c268e064cb78c62bf51d00b51f67))
+* **connector:** remember the superseded pair and mark retryable rotations ([e37bec5](https://github.com/kirinnee/ferretry/commit/e37bec557b8e4201013c27db07256750fee6f49c))
+
 ## [4.294.2](https://github.com/kirinnee/ferretry/compare/v4.294.1...v4.294.2) (2026-11-25)
 
 ### Fixes

@@ -1,3 +1,11 @@
+## [4.294.2](https://github.com/kirinnee/ferretry/compare/v4.294.1...v4.294.2) (2026-11-25)
+
+### Fixes
+
+* **mcp:** fy mcp token presents only the ferret's own session credential ([376450d](https://github.com/kirinnee/ferretry/commit/376450d0268ba1ecf6d26f32ad10b5e98092660f))
+* **mcp:** keep signed-in MCP tokens fresh in running Claude ferrets ([0eeff43](https://github.com/kirinnee/ferretry/commit/0eeff434eac975b527fa6a6e49a9f9775029ab83))
+* **mcp:** token route needs the ferret's own session credential; renew only the asked-for server ([cf5502d](https://github.com/kirinnee/ferretry/commit/cf5502db1b4c6e8692a947ec23f2391a3eff09a5))
+
 ## [4.294.1](https://github.com/kirinnee/ferretry/compare/v4.294.0...v4.294.1) (2026-11-25)
 
 ### Fixes
