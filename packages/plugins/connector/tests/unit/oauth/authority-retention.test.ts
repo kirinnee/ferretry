@@ -314,6 +314,54 @@ describe('the lost-response retry is spent once (RFC 9700 §4.14.2)', () => {
   });
 });
 
+describe('the one-shot window: replay once, then the grant (v4 rule)', () => {
+  test('the first replay mints exactly one pair and removes the lost pair from the stored grant', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    const lost = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    const before = f.state().grants[0];
+    expect(before?.access.length).toBeGreaterThan(0);
+    f.advance(5_000);
+    const retried = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    const after = f.state().grants[0];
+    // The lost pair is gone from storage, not merely unreachable; exactly one live refresh token remains.
+    expect(after?.refresh).toHaveLength(1);
+    expect(
+      after?.access.filter(t => t.expiresAt > Date.parse('2026-11-24T10:00:00.000Z') + 5_000).length,
+    ).toBeGreaterThan(0);
+    expect(await f.authority.verify(lost.access_token)).toBeUndefined();
+    expect(await f.authority.verify(retried.access_token)).toBeDefined();
+    expect(after?.revokedAt).toBeUndefined();
+    expect(JSON.stringify(f.state())).not.toContain(lost.access_token);
+    expect(f.events.some(e => e.kind === 'connector.refresh.reused')).toBe(false);
+  });
+
+  test('every further presentation of the old token revokes the grant, mints nothing and audits the reuse once', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    await f.authority.exchange(...refresh(flow.client.client_id, first));
+    f.advance(1_000);
+    const retried = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    for (let i = 0; i < 3; i++) {
+      f.advance(1_000);
+      await expect(f.authority.exchange(...refresh(flow.client.client_id, first))).rejects.toMatchObject({
+        error: 'invalid_grant',
+      });
+    }
+    const grant = f.state().grants[0];
+    expect(grant?.revokedAt).toBeDefined();
+    expect(grant?.access).toHaveLength(0);
+    expect(grant?.refresh).toHaveLength(0);
+    expect(await f.authority.verify(retried.access_token)).toBeUndefined();
+    // The theft is recorded when it is detected; later presentations hit an already-revoked grant.
+    expect(f.events.filter(e => e.kind === 'connector.refresh.reused')).toEqual([
+      { kind: 'connector.refresh.reused', grantId: flow.grant.id },
+    ]);
+  });
+});
+
 describe('a client success budget holds under concurrency', () => {
   test('31 simultaneous code exchanges for one client admit exactly 30', async () => {
     const f = fixture();
