@@ -7318,6 +7318,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     secretVault,
     secretCipher,
     clock,
+    fyCommand: CLIENT_NAME,
   });
   /**
    * What an account's own profile supplies at launch, when the profile authenticates it instead of a

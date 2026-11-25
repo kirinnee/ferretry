@@ -88,5 +88,6 @@ export {
 export * from './state-home-fence.ts';
 export * from './state-home-guard.ts';
 export * from './token-refresh.ts';
+export * from './mcp-token-command.ts';
 export * from './usage.ts';
 export * from './wrappers.ts';

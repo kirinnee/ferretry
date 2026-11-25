@@ -97,6 +97,12 @@ describe('FileClaudeLocalScope', () => {
             mcpServers: {
               mine: { command: 'node' },
               old: { type: 'http', url: 'https://old.example/mcp', headers: header('FY_MCP_OLD_0A_TOKEN') },
+              withHelper: {
+                type: 'http',
+                url: 'https://helper.example/mcp',
+                headers: header('FY_MCP_HELPER_0A_TOKEN'),
+                headersHelper: 'fy mcp token FY_MCP_HELPER_0A_TOKEN',
+              },
             },
           },
           '/work/other': { mcpServers: { kept: { command: 'x' } } },
@@ -107,7 +113,12 @@ describe('FileClaudeLocalScope', () => {
 
     // Act
     await new FileClaudeLocalScope().reconcile(file, '/work/app', {
-      docs: { type: 'http', url: 'https://docs.example/mcp', headers: header('FY_MCP_DOCS_0A_TOKEN') },
+      docs: {
+        type: 'http',
+        url: 'https://docs.example/mcp',
+        headers: header('FY_MCP_DOCS_0A_TOKEN'),
+        headersHelper: 'fy mcp token FY_MCP_DOCS_0A_TOKEN',
+      },
     });
 
     // Assert
@@ -118,7 +129,12 @@ describe('FileClaudeLocalScope', () => {
           allowedTools: ['Bash'],
           mcpServers: {
             mine: { command: 'node' },
-            docs: { type: 'http', url: 'https://docs.example/mcp', headers: header('FY_MCP_DOCS_0A_TOKEN') },
+            docs: {
+              type: 'http',
+              url: 'https://docs.example/mcp',
+              headers: header('FY_MCP_DOCS_0A_TOKEN'),
+              headersHelper: 'fy mcp token FY_MCP_DOCS_0A_TOKEN',
+            },
           },
         },
         '/work/other': { mcpServers: { kept: { command: 'x' } } },

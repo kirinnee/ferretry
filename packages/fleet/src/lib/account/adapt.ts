@@ -47,6 +47,7 @@
 import { mcpOAuthSecretNames, secretReference, secretReferencesIn } from '@ferretry/protocol';
 import { harnessAsset, HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, type HarnessAssetTable } from '../assets.ts';
 import type { HarnessKind } from '../manifest.ts';
+import type { ClaudeMcpTokenCommand } from '../mcp-token-command.ts';
 import { isAssetTreeReference } from '../paths.ts';
 import { deepMergeSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
 import { CODEX_CREDENTIAL_STORE_FILE, CODEX_CREDENTIAL_STORE_KEY } from './credentials.ts';
@@ -73,7 +74,15 @@ export type ClaudeStatuslineCommand = (ownCommand?: string) => string;
 
 /** The plumbing facts only the caller knows, per harness. */
 export type AdaptPlumbing =
-  | { readonly harness: 'claude'; readonly statusLine: ClaudeStatuslineCommand }
+  | {
+      readonly harness: 'claude';
+      readonly statusLine: ClaudeStatuslineCommand;
+      /**
+       * The `headersHelper` command for a signed-in MCP server's launch variable, bound by the caller to
+       * `claudeMcpTokenCommand(binary, variable)` (`../mcp-token-command.ts`). Codex has no such helper.
+       */
+      readonly mcpToken: ClaudeMcpTokenCommand;
+    }
   | {
       readonly harness: 'codex';
       /** The shared history pool's SQLite directory (`CODEX_SQLITE_HOME`), so every runtime shares it. */
@@ -312,13 +321,25 @@ const splitEnvironment = (env: Readonly<Record<string, string>>): ServerEnvironm
  * One server as Claude's `mcpServers` entry. A server signed in to from Ferretry carries its token as an
  * `Authorization` header that names a launch variable — Claude expands `${VAR}` in a server's headers
  * (INFERRED, docs/mcp-oauth.md) — so the document holds a variable name, never a value.
+ *
+ * It ALSO carries a `headersHelper` (`fy mcp token <VARIABLE>`): Claude runs it at connect time and again after a
+ * 401, and its headers override the static one. The static header stays as the fallback for a Claude that does not
+ * run the helper, but its token is the one the launch resolved, so a ferret that outlives it (Slack's lives 12 hours)
+ * is kept signed in only by the helper. Codex has no such helper (`codexServer`).
  */
-function claudeServer(server: McpComponent, env: ServerEnvironment, bearer: string | undefined): SettingsObject {
+function claudeServer(
+  server: McpComponent,
+  env: ServerEnvironment,
+  bearer: string | undefined,
+  tokenHelper: ClaudeMcpTokenCommand,
+): SettingsObject {
   if (server.url !== undefined)
     return {
       type: isSseUrl(server.url) ? 'sse' : 'http',
       url: server.url,
-      ...(bearer === undefined ? {} : { headers: { Authorization: `Bearer \${${bearer}}` } }),
+      ...(bearer === undefined
+        ? {}
+        : { headers: { Authorization: `Bearer \${${bearer}}` }, headersHelper: tokenHelper(bearer) }),
     };
   const variables = { ...env.literal, ...Object.fromEntries(env.forwarded.map(name => [name, `\${${name}}`])) };
   return {
@@ -342,7 +363,7 @@ function codexServer(server: McpComponent, env: ServerEnvironment, bearer: strin
 }
 
 function adaptMcp(
-  harness: HarnessKind,
+  plumbing: AdaptPlumbing,
   servers: readonly Contribution<McpComponent>[],
   launchEnv: Record<string, string>,
   problems: AdaptProblem[],
@@ -379,7 +400,9 @@ function adaptMcp(
       launchEnv[bearer] = secretReference(names.access);
     }
     rendered[layer.name] =
-      harness === 'claude' ? claudeServer(component, env, bearer) : codexServer(component, env, bearer);
+      plumbing.harness === 'claude'
+        ? claudeServer(component, env, bearer, plumbing.mcpToken)
+        : codexServer(component, env, bearer);
   }
   return rendered;
 }
@@ -612,7 +635,7 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
   entries.push(...hooks.entries);
   absent.push(...hooks.absent);
 
-  const servers = adaptMcp(harness, resolved.mcp, launchEnv, problems);
+  const servers = adaptMcp(plumbing, resolved.mcp, launchEnv, problems);
 
   let settings = baseSettings;
   let claudeJson: SettingsObject | undefined;

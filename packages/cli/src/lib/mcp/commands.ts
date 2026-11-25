@@ -1,5 +1,6 @@
 import type { Command } from 'commander';
 import type { McpCheckOptions, McpServersController, McpServersOptions } from './servers.ts';
+import type { McpTokenController } from './token.ts';
 
 const SCOPES = 'ferretry, component, user, project or local';
 
@@ -12,11 +13,15 @@ const SCOPES = 'ferretry, component, user, project or local';
  *
  * `ls` and `check` are every MCP server a ferret sees, from every scope, and whether one answers
  * (docs/mcp-scopes.md). Inside a ferret they read that ferret; `--machine` reads the whole machine.
+ *
+ * `token` is Claude Code's `headersHelper` for a signed-in server (docs/mcp-oauth.md): it prints that server's current
+ * headers as one JSON object and nothing else, so nobody runs it by hand.
  */
 export function registerMcpCommands(
   program: Command,
   serve: () => Promise<void>,
   servers?: McpServersController,
+  token?: McpTokenController,
 ): void {
   const mcp = program.command('mcp').description('MCP: the Ferretry tools server, and every server a ferret sees');
   mcp
@@ -44,5 +49,12 @@ export function registerMcpCommands(
     .option('--json', 'print the protocol result')
     .action(async (server: string, options: McpCheckOptions) => {
       await servers.check(server, options);
+    });
+  if (token === undefined) return;
+  mcp
+    .command('token <variable>')
+    .description("print fresh MCP sign-in headers for this ferret (Claude's headersHelper runs this)")
+    .action(async (variable: string) => {
+      await token.token(variable);
     });
 }

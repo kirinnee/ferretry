@@ -51,6 +51,7 @@ function foundationsNeeds(): McpFoundationsNeeds {
       openAll: NOT_EXERCISED('an open'),
     },
     clock: { now: () => '2026-10-20T12:00:00.000Z' },
+    fyCommand: 'fy',
   };
 }
 
@@ -68,7 +69,7 @@ function mcpNeeds(): McpNeeds {
       propose: NOT_EXERCISED('the fleet catalogue'),
       apply: NOT_EXERCISED('the fleet catalogue'),
     },
-    launchEnvironment: { forWrapper: async () => ({}) },
+    launchEnvironment: { forWrapper: async () => ({}), mcpTokenFor: async () => ({ kind: 'unknown' }) },
     secretVault: { values: async () => new Map() },
     redactor: { redact: async text => text },
     clock: { now: () => 0 },

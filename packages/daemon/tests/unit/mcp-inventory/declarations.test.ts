@@ -146,6 +146,13 @@ describe('MCP declarations', () => {
     should(
       isFerretryLocalEntry({ headers: { Authorization: `Bearer ${variable('FY_MCP_DOCS_0A_TOKEN')}` } }),
     ).be.true();
+    // One written before the headersHelper existed (above) and one written with it are both ours.
+    should(
+      isFerretryLocalEntry({
+        headers: { Authorization: `Bearer ${variable('FY_MCP_DOCS_0A_TOKEN')}` },
+        headersHelper: 'fy mcp token FY_MCP_DOCS_0A_TOKEN',
+      }),
+    ).be.true();
     should(isFerretryLocalEntry({ headers: { Authorization: `Bearer ${variable('MY_TOKEN')}` } })).be.false();
     should(isFerretryLocalEntry({ headers: { Authorization: 'Bearer raw' } })).be.false();
     should(isFerretryLocalEntry({ command: 'x' })).be.false();

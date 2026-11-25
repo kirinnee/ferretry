@@ -165,3 +165,28 @@ export const parseMcpProjectSubject = (
   const projectKey = subject.slice(at + MCP_PROJECT_SUBJECT_SEPARATOR.length);
   return PROJECT_KEY.test(projectKey) ? { name: subject.slice(0, at), projectKey } : null;
 };
+
+// ── A running ferret asking for a fresh token ────────────────────────────────────────────────────
+
+/**
+ * The shape of every launch variable a sign-in's access token travels in (`mcpOAuthSecretNames().variable`):
+ * the ONLY thing `POST /v1/sessions/:sessionId/mcp/token` will name. It is a variable NAME, never a path or a
+ * secret name, so a ferret cannot ask for anything its own launch did not already put in its environment.
+ */
+export const MCP_TOKEN_VARIABLE_PATTERN = /^FY_MCP_[A-Z0-9_]+_TOKEN$/u;
+
+/** A ferret's request for the current token behind one of its own launch variables. */
+export const McpTokenRequestSchema = z.strictObject({
+  variable: z.string().min(1).max(256).regex(MCP_TOKEN_VARIABLE_PATTERN, 'not an MCP sign-in token variable'),
+});
+export type McpTokenRequest = z.infer<typeof McpTokenRequestSchema>;
+
+/**
+ * The answer: the HTTP headers Claude Code's `headersHelper` prints for that server. `variable` echoes the NAME
+ * asked for, so the security log can record which one without ever reading the token.
+ */
+export const McpTokenAnswerSchema = z.strictObject({
+  variable: z.string().regex(MCP_TOKEN_VARIABLE_PATTERN),
+  headers: z.strictObject({ Authorization: z.string().min(1) }),
+});
+export type McpTokenAnswer = z.infer<typeof McpTokenAnswerSchema>;

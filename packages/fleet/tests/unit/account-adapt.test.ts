@@ -29,8 +29,11 @@ const SQLITE_HOME = '/fy/fleet/shared/codex/sqlite';
 /** The statusLine the tests bind, recording the person's own command it was handed. */
 const statusLine = (own?: string): string => (own === undefined ? 'fy statusline' : `fy statusline --then '${own}'`);
 
+/** The headersHelper the tests bind, spelled as `claudeMcpTokenCommand` spells it. */
+const mcpToken = (variable: string): string => `fy mcp token ${variable}`;
+
 const plumbingFor = (harness: HarnessKind): AdaptPlumbing =>
-  harness === 'claude' ? { harness, statusLine } : { harness, sqliteHome: SQLITE_HOME };
+  harness === 'claude' ? { harness, statusLine, mcpToken } : { harness, sqliteHome: SQLITE_HOME };
 
 /** One profile `p` holding `layers`, over `components`, resolved for `harness`. */
 const resolve = (
@@ -267,6 +270,7 @@ describe('adaptProfile — MCP servers on Claude', () => {
           type: 'http',
           url: 'https://mcp.linear.app/mcp',
           headers: { Authorization: `Bearer \${${names.variable}}` },
+          headersHelper: `fy mcp token ${names.variable}`,
         },
       },
     });
@@ -282,6 +286,32 @@ describe('adaptProfile — MCP servers on Claude', () => {
       'mcp/linear',
     ]);
     should(Object.values(moved.launchEnv)).not.containEql(`\${secret:${names.access}}`);
+  });
+
+  it('should give a component server the headersHelper beside its static header, and a header-less one none', () => {
+    // Arrange — one signed in to from Ferretry, one plain URL server, one stdio server.
+    const names = mcpOAuthSecretNames('slack', 'https://mcp.slack.com/mcp');
+    const components = {
+      mcp: {
+        slack: { url: 'https://mcp.slack.com/mcp', auth: 'oauth' as const },
+        open: { url: 'https://mcp.example.com/mcp' },
+        local: { command: 'uvx' },
+      },
+    };
+
+    // Act
+    const actual = adapt('claude', components, ['mcp/slack', 'mcp/open', 'mcp/local']);
+
+    // Assert — the helper prints the CURRENT header after a 401; the static one stays as the fallback.
+    const servers = (actual.claudeJson as { mcpServers: Record<string, Record<string, unknown>> }).mcpServers;
+    should(servers.slack).deepEqual({
+      type: 'http',
+      url: 'https://mcp.slack.com/mcp',
+      headers: { Authorization: `Bearer \${${names.variable}}` },
+      headersHelper: `fy mcp token ${names.variable}`,
+    });
+    should(servers.open).not.have.property('headersHelper');
+    should(servers.local).not.have.property('headersHelper');
   });
 
   it('should always write mcpServers, so a removed server leaves the file', () => {

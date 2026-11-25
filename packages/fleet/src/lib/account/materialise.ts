@@ -52,6 +52,7 @@ import { expandAssetPath, expandHomePath, joinPath } from '../paths.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, MaterialisedRecord } from '../provisioning.ts';
 import { type SettingsObject, serializeSettings } from '../settings.ts';
 import { sharedHistoryPoolDirectory, sharedHistoryPoolRequests } from '../shared-history.ts';
+import { claudeMcpTokenCommand } from '../mcp-token-command.ts';
 import { CREDENTIAL_ENV } from '../usage.ts';
 import {
   MANAGED_MARKER,
@@ -381,7 +382,11 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       resolved,
       plumbing:
         harness === 'claude'
-          ? { harness, statusLine: input.claudeStatusline }
+          ? {
+              harness,
+              statusLine: input.claudeStatusline,
+              mcpToken: variable => claudeMcpTokenCommand(input.fyCommand, variable),
+            }
           : { harness, sqliteHome: codexSqliteHome },
       bodies: {
         ...(input.bodies?.instructions === undefined ? {} : { instructions: input.bodies.instructions }),
