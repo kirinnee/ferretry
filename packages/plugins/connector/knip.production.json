@@ -1,0 +1,7 @@
+{
+  "entry": ["daemon/lib/**/*.ts"],
+  "project": ["**/*.{ts,tsx}", "!tests/**"],
+  "allowed": {
+    "entry:daemon/lib/**/*.ts": "the pure authorization server has no daemon half yet: the wiring unit (U3b) imports these from daemon/index.ts and this entry goes."
+  }
+}
