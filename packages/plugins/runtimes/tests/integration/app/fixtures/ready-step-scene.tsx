@@ -27,7 +27,9 @@ const row = (name: string, available = true, store: 'host' | 'ferretry' = 'host'
   name,
   harness: tool,
   credential: { id: name, store },
-  launch: available ? { available: true } : { available: false, reason: 'The claude command was not found.' },
+  launch: available
+    ? { available: true }
+    : { available: false, reason: `The ${tool === 'codex' ? 'codex' : 'claude'} command was not found.` },
 });
 
 const client = {

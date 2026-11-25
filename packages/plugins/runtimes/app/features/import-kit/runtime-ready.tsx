@@ -104,7 +104,7 @@ function ReadyPreview({
       ? {
           name:
             state.names.length > 1
-              ? `${state.names[0] ?? ''} · +${String(state.names.length - 1)} more`
+              ? `${state.names[0] ?? ''} · +${String(state.names.length - 1)}\u00a0more`
               : (state.names[0] ?? ''),
           state: good ? 'on' : 'off',
         }
