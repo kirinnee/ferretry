@@ -7,7 +7,7 @@ import { mintedValueOf, type SecretName, VaultPort } from '../../../contract/ind
 import vault from '../../../daemon/index.ts';
 
 /**
- * THE ONE GETTER (docs/secrets.md › The one exception): `VaultApi.mintedValue` exists only for a plugin whose manifest
+ * THE ONE GETTER (docs/secrets.md › The one exception): `MintedValueReader.mintedValue` (reached only through `mintedValueOf`) exists only for a plugin whose manifest
  * declares `permissions.revealMinted` (and the kernel's boot lets only MCP declare it: `packages/core/kernel/tests/integration/host/reveal-minted.test.ts`), and answers only a secret THAT plugin wrote (the Vault's
  * mint ledger). Every other plugin, and the core, has no such method at all: the type-level "no getter" stays true.
  */
