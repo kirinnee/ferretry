@@ -9,6 +9,14 @@
   display: flex;
   justify-content: flex-end;
 }
+/* A task opened by its link is a page in the shell's main column: no overlay, so the navigation and the machine picker stay. */
+.fy-board-detail__scrim[data-mode='inline'] {
+  position: static;
+  display: block;
+}
+.fy-board-detail__scrim[data-mode='inline'] .fy-board-detail {
+  height: auto;
+}
 .fy-board-detail__backdrop {
   position: absolute;
   inset: 0;
