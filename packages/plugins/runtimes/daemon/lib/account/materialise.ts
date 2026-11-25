@@ -85,7 +85,7 @@ import {
   resolveCredentialStore,
 } from './credentials.ts';
 import { type BudgetHolds, binaryNameOf, runtimeDisable } from './disabled-runtime.ts';
-import { applyFixedLayer, type FixedLayer, fixedLayerFor } from './fixed-layer.ts';
+import { applyFixedLayer, CODEX_KILL_RULES_FILE, type FixedLayer, fixedLayerFor } from './fixed-layer.ts';
 import { assignRuntimeIds, type RuntimeIds, runtimeIdsPath, serializeRuntimeIds } from './ids.ts';
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from './layering.ts';
 import type { AccountModel } from './schema.ts';
@@ -103,6 +103,9 @@ export const MATERIALISED_RECORD_FILE = 'materialised.json';
 
 /** The `--settings` overlay a Claude agent runtime launches with when the fixed layer needs one. */
 export const FIXED_SETTINGS_FILE = 'fixed.json';
+
+/** The folder of a Codex home Codex reads its rules from: the one place a rule outranks the approval policy. */
+const CODEX_RULES_DIRECTORY = 'rules';
 
 /** The folder the fixed layer is computed for while planning; the wrapper fills in the real one. */
 const LAUNCH_FOLDER_PLACEHOLDER = '/ferretry-launch-folder';
@@ -471,6 +474,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
           codex: () => ({}),
         }),
         overlay: fixed?.claudeSettingsOverlay,
+        codexRules: fixed?.codexRules,
         credentialLink: codexCredentialLink(home, store),
         layout,
       }),
@@ -616,6 +620,8 @@ interface ConfigDirectoryInput {
   /** The machine's MCP servers the profile in effect does not have, as they would be written. */
   readonly priorServers: Readonly<Record<string, SettingsObject>>;
   readonly overlay: SettingsObject | undefined;
+  /** The text of the rules file a Codex agent runtime's home holds (`rules/ferretry.rules`: the commands it forbids). */
+  readonly codexRules: string | undefined;
   /** The text of the model catalog file a Codex runtime on a third-party provider reads. */
   readonly codexCatalog: string | undefined;
   readonly credentialLink: ReturnType<typeof codexCredentialLink>;
@@ -715,6 +721,18 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       unlessUnrecorded: { record, key: `${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}`, byName: true },
     });
   }
+  if (input.codexRules !== undefined) {
+    operations.push(
+      { kind: 'directory', path: joinPath(home, CODEX_RULES_DIRECTORY), mode: DIRECTORY_MODE },
+      {
+        kind: 'file',
+        path: joinPath(home, CODEX_KILL_RULES_FILE),
+        content: input.codexRules,
+        mode: PRIVATE_FILE_MODE,
+        unlessUnrecorded: { record, key: CODEX_KILL_RULES_FILE, byName: true },
+      },
+    );
+  }
   if (input.codexCatalog !== undefined) {
     operations.push({
       kind: 'file',
@@ -745,6 +763,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
         ...[...ownEntries, ...skillEntries].map(entry => entry.dest),
         ...(input.overlay === undefined ? [] : [`${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}`]),
         ...(input.codexCatalog === undefined ? [] : [`${RUNTIME_STATE_DIRECTORY}/${CODEX_MODEL_CATALOG_FILE}`]),
+        ...(input.codexRules === undefined ? [] : [CODEX_KILL_RULES_FILE]),
         ...(input.credentialLink === undefined ? [] : [CODEX_CREDENTIAL_FILE]),
       ]),
     ].toSorted(),

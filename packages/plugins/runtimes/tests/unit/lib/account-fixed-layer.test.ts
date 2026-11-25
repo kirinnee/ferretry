@@ -51,6 +51,9 @@ const CWD = '/home/me/work.repo';
 const FY = '/opt/fy/bin/fy';
 /** What every agent runtime is told, for the binary {@link FY} names. */
 const INSTRUCTION = AGENT_BASE_INSTRUCTION('fy');
+/** The commands no ferret may run (E176): by pattern or by name, one stray call stopped ~17 agents. */
+const CLAUDE_KILL_DENY = ['Bash(pkill:*)', 'Bash(killall:*)'];
+
 /** What every Claude agent launch ends with: the tools server, and the instruction that names it. */
 const CLAUDE_TOOL_ARGS = [
   `--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"${FY}","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}`,
@@ -195,7 +198,7 @@ describe('fixedLayerFor — Claude', () => {
         ],
         args: ['--permission-mode', 'auto', '--disallowed-tools=AskUserQuestion', ...CLAUDE_TOOL_ARGS],
         claudeSettingsOverlay: {
-          permissions: { defaultMode: 'auto' },
+          permissions: { defaultMode: 'auto', deny: CLAUDE_KILL_DENY },
           remoteControlAtStartup: false,
           skipAutoPermissionPrompt: true,
         },
@@ -227,7 +230,7 @@ describe('fixedLayerFor — Claude', () => {
     ]);
     // The overlay names the mode too: a flag-settings mode is what keeps the auto-default dialog away.
     should(actual.claudeSettingsOverlay).deepEqual({
-      permissions: { defaultMode: 'bypassPermissions' },
+      permissions: { defaultMode: 'bypassPermissions', deny: CLAUDE_KILL_DENY },
       remoteControlAtStartup: false,
       skipDangerousModePermissionPrompt: true,
     });
@@ -320,6 +323,38 @@ describe('fixedLayerFor — Codex', () => {
       'approval_policy="never"',
       '-c',
       'sandbox_mode="danger-full-access"',
+    ]);
+  });
+
+  it('should forbid pkill and killall in a rules file, whatever the permission mode (E176)', () => {
+    // Act
+    const auto = layerOf({ harness: 'codex', agentPermissions: 'auto', cwd: CWD, fyCommand: FY });
+    const skip = layerOf({ harness: 'codex', agentPermissions: 'skip', cwd: CWD, fyCommand: FY });
+
+    // Assert — a prefix rule per command, forbidden outright; no hook, no argument
+    for (const layer of [auto, skip]) {
+      should(layer.codexRules).match(/prefix_rule\(pattern=\[.pkill.\], decision=.forbidden./);
+      should(layer.codexRules).match(/prefix_rule\(pattern=\[.killall.\], decision=.forbidden./);
+    }
+    should(skip.args.join(' ')).not.match(/pkill|killall/);
+  });
+
+  it('should keep the ban narrow: a plain kill <pid> is denied by neither harness (E176)', () => {
+    // Act
+    const claude = layerOf({
+      harness: 'claude',
+      agentPermissions: 'skip',
+      cwd: CWD,
+      fyCommand: FY,
+      acceptsAutoPermissionMode: false,
+    });
+    const codex = layerOf({ harness: 'codex', agentPermissions: 'skip', cwd: CWD, fyCommand: FY });
+
+    // Assert — exactly the two commands, and no rule that would also match `kill`
+    should(claude.claudeSettingsOverlay?.permissions).have.property('deny', ['Bash(pkill:*)', 'Bash(killall:*)']);
+    should(codex.codexRules?.match(/pattern=\[.(\w+).\]/g)?.map(rule => rule.replace(/\W+/g, ' ').trim())).deepEqual([
+      'pattern pkill',
+      'pattern killall',
     ]);
   });
 });
