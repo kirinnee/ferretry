@@ -237,7 +237,8 @@ describe('ProjectDetailPage lane editor entry', () => {
     await shown(mounted);
 
     const lanes = must(mounted.container.querySelector(`[data-project-lanes-link="${PROJECT.id}"]`), 'the Lanes entry');
-    expect(lanes.textContent).toBe('Lanes ✎');
+    expect(lanes.textContent).toBe('Edit lanes');
+    expect(mounted.container.textContent ?? '', 'no registry eyebrow').not.toContain('Workspace registry');
     await press(lanes);
 
     // Board opens its lane editor only for `?lanes=1`; without it this button would land on the board itself.

@@ -995,3 +995,60 @@ describe('what a screen reader hears while a page or its panels wait (L248)', ()
     }
   });
 });
+
+describe('Home after a daemon was reset (E214a)', () => {
+  for (const viewport of VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`at ${viewport.name} in ${mode}: four pairings of one machine read four different ways`, async () => {
+        const { tab, close } = await open(
+          viewport,
+          '/d/ws/ferrets',
+          '[data-ferret-list]',
+          '&twins=3',
+          `studio-${mode}`,
+        );
+        try {
+          if (viewport.phone) {
+            await tab.click('button[aria-label="Menu"]');
+            await tab.waitForSelector('.fy-drawer--overlay');
+          }
+          await tab.click('[data-daemon-picker]');
+          await tab.click('[role="menuitem"]:has-text("All daemons")');
+          await tab.waitForSelector('.fy-machine li');
+          const names = await tab.locator('.fy-machine li > a:first-child').allTextContents();
+          expect(names.length).toBe(4);
+          expect(new Set(names).size, `every pairing reads differently: ${names.join(' | ')}`).toBe(4);
+          await shotOf(tab, `${viewport.name}-home-twins-${mode}`);
+        } finally {
+          await close();
+        }
+      });
+});
+
+describe('the device recovery page with same-name machines (E142b)', () => {
+  for (const viewport of VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`at ${viewport.name} in ${mode}: each "Settings for" link names one machine and goes to its own settings`, async () => {
+        const { tab, close } = await open(
+          viewport,
+          '/settings',
+          'a:has-text("Connection settings")',
+          '&twins=3&blocked=1',
+          `studio-${mode}`,
+        );
+        try {
+          // The machine's own pages are blocked, so this link is the way to the device's recovery page.
+          await tab.click('a:has-text("Connection settings")');
+          await tab.waitForSelector('.fy-settings-daemons');
+          const links = tab.locator('.fy-settings-daemons a');
+          const names = await links.allTextContents();
+          const targets = await links.evaluateAll(nodes => nodes.map(node => node.getAttribute('href')));
+          expect(names.length).toBe(4);
+          expect(new Set(names).size, `every link reads differently: ${names.join(' | ')}`).toBe(4);
+          expect(new Set(targets).size, 'every link goes somewhere else').toBe(4);
+          await shotOf(tab, `${viewport.name}-recovery-twins-${mode}`);
+        } finally {
+          await close();
+        }
+      });
+});

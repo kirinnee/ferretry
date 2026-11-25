@@ -127,8 +127,14 @@ describe('Settings shell', () => {
         const machineHeadings = await tab
           .locator('nav[aria-label="Plugin settings"] section[aria-labelledby="fy-settings-block-machine"] summary')
           .allInnerTexts();
-        expect(machineHeadings.slice(0, 3)).toEqual(['Behaviour', 'Agents and logins', 'Supervision']);
+        expect(machineHeadings.slice(0, 3)).toEqual(['Behaviour · machine', 'Agents and logins', 'Supervision']);
         expect(machineHeadings).toContain('Devices & access');
+
+        // L274: a heading is never repeated across the two blocks (the machine's copy says so).
+        const everyHeading = await tab.locator('nav[aria-label="Plugin settings"] summary').allInnerTexts();
+        expect(new Set(everyHeading).size, `no group heading twice: ${everyHeading.join(' | ')}`).toBe(
+          everyHeading.length,
+        );
         expect(machineHeadings).not.toContain('More');
         const deviceBlock = tab.locator(
           'nav[aria-label="Plugin settings"] section[aria-labelledby="fy-settings-block-device"]',

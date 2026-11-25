@@ -5,6 +5,7 @@
  *   ?n=<1..120>                how many options the list has (default 5; the first 8 are named, the rest are "Option 9"...)
  *   ?searchable=auto|always|never
  *   ?edge=bottom               the box sits at the foot of the window (the popover must flip up)
+ *   ?edge=near                 the box sits 120px above the foot: a long list flips up, a one-row list fits below
  *   ?pane=<px>                 the box sits in a component container (CSS `container-type: inline-size`) of that width
  *   ?dialog=1                  the bare Dialog instead: a sheet of `lines` lines of text (default 3) with a Close button
  *   ?lines=<n>
@@ -51,7 +52,13 @@ const Box = () => {
   const [value, setValue] = useState('automatic');
   const field = (
     <div
-      style={params.get('edge') === 'bottom' ? { position: 'fixed', left: 16, right: 16, bottom: 16 } : { padding: 16 }}
+      style={
+        params.get('edge') === 'bottom'
+          ? { position: 'fixed', left: 16, right: 16, bottom: 16 }
+          : params.get('edge') === 'near'
+            ? { position: 'fixed', left: 16, right: 16, bottom: 120 }
+            : { padding: 16 }
+      }
     >
       <label htmlFor="agent-default">Default for new agents</label>
       <div style={{ width: 280, maxWidth: '100%' }}>
