@@ -275,3 +275,100 @@ describe('New ferret: Browse… opens the folder finder, whose toolbar fits the 
             expect(probe.small, 'every control is a 44x44 touch target on a phone').toEqual([]);
           }));
 });
+
+/** A tab on the same scene with extra query switches (`twins=1`, `slow=1`) and no wait for the panel to settle. */
+const openScene = async (
+  viewport: Viewport,
+  scheme: 'light' | 'dark',
+  switches: string,
+  run: (tab: Page) => Promise<void>,
+): Promise<void> => {
+  const context = await browser.newContext({
+    viewport: { width: viewport.width, height: viewport.height },
+    colorScheme: scheme,
+    deviceScaleFactor: viewport.phone ? 2 : 1,
+    hasTouch: viewport.phone,
+    isMobile: viewport.phone,
+  });
+  const origin = server?.url.origin ?? '';
+  await context.route('**/*', async route =>
+    new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+  );
+  const tab = await context.newPage();
+  tab.setDefaultTimeout(20_000);
+  try {
+    await tab.goto(`${origin}/?theme=studio-${scheme}&style=studio&${switches}`);
+    await run(tab);
+  } finally {
+    await context.close();
+  }
+};
+const snap = async (tab: Page, viewport: Viewport, scheme: string, name: string): Promise<void> => {
+  if (shotsDir === '') return;
+  await tab.waitForTimeout(600);
+  await tab.screenshot({ fullPage: true, path: join(shotsDir, `${viewport.name}-${scheme}-${name}.png`) });
+};
+
+describe('New ferret: a folder-only project is told apart by a short path, never the whole temp directory', () => {
+  for (const viewport of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`two like-named projects stay distinguishable, the full path rides in the tooltip (${viewport.name}, ${scheme})`, () =>
+        openScene(viewport, scheme, 'twins=1', async tab => {
+          await tab.waitForSelector(TRIGGER);
+          await tab.locator(TRIGGER).click();
+          const rows = tab.locator('[data-where-project-row]');
+          await rows.first().waitFor();
+          const lines = await rows.evaluateAll(list =>
+            list.map(row => ({
+              line: row.querySelector('button[title] > span:last-of-type > span:last-child')?.textContent ?? '',
+              title: row.querySelector('button[title]')?.getAttribute('title') ?? '',
+            })),
+          );
+          expect(
+            lines.map(row => row.line),
+            'no raw temp prefix in a row',
+          ).toEqual(['…/run-a/site', '…/run-b/site']);
+          expect(
+            lines.map(row => row.title),
+            'the full path is the tooltip',
+          ).toEqual(['/tmp/claude-1000/run-a/site', '/tmp/claude-1000/run-b/site']);
+          await snap(tab, viewport, scheme, 'twins-open');
+          await rows.nth(1).locator('button[title]').click();
+          const chip = tab.locator(TRIGGER);
+          expect(await chip.textContent(), 'the chip shows the short suffix').toContain('…/run-b/site');
+          expect(await chip.textContent(), 'and not the temp prefix').not.toContain('claude-1000');
+          expect(
+            await chip.locator('span[title]').getAttribute('title'),
+            'the chip carries the full path as its tooltip',
+          ).toBe('/tmp/claude-1000/run-b/site');
+          await snap(tab, viewport, scheme, 'twins-chip');
+        }));
+});
+
+describe('New ferret: Folder | Project stays pending through a slow registry read', () => {
+  for (const viewport of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`the first visible toggle already has its final value (${viewport.name}, ${scheme})`, () =>
+        openScene(viewport, scheme, 'slow=1', async tab => {
+          // The page gives up waiting after ten seconds and draws the form; the registry has still not answered.
+          await tab.waitForSelector('#fy-new-ferret-prompt', { timeout: 18_000 });
+          await tab.waitForSelector('[data-new-ferret-where-reading]');
+          expect(await tab.locator('[data-new-ferret-where-switch]').count(), 'no toggle yet').toBe(0);
+          expect(await tab.getByRole('radio', { name: 'Folder', exact: true }).count(), 'no Folder radio').toBe(0);
+          await snap(tab, viewport, scheme, 'slow-reading');
+          const belowOf = (): Promise<number> =>
+            tab.locator('#fy-new-ferret-prompt').evaluate(element => element.getBoundingClientRect().top);
+          const before = await belowOf();
+          await tab.evaluate(() => (window as unknown as { __release: () => void }).__release());
+          await tab.locator('[data-new-ferret-where-switch]').waitFor();
+          expect(await modeButton(tab, 'Project').getAttribute('aria-checked'), 'the first toggle is Project').toBe(
+            'true',
+          );
+          expect(await modeButton(tab, 'Folder').getAttribute('aria-checked')).toBe('false');
+          expect(
+            Math.abs((await belowOf()) - before),
+            'the controls below do not jump when the read lands',
+          ).toBeLessThanOrEqual(2);
+          await snap(tab, viewport, scheme, 'slow-read');
+        }));
+});
