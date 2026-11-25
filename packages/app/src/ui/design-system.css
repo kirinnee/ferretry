@@ -837,7 +837,8 @@ html[data-keyboard='open'] {
   [data-safe-bottom] {
     padding-bottom: max(var(--own-pad-bottom, 0px), var(--safe-bottom));
   }
-  .kt-shell:has([data-safe-bottom]:not([hidden] *)) {
+  .kt-shell:has([data-safe-bottom]:not([hidden] *)),
+  .fy-frame:has([data-safe-bottom]:not([hidden] *)) {
     padding-bottom: 0;
   }
 }

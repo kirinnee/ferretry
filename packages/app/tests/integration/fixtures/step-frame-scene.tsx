@@ -4,6 +4,7 @@
  *
  *   ?theme=<family>-<mode>
  *   ?scene=stack   stacked cards + StepDemo (the pages the plugins draw)
+ *   ?scene=pinned  the same with a PINNED StepDemo and a long body (Appearance, Voice): on a phone the heading and the demo stay while the body scrolls under them
  *   ?scene=prop    the same page with the old `demo` prop instead of StepDemo
  *   ?scene=none    stacked cards, no demo at all
  *   ?scene=inline  a StepDemo OUTSIDE a frame (renders inline)
@@ -36,6 +37,12 @@ const OPTIONS = [
     icon: <Monitor size={18} />,
   },
 ] as const;
+
+/** The long body of the pinned scene: ten cards, so the page scrolls under the strip. */
+const FILLER: readonly string[] = Array.from(
+  { length: 10 },
+  (_, index) => `A card of the long body, number ${index + 1}`,
+);
 
 const Demo = () => (
   <div
@@ -116,11 +123,22 @@ const Page = () => {
         {...(noted ? { note: <p data-footer-note="">Sign in to continue, or press Later.</p> } : {})}
       >
         <ChoiceCards label="Permission mode" layout="stack" options={OPTIONS} value={value} onChange={setValue} />
-        {scene === 'stack' || scene === 'busy' ? (
-          <StepDemo>
+        {scene === 'stack' || scene === 'busy' || scene === 'pinned' ? (
+          <StepDemo pinned={scene === 'pinned'}>
             <Demo />
           </StepDemo>
         ) : null}
+        {scene === 'pinned'
+          ? FILLER.map(label => (
+              <div
+                data-filler=""
+                key={label}
+                style={{ border: '1px solid var(--border)', borderRadius: 8, marginTop: 12, padding: 24 }}
+              >
+                {label}
+              </div>
+            ))
+          : null}
         <div data-in-body-buttons="" style={{ display: 'flex', marginTop: 16 }}>
           <Button>Check</Button>
           <Button variant="primary">Go</Button>
