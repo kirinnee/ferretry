@@ -100,6 +100,8 @@ export function FlowPage(props: FlowPageProps): ReactNode {
   // A legacy page (no `stepHost`) never says it is ready, so it starts ready and has no cover.
   const [ready, setReady] = useState(!step.stepHost);
   const [busy, setBusy] = useState<string | null>(null);
+  // The page said its own button is the way on (`holdNext`): the footer draws no Next until it says otherwise.
+  const [held, setHeld] = useState(false);
   const [silent, setSilent] = useState(false);
   // The loader is drawn only once the cover has waited COVER_DELAY_MS; before that the cover only holds the page's room.
   const [loaderDue, setLoaderDue] = useState(false);
@@ -173,6 +175,10 @@ export function FlowPage(props: FlowPageProps): ReactNode {
         // A page registers its save again when its pick changes: a refusal of the old pick must not linger over the new one.
         setSaveError(null);
       },
+      holdNext: on => {
+        flagless('holdNext');
+        setHeld(on);
+      },
       busy: label => {
         flagless('busy');
         if (label !== null) {
@@ -235,7 +241,7 @@ export function FlowPage(props: FlowPageProps): ReactNode {
       title={step.title}
       {...(progress === undefined ? {} : { progress })}
       {...(canBack ? { back: { onClick: pressBack, disabled: busy !== null } } : {})}
-      next={{ label: 'Next', disabled: locked, busy: busy !== null, onClick: pressNext }}
+      next={{ label: 'Next', disabled: locked, busy: busy !== null, hidden: held, onClick: pressNext }}
       {...(saveError === null
         ? {}
         : {

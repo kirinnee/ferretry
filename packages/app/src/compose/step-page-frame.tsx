@@ -38,6 +38,8 @@ export interface StepPageNext {
   readonly disabled?: boolean;
   /** Working: Next is locked and shows the busy mark. */
   readonly busy?: boolean;
+  /** Drawn not at all: the page's own button is the way on (Back and Later stay). */
+  readonly hidden?: boolean;
   /** Optional: a caller that routes elsewhere (a link, a form submit) may omit it. */
   readonly onClick?: () => void;
 }
@@ -119,16 +121,18 @@ export function StepPageFrame({ title, line, demo, children, back, next, later, 
                 {later.label ?? 'Later'}
               </Button>
             )}
-            <Button
-              variant="primary"
-              className="fy-spf__button"
-              disabled={locked}
-              onClick={next.onClick}
-              data-step-next=""
-            >
-              {marked ? <Spinner size={14} wait /> : null}
-              {next.label}
-            </Button>
+            {next.hidden === true ? null : (
+              <Button
+                variant="primary"
+                className="fy-spf__button"
+                disabled={locked}
+                onClick={next.onClick}
+                data-step-next=""
+              >
+                {marked ? <Spinner size={14} wait /> : null}
+                {next.label}
+              </Button>
+            )}
           </div>
         </footer>
       </section>

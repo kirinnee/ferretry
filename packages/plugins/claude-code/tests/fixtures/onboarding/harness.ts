@@ -26,6 +26,7 @@ export const stepHarness = (segment: StepSegmentMemory = {}): Harness => {
       return real.calls.map(call => {
         if (call.kind === 'skip') return `skip:${call.why}`;
         if (call.kind === 'busy') return `busy:${String(call.label)}`;
+        if (call.kind === 'holdNext') return `holdNext:${String(call.held)}`;
         return call.kind;
       });
     },

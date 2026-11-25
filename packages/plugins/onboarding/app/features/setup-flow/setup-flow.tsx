@@ -71,6 +71,7 @@ export function createSetupFlow(client: PluginClient, deps: FlowDeps = {}) {
               : {})}
             onBack={flow.canBack ? () => flow.back(END, flow.visit) : undefined}
             summary={flow.summary}
+            runtimesRead={flow.runtimesRead}
             unsaved={flow.unsaved}
             onRetry={flow.retryStep}
           />

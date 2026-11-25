@@ -8,6 +8,7 @@
  *   ?holdRuntimes=<ms>      GET /v1/runtimes answers that many ms late (a machine that is slow to say what can run)
  *   ?noRuntimes=1           GET /v1/runtimes lists none (a machine with no login yet: New ferret offers "Add a login")
  *   ?holdProjects=<ms>      GET /v1/projects answers that many ms late (a machine that is slow to say what is registered)
+ *   ?project=1              the ferret page's ferret is filed under the registered project (Info › Project)
  *   ?theme=<family>-<mode>      ?style=<id>&palette=<id>&mode=light|dark (open wearing a look)      ?longProject=1 (one project named by a single long word)
  *
  * `window.__fakeRequests` lists every path the page asked for that the fake daemon has no answer for (a probe aid).
@@ -86,6 +87,8 @@ const transport = new FakeTransport((request: TransportRequest): TransportAnswer
         ...(model === null ? {} : { model }),
         ...(effort === null ? {} : { effort }),
         ...(params.get('fast') === '1' ? { fast: true } : {}),
+        // `?project=1` files the ferret under the board's one registered project (the id the fake board and registry hand out).
+        ...(params.get('project') === '1' ? { projectId: '9f3c2a54-7b1e-4d6a-9c11-2f8e77d3b901' } : {}),
       },
     };
   }

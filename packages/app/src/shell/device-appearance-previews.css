@@ -11,6 +11,17 @@
 }
 
 /* ---- colour mode: one tiny chat per tone; its `data-swatch` re-declares that tone's tokens ---- */
+/* ONE OUTLINE for the whole scene, over both tones: the half that matches the page has the page's own colour and would have no edge
+   (L280b). It is the page's own muted ink, so it reads against a light page and a dark one, and it is drawn above the halves. */
+.fy-dap-frame[data-dap-mode]::after {
+  border-radius: var(--radius-control);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--muted) 60%, transparent);
+  content: '';
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
+}
 .fy-dap-pane {
   background: var(--bg);
   color: var(--fg);

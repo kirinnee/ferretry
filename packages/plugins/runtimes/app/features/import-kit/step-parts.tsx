@@ -7,10 +7,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import './step-parts.css';
 
-/** The words every import page says about the Next button before the import has run. */
-export const NEXT_LEAVES =
-  'Next leaves the import for later. You can import any time from Settings › Runtimes › Import.';
-
 /** The page body: a column of lines, cards and actions. `step` names the page for tests and the gate (`data-onboarding-step`). */
 export function StepBody({
   step,

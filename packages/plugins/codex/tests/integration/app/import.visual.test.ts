@@ -140,7 +140,7 @@ describe('the Codex import pages', () => {
   for (const mode of ['light', 'dark'] as const)
     for (const viewport of VIEWPORTS) {
       const at = `at ${viewport.name}, ${mode}`;
-      it(`run: the count, what Next does, the kit's name field, and the one Import action like Claude Code, ${at}`, async () => {
+      it(`run: the count, the kit's name field, and the one Import action like Claude Code, ${at}`, async () => {
         const context = await newContext(viewport, mode);
         const tab = await open(context, 'run', mode);
         const facts = await factsOf(tab);
@@ -150,7 +150,6 @@ describe('the Codex import pages', () => {
         expect(await tab.locator('[data-import-count]').innerText()).toMatch(
           /^Bringing \d+ items?(, leaving out \d+)?\. Hooks are never imported\.$/u,
         );
-        expect(await tab.locator('[data-import-next]').innerText()).toContain('Next leaves the import for later');
         await context.close();
       }, 60_000);
 

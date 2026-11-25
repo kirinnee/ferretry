@@ -87,6 +87,12 @@ export interface StepHost {
   done(): void;
   busy(label: string | null): void;
   /**
+   * "My own button answers this page": while `true` the footer draws no Next (Back and Later stay), so the page's own primary is the
+   * one way forward. Optional so a host that has no footer need not implement it; a page calls it `holdNext?.(false)` when its
+   * answer is in.
+   */
+  holdNext?(held: boolean): void;
+  /**
    * Registers what the footer's Next must SAVE before it moves on (null clears it). On Next the shell runs it under
    * busy('Saving…'): resolved → done() is recorded and the flow moves on; rejected with an Error → the page stays, the
    * error's message shows on the page, Next stays enabled to try again. A page calls it whenever its pick changes.

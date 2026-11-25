@@ -462,3 +462,41 @@ describe('the last page with a long checklist: the ways to start are in the firs
         }
       }, 60_000);
 });
+
+/** L265c: while the runtime check is out, or after it failed, the heading must not claim "You're set up". */
+describe('the last page before the runtime check has answered', () => {
+  for (const viewport of [
+    { name: '1440', width: 1_440, height: 900, phone: false },
+    { name: '390', width: 390, height: 844, phone: true },
+  ] as const)
+    for (const mode of ['light', 'dark'] as const)
+      for (const [name, query] of [
+        ['pending', 'case=checking&read=reading'],
+        ['failed', 'case=unread&read=unread'],
+      ] as const)
+        it(`says a neutral Done, never "set up" (${name}, ${viewport.name}, ${mode})`, async () => {
+          const context = await browser.newContext({
+            viewport: { width: viewport.width, height: viewport.height },
+            colorScheme: mode,
+            deviceScaleFactor: viewport.phone ? 2 : 1,
+            ...(viewport.phone ? { isMobile: true, hasTouch: true } : {}),
+          });
+          const origin = server?.url.origin ?? '';
+          await context.route('**/*', async route =>
+            new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+          );
+          const tab = await context.newPage();
+          try {
+            await tab.goto(`${origin}/?${query}&theme=studio-${mode}`);
+            await tab.waitForSelector('[data-flow-end]');
+            await tab.waitForTimeout(300);
+            expect(await tab.locator('.fy-spf__title').innerText()).toBe('Done');
+            const line = await tab.locator('.fy-spf__line').innerText();
+            expect(line).not.toMatch(/ready|set up/i);
+            if (shotsDir !== '')
+              await tab.screenshot({ path: join(shotsDir, `end-page-${viewport.name}-${mode}-${name}.png`) });
+          } finally {
+            await context.close();
+          }
+        });
+});

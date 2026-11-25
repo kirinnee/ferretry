@@ -1,4 +1,5 @@
 // Realworld: downloads the real 700 MB speech models (public files, hash-checked) and speaks a real clip through the stream.
+import type { SpeechThread } from '../../daemon/lib/engine/ports.ts';
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -8,7 +9,7 @@ import { UNIT_SAMPLES, decodeDownlinkUnit, encodeUplinkUnit, type StreamSnapshot
 import { startSpeechThread } from '../../daemon/adapters/worker-speech-thread.ts';
 import { SpeechEngine } from '../../daemon/lib/engine/engine.ts';
 import { VoiceStream } from '../../daemon/lib/stream/session.ts';
-import { DiskFiles, nativeFor } from './disk-files.ts';
+import { DiskFiles, nativeFor, nativeHost } from './disk-files.ts';
 
 /**
  * The red/green proof of the voice stream with the REAL engine: a real clip is streamed in real time, in 40 ms units, the
@@ -47,7 +48,7 @@ describe.skipIf(!ASKED)('the voice stream with the real speech engine', () => {
       native: nativeFor(process.env.FY_STT_ENGINE),
       clock: { after: (delay, fn) => realClock.after(delay as number, fn) },
       machine: () => 'this box',
-      start: () => startSpeechThread(bunWorkers()),
+      start: kind => (kind === 'native' ? (nativeHost('speech') as SpeechThread) : startSpeechThread(bunWorkers())),
       availableMemory: () => undefined,
       log: { info: () => undefined, warn: () => undefined },
     });

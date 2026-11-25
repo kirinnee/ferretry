@@ -644,37 +644,43 @@ describe('r11-1b G6: no cover blink, no first-draw hold', () => {
     for (const viewport of VIEWPORTS) {
       // A page that answers 40 ms after the cover's loader came up (answers at 100 ms: 300 + 40): onboarding.name 36 ms,
       // warden 39 ms at the gate. The loader must stay for its minimum, not vanish after those few frames.
-      it(`a cover that came up for a 340 ms answer stays for its minimum, then the page shows (${viewport.name}, ${scheme})`, async () => {
-        const { context, origin, tab } = await open(scheme, viewport.width, viewport.height);
-        try {
-          await tab.addInitScript(COVER_WATCH);
-          await tab.goto(`${origin}/?theme=studio-${scheme}&case=late&ms=340`);
-          await tab.waitForFunction(() => (window as unknown as { __readyAt?: number }).__readyAt !== undefined);
-          // The page has answered; the cover is still up (held for its minimum).
-          if (shotsDir !== '')
-            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-g6-cover-held.png`) });
-          await tab.waitForSelector('[data-flow-cover]', { state: 'detached' });
-          await tab.waitForTimeout(200);
-          if (shotsDir !== '')
-            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-g6-page-after.png`) });
-          const seen = await tab.evaluate(
-            () => (window as unknown as { __cover: { in: number; out: number } }).__cover,
-          );
-          const shown = seen.out - seen.in;
-          console.info(
-            `G6 cover loader held ${shown.toFixed(0)} ms after a 340 ms answer (${viewport.name}, ${scheme})`,
-          );
-          expect(seen.in, 'the loader was mounted').toBeGreaterThan(0);
-          expect(seen.out, 'and then left').toBeGreaterThan(seen.in);
-          expect(shown, `the loader was held ${shown.toFixed(0)} ms: not a blink`).toBeGreaterThanOrEqual(
-            HELD_AT_LEAST_MS,
-          );
-          expect(await tab.$('[data-flow-page]:not([hidden]) [data-flow-slot]:not([hidden])')).not.toBeNull();
-          expect(await tab.$('[data-flow-page][data-ready]'), 'the page shows after the hold').not.toBeNull();
-        } finally {
-          await context.close();
-        }
-      });
+      for (const slowdown of [1, 8])
+        it(`a cover that came up for a 340 ms answer stays for its minimum, then the page shows (${viewport.name}, ${scheme}${slowdown > 1 ? `, CPU ${slowdown}x slower` : ''})`, async () => {
+          const { context, origin, tab } = await open(scheme, viewport.width, viewport.height);
+          try {
+            await tab.addInitScript(COVER_WATCH);
+            // A slow device: the page takes longer to commit, which must not come out of the loader's minimum (the clock starts when it is in the document).
+            if (slowdown > 1) {
+              const cdp = await context.newCDPSession(tab);
+              await cdp.send('Emulation.setCPUThrottlingRate', { rate: slowdown });
+            }
+            await tab.goto(`${origin}/?theme=studio-${scheme}&case=late&ms=340`);
+            await tab.waitForFunction(() => (window as unknown as { __readyAt?: number }).__readyAt !== undefined);
+            // The page has answered; the cover is still up (held for its minimum).
+            if (shotsDir !== '')
+              await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-g6-cover-held.png`) });
+            await tab.waitForSelector('[data-flow-cover]', { state: 'detached' });
+            await tab.waitForTimeout(200);
+            if (shotsDir !== '')
+              await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-g6-page-after.png`) });
+            const seen = await tab.evaluate(
+              () => (window as unknown as { __cover: { in: number; out: number } }).__cover,
+            );
+            const shown = seen.out - seen.in;
+            console.info(
+              `G6 cover loader held ${shown.toFixed(0)} ms after a 340 ms answer (${viewport.name}, ${scheme})`,
+            );
+            expect(seen.in, 'the loader was mounted').toBeGreaterThan(0);
+            expect(seen.out, 'and then left').toBeGreaterThan(seen.in);
+            expect(shown, `the loader was held ${shown.toFixed(0)} ms: not a blink`).toBeGreaterThanOrEqual(
+              HELD_AT_LEAST_MS,
+            );
+            expect(await tab.$('[data-flow-page]:not([hidden]) [data-flow-slot]:not([hidden])')).not.toBeNull();
+            expect(await tab.$('[data-flow-page][data-ready]'), 'the page shows after the hold').not.toBeNull();
+          } finally {
+            await context.close();
+          }
+        });
     }
 
   // With Settings > Motion > Reduced the shared !important rule (ui/loading.css) used to add a SECOND 300 ms delay to the loader the

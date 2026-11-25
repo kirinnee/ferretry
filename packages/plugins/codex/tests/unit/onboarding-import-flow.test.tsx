@@ -329,16 +329,18 @@ describe('the Codex import pages in the setup flow', () => {
     expect(pageKey()).toBe('codex.import-run');
     noChooser();
     expect(query('[data-import-run]')).not.toBeNull();
-    // Before anything is pressed nothing is held: the person may go Back or choose Later.
+    // Before anything is pressed Back and Later are free, and the footer has no Next: Import is the one way on (L270).
     expect(query<HTMLButtonElement>('[data-flow-later]')?.disabled).toBe(false);
+    expect(query('[data-step-next]')).toBeNull();
     await press('[data-import-run]');
     expect(query('[data-import-refusal]')?.textContent).toContain('close it and try again');
     expect(query('[data-flow-busy]')).toBeNull();
     expect(query<HTMLButtonElement>('[data-flow-later]')?.disabled).toBe(false);
-    expect(query<HTMLButtonElement>('[data-step-next]')?.disabled).toBe(false);
+    expect(query('[data-step-next]'), 'a refused import still holds Next away').toBeNull();
     refuse = false;
     await press('[data-import-run]');
     expect(query('[data-import-done]')).not.toBeNull();
+    expect(query<HTMLButtonElement>('[data-step-next]')?.disabled, 'Next returns once it is imported').toBe(false);
     await act(async () => undefined);
   });
 

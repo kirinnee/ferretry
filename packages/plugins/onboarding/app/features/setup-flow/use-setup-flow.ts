@@ -28,7 +28,7 @@
 import { daemonOfClient, useEveryDaemon } from '@ferretry/app';
 import { readPress } from '@ferretry/app/ui';
 import { forgetSetupScanAhead, readSetupScanAhead } from './machine-scan.ts';
-import { useRuntimesRead, withRuntimesRead } from './runtimes-made.ts';
+import { type RuntimesRead, useRuntimesRead, withRuntimesRead } from './runtimes-made.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { StepSegmentMemory } from '@ferretry/kernel/contract';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
@@ -162,6 +162,8 @@ export interface SetupFlow {
   readonly retry: () => void;
   /** The machine's own steps and where each ended: what the closing summary lists (a page that skipped itself is not in it). */
   readonly summary: readonly SummaryStep[];
+  /** Whether the machine's runtime check has answered (the closing heading waits for it). */
+  readonly runtimesRead: RuntimesRead;
   /** Tries every unsaved answer again. */
   readonly retrySave: () => void;
   /** Tries one step's unsaved answer again. */
@@ -586,6 +588,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       ),
       runtimesRead,
     ),
+    runtimesRead,
     retrySave,
     retryStep,
   };
