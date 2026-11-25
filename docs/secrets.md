@@ -1668,8 +1668,8 @@ Claude ferret the renewed access token of an MCP server its own launch already h
 - **One Vault operation, for what the caller itself wrote.** The Vault has no general getter and none may be added.
   `VaultApi.mintedValue(name)` is the single exception: it is not a member of `VaultApi` at all
   (the type `MintedValueReader`, read through `mintedValueOf`) and exists only for a plugin whose manifest declares
-  `permissions.revealMinted`, which the kernel allows to MCP alone (`REVEAL_MINTED_PLUGINS`: any other plugin that declares it
-  is refused when it is defined and when the daemon boots, and the Vault hands the method to no other id). It answers only a secret the Vault's own mint ledger says THAT plugin wrote the
+  `permissions.revealMinted`, which the Vault allows to MCP alone (any other plugin that declares it stops the daemon's boot at
+  the Vault, naming the plugin). It answers only a secret the Vault's own mint ledger says THAT plugin wrote the
   current value of (the same word `fetchMinted` takes, [above](#a-secret-a-plugin-minted-placed-on-its-request-by-the-vault)).
   An owner's value, another plugin's, one replaced since and a name merely declared answer nothing; a plugin without the
   permission, and the core, are handed no such method. It gives MCP back a token MCP itself received from the provider and
