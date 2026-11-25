@@ -1,3 +1,9 @@
+## [4.294.1](https://github.com/kirinnee/ferretry/compare/v4.294.0...v4.294.1) (2026-11-25)
+
+### Fixes
+
+* **daemon:** stop the Warden's pricing from stalling the event loop ([17245ba](https://github.com/kirinnee/ferretry/commit/17245baa81c8f1549771875386c685e9c6dbfc78))
+
 ## [4.294.0](https://github.com/kirinnee/ferretry/compare/v4.293.0...v4.294.0) (2026-11-25)
 
 ### Features
