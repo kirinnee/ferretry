@@ -55,6 +55,7 @@ function source(w: World, project: ProjectMcpLaunchShare = NO_PROJECT) {
       return new Set(w.secrets.entries.keys());
     },
     renewal: w.service,
+    mcpFormat: harness => (harness === 'codex' ? 'toml' : harness === 'claude-code' ? 'json' : undefined),
     layered: async () => new Set(ITEMS.keys()),
     project: async () => project,
   });
@@ -99,7 +100,7 @@ describe('MCP launch renewal', () => {
     expect(parts.find(part => part.kind === 'mcp' && part.name === 'linear')).toEqual({
       kind: 'mcp',
       name: 'linear',
-      config: { url: SERVER, auth: 'oauth', bearer: NAMES.variable },
+      config: { type: 'http', url: SERVER, headers: { Authorization: `Bearer \${${NAMES.variable}}` } },
     });
     expect(parts.find(part => part.kind === 'mcp' && part.name === 'lint')).toEqual({
       kind: 'mcp',
