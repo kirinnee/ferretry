@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { DaemonCallError } from '@ferretry/app';
 import { TerminalSnapshotView } from '../../../app/components/terminal-snapshot.tsx';
 import { readPaneSnapshot, SNAPSHOT_ROUTE } from '../../../app/components/terminal-snapshot-model.ts';
 import { daemonConnection, daemonSessionScope } from '../../../app/shell.ts';
@@ -83,6 +84,57 @@ describe('terminal snapshot view', () => {
       await repoll();
       expect(view.container.textContent).toContain('first frame');
       expect(view.container.textContent).toContain('stale · last update <1s ago · daemon unreachable');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('says a first read that failed is unreadable, with no age: there is no snapshot for it to be stale against', async () => {
+    setHidden(false);
+    const view = await mount(
+      <TerminalSnapshotView
+        daemon={daemon}
+        scope={scope}
+        tmuxSession="pane"
+        now={() => 0}
+        readSnapshot={async () => {
+          throw new Error('daemon unreachable');
+        }}
+      />,
+    );
+    try {
+      const header = view.container.textContent ?? '';
+      expect(header).toContain('unreadable · daemon unreachable');
+      expect(header).not.toContain('stale');
+      expect(header).not.toContain('last update');
+      expect(header).not.toContain('— ago');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('words a refused first read in the Console’s own name when it is the live pane', async () => {
+    setHidden(false);
+    const view = await mount(
+      <TerminalSnapshotView
+        daemon={daemon}
+        scope={scope}
+        live
+        readSnapshot={async () => {
+          throw new DaemonCallError(
+            403,
+            'grant_step_up_required',
+            'using session terminals needs a passkey confirmation from this device.',
+          );
+        }}
+      />,
+    );
+    try {
+      const header = view.container.textContent ?? '';
+      expect(header).toContain(
+        'unreadable · Using the Console needs your passkey — confirm on this device and it goes ahead.',
+      );
+      expect(header).not.toContain('session terminals');
     } finally {
       await view.unmount();
     }

@@ -151,9 +151,10 @@
 .kt-webterm__ledger {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 2px 12px;
   padding: 5px 10px 6px;
   color: var(--muted);
   font-family: var(--font-mono);
@@ -161,8 +162,11 @@
   line-height: 1.3;
 }
 
+/* The path takes the row; the counter drops to a second line when a deck is too narrow for both (a 300px side pane gave the
+   path 40px), so the end of the path — where it differs — stays legible. */
 .kt-webterm__cwd {
   direction: rtl;
+  flex: 1 1 12rem;
   min-width: 0;
   overflow: hidden;
   text-align: left;
@@ -172,6 +176,7 @@
 
 .kt-webterm__ledger > span:last-child {
   flex: 0 0 auto;
+  margin-left: auto;
   white-space: nowrap;
 }
 
