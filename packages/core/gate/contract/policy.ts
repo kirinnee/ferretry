@@ -256,6 +256,9 @@ export const STEP_UP_ACT_NAMES = [
   'approve-sign-in-rule',
   'resume-cut-off',
   'approve-paste-rule',
+  'show-terminals',
+  'test-browser-proxy',
+  'show-sign-in-plans',
 ] as const;
 export type StepUpActName = (typeof STEP_UP_ACT_NAMES)[number];
 
@@ -285,6 +288,9 @@ export const STEP_UP_ACTS = {
   approveSignInRule: act('approve-sign-in-rule'),
   resumeCutOff: act('resume-cut-off'),
   approvePasteRule: act('approve-paste-rule'),
+  showTerminals: act('show-terminals'),
+  testBrowserProxy: act('test-browser-proxy'),
+  showSignInPlans: act('show-sign-in-plans'),
 } as const;
 export type StepUpAct = (typeof STEP_UP_ACTS)[keyof typeof STEP_UP_ACTS];
 
