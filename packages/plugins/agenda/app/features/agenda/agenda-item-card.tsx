@@ -185,11 +185,11 @@ function Situation({
     <section aria-label="Situation" className="fy-card__situation" data-agenda-situation="">
       {status.length === 0 ? null : (
         <div className="fy-card__sit-row" data-agenda-section="status">
-          <h4 className="fy-card__label fy-card__sit-label">Status</h4>
+          <h3 className="fy-card__label fy-card__sit-label">Status</h3>
           <div className="fy-card__status">
             {status.map(part => (
               <div className="fy-card__status-part" data-status-part={part.key} key={part.key}>
-                <h5 className="fy-card__status-label">{part.label}</h5>
+                <h4 className="fy-card__status-label">{part.label}</h4>
                 {renderProse(part.text)}
               </div>
             ))}
@@ -198,13 +198,13 @@ function Situation({
       )}
       {premise === null ? null : (
         <div className="fy-card__sit-row" data-agenda-section="premise">
-          <h4 className="fy-card__label fy-card__sit-label">Premise</h4>
+          <h3 className="fy-card__label fy-card__sit-label">Premise</h3>
           <PointForm className="fy-card__points" renderProse={renderProse} text={premise} />
         </div>
       )}
       {context === null ? null : (
         <div className="fy-card__sit-row" data-agenda-section="context">
-          <h4 className="fy-card__label fy-card__sit-label">Context</h4>
+          <h3 className="fy-card__label fy-card__sit-label">Context</h3>
           <PointForm className="fy-card__points" renderProse={renderProse} text={context} />
         </div>
       )}

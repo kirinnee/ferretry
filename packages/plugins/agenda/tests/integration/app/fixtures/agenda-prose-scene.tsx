@@ -12,6 +12,7 @@
  *   ?plain=1     no one provides `shell.prose`: the shell's own Markdown draws every segment (the height baseline)
  *   ?text=1      a body with text only (a heading, a list, bold, a quote): what the baseline and the real draw must agree on
  *   ?text=short  a short text-only item (no premise or context): the open card is as tall as its text, so the deck's height follows it
+ *   ?notice=1    the open item is an FYI (no ask; its one button is Got it)
  *   ?off=1       Conversation is registered but this machine's daemon has it OFF: the shell's own Markdown draws
  *
  * Where a reference link goes is written to `document.documentElement.dataset.navigated`.
@@ -63,8 +64,9 @@ const item = agendaItem('A61', {
   body,
   why: 'The release waits for it.',
   waitingSince: '2026-08-01T10:00:00.000Z',
-  ask: choices('Yes', 'No'),
-});
+  // ?notice=1: an open FYI, which has no ask: its one button is Got it.
+  ...(params.get('notice') === '1' ? { notice: true } : { ask: choices('Yes', 'No') }),
+} as never);
 // Waiting less long, so it is dealt AFTER the open one: the card that peeks out behind the top of the deck.
 const next = agendaItem('A62', {
   title: 'Ship it?',

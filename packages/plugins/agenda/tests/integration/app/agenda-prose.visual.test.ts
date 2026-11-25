@@ -396,5 +396,69 @@ describe('an agenda item drawn as Durian hypermedia', () => {
           await close();
         }
       });
+
+      it(`says an open FYI is a Notice, not Done, beside its active Got it (${name}, ${scheme})`, async () => {
+        const { tab, close } = await open(name, scheme, '&notice=1', '.fy-attn-deck__top [data-agenda-clear]');
+        try {
+          const found = await tab.evaluate(() => {
+            const chip = document.querySelector('.fy-attn-deck__top .fy-card__state') as HTMLElement;
+            const dot = getComputedStyle(chip, '::before').backgroundColor;
+            const probe = (name: string) => {
+              const el = document.createElement('i');
+              el.style.color = `var(${name})`;
+              document.body.append(el);
+              const color = getComputedStyle(el).color;
+              el.remove();
+              return color;
+            };
+            const button = document.querySelector('.fy-attn-deck__top [data-agenda-clear]') as HTMLButtonElement;
+            return {
+              text: (chip.textContent ?? '').trim(),
+              state: chip.dataset.agendaState ?? '',
+              dot,
+              ok: probe('--ok'),
+              muted: probe('--muted'),
+              gotIt: (button.textContent ?? '').trim(),
+              gotItDisabled: button.disabled,
+            };
+          });
+          expect(found.gotIt, 'the notice offers Got it').toBe('Got it');
+          expect(found.gotItDisabled, 'and Got it is active').toBe(false);
+          expect(found.text, 'the chip says Notice, never Done').toBe('Notice');
+          expect(found.state, 'its own state').toBe('notice');
+          expect(found.dot, 'the dot is neutral, not the green of done').not.toBe(found.ok);
+          expect(found.dot, 'the dot is the muted one').toBe(found.muted);
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}-${scheme}-notice.png`) });
+        } finally {
+          await close();
+        }
+      });
+
+      it(`puts Status, Premise and Context one level under the title (${name}, ${scheme})`, async () => {
+        const { tab, close } = await open(name, scheme, '', '.fy-attn-deck__top .fy-item-view__body .dh-doc .term');
+        try {
+          const found = await tab.evaluate(() => {
+            const top = document.querySelector('.fy-attn-deck__top') as HTMLElement;
+            const level = (el: Element) => Number(el.tagName.slice(1));
+            const title = top.querySelector('h2');
+            const labels = [
+              ...top.querySelectorAll('[data-agenda-situation] [data-agenda-section] > .fy-card__sit-label'),
+            ];
+            return {
+              title: title === null ? 0 : level(title),
+              labels: labels.map(each => [(each.textContent ?? '').trim(), level(each)]),
+            };
+          });
+          expect(found.title, 'the item title is the page’s h2').toBe(2);
+          expect(found.labels.length, 'the situation sections are drawn').toBeGreaterThan(0);
+          expect(
+            found.labels.every(([, at]) => at === 3),
+            `every direct subsection is an h3, no jump: ${JSON.stringify(found.labels)}`,
+          ).toBe(true);
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}-${scheme}-headings.png`) });
+        } finally {
+          await close();
+        }
+      });
     }
 });
