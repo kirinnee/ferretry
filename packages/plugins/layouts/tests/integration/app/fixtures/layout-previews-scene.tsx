@@ -3,11 +3,11 @@
  * under the settings header the shell draws (machine, state, and the scope chip ONLY when the tab's real declaration asks
  * for one), with a fake device so "Same on all my devices / Just this device" is drawn, and fake nav places that carry icons.
  *
- *   ?theme=<family>-<mode>   ?motion=reduced  sets Settings › Motion to Reduced   ?scope=device  opens on Just this device
+ *   ?theme=<family>-<mode>   ?motion=reduced  sets Settings › Motion to Reduced   ?scope=device  opens on Just this device   ?painted=1  the theme in use sets its own colours
  */
 import type { DeviceLayout, NavCatalogItem } from '@ferretry/app';
 import { createRoot } from 'react-dom/client';
-import { DEFAULT_LAYOUT } from '../../../../contract/index.ts';
+import { DEFAULT_LAYOUT, DEFAULT_THEME } from '../../../../contract/index.ts';
 import manifest from '../../../../manifest.ts';
 import { LayoutSettings } from '../../../../app/features/layout/layout-settings.tsx';
 import { listOf, readOf, scriptedLayouts } from '../../../support/layouts-app.ts';
@@ -18,8 +18,47 @@ if (params.get('motion') === 'reduced') document.documentElement.dataset.motion 
 
 // Eight layouts (the SelectBox opens a search field above seven), so the chooser's type-to-filter is exercised for real.
 const LAYOUT_IDS = ['default', 'compact', 'focus', 'wide', 'classic', 'sidebar-left', 'sidebar-right', 'minimal'];
+// ?painted=1: the theme in use sets its own colours (light and dark), so the Theme preview draws a pane for each.
+const PAINTED = {
+  ...DEFAULT_THEME,
+  id: 'dusk',
+  label: 'Dusk',
+  light: {
+    bg: '#f4efe6',
+    fg: '#2b2a33',
+    'fg-soft': '#6b6878',
+    accent: '#7b4bb7',
+    'accent-soft': '#e6dcf3',
+    'accent-border': '#b69be0',
+    border: '#d8d0c2',
+  },
+  dark: {
+    bg: '#17151f',
+    fg: '#ece9f5',
+    'fg-soft': '#a29fb5',
+    accent: '#a98be0',
+    'accent-soft': '#2c2540',
+    'accent-border': '#5b4a8a',
+    border: '#322d44',
+  },
+};
+const painted = params.get('painted') === '1';
 const script = scriptedLayouts(
-  readOf({}, listOf({ layouts: LAYOUT_IDS.map(id => ({ id, origin: 'built-in' as const })) })),
+  readOf(
+    painted ? { theme: PAINTED } : {},
+    listOf({
+      layouts: LAYOUT_IDS.map(id => ({ id, origin: 'built-in' as const })),
+      ...(painted
+        ? {
+            themes: [
+              { id: 'default', origin: 'built-in' as const },
+              { id: 'dusk', origin: 'saved' as const },
+            ],
+            current: { layout: 'default', theme: 'dusk' },
+          }
+        : {}),
+    }),
+  ),
 );
 // What the fake daemon was asked to do, for a test to read (the same writes the verbs make: `use compact`, `theme studio`).
 (window as unknown as { __fyCalls: readonly string[] }).__fyCalls = script.calls;
