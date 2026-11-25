@@ -107,6 +107,28 @@ export const RELEASE_CACHE_PREFIX = 'fy-release-';
 const cacheNameFor = (manifest: ReleaseManifest): string =>
   `${RELEASE_CACHE_PREFIX}${manifest.commit}-${manifest.sequence}`;
 
+/**
+ * How long a page load waits for the site's check before it is answered from the release already installed
+ * (`ReleaseKeeper.respondAfterCheck`). A check that outlasts it is not abandoned: it finishes behind the load.
+ */
+export const RELEASE_CHECK_DEADLINE_MS = 2_500;
+
+/**
+ * Waits for a page load's check, but never longer than `milliseconds` — and never throws. The check keeps running
+ * after the wait ends, so a slow or failing site costs the reader at most this long, and the load is then answered
+ * from the release already installed: exactly what an offline start does. Nothing here decides what is trusted; the
+ * answer that follows still comes from `respond`, which re-verifies every stored byte from the compiled-in key.
+ */
+export const settleWithin = async (
+  check: Promise<unknown>,
+  milliseconds: number,
+  wait: (milliseconds: number) => Promise<void>,
+): Promise<void> => {
+  await Promise.race([check.then(noop, noop), wait(milliseconds)]);
+};
+
+const noop = (): void => undefined;
+
 /** Enough endorsements for a few planned rotations; older ones only ever widened the chain further back. */
 const ENDORSEMENT_LIMIT = 8;
 

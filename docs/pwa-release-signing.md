@@ -36,6 +36,11 @@ and what to do when something goes wrong.
   file, checks every hash, writes them into a new cache, and only then moves one pointer to it. The
   pointer is one IndexedDB record written in one transaction, so a check interrupted halfway changes
   nothing.
+  A page load first finishes that check, but for **at most 2.5 seconds** (`RELEASE_CHECK_DEADLINE_MS`), so one
+  reload after a newer signed release was published shows it. A site that is down, slow or serving something the
+  worker refuses is waited for no longer than that: the installed release answers, exactly as an offline start
+  does, the check finishes behind the load, and the refusal is shown by the same notice. The wait changes nothing
+  about what is trusted — the answer is still chosen by `respond`, from bytes re-verified from the compiled-in key.
 - **Speech runtimes are listed but fetched later.** The speech runtimes (`assets/ort-wasm-simd-threaded-*.wasm`,
   12 MB, and Vosk's `assets/vosk-*.wasm`, 3 MB) are used only by people who install an on-device
   engine ([voice.md](voice.md)), so the update skips downloading them (`isDeferredReleaseFile`). It is still in the signed list: a request for it is
