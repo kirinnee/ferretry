@@ -509,6 +509,17 @@ function BoardStand(): ReactNode {
     </section>
   );
 }
+// `?late=<ms>`: the ferret toolbar's panels are still arriving (a lazy half's first draw) for that many ms, so the slot's own wait shows.
+const LATE = Number(params.get('late') ?? '0');
+const lateGate = LATE > 0 ? new Promise<void>(resolve => setTimeout(resolve, LATE)) : undefined;
+let lateOver = LATE <= 0;
+void lateGate?.then(() => {
+  lateOver = true;
+});
+const late = (Panel: () => ReactNode) => (): ReactNode => {
+  if (!lateOver && lateGate !== undefined) throw lateGate;
+  return <Panel />;
+};
 const page = (text: string) => () => <p style={{ padding: 16 }}>{text}</p>;
 const surfaces: readonly SurfaceEntry[] = [
   ...CORE.filter(entry => entry.id !== 'ferrets' && entry.id !== 'kernel'),
@@ -568,7 +579,7 @@ const surfaces: readonly SurfaceEntry[] = [
         build: () => ({
           panels: {
             ...Object.fromEntries(SIDE.map(id => [id, panelStand(id)])),
-            ...Object.fromEntries(TOOLBAR.map(([id, stand]) => [id, stand])),
+            ...Object.fromEntries(TOOLBAR.map(([id, stand]) => [id, late(stand)])),
             ...Object.fromEntries(COMPOSER_TOOLS.map(id => [id, () => null])),
           },
         }),

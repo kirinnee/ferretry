@@ -166,3 +166,18 @@ describe('R4-S1 where an address stands to a daemon-less screen, by the routerâ€
     expect(addressPlace(reserved, '/settings/x')).toBe('elsewhere');
   });
 });
+
+describe('the old Inbox address (E60)', () => {
+  const agenda: ScreenRef = { plugin: 'agenda', id: 'agenda', path: 'agenda', label: 'Agenda' };
+
+  test('/d/<daemon>/inbox is the Agenda (the query stays in the address, where the Agenda reads it)', () => {
+    const inbox = routeTable([agenda, card]);
+    expect(inbox.parse('/d/d1/inbox')).toEqual({ kind: 'screen', daemon: 'd1', screen: agenda, params: {} });
+    expect(inbox.parse('/d/d1/inbox/')).toEqual({ kind: 'screen', daemon: 'd1', screen: agenda, params: {} });
+  });
+
+  test('only that exact address; and with no Agenda installed it is still not found', () => {
+    expect(routeTable([agenda]).parse('/d/d1/inbox/x')).toEqual({ kind: 'not-found', path: '/d/d1/inbox/x' });
+    expect(routeTable([card]).parse('/d/d1/inbox')).toEqual({ kind: 'not-found', path: '/d/d1/inbox' });
+  });
+});

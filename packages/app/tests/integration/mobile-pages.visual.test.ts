@@ -233,3 +233,17 @@ describe('where you are', () => {
     }
   });
 });
+
+describe('the phone title bar names the page (L275)', () => {
+  for (const theme of THEMES)
+    it(`at 390, ${theme}: the New ferret page is titled "New ferret", not the plugin's name "Ferrets"`, async () => {
+      const { tab, close } = await open(390, theme, '/d/ws/new', '[data-new-ferret-form]');
+      try {
+        await shot(tab, 390, theme, 'new-ferret-title');
+        const bar = await tab.locator('[data-slot="phone-title"] .fy-phone-title__text').innerText();
+        expect(bar.trim()).toBe('New ferret');
+      } finally {
+        await close();
+      }
+    });
+});

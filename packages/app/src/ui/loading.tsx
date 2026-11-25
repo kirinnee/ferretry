@@ -38,9 +38,11 @@ export function useHeldLoading(active: boolean, gate: LoadingGate = {}): boolean
   const fade = gate.fade ?? LOADING_FADE_MS;
   const began = useRef<number | undefined>(undefined);
   const [held, setHeld] = useState(active);
-  if (active && began.current === undefined) began.current = Date.now();
   useEffect(() => {
     if (active) {
+      // The clock starts once the loader is IN the document, not when React first rendered it: a slow commit between the two would
+      // otherwise be taken out of the minimum the person gets to see (a hold that ends a few ms short of its minimum).
+      began.current ??= Date.now();
       setHeld(true);
       return undefined;
     }
@@ -186,5 +188,11 @@ export function useAnyBackgroundLoad(): boolean {
 /** The shell's one top bar: drawn while any view says it is busy, nothing otherwise. Mount it once. */
 export function LoadingBarHost() {
   const held = useHeldLoading(useAnyBackgroundLoad());
-  return held ? <TopBar /> : null;
+  // The hold keeps a bar steady while its read goes quiet, but a page loader that has started IS the one indicator now: the bar goes at once.
+  const pageUp = useSyncExternalStore(
+    subscribe,
+    () => pages > 0,
+    () => false,
+  );
+  return held && !pageUp ? <TopBar /> : null;
 }

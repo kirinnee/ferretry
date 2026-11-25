@@ -262,7 +262,7 @@ export function PanelSlot({
     <div className="fy-slot" data-slot={slot} data-phone-active={phone?.active}>
       {/* ONE readiness gate for the whole slot: a panel whose view is still arriving holds the others back, so the slot
           draws once, together, under the one bar — never panel by panel. */}
-      <Suspense fallback={<Loading kind="bar" label={`Loading ${slot}…`} />}>
+      <Suspense fallback={<Loading kind="bar" />}>
         {panels.map(panel => (
           <div
             key={`${panel.plugin}.${panel.id}`}

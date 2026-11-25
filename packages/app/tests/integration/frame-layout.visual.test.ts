@@ -961,3 +961,37 @@ describe('a slow daemon: ONE centred loader, never drawn over what is already dr
         }
       }, 40_000);
 });
+
+describe('what a screen reader hears while a page or its panels wait (L248)', () => {
+  it('is plain words, never a slot id such as "Loading ferret.toolbar…"', async () => {
+    const context = await browser.newContext({ viewport: { width: 1_280, height: 800 } });
+    const origin = server?.url.origin ?? '';
+    await context.route('**/*', async route =>
+      new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+    );
+    const tab = await context.newPage();
+    try {
+      // Every loading line the page ever puts in the document, read as it is added (a screen reader reads each one).
+      await tab.addInitScript(() => {
+        const heard = new Set<string>();
+        (window as unknown as { __heard: Set<string> }).__heard = heard;
+        const read = (): void => {
+          for (const node of document.querySelectorAll('[data-loading]')) heard.add((node.textContent ?? '').trim());
+        };
+        new MutationObserver(read).observe(document, { childList: true, subtree: true, characterData: true });
+      });
+      await tab.goto(`${origin}/d/ws/ferrets/zoe?theme=studio-light&relay=0&late=900`);
+      await tab.waitForSelector('[data-chat]', { timeout: 8_000 });
+      const heard = await tab.evaluate(() =>
+        [...(window as unknown as { __heard: Set<string> }).__heard].filter(line => line !== ''),
+      );
+      expect(heard, 'a slot waiting is the plain generic words').toContain('Loading…');
+      for (const line of heard)
+        expect(line, 'a reader-facing label, no internal slot id').not.toMatch(
+          /\w\.\w|Loading (main|side|bottom|settings)/,
+        );
+    } finally {
+      await context.close();
+    }
+  });
+});

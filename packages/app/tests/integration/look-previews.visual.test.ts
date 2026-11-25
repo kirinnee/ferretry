@@ -151,6 +151,92 @@ const playAll = async (tab: Page, hold = true): Promise<void> => {
   }
 };
 
+/**
+ * THE COLOUR MODE FRAME HAS AN EDGE (L280b, L296b): in a screenshot, along all four sides of the frame (both halves, so the
+ * half whose tone matches the page too), something within 2 px of the edge differs from the page just outside it by at least
+ * this contrast ratio. Read from the pixels the browser painted, not from the stylesheet.
+ */
+const EDGE_RATIO = 1.25;
+const weakestEdge = async (tab: Page, row: string): Promise<number> => {
+  const frame = frameOf(tab, row);
+  await frame.scrollIntoViewIfNeeded();
+  const box = await frame.boundingBox();
+  if (box === null) throw new Error('the frame has no box');
+  const around = 6;
+  const png = await tab.screenshot({
+    clip: { x: box.x - around, y: box.y - around, width: box.width + around * 2, height: box.height + around * 2 },
+  });
+  return await tab.evaluate(
+    async ({ base64, scale, width, height, margin }) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${base64}`;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D;
+      ctx.drawImage(image, 0, 0);
+      const at = (x: number, y: number): number[] => [
+        ...ctx.getImageData(Math.round(x * scale), Math.round(y * scale), 1, 1).data,
+      ];
+      const light = (c: number[]): number => {
+        const [r, g, b] = c.map(v => {
+          const x = (v ?? 0) / 255;
+          return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
+      };
+      const ratio = (a: number[], b: number[]): number => {
+        const [hi = 0, lo = 0] = [light(a), light(b)].sort((x, y) => y - x);
+        return (hi + 0.05) / (lo + 0.05);
+      };
+      let weakest = Number.POSITIVE_INFINITY;
+      // Along each side, in whole steps from 10 px in (past the corner radius): the page 3 px outside against the strongest pixel from 2 px outside to 2 px inside.
+      for (const side of ['top', 'bottom', 'left', 'right'] as const) {
+        const across = side === 'top' || side === 'bottom' ? width : height;
+        for (let along = 10; along <= across - 10; along += 10) {
+          const point = (out: number): number[] => {
+            const edge =
+              side === 'top' || side === 'left' ? margin - out : margin + (side === 'bottom' ? height : width) + out;
+            return side === 'top' || side === 'bottom' ? at(margin + along, edge) : at(edge, margin + along);
+          };
+          const outside = point(3);
+          let best = 1;
+          for (const out of [2, 1, 0, -1, -2]) best = Math.max(best, ratio(outside, point(out)));
+          weakest = Math.min(weakest, best);
+        }
+      }
+      return weakest;
+    },
+    {
+      base64: png.toString('base64'),
+      scale: await tab.evaluate(() => window.devicePixelRatio),
+      width: box.width,
+      height: box.height,
+      margin: around,
+    },
+  );
+};
+
+describe('the Colour mode frame has an edge (L280b, L296b)', () => {
+  for (const variant of VARIANTS)
+    for (const choice of ['Auto', 'Light', 'Dark'] as const)
+      it(`${variant.name}: ${choice}: the whole outline shows against the page`, async () => {
+        const { tab, close } = await open(variant);
+        try {
+          await tab.locator('[role="radiogroup"][aria-label="Colour mode"] label', { hasText: choice }).click();
+          await tab.waitForTimeout(150);
+          await seek(tab, PLAY_MS);
+          const weakest = await weakestEdge(tab, 'Colour mode');
+          if (shotsDir !== '') console.log(`edge ${variant.name} ${choice}: ${weakest.toFixed(3)}`);
+          await shotOf(tab, variant, `look-edge-${choice.replace(' ', '-').toLowerCase()}`);
+          expect(weakest, 'the weakest point of the outline').toBeGreaterThanOrEqual(EDGE_RATIO);
+        } finally {
+          await close();
+        }
+      });
+});
+
 describe('the Look previews', () => {
   for (const variant of VARIANTS) {
     it(`${variant.name}: each of the three rows carries a 160 x 100 frame that plays, and the page does not widen`, async () => {
