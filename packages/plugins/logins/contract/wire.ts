@@ -415,6 +415,11 @@ export const LoginViewSchema = z.strictObject({
   usage: LoginUsageSchema,
   /** The runtimes that use this credential, by name. */
   usedBy: z.array(NonEmptyStringSchema).readonly(),
+  /**
+   * Set when none of the harnesses this login drives has its command installed on this machine, so nothing here can run
+   * it. Absent when one does. A surface says which to install; the command was located, never run.
+   */
+  cliMissing: z.literal(true).optional(),
   /** Whether `POST /v1/logins/sign-in` can sign this credential in. */
   signIn: LoginActSchema,
   /** Whether `POST /v1/logins/:loginId/check` can run. */

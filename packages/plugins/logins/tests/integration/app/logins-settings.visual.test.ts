@@ -436,3 +436,53 @@ describe('C59 O8-1 review: the shared answer row fits the PANEL it is in, not th
       );
     });
 });
+
+describe('L195: a login no installed CLI can drive says what to install', () => {
+  const hint = '[data-login-no-cli]';
+  for (const viewport of VIEWPORTS)
+    for (const theme of THEMES)
+      for (const [name, query, expected] of [
+        [
+          'claude login, no CLI on the machine',
+          'view=needs&tools=none',
+          'Install Claude Code on box to use this login.',
+        ],
+        [
+          'codex login, no CLI on the machine',
+          'view=needs-codex&tools=none',
+          'Install Codex on box to use this login.',
+        ],
+        ['claude login, its CLI is installed', 'view=needs', null],
+      ] as const)
+        it(`${name} (${viewport.name}, ${theme})`, async () => {
+          await inPage(
+            viewport,
+            `theme=${theme}&${query}`,
+            '[data-login-used-by]',
+            async tab => {
+              expect(await tab.locator('[data-login-used-by]').textContent()).toContain(
+                'No runtime uses this login yet.',
+              );
+              const shown = await tab.locator(hint).allTextContents();
+              if (expected === null) expect(shown).toEqual([]);
+              else {
+                expect(shown).toEqual([expected]);
+                // It sits with the "Used by" line, inside the page, and is read at body size.
+                const box = await tab.locator(hint).evaluate(node => {
+                  const r = node.getBoundingClientRect();
+                  return { right: r.right, vw: window.innerWidth, h: r.height };
+                });
+                expect(box.right).toBeLessThanOrEqual(box.vw);
+                if (shotsDir !== '') {
+                  // The tab scrolls inside the window: bring the hint into the picture.
+                  await tab.locator(hint).scrollIntoViewIfNeeded();
+                  await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-no-cli.png`) });
+                }
+              }
+            },
+            async tab => {
+              await tab.waitForTimeout(150);
+            },
+          );
+        });
+});

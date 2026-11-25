@@ -69,7 +69,12 @@ const VIEWPORTS = [
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 const THEMES = ['studio-light', 'studio-dark'] as const;
-type Viewport = (typeof VIEWPORTS)[number];
+interface Viewport {
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly phone: boolean;
+}
 type Theme = (typeof THEMES)[number];
 
 const open = async (
@@ -526,5 +531,119 @@ describe('q8b S-25: the how-to picture is on screen at full strength nearly all 
         } finally {
           await close();
         }
+      });
+});
+
+describe('L293c: on a desktop, Finish sign-in starts at the answer column instead of spanning the card', () => {
+  const PHONE = VIEWPORTS[1];
+  const DESKTOP1440: Viewport = { name: '1440', width: 1_440, height: 900, phone: false };
+  // A settings panel at a wide window is narrower than the picture's 560 px breakpoint, so the form is one column.
+  for (const [scene, card] of [
+    ['claude-code', '[data-claude-login]'],
+    ['codex-link', '[data-codex-login]'],
+  ] as const)
+    for (const theme of THEMES)
+      it(`${scene}: Finish is narrower than the card and starts at the field's left (1440, ${theme})`, async () => {
+        const { tab, close } = await open(DESKTOP1440, theme, `${scene}&panel=520`);
+        try {
+          await tab.locator('form button[type="submit"]').waitFor({ state: 'visible' });
+          const facts = await tab.evaluate(
+            ({ cardSelector }) => {
+              const box = (el: Element | null) => {
+                const r = (el as HTMLElement).getBoundingClientRect();
+                return { left: r.left, right: r.right, w: r.width, h: r.height };
+              };
+              const form = document.querySelector('form') as HTMLFormElement;
+              return {
+                card: box(document.querySelector(cardSelector)),
+                field: box(form.querySelector('input, textarea')),
+                finish: box(form.querySelector('button[type="submit"]')),
+              };
+            },
+            { cardSelector: card },
+          );
+          measured[`finish-${scene}-1440-${theme}`] = facts;
+          expect(facts.finish.w).toBeLessThan(facts.card.w * 0.7);
+          expect(Math.abs(facts.finish.left - facts.field.left)).toBeLessThanOrEqual(1);
+          await shot(tab, DESKTOP1440, theme, `${scene}-finish-panel`);
+        } finally {
+          await close();
+        }
+      });
+  for (const theme of THEMES)
+    it(`on a phone Finish still fills the field's width (390, ${theme})`, async () => {
+      const { tab, close } = await open(PHONE, theme, 'claude-code');
+      try {
+        await tab.locator(CODE_FIELD).waitFor({ state: 'visible' });
+        const facts = await tab.evaluate(field => {
+          const w = (el: Element | null) => (el as HTMLElement).getBoundingClientRect().width;
+          return {
+            field: w(document.querySelector(field)),
+            finish: w(document.querySelector('form button[type="submit"]')),
+          };
+        }, CODE_FIELD);
+        expect(Math.abs(facts.finish - facts.field)).toBeLessThanOrEqual(1);
+      } finally {
+        await close();
+      }
+    });
+});
+
+describe('L299: the start button sits in one layout, idle on the page and on an existing login', () => {
+  for (const viewport of VIEWPORTS)
+    for (const theme of THEMES)
+      it(`both idle states put Start at the start of the steps column, beside (or above) the same picture (${viewport.name}, ${theme})`, async () => {
+        const facts: Record<
+          string,
+          {
+            demo: boolean;
+            stepsLeft: number;
+            left: number;
+            h: number;
+            top: number;
+            demoTop: number;
+            demoBottom: number;
+          }
+        > = {};
+        for (const scene of ['claude-add', 'claude-idle']) {
+          const { tab, close } = await open(viewport, theme, scene);
+          try {
+            await tab.getByRole('button', { name: /Sign in to Claude Code/u }).waitFor({ state: 'visible' });
+            facts[scene] = await tab.evaluate(() => {
+              const start = [...document.querySelectorAll('button')].find(b =>
+                /Sign in to Claude Code/u.test(b.textContent ?? ''),
+              )!;
+              const box = start.getBoundingClientRect();
+              const steps = start.closest('[data-sign-in-steps], .fy-sd-steps')?.getBoundingClientRect();
+              const demo = document.querySelector('[data-sign-in-demo]')?.getBoundingClientRect();
+              return {
+                demo: demo !== undefined,
+                stepsLeft: steps?.left ?? Number.NaN,
+                left: box.left,
+                h: box.height,
+                top: box.top,
+                demoTop: demo?.top ?? Number.NaN,
+                demoBottom: demo?.bottom ?? Number.NaN,
+              };
+            });
+            await shot(tab, viewport, theme, `${scene}-start`);
+          } finally {
+            await close();
+          }
+        }
+        measured[`start-layout-${viewport.name}-${theme}`] = facts;
+        const page = facts['claude-add']!;
+        const card = facts['claude-idle']!;
+        for (const one of [page, card]) {
+          expect(one.demo).toBe(true);
+          expect(Math.abs(one.left - one.stepsLeft)).toBeLessThanOrEqual(1);
+          // The desktop picture sits beside the steps and spans the button's height; the phone's sits below it.
+          if (viewport.phone) expect(one.top).toBeLessThan(one.demoTop);
+          else {
+            expect(one.top).toBeGreaterThanOrEqual(one.demoTop);
+            expect(one.top).toBeLessThanOrEqual(one.demoBottom);
+          }
+        }
+        expect(Math.abs(card.h - page.h)).toBeLessThanOrEqual(0.5);
       });
 });
