@@ -164,12 +164,19 @@ export function commandBarResults(
   }
   const groups: CommandBarGroup[] = [];
   const results: CommandBarEntry[] = [];
+  const scored: { heading: string; sorted: Item[] }[] = [];
   for (const [heading, all] of byGroup) {
     const list = all.filter(item => item.score > 0);
     if (list.length === 0) continue;
     const sorted = list.sort(
       (a, b) => b.score - a.score || (a.entry.order ?? UNORDERED) - (b.entry.order ?? UNORDERED) || a.order - b.order,
     );
+    scored.push({ heading, sorted });
+  }
+  // While searching, the group holding the best match leads (ties keep the order groups first arrived in), so the row
+  // Enter opens is the strongest result, not whichever source spoke first. At rest the sources' order stands.
+  if (searching) scored.sort((a, b) => (b.sorted[0]?.score ?? 0) - (a.sorted[0]?.score ?? 0));
+  for (const { heading, sorted } of scored) {
     const ranked = (searching ? sorted.slice(0, MAX_GROUP_RESULTS) : sorted).map(item => item.entry);
     groups.push({ heading, entries: ranked, offset: results.length });
     results.push(...ranked);

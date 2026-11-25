@@ -15,6 +15,7 @@ import {
   type RouteTable,
 } from '../router/routes.ts';
 import type { CommandBarEntry, CommandBarSource } from '../ui/command-bar-model.ts';
+import { ONBOARDING_SCREEN } from './first-run.ts';
 
 /**
  * THE SHELL'S OWN COMMAND BAR ENTRIES: places (each daemon, the screens the nav can open, settings) and this device's
@@ -86,6 +87,15 @@ export function placeSource(input: PlaceSourceInput): CommandBarSource {
         keywords: [screen.id, screen.plugin],
         resting: true,
         order: screen.navOrder,
+      });
+    }
+    // The generic pairing journey, as Home's "Pair a device" button opens it (Onboarding's own page, `?journey=pair`).
+    const onboarding = screens.find(screen => `${screen.plugin}.${screen.id}` === ONBOARDING_SCREEN);
+    if (onboarding !== undefined && onboarding.path.startsWith('/')) {
+      go('pair-a-device', 'Pair a device', `${input.routes.href(onboarding, {})}?journey=pair`, {
+        description: 'Add another phone or computer to this machine',
+        keywords: ['pair', 'pairing', 'add device', 'phone', 'link', 'code'],
+        order: SHELL_ORDER + 2,
       });
     }
     // Settings are offered at rest too, as v4's palette did: the bar never opens empty, even with no machine paired.
