@@ -612,7 +612,12 @@ export const subsystems = (): MountedSubsystems => ({
   catalogMembers: { members: {} as CatalogMemberSubsystem['members'] },
   catalogLinks: { links: {} as CatalogLinkSubsystem['links'] },
   connector: {
-    availability: () => ({ enabled: false, disabledReason: 'not exercised by the surface inventory' }),
+    availability: () => ({
+      enabled: false,
+      disabledReason: 'not exercised by the surface inventory',
+      switchedOn: false,
+    }),
+    change: async () => ({ ok: false, message: 'not exercised by the surface inventory' }),
     acts: {
       pending: async () => [],
       grants: async () => [],

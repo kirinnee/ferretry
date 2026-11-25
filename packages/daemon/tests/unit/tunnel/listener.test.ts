@@ -14,6 +14,7 @@ import {
   tunnelListenerSurface,
   tunnelPeer,
 } from '../../../src/lib/tunnel/listener.ts';
+import type { ConnectorHttpHandler } from '../../../src/lib/connector/ports.ts';
 import { request } from '../api/support.ts';
 import { CREDENTIALS } from '../runtime/mounts/support.ts';
 
@@ -105,5 +106,63 @@ describe('the tunnel listener', () => {
     // Assert
     should(decision.outcome).equal('accepted');
     should(accepted).deepEqual([`/v1/rendezvous/${DAEMON}/client loopback=false`]);
+  });
+});
+
+describe('the tunnel listener with the connector', () => {
+  const claimed = { status: 200, headers: new Map<string, string>(), body: 'ok' };
+  const withHandlers = (read: () => readonly ConnectorHttpHandler[]) =>
+    tunnelListenerSurface({
+      route,
+      credentials: CREDENTIALS,
+      guard: NO_GOVERNED_ROUTES_GUARD,
+      corsOrigins: [],
+      connector: read,
+    });
+
+  it('should offer a request to the connector handlers in order, and answer the first that claims it', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const handler = (name: string, claims: string): ConnectorHttpHandler => ({
+      handle: async arrival => {
+        asked.push(`${name} ${arrival.path}`);
+        return arrival.path === claims ? { ...claimed, body: name } : undefined;
+      },
+    });
+    const surface = withHandlers(() => [handler('a', '/mcp'), handler('b', '/oauth/token')]);
+
+    // Act
+    const mcp = await surface.http.dispatch(request({ path: '/mcp' }));
+    const token = await surface.http.dispatch(request({ path: '/oauth/token' }));
+    const other = await surface.http.dispatch(request({ path: '/v1/health' }));
+
+    // Assert
+    should([mcp.body, token.body, other.status]).deepEqual(['a', 'b', 404]);
+    should(asked).deepEqual(['a /mcp', 'a /oauth/token', 'b /oauth/token', 'a /v1/health', 'b /v1/health']);
+  });
+
+  it('should read the handlers on every request, so a switch takes effect with no restart', async () => {
+    // Arrange
+    let handlers: readonly ConnectorHttpHandler[] = [];
+    const surface = withHandlers(() => handlers);
+
+    // Act
+    const before = await surface.http.dispatch(request({ path: '/mcp' }));
+    handlers = [{ handle: async () => claimed }];
+    const during = await surface.http.dispatch(request({ path: '/mcp' }));
+    handlers = [];
+    const after = await surface.http.dispatch(request({ path: '/mcp' }));
+
+    // Assert
+    should([before.status, during.status, after.status]).deepEqual([404, 200, 404]);
+  });
+
+  it('should never switch a socket for a connector path, only the session route', async () => {
+    // Arrange
+    const surface = withHandlers(() => [{ handle: async () => claimed }]);
+
+    // Assert
+    should(surface.sockets.claims(request({ path: '/mcp' }))).be.false();
+    should(surface.sockets.claims(request({ path: `/v1/rendezvous/${DAEMON}/client` }))).be.true();
   });
 });

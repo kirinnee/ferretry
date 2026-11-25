@@ -19,8 +19,28 @@ export const CONNECTOR_PANEL = 'connector';
 
 export const MATCH_CODE_WARNING = 'Only approve if this code is on the page you just opened from Claude.';
 
-export const NOT_ENABLED_NOTE =
-  'The connector is off. It can only be turned on at the machine, in its config/daemon.json — a phone cannot do it. See docs/mcp-connector.md.';
+export const SWITCH_LABEL = 'Let Claude connect';
+
+/** Off is the default: what turning it on does, and who stays in charge. */
+export const OFF_NOTE =
+  'Off. Turn it on to let Claude reach this machine through its built-in tunnel. You still approve each Claude sign-in with your passkey.';
+
+/** On, but nothing answers yet: the daemon's own reason comes first, this says it is still on. */
+export const WAITING_NOTE = 'On, but Claude cannot reach it yet.';
+
+/** An explicit address in the machine's config always beats the built-in tunnel. */
+export const CONFIG_WINS_NOTE = 'An address set in config/daemon.json always wins over the built-in tunnel.';
+
+/** Tunnel mode only: the address Claude was given is the tunnel's hostname. */
+export const TUNNEL_RECONNECT_NOTE = 'If the tunnel’s hostname ever changes, Claude must be reconnected.';
+
+/** Where the address Claude is given comes from. */
+export const addressSourceWords = (source: 'configured' | 'tunnel' | undefined): string | null =>
+  source === 'tunnel'
+    ? 'This address is this machine’s built-in tunnel.'
+    : source === 'configured'
+      ? 'This address is the one set on the host (config/daemon.json).'
+      : null;
 
 /** What a scope lets the app do, in the words a person decides by. */
 const SCOPE_WORDS: Readonly<Record<ConnectorScope, string>> = {

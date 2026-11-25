@@ -121,6 +121,9 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   // A tunnel changes how other devices reach this machine — a hostname on Cloudflare's edge in front of it
   // — so switching it is kept as a change to the machine's security, beside the settings above.
   { method: 'PUT', path: '/v1/tunnel', event: 'security.changed', fixedSubject: 'tunnel' },
+  // The Claude connector lets another program read and drive this fleet from the internet once a sign-in is approved,
+  // so switching it on or off is kept the same way. The sign-ins themselves are recorded by the connector (connector.*).
+  { method: 'PUT', path: '/v1/connector', event: 'security.changed', fixedSubject: 'connector' },
   // A secure-copy rule lets a ferret paste a value it holds without asking each time (docs/secure-copy.md): adding
   // one (the commit of its staged rule, with a passkey bound to it, owner decision !A244), or approving a ferret's plan
   // of them, loosens what agents may do; removing one narrows it. All are kept.

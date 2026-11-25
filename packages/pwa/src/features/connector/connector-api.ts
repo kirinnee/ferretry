@@ -49,15 +49,21 @@ const ConnectorGrantSchema = z.object({
 });
 export type ConnectorGrant = z.infer<typeof ConnectorGrantSchema>;
 
-const ConnectorViewSchema = z.object({
-  enabled: z.boolean(),
-  publicUrl: z.string().optional(),
-  mcpUrl: z.string().optional(),
-  disabledReason: z.string().optional(),
-  pending: z.array(ConnectorPendingSchema),
-  grants: z.array(ConnectorGrantSchema),
-});
-export type ConnectorView = z.infer<typeof ConnectorViewSchema>;
+const ConnectorViewSchema = z
+  .object({
+    /** Reachable now: switched on AND an address answers. */
+    enabled: z.boolean(),
+    /** The owner's decision. A daemon older than the switch omits it; it then is what `enabled` says. */
+    switchedOn: z.boolean().optional(),
+    publicUrlSource: z.enum(['configured', 'tunnel']).optional().catch(undefined),
+    publicUrl: z.string().optional(),
+    mcpUrl: z.string().optional(),
+    disabledReason: z.string().optional(),
+    pending: z.array(ConnectorPendingSchema),
+    grants: z.array(ConnectorGrantSchema),
+  })
+  .transform(view => ({ ...view, switchedOn: view.switchedOn ?? view.enabled }));
+export type ConnectorView = z.output<typeof ConnectorViewSchema>;
 
 const Acknowledged = z.object({}).passthrough();
 
@@ -67,6 +73,18 @@ const enc = encodeURIComponent;
 /** Everything in one read: the address, why it is off, who is waiting, and who is connected. */
 export async function readConnector(client: ConnectorClient): Promise<ConnectorView> {
   return await client.request(CONNECTOR_PATH, ConnectorViewSchema);
+}
+
+/**
+ * Switches the connector on or off, and answers the status read after the change. The carrier asks for the
+ * passkey when the daemon answers `403 grant_step_up_required` and resends once, as it does for an approval.
+ */
+export async function changeConnector(client: ConnectorClient, enabled: boolean): Promise<ConnectorView> {
+  return await client.request(CONNECTOR_PATH, ConnectorViewSchema, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
 }
 
 /** Approves one waiting sign-in. The carrier asks for the passkey (`approve-connector`) and resends. */

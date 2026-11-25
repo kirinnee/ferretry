@@ -9,7 +9,11 @@ import type {
   ConnectorPendingView,
 } from '../../../../src/lib/connector/ports.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
-import { type ConnectorAvailability, connectorRoutes } from '../../../../src/lib/runtime/mounts/connector.ts';
+import {
+  type ConnectorAvailability,
+  type ConnectorSubsystem,
+  connectorRoutes,
+} from '../../../../src/lib/runtime/mounts/connector.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, fromFerret, grantSubsystem, human } from './support.ts';
 
@@ -34,10 +38,12 @@ const ENABLED: ConnectorAvailability = {
   enabled: true,
   publicUrl: 'https://mcp.example.test',
   mcpUrl: 'https://mcp.example.test/mcp',
+  source: 'configured',
 };
 const DISABLED: ConnectorAvailability = {
   enabled: false,
-  disabledReason: 'The connector is off. Set connector.enabled in config/daemon.json on this machine.',
+  disabledReason: 'The connector is off. Switch it on in the app (Settings › Claude connector).',
+  switchedOn: false,
 };
 
 /** Records every act and who it was done as; answers what the case set. */
@@ -108,11 +114,12 @@ async function mount(
   witness?: StepUpWitness,
   /** The operator's daemon-wide `pairing` grant. */
   pairing = { use: true, configure: true },
+  change: ConnectorSubsystem['change'] = async () => ({ ok: true }),
 ) {
   const grants = grantSubsystem({ grants: { ...DEFAULT_CAPABILITY_GRANTS, pairing } });
   await grants.refresh();
   return new ApiDispatcher(
-    new ApiRouter(connectorRoutes({ acts, availability: () => availability })),
+    new ApiRouter(connectorRoutes({ acts, availability: () => availability, change })),
     CREDENTIALS,
     grants,
     undefined,
@@ -272,6 +279,8 @@ describe('connector routes: what they answer', () => {
     should(answered.headers.get('cache-control')).equal('no-store');
     should(jsonBody(answered)).deepEqual({
       enabled: true,
+      switchedOn: true,
+      publicUrlSource: 'configured',
       publicUrl: ENABLED.enabled ? ENABLED.publicUrl : '',
       mcpUrl: ENABLED.enabled ? ENABLED.mcpUrl : '',
       pending: [{ ...PENDING }],
@@ -293,6 +302,7 @@ describe('connector routes: what they answer', () => {
     // Assert
     should(jsonBody(status)).deepEqual({
       enabled: false,
+      switchedOn: false,
       disabledReason: DISABLED.enabled ? '' : DISABLED.disabledReason,
       pending: [],
       grants: [],
@@ -374,5 +384,87 @@ describe('connector routes: what they answer', () => {
     // Assert
     should(answered.status).equal(500);
     should(answered.body).not.match(/do-not-leak/u);
+  });
+});
+
+describe('connector routes: switching it (PUT /v1/connector)', () => {
+  const put = (overrides: Parameters<typeof request>[0] = {}, enabled: unknown = true) =>
+    request({ method: 'PUT', path: '/v1/connector', body: JSON.stringify({ enabled }), ...overrides });
+
+  it('should let the host’s owner switch it with no passkey and answer the status read after', async () => {
+    // Arrange
+    const seen: boolean[] = [];
+    const surface = await mount(new FakeActs(), ENABLED, stepUps(), undefined, async enabled => {
+      seen.push(enabled);
+      return { ok: true };
+    });
+
+    // Act
+    const answered = await surface.dispatch(put({ headers: human, loopback: true, privilegedLoopback: true }));
+
+    // Assert
+    should(answered.status).equal(200);
+    should(answered.headers.get('cache-control')).equal('no-store');
+    should(jsonBody(answered).switchedOn).equal(true);
+    should(seen).deepEqual([true]);
+  });
+
+  it('should refuse a ferret and an anonymous caller before the switch runs', async () => {
+    // Arrange
+    const seen: boolean[] = [];
+    const surface = await mount(new FakeActs(), ENABLED, undefined, undefined, async enabled => {
+      seen.push(enabled);
+      return { ok: true };
+    });
+
+    // Act
+    const ferret = await surface.dispatch(fromFerret(put({ headers: human, loopback: true })));
+    const anonymous = await surface.dispatch(request({ method: 'PUT', path: '/v1/connector', loopback: true }));
+
+    // Assert
+    should([ferret.status, jsonBody(ferret).code]).deepEqual([403, 'owner_only']);
+    should(anonymous.status).equal(401);
+    should(seen).deepEqual([]);
+  });
+
+  it('should hold a governed device’s switch behind pairing.configure and the step-up every configure demand takes', async () => {
+    // Arrange
+    const seen: boolean[] = [];
+    const change = async (enabled: boolean) => {
+      seen.push(enabled);
+      return { ok: true } as const;
+    };
+    const locked = await mount(new FakeActs(), ENABLED, undefined, undefined, change);
+    const narrowed = await mount(new FakeActs(), ENABLED, stepUps(), { use: true, configure: false }, change);
+    const unlocked = await mount(new FakeActs(), ENABLED, stepUps(), undefined, change);
+
+    // Act
+    const noUnlock = await locked.dispatch(put(remote));
+    const notGranted = await narrowed.dispatch(put(remote));
+    const allowed = await unlocked.dispatch(put(remote));
+
+    // Assert
+    should(noUnlock.status).equal(403);
+    should([notGranted.status, jsonBody(notGranted).code]).deepEqual([403, 'grant_not_granted']);
+    should(allowed.status).equal(200);
+    should(seen).deepEqual([true]);
+  });
+
+  it('should answer a switch that cannot be done with 409, its code and the sentence, and a malformed body with 400', async () => {
+    // Arrange
+    const surface = await mount(new FakeActs(), ENABLED, undefined, undefined, async () => ({
+      ok: false,
+      message: 'The connector could not be switched on: port 7461 is taken.',
+    }));
+
+    // Act
+    const refused = await surface.dispatch(put({ headers: human, loopback: true }));
+    const malformed = await surface.dispatch(put({ headers: human, loopback: true }, 'yes'));
+
+    // Assert
+    should(refused.status).equal(409);
+    should(jsonBody(refused).code).equal(CONNECTOR_REFUSAL_CODES.cannotSwitch);
+    should(jsonBody(refused).error).equal('The connector could not be switched on: port 7461 is taken.');
+    should(malformed.status).equal(400);
   });
 });

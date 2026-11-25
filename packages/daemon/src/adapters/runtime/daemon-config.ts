@@ -10,6 +10,7 @@ import type {
   AnalyticsPricingConfigurationWrite,
   AnalyticsPricingConfigurationWriteResult,
 } from '../../lib/analytics/pricing-service.ts';
+import { connectorEnabledDocument } from '../../lib/connector/config.ts';
 import {
   type CarrierConversionOutcome,
   type DaemonConfig,
@@ -311,6 +312,22 @@ export class FileDaemonConfig {
     await this.files.writeTextAtomic(
       this.paths.daemonConfig,
       `${JSON.stringify(tunnelEntryDocument(raw, entry), null, 2)}\n`,
+    );
+  }
+
+  /**
+   * Records the connector switch: exactly `connector.enabled`, and no other key.
+   *
+   * Raw in, raw out and the schema run only as the refusal, for the reason `writeTunnelEntry` does the same —
+   * the operator's own `publicUrl`, `port` and `extraRedirectUris` survive, and no default is planted in their file.
+   */
+  async writeConnectorEnabled(enabled: boolean): Promise<void> {
+    const text = await this.files.readText(this.paths.daemonConfig);
+    const raw = this.raw(text);
+    this.checked(raw);
+    await this.files.writeTextAtomic(
+      this.paths.daemonConfig,
+      `${JSON.stringify(connectorEnabledDocument(raw, enabled), null, 2)}\n`,
     );
   }
 

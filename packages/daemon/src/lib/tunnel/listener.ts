@@ -1,5 +1,5 @@
 /**
- * THE TUNNEL'S OWN LISTENER: one route, and every arrival on it remote — `docs/relay-protocol.md` §15.
+ * THE TUNNEL'S OWN LISTENER: the session route (and, when switched on, the connector's), every arrival on it remote — `docs/relay-protocol.md` §15.
  *
  * `cloudflared` forwards from this daemon's own host, so everything that comes through a tunnel arrives
  * from a loopback peer. Pointing the tunnel at the daemon's API listener would therefore make a phone on
@@ -7,9 +7,11 @@
  * there: the daemon binds a SECOND listener on `127.0.0.1`, on an ephemeral port (the `originPort` it
  * provisions with), and that listener
  *
- * - serves ONLY `GET /v1/rendezvous/<its daemonId>/client` — the direct carrier's session route, the
- *   very same {@link SocketRoute} and session, not a fork of either — and answers `404` to everything
- *   else, including that path without an upgrade and any other fingerprint;
+ * - serves `GET /v1/rendezvous/<its daemonId>/client` — the direct carrier's session route, the
+ *   very same {@link SocketRoute} and session, not a fork of either — and, ONLY while the owner has the
+ *   Claude connector switched on over this tunnel, the connector's own routes (`docs/mcp-connector.md`
+ *   "Over the built-in tunnel"), handed to the very same handlers the connector listener runs; it answers
+ *   `404` to everything else, including the session path without an upgrade and any other fingerprint;
  * - stamps every arrival `loopback: false` and not privileged (the adapter applies
  *   `ApiBindOptions.remotePeer`), which is the relay rule of §14 for the same reason. A query-string
  *   token is honoured only from a loopback arrival, so it is never honoured here; a session opened here
@@ -19,8 +21,9 @@
  *   and falls back to ONE shared key when it is absent or not an address, so a caller that hides it
  *   shares a bucket rather than escaping one.
  *
- * The edge's ingress forwards only that one path too (`tunnelIngress`), so this is the inner of two
- * walls rather than the only one.
+ * The edge's ingress forwards only those paths too (`tunnelIngress`), so this is the inner of two
+ * walls rather than the only one — and the connector's paths are 404 here whenever the connector is off,
+ * so a widened edge never reaches a handler nobody switched on.
  */
 
 import type { ApiCredentials } from '../api/authentication.ts';
@@ -30,6 +33,7 @@ import type { ApiHeaders } from '../api/http.ts';
 import { ApiRouter } from '../api/router.ts';
 import type { ApiSurface } from '../api/server.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../api/socket.ts';
+import type { ConnectorHttpHandler } from '../connector/ports.ts';
 
 /** The header Cloudflare's edge sets to the address it accepted the connection from. */
 export const TUNNEL_PEER_HEADER = 'cf-connecting-ip';
@@ -82,8 +86,14 @@ export function tunnelPeer(headers: ApiHeaders): string {
 const NOT_SERVED = errorResponse(404, 'nothing is served at this path', 'not_found');
 
 /**
- * The listener's whole surface: the session route as its ONLY socket route, and `404` for every
- * request that is not an upgrade to it.
+ * The listener's whole surface: the session route as its ONLY socket route, the connector's HTTP handlers
+ * while `connector()` hands any, and `404` for everything else.
+ *
+ * `connector` is READ ON EVERY REQUEST, not at construction: the owner switches the connector on and off, and the
+ * tunnel's hostname (the connector's issuer) is only known once provisioning has answered. It answers no handlers
+ * until both hold. Handlers are offered in order and one no handler claims is the same `404` — nothing here
+ * reads `loopback`, a peer address or a `Host` header to decide anything, and the only credential any handler
+ * accepts is a connector token. No socket is ever switched for them: sockets stay the session route's alone.
  *
  * The socket table is the shared {@link ApiSocketDispatcher} over a router holding that one route, so
  * the upgrade is admitted by the same authorization code the main listener runs — the route is public
@@ -97,10 +107,20 @@ export function tunnelListenerSurface(input: {
   readonly guard: CapabilityGuard;
   /** The same browser origins the main listener admits: the PWA dials this exactly as it dials direct. */
   readonly corsOrigins: readonly string[];
+  /** The connector's handlers right now, or none: off, or no tunnel hostname yet. */
+  readonly connector?: () => readonly ConnectorHttpHandler[];
 }): ApiSurface {
   const sockets = new ApiSocketDispatcher(new ApiRouter([input.route]), input.credentials, input.guard);
   return {
-    http: { dispatch: async () => NOT_SERVED },
+    http: {
+      dispatch: async request => {
+        for (const handler of input.connector?.() ?? []) {
+          const answer = await handler.handle(request);
+          if (answer !== undefined) return answer;
+        }
+        return NOT_SERVED;
+      },
+    },
     sockets: {
       // GET only: the router would answer another method on this path 405 (or 401 to a stranger),
       // which tells a prober the path exists. Here it is the same 404 as everything else.

@@ -28,6 +28,7 @@ const GRANT: ConnectorGrantView = {
 };
 const ON: ConnectorStatus = {
   enabled: true,
+  switchedOn: true,
   publicUrl: 'https://mcp.example.test',
   mcpUrl: 'https://mcp.example.test/mcp',
   pending: [PENDING],
@@ -35,6 +36,7 @@ const ON: ConnectorStatus = {
 };
 const OFF: ConnectorStatus = {
   enabled: false,
+  switchedOn: false,
   disabledReason: 'The connector is off. Set connector.enabled in config/daemon.json on this machine.',
   pending: [],
   grants: [],

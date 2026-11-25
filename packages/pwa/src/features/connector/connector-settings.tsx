@@ -8,10 +8,11 @@
  * page therefore shows a short MATCH CODE and sends the owner here; the code is the phishing defence, so it is
  * drawn large and the warning that goes with it is in the same breath, never behind a disclosure.
  *
- * ## NO SWITCH
+ * ## THE SWITCH
  *
- * Turning the connector on is an edit to `config/daemon.json` on the host. A phone cannot do it, so when it is
- * off this panel says why and offers no toggle.
+ * `PUT /v1/connector` turns the connector on or off, no restart. It is a configure act, so a governed device gets
+ * `403 grant_step_up_required` and the carrier asks for the passkey and resends once, as for an approval. There is
+ * no optimistic state: the switch shows pending, then the panel renders the status the PUT answered.
  *
  * ## NOTHING SECRET IS HERE TO LEAK
  *
@@ -27,12 +28,14 @@
 
 import { CircleAlert, Copy, Fingerprint, Link2, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { cn } from '../../lib/class-names.ts';
 import { useDialogFocus } from '../../hooks/use-dialog-focus.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { absoluteWords, relativeWords } from '../../lib/security-log.ts';
 import { Button } from '../../shell/primitives.tsx';
 import {
   approveConnectorRequest,
+  changeConnector,
   type ConnectorClient,
   type ConnectorGrant,
   type ConnectorPending,
@@ -44,13 +47,18 @@ import {
 import {
   actFailureSentence,
   approvedByWords,
+  addressSourceWords,
+  CONFIG_WINS_NOTE,
   CONNECTOR_POLL_MS,
   MATCH_CODE_WARNING,
-  NOT_ENABLED_NOTE,
+  OFF_NOTE,
   orderedGrants,
   pendingHeadline,
   revokeConsequence,
   scopeSentence,
+  SWITCH_LABEL,
+  TUNNEL_RECONNECT_NOTE,
+  WAITING_NOTE,
 } from './connector-model.ts';
 
 export type ConnectorClientFactory = (connection: DaemonConnection) => Promise<ConnectorClient>;
@@ -274,12 +282,61 @@ function AddressRow({ mcpUrl }: { readonly mcpUrl: string }) {
   );
 }
 
+/** The on/off switch. `pending` while the PUT is in flight; it never shows the answer before the daemon gave it. */
+function SwitchControl({
+  checked,
+  pending,
+  onChange,
+}: {
+  readonly checked: boolean;
+  readonly pending: boolean;
+  readonly onChange: (next: boolean) => void;
+}) {
+  const labelId = useId();
+  return (
+    <div className="flex min-w-0 items-center gap-3" data-connector-switch-row="">
+      <span id={labelId} className="min-w-0 flex-1 text-ui font-semibold text-fg">
+        {SWITCH_LABEL}
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-labelledby={labelId}
+        aria-busy={pending}
+        disabled={pending}
+        data-connector-switch=""
+        onClick={() => onChange(!checked)}
+        className={cn(
+          'flex min-h-[44px] shrink-0 items-center gap-2 rounded-control border px-3 text-ui font-semibold disabled:opacity-60',
+          checked ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-muted',
+        )}
+      >
+        <span
+          aria-hidden="true"
+          className={cn('relative h-5 w-9 rounded-full transition-colors', checked ? 'bg-accent' : 'bg-surface-3')}
+        >
+          <span
+            className={cn(
+              'absolute top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-[left]',
+              checked ? 'left-[18px]' : 'left-0.5',
+            )}
+          />
+        </span>
+        {pending ? 'Working…' : checked ? 'On' : 'Off'}
+      </button>
+    </div>
+  );
+}
+
 /** The panel's content for a loaded view. Pure over its props so every state is one render. */
 function ConnectorCard({
   view,
   now,
   busyId,
+  switching,
   failure,
+  onSwitch,
   onApprove,
   onDeny,
   onRevoke,
@@ -287,7 +344,9 @@ function ConnectorCard({
   readonly view: ConnectorView;
   readonly now: number;
   readonly busyId: string | null;
+  readonly switching: boolean;
   readonly failure: string | null;
+  readonly onSwitch: (next: boolean) => void;
   readonly onApprove: (id: string) => void;
   readonly onDeny: (id: string) => void;
   readonly onRevoke: (grant: ConnectorGrant) => void;
@@ -304,13 +363,31 @@ function ConnectorCard({
         <Link2 size={16} className="text-accent" aria-hidden="true" />
         Claude connector
       </h3>
+      <SwitchControl checked={view.switchedOn} pending={switching} onChange={onSwitch} />
       {view.enabled && view.mcpUrl !== undefined ? (
-        <AddressRow mcpUrl={view.mcpUrl} />
+        <>
+          <AddressRow mcpUrl={view.mcpUrl} />
+          {addressSourceWords(view.publicUrlSource) === null ? null : (
+            <p className="m-0 text-meta leading-base text-faint" data-connector-source={view.publicUrlSource}>
+              {addressSourceWords(view.publicUrlSource)}
+            </p>
+          )}
+          {view.publicUrlSource === 'tunnel' ? (
+            <p className="m-0 text-meta leading-base text-faint" data-connector-tunnel-note="">
+              {TUNNEL_RECONNECT_NOTE}
+            </p>
+          ) : null}
+        </>
       ) : (
         <p className="m-0 text-cell leading-base text-muted" data-connector-off="">
-          {view.disabledReason === undefined ? NOT_ENABLED_NOTE : `${view.disabledReason} ${NOT_ENABLED_NOTE}`}
+          {view.switchedOn
+            ? `${WAITING_NOTE} ${view.disabledReason ?? ''}`.trim()
+            : `${OFF_NOTE}${view.disabledReason === undefined ? '' : ` ${view.disabledReason}`}`}
         </p>
       )}
+      <p className="m-0 text-meta leading-base text-faint" data-connector-config-note="">
+        {CONFIG_WINS_NOTE}
+      </p>
       {failure === null ? null : (
         <p
           role="alert"
@@ -379,6 +456,7 @@ export function ConnectorSurface({
 }: ConnectorSurfaceProps) {
   const [loaded, setLoaded] = useState<Loaded>({ kind: 'loading' });
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<ConnectorGrant | null>(null);
   const clientRef = useRef<ConnectorClient | null>(null);
@@ -439,6 +517,21 @@ export function ConnectorSurface({
     return ok;
   }, []);
 
+  /** No optimistic state: pending while the PUT runs, then exactly the status it answered. */
+  const switchTo = useCallback(async (enabled: boolean): Promise<void> => {
+    const client = clientRef.current;
+    if (client === null) return;
+    setSwitching(true);
+    setFailure(null);
+    try {
+      const view = await changeConnector(client, enabled);
+      setLoaded({ kind: 'ready', view });
+    } catch (reason) {
+      setFailure(actFailureSentence(reason));
+    }
+    setSwitching(false);
+  }, []);
+
   return (
     <div className="flex min-w-0 flex-col gap-2">
       {loaded.kind === 'ready' ? (
@@ -446,7 +539,9 @@ export function ConnectorSurface({
           view={loaded.view}
           now={now()}
           busyId={busyId}
+          switching={switching}
           failure={failure}
+          onSwitch={next => void switchTo(next)}
           onApprove={id => void act(id, client => approveConnectorRequest(client, id))}
           onDeny={id => void act(id, client => denyConnectorRequest(client, id))}
           onRevoke={setRevoking}
@@ -483,7 +578,7 @@ export const connectorSettingsTab = (createClient: ConnectorClientFactory) =>
   ({
     id: 'connector',
     label: 'Claude connector',
-    description: 'Let Claude read and control your fleet: approve a sign-in with your passkey, and revoke an app.',
+    description: 'Switch on Claude’s access to your fleet, approve each sign-in with your passkey, and revoke an app.',
     Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
       <ConnectorSurface connection={connection} createClient={createClient} />
     ),
