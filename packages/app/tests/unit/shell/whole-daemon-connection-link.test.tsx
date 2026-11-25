@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { DEVICE_SETTINGS_HREF } from '../../../src/router/routes.ts';
+import { STOP_SETTINGS_HREF } from '../../../src/shell/machine-stop.ts';
 import { RelaySessionError } from '../../../src/session/session-client.ts';
 import { RELAY_CLOSE_CODES } from '../../../src/session/wire/index.ts';
 import { App } from '../../../src/shell/app.tsx';
@@ -77,7 +78,7 @@ describe('a machine whose plugin list could not be read through its carrier', ()
     expect(main).toContain(`Reference: ${CAUSE.replace(/[.\s]+$/u, '')}`);
     const link = view.container.querySelector('[data-whole-daemon-connection] a') as HTMLAnchorElement;
     expect(link.textContent).toBe('Connection settings');
-    expect(link.getAttribute('href')).toBe(DEVICE_SETTINGS_HREF);
+    expect(link.getAttribute('href')).toBe(STOP_SETTINGS_HREF);
     await view.unmount();
   });
 
@@ -97,7 +98,7 @@ describe('a machine this browser cannot reach at all (no key kept, no carrier)',
     const view = await render({ unreachable: true });
     expect(view.container.querySelector('[data-machine-stop]')?.getAttribute('data-machine-stop')).toBe('no-key');
     const link = view.container.querySelector('[data-whole-daemon-connection] a') as HTMLAnchorElement;
-    expect(link.getAttribute('href')).toBe(DEVICE_SETTINGS_HREF);
+    expect(link.getAttribute('href')).toBe(STOP_SETTINGS_HREF);
     await interact(async () => link.click());
     await settle();
     // The recovery page stays: it must not treat the unreachable machine as usable and bounce to /d/d1/settings/device.

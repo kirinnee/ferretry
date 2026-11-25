@@ -8,7 +8,7 @@ import { CachedDataSetting } from './device-cached-data.tsx';
 import { DeviceAppearance } from './device-appearance.tsx';
 import { DevicePanels } from './device-panels.tsx';
 import { Link } from './link.tsx';
-import { stopOf } from './machine-stop.ts';
+import { cameFromStop, stopOf } from './machine-stop.ts';
 import { useEffect } from 'react';
 
 /**
@@ -27,7 +27,10 @@ export function DeviceSettingsPage() {
   // never guessed at (the list below names each machine), as Home does.
   const { selected } = runtime.daemons.snapshot();
   const inside =
-    selected !== null && runtime.daemons.get(selected) !== undefined && stopOf(runtime, selected) === undefined
+    !cameFromStop(window.location.search) &&
+    selected !== null &&
+    runtime.daemons.get(selected) !== undefined &&
+    stopOf(runtime, selected) === undefined
       ? deviceSettingsHref(selected)
       : undefined;
   useEffect(() => {

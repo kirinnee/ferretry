@@ -77,7 +77,12 @@ const STATES = [
   },
 ] as const;
 
-const open = async (viewport: (typeof VIEWPORTS)[number], scheme: 'light' | 'dark', state: string) => {
+const open = async (
+  viewport: (typeof VIEWPORTS)[number],
+  scheme: 'light' | 'dark',
+  state: string,
+  kind: string = state,
+) => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     colorScheme: scheme,
@@ -91,7 +96,7 @@ const open = async (viewport: (typeof VIEWPORTS)[number], scheme: 'light' | 'dar
   );
   const tab: Page = await context.newPage();
   await tab.goto(`${origin}/d/ws?theme=studio-${scheme}&style=${style}&state=${state}`);
-  await tab.waitForSelector(`[data-machine-stop="${state}"]`, { timeout: 15_000 });
+  await tab.waitForSelector(`[data-machine-stop="${kind}"]`, { timeout: 15_000 });
   await tab.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
   return { tab, close: async () => await context.close() };
 };
@@ -139,4 +144,31 @@ describe('every machine the browser cannot use at all is one full page', () => {
             await close();
           }
         });
+});
+
+describe('"Connection settings" always lands on This device, whichever machine is selected', () => {
+  // The stopped machine is NOT the selected one: a second, healthy machine is paired and selected, so the recovery page
+  // must not hand the click to that machine's Settings (`/d/lap/settings/device`).
+  for (const { state, kind } of [
+    { state: 'no-key-other', kind: 'no-key' },
+    { state: 'not-paired-other', kind: 'not-paired' },
+  ] as const)
+    it(`${kind} with another healthy machine selected: the click lands on /settings`, async () => {
+      const { tab, close } = await open(VIEWPORTS[0], 'light', state, kind);
+      try {
+        // Keyboard activation of the real link: the click a person makes. (A box with no fonts installed has zero-width text, which a
+        // pointer click refuses as "not visible"; the link's own click handler and the browser's navigation are the same.)
+        await tab.getByText('Connection settings').focus();
+        await tab.keyboard.press('Enter');
+        await tab.waitForSelector('[data-machine-stop]', { state: 'detached', timeout: 15_000 });
+        // Let any redirect the page would make settle before reading where it landed.
+        await tab.evaluate(
+          () => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+        );
+        expect(new URL(tab.url()).pathname).toBe('/settings');
+        expect(await tab.locator('h1').allTextContents()).toEqual(['This device']);
+      } finally {
+        await close();
+      }
+    });
 });

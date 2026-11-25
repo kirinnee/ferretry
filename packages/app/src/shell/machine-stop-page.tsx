@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { BrandMark } from '../ui/brand-mark.tsx';
-import { DEVICE_SETTINGS_HREF, HOME_HREF, pairAgainHref } from '../router/routes.ts';
+import { HOME_HREF, pairAgainHref } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import { PAIR_SCREEN } from './first-run.ts';
 import { Link } from './link.tsx';
-import { describeStop, type StopFacts } from './machine-stop.ts';
+import { describeStop, STOP_SETTINGS_HREF, type StopFacts } from './machine-stop.ts';
 import './machine-stop-page.css';
 
 /**
@@ -59,7 +59,7 @@ export function MachineStopPage({ daemon, facts }: { readonly daemon: string | u
           {stop.primary.label}
         </button>
         <p className="fy-stop__ways" data-whole-daemon-connection="">
-          <Link to={DEVICE_SETTINGS_HREF}>Connection settings</Link>
+          <Link to={STOP_SETTINGS_HREF}>Connection settings</Link>
           {others.length === 0 ? null : (
             <>
               <span aria-hidden="true"> · </span>

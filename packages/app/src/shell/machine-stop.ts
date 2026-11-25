@@ -160,3 +160,13 @@ export function stopOf(runtime: ShellRuntime, daemon: string): StopFacts | undef
   }
   return { kind: runtime.remedy(daemon) === 'update-daemon' ? 'needs-update' : 'needs-reload', machine, ...withDetail };
 }
+
+/**
+ * Where the stop page's "Connection settings" link goes: the bare recovery page, marked so it STAYS. Without the mark
+ * `/settings` hands a person with another healthy machine selected to that machine's Settings, which is not the page the
+ * link named (the stop belongs to a machine other than the selected one).
+ */
+export const STOP_SETTINGS_HREF = '/settings?from=stop';
+
+/** Whether this address is the stop page's own link, which the recovery page must not redirect away from. */
+export const cameFromStop = (search: string): boolean => new URLSearchParams(search).get('from') === 'stop';

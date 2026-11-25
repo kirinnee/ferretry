@@ -11,6 +11,7 @@
  *   ?state=needs-update  the app is newer than the machine
  *   ?state=needs-reload  the machine is newer than the app
  *   ?state=not-paired    the address names a machine this browser holds no pairing for
+ *   ?state=no-key-other / not-paired-other   the same stops with a SECOND, healthy machine (kirin-laptop) paired and selected
  */
 import { createRoot } from 'react-dom/client';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
@@ -45,18 +46,25 @@ const transport = new FakeTransport(request => {
   return json(inventoryOf(CORE, { gate: { contract: 'another' } }));
 });
 
+// A second machine that works, paired AFTER the stopped one so it is the selected one (the list selects the newest).
+const other = state === 'no-key-other' || state === 'not-paired-other';
+const healthy = new FakeTransport(request =>
+  request.path.split('?')[0] === '/v1/plugins' ? json(inventoryOf(CORE)) : json({ protocol: 1, version: '5.0.0' }),
+);
 const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
-if (state !== 'not-paired')
+if (state !== 'not-paired' && state !== 'not-paired-other')
   list.add({ daemon: 'ws', machine: 'pebox', deviceId: 'dev', address: 'http://127.0.0.1:40245' });
-if (state === 'refused')
+if (state === 'refused' || other)
   list.add({ daemon: 'lap', machine: 'kirin-laptop', deviceId: 'dev2', address: 'http://127.0.0.1:40246' });
 const runtime = new ShellRuntime({
   appVersion: state === 'needs-update' ? '5.1.0' : '5.0.0',
   surfaces: CORE,
   daemons: list,
-  connect: async () => (state === 'no-key' ? undefined : transport),
+  connect: async paired =>
+    other && paired.daemon === 'lap' ? healthy : state === 'no-key' || state === 'no-key-other' ? undefined : transport,
 });
-window.history.replaceState({}, '', `${state === 'not-paired' ? '/d/nope' : '/d/ws'}${window.location.search}`);
+const missing = state === 'not-paired' || state === 'not-paired-other';
+window.history.replaceState({}, '', `${missing ? '/d/nope' : '/d/ws'}${window.location.search}`);
 const storage = memoryStore();
 const themes = new ThemePreferenceStore(storage);
 const style = params.get('style');
