@@ -194,6 +194,7 @@ export default implementDaemon(manifest, {
       items,
       held,
       renewal: oauth,
+      mcpFormat: harness => ferrets.harnessFacts(harness)?.mcp.format,
       layered: async runtime => await layeredMcp(runtimes.current(), runtime),
       project: async spec => {
         // The ferret folders are the read roots, so they are read fresh before the launch's own folder is.
