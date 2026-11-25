@@ -215,15 +215,21 @@ export class ProjectMcpLaunch {
    * runtime disabled, or one this project does not have, is `unknown`: the launch would not have put it there.
    */
   async token(agent: string, cwd: string, variable: string): Promise<FerretMcpToken> {
-    const server = (await this.#resolve(agent, cwd))?.servers.find(candidate => candidate.variable === variable);
+    const server = (await this.#resolve(agent, cwd, variable))?.servers[0];
     if (server === undefined || server.disabled) return { kind: 'unknown' };
     if (server.token === undefined || (await this.deps.renewal?.signInRequired?.(server.accessName)) !== undefined)
       return { kind: 'needs-sign-in', server: server.declaration.name };
     return { kind: 'token', token: server.token };
   }
 
-  /** The part of a launch both ways of asking share: renewal, the stored values and the approvals. */
-  async #resolve(agent: string, cwd: string): Promise<ProjectLaunch | undefined> {
+  /**
+   * The part of a launch both ways of asking share: renewal, the stored values and the approvals.
+   *
+   * `only` narrows it to ONE server's variable, for a running ferret's token request: that server alone is
+   * renewed, and only if the runtime has not disabled it — an unknown or disabled variable renews nothing and
+   * resolves to no server at all. Without it, every remote server of the project is renewed, as a launch needs.
+   */
+  async #resolve(agent: string, cwd: string, only?: string): Promise<ProjectLaunch | undefined> {
     const account = (await this.deps.accounts()).find(
       candidate => candidate.wrapper === agent || candidate.runtime === agent,
     );
@@ -232,24 +238,27 @@ export class ProjectMcpLaunch {
     const root = folder.root.replace(/\/+$/u, '');
     const claudeJson = `${account.home.replace(/\/+$/u, '')}/.claude.json`;
     const remote = await remoteServers(this.deps.documents, root);
-    const named = remote.map(declaration => ({
-      declaration,
-      names: mcpOAuthSecretNames(mcpFolderSubject(folder, declaration.name), declaration.url),
-    }));
-    if (named.length > 0) await this.deps.renewal?.refreshForLaunch(named.map(entry => entry.names.access));
-    const values = named.length === 0 ? new Map<SecretName, string>() : await this.deps.secrets.values();
     const home = await this.#read(claudeJson);
     const settings = claudeApprovalKeys(await this.#read(`${account.home.replace(/\/+$/u, '')}/settings.json`));
+    const named = remote
+      .map(declaration => ({
+        declaration,
+        names: mcpOAuthSecretNames(mcpFolderSubject(folder, declaration.name), declaration.url),
+        disabled: claudeApproval(declaration.name, claudeProjectEntry(home, root), [settings]) === 'disabled',
+      }))
+      .filter(entry => only === undefined || (entry.names.variable === only && !entry.disabled));
+    if (named.length > 0) await this.deps.renewal?.refreshForLaunch(named.map(entry => entry.names.access));
+    const values = named.length === 0 ? new Map<SecretName, string>() : await this.deps.secrets.values();
     return {
       claudeJson,
       root,
       home,
-      servers: named.map(({ declaration, names }) => ({
+      servers: named.map(({ declaration, names, disabled }) => ({
         declaration,
         variable: names.variable,
         accessName: names.access,
         token: values.get(names.access),
-        disabled: claudeApproval(declaration.name, claudeProjectEntry(home, root), [settings]) === 'disabled',
+        disabled,
       })),
     };
   }

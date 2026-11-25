@@ -140,8 +140,8 @@ describe('ProjectMcpLaunch', () => {
     // Act
     const answer = await launch.token('/fy/fleet/bin/claude-work', `${PROJECT}/src`, DOCS.variable);
 
-    // Assert — renewed first, then the value; no `.claude.json` was touched.
-    should(renewed).deepEqual([[DOCS.access, LINEAR.access]]);
+    // Assert — ONLY the asked-for server was renewed, then its value; no `.claude.json` was touched.
+    should(renewed).deepEqual([[DOCS.access]]);
     should(answer).deepEqual({ kind: 'token', token: 'docs-token' });
     should(localScope.calls).deepEqual([]);
   });
@@ -165,6 +165,45 @@ describe('ProjectMcpLaunch', () => {
 
     // Assert
     should(answers).deepEqual([{ kind: 'unknown' }, { kind: 'unknown' }, { kind: 'unknown' }]);
+  });
+
+  it('should renew nothing for a variable this launch does not hold, nor for a server the runtime disabled', async () => {
+    // Arrange
+    const files = documents();
+    const home = files.get(`${CLAUDE_HOME}/.claude.json`) as {
+      projects: Record<string, { disabledMcpjsonServers: string[] }>;
+    };
+    home.projects[PROJECT]?.disabledMcpjsonServers.push('docs');
+    const disabled = launcher(files);
+    const open = launcher();
+
+    // Act
+    const answers = await Promise.all([
+      open.launch.token('/fy/fleet/bin/claude-work', PROJECT, 'FY_MCP_NOT_MINE_0000000000000000_TOKEN'),
+      disabled.launch.token('/fy/fleet/bin/claude-work', PROJECT, DOCS.variable),
+    ]);
+
+    // Assert — a 404 costs no refresh against any provider.
+    should(answers).deepEqual([{ kind: 'unknown' }, { kind: 'unknown' }]);
+    should(open.renewed).deepEqual([]);
+    should(disabled.renewed).deepEqual([]);
+  });
+
+  it('should renew only the enabled server asked for when another one is disabled', async () => {
+    // Arrange
+    const files = documents();
+    const home = files.get(`${CLAUDE_HOME}/.claude.json`) as {
+      projects: Record<string, { disabledMcpjsonServers: string[] }>;
+    };
+    home.projects[PROJECT]?.disabledMcpjsonServers.push('linear');
+    const { launch, renewed } = launcher(files);
+
+    // Act
+    const answer = await launch.token('/fy/fleet/bin/claude-work', PROJECT, DOCS.variable);
+
+    // Assert
+    should(answer).deepEqual({ kind: 'token', token: 'docs-token' });
+    should(renewed).deepEqual([[DOCS.access]]);
   });
 
   it('should say the server needs signing in again when its sign-in was rejected or holds no token', async () => {

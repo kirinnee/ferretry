@@ -27,7 +27,7 @@ const SELF: Caller = {
   credential: { kind: 'authenticated', tokenClass: 'session', sessionId: 's1' },
   actor: 'peer:s1',
 };
-/** A ferret with no credential of its own (an older `fy`): the honest-client admin token naming its session. */
+/** The admin token with an `x-ferretry-session-id` header naming this session: anyone holding it can write that header. */
 const SELF_BY_HEADER: Caller = { credential: { kind: 'authenticated', tokenClass: 'admin' }, actor: 'peer:s1' };
 const OTHER_FERRET: Caller = {
   credential: { kind: 'authenticated', tokenClass: 'session', sessionId: 's2' },
@@ -105,27 +105,23 @@ describe('POST /v1/sessions/:sessionId/mcp/token', () => {
     });
   });
 
-  for (const [who, caller] of [
-    ['a ferret on its own credential', SELF],
-    ['a ferret named by the honest-client header', SELF_BY_HEADER],
-  ] as const) {
-    it(`should give ${who} the headers for its session’s agent and folder`, async () => {
-      // Arrange
-      const made = subsystem({ kind: 'token', token: 'fresh-token' });
+  it('should give a ferret on its own session credential the headers for its session’s agent and folder', async () => {
+    // Arrange
+    const made = subsystem({ kind: 'token', token: 'fresh-token' });
 
-      // Act
-      const answer = await drive(made, caller);
+    // Act
+    const answer = await drive(made, SELF);
 
-      // Assert — the token goes out only in the body; the variable is echoed for the security log.
-      should(answer.status).equal(200);
-      should(answer.body).deepEqual({ variable: VARIABLE, headers: { Authorization: 'Bearer fresh-token' } });
-      should(made.asked).deepEqual([{ wrapper: SESSION.config.agent, cwd: SESSION.config.cwd, variable: VARIABLE }]);
-    });
-  }
+    // Assert — the token goes out only in the body; the variable is echoed for the security log.
+    should(answer.status).equal(200);
+    should(answer.body).deepEqual({ variable: VARIABLE, headers: { Authorization: 'Bearer fresh-token' } });
+    should(made.asked).deepEqual([{ wrapper: SESSION.config.agent, cwd: SESSION.config.cwd, variable: VARIABLE }]);
+  });
 
   for (const [who, caller] of [
     ['another ferret', OTHER_FERRET],
     ['another ferret by header', OTHER_BY_HEADER],
+    ['the admin token naming this very session in a header', SELF_BY_HEADER],
     ['a person at the machine', OWNER],
     ['a paired device', DEVICE],
     ['a warden', WARDEN],

@@ -371,11 +371,12 @@ ferret it exits 2; when the daemon refuses it prints the daemon's sentence on st
 **The route.** `POST /v1/sessions/:sessionId/mcp/token`, body `{ "variable": "FY_MCP_…_TOKEN" }`, answer
 `{ "variable": "…", "headers": { "Authorization": "Bearer …" } }` (`variable` echoes the NAME so the security log can
 record it; the token is only in `headers`). `noStore`, `operator` minimum, `caller: any`, governed as `secrets.use`
-— and then **only the ferret itself**: the caller's own session (`agentSessionOf`) must equal the path session, so a
-person, a warden, a paired device and another ferret all get 403 `not_this_ferret`. The daemon works out what THIS
+— and then **only the ferret itself**: the caller must hold the SESSION credential of the path's session (the admin token with an
+`x-ferretry-session-id` header is refused: anyone holding that token can write the header), so a person, a warden, a paired
+device, another ferret and the admin token all get 403 `not_this_ferret`. The daemon works out what THIS
 session would be launched with right now — its agent wrapper and folder from the session record — without writing
-anything (no `.claude.json` reconcile), renews the token if it is about to expire (`refreshForLaunch`, as at a
-launch), and answers the one variable:
+anything (no `.claude.json` reconcile), renews that ONE server's token if it is about to expire (`refreshForLaunch` of its one access name; an unknown or
+runtime-disabled variable renews nothing), and answers the one variable:
 
 | Answer                        | When                                                                                                                         |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
