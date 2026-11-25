@@ -169,6 +169,36 @@ describe('a server reached at a url that nobody signed in to', () => {
   });
 });
 
+describe('a project server entry and the headersHelper', () => {
+  const share = (authorization: string) => ({
+    root: '/work/app',
+    servers: {
+      docs: { type: 'http' as const, url: 'https://docs.example.test/mcp', headers: { Authorization: authorization } },
+    },
+    env: {},
+  });
+  const partsOf = async (format: 'json' | 'toml', authorization: string) =>
+    await new McpLaunchParts({
+      items: () => new Map(),
+      held: async () => new Set<SecretName>(),
+      renewal: { refreshForLaunch: async () => {} },
+      mcpFormat: () => format,
+      layered: async () => new Set(),
+      project: async () => share(authorization),
+    }).parts(specFor('claude-code'));
+
+  test('is written only when Claude reads it and the header names a sign-in variable', async () => {
+    const named = `Bearer \${${NAMES.variable}}`;
+
+    expect(configOf(await partsOf('json', named), 'docs')).toMatchObject({
+      headersHelper: `fy mcp token ${NAMES.variable}`,
+    });
+    expect(configOf(await partsOf('toml', named), 'docs')).not.toHaveProperty('headersHelper');
+    expect(configOf(await partsOf('json', 'Bearer \${HOME}'), 'docs')).not.toHaveProperty('headersHelper');
+    expect(configOf(await partsOf('json', 'Bearer a-literal'), 'docs')).not.toHaveProperty('headersHelper');
+  });
+});
+
 describe('bindings: the sign-in variables one ferret’s launch holds, by reference', () => {
   const launch = (held: readonly SecretName[], mcpFormat: 'json' | 'toml' | undefined = 'json') =>
     new McpLaunchParts({

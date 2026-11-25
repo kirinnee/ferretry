@@ -169,6 +169,21 @@ describe('MCP launch renewal', () => {
     expect((await w.service.connections())[0]?.state).toBe('needs-sign-in');
     expect(parts.map(part => (part.kind === 'mcp' ? part.name : part.kind))).toEqual(['linear', 'lint', 'env']);
     expect(envOf(parts)).toEqual({ [NAMES.variable]: optionalSecretReference(NAMES.access) });
+    // The token route reads this: the sign-in whose refresh was rejected, by its access secret's NAME.
+    expect(await w.service.signInRequired(NAMES.access)).toBe('linear');
+    expect(await w.service.signInRequired(mcpOAuthSecretNames('other', SERVER).access)).toBeUndefined();
+  });
+
+  test('a sign-in that is fine, or a damaged record, is never reported as needing a new one', async () => {
+    // Arrange
+    const fine = world({ expiresIn: 3600 });
+    await signIn(fine);
+    const damaged = world();
+    damaged.state.failure = new Error('damaged');
+
+    // Act / Assert
+    expect(await fine.service.signInRequired(NAMES.access)).toBeUndefined();
+    expect(await damaged.service.signInRequired(NAMES.access)).toBeUndefined();
   });
 
   test('a refresh that cannot reach the issuer, or a damaged sign-in record, never refuses the launch', async () => {

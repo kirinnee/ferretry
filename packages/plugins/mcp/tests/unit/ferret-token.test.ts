@@ -165,3 +165,47 @@ describe('the command both writers of an entry share', () => {
     expect(mcpTokenCommand(NAMES.variable)).toBe(`fy mcp token ${NAMES.variable}`);
   });
 });
+
+describe('the route, the rest of its refusals', () => {
+  const call = (
+    params: [string, string][],
+    credential: unknown,
+    body: unknown = { variable: NAMES.variable },
+  ): CallContext =>
+    ({
+      params: new Map(params),
+      credential,
+      request: { text: async () => JSON.stringify(body) } as ApiRequest,
+    }) as unknown as CallContext;
+  const own = { kind: 'authenticated', tokenClass: 'ferret', ferret: 'f1' };
+
+  test('an empty or missing ferret id in the path is a 400, before the credential is read', async () => {
+    const route = tokenRoutes(tokens().service)['POST /v1/ferrets/:ferretId/mcp/token'];
+
+    await expect(route(call([], own))).rejects.toMatchObject({ status: 400, code: 'invalid_ferret_id' });
+    await expect(route(call([['ferretId', '']], own))).rejects.toMatchObject({ status: 400 });
+  });
+
+  test('the service’s refusals reach the caller with their own status, code and sentence, and nothing else', async () => {
+    const route = tokenRoutes(tokens({ signInRequired: async () => 'linear' }).service)[
+      'POST /v1/ferrets/:ferretId/mcp/token'
+    ];
+
+    await expect(route(call([['ferretId', 'f1']], own))).rejects.toMatchObject({
+      status: 409,
+      code: 'mcp_needs_sign_in',
+    });
+  });
+
+  test('an unexpected fault is not turned into a refusal that could carry its text', async () => {
+    const route = tokenRoutes(
+      tokens({
+        value: async () => {
+          throw new Error('vault exploded');
+        },
+      }).service,
+    )['POST /v1/ferrets/:ferretId/mcp/token'];
+
+    await expect(route(call([['ferretId', 'f1']], own))).rejects.toThrow('vault exploded');
+  });
+});
