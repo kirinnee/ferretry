@@ -15,7 +15,7 @@ export function nixTool(spawn: SpawnPort): NixTool {
     async facts() {
       try {
         const result = await spawn.run('nix', ['--version'], { timeout: seconds(10) });
-        const version = /(\d+\.\d+(?:\.\d+)?\S*)/u.exec(result.stdout)?.[1];
+        const version = /(\d+\.\d+(?:\.\d+)?[^\s)]*)/u.exec(result.stdout)?.[1];
         if (result.exitCode === 0 && version !== undefined) return { present: true, version, path: 'nix' };
       } catch {
         // not installed: said below
