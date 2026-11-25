@@ -581,8 +581,8 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         throw new OAuthError('unsupported_grant_type', 'Unsupported grant type.');
       if (!client.grantTypes.includes(grantType))
         throw new OAuthError('unauthorized_client', 'This client may not use this grant type.');
-      const budget = `token:${client.id}`;
-      this.ports.limiter.check(budget, CLIENT_TOKENS_PER_MINUTE);
+      // The success budget is judged inside `redeem`, after the reuse decision and just before a token is minted: a
+      // replayed code or rotated refresh token must still revoke (and be audited) when the budget is full.
       // A credential the daemon has never issued to this client is refused here, without taking a queue slot.
       if (grantType === 'authorization_code') {
         const code = this.ports.memory.codes.get(await digest(this.ports.crypto, input.code ?? ''));
@@ -593,7 +593,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
           throw new OAuthError('invalid_grant', 'Invalid refresh token.');
       }
       const tokens = await this.ports.memory.run(() => this.redeem(input, grantType, client.id), 'token');
-      this.ports.limiter.record(budget);
+      this.ports.limiter.record(`token:${client.id}`);
       return tokens;
     });
   }
@@ -626,6 +626,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         !secretsMatch(base64url(await this.ports.crypto.sha256(input.code_verifier)), code.challenge)
       )
         throw new OAuthError('invalid_grant', 'Invalid or expired authorization code or verifier.');
+      this.ports.limiter.check(`token:${client.id}`, CLIENT_TOKENS_PER_MINUTE);
       // Spend before any await that might fail; even failed persistence cannot make a code reusable.
       this.ports.memory.codes.set(key, { ...code, used: true });
       scopes = grant.scopes;
@@ -661,6 +662,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
           : ([...new Set(input.scope.split(' ').filter(Boolean))] as ConnectorScope[]);
       if (scopes.some(scope => !token.scopes.includes(scope)))
         throw new OAuthError('invalid_scope', 'A refresh cannot increase its granted scopes.');
+      this.ports.limiter.check(`token:${client.id}`, CLIENT_TOKENS_PER_MINUTE);
       // On a retry the pair the first rotation issued is superseded: the client never saw it, so it dies here.
       const superseded = used?.successors;
       const supersededRefresh = grant.refresh.find(t => t.digest === superseded?.refresh);

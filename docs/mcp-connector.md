@@ -204,7 +204,8 @@ unknown client or a redirect URI problem is shown as an error page and NEVER red
   per source, 300/min overall; waiting-page polls 60/min per source, 1200/min overall; token and revoke 120/min per
   source with NO overall ceiling, plus 30 failed attempts per source per 5 min and 30 successful exchanges per
   authenticated client per minute (only a holder of a valid credential spends the latter, so anonymous traffic can
-  never starve a valid refresh); `/mcp` 60 calls/min per grant, of which write tools 10/min — except the two agenda
+  never starve a valid refresh; the budget is judged AFTER the reuse decision and just before minting, so a replayed
+  code or rotated refresh token still revokes the grant at a full budget); `/mcp` 60 calls/min per grant, of which write tools 10/min — except the two agenda
   acts (`answer_attention`, `snooze_attention`), which have their own 30/min so an agenda clean-up burst fits; they
   still count toward the 60. Over the limit is `429`
   with `Retry-After`. Only the per-source counters are kept in a bounded table (10,000 sources; at the bound the
