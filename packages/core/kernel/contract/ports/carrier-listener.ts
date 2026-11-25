@@ -5,6 +5,8 @@ import type { CarrierKey } from '../ids.ts';
 export interface CarrierListenerSurface {
   /** The plugin's declared socket, spelled as its manifest spells it: `GET /v1/rendezvous/:daemonId/client`. */
   readonly socket: string;
+  /** Also serve allow-listed public HTTP routes, stamped remote and credential-less; never a daemon API route. */
+  readonly doors?: true;
   /**
    * The rate-limit identity of one arrival, from its headers (the tunnel keys by the address its edge saw). It names
    * a bucket and nothing else: it can never make an arrival local. Absent: one shared identity for the listener.

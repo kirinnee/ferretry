@@ -117,7 +117,7 @@ import {
 import { JobRunner } from './jobs.ts';
 import type { ResponseCompressor } from './compression.ts';
 import { pluginsYamlLine, readAcceptedPlugins, writeAcceptedPlugins } from './accepted-plugins.ts';
-import { carrierListenerPort } from './carrier-listener.ts';
+import { listenerPorts } from './listener-ports.ts';
 import { PluginLifecycle } from './lifecycle.ts';
 import { livePort } from './live-port.ts';
 import { KERNEL_NEEDER, neederOf, ProvidedPerNeeder } from './needer.ts';
@@ -1027,7 +1027,7 @@ async function bootLocked(
         items,
         resolversOf(manifest.id),
       ),
-      carrierListener: carrierListenerPort({
+      ...listenerPorts({
         manifest,
         dispatcher: () => dispatcher,
         daemonId: identityPort.daemonId,

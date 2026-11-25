@@ -8,6 +8,7 @@ import type { CarriedArrival } from '../contract/session.ts';
 import type { Manifest } from '../manifest/types.ts';
 import type { Dispatcher } from './dispatch.ts';
 import { PermissionError } from './permissions.ts';
+import { PUBLIC_DOOR_BODY_BYTES, publicDoorHttpRoutes } from './public-door-http.ts';
 import { Router } from './router.ts';
 import { type SocketData, socketBehaviour, toApiRequest, toResponse } from './listener.ts';
 
@@ -52,6 +53,8 @@ export function carrierListenerPort(deps: CarrierListenerDeps): CarrierListenerP
   return {
     open: async ({ carrier, surface }) => {
       const declared = declaredSocket(manifest, carrier, surface);
+      if (surface.doors === true && carrier !== 'tunnel')
+        throw new PermissionError(`${manifest.title}: public doors are served only by the tunnel carrier.`);
       if (deps.stopping())
         throw new PermissionError(`${manifest.title} has stopped, so it cannot open a carrier listener.`);
       if (!watching) {
@@ -62,9 +65,26 @@ export function carrierListenerPort(deps: CarrierListenerDeps): CarrierListenerP
       }
       const served = new Router([declared]);
       const arrival: CarriedArrival = Object.freeze({ kind: 'carried', carrier });
+      const serveDoor = async (request: Request): Promise<Response> => {
+        try {
+          if (request.headers.has('upgrade')) return toResponse(NOT_SERVED, false);
+          const api = toApiRequest(request, { kind: 'door', door: 'tunnel' }, undefined);
+          return toResponse(
+            await deps.dispatcher().dispatch({
+              ...api,
+              clientAddress: surface.peer?.(api.headers) ?? CARRIER_SHARED_PEER,
+            }),
+            false,
+          );
+        } catch {
+          return toResponse(NOT_SERVED, false);
+        }
+      };
       const server: Server<SocketData> = Bun.serve<SocketData>({
         hostname: '127.0.0.1',
         port: 0,
+        ...(surface.doors === true ? { maxRequestBodySize: PUBLIC_DOOR_BODY_BYTES } : {}),
+        ...(surface.doors === true ? { routes: publicDoorHttpRoutes(deps.dispatcher(), serveDoor) } : {}),
         fetch: async (request, bound) => {
           try {
             const notServed = (): Response => toResponse(NOT_SERVED, false);

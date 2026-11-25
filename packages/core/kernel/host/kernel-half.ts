@@ -39,7 +39,7 @@ export type { InventoryEntry, InventorySurfaces };
 export function inventorySurfacesOf(manifest: Manifest): readonly Omit<ScopedRoute, 'method' | 'path'>[] {
   const scope = ({ method: _method, path: _path, ...rest }: ScopedRoute): Omit<ScopedRoute, 'method' | 'path'> => rest;
   return [
-    ...(manifest.actions?.routes ?? []).map(scope),
+    ...(manifest.actions?.routes ?? []).filter(route => route.door === undefined).map(scope),
     ...(manifest.actions?.sockets ?? []).map(scope),
     ...(manifest.actions?.agentTools ?? []),
   ];

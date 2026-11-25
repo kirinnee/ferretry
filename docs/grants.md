@@ -82,11 +82,13 @@ it the machine.
   **unconditionally** for a relayed session, whatever address the request appears to carry, and for a
   direct session exactly what the listener decided for its WebSocket upgrade — the same answer the
   same listener gives an HTTP request — and nothing inside a record can change it.
-- a **tunnel** arrival (protocol §15) reaches the daemon through `cloudflared` from a loopback peer, so
-  it never lands on the API listener: the daemon's dedicated tunnel listener serves only the session
-  route and stamps every arrival `loopback: false` and unprivileged, exactly like a relayed one.
+- a **tunnel** session arrival (protocol §15) reaches the daemon through `cloudflared` from a loopback peer, so
+  it never lands on the API listener: the daemon's dedicated tunnel listener serves the session
+  route and stamps every session arrival `loopback: false` and unprivileged, exactly like a relayed one.
+  In 5.0 it may also opt into the public connector routes described below.
 
 Nothing re-derives it, and no header can move it.
+
 `packages/daemon/tests/unit/grants/policy.test.ts` asserts exactly this with a relayed request that
 presents every loopback-looking signal it can.
 
@@ -100,6 +102,48 @@ already have the machine.
 The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises no foreign address,
 `mayTrustDirectLoopback`) is now about the **place**, never the owner: it admits only `privilegedOnly` routes
 — a local terminal attach — through `arrivedPrivileged`, and grants nothing.
+
+### Public connector arrivals
+
+In 5.0 the kernel stamps `ApiRequest.arrival`. A public HTTP arrival is
+`{ kind: 'door', door: 'own', plugin: 'connector' }` on the connector's own listener,
+or `{ kind: 'door', door: 'tunnel' }` on a tunnel listener that explicitly serves public doors.
+**Both are REMOTE, never loopback, and never privileged.** No peer address, `Host`, URL,
+forwarded header or bearer changes that classification. The surface's `peer` supplies only
+`clientAddress` for rate limiting; it supplies no authority.
+
+Gate parses **no credential** on either door: an admin token, warden token, ferret bearer,
+device credential or connector bearer in `Authorization` never establishes a Gate principal,
+an owner exemption, a device unlock or a passkey proof. The public handler receives no Gate
+standing. It may read its own protocol's bearer; that does not authenticate the arrival to Gate.
+
+Only `connector` may declare `door: 'public'` routes, and those routes must ask for
+`minimum: 'none'`, `caller: 'any'`, no capability, no grant consultation, no warden remedy
+and no privileged arrival. Its own listener also requires `permissions.publicDoor: true`
+and binds only `127.0.0.1`. It serves only that plugin's public routes; the opted-in tunnel
+serves only allow-listed public routes. A door reaches no ordinary daemon route, including
+`/v1/*`, `/healthz` and `/metrics`; unknown paths and wrong methods answer 404, never a 405
+method map. On the API listener and in direct, relay, tunnel or WebRTC sessions, public
+paths behave like ordinary unknown paths: admission runs first, then an admitted caller
+receives 404. An unauthenticated caller cannot discover public path claims from a different refusal.
+Availability is checked on every request; unavailable, stopped or unbuilt public routes answer 404.
+
+Public descriptors must declare canonical literal paths: parameters, catch-alls, encoded
+aliases, dot segments and trailing slashes are refused. Daemon API and liveness namespaces
+(`v1`, `api`, `health`, `healthz`, `metrics`, `live`, `livez`, `ready`, `readyz`, `liveness`,
+`readiness`) are reserved, including their descendants. Both listeners enforce exact methods
+and literal paths before URL normalization. Public descriptors are excluded from the API
+inventory and its bus projection; they give a device no additional discovery or event access.
+
+Both public listeners cap request bodies at **1 MiB**, enough for MCP JSON and smaller OAuth
+forms and registration bodies. A route may apply a tighter bound (registration uses 8 KiB).
+Closing the own listener waits for shutdown before its port can be reopened. If binding the
+own address fails, no public listener is opened there: the connector cannot serve that address
+until the port is available and the listener opens successfully; it never falls back to the API listener.
+
+The public arrival grants no fleet authority. A connector's later tool action needs a
+separate governed admission through the daemon's route dispatcher; receiving an OAuth or
+MCP request at a public door never grants access to `/v1/*`.
 
 ## Nine capabilities, two axes
 
