@@ -387,7 +387,7 @@ describe('materialiseFleet', () => {
     });
     should(JSON.parse((only(result, `${HOME_B}/.fy/materialised.json`) as { content: string }).content)).eql({
       version: 1,
-      entries: ['AGENTS.md', 'skills/review'],
+      entries: ['AGENTS.md', 'rules/ferretry.rules', 'skills/review'],
     });
   });
 
@@ -868,7 +868,7 @@ describe('materialiseFleet', () => {
         `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'auto' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' ${shellQuote(`--append-system-prompt=${AGENT_BASE_INSTRUCTION('fy')}`)}"$_fy_sections" '--settings' '${overlay}' "$@"\n`,
       );
       should(JSON.parse((only(result, overlay) as { content: string }).content)).eql({
-        permissions: { defaultMode: 'auto' },
+        permissions: { defaultMode: 'auto', deny: ['Bash(pkill:*)', 'Bash(killall:*)'] },
         remoteControlAtStartup: false,
         skipAutoPermissionPrompt: true,
       });
@@ -891,7 +891,7 @@ describe('materialiseFleet', () => {
         path: overlay,
         content: `${JSON.stringify(
           {
-            permissions: { defaultMode: 'bypassPermissions' },
+            permissions: { defaultMode: 'bypassPermissions', deny: ['Bash(pkill:*)', 'Bash(killall:*)'] },
             remoteControlAtStartup: false,
             skipDangerousModePermissionPrompt: true,
           },

@@ -234,13 +234,24 @@ describe('the first runtimes of a fresh machine', () => {
     should(claude).not.have.property('permissions');
     // The fixed layer's mode is the machine's (default skip), exactly as with no profile at all.
     should(JSON.parse(await text(path.join(host.claudeHome, '.fy', 'fixed.json')))).eql({
-      permissions: { defaultMode: 'bypassPermissions' },
+      permissions: { defaultMode: 'bypassPermissions', deny: ['Bash(pkill:*)', 'Bash(killall:*)'] },
       remoteControlAtStartup: false,
       skipDangerousModePermissionPrompt: true,
     });
     // Codex gets no comfort setting: nothing in its config.toml names an approval or sandbox mode.
     const codex = await text(path.join(host.codexHome, 'config.toml'));
     should(codex).not.match(/approval_policy|sandbox_mode|shell_environment_policy/);
+  });
+
+  it('should write the Codex home a rules file forbidding pkill and killall, and leave config.toml alone (E176)', async () => {
+    const host = await freshMachine();
+
+    const rules = await text(path.join(host.codexHome, 'rules', 'ferretry.rules'));
+    should(rules).match(/prefix_rule\(pattern=\[.pkill.\], decision=.forbidden./);
+    should(rules).match(/prefix_rule\(pattern=\[.killall.\], decision=.forbidden./);
+    should(await text(path.join(host.codexHome, 'config.toml'))).not.match(/pkill|killall/);
+    const record = JSON.parse(await text(path.join(host.codexHome, '.fy', 'materialised.json')));
+    should(record.entries).containEql('rules/ferretry.rules');
   });
 
   it('should let an explicit instructions file of the same name win over the built-in', async () => {

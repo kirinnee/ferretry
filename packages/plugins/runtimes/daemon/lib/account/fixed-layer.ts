@@ -8,6 +8,9 @@
  * there to answer an UNATTENDED agent: Claude's `--disallowed-tools=AskUserQuestion` (withheld from every ferret,
  * owner !A527) and Codex's `--no-alt-screen`.
  *
+ * It also refuses `pkill` and `killall` in every agent runtime (`KILL_COMMANDS`, E176), in each harness's own settings
+ * and not by a hook: Claude's `permissions.deny` in the overlay below, Codex's forbidden prefix rules in its `rules/` folder.
+ *
  * It also puts the Ferretry tools in every agent runtime — the `fy mcp serve` MCP server, through which
  * an agent drives terminals and browser pages by name — and a short instruction saying they exist and
  * how names work (`--mcp-config` and `--append-system-prompt` for Claude; `mcp_servers.ferretry` and
@@ -119,6 +122,8 @@ export interface FixedLayer {
    * it and passes `--settings <file>` after {@link FixedLayer.args}.
    */
   readonly claudeSettingsOverlay?: SettingsObject;
+  /** Codex only: the text of the home's {@link CODEX_KILL_RULES_FILE}, a rules file the harness reads itself (E176). */
+  readonly codexRules?: string;
   /** Claude only: the keys re-asserted into the config directory's `.claude.json` before launch. */
   readonly claudeJson?: SettingsObject;
 }
@@ -150,6 +155,28 @@ export type FixedLayerInput =
       readonly cwd: string;
       readonly fyCommand: string;
     };
+
+/**
+ * The shell commands no ferret may run (E176, owner): a pattern kill (`pkill -f`) or a kill by name (`killall`) reaches every
+ * process on the machine, not only the caller's. One stray `pkill -f` once stopped ~17 agents and 13 panes. Each harness
+ * refuses them in its OWN fixed settings layer, which outranks every file a person can edit and holds in the skip mode
+ * too (measured on Claude 2.1.327 and Codex 0.170, both with the bypass modes on): Claude as `permissions.deny` in the
+ * `--settings` overlay, Codex as a `forbidden` prefix rule in the home's `rules/` folder. Settings, never a hook.
+ */
+const KILL_COMMANDS = ['pkill', 'killall'] as const;
+
+/** Claude's `permissions.deny` rules for {@link KILL_COMMANDS}, with any arguments. */
+const CLAUDE_KILL_DENY: readonly string[] = KILL_COMMANDS.map(command => `Bash(${command}:*)`);
+
+/** The Codex home file the {@link codexKillRules} are written to (beside `default.rules`, which Codex keeps for itself). */
+export const CODEX_KILL_RULES_FILE = 'rules/ferretry.rules';
+
+/** Codex's rules (Starlark): one `forbidden` prefix rule per {@link KILL_COMMANDS}, which holds whatever the approval policy is. */
+const codexKillRules = (): string =>
+  `${KILL_COMMANDS.map(
+    command =>
+      `prefix_rule(pattern=[${JSON.stringify(command)}], decision="forbidden", justification="${command} can stop other ferrets' processes; stop the one process you started instead")`,
+  ).join('\n')}\n`;
 
 /** Claude's spelling of each Agent permissions choice (§3.6). */
 const CLAUDE_PERMISSION_MODES: Readonly<Record<AgentPermissions, string>> = {
@@ -596,7 +623,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
           // The mode is named HERE too: the overlay is the flag settings source, and a mode named by one
           // is what keeps the auto-default dialog away (see the header).
           claudeSettingsOverlay: {
-            permissions: { defaultMode: mode },
+            permissions: { defaultMode: mode, deny: CLAUDE_KILL_DENY },
             [CLAUDE_REMOTE_CONTROL_KEY]: false,
             ...(skip ? { skipDangerousModePermissionPrompt: true } : { skipAutoPermissionPrompt: true }),
           },
@@ -643,6 +670,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
             '-c',
             `developer_instructions=${tomlString(instruction)}`,
           ],
+          codexRules: codexKillRules(),
         },
       };
     }
