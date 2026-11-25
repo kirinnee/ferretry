@@ -30,7 +30,7 @@ describe('daemon-wide grants, per call', () => {
     r.state.grants = undefined;
     r.dispatch.on(sessionsRoute());
     const list = JSON.parse((await post(r.endpoint, rpc('tools/list')))?.body ?? '{}');
-    should(list.result.tools.length).equal(9);
+    should(list.result.tools.length).equal(11);
     const reply = await tool(r, 'list_ferrets', {});
     should(reply.isError).be.true();
     should(reply.text).equal(

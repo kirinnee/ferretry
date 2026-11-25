@@ -2,8 +2,10 @@ import { describe, it } from 'bun:test';
 import { BodyTooLargeError } from '../../../../src/lib/api/http.ts';
 import should from 'should';
 import { CONNECTOR_TOOL_NAMES } from '../../../../src/lib/connector/mcp/demands.ts';
-import { ok, READ_ACCESS, sessionView } from '../../../support/connector/mcp-fixtures.ts';
-import { callTool, INIT, post, rig, rpc, tool } from '../../../support/connector/mcp-harness.ts';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { agendaItem, ok, READ_ACCESS, sessionView } from '../../../support/connector/mcp-fixtures.ts';
+import { callTool, INIT, post, rig, rpc, TOKEN, tool } from '../../../support/connector/mcp-harness.ts';
 
 interface ListedTool {
   readonly name: string;
@@ -121,7 +123,7 @@ describe('/mcp — the real SDK round trip', () => {
       should(tl.annotations.openWorldHint).be.false();
       should(tl.inputSchema.type).equal('object');
     }
-    for (const read of ['list_ferrets', 'get_ferret', 'get_ferret_output', 'list_attention'])
+    for (const read of ['list_ferrets', 'get_ferret', 'get_ferret_output', 'list_attention', 'get_attention'])
       should(listed(read).annotations).containEql({
         readOnlyHint: true,
         destructiveHint: false,
@@ -129,7 +131,7 @@ describe('/mcp — the real SDK round trip', () => {
       });
     for (const destructive of ['restart_ferret', 'stop_ferret'])
       should(listed(destructive).annotations).containEql({ readOnlyHint: false, destructiveHint: true });
-    for (const write of ['send_to_ferret', 'answer_attention', 'spawn_ferret'])
+    for (const write of ['send_to_ferret', 'answer_attention', 'snooze_attention', 'spawn_ferret'])
       should(listed(write).annotations).containEql({ readOnlyHint: false, destructiveHint: false });
     should(listed('get_ferret_output').inputSchema.properties.lines?.maximum).equal(100_000);
     should(listed('send_to_ferret').inputSchema.properties.message?.maxLength).equal(8000);
@@ -141,7 +143,7 @@ describe('/mcp — the real SDK round trip', () => {
     r.dispatch.on(sessionsRoute());
     const list = JSON.parse((await post(r.endpoint, rpc('tools/list')))?.body ?? '{}');
     should(list.result.tools.map((t: { name: string }) => t.name).sort()).eql(
-      ['get_ferret', 'get_ferret_output', 'list_attention', 'list_ferrets'].sort(),
+      ['get_ferret', 'get_ferret_output', 'get_attention', 'list_attention', 'list_ferrets'].sort(),
     );
     const stop = await tool(r, 'stop_ferret', { ferret: 'lizzette' });
     should(stop.isError).be.true();
@@ -244,5 +246,122 @@ describe('/mcp — a request the transport cannot take, and one it must still an
     const response = await post(r.endpoint, INIT, { protocolVersion: 'bad\nvalue' });
     should(response?.status).equal(500);
     should(JSON.parse(response?.body ?? '{}').error.message).equal('The connector could not answer that.');
+  });
+});
+
+describe('/mcp — get_attention through the official MCP SDK client', () => {
+  const TABLE = ['| Option | Cost |', '| --- | --- |', '| Postgres | high |', '| SQLite | low |'].join('\n');
+  const item = agendaItem({
+    id: 'A12',
+    subject: 'Pick a database',
+    why: 'Which database should the connector use?',
+    ask: { kind: 'multiple-choice', options: [{ label: 'Postgres' }, { label: 'SQLite' }] },
+    extra: {
+      title: 'Database choice',
+      context: 'The key is sk-ant-ABCDEFGH12345678 for now.',
+      tabs: [{ id: 'costs', name: 'Costs', body: `Costs compared:\n\n${TABLE}` }],
+    },
+  });
+
+  /** The SDK client's own fetch, pointed at the endpoint: every byte goes through the real /mcp route. */
+  const connect = async (r: ReturnType<typeof rig>): Promise<Client> => {
+    const viaEndpoint = (async (_url, init) => {
+      const body = typeof init?.body === 'string' ? init.body : '';
+      const reply = await post(r.endpoint, body, { method: init?.method ?? 'POST' });
+      if (reply === undefined) return new Response('', { status: 404 });
+      return new Response(reply.body === '' ? null : reply.body, {
+        status: reply.status,
+        headers: Object.fromEntries(reply.headers),
+      });
+    }) as typeof fetch;
+    const client = new Client({ name: 'integration', version: '1' });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL('http://connector.invalid/mcp'), {
+        fetch: viaEndpoint,
+        requestInit: { headers: { authorization: `Bearer ${TOKEN}` } },
+      }),
+    );
+    return client;
+  };
+
+  it('is advertised as a read tool, and reads an item whole with its table and a masked secret', async () => {
+    const r = rig();
+    r.state.access = READ_ACCESS;
+    r.dispatch
+      .on(sessionsRoute())
+      .on(call =>
+        call.path === '/v1/agenda/open' ? ok({ sessions: [{ sessionId: LIZ.config.id, items: [item] }] }) : undefined,
+      );
+    const client = await connect(r);
+    try {
+      const listed = (await client.listTools()).tools;
+      const found = listed.find(entry => entry.name === 'get_attention');
+      should(found?.annotations).containEql({ readOnlyHint: true, destructiveHint: false, idempotentHint: true });
+      should(Object.keys(found?.inputSchema.properties ?? {}).sort()).eql(['ferret', 'from', 'item', 'tab']);
+      should(found?.inputSchema.required).eql(['item']);
+      const called = await client.callTool({ name: 'get_attention', arguments: { item: '!A12' } });
+      const text = (called.content as { type: string; text: string }[]).map(part => part.text).join('\n');
+      should(called.isError).not.be.true();
+      should(text).containEql('!A12 — Database choice — from Lizzette');
+      should(text).containEql(`Costs compared:\n\n${TABLE}`);
+      should(text).not.containEql('sk-ant-ABCDEFGH12345678');
+      const one = await client.callTool({ name: 'get_attention', arguments: { item: 'A12', tab: 'costs' } });
+      should((one.content as { text: string }[])[0]?.text).containEql(TABLE);
+      const missing = await client.callTool({ name: 'get_attention', arguments: { item: 'A99' } });
+      should(missing.isError).be.true();
+      should((missing.content as { text: string }[])[0]?.text).containEql('There is no open item A99.');
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('snoozes an item over the wire, in Pacific time, as a write tool a read-only token never sees', async () => {
+    const r = rig();
+    const posted: unknown[] = [];
+    r.dispatch
+      .on(sessionsRoute())
+      .on(call =>
+        call.path === '/v1/agenda/open' ? ok({ sessions: [{ sessionId: LIZ.config.id, items: [item] }] }) : undefined,
+      )
+      .on(call => {
+        if (call.method !== 'POST') return undefined;
+        posted.push(call.body);
+        return ok({
+          v: 1,
+          sessionId: LIZ.config.id,
+          items: [],
+          resolved: [],
+          count: 0,
+          parseErrors: 0,
+          updatedAt: '2026-11-24T12:00:00.000Z',
+        });
+      });
+    const client = await connect(r);
+    try {
+      const listed = (await client.listTools()).tools.find(entry => entry.name === 'snooze_attention');
+      should(listed?.annotations).containEql({ readOnlyHint: false, destructiveHint: false });
+      should(listed?.inputSchema.required).eql(['item']);
+      const done = await client.callTool({
+        name: 'snooze_attention',
+        arguments: { item: 'A12', until: '2026-11-25T09:00' },
+      });
+      should(done.isError).not.be.true();
+      should((done.content as { text: string }[])[0]?.text).startWith(
+        'Snoozed !A12 (Database choice) until Wed, Nov 25, 9:00 AM PST',
+      );
+      should(posted).eql([{ action: 'snooze', id: 'A12', until: '2026-11-25T17:00:00.000Z' }]);
+      should(r.calls.records.map(entry => entry.tool)).eql(['snooze_attention']);
+    } finally {
+      await client.close();
+    }
+    r.state.access = READ_ACCESS;
+    const readOnly = await connect(r);
+    try {
+      const names = (await readOnly.listTools()).tools.map(entry => entry.name);
+      should(names).not.containEql('snooze_attention');
+      should(names).containEql('get_attention');
+    } finally {
+      await readOnly.close();
+    }
   });
 });

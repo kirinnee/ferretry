@@ -469,7 +469,7 @@ export const STEP_UP_ACTS = {
   approvePasteRule: 'approve-paste-rule',
   /**
    * Approving a Claude CONNECTOR sign-in (docs/mcp-connector.md): the grant it mints lets that client read and drive
-   * this fleet through the nine connector tools until it is revoked, from anywhere on the internet. A governed device
+   * this fleet through the eleven connector tools until it is revoked, from anywhere on the internet. A governed device
    * proves a passkey for this act alone — a `catalog-install` or `add-device` proof never buys a connector. The
    * machine's own `fy connector approve` is skipped like every other access-adding act (it is not in
    * {@link STEP_UP_ACTS_EVERY_CALLER}); denying and revoking never ask.

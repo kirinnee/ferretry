@@ -17,7 +17,8 @@
  * |                                               | scrubbed transcript, not the live pane)  |
  * | POST /v1/sessions/:id/send, /stop             | none                                     |
  * | POST /v1/restarts                             | none                                     |
- * | GET/POST /v1/sessions/:id/agenda, /agenda/open| none (gated by who acts)                 |
+ * | GET/POST /v1/sessions/:id/agenda, /agenda/open| none (gated by who acts; get_attention  |
+ * |                                               | only reads /agenda/open and /sessions)   |
  * | GET  /v1/projects                             | none                                     |
  * | POST /v1/sessions (start)                     | none for a registered project and no     |
  * |                                               | harness flags — the only start this      |
@@ -36,8 +37,10 @@ export const CONNECTOR_TOOL_NAMES = [
   'get_ferret',
   'get_ferret_output',
   'list_attention',
+  'get_attention',
   'send_to_ferret',
   'answer_attention',
+  'snooze_attention',
   'restart_ferret',
   'stop_ferret',
   'spawn_ferret',
@@ -56,8 +59,10 @@ export const TOOL_DEMANDS: Readonly<Record<ConnectorToolName, readonly ToolDeman
   get_ferret: [FLEET_USE],
   get_ferret_output: [FLEET_USE],
   list_attention: [FLEET_USE],
+  get_attention: [FLEET_USE],
   send_to_ferret: [FLEET_USE],
   answer_attention: [FLEET_USE],
+  snooze_attention: [FLEET_USE],
   restart_ferret: [FLEET_USE],
   stop_ferret: [FLEET_USE],
   spawn_ferret: [FLEET_USE],

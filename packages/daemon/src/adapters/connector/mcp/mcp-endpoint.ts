@@ -175,7 +175,7 @@ export class ConnectorMcpEndpoint implements ConnectorHttpHandler {
       { name: 'ferretry', version: this.options.serverVersion },
       {
         instructions:
-          "Ferretry controls AI agents called ferrets on the owner's machine. Answers are short and meant to be read aloud. Refer to a ferret by its call sign (first name).",
+          "Ferretry controls AI agents called ferrets on the owner's machine. Answers are short and meant to be read aloud, except get_attention, which returns one whole agenda item. Refer to a ferret by its call sign (first name).",
       },
     );
     for (const spec of CONNECTOR_TOOLS) {
