@@ -109,7 +109,9 @@ export default implementDaemon(manifest, {
       const connection = ctx.uses.connections.current();
       if (connection === undefined || facts() === undefined)
         throw new ApiError(503, 'Connections cannot describe this machine.', 'signing_unavailable');
-      return { ...currentIdentity(), carriers: connection.carriers(), memberUnlockDays: unlockDays() };
+      // "Relay off" is Connections' word to a pairing device, not an address a catalog member could dial.
+      const carriers = connection.carriers().filter(carrier => carrier.kind !== 'relay-off');
+      return { ...currentIdentity(), carriers, memberUnlockDays: unlockDays() };
     };
     const live = new LiveMemberSessions();
     const members = new CatalogMemberService({

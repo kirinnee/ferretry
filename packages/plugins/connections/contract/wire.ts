@@ -152,6 +152,13 @@ export const PublishedCarrierSchema = z.discriminatedUnion('kind', [
     source: z.literal('configured').optional(),
   }),
   z.strictObject({ kind: z.literal('tunnel'), url: TunnelOriginSchema }),
+  /**
+   * The daemon's own word that it dials NO relay because the relay is switched off (its own block with `enabled:
+   * false`, or Ferretry's hosted relay disabled). It is not an address and is never dialled. Absence of any relay entry
+   * means only "this daemon published none", which an older daemon also does, so a device keeps trying the hosted
+   * relay it discovered for itself; THIS entry is what tells it to stop.
+   */
+  z.strictObject({ kind: z.literal('relay-off') }),
 ]);
 export type PublishedCarrier = z.infer<typeof PublishedCarrierSchema>;
 

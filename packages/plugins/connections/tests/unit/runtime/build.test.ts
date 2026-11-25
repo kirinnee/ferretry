@@ -141,7 +141,10 @@ describe('published carrier route', () => {
       config: { 'connections.yaml': { relay: [{ source: 'discovery', enabled: false }] } },
     });
     await host.runJob('relay-discovery');
-    expect(host.provided(ConnectionsPort).carriers()).toEqual([{ kind: 'direct', url: 'https://box.example' }]);
+    expect(host.provided(ConnectionsPort).carriers()).toEqual([
+      { kind: 'direct', url: 'https://box.example' },
+      { kind: 'relay-off' },
+    ]);
     await host.stop();
   });
   test('P88 wildcard binds never manufacture an advertised foreign address', () => {
@@ -517,7 +520,7 @@ describe('the carrier set the daemon publishes (Appendix D, connections batch 3)
     });
     await host.runJob('relay-discovery');
     const set = host.provided(ConnectionsPort).carriers();
-    expect(set.map(carrier => carrier.url)).toEqual([
+    expect(set.map(carrier => (carrier.kind === 'relay-off' ? carrier.kind : carrier.url))).toEqual([
       'https://box.example',
       'https://one.example',
       'https://hosted.example',
