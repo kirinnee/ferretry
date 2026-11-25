@@ -2,7 +2,7 @@ import type { ConfigCollectionDef, FerretId } from '@ferretry/kernel/contract';
 import { isKnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import type { CatalogMcpProvider, McpComponentRecord } from '@ferretry/plugin-catalogs/contract';
-import type { SecretName, SecretSummary } from '@ferretry/core-vault/contract';
+import { mintedValueOf, type SecretName, type SecretSummary } from '@ferretry/core-vault/contract';
 import type { RuntimeId } from '@ferretry/plugin-runtimes/contract';
 import {
   MCP_CONFIG,
@@ -198,7 +198,8 @@ export default implementDaemon(manifest, {
       renewal: oauth,
       mcpFormat: harness => ferrets.harnessFacts(harness)?.mcp.format,
       layered: async runtime => await layeredMcp(runtimes.current(), runtime),
-      project: async spec => {
+      client: kernel.identity.binaries.client,
+      project: async (spec, options) => {
         // The ferret folders are the read roots, so they are read fresh before the launch's own folder is.
         await refreshOwners();
         // The launch is its runtime's account when Runtimes published one (its home, as a v4 launch read it); else its
@@ -218,7 +219,7 @@ export default implementDaemon(manifest, {
           approvals: harnessProjectApprovals({ 'claude-code': () => claudeCode.current() }, spec.harness, spec.ferret),
           secrets: { held },
           renewal: oauth,
-        }).share(agent, spec.folder);
+        }).share(agent, spec.folder, options);
       },
     });
 
@@ -435,7 +436,9 @@ export default implementDaemon(manifest, {
       ferret: async id => await inventoryFerret(id),
       bindings: async subject => await launch.bindings(subject),
       signInRequired: async name => await oauth.signInRequired(name),
-      value: async name => await vault.mintedValue?.(name),
+      value: async name => await mintedValueOf(vault)?.mintedValue(name),
+      renew: async name => await oauth.refreshForLaunch([name]),
+      now: () => kernel.clock.nowMs(),
     });
 
     const api: McpApi = {

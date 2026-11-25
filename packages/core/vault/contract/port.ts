@@ -61,6 +61,24 @@ export interface SecureCopyCommandOutcome {
 export type PutNewOutcome = 'stored' | 'exists';
 
 /**
+ * THE ONE GETTER (docs/secrets.md › The one exception), and so NOT a member of {@link VaultApi}: a type that every caller
+ * holds cannot carry a getter. Only the plugin the kernel allows to declare `permissions.revealMinted` (MCP, see
+ * `REVEAL_MINTED_PLUGINS`) is handed it, and it reads {@link mintedValueOf} to find out. It answers the current value of
+ * a secret the Vault's mint ledger says THIS caller filed (`put` / `putNew`), or `undefined` for a name not held, an
+ * owner's value, another plugin's and a value written since by anybody else. It adds nothing the caller did not already
+ * hold when it minted the value. A store that cannot be read raises.
+ */
+export interface MintedValueReader {
+  mintedValue(name: SecretName): Promise<string | undefined>;
+}
+
+/** The getter, for the one plugin the Vault handed it; `undefined` for every other caller. */
+export const mintedValueOf = (api: VaultApi): MintedValueReader | undefined =>
+  typeof (api as Partial<MintedValueReader>).mintedValue === 'function'
+    ? (api as VaultApi & MintedValueReader)
+    : undefined;
+
+/**
  * The Vault port (§2.2, §3.7): secrets by NAME only. There is no getter, and none may be added (it would delete the
  * feature): `run` executes a command with the values in that child's environment and returns masked output;
  * `authorizeFetch` places ONE named secret on ONE request to an allowlisted host and returns only what came back.
@@ -90,14 +108,6 @@ export interface VaultApi {
    * {@link putNew}, to a non-core plugin that declares `permissions.createSecrets`.
    */
   filedSame?(name: SecretName, value: string): Promise<boolean>;
-  /**
-   * THE ONE GETTER, and only for what the caller itself wrote: the current value of a secret the Vault's mint ledger says
-   * THIS caller filed (`put` / `putNew`), or `undefined` for a name not held, an owner's value, another plugin's and a
-   * value written since by anybody else. MCP's sign-in is the only plugin handed it (`permissions.revealMinted`): it
-   * returns a running ferret its own renewed access token (docs/secrets.md › The one exception). It adds nothing the
-   * caller did not already hold when it minted the value. A store that cannot be read raises.
-   */
-  mintedValue?(name: SecretName): Promise<string | undefined>;
   run(command: SecretUseCommand, ferret?: FerretId): Promise<Result<SecretUseResult, SecretUseRefusal>>;
   authorizeFetch(
     name: SecretName,

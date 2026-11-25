@@ -17,7 +17,13 @@ const FAKE_TOKEN = 'FAKE-RENEWED-TOKEN-0123456789';
 
 const tokens = (over: Partial<FerretMcpTokensDeps> = {}) => {
   const asked: string[] = [];
+  const renewed: string[] = [];
+  const clock = { at: 0 };
   const service = new FerretMcpTokens({
+    now: () => clock.at,
+    renew: async name => {
+      renewed.push(name);
+    },
     ferret: async id => (id === 'f1' ? { id, harness: 'claude-code', folder: '/work/app', runtime: 'rt' } : undefined),
     bindings: async () => new Map<string, SecretName>([[NAMES.variable, NAMES.access]]),
     signInRequired: async () => undefined,
@@ -27,7 +33,7 @@ const tokens = (over: Partial<FerretMcpTokensDeps> = {}) => {
     },
     ...over,
   });
-  return { service, asked };
+  return { service, asked, renewed, clock };
 };
 
 describe('FerretMcpTokens: what THIS ferret’s launch holds, renewed', () => {
@@ -50,6 +56,31 @@ describe('FerretMcpTokens: what THIS ferret’s launch holds, renewed', () => {
     expect(asked).toEqual([]);
   });
 
+  test('a variable its launch does not hold starts NO renewal at all: nothing is spent before the binding is known', async () => {
+    const { service, renewed } = tokens();
+
+    await service.headers('f1', OTHER.variable).catch(() => undefined);
+    await service.headers('ghost', NAMES.variable).catch(() => undefined);
+
+    expect(renewed).toEqual([]);
+  });
+
+  test('the one bound sign-in is renewed, exactly that one, and before its value is read', async () => {
+    const events: string[] = [];
+    const { service, renewed } = tokens({
+      renew: async name => void events.push(`renew ${name}`),
+      value: async name => {
+        events.push(`value ${name}`);
+        return FAKE_TOKEN;
+      },
+    });
+
+    await service.headers('f1', NAMES.variable);
+
+    expect(events).toEqual([`renew ${NAMES.access}`, `value ${NAMES.access}`]);
+    expect(renewed).toEqual([]);
+  });
+
   test('a ferret this machine does not know is refused the same way', async () => {
     await expect(tokens().service.headers('ghost', NAMES.variable)).rejects.toMatchObject({ status: 404 });
   });
@@ -68,6 +99,33 @@ describe('FerretMcpTokens: what THIS ferret’s launch holds, renewed', () => {
     const { service } = tokens({ value: async () => undefined });
 
     await expect(service.headers('f1', NAMES.variable)).rejects.toMatchObject({ status: 409 });
+  });
+});
+
+describe('the per-ferret request budget', () => {
+  test('a ferret that asks too often is told to wait (429), the others are not, and the window then reopens', async () => {
+    const { service, renewed, clock } = tokens({
+      ferret: async id => ({ id, harness: 'claude-code', folder: '/work/app', runtime: 'rt' }),
+    });
+    const ask = async (ferret: string) =>
+      await service.headers(ferret, NAMES.variable).catch((error: unknown) => error);
+
+    for (let n = 0; n < 30; n += 1) await ask('f1');
+    const refused = await ask('f1');
+
+    expect(refused).toMatchObject({ status: 429, code: 'too_many_requests' });
+    expect(renewed).toHaveLength(30);
+    expect(await ask('f2')).toMatchObject({ variable: NAMES.variable });
+    clock.at += 61_000;
+    expect(await ask('f1')).toMatchObject({ variable: NAMES.variable });
+  });
+
+  test('a request for a variable the ferret does not hold spends the budget too', async () => {
+    const { service } = tokens();
+
+    for (let n = 0; n < 30; n += 1) await service.headers('f1', OTHER.variable).catch(() => undefined);
+
+    await expect(service.headers('f1', NAMES.variable)).rejects.toMatchObject({ status: 429 });
   });
 });
 
@@ -98,6 +156,19 @@ describe('POST /v1/ferrets/:ferretId/mcp/token: ONLY the ferret itself', () => {
     test(`${who} is refused 403 not_this_ferret`, async () => {
       await expect(route(call(credential, id))).rejects.toMatchObject({ status: 403, code: 'not_this_ferret' });
     });
+
+  test('a body over a small cap is refused 413 before it is parsed', async () => {
+    const big = {
+      text: async (limit: number) => {
+        if (limit < 4096) throw Object.assign(new Error('too large'), { name: 'BodyTooLargeError' });
+        return JSON.stringify({ variable: NAMES.variable });
+      },
+    };
+
+    await expect(
+      route({ params: new Map([['ferretId', 'f1']]), credential: own, request: big } as unknown as CallContext),
+    ).rejects.toMatchObject({ status: 413, code: 'body_too_large' });
+  });
 
   test('a variable that is not a sign-in variable is refused before anything is read', async () => {
     await expect(route(call(own, 'f1', 'HOME'))).rejects.toThrow('not an MCP sign-in token variable');
@@ -162,7 +233,7 @@ describe('fy mcp token', () => {
 
 describe('the command both writers of an entry share', () => {
   test('is `fy mcp token <VARIABLE>`', () => {
-    expect(mcpTokenCommand(NAMES.variable)).toBe(`fy mcp token ${NAMES.variable}`);
+    expect(mcpTokenCommand('fy', NAMES.variable)).toBe(`fy mcp token ${NAMES.variable}`);
   });
 });
 
@@ -207,5 +278,12 @@ describe('the route, the rest of its refusals', () => {
     )['POST /v1/ferrets/:ferretId/mcp/token'];
 
     await expect(route(call([['ferretId', 'f1']], own))).rejects.toThrow('vault exploded');
+  });
+});
+
+describe('the binary name is the daemon’s, never a literal', () => {
+  test('a renamed client is what the command runs, and an unsafe one is shell-quoted', () => {
+    expect(mcpTokenCommand('ferrety', NAMES.variable)).toBe(`ferrety mcp token ${NAMES.variable}`);
+    expect(mcpTokenCommand("my fy's", NAMES.variable)).toBe(`'my fy'\\''s' mcp token ${NAMES.variable}`);
   });
 });

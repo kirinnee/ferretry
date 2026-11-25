@@ -1,4 +1,9 @@
-import type { ChildEnvironment, FerretId, SecretResolver } from '@ferretry/kernel/contract';
+import {
+  type ChildEnvironment,
+  type FerretId,
+  REVEAL_MINTED_PLUGINS,
+  type SecretResolver,
+} from '@ferretry/kernel/contract';
 import type { FerretState } from '@ferretry/core-ferrets/contract';
 import { auditKind } from '@ferretry/core-gate/contract';
 import { implementDaemon, type Needer, neederMayReach, perNeeder } from '@ferretry/kernel/manifest';
@@ -513,9 +518,9 @@ export default implementDaemon(manifest, {
           return removed;
         },
         fetchMinted: async (name, asked, placement) => await fetchMinted(needer, name, asked, placement),
-        // The ONE getter: only for a plugin whose manifest declares `permissions.revealMinted`, and only for a value the
+        // The ONE getter: only for an allow-listed plugin (`REVEAL_MINTED_PLUGINS`) that declares `permissions.revealMinted`, and only for a value the
         // mint ledger says it wrote itself (`openOwnMint`, the same word `fetchMinted` takes).
-        ...(needer.permissions.revealMinted === true
+        ...(needer.permissions.revealMinted === true && (REVEAL_MINTED_PLUGINS as readonly string[]).includes(needer.id)
           ? { mintedValue: async (name: SecretName) => (await openOwnMint(needer.id, name))?.value }
           : {}),
         // Every narrowed call reads what the caller passed ONCE, into plain data of its own, checks that copy and uses

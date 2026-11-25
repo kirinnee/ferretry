@@ -40,6 +40,7 @@ const ITEMS: ReadonlyMap<string, McpItem> = new Map<string, McpItem>([
 /** Both servers signed in (their access tokens held), or only the ones named. */
 async function partsFor(harness: KnownHarnessKey, held: readonly SecretName[]): Promise<readonly LaunchPart[]> {
   const launch = new McpLaunchParts({
+    client: 'fy',
     items: () => ITEMS,
     held: async () => new Set(held),
     renewal: { refreshForLaunch: async () => {} },
@@ -111,6 +112,7 @@ describe('a signed-in machine MCP server, rendered for the harness that reads it
 
   test('a harness with no MCP format on record keeps the entry as configured, and still binds the variable', async () => {
     const launch = new McpLaunchParts({
+      client: 'fy',
       items: () => ITEMS,
       held: async () => new Set([NAMES.access]),
       renewal: { refreshForLaunch: async () => {} },
@@ -145,6 +147,7 @@ describe('a server reached at a url that nobody signed in to', () => {
   ]);
   const launchFor = (harness: KnownHarnessKey) =>
     new McpLaunchParts({
+      client: 'fy',
       items: () => items,
       held: async () => new Set<SecretName>(),
       renewal: { refreshForLaunch: async () => {} },
@@ -179,6 +182,7 @@ describe('a project server entry and the headersHelper', () => {
   });
   const partsOf = async (format: 'json' | 'toml', authorization: string) =>
     await new McpLaunchParts({
+      client: 'fy',
       items: () => new Map(),
       held: async () => new Set<SecretName>(),
       renewal: { refreshForLaunch: async () => {} },
@@ -202,6 +206,7 @@ describe('a project server entry and the headersHelper', () => {
 describe('bindings: the sign-in variables one ferret’s launch holds, by reference', () => {
   const launch = (held: readonly SecretName[], mcpFormat: 'json' | 'toml' | undefined = 'json') =>
     new McpLaunchParts({
+      client: 'fy',
       items: () => ITEMS,
       held: async () => new Set(held),
       renewal: { refreshForLaunch: async () => {} },

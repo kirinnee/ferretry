@@ -34,9 +34,18 @@ export const MCP_TOKEN_CODES = {
   notThisFerret: 'not_this_ferret',
   /** The variable is not one this ferret's launch holds. */
   notThisFerretsServer: 'not_this_ferrets_server',
+  /** This ferret has used up its request budget for now. */
+  tooManyRequests: 'too_many_requests',
   /** The sign-in was rejected or holds no token: only the owner can mend it. */
   needsSignIn: 'mcp_needs_sign_in',
 } as const;
 
-/** The `fy` verb Claude's `headersHelper` runs: `fy mcp token <VARIABLE>`. The ONE spelling both writers of an entry use. */
-export const mcpTokenCommand = (variable: string): string => `fy mcp token ${variable}`;
+/** The largest request body the route reads: a variable name and its braces, never more. */
+export const MCP_TOKEN_BODY_BYTES = 1024;
+
+/**
+ * The command Claude's `headersHelper` runs: `<client> mcp token <VARIABLE>`. The ONE spelling both writers of an entry
+ * use; the client is the product's binary name as the daemon knows it (`kernel.identity.binaries.client`), never a literal.
+ */
+export const mcpTokenCommand = (client: string, variable: string): string =>
+  `${/^[A-Za-z0-9_.\/-]+$/u.test(client) ? client : `'${client.replaceAll("'", "'\\''")}'`} mcp token ${variable}`;

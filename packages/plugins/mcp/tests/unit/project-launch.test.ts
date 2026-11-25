@@ -14,6 +14,7 @@ import { type Instant, ok } from '@ferretry/std';
 import { MCP_OAUTH_SECRETS, MCP_OAUTH_STATE, mcpOAuthSecretNames, mcpProjectSubject } from '../../contract/index.ts';
 import daemon from '../../daemon/index.ts';
 import { mcpProjectKey } from '../../daemon/lib/inventory/folders.ts';
+import { McpLaunchParts } from '../../daemon/lib/launch-parts.ts';
 import manifest from '../../manifest.ts';
 import { leaks, PWA_REDIRECT, world, type World } from './oauth/support.ts';
 
@@ -232,6 +233,7 @@ async function setup(
     uses: { claudeCode: handle(uses.claudeCode), projects: handle(uses.projects), runtimes: handle(undefined) },
     hooks: {} as never,
     kernel: {
+      identity: { binaries: { client: 'fy' } },
       config: { collection: () => new Map() },
       clock: { nowMs: () => w.clock.at + 60_000 },
       state,
@@ -631,5 +633,32 @@ describe('a sign-out racing a launch', () => {
       expect([...opened.value.names]).toEqual([s.variable]);
       expect(JSON.stringify(opened.value)).not.toContain('fake-carried-access-value');
     }
+  });
+});
+
+describe('which sign-ins a ferret holds, asked WITHOUT starting any provider work (the token route)', () => {
+  test('a project sign-in that is due is named, approvals applied, and its provider is never asked', async () => {
+    const { launch, w, variable, access } = await setup({ claudeCode: approving(), projects: await registered() });
+    const before = w.provider.tokenRequests.length;
+
+    const bound = await (launch as McpLaunchParts).bindings(spec(SUBFOLDER));
+
+    expect(bound.get(variable)).toBe(access);
+    expect(w.provider.tokenRequests).toHaveLength(before);
+  });
+
+  test('a server the harness did not approve is not named, and nothing is renewed for it either', async () => {
+    const claudeCode = fakeClaudeCode();
+    claudeCode.setApprovals(query => ({
+      state: 'read',
+      servers: Object.fromEntries(query.servers.map(name => [name, 'disabled' as const])),
+    }));
+    const { launch, w, variable } = await setup({ claudeCode, projects: await registered() });
+    const before = w.provider.tokenRequests.length;
+
+    const bound = await (launch as McpLaunchParts).bindings(spec(SUBFOLDER));
+
+    expect(bound.has(variable)).toBe(false);
+    expect(w.provider.tokenRequests).toHaveLength(before);
   });
 });

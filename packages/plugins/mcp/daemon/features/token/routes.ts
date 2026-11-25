@@ -6,7 +6,12 @@ import {
   jsonResponse,
   type RouteHandler,
 } from '@ferretry/kernel/contract';
-import { MCP_TOKEN_CODES, McpTokenAnswerSchema, McpTokenRequestSchema } from '../../../contract/index.ts';
+import {
+  MCP_TOKEN_BODY_BYTES,
+  MCP_TOKEN_CODES,
+  McpTokenAnswerSchema,
+  McpTokenRequestSchema,
+} from '../../../contract/index.ts';
 import { parseBody } from '../../lib/body.ts';
 import { type FerretMcpTokens, McpTokenRefusal } from './service.ts';
 
@@ -37,7 +42,7 @@ export function tokenRoutes(tokens: Pick<FerretMcpTokens, 'headers'>): {
           'only the ferret itself may ask for its MCP sign-in token; a person or another ferret signs in through Ferretry instead',
           MCP_TOKEN_CODES.notThisFerret,
         );
-      const request = await parseBody(call.request, McpTokenRequestSchema);
+      const request = await parseBody(call.request, McpTokenRequestSchema, { maxBytes: MCP_TOKEN_BODY_BYTES });
       try {
         return jsonResponse(McpTokenAnswerSchema.parse(await tokens.headers(id, request.variable)));
       } catch (error) {

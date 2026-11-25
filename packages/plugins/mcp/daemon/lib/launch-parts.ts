@@ -70,14 +70,14 @@ function plainConfig(item: McpItem, format: McpDocumentFormat | undefined): Json
  * a header (the shape `project-sign-in.ts` writes and the inventory recognises, a JSON document), Codex reads
  * `bearer_token_env_var` (a TOML table). The harness says which it takes (`HarnessFacts.mcp.format`). None of `auth`, `oauth` or `bearer` is a key either harness reads.
  */
-function signedInConfig(url: string, variable: string, format: McpDocumentFormat): JsonValue {
+function signedInConfig(url: string, variable: string, format: McpDocumentFormat, client: string): JsonValue {
   if (format === 'toml') return { url, bearer_token_env_var: variable };
   return {
     type: isSseAddress(url) ? 'sse' : 'http',
     url,
     headers: { Authorization: `Bearer \${${variable}}` },
     // Claude runs this at connect time and again after a 401, so a ferret that outlives its token sends the renewed one.
-    headersHelper: mcpTokenCommand(variable),
+    headersHelper: mcpTokenCommand(client, variable),
   };
 }
 
@@ -99,7 +99,9 @@ export interface McpLaunchPartsDeps {
    */
   layered(runtime: string | undefined): Promise<ReadonlySet<string>>;
   /** The launch's project servers (`ProjectMcpLaunch.share`), after their own renewal. */
-  project(spec: McpLaunchSubject): Promise<ProjectMcpLaunchShare>;
+  project(spec: McpLaunchSubject, options?: { readonly renew: boolean }): Promise<ProjectMcpLaunchShare>;
+  /** The product's client binary name (`kernel.identity.binaries.client`): the command a `headersHelper` runs. */
+  readonly client: string;
 }
 
 /**
@@ -134,17 +136,18 @@ export class McpLaunchParts implements LaunchPartSource {
   constructor(private readonly deps: McpLaunchPartsDeps) {}
 
   async parts(spec: Omit<LaunchSpec, 'parts'>): Promise<readonly LaunchPart[]> {
-    return await this.compose(spec);
+    return await this.compose(spec, true);
   }
 
   /**
    * Which sign-in variable each of this ferret's servers reads its token from, and the secret NAME behind it, as a
-   * launch would bind them NOW (after the same renewal): never a value. What the token route reads, so it can only
-   * ever answer for a server this ferret's own launch holds.
+   * launch would bind them NOW: never a value, and WITHOUT renewing anything (no machine, project or env sign-in is
+   * refreshed). What the token route reads first, so it can only ever answer for a server this ferret's own launch holds,
+   * and starts provider work only once the one binding it was asked for is known.
    */
   async bindings(subject: McpLaunchSubject): Promise<ReadonlyMap<string, SecretName>> {
     const bound = new Map<string, SecretName>();
-    for (const part of await this.compose(subject))
+    for (const part of await this.compose(subject, false))
       if (part.kind === 'env')
         for (const [variable, reference] of Object.entries(part.env)) {
           const name = optionalSecretReferenceOf(reference);
@@ -153,7 +156,7 @@ export class McpLaunchParts implements LaunchPartSource {
     return bound;
   }
 
-  private async compose(spec: McpLaunchSubject): Promise<readonly LaunchPart[]> {
+  private async compose(spec: McpLaunchSubject, renew: boolean): Promise<readonly LaunchPart[]> {
     // Only the items this runtime's profile stack names, as a v4 runtime home held only its profile's components.
     const layered = await this.deps.layered(spec.runtime);
     const items = new Map([...this.deps.items()].filter(([name]) => layered.has(name)));
@@ -173,8 +176,8 @@ export class McpLaunchParts implements LaunchPartSource {
       for (const value of Object.values(item.env ?? {})) for (const name of secretReferencesIn(value)) named.add(name);
     }
     const [project] = await Promise.all([
-      this.deps.project(spec),
-      named.size === 0 ? undefined : this.deps.renewal.refreshForLaunch([...named]),
+      this.deps.project(spec, { renew }),
+      renew && named.size > 0 ? this.deps.renewal.refreshForLaunch([...named]) : undefined,
     ]);
     const held = signedIn.size === 0 ? new Set<SecretName>() : await this.deps.held();
     const env: Record<string, string> = { ...project.env };
@@ -185,7 +188,7 @@ export class McpLaunchParts implements LaunchPartSource {
       // A harness with no MCP format on record is written no sign-in it could not read: the entry stays as configured.
       return format === undefined
         ? part
-        : { ...part, config: signedInConfig(server.url, server.names.variable, format) };
+        : { ...part, config: signedInConfig(server.url, server.names.variable, format, this.deps.client) };
     });
     for (const [name, server] of Object.entries(project.servers))
       parts.push({
@@ -194,7 +197,7 @@ export class McpLaunchParts implements LaunchPartSource {
         config: {
           ...server,
           headers: { ...server.headers },
-          ...projectHelper(server.headers.Authorization, format),
+          ...projectHelper(server.headers.Authorization, format, this.deps.client),
           scope: 'local',
           project: project.root,
         },
@@ -208,9 +211,10 @@ export class McpLaunchParts implements LaunchPartSource {
 function projectHelper(
   authorization: string | undefined,
   format: McpDocumentFormat | undefined,
+  client: string,
 ): Record<string, string> {
   const variable = /^Bearer \$\{([A-Z0-9_]+)\}$/u.exec(authorization ?? '')?.[1];
   return format === 'json' && variable !== undefined && MCP_TOKEN_VARIABLE_PATTERN.test(variable)
-    ? { headersHelper: mcpTokenCommand(variable) }
+    ? { headersHelper: mcpTokenCommand(client, variable) }
     : {};
 }

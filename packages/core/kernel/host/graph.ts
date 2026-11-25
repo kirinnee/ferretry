@@ -3,6 +3,7 @@ import { KERNEL_ONLY_PORTS } from '../contract/bound.ts';
 import { CORE_IDS } from '../contract/ids.ts';
 import { reachFaults } from '../manifest/reach.ts';
 import { publicDoorProblems } from '../manifest/public-door.ts';
+import { revealMintedProblems } from '../manifest/reveal-minted.ts';
 import type { Manifest } from '../manifest/types.ts';
 
 /** Why a plugin is not started (§3.4 checked/resolved, §2.4). Each is a plain sentence for `fy doctor`. */
@@ -19,7 +20,8 @@ export interface GraphRefusal {
     | 'kernel-only-port'
     | 'kernel-event'
     | 'reach'
-    | 'public-door';
+    | 'public-door'
+    | 'reveal-minted';
   readonly sentence: string;
 }
 
@@ -68,6 +70,10 @@ export function planGraph(
   for (const manifest of byId.values()) {
     const problems = publicDoorProblems(manifest);
     if (problems.length > 0) refuse({ plugin: manifest.id, reason: 'public-door', sentence: problems.join('\n') });
+  }
+  for (const manifest of byId.values()) {
+    const problems = revealMintedProblems(manifest);
+    if (problems.length > 0) refuse({ plugin: manifest.id, reason: 'reveal-minted', sentence: problems.join('\n') });
   }
 
   // Providers: one per port; kernel-bound ports only by their named core piece.

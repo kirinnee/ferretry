@@ -49,6 +49,7 @@ async function signIn(w: World): Promise<void> {
 function source(w: World, project: ProjectMcpLaunchShare = NO_PROJECT) {
   const seen: { tokenRequests: number; access: string | undefined }[] = [];
   const launch = new McpLaunchParts({
+    client: 'fy',
     items: () => ITEMS,
     held: async () => {
       seen.push({ tokenRequests: w.provider.tokenRequests.length, access: w.secrets.entries.get(NAMES.access) });
@@ -315,6 +316,7 @@ describe('MCP launch renewal through the daemon half', () => {
       },
       hooks: {} as never,
       kernel: {
+        identity: { binaries: { client: 'fy' } },
         config: { collection: () => ITEMS },
         clock: { nowMs: () => w.clock.at + 60_000 },
         state,
@@ -350,5 +352,27 @@ describe('MCP launch renewal through the daemon half', () => {
     expect(leaks(w.provider, parts, logged)).toEqual([]);
     expect(JSON.stringify(parts)).not.toContain('fake-access-value');
     expect(logged.join('\n')).not.toContain('fake-access-value');
+  });
+});
+
+describe('the headersHelper command', () => {
+  test('runs the client binary the daemon was given, so a renamed product writes its own name', async () => {
+    const w = world({ expiresIn: 3600 });
+    await signIn(w);
+    const launch = new McpLaunchParts({
+      client: 'renamed',
+      items: () => ITEMS,
+      held: async () => new Set(w.secrets.entries.keys()),
+      renewal: w.service,
+      mcpFormat: () => 'json',
+      layered: async () => new Set(ITEMS.keys()),
+      project: async () => NO_PROJECT,
+    });
+
+    const parts = await launch.parts(SPEC);
+
+    expect(parts.find(part => part.kind === 'mcp' && part.name === 'linear')).toMatchObject({
+      config: { headersHelper: `renamed mcp token ${NAMES.variable}` },
+    });
   });
 });

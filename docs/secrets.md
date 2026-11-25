@@ -48,7 +48,7 @@ simply be false, and only redaction would keep the transcript clean.
 resolves it and spawns a child with the value in _that child's_ environment; only the child's output
 comes back, scrubbed. There is nothing in the agent's own process to echo into its conversation.
 
-**There is no route, command or API that returns a secret value.** Not to an agent, not to `fy`, not
+**There is no route, command or API that returns a secret value** (one named, narrow exception: [a running ferret gets its own renewed MCP token](#the-one-exception-a-running-ferret-gets-its-own-renewed-mcp-token)). Not to an agent, not to `fy`, not
 to the browser, not to a debug endpoint. This is enforced by the types rather than by a check: the
 route table is handed a `SecretDirectory`, which has no method that opens ciphertext. Only six
 things hold a `SecretVault` — the redactor, the use executor, the fleet launch environment that
@@ -1666,8 +1666,10 @@ Claude ferret the renewed access token of an MCP server its own launch already h
   it adds nothing beyond the documented GAP ([mcp-oauth.md](mcp-oauth.md#what-this-does-not-protect-against): an agent
   can read its own environment). It extends that boundary in time (the renewed token), not in kind.
 - **One Vault operation, for what the caller itself wrote.** The Vault has no general getter and none may be added.
-  `VaultApi.mintedValue(name)` is the single exception: it exists only for a plugin whose manifest declares
-  `permissions.revealMinted` (MCP alone), and it answers only a secret the Vault's own mint ledger says THAT plugin wrote the
+  `VaultApi.mintedValue(name)` is the single exception: it is not a member of `VaultApi` at all
+  (the type `MintedValueReader`, read through `mintedValueOf`) and exists only for a plugin whose manifest declares
+  `permissions.revealMinted`, which the kernel allows to MCP alone (`REVEAL_MINTED_PLUGINS`: any other plugin that declares it
+  is refused when it is defined and when the daemon boots, and the Vault hands the method to no other id). It answers only a secret the Vault's own mint ledger says THAT plugin wrote the
   current value of (the same word `fetchMinted` takes, [above](#a-secret-a-plugin-minted-placed-on-its-request-by-the-vault)).
   An owner's value, another plugin's, one replaced since and a name merely declared answer nothing; a plugin without the
   permission, and the core, are handed no such method. It gives MCP back a token MCP itself received from the provider and

@@ -4,12 +4,14 @@
  *
  * - the real `fyd` (every real plugin) on a temp home, with a machine MCP server signed in through the real sign-in
  *   routes against a FAKE OAuth provider on loopback (ports 7480–7499);
- * - the real `claude` CLI in a temp HOME and CLAUDE_CONFIG_DIR, whose server entry is the one the launch writes
+ * - the real `claude` CLI in a SCRUBBED temp HOME (no CLAUDE_CONFIG_DIR, no CODEX_HOME, nothing of the caller's own CLI
+ *   configuration is read), whose server entry is the one the launch writes
  *   (`headersHelper: fy mcp token <VARIABLE>`), connecting to that provider's MCP endpoint;
  * - the real `fy` as the ferret, the owner and other ferrets.
  *
  * Fake tokens only, minted by the fake provider. The Claude child gets a SCRUBBED environment (a session's own
- * CLAUDE_CONFIG_DIR and credentials never reach it).
+ * CLAUDE_CONFIG_DIR and credentials never reach it). The ONE test that spawns the real `claude` is skipped where the CLI is
+ * not installed (CI); the `fy` and HTTP tests run everywhere.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -87,12 +89,12 @@ afterAll(async () => {
 async function claudeConnects(ferret: string): Promise<string> {
   const home = join(scratch, `claude-${ferret}-${String(Date.now())}`);
   const bin = join(home, 'bin');
-  await mkdir(join(home, '.claude'), { recursive: true });
+  await mkdir(home, { recursive: true });
   await mkdir(bin, { recursive: true });
   await writeFile(join(bin, 'fy'), `#!/bin/sh\nexec ${process.execPath} ${FY} "$@"\n`);
   await chmod(join(bin, 'fy'), 0o755);
   await writeFile(
-    join(home, '.claude', '.claude.json'),
+    join(home, '.claude.json'),
     JSON.stringify({
       hasCompletedOnboarding: true,
       mcpServers: {
@@ -100,7 +102,7 @@ async function claudeConnects(ferret: string): Promise<string> {
           type: 'http',
           url: provider.serverUrl,
           headers: { Authorization: `Bearer \${${variable}}` },
-          headersHelper: mcpTokenCommand(variable),
+          headersHelper: mcpTokenCommand('fy', variable),
         },
       },
     }),
@@ -113,7 +115,6 @@ async function claudeConnects(ferret: string): Promise<string> {
     env: {
       PATH: `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}`,
       HOME: home,
-      CLAUDE_CONFIG_DIR: join(home, '.claude'),
       TMPDIR: process.env.TMPDIR ?? '/tmp',
       LANG: 'C.UTF-8',
       DISABLE_AUTOUPDATER: '1',
@@ -135,27 +136,31 @@ async function claudeConnects(ferret: string): Promise<string> {
 }
 
 describe('a running Claude ferret and its signed-in MCP server, with no restart', () => {
-  test('Claude runs the headersHelper and the server sees a FRESH token, not the launch-time one, each time it rotates', async () => {
-    const before = provider.bearersSeen.length;
-    const refreshes = provider.tokenRequests.length;
+  test.skipIf(Bun.which('claude') === null)(
+    '(needs the real claude CLI; skipped where it is not installed) Claude runs the headersHelper and the server sees a FRESH token, not the launch-time one, each time it rotates',
+    async () => {
+      const before = provider.bearersSeen.length;
+      const refreshes = provider.tokenRequests.length;
 
-    const first = await claudeConnects('f1');
-    const second = await claudeConnects('f1');
+      const first = await claudeConnects('f1');
+      const second = await claudeConnects('f1');
 
-    // The helper asked the daemon, which renewed the sign-in at the provider (a refresh grant) before answering.
-    const grants = provider.tokenRequests.slice(refreshes).map(form => form.get('grant_type'));
-    expect(grants.length).toBeGreaterThanOrEqual(2);
-    expect(new Set(grants)).toEqual(new Set(['refresh_token']));
-    const seen = provider.bearersSeen.slice(before);
-    expect(seen.length).toBeGreaterThan(0);
-    // Never the token the ferret was launched with: the helper's header replaced the static one…
-    expect(seen).not.toContain(staleToken);
-    // …every token it presented was issued by the provider AFTER the sign-in, and the second run's differs from the first's.
-    for (const bearer of seen) expect(provider.issued).toContain(bearer);
-    expect(new Set(seen).size).toBeGreaterThanOrEqual(2);
-    expect(first).toContain('linear');
-    expect(second).toContain('linear');
-  }, 120_000);
+      // The helper asked the daemon, which renewed the sign-in at the provider (a refresh grant) before answering.
+      const grants = provider.tokenRequests.slice(refreshes).map(form => form.get('grant_type'));
+      expect(grants.length).toBeGreaterThanOrEqual(2);
+      expect(new Set(grants)).toEqual(new Set(['refresh_token']));
+      const seen = provider.bearersSeen.slice(before);
+      expect(seen.length).toBeGreaterThan(0);
+      // Never the token the ferret was launched with: the helper's header replaced the static one…
+      expect(seen).not.toContain(staleToken);
+      // …every token it presented was issued by the provider AFTER the sign-in, and the second run's differs from the first's.
+      for (const bearer of seen) expect(provider.issued).toContain(bearer);
+      expect(new Set(seen).size).toBeGreaterThanOrEqual(2);
+      expect(first).toContain('linear');
+      expect(second).toContain('linear');
+    },
+    120_000,
+  );
 
   test('fy mcp token, as the ferret itself, prints exactly the headers object', async () => {
     const ran = await daemon.fy('f1', ['mcp', 'token', variable]);
@@ -165,6 +170,21 @@ describe('a running Claude ferret and its signed-in MCP server, with no restart'
     const headers = ran.json as { Authorization: string };
     expect(Object.keys(headers)).toEqual(['Authorization']);
     expect(provider.issued).toContain(headers.Authorization.replace(/^Bearer /u, ''));
+  });
+});
+
+describe('the answer is never cached', () => {
+  test('the ferret’s own answer carries Cache-Control: no-store', async () => {
+    const fy = daemon.environment('f1');
+
+    const answered = await fetch(`${fy.FY_URL}/v1/ferrets/f1/mcp/token`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${fy.FY_SESSION_TOKEN as string}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ variable }),
+    });
+
+    expect(answered.status).toBe(200);
+    expect(answered.headers.get('cache-control') ?? '').toContain('no-store');
   });
 });
 
@@ -217,10 +237,14 @@ describe('nobody else gets a ferret’s token', () => {
   });
 
   test('a ferret cannot name a variable of the right shape for a server it never had', async () => {
+    const refreshes = provider.tokenRequests.length;
+
     const ran = await daemon.fy('f1', ['mcp', 'token', 'FY_MCP_NOPE_0123456789ABCDEF_TOKEN']);
 
     expect(ran.code).toBe(1);
     expect(ran.out).toBe('');
+    // …and the refusal started no provider work at all: the fake provider heard nothing.
+    expect(provider.tokenRequests.length).toBe(refreshes);
   });
 
   test('no fake token the provider ever issued is in the security log', async () => {

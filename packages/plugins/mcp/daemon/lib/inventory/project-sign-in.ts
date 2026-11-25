@@ -181,7 +181,11 @@ export class ProjectMcpLaunch {
   }
 
   /** {@link forLaunch}'s whole answer: the local-scope entries (handed on as `mcp` launch parts) as well. */
-  async share(agent: string, cwd: string): Promise<ProjectMcpLaunchShare> {
+  async share(
+    agent: string,
+    cwd: string,
+    options: { readonly renew: boolean } = { renew: true },
+  ): Promise<ProjectMcpLaunchShare> {
     const account = (await this.deps.accounts()).find(
       candidate => candidate.wrapper === agent || candidate.runtime === agent,
     );
@@ -201,7 +205,8 @@ export class ProjectMcpLaunch {
     // A harness that takes no project server is handed nothing and renews nothing for it (today's Codex).
     if (approvals?.state === 'not-taken') return NOTHING_TO_ADD;
     // Renewal on USE: the only moment a token is refreshed is the moment a launch needs it.
-    if (named.length > 0) await this.deps.renewal?.refreshForLaunch(named.map(entry => entry.names.access));
+    if (options.renew && named.length > 0)
+      await this.deps.renewal?.refreshForLaunch(named.map(entry => entry.names.access));
     const held = named.length === 0 ? new Set<SecretName>() : await this.deps.secrets.held();
     // FAIL CLOSED: the harness's answer decides every binding; no answer (off, unreadable) binds nothing.
     const decided = approvals?.state === 'read' ? approvals.servers : undefined;
