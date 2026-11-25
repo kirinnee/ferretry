@@ -271,7 +271,7 @@ export default implementDaemon(manifest, {
         send: async (loginId, variable, hosts, request, placement) =>
           await needs.logins.authorizeFetch(loginId as LoginId, variable, hosts, request, placement),
       },
-      spend: new AnalyticsTranscriptSpend(ingestion),
+      spend: new AnalyticsTranscriptSpend(ingestion, nowMs),
       clock: { nowMs },
     });
 

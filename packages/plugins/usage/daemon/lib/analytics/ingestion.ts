@@ -330,6 +330,14 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
     return await next;
   }
 
+  /**
+   * The stored rows as they were priced when ingested: one read of the store, and no re-pricing at today's rates (which
+   * {@link read} does for every row). For a caller that sums what the rows already say.
+   */
+  rawRows(): readonly AnalyticsRawSession[] {
+    return this.parts.store.rows().map(row => row.raw);
+  }
+
   /** The stored rows and an honest account of what they are. */
   read(): AnalyticsIndexRead {
     const status = this.parts.store.status();
