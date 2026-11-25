@@ -1,5 +1,5 @@
 import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
-import { GatePort } from '@ferretry/core-gate/contract';
+import { GatePort, STEP_UP_ACTS } from '@ferretry/core-gate/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { AgentControlPort, FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { browsersLoosens } from './contract/config-loosens.ts';
@@ -113,7 +113,7 @@ export default definePlugin({
       route('POST /v1/browser/proxy/test', {
         minimum: 'operator',
         caller: 'person',
-        capability: CONFIGURE.browser,
+        capability: { ...CONFIGURE.browser, act: STEP_UP_ACTS.testBrowserProxy },
         noStore: true,
         audit: { record: AUDIT.browserProxyTested },
         guard: GUARD_NONE,

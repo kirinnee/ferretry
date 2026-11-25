@@ -10,11 +10,10 @@ import { type ReactNode, useId, useState } from 'react';
 import { PAIRING_DEVICE_NAME_MAX_LENGTH } from '../../../contract/index.ts';
 import { PairButton } from './pairing-back.tsx';
 
-/** THE SAME PROGRESS BAR the setup pages draw (`StepProgress`), so the first screens are steps of the same run, not a different thing. */
+/** THE SAME PROGRESS BAR the setup pages draw (`StepProgress`): the two stages of PAIRING; the setup flow counts its own steps after the hand-off, so no third segment that is never drawn here. */
 const PAIR_SEGMENTS = [
   { id: 'pair', label: 'Pair' },
   { id: 'connected', label: 'Connected' },
-  { id: 'setup', label: 'Set up' },
 ] as const;
 const PROGRESS_AT: Readonly<Record<string, string | undefined>> = {
   // The first screen ("Connect a daemon": scan, upload or paste a link) is step 1 too.
