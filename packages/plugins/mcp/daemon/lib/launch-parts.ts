@@ -97,14 +97,14 @@ export class McpLaunchParts implements LaunchPartSource {
     const items = new Map([...this.deps.items()].filter(([name]) => layered.has(name)));
     // A harness whose MCP format this plugin does not write gets no servers from it: never another harness's.
     const servers = isKnownHarnessKey(spec.harness) ? mcpParts(items, spec.harness) : [];
-    const signedIn = new Map<string, McpOAuthSecretNames>();
+    const signedIn = new Map<string, { readonly names: McpOAuthSecretNames; readonly url: string }>();
     const named = new Set<SecretName>();
     for (const part of servers) {
       const item = items.get(part.name);
       if (item === undefined) continue;
       if (item.auth === 'oauth' && item.url !== undefined) {
         const names = mcpOAuthSecretNames(part.name, item.url);
-        signedIn.set(part.name, names);
+        signedIn.set(part.name, { names, url: item.url });
         named.add(names.access);
       }
       for (const value of Object.values(item.env ?? {})) for (const name of secretReferencesIn(value)) named.add(name);
@@ -117,13 +117,13 @@ export class McpLaunchParts implements LaunchPartSource {
     const held = signedIn.size === 0 ? new Set<SecretName>() : await this.deps.held();
     const env: Record<string, string> = { ...project.env };
     const parts: LaunchPart[] = servers.map(part => {
-      const names = signedIn.get(part.name);
-      if (names === undefined || !held.has(names.access)) return part;
-      env[names.variable] = optionalSecretReference(names.access);
-      const url = items.get(part.name)?.url;
-      return url === undefined || format === undefined
+      const server = signedIn.get(part.name);
+      if (server === undefined || !held.has(server.names.access)) return part;
+      env[server.names.variable] = optionalSecretReference(server.names.access);
+      // A harness with no MCP format on record is written no sign-in it could not read: the entry stays as configured.
+      return format === undefined
         ? part
-        : { ...part, config: signedInConfig(url, names.variable, format) };
+        : { ...part, config: signedInConfig(server.url, server.names.variable, format) };
     });
     for (const [name, server] of Object.entries(project.servers))
       parts.push({

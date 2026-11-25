@@ -107,6 +107,25 @@ describe('a signed-in machine MCP server, rendered for the harness that reads it
     expect(codex.servers[0]).toMatchObject({ transport: 'http', url: SERVER, bearerVariable: NAMES.variable });
   });
 
+  test('a harness with no MCP format on record keeps the entry as configured, and still binds the variable', async () => {
+    const launch = new McpLaunchParts({
+      items: () => ITEMS,
+      held: async () => new Set([NAMES.access]),
+      renewal: { refreshForLaunch: async () => {} },
+      mcpFormat: () => undefined,
+      layered: async () => new Set(ITEMS.keys()),
+      project: async () => ({ root: '', servers: {}, env: {} }),
+    });
+
+    const parts = await launch.parts(specFor('claude-code'));
+
+    expect(configOf(parts, 'linear')).toEqual({ url: SERVER, auth: 'oauth' });
+    expect(parts.find(part => part.kind === 'env')).toEqual({
+      kind: 'env',
+      env: { [NAMES.variable]: optionalSecretReference(NAMES.access) },
+    });
+  });
+
   test('a server nobody signed in to, and a server Ferretry starts, are unchanged', async () => {
     const parts = await partsFor('claude-code', []);
 
