@@ -9,6 +9,7 @@ import {
   allSeen,
   auditActorWords,
   auditDetailWords,
+  auditEventWords,
   auditOutcomeBadge,
   deviceLabel,
   devicesNotSeen,
@@ -33,6 +34,24 @@ const device = (id: string, createdAt: string, name = id): PairedDevice => ({
   lastSeenAt: createdAt as Instant,
   idleExpiresAt: createdAt as Instant,
   grants: FULL_DEVICE_GRANTS,
+});
+
+describe('security log words for a plugin own kinds', () => {
+  it('has a sentence for every Claude connector kind, and shows an unheard-of kind by its raw name', () => {
+    for (const kind of [
+      'connector.client-registered',
+      'connector.grant-approved',
+      'connector.grant-denied',
+      'connector.grant-revoked',
+      'connector.refresh-reused',
+      'connector.tool',
+    ]) {
+      expect(auditEventWords(kind), kind).not.toBe(kind);
+      expect(auditEventWords(kind), kind).toMatch(/^A (used )?Claude connector /u);
+    }
+    expect(auditEventWords('device.paired')).toBe('A device was paired');
+    expect(auditEventWords('connector.unheard-of')).toBe('connector.unheard-of');
+  });
 });
 
 describe('security log words', () => {

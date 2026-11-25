@@ -27,6 +27,10 @@ import {
   type ConnectorStore,
   OAuthError,
   type PendingAuthorization,
+  CANCELLED_FOR_SAFETY_TEXT,
+  DEAD_CONNECTION_TEXT,
+  INVALID_CLIENT_TEXT,
+  RECONNECT_HINT,
   base64url,
   canonicalResource,
   digest,
@@ -159,9 +163,22 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     const chars = Array.from(this.ports.crypto.randomBytes(6), n => alphabet[n % alphabet.length]).join('');
     return `${chars.slice(0, 3)}-${chars.slice(3)}`;
   }
+  /**
+   * A sign-in or code is good only under the trust it was issued under. The origin and the callback allow-list are
+   * both read LIVE, so a new `publicUrl`, a re-provisioned tunnel or a callback removed from `extraRedirectUris`
+   * ends every flow already in the air — at the next poll, approval or redemption, whichever comes first.
+   */
+  private trusted(issued: { readonly issuer: string; readonly redirectUri: string }): boolean {
+    return issued.issuer === this.ports.endpoints.issuer && this.redirectAllowed(issued.redirectUri);
+  }
+  /** Still waiting for a decision, unexpired and trusted — read synchronously, right where it is acted on. */
+  private approvable(request: PendingAuthorization): boolean {
+    return !request.decision && Date.parse(request.view.expiresAt) > this.now() && this.trusted(request);
+  }
   private prune(): void {
     for (const [key, request] of this.ports.memory.pending) {
-      if (Date.parse(request.view.expiresAt) <= this.now()) this.ports.memory.pending.delete(key);
+      if (Date.parse(request.view.expiresAt) <= this.now() || !this.trusted(request))
+        this.ports.memory.pending.delete(key);
     }
     // Used-code tombstones survive expiry for the live grant, so replay still revokes that grant.
     for (const [key, code] of this.ports.memory.codes) {
@@ -364,6 +381,9 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
           'temporarily_unavailable',
           'Too many sign-ins are waiting for approval. Please try again in a few minutes.',
           503,
+          undefined,
+          undefined,
+          'busy',
         );
       this.evictOldest(p => sourceOf(p) === heaviest[0]);
     }
@@ -375,9 +395,24 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     if (!arrival.admitted) this.admit('authorize', source);
     await this.ready();
     const client = this.ports.memory.index.client(input.client_id);
-    if (!client) throw new OAuthError('invalid_request', 'Unknown client.');
+    if (!client)
+      throw new OAuthError(
+        'invalid_request',
+        `Ferretry does not recognise this connection request. ${RECONNECT_HINT}`,
+        400,
+        undefined,
+        undefined,
+        'unrecognised',
+      );
     if (!client.redirectUris.includes(input.redirect_uri) || !this.redirectAllowed(input.redirect_uri))
-      throw new OAuthError('invalid_request', 'The redirect URI does not exactly match the registered client.');
+      throw new OAuthError(
+        'invalid_request',
+        'The redirect URI does not exactly match the registered client.',
+        400,
+        undefined,
+        undefined,
+        'unrecognised',
+      );
     const scopes = this.redirecting(input, () => {
       if (!client.grantTypes.includes('authorization_code'))
         throw new OAuthError('unauthorized_client', 'This client may not request authorization codes.');
@@ -409,6 +444,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     this.ports.memory.pending.set(handleDigest, {
       handleDigest,
       clientId: client.id,
+      issuer: this.ports.endpoints.issuer,
       source,
       redirectUri: input.redirect_uri,
       state: input.state,
@@ -446,10 +482,15 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       const found = this.findRequest(id);
       if (!found) return { ok: false, code: 'not_found', message: 'No matching sign-in.' };
       const [key, request] = found;
-      if (Date.parse(request.view.expiresAt) <= this.now())
+      // A sign-in whose origin or callback is no longer trusted is dead: nothing is approved for the new trust.
+      if (Date.parse(request.view.expiresAt) <= this.now() || !this.trusted(request))
         return { ok: false, code: 'expired', message: 'This sign-in expired.' };
       if (request.decision) return { ok: false, code: 'already_decided', message: 'This sign-in was already decided.' };
       const state = await this.ports.store.load();
+      // The load was an await: judge the request again, as it stands now, and write only if it is still the same
+      // live, undecided, trusted sign-in. A request pruned or re-decided meanwhile is never republished.
+      if (this.ports.memory.pending.get(key) !== request || !this.approvable(request))
+        return { ok: false, code: 'expired', message: 'This sign-in expired.' };
       const grant: ConnectorGrant = {
         id: this.id('cg_'),
         clientId: request.clientId,
@@ -463,6 +504,12 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         usedRefresh: [],
       };
       await this.persist({ ...state, grants: [...state.grants, grant] });
+      // The write was an await too. If the request vanished or lost its trust inside it, the approval is void: the
+      // grant just written is taken back out, nothing is republished and no approval is audited.
+      if (this.ports.memory.pending.get(key) !== request || !this.trusted(request)) {
+        await this.persist(state);
+        return { ok: false, code: 'expired', message: 'This sign-in expired.' };
+      }
       this.ports.memory.pending.set(key, { ...request, decision: 'approved', grantId: grant.id });
       await this.audit({
         kind: 'connector.grant.approved',
@@ -478,7 +525,8 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       const found = this.findRequest(id);
       if (!found) return { ok: false, code: 'not_found', message: 'No matching sign-in.' };
       const [key, request] = found;
-      if (Date.parse(request.view.expiresAt) <= this.now())
+      // A sign-in whose origin or callback is no longer trusted is dead: nothing is approved for the new trust.
+      if (Date.parse(request.view.expiresAt) <= this.now() || !this.trusted(request))
         return { ok: false, code: 'expired', message: 'This sign-in expired.' };
       if (request.decision) return { ok: false, code: 'already_decided', message: 'This sign-in was already decided.' };
       this.ports.memory.pending.set(key, { ...request, decision: 'denied' });
@@ -505,25 +553,50 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
   // read-scoped: none — answers a match code, a client name and a redirect address, never pane text a redaction scope covers
   async waitPage(handle: string, arrival: Arrival = {}): Promise<WaitResult> {
     if (!arrival.admitted) this.admit('wait', arrival.source);
-    this.prune();
     const key = await digest(this.ports.crypto, handle);
+    this.prune();
+    // Every digest this poll needs is computed BEFORE trust is judged, so the judgement and the write that follows
+    // it share one synchronous stretch and no live trust change can fall between them.
+    const code = this.random();
+    const codeDigest =
+      this.ports.memory.pending.get(key)?.decision === 'approved' ? await digest(this.ports.crypto, code) : undefined;
+    this.prune();
     const request = this.ports.memory.pending.get(key);
-    if (!request) throw new OAuthError('invalid_request', 'This sign-in is unknown or expired. Start again.');
-    if (!request.decision) return { kind: 'pending', pending: structuredClone(request.view) };
+    if (!request || !this.trusted(request))
+      throw new OAuthError(
+        'invalid_request',
+        'This sign-in is unknown or expired. Start again.',
+        400,
+        undefined,
+        undefined,
+        'sign_in_gone',
+      );
+    // Approved while the digest ran: no code was prepared, so answer as still pending; the next poll redirects.
+    if (!request.decision || (request.decision === 'approved' && codeDigest === undefined))
+      return { kind: 'pending', pending: structuredClone(request.view) };
     // The handle is spent before anything else can run, so two polls never both mint a code.
     this.ports.memory.pending.delete(key);
     const url = new URL(request.redirectUri);
     if (request.state !== undefined) url.searchParams.set('state', request.state);
-    url.searchParams.set('iss', this.ports.endpoints.issuer);
-    if (request.decision === 'denied') url.searchParams.set('error', 'access_denied');
-    else {
+    url.searchParams.set('iss', request.issuer);
+    if (request.decision === 'denied') {
+      url.searchParams.set('error', 'access_denied');
+      url.searchParams.set('error_description', `You declined this connection in Ferretry. ${RECONNECT_HINT}`);
+    } else {
       // An approval persisted before it was recorded, so the index already knows whether its grant is live.
-      if (!request.grantId || !this.ports.memory.index.grantLive(request.grantId))
-        throw new OAuthError('invalid_request', 'The approved grant is no longer valid.');
-      const code = this.random();
-      this.ports.memory.codes.set(await digest(this.ports.crypto, code), {
+      if (!request.grantId || !this.ports.memory.index.grantLive(request.grantId) || codeDigest === undefined)
+        throw new OAuthError(
+          'invalid_request',
+          'The approved grant is no longer valid.',
+          400,
+          undefined,
+          undefined,
+          'cancelled',
+        );
+      this.ports.memory.codes.set(codeDigest, {
         grantId: request.grantId,
         clientId: request.clientId,
+        issuer: request.issuer,
         redirectUri: request.redirectUri,
         challenge: request.challenge,
         expiresAt: this.now() + 60_000,
@@ -537,7 +610,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
   /** Authenticates against the index, so a bad client never reaches the queue. */
   private async authenticate(input: Pick<ExchangeInput, 'client_id' | 'client_secret' | 'authMethod'>) {
     const client = this.ports.memory.index.client(input.client_id);
-    if (!client) throw new OAuthError('invalid_client', 'Client authentication failed.', 401);
+    if (!client) throw new OAuthError('invalid_client', INVALID_CLIENT_TEXT, 401);
     const method = input.authMethod ?? (input.client_secret === undefined ? 'none' : 'client_secret_post');
     if (
       method !== client.authMethod ||
@@ -546,7 +619,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
           !client.secretDigest ||
           !secretsMatch(await digest(this.ports.crypto, input.client_secret), client.secretDigest)))
     ) {
-      throw new OAuthError('invalid_client', 'Client authentication failed.', 401);
+      throw new OAuthError('invalid_client', INVALID_CLIENT_TEXT, 401);
     }
     return client;
   }
@@ -584,11 +657,11 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       // A credential the daemon has never issued to this client is refused here, without taking a queue slot.
       if (grantType === 'authorization_code') {
         const code = this.ports.memory.codes.get(await digest(this.ports.crypto, input.code ?? ''));
-        if (!code || code.clientId !== client.id) throw new OAuthError('invalid_grant', 'Invalid authorization code.');
+        if (!code || code.clientId !== client.id) throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       } else {
         const known = this.ports.memory.index.token(await digest(this.ports.crypto, input.refresh_token ?? ''));
         if (!known || known.kind === 'access' || known.clientId !== client.id)
-          throw new OAuthError('invalid_grant', 'Invalid refresh token.');
+          throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       }
       // The success cap is judged inside the serialized write, immediately before minting (see redeem): a known
       // spent refresh token must still revoke its grant and be audited when the budget is full, and a burst of
@@ -610,60 +683,70 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     this.prune();
     const state = await this.ports.store.load();
     const client = state.clients.find(c => c.id === clientId);
-    if (!client) throw new OAuthError('invalid_client', 'Client authentication failed.', 401);
+    if (!client) throw new OAuthError('invalid_client', INVALID_CLIENT_TEXT, 401);
+    // Every digest the mint needs is computed HERE, before any trust is judged. From the judgement below to the
+    // write that commits it there is no await, so a live trust change can never fall between the two, and what is
+    // issued is pinned to the origin that judgement validated rather than read again afterwards.
+    const issuing = await this.mintMaterial(client, input, grantType);
     let grant: ConnectorGrant | undefined;
     let scopes: readonly ConnectorScope[];
+    /** The audience the trust check validated; the pair is issued for exactly this and never for a re-read one. */
+    let audience: string;
     /** The refresh token being rotated, and (on a retry inside its window) the pair its first rotation issued. */
     let rotating: { readonly used: UsedRefresh; readonly retry: boolean } | undefined;
     if (grantType === 'authorization_code') {
-      const key = await digest(this.ports.crypto, input.code ?? '');
+      const key = issuing.presented;
       const code = this.ports.memory.codes.get(key);
       if (!code || code.clientId !== client.id || code.redirectUri !== input.redirect_uri)
-        throw new OAuthError('invalid_grant', 'Invalid authorization code.');
+        throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       grant = state.grants.find(g => g.id === code.grantId);
       if (code.used) {
         if (grant) await this.revokeGrant(state, grant, 'code-reuse', 'reuse-detected');
-        throw new OAuthError('invalid_grant', 'Authorization code was already used.');
+        throw new OAuthError('invalid_grant', CANCELLED_FOR_SAFETY_TEXT);
       }
       if (
         !grant ||
         grant.revokedAt ||
+        !this.trusted(code) ||
         code.expiresAt <= this.now() ||
-        !input.code_verifier ||
-        !/^[A-Za-z0-9._~-]{43,128}$/.test(input.code_verifier) ||
-        !secretsMatch(base64url(await this.ports.crypto.sha256(input.code_verifier)), code.challenge)
+        issuing.challenge === undefined ||
+        !secretsMatch(issuing.challenge, code.challenge)
       )
-        throw new OAuthError('invalid_grant', 'Invalid or expired authorization code or verifier.');
+        throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
+      audience = this.ports.endpoints.resource;
+      this.target(input.resource);
       // A refused mint must not burn the code, so the cap is judged before it is spent.
       this.ports.limiter.check(budget, CLIENT_TOKENS_PER_MINUTE);
       // Spend before any await that might fail; even failed persistence cannot make a code reusable.
       this.ports.memory.codes.set(key, { ...code, used: true });
       scopes = grant.scopes;
     } else {
-      const key = await digest(this.ports.crypto, input.refresh_token ?? '');
+      const key = issuing.presented;
       grant = state.grants.find(
         g =>
           g.clientId === client.id &&
           (g.refresh.some(t => t.digest === key) || g.usedRefresh.some(u => u.digest === key)),
       );
-      if (!grant || grant.revokedAt) throw new OAuthError('invalid_grant', 'Invalid refresh token.');
+      if (!grant || grant.revokedAt) throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
       const used = grant.usedRefresh.find(u => u.digest === key);
       let token: ConnectorGrant['refresh'][number] | undefined;
       if (used) {
         // Past its own expiry a rotated-away token is just an invalid one; it is not evidence of theft.
-        if (used.expiresAt <= this.now()) throw new OAuthError('invalid_grant', 'Invalid or expired refresh token.');
+        if (used.expiresAt <= this.now()) throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
         // A lost response: the token rotated moments ago and nothing has used its successor yet.
         const successor = this.retryable(grant, used);
         if (!successor) {
           await this.revokeGrant(state, grant, 'refresh-reuse', 'reuse-detected');
           await this.audit({ kind: 'connector.refresh.reused', grantId: grant.id });
-          throw new OAuthError('invalid_grant', 'Refresh token was already used.');
+          throw new OAuthError('invalid_grant', CANCELLED_FOR_SAFETY_TEXT);
         }
         token = successor;
         rotating = { used, retry: true };
       } else token = grant.refresh.find(t => t.digest === key);
       if (!token || token.expiresAt <= this.now() || token.audience !== this.ports.endpoints.resource)
-        throw new OAuthError('invalid_grant', 'Invalid or expired refresh token.');
+        throw new OAuthError('invalid_grant', DEAD_CONNECTION_TEXT);
+      audience = token.audience;
+      this.target(input.resource);
       scopes =
         input.scope === undefined
           ? token.scopes
@@ -690,11 +773,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     }
     // Every reuse decision above has been taken; only a real mint spends the client's success budget.
     if (grantType === 'refresh_token') this.ports.limiter.check(budget, CLIENT_TOKENS_PER_MINUTE);
-    const access = this.random('fyc_at_');
-    const refresh = client.grantTypes.includes('refresh_token') ? this.random('fyc_rt_') : undefined;
-    const audience = this.ports.endpoints.resource;
-    const accessDigest = await digest(this.ports.crypto, access);
-    const refreshDigest = refresh ? await digest(this.ports.crypto, refresh) : undefined;
+    const { access, refresh, accessDigest, refreshDigest } = issuing;
     // Rotation is recorded with the digests of what it issued, so a retry can supersede exactly that pair.
     const rotated: UsedRefresh | undefined = rotating
       ? {
@@ -728,6 +807,37 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       expires_in: 3600,
       refresh_token: refresh,
       scope: scopes.join(' '),
+    };
+  }
+
+  /**
+   * Everything a redemption must digest, computed before trust is judged: the presented code or refresh token, the
+   * PKCE challenge of the presented verifier, and the pair that would be issued (discarded if the judgement refuses).
+   */
+  private async mintMaterial(
+    client: ConnectorClient,
+    input: ExchangeInput,
+    grantType: 'authorization_code' | 'refresh_token',
+  ) {
+    const presented = await digest(
+      this.ports.crypto,
+      (grantType === 'authorization_code' ? input.code : input.refresh_token) ?? '',
+    );
+    const challenge =
+      grantType === 'authorization_code' &&
+      input.code_verifier !== undefined &&
+      /^[A-Za-z0-9._~-]{43,128}$/.test(input.code_verifier)
+        ? base64url(await this.ports.crypto.sha256(input.code_verifier))
+        : undefined;
+    const access = this.random('fyc_at_');
+    const refresh = client.grantTypes.includes('refresh_token') ? this.random('fyc_rt_') : undefined;
+    return {
+      presented,
+      challenge,
+      access,
+      refresh,
+      accessDigest: await digest(this.ports.crypto, access),
+      refreshDigest: refresh ? await digest(this.ports.crypto, refresh) : undefined,
     };
   }
 

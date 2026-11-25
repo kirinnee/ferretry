@@ -17,6 +17,16 @@ import type { AuditEvent } from '../shell-grants.ts';
 /** One record as `GET /v1/audit` answers it (Gate's view omits the stored `format`). */
 type AuditRecord = AuditView['records'][number];
 
+/** What a plugin's own kinds are called to a person (the Claude connector's: `packages/plugins/connector`). */
+const PLUGIN_AUDIT_EVENT_WORDS: Readonly<Record<string, string>> = {
+  'connector.client-registered': 'A Claude connector client registered',
+  'connector.grant-approved': 'A Claude connector sign-in was approved',
+  'connector.grant-denied': 'A Claude connector sign-in was turned down',
+  'connector.grant-revoked': 'A Claude connector grant was ended',
+  'connector.refresh-reused': 'A used Claude connector refresh token was presented again, so its grant was ended',
+  'connector.tool': 'A Claude connector tool was called',
+};
+
 /** Every event the log can hold, as a sentence. Closed over the wire’s own list, so a new kind fails typecheck here. */
 export const AUDIT_EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'device.paired': 'A device was paired',
@@ -88,6 +98,10 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'phone-approval.refused': 'A sign-in to approve on your phone was refused: "Not me"',
   'phone-approval.settled': 'A sign-in to approve on your phone ended',
 };
+
+/** A sentence for any event the log holds: a core kind, a plugin's own kind, or (unknown to this build) its raw name. */
+export const auditEventWords = (event: string): string =>
+  (AUDIT_EVENT_WORDS as Readonly<Record<string, string>>)[event] ?? PLUGIN_AUDIT_EVENT_WORDS[event] ?? event;
 
 /**
  * The devices whose PAIRING a list of records shows: what the Security panel may mark as seen.

@@ -6,6 +6,7 @@
  * handed out exactly once — in the response that minted it — and is otherwise only ever HASHED. No type here can
  * carry one back to a caller, a log or a journal.
  */
+import type { ApiRequest, ApiResponse } from '@ferretry/kernel/contract';
 import type { ConnectorGrantView, ConnectorPendingView, ConnectorScope } from '../../contract/index.ts';
 
 /**
@@ -93,9 +94,19 @@ export type ConnectorAuditEvent =
        */
       readonly initiator?: ConnectorRevocationInitiator;
     }
-  | { readonly kind: 'connector.refresh.reused'; readonly grantId: string };
+  | { readonly kind: 'connector.refresh.reused'; readonly grantId: string }
+  /** The owner switched the connector on or off (a change to the machine's security, recorded as `security.changed`). */
+  | { readonly kind: 'connector.switched'; readonly enabled: boolean; readonly actor: string };
 
 /** Where those events go. Never throws into a request. */
 export interface ConnectorAuditSink {
   record(event: ConnectorAuditEvent): Promise<void>;
+}
+
+/**
+ * One door handler: answers the requests whose path it owns and `undefined` for any other, so a request no handler
+ * claims is the same 404 as any unrouted path. The OAuth server is one; `/mcp` is the other.
+ */
+export interface ConnectorHttpHandler {
+  handle(request: ApiRequest): Promise<ApiResponse | undefined>;
 }

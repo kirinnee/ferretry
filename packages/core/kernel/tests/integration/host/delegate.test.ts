@@ -146,6 +146,57 @@ describe('delegation crosses the real Gate', () => {
     expect((await port().call({ grant: 'invalid' }, { method: 'GET', path: '/v1/ferrets/F12' })).status).toBe(500);
   });
 
+  test('a delegated arrival reaches the API table only: a door route stays unrouted even when its key is allowed', async () => {
+    const w = await gateWorld();
+    const reached: string[] = [];
+    const publicRoute = route('GET /oauth/authorize', {
+      door: 'public',
+      minimum: 'none',
+      caller: 'any',
+      audit: { skip: 'fixture' },
+      guard: { none: 'fixture names only' },
+    });
+    const handle = async (call: CallContext) => {
+      reached.push(call.request.path);
+      return jsonResponse({ reached: call.request.path });
+    };
+    const dispatcher = new Dispatcher(
+      { admission: () => w.gate, outputGuard: () => undefined, version: '5.0.0' },
+      {
+        routes: [
+          {
+            ...publicRoute,
+            owner: { ...owner, plugin: 'connector', title: 'Connector' } as MountedRoute['owner'],
+            handle,
+          },
+          { ...read, owner: owner as MountedRoute['owner'], handle },
+        ],
+        sockets: [],
+        memberRoutes: [],
+      },
+    );
+    const refused: string[] = [];
+    const delegated = (path: string) => ({
+      method: 'GET',
+      path,
+      query: new Map(),
+      headers: new Map(),
+      arrival: { kind: 'delegated', by: 'connector', grant } as const,
+      text: async () => '',
+    });
+    // Even with the door route's key on the allow list (a mutant that matched the whole table would serve it), the
+    // delegated arrival is looked up in the API table alone: refused, the handler never run.
+    const delegation = {
+      allowed: new Set([publicRoute.key, read.key]),
+      refused: (key: string) => void refused.push(key),
+    };
+    expect((await dispatcher.dispatch(delegated('/oauth/authorize'), delegation)).status).toBe(500);
+    expect(reached).toEqual([]);
+    expect(refused).toEqual(['GET [unrouted]']);
+    expect((await dispatcher.dispatch(delegated('/v1/ferrets/F12'), delegation)).status).toBe(200);
+    expect(reached).toEqual(['/v1/ferrets/F12']);
+  });
+
   test('the final check precedes the host credential mask', async () => {
     const { w, port } = await fixture(async () => ({
       ...jsonResponse({ before: w.admin }),

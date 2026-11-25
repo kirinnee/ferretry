@@ -93,6 +93,19 @@ describe('GateConnectorAudit', () => {
     });
   });
 
+  it('records a switch as security.changed for the connector, by the person who made it', async () => {
+    should(await recorded({ kind: 'connector.switched', enabled: true, actor: 'device:d1' })).deepEqual({
+      event: 'security.changed',
+      actor: { kind: 'device', deviceId: 'd1' },
+      subject: 'connector',
+      outcome: 'succeeded',
+      detail: { enabled: true },
+    });
+    should((await recorded({ kind: 'connector.switched', enabled: false, actor: 'admin-cli' }))?.actor).deepEqual({
+      kind: 'host',
+    });
+  });
+
   it('never throws into a request when the log cannot write', async () => {
     await new GateConnectorAudit({
       audit: async () => {
