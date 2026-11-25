@@ -39,7 +39,9 @@
  * ## WHEN THE CONNECTOR IS OFF
  *
  * `GET` still answers — `enabled: false` and a sentence saying why and what to do — so `fy connector` and the app can
- * explain it. Approve, deny and revoke answer `409 connector_disabled` with a plain sentence and never touch the acts.
+ * explain it, and still lists the grants that were given: ending access is never harder than giving it, so an owner who
+ * switched the connector off to contain one can revoke it without switching it back on. Approve and deny answer
+ * `409 connector_disabled` with a plain sentence and never touch the acts; revoke works off or on.
  */
 import {
   CONNECTOR_REFUSAL_CODES,
@@ -164,7 +166,9 @@ export function connectorRoutes(subsystem: ConnectorSubsystem): readonly ApiRout
             switchedOn: availability.switchedOn,
             disabledReason: availability.disabledReason,
             pending: [],
-            grants: [],
+            // Granted access is listed — and revocable — whether or not the connector is reachable: an owner who
+            // switched it off to contain a grant must be able to end that grant without switching it back on.
+            grants: [...(await acts.grants().catch(() => []))],
           },
     );
   };
@@ -240,8 +244,7 @@ export function connectorRoutes(subsystem: ConnectorSubsystem): readonly ApiRout
         await parseOptionalBody(context.request, ConnectorActRequestSchema);
         const grantId = ConnectorGrantIdSchema.safeParse(decodeParameter(context.params.get('id') ?? ''));
         if (!grantId.success) return errorResponse(404, 'there is no such grant', CONNECTOR_REFUSAL_CODES.notFound);
-        const availability = await subsystem.availability();
-        if (!availability.enabled) return disabled(availability);
+        // No availability check: ending access is never harder than giving it, off or on.
         const result = await acts.revoke(grantId.data, context.actor ?? 'unknown');
         return result.ok ? jsonResponse(ConnectorGrantViewSchema.parse(result.value)) : refused(result);
       },

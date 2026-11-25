@@ -65,6 +65,8 @@ export interface ConnectorNeeds {
   readonly redactor: TextRedactor;
   /** The built-in tunnel's hostname as an origin (`https://<id>.<zone>`), or `undefined` while it has none. */
   readonly tunnelOrigin: () => string | undefined;
+  /** The `connector` block of the document AS IT IS NOW (not as this boot read it), so a switch-on judges what it would write beside. */
+  readonly readBlock: () => Promise<unknown>;
   /** Writes `connector.enabled` into the operator's document and nothing else. Rejects with a sentence's worth of error. */
   readonly writeEnabled: (enabled: boolean) => Promise<void>;
 }
@@ -190,13 +192,32 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
       return await run;
     };
 
+    /**
+     * Handlers that answer only while the connector is SWITCHED ON. Every surface that serves them (the operator's own
+     * loopback listener, the tunnel's) is given these, so a listener that came up ahead of the switch's commit — or a
+     * request still arriving after an off — is the same 404 as any other path, and an authenticated request already in
+     * flight cannot reach a fleet route after the switch said off (the tools' door below checks it again).
+     */
+    const gated = (inner: readonly ConnectorHttpHandler[]): readonly ConnectorHttpHandler[] =>
+      inner.map(handler => ({ handle: async request => (on ? await handler.handle(request) : undefined) }));
+
     const buildHandlers = async (needsNow: ConnectorListenNeeds): Promise<readonly ConnectorHttpHandler[]> => {
       // A damaged connector.json refuses here, loudly, rather than serving handlers whose every token fails.
       await store.load();
       const mcp = new ConnectorMcpEndpoint({
         verifier: authorityOf(),
         unauthorized: tokenPresented => unauthorizedResponse(endpoints, { tokenPresented }),
-        dispatch: new InProcessConnectorDispatch({ dispatch: needsNow.dispatch, adminToken: needsNow.adminToken }),
+        dispatch: new InProcessConnectorDispatch({
+          dispatch: async request =>
+            on
+              ? await needsNow.dispatch(request)
+              : {
+                  status: 503,
+                  headers: new Map(),
+                  body: JSON.stringify({ error: 'the connector was switched off', code: 'connector_disabled' }),
+                },
+          adminToken: needsNow.adminToken,
+        }),
         toolbox: new ConnectorToolbox({
           daemonGrants: needs.daemonGrants,
           guard: new ConnectorTextGuard(needs.redactor, () => [needsNow.adminToken(), needsNow.wardenToken?.()]),
@@ -208,7 +229,7 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
         newRequestId: () => `connector-${randomUUID()}`,
         serverVersion: daemonVersion,
       });
-      return [new ConnectorOAuthHttp(authorityOf(), endpoints), mcp];
+      return gated([new ConnectorOAuthHttp(authorityOf(), endpoints), mcp]);
     };
 
     /** Brings it up for the current state: handlers always, and the loopback listener when the address is the operator's own. */
@@ -272,6 +293,20 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
 
     const change = async (enabled: boolean): Promise<ConnectorChangeResult> =>
       await serially(async (): Promise<ConnectorChangeResult> => {
+        if (enabled) {
+          // The switch judges the file as it is NOW: an address, port or redirect list the operator changed since this
+          // daemon booted is not what is running, and switching on beside it would publish something they did not ask for.
+          const current = connectorConfiguration(await needs.readBlock().catch(() => undefined));
+          if (current.kind === 'invalid') return { ok: false, message: current.reason };
+          if (JSON.stringify(current.settings) !== JSON.stringify(settings))
+            return {
+              ok: false,
+              message:
+                'The connector settings in config/daemon.json changed after this daemon started. Restart it (fy daemon restart) so they apply, then switch the connector on.',
+            };
+          if (listenNeeds === undefined)
+            return { ok: false, message: 'The daemon is still starting. Try again in a moment.' };
+        }
         try {
           if (enabled) {
             // Bring it up BEFORE writing the document: a damaged connector.json or a taken port must refuse with its

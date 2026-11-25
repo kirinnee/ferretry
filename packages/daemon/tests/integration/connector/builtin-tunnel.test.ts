@@ -79,7 +79,11 @@ function recordingApi() {
   return { api, bound };
 }
 
-async function rig(block: unknown, moduleApi?: ApiServerPort) {
+async function rig(
+  block: unknown,
+  moduleApi?: ApiServerPort,
+  options: { readBlock?: () => unknown; writeEnabled?: (enabled: boolean) => Promise<void>; listen?: boolean } = {},
+) {
   const state = await mkdtemp(join(tmpdir(), 'fy-connector-tunnel-'));
   cleanups.push(async () => await rm(state, { recursive: true, force: true }));
   const written: boolean[] = [];
@@ -96,34 +100,39 @@ async function rig(block: unknown, moduleApi?: ApiServerPort) {
       daemonGrants: () => ALL_GRANTS,
       redactor: IDENTITY_REDACTOR,
       tunnelOrigin: () => tunnelOrigin,
-      writeEnabled: async enabled => void written.push(enabled),
+      readBlock: async () => (options.readBlock === undefined ? block : options.readBlock()),
+      writeEnabled: async enabled => {
+        await options.writeEnabled?.(enabled);
+        written.push(enabled);
+      },
     },
     undefined,
     lifecycle(),
   );
   const module: ConnectorModule = built.provides;
   const api = new BunApiServer();
-  await module.listen({
-    api: moduleApi ?? api,
-    dispatch: async (request: ApiRequest): Promise<ApiResponse> => {
-      calls.push(`${request.method} ${request.path}`);
-      return request.path === '/v1/sessions'
-        ? {
-            ...ok([
-              sessionView({
-                id: 'mwuanehg-4531fa9e',
-                callsign: 'lizzette',
-                task: 'Build the tunnel',
-                turnState: 'working',
-              }),
-            ]),
-            headers: new Map(),
-          }
-        : { status: 404, headers: new Map(), body: '{}' };
-    },
-    adminToken: () => CREDENTIALS.admin,
-    remotePeer: tunnelPeer,
-  });
+  if (options.listen !== false)
+    await module.listen({
+      api: moduleApi ?? api,
+      dispatch: async (request: ApiRequest): Promise<ApiResponse> => {
+        calls.push(`${request.method} ${request.path}`);
+        return request.path === '/v1/sessions'
+          ? {
+              ...ok([
+                sessionView({
+                  id: 'mwuanehg-4531fa9e',
+                  callsign: 'lizzette',
+                  task: 'Build the tunnel',
+                  turnState: 'working',
+                }),
+              ]),
+              headers: new Map(),
+            }
+          : { status: 404, headers: new Map(), body: '{}' };
+      },
+      adminToken: () => CREDENTIALS.admin,
+      remotePeer: tunnelPeer,
+    });
   const listener = await api.listen(
     tunnelListenerSurface({
       route: sessionRoute,
@@ -352,6 +361,7 @@ describe('the connector over the built-in tunnel', () => {
         daemonGrants: () => ALL_GRANTS,
         redactor: IDENTITY_REDACTOR,
         tunnelOrigin: () => r.origin,
+        readBlock: async () => ({}),
         writeEnabled: async () => void r.written.push(true),
       },
       undefined,
@@ -373,6 +383,63 @@ describe('the connector over the built-in tunnel', () => {
     should(r.written).deepEqual([]);
     should(await readFile(join(damaged, 'connector', 'connector.json'), 'utf8')).equal('{not json');
     should(broken.provides.tunnelHandlers()).deepEqual([]);
+  });
+
+  it('should refuse a switch-on beside settings that changed after boot, and write nothing', async () => {
+    // Arrange — booted with no address; the operator has since added one (and then a typo).
+    let now: unknown = { publicUrl: 'https://ferretry.example.com' };
+    const r = await rig({}, undefined, { readBlock: () => now });
+    r.setTunnel('up');
+
+    // Act
+    const changed = await r.module.subsystem.change(true);
+    now = { enabled: false, port: 'x' };
+    const damaged = await r.module.subsystem.change(true);
+
+    // Assert
+    should(changed.ok).be.false();
+    should(!changed.ok && changed.message).match(/fy daemon restart/u);
+    should(damaged.ok).be.false();
+    should(r.written).deepEqual([]);
+    should(r.module.tunnelHandlers()).deepEqual([]);
+  });
+
+  it('should not switch on before the daemon is serving, and say so', async () => {
+    // Arrange
+    const r = await rig({}, undefined, { listen: false });
+
+    // Act
+    const early = await r.module.subsystem.change(true);
+
+    // Assert
+    should(early.ok).be.false();
+    should(!early.ok && early.message).match(/still starting/u);
+    should(r.written).deepEqual([]);
+  });
+
+  it('should keep the operator’s own listener a 404 until the switch is committed, and again once it is off', async () => {
+    // Arrange
+    const own = recordingApi();
+    const answers: number[] = [];
+    let probe: () => Promise<number> = async () => 0;
+    const r = await rig({ publicUrl: 'https://ferretry.example.com', port: 7461 }, own.api, {
+      writeEnabled: async () => void answers.push(await probe()),
+    });
+    probe = async () =>
+      (await own.bound[0]?.surface.http.dispatch(request({ path: '/.well-known/oauth-authorization-server' })))
+        ?.status ?? 0;
+
+    // Act
+    const on = await r.module.subsystem.change(true);
+    const during = answers[0];
+    const afterOn = await probe();
+    const off = await r.module.subsystem.change(false);
+
+    // Assert — bound ahead of the write, but serving only after it.
+    should(on.ok && off.ok).be.true();
+    should(during).equal(404);
+    should(afterOn).equal(200);
+    should(own.bound).have.length(1);
   });
 
   it('should be reachable only on paths the edge forwards: every served path matches the Worker’s ingress pattern', async () => {

@@ -288,31 +288,33 @@ describe('connector routes: what they answer', () => {
     });
   });
 
-  it('should say why it is off, list nothing and never call the acts, while a switch is off', async () => {
+  it('should say why it is off, still list the grants, refuse approve and deny, and still let the owner revoke', async () => {
     // Arrange
     const acts = new FakeActs();
     const surface = await mount(acts, DISABLED);
 
     // Act
     const status = await surface.dispatch(request({ path: '/v1/connector', headers: human, loopback: true }));
-    const attempts = await Promise.all(
-      [APPROVE, DENY, REVOKE].map(path => surface.dispatch(post(path, { headers: human, loopback: true }))),
+    const [approve, deny] = await Promise.all(
+      [APPROVE, DENY].map(path => surface.dispatch(post(path, { headers: human, loopback: true }))),
     );
+    const revoke = await surface.dispatch(post(REVOKE, { headers: human, loopback: true }));
 
-    // Assert
+    // Assert — nothing is waiting while it is off, but access already given is listed and can be ended.
     should(jsonBody(status)).deepEqual({
       enabled: false,
       switchedOn: false,
       disabledReason: DISABLED.enabled ? '' : DISABLED.disabledReason,
       pending: [],
-      grants: [],
+      grants: [{ ...GRANT }],
     });
-    for (const attempt of attempts) {
-      should(attempt.status).equal(409);
-      should(jsonBody(attempt).code).equal(CONNECTOR_REFUSAL_CODES.disabled);
-      should(jsonBody(attempt).error).equal(DISABLED.enabled ? '' : DISABLED.disabledReason);
+    for (const attempt of [approve, deny]) {
+      should(attempt?.status).equal(409);
+      should(jsonBody(attempt as never).code).equal(CONNECTOR_REFUSAL_CODES.disabled);
+      should(jsonBody(attempt as never).error).equal(DISABLED.enabled ? '' : DISABLED.disabledReason);
     }
-    should(acts.calls).deepEqual([]);
+    should(revoke.status).equal(200);
+    should(acts.calls).deepEqual(['grants', `revoke ${GRANT.id}`]);
   });
 
   it('should answer each refusal with the status and code a client branches on, in the daemon’s own words', async () => {

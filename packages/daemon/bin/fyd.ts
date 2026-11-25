@@ -11903,6 +11903,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             const url = tunnel.view().tunnelUrl;
             return url === null ? undefined : new URL(url).origin;
           },
+          readBlock: async () => (await daemonConfigStore.peek()).document?.connector,
           writeEnabled: async enabled => await world.connectorEnabled.write(enabled),
         },
         undefined,

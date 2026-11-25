@@ -134,8 +134,17 @@ admin token over loopback is ungoverned. It is a person's route (a ferret or the
 `403 owner_only`). Writing happens only after the connector could start (a damaged `connector.json` or a taken port
 answers `409 connector_cannot_switch` with a sentence and writes nothing); the switch is journaled as
 `security.changed` with the subject `connector`. Turning it on grants nothing by itself: each sign-in still needs its own
-`approve-connector` passkey. Turning it off stops serving at once, keeps the grants (they are only good while it is on) and
-needs no restart. `GET /v1/connector` now also says `switchedOn` (the owner's decision) beside `enabled` (reachable
+`approve-connector` passkey. Turning it off stops serving at once — a request still in flight cannot reach a fleet route after the off — keeps the
+grants (they are only good while it is on) and needs no restart; **grants stay listed and revocable while it is off**, so
+containing one never means switching the connector back on. A switch-on is judged against `config/daemon.json` as it is
+now: if the operator changed `publicUrl`, `port` or `extraRedirectUris` after this daemon started (or damaged the block), it
+is refused with the sentence "restart it so they apply" and nothing is written; it is refused too while the daemon is still
+starting. With an own `publicUrl` the loopback listener is bound ahead of the write but answers 404 until the switch commits.
+
+**Declared gap.** An authorization code the owner has approved but Claude has not yet redeemed (at most 60 s) is not bound to
+the origin it was approved for. If the tunnel hostname changed inside that window, redeeming it would issue a token for the
+new hostname. The sign-in is still the owner's own approved one, and the window needs a re-provision at exactly that moment;
+binding pending sign-ins to their resource is deferred. `GET /v1/connector` now also says `switchedOn` (the owner's decision) beside `enabled` (reachable
 now) and `publicUrlSource` (`tunnel` or `configured`).
 
 ## Allowed redirect URIs
