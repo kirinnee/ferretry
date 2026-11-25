@@ -92,8 +92,8 @@ describe('reading a pane snapshot', () => {
 
 describe('snapshot freshness strings', () => {
   it('describes an error whether or not it is an Error', () => {
-    expect(describeSnapshotError(new Error('offline'))).toBe('offline');
-    expect(describeSnapshotError('offline')).toBe('offline');
+    expect(describeSnapshotError(new Error('offline'), 'the Console')).toBe('offline');
+    expect(describeSnapshotError('offline', 'the Console')).toBe('offline');
   });
 
   it('keeps the seconds visible instead of collapsing to bare minutes', () => {

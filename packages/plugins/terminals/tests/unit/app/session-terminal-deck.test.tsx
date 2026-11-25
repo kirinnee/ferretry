@@ -510,6 +510,22 @@ describe('SessionTerminalDeck', () => {
     run(() => page.unmount());
   });
 
+  test('words a passkey refusal in one sentence under its own name, not the capability’s', async () => {
+    const deck = fakeDeck(async () => {
+      throw new DaemonCallError(
+        403,
+        'grant_step_up_required',
+        'using session terminals needs a passkey confirmation from this device.',
+      );
+    });
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+
+    expect(json(page)).toContain('Using Terminals needs your passkey — confirm on this device and it goes ahead.');
+    expect(json(page)).not.toContain('session terminals');
+    run(() => page.unmount());
+  });
+
   test('keeps the shell the reader is on when a fresh listing still holds it', async () => {
     const listing = async () =>
       terminalListing([terminalView(FIRST, { title: 'first' }), terminalView(SECOND, { title: 'second' })]);

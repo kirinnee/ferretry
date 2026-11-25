@@ -55,7 +55,7 @@ import {
 } from '@ferretry/app';
 import type { PanelIntent } from '@ferretry/kernel/manifest';
 import { Button, FullscreenToggle, KEYBOARD_CAPTURE_ATTRIBUTE, useLinkBehaviour } from '@ferretry/app/ui';
-import { type DaemonConnection, type DaemonSessionScope, grantRefusalNotice } from '../shell.ts';
+import { type DaemonConnection, type DaemonSessionScope, grantRefusalText } from '../shell.ts';
 import {
   describeCoControl,
   shouldReopenTerminalStream,
@@ -227,9 +227,8 @@ const quarantineEnd = (until: string): string => {
 };
 
 const failure = (error: unknown): string => {
-  const grant = grantRefusalNotice(error);
-  if (grant !== null)
-    return grant.detail === '' ? grant.guidance.explanation : `${grant.guidance.explanation} ${grant.detail}`;
+  const grant = grantRefusalText(error, 'Terminals');
+  if (grant !== null) return grant;
   return error instanceof Error ? error.message : String(error);
 };
 
