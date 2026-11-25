@@ -608,3 +608,51 @@ describe('a carrier republish while a lane still sends direct', () => {
     }
   });
 });
+
+describe('a daemon that published "relay off" (E111b, E140b)', () => {
+  const OFF = [...PUBLISHED, { kind: 'relay-off' }];
+
+  test('the browser never dials the hosted relay: direct carries, across several sessions, and no line says a relay failed', async () => {
+    const r = await rig(hostsOf({ kind: 'carries', carrier: 'relay' }), OFF, 'relay', HOSTED, undefined, {
+      chosen: () => false,
+    });
+    for (let session = 0; session < 3; session += 1) {
+      const transport = await r.connect();
+      if (transport === undefined) throw new Error('no transport');
+      await transport.request({ method: 'GET', path: '/v1/carriers' });
+      transport.close?.();
+    }
+    expect(hostsDialled(r.network.dialled).filter(host => host === 'hosted.example')).toEqual([]);
+    expect(carriedOver(r.fx)).toEqual(['/v1/carriers direct', '/v1/carriers direct', '/v1/carriers direct']);
+    expect(r.router.relayFallback(r.fx.daemonId)).toBeUndefined();
+    expect(r.router.choice(r.fx.daemonId)).not.toMatchObject({ reason: RELAY_FALLBACK_LINE });
+    r.fx.layer.close();
+  });
+
+  test('Auto skips the hosted relay too, and a chosen "Relay only" stays strict (no relay is offered)', async () => {
+    const auto = await rig(hostsOf({ kind: 'carries', carrier: 'relay' }), OFF, 'auto', HOSTED);
+    const transport = await auto.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await transport.request({ method: 'GET', path: '/v1/carriers' });
+    expect(hostsDialled(auto.network.dialled)).toEqual([new URL(DIRECT).host]);
+    auto.fx.layer.close();
+
+    const strict = await rig(hostsOf({ kind: 'carries', carrier: 'relay' }), OFF, 'relay', HOSTED);
+    const refused = await strict.connect();
+    if (refused === undefined) throw new Error('no transport');
+    await expect(refused.request({ method: 'GET', path: '/v1/carriers' })).rejects.toBeDefined();
+    expect(strict.network.dialled).toEqual([]);
+    strict.fx.layer.close();
+  });
+
+  test('a legacy record (a published set that never said "off") still falls back to the hosted relay', async () => {
+    const r = await rig(hostsOf({ kind: 'carries', carrier: 'relay' }), PUBLISHED, 'relay', HOSTED, undefined, {
+      chosen: () => false,
+    });
+    const transport = await r.connect();
+    if (transport === undefined) throw new Error('no transport');
+    await transport.request({ method: 'GET', path: '/v1/carriers' });
+    expect(hostsDialled(r.network.dialled)).toEqual(['hosted.example']);
+    r.fx.layer.close();
+  });
+});

@@ -372,6 +372,8 @@ export function publishedConnectionMethods(
 ): readonly ConnectionMethod[] {
   const methods: ConnectionMethod[] = [];
   for (const carrier of carriers) {
+    // "Relay off" is a statement about the daemon, not an address: nothing to dial.
+    if (carrier.kind === 'relay-off') continue;
     const parsed = ConnectionMethodSchema.safeParse(
       carrier.kind === 'direct'
         ? { kind: 'direct', daemonUrl: carrier.url }

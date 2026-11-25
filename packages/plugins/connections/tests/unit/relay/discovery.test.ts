@@ -174,6 +174,27 @@ describe('choosing the carrier', () => {
     should(sources).match([{ kind: 'direct-only', reason: /switched off/u }]);
     should(publishedDaemonCarriers('https://box.example', sources)).deepEqual([
       { kind: 'direct', url: 'https://box.example' },
+      { kind: 'relay-off' },
+    ]);
+  });
+
+  it('E111b should say "relay off" when Ferretry’s relay is disabled, and say nothing when discovery merely failed', () => {
+    const disabled = [chooseRelayCarrierSource(undefined, { kind: 'disabled' })];
+    should(publishedDaemonCarriers('https://box.example', disabled)).deepEqual([
+      { kind: 'direct', url: 'https://box.example' },
+      { kind: 'relay-off' },
+    ]);
+    const unknown = [chooseRelayCarrierSource(undefined, NO_RELAY_DIRECTORY)];
+    should(publishedDaemonCarriers('https://box.example', unknown)).deepEqual([
+      { kind: 'direct', url: 'https://box.example' },
+    ]);
+  });
+
+  it('E111b should not say "relay off" while another relay is still dialled', () => {
+    const off = { kind: 'configured' as const, config: configured({ enabled: false }) };
+    const on = { kind: 'configured' as const, config: configured({ url: 'https://other.example' }) };
+    should(publishedDaemonCarriers(undefined, [off, on])).deepEqual([
+      { kind: 'relay', url: 'https://other.example', source: 'configured' },
     ]);
   });
 

@@ -217,7 +217,7 @@ describe('recovery from a directory that failed at boot', () => {
       await host.runJob('relay-discovery');
       await host.clock.advance(60 * MINUTE);
       expect(directory.reads()).toBe(1);
-      expect(kinds(host)).toEqual(['direct']);
+      expect(kinds(host)).toEqual(answer.kind === 'disabled' ? ['direct', 'relay-off'] : ['direct']);
       expect((await doctorRow(rig.half())).detail).not.toContain('retrying');
       await host.stop();
     }

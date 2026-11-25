@@ -208,7 +208,9 @@ export function buildConnections(
   const publishSources = (): void => {
     published = new PublishedCarrierSet(bindings?.directUrl, sources);
     if (tunnelUrl !== undefined) published.tunnel(tunnelUrl);
-    ctx.kernel.events.publish(CarriersChanged, { kinds: published.current().map(c => c.kind) });
+    ctx.kernel.events.publish(CarriersChanged, {
+      kinds: published.current().map(c => (c.kind === 'relay-off' ? 'relay' : c.kind)),
+    });
   };
   /**
    * A veto landed after a discovered relay was already published (the boot read answered, then the gate said no at
@@ -291,7 +293,9 @@ export function buildConnections(
   const publishTunnel = (url: string | undefined): void => {
     tunnelUrl = url;
     published.tunnel(url);
-    ctx.kernel.events.publish(CarriersChanged, { kinds: published.current().map(c => c.kind) });
+    ctx.kernel.events.publish(CarriersChanged, {
+      kinds: published.current().map(c => (c.kind === 'relay-off' ? 'relay' : c.kind)),
+    });
   };
   /**
    * Today's `browserOrigins(config)`: what a passkey may name and what a tunnel upgrade's `Origin` may be. It is read

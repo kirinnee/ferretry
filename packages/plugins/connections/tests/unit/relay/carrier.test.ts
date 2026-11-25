@@ -99,7 +99,9 @@ describe('the relay carrier decision', () => {
 
     // A switched-off relay publishes no address, so there is no host for a browser to dial unsigned.
     const off = relayConfig({ enabled: false });
-    should(publishedDaemonCarriers(undefined, [{ kind: 'configured', config: off }])).deepEqual([]);
+    should(publishedDaemonCarriers(undefined, [{ kind: 'configured', config: off }])).deepEqual([
+      { kind: 'relay-off' },
+    ]);
     should(decideRelayCarrier(off, DAEMON_ID).kind).equal('none');
   });
 
