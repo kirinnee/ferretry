@@ -500,8 +500,8 @@ describe('the connector over the built-in tunnel', () => {
     const pending = Promise.all(r.module.tunnelHandlers().map(async handler => await handler.handle(slow)));
 
     // Act — off, then on again, then the body finishes.
-    await r.module.subsystem.change(false);
-    await r.module.subsystem.change(true);
+    const off = await r.module.subsystem.change(false);
+    const on = await r.module.subsystem.change(true);
     finish(
       JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_ferrets', arguments: {} } }),
     );
@@ -509,7 +509,8 @@ describe('the connector over the built-in tunnel', () => {
 
     // Assert — whatever it answered, it never reached the fleet.
     should(r.calls.slice(calls)).deepEqual([]);
-    should(answers.length).be.aboveOrEqual(0);
+    should([off.ok, on.ok]).deepEqual([true, true]);
+    should(answers.length).be.above(0);
   });
 
   it('should be reachable only on paths the edge forwards: every served path matches the Worker’s ingress pattern', async () => {
