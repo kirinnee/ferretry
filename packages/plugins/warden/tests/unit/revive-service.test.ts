@@ -315,7 +315,7 @@ describe('a fleet-wide death', () => {
     };
   };
 
-  it('should wait for tmux, then revive in waves of three ten seconds apart, naming the tmux server', async () => {
+  it('should wait for tmux, then revive in waves of three ten seconds apart, saying several terminals ended together', async () => {
     // Arrange
     const { events, fleet } = cascade();
     const h = harness(events, { tmux: probe => probe >= 3 });
@@ -327,7 +327,7 @@ describe('a fleet-wide death', () => {
     should(h.tmuxProbes()).equal(3);
     should(h.sleeps).deepEqual([5000, 5000, 10_000]);
     should(h.resumed.map(entry => entry.id)).deepEqual(['a', 'b', 'c', 'd', 'e']);
-    should(h.resumed[0]?.message).containEql('the tmux server crashed');
+    should(h.resumed[0]?.message).containEql('several terminals ended together');
     should(h.persisted.map(entry => entry.actions.length)).deepEqual([3, 2]);
     should(result.actions).have.length(5);
     should(result.revive.batches.map(batch => batch.ids)).deepEqual([

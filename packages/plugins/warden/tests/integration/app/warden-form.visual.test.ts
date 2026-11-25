@@ -64,6 +64,57 @@ const VIEWPORTS = [
 const THEMES = ['studio-light', 'studio-dark'] as const;
 const STATES = ['all', 'rules'] as const;
 
+describe('the Investigation login names itself whole (L215a)', () => {
+  for (const viewport of VIEWPORTS) {
+    for (const theme of THEMES) {
+      it(`a long login name wraps and the box grows to hold it (${viewport.name}, ${theme})`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          deviceScaleFactor: viewport.phone ? 2 : 1,
+          hasTouch: viewport.phone,
+          isMobile: viewport.phone,
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const tab = await context.newPage();
+        try {
+          await tab.goto(`${origin}/?theme=${theme}&login=long`);
+          const login = tab.locator('[role="combobox"][aria-label="Login"]');
+          await login.waitFor({ state: 'visible' });
+          const text = await login.locator('.fy-sb__value').innerText();
+          expect(text).toContain('build host in the east datacentre');
+          const fit = await login.evaluate(button => {
+            const value = button.querySelector<HTMLElement>('.fy-sb__value');
+            const box = button.getBoundingClientRect();
+            const words = value?.getBoundingClientRect();
+            return {
+              clipped:
+                value === null
+                  ? true
+                  : value.scrollWidth > value.clientWidth || value.scrollHeight > value.clientHeight,
+              height: box.height,
+              wordsInside: words === undefined ? false : words.bottom <= box.bottom + 0.5 && words.right <= box.right,
+              pageOverflowsX: document.documentElement.scrollWidth > window.innerWidth,
+            };
+          });
+          expect(fit.clipped, 'the closed value is not cut off').toBe(false);
+          expect(fit.wordsInside, 'the words sit inside the box').toBe(true);
+          expect(fit.pageOverflowsX, 'no sideways scroll').toBe(false);
+          if (viewport.phone) expect(fit.height, 'the box grew past one line').toBeGreaterThan(48);
+          if (shotsDir !== '') {
+            await login.scrollIntoViewIfNeeded();
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-long-login.png`), fullPage: true });
+          }
+        } finally {
+          await context.close();
+        }
+      });
+    }
+  }
+});
+
 describe('the Warden settings form, over a fake config', () => {
   for (const viewport of VIEWPORTS) {
     for (const theme of THEMES) {

@@ -3,11 +3,24 @@ import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { WardenSettingsForm } from '../../../../app/features/warden/warden-settings-form.tsx';
 import { wardenFormErrors } from '../../../../app/features/warden/warden-settings-model.ts';
+import { pickerAccount } from '../../../support/app/pickers.ts';
 import { wardenConfig } from '../../../support/app/warden.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const state = params.get('state') ?? 'all';
+// ?login=long: the chosen login's name is long, as a runtime named for its account and machine is.
+const runtimes =
+  params.get('login') === 'long'
+    ? [
+        pickerAccount({
+          wrapper: 'claude-a',
+          displayName:
+            'Claude · work account (shared with the whole platform team) · build host in the east datacentre',
+        }),
+        pickerAccount({ wrapper: 'codex-b', displayName: 'Codex · personal sign-in' }),
+      ]
+    : [];
 
 const initial = wardenConfig({
   layers: { jev: state !== 'rules', llm: state !== 'rules' },
@@ -23,6 +36,7 @@ function Scene() {
         value={value}
         onChange={setValue}
         jevKey={{ state: 'set' }}
+        runtimes={runtimes}
         errors={wardenFormErrors(value)}
       />
     </main>
