@@ -150,10 +150,20 @@ describe('the connector on a real daemon, at its own address', () => {
     const mcp = (token: string) =>
       fetch(`${ORIGIN}/mcp`, {
         method: 'POST',
-        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body: '{}',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'e2e', version: '1' } },
+        }),
       });
-    expect((await mcp(tokens.access_token)).status).toBe(501);
+    // A live bearer reaches the SDK: initialize is answered (the tools themselves are proved in mcp-real-daemon.test.ts).
+    expect((await mcp(tokens.access_token)).status).toBe(200);
     expect((await mcp('fyc_at_' + 'x'.repeat(43))).status).toBe(401);
     expect((await fetch(`${ORIGIN}/mcp`, { method: 'POST' })).status).toBe(401);
     expect((await fetch(`${ORIGIN}/mcp`)).status).toBe(405);

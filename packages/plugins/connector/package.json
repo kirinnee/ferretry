@@ -16,10 +16,16 @@
     "./cli": "./cli/index.ts"
   },
   "dependencies": {
+    "@ferretry/core-asks": "workspace:*",
+    "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/core-gate": "workspace:*",
-    "@ferretry/plugin-connections": "workspace:*",
+    "@ferretry/core-mailbox": "workspace:*",
     "@ferretry/kernel": "workspace:*",
+    "@ferretry/plugin-agenda": "workspace:*",
+    "@ferretry/plugin-connections": "workspace:*",
+    "@ferretry/plugin-projects": "workspace:*",
     "@ferretry/std": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "zod": "4.4.3"
   },
   "sideEffects": false

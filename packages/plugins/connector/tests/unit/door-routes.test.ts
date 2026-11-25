@@ -70,7 +70,7 @@ describe('every door route answers 404 when the connector is off, exactly as an 
     const access = JSON.parse(done.token.body).access_token as string;
     expect(
       (await serve(w, { method: 'POST', path: '/mcp', headers: { authorization: `Bearer ${access}` } })).status,
-    ).toBe(501);
+    ).toBe(415);
     w.config.set({ ...ON, enabled: false });
     expect(
       (await serve(w, { method: 'POST', path: '/mcp', headers: { authorization: `Bearer ${access}` } })).status,
@@ -139,7 +139,8 @@ describe('a whole sign-in through the door, then a hostname change', () => {
     expect(tokens.refresh_token).toStartWith('fyc_rt_');
     expect(done.token.headers.get('cache-control')).toBe('no-store');
     const bearer = { authorization: `Bearer ${tokens.access_token}` };
-    expect((await serve(w, { method: 'POST', path: '/mcp', headers: bearer })).status).toBe(501);
+    // A live bearer is past the bearer gate (the endpoint, not a 401): with no JSON body it stops at the media type.
+    expect((await serve(w, { method: 'POST', path: '/mcp', headers: bearer })).status).toBe(415);
     // The operator moves the connector to another address: the issuer and every audience change, and the old token stops.
     w.config.set({ ...ON, publicUrl: 'https://other.example.com' });
     const stale = await serve(w, { method: 'POST', path: '/mcp', headers: bearer });
