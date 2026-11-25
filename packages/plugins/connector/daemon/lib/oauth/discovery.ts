@@ -1,6 +1,7 @@
 import type { ApiResponse } from '@ferretry/kernel/contract';
 import { CONNECTOR_SCOPES } from '../../../contract/index.ts';
 import type { ConnectorEndpoints } from '../ports.ts';
+import { DEAD_CONNECTION_TEXT } from './model.ts';
 
 export function protectedResourceMetadata(endpoints: ConnectorEndpoints) {
   return {
@@ -41,6 +42,10 @@ export function unauthorizedResponse(
       ['cache-control', 'no-store'],
       ['content-type', 'application/json'],
     ]),
-    body: JSON.stringify({ error: options.tokenPresented ? 'invalid_token' : 'unauthorized' }),
+    body: JSON.stringify(
+      options.tokenPresented
+        ? { error: 'invalid_token', error_description: DEAD_CONNECTION_TEXT }
+        : { error: 'unauthorized' },
+    ),
   };
 }

@@ -67,6 +67,7 @@
         "packages/plugins/access/",
         "packages/plugins/claude-code/",
         "packages/plugins/codex/",
+        "packages/plugins/connector/",
         "packages/plugins/mcp/",
         "packages/plugins/projects/",
         "packages/plugins/runtimes/",

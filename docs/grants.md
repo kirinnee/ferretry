@@ -84,6 +84,16 @@ Only `x-fy-request-id` crosses into the request. Handlers, Gate, audits and jour
 the response passes its normal final check and the kernel asks Gate to mask the host admin and warden token
 literals before returning text. The connector never receives those credentials.
 
+### Turning the connector on or off
+
+`PUT /v1/connector` is `pairing.configure`, a person's, and writes ONLY `enabled` in `config/connector.yaml`. Switching
+the connector ON, naming a redirect URI that was not allowed before, or changing its published address each LOOSEN
+who can reach this machine, so a file edit that does any of them (an agent's `fy config write`, a hand edit) is held
+for the owner like every loosening ([config-files.md](config-files.md)); the tighter version stays in effect. The owner's
+switch applies at once (the app's passkey, or the host's own admin token). Turning it ON reaches nothing by itself:
+every sign-in still needs its own `approve-connector` passkey (above), and the connector holds no device, so it can
+never switch itself on or off.
+
 ### A ferret session's own credential is not a device
 
 A ferret pane's `FY_SESSION_TOKEN` (`Authorization: Bearer fys_…`) is a bearer class of its own, `session`
@@ -117,7 +127,11 @@ it the machine.
   a tunnel's `cloudflared` reaches this host through a loopback peer. A device's authority is governed by the
   daemon-wide grants and its device grants; presenting an admin token off the host is governed too.
 - `delegated` comes only from the connector's allow-listed kernel port. It is remote and unprivileged;
-  the connector principal is governed by daemon-wide grants only, with no device or unlock, as above.
+  the connector principal is governed by daemon-wide grants only, with no device or unlock, as above. It is
+  looked up in the ordinary API route table ALONE (never a door's), and only for a template its plugin declared.
+- `door` comes only from a public door: the connector's own `127.0.0.1` listener or a tunnel listener that
+  serves doors. It is remote and unprivileged, and Gate parses no credential on it (see "Public connector
+  arrivals" below). It reaches only door routes; it is never looked up in the API route table.
 
 Nothing re-derives this from a peer address, a `Host` header or a URL, and no header can move it.
 Gate's admission tests and the kernel's delegated-dispatch integration tests pin these rules.
