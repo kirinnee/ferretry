@@ -672,10 +672,19 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         throw new OAuthError('invalid_scope', 'A refresh cannot increase its granted scopes.');
       // On a retry the pair the first rotation issued is superseded: the client never saw it, so it dies here.
       const superseded = used?.successors;
+      const supersededRefresh = grant.refresh.find(t => t.digest === superseded?.refresh);
       grant = {
         ...grant,
         access: grant.access.filter(t => t.digest !== superseded?.access),
         refresh: grant.refresh.filter(t => t.digest !== key && t.digest !== superseded?.refresh),
+        // The superseded refresh token is remembered as used, with no retry: a client that DID receive that pair
+        // and presents it proves the retry came from someone else, and that reuse revokes the grant.
+        usedRefresh: supersededRefresh
+          ? [
+              ...grant.usedRefresh.filter(u => u.digest !== supersededRefresh.digest),
+              { digest: supersededRefresh.digest, expiresAt: supersededRefresh.expiresAt, rotatedAt: this.now() },
+            ]
+          : grant.usedRefresh,
       };
       rotating ??= { used: { digest: key, expiresAt: token.expiresAt, rotatedAt: this.now() }, retry: false };
     }
@@ -690,9 +699,10 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     const rotated: UsedRefresh | undefined = rotating
       ? {
           ...rotating.used,
-          // The one retry is consumed by the retry itself: with no successor pointer left, a further use of this
-          // digest is reuse and revokes the family instead of minting another pair.
+          // The one retry is consumed by the retry itself: with no successor pointer or marker left, a further use
+          // of this digest is reuse and revokes the family instead of minting another pair.
           successors: refreshDigest && !rotating.retry ? { access: accessDigest, refresh: refreshDigest } : undefined,
+          retryable: refreshDigest && !rotating.retry ? (true as const) : undefined,
         }
       : undefined;
     const updated: ConnectorGrant = {
@@ -723,11 +733,12 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
 
   /**
    * The live refresh token a rotated-away one handed out, when presenting the old one again is a retry rather than
-   * a theft: within a minute of the rotation and with nothing yet rotated from its successor. A token rotated two
-   * generations ago, or one outside the window, has no such successor and revokes.
+   * a theft: within a minute of the rotation, with nothing yet rotated from its successor, and not yet retried —
+   * the window admits ONE retry, and only a first rotation marks its record retryable. A token rotated two
+   * generations ago, one already retried, or one outside the window has no such successor and revokes.
    */
   private retryable(grant: ConnectorGrant, used: UsedRefresh): ConnectorGrant['refresh'][number] | undefined {
-    if (used.successors === undefined) return undefined;
+    if (used.retryable !== true || used.successors === undefined) return undefined;
     if (this.now() - used.rotatedAt > REFRESH_RETRY_MS) return undefined;
     const successor = used.successors.refresh;
     return grant.refresh.find(t => t.digest === successor);

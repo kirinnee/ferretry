@@ -43,12 +43,15 @@ const TokenSchema = z.strictObject({
  * A refresh token that was rotated away. `expiresAt` is that token's OWN refresh expiry: once past it the token is
  * simply invalid, so the entry is dropped on the next write. `rotatedAt` and `successors` (the digests of the
  * access and refresh token its rotation issued) exist for the one-minute retry window after a lost response.
+ * `retryable` is written only by a FIRST rotation and absent once the token's one retry is spent: a record without
+ * it (a retried token, or the pair a retry superseded) can never be retried, and reuse revokes.
  */
 const UsedRefreshSchema = z.strictObject({
   digest: DigestSchema,
   expiresAt: z.number().finite(),
   rotatedAt: z.number().finite(),
   successors: z.strictObject({ access: DigestSchema, refresh: DigestSchema }).optional(),
+  retryable: z.literal(true).optional(),
 });
 export type UsedRefresh = z.infer<typeof UsedRefreshSchema>;
 

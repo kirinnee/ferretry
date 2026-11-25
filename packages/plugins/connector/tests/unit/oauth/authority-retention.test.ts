@@ -199,11 +199,6 @@ describe('a lost refresh response costs a retry, not the grant (finding 4)', () 
     expect(await f.authority.verify(retried.access_token)).toBeDefined();
     // The pair the client never saw is dead, but nothing was revoked or reported as theft.
     expect(await f.authority.verify(lost.access_token)).toBeUndefined();
-    await expect(
-      f.authority.exchange(...refresh(flow.client.client_id, lost.refresh_token ?? '')),
-    ).rejects.toMatchObject({
-      error: 'invalid_grant',
-    });
     expect(f.state().grants[0]?.revokedAt).toBeUndefined();
     expect(f.events.some(e => e.kind === 'connector.refresh.reused')).toBe(false);
     // The client then carries on with the new pair.
@@ -447,5 +442,108 @@ describe('the success cap is applied at the mint, after the reuse decision', () 
       status: 429,
     });
     expect(f.state().grants[0]?.revokedAt).toBeUndefined();
+  });
+});
+
+describe('parity with the merged v4 fix (PR 2550): the one-shot retry table', () => {
+  test('the superseded pair is not forgotten: the client that DID receive it presents it and the grant is revoked', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    const received = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    f.advance(5_000);
+    const replayed = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    expect(await f.authority.verify(received.access_token)).toBeUndefined();
+    await expect(
+      f.authority.exchange(...refresh(flow.client.client_id, received.refresh_token ?? '')),
+    ).rejects.toMatchObject({ error: 'invalid_grant' });
+    expect(f.state().grants[0]?.revokedAt).toBeDefined();
+    expect(await f.authority.verify(replayed.access_token)).toBeUndefined();
+    expect(f.events).toContainEqual({ kind: 'connector.refresh.reused', grantId: flow.grant.id });
+  });
+
+  test('the superseded token keeps no retry and no successor: only its digest and times are stored', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    const received = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    f.advance(5_000);
+    await f.authority.exchange(...refresh(flow.client.client_id, first));
+    const stored = f.state().grants[0]?.usedRefresh ?? [];
+    expect(stored).toHaveLength(2);
+    expect(stored.filter(u => u.retryable === true)).toHaveLength(0);
+    expect(stored.filter(u => u.successors !== undefined)).toHaveLength(0);
+    expect(JSON.stringify(f.state())).not.toContain(received.refresh_token ?? '');
+  });
+
+  test('a client revoking with the superseded token revokes the grant with the client-revocation audit, not a reuse audit', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    const received = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    f.advance(5_000);
+    const replayed = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    await f.authority.revokeToken({ client_id: flow.client.client_id, token: received.refresh_token ?? '' });
+    expect(f.state().grants[0]?.revokedAt).toBeDefined();
+    expect(await f.authority.verify(replayed.access_token)).toBeUndefined();
+    expect(f.events.some(e => e.kind === 'connector.refresh.reused')).toBe(false);
+    expect(f.events).toContainEqual(
+      expect.objectContaining({ kind: 'connector.grant.revoked', grantId: flow.grant.id, initiator: 'client' }),
+    );
+  });
+
+  test('a record without the first-rotation marker can never be retried: rejected, revoked and audited', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    await f.authority.exchange(...refresh(flow.client.client_id, first));
+    const old = f.state();
+    expect(old.grants[0]?.usedRefresh.some(u => u.retryable === true && u.successors !== undefined)).toBe(true);
+    await f.store.save({
+      ...old,
+      grants: old.grants.map(g => ({ ...g, usedRefresh: g.usedRefresh.map(({ retryable: _marker, ...u }) => u) })),
+    });
+    f.memory.index.replace(await f.store.load());
+    f.advance(1_000);
+    await expect(f.authority.exchange(...refresh(flow.client.client_id, first))).rejects.toMatchObject({
+      error: 'invalid_grant',
+    });
+    expect(f.state().grants[0]?.revokedAt).toBeDefined();
+    expect(f.events).toContainEqual({ kind: 'connector.refresh.reused', grantId: flow.grant.id });
+  });
+
+  test('a replacement token that is later rotated for the first time opens its own retry window', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    await f.authority.exchange(...refresh(flow.client.client_id, first));
+    f.advance(5_000);
+    const replacement = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    f.advance(5_000);
+    const lost = await f.authority.exchange(...refresh(flow.client.client_id, replacement.refresh_token ?? ''));
+    f.advance(5_000);
+    const retried = await f.authority.exchange(...refresh(flow.client.client_id, replacement.refresh_token ?? ''));
+    expect(await f.authority.verify(retried.access_token)).toBeDefined();
+    expect(await f.authority.verify(lost.access_token)).toBeUndefined();
+    expect(f.state().grants[0]?.revokedAt).toBeUndefined();
+    expect(f.events.some(e => e.kind === 'connector.refresh.reused')).toBe(false);
+  });
+
+  test('a replay hammered repeatedly inside the window never yields a live pair after the first retry', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    await f.authority.exchange(...refresh(flow.client.client_id, first));
+    const live: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      f.advance(1000);
+      try {
+        live.push((await f.authority.exchange(...refresh(flow.client.client_id, first))).access_token);
+      } catch {
+        // every attempt after the one retry is refused
+      }
+    }
+    expect(live).toHaveLength(1);
+    expect(await f.authority.verify(live[0] ?? '')).toBeUndefined();
   });
 });
