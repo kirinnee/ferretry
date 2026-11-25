@@ -45,6 +45,7 @@ const grantRow: ConnectorGrant = {
 
 const on = (overrides: Partial<ConnectorView> = {}): ConnectorView => ({
   enabled: true,
+  switchedOn: true,
   publicUrl: 'https://mcp.example.test',
   mcpUrl: 'https://mcp.example.test/mcp',
   pending: [],
@@ -68,7 +69,8 @@ const fake =
           calls.push(call);
           const refusal = refuse?.(call);
           if (refusal !== undefined) throw refusal;
-          return {};
+          // `PUT /v1/connector` answers the status read after the change; the acts answer an acknowledgement.
+          return call.method === 'PUT' ? view() : {};
         }
         return view();
       }) as ConnectorClient['request'],
@@ -109,18 +111,158 @@ describe('Settings › Claude connector', () => {
     await shown.unmount();
   });
 
-  it('says why it is off and offers no switch', async () => {
+  const off = (overrides: Partial<ConnectorView> = {}): ConnectorView => ({
+    enabled: false,
+    switchedOn: false,
+    pending: [],
+    grants: [],
+    ...overrides,
+  });
+  const theSwitch = (container: HTMLElement): HTMLElement =>
+    must(container.querySelector('[role="switch"]'), 'switch') as HTMLElement;
+
+  it('is off by default: a switch, one line on what turning it on does, and no address', async () => {
+    const shown = await mount(surface(fake(() => off())));
+    await settled(shown.container, '[data-connector-off]');
+    const text = must(shown.container.querySelector('[data-connector-off]'), 'off').textContent ?? '';
+    expect(text).toContain('built-in tunnel');
+    expect(text).toContain('approve each Claude sign-in with your passkey');
+    expect(text).not.toContain('only be turned on at the machine');
+    expect(theSwitch(shown.container).getAttribute('aria-checked')).toBe('false');
+    expect(shown.container.querySelector('[data-connector-url]')).toBeNull();
+    expect(must(shown.container.querySelector('[data-connector-config-note]'), 'note').textContent).toContain(
+      'config/daemon.json always wins',
+    );
+    await shown.unmount();
+  });
+
+  it('turns on with PUT { enabled: true }, shows pending, then renders exactly the answer', async () => {
+    const calls: Call[] = [];
+    const bodies: unknown[] = [];
+    let status: ConnectorView = off();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const client: ConnectorClientFactory = async () =>
+      ({
+        request: (async (path: string, _schema: unknown, init?: RequestInit) => {
+          const method = init?.method ?? 'GET';
+          if (method === 'GET') return status;
+          calls.push({ path, method });
+          bodies.push(JSON.parse(String(init?.body)));
+          await gate;
+          status = on({ publicUrlSource: 'tunnel', mcpUrl: 'https://abc.tunnel.example/mcp' });
+          return status;
+        }) as ConnectorClient['request'],
+      }) satisfies ConnectorClient;
+    const shown = await mount(surface(client));
+    await settled(shown.container, '[role="switch"]');
+    await interact(() => theSwitch(shown.container).click());
+    await settleUntil(() => calls.length === 1, 'put sent', runAsync);
+    // Pending, not optimistic: still off, disabled, and no address yet.
+    expect(theSwitch(shown.container).getAttribute('aria-checked')).toBe('false');
+    expect(theSwitch(shown.container).hasAttribute('disabled')).toBe(true);
+    expect(shown.container.querySelector('[data-connector-url]')).toBeNull();
+    release();
+    await settled(shown.container, '[data-connector-url]');
+    expect(calls).toEqual([{ path: '/v1/connector', method: 'PUT' }]);
+    expect(bodies).toEqual([{ enabled: true }]);
+    expect(theSwitch(shown.container).getAttribute('aria-checked')).toBe('true');
+    expect(must(shown.container.querySelector('[data-connector-url]'), 'url').textContent).toBe(
+      'https://abc.tunnel.example/mcp',
+    );
+    await shown.unmount();
+  });
+
+  it('turns off with PUT { enabled: false }', async () => {
+    let status: ConnectorView = on();
+    const bodies: unknown[] = [];
+    const client: ConnectorClientFactory = async () =>
+      ({
+        request: (async (_path: string, _schema: unknown, init?: RequestInit) => {
+          if ((init?.method ?? 'GET') === 'GET') return status;
+          bodies.push(JSON.parse(String(init?.body)));
+          status = off();
+          return status;
+        }) as ConnectorClient['request'],
+      }) satisfies ConnectorClient;
+    const shown = await mount(surface(client));
+    await settled(shown.container, '[data-connector-url]');
+    await interact(() => theSwitch(shown.container).click());
+    await settled(shown.container, '[data-connector-off]');
+    expect(bodies).toEqual([{ enabled: false }]);
+    expect(theSwitch(shown.container).getAttribute('aria-checked')).toBe('false');
+    await shown.unmount();
+  });
+
+  it('on and reachable through the tunnel: names the source and says to reconnect if the hostname changes', async () => {
+    const shown = await mount(surface(fake(() => on({ publicUrlSource: 'tunnel' }))));
+    await settled(shown.container, '[data-connector-url]');
+    expect(must(shown.container.querySelector('[data-connector-source]'), 'source').textContent).toContain(
+      'built-in tunnel',
+    );
+    expect(must(shown.container.querySelector('[data-connector-tunnel-note]'), 'note').textContent).toContain(
+      'Claude must be reconnected',
+    );
+    await shown.unmount();
+  });
+
+  it('on with a configured address: names the host setting and has no reconnect line', async () => {
+    const shown = await mount(surface(fake(() => on({ publicUrlSource: 'configured' }))));
+    await settled(shown.container, '[data-connector-url]');
+    expect(must(shown.container.querySelector('[data-connector-source]'), 'source').textContent).toContain(
+      'set on the host',
+    );
+    expect(shown.container.querySelector('[data-connector-tunnel-note]')).toBeNull();
+    await shown.unmount();
+  });
+
+  it('on but not reachable: shows the daemon’s reason and the switch stays on', async () => {
     const shown = await mount(
-      surface(
-        fake(() => ({ enabled: false, disabledReason: 'No connector.publicUrl is set.', pending: [], grants: [] })),
-      ),
+      surface(fake(() => off({ switchedOn: true, disabledReason: 'Turn on the tunnel in Settings › Connection.' }))),
     );
     await settled(shown.container, '[data-connector-off]');
     const text = must(shown.container.querySelector('[data-connector-off]'), 'off').textContent ?? '';
-    expect(text).toContain('No connector.publicUrl is set.');
-    expect(text).toContain('only be turned on at the machine');
+    expect(text).toContain('Turn on the tunnel in Settings › Connection.');
+    expect(theSwitch(shown.container).getAttribute('aria-checked')).toBe('true');
     expect(shown.container.querySelector('[data-connector-url]')).toBeNull();
-    expect(shown.container.querySelector('input[type="checkbox"], [role="switch"]')).toBeNull();
+    await shown.unmount();
+  });
+
+  it('a daemon older than the switch: it reads as what enabled says', async () => {
+    const { switchedOn: _omitted, ...legacy } = on();
+    const shown = await mount(
+      surface(async () => ({
+        request: (async (_path: string, schema: { parse: (v: unknown) => unknown }) =>
+          schema.parse(legacy)) as ConnectorClient['request'],
+      })),
+    );
+    await settled(shown.container, '[role="switch"]');
+    expect(theSwitch(shown.container).getAttribute('aria-checked')).toBe('true');
+    await shown.unmount();
+  });
+
+  it('says in one sentence when the passkey was not confirmed, and leaves the switch where it was', async () => {
+    const calls: Call[] = [];
+    const shown = await mount(
+      surface(
+        fake(
+          () => off(),
+          calls,
+          call => (call.method === 'PUT' ? new FyHttpError('step up', 403, 'grant_step_up_required') : undefined),
+        ),
+      ),
+    );
+    await settled(shown.container, '[role="switch"]');
+    await interact(() => theSwitch(shown.container).click());
+    await settled(shown.container, '[data-connector-failure]');
+    expect(must(shown.container.querySelector('[data-connector-failure]'), 'failure').textContent).toContain(
+      'the passkey wasn’t confirmed',
+    );
+    expect(theSwitch(shown.container).getAttribute('aria-checked')).toBe('false');
+    expect(theSwitch(shown.container).hasAttribute('disabled')).toBe(false);
+    expect(calls).toEqual([{ path: '/v1/connector', method: 'PUT' }]);
     await shown.unmount();
   });
 

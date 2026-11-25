@@ -68,7 +68,12 @@ export type ConnectorGrantView = z.infer<typeof ConnectorGrantViewSchema>;
  * config/daemon.json"). `publicUrl` and `mcpUrl` are present only while it is on.
  */
 export const ConnectorStatusSchema = z.strictObject({
+  /** Whether the connector is reachable now: switched on AND the address Claude is given answers. */
   enabled: z.boolean(),
+  /** Whether it is SWITCHED on (the owner's decision). On but not `enabled` means it is waiting — see `disabledReason`. */
+  switchedOn: z.boolean(),
+  /** Where `publicUrl` comes from while on: the operator's own `connector.publicUrl`, or this machine's built-in tunnel. */
+  publicUrlSource: z.enum(['configured', 'tunnel']).optional(),
   publicUrl: z.string().max(2_048).optional(),
   mcpUrl: z.string().max(2_048).optional(),
   disabledReason: z.string().max(500).optional(),
@@ -93,4 +98,14 @@ export const CONNECTOR_REFUSAL_CODES = {
   notFound: 'connector_not_found',
   expired: 'connector_expired',
   alreadyDecided: 'connector_already_decided',
+  /** `PUT /v1/connector` could not switch it (a damaged block or state file); the sentence says what to fix. */
+  cannotSwitch: 'connector_cannot_switch',
 } as const;
+
+/**
+ * `PUT /v1/connector`: switch the connector on or off from the app, no restart. The one fact a caller may
+ * change is on or off; the address, port and redirect allow-list stay the operator's (or the built-in tunnel's).
+ * The answer is the {@link ConnectorStatusSchema} read after the change.
+ */
+export const ConnectorChangeSchema = z.strictObject({ enabled: z.boolean() });
+export type ConnectorChange = z.infer<typeof ConnectorChangeSchema>;

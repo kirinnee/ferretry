@@ -12,7 +12,11 @@
 export const CONNECTOR_SCOPES = ['fleet:read', 'fleet:write'] as const;
 export type ConnectorScope = (typeof CONNECTOR_SCOPES)[number];
 
-/** Where the connector is published, derived once from `config/daemon.json` `connector.publicUrl`. */
+/**
+ * Where the connector is published: `config/daemon.json` `connector.publicUrl`, or — when that names none — this
+ * machine's built-in tunnel hostname. READ LAZILY: an implementation may answer from a getter, because the tunnel's
+ * hostname is known only once provisioning has answered and can change. Nothing may cache a field.
+ */
 export interface ConnectorEndpoints {
   /** The `publicUrl` origin, no trailing slash. Also the OAuth issuer. */
   readonly issuer: string;

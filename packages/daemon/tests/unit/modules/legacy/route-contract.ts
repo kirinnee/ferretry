@@ -320,6 +320,7 @@ export const callers: readonly string[] = [
   'PUT /v1/catalog-links/:linkId/version operator person',
   'PUT /v1/catalog-shares/:shareId/new-passkey operator person',
   'PUT /v1/config/file operator person',
+  'PUT /v1/connector operator person',
   'PUT /v1/copy-rules/settings operator person',
   'PUT /v1/secrets/logins/:id operator person',
   'PUT /v1/sessions/:sessionId/agenda/:id/seen operator person',

@@ -11,8 +11,9 @@ a public HTTPS tunnel the owner runs, protected by an OAuth 2.1 authorization se
 a sign-in is approved by the owner inside the paired Ferretry app with a passkey, and every tool acts through
 the daemon's own API with exactly the eleven tools below.**
 
-It is **off by default**. Turning it on is an edit to `<FY_HOME>/config/daemon.json` on the host — a phone cannot
-turn it on.
+It is **off by default**. Turn it on from the app (Settings › Claude connector — a passkey step-up, see "Over the
+built-in tunnel") or by editing `<FY_HOME>/config/daemon.json` on the host; both write the same `connector.enabled`.
+With no address of your own, it is served by the machine's built-in tunnel and nothing else needs setting up.
 
 ## Why the approval happens in the app, not on the sign-in page
 
@@ -81,7 +82,70 @@ ungoverned — docs/grants.md). That is also how the automated end-to-end test a
   is accepted only for local testing.
 - `extraRedirectUris` — exact redirect URIs allowed IN ADDITION to Claude's (for MCP Inspector or a test client,
   e.g. `http://localhost:6274/oauth/callback`). Each must be `https://`, or `http://` on a loopback host.
-- Absent, `enabled: false`, or an invalid `publicUrl` → no listener, and `fy connector` says why.
+- `publicUrl` may be left out: the issuer is then the built-in tunnel's hostname (see "Over the built-in tunnel") and no
+  listener is bound.
+- Absent, or `enabled: false` → off; an invalid `publicUrl`, `port` or redirect URI → off, and `fy connector` and the app
+  say why. The app's switch edits only `enabled`.
+
+## Over the built-in tunnel (no setup on the machine)
+
+Every daemon that has switched on Ferretry's built-in tunnel (docs/relay-protocol.md §15, Settings › Connection) already
+has a public hostname, `https://<id>.ferretry.stream`. The connector reuses it, so a machine needs **no terminal, no
+`cloudflared` of its own, no launch agent and no hand-edited file** — only two switches in the app.
+
+**What the owner does:** turn the tunnel on (Settings › Connection), turn the connector on (Settings › Claude connector,
+confirmed with a passkey), copy the MCP URL the panel shows into Claude (Settings › Connectors › Add custom connector),
+and approve the sign-in in the app as usual.
+
+**What changes on the machine:** one key, `connector.enabled`, in `config/daemon.json` (nothing else is written, and a
+`publicUrl`, `port` or `extraRedirectUris` you wrote stays exactly as it was), and `state/connector/` once a client
+signs in. No port is bound for the connector, no process is started.
+
+How it is served:
+
+- The tunnel's own loopback listener (docs/relay-protocol.md §15) offers a request to the connector's handlers — the
+  very same OAuth and `/mcp` handlers the connector listener runs, not a copy — **only while the connector is switched
+  on and the tunnel has a hostname**. Every arrival is remote and unprivileged, whatever its peer address says, and the
+  only credential any of those handlers accepts is a connector token. With the connector off, every connector path is
+  the same `404` as any other path.
+- The path set is exactly the table in "Where it listens" and nothing else. The hosted service's edge ingress forwards
+  the same set (`TUNNEL_CONNECTOR_PATH_PATTERN` in `@ferretry/relay`, written beside the session rule by
+  `tunnelIngress`): the edge forwards it for every tunnel because it cannot know who switched what on, and the daemon is
+  the wall that refuses it. Neither the owner's `/v1/connector/*` routes nor any other `/v1/*` route is reachable
+  through the tunnel; the integration test `tests/integration/connector/builtin-tunnel.test.ts` pins that with the admin
+  token, a connector token and no credential.
+- **The address.** With no `connector.publicUrl`, the issuer is the tunnel's hostname (`resource` is
+  `https://<id>.ferretry.stream/mcp`, which is every token's audience). **An explicit `publicUrl` always wins and is
+  never overwritten**: the connector then listens on its own `127.0.0.1:<port>` for the tunnel you run, exactly as
+  before, and the built-in tunnel does not serve it (the server's `https://ferretry.atomi.cloud` is the example).
+- **If the hostname changes** — the hosted service gave this machine another one, or the tunnel was released and
+  provisioned anew — issuer and audience change with it. Every token issued for the old hostname stops working **by
+  design** (a token is only good for the audience it was issued for), Claude's connector shows signed out, and the
+  owner adds the new URL and approves again. Until the tunnel has a hostname the panel says "waiting for the tunnel".
+- **Rolling out.** The Worker that writes the tunnel's ingress must run a version that forwards the connector paths
+  before the connector answers through a tunnel; an existing tunnel gets the new ingress the next time its daemon
+  provisions with a new origin port, which every daemon start does (the ingress is rewritten only when the port
+  changed). A daemon that is not yet re-provisioned says nothing wrong: the connector paths are simply not forwarded.
+
+**The switch** is `PUT /v1/connector` `{ "enabled": boolean }`, answered with the status document. It is
+`pairing.configure` (docs/grants.md "Turning the connector on or off"): a governed device needs that grant and the
+passkey step-up every `configure` demand takes — the app's passkey is the owner's confirmation — and the host's own
+admin token over loopback is ungoverned. It is a person's route (a ferret or the connector itself is refused with
+`403 owner_only`). Writing happens only after the connector could start (a damaged `connector.json` or a taken port
+answers `409 connector_cannot_switch` with a sentence and writes nothing); the switch is journaled as
+`security.changed` with the subject `connector`. Turning it on grants nothing by itself: each sign-in still needs its own
+`approve-connector` passkey. Turning it off stops serving at once — a request still in flight cannot reach a fleet route after the off — keeps the
+grants (they are only good while it is on) and needs no restart; **grants stay listed and revocable while it is off**, so
+containing one never means switching the connector back on. A switch-on is judged against `config/daemon.json` as it is
+now: if the operator changed `publicUrl`, `port` or `extraRedirectUris` after this daemon started (or damaged the block), it
+is refused with the sentence "restart it so they apply" and nothing is written; it is refused too while the daemon is still
+starting. With an own `publicUrl` the loopback listener is bound ahead of the write but answers 404 until the switch commits.
+
+**Declared gap.** An authorization code the owner has approved but Claude has not yet redeemed (at most 60 s) is not bound to
+the origin it was approved for. If the tunnel hostname changed inside that window, redeeming it would issue a token for the
+new hostname. The sign-in is still the owner's own approved one, and the window needs a re-provision at exactly that moment;
+binding pending sign-ins to their resource is deferred. `GET /v1/connector` now also says `switchedOn` (the owner's decision) beside `enabled` (reachable
+now) and `publicUrlSource` (`tunnel` or `configured`).
 
 ## Allowed redirect URIs
 
@@ -384,7 +448,10 @@ Hides one open agenda item until a time and lists it again afterwards — the da
 - **Protocol version**: the endpoint's own refusal reply for a write tool a read-only token may not call never
   reaches the SDK, so it checks `MCP-Protocol-Version` itself (an unsupported value is `400`, as the SDK does).
 
-## Turning it on (the owner, at the machine)
+## Turning it on with your own tunnel (the owner, at the machine)
+
+This is the path for a server with its own public address (`connector.publicUrl` set). A machine with the built-in tunnel
+needs none of it — see "Over the built-in tunnel".
 
 The daemon never runs the tunnel itself. You run `cloudflared` (or any HTTPS reverse proxy) in front of the
 connector listener. `fy.example.com` below stands for the hostname you choose.
@@ -435,7 +502,8 @@ when the tunnel restarts.
 ## Not in this version
 
 Voice inside Ferretry; more than one owner / team permissions; Client ID Metadata Documents; a daemon-managed
-tunnel (the owner runs `cloudflared` — see "Turning it on"); per-tool consent; restricting `/mcp` and `/oauth/token` to
+tunnel of the connector's own (the built-in tunnel serves it — see "Over the built-in tunnel"; anything else is the
+operator's own `cloudflared` — see "Turning it on"); per-tool consent; restricting `/mcp` and `/oauth/token` to
 Anthropic's published address range.
 
 ## Sources

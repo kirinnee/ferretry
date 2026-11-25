@@ -916,6 +916,8 @@ const harnessMinutesAgo = (minutes: number): string => new Date(Date.now() - min
  */
 const HARNESS_CONNECTOR_VIEW: ConnectorView = {
   enabled: true,
+  switchedOn: true,
+  publicUrlSource: 'configured',
   publicUrl: 'https://mcp.example.test',
   mcpUrl: 'https://mcp.example.test/mcp',
   pending: [

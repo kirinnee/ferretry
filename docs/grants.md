@@ -96,7 +96,8 @@ it the machine.
   same listener gives an HTTP request — and nothing inside a record can change it.
 - a **tunnel** arrival (protocol §15) reaches the daemon through `cloudflared` from a loopback peer, so
   it never lands on the API listener: the daemon's dedicated tunnel listener serves only the session
-  route and stamps every arrival `loopback: false` and unprivileged, exactly like a relayed one.
+  route — and, while the owner has the connector switched on over the tunnel, the connector's own handlers, which accept
+  nothing but a connector token — and stamps every arrival `loopback: false` and unprivileged, exactly like a relayed one.
 
 Nothing re-derives it, and no header can move it.
 `packages/daemon/tests/unit/grants/policy.test.ts` asserts exactly this with a relayed request that
@@ -623,6 +624,17 @@ a tunnel reaches nobody who was not already paired — every session through it 
 against the pinned identity, and pairing itself is refused on the tunnel listener — which is why the
 owner may switch it from the app. Reading it (`GET /v1/tunnel`) needs no capability, like
 `GET /v1/carriers`. A change is journaled as `security.changed` with the subject `tunnel`.
+
+## Turning the connector on or off
+
+Turning the Claude connector on or off is `pairing.configure`, the same capability as the tunnel above. `PUT /v1/connector`
+([mcp-connector.md](mcp-connector.md) "Over the built-in tunnel") changes how OTHER programs reach this host, and how this host
+may be reached is the subject `pairing` governs. A governed caller needs that grant and the current step-up every
+`configure` demand takes, so the owner's passkey in the app IS the confirmation; the host's admin token over loopback is
+ungoverned. It needs no act of its own because turning it on grants nothing: each sign-in still needs `approve-connector`
+(its own passkey, `pairing.configure`), and denying or revoking stays `pairing.use`. It is a person's route — a ferret, the
+warden and the connector itself get `403 owner_only`. An operator can narrow it by setting `pairing.configure` false, which
+also stops approving. A change is journaled as `security.changed` with the subject `connector`.
 
 ## Widening is a local act. There is no remote path to it.
 

@@ -18,8 +18,12 @@ export const CLAUDE_REDIRECT_URI = 'https://claude.ai/api/mcp/auth_callback';
 export type ConnectorSettings =
   | {
       readonly kind: 'enabled';
-      /** The public origin, no trailing slash: the issuer. */
-      readonly publicUrl: string;
+      /**
+       * The public origin the operator configured, no trailing slash: the issuer. `undefined` means none was
+       * written, and the issuer is this machine's built-in tunnel hostname once that is known (docs/mcp-connector.md
+       * "Over the built-in tunnel"). A configured address ALWAYS wins and is never overwritten.
+       */
+      readonly publicUrl: string | undefined;
       readonly port: number;
       /** Claude's callback first, then the operator's extras, de-duplicated, exact strings. */
       readonly redirectUris: readonly string[];
@@ -52,36 +56,71 @@ function urlProblem(text: string, what: string, origin: boolean): string | undef
   return undefined;
 }
 
-export function connectorSettings(block: unknown): ConnectorSettings {
-  if (block === undefined)
-    return { kind: 'disabled', reason: 'The connector is off: config/daemon.json has no "connector" block.' };
-  const parsed = ConnectorBlockSchema.safeParse(block);
+/**
+ * The block read WHETHER OR NOT it is switched on: the settings a switch-on will use, or why none can be.
+ *
+ * Kept apart from {@link connectorSettings} so the app's switch can turn the connector on live — it needs the
+ * address, port and redirect allow-list of a block that says `enabled: false`, and must refuse (not half-start)
+ * when that block is damaged.
+ */
+export type ConnectorConfiguration =
+  | {
+      readonly kind: 'valid';
+      /** Whether the block says the connector is on. */
+      readonly enabled: boolean;
+      readonly settings: Extract<ConnectorSettings, { kind: 'enabled' }>;
+    }
+  | { readonly kind: 'invalid'; readonly reason: string };
+
+const OFF_SENTENCE = 'The connector is off. Switch it on in the app (Settings › Claude connector).';
+
+export function connectorConfiguration(block: unknown): ConnectorConfiguration {
+  const parsed = ConnectorBlockSchema.safeParse(block ?? {});
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     const where = issue?.path.join('.') ?? '';
     return {
-      kind: 'disabled',
+      kind: 'invalid',
       reason: `The connector is off: config/daemon.json "connector"${where === '' ? '' : `.${where}`} is not valid (${issue?.message ?? 'unreadable'}).`,
     };
   }
   const value = parsed.data;
-  if (!value.enabled)
-    return { kind: 'disabled', reason: 'The connector is off: config/daemon.json "connector.enabled" is not true.' };
-  if (value.publicUrl === undefined)
-    return {
-      kind: 'disabled',
-      reason: 'The connector is off: set config/daemon.json "connector.publicUrl" to the public https:// address.',
-    };
-  const publicProblem = urlProblem(value.publicUrl, '"connector.publicUrl"', true);
-  if (publicProblem !== undefined) return { kind: 'disabled', reason: `The connector is off: ${publicProblem}.` };
+  const publicProblem =
+    value.publicUrl === undefined ? undefined : urlProblem(value.publicUrl, '"connector.publicUrl"', true);
+  if (publicProblem !== undefined) return { kind: 'invalid', reason: `The connector is off: ${publicProblem}.` };
   for (const extra of value.extraRedirectUris) {
     const problem = urlProblem(extra, `"connector.extraRedirectUris" entry ${JSON.stringify(extra)}`, false);
-    if (problem !== undefined) return { kind: 'disabled', reason: `The connector is off: ${problem}.` };
+    if (problem !== undefined) return { kind: 'invalid', reason: `The connector is off: ${problem}.` };
   }
   return {
-    kind: 'enabled',
-    publicUrl: new URL(value.publicUrl).origin,
-    port: value.port ?? CONNECTOR_DEFAULT_PORT,
-    redirectUris: [...new Set([CLAUDE_REDIRECT_URI, ...value.extraRedirectUris])],
+    kind: 'valid',
+    enabled: value.enabled,
+    settings: {
+      kind: 'enabled',
+      publicUrl: value.publicUrl === undefined ? undefined : new URL(value.publicUrl).origin,
+      port: value.port ?? CONNECTOR_DEFAULT_PORT,
+      redirectUris: [...new Set([CLAUDE_REDIRECT_URI, ...value.extraRedirectUris])],
+    },
   };
+}
+
+export function connectorSettings(block: unknown): ConnectorSettings {
+  if (block === undefined) return { kind: 'disabled', reason: OFF_SENTENCE };
+  const configuration = connectorConfiguration(block);
+  if (configuration.kind === 'invalid') return { kind: 'disabled', reason: configuration.reason };
+  return configuration.enabled ? configuration.settings : { kind: 'disabled', reason: OFF_SENTENCE };
+}
+
+/**
+ * The raw `config/daemon.json` document with exactly one fact changed: `connector.enabled`.
+ *
+ * Raw in, raw out — the same rule every daemon-config write keeps: the operator's own `publicUrl`, `port` and
+ * `extraRedirectUris` survive untouched, and a block that is not an object (a typo) is replaced by `{ enabled }` alone
+ * rather than merged into, because a damaged block read as "off" must not stay damaged under a switch that says it is on.
+ */
+export function connectorEnabledDocument(raw: Record<string, unknown>, enabled: boolean): Record<string, unknown> {
+  const block = raw.connector;
+  const existing =
+    typeof block === 'object' && block !== null && !Array.isArray(block) ? (block as Record<string, unknown>) : {};
+  return { ...raw, connector: { ...existing, enabled } };
 }

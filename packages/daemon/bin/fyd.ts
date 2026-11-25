@@ -1850,6 +1850,11 @@ export interface DaemonWorld {
    */
   readonly tunnelEntry: TunnelEntryStorePort;
   /**
+   * Where the connector switch writes its decision: `connector.enabled` and no other key, in the document this
+   * daemon booted from, under the same barrier the tunnel switch and grant writes hold.
+   */
+  readonly connectorEnabled: { write(enabled: boolean): Promise<void> };
+  /**
    * The peer-to-peer carrier's native engine (`docs/relay-protocol.md` §16), asked only whether it works.
    *
    * A world field because `--check` proves it with a real self-test — two loopback peers echoing
@@ -8814,6 +8819,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     tunnelEntry: {
       write: async entry => await daemonConfigMutations.runExclusive(() => daemonConfigStore.writeTunnelEntry(entry)),
     },
+    connectorEnabled: {
+      write: async enabled =>
+        await daemonConfigMutations.runExclusive(() => daemonConfigStore.writeConnectorEnabled(enabled)),
+    },
     createTunnelCarrier: input => {
       const directoryOrigin = environment.relayDirectoryOrigin();
       return new TunnelCarrier({
@@ -11889,6 +11898,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           audit: auditLog,
           daemonGrants: () => grants.enforced(),
           redactor: secretRedactor,
+          // The built-in tunnel's hostname, once provisioned: the connector's address when none is configured.
+          tunnelOrigin: () => {
+            const url = tunnel.view().tunnelUrl;
+            return url === null ? undefined : new URL(url).origin;
+          },
+          readBlock: async () => (await daemonConfigStore.peek()).document?.connector,
+          writeEnabled: async enabled => await world.connectorEnabled.write(enabled),
         },
         undefined,
         lifecycle,
@@ -13874,6 +13890,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
             credentials: base.credentials,
             guard: subsystems.grants,
             corsOrigins: browserOrigins(config),
+            // The connector's routes, only while it is on AND has no address of the operator's own (docs/mcp-connector.md).
+            connector: () => modules.connector.provides.tunnelHandlers(),
           }),
           { host: '127.0.0.1', port: 0, directLoopbackIsPrivileged: false, remotePeer: tunnelPeer },
         );
@@ -13889,29 +13907,19 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
       notices: world.notices,
     }),
   );
-  // The remote MCP connector's own listener (docs/mcp-connector.md), bound only when config/daemon.json turns it on.
-  // Every tool acts through THIS dispatcher, as the owner, so it is bound after the dispatcher exists. A connector
-  // that cannot listen (its port taken, a damaged connector.json) is said out loud and leaves the daemon serving.
-  if (modules.connector.provides.settings.kind === 'enabled') {
-    try {
-      const listening = await modules.connector.provides.listen({
-        api: world.api,
-        dispatch: async request => await dispatcher.dispatch(request),
-        adminToken: () => base.credentials.admin,
-        wardenToken: () => base.credentials.warden,
-        remotePeer: tunnelPeer,
-      });
-      if (listening !== undefined) {
-        cleanups.push(async () => await listening.close());
-        world.notices.state(
-          `connector listening on ${listening.url} for ${modules.connector.provides.settings.publicUrl}/mcp`,
-        );
-      }
-    } catch (error) {
-      world.notices.state(`! connector not started: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  } else {
-    world.notices.state(modules.connector.provides.settings.reason);
+  // The remote MCP connector (docs/mcp-connector.md): the tools act through THIS dispatcher, as the owner, so it is brought
+  // up now that the dispatcher exists. Its own loopback listener binds only for an operator's own publicUrl; otherwise it is
+  // served by the built-in tunnel's listener. A connector that cannot start (its port taken, a damaged connector.json) is
+  // said out loud and leaves the daemon serving — and can be retried by switching it on again.
+  {
+    await modules.connector.provides.listen({
+      api: world.api,
+      dispatch: async request => await dispatcher.dispatch(request),
+      adminToken: () => base.credentials.admin,
+      wardenToken: () => base.credentials.warden,
+      remotePeer: tunnelPeer,
+    });
+    world.notices.state(modules.connector.provides.bootNotice());
   }
   // The self-check tick, armed only once the daemon is actually serving. Its cadence IS the number
   // the wedge detector measures lateness against, so it comes from the same settings object the

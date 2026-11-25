@@ -3077,8 +3077,11 @@ Cloudflare Tunnel: Edit, Zone › DNS: Edit and Zone › Zone: Read on that zone
    provision, new or renewal, reads it with `GET /accounts/{account}/cfd_tunnel/{id}/token` and hands
    it straight to the daemon, so the control object holds no credential a storage read could leak.
 2. `PUT /accounts/{account}/cfd_tunnel/{id}/configurations` with the ingress `tunnelIngress` builds:
-   the one rule `hostname: <label>.<zone>`, `path: ^/v1/rendezvous/<daemonId>/client$`,
-   `service: http://127.0.0.1:<originPort>`, then `http_status:404` for everything else.
+   the session rule `hostname: <label>.<zone>`, `path: ^/v1/rendezvous/<daemonId>/client$`,
+   `service: http://127.0.0.1:<originPort>`; then the connector rule — the same hostname and service with `path:
+TUNNEL_CONNECTOR_PATH_PATTERN`, the nine fixed paths of the daemon's Claude connector (`/mcp`, `/oauth/*`,
+   `/.well-known/oauth-*`, [mcp-connector.md](mcp-connector.md) "Over the built-in tunnel"); then `http_status:404` for
+   everything else. The daemon's tunnel listener answers 404 to the connector paths unless the owner switched the connector on.
 3. `POST /zones/{zone}/dns_records` `{ type: "CNAME", proxied: true, name: <label>.<zone>, content: <id>.cfargotunnel.com }`.
 
 The hostname is **one random label** under the account's zone — never derived from the fingerprint,
@@ -3193,7 +3196,10 @@ partial one. The operator runbook is
   daemon's own host, so an arrival through it comes from a loopback peer. The tunnel therefore never
   points at the daemon's API listener: the daemon binds a **second** listener on `127.0.0.1`, on an
   ephemeral port (the `originPort` it provisions with), that serves **only**
-  `GET /v1/rendezvous/<its daemonId>/client` and answers `404` to everything else, and that stamps every
+  `GET /v1/rendezvous/<its daemonId>/client` — plus, while the owner has the Claude connector switched on and
+  it has no address of its own, the connector's nine fixed paths, handed to the same handlers its own listener runs
+  ([mcp-connector.md](mcp-connector.md) "Over the built-in tunnel"; they are `404` otherwise) — and answers `404` to
+  everything else, and that stamps every
   arrival `loopback: false` and not privileged — the relay rule (§14, "What this tunnel does not
   carry"), for the same reason. The per-peer bounds of §4 key a tunnel arrival by its
   `CF-Connecting-IP` — an IPv4 address whole, an IPv6 address by its **/64**, because one subscriber is

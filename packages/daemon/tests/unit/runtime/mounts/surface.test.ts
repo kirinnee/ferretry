@@ -66,7 +66,7 @@ describe('the mounted daemon surface', () => {
       1 + // the draft-profile preview, a read with a body
       6 + // the setup scan, tool install, the clone export, the clone review, forgetting a copy source and the record of the keys a sealed copy filed
       1 + // the security log read
-      4 + // the owner's remote MCP connector: its status read, approving or denying a sign-in, and revoking a grant (docs/mcp-connector.md)
+      5 + // the owner's remote MCP connector: its status read, switching it on or off, approving or denying a sign-in, and revoking a grant (docs/mcp-connector.md)
       1 + // a lead's table of its sub-ferrets (`GET /v1/sessions/:sessionId/subtree`, docs/pack-mode.md)
       5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options (the owner's re-opened window is admin-token)
       1 + // "Send now" for the answers a ferret's outbox holds (docs/agenda.md § The loop)
@@ -365,6 +365,7 @@ describe('the mounted daemon surface', () => {
         'POST /v1/catalog-links/:linkId/copy',
         'DELETE /v1/catalog-links/:linkId',
         'GET /v1/connector',
+        'PUT /v1/connector',
         'POST /v1/connector/requests/:id/approve',
         'POST /v1/connector/requests/:id/deny',
         'POST /v1/connector/grants/:id/revoke',

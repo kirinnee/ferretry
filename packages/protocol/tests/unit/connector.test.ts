@@ -42,6 +42,8 @@ const cases: SchemaCase[] = [
     schema: connector.ConnectorStatusSchema,
     value: {
       enabled: true,
+      switchedOn: true,
+      publicUrlSource: 'tunnel',
       publicUrl: 'https://mcp.example.test',
       mcpUrl: 'https://mcp.example.test/mcp',
       pending: [pending],
@@ -51,9 +53,27 @@ const cases: SchemaCase[] = [
   {
     name: 'status when off',
     schema: connector.ConnectorStatusSchema,
-    value: { enabled: false, disabledReason: 'Set connector.enabled in config/daemon.json.', pending: [], grants: [] },
+    value: {
+      enabled: false,
+      switchedOn: false,
+      disabledReason: 'Switch it on in the app.',
+      pending: [],
+      grants: [],
+    },
+  },
+  {
+    name: 'status when on but waiting for the tunnel',
+    schema: connector.ConnectorStatusSchema,
+    value: {
+      enabled: false,
+      switchedOn: true,
+      disabledReason: 'Waiting for the tunnel.',
+      pending: [],
+      grants: [],
+    },
   },
   { name: 'act body', schema: connector.ConnectorActRequestSchema, value: {} },
+  { name: 'switch body', schema: connector.ConnectorChangeSchema, value: { enabled: true } },
 ];
 
 describe('connector wire schemas', () => {
@@ -107,6 +127,28 @@ describe('connector wire schemas', () => {
         name: 'a date, not an instant',
         schema: connector.ConnectorGrantViewSchema,
         value: { ...grant, createdAt: 'yesterday' },
+      },
+    ]);
+  });
+
+  it('should refuse a switch that names anything but on or off, and a status that does not say whether it is switched on', () => {
+    assertRejects([
+      {
+        name: 'switch with an address',
+        schema: connector.ConnectorChangeSchema,
+        value: { enabled: true, publicUrl: 'https://x.example' },
+      },
+      { name: 'switch with no answer', schema: connector.ConnectorChangeSchema, value: {} },
+      { name: 'switch as a word', schema: connector.ConnectorChangeSchema, value: { enabled: 'yes' } },
+      {
+        name: 'status without switchedOn',
+        schema: connector.ConnectorStatusSchema,
+        value: { enabled: false, pending: [], grants: [] },
+      },
+      {
+        name: 'status with an unknown address source',
+        schema: connector.ConnectorStatusSchema,
+        value: { enabled: true, switchedOn: true, publicUrlSource: 'guess', pending: [], grants: [] },
       },
     ]);
   });

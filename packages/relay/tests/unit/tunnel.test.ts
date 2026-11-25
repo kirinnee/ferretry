@@ -16,6 +16,7 @@ import {
   TunnelReleaseRequestSchema,
   TunnelServiceAdvertisementSchema,
   toBase64Url,
+  TUNNEL_CONNECTOR_PATH_PATTERN,
   tunnelIngress,
   tunnelTranscript,
   utf8Text,
@@ -141,7 +142,7 @@ describe('tunnel wire shapes', () => {
     should(TunnelProvisionSchema.safeParse({ ...answer, connectorToken: '' }).success).be.false();
   });
 
-  it('should forward exactly one route to one loopback port', async () => {
+  it('should forward the session route and the connector paths to one loopback port, and 404 the rest', async () => {
     const daemonId = (await newDaemonIdentity()).daemonId;
     should(tunnelIngress('abc.tunnels-a.example.com', daemonId, 41_234)).eql([
       {
@@ -149,8 +150,47 @@ describe('tunnel wire shapes', () => {
         path: `^/v1/rendezvous/${daemonId}/client$`,
         service: 'http://127.0.0.1:41234',
       },
+      {
+        hostname: 'abc.tunnels-a.example.com',
+        path: TUNNEL_CONNECTOR_PATH_PATTERN,
+        service: 'http://127.0.0.1:41234',
+      },
       { service: 'http_status:404' },
     ]);
+  });
+
+  it('should match exactly the connector paths, anchored, and nothing a daemon serves besides', () => {
+    const pattern = new RegExp(TUNNEL_CONNECTOR_PATH_PATTERN, 'u');
+    for (const served of [
+      '/mcp',
+      '/oauth/register',
+      '/oauth/authorize',
+      '/oauth/authorize/wait',
+      '/oauth/token',
+      '/oauth/revoke',
+      '/.well-known/oauth-protected-resource',
+      '/.well-known/oauth-protected-resource/mcp',
+      '/.well-known/oauth-authorization-server',
+    ])
+      should(pattern.test(served)).be.true();
+    for (const other of [
+      '/',
+      '/v1/status',
+      '/v1/connector',
+      '/mcp/',
+      '/mcp/x',
+      '/oauth',
+      '/oauth/',
+      '/oauth/authorize/x',
+      '/oauth/other',
+      '/xmcp',
+      '/a/mcp',
+      '/.well-known/openid-configuration',
+      '/.well-known/oauth-protected-resource/other',
+      '/.well-known/oauth-authorization-server/x',
+      '/v1/rendezvous/x/client',
+    ])
+      should(pattern.test(other)).be.false();
   });
 });
 

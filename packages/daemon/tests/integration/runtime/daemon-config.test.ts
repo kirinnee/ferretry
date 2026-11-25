@@ -275,6 +275,40 @@ describe('FileDaemonConfig', () => {
     should(settled.config.carrierSet.tunnel).deepEqual({ kind: 'tunnel', source: 'discovery', enabled: true });
   });
 
+  it('should write connector.enabled alone, keeping the operator’s publicUrl, port and every other key', async () => {
+    // Arrange
+    const documents = documentStore(
+      JSON.stringify({
+        port: 7_431,
+        connector: { enabled: false, publicUrl: 'https://ferretry.example.com', port: 7_461 },
+      }),
+    );
+
+    // Act
+    await documents.store.writeConnectorEnabled(true);
+    const written = JSON.parse(documents.text() ?? '{}') as Record<string, unknown>;
+    await documents.store.writeConnectorEnabled(false);
+    const off = JSON.parse(documents.text() ?? '{}') as Record<string, unknown>;
+
+    // Assert — nothing manufactured, nothing lost.
+    should(written).deepEqual({
+      port: 7_431,
+      connector: { enabled: true, publicUrl: 'https://ferretry.example.com', port: 7_461 },
+    });
+    should(off.connector).deepEqual({ enabled: false, publicUrl: 'https://ferretry.example.com', port: 7_461 });
+  });
+
+  it('should add the connector block to a document that has none, and write nothing else', async () => {
+    // Arrange
+    const documents = documentStore(JSON.stringify({ port: 7_431 }));
+
+    // Act
+    await documents.store.writeConnectorEnabled(true);
+
+    // Assert
+    should(JSON.parse(documents.text() ?? '{}')).deepEqual({ port: 7_431, connector: { enabled: true } });
+  });
+
   it('should replace the one tunnel entry in place, leaving every other entry exactly as written', async () => {
     // Arrange
     const documents = documentStore(

@@ -5,6 +5,7 @@ import type {
   AnalyticsPricingConfigurationWrite,
   AnalyticsPricingConfigurationWriteResult,
 } from '../../lib/analytics/pricing-service.ts';
+import { connectorEnabledDocument } from '../../lib/connector/config.ts';
 import {
   type CarrierConversionOutcome,
   type DaemonConfig,
@@ -101,6 +102,14 @@ export class ExplicitDaemonConfig implements DaemonConfigStore, AnalyticsPricing
     const raw = (text === undefined ? {} : JSON.parse(text)) as Record<string, unknown>;
     DaemonConfigDocumentSchema.parse(raw);
     await this.write(tunnelEntryDocument(raw, entry));
+  }
+
+  /** Writes `connector.enabled` into the exact file `--config` named — see `connectorEnabledDocument`. */
+  async writeConnectorEnabled(enabled: boolean): Promise<void> {
+    const text = await this.read();
+    const raw = (text === undefined ? {} : JSON.parse(text)) as Record<string, unknown>;
+    DaemonConfigDocumentSchema.parse(raw);
+    await this.write(connectorEnabledDocument(raw, enabled));
   }
 
   /** Reads the same pricing slice as the state-home adapter, from the exact file `--config` named. */

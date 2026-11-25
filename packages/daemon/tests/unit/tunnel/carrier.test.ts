@@ -148,7 +148,7 @@ describe('the hosted tunnel carrier', () => {
     should(subject.published).equal('https://quiet-otter.tunnels.example');
     should(world.holding.held).deepEqual({ origin: ORIGIN, tunnelUrl: 'https://quiet-otter.tunnels.example' });
     should(world.notices.steps).deepEqual([
-      'tunnel listener: 127.0.0.1:41234, serving only this daemon’s session route to the tunnel',
+      'tunnel listener: 127.0.0.1:41234, serving this daemon’s session route (and the connector’s, while it is on) to the tunnel',
       'tunnel provisioned: https://quiet-otter.tunnels.example, renewing every 86400s',
       'tunnel connector registered: https://quiet-otter.tunnels.example',
     ]);

@@ -27,14 +27,26 @@
  * The strict protocol schemas have no field for a token, a code, a secret or a handle. Every answer is parsed
  * through them, so a view that grew one would fail here (500) rather than reach a client.
  *
+ * ## SWITCHING IT (`PUT /v1/connector`)
+ *
+ * `pairing.configure`, exactly as `PUT /v1/tunnel` is: a connector changes how OTHER programs reach this host, and
+ * that is the subject `pairing` already governs. A governed caller therefore needs that grant AND the step-up every
+ * `configure` demand takes — the app's passkey IS the owner's confirmation — while the host's own admin token over
+ * loopback is ungoverned. Turning it ON reaches nothing by itself: every sign-in still needs its own `approve-connector`
+ * passkey, and a connector holds no device, so it can never switch itself on or off (`caller: 'person'`). Off is the
+ * default, and a config that names no `publicUrl` serves the connector over the built-in tunnel only.
+ *
  * ## WHEN THE CONNECTOR IS OFF
  *
  * `GET` still answers — `enabled: false` and a sentence saying why and what to do — so `fy connector` and the app can
- * explain it. Approve, deny and revoke answer `409 connector_disabled` with a plain sentence and never touch the acts.
+ * explain it, and still lists the grants that were given: ending access is never harder than giving it, so an owner who
+ * switched the connector off to contain one can revoke it without switching it back on. Approve and deny answer
+ * `409 connector_disabled` with a plain sentence and never touch the acts; revoke works off or on.
  */
 import {
   CONNECTOR_REFUSAL_CODES,
   ConnectorActRequestSchema,
+  ConnectorChangeSchema,
   ConnectorGrantViewSchema,
   ConnectorPendingViewSchema,
   ConnectorGrantIdSchema,
@@ -51,6 +63,7 @@ import {
   decodeParameter,
   errorResponse,
   jsonResponse,
+  parseBody,
   parseOptionalBody,
   type RouteContext,
 } from '../../api/index.ts';
@@ -61,12 +74,28 @@ import type { ConnectorActRefusal, ConnectorActResult, ConnectorOwnerActs } from
  * daemon pick that up while the routes are mounted.
  */
 export type ConnectorAvailability =
-  | { readonly enabled: true; readonly publicUrl: string; readonly mcpUrl: string }
-  | { readonly enabled: false; readonly disabledReason: string };
+  | {
+      readonly enabled: true;
+      readonly publicUrl: string;
+      readonly mcpUrl: string;
+      /** Whose address it is: the operator's `connector.publicUrl`, or this machine's built-in tunnel hostname. */
+      readonly source: 'configured' | 'tunnel';
+    }
+  | {
+      readonly enabled: false;
+      readonly disabledReason: string;
+      /** Switched on but not reachable yet (waiting for the tunnel, or it could not start) — as opposed to off. */
+      readonly switchedOn: boolean;
+    };
+
+/** The answer of a switch: done, or a sentence saying why not. Nothing is written when it is a refusal. */
+export type ConnectorChangeResult = { readonly ok: true } | { readonly ok: false; readonly message: string };
 
 export interface ConnectorSubsystem {
   readonly acts: ConnectorOwnerActs;
   availability(): Promise<ConnectorAvailability> | ConnectorAvailability;
+  /** Switches the connector on or off live, writing the same `connector.enabled` the host edit writes. */
+  change(enabled: boolean): Promise<ConnectorChangeResult>;
 }
 
 const CONNECTOR_USE: CapabilityDemand = { capability: 'pairing', axis: 'use' };
@@ -118,6 +147,31 @@ const notFoundRequest = (): ApiResponse =>
 
 export function connectorRoutes(subsystem: ConnectorSubsystem): readonly ApiRoute[] {
   const { acts } = subsystem;
+  /** The status document, read fresh. Off or waiting: nothing to list, and no call into acts that may not exist. */
+  const statusOf = async () => {
+    const availability = await subsystem.availability();
+    return ConnectorStatusSchema.parse(
+      availability.enabled
+        ? {
+            enabled: true,
+            switchedOn: true,
+            publicUrlSource: availability.source,
+            publicUrl: availability.publicUrl,
+            mcpUrl: availability.mcpUrl,
+            pending: [...(await acts.pending())],
+            grants: [...(await acts.grants())],
+          }
+        : {
+            enabled: false,
+            switchedOn: availability.switchedOn,
+            disabledReason: availability.disabledReason,
+            pending: [],
+            // Granted access is listed — and revocable — whether or not the connector is reachable: an owner who
+            // switched it off to contain a grant must be able to end that grant without switching it back on.
+            grants: [...(await acts.grants().catch(() => []))],
+          },
+    );
+  };
   return [
     {
       method: 'GET',
@@ -126,19 +180,20 @@ export function connectorRoutes(subsystem: ConnectorSubsystem): readonly ApiRout
       caller: 'person',
       capability: CONNECTOR_USE,
       noStore: true,
-      handle: async () => {
-        const availability = await subsystem.availability();
-        // Off: nothing to list, and no call into acts that may not exist. The sentence says why and what to do.
-        const status = availability.enabled
-          ? {
-              enabled: true,
-              publicUrl: availability.publicUrl,
-              mcpUrl: availability.mcpUrl,
-              pending: [...(await acts.pending())],
-              grants: [...(await acts.grants())],
-            }
-          : { enabled: false, disabledReason: availability.disabledReason, pending: [], grants: [] };
-        return jsonResponse(ConnectorStatusSchema.parse(status));
+      handle: async () => jsonResponse(await statusOf()),
+    },
+    {
+      method: 'PUT',
+      path: '/v1/connector',
+      minimum: 'operator',
+      caller: 'person',
+      capability: CONNECTOR_CONFIGURE,
+      noStore: true,
+      handle: async context => {
+        const change = await parseBody(context.request, ConnectorChangeSchema);
+        const result = await subsystem.change(change.enabled);
+        if (!result.ok) return errorResponse(409, result.message, CONNECTOR_REFUSAL_CODES.cannotSwitch);
+        return jsonResponse(await statusOf());
       },
     },
     {
@@ -189,8 +244,7 @@ export function connectorRoutes(subsystem: ConnectorSubsystem): readonly ApiRout
         await parseOptionalBody(context.request, ConnectorActRequestSchema);
         const grantId = ConnectorGrantIdSchema.safeParse(decodeParameter(context.params.get('id') ?? ''));
         if (!grantId.success) return errorResponse(404, 'there is no such grant', CONNECTOR_REFUSAL_CODES.notFound);
-        const availability = await subsystem.availability();
-        if (!availability.enabled) return disabled(availability);
+        // No availability check: ending access is never harder than giving it, off or on.
         const result = await acts.revoke(grantId.data, context.actor ?? 'unknown');
         return result.ok ? jsonResponse(ConnectorGrantViewSchema.parse(result.value)) : refused(result);
       },

@@ -100,6 +100,45 @@ describe('ExplicitDaemonConfig', () => {
     should((await stat(path)).mode & 0o777).equal(0o600);
   });
 
+  it('should switch the connector in the file `--config` named, changing connector.enabled and nothing else', async () => {
+    // Arrange
+    const directory = await tempDirectory('fyd-explicit-connector');
+    const path = join(directory, 'daemon.json');
+    await writeFile(
+      path,
+      JSON.stringify({
+        port: 7_431,
+        connector: { enabled: false, publicUrl: 'https://ferretry.example.com', port: 7_461 },
+      }),
+    );
+    const store = new ExplicitDaemonConfig(path);
+
+    // Act
+    await store.writeConnectorEnabled(true);
+    const written = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+    await store.writeConnectorEnabled(false);
+    const off = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+
+    // Assert
+    should(written).deepEqual({
+      port: 7_431,
+      connector: { enabled: true, publicUrl: 'https://ferretry.example.com', port: 7_461 },
+    });
+    should(off.connector).deepEqual({ enabled: false, publicUrl: 'https://ferretry.example.com', port: 7_461 });
+  });
+
+  it('should add the connector block where `--config` points even before the file exists', async () => {
+    // Arrange
+    const directory = await tempDirectory('fyd-explicit-connector-absent');
+    const path = join(directory, 'daemon.json');
+
+    // Act
+    await new ExplicitDaemonConfig(path).writeConnectorEnabled(true);
+
+    // Assert
+    should(JSON.parse(await readFile(path, 'utf8'))).deepEqual({ connector: { enabled: true } });
+  });
+
   it('should refuse to record over a document it could not read as a configuration', async () => {
     // Writing the raw document plus one key must not become a way to persist a shape this daemon
     // would refuse to boot on: the parse boundary stays exactly where it was.

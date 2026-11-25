@@ -15,7 +15,7 @@ export function registerConnectorCommands(program: Command, controller: () => Co
       'after',
       [
         '',
-        'The connector is OFF until you turn it on in config/daemon.json on this machine (docs/mcp-connector.md).',
+        'The connector is OFF until you turn it on: in the app (Settings › Claude connector) or in config/daemon.json (docs/mcp-connector.md).',
         'When Claude signs in, it shows a short match code on a waiting page. Approve only the sign-in whose code',
         'matches the page YOU just opened from Claude — in the app with your passkey, or here at the machine.',
         '',

@@ -7,7 +7,7 @@
  *    so because the tunnel is opt-in — means release a held tunnel and stop. Otherwise `cloudflared` must be found (it is a dependency, never a download) and
  *    the hosted service must advertise `available: true`; either missing turns the carrier off, said
  *    once with the reason and the remedy.
- * 2. **Listen.** A second listener on `127.0.0.1:0` serving only this daemon's session route, every
+ * 2. **Listen.** A second listener on `127.0.0.1:0` serving this daemon's session route (and, while it is on, the connector's), every
  *    arrival on it remote (`listener.ts`). Its port is the `originPort` the tunnel forwards to.
  * 3. **Provision**, signed for the discovered host only (`provisioning.ts`), on boot and again every
  *    `renewAfterSeconds`. A failure that may clear is retried with a capped, jittered backoff, and every
@@ -236,7 +236,7 @@ export class TunnelCarrier {
     this.#listener = listener;
     this.deps.notices.step(
       'tunnel listener',
-      `127.0.0.1:${String(listener.port)}, serving only this daemon’s session route to the tunnel`,
+      `127.0.0.1:${String(listener.port)}, serving this daemon’s session route (and the connector’s, while it is on) to the tunnel`,
     );
     this.#supervisor = new ConnectorSupervisor({
       executable,
