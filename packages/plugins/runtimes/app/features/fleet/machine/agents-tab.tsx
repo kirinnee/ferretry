@@ -12,8 +12,10 @@
 
 import { Loading } from '@ferretry/app/ui';
 import { ChoiceCards, SettingRow, SettingSwitch } from '@ferretry/app';
+import { displayCallsign } from '@ferretry/core-ferrets/contract';
 import { ShieldCheck, ShieldOff } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { z } from 'zod';
 import type { AgentControl, MachineView } from '../../../../contract/index.ts';
 import { useConfigFileChanges } from '../../../hooks/use-config-file-changes.ts';
 import type { LiveRuntimesClient } from '../../../lib/client.ts';
@@ -39,6 +41,9 @@ import {
   runningSessionsSentence,
 } from './agents-words.ts';
 import { machineSettings } from './machine-settings.ts';
+
+/** Only who a ferret is, from Ferrets' own list: the rest of a row is not read here. */
+const FerretNamesSchema = z.array(z.looseObject({ id: z.string(), name: z.string() }));
 
 interface SectionProps {
   readonly machine: MachineView;
@@ -190,11 +195,36 @@ function AgentControlSection({ machine, machineName, changes, onSaved }: Section
   );
 }
 
-function AutoResumeSection({ machine, machineName, changes, onSaved }: SectionProps) {
+/** A ferret the last auto-resume pass skipped, as a person knows it: its callsign when the machine still lists it, else the first part of its id. */
+const shortId = (sessionId: string): string => sessionId.slice(0, 8);
+
+function AutoResumeSection({
+  machine,
+  machineName,
+  changes,
+  onSaved,
+  client,
+}: SectionProps & { readonly client: LiveRuntimesClient }) {
   const current = machine.autoResume ? 'on' : 'off';
   const [draft, setDraft] = useState<'on' | 'off'>(current);
   const pending = draft !== current;
   const last = machine.lastAutoResume;
+  const [callsigns, setCallsigns] = useState<ReadonlyMap<string, string>>(new Map());
+  const skipped = last?.skipped.length ?? 0;
+  useEffect(() => {
+    if (skipped === 0) return;
+    let live = true;
+    client.call('GET /v1/ferrets').then(
+      answer => {
+        const rows = FerretNamesSchema.safeParse(answer);
+        if (live && rows.success) setCallsigns(new Map(rows.data.map(row => [row.id, displayCallsign(row.name)])));
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [client, skipped]);
   const save = (): void => {
     void changes.apply(machineSettings(machine, { autoResume: draft === 'on' })).then(result => {
       if (result.kind !== 'applied') return;
@@ -219,7 +249,7 @@ function AutoResumeSection({ machine, machineName, changes, onSaved }: SectionPr
               <p className="m-0 text-ui font-semibold text-fg">{autoResumeSentence(last.resumed)}</p>
               {last.skipped.map(item => (
                 <p key={item.sessionId} className="m-0 text-meta leading-base text-warn" data-auto-resume-skipped="">
-                  Couldn’t auto-resume {item.sessionId}: {item.reason}
+                  Couldn’t auto-resume {callsigns.get(item.sessionId) || shortId(item.sessionId)}: {item.reason}
                 </p>
               ))}
             </div>
@@ -374,7 +404,7 @@ export function AgentsTab({ client, machine, machineName, checking, onRetry, onR
       </div>
       <AgentPermissionsSection key={machine.agentPermissions} {...props} />
       <AgentControlSection key={Object.values(machine.agentControl).join(',')} {...props} />
-      <AutoResumeSection key={`resume-${String(machine.autoResume)}`} {...props} />
+      <AutoResumeSection key={`resume-${String(machine.autoResume)}`} {...props} client={client} />
       <AgendaModeSection key={`agenda-${String(machine.agendaMode)}`} {...props} />
       <ConversationsSection client={client} />
     </div>

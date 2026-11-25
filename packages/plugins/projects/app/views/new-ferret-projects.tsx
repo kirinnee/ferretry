@@ -87,18 +87,31 @@ function NewFerretWhere({
   });
   return (
     <div className="grid gap-2" data-new-ferret-where="">
-      <SegmentedChoice
-        data-new-ferret-where-switch=""
-        label="Where it works"
-        onChange={choose}
-        options={CHOICES}
-        value={kind}
-      />
       {unread ? (
-        <div className="min-h-[44px] text-ui text-muted" data-new-ferret-where-reading="" role="status">
-          Reading your projects…
-        </div>
-      ) : kind === 'folder' ? (
+        // The choice is drawn only once the registry has been read: its default depends on it, and a toggle shown on
+        // Folder that then flips to Project is worse than a short wait. An unseen, unreachable copy of it holds its place.
+        <>
+          <div aria-hidden="true" className="invisible" inert>
+            <SegmentedChoice label="Where it works" onChange={choose} options={CHOICES} value="project" />
+          </div>
+          <div
+            className="kt-input flex min-h-[44px] items-center border-transparent bg-transparent text-muted"
+            data-new-ferret-where-reading=""
+            role="status"
+          >
+            Reading your projects…
+          </div>
+        </>
+      ) : (
+        <SegmentedChoice
+          data-new-ferret-where-switch=""
+          label="Where it works"
+          onChange={choose}
+          options={CHOICES}
+          value={kind}
+        />
+      )}
+      {unread ? null : kind === 'folder' ? (
         <WhereFolder client={client} id={id} onPick={onPick} recent={recent} value={value} />
       ) : (
         <WhereProject

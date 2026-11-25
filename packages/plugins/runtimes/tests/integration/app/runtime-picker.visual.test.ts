@@ -5,7 +5,7 @@
  * classes and the chat page's column, over a fake daemon. At the sweep's windows and a phone, light and dark:
  *
  *  - at rest the bar reads `<model> · <thinking> · <speed>` on ONE line under the row, the box keeps the row, Send is
- *    inside the window; no list and no error, and no model catalog was asked for;
+ *    inside the window; no list and no error (the model catalog is read quietly, only to name the model on the chip);
  *  - a tap on any of the three opens ONE popover (a bottom sheet on a phone) wholly inside the window, above that chip, with the model, thinking and
  *    speed lists, the tapped one holding focus;
  *  - with no runtime discovery the popover says so once, quietly (no red alert).
@@ -138,7 +138,6 @@ for (const mode of ['light', 'dark'] as const)
           expect(seen.chipsRight, 'inside the window').toBeLessThanOrEqual(seen.window.width);
           expect(seen.menus, 'no list drawn in the row').toBe(0);
           expect(seen.alerts, 'no error on a composer nobody opened the picker on').toBe(0);
-          expect(seen.asked, 'no model catalog asked for').not.toContain('GET /v1/ferrets/:id/runtime-models');
         } finally {
           await close();
         }
@@ -236,7 +235,7 @@ for (const mode of ['light', 'dark'] as const)
         await tab.waitForSelector('[data-runtime-list="model"] [role="menuitemradio"]');
         await tab.click('[data-runtime-list="model"] [role="menuitemradio"]:has-text("Sonnet 5.5")');
         await tab.waitForFunction(
-          () => document.querySelector('[data-runtime-chip="model"]')?.textContent === 'claude-sonnet-5-5',
+          () => document.querySelector('[data-runtime-chip="model"]')?.textContent === 'Sonnet 5.5',
         );
         expect(await focusedIs(tab)).toBe('chip:model');
       } finally {
@@ -299,12 +298,20 @@ for (const mode of ['light', 'dark'] as const)
       it(`at ${size.name}: an unpinned ferret the harness reports on Opus names it, ticks it, and offers Fast`, async () => {
         const { tab, close } = await open(size, mode, '&model=none&observed=claude-opus-5-5');
         try {
+          // The chip draws the catalog's label (the id is the tooltip only), once the catalog has been read.
+          await tab.waitForFunction(
+            () => document.querySelector('[data-runtime-chip="model"]')?.textContent === 'Opus 5.5',
+          );
           const seen = await rest(tab);
           expect(seen.chipTexts, 'the bar names the model in force, never "Default"').toEqual([
-            'claude-opus-5-5',
+            'Opus 5.5',
             'high',
             'Normal',
           ]);
+          expect(
+            await tab.getAttribute('[data-runtime-chip="model"]', 'title'),
+            'the raw id is on demand, in the tooltip',
+          ).toContain('claude-opus-5-5');
           await tab.click('[data-runtime-chip="model"]');
           await tab.waitForSelector('[data-runtime-list="model"] [role="menuitemradio"]');
           await tab.waitForTimeout(450);

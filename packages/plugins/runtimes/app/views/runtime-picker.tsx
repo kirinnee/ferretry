@@ -24,9 +24,11 @@ import {
   RuntimeModelControls,
   RuntimeSpeedControls,
 } from '../components/runtime-controls.tsx';
+import { isSupportedHarnessKey } from '../../contract/harness-words.ts';
+import { modelDisplayName } from '../../contract/index.ts';
 import { readAccountPickerCatalog } from '../lib/account-picker-catalog.ts';
 import type { LiveRuntimesClient } from '../lib/client.ts';
-import { DaemonRuntimeModelCatalogStore } from '../lib/runtime-models.ts';
+import { DaemonRuntimeModelCatalogStore, type RuntimeModelCatalog } from '../lib/runtime-models.ts';
 import { readRuntimeSessionView, runtimeControlApi } from '../lib/runtime-switch.ts';
 import { type RuntimeParts, type RuntimeSessionView, runtimeParts, runtimeReadout } from '../lib/session-view.ts';
 
@@ -68,6 +70,9 @@ export const createRuntimePicker = (client: LiveRuntimesClient): AppComponent<Pa
     const [failure, setFailure] = useState<string | null>(null);
     // The words for the runtime this ferret runs on ("Claude · your terminal sign-in"); absent until the roster is read, and never guessed.
     const [runsOn, setRunsOn] = useState<string | null>(null);
+    // The catalog's labels, read quietly once the ferret is: they name the model on the chip. A catalog that cannot be read
+    // is not an error here (the popover says so when it is opened): the chip then draws the id.
+    const [labels, setLabels] = useState<RuntimeModelCatalog | null>(null);
     const [section, setSection] = useState<Section | null>(null);
     const [sent, setSent] = useState<Sent>({});
     const [placement, setPlacement] = useState<Placement | null>(null);
@@ -87,12 +92,21 @@ export const createRuntimePicker = (client: LiveRuntimesClient): AppComponent<Pa
       setView(null);
       setFailure(null);
       setRunsOn(null);
+      setLabels(null);
       setSection(null);
       setSent({});
       readRuntimeSessionView(client, subject).then(
         read => {
           if (!live) return;
           setView(read);
+          // A harness this build has no behaviour for has no model list to ask for.
+          if (isSupportedHarnessKey(read.config.harness))
+            catalogs.load(subject).then(
+              catalog => {
+                if (live) setLabels(catalog);
+              },
+              () => undefined,
+            );
           const wrapper = read.config.runtime;
           if (wrapper === undefined) return;
           readAccountPickerCatalog(client).then(
@@ -247,15 +261,27 @@ export const createRuntimePicker = (client: LiveRuntimesClient): AppComponent<Pa
         ...(parts.fast === undefined ? {} : { observedFast: parts.fast }),
       },
     };
-    const label = runtimeReadout(current);
+    const modelName = (id: string): string =>
+      modelDisplayName(
+        id,
+        (labels?.choices ?? []).map(choice => ({ id: choice.value, label: choice.label })),
+      );
+    const label = runtimeReadout(current, modelName);
     const fast = parts.fast === true;
     const chips: readonly {
       readonly key: Section;
       readonly text: string;
       readonly title: string;
+      /** The raw value, on demand: the tooltip, never drawn. */
+      readonly detail?: string;
       readonly icon?: ReactNode;
     }[] = [
-      { key: 'model', text: parts.model ?? 'Default', title: 'Change the model' },
+      {
+        key: 'model',
+        text: parts.model === undefined ? 'Default' : modelName(parts.model),
+        title: 'Change the model',
+        ...(parts.model === undefined || modelName(parts.model) === parts.model ? {} : { detail: parts.model }),
+      },
       {
         key: 'effort',
         text: parts.effort ?? 'Default',
@@ -367,7 +393,7 @@ export const createRuntimePicker = (client: LiveRuntimesClient): AppComponent<Pa
               setSection(current => (current === entry.key ? null : entry.key));
               place();
             }}
-            title={`${entry.title} — ${label}`}
+            title={`${entry.title} — ${label}${entry.detail === undefined ? '' : ` (${entry.detail})`}`}
             type="button"
           >
             {entry.icon}

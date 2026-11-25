@@ -1,5 +1,5 @@
 import { SettingGroup } from '../compose/setting-row.tsx';
-import { daemonTitle } from '../daemons/daemon-list.ts';
+import { distinctDaemonName } from '../daemons/machine-names.ts';
 import { daemonSettingsHref, deviceSettingsHref } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { Loading } from '../ui/loading.tsx';
@@ -40,7 +40,9 @@ export function DeviceSettingsPage() {
         <ul className="fy-settings-daemons" aria-label="Daemon settings">
           {daemons.map(daemon => (
             <li key={daemon.daemon}>
-              <Link to={daemonSettingsHref(daemon.daemon)}>{`Settings for ${daemonTitle(daemon)}`}</Link>
+              <Link
+                to={daemonSettingsHref(daemon.daemon)}
+              >{`Settings for ${distinctDaemonName(daemon, daemons)}`}</Link>
             </li>
           ))}
         </ul>

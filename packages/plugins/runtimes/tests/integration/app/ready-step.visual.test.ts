@@ -139,3 +139,46 @@ for (const variant of VARIANTS)
         }
       });
   });
+
+// L282: from 900px the frame's second track is the demo column; a page without a preview left it empty at 1440.
+for (const variant of VARIANTS)
+  describe(`the Ready page's preview, ${variant.name}`, () => {
+    for (const each of CASES.filter(entry => entry.kind !== 'unread'))
+      it(`${each.name}: draws a preview that fills the second track on a wide window and stacks without overflow on a phone`, async () => {
+        const { tab, close } = await open(variant, each.query);
+        try {
+          const facts = await tab.evaluate(() => {
+            const rect = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
+            const demo = rect('[data-ready-demo]');
+            const body = rect('.fy-spf__main');
+            return {
+              drawn: demo !== undefined && demo.width > 0 && demo.height > 0,
+              left: demo?.left ?? 0,
+              right: demo?.right ?? 0,
+              top: demo?.top ?? 0,
+              bodyRight: body?.right ?? 0,
+              bodyBottom: body?.bottom ?? 0,
+              overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            };
+          });
+          expect(facts.drawn).toBe(true);
+          expect(facts.overflow).toBeLessThanOrEqual(0);
+          if (variant.phone) expect(facts.right).toBeLessThanOrEqual(variant.width);
+          else expect(facts.left).toBeGreaterThanOrEqual(facts.bodyRight);
+        } finally {
+          await close();
+        }
+      });
+  });
+
+// L298a: a blocked terminal login still says the daemon's own reason, beside the sign-in advice.
+for (const variant of VARIANTS)
+  it(`${variant.name}: a blocked terminal sign-in shows the daemon's reason and keeps the terminal advice`, async () => {
+    const { tab, close } = await open(variant, '&state=blocked');
+    try {
+      expect((await tab.locator('[data-ready-reason]').innerText()).trim()).toBe('The claude command was not found.');
+      expect(await tab.locator('[data-ready-terminal]').count()).toBe(1);
+    } finally {
+      await close();
+    }
+  });

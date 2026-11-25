@@ -54,6 +54,17 @@ describe('FileFinder', () => {
     await mounted.unmount();
   });
 
+  it('says "1 file indexed" for a single file and the plural for every other count', async () => {
+    const one = await mount(finder(scripted(reading(summaryOf({ indexed: 1 })), [])));
+    await until(one, c => c.querySelector('[data-finder-built]') !== null, 'the index line');
+    expect(one.container.querySelector('[data-finder-built]')?.textContent).toBe('1 file indexed · updated 3m ago');
+    await one.unmount();
+    const none = await mount(finder(scripted(reading(summaryOf({ indexed: 0 })), [])));
+    await until(none, c => c.querySelector('[data-finder-built]') !== null, 'the index line');
+    expect(none.container.querySelector('[data-finder-built]')?.textContent).toBe('0 files indexed · updated 3m ago');
+    await none.unmount();
+  });
+
   it('searches on the daemon as the person types, one read for a burst, and draws what comes back', async () => {
     const calls: Call[] = [];
     const mounted = await mount(finder(scripted(reading(), calls)));

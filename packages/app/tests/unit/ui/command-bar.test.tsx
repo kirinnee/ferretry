@@ -31,7 +31,8 @@ describe('the command bar model', () => {
     expect(commandBarResults([places, layout], '').results.map(entry => entry.id)).toEqual(['board', 'agenda']);
     expect(commandBarResults([places, layout], 'theme').results.map(entry => entry.id)).toEqual(['settings']);
     const grouped = commandBarResults([places, layout], 'r');
-    expect(grouped.groups.map(group => group.heading)).toEqual(['Go to', 'Layout on this device']);
+    // The group holding the best match leads: "right" starts a word, "Board" only contains the letter.
+    expect(grouped.groups.map(group => group.heading)).toEqual(['Layout on this device', 'Go to']);
   });
 
   it('a source that throws costs only its own entries', () => {

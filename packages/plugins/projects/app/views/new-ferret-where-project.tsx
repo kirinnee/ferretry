@@ -56,7 +56,9 @@ export function WhereProject({ client, store, projects, connectAccount, id, valu
             {selected?.name ?? 'Choose a project'}
           </span>
           {selected === undefined ? null : (
-            <span className="truncate text-meta text-muted">{projectLine(selected)}</span>
+            <span className="truncate text-meta text-muted" title={selected.path}>
+              {projectLine(selected)}
+            </span>
           )}
         </span>
         <ChevronDown aria-hidden="true" className="shrink-0 text-faint" size={16} />

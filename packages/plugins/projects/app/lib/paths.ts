@@ -40,7 +40,7 @@ export const projectBoardPath = (daemon: string, projectId: string): string =>
   `/d/${encodeURIComponent(daemon)}/board/${encodeURIComponent(projectId)}`;
 
 /**
- * Where "Lanes ✎" goes: the project's own board with its lane editor open. Board opens the editor only when the
+ * Where "Edit lanes" goes: the project's own board with its lane editor open. Board opens the editor only when the
  * address says `?lanes=1` (Board's `projectLanesPath`); without it the button would land on the board itself.
  */
 export const projectLanesPath = (daemon: string, projectId: string): string =>

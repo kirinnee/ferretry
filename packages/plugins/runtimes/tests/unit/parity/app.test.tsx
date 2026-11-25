@@ -728,6 +728,10 @@ describe('the machine-setup views the half builds (the first run’s steps and E
       expect(listing).toContain('secrets: none');
       expect(listing).not.toContain('logins/work.yaml');
       expect(text(root, '[data-setup-note="export-left-out"]')).toContain('logins/work.yaml');
+      // E7b: the command that fixes a skipped file is drawn as code, not left in the warning's running text.
+      expect(
+        must(root.querySelector('[data-setup-note="export-left-out"] code'), 'the command as code').textContent,
+      ).toBe('fy config check');
       expect(saved.length).toBe(1);
     } finally {
       URL.createObjectURL = real.create;

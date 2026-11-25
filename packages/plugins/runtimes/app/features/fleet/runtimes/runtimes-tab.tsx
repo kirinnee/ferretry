@@ -458,10 +458,12 @@ function RuntimeRow({
                   className="flex min-h-control basis-[min(18rem,100%)] grow items-start gap-2 py-1 text-left no-underline after:absolute after:inset-0 after:content-[''] hover:no-underline"
                   data-runtime-row={runtime.name}
                 >
+                  {/* A hollow ring alone says nothing: a runtime that needs sign-in says so in words, on the row. */}
                   <AccountStatus
                     word={runtimeWord(runtime)}
                     {...(rowWords === undefined ? {} : { label: rowWords })}
-                    className="min-h-[calc(var(--control-h)-0.5rem)] w-4 shrink-0 justify-center"
+                    {...(runtimeWord(runtime) === 'needs_sign_in' ? { showLabel: true } : {})}
+                    className={`min-h-[calc(var(--control-h)-0.5rem)] shrink-0 ${runtimeWord(runtime) === 'needs_sign_in' ? 'items-start py-1 text-meta text-err' : 'w-4 justify-center'}`}
                   />
                   <span
                     className="flex min-h-[calc(var(--control-h)-0.5rem)] min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1"
