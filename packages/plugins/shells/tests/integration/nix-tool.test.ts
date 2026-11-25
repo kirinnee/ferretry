@@ -39,6 +39,12 @@ describe('which nix is on the machine', () => {
     expect(await tool.facts()).toEqual({ present: true, version: '2.24.1', path: 'nix' });
   });
 
+  test('a vendor version that closes with a parenthesis is read without that punctuation', async () => {
+    const tool = await nixWith('echo "nix (Determinate Nix 3.21.8) 2.34.6"');
+
+    expect(await tool.facts()).toEqual({ present: true, version: '3.21.8', path: 'nix' });
+  });
+
   test('no nix, a nix that fails and a nix that prints no version all say what ferrets use instead', async () => {
     for (const body of [undefined, 'exit 1', 'echo "something else entirely"']) {
       const facts = await (await nixWith(body)).facts();
