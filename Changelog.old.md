@@ -1,3 +1,14 @@
+## [4.293.0](https://github.com/kirinnee/ferretry/compare/v4.292.0...v4.293.0) (2026-11-25)
+
+### Features
+
+* **connector:** read an agenda item in full and snooze it from Claude ([3a381a5](https://github.com/kirinnee/ferretry/commit/3a381a57ffebdb3aba5ea0e22e48ca1d72eef856))
+
+### Fixes
+
+* **connector:** clean before cutting, one open predicate, exact snooze titles, enforced read cap ([d66a6df](https://github.com/kirinnee/ferretry/commit/d66a6dfea4d6aa1e68796ba089b54848bb7f82f5))
+* **connector:** say get_attention is the one long answer in the server instructions ([9295d98](https://github.com/kirinnee/ferretry/commit/9295d98a4b02c273824d2a7fdc9eb1a27c55dbdf))
+
 ## [4.292.0](https://github.com/kirinnee/ferretry/compare/v4.291.23...v4.292.0) (2026-11-24)
 
 ### Features
