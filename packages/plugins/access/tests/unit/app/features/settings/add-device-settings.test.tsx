@@ -117,6 +117,13 @@ const view = (overrides: Partial<PairedDevicesView> = {}): PairedDevicesView => 
 
 const text = (renderer: ReactTestRenderer): string => JSON.stringify(renderer.toJSON());
 
+/** The pairing address as a person reads and copies it: the pieces it is cut into (for a line break) joined back. */
+const pairUrlText = (renderer: ReactTestRenderer): string => {
+  const read = (node: ReactTestInstance | string): string =>
+    typeof node === 'string' ? node : node.children.map(read).join('');
+  return read(renderer.root.findByProps({ 'data-pair-url': '' }));
+};
+
 const marked = (renderer: ReactTestRenderer, attribute: string, value?: string) =>
   renderer.root.findAll(
     node =>
@@ -175,7 +182,7 @@ describe('AddDeviceCard', () => {
     should(marked(renderer, 'data-pair-code')).have.length(1);
     should(marked(renderer, 'data-pair-url')).have.length(1);
     expect(text(renderer)).toContain('7F3K-Q2ND');
-    expect(text(renderer)).toContain('ferretry.pages.dev/pair');
+    expect(pairUrlText(renderer)).toContain('ferretry.pages.dev/pair');
     // The QR is drawn in this tab: an SVG path, not a request to anybody.
     should(marked(renderer, 'data-qr-version')).have.length(1);
     // A phone IS the caller a QR is for, so both the heading and the disclosure may say so here.
@@ -255,7 +262,7 @@ describe('AddDeviceCard', () => {
     expect(text(renderer)).toContain('Show this to the device you are adding');
     // THE QR CARRIES THE ORDINARY LINK. The rendezvous is disclosed beside it and is not in the
     // fragment; the phone finds that address for itself.
-    expect(text(renderer)).toContain('ferretry.pages.dev/pair#v1;');
+    expect(pairUrlText(renderer)).toContain('ferretry.pages.dev/pair#v1;');
     expect(text(renderer)).not.toContain('#v2;');
     expect(text(renderer)).not.toContain(';relay=');
   });
