@@ -591,9 +591,14 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         if (!known || known.kind === 'access' || known.clientId !== client.id)
           throw new OAuthError('invalid_grant', 'Invalid refresh token.');
       }
-      const tokens = await this.ports.memory.run(() => this.redeem(input, grantType, client.id), 'token');
-      this.ports.limiter.record(budget);
-      return tokens;
+      // The budget is judged again inside the serialized write: the check above ran before any queued redemption
+      // had been charged, so a burst of callers would all have passed it.
+      return this.ports.memory.run(async () => {
+        this.ports.limiter.check(budget, CLIENT_TOKENS_PER_MINUTE);
+        const issued = await this.redeem(input, grantType, client.id);
+        this.ports.limiter.record(budget);
+        return issued;
+      }, 'token');
     });
   }
 
@@ -677,7 +682,9 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     const rotated: UsedRefresh | undefined = rotating
       ? {
           ...rotating.used,
-          successors: refreshDigest ? { access: accessDigest, refresh: refreshDigest } : undefined,
+          // The one retry is consumed by the retry itself: with no successor pointer left, a further use of this
+          // digest is reuse and revokes the family instead of minting another pair.
+          successors: refreshDigest && !rotating.retry ? { access: accessDigest, refresh: refreshDigest } : undefined,
         }
       : undefined;
     const updated: ConnectorGrant = {

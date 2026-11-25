@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ConnectorAuthority } from '../../../daemon/lib/oauth/authority.ts';
+import { ConnectorAuthority, type ExchangeInput } from '../../../daemon/lib/oauth/authority.ts';
 import { ConnectorMemory, base64url } from '../../../daemon/lib/oauth/model.ts';
 import { ConnectorRateLimiter } from '../../../daemon/lib/oauth/rate-limiter.ts';
 import { fixture, redirectUri, verifier } from '../../support/oauth-fixture.ts';
@@ -286,5 +286,63 @@ describe('a lost refresh response costs a retry, not the grant (finding 4)', () 
     const stored = JSON.stringify(f.state());
     for (const secret of [first, next.refresh_token ?? '', next.access_token]) expect(stored).not.toContain(secret);
     expect(f.state().grants[0]?.usedRefresh[0]?.rotatedAt).toBe(Date.parse('2026-11-24T10:00:00.000Z'));
+  });
+});
+
+describe('the lost-response retry is spent once (RFC 9700 §4.14.2)', () => {
+  test('the old token a second time inside the window revokes the grant and mints no pair', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    await f.authority.exchange(...refresh(flow.client.client_id, first));
+    f.advance(10_000);
+    const retried = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    expect(await f.authority.verify(retried.access_token)).toBeDefined();
+    f.advance(10_000);
+    await expect(f.authority.exchange(...refresh(flow.client.client_id, first))).rejects.toMatchObject({
+      error: 'invalid_grant',
+    });
+    const grant = f.state().grants[0];
+    expect(grant?.revokedAt).toBeDefined();
+    expect(JSON.stringify(grant?.access)).not.toContain('"digest"');
+    expect(JSON.stringify(grant?.refresh)).not.toContain('"digest"');
+    expect(await f.authority.verify(retried.access_token)).toBeUndefined();
+    await expect(
+      f.authority.exchange(...refresh(flow.client.client_id, retried.refresh_token ?? '')),
+    ).rejects.toMatchObject({ error: 'invalid_grant' });
+    expect(f.events).toContainEqual({ kind: 'connector.refresh.reused', grantId: flow.grant.id });
+  });
+});
+
+describe('a client success budget holds under concurrency', () => {
+  test('31 simultaneous code exchanges for one client admit exactly 30', async () => {
+    const f = fixture();
+    const client = await f.register();
+    const exchanges: { id: string; input: ExchangeInput }[] = [];
+    for (let i = 0; i < 31; i++) {
+      const source = `source-${i}`;
+      const handle = await startFrom(f, client.client_id, source);
+      const pending = (await f.authority.pending()).find(p => !exchanges.some(e => e.id === p.id));
+      if (!pending) throw new Error('missing request');
+      const approval = await f.authority.approve(pending.id, 'admin-cli');
+      if (!approval.ok) throw new Error('approval failed');
+      const answer = await f.authority.waitPage(handle, { source });
+      if (answer.kind !== 'redirect') throw new Error('missing redirect');
+      exchanges.push({
+        id: pending.id,
+        input: {
+          grant_type: 'authorization_code',
+          client_id: client.client_id,
+          code: new URL(answer.location).searchParams.get('code') ?? '',
+          code_verifier: verifier,
+          redirect_uri: redirectUri,
+          client_secret: client.client_secret,
+        },
+      });
+    }
+    const answers = await Promise.allSettled(
+      exchanges.map((e, i) => f.authority.exchange(e.input, { source: `s-${i}` })),
+    );
+    expect(answers.filter(a => a.status === 'fulfilled')).toHaveLength(30);
   });
 });
