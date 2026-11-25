@@ -16,11 +16,16 @@ import { createNewFerretProjectsPanel } from '../../../../app/views/new-ferret-p
 const params = new URLSearchParams(window.location.search);
 applyTheme(params);
 
-const PROJECTS = ['site', 'api'].map((name, index) =>
+// `?twins=1`: two like-named folder-only projects deep under a temp directory, told apart only by their parent.
+// `?slow=1`: the registry read is held until the test calls `window.__release()`.
+const twins = params.get('twins') === '1';
+const slow = params.get('slow') === '1';
+const PATHS = twins ? ['/tmp/claude-1000/run-a/site', '/tmp/claude-1000/run-b/site'] : ['/fake/site', '/fake/api'];
+const PROJECTS = PATHS.map((path, index) =>
   ProjectInfoSchema.parse({
     id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
-    name,
-    path: `/fake/${name}`,
+    name: path.split('/').at(-1),
+    path,
     source: 'existing-folder',
     createdAt: '2026-08-01T10:00:00.000Z',
   }),
@@ -37,7 +42,10 @@ interface Recorded {
   body: unknown;
 }
 const calls: Recorded[] = [];
-const win = window as unknown as { __calls: Recorded[]; __navigated: string[] };
+const win = window as unknown as { __calls: Recorded[]; __navigated: string[]; __release: () => void };
+const gate = new Promise<void>(resolve => {
+  win.__release = resolve;
+});
 win.__calls = calls;
 win.__navigated = [];
 
@@ -47,7 +55,10 @@ const client = {
     init?: { headers?: Record<string, string>; body?: unknown; query?: Record<string, string> },
   ): Promise<Answer> => {
     calls.push({ route, headers: init?.headers, body: init?.body });
-    if (route === 'GET /v1/projects') return PROJECTS as Answer;
+    if (route === 'GET /v1/projects') {
+      if (slow) await gate;
+      return PROJECTS as Answer;
+    }
     if (route === 'GET /v1/ferrets') return FERRETS as Answer;
     if (route === 'POST /v1/ferrets') return { id: 'new-ferret' } as Answer;
     if (route === 'GET /v1/git-accounts') return [] as Answer;

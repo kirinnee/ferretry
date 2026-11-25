@@ -146,8 +146,9 @@ describe('what a failure says', () => {
 
   it('words a grant refusal in the grant’s own words, one remedy per cause, and keeps the plain 403 copy for the rest', () => {
     const passkey = processErrorText(new DaemonCallError(403, 'grant_step_up_required', 'needs a passkey'));
-    expect(passkey).toContain('This needs your passkey');
-    expect(passkey).toContain('needs a passkey');
+    // One sentence, in this panel's own name: the daemon's "needs a passkey" is not run on after it, and the capability's name
+    // ("session terminals") is not borrowed.
+    expect(passkey).toBe('Using Processes needs your passkey — confirm on this device and it goes ahead.');
     expect(passkey).not.toContain('Settings › Devices');
     expect(processForbiddenText(new DaemonCallError(403, 'grant_device_not_granted', 'x'))).toContain(
       'this device has not been given it',

@@ -248,3 +248,79 @@ describe('the mic carries no heavy shadow in the loud theme families', () => {
       }
     });
 });
+
+// L207a: the loud Antiposh look uppercases every control; a model's name is a name, not a shout, and capitals take more of a
+// phone's width than the chip has, so fewer letters would show before the ellipsis.
+describe('the model chip keeps the model name as it is written', () => {
+  for (const mode of ['light', 'dark'] as const)
+    for (const size of WINDOWS)
+      it(`antiposh, ${mode}, ${size.name}: mixed case beside the context and quota readouts`, async () => {
+        const { tab, close } = await open(size, mode, 'known', 'antiposh');
+        try {
+          const seen = await tab.evaluate(() => {
+            const model = document.querySelector('[data-runtime-chip="model"]') as HTMLElement;
+            const label = model.querySelector('span') as HTMLElement;
+            return {
+              chip: getComputedStyle(model).textTransform,
+              label: getComputedStyle(label).textTransform,
+              shown: label.textContent,
+              quota: document.querySelector('.fy-composer-quota') !== null,
+            };
+          });
+          expect(seen.quota, 'the quota readout is beside it').toBe(true);
+          expect(seen.chip, 'the chip is not uppercased').toBe('none');
+          expect(seen.label, 'the name is not uppercased').toBe('none');
+          expect(seen.shown).toBe('claude-opus-5-5');
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${size.name}-${mode}-antiposh-chip.png`) });
+        } finally {
+          await close();
+        }
+      });
+});
+
+// L7b: the keyboard opening on a phone steps the readouts aside, and the model chip went with them; the reader who wants a
+// different model mid-sentence had to close the keyboard (and lose their place) to reach it.
+describe('the model chip stays while the phone keyboard is open', () => {
+  for (const mode of ['light', 'dark'] as const)
+    it(`${mode}: the chip is on screen under the draft, the draft is intact, the other readouts step aside`, async () => {
+      const { tab, close } = await open(WINDOWS[1], mode, 'known');
+      try {
+        await tab.locator(FIELD).first().click();
+        await tab.keyboard.type('Fix the login redirect');
+        await tab.evaluate(() => {
+          document.documentElement.dataset.keyboard = 'open';
+        });
+        const seen = await tab.evaluate(() => {
+          const visible = (query: string) => {
+            const el = document.querySelector<HTMLElement>(query);
+            if (el === null) return false;
+            const box = el.getBoundingClientRect();
+            return (
+              box.width > 0 && box.height > 0 && box.bottom <= window.innerHeight && box.right <= window.innerWidth
+            );
+          };
+          const field = document.querySelector<HTMLTextAreaElement | HTMLElement>(
+            '.fy-composer-input-layer textarea, .fy-composer-input-layer [contenteditable="true"]',
+          );
+          return {
+            model: visible('[data-runtime-chip="model"]'),
+            effort: visible('[data-runtime-chip="effort"]'),
+            speed: visible('[data-runtime-chip="speed"]'),
+            quota: visible('.fy-composer-quota'),
+            draft: field instanceof HTMLTextAreaElement ? field.value : (field?.textContent ?? ''),
+            chipHeight: document.querySelector('[data-runtime-chip="model"]')?.getBoundingClientRect().height ?? 0,
+          };
+        });
+        expect(seen.model, 'the model chip is still there').toBe(true);
+        expect(seen.draft, 'the draft is intact').toBe('Fix the login redirect');
+        expect(seen.effort, 'thinking steps aside').toBe(false);
+        expect(seen.speed, 'speed steps aside').toBe(false);
+        expect(seen.quota, 'the quota steps aside').toBe(false);
+        // It opens: a real tap on it is not swallowed.
+        await tab.locator('[data-runtime-chip="model"]').click();
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `390-${mode}-keyboard-chip.png`) });
+      } finally {
+        await close();
+      }
+    });
+});

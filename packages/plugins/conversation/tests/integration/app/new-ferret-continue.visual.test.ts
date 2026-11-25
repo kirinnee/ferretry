@@ -68,11 +68,24 @@ let browser: Browser;
 let directory = '';
 let server: ReturnType<typeof Bun.serve> | undefined;
 let rowsJson = '[]';
+/** The same rows, two of them named alike: a long shared start and only the end tells them apart (L200b). */
+let similarRowsJson = '[]';
+const SIMILAR_START = 'Refactor the checkout service so every payment retry reuses its idempotency key and logs why';
+const SIMILAR_ENDS = [' (staging rollout)', ' (production rollout)'] as const;
 let rowIds: readonly string[] = [];
 
 beforeAll(async () => {
   const rows = await makeRows();
   rowsJson = JSON.stringify(rows);
+  similarRowsJson = JSON.stringify(
+    rows.map(row =>
+      row.id === LOGIN
+        ? { ...row, name: SIMILAR_START + SIMILAR_ENDS[0] }
+        : row.id === DEPLOY
+          ? { ...row, name: SIMILAR_START + SIMILAR_ENDS[1] }
+          : row,
+    ),
+  );
   rowIds = rows.map(row => row.id);
   directory = await mkdtemp(join(tmpdir(), 'ferretry-new-ferret-continue-'));
   const child = Bun.spawn(
@@ -95,7 +108,10 @@ beforeAll(async () => {
     fetch: request => {
       const path = new URL(request.url).pathname;
       if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });
-      if (path === '/rows.json') return new Response(rowsJson, { headers: { 'content-type': 'application/json' } });
+      if (path === '/rows.json')
+        return new Response(new URL(request.url).searchParams.has('similar') ? similarRowsJson : rowsJson, {
+          headers: { 'content-type': 'application/json' },
+        });
       if (path === '/') return new Response(html, { headers: { 'content-type': 'text/html' } });
       return new Response('not here', { status: 404 });
     },
@@ -309,6 +325,37 @@ describe('New ferret: continue a past conversation', () => {
           );
         }));
     }
+
+  // L200b: a title that ends in an ellipsis hides the one part that tells two alike conversations apart.
+  for (const scheme of ['light', 'dark'] as const)
+    it(`390 ${scheme}: two alike titles both show their ending on a phone (they wrap; the age stays compact)`, () =>
+      withPage(VARIANTS[1], scheme, '&similar=1', async tab => {
+        await tab.click(CONTINUE_CHOICE);
+        await tab.waitForSelector('[data-continue-row]');
+        const titles = await tab.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>('[data-continue-row] .fy-convo-title')].map(title => {
+            const age = title.parentElement?.querySelector<HTMLElement>('.fy-convo-age')?.getBoundingClientRect();
+            const line = Number.parseFloat(getComputedStyle(title).lineHeight);
+            return {
+              text: title.textContent ?? '',
+              clippedAcross: title.scrollWidth > title.clientWidth + 1,
+              clippedDown: title.scrollHeight > title.clientHeight + 1,
+              lines: Math.round(title.getBoundingClientRect().height / (Number.isFinite(line) ? line : 20)),
+              ageWidth: age?.width ?? 0,
+            };
+          }),
+        );
+        const alike = titles.filter(title => title.text.startsWith(SIMILAR_START));
+        expect(alike, 'both alike titles are listed').toHaveLength(2);
+        for (const title of alike) {
+          expect(title.clippedAcross, `"${title.text}" is cut off sideways`).toBe(false);
+          expect(title.clippedDown, `"${title.text}" is cut off below`).toBe(false);
+          expect(title.lines, `"${title.text}" wraps onto more than one line`).toBeGreaterThan(1);
+          expect(title.ageWidth, 'the age stays compact').toBeLessThan(80);
+        }
+        await noSideways(tab);
+        await shot(tab, VARIANTS[1], scheme, 'alike-titles');
+      }));
 
   it('a runtime typed for the OTHER harness is refused by the daemon and says why; nothing is resumed or opened', () =>
     withPage(VARIANTS[0], 'light', '', async tab => {

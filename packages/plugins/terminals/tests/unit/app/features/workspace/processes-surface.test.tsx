@@ -197,7 +197,7 @@ describe('the process list', () => {
     );
     const { view } = await setup({ state: { status: 'forbidden', reason: passkey } });
     const shown = must(view.container.querySelector('[data-processes-forbidden]'), 'the refusal').textContent ?? '';
-    expect(shown).toContain('This needs your passkey');
+    expect(shown).toBe('Using Processes needs your passkey — confirm on this device and it goes ahead.');
     expect(shown).not.toContain('Settings › Devices');
   });
 
@@ -443,7 +443,7 @@ describe('an opened process', () => {
     await click(rowFor('100.1'));
     await turns();
     const alert = q('.fy-proc-body [role="alert"]', 'the alert').textContent ?? '';
-    expect(alert).toContain('This needs your passkey');
+    expect(alert).toBe('Using Processes needs your passkey — confirm on this device and it goes ahead.');
     expect(alert).not.toContain('Settings › Devices');
   });
 

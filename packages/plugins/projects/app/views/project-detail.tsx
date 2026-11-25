@@ -98,7 +98,6 @@ function ProjectDetailView({
           >
             <ArrowLeft size={14} aria-hidden="true" /> Back to Projects
           </button>
-          <p className="m-0 text-meta font-semibold uppercase tracking-wide text-muted">Workspace registry / project</p>
           <h1 className="m-0 font-display text-display font-bold tracking-display">{project.name}</h1>
         </div>
         <div className="flex flex-wrap items-start gap-md">
@@ -108,7 +107,7 @@ function ProjectDetailView({
             data-project-lanes-link={project.id}
             onClick={() => onNavigate(projectLanesPath(daemon, project.id))}
           >
-            Lanes ✎
+            Edit lanes
           </button>
           <div className="grid shrink-0 justify-items-start gap-1">
             <button

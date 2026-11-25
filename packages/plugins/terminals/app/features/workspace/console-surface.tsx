@@ -23,7 +23,7 @@ import { type PaneSnapshotReader, TerminalSnapshotView } from '../../components/
 import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
 import { terminalFontFamily } from '../../lib/terminal-font.ts';
 import { typeIntoSessionConsole } from '../../lib/web-terminals.ts';
-import { type DaemonConnection, type DaemonSessionScope, grantRefusalNotice } from '../../shell.ts';
+import { type DaemonConnection, type DaemonSessionScope, grantRefusalText } from '../../shell.ts';
 import { consoleKeyInput } from './console-keys.ts';
 
 /** Sends one write to the session's own pane. Injected so tests and the harness never reach a daemon. */
@@ -53,9 +53,8 @@ export const CONSOLE_REFRESH_MIN_MS = 1_000;
 
 /** A refusal in the grant's own words when it is one; the daemon's message otherwise. */
 const refusalText = (error: unknown): string => {
-  const grant = grantRefusalNotice(error);
-  if (grant !== null)
-    return grant.detail === '' ? grant.guidance.explanation : `${grant.guidance.explanation} ${grant.detail}`;
+  const grant = grantRefusalText(error, 'the Console');
+  if (grant !== null) return grant;
   return error instanceof Error ? error.message : String(error);
 };
 
