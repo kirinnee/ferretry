@@ -130,9 +130,10 @@ const client = {
       onClose: (reason: string, code?: number) => void;
     },
   ) => {
-    // A real stream takes a session handshake to open, and a reply can be read before it has: `speaking` opens late, so the
-    // page has to hold the line until the start record has gone, as a real transport drops a frame sent before it opened.
-    setTimeout(() => listeners.onOpen?.(), talk === 'speaking' ? 400 : 0);
+    // A real stream takes a session handshake to open, so every talk opens late: the panel is on (and says it is loading)
+    // before the start record has gone, and a reply read in that gap (`speaking`) has to be held until it has, as a real
+    // transport drops a frame sent before it opened.
+    setTimeout(() => listeners.onOpen?.(), 400);
     const at = (ms: number, work: () => void) => setTimeout(work, ms);
     let tone: ReturnType<typeof setInterval> | undefined;
     return {

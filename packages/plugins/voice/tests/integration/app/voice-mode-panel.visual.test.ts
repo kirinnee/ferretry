@@ -109,6 +109,16 @@ describe('Voice mode panel', () => {
           await tab.locator('[data-voice-mode="on"]').waitFor({ state: 'visible' });
           expect(await tab.locator('[data-fake-composer]').isVisible()).toBe(false);
           expect(await tab.locator('[data-fake-composer]').count()).toBe(1);
+          // The panel is on as soon as it is pressed, and the start record goes once the stream has opened (a handshake
+          // later): until then it says it is loading, never that it is listening. One read, so the two cannot drift apart.
+          const before = await tab.evaluate(() => ({
+            started: (window as unknown as { __fake: Fake }).__fake.starts.length > 0,
+            state: document.querySelector('[data-voice-mode]')?.getAttribute('data-state'),
+            status: document.querySelector('[data-voice-mode-status]')?.textContent,
+          }));
+          if (!before.started)
+            expect(before).toEqual({ started: false, state: 'loading', status: 'Loading speech on Studio Mac…' });
+          await tab.waitForFunction(() => (window as unknown as { __fake: Fake }).__fake.starts.length > 0);
           expect(JSON.parse((await fakeOf(tab)).starts[0] as string)).toEqual({
             t: 'start',
             v: 1,
