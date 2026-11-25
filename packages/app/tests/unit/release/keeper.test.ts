@@ -13,6 +13,7 @@ import {
   answerReleaseRequest,
   parseReleaseReply,
   parseReleaseRequest,
+  settleWithin,
 } from '../../../src/release/keeper.ts';
 import { RELEASE_MANIFEST_FILE, RELEASE_SIGNATURE_FILE, RELEASE_WORKER_FILE } from '../../../src/release/manifest.ts';
 import { type BuiltRelease, type ReleaseSigner, buildRelease, bytesOf, releaseSigner } from '../../support/release.ts';
@@ -701,5 +702,45 @@ describe('a deferred file', () => {
     // Tampered on the way: refused, never served.
     served.serve(release, { [RUNTIME]: 'not the runtime' });
     should((await subject.respond({ pathname: `/${RUNTIME}`, navigate: false }))?.status).equal(503);
+  });
+});
+
+describe('settleWithin', () => {
+  it('returns when the check finishes, without waiting out the deadline', async () => {
+    // Arrange
+    const waits: number[] = [];
+
+    // Act
+    await settleWithin(Promise.resolve('done'), 2500, milliseconds => {
+      waits.push(milliseconds);
+      return new Promise(() => undefined);
+    });
+
+    // Assert: the deadline was only ever asked for, never the thing that ended the wait.
+    should(waits).eql([2500]);
+  });
+
+  it('returns at the deadline when the check is still running, leaving the check to finish', async () => {
+    // Arrange
+    let finish: () => void = () => undefined;
+    let finished = false;
+    const slow = new Promise<void>(done => {
+      finish = done;
+    }).then(() => {
+      finished = true;
+    });
+
+    // Act
+    await settleWithin(slow, 2500, () => Promise.resolve());
+
+    // Assert
+    should(finished).be.false();
+    finish();
+    await slow;
+    should(finished).be.true();
+  });
+
+  it('never throws when the check fails', async () => {
+    await settleWithin(Promise.reject(new Error('offline')), 2500, () => new Promise(() => undefined));
   });
 });
