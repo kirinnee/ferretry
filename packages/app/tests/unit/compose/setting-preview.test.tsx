@@ -245,7 +245,7 @@ describe('SettingGroup and SettingRow layout', () => {
     expect(list.querySelectorAll('li[data-setting-row]').length).toBe(2);
   });
 
-  it('should put the control right after a 40 % label column, with the (i) last', async () => {
+  it('should put the control right after the label column, laid out by the row\u2019s own width, with the (i) last', async () => {
     mounted = await mount(
       <ul>
         <SettingRow
@@ -258,8 +258,9 @@ describe('SettingGroup and SettingRow layout', () => {
     );
     const row = must(mounted.container.querySelector('[data-setting-row]'), 'the row');
     const label = must(row.querySelector('[data-setting-hint]')?.parentElement, 'the label column');
-    expect(label.className).toContain('min-[900px]:basis-[40%]');
-    expect(label.className).toContain('min-w-[min(220px,100%)]');
+    // The 40 % column is a container rule of the row (`design-system.css`, drawn in `setting-row-container.visual.test.ts`), never a window width.
+    expect(label.hasAttribute('data-setting-label')).toBe(true);
+    expect(label.className).not.toMatch(/min-\[|max-\[|max-md|min-md/u);
     const controls = must(row.querySelector('[data-setting-controls]'), 'the controls');
     expect(label.nextElementSibling).toBe(controls);
     expect(controls.lastElementChild?.hasAttribute('data-setting-info')).toBe(true);
