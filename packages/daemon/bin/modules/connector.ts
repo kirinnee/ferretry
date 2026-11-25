@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { CapabilityGrants } from '@ferretry/protocol';
@@ -10,7 +11,12 @@ import type { ApiRequest, ApiResponse } from '../../src/lib/api/http.ts';
 import type { ApiBindOptions, ApiServerPort } from '../../src/lib/api/server.ts';
 import type { AuditSink } from '../../src/lib/audit/types.ts';
 import { SecurityLogConnectorAudit } from '../../src/lib/connector/audit.ts';
-import { type ConnectorConfiguration, connectorConfiguration } from '../../src/lib/connector/config.ts';
+import {
+  CLAUDE_REDIRECT_URI,
+  CONNECTOR_DEFAULT_PORT,
+  type ConnectorConfiguration,
+  connectorConfiguration,
+} from '../../src/lib/connector/config.ts';
 import { connectorListenerSurface, InProcessConnectorDispatch } from '../../src/lib/connector/listener.ts';
 import { ConnectorTextGuard } from '../../src/lib/connector/mcp/redaction.ts';
 import { ConnectorToolbox } from '../../src/lib/connector/mcp/tools.ts';
@@ -132,26 +138,18 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
   id: 'connector',
   build: (needs, _seams, lifecycle) => {
     const configuration: ConnectorConfiguration = connectorConfiguration(needs.block);
-    if (configuration.kind === 'invalid') {
-      // A damaged block: nothing can be switched on until the operator fixes the file, and the sentence says what.
-      const availability: ConnectorAvailability = {
-        enabled: false,
-        disabledReason: configuration.reason,
-        switchedOn: false,
-      };
-      const provides: ConnectorModule = {
-        bootNotice: () => configuration.reason,
-        subsystem: {
-          acts: OFF_ACTS,
-          availability: () => availability,
-          change: async () => ({ ok: false, message: configuration.reason }),
-        },
-        listen: async () => {},
-        tunnelHandlers: () => [],
-      };
-      return { id: 'connector', provides, jobs: {}, contributes: {} };
-    }
-    const { settings } = configuration;
+    // A damaged block can never be switched on (the sentence says what to fix), but the saved grants stay listed and
+    // revocable: the authority is built either way, with the one redirect URI that needs no configuration.
+    const invalidReason = configuration.kind === 'invalid' ? configuration.reason : undefined;
+    const settings =
+      configuration.kind === 'valid'
+        ? configuration.settings
+        : ({
+            kind: 'enabled',
+            publicUrl: undefined,
+            port: CONNECTOR_DEFAULT_PORT,
+            redirectUris: [CLAUDE_REDIRECT_URI],
+          } as const);
     const configuredOrigin = settings.publicUrl;
     /** The address Claude is given: the operator's own, else the built-in tunnel's, else none yet. */
     const originNow = (): string | undefined => configuredOrigin ?? needs.tunnelOrigin();
@@ -177,7 +175,13 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
       return authority;
     };
     /** Whether it is switched on: the document's answer at boot, then `change`'s. */
-    let on = configuration.enabled;
+    let on = configuration.kind === 'valid' && configuration.enabled;
+    /**
+     * Which switched-on period a request began in. Bumped on every off, so a request that was authenticated in an
+     * earlier period and resumes after the switch went off AND on again is still refused at the tools' door.
+     */
+    let epoch = 0;
+    const requestEpoch = new AsyncLocalStorage<number>();
     /** Why a switched-on connector could not start, until it can. */
     let startProblem: string | undefined;
     let listenNeeds: ConnectorListenNeeds | undefined;
@@ -199,7 +203,10 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
      * flight cannot reach a fleet route after the switch said off (the tools' door below checks it again).
      */
     const gated = (inner: readonly ConnectorHttpHandler[]): readonly ConnectorHttpHandler[] =>
-      inner.map(handler => ({ handle: async request => (on ? await handler.handle(request) : undefined) }));
+      inner.map(handler => ({
+        handle: async request =>
+          on ? await requestEpoch.run(epoch, async () => await handler.handle(request)) : undefined,
+      }));
 
     const buildHandlers = async (needsNow: ConnectorListenNeeds): Promise<readonly ConnectorHttpHandler[]> => {
       // A damaged connector.json refuses here, loudly, rather than serving handlers whose every token fails.
@@ -209,7 +216,7 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
         unauthorized: tokenPresented => unauthorizedResponse(endpoints, { tokenPresented }),
         dispatch: new InProcessConnectorDispatch({
           dispatch: async request =>
-            on
+            on && requestEpoch.getStore() === epoch
               ? await needsNow.dispatch(request)
               : {
                   status: 503,
@@ -263,6 +270,7 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
     };
 
     const availability = (): ConnectorAvailability => {
+      if (invalidReason !== undefined) return { enabled: false, disabledReason: invalidReason, switchedOn: false };
       if (!on) return { enabled: false, disabledReason: NOT_SWITCHED_ON, switchedOn: false };
       if (startProblem !== undefined) return { enabled: false, disabledReason: startProblem, switchedOn: true };
       if (handlers === undefined)
@@ -293,6 +301,7 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
 
     const change = async (enabled: boolean): Promise<ConnectorChangeResult> =>
       await serially(async (): Promise<ConnectorChangeResult> => {
+        if (invalidReason !== undefined) return { ok: false, message: invalidReason };
         if (enabled) {
           // The switch judges the file as it is NOW: an address, port or redirect list the operator changed since this
           // daemon booted is not what is running, and switching on beside it would publish something they did not ask for.
@@ -313,11 +322,18 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
             // sentence and leave the document saying off, rather than record an "on" nothing answers.
             startProblem = undefined;
             if (listenNeeds !== undefined) await bringUp(listenNeeds);
+            // Judged again immediately before the write: the narrowest window a hand edit can land in.
+            const again = connectorConfiguration(await needs.readBlock().catch(() => undefined));
+            if (again.kind !== 'valid' || JSON.stringify(again.settings) !== JSON.stringify(settings))
+              throw new Error(
+                'config/daemon.json changed while the connector was starting; restart the daemon and try again',
+              );
             await needs.writeEnabled(true);
             on = true;
           } else {
             await needs.writeEnabled(false);
             on = false;
+            epoch += 1;
             startProblem = undefined;
             await bringDown();
           }
@@ -333,6 +349,7 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
 
     const provides: ConnectorModule = {
       bootNotice: () => {
+        if (invalidReason !== undefined) return invalidReason;
         if (!on) return NOT_SWITCHED_ON;
         if (startProblem !== undefined) return `! connector not started: ${startProblem}`;
         return configuredOrigin !== undefined
@@ -368,12 +385,4 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
     };
     return { id: 'connector', provides, jobs: {}, contributes: {} };
   },
-};
-
-const OFF_ACTS: ConnectorSubsystem['acts'] = {
-  pending: async () => [],
-  grants: async () => [],
-  approve: async () => ({ ok: false, code: 'not_found', message: 'The connector is off.' }),
-  deny: async () => ({ ok: false, code: 'not_found', message: 'The connector is off.' }),
-  revoke: async () => ({ ok: false, code: 'not_found', message: 'The connector is off.' }),
 };

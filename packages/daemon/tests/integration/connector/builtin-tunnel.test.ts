@@ -150,6 +150,7 @@ async function rig(
   const origin = `http://127.0.0.1:${listener.port}`;
   return {
     module,
+    state,
     origin,
     written,
     calls,
@@ -440,6 +441,75 @@ describe('the connector over the built-in tunnel', () => {
     should(during).equal(404);
     should(afterOn).equal(200);
     should(own.bound).have.length(1);
+  });
+
+  it('should keep listing and revoking grants when the connector block is damaged at boot', async () => {
+    // Arrange — one grant exists from an earlier period, then the block is damaged and the daemon restarts.
+    const first = await rig({ enabled: true });
+    first.setTunnel('up');
+    await signIn(first.origin, first.module);
+    const state = (await first.module.subsystem.acts.grants())[0];
+    should(state?.id).match(/^cg_/u);
+    const damaged = connectorModule.build(
+      {
+        block: { enabled: true, port: 'x' },
+        stateDirectory: first.state,
+        daemonId: () => 'fy_daemon_x',
+        appOrigin: 'https://app.example',
+        clock: { now: () => Date.now() },
+        audit: { record: async () => undefined },
+        daemonGrants: () => ALL_GRANTS,
+        redactor: IDENTITY_REDACTOR,
+        tunnelOrigin: () => first.origin,
+        readBlock: async () => ({ enabled: true, port: 'x' }),
+        writeEnabled: async () => undefined,
+      },
+      undefined,
+      lifecycle(),
+    ).provides;
+
+    // Act
+    const listed = await damaged.subsystem.acts.grants();
+    const switched = await damaged.subsystem.change(true);
+    const revoked = await damaged.subsystem.acts.revoke(state?.id ?? '', 'admin-cli');
+
+    // Assert — it can never be switched on beside a damaged block, but access already given is visible and endable.
+    should(listed.map(grant => grant.id)).deepEqual([state?.id]);
+    should(switched.ok).be.false();
+    should(revoked.ok).be.true();
+    should((await damaged.subsystem.availability()).enabled).be.false();
+  });
+
+  it('should refuse a request that began before an off, even when the connector is switched on again before it finishes', async () => {
+    // Arrange — a signed-in client whose request body is still arriving.
+    const r = await rig({ enabled: true });
+    r.setTunnel('up');
+    const token = await signIn(r.origin, r.module);
+    let finish: (text: string) => void = () => undefined;
+    const body = new Promise<string>(resolve => (finish = resolve));
+    const slow: ApiRequest = {
+      ...request({ method: 'POST', path: '/mcp', headers: { authorization: `Bearer ${token}` }, loopback: false }),
+      headers: new Map([
+        ['authorization', `Bearer ${token}`],
+        ['content-type', 'application/json'],
+        ['accept', 'application/json, text/event-stream'],
+      ]),
+      text: async () => await body,
+    };
+    const calls = r.calls.length;
+    const pending = Promise.all(r.module.tunnelHandlers().map(async handler => await handler.handle(slow)));
+
+    // Act — off, then on again, then the body finishes.
+    await r.module.subsystem.change(false);
+    await r.module.subsystem.change(true);
+    finish(
+      JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_ferrets', arguments: {} } }),
+    );
+    const answers = (await pending).filter(answer => answer !== undefined);
+
+    // Assert — whatever it answered, it never reached the fleet.
+    should(r.calls.slice(calls)).deepEqual([]);
+    should(answers.length).be.aboveOrEqual(0);
   });
 
   it('should be reachable only on paths the edge forwards: every served path matches the Worker’s ingress pattern', async () => {
