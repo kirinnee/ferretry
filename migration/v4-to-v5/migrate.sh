@@ -478,6 +478,18 @@ baseline)
   jq -r '[.secrets[].name] | sort | .[]' <<<"${secret_listing}" >"${base}/secrets.txt"
   secret_listing=""
 
+  # The Claude connector, read from its files (no daemon call): the switch from config/daemon.json, and how many grants are
+  # live (not revoked) in state/connector/connector.json. verify compares both with v5's.
+  connector_on=false
+  if [ -f "${H}/config/daemon.json" ]; then
+    [ "$(jq -r '.connector.enabled // false' "${H}/config/daemon.json" 2>/dev/null || echo false)" = true ] && connector_on=true
+  fi
+  connector_grants=0
+  if [ -f "${H}/state/connector/connector.json" ]; then
+    connector_grants="$(jq '[.grants[] | select(.revokedAt == null)] | length' "${H}/state/connector/connector.json")" || fail "cannot read the v4 connector state (state/connector/connector.json); do not go on"
+  fi
+  printf '%s %s\n' "${connector_on}" "${connector_grants}" >"${base}/connector.txt"
+
   note_set BASE "${base}"
   note_set ASKS_OPEN "${asks_open}"
   note_set ASKS_ANSWERED "${answered_ask}"
@@ -993,6 +1005,26 @@ verify)
     if [ -z "${missing}" ]; then row "secret names" OK "$(wc -l <"${base}/secrets.txt" | tr -d ' ') baseline names present"; else row "secret names" FAIL "$(wc -l <<<"${missing}" | tr -d ' ') baseline names missing"; fi
   else
     row "secret names" FAIL "v5 'fy secret ls --json' failed, was unreadable, or says the store is not healthy"
+  fi
+
+  # The Claude connector: the live grant count must be the same (Claude stays signed in); the switch is shown to the owner when it differs.
+  if [ -f "${base}/connector.txt" ]; then
+    read -r v4_on v4_grants <"${base}/connector.txt"
+    v5_on=false
+    grep -Eq '^enabled:[[:space:]]*true[[:space:]]*$' "${H}/config/connector.yaml" 2>/dev/null && v5_on=true
+    v5_grants=0
+    if [ -f "${H}/state/connector/connector.json" ]; then
+      v5_grants="$(jq '[.grants[] | select(.revokedAt == null)] | length' "${H}/state/connector/connector.json" 2>/dev/null)" || v5_grants="unreadable"
+    fi
+    if [ "${v4_grants}" != "${v5_grants}" ]; then
+      row "claude connector" FAIL "live grants: ${v4_grants} in v4, ${v5_grants} in v5 (Claude would have to sign in again)"
+    elif [ "${v4_on}" != "${v5_on}" ]; then
+      row "claude connector" REVIEW "switch: on=${v4_on} in v4, on=${v5_on} in v5 (the converter never carries a block v5 refuses); ${v5_grants} live grants kept"
+    else
+      row "claude connector" OK "on=${v5_on}, ${v5_grants} live grants, as in v4"
+    fi
+  else
+    row "claude connector" SKIP "no connector baseline (taken before this check existed)"
   fi
 
   # Asks: the owner's count against v5's list.

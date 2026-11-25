@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { advance, makeSandbox, type Sandbox } from './migrate-harness.ts';
+import { advance, baselineArgs, makeSandbox, type Sandbox } from './migrate-harness.ts';
 
 setDefaultTimeout(60_000);
 
@@ -280,5 +280,82 @@ describe('verify on an empty fleet', () => {
     } finally {
       await empty.cleanup();
     }
+  });
+});
+
+describe('verify: the Claude connector (Claude stays signed in)', () => {
+  let sb: Sandbox;
+  beforeEach(async () => {
+    sb = await makeSandbox();
+    await advance(sb, 'preflight');
+  });
+  afterEach(async () => {
+    await sb.cleanup();
+  });
+
+  const grant = (id: string, revoked: boolean) => ({
+    id,
+    ...(revoked ? { revokedAt: '2026-11-01T00:00:00.000Z' } : {}),
+  });
+  const put = async (path: string, text: string) => {
+    await mkdir(join(sb.v4home, path, '..'), { recursive: true });
+    await writeFile(join(sb.v4home, path), text);
+  };
+  /** The v4 home as the owner has it: the switch on, two grants of which one is live. */
+  const v4Connector = async () => {
+    await put('config/daemon.json', JSON.stringify({ connector: { enabled: true, publicUrl: 'https://c.example' } }));
+    await put(
+      'state/connector/connector.json',
+      JSON.stringify({ version: 1, grants: [grant('cg_a', false), grant('cg_b', true)] }),
+    );
+  };
+  const toStart = async () => {
+    for (const [phase, args] of [
+      ['baseline', baselineArgs],
+      ['quiet', ['--owner-confirmed']],
+      ['backup', ['--owner-yes']],
+      ['convert', []],
+      ['install', []],
+      ['start', []],
+    ] as const)
+      expect((await sb.run(phase, args)).code, phase).toBe(0);
+  };
+
+  test('the same live grants and the same switch in v5: OK', async () => {
+    await v4Connector();
+    await toStart();
+    await put('config/connector.yaml', 'enabled: true\npublicUrl: https://c.example\n');
+    await put(
+      'state/connector/connector.json',
+      JSON.stringify({ format: 1, grants: [grant('cg_a', false), grant('cg_b', true)] }),
+    );
+    const result = await sb.run('verify');
+    expect(result.code, result.all).toBe(0);
+    expect(result.out).toMatch(/claude connector .* OK .*1 live grants/);
+  });
+
+  test('a lost grant is a FAIL: Claude would have to sign in again', async () => {
+    await v4Connector();
+    await toStart();
+    await put('config/connector.yaml', 'enabled: true\n');
+    await put('state/connector/connector.json', JSON.stringify({ format: 1, grants: [grant('cg_b', true)] }));
+    const result = await sb.run('verify');
+    expect(result.code).toBe(1);
+    expect(result.out).toMatch(/claude connector .* FAIL .*1 in v4, 0 in v5/);
+  });
+
+  test('a switch that did not carry is a REVIEW for the owner, never a silent pass', async () => {
+    await v4Connector();
+    await toStart();
+    await put('state/connector/connector.json', JSON.stringify({ format: 1, grants: [grant('cg_a', false)] }));
+    const result = await sb.run('verify');
+    expect(result.code, result.all).toBe(0);
+    expect(result.out).toMatch(/claude connector .* REVIEW .*on=true in v4, on=false in v5/);
+  });
+
+  test('a home with no connector at all verifies as 0 grants, off, as in v4', async () => {
+    await toStart();
+    const result = await sb.run('verify');
+    expect(result.out).toMatch(/claude connector .* OK .*on=false, 0 live grants/);
   });
 });
