@@ -13,7 +13,6 @@ import {
   GROQ_ENHANCEMENT_EXPLANATION,
   LIVE_WORDS_EXPLANATION,
   LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE,
-  LOGIN_CLEANUP_UNAVAILABLE,
   providerChoicePatch,
   SPEEDUP_KEY_HINT,
   USER_CONTEXT_EXPLANATION,
@@ -26,6 +25,7 @@ import { defaultEngineNote } from '../../../../../app/features/settings/engine-s
 import { ON_DEVICE_MODELS } from '../../../../../app/lib/stt/model-catalog.ts';
 import {
   DEFAULT_STT_SETTINGS,
+  ENHANCEMENT_PROVIDERS,
   type SttSettings,
   type SttSettingsPatch,
 } from '../../../../../app/lib/stt/stt-settings.ts';
@@ -423,20 +423,16 @@ describe('<DictationSettings>', () => {
     await view.unmount();
   });
 
-  it('shows using a login as a choice that cannot be picked yet', async () => {
+  it('offers only the providers that work: no "one of your logins" choice until it can be picked', async () => {
     const view = await mount(<DictationSettings {...settingsProps()} />);
     const box = must(view.container.querySelector<HTMLElement>('#stt-enhancement-provider'), 'the provider');
     await interact(() => box.click());
-    const login = must(
-      [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
-        option => option.querySelector('[data-label]')?.textContent === LOGIN_CLEANUP_UNAVAILABLE,
-      ) ?? null,
-      'the login option',
+    const labels = [...document.querySelectorAll<HTMLElement>('[role="option"]')].map(
+      option => option.querySelector('[data-label]')?.textContent,
     );
-    expect(login.getAttribute('aria-disabled')).toBe('true');
-    // Pressing it changes nothing: no patch, no staged provider.
-    await interact(() => login.click());
-    expect(view.container.querySelector('[data-provider-staged]')).toBeNull();
+    expect(labels).toEqual(ENHANCEMENT_PROVIDERS.map(entry => entry.label));
+    expect(document.querySelector('[role="option"][aria-disabled="true"]')).toBeNull();
+    expect(document.body.textContent ?? '').not.toContain('not available yet');
     await view.unmount();
   });
 

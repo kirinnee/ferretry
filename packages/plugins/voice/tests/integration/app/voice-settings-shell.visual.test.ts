@@ -66,7 +66,7 @@ const VIEWPORTS = [
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 
-type Viewport = (typeof VIEWPORTS)[number];
+type Viewport = { readonly name: string; readonly width: number; readonly height: number; readonly phone: boolean };
 
 const open = async (viewport: Viewport, scheme: 'light' | 'dark', tab: string, query = '') => {
   const context = await browser.newContext({
@@ -515,7 +515,7 @@ describe('Voice settings in the real Settings shell', () => {
           await page.waitForTimeout(600);
           expect(
             await page.locator('[role="dialog"] [role="option"], [data-select-popover] [role="option"]').count(),
-          ).toBe(4);
+          ).toBe(3);
           // A hosted provider is staged: choosing it saves nothing until Apply.
           await page.locator('[role="option"]', { hasText: 'Groq clean-up' }).click();
           await page.locator('[data-provider-staged]').waitFor();
@@ -541,6 +541,40 @@ describe('Voice settings in the real Settings shell', () => {
         }
       });
     }
+});
+
+// E193: the clean-up choice that cannot be picked yet ("One of your logins") is not drawn at all.
+describe('the "Correction provider" list in Settings › Voice', () => {
+  const E193_VIEWPORTS: readonly Viewport[] = [
+    { name: '390', width: 390, height: 844, phone: true },
+    { name: '1440', width: 1_440, height: 900, phone: false },
+  ];
+  for (const viewport of E193_VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`${viewport.name} ${scheme}: lists only the choices that work, none greyed out, no "not available yet"`, async () => {
+        const { page, problems, close } = await open(viewport, scheme, 'voice');
+        try {
+          const box = page.locator('#stt-enhancement-provider');
+          await box.scrollIntoViewIfNeeded();
+          await box.click();
+          await page.waitForTimeout(600);
+          const options = page.locator('[role="dialog"] [role="option"], [data-select-popover] [role="option"]');
+          expect(await options.allInnerTexts()).toEqual([
+            'On-device word correction',
+            'Groq clean-up',
+            'Cerebras clean-up',
+          ]);
+          expect(await page.locator('[role="option"][aria-disabled="true"]').count(), 'no greyed-out choice').toBe(0);
+          expect(await page.locator('body').innerText()).not.toContain('not available yet');
+          if (shotsDir !== '') {
+            await mkdir(shotsDir, { recursive: true });
+            await page.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-correction-provider-open.png`) });
+          }
+          expect(problems).toEqual([]);
+        } finally {
+          await close();
+        }
+      });
 });
 
 // VC U12: Google's live transcriber is one more card in Settings › Voice, drawn by the same card as every engine.
