@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ConnectorOAuthHttp } from '../../../../src/adapters/connector/oauth-http.ts';
-import { CLAUDE_CONNECTORS_URL, connectorOffPage } from '../../../../src/adapters/connector/pages.ts';
+import { CLAUDE_CONNECTORS_URL } from '../../../../src/adapters/connector/pages.ts';
 import type { ApiRequest, ApiResponse } from '../../../../src/lib/api/http.ts';
 import { ConnectorMemory, base64url } from '../../../../src/lib/connector/oauth/model.ts';
 import { ConnectorAuthority } from '../../../../src/lib/connector/oauth/authority.ts';
@@ -182,22 +182,6 @@ describe('connector reconnect pages', () => {
     expectReconnectPage(response, 'Ferretry could not finish this sign-in', 'server_error');
   });
 
-  test('the connector being off shows a page on the two page paths only', () => {
-    const page = connectorOffPage(get('/oauth/authorize/wait?h=x'), endpoints);
-    expect(page?.status).toBe(503);
-    expect(page?.body).toContain('<h1>The Claude connector is turned off</h1>');
-    expect(page?.body).toContain(APP);
-    expect(page?.body).toContain('Reference: connector_disabled');
-    expect(connectorOffPage(get('/oauth/authorize'), endpoints)?.status).toBe(503);
-    for (const request of [
-      get('/mcp'),
-      get('/oauth/token'),
-      get('/.well-known/oauth-authorization-server'),
-      post('/oauth/authorize', ''),
-    ])
-      expect(connectorOffPage(request, endpoints)).toBeUndefined();
-  });
-
   test('a denied sign-in goes back to Claude with words that say how to try again', async () => {
     const f = fixture();
     const http = new ConnectorOAuthHttp(f.authority, endpoints);
@@ -268,5 +252,35 @@ describe('connector reconnect pages', () => {
     );
     expect(unknown?.status).toBe(401);
     expect(JSON.parse(unknown?.body ?? '').error_description).toContain(hint);
+    // A known client with the wrong secret: the same words, so a stale credential never gets a bare refusal.
+    const secretClient = await f.register({ token_endpoint_auth_method: 'client_secret_post' });
+    const wrongSecret = await http.handle(
+      post(
+        '/oauth/token',
+        new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: secretClient.client_id,
+          client_secret: 'wrong-secret',
+          refresh_token: 'x',
+        }).toString(),
+      ),
+    );
+    expect(wrongSecret?.status).toBe(401);
+    expect(JSON.parse(wrongSecret?.body ?? '')).toMatchObject({ error: 'invalid_client' });
+    expect(JSON.parse(wrongSecret?.body ?? '').error_description).toContain(hint);
+    // A malformed Basic header.
+    const malformed = await http.handle({
+      ...post(
+        '/oauth/token',
+        new URLSearchParams({ client_id: secretClient.client_id, grant_type: 'refresh_token' }).toString(),
+      ),
+      headers: new Map([
+        ['content-type', 'application/x-www-form-urlencoded'],
+        ['authorization', 'Basic !!!'],
+      ]),
+    });
+    expect(malformed?.status).toBe(401);
+    expect(JSON.parse(malformed?.body ?? '')).toMatchObject({ error: 'invalid_client' });
+    expect(JSON.parse(malformed?.body ?? '').error_description).toContain(hint);
   });
 });

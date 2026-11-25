@@ -254,10 +254,8 @@ code" where an approval is involved.
 | Too many sign-ins already waiting                                                                       | `/oauth/authorize`          | Ferretry has too many sign-ins waiting                                                                  | 503    |
 | Rate limit on either page path                                                                          | both                        | Too many tries in a short time (`Retry-After`)                                                          | 429    |
 | Storage or other internal failure                                                                       | both                        | Ferretry could not finish this sign-in                                                                  | 503    |
-| Connector switched off                                                                                  | both, GET only              | The Claude connector is turned off                                                                      | 503    |
 
-A switched-off connector answers every other path, and every other method, with the same bare `404` as before; only a
-browser's `GET` of the two page paths gets the page, which names no daemon detail beyond the app link.
+A switched-off connector (or one that failed to start) serves nothing: every path is the same bare 404, so a prober learns nothing. A person opening an old sign-in link then sees that 404; a page for this case is a declared gap, because the tunnel and the dedicated listener are not up while it is off.
 
 **What Claude is told.** A denied sign-in still redirects to Claude with `error=access_denied`, and now an
 `error_description`. Every JSON error Claude may show carries an `error_description` ending in "Reconnect in Claude:

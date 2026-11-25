@@ -1,4 +1,4 @@
-import type { ApiRequest, ApiResponse } from '../../lib/api/http.ts';
+import type { ApiResponse } from '../../lib/api/http.ts';
 import type { ConnectorEndpoints } from '../../lib/connector/ports.ts';
 import type { OAuthError, ReconnectReason } from '../../lib/connector/oauth/model.ts';
 
@@ -81,7 +81,7 @@ const APPROVE_STEP = 'Then open Ferretry and approve the new code.';
 const COPY: Readonly<Record<ReconnectReason, Copy>> = {
   sign_in_gone: {
     headline: 'This sign-in is no longer waiting',
-    what: 'It took longer than 10 minutes, it was already finished, or Ferretry restarted and forgot it. Nothing was connected.',
+    what: 'It took longer than 10 minutes, it was already finished, or Ferretry restarted and forgot it. If Claude already shows Ferretry as connected, you can close this page.',
     steps: [RECONNECT_STEP, APPROVE_STEP],
     status: 400,
   },
@@ -151,16 +151,5 @@ export function failurePage(failure: OAuthError, endpoints: ConnectorEndpoints):
     failure.error,
     failure.status >= 400 ? failure.status : COPY[reason].status,
     headers,
-  );
-}
-
-/** What a switched-off connector says to a person who still has a sign-in link open. Only the two page paths. */
-export function connectorOffPage(request: ApiRequest, endpoints: ConnectorEndpoints): ApiResponse | undefined {
-  if (request.method !== 'GET' || (request.path !== '/oauth/authorize' && request.path !== '/oauth/authorize/wait'))
-    return undefined;
-  return page(
-    'The Claude connector is turned off',
-    `<p>Ferretry's Claude connector is switched off on this machine, so nothing was connected.</p><p><a class="button" href="${escapeHtml(appPanelUrl(endpoints))}">Open Ferretry's Claude connector panel</a></p><h2>How to connect again</h2><ol><li>Open Ferretry's Claude connector panel and switch the connector on.</li><li>${escapeHtml(RECONNECT_STEP)}</li><li>${escapeHtml(APPROVE_STEP)}</li></ol><p class="small">Reference: connector_disabled</p>`,
-    { status: 503 },
   );
 }

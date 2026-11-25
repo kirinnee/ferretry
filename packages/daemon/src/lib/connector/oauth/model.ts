@@ -242,6 +242,8 @@ export class ConnectorMemory {
 export type ReconnectReason = 'sign_in_gone' | 'cancelled' | 'unrecognised' | 'busy' | 'slow_down' | 'trouble';
 /** The sentence every error Claude may show ends with: exactly where to connect again. */
 export const RECONNECT_HINT = 'Reconnect in Claude: Settings > Connectors > Ferretry > Connect.';
+/** The one description every `invalid_client` refusal carries, whatever made the client unacceptable. */
+export const INVALID_CLIENT_TEXT = `Ferretry does not recognise this connection. ${RECONNECT_HINT}`;
 
 export class OAuthError extends Error {
   constructor(

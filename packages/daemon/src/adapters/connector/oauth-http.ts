@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { BodyTooLargeError, type ApiRequest, type ApiResponse } from '../../lib/api/http.ts';
 import type { ConnectorAuthority, ExchangeInput } from '../../lib/connector/oauth/authority.ts';
 import { authorizationServerMetadata, protectedResourceMetadata } from '../../lib/connector/oauth/discovery.ts';
-import { OAuthError } from '../../lib/connector/oauth/model.ts';
+import { INVALID_CLIENT_TEXT, OAuthError, RECONNECT_HINT } from '../../lib/connector/oauth/model.ts';
 import type { ConnectorEndpoints, ConnectorHttpHandler } from '../../lib/connector/ports.ts';
 import { appPanelUrl, escapeHtml, failurePage, page } from './pages.ts';
 
@@ -82,7 +82,7 @@ function credentials(
   const authorization = request.headers.get('authorization');
   if (!authorization) return { body, authMethod: body.client_secret === undefined ? 'none' : 'client_secret_post' };
   if (!/^Basic /i.test(authorization) || body.client_secret !== undefined)
-    throw new OAuthError('invalid_client', 'Use exactly one client authentication method.', 401);
+    throw new OAuthError('invalid_client', `Use exactly one client authentication method. ${RECONNECT_HINT}`, 401);
   try {
     const decoded = atob(authorization.slice(6).trim());
     const colon = decoded.indexOf(':');
@@ -92,7 +92,7 @@ function credentials(
     if (body.client_id !== undefined && body.client_id !== clientId) throw new Error('Mismatched client');
     return { body: { ...body, client_id: clientId, client_secret: secret }, authMethod: 'client_secret_basic' };
   } catch {
-    throw new OAuthError('invalid_client', 'Invalid client authentication.', 401);
+    throw new OAuthError('invalid_client', INVALID_CLIENT_TEXT, 401);
   }
 }
 

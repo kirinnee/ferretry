@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import type { CapabilityGrants } from '@ferretry/protocol';
 import { FileConnectorStore } from '../../src/adapters/connector/file-store.ts';
 import { ConnectorOAuthHttp } from '../../src/adapters/connector/oauth-http.ts';
-import { connectorOffPage } from '../../src/adapters/connector/pages.ts';
 import { FileConnectorCallsLog } from '../../src/adapters/connector/mcp/calls-log.ts';
 import { ConnectorMcpEndpoint } from '../../src/adapters/connector/mcp/mcp-endpoint.ts';
 import { webCryptoConnector } from '../../src/adapters/connector/webcrypto.ts';
@@ -206,9 +205,7 @@ export const connectorModule: DaemonModule<void, ConnectorNeeds, ConnectorModule
     const gated = (inner: readonly ConnectorHttpHandler[]): readonly ConnectorHttpHandler[] =>
       inner.map(handler => ({
         handle: async request =>
-          on
-            ? await requestEpoch.run(epoch, async () => await handler.handle(request))
-            : connectorOffPage(request, endpoints),
+          on ? await requestEpoch.run(epoch, async () => await handler.handle(request)) : undefined,
       }));
 
     const buildHandlers = async (needsNow: ConnectorListenNeeds): Promise<readonly ConnectorHttpHandler[]> => {

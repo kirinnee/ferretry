@@ -22,6 +22,7 @@ import {
   type ConnectorStore,
   OAuthError,
   type PendingAuthorization,
+  INVALID_CLIENT_TEXT,
   RECONNECT_HINT,
   type UsedRefresh,
   base64url,
@@ -574,8 +575,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
   /** Authenticates against the index, so a bad client never reaches the queue. */
   private async authenticate(input: Pick<ExchangeInput, 'client_id' | 'client_secret' | 'authMethod'>) {
     const client = this.ports.memory.index.client(input.client_id);
-    if (!client)
-      throw new OAuthError('invalid_client', `Ferretry does not recognise this connection. ${RECONNECT_HINT}`, 401);
+    if (!client) throw new OAuthError('invalid_client', INVALID_CLIENT_TEXT, 401);
     const method = input.authMethod ?? (input.client_secret === undefined ? 'none' : 'client_secret_post');
     if (
       method !== client.authMethod ||
@@ -584,7 +584,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
           !client.secretDigest ||
           !secretsMatch(await digest(this.ports.crypto, input.client_secret), client.secretDigest)))
     ) {
-      throw new OAuthError('invalid_client', 'Client authentication failed.', 401);
+      throw new OAuthError('invalid_client', INVALID_CLIENT_TEXT, 401);
     }
     return client;
   }
@@ -646,8 +646,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     this.prune();
     const state = await this.ports.store.load();
     const client = state.clients.find(c => c.id === clientId);
-    if (!client)
-      throw new OAuthError('invalid_client', `Ferretry does not recognise this connection. ${RECONNECT_HINT}`, 401);
+    if (!client) throw new OAuthError('invalid_client', INVALID_CLIENT_TEXT, 401);
     let grant: ConnectorGrant | undefined;
     let scopes: readonly ConnectorScope[];
     /** The refresh token being rotated, and (on a retry inside its window) the pair its first rotation issued. */
