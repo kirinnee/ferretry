@@ -32,7 +32,7 @@ import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Document } from 'yaml';
 import { z } from 'zod';
-import { keyPath } from '../key-path.ts';
+import { keyPath, pathSegment } from '../key-path.ts';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
 import { YAML_OPTIONS } from '../v4/config.ts';
 import {
@@ -46,6 +46,7 @@ import { V4_DAEMON_JSON } from '../v4/daemon.ts';
 import { failureNote, isRecord, readV4Json, readV4Lines, V4InputError } from '../v4/documents.ts';
 import { CONFIG_TARGETS } from '../v5/targets.ts';
 import { configPath } from '../v5/write.ts';
+import { V5_MAX_JSONL_LINE_BYTES } from './conversation.ts';
 import type { Step } from './index.ts';
 
 export const V5_CONNECTOR_STATE = join('state/connector', CONNECTOR_STATE.path);
@@ -95,7 +96,8 @@ function convertConfig(
   if (!parsed.success)
     return {
       problems: parsed.error.issues.map(issue => {
-        const keys = issue.code === 'unrecognized_keys' ? ` ${issue.keys.join(', ')}` : '';
+        // An unrecognised key is the owner's own text: a credential written as a key must not reach the report.
+        const keys = issue.code === 'unrecognized_keys' ? ` ${issue.keys.map(pathSegment).join(', ')}` : '';
         return `${keyPath(['connector', ...issue.path])} (${issue.code}${keys})`;
       }),
     };
@@ -110,6 +112,14 @@ function convertConfig(
     }
   return { text: String(document), keys };
 }
+
+/**
+ * What the person does about a connector file the converter cannot read. The conversion fails closed on it (it never
+ * repairs or guesses), and this says which file and the two ways out.
+ */
+const unreadableRemedy = (file: string): string =>
+  `. Nothing was changed. Fix ${file} (restore it from your v4 backup, or correct the JSON), or move it aside in the v4 home ` +
+  `(mv ${file} ${file}.damaged) to move WITHOUT the connector's approved apps: Claude then signs in again`;
 
 const CallLine = z.record(z.string(), z.unknown()).refine(line => !('format' in line));
 
@@ -161,12 +171,16 @@ export const connectorStep: Step = {
       }
 
       // ── state ──
-      const value = await readV4Json(home, join(home, V4_CONNECTOR_STATE));
+      const value = await readV4Json(home, join(home, V4_CONNECTOR_STATE)).catch((error: unknown) => {
+        throw error instanceof V4InputError
+          ? new V4InputError(`${error.message}${unreadableRemedy(V4_CONNECTOR_STATE)}`)
+          : error;
+      });
       if (value !== undefined) {
         const v4 = V4ConnectorState.safeParse(value);
         if (!v4.success)
           throw new V4InputError(
-            `${V4_CONNECTOR_STATE}: is not a document v4 reads (${v4.error.issues.map(issue => keyPath(issue.path)).join(', ')}); v4 refuses all connector access on it, so nothing is carried`,
+            `${V4_CONNECTOR_STATE}: is not a document v4 reads (${v4.error.issues.map(issue => keyPath(issue.path)).join(', ')}); v4 refuses all connector access on it, so nothing is carried${unreadableRemedy(V4_CONNECTOR_STATE)}`,
           );
         const document = convertState(v4.data, now);
         await ctx.v5.json(
@@ -192,24 +206,34 @@ export const connectorStep: Step = {
       }
 
       // ── calls log: the rotated file first, so the order is the order the calls happened ──
-      const lines = [
-        ...((await readV4Lines(home, V4_CONNECTOR_CALLS_ROTATED)) ?? []),
-        ...((await readV4Lines(home, V4_CONNECTOR_CALLS)) ?? []),
-      ];
-      if (lines.length > 0) {
+      const sources = [V4_CONNECTOR_CALLS_ROTATED, V4_CONNECTOR_CALLS] as const;
+      const files = await Promise.all(
+        sources.map(async path => [path, (await readV4Lines(home, path)) ?? []] as const),
+      );
+      if (files.some(([, lines]) => lines.length > 0)) {
         const records: Record<string, unknown>[] = [];
         let unreadable = 0;
-        for (const line of lines) {
-          let decoded: unknown;
-          try {
-            decoded = JSON.parse(line);
-          } catch {
-            decoded = undefined;
+        const tooLarge: string[] = [];
+        for (const [path, lines] of files)
+          for (const [index, line] of lines.entries()) {
+            let decoded: unknown;
+            try {
+              decoded = JSON.parse(line);
+            } catch {
+              decoded = undefined;
+            }
+            const record = CallLine.safeParse(decoded);
+            if (!record.success) {
+              unreadable++;
+              continue;
+            }
+            // The ENCODED line, `format` key included: v5's reader refuses a line over its bound, so counting a record as
+            // kept that it would not return is a loss nobody told the person about.
+            const encoded = JSON.stringify({ format: CONNECTOR_CALLS.format, ...record.data });
+            if (Buffer.byteLength(encoded, 'utf8') > V5_MAX_JSONL_LINE_BYTES)
+              tooLarge.push(`${path} record ${String(index + 1)}`);
+            else records.push(record.data);
           }
-          const record = CallLine.safeParse(decoded);
-          if (record.success) records.push(record.data);
-          else unreadable++;
-        }
         await ctx.v5.jsonl(
           {
             path: V5_CONNECTOR_CALLS,
@@ -227,6 +251,11 @@ export const connectorStep: Step = {
           notCarried.push({
             what: 'calls-log lines that are not one JSON object',
             why: `${String(unreadable)} line(s) of ${V4_CONNECTOR_CALLS} / ${V4_CONNECTOR_CALLS_ROTATED} could not be re-stamped for v5 and were left behind in the v4 backup`,
+          });
+        if (tooLarge.length > 0)
+          notCarried.push({
+            what: 'connector call records too large for v5',
+            why: `${String(tooLarge.length)} record(s) would exceed v5's 1 MiB record limit once re-stamped (${tooLarge.join(', ')}; non-empty lines counted): left behind whole in the v4 backup, nothing was cut`,
           });
       }
 

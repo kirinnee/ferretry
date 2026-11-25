@@ -321,14 +321,14 @@ describe('verify: the Claude connector (Claude stays signed in)', () => {
       expect((await sb.run(phase, args)).code, phase).toBe(0);
   };
 
-  test('the same live grants and the same switch in v5: OK', async () => {
+  /** What v5's daemon says is IN EFFECT (`fy connector --json`): the switch actually on, and its grants. */
+  const inEffect = (switchedOn: boolean, grants: ReturnType<typeof grant>[], enabled = true) =>
+    sb.state('connector.v5.json', JSON.stringify({ enabled, switchedOn, grants }));
+
+  test('the same live grants and the same switch IN EFFECT in v5: OK', async () => {
     await v4Connector();
     await toStart();
-    await put('config/connector.yaml', 'enabled: true\npublicUrl: https://c.example\n');
-    await put(
-      'state/connector/connector.json',
-      JSON.stringify({ format: 1, grants: [grant('cg_a', false), grant('cg_b', true)] }),
-    );
+    await inEffect(true, [grant('cg_a', false), grant('cg_b', true)]);
     const result = await sb.run('verify');
     expect(result.code, result.all).toBe(0);
     expect(result.out).toMatch(/claude connector .* OK .*1 live grants/);
@@ -337,20 +337,47 @@ describe('verify: the Claude connector (Claude stays signed in)', () => {
   test('a lost grant is a FAIL: Claude would have to sign in again', async () => {
     await v4Connector();
     await toStart();
-    await put('config/connector.yaml', 'enabled: true\n');
-    await put('state/connector/connector.json', JSON.stringify({ format: 1, grants: [grant('cg_b', true)] }));
+    await inEffect(true, [grant('cg_b', true)]);
     const result = await sb.run('verify');
     expect(result.code).toBe(1);
     expect(result.out).toMatch(/claude connector .* FAIL .*1 in v4, 0 in v5/);
   });
 
-  test('a switch that did not carry is a REVIEW for the owner, never a silent pass', async () => {
+  test('a switch that is not on in v5 is a REVIEW for the owner, never a silent pass', async () => {
     await v4Connector();
     await toStart();
-    await put('state/connector/connector.json', JSON.stringify({ format: 1, grants: [grant('cg_a', false)] }));
+    await inEffect(false, [grant('cg_a', false)], false);
     const result = await sb.run('verify');
     expect(result.code, result.all).toBe(0);
     expect(result.out).toMatch(/claude connector .* REVIEW .*on=true in v4, on=false in v5/);
+  });
+
+  test('the file says on but v5 holds the connector OFF: verify reads what is in effect, so it is a REVIEW, not OK', async () => {
+    await v4Connector();
+    await toStart();
+    // The converted config/connector.yaml says `enabled: true`, but the daemon holds the switch off.
+    await put('config/connector.yaml', 'enabled: true\npublicUrl: https://c.example\n');
+    await inEffect(false, [grant('cg_a', false)], true);
+    const result = await sb.run('verify');
+    expect(result.out).toMatch(/claude connector .* REVIEW .*on=true in v4, on=false in v5/);
+    expect(result.out).not.toMatch(/claude connector .* OK/);
+  });
+
+  test('a v5 that cannot say what is in effect is a FAIL, never a guess from a file', async () => {
+    await v4Connector();
+    await toStart();
+    await put('config/connector.yaml', 'enabled: true\n');
+    await sb.fake('fy', [
+      { match: 'connector --json', code: 7 },
+      { match: 'ps -a --json', run: 'cat "$D/ps.v5.json"; echo' },
+      { match: 'secret ls --json', out: '{"health":"ready","secrets":[]}' },
+      { match: 'ask', out: 'no asks are waiting' },
+      { match: 'doctor', out: 'doctor clean' },
+      { match: 'board *', run: 'echo \'{"cards":[],"nextCursor":null}\'' },
+      { match: '*', code: 0 },
+    ]);
+    const result = await sb.run('verify');
+    expect(result.out).toMatch(/claude connector .* FAIL .*fy connector --json/);
   });
 
   test('a home with no connector at all verifies as 0 grants, off, as in v4', async () => {

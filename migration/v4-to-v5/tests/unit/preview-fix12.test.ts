@@ -170,7 +170,7 @@ test('the dry pass runs exactly the steps that write config (behavioural: any wr
   await put('config/machine.yaml', 'timeZone: Europe/Berlin\n');
   await put('config/pack.yaml', 'enabled: true\n');
   await put('config/learning.yaml', 'enabled: true\n');
-  await put('config/daemon.json', '{"port": 4321}');
+  await put('config/daemon.json', '{"port": 4321, "connector": {"enabled": true}}');
   const plain = f.ctx(true);
   const called = new Set<string>();
   for (const step of ALL_STEPS) {

@@ -9,11 +9,12 @@
  */
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import { dryConfigsOf } from '../../src/convert.ts';
+import { convert } from '../../src/convert.ts';
 import { acceptedConfigStep } from '../../src/steps/accepted-config.ts';
 import { connectorStep } from '../../src/steps/connector.ts';
+import { settingsStep } from '../../src/steps/settings.ts';
 import { fixture } from './ferret-fixture.ts';
 
 const repo = join(import.meta.dir, '../../../..');
@@ -114,10 +115,28 @@ beforeAll(async () => {
       },
     ],
   });
-  const steps = [connectorStep];
-  const ctx = { ...f.ctx(), dryConfigs: dryConfigsOf(f.from, f.to, undefined, steps) };
-  expect((await connectorStep.run(ctx)).status).toBe('converted');
-  expect((await acceptedConfigStep.run(ctx)).status).toBe('converted');
+  // An UNRELATED v4 edit nobody confirmed is held at the move (warden.yaml: v4 enforces `false`, the file now says `true`).
+  // v4 held it, so the converter records what v4 ENFORCED for every config it writes; the connector must not be held with it.
+  const put = async (path: string, text: string) => {
+    await mkdir(join(f.from, path, '..'), { recursive: true });
+    await writeFile(join(f.from, path), text, { mode: 0o600 });
+  };
+  await put('layout-version', '2\n');
+  await put('config/warden.yaml', 'enabled: true\n');
+  await put(
+    'state/config-accepted.json',
+    JSON.stringify({ 'warden.yaml': { etag: sha('enabled: false\n'), text: 'enabled: false\n' } }),
+  );
+  const converted = await convert({
+    from: f.from,
+    to: f.to,
+    dryRun: false,
+    lock: { held: async () => false },
+    now: () => new Date(),
+    host: { homeDirectory: f.root, env: {} },
+    steps: [settingsStep, connectorStep, acceptedConfigStep],
+  });
+  expect(converted.kind).toBe('done');
   const seed = Object.fromEntries([...(await filesOf(f.to, 'config')), ...(await filesOf(f.to, 'state'))]);
   daemon = await bootRealDaemon(seed);
 }, 240_000);
@@ -139,7 +158,7 @@ const refresh = (value: string) =>
     body: new URLSearchParams({ grant_type: 'refresh_token', client_id: CLIENT, refresh_token: value }).toString(),
   });
 
-test('the converted connector is ON at its own address with no confirmation asked, and the grant is there', async () => {
+test('the converted connector is ON IN EFFECT at its own address with an unrelated v4 edit held, and the grant is there', async () => {
   const status = await daemon.fy(['connector', '--json']);
   expect(status.code, status.err).toBe(0);
   expect(status.json).toMatchObject({

@@ -341,6 +341,7 @@ export async function makeSandbox(options: SandboxOptions = {}): Promise<Sandbox
   await sandbox.state('board-open.json', BOARD_OPEN);
   await sandbox.state('board-closed.json', BOARD_EMPTY);
   await sandbox.state('board-dropped.json', BOARD_EMPTY);
+  await sandbox.state('connector.v5.json', '{"enabled":false,"switchedOn":false,"grants":[]}\n');
   await sandbox.state('brew.casks', options.casks ?? 'ferretry@4\n');
   await sandbox.state('nix.profile', '');
   await sandbox.state('ps.out', '');
@@ -363,6 +364,7 @@ async function installDefaults(sb: Sandbox): Promise<void> {
     { match: 'board --project all --state closed --all --json', run: `cat ${D}/board-closed.json` },
     { match: 'board --project all --state dropped --all --json', run: `cat ${D}/board-dropped.json` },
     { match: 'secret ls --json', out: SECRET_LS },
+    { match: 'connector --json', run: `cat ${D}/connector.v5.json` },
     { match: 'daemon stop', run: DAEMON_DOWN_SH },
     { match: 'daemon start', run: DAEMON_UP_SH },
     { match: 'daemon update --major --yes --to *', run: `echo 5.0.0 > ${D}/fy.version; echo 5.0.0 > ${D}/fyd.version` },

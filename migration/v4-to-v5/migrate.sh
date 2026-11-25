@@ -1007,19 +1007,25 @@ verify)
     row "secret names" FAIL "v5 'fy secret ls --json' failed, was unreadable, or says the store is not healthy"
   fi
 
-  # The Claude connector: the live grant count must be the same (Claude stays signed in); the switch is shown to the owner when it differs.
+  # The Claude connector, as v5's daemon has it in effect: the live grant count must be the same (Claude stays signed in); the switch is shown to the owner when it differs.
   if [ -f "${base}/connector.txt" ]; then
     read -r v4_on v4_grants <"${base}/connector.txt"
-    v5_on=false
-    grep -Eq '^enabled:[[:space:]]*true[[:space:]]*$' "${H}/config/connector.yaml" 2>/dev/null && v5_on=true
-    v5_grants=0
-    if [ -f "${H}/state/connector/connector.json" ]; then
-      v5_grants="$(jq '[.grants[] | select(.revokedAt == null)] | length' "${H}/state/connector/connector.json" 2>/dev/null)" || v5_grants="unreadable"
+    # What is IN EFFECT, from v5's own daemon (the switch actually on, and the grants it holds): never the files. An edit
+    # held at the move can leave `enabled: true` in config/connector.yaml while the daemon keeps the connector off.
+    if connector_json="$(fy5 connector --json 2>/dev/null)" && jq -e '(.switchedOn | type) == "boolean" and (.grants | type) == "array"' <<<"${connector_json}" >/dev/null 2>&1; then
+      v5_on="$(jq -r '.switchedOn' <<<"${connector_json}")"
+      v5_grants="$(jq '[.grants[] | select(.revokedAt == null)] | length' <<<"${connector_json}")"
+    else
+      v5_on=unknown
+      v5_grants=unreadable
     fi
-    if [ "${v4_grants}" != "${v5_grants}" ]; then
+    connector_json=""
+    if [ "${v5_on}" = unknown ]; then
+      row "claude connector" FAIL "v5 'fy connector --json' failed or was unreadable, so what is in effect is unknown: show the owner"
+    elif [ "${v4_grants}" != "${v5_grants}" ]; then
       row "claude connector" FAIL "live grants: ${v4_grants} in v4, ${v5_grants} in v5 (Claude would have to sign in again)"
     elif [ "${v4_on}" != "${v5_on}" ]; then
-      row "claude connector" REVIEW "switch: on=${v4_on} in v4, on=${v5_on} in v5 (the converter never carries a block v5 refuses); ${v5_grants} live grants kept"
+      row "claude connector" REVIEW "switch: on=${v4_on} in v4, on=${v5_on} in v5 (the converter never carries a block v5 refuses, and a held edit keeps the switch off until the owner confirms it in the app); ${v5_grants} live grants in effect"
     else
       row "claude connector" OK "on=${v5_on}, ${v5_grants} live grants, as in v4"
     fi

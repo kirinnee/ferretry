@@ -69,6 +69,7 @@ export const CONFIG_STEPS: ReadonlySet<string> = new Set([
   'lessons',
   'packs',
   'archive-setting',
+  'connector',
 ]);
 
 /** What the plain passes share with the real run beyond the v4 and v5 paths. */

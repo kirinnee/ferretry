@@ -146,6 +146,17 @@ test('never wider: a block v5 refuses writes no file, names the key path, never 
   expect((await readState()).grants).toHaveLength(2);
 });
 
+test('a credential-shaped property name in the block is said as <key>, never printed', async () => {
+  const KEY = `sk-ant-${'FAKE0123'.repeat(5)}`;
+  await daemon({ enabled: true, publicUrl: ORIGIN, [KEY]: true });
+  const report = await connectorStep.run(ctx());
+  expect(report.status).toBe('converted');
+  expect(await exists('config/connector.yaml')).toBe(false);
+  expect(report.note).toContain('unrecognized_keys <key>');
+  expect(everything(report)).not.toContain(KEY);
+  expect(everything(report)).not.toContain('FAKE0123');
+});
+
 test('a block that is not an object is refused the same way', async () => {
   await daemon('on');
   const report = await connectorStep.run(ctx());
@@ -180,6 +191,7 @@ test('rotated-away refresh tokens: every v4 spelling becomes the one v5 record, 
   const unstamped = sha('no-stamps');
   const retried = sha('already-retried');
   const halfMarked = sha('marker-without-successors');
+  const noRotatedAt = sha('marker-and-successors-without-rotatedat');
   const rotatedAt = NOW.getTime() - 5 * DAY;
   await f.put(
     'state/connector/connector.json',
@@ -200,6 +212,13 @@ test('rotated-away refresh tokens: every v4 spelling becomes the one v5 record, 
       { digest: retried, expiresAt: FUTURE, rotatedAt },
       // 5. a marker v4 would not honour (no successors): left off, so a reuse revokes as it did
       { digest: halfMarked, expiresAt: FUTURE, rotatedAt, retryable: true },
+      // 6. a marker and successors but no `rotatedAt`: v4 had no window to honour, so it is NOT retryable after the move
+      {
+        digest: noRotatedAt,
+        expiresAt: FUTURE,
+        successors: { access: sha('n-access'), refresh: sha('n-refresh') },
+        retryable: true,
+      },
     ]),
   );
   const report = await connectorStep.run(ctx());
@@ -217,7 +236,14 @@ test('rotated-away refresh tokens: every v4 spelling becomes the one v5 record, 
   expect(used[unstamped]).toEqual({ digest: unstamped, expiresAt: stamp, rotatedAt: NOW.getTime() });
   expect(used[retried]).toEqual({ digest: retried, expiresAt: FUTURE, rotatedAt });
   expect(used[halfMarked]).toEqual({ digest: halfMarked, expiresAt: FUTURE, rotatedAt });
-  expect(report.kept).toContainEqual({ what: 'rotated-away refresh digests (reuse still revokes)', count: 5 });
+  expect(used[noRotatedAt]).toEqual({
+    digest: noRotatedAt,
+    expiresAt: FUTURE,
+    rotatedAt: NOW.getTime(),
+    successors: { access: sha('n-access'), refresh: sha('n-refresh') },
+  });
+  expect(used[noRotatedAt]).not.toHaveProperty('retryable');
+  expect(report.kept).toContainEqual({ what: 'rotated-away refresh digests (reuse still revokes)', count: 6 });
 });
 
 test('a connector.json v4 would refuse fails the step, writes nothing, and quotes nothing', async () => {
@@ -232,6 +258,31 @@ test('a connector.json v4 would refuse fails the step, writes nothing, and quote
   expect(report.status).toBe('failed');
   expect(await exists(V5_CONNECTOR_STATE)).toBe(false);
   expect(everything(report)).not.toContain('SECRET-LOOKING-VALUE');
+});
+
+test('a connector.json that is not JSON fails closed, names the file and both ways out, and quotes nothing', async () => {
+  await mkdir(join(f.from, 'state/connector'), { recursive: true, mode: 0o700 });
+  await writeFile(join(f.from, 'state/connector/connector.json'), '{"grants": SECRET-LOOKING-VALUE', { mode: 0o600 });
+  const report = await connectorStep.run(ctx());
+  expect(report.status).toBe('failed');
+  expect(report.note).toContain('state/connector/connector.json');
+  expect(report.note).toContain('is not valid JSON');
+  expect(report.note).toContain('Fix state/connector/connector.json');
+  expect(report.note).toContain('move it aside');
+  expect(report.note).toContain('Claude then signs in again');
+  expect(await exists(V5_CONNECTOR_STATE)).toBe(false);
+  expect(everything(report)).not.toContain('SECRET-LOOKING-VALUE');
+});
+
+test('a connector.json v4 would refuse names the file and both ways out too', async () => {
+  await mkdir(join(f.from, 'state/connector'), { recursive: true, mode: 0o700 });
+  await writeFile(join(f.from, 'state/connector/connector.json'), JSON.stringify({ version: 1, grants: 'no' }), {
+    mode: 0o600,
+  });
+  const report = await connectorStep.run(ctx());
+  expect(report.status).toBe('failed');
+  expect(report.note).toContain('Fix state/connector/connector.json');
+  expect(report.note).toContain('move it aside');
 });
 
 test('the calls log moves in order (rotated file first), each line re-stamped with format first and its fields intact', async () => {
