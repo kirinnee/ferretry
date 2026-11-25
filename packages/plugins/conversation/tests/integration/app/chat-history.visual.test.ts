@@ -6,7 +6,7 @@
  * older pages load by themselves before the reader reaches them, a page arriving never moves the message
  * under the reader, and the walk ends at the conversation's first message with every message on screen once.
  *
- * Set `FY_HISTORY_SHOTS_DIR` to keep `<viewport>-<scheme>-loading.png`, `-loading-top.png` and `-start.png`.
+ * Set `FY_HISTORY_SHOTS_DIR` to keep `<viewport>-<scheme>-loading.png`, `-landed.png`, `-loading-top.png` and `-start.png`.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -80,6 +80,19 @@ const framesSettled = async (tab: Page): Promise<void> =>
 
 const status = async (tab: Page): Promise<string> => await tab.evaluate(() => window.__historyStatus);
 
+/**
+ * The page has landed AND is on screen: the transcript holds an older page back, still saying "loading", until its rows are
+ * read (`transcript-staging.ts`), so a measurement taken before that would see nothing move and prove nothing.
+ */
+const pageShown = async (tab: Page): Promise<void> => {
+  await tab.waitForFunction(() => window.__historyStatus !== 'loading');
+  await tab.waitForFunction(
+    () =>
+      (document.querySelector('.fy-transcript-history') as HTMLElement | null)?.dataset.history !== 'loading' &&
+      document.querySelector('.fy-transcript-staged') === null,
+  );
+};
+
 /** Wheels up over the transcript, as a reader does, by `pixels`. */
 const wheelUp = async (tab: Page, pixels: number): Promise<void> => {
   const box = await tab.locator('.fy-transcript').boundingBox();
@@ -133,10 +146,11 @@ describe('scrolling a long chat back to its first message', () => {
           const before = await markTopRow(tab);
           await shoot(tab, `${name}-${scheme}-loading`);
           await tab.evaluate(() => window.__releaseOlder());
-          await tab.waitForFunction(() => window.__historyStatus !== 'loading');
+          await pageShown(tab);
           await framesSettled(tab);
           // The page went in ABOVE the reader: what they were looking at did not move.
-          expect(Math.abs((await markedRowTop(tab)) - before)).toBeLessThanOrEqual(2);
+          expect(Math.abs((await markedRowTop(tab)) - before)).toBeLessThan(1);
+          await shoot(tab, `${name}-${scheme}-landed`);
 
           // A reader who outran the pages sits at the very top while one loads, and stays put when it lands.
           await tab.evaluate(() => window.__holdOlder());
@@ -147,9 +161,9 @@ describe('scrolling a long chat back to its first message', () => {
           const atTop = await markTopRow(tab);
           await shoot(tab, `${name}-${scheme}-loading-top`);
           await tab.evaluate(() => window.__releaseOlder());
-          await tab.waitForFunction(() => window.__historyStatus !== 'loading');
+          await pageShown(tab);
           await framesSettled(tab);
-          expect(Math.abs((await markedRowTop(tab)) - atTop)).toBeLessThanOrEqual(2);
+          expect(Math.abs((await markedRowTop(tab)) - atTop)).toBeLessThan(1);
 
           // On up to the top, page by page.
           for (let step = 0; step < 400 && (await status(tab)) !== 'start'; step += 1) {

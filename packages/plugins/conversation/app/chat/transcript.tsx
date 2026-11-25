@@ -16,6 +16,7 @@ import { useQuoteMenu } from '@ferretry/app';
 import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 import { type TranscriptHistoryControl, TranscriptHistoryRow, wantsOlder } from './transcript-history-row.tsx';
 import { TranscriptRow } from './transcript-row.tsx';
+import { STAGED_MARKER_CLASS, watchStagedReadings } from './transcript-staging.ts';
 import { RowSlot } from './row-slots.tsx';
 import { CONVERSATION_ROW_SLOT } from '../../contract/index.ts';
 
@@ -133,16 +134,31 @@ export function Transcript({
   const lastId = ids.at(-1) ?? null;
   const firstId = ids[0] ?? null;
 
+  // ---- STAGING: an older page stays hidden until its rows are their final height (`transcript-staging.ts`) ----------
+  // Decided during the render that brings the page, so no frame ever lays the rows out before they are hidden.
+  const [staging, setStaging] = useState<{ readonly before: string; readonly since: number } | null>(null);
+  const [seenFirstId, setSeenFirstId] = useState(firstId);
+  if (firstId !== seenFirstId) {
+    setSeenFirstId(firstId);
+    if (staging === null && seenFirstId !== null && prependedAbove(ids, seenFirstId))
+      setStaging({ before: seenFirstId, since: performance.now() });
+  }
+  /** The first row on screen while older rows above it are staged; null when nothing is. */
+  const stagedBefore = staging !== null && ids.includes(staging.before) ? staging.before : null;
+  const visibleFirstId = stagedBefore ?? firstId;
+
   const [newCount, setNewCount] = useState(0);
   const prevLastId = useRef<string | null>(null);
   const prevCount = useRef(0);
   const prevFirstId = useRef<string | null>(null);
+  const prevVisibleFirstId = useRef<string | null>(null);
   const clearCount = useCallback(() => setNewCount(0), []);
   // A new daemon or session is a newly opened transcript; a bumped `pinSignal` is the reader having
   // just sent something. Either lands at the latest message and follows.
   const { viewportRef, contentRef, following, gap, jumpShown, onScroll, jumpToLatest, scrollTo } = useStickToBottom({
     resetKey: `${daemonId}\u0000${sessionId}\u0000${pinSignal}`,
-    contentKeys: [shown.entries, shown.busy],
+    // Staged rows going on screen are new content too: a following reader is re-pinned in that commit.
+    contentKeys: [shown.entries, shown.busy, stagedBefore],
     onFollow: clearCount,
     ...(readingPosition === undefined ? {} : { memory: readingPosition }),
   });
@@ -157,22 +173,41 @@ export function Transcript({
     prevCount.current = ids.length;
   }, [lastId, ids.length]);
 
+  // The staged rows go on screen together once none of them is still being read, or the patience runs out.
+  const stagingSince = staging?.since;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new staging (its start) or its boundary leaving is the trigger
+  useEffect(() => {
+    if (stagingSince === undefined) return;
+    const content = contentRef.current;
+    if (content === null || stagedBefore === null) {
+      setStaging(null);
+      return;
+    }
+    return watchStagedReadings(content, stagingSince, () => setStaging(null));
+  }, [stagingSince, stagedBefore]);
+
   // ---- PREPEND: hold a detached reader's content still, before paint -------------------------------
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the first id and row count are the trigger
+  // Twice for a staged page: when it arrives (the first row on screen now has a row before it, which can change its own
+  // spacing) and when it is shown (the rows themselves).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the first row, the first row on screen and the row count are the trigger
   useLayoutEffect(() => {
     const element = viewportRef.current;
-    if (element !== null && !following.current && prependedAbove(ids, prevFirstId.current)) {
+    const onScreen = stagedBefore === null ? ids : ids.slice(ids.indexOf(stagedBefore));
+    const moved = prependedAbove(ids, prevFirstId.current) || prependedAbove(onScreen, prevVisibleFirstId.current);
+    if (element !== null && !following.current && moved) {
       const target = prependRestoreTarget(element, gap.current);
       if (target !== undefined) scrollTo(target);
     }
     prevFirstId.current = firstId;
-  }, [firstId, ids.length]);
+    prevVisibleFirstId.current = visibleFirstId;
+  }, [firstId, visibleFirstId, ids.length]);
 
   // ---- OLDER HISTORY: read the page before the first row as the reader nears the top ----------------
   // Asked on every scroll and again after every change to the rows or the status, so a page that added
   // nothing to see — a run of tool calls, a stretch of bookkeeping — is followed by the next one at once,
   // and a transcript too short to scroll keeps loading until it fills the screen or reaches the start.
-  const historyStatus = history?.status ?? 'unavailable';
+  // Staged rows are still loading to the reader: the row says so, and nothing older is asked for until they are shown.
+  const historyStatus = stagedBefore !== null && history !== undefined ? 'loading' : (history?.status ?? 'unavailable');
   const loadOlder = history?.loadOlder;
   const askOlder = useCallback(() => {
     const element = viewportRef.current;
@@ -204,9 +239,12 @@ export function Transcript({
         aria-live="polite"
       >
         <div className="fy-transcript-content" ref={contentRef}>
-          {history === undefined ? null : <TranscriptHistoryRow control={history} />}
+          {history === undefined ? null : (
+            <TranscriptHistoryRow control={stagedBefore === null ? history : { ...history, status: historyStatus }} />
+          )}
           {items.map((item, index) => (
             <Fragment key={item.entry.id}>
+              {item.entry.id === stagedBefore ? <div aria-hidden="true" className={STAGED_MARKER_CLASS} /> : null}
               {compaction?.phase === 'done' && stripAt === index ? <CompactionStrip compaction={compaction} /> : null}
               <TranscriptRow
                 answered={item.answered === true}

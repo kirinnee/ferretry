@@ -67,6 +67,12 @@
 .fy-transcript-content > :first-child {
   margin-top: 0;
 }
+/* AN OLDER PAGE STILL BEING READ (`transcript-staging.ts`): every row before the marker is mounted but not laid out, so
+   none of them changes height on screen; the history row above them stays. */
+.fy-transcript-staged,
+.fy-transcript-content > :not(.fy-transcript-history):has(~ .fy-transcript-staged) {
+  display: none;
+}
 .fy-message {
   min-width: 0;
   max-width: 100%;
