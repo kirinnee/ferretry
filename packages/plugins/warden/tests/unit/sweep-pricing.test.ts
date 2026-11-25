@@ -4,9 +4,8 @@ import type { WardenInvestigationRecord } from '../../daemon/lib/triage.ts';
 import { at, enabled, harness } from './sweep-harness.ts';
 
 /**
- * What one sweep spends on the investigations it keeps for a day: one keyed price per UNPRICED record, and one read of a
- * report only until it is filed. v4 re-read and re-priced the whole analytics history once per unpriced investigation
- * (33 × 11.5k rows, ~12 s of main thread every sweep).
+ * What one sweep spends on the investigations it keeps for a day: one keyed price per UNPRICED record. v4 re-read and
+ * re-priced the whole analytics history once per unpriced investigation (33 × 11.5k rows, ~12 s of main thread).
  */
 
 const COUNT = 40;
@@ -20,18 +19,6 @@ const records = (): WardenInvestigationRecord[] =>
     finishedAt: at(-30),
     reportPath: `reports/w${String(index)}.md`,
   }));
-
-/** A reports map that counts every read of it, and files a report only once `filed` holds its path. */
-function countedReports(filed: ReadonlySet<string>) {
-  const reads: string[] = [];
-  const map = new Proxy({} as Record<string, string | undefined>, {
-    get: (_target, path) => {
-      reads.push(String(path));
-      return filed.has(String(path)) ? '# report' : undefined;
-    },
-  });
-  return { reads, map };
-}
 
 describe('the sweep over a day of finished investigations', () => {
   it('should price every unpriced investigation with one keyed ask each, and never ask again for a priced one', async () => {
@@ -76,35 +63,5 @@ describe('the sweep over a day of finished investigations', () => {
     // Assert
     should(asked).have.length(COUNT * 2);
     should((subject.state().investigations ?? []).some(record => record.costUsd !== undefined)).be.false();
-  });
-
-  it('should read a report once it is filed, then leave it alone on every later sweep', async () => {
-    // Arrange: every report is filed on the first read.
-    const reports = countedReports(new Set(records().map(record => record.reportPath)));
-    const subject = harness({ config: enabled(), state: { investigations: records() }, reports: reports.map });
-
-    // Act
-    await subject.service.run({ force: false });
-    await subject.service.run({ force: false });
-    await subject.service.run({ force: false });
-
-    // Assert
-    should(reports.reads).have.length(COUNT);
-  });
-
-  it('should keep reading a report that is not there yet, until it lands', async () => {
-    // Arrange
-    const filed = new Set<string>();
-    const reports = countedReports(filed);
-    const subject = harness({ config: enabled(), state: { investigations: records() }, reports: reports.map });
-    await subject.service.run({ force: false });
-    filed.add('reports/w0.md');
-
-    // Act
-    await subject.service.run({ force: false });
-    await subject.service.run({ force: false });
-
-    // Assert: 40 reads on the first sweep, 40 on the second (w0 files), then 39 on the third.
-    should(reports.reads).have.length(COUNT + COUNT + (COUNT - 1));
   });
 });

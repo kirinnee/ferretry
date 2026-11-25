@@ -39,6 +39,7 @@ import {
   withLiveness,
   withRateLimited,
 } from './fleet.ts';
+import { onceFiled } from './lib/filed-reports.ts';
 import { createWardenRemedies } from './remedies.ts';
 import { ferretsWardenSpawner } from './spawner.ts';
 import { conversationStuckInbox, conversationStuckInput } from './stuck-ports.ts';
@@ -480,7 +481,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
         monitorStalled: () => monitorOn() && liveness.stalled(),
       },
       spawner,
-      artifacts,
+      artifacts: onceFiled(artifacts),
       state: new StateWardenStateStore(kernel.state),
       config: configStore,
       agents,

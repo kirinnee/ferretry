@@ -860,12 +860,6 @@ export class WardenSweepService {
   private readonly ports: WardenSweepPorts;
   /** Why the machine item was last refused, until it lands again: said once, not on every sweep that repeats it. */
   private orphanItemRefusal: string | undefined;
-  /**
-   * The reports already filed. Reading a report is what FILES an investigator's summary, and a filed report is never
-   * replaced, so once a read finds one the sweep has nothing left to do for that record: it asks again only for a
-   * report that is not there yet. Without this, every finished record cost two file reads on every sweep for a day.
-   */
-  private readonly filedReports = new Set<string>();
 
   constructor(
     ports: WardenSweepPorts,
@@ -3212,10 +3206,8 @@ export class WardenSweepService {
       // A finished investigator's report is the summary of its last `signal done`; only a read through the artifacts
       // adapter files it (masked, never over a report already filed). Done for every finished record, not only an
       // assignment's, and for a day — the summary may land after the session stops, so an absent one is retried.
-      if (finishedMs !== undefined && nowMs - finishedMs < 86_400_000 && !this.filedReports.has(record.reportPath)) {
-        const filed = await this.ports.artifacts.readReport(record.reportPath).catch(() => undefined);
-        if (filed !== undefined) this.filedReports.add(record.reportPath);
-      }
+      if (finishedMs !== undefined && nowMs - finishedMs < 86_400_000)
+        await this.ports.artifacts.readReport(record.reportPath).catch(() => undefined);
       const costUsd = worthAsking ? await this.ports.costs.costUsd(record.id).catch(() => undefined) : undefined;
       if (costUsd !== undefined && Number.isFinite(costUsd) && costUsd >= 0)
         average = { count: average.count + 1, totalUsd: average.totalUsd + costUsd };
