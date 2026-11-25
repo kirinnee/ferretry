@@ -34,7 +34,13 @@
  */
 
 import type { ReleaseHeaderRule } from '../release/headers.ts';
-import { answerReleaseRequest, parseReleaseRequest, ReleaseKeeper } from '../release/keeper.ts';
+import {
+  answerReleaseRequest,
+  parseReleaseRequest,
+  RELEASE_CHECK_DEADLINE_MS,
+  ReleaseKeeper,
+  settleWithin,
+} from '../release/keeper.ts';
 import { readPushMessage } from '@ferretry/kernel/contract/push-envelope';
 import { shouldShowPush } from '@ferretry/kernel/contract/notification-filter';
 import { isLoopbackHost } from '../release/loopback.ts';
@@ -147,10 +153,21 @@ worker.addEventListener('fetch', event => {
   // Every page load also re-checks the site (two small files; one check at a time). That is what
   // keeps a release a page put back from outliving one load after the worker starts: the check
   // re-confirms the newer release and raises the worker's floor above the restored one.
-  if (navigate) event.waitUntil(keeper.update().catch(() => undefined));
+  // The load is answered AFTER that check, for at most `RELEASE_CHECK_DEADLINE_MS`: a newer signed release the
+  // site published installs before the page is chosen, so ONE reload gets it. A site that is down or slow is waited
+  // for no longer than that, then the installed release answers (and the check finishes behind the load).
+  const check = navigate ? keeper.update().catch(() => undefined) : null;
+  if (check !== null) event.waitUntil(check);
   event.respondWith(
-    keeper
-      .respond({ pathname: url.pathname, navigate })
+    (check === null
+      ? Promise.resolve()
+      : settleWithin(
+          check,
+          RELEASE_CHECK_DEADLINE_MS,
+          milliseconds => new Promise(done => setTimeout(done, milliseconds)),
+        )
+    )
+      .then(() => keeper.respond({ pathname: url.pathname, navigate }))
       .catch(() => null)
       .then(answer =>
         answer === null

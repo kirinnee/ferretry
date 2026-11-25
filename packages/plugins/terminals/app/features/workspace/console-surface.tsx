@@ -189,7 +189,7 @@ export function ConsoleSurface({
           autoCapitalize="off"
           autoComplete="off"
           autoCorrect="off"
-          className="mono min-h-[44px] min-w-0 flex-1 border-0 bg-transparent text-ui text-code-fg outline-none focus-visible:outline-none"
+          className="mono min-h-[44px] min-w-0 flex-1 border-0 bg-transparent text-ui text-code-fg outline-none placeholder:text-code-fg placeholder:opacity-70 focus-visible:outline-none"
           data-console-input=""
           enterKeyHint="send"
           onCompositionEnd={event => {
