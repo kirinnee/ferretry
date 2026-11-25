@@ -1,3 +1,14 @@
+## [4.295.0](https://github.com/kirinnee/ferretry/compare/v4.294.3...v4.295.0) (2026-11-25)
+
+### Features
+
+* **connector:** say how to connect again on every sign-in dead end ([080f56f](https://github.com/kirinnee/ferretry/commit/080f56f151df20ca0380d1db795548cd5e140983))
+
+### Fixes
+
+* **connector:** keep the unreachable-race throw on one line for the 100% gate ([b0b3fb8](https://github.com/kirinnee/ferretry/commit/b0b3fb855429134148f618db56e1f87df2aaf131))
+* **connector:** one reconnect hint on every invalid_client, drop the off page ([bbf2f4c](https://github.com/kirinnee/ferretry/commit/bbf2f4c29843045d09226afa13f0640c102d4bf1))
+
 ## [4.294.3](https://github.com/kirinnee/ferretry/compare/v4.294.2...v4.294.3) (2026-11-25)
 
 ### Fixes
