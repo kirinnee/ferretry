@@ -9,7 +9,7 @@
 
 import { SetupNote, SetupSection } from '@ferretry/app/ui';
 import { Download } from 'lucide-react';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { type ConfigStatusView, readConfigFile, readConfigStatus } from '../../../lib/config-files.ts';
 import type { RuntimesClient } from '../../../lib/client.ts';
 import { Button } from '../../../ui.ts';
@@ -69,6 +69,18 @@ export const readExport = async (
   }
   return { files: carried, plan: { include: carried.map(file => file.path), leftOut } };
 };
+
+/** The command a reason tells the reader to run, drawn as code (`fy config check`), the rest as the words they are. */
+const reasonWithCode = (reason: string): ReactNode =>
+  reason.split(/(fy config check)/u).map((part, index) =>
+    part === 'fy config check' ? (
+      <code className="font-mono" key={`${String(index)}-${part}`}>
+        {part}
+      </code>
+    ) : (
+      part
+    ),
+  );
 
 export function ExportSettings({
   client,
@@ -139,7 +151,7 @@ export function ExportSettings({
             <SetupNote tone="warn" name="export-left-out" title={`${files(phase.plan.leftOut.length)} left out`}>
               {phase.plan.leftOut.map(entry => (
                 <span key={entry.path} className="[overflow-wrap:anywhere]">
-                  <span className="font-mono">{entry.path}</span>: {entry.reason}
+                  <span className="font-mono">{entry.path}</span>: {reasonWithCode(entry.reason)}
                 </span>
               ))}
             </SetupNote>

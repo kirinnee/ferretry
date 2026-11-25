@@ -2,16 +2,18 @@
  * Browser entry for O8-9, "a ready login is a runtime": the REAL runtime picker New ferret draws (Runtimes' panel, in the
  * field New ferret gives it) over a daemon that answers from memory, and the REAL Advanced "Add a runtime" form. Fake data, no network.
  *
- *   ?view=new|advanced|runtimes   the New ferret runtime field (default), the Advanced form or the Runtimes tab
+ *   ?view=new|advanced|runtimes|failed   the New ferret runtime field (default), the Advanced form, the Runtimes tab or a catalog page whose read failed
  *   ?host=1              the logins are the person's own terminal sign-in (`store: host`), each runtime reading a model catalog (O12 S2)
  *   ?logins=<n>          ready Claude logins, one runtime each (default 4: atomi, llm1, llm2, personal)
  *   ?codex=1             add one Codex login and its runtime, to show the second group
+ *   ?signin=1           the Codex login needs sign-in (its runtime row says so in words)
  *   ?open=1              open the runtime list (new view) / the More options block (advanced view)
  *   ?theme=<family>-<mode>
  */
 import { useAccountChanges } from '../../../../app/features/fleet/shell/apply-change-panel.tsx';
 import { AddRuntime } from '../../../../app/features/fleet/runtimes/add-runtime.tsx';
 import type { MachineData } from '../../../../app/features/fleet/runtimes/machine-data.ts';
+import { ReadFailed } from '../../../../app/features/fleet/components/catalog-ui.tsx';
 import { createNewFerretAccountPanel } from '../../../../app/views/account-picker-panels.tsx';
 import type { LiveRuntimesClient } from '../../../../app/lib/client.ts';
 import { LayeredProfileCatalogSchema, RuntimeCatalogSchema } from '../../../../contract/index.ts';
@@ -36,6 +38,7 @@ const withCodex = params.get('codex') === '1';
 const open = params.get('open') === '1';
 const view = params.get('view') ?? 'new';
 const host = params.get('host') === '1';
+const needsSignIn = params.get('signin') === '1';
 
 const NAMES = ['atomi', 'llm1', 'llm2', 'personal', 'work', 'side'].slice(0, count);
 
@@ -98,7 +101,12 @@ const runtimes = RuntimeCatalogSchema.parse({
             name: 'codex-personal',
             harness: 'codex',
             profile: 'ferretry-codex',
-            credential: { id: 'codex-personal', store, label: 'personal', status: 'ready' },
+            credential: {
+              id: 'codex-personal',
+              store,
+              label: 'personal',
+              status: needsSignIn ? 'needs_sign_in' : 'ready',
+            },
             ...(host ? catalogOf('gpt-6.1-sol', 'GPT-6.1 Sol', 'OpenAI') : {}),
           }),
         ]
@@ -209,7 +217,15 @@ const root = document.getElementById('root');
 if (root !== null)
   createRoot(root).render(
     <div data-scene-ready="" className="mx-auto max-w-2xl p-4">
-      {view === 'advanced' ? <Advanced /> : view === 'runtimes' ? <RuntimesPage /> : <NewFerretField />}
+      {view === 'advanced' ? (
+        <Advanced />
+      ) : view === 'runtimes' ? (
+        <RuntimesPage />
+      ) : view === 'failed' ? (
+        <ReadFailed reason="Couldn’t read this machine’s profiles." onRetry={() => undefined} />
+      ) : (
+        <NewFerretField />
+      )}
     </div>,
   );
 

@@ -199,7 +199,12 @@ export function ReadFailed({ reason, onRetry }: { reason: string; onRetry: () =>
       role="status"
       spot="read-failed"
       actions={
-        <button type="button" className="kt-btn kt-btn--sm" onClick={onRetry} data-catalog-retry="">
+        <button
+          type="button"
+          className="kt-btn kt-btn--sm max-[640px]:min-h-[44px]"
+          onClick={onRetry}
+          data-catalog-retry=""
+        >
           Try again
         </button>
       }

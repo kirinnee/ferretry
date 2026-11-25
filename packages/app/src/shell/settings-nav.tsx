@@ -67,11 +67,16 @@ export function SettingsNav({
     }
   }, [active]);
   const { device, machine: machineTabs } = splitTabsByScope(tabs);
-  const groups = (list: readonly NavTab[]) =>
+  // The two blocks each group by the same headings; a machine group that shares its heading with a device group says
+  // "· machine", so no heading reads twice down the list.
+  const deviceHeadings = new Set(groupSettingsTabs(device).map(group => group.label));
+  const headingOf = (group: { readonly label: string }, block: 'device' | 'machine'): string =>
+    block === 'machine' && deviceHeadings.has(group.label) ? `${group.label} · machine` : group.label;
+  const groups = (list: readonly NavTab[], block: 'device' | 'machine') =>
     groupSettingsTabs(list).map(group => (
       <details key={group.id} className="fy-tab-group" open={group.tabs.some(candidate => candidate === active)}>
         <summary className="fy-tab-group__title">
-          {group.label}
+          {headingOf(group, block)}
           <ChevronRight className="fy-tab-group__chevron" size={16} aria-hidden="true" />
         </summary>
         <div className="fy-tab-group__tabs">
@@ -136,14 +141,14 @@ export function SettingsNav({
           <Icon name="monitor" />
           This device
         </Link>
-        {groups(device)}
+        {groups(device, 'device')}
       </section>
       {machineTabs.length === 0 ? null : (
         <section aria-labelledby="fy-settings-block-machine" className="fy-settings-block">
           <p className="fy-settings-block__title" id="fy-settings-block-machine">
             {`${machine} · every device`}
           </p>
-          {groups(machineTabs)}
+          {groups(machineTabs, 'machine')}
         </section>
       )}
     </nav>
