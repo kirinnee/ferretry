@@ -581,7 +581,6 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       if (!client.grantTypes.includes(grantType))
         throw new OAuthError('unauthorized_client', 'This client may not use this grant type.');
       const budget = `token:${client.id}`;
-      this.ports.limiter.check(budget, CLIENT_TOKENS_PER_MINUTE);
       // A credential the daemon has never issued to this client is refused here, without taking a queue slot.
       if (grantType === 'authorization_code') {
         const code = this.ports.memory.codes.get(await digest(this.ports.crypto, input.code ?? ''));
@@ -591,18 +590,23 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         if (!known || known.kind === 'access' || known.clientId !== client.id)
           throw new OAuthError('invalid_grant', 'Invalid refresh token.');
       }
-      // The budget is judged again inside the serialized write: the check above ran before any queued redemption
-      // had been charged, so a burst of callers would all have passed it.
+      // The success cap is judged inside the serialized write, immediately before minting (see redeem): a known
+      // spent refresh token must still revoke its grant and be audited when the budget is full, and a burst of
+      // queued callers is charged one at a time.
       return this.ports.memory.run(async () => {
-        this.ports.limiter.check(budget, CLIENT_TOKENS_PER_MINUTE);
-        const issued = await this.redeem(input, grantType, client.id);
+        const issued = await this.redeem(input, grantType, client.id, budget);
         this.ports.limiter.record(budget);
         return issued;
       }, 'token');
     });
   }
 
-  private async redeem(input: ExchangeInput, grantType: 'authorization_code' | 'refresh_token', clientId: string) {
+  private async redeem(
+    input: ExchangeInput,
+    grantType: 'authorization_code' | 'refresh_token',
+    clientId: string,
+    budget: string,
+  ) {
     this.prune();
     const state = await this.ports.store.load();
     const client = state.clients.find(c => c.id === clientId);
@@ -630,6 +634,8 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         !secretsMatch(base64url(await this.ports.crypto.sha256(input.code_verifier)), code.challenge)
       )
         throw new OAuthError('invalid_grant', 'Invalid or expired authorization code or verifier.');
+      // A refused mint must not burn the code, so the cap is judged before it is spent.
+      this.ports.limiter.check(budget, CLIENT_TOKENS_PER_MINUTE);
       // Spend before any await that might fail; even failed persistence cannot make a code reusable.
       this.ports.memory.codes.set(key, { ...code, used: true });
       scopes = grant.scopes;
@@ -673,6 +679,8 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       };
       rotating ??= { used: { digest: key, expiresAt: token.expiresAt, rotatedAt: this.now() }, retry: false };
     }
+    // Every reuse decision above has been taken; only a real mint spends the client's success budget.
+    if (grantType === 'refresh_token') this.ports.limiter.check(budget, CLIENT_TOKENS_PER_MINUTE);
     const access = this.random('fyc_at_');
     const refresh = client.grantTypes.includes('refresh_token') ? this.random('fyc_rt_') : undefined;
     const audience = this.ports.endpoints.resource;

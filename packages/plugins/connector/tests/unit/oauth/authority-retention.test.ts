@@ -394,3 +394,58 @@ describe('a client success budget holds under concurrency', () => {
     expect(answers.filter(a => a.status === 'fulfilled')).toHaveLength(30);
   });
 });
+
+describe('the success cap is applied at the mint, after the reuse decision', () => {
+  const full = (f: Fixture, clientId: string, spent: number) => {
+    for (let i = 0; i < spent; i++) f.limiter.record(`token:${clientId}`);
+  };
+
+  test('with a full budget a known spent token still revokes the grant and audits (not 429)', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    await f.authority.exchange(...refresh(flow.client.client_id, first));
+    f.advance(1_000);
+    const retried = await f.authority.exchange(...refresh(flow.client.client_id, first));
+    full(f, flow.client.client_id, 27);
+    await expect(f.authority.exchange(...refresh(flow.client.client_id, first))).rejects.toMatchObject({
+      error: 'invalid_grant',
+    });
+    expect(f.state().grants[0]?.revokedAt).toBeDefined();
+    expect(await f.authority.verify(retried.access_token)).toBeUndefined();
+    expect(f.events.filter(e => e.kind === 'connector.refresh.reused')).toEqual([
+      { kind: 'connector.refresh.reused', grantId: flow.grant.id },
+    ]);
+  });
+
+  test('two queued retries at the last minting slot: one mint, then revoke and audit', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    await f.authority.exchange(...refresh(flow.client.client_id, first));
+    full(f, flow.client.client_id, 27);
+    f.advance(1_000);
+    const answers = await Promise.allSettled([
+      f.authority.exchange(refresh(flow.client.client_id, first)[0], { source: 'a' }),
+      f.authority.exchange(refresh(flow.client.client_id, first)[0], { source: 'b' }),
+    ]);
+    expect(answers.map(a => a.status)).toEqual(['fulfilled', 'rejected']);
+    expect((answers[1] as PromiseRejectedResult).reason).toMatchObject({ error: 'invalid_grant' });
+    const minted = (answers[0] as PromiseFulfilledResult<{ access_token: string }>).value;
+    expect(f.state().grants[0]?.revokedAt).toBeDefined();
+    expect(await f.authority.verify(minted.access_token)).toBeUndefined();
+    expect(f.events.filter(e => e.kind === 'connector.refresh.reused')).toHaveLength(1);
+  });
+
+  test('a first retry that would be a real mint is still refused when the budget is full', async () => {
+    const f = fixture();
+    const flow = await f.flow();
+    const first = flow.tokens.refresh_token ?? '';
+    await f.authority.exchange(...refresh(flow.client.client_id, first));
+    full(f, flow.client.client_id, 28);
+    await expect(f.authority.exchange(...refresh(flow.client.client_id, first))).rejects.toMatchObject({
+      status: 429,
+    });
+    expect(f.state().grants[0]?.revokedAt).toBeUndefined();
+  });
+});
