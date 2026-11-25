@@ -20,6 +20,8 @@ import { claudeFlow, codexFlow } from '../../../unit/app/support/harness-login.t
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const which = params.get('case') ?? 'codex-add';
+/** `?panel=<px>`: the width of the card's column (a settings panel is narrower than the window). */
+const panel = Number(params.get('panel') ?? 0);
 /** The cases whose daemon speaks Claude's sign-in (C59 O5). */
 const CLAUDE_FLOW: ReadonlySet<string> = new Set(['claude-code', 'claude-fail', 'claude-done', 'claude-starting']);
 
@@ -225,6 +227,6 @@ const root = document.getElementById('root');
 if (root !== null)
   createRoot(root).render(
     <div className="kt-chat-surface" style={{ position: 'fixed', inset: 0, overflow: 'auto', padding: 16 }}>
-      <div style={{ maxWidth: 880, margin: '0 auto' }}>{surface}</div>
+      <div style={{ maxWidth: 880, margin: '0 auto', width: panel > 0 ? panel : undefined }}>{surface}</div>
     </div>,
   );

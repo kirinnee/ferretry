@@ -13,8 +13,12 @@ import { type ReactNode, useCallback, useId, useState } from 'react';
 import type { Apply } from './choice-row.tsx';
 import { LayoutKeys } from './layout-keys.tsx';
 import { LayoutGroup, LayoutRow } from './layout-row.tsx';
+import { MiniShell } from './previews/mini-shell.tsx';
+import { stateOfLayout } from './previews/scene.ts';
+import { ThemePreview } from './previews/theme-preview.tsx';
+import { SettingPreview } from '@ferretry/app';
 import { ScopeSwitch } from './scope-switch.tsx';
-import { LAYOUT_ID, refusalSentence, type Scope } from '../../lib/layout-model.ts';
+import { LAYOUT_ID, presetLabel, refusalSentence, type Scope } from '../../lib/layout-model.ts';
 import type { LayoutsClient } from '../../lib/layouts-client.ts';
 import { navSources } from '../../lib/list-places.ts';
 import { useLayouts } from '../../hooks/use-layouts.ts';
@@ -41,10 +45,16 @@ function Choose({
       disabled={busy}
       label={label}
       onChange={onChoose}
-      options={ids.map(item => ({ value: item.id, label: item.origin === 'saved' ? `${item.id} (saved)` : item.id }))}
+      options={ids.map(item => ({ value: item.id, label: presetLabel(item.id, item.origin) }))}
       value={value}
     />
   );
+}
+
+/** The words a chooser shows for the preset `id`: its label in the list, else the id itself. */
+function nameOf(items: readonly { readonly id: string; readonly origin: 'built-in' | 'saved' }[], id: string): string {
+  const item = items.find(entry => entry.id === id);
+  return item === undefined ? id : presetLabel(item.id, item.origin);
 }
 
 function Problem({ children }: { readonly children: ReactNode }) {
@@ -125,7 +135,15 @@ export function LayoutSettings({ client, device, navCatalog, absentPanels }: Lay
               <LayoutRow
                 id={`${ids}-layout`}
                 name="Layout"
-                hint={`${current.layout.id} — the layout in use, with your changes applied`}
+                hint={`${nameOf(list.layouts, current.layout.id)} — the layout in use, with your changes applied`}
+                preview={
+                  <SettingPreview
+                    className="fy-ls"
+                    label={`Layout: ${nameOf(list.layouts, current.layout.id)}`}
+                    value={current.layout.id}
+                    after={<MiniShell state={stateOfLayout(current.layout)} />}
+                  />
+                }
                 control={() => (
                   <Choose
                     label="Layout"
@@ -140,6 +158,7 @@ export function LayoutSettings({ client, device, navCatalog, absentPanels }: Lay
                 id={`${ids}-theme`}
                 name="Theme"
                 hint={`${current.theme.label} — colours, type and spacing`}
+                preview={<ThemePreview theme={current.theme} />}
                 control={() => (
                   <Choose
                     label="Theme"

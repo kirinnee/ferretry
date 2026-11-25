@@ -171,23 +171,29 @@ export function ClaudeLoginPanel({
         <ResumedNote flow={flow} />
 
         {state === 'idle' || state === 'starting' ? (
-          <div className="space-y-3">
-            <p className="m-0 text-ui leading-base text-muted">
-              Open the link, sign in, then bring the code Claude shows back here.
-            </p>
-            <div className="flex flex-wrap items-center gap-3" data-sign-in-actions="">
-              <Button
-                type="button"
-                variant="primary"
-                onClick={onStart}
-                disabled={busy}
-                icon={<Link2 size={16} />}
-                busy={state === 'starting'}
-                busyLabel="Starting sign-in…"
-              >
-                Sign in to Claude Code
-              </Button>
-              {state === 'starting' ? <StartOverButton onStartOver={onStartOver} busy={busy} /> : null}
+          // L299: the idle card is the page's idle layout (steps beside the how-to picture), so Start sits in one place on both.
+          <div className="fy-sd-host" data-claude-login-start="">
+            <div className="fy-sd-layout">
+              <div className="fy-sd-steps space-y-3" data-sign-in-steps="">
+                <p className="m-0 text-ui leading-base text-muted">
+                  Open the link, sign in, then bring the code Claude shows back here.
+                </p>
+                <div className="flex flex-wrap items-center gap-3" data-sign-in-actions="">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={onStart}
+                    disabled={busy}
+                    icon={<Link2 size={16} />}
+                    busy={state === 'starting'}
+                    busyLabel="Starting sign-in…"
+                  >
+                    Sign in to Claude Code
+                  </Button>
+                  {state === 'starting' ? <StartOverButton onStartOver={onStartOver} busy={busy} /> : null}
+                </div>
+              </div>
+              <SignInDemo kind="code" />
             </div>
           </div>
         ) : null}
