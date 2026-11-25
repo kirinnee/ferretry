@@ -9,7 +9,7 @@ import { realAdapters } from '../../../host/wiring.ts';
 import { definePlugin, implementDaemon, route } from '../../../manifest/index.ts';
 
 const Delegate = definePort<DelegatePort>('fixture-connector-delegate');
-const read = route('GET /v1/fixture', {
+const read = route('GET /v1/projects', {
   minimum: 'operator',
   caller: 'person',
   capability: cap('fleet', 'use'),
@@ -80,7 +80,7 @@ test('real boot wires the scoped delegate after Gate binding and refuses calls o
     expect(boot.kind).toBe('running');
     if (boot.kind !== 'running' || delegate === undefined) throw new Error('fixture did not boot the connector');
     const scoped = delegate;
-    const call = () => scoped.call({ grant: 'cg_abcdefghij' }, { method: 'GET', path: '/v1/fixture' });
+    const call = () => scoped.call({ grant: 'cg_abcdefghij' }, { method: 'GET', path: '/v1/projects' });
     expect(await call()).toMatchObject({
       status: 200,
       body: JSON.stringify({ actor: 'connector:cg_abcdefghij', local: false }),

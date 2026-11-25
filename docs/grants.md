@@ -59,12 +59,17 @@ header or URL check can make it local or privileged. It authenticates from the k
 forwarded admin token, device credential or session header. Its actor is `connector:<grant>`; audit records say
 `connector` with `detail.grant`, never “this computer”.
 
+The grant id is **plugin-asserted attribution**: the kernel checks its shape, not its liveness. Before every
+delegated call, the connector plugin must check that the connector is enabled and that its token and grant are
+live, unrevoked and bound to the current issuer. Gate independently enforces the machine's grants.
+
 The connector has no device, unlock or passkey proof. Gate reads the **daemon-wide grants only** on every call;
 there is no device grant to intersect. It may reach `caller: 'person'` routes because the owner approved that
 connector, but every explicit step-up act is refused (`403 grant_step_up_required`), and fresh or stored proof
-claims always fail. Fleet configure operations such as restart and start require `fleet.configure` (and
-`fleet.use`); their ordinary device confirmation does not apply to this approved connector. Other capabilities'
-step-up demands still refuse it. Undetermined grants refuse it too.
+claims always fail. Every delegated route requires `fleet.use`, including reads with no declared capability.
+Only `POST /v1/restarts` and `POST /v1/ferrets` waive their ordinary device confirmation; both still require
+`fleet.configure` and `fleet.use`. Every other fleet configure route and other capabilities' step-up demands
+still refuse it. Undetermined grants refuse it too.
 
 For as long as its grant lives, a connector can work with every phone locked and nobody home. Approval is the
 point where the person is in the loop: it requires `pairing.configure` and a passkey proved fresh for
@@ -72,7 +77,9 @@ point where the person is in the loop: it requires `pairing.configure` and a pas
 the owner, so that approval is in effect code execution as the owner; use a read-only connection where possible.
 
 This is a fixed, allow-listed kernel port, available only to plugin `connector` with `permissions.delegate`.
-Every key must name an existing route at build and boot; dispatch enforces the matched route template's membership.
+The delegate list is the fence: the kernel's twelve `DELEGATE_ROUTES` keys are the exact MCP parity surface,
+including its approved person routes. A plugin may declare a subset, never any other route. Every declared key
+must name an existing route at build and boot; dispatch enforces both lists against the matched route template.
 Only `x-fy-request-id` crosses into the request. Handlers, Gate, audits and journals are the real route path;
 the response passes its normal final check and the kernel asks Gate to mask the host admin and warden token
 literals before returning text. The connector never receives those credentials.

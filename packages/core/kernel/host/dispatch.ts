@@ -162,7 +162,7 @@ function admit(
   };
   const admission = bindings.admission();
   if (admission === undefined) {
-    return servableWithoutAdmission(descriptor)
+    return request.arrival.kind !== 'delegated' && servableWithoutAdmission(descriptor)
       ? { outcome: 'admitted', standing: {}, actor: DEFAULT_ACTOR }
       : refuse(ADMISSION_UNAVAILABLE());
   }

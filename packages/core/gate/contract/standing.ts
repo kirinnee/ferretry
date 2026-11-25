@@ -117,7 +117,7 @@ export interface CallerGovernance {
 /** The facts the grant layer reads about this caller (today's `CapabilityPresentation`). */
 export interface CapabilityPresentation {
   /** Stamped only from the kernel's delegated arrival; never from a bearer or a header. */
-  readonly connector?: true;
+  readonly connector?: { readonly route: string };
   /** Today's `loopback`: arrived on the host with the admin token, or a ferret's own token. Carrier-proved only. */
   readonly local: boolean;
   readonly adminToken: boolean;

@@ -1,4 +1,4 @@
-import { DELEGATE_PLUGINS } from '../contract/ports/delegate.ts';
+import { DELEGATE_PLUGINS, DELEGATE_ROUTES } from '../contract/ports/delegate.ts';
 import { parseRouteKey } from '../contract/route.ts';
 import type { Manifest } from './types.ts';
 
@@ -16,6 +16,7 @@ export function delegateProblems(manifest: Manifest, manifests?: readonly Manife
     } catch {
       return [`${manifest.id} permissions.delegate has malformed route ${key}`];
     }
+    if (!DELEGATE_ROUTES.includes(key)) return [`${manifest.id} permissions.delegate may not name route ${key}`];
     return routes !== undefined && !routes.has(key)
       ? [`${manifest.id} permissions.delegate names missing route ${key}`]
       : [];

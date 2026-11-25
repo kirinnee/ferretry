@@ -5,6 +5,22 @@ export const DELEGATE_PLUGINS = ['connector'] as const;
 export const CONNECTOR_GRANT_PATTERN = /^cg_[a-z2-7]{10}$/u;
 export type RouteKey = `${'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS'} /${string}`;
 
+/** The fixed connector parity surface. A manifest may narrow this list, never widen it. */
+export const DELEGATE_ROUTES: readonly RouteKey[] = [
+  'GET /v1/ferrets',
+  'GET /v1/ferrets/:ferretId',
+  'GET /v1/ferrets/:ferretId/logs',
+  'POST /v1/ferrets/:ferretId/send',
+  'POST /v1/ferrets/:ferretId/stop',
+  'POST /v1/restarts',
+  'POST /v1/ferrets',
+  'GET /v1/projects',
+  'GET /v1/agenda/open',
+  'POST /v1/ferrets/:ferretId/agenda',
+  'GET /v1/machine/agenda',
+  'POST /v1/machine/agenda',
+];
+
 export interface DelegateRequest {
   readonly method: string;
   readonly path: string;

@@ -1,7 +1,12 @@
 import type { Admission } from '../contract/bound.ts';
 import { WITHHELD_SENTENCE } from '../contract/bound.ts';
 import { ApiError, errorResponse, finalised } from '../contract/http.ts';
-import { CONNECTOR_GRANT_PATTERN, DELEGATE_PLUGINS, type DelegatePort } from '../contract/ports/delegate.ts';
+import {
+  CONNECTOR_GRANT_PATTERN,
+  DELEGATE_PLUGINS,
+  DELEGATE_ROUTES,
+  type DelegatePort,
+} from '../contract/ports/delegate.ts';
 import type { Manifest } from '../manifest/types.ts';
 import type { Dispatcher } from './dispatch.ts';
 import type { Log } from '../contract/ports/log.ts';
@@ -31,7 +36,7 @@ export function delegatePort(input: {
   readonly stopping?: () => boolean;
 }): DelegatePort {
   const declared = input.manifest.permissions?.delegate;
-  const allowed = new Set(declared);
+  const allowed = new Set(declared?.filter(key => DELEGATE_ROUTES.includes(key)));
   const enabled = declared !== undefined && (DELEGATE_PLUGINS as readonly string[]).includes(input.manifest.id);
   const failure = () => errorResponse(500, 'This plugin may not delegate that call.', 'delegate_refused');
   return {

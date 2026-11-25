@@ -72,7 +72,7 @@ describe('a refused call is said at warn, with its reason', () => {
       },
       response: errorResponse(403, 'fleet use is not granted', 'grant_not_granted'),
     });
-    expect(fields).toMatchObject({ who: 'connector', arrival: 'delegated', status: 403 });
+    expect(fields).toMatchObject({ who: 'connector', arrival: 'delegated:connector', status: 403 });
   });
 
   test('a refused device read says the route, the status, the code, the sentence and which device', async () => {

@@ -63,6 +63,7 @@ function whoOf(request: ApiRequest): string {
 }
 
 function arrivalOf(request: ApiRequest): string {
+  if (request.arrival.kind === 'delegated') return 'delegated:connector';
   return request.arrival.kind === 'carried' ? `carried:${request.arrival.carrier}` : request.arrival.kind;
 }
 

@@ -39,10 +39,12 @@ export interface SessionRestartSubsystem {
 }
 
 /**
- * Who a request came from, in the words the journal keeps: a calling ferret's session, else the owner (today's
+ * Who a request came from, in the words the journal keeps: a connector grant, a calling ferret's session, else the owner (today's
  * `moverOf`, which ferrets-c's move mount also keeps; here read from Gate's standing instead of the actor string).
  */
 function requestedBy(call: CallContext): string {
+  if (call.credential?.kind === 'authenticated' && call.credential.tokenClass === 'connector')
+    return `connector:${call.credential.grant}`;
   // A ferret's own token, or the admin token naming a ferret (G12), is that ferret's request.
   const ferret = ferretOf(call);
   return ferret === undefined ? 'owner' : `session:${ferret}`;

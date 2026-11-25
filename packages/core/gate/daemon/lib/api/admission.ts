@@ -38,6 +38,7 @@ import {
   type ClaimStoredProof,
   type CredentialProvider,
   callerIsAgent,
+  cap,
   type DeviceHolderStanding,
   type EveryCallerStepUpAct,
   type FerretBearerDirectory,
@@ -441,7 +442,7 @@ export class GateAdmission implements Admission {
   ): AdmissionDecision {
     // A MEMBER IS REFUSED BY THE MAIN TABLE BEFORE ANYTHING ELSE, the public shortcut included.
     if (request.principal?.kind === 'member') return forbidden(request);
-    if (servedPublicly(descriptor)) {
+    if (request.arrival.kind !== 'delegated' && servedPublicly(descriptor)) {
       if (descriptor.privilegedOnly === true && !(request.arrival.kind === 'local' && request.arrival.privileged))
         return forbidden(request);
       return { outcome: 'admitted', standing: {}, actor: 'owner-viewer' };
@@ -561,7 +562,9 @@ export class GateAdmission implements Admission {
     // asked for one per act (G47, G79). The SESSION's proven device, never a header's claim.
     const stepUp = subject !== undefined && this.deps.stepUps.held(subject);
     const presentation: CapabilityPresentation = {
-      ...(authentication.tokenClass === 'connector' ? { connector: true as const } : {}),
+      ...(authentication.tokenClass === 'connector'
+        ? { connector: { route: `${descriptor.method} ${descriptor.path}` } }
+        : {}),
       // The CARRIER's proof, never a header's. A ferret's own token is on the host too, and is looked up only for a
       // call on the privileged local listener, so grants never govern it.
       local: onHost || authentication.tokenClass === 'ferret',
@@ -573,6 +576,15 @@ export class GateAdmission implements Admission {
       ...(device === undefined ? {} : { deviceGrants: device.grants }),
     };
 
+    // Even capability-free/public parity reads must pass a real fleet.use verdict before their handler runs.
+    if (authentication.tokenClass === 'connector') {
+      const fleet = cap('fleet', 'use');
+      const decision = this.#guard.decide(fleet, presentation);
+      if (!decision.allowed)
+        return refused(
+          errorResponse(403, this.#guard.explain(fleet, decision.refusal), grantRefusalCode(decision.refusal)),
+        );
+    }
     const demand = descriptor.capability;
     let governance: CallerGovernance | undefined;
     // Whether THIS admission spent the step-up it rode on (a window of `0`): its claim then still takes the proof it was
@@ -606,7 +618,7 @@ export class GateAdmission implements Admission {
         spentStepUp = true;
       }
       governance = this.#guard.governance(presentation);
-    } else if (descriptor.consultsGrants === true) {
+    } else if (descriptor.consultsGrants === true || authentication.tokenClass === 'connector') {
       governance = this.#guard.governance(presentation);
     }
 

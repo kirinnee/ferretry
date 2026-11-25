@@ -29,7 +29,7 @@ export function demandNeedsStepUp(demand: CapabilityDemand): boolean {
 /** Everything the per-call decision reads, gathered so none of it comes from a global (today's `GrantEvaluation`). */
 export interface GrantEvaluation {
   /** A delegated connector: daemon-wide fleet grants apply, explicit passkey acts never pass. */
-  readonly connector?: true;
+  readonly connector?: { readonly route: string };
   /** The daemon-wide half (`gate.yaml`), or `undefined` when it cannot be read as a decision: undetermined. */
   readonly grants: CapabilityGrants | undefined;
   readonly governed: boolean;
@@ -73,11 +73,16 @@ export function decideCapability(demand: CapabilityDemand, evaluation: GrantEval
     if (!own.use || (demand.axis === 'configure' && !own.configure))
       return { allowed: false, refusal: 'device-not-granted' };
   }
-  // The owner approved fleet authority at connection time. Fleet configure (start/restart) needs its grant,
-  // not a device unlock. A NAMED passkey act, and non-fleet step-up demands, still have no proof to ride on.
-  if (evaluation.connector === true) {
+  // Only the two parity descriptors waive fleet.configure confirmation. Every other configure and every
+  // named passkey act still needs proof, even if a future caller accidentally opens another route.
+  if (evaluation.connector !== undefined) {
     if (demand.act !== undefined) return { allowed: false, refusal: 'step-up-required' };
-    if (name === 'fleet') return { allowed: true, refusal: 'granted' };
+    if (
+      name === 'fleet' &&
+      demand.axis === 'configure' &&
+      ['POST /v1/restarts', 'POST /v1/ferrets'].includes(evaluation.connector.route)
+    )
+      return { allowed: true, refusal: 'granted' };
   }
   // A narrowing skips the per-act step-up, never the proven device it stood for: a governed caller with no device (the
   // admin token off the host, a remote warden) is refused as it was when it had to step up.

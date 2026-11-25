@@ -32,8 +32,11 @@ const actualFleetRoute = (key: RouteKey) => {
 };
 const restart = route('POST /v1/restarts', actualFleetRoute('POST /v1/restarts'));
 const start = route('POST /v1/ferrets', actualFleetRoute('POST /v1/ferrets'));
-const act = route('POST /v1/proof', { ...base, capability: cap('fleet', 'use', { act: STEP_UP_ACTS.catalogInstall }) });
-const terminal = route('POST /v1/terminal-proof', { ...base, capability: cap('terminal', 'use') });
+const act = route('POST /v1/ferrets/:ferretId/agenda', {
+  ...base,
+  capability: cap('fleet', 'use', { act: STEP_UP_ACTS.catalogInstall }),
+});
+const terminal = route('POST /v1/ferrets/:ferretId/stop', { ...base, capability: cap('terminal', 'use') });
 const connector = (keys: readonly RouteKey[] = [read.key, restart.key, start.key, act.key]) =>
   definePlugin({
     id: 'connector',
@@ -123,7 +126,7 @@ describe('delegation crosses the real Gate', () => {
 
   test('an explicit passkey act is refused even on fleet.use', async () => {
     const { port } = await fixture();
-    expect(await port().call({ grant }, { method: 'POST', path: '/v1/proof' })).toMatchObject({
+    expect(await port().call({ grant }, { method: 'POST', path: '/v1/ferrets/F12/agenda' })).toMatchObject({
       status: 403,
       body: expect.stringContaining('grant_step_up_required'),
     });
@@ -166,17 +169,18 @@ describe('delegation crosses the real Gate', () => {
     });
     expect(
       planGraph(
-        [targets, connector(['GET /missing'])],
+        [targets, connector(['GET /v1/projects'])],
         () => true,
         () => [],
       ).refused,
-    ).toMatchObject([{ plugin: 'connector', sentence: expect.stringContaining('GET /missing') }]);
+    ).toMatchObject([{ plugin: 'connector', sentence: expect.stringContaining('GET /v1/projects') }]);
+    expect(() => connector(['GET /missing'])).toThrow('delegate');
     expect(() => definePlugin({ ...connector(), id: 'other' })).toThrow('delegate');
   });
 
   test('non-fleet passkey demands and direct forged delegated dispatch cannot bypass Gate', async () => {
     const { port, dispatcher } = await fixture();
-    expect(await port([terminal.key]).call({ grant }, { method: 'POST', path: '/v1/terminal-proof' })).toMatchObject({
+    expect(await port([terminal.key]).call({ grant }, { method: 'POST', path: '/v1/ferrets/F12/stop' })).toMatchObject({
       status: 403,
       body: expect.stringContaining('grant_step_up_required'),
     });
