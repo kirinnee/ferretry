@@ -94,11 +94,11 @@ import {
   StartRefusalCodeSchema,
   TranscriptProvenanceSchema,
   type FerretDetails,
-  type StartRefusal,
 } from '../../../contract/index.ts';
 import { effectiveMode, type FerretRegistry, type FerretFilter } from '../registry/registry.ts';
 import { launchMode } from '../session/peers/fleet.ts';
 import { STOP_UNCONFIRMED, withStampedLabel } from './restart-guards.ts';
+import { runnerRefusal } from './runner-refusal.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { resumeTurnAuthor } from '../session/resume/policy.ts';
 import type { LaunchGate, ResumeActor } from '../session/resume/types.ts';
@@ -591,19 +591,6 @@ const START_ASKERS = { owner: true, ferret: true, pack: true, board: true, warde
 >;
 const START_ASKER_REFUSAL =
   'a start is asked for by the owner, a ferret, a pack, the board or the Warden; a resume is asked for through resume';
-
-/**
- * What the owner is told for each closed runner refusal (`StartRefusal`): a runner mints no text, so the daemon says the
- * next thing to check instead of the bare code. `real_harness` has its own sentence ({@link REAL_HARNESS_REFUSED}).
- */
-const RUNNER_REFUSAL_SENTENCES: Readonly<Record<Exclude<StartRefusal, 'real_harness'>, string>> = {
-  unavailable:
-    'the runner could not be reached on this machine, so the ferret was not started: check that it is installed and running, then try again',
-  failed:
-    'the runner could not open a pane for the ferret, so it was not started: a pane with its name may still be running (stop it), or the runner refused the launch (see the daemon log), then try again',
-  limits:
-    "the machine's limits left no room for the ferret, so it was not started: stop another ferret or raise the cap in limits.yaml, then try again",
-};
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
   err({ code, reason } as StartFailure);
@@ -2389,10 +2376,7 @@ export class FerretsService implements FerretsApi {
     if (!started.ok) {
       // A test-mode daemon refused to reach a real harness: the closed code becomes a sentence a test log can act on.
       if (started.error === 'real_harness') return failed('refused', REAL_HARNESS_REFUSED);
-      return failed(
-        started.error === 'unavailable' ? 'runner_unavailable' : 'failed',
-        RUNNER_REFUSAL_SENTENCES[started.error],
-      );
+      return runnerRefusal(started.error);
     }
     // The pane is open: its conversation moves onto the pane's own pid. FAIL CLOSED: the caller's cleanup stops the
     // pane (keeping its handle, and so this lease, when it cannot) before anything else can write the conversation.
