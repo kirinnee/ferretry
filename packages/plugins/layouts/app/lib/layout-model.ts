@@ -204,6 +204,16 @@ function navFormOf(nav: Layout['nav']): string {
   return nav.labels === 'words' ? 'dock-words' : 'dock-icons';
 }
 
+/**
+ * What a layout or theme is called in a chooser: a built-in preset by its name in plain words ("Default", "Sidebar left"),
+ * a saved one by the name the owner gave it, marked as theirs.
+ */
+export function presetLabel(id: string, origin: 'built-in' | 'saved'): string {
+  if (origin === 'saved') return `${id} (saved)`;
+  const words = id.replaceAll('-', ' ');
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+}
+
 /** The keys one word of a choice is saved to (`nav.form` is three keys); any other choice is its one key. */
 export function changesFor(path: ChoiceSetting['path'], word: string): readonly Change[] {
   if (path !== 'nav.form') return [{ path, value: word }];
