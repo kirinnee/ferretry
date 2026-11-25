@@ -3,14 +3,16 @@ import type { AuditedRouteRule } from '../../audit/routes.ts';
 import type { ModuleContribution } from '../modules.ts';
 import { type McpInventorySubsystem, mcpInventoryRoutes } from './mcp-inventory.ts';
 import { type McpOAuthSubsystem, mcpOAuthRoutes } from './mcp-oauth.ts';
+import { type McpTokenSubsystem, mcpTokenRoutes } from './mcp-token.ts';
 import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 
 /**
- * The security log's rules for the three MCP surfaces. Signing in to (and out of) a remote server records the
+ * The security log's rules for the MCP surfaces. Signing in to (and out of) a remote server records the
  * component NAME and the flow id, never an address or a token (docs/mcp-oauth.md). Adding a server for one ferret
  * (`./session-mcp.ts`) records the session and the server's NAME, never its command, address or environment: both
  * change what agents launch with, the project file for everyone on the repository and the login for every ferret on
- * it, so both are recorded as fleet configuration, told apart by `scope`. The inventory reads and the previews write
+ * it, so both are recorded as fleet configuration, told apart by `scope`. A ferret asking for its own sign-in token records the session and the variable NAME (`secrets.used`).
+ * The inventory reads and the previews write
  * nothing, so they have no rule.
  */
 const MCP_AUDIT_RULES: readonly AuditedRouteRule[] = [
@@ -64,13 +66,25 @@ const MCP_AUDIT_RULES: readonly AuditedRouteRule[] = [
     responseNames: 'name',
     detail: { action: 'mcp-add', scope: 'login' },
   },
+  // A running ferret asking for the current token behind one of its own sign-in variables (`mounts/mcp-token.ts`): the
+  // session and the variable NAME the answer echoes, never the token, which no rule can read.
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/mcp/token',
+    event: 'secrets.used',
+    subject: 'sessionId',
+    responseNames: 'variable',
+    refusalCode: true,
+    detail: { action: 'mcp-token' },
+  },
 ];
 
-/** The three subsystems the MCP module serves. */
+/** The four subsystems the MCP module serves. */
 export interface McpSubsystems {
   readonly oauth: McpOAuthSubsystem;
   readonly inventory: McpInventorySubsystem;
   readonly sessionMcp: SessionMcpSubsystem;
+  readonly token: McpTokenSubsystem;
 }
 
 /** The routes of the three MCP surfaces, in the order they sat in the legacy table. */
@@ -83,11 +97,13 @@ function mcpRoutes(subsystems: McpSubsystems): readonly ApiRoute[] {
     // Every path ends in literals under `mcp`, which no other route uses, and the subsystem registers its
     // deeper `preview` paths before the shallower ones itself, so none can shadow or be shadowed.
     ...sessionMcpRoutes(subsystems.sessionMcp),
+    // `mcp/token` is a literal pair no other session MCP route uses.
+    ...mcpTokenRoutes(subsystems.token),
   ];
 }
 
 /**
- * What the mcp module adds to the daemon: the sign-in routes, the inventory routes and the session MCP routes, and the
+ * What the mcp module adds to the daemon: the sign-in routes, the inventory routes, the session MCP routes and the ferret token route, and the
  * six audit rules for the ones that write. It claims no protocol feature.
  */
 export function mcpContribution(subsystems: McpSubsystems): ModuleContribution {

@@ -536,6 +536,28 @@ describe('McpOAuthService', () => {
       should(w.state.document.connections.linear?.needsSignIn).be.true();
     });
 
+    it('should name the sign-in whose refresh was rejected, and nothing for a healthy one or a stranger', async () => {
+      // Arrange
+      const w = world({ expiresIn: 10 });
+      await signIn(w);
+      const before = await w.service.signInRequired(NAMES.access);
+      await w.internal.remove(NAMES.refresh);
+      w.clock.at += 20_000;
+      await w.service.refreshForLaunch([NAMES.access]);
+
+      // Act
+      const after = await w.service.signInRequired(NAMES.access);
+      const stranger = await w.service.signInRequired('SOMETHING_ELSE');
+      w.state.failure = new Error('damaged');
+      const unreadable = await w.service.signInRequired(NAMES.access);
+
+      // Assert
+      should(before).be.undefined();
+      should(after).equal('linear');
+      should(stranger).be.undefined();
+      should(unreadable).be.undefined();
+    });
+
     it('should never throw, even over a state document it cannot read', async () => {
       // Arrange
       const w = world();

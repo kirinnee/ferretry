@@ -164,6 +164,7 @@ async function machine(options: FakeProviderOptions = {}, entry: Record<string, 
     secrets: stores.secrets,
     renewal: oauth,
     localScope: new FileClaudeLocalScope(),
+    tokenCommand: variable => `fy mcp token ${variable}`,
   });
   return { client: await browserClient(dispatcher), provider, stores, launch, folders, home, pe };
 }
@@ -200,6 +201,7 @@ describe('signing in to a project MCP server from the PWA', () => {
         type: 'http',
         url: m.provider.serverUrl,
         headers: { Authorization: `Bearer \${${names.variable}}` },
+        headersHelper: `fy mcp token ${names.variable}`,
       },
     });
     should(leaks(m.provider, completion, claudeJson, m.stores.state.document)).deepEqual([]);

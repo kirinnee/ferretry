@@ -15,9 +15,19 @@
  * things held one: the redactor, which turns values into masks, and the use executor, which puts them
  * in a child's environment and returns only that child's scrubbed output. This is the third, and it
  * is the same kind of thing as the second — it produces an environment for one launch and returns it
- * to the launcher, which passes it straight to the terminal. It answers nothing to a route, projects
- * nothing, logs nothing, and caches nothing. A method here that returned a value to a caller who was
- * going to show it to somebody would delete the property rather than extend it.
+ * to the launcher, which passes it straight to the terminal. It projects nothing, logs nothing, and caches
+ * nothing. A method here that returned a value to a caller who was going to show it to somebody would delete the
+ * property rather than extend it.
+ *
+ * ## The one narrow exception, in time and not in kind
+ *
+ * {@link FleetLaunchEnvironment.mcpTokenFor} DOES answer a route — only the one a RUNNING ferret asks about itself
+ * (`POST /v1/sessions/:sessionId/mcp/token`, docs/mcp-oauth.md). It hands that ferret the one MCP sign-in token its
+ * own launch already put in its environment (the documented GAP in `lib/mcp-inventory/project-sign-in.ts`: an agent
+ * can read its own environment), renewed — because a ferret that outlives a twelve-hour access token would otherwise
+ * send a dead one for ever and `/mcp` cannot help, as it expands the same stale variable. It is the same boundary
+ * extended in time: it names a variable this runtime or this folder's project already binds, returns that one value
+ * and no other secret, and the route refuses every caller but the ferret itself.
  *
  * ## Why the manifest and not the configuration
  *
@@ -34,7 +44,8 @@
  */
 
 import { type FleetManifestAccount, resolveSecretEnvironment, wrapperNameOf } from '@ferretry/fleet';
-import { type SecretName, secretReferencesIn } from '@ferretry/protocol';
+import { parseMcpProjectSubject, type SecretName, secretReferencesIn } from '@ferretry/protocol';
+import type { FerretMcpToken } from '../mcp-inventory/project-sign-in.ts';
 
 /**
  * The extra environment one account's launch is entitled to, keyed by the executable it runs.
@@ -57,6 +68,8 @@ export interface AccountLaunchEnvironment {
  */
 export interface ProjectLaunchEnvironment {
   forLaunch(agent: string, cwd: string): Promise<Readonly<Record<string, string>>>;
+  /** The token one signed-in project server is launched with, renewed, without writing anything. */
+  token(agent: string, cwd: string, variable: string): Promise<FerretMcpToken>;
 }
 
 /** The published accounts, as the daemon's existing inventory already answers them. */
@@ -75,6 +88,8 @@ export interface LaunchSecretValues {
  */
 export interface LaunchSecretRenewal {
   refreshForLaunch(names: readonly SecretName[]): Promise<void>;
+  /** The sign-in that filed this access secret, when its refresh was rejected so only the person can mend it. */
+  signInRequired?(name: SecretName): Promise<string | undefined>;
 }
 
 /**
@@ -109,6 +124,41 @@ export class FleetLaunchEnvironment implements AccountLaunchEnvironment {
     ]);
     // The profile's own bindings win a same-named variable: a project server's is derived, theirs is chosen.
     return { ...project, ...own };
+  }
+
+  /**
+   * The current token behind one MCP sign-in variable this ferret was launched with — the account's own binding
+   * (a component signed in to from Ferretry), else the folder's project server — renewed first, with nothing
+   * written and no other secret read out. See the module doc for why this one method may answer a route.
+   *
+   * `unknown` when neither binds that variable; `needs-sign-in` when the sign-in was rejected or holds no token.
+   */
+  async mcpTokenFor(wrapper: string, cwd: string, variable: string): Promise<FerretMcpToken> {
+    const bound = (await this.#boundSecretEnv(wrapper))[variable];
+    if (bound === undefined) return (await this.project?.token(wrapper, cwd, variable)) ?? { kind: 'unknown' };
+    const names = secretReferencesIn(bound);
+    await this.renewal?.refreshForLaunch(names);
+    const server = await this.#signInRequired(names);
+    if (server !== undefined) return { kind: 'needs-sign-in', server: componentLabel(server) };
+    const values = await this.secrets.values();
+    const token = names.length === 1 ? values.get(names[0] as SecretName) : undefined;
+    return token === undefined ? { kind: 'needs-sign-in', server: variableLabel(variable) } : { kind: 'token', token };
+  }
+
+  async #signInRequired(names: readonly SecretName[]): Promise<string | undefined> {
+    for (const name of names) {
+      const component = await this.renewal?.signInRequired?.(name);
+      if (component !== undefined) return component;
+    }
+    return undefined;
+  }
+
+  async #boundSecretEnv(wrapper: string): Promise<Readonly<Record<string, string>>> {
+    const name = wrapperNameOf(wrapper);
+    const account = (await this.inventory.accounts()).find(
+      published => wrapperNameOf(published.wrapper) === name || published.wrapper === wrapper,
+    );
+    return account?.secretEnv ?? {};
   }
 
   async #account(wrapper: string): Promise<Readonly<Record<string, string>>> {
@@ -149,3 +199,10 @@ export function launchEnvironment(
   const { HOME: _sessionHome, ...fromSession } = session;
   return { ...fromAccount, ...fromSession };
 }
+
+/** A sign-in's component name, as a person knows the server: a project server's subject is its name and a folder. */
+const componentLabel = (component: string): string => parseMcpProjectSubject(component)?.name ?? component;
+
+/** The server a sign-in variable belongs to, as far as the variable says: `FY_MCP_<NAME>_<16 hex>_TOKEN`. */
+const variableLabel = (variable: string): string =>
+  /^FY_MCP_(?:([A-Z0-9_]+?)_)?[0-9A-F]{16}_TOKEN$/u.exec(variable)?.[1]?.toLowerCase().replaceAll('_', '-') ?? variable;

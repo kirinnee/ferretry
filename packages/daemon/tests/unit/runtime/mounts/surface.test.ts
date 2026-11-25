@@ -59,6 +59,7 @@ describe('the mounted daemon surface', () => {
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
       3 + // every MCP server a ferret sees, for the machine and for one ferret, and checking one (docs/mcp-scopes.md)
+      1 + // a running ferret's request for the renewed token behind one of its own MCP sign-in variables, answered to that ferret only (docs/mcp-oauth.md)
       2 + // the account model's credential list and its Check now
       3 + // copying secrets to another machine: open an import, seal for one, file one (docs/secrets.md)
       2 + // an environment login's Test, and the provider presets one is made from (docs/provider-presets.md)
@@ -430,6 +431,7 @@ describe('the mounted daemon surface', () => {
         'POST /v1/sessions/:sessionId/mcp/project',
         'POST /v1/sessions/:sessionId/mcp/login',
         'GET /v1/sessions/:sessionId/mcp',
+        'POST /v1/sessions/:sessionId/mcp/token',
         'POST /v1/catalog-installs/project/preview',
         'POST /v1/catalog-installs/runtime/preview',
         'POST /v1/catalog-installs/project',

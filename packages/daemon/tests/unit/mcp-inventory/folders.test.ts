@@ -106,6 +106,7 @@ describe('one derivation of a project server’s subject', () => {
         secrets: { values: async () => new Map() },
         renewal: { refreshForLaunch: async names => void renewed.push(...names) },
         localScope: NO_LOCAL_SCOPE,
+        tokenCommand: variable => `fy mcp token ${variable}`,
       });
 
       // Act

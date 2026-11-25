@@ -109,6 +109,7 @@ async function machine(options: { disabled?: boolean } = {}) {
     secrets: w.secrets,
     renewal: service,
     localScope: new FileClaudeLocalScope(),
+    tokenCommand: variable => `fy mcp token ${variable}`,
   });
   const subject = mcpProjectSubject('docs', mcpProjectKey(project));
   const names = mcpOAuthSecretNames(subject, w.provider.serverUrl);
@@ -171,6 +172,7 @@ describe('signing in to a project’s .mcp.json server', () => {
         type: 'http',
         url: m.w.provider.serverUrl,
         headers: { Authorization: `Bearer \${${m.names.variable}}` },
+        headersHelper: `fy mcp token ${m.names.variable}`,
       },
     });
     should(leaks(m.w.provider, await readFile(path.join(m.home, '.claude.json'), 'utf8'))).deepEqual([]);
@@ -188,6 +190,41 @@ describe('signing in to a project’s .mcp.json server', () => {
     // Assert — the entry is keyed by the worktree's own root, which is the folder Claude keys it by.
     should(Object.keys(env)).deepEqual([m.names.variable]);
     should(Object.keys((await m.claudeJson()).projects[m.worktree]?.mcpServers ?? {})).deepEqual(['docs']);
+  });
+
+  it('should give a RUNNING ferret the renewed token after the one it launched with expired, writing nothing', async () => {
+    // Arrange — launched with the first token, then twelve hours later asked again.
+    const m = await machine();
+    const flow = await m.service.start(m.subject, { redirectUri: PWA_REDIRECT });
+    await m.service.complete(flow.flowId, { callback: await m.w.provider.approve(flow.authorizeUrl) });
+    const launched = await m.launch.forLaunch('/fy/bin/claude-work', m.project);
+    const written = await readFile(path.join(m.home, '.claude.json'), 'utf8');
+    m.w.clock.at += 3600_000 - 30_000;
+
+    // Act
+    const answer = await m.launch.token('/fy/bin/claude-work', m.project, m.names.variable);
+
+    // Assert — the stored token was refreshed (a new one issued), the answer is that one, `.claude.json` is untouched.
+    should(launched).deepEqual({ [m.names.variable]: m.w.provider.issued[0] });
+    should(answer).deepEqual({ kind: 'token', token: m.w.provider.issued[2] });
+    should(m.w.provider.issued[2]).not.equal(m.w.provider.issued[0]);
+    should(await readFile(path.join(m.home, '.claude.json'), 'utf8')).equal(written);
+  });
+
+  it('should tell a running ferret to ask the owner when the provider rejects the refresh, never sending the old token', async () => {
+    // Arrange
+    const m = await machine();
+    const flow = await m.service.start(m.subject, { redirectUri: PWA_REDIRECT });
+    await m.service.complete(flow.flowId, { callback: await m.w.provider.approve(flow.authorizeUrl) });
+    m.w.provider.refreshError = 'invalid_grant';
+    m.w.clock.at += 3600_000 - 30_000;
+
+    // Act
+    const answer = await m.launch.token('/fy/bin/claude-work', m.project, m.names.variable);
+
+    // Assert
+    should(answer).deepEqual({ kind: 'needs-sign-in', server: 'docs' });
+    should(leaks(m.w.provider, answer)).deepEqual([]);
   });
 
   it('should give nothing to a runtime that disabled the server in this project', async () => {
@@ -290,6 +327,7 @@ describe('signing in to a project’s .mcp.json server', () => {
         type: 'http',
         url: m.w.provider.serverUrl,
         headers: { Authorization: `Bearer \${${variable}}` },
+        headersHelper: `fy mcp token ${variable}`,
       },
     });
     const after = (await inventory.session('s1')).servers.find(server => server.name === 'phoebe');

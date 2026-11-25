@@ -15,6 +15,7 @@ import { AgentToolsClient } from '../src/lib/agent-tools/client';
 import { paneCredentialValue } from '../src/lib/daemon/credential';
 import { McpServer } from '../src/lib/mcp/server';
 import { ProtocolMcpServersGateway, McpServersController } from '../src/lib/mcp/servers';
+import { McpTokenController, ProtocolMcpTokenGateway } from '../src/lib/mcp/token';
 import { registerMcpCommands } from '../src/lib/mcp/commands';
 import { assertSemver } from '../src/lib/version';
 import {
@@ -77,6 +78,7 @@ export function registerMcpGroup(
       );
     },
     new McpServersController(new ProtocolMcpServersGateway(wiring.client), world.io, wiring.ownSessionId),
+    new McpTokenController(new ProtocolMcpTokenGateway(wiring.client), world.io, wiring.ownSessionId),
   );
 }
 

@@ -1,4 +1,4 @@
-import { wrapperNameOf } from '@ferretry/fleet';
+import { claudeMcpTokenCommand, wrapperNameOf } from '@ferretry/fleet';
 import { mcpOAuthSecretNames } from '@ferretry/protocol';
 import { readDeclaredAccountModel, type ConfigAccountLocations } from '../../src/adapters/fleet/account-model-files.ts';
 import { FileSecretDocumentStore, MCP_OAUTH_SECRETS_DOCUMENT } from '../../src/adapters/index.ts';
@@ -23,6 +23,7 @@ import {
   type FileSystemPort,
   type FoundationPaths,
   KnownAndFerretFolders,
+  FerretMcpTokens,
   McpCheckService,
   type McpInventoryAccount,
   type McpInventoryFolder,
@@ -43,6 +44,7 @@ import type { McpOAuthClock, McpOAuthSecretWriter } from '../../src/lib/mcp-oaut
 import { type DaemonModule, type LateBound, lateBound } from '../../src/lib/runtime/modules.ts';
 import type { CatalogSubsystem } from '../../src/lib/runtime/mounts/catalogs.ts';
 import { mcpContribution } from '../../src/lib/runtime/mounts/mcp.ts';
+import type { McpTokenSubsystem } from '../../src/lib/runtime/mounts/mcp-token.ts';
 import { createSessionMcpSubsystem, type SessionMcpSubsystem } from '../../src/lib/runtime/mounts/session-mcp.ts';
 import { knownProjectRoots, type SessionMcpServiceDeps } from '../../src/lib/session-mcp/service.ts';
 
@@ -81,6 +83,8 @@ export interface McpFoundationsNeeds {
   readonly secretCipher: SecretCipherPort;
   /** The clock the daemon-internal directory stamps with. */
   readonly clock: ClockPort;
+  /** The `fy` executable Claude's `headersHelper` runs to fetch a fresh sign-in header (`fy mcp token <VARIABLE>`). */
+  readonly fyCommand: string;
 }
 
 /**
@@ -167,6 +171,7 @@ export function createMcpFoundations(needs: McpFoundationsNeeds): McpFoundations
     secrets: needs.secretVault,
     renewal: oauth,
     localScope: new FileClaudeLocalScope(),
+    tokenCommand: variable => claudeMcpTokenCommand(needs.fyCommand, variable),
   });
   return { folders, knownFolders, ferretFolders, documents, accounts, oauth, launch };
 }
@@ -184,7 +189,7 @@ export interface McpNeeds {
   /** The fleet catalogue: the MCP components the inventory names, and the changes an add to a login proposes. */
   readonly fleetCatalog: SessionMcpServiceDeps['fleet'];
   /** What a runtime's harness is launched with, resolved: a check fills a component's `${VAR}` as the agent does. */
-  readonly launchEnvironment: Pick<FleetLaunchEnvironment, 'forWrapper'>;
+  readonly launchEnvironment: Pick<FleetLaunchEnvironment, 'forWrapper' | 'mcpTokenFor'>;
   /** The ordinary secret store's open half: the access token a check presents. */
   readonly secretVault: Pick<SecretVault, 'values'>;
   /** Scrubs a secret out of a check's own words. */
@@ -251,11 +256,15 @@ export const mcpModule: DaemonModule<void, McpNeeds, McpProvides> = {
       files: new FileMcpProjectFiles(),
       fleet: needs.fleetCatalog,
     });
+    // The session's own agent and folder say what it was launched with; the launch environment renews and answers.
+    const token: McpTokenSubsystem = {
+      tokens: new FerretMcpTokens({ sessions: needs.sessions, tokens: needs.launchEnvironment }),
+    };
     return {
       id: 'mcp',
       provides: { oauth: foundations.oauth, inventory, check, sessionMcp },
       jobs: {},
-      contributes: mcpContribution({ oauth: foundations.oauth, inventory: { inventory, check }, sessionMcp }),
+      contributes: mcpContribution({ oauth: foundations.oauth, inventory: { inventory, check }, sessionMcp, token }),
     };
   },
 };

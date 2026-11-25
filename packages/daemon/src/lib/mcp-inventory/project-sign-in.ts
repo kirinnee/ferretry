@@ -17,10 +17,17 @@
  *    in its own `.claude.json` — with an `Authorization` header naming a launch variable. Claude uses a
  *    local server in place of a same-named project one (local › project › user), and expands `${VAR}`
  *    in its headers from its own environment;
- * 3. the variable is added to the launch environment, resolved.
+ * 3. the variable is added to the launch environment, resolved;
+ * 4. the entry also names a `headersHelper` (`fy mcp token <VARIABLE>`), which Claude runs at connect time and again
+ *    after a 401 to get the CURRENT header. Without it a ferret that outlives its access token (Slack's lives
+ *    12 hours) keeps sending the one it was launched with and every call fails; `/mcp` cannot help, because it
+ *    expands the same stale variable. The static header stays as the fallback for a Claude that does not run the
+ *    helper.
  *
  * The configuration file holds a variable NAME, never the token — the same boundary, and the same GAP
- * (the agent can read its own environment), as a component's sign-in.
+ * (the agent can read its own environment), as a component's sign-in. The helper extends that boundary in time and
+ * no further: `POST /v1/sessions/:sessionId/mcp/token` (`./ferret-token.ts`) hands a ferret ONLY the token its own
+ * launch already put in its environment, renewed, and only to that ferret.
  *
  * WHAT IT RESPECTS. A runtime that DISABLED the server in this project gets no override: somebody said
  * no there. A runtime that has not been asked yet gets it — signing in was an explicit act behind
@@ -110,6 +117,12 @@ export interface LocalScopeServer {
   readonly type: 'http' | 'sse';
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
+  /**
+   * Claude's `headersHelper` for this server: a command that prints its CURRENT headers, run at connect time and
+   * again after a 401 — so a ferret that outlives its access token is kept signed in. Optional so an entry an
+   * earlier daemon wrote (header only) still reads as ours.
+   */
+  readonly headersHelper?: string;
 }
 
 /**
@@ -127,8 +140,44 @@ export interface ProjectMcpLaunchDeps {
   readonly folders: McpProjectFolders;
   readonly documents: McpHarnessDocuments;
   readonly secrets: { values(): Promise<ReadonlyMap<SecretName, string>> };
-  readonly renewal?: { refreshForLaunch(names: readonly SecretName[]): Promise<void> };
+  readonly renewal?: {
+    refreshForLaunch(names: readonly SecretName[]): Promise<void>;
+    /** The sign-in that filed this access secret, when its refresh was rejected so only the person can mend it. */
+    signInRequired?(name: SecretName): Promise<string | undefined>;
+  };
   readonly localScope: ClaudeLocalScope;
+  /** The `headersHelper` command for one sign-in variable (`claudeMcpTokenCommand`, bound to this machine's `fy`). */
+  readonly tokenCommand: (variable: string) => string;
+}
+
+/**
+ * What a running ferret is told when it asks for the token behind one of its own launch variables.
+ *
+ * `unknown`: this ferret's launch holds no such variable. `needs-sign-in`: it does, but the sign-in cannot supply a
+ * working token — the person must sign in again in Ferretry — and `server` names which. Never carries provider text.
+ */
+export type FerretMcpToken =
+  | { readonly kind: 'token'; readonly token: string }
+  | { readonly kind: 'needs-sign-in'; readonly server: string }
+  | { readonly kind: 'unknown' };
+
+/** One signed-in project server as a launch would use it, resolved and checked against the approvals. */
+interface ProjectServerLaunch {
+  readonly declaration: RemoteDeclaration;
+  readonly variable: string;
+  readonly accessName: SecretName;
+  /** Absent when the person has not signed in to it. */
+  readonly token: string | undefined;
+  /** Whether the runtime has said no to it in this project. */
+  readonly disabled: boolean;
+}
+
+interface ProjectLaunch {
+  readonly claudeJson: string;
+  readonly root: string;
+  /** The runtime's `.claude.json`, as read. */
+  readonly home: unknown;
+  readonly servers: readonly ProjectServerLaunch[];
 }
 
 export class ProjectMcpLaunch {
@@ -141,10 +190,44 @@ export class ProjectMcpLaunch {
    * worktree is a project of its own, exactly as its ferret is listed.
    */
   async forLaunch(agent: string, cwd: string): Promise<Readonly<Record<string, string>>> {
+    const launch = await this.#resolve(agent, cwd);
+    if (launch === undefined) return {};
+    const servers: Record<string, LocalScopeServer> = {};
+    const env: Record<string, string> = {};
+    for (const { declaration, variable, token, disabled } of launch.servers) {
+      if (token === undefined || disabled) continue;
+      servers[declaration.name] = {
+        type: declaration.transport,
+        url: declaration.url,
+        headers: { ...declaration.headers, Authorization: `Bearer \${${variable}}` },
+        headersHelper: this.deps.tokenCommand(variable),
+      };
+      env[variable] = token;
+    }
+    // Reconciled even when empty: a sign-out, or a server removed from `.mcp.json`, leaves no entry behind.
+    if (Object.keys(servers).length > 0 || hasFerretryEntry(claudeProjectEntry(launch.home, launch.root)))
+      await this.deps.localScope.reconcile(launch.claudeJson, launch.root, servers);
+    return env;
+  }
+
+  /**
+   * The token one of this folder's project servers is launched with, renewed — or why there is none. A server the
+   * runtime disabled, or one this project does not have, is `unknown`: the launch would not have put it there.
+   */
+  async token(agent: string, cwd: string, variable: string): Promise<FerretMcpToken> {
+    const server = (await this.#resolve(agent, cwd))?.servers.find(candidate => candidate.variable === variable);
+    if (server === undefined || server.disabled) return { kind: 'unknown' };
+    if (server.token === undefined || (await this.deps.renewal?.signInRequired?.(server.accessName)) !== undefined)
+      return { kind: 'needs-sign-in', server: server.declaration.name };
+    return { kind: 'token', token: server.token };
+  }
+
+  /** The part of a launch both ways of asking share: renewal, the stored values and the approvals. */
+  async #resolve(agent: string, cwd: string): Promise<ProjectLaunch | undefined> {
     const account = (await this.deps.accounts()).find(
       candidate => candidate.wrapper === agent || candidate.runtime === agent,
     );
-    if (account === undefined || account.harness !== 'claude') return {};
+    if (account === undefined || account.harness !== 'claude') return undefined;
     const folder = await this.deps.folders.forCwd(cwd);
     const root = folder.root.replace(/\/+$/u, '');
     const claudeJson = `${account.home.replace(/\/+$/u, '')}/.claude.json`;
@@ -157,23 +240,18 @@ export class ProjectMcpLaunch {
     const values = named.length === 0 ? new Map<SecretName, string>() : await this.deps.secrets.values();
     const home = await this.#read(claudeJson);
     const settings = claudeApprovalKeys(await this.#read(`${account.home.replace(/\/+$/u, '')}/settings.json`));
-    const servers: Record<string, LocalScopeServer> = {};
-    const env: Record<string, string> = {};
-    for (const { declaration, names } of named) {
-      const token = values.get(names.access);
-      if (token === undefined) continue;
-      if (claudeApproval(declaration.name, claudeProjectEntry(home, root), [settings]) === 'disabled') continue;
-      servers[declaration.name] = {
-        type: declaration.transport,
-        url: declaration.url,
-        headers: { ...declaration.headers, Authorization: `Bearer \${${names.variable}}` },
-      };
-      env[names.variable] = token;
-    }
-    // Reconciled even when empty: a sign-out, or a server removed from `.mcp.json`, leaves no entry behind.
-    if (Object.keys(servers).length > 0 || hasFerretryEntry(claudeProjectEntry(home, root)))
-      await this.deps.localScope.reconcile(claudeJson, root, servers);
-    return env;
+    return {
+      claudeJson,
+      root,
+      home,
+      servers: named.map(({ declaration, names }) => ({
+        declaration,
+        variable: names.variable,
+        accessName: names.access,
+        token: values.get(names.access),
+        disabled: claudeApproval(declaration.name, claudeProjectEntry(home, root), [settings]) === 'disabled',
+      })),
+    };
   }
 
   async #read(path: string): Promise<unknown> {

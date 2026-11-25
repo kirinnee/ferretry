@@ -19,6 +19,7 @@ export const callers: readonly string[] = [
   'POST /v1/sessions/:sessionId/mcp/login/preview operator any',
   'POST /v1/sessions/:sessionId/mcp/project operator any',
   'POST /v1/sessions/:sessionId/mcp/project/preview operator any',
+  'POST /v1/sessions/:sessionId/mcp/token operator any',
 ];
 
 export const notAudited: Readonly<Record<string, string>> = {

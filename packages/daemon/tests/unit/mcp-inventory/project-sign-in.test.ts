@@ -46,6 +46,7 @@ function launcher(
     secrets: { values: async () => new Map(Object.entries(held) as [SecretName, string][]) },
     renewal: { refreshForLaunch: async names => void renewed.push(names) },
     localScope,
+    tokenCommand: variable => `fy mcp token ${variable}`,
   });
   return { launch, localScope, renewed };
 }
@@ -121,9 +122,77 @@ describe('ProjectMcpLaunch', () => {
         path: `${CLAUDE_HOME}/.claude.json`,
         root: PROJECT,
         servers: {
-          docs: { type: 'http', url: DOCS_URL, headers: { Authorization: `Bearer ${variable(DOCS.variable)}` } },
+          docs: {
+            type: 'http',
+            url: DOCS_URL,
+            headers: { Authorization: `Bearer ${variable(DOCS.variable)}` },
+            headersHelper: `fy mcp token ${DOCS.variable}`,
+          },
         },
       },
+    ]);
+  });
+
+  it('should answer a project server\u2019s renewed token without writing anything', async () => {
+    // Arrange
+    const { launch, localScope, renewed } = launcher();
+
+    // Act
+    const answer = await launch.token('/fy/fleet/bin/claude-work', `${PROJECT}/src`, DOCS.variable);
+
+    // Assert — renewed first, then the value; no `.claude.json` was touched.
+    should(renewed).deepEqual([[DOCS.access, LINEAR.access]]);
+    should(answer).deepEqual({ kind: 'token', token: 'docs-token' });
+    should(localScope.calls).deepEqual([]);
+  });
+
+  it('should say unknown for a variable this launch does not hold, a disabled server and a Codex runtime', async () => {
+    // Arrange
+    const files = documents();
+    const home = files.get(`${CLAUDE_HOME}/.claude.json`) as {
+      projects: Record<string, { disabledMcpjsonServers: string[] }>;
+    };
+    home.projects[PROJECT]?.disabledMcpjsonServers.push('docs');
+    const disabled = launcher(files);
+    const open = launcher();
+
+    // Act
+    const answers = await Promise.all([
+      open.launch.token('/fy/fleet/bin/claude-work', PROJECT, 'FY_MCP_NOT_MINE_0000000000000000_TOKEN'),
+      disabled.launch.token('/fy/fleet/bin/claude-work', PROJECT, DOCS.variable),
+      open.launch.token('/fy/fleet/bin/codex-work', PROJECT, DOCS.variable),
+    ]);
+
+    // Assert
+    should(answers).deepEqual([{ kind: 'unknown' }, { kind: 'unknown' }, { kind: 'unknown' }]);
+  });
+
+  it('should say the server needs signing in again when its sign-in was rejected or holds no token', async () => {
+    // Arrange — one sign-in flagged by the renewal, one with nothing stored.
+    const rejected = new ProjectMcpLaunch({
+      accounts: async () => ACCOUNTS,
+      folders: knownFolders(FOLDERS),
+      documents: new MemoryDocuments(documents()),
+      secrets: { values: async () => new Map([[DOCS.access, 'old-token']]) },
+      renewal: {
+        refreshForLaunch: async () => undefined,
+        signInRequired: async name => (name === DOCS.access ? mcpProjectSubject('docs', PROJECT_KEY) : undefined),
+      },
+      localScope: new RecordingLocalScope(),
+      tokenCommand: variable => `fy mcp token ${variable}`,
+    });
+    const empty = launcher(documents(), {});
+
+    // Act
+    const answers = await Promise.all([
+      rejected.token('/fy/fleet/bin/claude-work', PROJECT, DOCS.variable),
+      empty.launch.token('/fy/fleet/bin/claude-work', PROJECT, DOCS.variable),
+    ]);
+
+    // Assert — the server is named by its own name, never the old token.
+    should(answers).deepEqual([
+      { kind: 'needs-sign-in', server: 'docs' },
+      { kind: 'needs-sign-in', server: 'docs' },
     ]);
   });
 
@@ -195,6 +264,7 @@ describe('ProjectMcpLaunch', () => {
       },
       secrets: { values: async () => new Map([[DOCS.access, 'docs-token']]) },
       localScope: new RecordingLocalScope(),
+      tokenCommand: variable => `fy mcp token ${variable}`,
     });
 
     // Act
@@ -238,6 +308,7 @@ describe('ProjectMcpLaunch', () => {
         },
       },
       localScope: new RecordingLocalScope(),
+      tokenCommand: variable => `fy mcp token ${variable}`,
     });
 
     // Act

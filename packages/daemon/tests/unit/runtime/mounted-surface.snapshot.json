@@ -353,6 +353,7 @@
     "POST /v1/sessions/:sessionId/mcp/login/preview operator any",
     "POST /v1/sessions/:sessionId/mcp/project operator any",
     "POST /v1/sessions/:sessionId/mcp/project/preview operator any",
+    "POST /v1/sessions/:sessionId/mcp/token operator any",
     "POST /v1/sessions/:sessionId/migrate operator any",
     "POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs operator any",
     "POST /v1/sessions/:sessionId/permission operator person",

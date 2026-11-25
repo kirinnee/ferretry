@@ -132,6 +132,7 @@ describe('FleetLaunchEnvironment', () => {
           asked.push({ agent, cwd });
           return { FY_MCP_DOCS_0A_TOKEN: 'project-token', ANTHROPIC_API_KEY: 'never-this' };
         },
+        token: async () => ({ kind: 'unknown' }),
       },
     );
 
@@ -215,6 +216,105 @@ describe('FleetLaunchEnvironment', () => {
 
     // Assert
     should((raised as Error).message).match(/manifest/u);
+  });
+});
+
+describe('FleetLaunchEnvironment.mcpTokenFor', () => {
+  const WRAPPER = '/state/fleet/bin/claude-auto-kirin';
+  const VARIABLE = 'FY_MCP_SLACK_0123456789ABCDEF_TOKEN';
+  const ACCESS = 'MCP_SLACK_0123456789ABCDEF_ACCESS';
+  const bound = account({ secretEnv: { [VARIABLE]: `\${secret:${ACCESS}}`, OTHER_KEY: '${secret:WORK_KEY}' } });
+
+  it('should renew a component server’s token first, then answer that one value and no other secret', async () => {
+    // Arrange
+    const values: Record<string, string> = { [ACCESS]: 'stale', WORK_KEY: 'never-this' };
+    const asked: (readonly SecretName[])[] = [];
+    const subject = new FleetLaunchEnvironment(
+      inventory(bound),
+      { values: async () => new Map(Object.entries(values)) },
+      {
+        refreshForLaunch: async names => {
+          asked.push(names);
+          values[ACCESS] = 'fresh';
+        },
+      },
+    );
+
+    // Act
+    const actual = await subject.mcpTokenFor(WRAPPER, '/work/app', VARIABLE);
+
+    // Assert
+    should(actual).deepEqual({ kind: 'token', token: 'fresh' });
+    should(asked).deepEqual([[ACCESS]]);
+  });
+
+  it('should say a component server needs signing in again when its refresh was rejected, naming it', async () => {
+    // Arrange
+    const subject = new FleetLaunchEnvironment(inventory(bound), store({ [ACCESS]: 'old' }), {
+      refreshForLaunch: async () => undefined,
+      signInRequired: async name => (name === ACCESS ? 'slack' : undefined),
+    });
+
+    // Act
+    const actual = await subject.mcpTokenFor(WRAPPER, '/work/app', VARIABLE);
+
+    // Assert
+    should(actual).deepEqual({ kind: 'needs-sign-in', server: 'slack' });
+  });
+
+  it('should say it needs signing in when the store holds no token, naming the server from the variable', async () => {
+    // Arrange
+    const subject = new FleetLaunchEnvironment(inventory(bound), store({}));
+
+    // Act
+    const actual = await subject.mcpTokenFor(WRAPPER, '/work/app', VARIABLE);
+
+    // Assert
+    should(actual).deepEqual({ kind: 'needs-sign-in', server: 'slack' });
+  });
+
+  it('should not hand out a secret that is bound to a variable that is not an MCP sign-in', async () => {
+    // Arrange — OTHER_KEY is bound, but the project is asked first and knows nothing of it.
+    const subject = new FleetLaunchEnvironment(inventory(bound), store({ WORK_KEY: 'never-this' }), undefined, {
+      forLaunch: async () => ({}),
+      token: async () => ({ kind: 'unknown' }),
+    });
+
+    // Act — the route schema keeps this from arriving; the answer must not depend on it.
+    const actual = await subject.mcpTokenFor(WRAPPER, '/work/app', 'FY_MCP_NOT_MINE_0000000000000000_TOKEN');
+
+    // Assert
+    should(actual).deepEqual({ kind: 'unknown' });
+  });
+
+  it('should ask the folder’s project for a variable the account does not bind', async () => {
+    // Arrange
+    const asked: [string, string, string][] = [];
+    const subject = new FleetLaunchEnvironment(inventory(account()), store(), undefined, {
+      forLaunch: async () => ({}),
+      token: async (agent, cwd, variable) => {
+        asked.push([agent, cwd, variable]);
+        return { kind: 'token', token: 'project-token' };
+      },
+    });
+
+    // Act
+    const actual = await subject.mcpTokenFor(WRAPPER, '/work/app', VARIABLE);
+
+    // Assert
+    should(actual).deepEqual({ kind: 'token', token: 'project-token' });
+    should(asked).deepEqual([[WRAPPER, '/work/app', VARIABLE]]);
+  });
+
+  it('should say unknown when there is no project source and the account binds nothing', async () => {
+    // Arrange
+    const subject = new FleetLaunchEnvironment(inventory(account()), store());
+
+    // Act
+    const actual = await subject.mcpTokenFor(WRAPPER, '/work/app', VARIABLE);
+
+    // Assert
+    should(actual).deepEqual({ kind: 'unknown' });
   });
 });
 
