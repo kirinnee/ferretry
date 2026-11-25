@@ -94,6 +94,28 @@ const framesSettled = async (tab: Page): Promise<void> => {
       .every(entry => entry.playState === 'finished'),
   );
   await tab.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+  // The rows lay out late after the animations finish (a wrapped line settling from 93 px to 73 px, the content 1599 px
+  // tall then 1541), and a scroll that arrives in the frame of a shrink is never read as the reader's (the follow model's
+  // guard against a removed footer or a squeezed viewport), so the page stays attached and pins back to the tail: the pill
+  // never shows. Settled therefore also means the transcript's own height has held still for a stretch of frames.
+  await tab.evaluate(
+    () =>
+      new Promise<void>(done => {
+        const scroller = document.querySelector('.fy-transcript');
+        const measure = (): string =>
+          scroller === null ? '' : `${String(scroller.scrollHeight)}x${String(scroller.clientHeight)}`;
+        let last = measure();
+        let still = 0;
+        const frame = (): void => {
+          const now = measure();
+          still = now === last ? still + 1 : 0;
+          last = now;
+          if (still >= 20) done();
+          else requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+      }),
+  );
 };
 
 interface Box {
