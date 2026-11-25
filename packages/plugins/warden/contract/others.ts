@@ -21,6 +21,8 @@ export interface UsageHeadroomApi {
   headroomPercent(login: string): Promise<number | undefined>;
   /** The limits live ferrets' panes prove (the Move's own "is this login out of quota" evidence). */
   paneLimits?(): Promise<readonly UsagePaneLimit[]>;
+  /** What one finished session cost in dollars (a keyed read of its analytics row), or `undefined` until it is priced. */
+  sessionCostUsd?(session: string): Promise<number | undefined>;
 }
 export const UsagePort = definePort<UsageHeadroomApi>('usage');
 

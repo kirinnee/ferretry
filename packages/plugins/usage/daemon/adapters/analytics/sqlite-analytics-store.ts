@@ -332,6 +332,13 @@ class SqliteAnalyticsStore implements AnalyticsIndexStore {
       .map(storedFromRow);
   }
 
+  row(id: string): AnalyticsStoredSession | undefined {
+    const found = this.database.query<SessionRow>(`SELECT ${COLUMNS.join(', ')} FROM analytics_sessions WHERE id = ?`, [
+      id,
+    ])[0];
+    return found === undefined ? undefined : storedFromRow(found);
+  }
+
   status(): AnalyticsStoreStatus {
     const counts = this.database.query<{
       sessions: number;

@@ -271,7 +271,7 @@ export default implementDaemon(manifest, {
         send: async (loginId, variable, hosts, request, placement) =>
           await needs.logins.authorizeFetch(loginId as LoginId, variable, hosts, request, placement),
       },
-      spend: new AnalyticsTranscriptSpend(ingestion),
+      spend: new AnalyticsTranscriptSpend(ingestion, nowMs),
       clock: { nowMs },
     });
 
@@ -524,6 +524,10 @@ export default implementDaemon(manifest, {
           headroomPercent: async login => headroomOf((await feedView(feed)).accounts.find(row => row.agent === login)),
           feed: async read => await feedView(read.watched ? feed : scraped),
           paneLimits,
+          sessionCostUsd: async session => {
+            const micros = ingestion.costUsdMicrosOf(session);
+            return micros === undefined ? undefined : micros / 1_000_000;
+          },
           pauses: () => Object.keys(budget.holds()).flatMap(login => pauseOf(login) ?? []),
           pauseOf: login => pauseOf(login),
           budgets: async () => budgetsView(),
