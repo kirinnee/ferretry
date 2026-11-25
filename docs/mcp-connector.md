@@ -10,7 +10,7 @@ own passkey act. **Not built yet:** `POST /mcp` and the eleven tools. Until that
 everything that does not reach a tool exactly as it will (`405` for GET/DELETE, `401` with the metadata pointer for no
 bearer, `401 invalid_token` for one that is not live), and a live bearer is told `501` that the tools are not served yet —
 never answered as if a tool ran. "Scopes and tools" and "What a tool may do" below are the contract that unit implements.
-The settings panel in the app is a later unit too; until then the switch is `config/connector.yaml` or `PUT /v1/connector`.
+The settings tab in the app (Settings › Claude connector) is built: see "Settings › Claude connector (the app)" below.
 
 ## What changed from v4 (the deliberate differences)
 
@@ -131,6 +131,31 @@ All five are a **person's** (`caller: 'person'`: a ferret, the warden and the co
   waiting-page handle, so a view that grew one would fail rather than reach a client.
 - Refusals carry a code a client can branch on: `connector_disabled` (409, approve/deny while it is off),
   `connector_not_found` (404), `connector_expired` (410), `connector_already_decided` (409), `connector_cannot_switch` (409).
+
+## Settings › Claude connector (the app)
+
+The tab lives in the connector plugin's own app half (`app/`), in the **Devices & access** group beside Connection. It
+reads and acts only through the owner's routes above, by route key, through the one client the shell gives it; it holds
+no token and the strict wire schemas leave no field for one.
+
+- **Let Claude connect** — the switch (`PUT /v1/connector`, only `enabled`). There is no optimistic state: it is pending
+  while the call runs, then shows exactly the status the daemon answered. While on and reachable the **address** Claude is
+  given shows with a copy button, and where it comes from (`config/connector.yaml`, or the built-in tunnel — "waiting for
+  the tunnel" is the daemon's own `disabledReason` until a hostname exists).
+- **Waiting for you** — each sign-in with its **match code**, set large, and the warning "Only approve if this code is on
+  the page you just opened from Claude." in the same breath. **Approve with passkey** asks the shell's step-up prompt
+  for `approve-connector` (the daemon names the act in its first `403 grant_step_up_required`; the client proves it and
+  resends once); **Deny** asks nothing.
+- **Connected apps** — what each may do, who approved it, when it last called; **Revoke** behind a confirm that says it
+  stops on its very next call. Live apps are listed before revoked ones.
+- It reads again every 2 s while open and visible, and keeps what it shows through a failed read.
+- **Version skew.** A machine that answers `404 unknown_route` for `GET /v1/connector` gets "This machine needs an update
+  to use the Claude connector." with the update command.
+- **Round-safe.** The tab is built from the settings kit's rows, so it follows the theme's corners; no text, icon or
+  button of it may sit where a corner is cut away, which the visual test checks at the highest rounding (Neumorphism).
+
+The waiting page's "Open Ferretry" link is `<app>/d/<daemon id>/settings/connector?request=<cr_ id>`: the tab puts that
+sign-in first and scrolls to it. The request id is public; the page's handle and the match code never ride in a link.
 
 ## Configuration
 
@@ -340,7 +365,7 @@ code" where an approval is involved.
 
 A switched-off connector (or one that failed to start) serves nothing: every path is the same bare 404, so a prober learns nothing. A person opening an old sign-in link then sees that 404; a page for this case is a declared gap (as in v4), because with the connector off a door route answers as an unrouted path does.
 
-The "Open Ferretry" link (and the "Open Ferretry's Claude connector panel" link) points at `<app>/?connector=<daemon id>#connector`, the same deep link v4's waiting page used; the app's settings panel (a later unit) owns what it opens.
+The "Open Ferretry" link (and the "Open Ferretry's Claude connector panel" link) points at `<app>/d/<daemon id>/settings/connector` (the 5.0 settings route; the waiting page adds `?request=<cr_ id>`, a public id), which opens Settings › Claude connector with that sign-in first.
 
 **What Claude is told.** A denied sign-in still redirects to Claude with `error=access_denied`, and now an
 `error_description`. Every JSON error Claude may show carries an `error_description` ending in "Reconnect in Claude:

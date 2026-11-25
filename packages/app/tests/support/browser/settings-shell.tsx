@@ -64,6 +64,17 @@ const GRANTS = {
       mayGrant: false,
       origin: 'default',
     },
+    // Pairing too: Connector's tab asks `pairing` for its switch and approvals, and a machine that says nothing of it reads as undetermined.
+    {
+      capability: 'pairing',
+      use: true,
+      configure: true,
+      granted: { use: true, configure: true },
+      useRefusal: 'granted',
+      configureRefusal: 'granted',
+      mayGrant: false,
+      origin: 'default',
+    },
   ],
   governed: true,
   hostLocal: false,
