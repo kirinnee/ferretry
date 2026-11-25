@@ -170,3 +170,57 @@ describe('the command bar at v4 parity', () => {
     }
   });
 });
+
+describe('the command bar ranks the best match first (E114, E159, E216, E231)', () => {
+  const typed = async (variant: (typeof VARIANTS)[number], query: string) => {
+    const { tab, close } = await open(variant);
+    await tab.waitForSelector(`${BAR} [role="option"]:has-text("Fixture running")`);
+    await tab.locator(`${BAR} input[role="combobox"]`).fill(query);
+    return { tab, close };
+  };
+
+  for (const variant of VARIANTS) {
+    it(`${variant.name}: puts the ferret named "shivam" above every fuzzy destination, and Enter opens it`, async () => {
+      const { tab, close } = await typed(variant, 'shivam');
+      try {
+        const labels = await options(tab);
+        // A ferret with no task of its own is titled by its folder, with its callsign under it.
+        expect(await tab.locator(`${BAR} [role="option"]`).first().innerText()).toContain('Shivam');
+        expect(labels[0]).toBe('lab');
+        await shotOf(tab, variant, 'search-shivam');
+        await tab.locator(`${BAR} input[role="combobox"]`).press('Enter');
+        expect(await tab.evaluate(() => document.body.getAttribute('data-went'))).toContain('shivam');
+      } finally {
+        await close();
+      }
+    });
+
+    it(`${variant.name}: puts the ferret titled "Cascade failure review" above Subscriptions`, async () => {
+      const { tab, close } = await typed(variant, 'Cascade');
+      try {
+        const labels = await options(tab);
+        expect(labels.indexOf('Cascade failure review')).toBeGreaterThanOrEqual(0);
+        expect(labels.indexOf('Cascade failure review')).toBeLessThan(
+          labels.includes('Subscriptions') ? labels.indexOf('Subscriptions') : Number.MAX_SAFE_INTEGER,
+        );
+        expect(labels[0]).toBe('Cascade failure review');
+        await shotOf(tab, variant, 'search-cascade');
+      } finally {
+        await close();
+      }
+    });
+
+    it(`${variant.name}: offers "Pair a device" as a destination, and Enter opens the pairing journey (E139b)`, async () => {
+      const { tab, close } = await typed(variant, 'pair a device');
+      try {
+        const labels = await options(tab);
+        expect(labels[0]).toBe('Pair a device');
+        await shotOf(tab, variant, 'search-pair');
+        await tab.locator(`${BAR} input[role="combobox"]`).press('Enter');
+        expect(await tab.evaluate(() => document.body.getAttribute('data-went'))).toContain('journey=pair');
+      } finally {
+        await close();
+      }
+    });
+  }
+});

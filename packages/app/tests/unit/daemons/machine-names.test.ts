@@ -57,6 +57,20 @@ describe('distinctDaemonName', () => {
     expect(distinctDaemonName(live, [old, live])).toBe('dev-box');
   });
 
+  test('several old pairings are told apart by the day each was paired, or by number when they share a day', () => {
+    const day1 = paired('a', { pairedAt: Date.UTC(2026, 9, 3, 9) });
+    const day2 = paired('b', { pairedAt: Date.UTC(2026, 9, 4, 9) });
+    const live = paired('c', { pairedAt: Date.UTC(2026, 9, 5, 9) });
+    const all = [day1, day2, live];
+    expect(distinctDaemonName(day1, all)).toBe('dev-box (old pairing, paired 3 Oct)');
+    expect(distinctDaemonName(day2, all)).toBe('dev-box (old pairing, paired 4 Oct)');
+    expect(distinctDaemonName(live, all)).toBe('dev-box');
+    const sameDay = paired('d', { pairedAt: Date.UTC(2026, 9, 3, 15) });
+    const both = [day1, sameDay, live];
+    expect(distinctDaemonName(day1, both)).toBe('dev-box (old pairing 1)');
+    expect(distinctDaemonName(sameDay, both)).toBe('dev-box (old pairing 2)');
+  });
+
   test('two that still share an address are told apart by the day each was paired', () => {
     const first = paired('a', { address: 'http://10.0.0.2:40245', pairedAt: Date.UTC(2026, 9, 3, 12) });
     const second = paired('b', { address: 'http://10.0.0.2:40245', pairedAt: Date.UTC(2026, 9, 3, 12) });

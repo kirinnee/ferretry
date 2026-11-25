@@ -57,7 +57,20 @@ const loopbackTwinMark = (daemon: PairedDaemon, twins: readonly PairedDaemon[]):
  */
 export const distinctDaemonName = (daemon: PairedDaemon, paired: readonly PairedDaemon[]): string => {
   const name = daemonTitle(daemon);
-  if (replacedPairing(daemon, paired)) return `${name} (old pairing)`;
+  if (replacedPairing(daemon, paired)) {
+    // Several pairings a reset left behind would all read "old pairing": tell them apart by the day each was made, or by
+    // their number in pairing order when two share a day.
+    const olds = paired.filter(
+      other => other.daemon !== daemon.daemon && daemonTitle(other) === name && replacedPairing(other, paired),
+    );
+    if (olds.length === 0) return `${name} (old pairing)`;
+    const day = pairedDay(daemon.pairedAt);
+    if (!olds.some(other => pairedDay(other.pairedAt) === day)) return `${name} (old pairing, paired ${day})`;
+    const order = [daemon, ...olds].sort(
+      (left, right) => left.pairedAt - right.pairedAt || left.daemon.localeCompare(right.daemon),
+    );
+    return `${name} (old pairing ${order.indexOf(daemon) + 1})`;
+  }
   const twins = paired.filter(
     other => other.daemon !== daemon.daemon && daemonTitle(other) === name && !replacedPairing(other, paired),
   );

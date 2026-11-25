@@ -616,6 +616,8 @@ const workIsOff = (machine: string): boolean => WORK === 'off' || (WORK === 'spl
 const SLOW = Number(params.get('slow') ?? '0');
 const transportOf = (machine: string) =>
   new FakeTransport((request: TransportRequest): Promise<TransportAnswer> | TransportAnswer => {
+    // `?blocked=1`: the daemon cannot read its plugin list, so no machine page may run (the recovery pages draw).
+    if (request.path === '/v1/plugins' && params.get('blocked') === '1') return json({ error: 'fake failure' }, 500);
     if (request.path === '/v1/plugins' && SLOW > 0) {
       const answer = json(
         inventoryOf(surfaces, workIsOff(machine) ? { agenda: { on: false }, board: { on: false } } : {}),
@@ -645,7 +647,17 @@ const handler: PasskeyHandler = {
   subscribe: () => () => undefined,
 };
 const provision = { handler, Prompts: () => null } as unknown as PasskeyProvision;
-const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
+// `?twins=<n>`: that many OLDER pairings of the same machine at the same address, each paired a day apart (a daemon reset
+// gives the machine a new identity and the browser keeps the old pairing), before the live one.
+const TWINS = Number(params.get('twins') ?? '0');
+const DAY = 86_400_000;
+let clock = 1;
+const list = new DaemonList({ storage: memoryStore(), now: () => clock });
+for (let twin = 1; twin <= TWINS; twin += 1) {
+  clock = twin * DAY;
+  list.add({ daemon: `ws-old${twin}`, machine: 'workshop-host', deviceId: 'dev', address: 'http://127.0.0.1:40245' });
+}
+clock = TWINS === 0 ? 1 : (TWINS + 1) * DAY;
 list.add({ daemon: 'ws', machine: 'workshop-host', deviceId: 'dev', address: 'http://127.0.0.1:40245' });
 if (WORK === 'split')
   list.add({ daemon: 'ws2', machine: 'studio-host', deviceId: 'dev', address: 'http://127.0.0.1:40246' });

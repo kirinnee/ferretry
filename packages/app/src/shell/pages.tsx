@@ -1,4 +1,5 @@
 import { daemonTitle } from '../daemons/daemon-list.ts';
+import { distinctDaemonName } from '../daemons/machine-names.ts';
 import { daemonHomeHref, daemonSettingsHref, DEVICE_SETTINGS_HREF, HOME_HREF } from '../router/routes.ts';
 import { destinationPath, useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
@@ -80,7 +81,7 @@ export function DaemonListPage() {
           <ul>
             {group.daemons.map(daemon => (
               <li key={daemon.daemon}>
-                <Link to={daemonHomeHref(daemon.daemon)}>{daemonTitle(daemon)}</Link>
+                <Link to={daemonHomeHref(daemon.daemon)}>{distinctDaemonName(daemon, snapshot.daemons)}</Link>
                 {' · '}
                 <Link to={daemonSettingsHref(daemon.daemon)}>Settings</Link>
               </li>

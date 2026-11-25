@@ -43,6 +43,8 @@ const FERRETS = [
   summary('zoe', 'zoe', '/work/fixture', 'working', 1, 'Fixture running'),
   summary('kai', 'kai', '/work/release', 'idle', 3, 'Release train'),
   summary('hadi', 'hadi', '/work/docs', 'stopped', 30, 'Docs sweep'),
+  summary('shivam', 'shivam', '/work/lab', 'idle', 40),
+  summary('cascade', 'wren', '/work/lab', 'idle', 41, 'Cascade failure review'),
 ];
 const client = {
   call: async (route: string) => {

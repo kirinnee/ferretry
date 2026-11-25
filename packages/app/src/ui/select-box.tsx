@@ -328,20 +328,35 @@ function SelectPopover({ anchor, onClose, onDismiss, children }: PopoverProps) {
         GAP,
       );
       const above = spot.top < box.top;
-      setPlace({
+      const next: Place = {
         left: spot.left,
         width,
         maxHeight: spot.maxHeight,
         ...(above ? { bottom: viewport.height - (spot.top + spot.maxHeight) } : { top: spot.top }),
-      });
+      };
+      // The same spot again keeps the state (and so the render) as it was: a resize it caused must not cause another.
+      setPlace(held =>
+        held !== null &&
+        held.left === next.left &&
+        held.width === next.width &&
+        held.maxHeight === next.maxHeight &&
+        held.top === next.top &&
+        held.bottom === next.bottom
+          ? held
+          : next,
+      );
     };
     measure();
+    // A filter that narrows the list changes the panel's natural height: where it fits (above or below the button) changes with it.
+    const watch = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
+    if (ref.current !== null) watch?.observe(ref.current);
     const onScroll = (event: Event): void => {
       if (!(event.target instanceof Node && ref.current?.contains(event.target) === true)) measure();
     };
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', onScroll, true);
     return () => {
+      watch?.disconnect();
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', onScroll, true);
     };

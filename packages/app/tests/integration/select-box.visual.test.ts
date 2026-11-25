@@ -353,6 +353,28 @@ for (const variant of [DESKTOP, DESKTOP_DARK]) {
       }
     });
 
+    it('should move from above the button to below it when filtering leaves rows that fit below (L89a)', async () => {
+      const { tab, close } = await open(variant, '&n=60&edge=near');
+      try {
+        await press(tab, variant);
+        await tab.waitForSelector('[role=listbox]');
+        const trigger = await box(tab, '#agent-default');
+        const long = await box(tab, '[data-select-popover]');
+        if (trigger === null || long === null) throw new Error('no boxes');
+        expect(long.bottom, 'the long list opens above').toBeLessThanOrEqual(trigger.top);
+        await tab.keyboard.type('Option 59');
+        await tab.waitForFunction(() => document.querySelectorAll('[role=option]').length === 1);
+        await shotOf(tab, variant, 'filtered-below');
+        const after = await box(tab, '[data-select-popover]');
+        if (after === null) throw new Error('no popover');
+        expect(after.top, 'the one-row list moves under the button').toBeGreaterThanOrEqual(trigger.bottom);
+        expect(after.top - trigger.bottom).toBeLessThanOrEqual(12);
+        expect(after.bottom).toBeLessThanOrEqual(variant.height);
+      } finally {
+        await close();
+      }
+    });
+
     it('should close on a click outside, and on Tab, without a pick', async () => {
       const { tab, close } = await open(variant, '&n=8');
       try {
