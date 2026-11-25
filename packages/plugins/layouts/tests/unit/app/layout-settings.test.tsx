@@ -325,7 +325,7 @@ describe('the Layout tab', () => {
     expect(view.container.querySelector('select')).toBeNull();
     await choose(
       must(view.container.querySelector<HTMLElement>('[role="combobox"][aria-label="Layout"]'), 'layout'),
-      'compact',
+      'Compact',
     );
     await settle();
     await choose(
@@ -334,6 +334,42 @@ describe('the Layout tab', () => {
     );
     await settle();
     expect(script.calls).toEqual(['use compact', 'theme studio']);
+    await view.unmount();
+  });
+
+  test('the choosers name a built-in preset in plain words and draw a preview of the one in use', async () => {
+    const script = scriptedLayouts(
+      readOf(
+        {},
+        listOf({
+          layouts: [
+            { id: 'default', origin: 'built-in' },
+            { id: 'compact', origin: 'built-in' },
+            { id: 'mine', origin: 'saved' },
+          ],
+        }),
+      ),
+    );
+    const view = await mount(<LayoutSettings client={script.client} />);
+    await settle();
+    const layoutBox = must(
+      view.container.querySelector<HTMLElement>('[role="combobox"][aria-label="Layout"]'),
+      'layout',
+    );
+    await interact(() => layoutBox.click());
+    const labels = [...document.querySelectorAll('[role="option"] [data-label]')].map(item => item.textContent);
+    expect(labels).toEqual(['Default', 'Compact', 'mine (saved)']);
+    await interact(() => layoutBox.click());
+    const row = (name: string) => must(view.container.querySelector<HTMLElement>(`[data-setting-row="${name}"]`), name);
+    expect(row('Layout').textContent).toContain('Default — the layout in use');
+    expect(row('Layout').textContent).not.toContain('default —');
+    expect(row('Layout').querySelector('[data-sp-label]')?.getAttribute('data-sp-label')).toBe('Layout: Default');
+    expect(row('Theme').querySelector('[data-sp-label]')?.getAttribute('data-sp-label')).toBe('Theme: Default');
+    // Choosing another layout moves its preview with it.
+    script.held = compactRead();
+    await choose(layoutBox, 'Compact');
+    await settle();
+    expect(row('Layout').querySelector('[data-sp-label]')?.getAttribute('data-sp-label')).toBe('Layout: Compact');
     await view.unmount();
   });
 

@@ -31,6 +31,14 @@ import { additivesFixture } from './additives-fixture.ts';
  * are inline literals: a change to any of them is a change to what a launch does, and must be made on purpose.
  */
 
+/** What the owner is told for each closed runner refusal: the next thing to check, never a bare code. */
+const UNAVAILABLE_SENTENCE =
+  'the runner could not be reached on this machine, so the ferret was not started: check that it is installed and running, then try again';
+const FAILED_SENTENCE =
+  'the runner could not open a pane for the ferret, so it was not started: a pane with its name may still be running (stop it), or the runner refused the launch (see the daemon log), then try again';
+const LIMITS_SENTENCE =
+  'the machine\x27s limits left no room for the ferret, so it was not started: stop another ferret or raise the cap in limits.yaml, then try again';
+
 const NOW = new Date('2026-11-16T10:00:00.000Z');
 const OLD = 'conv-old';
 const OTHER = parseSessionId('mw7bp89h-61f11260');
@@ -60,7 +68,7 @@ class LoggedRunner extends FakeRunner {
 
 /** A harness that logs what it is asked, and can disprove a conversation or refuse to start. */
 class LoggedHarness extends FakeHarness {
-  refuse: 'real_harness' | 'unavailable' | undefined;
+  refuse: 'real_harness' | 'unavailable' | 'failed' | 'limits' | undefined;
   prepareFails: 'refusal' | undefined;
   declare hasConversation: ((spec: LaunchSpec, conversation: string) => Promise<boolean | undefined>) | undefined;
   constructor(private readonly log: string[]) {
@@ -541,7 +549,29 @@ const ROWS: readonly Row[] = [
     arrange: f => {
       f.harness.refuse = 'unavailable';
     },
-    answer: { ok: false, code: 'runner_unavailable', reason: 'the harness could not start: unavailable' },
+    answer: { ok: false, code: 'runner_unavailable', reason: UNAVAILABLE_SENTENCE },
+    log: 'save(starting) > session.prepare > session.carry > saveTokens(1) > harness.prepareHome > vault.childEnvironment > launchEnvironment.write > bound.verify > lease.claim(conv-old) > harness.resume(conv-old) > saveTokens(1) > save(stopped) > endWait > lease.release',
+    state: 'stopped',
+  },
+  {
+    name: 'the runner could not open a pane (a bare failed)',
+    options: { resumable: true },
+    kind: 'resume',
+    arrange: f => {
+      f.harness.refuse = 'failed';
+    },
+    answer: { ok: false, code: 'failed', reason: FAILED_SENTENCE },
+    log: 'save(starting) > session.prepare > session.carry > saveTokens(1) > harness.prepareHome > vault.childEnvironment > launchEnvironment.write > bound.verify > lease.claim(conv-old) > harness.resume(conv-old) > saveTokens(1) > save(stopped) > endWait > lease.release',
+    state: 'stopped',
+  },
+  {
+    name: 'the runner refused the launch for the machine\x27s limits',
+    options: { resumable: true },
+    kind: 'resume',
+    arrange: f => {
+      f.harness.refuse = 'limits';
+    },
+    answer: { ok: false, code: 'failed', reason: LIMITS_SENTENCE },
     log: 'save(starting) > session.prepare > session.carry > saveTokens(1) > harness.prepareHome > vault.childEnvironment > launchEnvironment.write > bound.verify > lease.claim(conv-old) > harness.resume(conv-old) > saveTokens(1) > save(stopped) > endWait > lease.release',
     state: 'stopped',
   },

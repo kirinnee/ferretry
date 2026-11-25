@@ -112,6 +112,68 @@ describe('the Logins list: a long login name never runs under the switch', () =>
   }
 });
 
+describe('L277: a login name reads in the body font and breaks only at a word break', () => {
+  for (const viewport of VIEWPORTS) {
+    for (const theme of THEMES) {
+      it(`names are not monospace and no line breaks inside a word (${viewport.name}, ${theme})`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          deviceScaleFactor: viewport.phone ? 2 : 1,
+          hasTouch: viewport.phone,
+          isMobile: viewport.phone,
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const tab = await context.newPage();
+        try {
+          await tab.goto(`${origin}/?theme=${theme}&long=1`);
+          await tab.locator('[data-login-card-wrap]').first().waitFor({ state: 'visible' });
+          await tab.waitForTimeout(200);
+          const facts = await tab.evaluate(() => {
+            const body = getComputedStyle(document.body).fontFamily;
+            return Array.from(document.querySelectorAll('[data-login-card-wrap]')).map(card => {
+              const name = card.querySelector('[data-login-name]') as HTMLElement;
+              // The text split into the lines it is drawn on (a character's top says which line it sits on).
+              const lines: string[] = [];
+              let lastTop = Number.NaN;
+              const range = document.createRange();
+              const walker = document.createTreeWalker(name, NodeFilter.SHOW_TEXT);
+              for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+                const text = node as Text;
+                for (let i = 0; i < text.length; i++) {
+                  range.setStart(text, i);
+                  range.setEnd(text, i + 1);
+                  const rect = range.getClientRects()[0];
+                  if (rect === undefined) continue;
+                  const top = Math.round(rect.top);
+                  if (top !== lastTop) lines.push('');
+                  lastTop = top;
+                  lines[lines.length - 1] = (lines[lines.length - 1] ?? '') + (text.data[i] ?? '');
+                }
+              }
+              // A break is at a word when the line it ends follows a space, a hyphen, an @ or a dot.
+              const mid = lines.slice(0, -1).filter(line => !/[\s\-@.]$/u.test(line));
+              return {
+                id: card.getAttribute('data-login-card-wrap') ?? '',
+                family: getComputedStyle(name).fontFamily,
+                body,
+                lines,
+                mid,
+              };
+            });
+          });
+          for (const fact of facts) expect(fact.family, fact.id).toBe(fact.body);
+          expect(facts.flatMap(fact => fact.mid.map(line => `${fact.id}: ${line}`))).toEqual([]);
+        } finally {
+          await context.close();
+        }
+      });
+    }
+  }
+});
+
 describe('the Logins list: each card has its switch and its Remove', () => {
   for (const viewport of VIEWPORTS) {
     for (const theme of THEMES) {

@@ -76,7 +76,7 @@ const pick = async (box: HTMLElement, label: string): Promise<void> => {
 };
 
 const NEEDS_UPDATE =
-  'Auto-read needs a newer Ferretry on your computer. Until you update the Ferretry app on your computer, nothing is read on its own, but Read aloud on a message still works.';
+  'Auto-read needs a newer Ferretry on your computer. Until you update the Ferretry app on your computer, nothing is read on its own. To have a reply read aloud now, turn on “Show Read aloud on each reply” below, then tap Read aloud on a message.';
 
 const trigger = (root: HTMLElement) => byId<HTMLButtonElement>(root, 'auto-read-voice');
 const radios = (root: HTMLElement) => [...root.querySelectorAll<HTMLInputElement>('.fy-ar-list input[type="radio"]')];
@@ -108,6 +108,13 @@ describe('<AutoReadSettings>', () => {
     const r = rig();
     const root = await show(r, { olderMachine: true });
     expect(root.querySelector('[data-auto-read-needs-update]')?.textContent).toBe(NEEDS_UPDATE);
+    // The note names the very switch the row below carries, so the two cannot drift apart.
+    const switches = [...root.querySelectorAll<HTMLElement>('[role="switch"]')];
+    const labels = switches.map(
+      item => document.getElementById(item.getAttribute('aria-labelledby') ?? '')?.textContent,
+    );
+    expect(labels).toContain('Show Read aloud on each reply');
+    expect(NEEDS_UPDATE).toContain(`“${'Show Read aloud on each reply'}”`);
     expect(root.textContent?.toLowerCase()).not.toContain('daemon');
     await interact(() => must(root.querySelector<HTMLElement>('[role="switch"]'), 'switch').click());
     expect(root.querySelector('[data-auto-read-needs-update]')?.textContent).toBe(NEEDS_UPDATE);

@@ -1690,20 +1690,49 @@ body {
   overflow: visible;
 }
 /* A setting row lays out by the width of the PANEL it sits in, not the window's: a 768px window with the drawer and the Settings list
-   open leaves a panel of 212px, where a wide control (a segmented one, 288px) and the (i) beside the name cannot share a line. Below
-   520px a wide control takes its own line; below 360px every control and the (i) keep their own size and wrap rather than shrink to 0. */
+   open leaves a panel of 212px, where a wide control (a segmented one, 288px) and the (i) beside the name cannot share a line, and a
+   resized drawer leaves a 1440px window with a cramped panel. The row is the container; its parts follow its width in three steps:
+   600px and over the name column is 40% (never under 220px) and a preview sits beside the control; under 600px the name takes what is
+   left and a preview takes its own line; under 520px a wide control takes its own line too and every other control keeps its size;
+   under 360px the (i) drops under a wide control instead of squeezing it. */
 .fy-setting-row {
   container-type: inline-size;
 }
+.fy-setting-row [data-setting-label] {
+  min-width: 0;
+  flex: 1 1 10rem;
+}
+.fy-setting-row [data-setting-preview-slot] {
+  flex-basis: 100%;
+}
+@container (min-width: 600px) {
+  .fy-setting-row [data-setting-label] {
+    min-width: min(220px, 100%);
+    flex: 0 0 40%;
+  }
+  .fy-setting-row [data-setting-preview-slot] {
+    flex-basis: auto;
+    margin-inline-start: 0.5rem;
+  }
+  .fy-setting-row [data-setting-controls][data-has-preview] {
+    flex: none;
+  }
+}
 @container (max-width: 519.98px) {
+  .fy-setting-row [data-setting-label][data-wide] {
+    flex-basis: 100%;
+  }
   .fy-setting-row [data-setting-controls][data-wide] {
     flex-basis: 100%;
   }
-}
-@container (max-width: 359.98px) {
   .fy-setting-row [data-setting-controls]:not([data-wide]) {
     flex: none;
   }
+  .fy-setting-row [data-setting-controls][data-wide] [data-setting-spacer] {
+    display: none;
+  }
+}
+@container (max-width: 359.98px) {
   /* The (i) drops under a wide control instead of squeezing it (a segmented control's labels never shrink). */
   .fy-setting-row [data-setting-controls][data-wide] {
     flex-wrap: wrap;

@@ -98,6 +98,7 @@ import {
 import { effectiveMode, type FerretRegistry, type FerretFilter } from '../registry/registry.ts';
 import { launchMode } from '../session/peers/fleet.ts';
 import { STOP_UNCONFIRMED, withStampedLabel } from './restart-guards.ts';
+import { runnerRefusal } from './runner-refusal.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { resumeTurnAuthor } from '../session/resume/policy.ts';
 import type { LaunchGate, ResumeActor } from '../session/resume/types.ts';
@@ -2375,8 +2376,7 @@ export class FerretsService implements FerretsApi {
     if (!started.ok) {
       // A test-mode daemon refused to reach a real harness: the closed code becomes a sentence a test log can act on.
       if (started.error === 'real_harness') return failed('refused', REAL_HARNESS_REFUSED);
-      const code = started.error === 'unavailable' ? 'runner_unavailable' : 'failed';
-      return failed(code, `the harness could not start: ${started.error}`);
+      return runnerRefusal(started.error);
     }
     // The pane is open: its conversation moves onto the pane's own pid. FAIL CLOSED: the caller's cleanup stops the
     // pane (keeping its handle, and so this lease, when it cannot) before anything else can write the conversation.

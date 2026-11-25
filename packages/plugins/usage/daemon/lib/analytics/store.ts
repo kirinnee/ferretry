@@ -83,6 +83,8 @@ export interface AnalyticsIndexStore {
   forget(ids: readonly string[]): void;
   /** Every stored row, for the query surface to filter and aggregate. */
   rows(): readonly AnalyticsStoredSession[];
+  /** One stored row by its session id: a keyed read, never a scan. `undefined` when the id holds no row. */
+  row(id: string): AnalyticsStoredSession | undefined;
   status(): AnalyticsStoreStatus;
   /** Discard the whole materialization. The next pass rebuilds it from the durable records. */
   drop(): void;

@@ -282,3 +282,50 @@ describe('the layout previews', () => {
     }
   });
 });
+
+describe('L281b: the Layout and Theme choosers', () => {
+  for (const variant of VARIANTS) {
+    for (const painted of [false, true]) {
+      it(`${variant.name}${painted ? ' painted theme' : ''}: plain-words labels, and a preview beside each chooser`, async () => {
+        const { tab, problems, close } = await open(variant, painted ? '&painted=1' : '');
+        try {
+          for (const row of ['Layout', 'Theme'] as const) {
+            const box = await previewOf(tab, row).first().boundingBox();
+            expect(Math.round(box?.width ?? 0), `${row} preview width`).toBe(160);
+            expect(Math.round(box?.height ?? 0), `${row} preview height`).toBe(100);
+            // The chooser shows the plain word, not the stored id.
+            const shown = await tab.locator(`[data-setting-row="${row}"] [role="combobox"]`).first().textContent();
+            expect(shown, `${row} chooser`).toBe(row === 'Theme' && painted ? 'dusk (saved)' : 'Default');
+            await previewOf(tab, row).first().scrollIntoViewIfNeeded();
+            await shot(
+              previewOf(tab, row).first(),
+              variant,
+              `${row.toLowerCase()}${painted ? '-painted' : ''}-preview`,
+            );
+          }
+          if (painted) {
+            // One pane for each mode the theme paints, each in that mode's own colours.
+            const panes = tab.locator('[data-setting-row="Theme"] .fy-ls-theme-pane');
+            expect(await panes.count()).toBe(2);
+            const backgrounds = await panes.evaluateAll(nodes => nodes.map(n => getComputedStyle(n).backgroundColor));
+            expect(backgrounds).toEqual(['rgb(244, 239, 230)', 'rgb(23, 21, 31)']);
+          }
+          // The list of layouts reads in plain words too.
+          const combobox = tab.locator('[data-setting-row="Layout"] [role="combobox"]').first();
+          await combobox.click();
+          const labels = await tab.locator('[role="option"] [data-label]').allTextContents();
+          expect(labels.slice(0, 3)).toEqual(['Default', 'Compact', 'Focus']);
+          expect(labels).toContain('Sidebar left');
+          await tab.keyboard.press('Escape');
+          const overflow = await tab.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          );
+          expect(overflow, 'no sideways scroll').toBeLessThanOrEqual(0);
+          expect(problems).toEqual([]);
+        } finally {
+          await close();
+        }
+      });
+    }
+  }
+});

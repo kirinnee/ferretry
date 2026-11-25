@@ -502,6 +502,19 @@ describe('FleetCredentialsService — signing out', () => {
     });
   });
 
+  it('should mark a login none of whose harness commands is installed, and no other', async () => {
+    const missing = await serviceOf({ locate: () => undefined }).service.list();
+    should(missing.logins.every(login => login.cliMissing === true)).equal(true);
+    const present = await serviceOf({}).service.list();
+    should(present.logins.some(login => 'cliMissing' in login)).equal(false);
+    // A login is driven by its own harness: Codex installed does not help a Claude login.
+    const onlyCodex = await serviceOf({
+      locate: harness => (harness === 'codex' ? '/usr/bin/codex' : undefined),
+    }).service.list();
+    should(onlyCodex.logins.find(login => login.id === 'codex-team')?.cliMissing).equal(undefined);
+    should(onlyCodex.logins.find(login => login.id === 'claude-you')?.cliMissing).equal(true);
+  });
+
   it('should say the harness command is not installed rather than run nothing', async () => {
     const { service, runs } = serviceOf({ locate: () => undefined });
     should(await service.signOut('claude-work')).match({

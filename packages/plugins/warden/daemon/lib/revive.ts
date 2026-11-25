@@ -29,7 +29,7 @@
 
 import type { WardenReviveConfig } from './protocol.ts';
 import { focusTaskBrief, type WardenFocusTask } from './focus-task.ts';
-import { instantMs } from './time.ts';
+import { instantMs, pacificOf } from './time.ts';
 
 /** One journal event, as the revive reads it. */
 export interface ReviveEvent {
@@ -153,7 +153,7 @@ export function classifyEnd(status: string, events: readonly ReviveEvent[]): End
 export function causeText(cause: ReviveCause): string {
   switch (cause.kind) {
     case 'tmux_crashed':
-      return 'the tmux server crashed';
+      return 'several terminals ended together';
     case 'terminal_gone':
       return 'its terminal disappeared';
     case 'signal':
@@ -176,7 +176,11 @@ export function causeKey(cause: ReviveCause): string {
   }
 }
 
-const clock = (at: string): string => `${at.slice(0, 10)} ${at.slice(11, 16)} UTC`;
+/** When it happened, the way the owner reads times (Pacific, `Oct 30, 4:59 AM PDT`); an instant that does not parse is said as it came. */
+const clock = (at: string): string => {
+  const ms = instantMs(at);
+  return ms === undefined ? at : pacificOf(ms);
+};
 
 /**
  * What a revived session is told.
@@ -367,8 +371,9 @@ function ancestorStopped(id: string, fleet: ReadonlyMap<string, ReviveFleetEntry
  * `waveSize`: interactive sessions first (a person may be waiting), then leads, then the earliest to die; a
  * child never shares a wave with, or precedes, a lead that is itself being revived.
  *
- * In a cascade a "terminal gone" death is promoted to "the tmux server crashed": three terminals vanishing
- * together is one cause, and saying so is what the session's own notice should read.
+ * In a cascade a "terminal gone" death is promoted to `tmux_crashed`: three terminals vanishing
+ * together is one cause. It is an inference, so the notice says what was seen ("several terminals ended together"), not
+ * that the tmux server crashed.
  */
 export function planRevives(
   subjects: readonly ReviveSubject[],

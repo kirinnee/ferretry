@@ -360,3 +360,14 @@
     }
   }
 }
+
+/* L293c: where the form is one column on a desktop window (a settings panel narrower than the picture's breakpoint), Finish
+   starts at the answer column's edge at its own width instead of spanning the whole card. A phone keeps it full width: it is
+   the thumb's target there. The Start over / Cancel row under it stays the field's full width. */
+@media (min-width: 768px) {
+  @container (max-width: 559.98px) {
+    .fy-sd-form [data-sign-in-actions] > button[type='submit'] {
+      align-self: flex-start;
+    }
+  }
+}
