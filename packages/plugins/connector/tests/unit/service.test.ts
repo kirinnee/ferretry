@@ -200,8 +200,46 @@ describe('who is the rate-limit source of an own-address arrival', () => {
     expect(doorPeer(headers('203.0.113.9'))).toBe('203.0.113.9');
     expect(doorPeer(headers('2001:db8:1:2:3:4:5:6'))).toBe('2001:db8:1:2::/64');
     expect(doorPeer(headers('2001:db8:1:2:ffff::1'))).toBe('2001:db8:1:2::/64');
+    expect(doorPeer(headers('::ffff:203.0.113.9'))).toBe('203.0.113.9');
+    expect(doorPeer(headers('::ffff:300.1.1.1'))).toBe('door');
     expect(doorPeer(headers('not an address'))).toBe('door');
     expect(doorPeer(headers())).toBe('door');
     expect(door('GET', '/').headers.get('cf-connecting-ip')).toBeUndefined();
+  });
+});
+
+describe('the redirect URIs the owner allowed apply live, and the boot notice says where it is served', () => {
+  const register = async (w: ReturnType<typeof world>, redirect: string) => {
+    const [oauth] = w.service.handlers;
+    const answer = await oauth?.handle(
+      door('POST', '/oauth/register', {
+        contentType: 'application/json',
+        body: JSON.stringify({
+          client_name: 'Inspector',
+          redirect_uris: [redirect],
+          token_endpoint_auth_method: 'none',
+        }),
+      }),
+    );
+    return answer?.status;
+  };
+
+  test('an extra redirect URI is accepted while on, and refused again when it leaves the file', async () => {
+    const w = world({
+      enabled: true,
+      publicUrl: 'https://mcp.example.com',
+      port: 7481,
+      extraRedirectUris: ['http://localhost:6274/cb'],
+    });
+    expect(await register(w, 'http://localhost:6274/cb')).toBe(201);
+    expect(await register(w, 'http://localhost:9999/cb')).toBe(400);
+    w.config.set({ enabled: true, publicUrl: 'https://mcp.example.com', port: 7481 });
+    expect(await register(w, 'http://localhost:6274/cb')).toBe(400);
+  });
+
+  test('over the tunnel the notice says so, with no listener named', () => {
+    expect(world({ enabled: true }).service.bootNotice()).toBe(
+      'connector on, served over the built-in tunnel once it has a hostname',
+    );
   });
 });

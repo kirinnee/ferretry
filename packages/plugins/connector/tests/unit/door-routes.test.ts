@@ -39,6 +39,15 @@ async function connect(w: ReturnType<typeof world>) {
   return { flow, waitingPage, approved, redirect, callback, token, tokenBody };
 }
 
+describe('a door path no handler owns', () => {
+  test('is the same 404 as an unrouted path, while serving', async () => {
+    const w = world(ON);
+    const answer = await serve(w, { method: 'GET', path: '/nothing/here' });
+    expect(answer.status).toBe(404);
+    expect(JSON.parse(answer.body)).toMatchObject({ code: 'unknown_route', path: '/nothing/here' });
+  });
+});
+
 describe('every door route answers 404 when the connector is off, exactly as an unrouted path does', () => {
   test('all eleven declared door paths', async () => {
     const w = world();
