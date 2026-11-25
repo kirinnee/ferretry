@@ -240,6 +240,8 @@ export const LESSONS_MINER_GAP =
  */
 export const FerretLessonsSchema = z.strictObject({
   ferretId: z.string().min(1),
+  /** The ferret's name when it was last recorded, so a ferret that is gone is still named. */
+  name: z.string().min(1).optional(),
   passive: z.boolean(),
   since: InstantSchema,
   setBy: z.enum(['default', 'owner']),
