@@ -4,7 +4,6 @@ import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { DEVICE_SETTINGS_HREF } from '../../../src/router/routes.ts';
 import { RelaySessionError } from '../../../src/session/session-client.ts';
 import { RELAY_CLOSE_CODES } from '../../../src/session/wire/index.ts';
-import { UNREADABLE_INVENTORY_SENTENCE } from '../../../src/client/sentences.ts';
 import { App } from '../../../src/shell/app.tsx';
 import type { ShellWindow } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
@@ -73,8 +72,8 @@ describe('a machine whose plugin list could not be read through its carrier', ()
   test('the block says so, names the carrier’s cause, and offers the Connection setting', async () => {
     const view = await render();
     const main = view.container.querySelector('main')?.textContent ?? '';
-    expect(main).toContain(UNREADABLE_INVENTORY_SENTENCE);
-    expect(main).toContain(`Why: ${CAUSE}`);
+    expect(view.container.querySelector('h1')?.textContent).toBe("Can't read what laptop offers right now");
+    expect(main).toContain(`Reference: ${CAUSE.replace(/[.\s]+$/u, '')}`);
     const link = view.container.querySelector('[data-whole-daemon-connection] a') as HTMLAnchorElement;
     expect(link.textContent).toBe('Connection settings');
     expect(link.getAttribute('href')).toBe(DEVICE_SETTINGS_HREF);
