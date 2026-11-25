@@ -10,7 +10,7 @@
  * Everything in this file is pure and shared by both ends of provisioning — the Worker that answers
  * and the daemon that asks — so the two cannot disagree about a shape or a signed byte. The Cloudflare
  * API itself is an adapter concern and is not here; the ingress document is, because what a tunnel
- * forwards is part of the contract (it forwards one route and nothing else).
+ * forwards is part of the contract (it forwards the session route and the connector's fixed paths, nothing else).
  */
 
 import { concatBytes, fromBase64UrlFixed, lengthPrefixed, toBase64Url, utf8Bytes } from '../wire/binary.ts';
@@ -104,17 +104,31 @@ export interface TunnelIngressRule {
 }
 
 /**
- * WHAT A TUNNEL FORWARDS: one route, to one loopback port, and a 404 for everything else.
+ * THE PATHS OF THE DAEMON'S CLAUDE CONNECTOR (`docs/mcp-connector.md`), as one anchored regular expression: exactly
+ * the paths its public door answers, and nothing under them. Cloudflare matches an ingress `path` as a regex, so this
+ * is one rule rather than nine.
  *
- * The path is anchored to this daemon's own direct-session route (§4), so the edge refuses every other
- * path before it reaches the machine — the daemon's tunnel listener refuses them too, so this is the
- * outer of two walls rather than the only one. The service is ALWAYS `http://127.0.0.1:<port>`: the
- * port is the daemon's to say, the host never is, so a provision request cannot point a tunnel at
- * anything but the daemon's own loopback listener.
+ * Forwarding them is not exposing them: the daemon's tunnel listener answers `404` to every one of them unless the
+ * owner has switched the connector on and it has no address of the operator's own, and every handler behind them
+ * accepts only a connector token. The edge cannot know that, so it forwards the same set for every tunnel.
+ */
+export const TUNNEL_CONNECTOR_PATH_PATTERN =
+  '^/(mcp|oauth/(register|authorize|authorize/wait|token|revoke)|\\.well-known/oauth-(protected-resource(/mcp)?|authorization-server))$';
+
+/**
+ * WHAT A TUNNEL FORWARDS: two kinds of route, to one loopback port, and a 404 for everything else.
+ *
+ * The first is anchored to this daemon's own direct-session route (§4), the second is the connector's fixed path set
+ * ({@link TUNNEL_CONNECTOR_PATH_PATTERN}) — so the edge refuses every other path before it reaches the machine, and
+ * the daemon's tunnel listener refuses them too, so this is the outer of two walls rather than the only one. The
+ * service is ALWAYS `http://127.0.0.1:<port>`: the port is the daemon's to say, the host never is, so a provision
+ * request cannot point a tunnel at anything but the daemon's own loopback listener.
  */
 export function tunnelIngress(hostname: string, daemonId: string, originPort: number): readonly TunnelIngressRule[] {
+  const service = `http://127.0.0.1:${originPort}`;
   return [
-    { hostname, path: `^/v1/rendezvous/${daemonId}/client$`, service: `http://127.0.0.1:${originPort}` },
+    { hostname, path: `^/v1/rendezvous/${daemonId}/client$`, service },
+    { hostname, path: TUNNEL_CONNECTOR_PATH_PATTERN, service },
     { service: 'http_status:404' },
   ];
 }
