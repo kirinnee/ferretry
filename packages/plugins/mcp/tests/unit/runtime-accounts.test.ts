@@ -236,6 +236,7 @@ async function launchSource(): Promise<LaunchPartSource> {
     },
     hooks: {} as never,
     kernel: {
+      identity: { binaries: { client: 'fy' } },
       config: { collection: () => new Map(Object.entries(ITEMS)) },
       clock: { nowMs: () => 0 },
       roots: { root: () => ({ resolve: () => ({ ok: false }) }) },

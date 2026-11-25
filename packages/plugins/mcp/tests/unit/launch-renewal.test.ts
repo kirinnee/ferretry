@@ -49,6 +49,7 @@ async function signIn(w: World): Promise<void> {
 function source(w: World, project: ProjectMcpLaunchShare = NO_PROJECT) {
   const seen: { tokenRequests: number; access: string | undefined }[] = [];
   const launch = new McpLaunchParts({
+    client: 'fy',
     items: () => ITEMS,
     held: async () => {
       seen.push({ tokenRequests: w.provider.tokenRequests.length, access: w.secrets.entries.get(NAMES.access) });
@@ -100,7 +101,12 @@ describe('MCP launch renewal', () => {
     expect(parts.find(part => part.kind === 'mcp' && part.name === 'linear')).toEqual({
       kind: 'mcp',
       name: 'linear',
-      config: { type: 'http', url: SERVER, headers: { Authorization: `Bearer \${${NAMES.variable}}` } },
+      config: {
+        type: 'http',
+        url: SERVER,
+        headers: { Authorization: `Bearer \${${NAMES.variable}}` },
+        headersHelper: `fy mcp token ${NAMES.variable}`,
+      },
     });
     expect(parts.find(part => part.kind === 'mcp' && part.name === 'lint')).toEqual({
       kind: 'mcp',
@@ -145,7 +151,7 @@ describe('MCP launch renewal', () => {
     expect(unsigned.find(part => part.kind === 'mcp' && part.name === 'linear')).toEqual({
       kind: 'mcp',
       name: 'linear',
-      config: { url: SERVER, auth: 'oauth' },
+      config: { type: 'http', url: SERVER },
     });
   });
 
@@ -164,6 +170,21 @@ describe('MCP launch renewal', () => {
     expect((await w.service.connections())[0]?.state).toBe('needs-sign-in');
     expect(parts.map(part => (part.kind === 'mcp' ? part.name : part.kind))).toEqual(['linear', 'lint', 'env']);
     expect(envOf(parts)).toEqual({ [NAMES.variable]: optionalSecretReference(NAMES.access) });
+    // The token route reads this: the sign-in whose refresh was rejected, by its access secret's NAME.
+    expect(await w.service.signInRequired(NAMES.access)).toBe('linear');
+    expect(await w.service.signInRequired(mcpOAuthSecretNames('other', SERVER).access)).toBeUndefined();
+  });
+
+  test('a sign-in that is fine, or a damaged record, is never reported as needing a new one', async () => {
+    // Arrange
+    const fine = world({ expiresIn: 3600 });
+    await signIn(fine);
+    const damaged = world();
+    damaged.state.failure = new Error('damaged');
+
+    // Act / Assert
+    expect(await fine.service.signInRequired(NAMES.access)).toBeUndefined();
+    expect(await damaged.service.signInRequired(NAMES.access)).toBeUndefined();
   });
 
   test('a refresh that cannot reach the issuer, or a damaged sign-in record, never refuses the launch', async () => {
@@ -212,6 +233,7 @@ describe('MCP launch renewal', () => {
         type: 'http',
         url: 'https://docs.example.com/mcp',
         headers: { Authorization: `Bearer \${${docs.variable}}` },
+        headersHelper: `fy mcp token ${docs.variable}`,
         scope: 'local',
         project: '/work/app',
       },
@@ -294,6 +316,7 @@ describe('MCP launch renewal through the daemon half', () => {
       },
       hooks: {} as never,
       kernel: {
+        identity: { binaries: { client: 'fy' } },
         config: { collection: () => ITEMS },
         clock: { nowMs: () => w.clock.at + 60_000 },
         state,
@@ -329,5 +352,27 @@ describe('MCP launch renewal through the daemon half', () => {
     expect(leaks(w.provider, parts, logged)).toEqual([]);
     expect(JSON.stringify(parts)).not.toContain('fake-access-value');
     expect(logged.join('\n')).not.toContain('fake-access-value');
+  });
+});
+
+describe('the headersHelper command', () => {
+  test('runs the client binary the daemon was given, so a renamed product writes its own name', async () => {
+    const w = world({ expiresIn: 3600 });
+    await signIn(w);
+    const launch = new McpLaunchParts({
+      client: 'renamed',
+      items: () => ITEMS,
+      held: async () => new Set(w.secrets.entries.keys()),
+      renewal: w.service,
+      mcpFormat: () => 'json',
+      layered: async () => new Set(ITEMS.keys()),
+      project: async () => NO_PROJECT,
+    });
+
+    const parts = await launch.parts(SPEC);
+
+    expect(parts.find(part => part.kind === 'mcp' && part.name === 'linear')).toMatchObject({
+      config: { headersHelper: `renamed mcp token ${NAMES.variable}` },
+    });
   });
 });

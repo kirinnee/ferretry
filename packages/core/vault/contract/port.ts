@@ -61,6 +61,24 @@ export interface SecureCopyCommandOutcome {
 export type PutNewOutcome = 'stored' | 'exists';
 
 /**
+ * THE ONE GETTER (docs/secrets.md › The one exception), and so NOT a member of {@link VaultApi}: a type that every caller
+ * holds cannot carry a getter. Only MCP may declare `permissions.revealMinted` (the kernel's boot refuses any other
+ * plugin that does) and is handed it; it reads {@link mintedValueOf} to find out. It answers the current value of
+ * a secret the Vault's mint ledger says THIS caller filed (`put` / `putNew`), or `undefined` for a name not held, an
+ * owner's value, another plugin's and a value written since by anybody else. It adds nothing the caller did not already
+ * hold when it minted the value. A store that cannot be read raises.
+ */
+export interface MintedValueReader {
+  mintedValue(name: SecretName): Promise<string | undefined>;
+}
+
+/** The getter, for the one plugin the Vault handed it; `undefined` for every other caller. */
+export const mintedValueOf = (api: VaultApi): MintedValueReader | undefined =>
+  typeof (api as Partial<MintedValueReader>).mintedValue === 'function'
+    ? (api as VaultApi & MintedValueReader)
+    : undefined;
+
+/**
  * The Vault port (§2.2, §3.7): secrets by NAME only. There is no getter, and none may be added (it would delete the
  * feature): `run` executes a command with the values in that child's environment and returns masked output;
  * `authorizeFetch` places ONE named secret on ONE request to an allowlisted host and returns only what came back.

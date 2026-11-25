@@ -245,6 +245,15 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'loginId',
     detail: { action: 'login-test' },
   },
+  // A running ferret's renewed MCP sign-in token (docs/secrets.md › The one exception): the ferret and the variable's NAME.
+  {
+    method: 'POST',
+    path: '/v1/ferrets/:ferretId/mcp/token',
+    event: 'secrets.used',
+    subject: 'ferretId',
+    responseNames: 'variable',
+    detail: { action: 'mcp-token' },
+  },
   {
     method: 'POST',
     path: '/v1/secrets',

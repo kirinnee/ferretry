@@ -4,6 +4,7 @@ import { milliseconds } from '@ferretry/std';
 import manifest from '../manifest.ts';
 import { serveTools } from './serve.ts';
 import { clientServersGateway, McpServersController } from './lib/servers.ts';
+import { McpTokenController } from './lib/token.ts';
 
 const on = (invocation: VerbInvocation, name: string): boolean => {
   const value = invocation.options[name];
@@ -29,8 +30,10 @@ export default implementCli(manifest, {
       keys: MCP_ITEM_KEYS,
     });
     const servers = new McpServersController(clientServersGateway(client), io, env?.FY_SESSION_ID);
+    const token = new McpTokenController(client, io, env?.FY_SESSION_ID);
     return {
       verbs: {
+        'mcp token': async invocation => await token.token(invocation.args[0]),
         'mcp serve': async () =>
           await serveTools({
             client,

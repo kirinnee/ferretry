@@ -2,7 +2,7 @@ import type { ConfigCollectionDef, FerretId } from '@ferretry/kernel/contract';
 import { isKnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import type { CatalogMcpProvider, McpComponentRecord } from '@ferretry/plugin-catalogs/contract';
-import type { SecretName, SecretSummary } from '@ferretry/core-vault/contract';
+import { mintedValueOf, type SecretName, type SecretSummary } from '@ferretry/core-vault/contract';
 import type { RuntimeId } from '@ferretry/plugin-runtimes/contract';
 import {
   MCP_CONFIG,
@@ -40,6 +40,8 @@ import { parseHarnessDocument } from './lib/inventory/parse-document.ts';
 import { accountsOf, componentsOf, layeredMcp } from './lib/inventory/runtime-wiring.ts';
 import { mcpCatalogRuntime } from './lib/catalog-runtime.ts';
 import { McpLaunchParts } from './lib/launch-parts.ts';
+import { FerretMcpTokens } from './features/token/service.ts';
+import { tokenRoutes } from './features/token/routes.ts';
 import { hostImportPut, kernelConfigWrite } from './features/host-import/index.ts';
 import { mcpComponentSource } from './lib/profile-component-source.ts';
 import { McpOAuthService } from './lib/oauth/service.ts';
@@ -196,7 +198,8 @@ export default implementDaemon(manifest, {
       renewal: oauth,
       mcpFormat: harness => ferrets.harnessFacts(harness)?.mcp.format,
       layered: async runtime => await layeredMcp(runtimes.current(), runtime),
-      project: async spec => {
+      client: kernel.identity.binaries.client,
+      project: async (spec, options) => {
         // The ferret folders are the read roots, so they are read fresh before the launch's own folder is.
         await refreshOwners();
         // The launch is its runtime's account when Runtimes published one (its home, as a v4 launch read it); else its
@@ -209,14 +212,14 @@ export default implementDaemon(manifest, {
             own !== undefined
               ? [own]
               : isKnownHarnessKey(spec.harness)
-                ? [{ runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home }]
+                ? [{ runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home ?? '' }]
                 : [],
           folders,
           documents,
           approvals: harnessProjectApprovals({ 'claude-code': () => claudeCode.current() }, spec.harness, spec.ferret),
           secrets: { held },
           renewal: oauth,
-        }).share(agent, spec.folder);
+        }).share(agent, spec.folder, options);
       },
     });
 
@@ -427,6 +430,17 @@ export default implementDaemon(manifest, {
       }),
     };
 
+    // A running ferret's own renewed token (docs/secrets.md › The one exception): what ITS launch holds now, read back
+    // through the Vault's one getter, only for a secret this plugin minted.
+    const tokens = new FerretMcpTokens({
+      ferret: async id => await inventoryFerret(id),
+      bindings: async subject => await launch.bindings(subject),
+      signInRequired: async name => await oauth.signInRequired(name),
+      value: async name => await mintedValueOf(vault)?.mintedValue(name),
+      renew: async name => await oauth.refreshForLaunch([name]),
+      now: () => kernel.clock.nowMs(),
+    });
+
     const api: McpApi = {
       inventory: async ferret => (ferret === undefined ? await inventory.machine() : await inventory.ferret(ferret)),
       check: async (id, ferret) => await check.check(id, ferret),
@@ -461,6 +475,7 @@ export default implementDaemon(manifest, {
             return out;
           },
         }),
+        ...tokenRoutes(tokens),
         ...sessionRoutes({
           list: id => session.list(id),
           previewProject: (id, request) => session.previewProject(id, request),
