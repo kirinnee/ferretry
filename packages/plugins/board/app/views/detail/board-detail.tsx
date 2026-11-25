@@ -84,6 +84,8 @@ export interface BoardDetailProps {
   }[];
   /** A phone shows the task as a page of its own; a wide screen as a drawer beside the Board. */
   readonly phone: boolean;
+  /** The task on a page of its own (a link opened it): it sits in the shell's main column instead of over the whole window. */
+  readonly inline?: boolean;
   readonly onClose: () => void;
   readonly onNavigate: (to: string) => void;
 }
@@ -127,12 +129,12 @@ class TaskErrorBoundary extends Component<
 }
 
 export function BoardDetail(props: BoardDetailProps) {
-  const { phone, onClose, taskId, machine } = props;
+  const { phone, inline = false, onClose, taskId, machine } = props;
   const ref = parseTaskRef(taskId);
   const label = ref.ok ? formatTaskRef(ref.value) : taskId;
   return (
-    <div className="fy-board-detail__scrim" data-mode={phone ? 'page' : 'drawer'}>
-      <div aria-hidden="true" className="fy-board-detail__backdrop" onClick={onClose} />
+    <div className="fy-board-detail__scrim" data-mode={inline ? 'inline' : phone ? 'page' : 'drawer'}>
+      {inline ? null : <div aria-hidden="true" className="fy-board-detail__backdrop" onClick={onClose} />}
       <aside
         aria-label={`Task ${label}`}
         className="fy-board-detail"

@@ -135,6 +135,7 @@ function TaskPage({ runtime, id }: { readonly runtime: BoardRuntime; readonly id
       machine={MACHINE}
       names={names}
       now={now}
+      inline
       onClose={() => navigateTo(boardPath())}
       onNavigate={navigateTo}
       phone
