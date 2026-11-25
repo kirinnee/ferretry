@@ -150,10 +150,10 @@ describe('the layout page groups', () => {
         await search.fill('compact');
         await tab.waitForFunction(() => document.querySelectorAll('[role="option"]').length === 1);
         const after = await tab.locator('[role="option"]').allTextContents();
-        expect(after, 'non-matching options disappear').toEqual(['compact']);
+        expect(after, 'non-matching options disappear').toEqual(['Compact']);
         if (shotsDir !== '')
           await tab.screenshot({ path: join(shotsDir, `${variant.name}-layout-chooser-filtered.png`) });
-        await tab.locator('[role="option"]', { hasText: 'compact' }).click();
+        await tab.locator('[role="option"]', { hasText: 'Compact' }).click();
         await tab.waitForFunction(() =>
           (window as unknown as { __fyCalls: string[] }).__fyCalls.includes('use compact'),
         );

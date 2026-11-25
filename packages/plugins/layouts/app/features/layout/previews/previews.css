@@ -416,7 +416,6 @@
 }
 .fy-ls-theme-chip {
   background: var(--accent-soft);
-  border: 1px solid var(--accent-border);
   border-radius: 3px;
   flex: none;
   height: 12px;
