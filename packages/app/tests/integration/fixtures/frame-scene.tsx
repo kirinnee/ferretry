@@ -42,6 +42,8 @@ const TALL = params.get('tall') === '1';
 // (the chips and switches live behind it), so the chrome above the first chat line can be measured as a person sees it.
 const HOST_STATE = params.get('host') === 'unnamed' ? 'unnamed' : params.get('host') === 'named' ? 'named' : null;
 const MODES_HEADER = params.get('header') === 'modes';
+// `?safe=1` makes the fake composer the screen's bottom-inset owner the real one is (`fy-chat-input` + `data-safe-bottom`).
+const SAFE_BOTTOM = params.get('safe') === '1';
 const tallBlock = (what: string): ReactNode =>
   TALL ? <div data-tall-filler="" style={{ height: 3_000, flexShrink: 0 }}>{`Fake ${what}: a tall page.`}</div> : null;
 
@@ -229,9 +231,22 @@ function FerretPageScreen(): ReactNode {
               {tallBlock('conversation')}
             </div>
             {/* The composer is the real one's size: a text box, a model chip and the send button, about 170px. */}
-            <div data-composer="" style={{ flex: '0 0 170px', padding: 16, borderTop: '1px solid var(--border)' }}>
-              Fake composer
-            </div>
+            {SAFE_BOTTOM ? (
+              <div
+                className="fy-chat-input"
+                data-composer=""
+                data-safe-bottom=""
+                style={{ borderTop: '1px solid var(--border)', background: 'var(--surface)' }}
+              >
+                <div data-composer-field="" style={{ height: 48, margin: 8, border: '1px solid var(--border-strong)' }}>
+                  Fake composer
+                </div>
+              </div>
+            ) : (
+              <div data-composer="" style={{ flex: '0 0 170px', padding: 16, borderTop: '1px solid var(--border)' }}>
+                Fake composer
+              </div>
+            )}
           </div>
         }
         daemon="ws"

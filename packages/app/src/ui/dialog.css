@@ -41,6 +41,14 @@
   /* A body that is a scroller must not chain to the page behind. */
   overscroll-behavior: contain;
 }
+/* DARK: a dark panel on a near-black scrim has only its 1px edge to say where it ends, and the shared panel's decorative
+   hairline (`--border`) read 1.1-2.1:1 against the scrim in six of the twelve dark palettes. The control edge
+   (`--border-strong`) clears 3:1 in all of them. Dark only: in light the panel stands out by its fill and the same
+   line would weaken the edge (studio 2.00 -> 1.47:1). */
+:root[data-mode='dark'] .fy-dialog__panel,
+[data-swatch][data-mode='dark'] .fy-dialog__panel {
+  border-color: var(--border-strong);
+}
 .fy-dialog__panel:focus {
   outline: none;
 }

@@ -162,6 +162,16 @@
       position: sticky;
       z-index: 6;
     }
+    /* DARK: a black shadow cannot show on a near-black page (0.56 L* of step in studio dark, 2.08 in light), so the strip gets a
+       1px edge of its own, in the page's hairline, under the same soft shadow. Dark only: in light the shadow already reads. */
+    :root[data-mode='dark'] .fy-spf__page:where(:has([data-step-demo-pinned-mark]:not([hidden] *))) .fy-spf__pin,
+    [data-swatch][data-mode='dark']
+      .fy-spf__page:where(:has([data-step-demo-pinned-mark]:not([hidden] *)))
+      .fy-spf__pin {
+      box-shadow:
+        0 1px 0 var(--border),
+        0 8px 14px -8px var(--shadow-lg-2);
+    }
     .fy-spf__page:has([data-step-demo-pinned-mark]:not([hidden] *))
       .fy-spf__body
       :is(input, button, a, select, textarea, summary, [tabindex], .fy-cc__card) {
