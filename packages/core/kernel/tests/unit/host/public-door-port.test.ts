@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import type { Manifest } from '../../../manifest/types.ts';
 import { publicDoorPort } from '../../../host/public-door.ts';
 import { testPublicDoor } from '../../../testing/public-door.ts';
@@ -81,5 +81,36 @@ test('the test host API hides public routes just like the real kernel', async ()
     expect((await host.request('POST', '/oauth/authorize')).status).toBe(404);
   } finally {
     await host.stop();
+  }
+});
+
+test('closing a public door waits for Bun shutdown, including simultaneous closes', async () => {
+  let finish: (() => void) | undefined;
+  const stopped = new Promise<void>(resolve => {
+    finish = resolve;
+  });
+  const serve = spyOn(Bun, 'serve').mockImplementation((() => ({ port: 7489, stop: () => stopped })) as never);
+  try {
+    const handle = await publicDoorPort({
+      manifest: manifest('connector', true),
+      dispatcher: () => ({ table: [] }) as never,
+      onStop: () => {},
+      stopping: () => false,
+    }).open({ port: 7489 });
+    let completed = 0;
+    const first = handle.close().then(() => {
+      completed++;
+    });
+    const second = handle.close().then(() => {
+      completed++;
+    });
+    await Promise.resolve();
+    expect(completed).toBe(0);
+    finish?.();
+    await Promise.all([first, second]);
+    expect(completed).toBe(2);
+  } finally {
+    finish?.();
+    serve.mockRestore();
   }
 });

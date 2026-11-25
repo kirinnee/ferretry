@@ -57,3 +57,43 @@ test('boot refuses an invalid public descriptor even when definePlugin was bypas
   expect(plan.refused[0]?.reason).toBe('public-door');
   expect(plan.refused[0]?.sentence).toContain('GET /oauth/authorize');
 });
+
+test('public declarations cannot claim daemon namespaces or non-canonical literal paths', () => {
+  for (const path of [
+    '/v1',
+    '/v1/health',
+    '/health',
+    '/healthz',
+    '/health/live',
+    '/metrics',
+    '/metrics/live',
+    '/api',
+    '/api/status',
+    '/live',
+    '/livez',
+    '/ready',
+    '/readyz',
+    '/liveness',
+    '/readiness',
+    '/oauth/:id',
+    '/oauth/*rest',
+    '/oauth/authorize/',
+    '/oauth//authorize',
+    '/oauth/../mcp',
+    '/oauth/%2e%2e/mcp',
+    '/%76%31/health',
+    '/oauth/authorize?x=1',
+    '/oauth/authorize#x',
+    '/oauth\\authorize',
+  ]) {
+    const manifest = plugin('connector');
+    const invalid = { ...manifest, actions: { routes: [{ ...declaration(), key: `GET ${path}`, path }] } };
+    expect(() => definePlugin(invalid), path).toThrow(`GET ${path}`);
+    const plan = planGraph(
+      [invalid],
+      () => true,
+      () => [],
+    );
+    expect(plan.refused[0]?.reason, path).toBe('public-door');
+  }
+});

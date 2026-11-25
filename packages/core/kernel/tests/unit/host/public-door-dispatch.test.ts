@@ -68,7 +68,7 @@ describe('public door routing is isolated from every API arrival', () => {
       { admission: () => recordingAdmission(() => false), outputGuard: () => undefined, version: '5.0.0' },
       { routes: [{ ...publicRoute, available: () => false }], sockets: [], memberRoutes: [] },
     );
-    expect((await hidden.dispatch(request('GET', publicRoute.path))).status).toBe(404);
+    expect((await hidden.dispatch(request('GET', publicRoute.path))).status).toBe(401);
     expect(
       (
         await hidden.dispatch({
@@ -76,10 +76,43 @@ describe('public door routing is isolated from every API arrival', () => {
           principal: { kind: 'member' } as never,
         })
       ).status,
-    ).toBe(404);
+    ).toBe(403);
   });
   test('a private route cannot shadow a door route with the same path', async () => {
     const dispatcher = table(mounted(publicRoute.path, 'kernel'), publicRoute);
     expect((await dispatcher.dispatch({ ...request('GET', publicRoute.path), arrival: door() })).status).toBe(200);
+  });
+  test('door matching is literal and method-exact', async () => {
+    for (const arrival of [door(), { kind: 'door', door: 'tunnel' } as Arrival]) {
+      for (const path of ['/oauth/authorize/', '/oauth//authorize', '/oauth/../oauth/authorize', '/oauth/%61uthorize'])
+        expect((await table(publicRoute).dispatch({ ...request('GET', path), arrival })).status, path).toBe(404);
+      expect((await table(publicRoute).dispatch({ ...request('get', publicRoute.path), arrival })).status).toBe(404);
+    }
+  });
+  test('stopped, failed, damaged or unbuilt plugins disappear on both doors', async () => {
+    for (const arrival of [door(), { kind: 'door', door: 'tunnel' } as Arrival]) {
+      for (const kind of ['skeleton', 'failed', 'damaged'] as const) {
+        const stopped = { ...publicRoute, owner: { ...publicRoute.owner, serving: () => ({ kind, files: [] }) } };
+        expect((await table(stopped).dispatch({ ...request('GET', publicRoute.path), arrival })).status, kind).toBe(
+          404,
+        );
+      }
+      expect(
+        (await table({ ...publicRoute, handle: undefined }).dispatch({ ...request('GET', publicRoute.path), arrival }))
+          .status,
+      ).toBe(404);
+    }
+  });
+  test('unauthenticated API misses do not disclose public path claims', async () => {
+    const hidden = new Dispatcher(
+      { admission: () => recordingAdmission(() => false), outputGuard: () => undefined, version: '5.0.0' },
+      { routes: [publicRoute], sockets: [], memberRoutes: [] },
+    );
+    for (const method of ['GET', 'POST']) {
+      const known = await hidden.dispatch(request(method, publicRoute.path));
+      const unknown = await hidden.dispatch(request(method, '/unknown'));
+      expect(known.status).toBe(unknown.status);
+      expect(known.status).toBe(401);
+    }
   });
 });

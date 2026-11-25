@@ -81,6 +81,19 @@ function told(
 }
 
 describe('Admission.recorded: today’s audited-route rules, after the handler', () => {
+  test('an audited public route records an anonymous remote door arrival', () => {
+    for (const door of ['own', 'tunnel'] as const) {
+      const call = told('POST', '/oauth/token', { standing: {} });
+      const draft = recordedCallDraft({
+        ...call,
+        request: {
+          ...call.request,
+          arrival: door === 'own' ? { kind: 'door', door, plugin: 'connector' as never } : { kind: 'door', door },
+        },
+      });
+      expect(draft).toMatchObject({ actor: { kind: 'anonymous' }, detail: { arrival: 'door', door } });
+    }
+  });
   test('a refused step-up is recorded as step-up.failed, a good one as step-up.succeeded (refusedEvent)', () => {
     expect(recordedCallDraft(told('POST', '/v1/step-up'))?.event).toBe(AUDIT_KINDS['step-up.succeeded']);
     const refused = recordedCallDraft(told('POST', '/v1/step-up', { status: 403, standing: device('phone') }));

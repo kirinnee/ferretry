@@ -98,11 +98,18 @@ test('a real kernel public listener is remote, isolated, live and closed with it
       expect((await fetch(`${base}${path}`, { headers })).status).toBe(404);
     expect((await fetch(`${base}/oauth/authorize`, { method: 'POST', headers })).status).toBe(404);
     expect((await fetch(`${base}/oauth/authorize`, { headers: { upgrade: 'websocket' } })).status).toBe(404);
-    expect((await outcome.host.dispatch(request('GET', '/oauth/authorize'))).status).toBe(404);
+    // With no Gate bound, ordinary API misses fail admission alike; a public claim reveals nothing there.
+    expect((await outcome.host.dispatch(request('GET', '/oauth/authorize'))).status).toBe(
+      (await outcome.host.dispatch(request('GET', '/unknown'))).status,
+    );
     expect((await outcome.host.dispatch(request('GET', '/v1/private'))).status).toBe(200);
     available = false;
     expect((await fetch(`${base}/oauth/authorize`)).status).toBe(404);
     available = true;
+    expect((await fetch(`${base}/oauth/authorize`)).status).toBe(200);
+    const samePort = handle.port;
+    await handle.close();
+    handle = await kernel.publicDoor.open({ port: samePort });
     expect((await fetch(`${base}/oauth/authorize`)).status).toBe(200);
     await outcome.host.stop();
     await handle.close();

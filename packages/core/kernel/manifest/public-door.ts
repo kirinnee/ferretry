@@ -1,6 +1,27 @@
 import { PUBLIC_DOOR_PLUGINS } from '../contract/ports/public-door.ts';
 import type { Manifest } from './types.ts';
 
+/** API and process-health namespaces belong to the daemon, even if the plugin declares no private route there. */
+const RESERVED = new Set([
+  'v1',
+  'api',
+  'health',
+  'healthz',
+  'metrics',
+  'live',
+  'livez',
+  'ready',
+  'readyz',
+  'liveness',
+  'readiness',
+]);
+
+function literalPublicPath(path: string): boolean {
+  if (!/^(?:\/[A-Za-z0-9._~-]+)+$/u.test(path)) return false;
+  const segments = path.slice(1).split('/');
+  return !RESERVED.has(segments[0]?.toLowerCase() ?? '') && !segments.some(part => part === '.' || part === '..');
+}
+
 /** Checked at declaration and boot: a public surface can never borrow Gate's authenticated authority. */
 export function publicDoorProblems(manifest: Manifest): readonly string[] {
   const problems: string[] = [];
@@ -9,6 +30,10 @@ export function publicDoorProblems(manifest: Manifest): readonly string[] {
     problems.push(`plugin ${manifest.id}: permissions.publicDoor is not allowed`);
   for (const route of manifest.actions?.routes ?? []) {
     if (route.door === undefined) continue;
+    if (!literalPublicPath(route.path) || !/^[A-Z]+$/u.test(route.method))
+      problems.push(
+        `plugin ${manifest.id}: route ${route.key} must use an exact canonical literal path outside daemon API and liveness namespaces`,
+      );
     if (
       !allowed ||
       route.door !== 'public' ||

@@ -19,7 +19,6 @@ import type {
   MemberRouteHandler,
   RouteDescriptor,
   RouteHandler,
-  RoutePattern,
   ScopedRoute,
 } from '../contract/route.ts';
 import type { SocketAccept, SocketDescriptor, SocketUpgradeDecision } from '../contract/socket.ts';
@@ -40,6 +39,7 @@ import {
 } from './responses.ts';
 import type { RefusalNote } from './refusal-log.ts';
 import { orderRoutesBySpecificity, Router } from './router.ts';
+import { PublicRouter } from './public-router.ts';
 
 /** How one plugin is serving right now. Read on every call, so a failure or damage after mount is honoured. */
 export type Serving =
@@ -273,10 +273,9 @@ async function run(
  */
 export class Dispatcher {
   private readonly routes: Router<MountedRoute>;
-  private readonly publicRoutes: Router<MountedRoute>;
-  private readonly publicClaims: Router<RoutePattern>;
+  private readonly publicRoutes: PublicRouter<MountedRoute>;
   private readonly apiRoutes: Router<MountedRoute>;
-  private readonly ownDoors: ReadonlyMap<string, Router<MountedRoute>>;
+  private readonly ownDoors: ReadonlyMap<string, PublicRouter<MountedRoute>>;
   private readonly sockets: Router<MountedSocket>;
   private readonly members: Router<MountedMemberRoute>;
   private readonly streams = new Set<() => void>();
@@ -291,18 +290,15 @@ export class Dispatcher {
   ) {
     this.routes = new Router(orderRoutesBySpecificity(tables.routes));
     this.apiRoutes = new Router(this.routes.routes.filter(route => route.door === undefined));
-    this.publicRoutes = new Router(
+    this.publicRoutes = new PublicRouter(
       this.routes.routes.filter(
         route => route.door === 'public' && (PUBLIC_DOOR_PLUGINS as readonly string[]).includes(route.owner.plugin),
       ),
     );
-    this.publicClaims = new Router(
-      this.routes.routes.filter(route => route.door === 'public').map(({ method, path }) => ({ method, path })),
-    );
     this.ownDoors = new Map(
       PUBLIC_DOOR_PLUGINS.map(plugin => [
         plugin,
-        new Router(this.publicRoutes.routes.filter(route => route.owner.plugin === plugin)),
+        new PublicRouter(this.publicRoutes.routes.filter(route => route.owner.plugin === plugin)),
       ]),
     );
     this.sockets = new Router(orderRoutesBySpecificity(tables.sockets));
@@ -316,11 +312,7 @@ export class Dispatcher {
   async dispatch(incoming: ApiRequest): Promise<ApiResponse> {
     const request = this.stamped(incoming);
     const door = request.arrival.kind === 'door';
-    if (!door && request.principal?.kind === 'member') {
-      if (this.publicClaims.lookup(request.method, request.path).kind !== 'not-found')
-        return withVersion(unknownRouteResponse(request.method, request.path), this.bindings.version);
-      return await this.dispatchMember(request);
-    }
+    if (!door && request.principal?.kind === 'member') return await this.dispatchMember(request);
     const routes =
       request.arrival.kind === 'door'
         ? request.arrival.door === 'own'
@@ -330,8 +322,7 @@ export class Dispatcher {
     const found = routes?.lookup(request.method, request.path) ?? { kind: 'not-found' as const };
     if (found.kind !== 'matched') {
       // Public and API tables do not reveal each other's paths or methods. Unknown public paths also bypass Gate.
-      if (door || this.publicClaims.lookup(request.method, request.path).kind !== 'not-found')
-        return withVersion(unknownRouteResponse(request.method, request.path), this.bindings.version);
+      if (door) return withVersion(unknownRouteResponse(request.method, request.path), this.bindings.version);
       const decision = admit(
         this.bindings,
         'route',
@@ -349,6 +340,8 @@ export class Dispatcher {
       );
     }
     request.onRoute?.(found.route.path);
+    if (door && (notServing(found.route.owner) !== undefined || found.route.handle === undefined))
+      return withVersion(unknownRouteResponse(request.method, request.path), this.bindings.version);
     const decision = admit(this.bindings, 'route', found.route, request, found.params);
     if (decision.outcome === 'refused') return withVersion(decision.response, this.bindings.version);
     const refusal = notServing(found.route.owner);

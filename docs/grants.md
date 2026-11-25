@@ -82,9 +82,10 @@ it the machine.
   **unconditionally** for a relayed session, whatever address the request appears to carry, and for a
   direct session exactly what the listener decided for its WebSocket upgrade — the same answer the
   same listener gives an HTTP request — and nothing inside a record can change it.
-- a **tunnel** arrival (protocol §15) reaches the daemon through `cloudflared` from a loopback peer, so
-  it never lands on the API listener: the daemon's dedicated tunnel listener serves only the session
-  route and stamps every arrival `loopback: false` and unprivileged, exactly like a relayed one.
+- a **tunnel** session arrival (protocol §15) reaches the daemon through `cloudflared` from a loopback peer, so
+  it never lands on the API listener: the daemon's dedicated tunnel listener serves the session
+  route and stamps every session arrival `loopback: false` and unprivileged, exactly like a relayed one.
+  In 5.0 it may also opt into the public connector routes described below.
 
 Nothing re-derives it, and no header can move it.
 
@@ -122,9 +123,23 @@ and no privileged arrival. Its own listener also requires `permissions.publicDoo
 and binds only `127.0.0.1`. It serves only that plugin's public routes; the opted-in tunnel
 serves only allow-listed public routes. A door reaches no ordinary daemon route, including
 `/v1/*`, `/healthz` and `/metrics`; unknown paths and wrong methods answer 404, never a 405
-method map. Public routes likewise answer 404 on the API listener and in direct, relay,
-tunnel or WebRTC sessions. Availability is checked on every request, so an unavailable
-public route is unrouted immediately.
+method map. On the API listener and in direct, relay, tunnel or WebRTC sessions, public
+paths behave like ordinary unknown paths: admission runs first, then an admitted caller
+receives 404. An unauthenticated caller cannot discover public path claims from a different refusal.
+Availability is checked on every request; unavailable, stopped or unbuilt public routes answer 404.
+
+Public descriptors must declare canonical literal paths: parameters, catch-alls, encoded
+aliases, dot segments and trailing slashes are refused. Daemon API and liveness namespaces
+(`v1`, `api`, `health`, `healthz`, `metrics`, `live`, `livez`, `ready`, `readyz`, `liveness`,
+`readiness`) are reserved, including their descendants. Both listeners enforce exact methods
+and literal paths before URL normalization. Public descriptors are excluded from the API
+inventory and its bus projection; they give a device no additional discovery or event access.
+
+Both public listeners cap request bodies at **1 MiB**, enough for MCP JSON and smaller OAuth
+forms and registration bodies. A route may apply a tighter bound (registration uses 8 KiB).
+Closing the own listener waits for shutdown before its port can be reopened. If binding the
+own address fails, no public listener is opened there: the connector cannot serve that address
+until the port is available and the listener opens successfully; it never falls back to the API listener.
 
 The public arrival grants no fleet authority. A connector's later tool action needs a
 separate governed admission through the daemon's route dispatcher; receiving an OAuth or

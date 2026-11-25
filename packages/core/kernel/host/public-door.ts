@@ -5,6 +5,7 @@ import { errorResponse } from '../contract/http.ts';
 import type { CarrierListenerDeps } from './carrier-listener.ts';
 import { toApiRequest, toResponse } from './listener.ts';
 import { PermissionError } from './permissions.ts';
+import { PUBLIC_DOOR_BODY_BYTES, publicDoorHttpRoutes } from './public-door-http.ts';
 
 /** A rate-limit identity, never an authentication claim. All arrivals without a surface peer share this bucket. */
 const PUBLIC_DOOR_SHARED_PEER = 'public-door';
@@ -32,31 +33,34 @@ export function publicDoorPort(deps: Omit<CarrierListenerDeps, 'daemonId'>): Pub
         });
       }
       const arrival = Object.freeze({ kind: 'door' as const, door: 'own' as const, plugin: manifest.id as PluginId });
+      const serve = async (request: Request): Promise<Response> => {
+        try {
+          if (request.headers.has('upgrade')) return toResponse(NOT_SERVED, false);
+          const api = toApiRequest(request, arrival, undefined);
+          const response = await deps.dispatcher().dispatch({
+            ...api,
+            clientAddress: input.peer?.(api.headers) ?? PUBLIC_DOOR_SHARED_PEER,
+          });
+          return toResponse(response, false);
+        } catch {
+          return toResponse(NOT_SERVED, false);
+        }
+      };
       const server = Bun.serve({
         hostname: '127.0.0.1',
         port: input.port,
-        fetch: async request => {
-          try {
-            if (request.headers.has('upgrade')) return toResponse(NOT_SERVED, false);
-            const api = toApiRequest(request, arrival, undefined);
-            const response = await deps.dispatcher().dispatch({
-              ...api,
-              clientAddress: input.peer?.(api.headers) ?? PUBLIC_DOOR_SHARED_PEER,
-            });
-            return toResponse(response, false);
-          } catch {
-            return toResponse(NOT_SERVED, false);
-          }
-        },
+        maxRequestBodySize: PUBLIC_DOOR_BODY_BYTES,
+        routes: publicDoorHttpRoutes(deps.dispatcher(), serve, manifest.id),
+        fetch: () => toResponse(NOT_SERVED, false),
       });
-      let closed = false;
+      let closing: Promise<void> | undefined;
       const handle: PublicDoorHandle = {
         port: server.port ?? 0,
         close: async () => {
-          if (closed) return;
-          closed = true;
-          open.delete(handle);
-          void server.stop(true);
+          closing ??= server.stop(true).then(() => {
+            open.delete(handle);
+          });
+          await closing;
         },
       };
       open.add(handle);
