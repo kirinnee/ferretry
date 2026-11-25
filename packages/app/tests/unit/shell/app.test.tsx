@@ -363,7 +363,7 @@ describe('the app shell', () => {
       />,
     );
     await settle();
-    expect(view.container.querySelector('main')?.textContent).toContain('This daemon needs an update');
+    expect(view.container.querySelector('h1')?.textContent).toBe('Update laptop to keep using it');
     await view.unmount();
   });
 

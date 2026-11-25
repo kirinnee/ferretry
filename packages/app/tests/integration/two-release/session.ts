@@ -43,6 +43,8 @@ export interface AppSession {
   readonly daemonId: string;
   /** The transport the runtime's client talks through; throws before the runtime has connected. */
   recording(): RecordingTransport;
+  /** How many sockets this session has dialled that are still connecting or open: what a stop of the daemon would wait on. */
+  openSockets(): number;
   /** Reads the connection to the daemon once its first inventory answer is in. */
   ready(): Promise<void>;
   /** Drops the pairing (stopping the client) and closes the sealed session, so nothing outlives the test. */
@@ -130,11 +132,18 @@ export async function openApp(
   options: { readonly grants: 'full' | 'limited'; readonly production?: ProductionCarrier },
 ): Promise<AppSession> {
   const crypto = new WebCryptoRelayCrypto(nativeCrypto.subtle);
+  // EVERY socket this device dialled, so a test can say none is left open.
+  const sockets: InstanceType<typeof NativeWebSocket>[] = [];
+  const dial = (url: string): SocketLike => {
+    const socket = new NativeWebSocket(url);
+    sockets.push(socket);
+    return socket as unknown as SocketLike;
+  };
   const direct: DirectDial = target =>
     directDial({
       address: target.address,
       daemonId: target.daemon,
-      openSocket: url => new NativeWebSocket(url) as unknown as SocketLike,
+      openSocket: dial,
       after: (delayMs, run) => {
         nativeSetTimeout(run, delayMs);
       },
@@ -222,7 +231,7 @@ export async function openApp(
       const asked = new URL(url);
       const isRelay = asked.host === new URL(RELAY_URL).host;
       const target = isRelay && relayState.up ? `ws://${daemonOrigin.host}${asked.pathname}` : url;
-      return new NativeWebSocket(target) as unknown as SocketLike;
+      return dial(target);
     };
     const host = globalThis as { localStorage?: unknown; __FY_RELAY_DIRECTORY__?: string };
     const priorStorage = host.localStorage;
@@ -265,7 +274,15 @@ export async function openApp(
   }
 
   let latest: RecordingTransport | undefined;
-  let opened: (DaemonTransport & { close?: () => void }) | undefined;
+  // EVERY session the app opened, not only the latest: a reconnect that races a close would otherwise leave a live socket the
+  // daemon's stop then waits on. After `close` nothing new is kept: a late connect is closed on the spot.
+  const opened = new Set<DaemonTransport & { close?: () => void }>();
+  let closed = false;
+  // `endAppSessions` closes what is open NOW but forgets nothing: a transport reopens its session for the next read, and only
+  // the final `close` may let go of it.
+  const closeAll = (): void => {
+    for (const transport of [...opened]) transport.close?.();
+  };
   const runtime = new ShellRuntime({
     appVersion: app.appVersion,
     surfaces: app.surfaces,
@@ -273,7 +290,11 @@ export async function openApp(
     connect: async paired => {
       const transport: DaemonTransport | undefined = await connect(paired);
       if (transport === undefined) return undefined;
-      opened = transport;
+      if (closed) {
+        (transport as { close?: () => void }).close?.();
+        return undefined;
+      }
+      opened.add(transport);
       latest = new RecordingTransport(transport);
       return latest;
     },
@@ -285,8 +306,10 @@ export async function openApp(
     storage,
     daemonId,
     close: () => {
+      closed = true;
       daemons.remove(daemonId);
-      opened?.close?.();
+      closeAll();
+      opened.clear();
       for (const undo of restore) undo();
     },
     dialled,
@@ -294,7 +317,7 @@ export async function openApp(
       relayState.up = up;
     },
     endAppSessions: () => {
-      opened?.close?.();
+      closeAll();
     },
     probe: async () => {
       const paired = daemons.get(daemonId);
@@ -307,6 +330,7 @@ export async function openApp(
         (transport as { close?: () => void }).close?.();
       }
     },
+    openSockets: () => sockets.filter(socket => socket.readyState === 0 || socket.readyState === 1).length,
     relayFallbackLine: () => {
       const view = registeredBackgroundViews(app.surfaces as readonly SurfaceEntry[]).find(
         entry => entry.plugin === 'connections' && entry.id === 'relay-fallback',

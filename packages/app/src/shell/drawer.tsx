@@ -52,7 +52,6 @@ export function Drawer({
   route,
   findRef,
   onFind,
-  listed,
 }: {
   /** The machine this page is on (none on the list and device pages). */
   readonly daemon: string | undefined;
@@ -61,8 +60,6 @@ export function Drawer({
   readonly route: Route;
   readonly findRef: RefObject<HTMLButtonElement | null>;
   readonly onFind: () => void;
-  /** Whether the list slot may draw (not while a whole-machine line replaces the pages). */
-  readonly listed: boolean;
 }) {
   useApplyPanelWidths();
   const { viewport, plan } = useShell();
@@ -118,7 +115,7 @@ export function Drawer({
         </div>
         {placement === 'list' ? <DrawerNav daemon={navDaemon} rail={rail} /> : null}
         {/* THE LIST SLOT: the ferret list (its Mine / All / Agents header and rows) is drawn here, whole; the rail has no room for it. */}
-        {rail || !listed || plan.side.at !== 'left' || holds === undefined || daemon === undefined ? null : (
+        {rail || plan.side.at !== 'left' || holds === undefined || daemon === undefined ? null : (
           <div className="fy-drawer__list" data-slot="side">
             <SideBody daemon={daemon} holds={holds} />
           </div>

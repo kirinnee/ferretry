@@ -1,0 +1,77 @@
+/* THE FULL-PAGE "CANNOT USE THIS MACHINE" SCREEN (`machine-stop-page.tsx`): one centred column on the app's own background, the
+   frame's chrome gone. Only the shell's tokens, so every style and both colour schemes carry it. */
+.fy-stop {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding: 24px 16px calc(24px + var(--safe-bottom, 0px));
+}
+.fy-stop__card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  max-width: 34rem;
+  padding: 28px 24px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-panel, 13px);
+  background: var(--surface);
+  color: var(--fg);
+}
+.fy-stop__mark {
+  color: var(--fg-soft);
+}
+.fy-stop__headline {
+  margin: 4px 0 0;
+  font-size: calc(var(--fy-text-scale, 1) * 1.6rem);
+  font-weight: var(--weight-heading);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+/* The headline takes focus so a screen reader reads it; a heading does not act, so it draws no ring. */
+.fy-stop__headline:focus {
+  outline: none;
+}
+.fy-stop__why {
+  margin: 0;
+  color: var(--fg-soft);
+  line-height: 1.5;
+}
+.fy-stop__command {
+  padding: 6px 10px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-input, 6px);
+  background: var(--surface-2);
+  font-size: 0.95em;
+}
+.fy-stop__main {
+  margin-top: 8px;
+}
+.fy-stop__ways {
+  margin: 0;
+  font-size: var(--text-sm, 0.9rem);
+}
+.fy-stop__ways a {
+  color: var(--accent);
+}
+.fy-stop__reference {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--text-sm, 0.85rem);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 479.98px) {
+  .fy-stop {
+    align-items: flex-start;
+    padding-top: 40px;
+  }
+  .fy-stop__card {
+    padding: 20px 16px;
+  }
+  .fy-stop__main {
+    width: 100%;
+  }
+}

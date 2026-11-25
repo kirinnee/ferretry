@@ -13,22 +13,17 @@ import { Drawer, useDrawerShortcut } from './drawer.tsx';
 import { useFindShortcut } from './drawer-find.tsx';
 import { RightSide } from './side-column.tsx';
 import { isChatRoute, routeDaemon } from './nav-targets.ts';
-import { DEVICE_SETTINGS_HREF, pairAgainHref, type Route } from '../router/routes.ts';
+import type { Route } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
-import {
-  DaemonHomePage,
-  DaemonListPage,
-  DaemonSettingsPage,
-  DeviceSettingsPage,
-  Link,
-  NotFoundPage,
-} from './pages.tsx';
+import { DaemonHomePage, DaemonListPage, DaemonSettingsPage, DeviceSettingsPage, NotFoundPage } from './pages.tsx';
 import { PageScrollRegion } from '../scroll/page-scroll-region.tsx';
 import { FrameRootContext } from './frame-root.tsx';
 import { NameThisMachine } from './name-machine.tsx';
 import { PasskeyMount } from './passkey-mount.tsx';
-import { ScreenView, ShellLine } from './views.tsx';
+import { MachineStopPage } from './machine-stop-page.tsx';
+import { stopOf } from './machine-stop.ts';
+import { ScreenView } from './views.tsx';
 
 /**
  * THE FRAME (§5.2): the shell's slots, placed by the layout: the left drawer (find, destinations, the list slot; an overlay on a phone) and, on a phone, the `bottom` bar; `main` (one screen at a time, by the router), `side` (wide screens, when the layout asks). Nothing
@@ -126,52 +121,17 @@ function ShellCommandBar(props: {
   return <CommandBar open={props.open} focusSignal={props.focusSignal} onClose={props.onClose} sources={sources} />;
 }
 
-/**
- * The sentence that replaces a whole machine's page. A machine this page was refused on (`4403`) also offers the one
- * repair, "Pair again" (S12): its key and pairing are kept, so the person chooses whether to repeat the pairing.
- *
- * THE CONNECTION SETTING IS ALWAYS REACHABLE FROM HERE: this page replaces every screen of the machine, including the
- * machine's own Connection panel, and how this device reaches a machine is a per-device choice kept in the browser — so
- * the link goes to This device's settings, which need no machine, rather than to a screen this very block hides.
- */
-function WholeLine({ daemon, line }: { readonly daemon: string | undefined; readonly line: string }) {
-  const { runtime } = useShell();
-  // Which core piece (or that the list could not be read): the sentence above is the same for every cause.
-  const why = daemon === undefined ? undefined : runtime.wholeDaemonDetail(daemon);
-  const { navigate } = useRouter();
-  const refused = daemon !== undefined && runtime.isRefused(daemon) ? daemon : undefined;
-  return (
-    <>
-      <ShellLine tone="warn">{line}</ShellLine>
-      {why === undefined ? null : <ShellLine>{`Why: ${why}.`}</ShellLine>}
-      <p className="fy-shell-line" data-whole-daemon-connection="">
-        <Link to={DEVICE_SETTINGS_HREF}>Connection settings</Link>
-      </p>
-      {refused === undefined ? null : (
-        <button
-          type="button"
-          className="kt-btn"
-          data-variant="primary"
-          data-device-refused-pair=""
-          onClick={() => navigate(pairAgainHref(refused))}
-        >
-          Pair again
-        </button>
-      )}
-    </>
-  );
-}
-
 export function Frame() {
   const { runtime, plan, scroll } = useShell();
   useRuntimeVersion(runtime);
   const { route, entryKey } = useRouter();
   const daemon = routeDaemon(route);
   // A ferret's own page: the chat, whose top chrome is one slim row (shell.css `[data-chat-chrome]`, chat-menu.tsx).
-  const chat = isChatRoute(route);
-  // A screen that declares `chrome: 'none'` (first-run setup) is drawn alone: no drawer, bars, side column or command bar.
-  const bare = route.kind === 'screen' && route.screen.chrome === 'none';
-  const whole = daemon === undefined ? undefined : runtime.wholeDaemonLine(daemon);
+  // A machine this browser cannot use at all (refused, unreadable, needs an update, not paired…) is ONE full page, not an empty shell.
+  const stop = daemon === undefined ? undefined : stopOf(runtime, daemon);
+  const chat = isChatRoute(route) && stop === undefined;
+  // A screen that declares `chrome: 'none'` (first-run setup), or the stop page, is drawn alone: no drawer, bars, side column or command bar.
+  const bare = stop !== undefined || (route.kind === 'screen' && route.screen.chrome === 'none');
   const [bar, setBar] = useState({ open: false, signal: 0 });
   // Ctrl-K opens nothing on a chrome-less screen (no bar is drawn, so it must not wait open for the next screen).
   const openBar = useCallback(
@@ -203,7 +163,6 @@ export function Frame() {
             route={route}
             findRef={findRef}
             onFind={openBar}
-            listed={whole === undefined}
           />
         )}
         <div className="fy-body">
@@ -229,10 +188,10 @@ export function Frame() {
             <main className="fy-main" data-slot="main">
               {chat ? <ChatMenu /> : null}
               <PageScrollRegion entryKey={entryKey} memory={scroll}>
-                {whole === undefined ? <Main route={route} /> : <WholeLine daemon={daemon} line={whole} />}
+                {stop === undefined ? <Main route={route} /> : <MachineStopPage daemon={daemon} facts={stop} />}
               </PageScrollRegion>
             </main>
-            {whole === undefined && !bare ? <RightSide daemon={daemon} route={route} /> : null}
+            {!bare ? <RightSide daemon={daemon} route={route} /> : null}
           </div>
           {plan.nav.side === 'bottom' && !bare ? (
             <BottomNav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
