@@ -5,6 +5,7 @@ import { parseReleaseHeaders } from '../../../src/release/headers.ts';
 import {
   type KeeperState,
   RELEASE_CACHE_PREFIX,
+  RELEASE_RECENT_CHECK_MS,
   ReleaseKeeper,
   type ReleaseCaches,
   type ReleaseNetwork,
@@ -86,6 +87,7 @@ const keeperFor = (
     caches?: ReturnType<typeof memoryCaches>;
     state?: ReturnType<typeof memoryState>;
     allowUnsigned?: boolean;
+    now?: () => number;
   } = {},
 ) => {
   const caches = options.caches ?? memoryCaches();
@@ -98,6 +100,7 @@ const keeperFor = (
     allowUnsigned: options.allowUnsigned ?? false,
     rewrites: [{ from: '/app/*', to: '/app/' }],
     headers: HEADERS,
+    ...(options.now === undefined ? {} : { now: options.now }),
   });
   return { subject, caches, state };
 };
@@ -126,7 +129,9 @@ describe('ReleaseKeeper.update', () => {
       previous: null,
       endorsements: [],
       lastOutcome: { status: 'updated' },
+      checkedAt: state.current()?.checkedAt,
     });
+    should(typeof state.current()?.checkedAt).equal('number');
     const cached = caches.caches.get(cacheOf(release));
     should([...(cached?.keys() ?? [])].sort()).eql(Object.keys(release.files).sort());
   });
@@ -275,7 +280,13 @@ describe('ReleaseKeeper.update', () => {
     should(answer).be.null();
     should(outcome).be.null();
     should(checked).eql({ status: 'refused', refusal: 'unknown-key', hadRelease: false });
-    should(state.current()).eql({ active: null, previous: null, endorsements: [], lastOutcome: checked });
+    should(state.current()).eql({
+      active: null,
+      previous: null,
+      endorsements: [],
+      lastOutcome: checked,
+      checkedAt: state.current()?.checkedAt,
+    });
   });
 
   it.each([
@@ -373,6 +384,47 @@ describe('ReleaseKeeper.update', () => {
 
     // Assert
     should(await subject.update()).eql({ status: 'current' });
+  });
+});
+
+describe('ReleaseKeeper.checkIsDue', () => {
+  const NOW = 1_000_000_000_000;
+  const dueWith = async (stored: unknown): Promise<boolean> => {
+    const signer = await releaseSigner();
+    const { subject } = keeperFor(signer, site(null).network, { state: memoryState(stored), now: () => NOW });
+    return await subject.checkIsDue();
+  };
+
+  it.each([
+    ['no record', null],
+    ['no stamp', { active: null }],
+    ['a stamp that is not a number', { checkedAt: 'now' }],
+    ['a stamp older than the window', { checkedAt: NOW - RELEASE_RECENT_CHECK_MS }],
+    ['a stamp from the future, which only a page could have written', { checkedAt: NOW + 1 }],
+  ])('is due with %s', async (_name, stored) => {
+    should(await dueWith(stored)).be.true();
+  });
+
+  it('is not due when the site answered a check inside the window', async () => {
+    should(await dueWith({ checkedAt: NOW - RELEASE_RECENT_CHECK_MS + 1 })).be.false();
+  });
+
+  it('stamps the time when the site answers, and not when it is unreachable', async () => {
+    // Arrange
+    const signer = await releaseSigner();
+    const release = await buildRelease(signer, { sequence: 4 });
+    const served = site(release);
+    const { subject, state } = keeperFor(signer, served.network, { now: () => NOW });
+
+    // Act / Assert
+    should(await subject.checkIsDue()).be.true();
+    await subject.update();
+    should(state.current()?.checkedAt).equal(NOW);
+    should(await subject.checkIsDue()).be.false();
+
+    const other = keeperFor(signer, site(null).network, { now: () => NOW });
+    await other.subject.update();
+    should(other.state.current()?.checkedAt).equal(null);
   });
 });
 

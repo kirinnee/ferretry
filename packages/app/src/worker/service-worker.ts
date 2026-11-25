@@ -156,15 +156,23 @@ worker.addEventListener('fetch', event => {
   // The load is answered AFTER that check, for at most `RELEASE_CHECK_DEADLINE_MS`: a newer signed release the
   // site published installs before the page is chosen, so ONE reload gets it. A site that is down or slow is waited
   // for no longer than that, then the installed release answers (and the check finishes behind the load).
+  // The wait is paid only when no check was answered recently (`RELEASE_RECENT_CHECK_MS`), so a slow-but-connected
+  // phone pays it on the first open after a while, not on every open. `checkIsDue` is asked BEFORE this load's own
+  // check starts, because that check stamps the time when the site answers.
+  const due = navigate ? keeper.checkIsDue().catch(() => true) : null;
   const check = navigate ? keeper.update().catch(() => undefined) : null;
   if (check !== null) event.waitUntil(check);
   event.respondWith(
-    (check === null
+    (check === null || due === null
       ? Promise.resolve()
-      : settleWithin(
-          check,
-          RELEASE_CHECK_DEADLINE_MS,
-          milliseconds => new Promise(done => setTimeout(done, milliseconds)),
+      : due.then(isDue =>
+          isDue
+            ? settleWithin(
+                check,
+                RELEASE_CHECK_DEADLINE_MS,
+                milliseconds => new Promise(done => setTimeout(done, milliseconds)),
+              )
+            : undefined,
         )
     )
       .then(() => keeper.respond({ pathname: url.pathname, navigate }))

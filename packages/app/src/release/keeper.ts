@@ -92,6 +92,12 @@ export interface KeeperState {
   readonly endorsements: readonly SignedRelease[];
   /** What the last check concluded. Shown to the reader, never used to decide anything. */
   readonly lastOutcome: ReleaseOutcome | null;
+  /**
+   * When (ms since the epoch) the site last ANSWERED a check — any answer but "unreachable". It decides one thing
+   * only: whether a page load waits for the next check (`ReleaseKeeper.checkIsDue`). A page can write it, which can
+   * only shorten or lengthen a wait, never change what is trusted.
+   */
+  readonly checkedAt: number | null;
 }
 
 export interface ReleaseStateStore {
@@ -109,9 +115,17 @@ const cacheNameFor = (manifest: ReleaseManifest): string =>
 
 /**
  * How long a page load waits for the site's check before it is answered from the release already installed
- * (`ReleaseKeeper.respondAfterCheck`). A check that outlasts it is not abandoned: it finishes behind the load.
+ * (`settleWithin`, called by `src/worker/service-worker.ts`). A check that outlasts it is not abandoned: it finishes
+ * behind the load.
  */
 export const RELEASE_CHECK_DEADLINE_MS = 2_500;
+
+/**
+ * A page load waits for the check only when no check has been answered by the site within this long
+ * (`ReleaseKeeper.checkIsDue`), so a slow-but-connected phone pays the wait on the first open after a while, not on
+ * every open. The check still runs on every load; it just is not waited for.
+ */
+export const RELEASE_RECENT_CHECK_MS = 10 * 60_000;
 
 /**
  * Waits for a page load's check, but never longer than `milliseconds` — and never throws. The check keeps running
@@ -144,6 +158,8 @@ export interface ReleaseKeeperOptions {
   readonly rewrites: readonly ReleaseRewrite[];
   /** The app's header rules from `_headers`, compiled in by the build. */
   readonly headers: readonly ReleaseHeaderRule[];
+  /** The clock, in ms since the epoch. Defaults to `Date.now`. */
+  readonly now?: () => number;
 }
 
 /** An answer the worker turns into a `Response` as it is: status, the bytes, and the headers. */
@@ -167,6 +183,7 @@ interface VerifiedState {
   readonly previous: VerifiedRelease | null;
   readonly endorsements: readonly SignedRelease[];
   readonly lastOutcome: ReleaseOutcome | null;
+  readonly checkedAt: number | null;
 }
 
 const decoder = new TextDecoder();
@@ -183,6 +200,11 @@ const signedRelease = (value: unknown): SignedRelease | null => {
 
 const field = (value: unknown, name: string): unknown =>
   typeof value === 'object' && value !== null ? (value as Record<string, unknown>)[name] : undefined;
+
+const checkedAtOf = (stored: unknown): number | null => {
+  const value = field(stored, 'checkedAt');
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+};
 
 const installedOrder = (release: VerifiedRelease | null): InstalledOrder | null =>
   release === null
@@ -219,6 +241,10 @@ export class ReleaseKeeper {
   #floor = 0;
 
   constructor(private readonly options: ReleaseKeeperOptions) {}
+
+  #now(): number {
+    return (this.options.now ?? Date.now)();
+  }
 
   #check(release: SignedRelease, chain: readonly string[]): Promise<SignatureCheck> {
     const key = `${chain.join(' ')}\n${release.signatureText}`;
@@ -261,6 +287,7 @@ export class ReleaseKeeper {
       previous: await this.#reverify(field(stored, 'previous'), chain),
       endorsements,
       lastOutcome: outcome.success ? outcome.data : null,
+      checkedAt: checkedAtOf(stored),
     };
   }
 
@@ -270,6 +297,7 @@ export class ReleaseKeeper {
       previous: state.previous?.signed ?? null,
       endorsements: state.endorsements,
       lastOutcome: state.lastOutcome,
+      checkedAt: state.checkedAt,
       ...changes,
     });
   }
@@ -277,6 +305,17 @@ export class ReleaseKeeper {
   /** The last update check's outcome, for a page that has just opened. */
   async lastOutcome(): Promise<ReleaseOutcome | null> {
     return (await this.#load()).lastOutcome;
+  }
+
+  /**
+   * True when no check was answered by the site within `RELEASE_RECENT_CHECK_MS`, so a page load should wait (a
+   * little) for the next one. A missing, unreadable or future-dated stamp counts as due, so it fails toward the wait.
+   * Read BEFORE the load's own check starts, which stamps it when the site answers.
+   */
+  async checkIsDue(): Promise<boolean> {
+    const checkedAt = checkedAtOf(await this.options.state.load());
+    const age = (this.options.now ?? Date.now)() - (checkedAt ?? Number.NEGATIVE_INFINITY);
+    return !(age >= 0 && age < RELEASE_RECENT_CHECK_MS);
   }
 
   /** Fetches, verifies and installs the release the site serves now. */
@@ -291,7 +330,12 @@ export class ReleaseKeeper {
     const outcome = await this.#install(await this.#load());
     // `updated` already wrote its own record. Anything else rewrites only the outcome — and, in
     // passing, drops whatever in the record did not verify.
-    if (outcome.status !== 'updated') await this.#save(await this.#load(), { lastOutcome: outcome });
+    if (outcome.status !== 'updated') {
+      await this.#save(
+        await this.#load(),
+        outcome.status === 'unreachable' ? { lastOutcome: outcome } : { lastOutcome: outcome, checkedAt: this.#now() },
+      );
+    }
     return outcome;
   }
 
@@ -340,6 +384,7 @@ export class ReleaseKeeper {
           ? state.endorsements
           : [...state.endorsements, candidate].slice(-ENDORSEMENT_LIMIT),
       lastOutcome: outcome,
+      checkedAt: this.#now(),
     });
     this.#floor = Math.max(this.#floor, manifest.sequence);
     await this.#prune([cacheName, state.active?.cacheName]);
