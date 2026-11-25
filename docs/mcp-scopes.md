@@ -164,7 +164,14 @@ the project:
    `Authorization: Bearer ${FY_MCP_<NAME>_<HASH>_TOKEN}`. Claude uses a local server in place of a
    same-named project one, and expands `${VAR}` in its headers from its own environment;
 3. the variable is added to the launch environment, resolved. A profile's own binding of the same name
-   wins.
+   wins;
+4. the entry also carries `headersHelper: "fy mcp token FY_MCP_<NAME>_<HASH>_TOKEN"`, which Claude runs at connect
+   time and again after a 401 to get the CURRENT header
+   ([mcp-oauth.md](mcp-oauth.md#a-ferret-that-outlives-its-token)): the launch resolved the token once and a ferret can
+   outlive it (Slack's lives twelve hours). The static header stays as the fallback. The helper asks
+   `POST /v1/ferrets/:ferretId/mcp/token`, which answers only the ferret itself, works out what that ferret's launch
+   holds right now without writing `.claude.json`, and hands back that one token, renewed — the documented GAP (the
+   agent can read its own environment) extended in time, not widened.
 
 The file holds a variable name, never the token. Ferretry's entries are recognised by that header shape
 and only they are replaced: every other local-scope server, and every other key of the file, is kept.
@@ -183,7 +190,13 @@ server.
   `.claude.json` too; the entry is written whole, beside the file and renamed over it, keeping its mode
   (the materialiser's `replaceKeys` write has the same window). What can be lost is Claude's own state,
   never a token, and the next launch writes the entry again.
-- **A ferret already running does not pick up a new sign-in** until it is restarted, as for a component.
+- **A ferret already running does not pick up a NEW sign-in** until it is restarted, as for a component. A sign-in it
+  already had stays fresh without one (the helper above); one the provider rejected answers the ferret with a sentence
+  telling it to ask the owner.
+- **Codex has no helper hook**: a Codex ferret gets its token at launch only and needs a restart after its lifetime.
+- **A server reached at a `url` is written as the harness reads it**, signed in to or not: Claude's `{ "type": "http" | "sse", "url" }`
+  (an entry with no `type` is read as a command to start, and `auth` / `oauth` are keys Claude ignores), Codex's `url`.
+  An address is the legacy `sse` transport when its **path** ends in `/sse`; a query or fragment value that ends in `/sse` does not make it one.
 
 ## Tests
 

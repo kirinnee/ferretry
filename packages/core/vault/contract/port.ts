@@ -90,6 +90,14 @@ export interface VaultApi {
    * {@link putNew}, to a non-core plugin that declares `permissions.createSecrets`.
    */
   filedSame?(name: SecretName, value: string): Promise<boolean>;
+  /**
+   * THE ONE GETTER, and only for what the caller itself wrote: the current value of a secret the Vault's mint ledger says
+   * THIS caller filed (`put` / `putNew`), or `undefined` for a name not held, an owner's value, another plugin's and a
+   * value written since by anybody else. MCP's sign-in is the only plugin handed it (`permissions.revealMinted`): it
+   * returns a running ferret its own renewed access token (docs/secrets.md › The one exception). It adds nothing the
+   * caller did not already hold when it minted the value. A store that cannot be read raises.
+   */
+  mintedValue?(name: SecretName): Promise<string | undefined>;
   run(command: SecretUseCommand, ferret?: FerretId): Promise<Result<SecretUseResult, SecretUseRefusal>>;
   authorizeFetch(
     name: SecretName,

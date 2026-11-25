@@ -61,12 +61,14 @@ describe('a signed-in machine MCP server, rendered for the harness that reads it
       type: 'http',
       url: SERVER,
       headers: { Authorization: `Bearer \${${NAMES.variable}}` },
+      headersHelper: `fy mcp token ${NAMES.variable}`,
     });
     // The address ends in /sse: the legacy transport, as both harnesses and the inventory read it.
     expect(configOf(parts, 'legacy')).toEqual({
       type: 'sse',
       url: SSE_SERVER,
       headers: { Authorization: `Bearer \${${SSE_NAMES.variable}}` },
+      headersHelper: `fy mcp token ${SSE_NAMES.variable}`,
     });
   });
 
@@ -129,7 +131,68 @@ describe('a signed-in machine MCP server, rendered for the harness that reads it
   test('a server nobody signed in to, and a server Ferretry starts, are unchanged', async () => {
     const parts = await partsFor('claude-code', []);
 
-    expect(configOf(parts, 'linear')).toEqual({ url: SERVER, auth: 'oauth' });
+    // A server reached at a url is written as the harness reads it: Claude's typed entry, with no `auth` key it ignores.
+    expect(configOf(parts, 'linear')).toEqual({ type: 'http', url: SERVER });
     expect(configOf(parts, 'lint')).toEqual({ command: 'npx', args: ['lint-mcp'] });
+  });
+});
+
+describe('a server reached at a url that nobody signed in to', () => {
+  const PLAIN = 'https://docs.example.test/mcp?next=/sse';
+  const items: ReadonlyMap<string, McpItem> = new Map<string, McpItem>([
+    ['docs', { url: PLAIN }],
+    ['linear', { url: SERVER, auth: 'oauth', oauth: { clientId: 'client-fake' } as never }],
+  ]);
+  const launchFor = (harness: KnownHarnessKey) =>
+    new McpLaunchParts({
+      items: () => items,
+      held: async () => new Set<SecretName>(),
+      renewal: { refreshForLaunch: async () => {} },
+      mcpFormat: harness => (harness === 'codex' ? 'toml' : harness === 'claude-code' ? 'json' : undefined),
+      layered: async () => new Set(items.keys()),
+      project: async () => ({ root: '', servers: {}, env: {} }),
+    }).parts(specFor(harness));
+
+  test('Claude reads a typed entry: a plain url item and an unsigned oauth one carry no auth or oauth key', async () => {
+    const parts = await launchFor('claude-code');
+
+    // The /sse in a QUERY value does not make the address a legacy SSE one.
+    expect(configOf(parts, 'docs')).toEqual({ type: 'http', url: PLAIN });
+    expect(configOf(parts, 'linear')).toEqual({ type: 'http', url: SERVER });
+  });
+
+  test('Codex reads its url alone', async () => {
+    const parts = await launchFor('codex');
+
+    expect(configOf(parts, 'docs')).toEqual({ url: PLAIN });
+    expect(configOf(parts, 'linear')).toEqual({ url: SERVER });
+  });
+});
+
+describe('bindings: the sign-in variables one ferret’s launch holds, by reference', () => {
+  const launch = (held: readonly SecretName[], mcpFormat: 'json' | 'toml' | undefined = 'json') =>
+    new McpLaunchParts({
+      items: () => ITEMS,
+      held: async () => new Set(held),
+      renewal: { refreshForLaunch: async () => {} },
+      mcpFormat: () => mcpFormat,
+      layered: async () => new Set(ITEMS.keys()),
+      project: async () => ({ root: '', servers: {}, env: {} }),
+    });
+  const subject = {
+    ferret: ferretId('f1'),
+    runtime: 'rt' as RuntimeId,
+    harness: 'claude-code',
+    folder: '/work/app',
+  } as never;
+
+  test('names each held sign-in variable with the secret NAME behind it, and nothing else', async () => {
+    const bound = await launch([NAMES.access]).bindings(subject);
+
+    expect([...bound]).toEqual([[NAMES.variable, NAMES.access]]);
+  });
+
+  test('a server nobody signed in to, or one signed out, binds nothing', async () => {
+    expect([...(await launch([]).bindings(subject))]).toEqual([]);
   });
 });

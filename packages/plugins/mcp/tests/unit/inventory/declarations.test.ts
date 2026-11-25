@@ -53,6 +53,33 @@ describe('MCP declarations', () => {
     should(claudeServers(null)).deepEqual({ servers: [], problems: [] });
   });
 
+  it('should call an address SSE only by its PATH, never by a query or fragment value that ends in /sse', () => {
+    // Arrange
+    const document = {
+      mcpServers: {
+        path: { url: 'https://a.example/sse' },
+        slash: { url: 'https://a.example/sse/' },
+        pathWithQuery: { url: 'https://a.example/sse?key=1#x' },
+        inQuery: { url: 'https://a.example/mcp?next=/sse' },
+        inFragment: { url: 'https://a.example/mcp#/sse' },
+        sseWord: { url: 'https://a.example/classes' },
+      },
+    };
+
+    // Act
+    const read = claudeServers(document);
+
+    // Assert
+    should(read.servers.map(server => `${server.name}:${server.transport}`)).deepEqual([
+      'path:sse',
+      'slash:sse',
+      'pathWithQuery:sse',
+      'inQuery:http',
+      'inFragment:http',
+      'sseWord:http',
+    ]);
+  });
+
   it('should read Claude’s hand-registered OAuth client, and only a usable one', () => {
     // Arrange
     const document = {

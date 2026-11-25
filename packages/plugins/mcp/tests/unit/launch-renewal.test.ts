@@ -100,7 +100,12 @@ describe('MCP launch renewal', () => {
     expect(parts.find(part => part.kind === 'mcp' && part.name === 'linear')).toEqual({
       kind: 'mcp',
       name: 'linear',
-      config: { type: 'http', url: SERVER, headers: { Authorization: `Bearer \${${NAMES.variable}}` } },
+      config: {
+        type: 'http',
+        url: SERVER,
+        headers: { Authorization: `Bearer \${${NAMES.variable}}` },
+        headersHelper: `fy mcp token ${NAMES.variable}`,
+      },
     });
     expect(parts.find(part => part.kind === 'mcp' && part.name === 'lint')).toEqual({
       kind: 'mcp',
@@ -145,7 +150,7 @@ describe('MCP launch renewal', () => {
     expect(unsigned.find(part => part.kind === 'mcp' && part.name === 'linear')).toEqual({
       kind: 'mcp',
       name: 'linear',
-      config: { url: SERVER, auth: 'oauth' },
+      config: { type: 'http', url: SERVER },
     });
   });
 
@@ -212,6 +217,7 @@ describe('MCP launch renewal', () => {
         type: 'http',
         url: 'https://docs.example.com/mcp',
         headers: { Authorization: `Bearer \${${docs.variable}}` },
+        headersHelper: `fy mcp token ${docs.variable}`,
         scope: 'local',
         project: '/work/app',
       },

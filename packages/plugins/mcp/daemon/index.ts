@@ -40,6 +40,8 @@ import { parseHarnessDocument } from './lib/inventory/parse-document.ts';
 import { accountsOf, componentsOf, layeredMcp } from './lib/inventory/runtime-wiring.ts';
 import { mcpCatalogRuntime } from './lib/catalog-runtime.ts';
 import { McpLaunchParts } from './lib/launch-parts.ts';
+import { FerretMcpTokens } from './features/token/service.ts';
+import { tokenRoutes } from './features/token/routes.ts';
 import { hostImportPut, kernelConfigWrite } from './features/host-import/index.ts';
 import { mcpComponentSource } from './lib/profile-component-source.ts';
 import { McpOAuthService } from './lib/oauth/service.ts';
@@ -209,7 +211,7 @@ export default implementDaemon(manifest, {
             own !== undefined
               ? [own]
               : isKnownHarnessKey(spec.harness)
-                ? [{ runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home }]
+                ? [{ runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home ?? '' }]
                 : [],
           folders,
           documents,
@@ -427,6 +429,15 @@ export default implementDaemon(manifest, {
       }),
     };
 
+    // A running ferret's own renewed token (docs/secrets.md › The one exception): what ITS launch holds now, read back
+    // through the Vault's one getter, only for a secret this plugin minted.
+    const tokens = new FerretMcpTokens({
+      ferret: async id => await inventoryFerret(id),
+      bindings: async subject => await launch.bindings(subject),
+      signInRequired: async name => await oauth.signInRequired(name),
+      value: async name => await vault.mintedValue?.(name),
+    });
+
     const api: McpApi = {
       inventory: async ferret => (ferret === undefined ? await inventory.machine() : await inventory.ferret(ferret)),
       check: async (id, ferret) => await check.check(id, ferret),
@@ -461,6 +472,7 @@ export default implementDaemon(manifest, {
             return out;
           },
         }),
+        ...tokenRoutes(tokens),
         ...sessionRoutes({
           list: id => session.list(id),
           previewProject: (id, request) => session.previewProject(id, request),

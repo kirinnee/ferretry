@@ -171,6 +171,20 @@ export default definePlugin({
         audit: audit(MCP_AUDIT.addLogin),
         guard: { none: 'the added name, runtime and profile' },
       }),
+      // The ONE route that hands a secret value back (docs/secrets.md › The one exception): a running ferret asks for the
+      // renewed token behind one of ITS OWN launch's sign-in variables, so Claude's `headersHelper` keeps it current. The
+      // handler refuses every caller but that ferret's own session credential (the admin token with a session header,
+      // a person, a device, the warden and another ferret all get 403).
+      route('POST /v1/ferrets/:ferretId/mcp/token', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('secrets', 'use'),
+        noStore: true,
+        audit: audit('secrets.used'),
+        guard: {
+          none: 'the one sanctioned exception: the answering ferret’s own sign-in token, in a bearer header, to that ferret only',
+        },
+      }),
       route('GET /v1/ferrets/:ferretId/mcp', {
         minimum: 'operator',
         caller: 'any',
@@ -209,6 +223,11 @@ export default definePlugin({
           },
           { flag: '--json', help: 'print the protocol result' },
         ],
+      }),
+      verb('mcp token', {
+        summary: 'print this ferret’s current MCP sign-in header (what Claude’s headersHelper runs)',
+        args: [{ name: 'variable', help: 'the sign-in variable, FY_MCP_<NAME>_<DIGEST>_TOKEN' }],
+        options: [],
       }),
       verb('mcp add', {
         summary: 'add an MCP server item',
@@ -319,5 +338,7 @@ export default definePlugin({
     secrets: [],
     // The OAuth access tokens a sign-in files in the Vault (`mcpOAuthSecretNames`): today's exact names, and no others.
     mintedSecrets: [SIGN_IN_SECRET_NAME],
+    // Reads back ONLY a sign-in's access token this plugin itself minted, for the one route above (`VaultApi.mintedValue`).
+    revealMinted: true,
   },
 });

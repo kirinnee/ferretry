@@ -513,6 +513,11 @@ export default implementDaemon(manifest, {
           return removed;
         },
         fetchMinted: async (name, asked, placement) => await fetchMinted(needer, name, asked, placement),
+        // The ONE getter: only for a plugin whose manifest declares `permissions.revealMinted`, and only for a value the
+        // mint ledger says it wrote itself (`openOwnMint`, the same word `fetchMinted` takes).
+        ...(needer.permissions.revealMinted === true
+          ? { mintedValue: async (name: SecretName) => (await openOwnMint(needer.id, name))?.value }
+          : {}),
         // Every narrowed call reads what the caller passed ONCE, into plain data of its own, checks that copy and uses
         // only that copy: a getter on the caller's object cannot show a declared value to the check and another to the use.
         run: async (asked, ferret) => {

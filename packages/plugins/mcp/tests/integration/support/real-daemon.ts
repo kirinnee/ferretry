@@ -1,0 +1,242 @@
+import { createHash, randomBytes } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { FerretRecordSchema, FerretTokensSchema } from '@ferretry/core-ferrets/contract';
+
+/**
+ * (A copy of the CLI's `real-daemon.ts` support, kept in this package because a package's tests reach another only through
+ * its contract; it adds a seeded ferret's harness and runtime and `environment(actor)`.)
+ *
+ * A REAL 5.0 daemon for a CLI test: the production `fyd` (every real plugin, the real route spine, grants and Asks engine)
+ * on a temp FY_HOME with an OS-chosen loopback port, and the REAL `fy` run as a child process against it, as a ferret
+ * (its own session id and bearer) or as the owner (no session). Nothing here is a fixture of the daemon's answers: a verb
+ * that did nothing, wrote to the wrong item, or closed fewer than it said shows in the board the daemon serves afterwards.
+ *
+ * Ferrets are seeded as schema-validated records with a bearer each, so no harness, model or pane is ever launched.
+ * Fake values only; loopback only; nothing reads a real home or credential. The test file calls `dispose()` from its own
+ * `afterAll` (a hook cannot be registered from inside `beforeAll`), which stops the daemon and removes the home.
+ */
+
+const ROOT = join(import.meta.dir, '../../../../../..');
+const FYD = join(ROOT, 'packages/core/kernel/host/fyd.ts');
+const FY = join(ROOT, 'packages/cli/bin/fy.ts');
+const STAMP = '2026-11-13T00:00:00.000Z';
+const READY_MS = 90_000;
+
+export interface SeededFerret {
+  readonly id: string;
+  readonly mode: 'auto' | 'interactive';
+  /** The lead this ferret is a helper of. */
+  readonly parent?: string;
+  /** The harness its record names (default `codex`: no harness is ever launched). */
+  readonly harness?: 'codex' | 'claude-code';
+  /** The runtime its record names, so its launch carries that runtime's profile. */
+  readonly runtime?: string;
+}
+
+interface RanFy {
+  readonly code: number;
+  readonly out: string;
+  readonly err: string;
+  /** The stdout parsed as JSON when it is, else undefined. */
+  readonly json: unknown;
+}
+
+export interface RealDaemon {
+  readonly home: string;
+  /** Stops the daemon and removes its home. */
+  dispose(): Promise<void>;
+  /** One owner request to the daemon's HTTP API (the admin bearer from the home's own token file), for what the CLI does not say. */
+  call(
+    method: string,
+    path: string,
+    body?: unknown,
+    headers?: Readonly<Record<string, string>>,
+  ): Promise<{ status: number; text: string }>;
+  /** The environment `fy` runs in as `actor` (a ferret's own session id and bearer, or the owner's): for a child that runs `fy` itself. */
+  environment(actor: string): Readonly<Record<string, string>>;
+  /** Runs `fy <args>` as a ferret (`actor` is its id) or as the owner (`'owner'`). */
+  fy(actor: string, args: readonly string[]): Promise<RanFy>;
+}
+
+/**
+ * @param seed files (path under FY_HOME → text) written before the first boot: the state a ferret with no live agent cannot
+ *   be made to produce (a message the owner sent it, which a daemon without a pane refuses to take).
+ * @param options.workOn start with Board and Agenda on (`config/plugins.yaml` `work: on`, which is off by default).
+ * @param options.preload a module the daemon process loads first (`bun --preload`): a test's seam at the process boundary.
+ */
+export async function bootRealDaemon(
+  ferrets: readonly SeededFerret[],
+  seed: Readonly<Record<string, string>> = {},
+  options: { readonly preload?: string; readonly workOn?: boolean } = {},
+): Promise<RealDaemon> {
+  const root = await mkdtemp(join(tmpdir(), 'fy-cli-real-'));
+  const home = join(root, 'fy-home');
+  const userHome = join(root, 'user-home');
+  await mkdir(userHome, { recursive: true });
+  for (const path of ['config', 'state/ferrets']) await mkdir(join(home, path), { recursive: true });
+  await writeFile(
+    join(home, 'home.json'),
+    JSON.stringify({ format: 1, createdBy: 'cli-real-daemon', createdAt: STAMP }),
+  );
+  for (const [path, text] of Object.entries(seed)) {
+    await mkdir(join(home, path, '..'), { recursive: true });
+    await writeFile(join(home, path), text);
+  }
+  const tokens: Record<string, string> = {};
+  for (const ferret of ferrets) {
+    await mkdir(join(home, 'state/ferrets', ferret.id), { recursive: true });
+    const record = FerretRecordSchema.parse({
+      format: 1,
+      id: ferret.id,
+      name: ferret.id,
+      role: ferret.parent === undefined ? 'lead' : 'helper',
+      ...(ferret.parent === undefined ? {} : { parent: ferret.parent }),
+      mode: ferret.mode,
+      harness: ferret.harness ?? 'codex',
+      ...(ferret.runtime === undefined ? {} : { runtime: ferret.runtime }),
+      runner: 'tmux',
+      folder: root,
+      // 'starting', never a live-looking 'working'/'idle': the boot pass and the 30 s sweep settle a live record whose
+      // pane the runner proves gone as stopped (terminal_gone) and a stopped ferret's bearer authenticates nobody.
+      state: 'starting',
+      birth: 'person',
+      createdAt: STAMP,
+      stateAt: STAMP,
+    });
+    await writeFile(join(home, 'state/ferrets', ferret.id, 'ferret.json'), JSON.stringify(record));
+    tokens[ferret.id] = `fys_${randomBytes(32).toString('base64url')}`;
+  }
+  await writeFile(
+    join(home, 'state/ferrets/tokens.json'),
+    JSON.stringify(
+      FerretTokensSchema.parse({
+        format: 1,
+        tokens: Object.entries(tokens).map(([ferret, token]) => ({
+          ferret,
+          digest: createHash('sha256').update(token).digest('hex'),
+          issuedAt: STAMP,
+        })),
+      }),
+    ),
+    { mode: 0o600 },
+  );
+  const base = {
+    PATH: process.env.PATH ?? '/usr/bin:/bin',
+    HOME: userHome,
+    TMPDIR: process.env.TMPDIR ?? '/tmp',
+    LANG: 'C.UTF-8',
+    FY_HOME: home,
+    // Offline, as scripts/ci/test.sh runs every tier.
+    FY_MODEL_CATALOG: 'off',
+    FY_LOCAL_MODELS: 'off',
+    FY_RELAY_DIRECTORY_ORIGIN: 'off',
+    FY_UPDATE_CHECK: 'off',
+    FYD_BACKGROUND_DELAY_SECONDS: '3600',
+  };
+  /** Starts `fyd` on this home and waits until it is ready: its process, and where and as whom to reach it. */
+  const start = async (): Promise<{ child: ReturnType<typeof Bun.spawn>; url: string; admin: string }> => {
+    const child = Bun.spawn({
+      cmd: [process.execPath, ...(options.preload === undefined ? [] : ['--preload', options.preload]), FYD],
+      cwd: ROOT,
+      env: { ...base, FY_PORT: '0' },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const log: string[] = [];
+    let ready = false;
+    const pump = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
+      const decoder = new TextDecoder();
+      for await (const chunk of stream) {
+        const text = decoder.decode(chunk, { stream: true });
+        log.push(text);
+        if (/\bfyd \S+ ready \(/u.test(text)) ready = true;
+      }
+    };
+    void pump(child.stderr as ReadableStream<Uint8Array>);
+    void pump(child.stdout as ReadableStream<Uint8Array>);
+    const until = Date.now() + READY_MS;
+    while (!ready && Date.now() < until) {
+      if (child.exitCode !== null)
+        throw new Error(`fyd exited ${String(child.exitCode)}: ${log.join('').slice(-1500)}`);
+      await Bun.sleep(200);
+    }
+    if (!ready) {
+      await stop(child);
+      throw new Error(`fyd was not ready in ${String(READY_MS)} ms: ${log.join('').slice(-1500)}`);
+    }
+    const run = JSON.parse(await readFile(join(home, 'run/daemon.json'), 'utf8')) as { port: number };
+    const admin = (await readFile(join(home, 'state/gate/admin-token'), 'utf8')).trim();
+    return { child, url: `http://127.0.0.1:${String(run.port)}`, admin };
+  };
+  const stop = async (child: ReturnType<typeof Bun.spawn>): Promise<void> => {
+    child.kill('SIGTERM');
+    await Promise.race([child.exited, Bun.sleep(10_000)]);
+    child.kill('SIGKILL');
+  };
+  let { child, url, admin } = await start();
+  const dispose = async (): Promise<void> => {
+    await stop(child);
+    await rm(root, { recursive: true, force: true });
+  };
+  if (options.workOn === true) {
+    // Turning `work` on is a loosening, held for a person; the host's admin token is that person at the machine, so it
+    // applies at once, and the plugins it starts are chosen at boot, so the daemon restarts on it.
+    const put = await fetch(`${url}/v1/config/file`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${admin}`, 'x-ferretry-client': 'cli', 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'plugins.yaml', text: 'work: on\n' }),
+    });
+    if (!put.ok) throw new Error(`turning work on failed (${String(put.status)}): ${await put.text()}`);
+    await stop(child);
+    ({ child, url, admin } = await start());
+  }
+  const environmentFor = (actor: string): Record<string, string> => ({
+    ...base,
+    FY_URL: url,
+    ...(actor === 'owner' ? {} : { FY_SESSION_ID: actor, FY_SESSION_TOKEN: tokens[actor] ?? '' }),
+  });
+  return {
+    home,
+    dispose,
+    async call(method, path, body, headers = {}) {
+      const response = await fetch(`${url}${path}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${admin}`,
+          'x-ferretry-client': 'cli',
+          accept: 'application/json',
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          ...headers,
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      return { status: response.status, text: await response.text() };
+    },
+    environment: actor => environmentFor(actor),
+    async fy(actor, args) {
+      const proc = Bun.spawn({
+        cmd: [process.execPath, FY, ...args],
+        cwd: ROOT,
+        env: environmentFor(actor),
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [out, err, code] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      let json: unknown;
+      try {
+        json = JSON.parse(out);
+      } catch {
+        json = undefined;
+      }
+      return { code, out, err, json };
+    },
+  };
+}

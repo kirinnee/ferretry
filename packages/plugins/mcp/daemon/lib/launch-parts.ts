@@ -6,9 +6,21 @@ import {
   type LaunchPartSource,
   type LaunchSpec,
 } from '@ferretry/core-ferrets/contract';
-import { optionalSecretReference, type SecretName, secretReferencesIn } from '@ferretry/core-vault/contract';
+import {
+  optionalSecretReference,
+  optionalSecretReferenceOf,
+  type SecretName,
+  secretReferencesIn,
+} from '@ferretry/core-vault/contract';
 import type { JsonValue } from '@ferretry/std';
-import { McpEnvSchema, type McpItem, type McpOAuthSecretNames, mcpOAuthSecretNames } from '../../contract/index.ts';
+import {
+  MCP_TOKEN_VARIABLE_PATTERN,
+  McpEnvSchema,
+  type McpItem,
+  type McpOAuthSecretNames,
+  mcpOAuthSecretNames,
+  mcpTokenCommand,
+} from '../../contract/index.ts';
 import { isSseAddress } from './inventory/declarations.ts';
 import type { ProjectMcpLaunchShare } from './inventory/project-sign-in.ts';
 
@@ -23,7 +35,11 @@ type McpLaunchPart = Extract<LaunchPart, { readonly kind: 'mcp' }>;
  * item that names a harness is for that harness only). Inert: a part is a name and the item as data. `env` keeps its
  * `${secret:NAME}` references; the Vault opens them for the child at the moment it starts, so no value is here.
  */
-export function mcpParts(items: ReadonlyMap<string, McpItem>, harness: KnownHarnessKey): readonly McpLaunchPart[] {
+export function mcpParts(
+  items: ReadonlyMap<string, McpItem>,
+  harness: KnownHarnessKey,
+  format?: McpDocumentFormat,
+): readonly McpLaunchPart[] {
   const parts: McpLaunchPart[] = [];
   for (const [name, item] of [...items].sort(([left], [right]) => left.localeCompare(right))) {
     if (item.harness !== undefined && item.harness !== harness) continue;
@@ -31,10 +47,21 @@ export function mcpParts(items: ReadonlyMap<string, McpItem>, harness: KnownHarn
       throw new Error(
         `The MCP server environment is invalid. Store credentials with fy secret set NAME and use \${secret:NAME}.`,
       );
-    const { harness: _harness, ...config } = item;
-    parts.push({ kind: 'mcp', name, config: config as JsonValue });
+    parts.push({ kind: 'mcp', name, config: plainConfig(item, format) });
   }
   return parts;
+}
+
+/**
+ * One item as the harness reads it. A server reached at a `url` is written as the document's own entry: Claude's
+ * `{ type, url }` (an entry with no `type` is read as a command to start, and `auth` / `oauth` are keys it does not
+ * read), Codex's `{ url }`. A harness with no MCP format on record keeps the item as configured, and a server Ferretry
+ * starts is never rewritten.
+ */
+function plainConfig(item: McpItem, format: McpDocumentFormat | undefined): JsonValue {
+  const { harness: _harness, ...config } = item;
+  if (item.url === undefined || format === undefined) return config as JsonValue;
+  return format === 'toml' ? { url: item.url } : { type: isSseAddress(item.url) ? 'sse' : 'http', url: item.url };
 }
 
 /**
@@ -45,7 +72,13 @@ export function mcpParts(items: ReadonlyMap<string, McpItem>, harness: KnownHarn
  */
 function signedInConfig(url: string, variable: string, format: McpDocumentFormat): JsonValue {
   if (format === 'toml') return { url, bearer_token_env_var: variable };
-  return { type: isSseAddress(url) ? 'sse' : 'http', url, headers: { Authorization: `Bearer \${${variable}}` } };
+  return {
+    type: isSseAddress(url) ? 'sse' : 'http',
+    url,
+    headers: { Authorization: `Bearer \${${variable}}` },
+    // Claude runs this at connect time and again after a 401, so a ferret that outlives its token sends the renewed one.
+    headersHelper: mcpTokenCommand(variable),
+  };
 }
 
 /** The launch's share of the sign-in service: make due tokens current. Never throws (`McpOAuthService.refreshForLaunch`). */
@@ -66,8 +99,17 @@ export interface McpLaunchPartsDeps {
    */
   layered(runtime: string | undefined): Promise<ReadonlySet<string>>;
   /** The launch's project servers (`ProjectMcpLaunch.share`), after their own renewal. */
-  project(spec: Omit<LaunchSpec, 'parts'>): Promise<ProjectMcpLaunchShare>;
+  project(spec: McpLaunchSubject): Promise<ProjectMcpLaunchShare>;
 }
+
+/**
+ * What of a launch decides which servers it carries: the ferret, its harness, runtime and folder. A running ferret's
+ * summary answers all of it (the token route asks what ITS launch holds now), so the launch's whole spec is not needed.
+ */
+export type McpLaunchSubject = Pick<LaunchSpec, 'ferret' | 'harness' | 'runtime' | 'folder'> & {
+  /** The ferret's home, when the caller has it: only a launch without a published runtime reads it. */
+  readonly home?: string;
+};
 
 /**
  * MCP's `launch.parts` source: today's `FleetLaunchEnvironment` and `ProjectMcpLaunch` together, asked per launch.
@@ -92,11 +134,32 @@ export class McpLaunchParts implements LaunchPartSource {
   constructor(private readonly deps: McpLaunchPartsDeps) {}
 
   async parts(spec: Omit<LaunchSpec, 'parts'>): Promise<readonly LaunchPart[]> {
+    return await this.compose(spec);
+  }
+
+  /**
+   * Which sign-in variable each of this ferret's servers reads its token from, and the secret NAME behind it, as a
+   * launch would bind them NOW (after the same renewal): never a value. What the token route reads, so it can only
+   * ever answer for a server this ferret's own launch holds.
+   */
+  async bindings(subject: McpLaunchSubject): Promise<ReadonlyMap<string, SecretName>> {
+    const bound = new Map<string, SecretName>();
+    for (const part of await this.compose(subject))
+      if (part.kind === 'env')
+        for (const [variable, reference] of Object.entries(part.env)) {
+          const name = optionalSecretReferenceOf(reference);
+          if (name !== undefined && MCP_TOKEN_VARIABLE_PATTERN.test(variable)) bound.set(variable, name);
+        }
+    return bound;
+  }
+
+  private async compose(spec: McpLaunchSubject): Promise<readonly LaunchPart[]> {
     // Only the items this runtime's profile stack names, as a v4 runtime home held only its profile's components.
     const layered = await this.deps.layered(spec.runtime);
     const items = new Map([...this.deps.items()].filter(([name]) => layered.has(name)));
+    const format = this.deps.mcpFormat(spec.harness);
     // A harness whose MCP format this plugin does not write gets no servers from it: never another harness's.
-    const servers = isKnownHarnessKey(spec.harness) ? mcpParts(items, spec.harness) : [];
+    const servers = isKnownHarnessKey(spec.harness) ? mcpParts(items, spec.harness, format) : [];
     const signedIn = new Map<string, { readonly names: McpOAuthSecretNames; readonly url: string }>();
     const named = new Set<SecretName>();
     for (const part of servers) {
@@ -113,7 +176,6 @@ export class McpLaunchParts implements LaunchPartSource {
       this.deps.project(spec),
       named.size === 0 ? undefined : this.deps.renewal.refreshForLaunch([...named]),
     ]);
-    const format = signedIn.size === 0 ? undefined : this.deps.mcpFormat(spec.harness);
     const held = signedIn.size === 0 ? new Set<SecretName>() : await this.deps.held();
     const env: Record<string, string> = { ...project.env };
     const parts: LaunchPart[] = servers.map(part => {
@@ -129,9 +191,26 @@ export class McpLaunchParts implements LaunchPartSource {
       parts.push({
         kind: 'mcp',
         name,
-        config: { ...server, headers: { ...server.headers }, scope: 'local', project: project.root },
+        config: {
+          ...server,
+          headers: { ...server.headers },
+          ...projectHelper(server.headers.Authorization, format),
+          scope: 'local',
+          project: project.root,
+        },
       });
     if (Object.keys(env).length > 0) parts.push({ kind: 'env', env });
     return parts;
   }
+}
+
+/** A project server's `headersHelper`, when Claude reads it and its header names a sign-in variable (the same command as a machine server's). */
+function projectHelper(
+  authorization: string | undefined,
+  format: McpDocumentFormat | undefined,
+): Record<string, string> {
+  const variable = /^Bearer \$\{([A-Z0-9_]+)\}$/u.exec(authorization ?? '')?.[1];
+  return format === 'json' && variable !== undefined && MCP_TOKEN_VARIABLE_PATTERN.test(variable)
+    ? { headersHelper: mcpTokenCommand(variable) }
+    : {};
 }
