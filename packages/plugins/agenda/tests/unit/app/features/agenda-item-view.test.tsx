@@ -301,7 +301,7 @@ describe('the v6 layout: title, ONE card — one column', () => {
   test('draws premise and context as ONE panel, labelled Premise and Context — never "Why now"', async () => {
     await draw(richItem);
     const panel = one('.fy-card [data-agenda-situation]');
-    expect([...panel.querySelectorAll('h4')].map(label => label.textContent)).toEqual(['Premise', 'Context']);
+    expect([...panel.querySelectorAll('h3')].map(label => label.textContent)).toEqual(['Premise', 'Context']);
     expect(panel.querySelectorAll('li')).toHaveLength(3);
     const text = root().textContent ?? '';
     expect(text).not.toMatch(/why now|what’s going on|what's going on|why it matters/iu);

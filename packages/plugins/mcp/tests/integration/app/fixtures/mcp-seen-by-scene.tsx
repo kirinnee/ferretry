@@ -1,16 +1,48 @@
 /**
  * Settings › MCP servers over fake data, in a real browser: the REAL tab, an in-memory client, and the runtime behind
  * "Seen by" (Q8a): it must read as words, never as the stored runtime name.
+ *
+ *   ?theme=<family>-<mode>
+ *   ?data=healthy    one server that needs nothing (the Needs attention chip is empty)
+ *   ?data=builtins   Claude's and Codex's built-in `ferretry` server side by side
  */
+import { McpInventorySchema } from '../../../../contract/index.ts';
 import { createRoot } from 'react-dom/client';
 import { McpSettings } from '../../../../app/views/servers-settings.tsx';
-import { MCP, mcpConnection, NOW, RUNTIMES, scriptedClient } from '../../../unit/app/mcp-fixtures.ts';
+import { MCP, mcpConnection, mcpServer, NOW, RUNTIMES, scriptedClient } from '../../../unit/app/mcp-fixtures.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 
+const inventory = () => {
+  switch (params.get('data')) {
+    case 'healthy':
+      return McpInventorySchema.parse({
+        problems: [],
+        servers: [mcpServer({ name: 'github', scope: 'user', transport: 'stdio', target: 'npx' })],
+      });
+    case 'builtins':
+      return McpInventorySchema.parse({
+        problems: [],
+        servers: [
+          mcpServer({ name: 'ferretry', scope: 'ferretry', transport: 'stdio', target: 'fy mcp serve' }),
+          mcpServer({
+            name: 'ferretry',
+            scope: 'ferretry',
+            harness: 'codex',
+            transport: 'stdio',
+            target: 'fy mcp serve',
+            runtimes: [{ runtime: 'codex-work' }],
+          }),
+        ],
+      });
+    default:
+      return MCP;
+  }
+};
+
 const client = scriptedClient({
-  'GET /v1/mcp': MCP,
+  'GET /v1/mcp': inventory(),
   'GET /v1/runtimes': RUNTIMES,
   'GET /v1/mcp/auth': { connections: [mcpConnection()] },
   'GET /v1/grants': { capabilities: [{ capability: 'fleet', configure: true, configureRefusal: 'granted' }] },

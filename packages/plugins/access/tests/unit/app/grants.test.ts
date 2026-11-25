@@ -101,6 +101,12 @@ describe('grant vocabulary', () => {
     );
     expect(stepUpAct({ capability: 'browser', axis: 'use' })).toBe('open the remote browser');
     expect(stepUpAct({ capability: 'pairing', axis: 'use' })).toBe('add or manage a paired device');
+    // A read or a test is worded as itself, never as the capability's general use ("open a terminal" for viewing a list).
+    expect(stepUpAct({ capability: 'terminal', axis: 'use', act: 'show-terminals' })).toBe('show open terminals');
+    expect(stepUpAct({ capability: 'browser', axis: 'configure', act: 'test-browser-proxy' })).toBe(
+      'test the browser proxy',
+    );
+    expect(stepUpAct({ capability: 'terminal', axis: 'use', act: 'show-sign-in-plans' })).toBe('show sign-in plans');
     expect(stepUpAct({ capability: 'secrets', axis: 'use' })).toBe('run a command with a stored secret');
     expect(STEP_UP_FALLBACK_ACT).toBe('make this change');
   });

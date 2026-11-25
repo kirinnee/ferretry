@@ -108,3 +108,38 @@ describe('Confirm it’s you, for a device with no passkey', () => {
       });
     }
 });
+
+describe('Confirm it’s you, worded for what is being read or tested', () => {
+  const DEMANDS = [
+    { demand: 'terminal:use:show-terminals', purpose: 'show open terminals' },
+    { demand: 'browser:configure:test-browser-proxy', purpose: 'test the browser proxy' },
+    { demand: 'terminal:use:show-sign-in-plans', purpose: 'show sign-in plans' },
+  ] as const;
+  for (const entry of DEMANDS)
+    for (const variant of VIEWPORTS) {
+      it(`${entry.purpose} ${variant.name}: the prompt names the read, never "open a terminal"`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: variant.width, height: variant.height },
+          deviceScaleFactor: variant.phone ? 2 : 1,
+          hasTouch: variant.phone,
+          isMobile: variant.phone,
+          colorScheme: variant.scheme,
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const tab = await context.newPage();
+        try {
+          await tab.goto(`${origin}/?theme=studio-${variant.scheme}&state=passkey&demand=${entry.demand}`);
+          await tab.waitForSelector('[data-step-up-act]');
+          expect(await tab.locator('[data-step-up-act]').innerText()).toBe(entry.purpose);
+          expect(await tab.locator('[data-step-up-dialog]').innerText()).not.toContain('open a terminal');
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${entry.purpose.replaceAll(' ', '-')}-${variant.name}.png`) });
+        } finally {
+          await context.close();
+        }
+      });
+    }
+});

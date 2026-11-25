@@ -10,6 +10,12 @@
 
 import { createRoot } from 'react-dom/client';
 import { AddMcpForm } from '../../../../app/views/add-mcp-form.tsx';
+import { RUNTIMES } from '../../../unit/app/mcp-fixtures.ts';
+
+const CATALOG = {
+  ...RUNTIMES,
+  runtimes: RUNTIMES.runtimes.map(runtime => ({ ...runtime, name: 'claude-you', wrapper: 'claude-you' })),
+};
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
@@ -17,7 +23,7 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const ferret = (id: string, name: string, state: string) => ({
   id,
   name,
-  runtime: 'marin',
+  runtime: 'claude-you',
   state,
   harness: 'claude-code',
   folder: '/work/example',
@@ -27,12 +33,18 @@ const ANSWERS: Record<string, unknown> = {
   'GET /v1/ferrets/:ferretId/mcp': { project: null },
   'POST /v1/ferrets/:ferretId/mcp/login/preview': {
     scope: 'login',
-    runtime: 'marin',
-    profile: 'default',
+    runtime: 'claude-you',
+    profile: 'claude-default',
     replaces: false,
     ferrets: 3,
   },
-  'POST /v1/ferrets/:ferretId/mcp/login': { scope: 'login', name: 'sentry', runtime: 'marin', profile: 'default' },
+  'POST /v1/ferrets/:ferretId/mcp/login': {
+    scope: 'login',
+    name: 'sentry',
+    runtime: 'claude-you',
+    profile: 'claude-default',
+  },
+  'GET /v1/runtimes': CATALOG,
   'GET /v1/ferrets': [ferret('f1', 'Wren', 'working'), ferret('f2', 'Otter', 'idle'), ferret('f3', 'Heron', 'working')],
   'POST /v1/restarts': { restarted: [{ id: 'f1' }], queued: [], skipped: [], failed: [] },
 };
@@ -53,7 +65,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
       ferretId="f1"
       host={{ close: () => undefined }}
       initialScope="login"
-      login="marin"
+      login="claude-you"
       origin="https://pwa.example.test"
       previewDebounceMs={0}
     />

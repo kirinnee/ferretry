@@ -270,6 +270,59 @@ describe('Access settings, in the real Settings shell, over a fake machine', () 
     });
   }
 
+  for (const theme of THEMES) {
+    it(`devices: the pairing address wraps only at its separators on a phone (390, ${theme})`, async () => {
+      const { page, context } = await open(VIEWPORTS[2], theme, 'devices', 'long');
+      try {
+        await page.locator('[data-pair-mint]').click();
+        await page.locator('[data-pair-invite]').waitFor();
+        const url = page.locator('[data-pair-url]');
+        // Where each line of the address ends: the character a line stops on, read from one box per character.
+        const ends = await url.evaluate(element => {
+          const range = document.createRange();
+          const lines: { top: number; text: string }[] = [];
+          const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+            const text = node as Text;
+            for (let at = 0; at < text.length; at += 1) {
+              range.setStart(text, at);
+              range.setEnd(text, at + 1);
+              const box = range.getClientRects()[0];
+              if (box === undefined) continue;
+              const last = lines.at(-1);
+              if (last !== undefined && Math.abs(last.top - box.top) < 3) last.text += text.data[at];
+              else lines.push({ top: box.top, text: text.data[at] as string });
+            }
+          }
+          return { lines: lines.map(line => line.text), copied: (element as HTMLElement).textContent };
+        });
+        // Wrapping is real at this width, the copied text is the address as minted, and every break before the long
+        // fingerprint (which can be wider than the box on its own) falls after a separator or before a "%"-escape.
+        expect(ends.lines.length).toBeGreaterThan(1);
+        expect(ends.copied).toBe(
+          'https://ferretry.example.test/pair#v1;url=https%3A%2F%2Fworkshop.example.test;code=7F3K-Q2ND;fp=fy_daemon_' +
+            'a'.repeat(43),
+        );
+        const breaks = ends.lines
+          .slice(0, -1)
+          .map((line, index) => ({
+            end: line.at(-1) as string,
+            next: (ends.lines[index + 1] as string)[0] as string,
+            line,
+          }))
+          .filter(
+            entry =>
+              !entry.line.includes('fp=') && !entry.line.startsWith('fy_daemon') && !entry.line.startsWith('aaa'),
+          );
+        for (const entry of breaks) expect(`${entry.end}|${entry.next}`).toMatch(/^[/?&#;=.]\||\|%/u);
+        await page.setViewportSize({ width: 390, height: 3_000 });
+        if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, `pair-address-390-${theme}.png`) });
+      } finally {
+        await context.close();
+      }
+    });
+  }
+
   for (const viewport of [VIEWPORTS[1], VIEWPORTS[2]]) {
     for (const theme of THEMES) {
       it(`devices: a revoke asks first, in the panel's own layout (${viewport.name}, ${theme})`, async () => {
