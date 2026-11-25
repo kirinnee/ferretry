@@ -11,6 +11,7 @@ import type {
 } from '../contract/http.ts';
 import { ApiError, errorResponse } from '../contract/http.ts';
 import type { PluginId } from '../contract/ids.ts';
+import { PUBLIC_DOOR_PLUGINS } from '../contract/ports/public-door.ts';
 import type {
   CallContext,
   MemberRouteDescriptor,
@@ -38,6 +39,7 @@ import {
 } from './responses.ts';
 import type { RefusalNote } from './refusal-log.ts';
 import { orderRoutesBySpecificity, Router } from './router.ts';
+import { PublicRouter } from './public-router.ts';
 
 /** How one plugin is serving right now. Read on every call, so a failure or damage after mount is honoured. */
 export type Serving =
@@ -207,6 +209,12 @@ async function run(
 ): Promise<ApiResponse> {
   const policy = <R extends ApiResponse>(response: R): R =>
     withVersion(descriptor.noStore === true ? noStore(response) : response, bindings.version);
+  const unavailable = (): PlainApiResponse | undefined => {
+    const refusal = owner === undefined ? undefined : notServing(owner);
+    return refusal !== undefined && table === 'route' && 'door' in descriptor && descriptor.door === 'public'
+      ? unknownRouteResponse(descriptor.method, descriptor.path)
+      : refusal;
+  };
   const guarded = descriptor.guard === 'secrets';
   const guard = guarded ? bindings.outputGuard() : undefined;
   let stamp: ReturnType<OutputGuard['stamp']> | undefined;
@@ -241,7 +249,7 @@ async function run(
   let cached: { readonly source: PublishedApiResponse; readonly answer: PublishedApiResponse } | undefined;
   let prepared: PublishedApiResponse | undefined;
   const last = (): PlainApiResponse | PublishedApiResponse => {
-    const refusal = owner === undefined ? undefined : notServing(owner);
+    const refusal = unavailable();
     if (refusal !== undefined) return policy(refusal);
     if (!showable()) return policy(withheld());
     if (spell === undefined) {
@@ -250,8 +258,8 @@ async function run(
     }
     try {
       const next = spell();
-      const unavailable = owner === undefined ? undefined : notServing(owner);
-      if (unavailable !== undefined) return policy(unavailable);
+      const stopped = unavailable();
+      if (stopped !== undefined) return policy(stopped);
       if (!showable()) return policy(withheld());
       if (!isPublishedResponse(next)) return policy(next);
       if (cached?.source !== next) cached = { source: next, answer: publishResponse(policy(next)) };
@@ -271,6 +279,9 @@ async function run(
  */
 export class Dispatcher {
   private readonly routes: Router<MountedRoute>;
+  private readonly publicRoutes: PublicRouter<MountedRoute>;
+  private readonly apiRoutes: Router<MountedRoute>;
+  private readonly ownDoors: ReadonlyMap<string, PublicRouter<MountedRoute>>;
   private readonly sockets: Router<MountedSocket>;
   private readonly members: Router<MountedMemberRoute>;
   private readonly streams = new Set<() => void>();
@@ -284,6 +295,18 @@ export class Dispatcher {
     },
   ) {
     this.routes = new Router(orderRoutesBySpecificity(tables.routes));
+    this.apiRoutes = new Router(this.routes.routes.filter(route => route.door === undefined));
+    this.publicRoutes = new PublicRouter(
+      this.routes.routes.filter(
+        route => route.door === 'public' && (PUBLIC_DOOR_PLUGINS as readonly string[]).includes(route.owner.plugin),
+      ),
+    );
+    this.ownDoors = new Map(
+      PUBLIC_DOOR_PLUGINS.map(plugin => [
+        plugin,
+        new PublicRouter(this.publicRoutes.routes.filter(route => route.owner.plugin === plugin)),
+      ]),
+    );
     this.sockets = new Router(orderRoutesBySpecificity(tables.sockets));
     this.members = new Router(orderRoutesBySpecificity(tables.memberRoutes));
   }
@@ -297,8 +320,15 @@ export class Dispatcher {
     delegation?: { readonly allowed: ReadonlySet<string>; readonly refused: (key: string) => void },
   ): Promise<ApiResponse> {
     const request = this.stamped(incoming);
-    if (request.principal?.kind === 'member') return await this.dispatchMember(request);
-    const found = this.routes.lookup(request.method, request.path);
+    const door = request.arrival.kind === 'door';
+    if (!door && request.principal?.kind === 'member') return await this.dispatchMember(request);
+    const routes =
+      request.arrival.kind === 'door'
+        ? request.arrival.door === 'own'
+          ? this.ownDoors.get(request.arrival.plugin)
+          : this.publicRoutes
+        : this.apiRoutes;
+    const found = routes?.lookup(request.method, request.path) ?? { kind: 'not-found' as const };
     if (request.arrival.kind === 'delegated') {
       const key =
         found.kind === 'matched' ? `${found.route.method} ${found.route.path}` : `${request.method} [unrouted]`;
@@ -312,6 +342,8 @@ export class Dispatcher {
       }
     }
     if (found.kind !== 'matched') {
+      // Public and API tables do not reveal each other's paths or methods. Unknown public paths also bypass Gate.
+      if (door) return withVersion(unknownRouteResponse(request.method, request.path), this.bindings.version);
       const decision = admit(
         this.bindings,
         'route',
@@ -329,12 +361,19 @@ export class Dispatcher {
       );
     }
     request.onRoute?.(found.route.path);
+    if (door && (notServing(found.route.owner) !== undefined || found.route.handle === undefined))
+      return withVersion(unknownRouteResponse(request.method, request.path), this.bindings.version);
     const decision = admit(this.bindings, 'route', found.route, request, found.params);
     if (decision.outcome === 'refused') return withVersion(decision.response, this.bindings.version);
     const refusal = notServing(found.route.owner);
     const handle = found.route.handle;
     if (refusal !== undefined || handle === undefined)
-      return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
+      return withVersion(
+        door
+          ? unknownRouteResponse(request.method, request.path)
+          : (refusal ?? skeletonResponse(found.route.owner.title)),
+        this.bindings.version,
+      );
     const call = { request, params: found.params, ...decision.standing } as CallContext;
     let executed = false;
     const response = await runInCall({ actor: decision.actor, standing: decision.standing }, () =>
@@ -473,6 +512,7 @@ export class Dispatcher {
 
   /** The socket upgrade: the same admission, asked before `accept`. `unclaimed` lets the caller serve plain HTTP. */
   async upgrade(request: ApiRequest): Promise<SocketUpgradeDecision> {
+    if (request.arrival.kind === 'door') return { outcome: 'unclaimed' };
     const found = this.sockets.lookup(request.method, request.path);
     if (found.kind !== 'matched') return { outcome: 'unclaimed' };
     const decision = admit(this.bindings, 'socket', found.route, request, found.params);

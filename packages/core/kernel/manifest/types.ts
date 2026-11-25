@@ -2,7 +2,7 @@ import type { z } from 'zod';
 import type { Op } from '../contract/act.ts';
 import type { ConfigDef, EventDef, HookDef, PortToken, StateFileDef } from '../contract/define.ts';
 import type { ItemKind, PluginApi } from '../contract/ids.ts';
-import type { RootName, RouteKey } from '../contract/ports.ts';
+import type { PublicDoorPermission, RootName, RouteKey } from '../contract/ports.ts';
 import type { MemberRouteDescriptor, RouteDescriptor, ScopedRoute } from '../contract/route.ts';
 import type { SocketDescriptor } from '../contract/socket.ts';
 import type { InstructionWhen, Word } from '../contract/snapshot.ts';
@@ -309,7 +309,7 @@ export interface HistoryPoolPermission {
 }
 
 /** What it may touch outside its own folder (§3.7). Anything undeclared is refused by the kernel ports. */
-export interface Permissions {
+export interface Permissions extends PublicDoorPermission {
   /** Only the allow-listed connector may call these declared route templates through Gate. */
   readonly delegate?: readonly RouteKey[];
   readonly roots?: readonly RootName[];

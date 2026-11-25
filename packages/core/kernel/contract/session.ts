@@ -1,5 +1,5 @@
 import type { Instant } from '@ferretry/std';
-import type { CarrierKey, HolderId, SessionId } from './ids.ts';
+import type { CarrierKey, HolderId, PluginId, SessionId } from './ids.ts';
 
 /**
  * The session layer's protocol number (§9.6). Covers the sealed session, its records and its modes only;
@@ -51,7 +51,7 @@ export interface CarriedArrival {
 }
 
 /** How a call arrived; today's `loopback` / `privilegedLoopback` / `carrier` folded into one value. */
-export type Arrival = LocalArrival | CarriedArrival | DelegatedArrival;
+export type Arrival = LocalArrival | CarriedArrival | DelegatedArrival | DoorArrival;
 
 /** A connector tool acting for a passkey-approved grant. Always remote; carries no host or device credential. */
 export interface DelegatedArrival {
@@ -59,6 +59,10 @@ export interface DelegatedArrival {
   readonly by: 'connector';
   readonly grant: string;
 }
+/** Public HTTP: always remote and unprivileged, even behind a forwarder on loopback. Gate parses no credential. */
+export type DoorArrival =
+  | { readonly kind: 'door'; readonly door: 'own'; readonly plugin: PluginId }
+  | { readonly kind: 'door'; readonly door: 'tunnel' };
 
 /** One sealed frame handed to a carrier. Opaque bytes; the carrier never opens them. */
 export interface SealedFrame {

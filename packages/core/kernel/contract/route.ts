@@ -85,7 +85,10 @@ export interface RouteResponseFlags {
 }
 
 /** What a manifest declares for one route: the full descriptor, no handler. */
-export interface RouteDescriptor extends ScopedRoute, RouteResponseFlags {}
+export interface RouteDescriptor extends ScopedRoute, RouteResponseFlags {
+  /** Served only on a public listener, never on the API listener or inside a sealed session. */
+  readonly door?: 'public';
+}
 
 /**
  * What Gate puts on every admitted call. Empty here on purpose: the kernel carries it and never reads it. Gate's

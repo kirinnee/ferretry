@@ -20,6 +20,7 @@ import type { Log } from './log.ts';
 import type { LoopPort } from './loop.ts';
 import type { PathsPort } from './paths.ts';
 import type { ProcessesPort } from './processes.ts';
+import type { PublicDoorPort } from './public-door.ts';
 import type { RootsPort } from './roots.ts';
 import type { ScratchPort } from './scratch.ts';
 import type { SelfCountersPort } from './self-counters.ts';
@@ -58,6 +59,8 @@ export interface KernelPorts {
    * takes that carrier's hook and declares the route.
    */
   readonly carrierListener: CarrierListenerPort;
+  /** Credential-less remote HTTP, only for the allow-listed plugin declaring `permissions.publicDoor`. */
+  readonly publicDoor: PublicDoorPort;
   /** Where this daemon's own local listener really bound, once it has: read at the moment of use, never at build. */
   readonly bind: BindPort;
   /** Who this daemon is, read-only: its id and name, never its key. */

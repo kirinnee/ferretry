@@ -350,6 +350,7 @@ export class GateAdmission implements Admission {
   }
 
   #viewerOf(request: ApiRequest): InventoryViewer {
+    if (request.arrival.kind === 'door') return { kind: 'none' };
     if (request.principal?.kind === 'member') return { kind: 'member' };
     const authentication = this.#authenticate(request);
     if (authentication.kind === 'anonymous') return { kind: 'none' };
@@ -392,6 +393,7 @@ export class GateAdmission implements Admission {
 
   /** A ferret bearer Ferrets has not loaded its tokens to judge yet: retryable, and never the 401 a pane's pump counts. */
   #stillStarting(request: ApiRequest): ApiResponse | undefined {
+    if (request.arrival.kind === 'door') return undefined;
     const bearer = bearerToken(headerValue(request, 'authorization'));
     const undecided = ferretBearerUndecided(this.deps.ferrets(), {
       ...(bearer === undefined ? {} : { bearer }),
@@ -405,6 +407,7 @@ export class GateAdmission implements Admission {
   }
 
   #authenticate(request: ApiRequest): Authentication {
+    if (request.arrival.kind === 'door') return { kind: 'anonymous' };
     if (request.arrival.kind === 'delegated')
       return request.arrival.by === 'connector' && CONNECTOR_GRANT_PATTERN.test(request.arrival.grant)
         ? { kind: 'authenticated', tokenClass: 'connector', grant: request.arrival.grant }
@@ -440,6 +443,11 @@ export class GateAdmission implements Admission {
     params: RouteParameters,
     table?: 'route' | 'socket' | 'tool',
   ): AdmissionDecision {
+    // Public listeners carry no Gate credential or session principal, whatever Authorization says.
+    if (request.arrival.kind === 'door')
+      return servedPublicly(descriptor) && descriptor.privilegedOnly !== true && descriptor.capability === undefined
+        ? { outcome: 'admitted', standing: {}, actor: 'owner-viewer' }
+        : refused(UNAUTHORIZED());
     // A MEMBER IS REFUSED BY THE MAIN TABLE BEFORE ANYTHING ELSE, the public shortcut included.
     if (request.principal?.kind === 'member') return forbidden(request);
     if (request.arrival.kind !== 'delegated' && servedPublicly(descriptor)) {

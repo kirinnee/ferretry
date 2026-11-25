@@ -1,4 +1,5 @@
 import { posix } from 'node:path';
+import { testPublicDoor } from './public-door.ts';
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { absolute } from '../host/fence-guard.ts';
@@ -257,6 +258,7 @@ export interface TestHostOptions {
   readonly carrierListener?: CarrierListenerPort;
   /** A fake delegate for connector tool tests; production dispatch is covered by the real-host integration suite. */
   readonly delegate?: KernelPorts['delegate'];
+  readonly publicDoor?: import('../contract/ports/public-door.ts').PublicDoorPort;
   /** What `kernel.bind.current()` answers (a live read, so a test may bind "after" the plugin is built). Default: not bound. */
   readonly bind?: () => BoundAddress | undefined;
   /** Answers `RootHandle.pin` (with the path the test root resolved). Without it a pin is refused. */
@@ -2604,6 +2606,7 @@ async function start(world: World): Promise<TestHost> {
           throw new Error(`${manifest.id}: open a carrier listener with no carrierListener fake`);
         },
       },
+      publicDoor: testPublicDoor(manifest, options.publicDoor),
       bind: { current: () => options.bind?.() },
       identity,
       paths: gatedWhich(
@@ -2884,7 +2887,9 @@ async function start(world: World): Promise<TestHost> {
     readonly key: string;
   }
   const routeTable = new RouteTable<Mounted>(
-    built.flatMap(b => (b.manifest.actions?.routes ?? []).map(r => ({ ...r, plugin: b }))),
+    built.flatMap(b =>
+      (b.manifest.actions?.routes ?? []).filter(r => r.door === undefined).map(r => ({ ...r, plugin: b })),
+    ),
   );
   const socketTable = new RouteTable<Mounted>(
     built.flatMap(b => (b.manifest.actions?.sockets ?? []).map(r => ({ ...r, plugin: b }))),

@@ -18,6 +18,7 @@ export * from './ports/log.ts';
 export * from './ports/loop.ts';
 export * from './ports/paths.ts';
 export * from './ports/processes.ts';
+export * from './ports/public-door.ts';
 export * from './ports/roots.ts';
 export * from './ports/scratch.ts';
 export * from './ports/self-counters.ts';

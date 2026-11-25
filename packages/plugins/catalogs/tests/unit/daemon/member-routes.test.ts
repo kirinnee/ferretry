@@ -158,6 +158,7 @@ describe('the member routes answer a refusal with its own code and status', () =
       method: 'GET',
       path: '/v1/shared/contract',
       headers: new Map(),
+      arrival: { kind: 'carried', carrier: 'relay' },
       body: '',
     } as never);
 

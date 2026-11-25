@@ -64,7 +64,8 @@ function whoOf(request: ApiRequest): string {
 
 function arrivalOf(request: ApiRequest): string {
   if (request.arrival.kind === 'delegated') return 'delegated:connector';
-  return request.arrival.kind === 'carried' ? `carried:${request.arrival.carrier}` : request.arrival.kind;
+  if (request.arrival.kind === 'door') return `door:${request.arrival.door}`;
+  return request.arrival.kind === 'carried' ? `carried:${request.arrival.carrier}` : 'local';
 }
 
 /** The `warn` line and fields for one refusal. Pure and total. */

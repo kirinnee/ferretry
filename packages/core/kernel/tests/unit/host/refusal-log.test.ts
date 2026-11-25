@@ -75,6 +75,21 @@ describe('a refused call is said at warn, with its reason', () => {
     expect(fields).toMatchObject({ who: 'connector', arrival: 'delegated:connector', status: 403 });
   });
 
+  test('public door refusals name their remote arrival instead of local', () => {
+    for (const arrival of [
+      { kind: 'door', door: 'own', plugin: 'connector' },
+      { kind: 'door', door: 'tunnel' },
+    ] as const) {
+      const line = describeRefusal({
+        table: 'route',
+        method: 'GET',
+        route: '/oauth/authorize',
+        request: { ...request('GET', '/oauth/authorize'), arrival: arrival as never },
+        response: errorResponse(403, 'no', 'forbidden'),
+      });
+      expect(line.fields.arrival).toBe(`door:${arrival.door}`);
+    }
+  });
   test('a refused device read says the route, the status, the code, the sentence and which device', async () => {
     const { log, said } = recording();
     const dispatcher = new Dispatcher(

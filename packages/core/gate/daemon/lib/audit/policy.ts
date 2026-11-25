@@ -1,3 +1,4 @@
+import type { Arrival } from '@ferretry/kernel/contract';
 import {
   AUDIT_KEPT_KINDS,
   type AuditActor,
@@ -119,9 +120,7 @@ export function routeAuditDraft(
   call: {
     readonly credential?: AuthenticatedCredential;
     readonly params: ReadonlyMap<string, string>;
-    readonly request: {
-      readonly arrival: { readonly kind: 'local' | 'carried' | 'delegated'; readonly carrier?: string };
-    };
+    readonly request: { readonly arrival: Arrival };
   },
   status: number | undefined,
 ): AuditDraft {
@@ -131,6 +130,7 @@ export function routeAuditDraft(
   const detail: AuditDetail = {
     ...agentAuditDetail(call.credential),
     ...(carrier === undefined ? {} : { carrier }),
+    ...(call.request.arrival.kind === 'door' ? { arrival: 'door', door: call.request.arrival.door } : {}),
   };
   return {
     event,
