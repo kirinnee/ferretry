@@ -7,6 +7,7 @@ import type {
   SessionId,
   SessionPrincipal,
 } from '@ferretry/kernel/contract';
+import { CONNECTOR_GRANT_PATTERN } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import type {
   CapabilityGrants,
@@ -35,6 +36,8 @@ export type ApiActor = string;
 export const FERRET_ACTOR_PREFIX = 'ferret:';
 export const WARDEN_ACTOR_PREFIX = 'warden:';
 export const DEVICE_ACTOR_PREFIX = 'device:';
+export const CONNECTOR_ACTOR_PREFIX = 'connector:';
+export const connectorActor = (grant: string): `connector:${string}` => `${CONNECTOR_ACTOR_PREFIX}${grant}`;
 
 export const ferretActor = (ferret: string): `ferret:${string}` => `${FERRET_ACTOR_PREFIX}${ferret}`;
 export const wardenActor = (ferret: string): `warden:${string}` => `${WARDEN_ACTOR_PREFIX}${ferret}`;
@@ -53,20 +56,23 @@ export function parseActor(source: string): ParsedActor {
   return { kind: source.slice(0, separator), id: source.slice(separator + 1), raw: source };
 }
 
-/** Today's `isHumanAdminActor`: the owner's own app or `fy`, with no ferret behind the admin token. */
+/** The owner's own app, `fy`, or an approved connector grant; attribution, never a host-arrival proof. */
 export function isHumanAdminActor(actor: ApiActor | undefined): boolean {
-  const { kind } = parseActor(actor ?? '');
-  return kind === 'admin-ui' || kind === 'admin-cli';
+  const { kind, id } = parseActor(actor ?? '');
+  return (
+    kind === 'admin-ui' || kind === 'admin-cli' || (kind === 'connector' && CONNECTOR_GRANT_PATTERN.test(id ?? ''))
+  );
 }
 
 // ─── credential ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The bearer classes Gate checks by hash, plus the device principal the kernel stamped (§7.1). */
-export type TokenClass = 'admin' | 'warden' | 'ferret' | 'device';
+export type TokenClass = 'admin' | 'warden' | 'ferret' | 'device' | 'connector';
 
 /** WHICH credential authenticated the call (today's `AuthenticatedCredential`). Never a token or a digest. */
 export type AuthenticatedCredential =
   | { readonly kind: 'authenticated'; readonly tokenClass: 'admin' | 'warden' }
+  | { readonly kind: 'authenticated'; readonly tokenClass: 'connector'; readonly grant: string }
   | { readonly kind: 'authenticated'; readonly tokenClass: 'ferret'; readonly ferret: FerretId }
   | { readonly kind: 'authenticated'; readonly tokenClass: 'device'; readonly principal: SessionPrincipal };
 
@@ -86,6 +92,7 @@ export function callerIsAgent(credential: AuthenticatedCredential | undefined, a
     case 'warden':
       return true;
     case 'device':
+    case 'connector':
       return false;
     case 'admin':
       return !isHumanAdminActor(actor);
@@ -109,6 +116,8 @@ export interface CallerGovernance {
 
 /** The facts the grant layer reads about this caller (today's `CapabilityPresentation`). */
 export interface CapabilityPresentation {
+  /** Stamped only from the kernel's delegated arrival; never from a bearer or a header. */
+  readonly connector?: true;
   /** Today's `loopback`: arrived on the host with the admin token, or a ferret's own token. Carrier-proved only. */
   readonly local: boolean;
   readonly adminToken: boolean;

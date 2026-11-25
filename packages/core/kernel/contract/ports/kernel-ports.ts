@@ -7,6 +7,7 @@ import type { CarrierListenerPort } from './carrier-listener.ts';
 import type { Clock } from './clock.ts';
 import type { ConfigFilesWriter, ConfigPort } from './config.ts';
 import type { ContractPort } from './contract.ts';
+import type { DelegatePort } from './delegate.ts';
 import type { EventsPort } from './events.ts';
 import type { FetchPort } from './fetch.ts';
 import type { FileEventsPort } from './file-events.ts';
@@ -35,6 +36,8 @@ import type { WorkersPort } from './workers.ts';
  * `Date.now`, `setTimeout`, `node:fs`, `process.env`, `fetch` or `Bun.spawn` directly (`banned-globals`, §7.7).
  */
 export interface KernelPorts {
+  /** Allow-listed in-process calls through the real dispatcher and Gate, stamped remote. */
+  readonly delegate: DelegatePort;
   readonly clock: Clock;
   readonly log: Log;
   readonly state: StatePort;

@@ -7,7 +7,7 @@ import { z } from 'zod';
  * and ids only (docs/audit.md). `event` is an audit kind ref (`AUDIT_KINDS` or a plugin's own `auditKind`).
  */
 
-export const AUDIT_ACTOR_KINDS = ['host', 'device', 'warden', 'anonymous'] as const;
+export const AUDIT_ACTOR_KINDS = ['host', 'device', 'warden', 'anonymous', 'connector'] as const;
 export const AuditActorKindSchema = z.enum(AUDIT_ACTOR_KINDS);
 export type AuditActorKind = z.infer<typeof AuditActorKindSchema>;
 

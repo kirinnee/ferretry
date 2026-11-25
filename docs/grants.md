@@ -7,7 +7,7 @@ than the name suggests.
 
 **Only the owner at the machine — `fy` with the host's admin token — is ungoverned. Everything here is about
 every other caller**: a paired phone, a browser across the network, a session carried over the relay, and a
-browser on the host itself. Being **governed means needing an unlock**: such a caller can do nothing until its
+browser on the host itself, and a remote MCP connector. For a **paired device**, being governed means needing an unlock: it can do nothing until its
 device unlocks the machine with a passkey, and then may do what the operator granted for the unlock period,
 with no further prompt unless the owner asked for one per act.
 
@@ -38,17 +38,44 @@ browser is bounded and deliberate, not that the host is defended against somebod
 
 The answer has two cases:
 
-| caller                                                 | governed?            | person routes?                   |
-| ------------------------------------------------------ | -------------------- | -------------------------------- |
-| `fy` on the host (admin token, loopback)               | no, always           | yes                              |
-| a ferret session (its own `fys_` credential, on host)  | no — not a grant one | never: `403 owner_only`          |
-| the admin token naming a ferret's session (older `fy`) | no, always           | never: `403 owner_only`          |
-| anything else, a browser on the host too               | yes, unconditionally | yes, a paired device is a person |
+| caller                                                 | governed?             | person routes?                   |
+| ------------------------------------------------------ | --------------------- | -------------------------------- |
+| `fy` on the host (admin token, loopback)               | no, always            | yes                              |
+| a ferret session (its own `fys_` credential, on host)  | no — not a grant one  | never: `403 owner_only`          |
+| the admin token naming a ferret's session (older `fy`) | no, always            | never: `403 owner_only`          |
+| a remote MCP connector (delegated, off the host)       | yes, daemon-wide only | yes; never a step-up act         |
+| anything else, a browser on the host too               | yes, unconditionally  | yes, a paired device is a person |
 
 `GrantsView` carries `governed` (do the limits apply to me), `hostLocal` (did this request arrive on the
 machine) and `steppedUp` (does this device hold a passkey step-up right now). Today `hostLocal` is exactly
 `!governed`; the two stay separate fields because they are different questions, and a UI that derived one
 from the other would have to be rewritten the day a third caller class appears.
+
+### A remote MCP connector acts through Gate
+
+`kernel.delegate.call({ grant }, …)` stamps a `delegated` arrival for the connector principal. This arrival is
+**REMOTE, never loopback**, even though dispatch happens inside the daemon process. No peer address, `Host`
+header or URL check can make it local or privileged. It authenticates from the kernel's arrival, never from a
+forwarded admin token, device credential or session header. Its actor is `connector:<grant>`; audit records say
+`connector` with `detail.grant`, never “this computer”.
+
+The connector has no device, unlock or passkey proof. Gate reads the **daemon-wide grants only** on every call;
+there is no device grant to intersect. It may reach `caller: 'person'` routes because the owner approved that
+connector, but every explicit step-up act is refused (`403 grant_step_up_required`), and fresh or stored proof
+claims always fail. Fleet configure operations such as restart and start require `fleet.configure` (and
+`fleet.use`); their ordinary device confirmation does not apply to this approved connector. Other capabilities'
+step-up demands still refuse it. Undetermined grants refuse it too.
+
+For as long as its grant lives, a connector can work with every phone locked and nobody home. Approval is the
+point where the person is in the loop: it requires `pairing.configure` and a passkey proved fresh for
+`approve-connector`. A `fleet:write` grant reaches start and send, whose ferrets run commands on the host as
+the owner, so that approval is in effect code execution as the owner; use a read-only connection where possible.
+
+This is a fixed, allow-listed kernel port, available only to plugin `connector` with `permissions.delegate`.
+Every key must name an existing route at build and boot; dispatch enforces the matched route template's membership.
+Only `x-fy-request-id` crosses into the request. Handlers, Gate, audits and journals are the real route path;
+the response passes its normal final check and the kernel asks Gate to mask the host admin and warden token
+literals before returning text. The connector never receives those credentials.
 
 ### A ferret session's own credential is not a device
 
@@ -75,30 +102,27 @@ The relay **terminates on the host it serves**. A check that read a peer address
 a URL containing `127.0.0.1` would see loopback for a phone on the other side of the world and hand
 it the machine.
 
-`ApiRequest.loopback` is therefore **carrier-derived**:
+`ApiRequest.arrival` is therefore **kernel-stamped**:
 
-- the Bun transport sets it from the socket's real remote address;
-- `tunnelApiRequest` (the session hop) sets it from the session's **arrival**: `false`
-  **unconditionally** for a relayed session, whatever address the request appears to carry, and for a
-  direct session exactly what the listener decided for its WebSocket upgrade — the same answer the
-  same listener gives an HTTP request — and nothing inside a record can change it.
-- a **tunnel** arrival (protocol §15) reaches the daemon through `cloudflared` from a loopback peer, so
-  it never lands on the API listener: the daemon's dedicated tunnel listener serves only the session
-  route and stamps every arrival `loopback: false` and unprivileged, exactly like a relayed one.
+- `local` comes only from the kernel's own local listener. Only this arrival carrying the admin credential
+  satisfies `arrivedOnHost`.
+- `carried` is a sealed session over direct, relay, tunnel or WebRTC. Every such arrival is remote, even when
+  a tunnel's `cloudflared` reaches this host through a loopback peer. A device's authority is governed by the
+  daemon-wide grants and its device grants; presenting an admin token off the host is governed too.
+- `delegated` comes only from the connector's allow-listed kernel port. It is remote and unprivileged;
+  the connector principal is governed by daemon-wide grants only, with no device or unlock, as above.
 
-Nothing re-derives it, and no header can move it.
-`packages/daemon/tests/unit/grants/policy.test.ts` asserts exactly this with a relayed request that
-presents every loopback-looking signal it can.
+Nothing re-derives this from a peer address, a `Host` header or a URL, and no header can move it.
+Gate's admission tests and the kernel's delegated-dispatch integration tests pin these rules.
 
 **A loopback peer is not proof of the owner.** A remote caller forwarded through a locally bound proxy
 (`tailscale serve`, `cloudflared`, `ssh -L`) arrives from a loopback peer too, so every owner rule — widening
 (`hostLocal`), whether a caller is governed, and the owner's passkey recovery — reads `arrivedOnHost` in
-`packages/daemon/src/lib/api/http.ts` instead of `loopback`. It admits **only the host's admin token over a
-loopback peer**: reading that token already needs this machine's disk, so nobody can present it who did not
+`packages/core/kernel/contract/http.ts` instead of checking a peer address. It admits **only the host's admin
+token through a `local` arrival**: reading that token already needs this machine's disk, so nobody can present it who did not
 already have the machine.
 
-The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises no foreign address,
-`mayTrustDirectLoopback`) is now about the **place**, never the owner: it admits only `privilegedOnly` routes
+The local arrival's `privileged` proof is about the **place**, never the owner: it admits only `privilegedOnly` routes
 — a local terminal attach — through `arrivedPrivileged`, and grants nothing.
 
 ## Nine capabilities, two axes

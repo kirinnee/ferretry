@@ -4,6 +4,7 @@ export * from './ports/carrier-listener.ts';
 export * from './ports/clock.ts';
 export * from './ports/config.ts';
 export * from './ports/contract.ts';
+export * from './ports/delegate.ts';
 export * from './ports/events.ts';
 export * from './ports/fetch.ts';
 export * from './ports/file-events.ts';

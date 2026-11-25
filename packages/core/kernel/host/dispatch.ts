@@ -292,10 +292,25 @@ export class Dispatcher {
     return this.routes.routes;
   }
 
-  async dispatch(incoming: ApiRequest): Promise<ApiResponse> {
+  async dispatch(
+    incoming: ApiRequest,
+    delegation?: { readonly allowed: ReadonlySet<string>; readonly refused: (key: string) => void },
+  ): Promise<ApiResponse> {
     const request = this.stamped(incoming);
     if (request.principal?.kind === 'member') return await this.dispatchMember(request);
     const found = this.routes.lookup(request.method, request.path);
+    if (request.arrival.kind === 'delegated') {
+      const key =
+        found.kind === 'matched' ? `${found.route.method} ${found.route.path}` : `${request.method} [unrouted]`;
+      if (found.kind !== 'matched' || delegation?.allowed.has(key) !== true) {
+        try {
+          delegation?.refused(key);
+        } catch {
+          /* The refusal stands if its log fails. */
+        }
+        return errorResponse(500, 'This plugin may not delegate that route.', 'delegate_refused');
+      }
+    }
     if (found.kind !== 'matched') {
       const decision = admit(
         this.bindings,

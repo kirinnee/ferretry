@@ -255,6 +255,8 @@ export interface TestHostOptions {
   readonly websocket?: (url: URL) => WebSocketClient;
   /** Answers `kernel.carrierListener.open` (the test host binds no listener of its own). Without it an open fails. */
   readonly carrierListener?: CarrierListenerPort;
+  /** A fake delegate for connector tool tests; production dispatch is covered by the real-host integration suite. */
+  readonly delegate?: KernelPorts['delegate'];
   /** What `kernel.bind.current()` answers (a live read, so a test may bind "after" the plugin is built). Default: not bound. */
   readonly bind?: () => BoundAddress | undefined;
   /** Answers `RootHandle.pin` (with the path the test root resolved). Without it a pin is refused. */
@@ -2584,6 +2586,17 @@ async function start(world: World): Promise<TestHost> {
           if (options.websocket === undefined)
             throw new Error(`${manifest.id}: dial ${parsed.host} with no websocket fake`);
           return options.websocket(parsed);
+        },
+      },
+      delegate: {
+        call: async (principal, request) => {
+          if (
+            manifest.id !== 'connector' ||
+            manifest.permissions?.delegate === undefined ||
+            options.delegate === undefined
+          )
+            throw new Error(`${manifest.id}: no declared delegate fake`);
+          return options.delegate.call(principal, request);
         },
       },
       carrierListener: options.carrierListener ?? {

@@ -51,7 +51,14 @@ export interface CarriedArrival {
 }
 
 /** How a call arrived; today's `loopback` / `privilegedLoopback` / `carrier` folded into one value. */
-export type Arrival = LocalArrival | CarriedArrival;
+export type Arrival = LocalArrival | CarriedArrival | DelegatedArrival;
+
+/** A connector tool acting for a passkey-approved grant. Always remote; carries no host or device credential. */
+export interface DelegatedArrival {
+  readonly kind: 'delegated';
+  readonly by: 'connector';
+  readonly grant: string;
+}
 
 /** One sealed frame handed to a carrier. Opaque bytes; the carrier never opens them. */
 export interface SealedFrame {

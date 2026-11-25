@@ -12,6 +12,7 @@ import {
   type ConfigAccessJudgement,
   type ConfigAccessVerdict,
   type ConfigWriteJudgement,
+  CONNECTOR_GRANT_PATTERN,
   errorResponse,
   headerValue,
   type InventoryEntry,
@@ -180,6 +181,16 @@ export class GateAdmission implements Admission {
     this.#guard = grantGuard(() => deps.policy()?.grants, deps.clientName);
   }
 
+  /** The kernel asks after the route's final check; neither token is handed to the connector. */
+  maskHostCredentials(text: string): string | undefined {
+    const tokens = this.deps.tokens();
+    if (tokens === undefined || tokens.admin === '') return undefined;
+    let masked = text;
+    for (const token of [tokens.admin, tokens.warden])
+      if (token !== undefined && token !== '') masked = masked.split(token).join('[redacted]');
+    return masked;
+  }
+
   admit(input: AdmissionInput & { readonly table: 'route' | 'socket' | 'tool' }): AdmissionDecision {
     return this.#authorize(input.descriptor, input.request, input.params, input.table);
   }
@@ -342,6 +353,8 @@ export class GateAdmission implements Admission {
     const authentication = this.#authenticate(request);
     if (authentication.kind === 'anonymous') return { kind: 'none' };
     switch (authentication.tokenClass) {
+      case 'connector':
+        return this.#governedViewer();
       case 'admin':
         return arrivedOnHost(request, true) ? { kind: 'owner' } : this.#governedViewer();
       case 'ferret':
@@ -391,6 +404,10 @@ export class GateAdmission implements Admission {
   }
 
   #authenticate(request: ApiRequest): Authentication {
+    if (request.arrival.kind === 'delegated')
+      return request.arrival.by === 'connector' && CONNECTOR_GRANT_PATTERN.test(request.arrival.grant)
+        ? { kind: 'authenticated', tokenClass: 'connector', grant: request.arrival.grant }
+        : { kind: 'anonymous' };
     const principal = request.principal;
     if (principal !== undefined) {
       // A DEVICE IS WHOEVER ITS SESSION PROVED, while its provider still holds it. A session's call carries no
@@ -469,6 +486,7 @@ export class GateAdmission implements Admission {
 
     const actor = resolveApiActor({
       tokenClass: authentication.tokenClass,
+      ...(authentication.tokenClass === 'connector' ? { grant: authentication.grant } : {}),
       ...(authentication.tokenClass === 'device' ? { holder: authentication.principal.holder } : {}),
       ...(authentication.tokenClass === 'ferret'
         ? { ferret: authentication.ferret }
@@ -543,6 +561,7 @@ export class GateAdmission implements Admission {
     // asked for one per act (G47, G79). The SESSION's proven device, never a header's claim.
     const stepUp = subject !== undefined && this.deps.stepUps.held(subject);
     const presentation: CapabilityPresentation = {
+      ...(authentication.tokenClass === 'connector' ? { connector: true as const } : {}),
       // The CARRIER's proof, never a header's. A ferret's own token is on the host too, and is looked up only for a
       // call on the privileged local listener, so grants never govern it.
       local: onHost || authentication.tokenClass === 'ferret',

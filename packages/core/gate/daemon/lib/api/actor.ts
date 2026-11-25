@@ -1,5 +1,12 @@
 import type { HolderId } from '@ferretry/kernel/contract';
-import { type ApiActor, deviceActor, ferretActor, type TokenClass, wardenActor } from '../../../contract/index.ts';
+import {
+  type ApiActor,
+  connectorActor,
+  deviceActor,
+  ferretActor,
+  type TokenClass,
+  wardenActor,
+} from '../../../contract/index.ts';
 
 /**
  * Per-call actor attribution (today's `api/actor.ts`, with `peer:` renamed `ferret:` and `session` renamed `ferret`,
@@ -9,6 +16,7 @@ import { type ApiActor, deviceActor, ferretActor, type TokenClass, wardenActor }
  * never decides anything, because a header can move it.
  */
 export interface ApiActorInput {
+  readonly grant?: string;
   readonly tokenClass: TokenClass;
   /** The kernel-stamped holder, present only for a device. */
   readonly holder?: HolderId;
@@ -23,6 +31,7 @@ export interface ApiActorInput {
 
 /** Today's `resolveApiActor`. Never answers `daemon`: a call always has a human or an agent behind it. */
 export function resolveApiActor(input: ApiActorInput): ApiActor {
+  if (input.tokenClass === 'connector') return connectorActor(input.grant ?? '');
   if (input.tokenClass === 'device') {
     const holder = input.holder?.trim();
     return holder === undefined || holder === '' ? 'device' : deviceActor(holder);

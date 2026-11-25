@@ -66,6 +66,7 @@ import type {
   WorkersPort,
 } from '../contract/ports.ts';
 import { KERNEL_REFUSALS } from '../contract/refusals.ts';
+import { delegateFor } from './delegate.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type {
   DaemonContext,
@@ -1027,6 +1028,7 @@ async function bootLocked(
         items,
         resolversOf(manifest.id),
       ),
+      delegate: delegateFor(manifest, () => dispatcher, bound, log, lifecycle),
       carrierListener: carrierListenerPort({
         manifest,
         dispatcher: () => dispatcher,
@@ -1488,9 +1490,7 @@ async function bootLocked(
       const line = describeRefusal(note);
       refusalLog.warn(line.message, line.fields);
     },
-    // A handler that threw is a 500 the caller cannot explain: say why here, with no secret value. Said once a minute per
-    // method + template + error class (the log file is synchronous and never rotated, so a route that throws on every
-    // poll must not fill it), and the next line that gets through carries how many were held back.
+    // Explain 500s once/min per method + template + error class, without secrets, counting held lines (no rotation).
     failed: (note: FailureNote) => {
       const line = describeFailure(note);
       sayFailure(failureKey(note), line.message, line.fields);
