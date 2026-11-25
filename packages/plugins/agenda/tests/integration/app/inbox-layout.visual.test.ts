@@ -229,5 +229,45 @@ describe('the Inbox list lines up', () => {
             await close();
           }
         });
+
+        it(`keeps the row aligned once the filter is changed to Agents (${label})`, async () => {
+          const { tab, close } = await open(viewport, theme, scheme);
+          try {
+            const rows = async () =>
+              await tab.evaluate(() =>
+                [...document.querySelectorAll('[data-agenda-row]')].map(e => e.textContent ?? ''),
+              );
+            expect(
+              (await rows()).some(text => text.includes('Ship the relay fix today?')),
+              'the interactive ferret’s item shows under All',
+            ).toBe(true);
+            await tab.locator('[data-agenda-kind] [aria-haspopup="menu"]').click();
+            await tab.locator('[data-agenda-kind-option="auto"]').click();
+            await tab.waitForFunction(() => !(document.body.textContent ?? '').includes('Ship the relay fix today?'));
+            expect(await tab.locator('[data-agenda-kind] [aria-haspopup="menu"]').textContent()).toContain('Agents');
+            const shown = await rows();
+            expect(
+              shown.some(text => text.includes('Which day works for the cut-over?')),
+              'an agent’s item is visible',
+            ).toBe(true);
+            expect(
+              shown.some(text => text.includes('Ship the relay fix today?')),
+              'the interactive ferret’s item is gone',
+            ).toBe(false);
+            // The filtered page lines up as the unfiltered one does: the toolbar is one row, nothing scrolls sideways.
+            const found = await measure(tab);
+            const first = found.controls[0] as Box;
+            for (const control of found.controls) {
+              near(control.top, first.top, `${control.what} top`);
+              near(control.height, first.height, `${control.what} height`);
+            }
+            expect(found.overflow, 'no sideways scroll').toBeLessThanOrEqual(0);
+            expect(found.pageOverflow, 'no sideways scroll in the page').toBeLessThanOrEqual(0);
+            if (shotsDir !== '')
+              await tab.screenshot({ path: join(shotsDir, `${label.replace(/, /g, '-')}-agents.png`) });
+          } finally {
+            await close();
+          }
+        });
       }
 });
