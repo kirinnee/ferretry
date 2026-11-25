@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { OP_EFFECTS } from '@ferretry/kernel/contract';
+import { STEP_UP_ACTS } from '@ferretry/core-gate/contract';
 import manifest from '../../manifest.ts';
 
 const routes = manifest.actions.routes;
@@ -54,5 +55,9 @@ describe('terminals manifest', () => {
     const edges = [...Object.keys(manifest.needs), ...Object.keys((manifest as { uses?: object }).uses ?? {})];
     expect(edges).not.toContain('browsers');
     expect(edges).not.toContain('warden');
+  });
+  test('viewing the terminal list asks to show open terminals, never to open one', () => {
+    const claim = routes.find(route => route.key === 'GET /v1/terminals')?.capability;
+    expect(claim?.act).toBe(STEP_UP_ACTS.showTerminals);
   });
 });

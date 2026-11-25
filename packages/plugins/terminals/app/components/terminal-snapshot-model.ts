@@ -11,7 +11,7 @@
 
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { SnapshotScope } from '../lib/protocol/holds.ts';
-import { assertScopeDaemon, type DaemonConnection, type DaemonSessionScope } from '../shell.ts';
+import { assertScopeDaemon, type DaemonConnection, type DaemonSessionScope, grantRefusalText } from '../shell.ts';
 
 /** The pane snapshot's route, by manifest key. */
 export const SNAPSHOT_ROUTE = 'GET /v1/ferrets/:ferretId/snapshot';
@@ -70,9 +70,9 @@ export const trimBlankTail = (text: string): string => {
   return last < 0 ? text : rows.slice(0, last + 1).join('\n');
 };
 
-/** How the daemon's unreachability is worded when the last good text is kept. */
-export const describeSnapshotError = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+/** How a failed read is worded: a grant refusal in the pane's own name (`panel`), else the daemon's message. */
+export const describeSnapshotError = (error: unknown, panel: string): string =>
+  grantRefusalText(error, panel) ?? (error instanceof Error ? error.message : String(error));
 
 /**
  * "<1s" / "12s" / "3m 4s", exactly as the original — the unit never collapses

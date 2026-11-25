@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { showsSomething } from '@ferretry/kernel/contract';
+import { STEP_UP_ACTS } from '@ferretry/core-gate/contract';
 import manifest from '../../manifest.ts';
 
 const routes = manifest.actions.routes;
@@ -93,5 +94,9 @@ describe('browsers manifest', () => {
       'reference.catalog:%browser',
       'launch.parts:',
     ]);
+  });
+  test('testing the proxy asks to test the browser proxy', () => {
+    const claim = routes.find(route => route.key === 'POST /v1/browser/proxy/test')?.capability;
+    expect(claim?.act).toBe(STEP_UP_ACTS.testBrowserProxy);
   });
 });
