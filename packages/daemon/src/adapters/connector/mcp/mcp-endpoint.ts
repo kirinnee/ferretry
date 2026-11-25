@@ -19,6 +19,25 @@ const MCP_MAX_BODY_BYTES = 1024 * 1024;
 /** docs/mcp-connector.md "Rate limits": per grant, per minute. */
 const CALLS_PER_MINUTE = 60;
 const WRITE_CALLS_PER_MINUTE = 10;
+/**
+ * Agenda acts — answering or snoozing an ask — have a budget of their own, apart from the other writes.
+ *
+ * WHY. Cleaning up the agenda is a burst by nature: the owner reads the list and settles 10–30 asks in a
+ * minute. At 10 writes a minute that burst was refused part way. These two acts each settle one ask the
+ * owner was already shown and start nothing, so they cannot spend money or multiply work the way a spawn,
+ * restart, stop or send can; those keep the tighter 10. Both still count toward the 60 calls a minute, so
+ * a runaway loop is bounded exactly as before.
+ */
+const AGENDA_CALLS_PER_MINUTE = 30;
+const AGENDA_TOOLS: ReadonlySet<string> = new Set(['answer_attention', 'snooze_attention']);
+
+/** Which per-minute budget a tool call spends, beside the overall one. */
+type CallBudget = 'read' | 'write' | 'agenda';
+
+function budgetOf(spec: ConnectorToolSpec | undefined): CallBudget {
+  if (spec?.scope !== 'fleet:write') return 'read';
+  return AGENDA_TOOLS.has(spec.name) ? 'agenda' : 'write';
+}
 
 export interface ConnectorMcpEndpointOptions {
   readonly verifier: ConnectorAccessVerifier;
@@ -102,7 +121,7 @@ export class ConnectorMcpEndpoint implements ConnectorHttpHandler {
     const call = toolCall(parsed);
     if (call !== undefined) {
       const spec = this.#specs.get(call.name);
-      const refused = this.#rateLimit(access, spec?.scope === 'fleet:write');
+      const refused = this.#rateLimit(access, budgetOf(spec));
       if (refused !== undefined) return refused;
       // A write tool this token was not approved for is not registered, so the SDK would call it unknown. Say it
       // as the tool error the contract asks for, through the same toolbox that records the refusal. This reply
@@ -143,25 +162,31 @@ export class ConnectorMcpEndpoint implements ConnectorHttpHandler {
     }
   }
 
-  #rateLimit(access: ConnectorAccess, write: boolean): ApiResponse | undefined {
+  #rateLimit(access: ConnectorAccess, budget: CallBudget): ApiResponse | undefined {
     const all = `${access.grantId}:calls`;
-    const writes = `${access.grantId}:writes`;
+    const own =
+      budget === 'write'
+        ? { key: `${access.grantId}:writes`, limit: WRITE_CALLS_PER_MINUTE }
+        : budget === 'agenda'
+          ? { key: `${access.grantId}:agenda`, limit: AGENDA_CALLS_PER_MINUTE }
+          : undefined;
+    const ownDecision = own === undefined ? undefined : this.#limiter.peek(own.key, own.limit);
     const blocked = [
-      ...(write ? [this.#limiter.peek(writes, WRITE_CALLS_PER_MINUTE)] : []),
+      ...(ownDecision === undefined ? [] : [ownDecision]),
       this.#limiter.peek(all, CALLS_PER_MINUTE),
     ].find(decision => !decision.ok);
     if (blocked !== undefined && !blocked.ok) {
       return jsonRpcError(
         429,
         -32000,
-        write && this.#limiter.peek(writes, WRITE_CALLS_PER_MINUTE).ok === false
+        ownDecision?.ok === false
           ? 'Too many changes in a minute. Wait a little before asking for another.'
           : 'Too many calls in a minute. Wait a little before asking again.',
         { 'retry-after': String(blocked.retryAfterSeconds) },
       );
     }
     this.#limiter.take(all, CALLS_PER_MINUTE);
-    if (write) this.#limiter.take(writes, WRITE_CALLS_PER_MINUTE);
+    if (own !== undefined) this.#limiter.take(own.key, own.limit);
     return undefined;
   }
 

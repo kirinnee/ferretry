@@ -2,7 +2,7 @@
  * A sliding-window rate limiter, in memory, with an injectable clock.
  *
  * The connector's budget (docs/mcp-connector.md "Rate limits") is per GRANT: 60 tool calls a minute, of which
- * write tools 10. A grant's limiter dying with the process is fine — a restart drops every pending sign-in
+ * write tools 10 (the agenda acts their own 30). A grant's limiter dying with the process is fine — a restart drops every pending sign-in
  * too, and the cap exists to bound a runaway assistant loop, not to be an audit.
  */
 

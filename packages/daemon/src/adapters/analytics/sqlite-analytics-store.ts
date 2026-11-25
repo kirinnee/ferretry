@@ -344,6 +344,13 @@ export class BunSqliteAnalyticsStore implements AnalyticsIndexStore {
       .map(storedFromRow);
   }
 
+  row(id: string): AnalyticsStoredSession | undefined {
+    const found = this.database
+      .query<SessionRow, [string]>(`SELECT ${COLUMNS.join(', ')} FROM analytics_sessions WHERE id = ?`)
+      .get(id);
+    return found === null ? undefined : storedFromRow(found);
+  }
+
   status(): AnalyticsStoreStatus {
     const counts = this.database
       .query<{ sessions: number; token_sessions: number; refused: number; last_ingested_at: string | null }, []>(

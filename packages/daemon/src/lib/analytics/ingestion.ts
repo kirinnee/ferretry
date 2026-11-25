@@ -352,6 +352,16 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
     return await next;
   }
 
+  /**
+   * One session's row exactly as {@link read} would list it, or undefined when none is stored.
+   *
+   * A keyed read: no other row is loaded or priced, so asking about one session costs one row.
+   */
+  readOne(id: string): AnalyticsRawSession | undefined {
+    const stored = this.parts.store.row(id);
+    return stored === undefined ? undefined : withCostEvidence(stored, this.catalog, this.parts.clock.now());
+  }
+
   /** The stored rows and an honest account of what they are. */
   read(): AnalyticsIndexRead {
     const status = this.parts.store.status();

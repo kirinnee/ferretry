@@ -75,6 +75,10 @@ export class WriteBehindAnalyticsStore implements AnalyticsIndexStore {
     return this.memory.rows();
   }
 
+  row(id: string): AnalyticsStoredSession | undefined {
+    return this.memory.row(id);
+  }
+
   status(): AnalyticsStoreStatus {
     return this.memory.status();
   }

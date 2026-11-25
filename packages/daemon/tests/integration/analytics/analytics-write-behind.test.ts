@@ -248,6 +248,8 @@ describe('WriteBehindAnalyticsStore', () => {
     subject.forget(['b']);
     const read = {
       ids: subject.rows().map(row => row.raw.id),
+      one: subject.row('a')?.raw.id,
+      forgotten: subject.row('b'),
       ingested: [...subject.ingested().keys()],
       sessions: subject.status().sessions,
       pending: subject.pendingWrites,
@@ -258,6 +260,8 @@ describe('WriteBehindAnalyticsStore', () => {
     // Assert
     should(read).deepEqual({
       ids: ['a'],
+      one: 'a',
+      forgotten: undefined,
       ingested: ['a'],
       sessions: 1,
       pending: writes({ upserts: [refusedSession('a')], forgets: ['b'] }),

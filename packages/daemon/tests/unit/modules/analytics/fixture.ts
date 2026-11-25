@@ -28,6 +28,7 @@ const EMPTY_STORE: AnalyticsIndexStore = {
   upsert: NOT_EXERCISED('an analytics write'),
   forget: NOT_EXERCISED('an analytics write'),
   rows: () => [],
+  row: () => undefined,
   status: () => ({
     schemaVersion: ANALYTICS_INDEX_SCHEMA_VERSION,
     sessions: 0,
