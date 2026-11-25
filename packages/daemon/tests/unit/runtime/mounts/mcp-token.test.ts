@@ -47,13 +47,14 @@ interface Asked {
   variable: string;
 }
 
-function subsystem(answer: FerretMcpToken, known = true) {
+function subsystem(answer: FerretMcpToken | Error, known = true) {
   const asked: Asked[] = [];
   const tokens = new FerretMcpTokens({
     sessions: { get: async () => (known ? SESSION : undefined) },
     tokens: {
       mcpTokenFor: async (wrapper, cwd, variable) => {
         asked.push({ wrapper, cwd, variable });
+        if (answer instanceof Error) throw answer;
         return answer;
       },
     },
@@ -66,6 +67,7 @@ async function drive(
   caller: Caller,
   body: unknown = { variable: VARIABLE },
   path = PATH,
+  params?: ReadonlyMap<string, string>,
 ) {
   const found = new ApiRouter(mcpTokenRoutes(made.subsystem)).lookup('POST', path);
   if (found.kind !== 'matched') throw new Error(`no route POST ${path}`);
@@ -76,7 +78,7 @@ async function drive(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }),
-    params: found.params,
+    params: params ?? found.params,
     actor: caller.actor,
     credential: caller.credential,
   };
@@ -195,5 +197,37 @@ describe('POST /v1/sessions/:sessionId/mcp/token', () => {
     // Assert
     should(answer.status).equal(400);
     should(made.asked).deepEqual([]);
+  });
+
+  it.each([
+    ['no session id', new Map<string, string>()],
+    ['an empty session id', new Map([['sessionId', '']])],
+    ['an undecodable session id', new Map([['sessionId', '%E0%A4%A']])],
+  ] as const)('should answer 400 invalid_session_id for %s, before any token is read', async (_what, params) => {
+    // Arrange
+    const made = subsystem({ kind: 'token', token: 'fresh-token' });
+
+    // Act
+    const answer = await drive(made, SELF, { variable: VARIABLE }, PATH, params);
+
+    // Assert
+    should(answer.status).equal(400);
+    should(answer.code).equal('invalid_session_id');
+    should(made.asked).deepEqual([]);
+  });
+
+  it('should let an unexpected failure from the token lookup escape instead of answering it as a refusal', async () => {
+    // Arrange
+    const made = subsystem(new Error('token store exploded'));
+
+    // Act
+    const failure = await drive(made, SELF).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(failure).be.an.Error();
+    should((failure as Error).message).equal('token store exploded');
   });
 });
