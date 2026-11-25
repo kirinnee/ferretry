@@ -172,6 +172,7 @@ describe('MCP sign-in secrets: the use path', () => {
       needs: { ferrets: new FakeFerrets(), vault: new FakeVault(), sealed },
       uses: {
         claudeCode: { current: () => undefined },
+        logins: { current: () => undefined },
         codex: { current: () => undefined },
         projects: { current: () => undefined },
         runtimes: { current: () => undefined },

@@ -201,3 +201,46 @@ export const RUNTIMES = RuntimeCatalogSchema.parse({
 
 /** What "Seen by" says for `claude-work`: its words, never its stored name. */
 export const CLAUDE_WORK_WORDS = 'Claude · your terminal sign-in';
+
+// ── Two runtimes that read alike (L231b) ─────────────────────────────────────────────────────────
+
+const claudeRuntime = (login: string) => ({
+  id: `rt-${login}`,
+  name: `claude-${login}`,
+  wrapper: `claude-${login}`,
+  harness: 'claude-code',
+  credential: { id: login, store: 'host', status: 'ready' },
+  // Both sit on the SAME profile, so only the account can tell them apart.
+  profile: 'claude-default',
+  stack: {
+    harness: 'claude-code',
+    available: { available: true },
+    applied: [],
+    skipped: [],
+    conflicts: [],
+    partial: [],
+  },
+  modelSet: { source: 'harness-default' },
+  launch: { available: true },
+  sameAs: [],
+});
+
+/** `GET /v1/runtimes` with two terminal sign-ins on one profile: the same words until an account tells them apart. */
+export const TWIN_RUNTIMES = RuntimeCatalogSchema.parse({
+  format: 'present',
+  runtimes: [claudeRuntime('atomi'), claudeRuntime('llm1')],
+});
+
+/** `GET /v1/logins` for those two: the account each one is (the words Logins' own list shows). */
+export const TWIN_LOGINS = {
+  logins: [
+    { id: 'atomi', email: 'atomi@example.test', status: { state: 'ready' } },
+    { id: 'llm1', email: 'llm1@example.test', status: { state: 'ready' } },
+  ],
+};
+
+/** One server seen by both twins. */
+export const TWIN_MCP: McpInventory = McpInventorySchema.parse({
+  problems: [],
+  servers: [mcpServer({ name: 'notion', runtimes: [{ runtime: 'claude-atomi' }, { runtime: 'claude-llm1' }] })],
+});

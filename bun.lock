@@ -538,6 +538,7 @@
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-catalogs": "workspace:*",
         "@ferretry/plugin-claude-code": "workspace:*",
+        "@ferretry/plugin-logins": "workspace:*",
         "@ferretry/plugin-projects": "workspace:*",
         "@ferretry/plugin-runtimes": "workspace:*",
         "@ferretry/std": "workspace:*",

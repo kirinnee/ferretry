@@ -94,7 +94,7 @@ describe('Settings › MCP servers: "Seen by" names runtimes in words (Q8a)', ()
 const withScene = async (
   viewport: (typeof VIEWPORTS)[number],
   theme: 'studio-light' | 'studio-dark',
-  data: 'healthy' | 'builtins',
+  data: 'healthy' | 'builtins' | 'twins',
   name: string,
   check: (tab: Awaited<ReturnType<Browser['newPage']>>) => Promise<void>,
 ): Promise<void> => {
@@ -144,6 +144,20 @@ describe('Settings › MCP servers: two built-in servers named ferretry (L278)',
             'ferretry · Claude',
             'ferretry · Codex',
           ]);
+        });
+      });
+});
+
+describe('Settings › MCP servers: two runtimes on one profile (L231b)', () => {
+  for (const viewport of VIEWPORTS)
+    for (const theme of ['studio-light', 'studio-dark'] as const)
+      it(`tells them apart by account, never a stored id (${viewport.name}, ${theme})`, async () => {
+        await withScene(viewport, theme, 'twins', 'seen-by-twins', async tab => {
+          await tab.locator('[data-mcp-details="notion"]').waitFor({ state: 'visible' });
+          const seen = (await tab.locator('[data-mcp-details="notion"]').innerText()).replaceAll('\n', ' ');
+          expect(seen).toContain('Claude · your terminal sign-in — atomi@example.test');
+          expect(seen).toContain('Claude · your terminal sign-in — llm1@example.test');
+          expect(await tab.locator('[data-settings="mcp"]').innerText()).not.toMatch(/claude-(atomi|llm1)/u);
         });
       });
 });

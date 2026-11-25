@@ -6,7 +6,12 @@
  * in the answer, is named by its tool ("Claude runtime"), never by its stored name.
  */
 import { useEffect, useState } from 'react';
-import { RuntimeCatalogSchema, harnessWord, runtimeDisplayName } from '@ferretry/plugin-runtimes/contract';
+import {
+  RuntimeCatalogSchema,
+  harnessWord,
+  runtimeAccountsFrom,
+  runtimeDisplayName,
+} from '@ferretry/plugin-runtimes/contract';
 import type { McpInventoryServer } from '../../contract/index.ts';
 import type { McpClient } from './client.ts';
 
@@ -19,9 +24,12 @@ const NONE: RuntimeNames = new Map();
 const readRuntimeNames = async (client: McpClient): Promise<RuntimeNames> => {
   try {
     const runtimes = RuntimeCatalogSchema.parse(await client.call<unknown>('GET /v1/runtimes')).runtimes;
-    // Two runtimes that would read alike are told apart by profile. The account words (Logins' list) are not read here:
-    // MCP does not use Logins, and a new dependency for a tell-apart line is not worth it.
-    return new Map(runtimes.map(runtime => [runtime.name, runtimeDisplayName(runtime, runtimes)] as const));
+    // Two runtimes that would read alike are told apart by ACCOUNT (Logins' list, read here as a plain route), then profile.
+    // Logins that cannot be read tell nobody apart: the profile words still do, and a stored name is the last resort.
+    const accounts = await client
+      .call<unknown>('GET /v1/logins')
+      .then(runtimeAccountsFrom, () => runtimeAccountsFrom(null));
+    return new Map(runtimes.map(runtime => [runtime.name, runtimeDisplayName(runtime, runtimes, accounts)] as const));
   } catch {
     return NONE;
   }

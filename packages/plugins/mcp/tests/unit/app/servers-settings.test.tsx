@@ -13,6 +13,9 @@ import {
   CLAUDE_WORK_WORDS,
   scriptedClient,
   SECRETS,
+  TWIN_LOGINS,
+  TWIN_MCP,
+  TWIN_RUNTIMES,
 } from './mcp-fixtures.ts';
 import { click, mountSettled, text } from './mcp-view-support.tsx';
 
@@ -141,5 +144,26 @@ describe('DOM tests — Settings › MCP servers', () => {
     expect(root.querySelectorAll('[data-context-mcp]')).toHaveLength(6);
     // The opening read is the page's own; only Try again is a person's press.
     expect(calls.filter(call => call.route === 'GET /v1/mcp').map(call => call.quiet)).toEqual([undefined, false]);
+  });
+});
+
+describe('DOM tests — Settings › MCP servers: look-alike runtimes (L231b)', () => {
+  const twins = (answers: Answers = {}) =>
+    settings({ 'GET /v1/mcp': TWIN_MCP, 'GET /v1/runtimes': TWIN_RUNTIMES, 'GET /v1/logins': TWIN_LOGINS, ...answers });
+
+  it('tells two runtimes on one profile apart by their account, never by a stored id', async () => {
+    const { root } = await twins();
+    const seen = text(root, '[data-mcp-details="notion"]');
+    expect(seen).toContain('Claude · your terminal sign-in — atomi@example.test');
+    expect(seen).toContain('Claude · your terminal sign-in — llm1@example.test');
+    expect(seen).not.toContain('claude-atomi');
+    expect(seen).not.toContain('claude-llm1');
+  });
+
+  it('still names no stored id when the logins cannot be read', async () => {
+    const { root } = await twins({ 'GET /v1/logins': new Error('off') });
+    const seen = text(root, '[data-mcp-details="notion"]');
+    expect(seen).not.toContain('@example.test');
+    expect(seen).toContain('Claude · your terminal sign-in');
   });
 });
