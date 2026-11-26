@@ -40,6 +40,7 @@ import {
 import type { RefusalNote } from './refusal-log.ts';
 import { orderRoutesBySpecificity, Router } from './router.ts';
 import { PublicRouter } from './public-router.ts';
+import { timedRoute, type WorkFeed } from './work-feed.ts';
 
 /** How one plugin is serving right now. Read on every call, so a failure or damage after mount is honoured. */
 export type Serving =
@@ -89,6 +90,8 @@ export interface DispatchBindings {
    * the log nothing either). The host turns it into one `error` line; a throw here never changes the answer.
    */
   readonly failed?: (note: FailureNote) => void;
+  /** Hears each served route, by template, with its wall time ({@link WorkFeed}); absent: nothing is measured. */
+  readonly work?: WorkFeed;
 }
 
 /**
@@ -319,6 +322,16 @@ export class Dispatcher {
     incoming: ApiRequest,
     delegation?: { readonly allowed: ReadonlySet<string>; readonly refused: (key: string) => void },
   ): Promise<ApiResponse> {
+    const { work } = this.bindings;
+    return work === undefined
+      ? await this.serve(incoming, delegation)
+      : await timedRoute(work, incoming, request => this.serve(request, delegation));
+  }
+
+  private async serve(
+    incoming: ApiRequest,
+    delegation?: { readonly allowed: ReadonlySet<string>; readonly refused: (key: string) => void },
+  ): Promise<ApiResponse> {
     const request = this.stamped(incoming);
     const door = request.arrival.kind === 'door';
     if (!door && request.principal?.kind === 'member') return await this.dispatchMember(request);
@@ -360,7 +373,7 @@ export class Dispatcher {
         this.bindings.version,
       );
     }
-    request.onRoute?.(found.route.path);
+    request.onRoute?.(`${found.route.method} ${found.route.path}`);
     if (door && (notServing(found.route.owner) !== undefined || found.route.handle === undefined))
       return withVersion(unknownRouteResponse(request.method, request.path), this.bindings.version);
     const decision = admit(this.bindings, 'route', found.route, request, found.params);
@@ -448,6 +461,7 @@ export class Dispatcher {
   private async dispatchMember(incoming: ApiRequest): Promise<ApiResponse> {
     const request = this.stamped(incoming);
     const found = this.members.lookup(request.method, request.path);
+    if (found.kind === 'matched') request.onRoute?.(`${found.route.method} ${found.route.path}`);
     const admission = this.bindings.admission();
     if (found.kind !== 'matched' || admission === undefined) {
       const response =
