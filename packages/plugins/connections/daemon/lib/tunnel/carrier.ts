@@ -112,6 +112,8 @@ export interface TunnelCarrierDependencies {
   readonly notices: TunnelCarrierNotices;
 }
 
+const NOTHING = (): void => undefined;
+
 /** The label every boot line about this carrier starts with, so a reader can find all of them. */
 const OFF = 'tunnel carrier off —';
 
@@ -174,10 +176,7 @@ export class TunnelCarrier {
         if (!this.#stopped && location.kind === 'absent') this.#unavailable(cloudflaredRemedy(location.reason));
         return location;
       });
-      this.#decided = decided.then(
-        () => undefined,
-        () => undefined,
-      );
+      this.#decided = decided.then(NOTHING, NOTHING);
       this.#track(
         decided.then(async location => {
           if (!this.#stopped && location.kind === 'found') await this.#bringUp(location.path);
