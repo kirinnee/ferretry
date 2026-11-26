@@ -192,6 +192,7 @@ function build(
     readonly withRemoval?: <T>(path: string, remove: () => Promise<T>) => Promise<T>;
     readonly managedRoot?: string | undefined;
     readonly ids?: readonly string[];
+    readonly adoptExisting?: ConstructorParameters<typeof ManagedWorktreeService>[7];
   } = {},
 ) {
   const registry = new MemoryRegistry({ worktrees: options.entries ?? [], intents: options.intents ?? [] });
@@ -208,12 +209,126 @@ function build(
     { nowIso: () => '2026-08-04T09:00:00.000Z' },
     { next: () => minted.shift() ?? 'exhausted' },
     'managedRoot' in options ? options.managedRoot : MANAGED_ROOT,
+    options.adoptExisting,
   );
   return { subject, registry, operations };
 }
 
 const thrown = async (operation: Promise<unknown>): Promise<unknown> =>
   await operation.then(() => undefined).catch((error: unknown) => error);
+
+describe('in-place adoption lifecycle', () => {
+  const adopted = () =>
+    record({
+      origin: 'adopted',
+      path: '/existing/checkout',
+      sourceCwd: '/existing/checkout',
+      relativeCwd: '',
+      branchPreexisted: true,
+      ownerSessionId: undefined,
+    });
+  const identity = { checkout: '1:11', gitDirectory: '1:12', commonDirectory: '1:13' };
+
+  it('should persist authorization before the marker operation, then file origin and the live owner', async () => {
+    const entry = adopted();
+    const { subject, registry } = build({
+      sessions: [session({ id: 'live-owner', cwd: `${entry.path}/src` })],
+      adoptExisting: async (folder, token, planned) => {
+        should(folder).equal(entry.path);
+        should(token).equal('id-one-0000');
+        await planned({ ...entry, ownershipToken: token }, identity);
+        should(registry.state.worktrees).eql([]);
+        should(registry.state.intents[0]).match({
+          origin: 'adopted',
+          gitDir: entry.gitDir,
+          adoptionIdentity: identity,
+          ownershipToken: token,
+          declaredAt: entry.createdAt,
+        });
+        return { ...entry, ownershipToken: token };
+      },
+    });
+    const response = await subject.adopt(entry.path);
+    should(response).match({
+      cwd: entry.path,
+      worktree: { origin: 'adopted', ownerSessionId: 'live-owner', ownerActive: true },
+    });
+    should(registry.state.intents).eql([]);
+    should(registry.state.worktrees[0]).match({
+      origin: 'adopted',
+      ownerSessionId: 'live-owner',
+      branchPreexisted: true,
+    });
+    should((await subject.records())[0]).match({ origin: 'adopted', path: entry.path });
+  });
+
+  it('should adopt with no proven owner while keeping unreadable occupancy as removal evidence', async () => {
+    const entry = adopted();
+    const { subject, operations } = build({
+      sessionEvidence: async () => undefined,
+      adoptExisting: async (_folder, _token, planned) => {
+        await planned(entry, identity);
+        return entry;
+      },
+    });
+    const response = await subject.adopt(entry.path);
+    should(response.worktree.ownerSessionId).be.undefined();
+    should(operations.examined[0]?.undeterminedEvidence?.join(' ')).match(/session directory could not be read/);
+  });
+
+  it('should retry an owned adopted row without minting or overwriting its marker', async () => {
+    const entry = adopted();
+    const operations = new RecordingOperations({ presence: { kind: 'owned' } });
+    const { subject, registry } = build({
+      entries: [entry],
+      operations,
+      adoptExisting: async () => {
+        throw new Error('must never overwrite an existing marker');
+      },
+    });
+    should((await subject.adopt(entry.path)).worktree).match({ origin: 'adopted', path: entry.path });
+    should(registry.history).eql([]);
+    should(operations.probed).eql([entry.path]);
+  });
+
+  it('should refuse existing management, mismatched ownership and unresolved adoption intents', async () => {
+    const entry = adopted();
+    for (const entries of [[record({ path: entry.path })], [entry]]) {
+      const { subject } = build({
+        entries,
+        operations: new RecordingOperations({ presence: { kind: 'unverified', reason: 'foreign marker' } }),
+      });
+      should(await thrown(subject.adopt(entry.path))).match({ code: 'destination_exists' });
+    }
+    const { gitDir: _git, createdAt, ...rest } = entry;
+    const { subject } = build({
+      intents: [{ ...rest, declaredAt: createdAt, adoptionIdentity: identity }],
+      operations: new RecordingOperations({ adoption: { kind: 'unverified', reason: 'foreign marker' } }),
+    });
+    should(await thrown(subject.adopt(entry.path))).match({ code: 'destination_exists' });
+    should((await subject.list()).worktrees[0]).match({ origin: 'adopted', unresolved: /never finished/ });
+    should((await subject.records())[0]).match({ origin: 'adopted', unresolved: /never finished/ });
+  });
+
+  it('should refuse an unavailable adoption capability without changing the registry', async () => {
+    const { subject, registry } = build();
+    should(await thrown(subject.adopt('/existing/checkout'))).match({ code: 'no_managed_root' });
+    should(registry.history).eql([]);
+  });
+
+  it('should leave the identity-pinned intent for recovery if the marker operation crashes', async () => {
+    const entry = adopted();
+    const { subject, registry } = build({
+      adoptExisting: async (_folder, _token, planned) => {
+        await planned(entry, identity);
+        throw new Error('crashed after marker');
+      },
+    });
+    await should(subject.adopt(entry.path)).be.rejectedWith(/crashed after marker/);
+    should(registry.state.worktrees).eql([]);
+    should(registry.state.intents[0]).match({ path: entry.path, origin: 'adopted', adoptionIdentity: identity });
+  });
+});
 
 /** A deterministic boundary: the test observes entry, then decides when the operation may continue. */
 function deferredBoundary(): {

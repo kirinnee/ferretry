@@ -4,6 +4,14 @@ import { mkdir, rename } from 'node:fs/promises';
 import should from 'should';
 import { WorktreesFile, type CreatedWorktree, type RepoWorktreeListResponse } from '../../../../contract/index.ts';
 import { worktreeRouteWorld } from '../../../support/daemon/worktree-world.ts';
+import { KernelGitRunner } from '../../../../daemon/adapters/git/runner.ts';
+import { InPlaceWorktrees } from '../../../../daemon/adapters/worktrees/in-place.ts';
+import {
+  GitWorktreeGateway,
+  KernelWorktreeClock,
+  ManagedWorktreeAdapter,
+  WorktreeOperationQueue,
+} from '../../../../daemon/adapters/worktrees/index.ts';
 import { cleanupTempDirectories, setupGit, tempRepository } from '../support/repository.ts';
 
 async function fixture(label: string) {
@@ -15,6 +23,99 @@ async function fixture(label: string) {
 
 describe('adopt in place through the real roots and Git', () => {
   afterAll(cleanupTempDirectories);
+
+  it('should refuse relative or non-canonical paths and detached checkouts without writing ownership', async () => {
+    const world = await fixture('adopt-invalid-target');
+    for (const target of ['relative/checkout', `${world.target}/../hand-made`]) {
+      should((await world.call('POST /v1/worktrees/adopt', { body: { path: target } })).status).equal(409);
+    }
+    const detached = path.join(world.repository.root, 'detached');
+    await setupGit(world.repository.root, 'worktree', 'add', '--detach', detached);
+    should((await world.call('POST /v1/worktrees/adopt', { body: { path: detached } })).status).equal(409);
+    should(world.state.raw(WorktreesFile)).be.undefined();
+  });
+
+  it('should refuse a checkout that disappears between metadata authorization and Git enumeration', async () => {
+    const world = await fixture('adopt-disappeared');
+    const discover = world.io.repoAccess.commonDirectory;
+    world.io.repoAccess.commonDirectory = async folder => {
+      const common = await discover(folder);
+      await setupGit(world.repository.root, 'worktree', 'remove', world.target);
+      return common;
+    };
+    should((await world.call('POST /v1/worktrees/adopt', { body: { path: world.target } })).status).equal(409);
+    should(world.state.raw(WorktreesFile)).be.undefined();
+  });
+
+  it('should recheck the state-home fence after recording intent and before writing a marker', async () => {
+    const world = await fixture('adopt-late-fence');
+    const clock = new KernelWorktreeClock(world.clock);
+    const runner = new KernelGitRunner(world.io.git);
+    const base = new ManagedWorktreeAdapter(
+      new GitWorktreeGateway(runner, world.io.fileSystem, clock),
+      world.io.fileSystem,
+      clock,
+      new WorktreeOperationQueue(),
+      world.io.pinner,
+    );
+    let checks = 0;
+    let planned = 0;
+    const subject = new InPlaceWorktrees(base, runner, world.io.repoAccess, world.io.fileSystem, clock, async () =>
+      ++checks === 1 ? undefined : '/synthetic/state-home',
+    );
+    await should(
+      subject.adoptExisting(world.target, 'synthetic-owner-token', async () => {
+        planned++;
+      }),
+    ).be.rejectedWith(/state home/);
+    should(planned).equal(1);
+    const gitDir = (await setupGit(world.target, 'rev-parse', '--absolute-git-dir')).trim();
+    should(await Bun.file(path.join(gitDir, 'worktree-owner')).exists()).equal(false);
+  });
+
+  it('should keep unreadable adopted repositories visible but never removable or silently re-owned', async () => {
+    const world = await fixture('adopt-unreadable');
+    should((await world.call('POST /v1/worktrees/adopt', { body: { path: world.target } })).status).equal(200);
+    await rename(path.join(world.repository.root, '.git'), path.join(world.repository.root, '.git-away'));
+    const list = await world.built.service.list();
+    should(list.worktrees[0]).match({
+      origin: 'adopted',
+      removal: { removable: false, blockers: [{ code: 'undetermined_evidence' }] },
+    });
+    should((await world.call('POST /v1/worktrees/adopt', { body: { path: world.target } })).status).equal(409);
+    should(JSON.parse(world.state.raw(WorktreesFile)!).worktrees).have.length(1);
+  });
+
+  it('should preserve ordinary managed creation, crash recovery, inspection and removal', async () => {
+    const world = await worktreeRouteWorld('adopt-managed-delegation');
+    const writeText = world.io.fileSystem.writeText;
+    world.io.fileSystem.writeText = async (...args) => {
+      await writeText(...args);
+      throw new Error('synthetic managed-creation crash');
+    };
+    await world
+      .call('POST /v1/worktrees', {
+        body: { sourcePath: world.repository.root, branch: 'managed/recovery', sessionId: 'session-1' },
+      })
+      .should.be.rejectedWith(/managed-creation crash/);
+    const list = await world.built.service.list();
+    const target = list.worktrees[0]!.path;
+    should(list.worktrees[0]?.origin).be.undefined();
+    const registry = JSON.parse(world.state.raw(WorktreesFile)!);
+    registry.worktrees[0].removalStartedAt = '2026-11-16T00:00:00.000Z';
+    world.state.plant(WorktreesFile, JSON.stringify(registry));
+    await world.built.service.list();
+    should(JSON.parse(world.state.raw(WorktreesFile)!).worktrees[0].removalStartedAt).be.undefined();
+    const removed = await world.call('POST /v1/worktrees/remove', {
+      body: {
+        path: target,
+        overrides: ['accept_unpushed_commits'],
+        deleteBranch: false,
+        confirmations: [],
+      },
+    });
+    should(removed.status).equal(200);
+  });
 
   it('should never recover a replacement checkout merely because it inherited the matching marker', async () => {
     const world = await fixture('adopt-crash-replaced');
