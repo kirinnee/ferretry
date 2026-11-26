@@ -1,0 +1,22 @@
+{
+  "id": "wren",
+  "name": "lead",
+  "role": "lead",
+  "mode": "auto",
+  "harness": "claude-code",
+  "runner": "tmux",
+  "runtime": "codex-main",
+  "folder": "/work/lead",
+  "state": "working",
+  "createdAt": "2026-11-06T09:00:00.000Z",
+  "stateAt": "2026-11-06T09:00:00.000Z",
+  "provenance": {
+    "v": 1,
+    "at": "2026-11-06T09:00:00.000Z",
+    "origin": "human",
+    "wardenLineage": false,
+    "lineageSource": "none"
+  },
+  "model": "model-x",
+  "notice": "Started without Fast: Codex’s model list is still loading; try again in a few seconds"
+}

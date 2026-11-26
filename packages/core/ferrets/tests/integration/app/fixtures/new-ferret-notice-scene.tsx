@@ -12,6 +12,7 @@ import { useFerretActions } from '../../../../app/features/header/use-ferret-act
 import { ActionToast } from '../../../../app/features/header/action-toast.tsx';
 import { FerretLifecycle } from '../../../../app/features/header/status-panel.tsx';
 import { FerretSummarySchema } from '../../../../contract/index.ts';
+import restartResponse from '../../../fixtures/restart-downgrade-response.json';
 import type { LiveFerretsClient } from '../../../../app/lib/client.ts';
 import '../../../../app/features/header/ferret-actions.css';
 
@@ -41,7 +42,8 @@ const client: FerretsClient = {
     if (route === 'GET /v1/ferrets') return [] as Answer;
     if (route === 'POST /v1/ferrets') return { id: 'new-ferret', notice: NOTICE } as Answer;
     if (route === 'POST /v1/ferrets/:ferretId/resume') return { id: ferret.id, notice: NOTICE } as Answer;
-    if (route === 'POST /v1/ferrets/:ferretId/move') return { ...ferret, notice: NOTICE } as Answer;
+    // The daemon's own Restart answer, pinned by tests/unit/daemon/ferrets/fast-fallback-relaunch.test.ts.
+    if (route === 'POST /v1/ferrets/:ferretId/move') return restartResponse as Answer;
     throw new Error(`no route ${route}`);
   },
 } as FerretsClient;

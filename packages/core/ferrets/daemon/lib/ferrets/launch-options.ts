@@ -45,8 +45,9 @@ export const launchFastOf = (decided: DecidedFast | undefined, live: boolean | u
 /**
  * A resume's answer from `start.decide`, with fast mode verified like a start's: the fast mode the relaunch would carry
  * goes to the decision WITH the model and login it will run on (a start's own refusal rule), and a decision that says the
- * model cannot serve it (`unservable_model`) explicitly switches fast off instead of refusing the revive — a relaunch never passes
- * an unverified paid tier, and never strands a session over one.
+ * model cannot serve it (`unservable_model`) drops the fast mode instead of refusing the revive, and one that cannot VERIFY it
+ * (`fast_unverified`, a Codex answer) relaunches with fast explicitly off and says why — a relaunch never passes an
+ * unverified paid tier, and never strands a session over one.
  */
 export async function decideResume(
   decide: (input: StartDecideInput) => Promise<HookDecision>,
@@ -61,13 +62,14 @@ export async function decideResume(
   const model = keeps?.recorded?.model;
   const first = await decide({ ...base, fast, ...(model === undefined ? {} : { model }) });
   if (first.allow) return { decision: first, fast };
-  if (first.code !== 'unservable_model' && first.code !== 'fast_unverified')
-    return { decision: first, fast: undefined };
-  return {
-    decision: await decide({ ...base, fast: false, ...(model === undefined ? {} : { model }) }),
-    fast: false,
-    notice: first.code === 'fast_unverified' ? first.reason : `Started without Fast: ${first.reason}`,
-  };
+  if (first.code === 'fast_unverified')
+    return {
+      decision: await decide({ ...base, fast: false, ...(model === undefined ? {} : { model }) }),
+      fast: false,
+      notice: first.reason,
+    };
+  if (first.code !== 'unservable_model') return { decision: first, fast: undefined };
+  return { decision: await decide(base), fast: undefined };
 }
 
 /**
