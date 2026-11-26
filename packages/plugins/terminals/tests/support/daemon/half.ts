@@ -56,6 +56,9 @@ export class FakeTerminalRuntime implements TerminalRuntimePort {
   async list(): Promise<readonly TerminalRecord[]> {
     return this.records;
   }
+  async roots(): Promise<readonly string[]> {
+    return this.records.map(record => record.root);
+  }
   async create(input: Parameters<TerminalRuntimePort['create']>[0]): Promise<TerminalRecord> {
     const record: TerminalRecord = {
       id: input.id,
@@ -225,6 +228,7 @@ export async function terminalsHalf(
         tmux: new ScriptedTmux(),
         socketPath: '/state/terminals/tmux.sock',
         runtime,
+        realPath: async path => path,
         ...overrides,
       })),
   });

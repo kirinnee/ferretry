@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { createKernelWorktreeHostIo } from '../adapters/worktrees/kernel-host-io.ts';
+import { liveTerminalRoots, withTerminalRemoval } from '../lib/worktrees/terminal-roots.ts';
 import { buildWorktrees } from '../modules/worktrees.ts';
+import { TerminalRoots } from '../../contract/index.ts';
 import type { FeatureContribution, FerretsContext, FerretsFeature } from './types.ts';
 
 function register(f: FerretsContext): FeatureContribution | undefined {
-  const { kernel, registry, ready, late } = f;
+  const { kernel, hooks, registry, ready, late } = f;
   // Managed worktrees (today's worktrees module). Its Git and disk IO is the kernel's roots and spawn: the `worktrees` root
   // (`<home>-worktrees`) is the managed folder, and a repository a checkout is made from is reached through the `work`
   // root of the ferret standing in it. A host whose `worktrees` root names no folder hosts none, and every route says so.
@@ -28,7 +30,13 @@ function register(f: FerretsContext): FeatureContribution | undefined {
         ...(ferret.state === 'stopped' ? { finishedAt: ferret.stateAt } : {}),
       }));
     },
-    terminalRoots: async () => undefined,
+    terminalRoots: async () => await liveTerminalRoots(hooks.contributions(TerminalRoots).map(entry => entry.item)),
+    withTerminalRemoval: async (path, remove) =>
+      await withTerminalRemoval(
+        hooks.contributions(TerminalRoots).map(entry => entry.item),
+        path,
+        remove,
+      ),
     newId: () => randomUUID(),
   });
   late.worktrees = worktrees;

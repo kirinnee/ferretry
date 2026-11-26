@@ -43,7 +43,11 @@ describe('a test daemon never reaches the machine fleet slice', () => {
       plugins: [
         implementDaemon(manifest, {
           build: ctx =>
-            buildTerminals(ctx, { tmux: new ScriptedTmux(), socketPath: '/fixture/state/terminals/tmux.sock' }),
+            buildTerminals(ctx, {
+              realPath: async path => path,
+              tmux: new ScriptedTmux(),
+              socketPath: '/fixture/state/terminals/tmux.sock',
+            }),
         }),
       ],
       fakes: { ferrets, vault: fakeVault([]) },

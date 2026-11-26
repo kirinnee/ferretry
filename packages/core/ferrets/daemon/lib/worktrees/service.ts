@@ -126,6 +126,7 @@ export interface WorktreeSessionEvidence {
  */
 export interface WorktreeTerminalEvidence {
   roots(): Promise<readonly string[] | undefined>;
+  withRemoval?<T>(path: string, remove: () => Promise<T>): Promise<T>;
 }
 
 /** Opaque ids for ownership tokens and for the destination key of an unowned checkout. */
@@ -339,6 +340,17 @@ export class ManagedWorktreeService {
 
   async #remove(request: WorktreeRemovalRequest): Promise<RemovedWorktree> {
     const { managed, managedRoot } = await this.#live(request.path);
+    const remove = async () => await this.#removeHeld(request, managed, managedRoot);
+    return this.terminals.withRemoval === undefined
+      ? await remove()
+      : await this.terminals.withRemoval(managed.path, remove);
+  }
+
+  async #removeHeld(
+    request: WorktreeRemovalRequest,
+    managed: ManagedWorktree,
+    managedRoot: string,
+  ): Promise<RemovedWorktree> {
     const refreshEvidence = async (): Promise<CheckManagedWorktreeRemovalInput> => {
       const [sessions, terminalRoots] = await Promise.all([this.sessions.sessions(), this.terminals.roots()]);
       return managedWorktreeRemovalContext({

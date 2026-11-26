@@ -52,6 +52,8 @@ export type TerminalCloseTrigger = 'boot' | 'sweep' | 'owner';
 
 export interface TerminalRuntimePort {
   list(): Promise<readonly TerminalRecord[]>;
+  /** Canonical CURRENT cwd of every live pane. Any unreadable endpoint or cwd throws. */
+  roots(): Promise<readonly string[]>;
   create(input: {
     readonly ownerId: string;
     readonly id: string;
