@@ -21,7 +21,7 @@ import {
 } from './adapters/worker-speech-thread.ts';
 import type { ReplyThread, SpeechThread } from './lib/engine/ports.ts';
 import { nativeTargetFor, nativeThreads, type NativeParts } from './lib/native/catalog.ts';
-import { REPLY_DIR } from './lib/reply/catalog.ts';
+import { REPLY_DIR, replyNativeThreads } from './lib/reply/catalog.ts';
 import { ReplyVoiceEngine } from './lib/reply/engine.ts';
 import { ElevenLabsReplyVoice } from './lib/reply/elevenlabs.ts';
 import { routeReplyVoice } from './lib/reply/router.ts';
@@ -65,7 +65,7 @@ export default implementDaemon(manifest, {
       guard: new JevProbe(authorizer),
     });
 
-    // The native engine: this machine's pinned library (none for a platform we pin nothing for), and four threads at most.
+    // The speech engine's native budget: four threads at most. Replies below use their own measured CPU budget.
     const native: NativeParts = {
       target: nativeTargetFor(kernel.hostFacts.platform, process.arch),
       threads: () => nativeThreads(kernel.hostFacts.cpus),
@@ -98,14 +98,14 @@ export default implementDaemon(manifest, {
     });
     kernel.lifecycle.onStop(() => void engine.unload());
 
-    // The reply voice (Kokoro): installed apart from the speech engine, and its own worker thread so listening never waits.
+    // The reply voice (Kokoro): installed apart from speech, with its own native child so listening never waits.
     const replyLog = kernel.log.child('reply');
     const reply = new ReplyVoiceEngine({
       http: { request: async (url, init) => await kernel.fetch.request(url, init) },
       files: new StateEngineFiles(kernel.state, kernel.hostFacts, REPLY_DIR),
       clock: kernel.clock,
       machine: () => kernel.identity.daemonName,
-      native,
+      native: { ...native, threads: () => replyNativeThreads(kernel.hostFacts.cpus) },
       start: kind =>
         kind === 'native'
           ? (startChildThread({
