@@ -7,7 +7,7 @@ import { DEFAULT_LAYOUT, layoutCandidates } from '../../../src/layout/layout.ts'
 import { APP_STORAGE } from '../../../src/storage/names.ts';
 import { memoryStore, writeRecord } from '../../../src/storage/records.ts';
 
-const theme = { id: 'default', label: 'Default', style: 'studio' };
+const theme = { id: 'default', label: 'Default', base: 'studio' };
 const owner = { ...DEFAULT_LAYOUT, id: 'owner', density: 'compact' as const };
 
 /** A guarded client for the `layouts` package that answers `GET /v1/layouts/current` from `answer`. */
@@ -55,7 +55,7 @@ describe('the daemon layout channel', () => {
     expect(asked).toEqual([`d1/${LAYOUTS_PLUGIN}`]);
     expect(fake.calls).toEqual(['GET /v1/layouts/current']);
     expect(layouts.current('d1')?.layout.density).toBe('compact');
-    expect(layouts.current('d1')?.theme).toMatchObject({ id: 'default', style: 'studio' });
+    expect(layouts.current('d1')?.theme).toMatchObject({ id: 'default', base: 'studio' });
 
     current = { layout: { ...owner, density: 'comfortable' }, theme };
     fake.wake();
@@ -96,8 +96,8 @@ describe('this device’s layout store', () => {
   test('keeps the --device overrides under fy:app:layout and resets them', () => {
     const storage = memoryStore();
     const store = new DeviceLayoutStore(storage);
-    expect(store.set(DEFAULT_LAYOUT, 'nav.side', 'bottom')).toBeUndefined();
-    expect(store.snapshot()).toMatchObject({ nav: { side: 'bottom' } });
+    expect(store.set(DEFAULT_LAYOUT, 'nav.side', 'right')).toBeUndefined();
+    expect(store.snapshot()).toMatchObject({ nav: { side: 'right' } });
     expect(JSON.parse(storage.entries()[APP_STORAGE.layout] ?? '{}')).toMatchObject({ format: 1 });
     expect(new DeviceLayoutStore(storage).snapshot()).toEqual(store.snapshot());
     expect(store.set(DEFAULT_LAYOUT, 'nav.side', 'middle')).toBeString();
@@ -127,8 +127,8 @@ describe('this device’s layout store', () => {
 
   test('a stamped record is kept as it is, and a fresh browser draws the default', () => {
     const storage = memoryStore();
-    writeRecord(storage, APP_STORAGE.layout, storedOverrides({ nav: { side: 'bottom' } }));
-    expect(new DeviceLayoutStore(storage).snapshot()).toEqual({ nav: { side: 'bottom' } });
+    writeRecord(storage, APP_STORAGE.layout, storedOverrides({ nav: { side: 'right' } }));
+    expect(new DeviceLayoutStore(storage).snapshot()).toEqual({ nav: { side: 'right' } });
     const fresh = new DeviceLayoutStore(memoryStore());
     expect(fresh.snapshot()).toEqual({});
     expect(drawn(fresh)).toMatchObject({ nav: { side: 'left', style: 'dock' }, side: { at: 'left' } });
