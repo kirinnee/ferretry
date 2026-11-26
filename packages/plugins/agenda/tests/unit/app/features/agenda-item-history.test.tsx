@@ -55,10 +55,26 @@ describe('the Conversation of an open agenda item', () => {
     const root = view.container;
     const toggle = must(root.querySelector<HTMLButtonElement>('[data-agenda-fold="conversation"]'), 'fold toggle');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle.textContent).toBe('Conversation2 messages');
+    expect(toggle.textContent).toBe('History2 messages');
     expect(root.querySelector('[data-agenda-history]')).toBeNull();
     await interact(() => toggle.click());
     expect(root.querySelectorAll('[data-agenda-history] [data-history]')).toHaveLength(3);
+  });
+
+  test("A-29: answered asks are counted on the History fold, which opens on the owner's answers", async () => {
+    view = await mount(
+      <AgendaItemHistory
+        events={[
+          { kind: 'ferret', key: 'f', at: AT, text: 'Blue or green?' },
+          { kind: 'owner', key: 'o', at: AT + 1, text: 'Blue', form: 'answer' },
+        ]}
+        ferret="Lizzette"
+        itemKey="history-test:answered"
+        renderProse={text => <p>{text}</p>}
+      />,
+    );
+    const toggle = must(view.container.querySelector<HTMLButtonElement>('[data-agenda-fold="conversation"]'), 'fold');
+    expect(toggle.textContent).toBe('History1 answered · 2 messages');
   });
 
   test('is drawn with the chat’s own rows, oldest first: the ferret’s name above its words, the owner as a bubble', async () => {
@@ -73,7 +89,7 @@ describe('the Conversation of an open agenda item', () => {
     expect(rows.map(row => row.getAttribute('data-history'))).toEqual(['ferret', 'owner', 'ferret']);
     expect(
       must(root.querySelector('[data-agenda-part="conversation"] h4 .fy-card__label'), 'heading').textContent,
-    ).toBe('Conversation');
+    ).toBe('History');
     // The chat's agent row: the name small above, the time at the foot — the chat's clock, not an age.
     const ferretRow = must(rows[0]?.querySelector('article.fy-message-assistant'), 'the chat’s agent row');
     expect(ferretRow.getAttribute('data-transcript-kind')).toBe('assistant');

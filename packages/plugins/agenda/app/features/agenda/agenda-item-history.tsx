@@ -98,7 +98,7 @@ export function AgendaItemHistory({
   ferret,
   renderProse,
   itemKey,
-  title = 'Conversation',
+  title = 'History',
 }: {
   readonly events: readonly HistoryEvent[];
   readonly ferret: string;
@@ -111,10 +111,15 @@ export function AgendaItemHistory({
   const spoken = spokenEvents(events);
   if (spoken.length === 0) return null;
   const said = spoken.filter(event => event.kind !== 'gap').length;
+  // An answered ask lives here, not in "What I need from you": the owner's answers are counted first.
+  const answered = spoken.filter(
+    event => event.kind === 'owner' && (event.form === 'answer' || event.form === 'done'),
+  ).length;
+  const messages = `${String(said)} ${said === 1 ? 'message' : 'messages'}`;
   return (
     <AgendaFold
       itemKey={itemKey}
-      meta={`${String(said)} ${said === 1 ? 'message' : 'messages'}`}
+      meta={answered === 0 ? messages : `${String(answered)} answered · ${messages}`}
       part="conversation"
       title={title}
     >

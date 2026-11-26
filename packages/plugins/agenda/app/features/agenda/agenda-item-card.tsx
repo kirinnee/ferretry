@@ -729,6 +729,20 @@ export function AgendaItemCard({
               {replies}
             </div>
           ) : null}
+          {taskAsks.length === 0 ? null : (
+            <div className="fy-card__card-asks" data-agenda-card-asks={taskAsks.length}>
+              {taskAsks.map(ask => (
+                <TaskAskBlock
+                  ask={ask}
+                  busy={busy}
+                  key={ask.key}
+                  offer={replyOffer?.ask === ask.key ? replyOffer : null}
+                  onAct={onAct}
+                  renderProse={renderProse}
+                />
+              ))}
+            </div>
+          )}
           {recommendation === undefined || recommendation.why === undefined ? null : (
             <Section
               name="recommendation"
@@ -764,20 +778,6 @@ export function AgendaItemCard({
                 </p>
               )}
             </Section>
-          )}
-          {taskAsks.length === 0 ? null : (
-            <div className="fy-card__card-asks" data-agenda-card-asks={taskAsks.length}>
-              {taskAsks.map(ask => (
-                <TaskAskBlock
-                  ask={ask}
-                  busy={busy}
-                  key={ask.key}
-                  offer={replyOffer?.ask === ask.key ? replyOffer : null}
-                  onAct={onAct}
-                  renderProse={renderProse}
-                />
-              ))}
-            </div>
           )}
           {!latest ? (
             <p className="fy-card__old" data-agenda-old-version="">

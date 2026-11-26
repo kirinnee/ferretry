@@ -18,10 +18,12 @@ import {
   type BoardGroupOf,
   buildTree,
   flattenTree,
+  groupTaskCount,
 } from '../lib/board-view.ts';
 import { BoardTask } from './board-task.tsx';
 import { BoardIcon } from './board-icons.tsx';
 import { BoardLane } from './board-lane.tsx';
+import { BoardProject, type BoardProjectFocus } from './board-project-head.tsx';
 import { archiveRowsOf, TableRows } from './board-table.tsx';
 
 /** What every view needs to draw and wire a task. */
@@ -72,6 +74,8 @@ export interface KanbanViewProps {
   readonly projectName: (group: BoardGroupOf) => string;
   /** The Closed lane is not drawn (closed is hidden by default). */
   readonly hideClosed: boolean;
+  /** The page's project filter, so a project's heading can narrow the board to it and back. */
+  readonly focus?: BoardProjectFocus | undefined;
 }
 
 function KanbanBoard({
@@ -106,21 +110,23 @@ function KanbanBoard({
   );
 }
 
-/** One row of lanes per project (and machine); with a single project the heading is left out. */
-export function KanbanView({ model, env, projectName, hideClosed }: KanbanViewProps) {
-  const headed = model.groups.length > 1;
+/** One headed row of lanes per project (and machine): the project is always named, however few there are. */
+export function KanbanView({ model, env, projectName, hideClosed, focus }: KanbanViewProps) {
+  const several = model.groups.length > 1;
   return (
     <div className="fy-board-rows">
       {model.groups.map(group => (
-        <section aria-label={headed ? projectName(group) : 'Board'} className="fy-board-project" key={group.key}>
-          {headed ? (
-            <h2 className="fy-board-project__head">
-              {projectName(group)}
-              {model.multiMachine ? <span className="fy-board-project__machine">{group.machine}</span> : null}
-            </h2>
-          ) : null}
+        <BoardProject
+          count={groupTaskCount(group, hideClosed)}
+          focus={focus}
+          key={group.key}
+          machine={model.multiMachine ? group.machine : null}
+          name={projectName(group)}
+          projectId={group.projectId}
+          several={several}
+        >
           <KanbanBoard env={env} group={group} hideClosed={hideClosed} />
-        </section>
+        </BoardProject>
       ))}
     </div>
   );

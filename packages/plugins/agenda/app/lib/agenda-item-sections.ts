@@ -51,7 +51,7 @@ export const PART_TITLES: Readonly<Record<Exclude<ItemViewPart, 'head' | 'premis
   references: 'Terms and references',
   needs: 'What I need from you',
   tabs: 'The live document',
-  conversation: 'Conversation',
+  conversation: 'History',
   activity: 'Activity',
 };
 

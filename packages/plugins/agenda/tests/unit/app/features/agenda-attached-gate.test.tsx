@@ -121,3 +121,17 @@ describe('a thread with a gate attached', () => {
     expect(root.querySelector('[data-agenda-attached-gate]')).toBeNull();
   });
 });
+
+describe('A-29: every open ask comes first', () => {
+  test('the task ask is drawn before the why, the steps and the impact', async () => {
+    const root = await draw(
+      thread({
+        impact: 'It changes the badge for everyone',
+        cardAsks: [{ gate: gate, at: '2026-08-01T10:00:00.000Z' }],
+      } as unknown as Partial<AgendaItem>),
+    );
+    const ask = must(root.querySelector<HTMLElement>('[data-agenda-card-asks]'), 'the task asks');
+    const impact = must(root.querySelector<HTMLElement>('[data-agenda-section="impact"]'), 'the impact');
+    expect(ask.compareDocumentPosition(impact) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});

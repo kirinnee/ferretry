@@ -20,6 +20,7 @@ import { ferretNamer } from '../lib/board-present.ts';
 import {
   archivePage,
   archiveRows,
+  BOARD_VIEW_HINT,
   BOARD_VIEW_LABEL,
   BOARD_VIEWS,
   type BoardGroupOf,
@@ -33,6 +34,7 @@ import { BoardCountsBar } from './board-counts.tsx';
 import { DEFAULT_SUMMARY_WINDOW, parseSummaryWindow, type SummaryWindow } from '../lib/board-summary.ts';
 import { BoardFilterBar, BoardFilterSheet } from './board-filters.tsx';
 import { BoardNotice } from './board-notice.tsx';
+import type { BoardProjectFocus } from './board-project-head.tsx';
 import { PhoneKanban } from './board-phone.tsx';
 import { BoardDetail } from './detail/board-detail.tsx';
 import { TableView } from './board-table.tsx';
@@ -308,6 +310,10 @@ export function BoardPage({
     };
   }, [highlight, model]);
 
+  const projectFocus = useMemo<BoardProjectFocus>(
+    () => ({ projectId: filters.project, onFocus: project => setFilters({ ...filters, project }) }),
+    [filters, setFilters],
+  );
   const hideClosed = filters.state === 'open';
   const reading = board.status === 'loading' || board.status === 'idle';
   const failed = board.status === 'error';
@@ -324,6 +330,7 @@ export function BoardPage({
               data-view-tab={option}
               key={option}
               onClick={() => setView(option)}
+              title={BOARD_VIEW_HINT[option]}
               type="button"
             >
               {BOARD_VIEW_LABEL[option]}
@@ -332,6 +339,9 @@ export function BoardPage({
         </nav>
         {phone ? null : <div className="fy-board__tools">{scopeToggle}</div>}
       </header>
+      <p className="fy-board__hint" data-board-hint={view}>
+        {BOARD_VIEW_HINT[view]}
+      </p>
       {phone ? (
         <div className="fy-board__phone-bar">
           <BoardFilterSheet
@@ -406,9 +416,10 @@ export function BoardPage({
             model={model}
             onLane={setLane}
             projectName={projectName}
+            focus={projectFocus}
           />
         ) : (
-          <KanbanView env={env} hideClosed={hideClosed} model={model} projectName={projectName} />
+          <KanbanView env={env} focus={projectFocus} hideClosed={hideClosed} model={model} projectName={projectName} />
         )
       ) : view === 'list' ? (
         <TableView closed={closed.model} env={env} model={model} onWindow={setWindow} window={window} />

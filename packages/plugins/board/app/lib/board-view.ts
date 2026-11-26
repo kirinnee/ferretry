@@ -21,6 +21,15 @@ export const BOARD_VIEW_LABEL: Readonly<Record<BoardViewId, string>> = {
   archive: 'Archive',
 };
 
+/** One plain line per view, said as the tab's tooltip: what the view is for, so no tab is a guess. */
+export const BOARD_VIEW_HINT: Readonly<Record<BoardViewId, string>> = {
+  kanban: 'Each project is a row; its lanes are the steps a task moves through',
+  list: 'Every task in one table',
+  tree: 'Tasks nested under the task they belong to',
+  dependencies: 'Which task waits on which',
+  archive: 'Closed and dropped tasks',
+};
+
 export const parseBoardView = (value: string | null): BoardViewId =>
   BOARD_VIEWS.find(view => view === value) ?? 'kanban';
 
@@ -208,3 +217,8 @@ export const taskPlaces = (model: BoardModel): ReadonlyMap<string, BoardTaskPlac
   }
   return places;
 };
+
+/** How many tasks a project's row of lanes holds, as drawn: the Closed lane is left out while closed work is hidden. */
+export const groupTaskCount = (group: BoardGroupOf, hideClosed: boolean): number =>
+  group.unplaced.length +
+  group.lanes.reduce((sum, lane) => sum + (hideClosed && lane.category === 'closed' ? 0 : lane.cards.length), 0);
