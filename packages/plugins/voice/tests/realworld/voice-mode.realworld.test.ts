@@ -257,7 +257,9 @@ describe.skipIf(!ASKED)('voice mode in a real browser with the real speech engin
         // The fake microphone starts with the stream: 1 s of silence, then the clip. Speech ended that long after the first unit.
         const speechEndedAt = firstAudioAt + 1_000 + (clip.length / 16_000) * 1_000;
         console.log('speech ended → sent (ms)', Math.round((sent[0]?.at ?? 0) - speechEndedAt));
-        expect(started).toEqual([{ t: 'start', v: 1, purpose: 'chat', ferretId: 'real-ferret' }]);
+        expect(started).toEqual([
+          { t: 'start', v: 1, purpose: 'chat', ferretId: 'real-ferret', session: expect.stringMatching(/^vm-/u) },
+        ]);
         expect(interim.length).toBeGreaterThan(0);
         console.log('outcomes', JSON.stringify([...new Set(outcomes)]));
         // The machine's final words are firm in the panel (the greyed interim style is gone).

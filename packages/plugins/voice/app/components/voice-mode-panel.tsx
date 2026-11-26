@@ -21,6 +21,11 @@
  * device's own voice when the machine has none or could not begin. Which replies are read, and when, is Auto-read's own rule
  * (`forced` while voice mode is on): the reading it starts is the one heard here.
  *
+ * IT SPEAKS WHILE THE FERRET WORKS. A `<voice>` line the ferret finishes mid-turn is handed to the machine's voice at once through
+ * the store's live sink ({@link createLiveLines}; the page's reader of finished lines is `useLiveVoiceLines`): it plays behind
+ * the piece that is playing, and a progress line that a newer one outdates while it still waits is dropped. The reading at the
+ * end of the turn then says only what was not already said.
+ *
  * BARGE-IN. The microphone stays open while the MACHINE's voice speaks (echo cancellation is on in the browser's own
  * capture). Talking over it, for `BARGE_IN_MS` (300 ms), stops the sound at once and tells the machine to drop the rest; the
  * machine hears the same words and sends them after the pause as usual, so the person just carries on talking.
@@ -45,6 +50,7 @@ import {
   type VoiceStreamHandle,
 } from '../lib/stream/voice-stream.ts';
 import { createBargeInDetector } from '../lib/voice-mode/barge-in.ts';
+import { createLiveLines } from '../lib/voice-mode/live-lines.ts';
 import { createMachineSpeaker } from '../lib/voice-mode/machine-speaker.ts';
 import { lostBanner, shouldFallBack } from '../lib/voice-mode/phone-loop.ts';
 import { useVoiceMode, type VoiceModeStore } from '../lib/voice-mode/voice-mode-store.ts';
@@ -145,6 +151,7 @@ export function VoiceModeSlot({
           ferretId={ferretId}
           machine={state.machine}
           player={state.player}
+          session={state.session}
           store={store}
           turn={turn}
         />
@@ -169,6 +176,8 @@ interface SessionProps {
   readonly createPlayer: () => ReplyPlayer;
   /** The sound output the button made inside the tap, when it could. */
   readonly player: ReplyPlayer | undefined;
+  /** This voice-mode session's name, the same across every stream it opens. */
+  readonly session: string;
   readonly turn: Turn | undefined;
   /** Whether a lost machine hands the loop to the phone's own engine (the page supplies one). */
   readonly canFallBack: boolean;
@@ -182,6 +191,7 @@ function VoiceModeSession({
   createMic,
   createPlayer,
   player: given,
+  session,
   turn,
   canFallBack,
 }: SessionProps) {
@@ -201,6 +211,8 @@ function VoiceModeSession({
   const muted = userMuted || (reading && !machineVoice);
   const live = useRef({ reading, machineVoice });
   live.current = { reading, machineVoice };
+  /** Who is making the machine's voice heard: the reading of a whole reply, and the lines said while the ferret works. */
+  const voices = useRef({ reading: false, lines: false });
 
   // The sound output: the one made inside the tap, else one now (a browser without audio has none, and the device reads).
   const [player] = useState<ReplyPlayer | undefined>(() => {
@@ -230,19 +242,43 @@ function VoiceModeSession({
             replyState: () => replyState.current,
             player,
             onActive: active => {
-              if (!disposed) setMachineVoice(active);
+              voices.current.reading = active;
+              if (!disposed) setMachineVoice(voices.current.reading || voices.current.lines);
             },
           });
+    const lines =
+      player === undefined
+        ? undefined
+        : createLiveLines({
+            stream: () => handle.current ?? undefined,
+            replyState: () => replyState.current,
+            player,
+            onActive: active => {
+              voices.current.lines = active;
+              if (!disposed) setMachineVoice(voices.current.reading || voices.current.lines);
+            },
+          });
+    if (lines !== undefined) store.attachLive(ferretId, lines);
     if (speaker !== undefined) reader.attach(speaker);
     const opened = openVoiceStream(
       client,
-      { t: 'start', v: 1, purpose: 'chat', ferretId, ...(player === undefined ? {} : { reply: 'machine' as const }) },
+      {
+        t: 'start',
+        v: 1,
+        purpose: 'chat',
+        ferretId,
+        session,
+        ...(player === undefined ? {} : { reply: 'machine' as const }),
+      },
       createMic(),
       {
         onReply: state => {
           replyState.current = state;
         },
-        onSpeech: line => speaker?.onSpeech(line),
+        onSpeech: line => {
+          speaker?.onSpeech(line);
+          lines?.onSpeech(line);
+        },
         onSnapshot: (snapshot: StreamSnapshot) => {
           if (disposed) return;
           setState(snapshot.state);
@@ -276,10 +312,10 @@ function VoiceModeSession({
         ...(player === undefined ? {} : { player }),
         // Talking over the machine's voice stops it; the device's own voice is never talked over (the microphone is muted).
         onMicUnit: pcm => {
-          const { reading: on, machineVoice: machineOn } = live.current;
-          const armed = on && machineOn;
-          if (!detector.push(pcm, armed)) return;
+          // The machine's voice is being heard, whether it reads a whole reply or says a line the ferret just finished.
+          if (!detector.push(pcm, live.current.machineVoice)) return;
           reader.stop();
+          lines?.hush();
           setInterrupted(true);
         },
       },
@@ -288,11 +324,13 @@ function VoiceModeSession({
     return () => {
       disposed = true;
       handle.current = null;
+      store.attachLive(ferretId, null);
+      voices.current = { reading: false, lines: false };
       if (speaker !== undefined) reader.attach(null);
       setMachineVoice(false);
       opened.stop();
     };
-  }, [canFallBack, client, createMic, ferretId, machine, player, reader, store]);
+  }, [canFallBack, client, createMic, ferretId, machine, player, reader, session, store]);
 
   // A new reading starts a clean slate for the "stopped" note.
   useEffect(() => {
@@ -309,7 +347,8 @@ function VoiceModeSession({
   const end = useCallback(() => store.end(ferretId), [store, ferretId]);
   const working = turn?.live === true && turn.state === 'working' && !muted;
   const shown: StreamState = muted ? 'muted' : state;
-  const status = reading
+  const speaking = reading || machineVoice;
+  const status = speaking
     ? machineVoice
       ? 'Speaking. Talk any time to interrupt.'
       : 'Reading the reply. Your microphone is off until it is done.'
@@ -324,7 +363,7 @@ function VoiceModeSession({
       aria-label="Voice mode"
       className="fy-voice-mode"
       data-engine="machine"
-      data-reply-voice={reading ? (machineVoice ? 'machine' : 'device') : 'none'}
+      data-reply-voice={speaking ? (machineVoice ? 'machine' : 'device') : 'none'}
       data-state={reading && !machineVoice ? 'muted' : working ? 'working' : shown}
       data-voice-mode="on"
     >

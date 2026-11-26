@@ -104,6 +104,11 @@ export interface AutoReadInput {
   readonly sends: readonly SendAcceptance[];
   /** Read replies whatever the device's Auto-read switch says (voice mode: hands-free has no other way to hear them). */
   readonly forced?: boolean;
+  /**
+   * True for a reply whose spoken lines were already said while the ferret worked (voice mode's live lines): the reading at
+   * the end of the turn then leaves it alone instead of saying it twice. A question is never covered.
+   */
+  readonly covers?: (markdown: string) => boolean;
   /** The clock, for tests. */
   readonly now?: () => number;
 }
@@ -243,6 +248,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
           step.fire.outcome === 'needs-input'
             ? pickQuestion(current.question)
             : pickReply(current.entries, step.fire.startedAt, current.settings.whatToRead);
+        if (step.fire.outcome !== 'needs-input' && current.covers?.(pick.markdown) === true) return;
         mine.current = pick.key;
         if (step.fire.outcome === 'needs-input')
           asked.current = { turnAt: parseInstant(current.turnStateAt), words: pick.markdown };
@@ -267,6 +273,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
           timer.current = setTimeout(evaluate, Math.max(1, Math.ceil(TEXT_SETTLED_MS - Math.max(0, quiet))));
         } else {
           pending.current = null;
+          if (current.covers?.(pick.markdown) === true) return;
           mine.current = pick.key;
           controller.read(pick.key, pick.markdown, readOptionsOf(current.settings));
         }

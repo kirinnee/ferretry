@@ -20,6 +20,7 @@ import {
   WordsAssembler,
   decodeDownlinkUnit,
   decodeReplyDownlinkUnit,
+  encodeDropFrame,
   encodeHushFrame,
   encodeSpeakFrame,
   encodeUplinkUnit,
@@ -95,6 +96,11 @@ export interface VoiceStreamHandle {
    */
   speak(text: string): readonly { readonly id: number; readonly text: string }[];
   /**
+   * Takes back lines that were sent and have not begun to play (a newer progress line outdated them): the machine does not
+   * speak them, and any sound of theirs that still arrives is ignored. A line already heard from is left to finish.
+   */
+  drop(ids: readonly number[]): void;
+  /**
    * Stops the reply voice at once (barge-in): the sound already queued here is silenced, the machine is told to drop the
    * lines it has not spoken, and the sound of every line sent so far is ignored if it still arrives.
    */
@@ -125,6 +131,8 @@ export function openVoiceStream(
   const assembler = new UnitAssembler(wantsReply ? REPLY_DOWNLINK_UNIT_BYTES : DOWNLINK_UNIT_BYTES);
   const sentAt = new Map<number, number>();
   const began = new Set<number>();
+  /** Lines taken back before any sound was heard: whatever of theirs still arrives is not played. */
+  const droppedIds = new Set<number>();
   /** Sound of a line numbered below this is from before a hush and is never played. */
   let hushedBelow = 0;
   let nextLine = 0;
@@ -140,7 +148,7 @@ export function openVoiceStream(
   let sentence: string | undefined;
 
   const hear = (audio: NonNullable<StreamSnapshot['audio']>, pcm: Int16Array | undefined): void => {
-    if (audio.id < hushedBelow) return;
+    if (audio.id < hushedBelow || droppedIds.has(audio.id)) return;
     if (pcm !== undefined && pcm.length > 0) {
       options.player?.play(pcm);
       if (!began.has(audio.id)) {
@@ -240,6 +248,18 @@ export function openVoiceStream(
         lines.push({ id, text: piece });
       }
       return lines;
+    },
+    drop: ids => {
+      if (!wantsReply || ended) return;
+      for (const id of ids) {
+        // Sound of a line already heard from plays on: only a line nobody has heard is taken back.
+        if (began.has(id)) continue;
+        sentAt.delete(id);
+        droppedIds.add(id);
+        const waiting = held.findIndex(line => line.id === id);
+        if (waiting !== -1) held.splice(waiting, 1);
+        else if (opened) socket.send(encodeDropFrame(id));
+      }
     },
     hush: () => {
       if (ended) return;

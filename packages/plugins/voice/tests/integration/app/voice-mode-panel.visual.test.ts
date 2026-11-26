@@ -124,6 +124,7 @@ describe('Voice mode panel', () => {
             v: 1,
             purpose: 'chat',
             ferretId: 'ferret-1',
+            session: expect.stringMatching(/^vm-[0-9a-f-]{36}$/u),
             reply: 'machine',
           });
           await tab.locator('[data-voice-mode-words]').filter({ hasText: 'please check the build' }).waitFor();

@@ -25,6 +25,7 @@ import { TranscriptionLogSettings } from './features/settings/transcription-log-
 import { SpeedupsStepContainer, VoiceStepContainer } from './features/onboarding/step-panels.tsx';
 import { SpeedupsSurface } from './features/speedups/speedups-surface.tsx';
 import { useAutoRead } from './hooks/use-auto-read.ts';
+import { useLiveVoiceLines } from './hooks/use-live-voice-lines.ts';
 import { useDeviceVoiceSettingsStore, useLiveVoiceSettings } from './hooks/use-live-voice-settings.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { needsInputOf } from './lib/voice-chat/reply-picker.ts';
@@ -32,7 +33,7 @@ import type { SpeechAssets } from './lib/stt/on-device-voices.ts';
 import { createVoiceModeStore, useVoiceMode } from './lib/voice-mode/voice-mode-store.ts';
 import { createVoiceStore, StoreProvider, useSttSettingsStore, type VoiceStore } from './lib/voice-store.tsx';
 import { useComposerDraft } from '@ferretry/app';
-import { daemonConnection, SettingGroup, VoiceClientProvider } from './shell-voice.ts';
+import { daemonConnection, SettingGroup, useDocumentVisible, VoiceClientProvider } from './shell-voice.ts';
 
 /** The daemon every call goes to is the one the shell's client is for; the connection only carries an identity. */
 const THIS_DAEMON = daemonConnection({
@@ -223,12 +224,23 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
     needsInput,
     sends,
   }: { readonly subject: string } & ConversationAboveComposerProps) {
+    const voiceModeOn = useVoiceMode(voiceMode, subject).active;
+    // Voice mode speaks each `<voice>` line as the ferret finishes it; the reading at the end of the turn skips what was said.
+    const lines = useLiveVoiceLines({
+      active: voiceModeOn,
+      rows,
+      live: turn.live,
+      working: turn.state === 'working',
+      visible: useDocumentVisible(),
+      sink: () => voiceMode.live(subject),
+    });
     const handle = useAutoRead({
       scope: subject,
       entries: rows,
       authoritative: turn.live,
       // Voice mode reads the replies aloud whatever the device's Auto-read switch says: hands-free has no other way to hear them.
-      forced: useVoiceMode(voiceMode, subject).active,
+      forced: voiceModeOn,
+      covers: lines.covers,
       turn: turn.state,
       turnStateAt: turn.at,
       question: needsInputOf(needsInput),

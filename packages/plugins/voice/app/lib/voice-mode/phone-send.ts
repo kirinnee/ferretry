@@ -6,6 +6,7 @@
  * taught to read (`instructions/voice.md`), and a send id of its own that makes a repeat of one call ONE message (the send route's `sendId`):
  * the id is minted once per turn and a retry reuses it.
  */
+import { entrySendId, VOICE_ENTRY_MESSAGE } from '../../../contract/index.ts';
 import type { VoicePluginClient } from '../../shell-voice.ts';
 
 const SPOKEN_PREFIX = '(voice) ';
@@ -29,12 +30,34 @@ export async function sendSpoken(
   text: string,
   sendId: string,
 ): Promise<PhoneSendResult> {
+  return await post(client, ferretId, `${SPOKEN_PREFIX}${text}`, sendId);
+}
+
+/**
+ * Voice mode was entered on this phone's own engine: tells the ferret once (the machine does the same for its own engine), under
+ * the id of the voice-mode SESSION. A machine that was lost mid-chat hands the loop to the phone inside the same session, so the
+ * ferret that already has the message reads it once.
+ */
+export async function sendEntry(
+  client: Pick<VoicePluginClient, 'call'>,
+  ferretId: string,
+  session: string,
+): Promise<PhoneSendResult> {
+  return await post(client, ferretId, VOICE_ENTRY_MESSAGE, entrySendId(session));
+}
+
+async function post(
+  client: Pick<VoicePluginClient, 'call'>,
+  ferretId: string,
+  words: string,
+  sendId: string,
+): Promise<PhoneSendResult> {
   let failure: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await client.call(SEND_ROUTE, {
         params: { ferretId },
-        body: { message: `${SPOKEN_PREFIX}${text}`, sendId },
+        body: { message: words, sendId },
         // The route refuses a send without it, and one whose body names another id.
         headers: { 'x-fy-request-id': sendId },
       });

@@ -148,6 +148,8 @@ const client = {
             tone = undefined;
             return;
           }
+          // A line taken back before it was heard is simply not spoken.
+          if (line.t === 'drop') return;
           fake.lines.push(line.text);
           let sent = 0;
           tone = setInterval(() => {

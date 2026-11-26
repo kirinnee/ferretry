@@ -86,7 +86,9 @@ describe.skipIf(!ASKED)('the voice stream with the real speech engine', () => {
         log: { info: () => undefined },
       });
       await stream.open();
-      stream.fromClient(JSON.stringify({ t: 'start', v: 1, purpose: 'chat', ferretId: 'real-ferret' }));
+      stream.fromClient(
+        JSON.stringify({ t: 'start', v: 1, purpose: 'chat', ferretId: 'real-ferret', session: 'vm-real-session' }),
+      );
 
       const clip = pcmOf(new Uint8Array(await readFile(CLIP)));
       const lead = 2 * 16_000;

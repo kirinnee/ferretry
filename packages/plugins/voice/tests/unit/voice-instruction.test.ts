@@ -17,13 +17,35 @@ const TEXT = read('instructions/voice.md')?.trim() ?? '';
 describe('the Voice instruction', () => {
   test('says exactly this', () => {
     expect(TEXT).toBe(
-      'Voice: a message that starts with `(voice)` was spoken aloud, and the person hears your `<voice>…</voice>` lines. Your very first output must be `<voice>one short line</voice>`, before you call any tool, even a read. End the turn with `<voice>1-3 plain sentences</voice>`, never more than three. Inside the tags: no code, paths, lists or IDs. Close every line in the same paragraph, never inside code. Text outside the tags is shown, not spoken.',
+      'Voice: a message that starts with `(voice)` was spoken aloud, and the person hears only your `<voice>…</voice>` lines. A message that starts with `(voice mode on)` switches this on: speak first, narrate as you work, speak the result. Your very first output must be `<voice>one short line</voice>`, before you call any tool, even a read. While you work, add one short `<voice>` line at each real step, at most one every 15 seconds, never filler. End the turn with `<voice>1-3 plain sentences</voice>` that give the result. Never wait for speech to finish; keep working. Inside the tags: no code, paths, lists or IDs. Close every line in the same paragraph, never inside code. Text outside the tags is shown, not spoken. If a message begins with `[heard up to: "…"; not heard: "…"]`, the person cut you off: carry on from the not heard part and do not repeat what was heard.',
     );
   });
 
-  test('is one short paragraph, about sixty tokens, with nothing `printf` would eat', () => {
+  test('V1: teaches each rule of voice mode, in the order a ferret meets them', () => {
+    const rules = [
+      'message that starts with `(voice mode on)` switches this on',
+      'Your very first output must be',
+      'before you call any tool',
+      'add one short `<voice>` line at each real step',
+      'at most one every 15 seconds',
+      'never filler',
+      'End the turn with',
+      '1-3 plain sentences',
+      'Never wait for speech to finish',
+      'If a message begins with `[heard up to: "…"; not heard: "…"]`',
+      'do not repeat what was heard',
+    ];
+    let at = -1;
+    for (const rule of rules) {
+      const found = TEXT.indexOf(rule);
+      expect(found).toBeGreaterThan(at);
+      at = found;
+    }
+  });
+
+  test('is one paragraph, short enough to read every turn, with nothing `printf` would eat', () => {
     expect(TEXT).not.toContain('\n');
-    expect(TEXT.length).toBeLessThan(450);
+    expect(TEXT.length).toBeLessThan(1_000);
     expect(TEXT).not.toMatch(/['%]/u);
   });
 
