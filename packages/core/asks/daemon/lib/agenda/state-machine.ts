@@ -2762,11 +2762,10 @@ function surface(ledger: AgendaLedger, command: SurfaceCommand): AgendaMutation 
 
 /**
  * The owner's action never reached the ferret, so the item goes back to the owner as a task
- * (docs/agenda.md § Delivery). Only the daemon says so, and only of an item a ferret raised.
+ * (docs/agenda.md § Delivery). Only the daemon says so, and only of an item a ferret raised or a carried question form.
  *
  * - An ANSWER (or done, or dismiss) that was not delivered: the closed item is OPEN again, with what the
- *   owner did kept in `undelivered` so a retry is one tap. An item no longer in the board's history, or
- *   already open again, is left alone.
+ *   owner did kept in `undelivered` so a retry is one tap. One gone from the history, or open again, is left alone.
  * - A request for more information or to discuss (`request`): the item stops waiting on the ferret, but
  *   only while it is still waiting on THAT request — the ferret may have answered it, or the owner asked
  *   again, since.
@@ -2825,7 +2824,8 @@ function undelivered(ledger: AgendaLedger, command: UndeliveredCommand): AgendaM
     (entry): entry is Extract<AgendaEntry, { lifecycle: 'addressed' }> =>
       entry.lifecycle === 'addressed' && entry.item.id === command.id,
   );
-  if (closed === undefined || closed.item.raisedBy !== 'agent') return unchanged(ledger);
+  if (closed === undefined || (closed.item.raisedBy !== 'agent' && !isCarriedQuestionItem(closed.item)))
+    return unchanged(ledger);
   if (active.length + setAsideOf(ledger.unreadable).active >= MAX_AGENDA_PER_SESSION)
     return failure(
       'full',

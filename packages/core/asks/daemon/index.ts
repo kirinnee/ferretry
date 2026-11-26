@@ -29,6 +29,7 @@ import {
 import { agendaContext } from './adapters/agenda-context.ts';
 import manifest from '../manifest.ts';
 import { askDelivery } from './adapters/ask-delivery.ts';
+import { ferretLifecycle } from './adapters/ferret-lifecycle.ts';
 import { asksPort } from './adapters/asks-port.ts';
 import { AskEvents } from './adapters/ask-events.ts';
 import { sourceAnswers } from './adapters/source-answers.ts';
@@ -113,7 +114,11 @@ export default implementDaemon(manifest, {
       { now },
       undefined,
       undefined,
-      { ...delivery.ports, undelivered: new AgendaBoardUndelivered(agenda) },
+      {
+        ...delivery.ports,
+        undelivered: new AgendaBoardUndelivered(agenda),
+        lifecycle: ferretLifecycle(key => hooks.provider(AgendaContext, key)),
+      },
     );
 
     const sources = (key: SourceKey) => hooks.provider(AskSources, key);
