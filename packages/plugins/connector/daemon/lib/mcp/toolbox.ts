@@ -68,6 +68,7 @@ export class ConnectorToolbox {
     }
     const refusal = daemonGrantRefusal(spec.name, grants);
     if (refusal !== undefined) return await finish({ text: refusal, isError: true }, 'refused', true);
+    gateway.clean = async text => await this.options.guard.clean(text);
     try {
       const args = z.object(spec.input as z.ZodRawShape).parse(rawArgs ?? {});
       const output = await (spec.run as (a: unknown, e: ToolEnvironment) => Promise<ToolOutput>)(args, {
@@ -102,7 +103,7 @@ export class ConnectorToolbox {
     gated: boolean,
   ): Promise<void> {
     try {
-      const args = cutLongStrings(await this.options.guard.cleanData(rawArgs));
+      const args = cutLongStrings(await this.options.guard.cleanData(declaredOnly(spec, rawArgs)));
       await this.options.callsLog.append({
         at: new Date(this.options.now()).toISOString(),
         tool: spec.name,
@@ -127,6 +128,13 @@ export class ConnectorToolbox {
       // The sink never throws into a request by contract; belt and braces.
     }
   }
+}
+
+/** Only the arguments the tool declares: a caller-chosen property name is never written to the log. */
+function declaredOnly(spec: ConnectorToolSpec, value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return {};
+  const declared = new Set(Object.keys(spec.input));
+  return Object.fromEntries(Object.entries(value).filter(([key]) => declared.has(key)));
 }
 
 /** Message/answer/task text is cut to 500 characters in the calls log: the log says WHAT was done, not the whole text. */

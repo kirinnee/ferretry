@@ -100,7 +100,7 @@ export class ConnectorMcpEndpoint implements ConnectorHttpHandler {
     if (access === undefined) return this.options.unauthorized(request.headers.get('authorization') !== undefined);
 
     const contentType = request.headers.get('content-type') ?? '';
-    if (!/^application\/json\b/iu.test(contentType)) {
+    if (!/^application\/json[ \t]*(;|$)/iu.test(contentType)) {
       return jsonRpcError(415, -32000, 'Unsupported media type: send application/json.');
     }
     let text: string;
@@ -121,6 +121,17 @@ export class ConnectorMcpEndpoint implements ConnectorHttpHandler {
     const call = toolCall(parsed);
     if (call !== undefined) {
       const spec = this.#specs.get(call.name);
+      // The SDK would echo a caller-chosen name back in its error, outside the redactor: say a fixed sentence instead.
+      if (spec === undefined)
+        return {
+          status: 200,
+          headers: new Map(Object.entries(JSON_HEADERS)),
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: call.id,
+            result: { content: [{ type: 'text', text: 'There is no such tool.' }], isError: true },
+          }),
+        };
       const refused = this.#rateLimit(access, budgetOf(spec));
       if (refused !== undefined) return refused;
       // A write tool this token was not approved for is not registered, so the SDK would call it unknown. Say it
@@ -136,7 +147,7 @@ export class ConnectorMcpEndpoint implements ConnectorHttpHandler {
             `Bad Request: Unsupported protocol version: ${version} (supported versions: ${SUPPORTED_PROTOCOL_VERSIONS.join(', ')})`,
           );
         }
-        const result = await this.options.toolbox.execute(spec, call.arguments, access, this.#gateway(access));
+        const result = await this.options.toolbox.execute(spec, call.arguments, access, this.#gateway(access, request));
         return {
           status: 200,
           headers: new Map(Object.entries(JSON_HEADERS)),
@@ -190,12 +201,24 @@ export class ConnectorMcpEndpoint implements ConnectorHttpHandler {
     return undefined;
   }
 
-  #gateway(access: ConnectorAccess): FleetGateway {
-    return new FleetGateway(this.options.delegate, access.grantId, this.options.newRequestId, this.options.serving);
+  /**
+   * Whether this exact call is still allowed: the connector is on AND the bearer still verifies as the same token of the
+   * same grant. Asked before EVERY delegated call, so a revoke or an off between two calls of one request stops the next.
+   */
+  async #live(request: ApiRequest, access: ConnectorAccess): Promise<boolean> {
+    if (!this.options.serving()) return false;
+    const now = await this.#authenticate(request);
+    return now !== undefined && now.grantId === access.grantId && now.tokenId === access.tokenId;
+  }
+
+  #gateway(access: ConnectorAccess, request: ApiRequest): FleetGateway {
+    return new FleetGateway(this.options.delegate, access.grantId, this.options.newRequestId, () =>
+      this.#live(request, access),
+    );
   }
 
   async #serve(request: ApiRequest, parsed: unknown, text: string, access: ConnectorAccess): Promise<ApiResponse> {
-    const gateway = this.#gateway(access);
+    const gateway = this.#gateway(access, request);
     const server = new McpServer(
       { name: 'ferretry', version: this.options.serverVersion },
       {

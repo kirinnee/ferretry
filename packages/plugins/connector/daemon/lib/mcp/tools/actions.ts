@@ -51,7 +51,7 @@ const restartFerret: ConnectorToolSpec<{ ferret: typeof ferretArg }> = {
       return { text: `${who} is busy, so I queued the restart for when it is idle.`, sessionId: view.id };
     const failure = result.failed[0];
     if (failure !== undefined)
-      throw new ToolFailure(`I could not restart ${who}: ${clip(oneLine(failure.reason), 200)}`);
+      throw new ToolFailure(`I could not restart ${who}: ${clip(oneLine(await env.clean(failure.reason)), 200)}`);
     const skipped = result.skipped[0];
     // The daemon restarts only a RUNNING ferret. Say that plainly, and the one thing that does bring it back here:
     // a message to it wakes it (`send_to_ferret`, disposition `revived`).

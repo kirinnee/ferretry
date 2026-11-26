@@ -9,7 +9,12 @@
  * machine agenda a few more. The two methods below send `resolve` and `snooze` and nothing else, so what the connector
  * can do to the agenda is exactly v4's two tools.
  */
-import { AgendaActionRequestSchema, AgendaListSnapshotSchema, isMachineAgendaId } from '@ferretry/core-asks/contract';
+import {
+  AgendaActionRequestSchema,
+  AgendaListSnapshotSchema,
+  MACHINE_AGENDA_ID,
+  isMachineAgendaId,
+} from '@ferretry/core-asks/contract';
 import type { AgendaItem, AgendaResponse } from '@ferretry/core-asks/contract';
 import {
   type FerretSummary,
@@ -79,12 +84,37 @@ export class FleetGateway {
     private readonly serving: ConnectorServing,
   ) {}
 
+  /**
+   * Cleans a text of secrets. Set by the toolbox before a tool runs: every ferret-written text read here is cleaned BEFORE
+   * any tool cuts it short, because a cut that lands inside a secret leaves a fragment no pattern can recognise.
+   */
+  clean: ((text: string) => Promise<string>) | undefined;
+
   async ferrets(): Promise<readonly FerretSummary[]> {
-    return await this.json({ method: 'GET', path: '/v1/ferrets' }, z.array(FerretSummarySchema));
+    const views = await this.json({ method: 'GET', path: '/v1/ferrets' }, z.array(FerretSummarySchema));
+    return await Promise.all(views.map(async view => await this.cleaned(view)));
   }
 
   async ferret(id: string): Promise<FerretSummary> {
-    return await this.json({ method: 'GET', path: `/v1/ferrets/${encodeURIComponent(id)}` }, FerretSummarySchema);
+    return await this.cleaned(
+      await this.json({ method: 'GET', path: `/v1/ferrets/${encodeURIComponent(id)}` }, FerretSummarySchema),
+    );
+  }
+
+  private async cleaned(view: FerretSummary): Promise<FerretSummary> {
+    const clean = this.clean;
+    if (clean === undefined) return view;
+    return {
+      ...view,
+      name: await clean(view.name),
+      ...(view.title === undefined ? {} : { title: await clean(view.title) }),
+      ...(view.waiting?.condition === undefined
+        ? {}
+        : { waiting: { ...view.waiting, condition: await clean(view.waiting.condition) } }),
+      ...(view.quota?.limitNotice === undefined
+        ? {}
+        : { quota: { ...view.quota, limitNotice: await clean(view.quota.limitNotice) } }),
+    };
   }
 
   async projects(): Promise<readonly ProjectInfo[]> {
@@ -164,6 +194,16 @@ export class FleetGateway {
       if (answer.next === undefined) break;
       after = answer.next;
     }
+    // The roll-up leaves out the machine's own list, so it is read from its own route; a failure there leaves the ferrets'
+    // boards as they are, but "the connector is off" and a refusal are never swallowed.
+    try {
+      const machine = await this.json({ method: 'GET', path: '/v1/machine/agenda' }, AgendaListSnapshotSchema);
+      for (const item of machine.items)
+        if (!found.some(known => known.sessionId === MACHINE_AGENDA_ID && known.item.id === item.id))
+          found.push({ sessionId: MACHINE_AGENDA_ID, item });
+    } catch (error) {
+      if (error instanceof ToolFailure && error.refused) throw error;
+    }
     return found;
   }
 
@@ -219,7 +259,7 @@ export class FleetGateway {
   }
 
   private async call(call: DelegateRequest): Promise<DelegateResponse> {
-    if (!this.serving()) throw new ToolFailure('The connector is switched off.', { refused: true });
+    if (!(await this.serving())) throw new ToolFailure('The connector is switched off.', { refused: true });
     let answer: DelegateResponse;
     try {
       answer = await this.delegate.call({ grant: this.grantId }, call);

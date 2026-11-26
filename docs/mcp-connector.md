@@ -582,6 +582,15 @@ Hides one open agenda item until a time and lists it again afterwards — the da
 - **Declared gap — the calls log.** The plugin masks what it records (credential shapes, Vault values), but a host admin or
   warden token literal typed into a tool's arguments is masked by the kernel only in responses, so the plugin cannot mask
   it in the calls log. Nothing in the tool surface hands such a value to Claude; this is the residual.
+- **Before every delegated call** the endpoint checks that the connector is on AND the bearer still verifies as the same
+  token of the same grant, so a revoke or an off stops the NEXT call of a request in flight (the one dispatch already
+  running is the kernel's and cannot be cancelled). The calls log keeps only the arguments a tool declares, never a
+  caller-chosen property name; a ferret-written text is cleaned before any tool cuts it short.
+- **The machine's own list is read from its own route** (`GET /v1/machine/agenda`): the all-ferrets roll-up leaves it out.
+- **Declared gaps (owned elsewhere).** An already-existing `calls.jsonl` with broader permissions keeps them on append
+  (the state port's file mode applies at creation; the connector creates it `0600`). A project nested inside a registered
+  one that was removed after the lookup can still be launched while its parent is registered (core ferrets' launch check,
+  not the connector's).
 - **Protocol version**: the endpoint's own refusal reply for a write tool a read-only token may not call never
   reaches the SDK, so it checks `MCP-Protocol-Version` itself (an unsupported value is `400`, as the SDK does).
 

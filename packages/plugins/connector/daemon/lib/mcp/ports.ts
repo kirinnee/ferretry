@@ -34,4 +34,4 @@ export type DaemonGrantsSource = () => CapabilityGrants | undefined;
 export type ConnectorDelegate = Pick<DelegatePort, 'call'>;
 
 /** Whether the connector is on RIGHT NOW. Asked again before every delegated call, so an off stops a request in flight (S17). */
-export type ConnectorServing = () => boolean;
+export type ConnectorServing = () => boolean | Promise<boolean>;

@@ -161,6 +161,7 @@ describe('get_attention — the whole item', () => {
     should(r.delegate.calls.map(entry => `${entry.call.method} ${entry.call.path}`).sort()).eql([
       'GET /v1/agenda/open',
       'GET /v1/ferrets',
+      'GET /v1/machine/agenda',
     ]);
     should(r.calls.records.length).equal(0);
     should(r.audit.events.length).equal(0);

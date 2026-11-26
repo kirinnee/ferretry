@@ -460,6 +460,53 @@ describe('agenda budget 30/min inside 60', () => {
 });
 
 // S17 (docs/mcp-connector.md "Turning it off"): a request already inside the endpoint cannot reach a fleet route after an off.
+describe('a revoke in the middle of a request, and the other review findings', () => {
+  it('stops the next delegated call when the grant stops verifying between two calls of one request', async () => {
+    const r = rig();
+    r.delegate.on(call => {
+      if (call.path === '/v1/ferrets') r.state.access = undefined;
+      return call.path === '/v1/ferrets' ? ok([LIZ]) : undefined;
+    });
+    const reply = await tool(r, 'stop_ferret', { ferret: 'lizzette' });
+    should(reply.isError).be.true();
+    should(reply.text).equal('The connector is switched off.');
+    should(r.delegate.calls.map(entry => entry.call.path)).eql(['/v1/ferrets']);
+  });
+
+  it('answers an unknown tool name with a fixed sentence, never echoing what the caller sent', async () => {
+    const r = rig();
+    const response = await post(r.endpoint, callTool('fyc_at_' + 'x'.repeat(43), {}));
+    should(response?.body).not.containEql('fyc_at_');
+    should(response?.body).containEql('There is no such tool.');
+  });
+
+  it('does not take application/json-seq (or any other suffix) for application/json', async () => {
+    const r = rig();
+    should((await post(r.endpoint, INIT, { contentType: 'application/json-seq' }))?.status).equal(415);
+    should((await post(r.endpoint, INIT, { contentType: 'application/json; charset=utf-8' }))?.status).equal(200);
+  });
+
+  it("writes only the tool's declared arguments to the calls log, never a caller-chosen property name", async () => {
+    const r = rig();
+    r.state.access = READ_ACCESS;
+    await tool(r, 'stop_ferret', { ferret: 'lizzette', ['fyc_at_' + 'y'.repeat(43)]: 'x' });
+    should(JSON.stringify(r.calls.records)).not.containEql('fyc_at_');
+    should(Object.keys(r.calls.records[0]?.args ?? {})).eql(['ferret']);
+  });
+
+  it('cleans a ferret-written title before any cut, so a secret split by the cut leaves no fragment', async () => {
+    const SECRET = 'correct-horse-battery-staple-e2e';
+    const r = rig({ redact: async text => text.replaceAll(SECRET, '[vault]') });
+    const long = `${'a'.repeat(70)} ${SECRET}`;
+    r.delegate.on(
+      ferretsRoute([ferretView({ id: 'mwuanehg-4531fa9e', callsign: 'lizzette', task: long, state: 'working' })]),
+    );
+    const reply = await tool(r, 'list_ferrets', {});
+    should(reply.text).not.containEql('correct-horse');
+    should(reply.text).not.containEql(SECRET.slice(0, 8));
+  });
+});
+
 describe('an off in the middle of a request', () => {
   it('stops the next delegated call of a tool that had already begun, and reaches no route', async () => {
     const r = rig();

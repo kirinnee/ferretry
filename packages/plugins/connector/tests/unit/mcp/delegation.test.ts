@@ -159,6 +159,30 @@ describe('what the tools send', () => {
     should(r.calls.records[0]?.outcome).equal('refused');
   });
 
+  it("lists an item that only the machine's own list holds (the roll-up leaves that list out), and refuses a decision on it", async () => {
+    const r = rig();
+    const only = agendaItem({
+      id: 'A4',
+      subject: 'Allow it?',
+      why: 'The daemon asks',
+      raisedBySession: MACHINE,
+      ask: { kind: 'permission' },
+    });
+    r.delegate
+      .on(call => (call.path === '/v1/ferrets' ? ok([LIZ]) : undefined))
+      .on(call => (call.path === '/v1/agenda/open' ? ok({ sessions: [] }) : undefined))
+      .on(call =>
+        call.path === '/v1/machine/agenda' && call.method === 'GET'
+          ? ok({ ...snapshot(MACHINE), items: [only], count: 1 })
+          : undefined,
+      );
+    should((await tool(r, 'list_attention', {})).text).containEql('A4');
+    const reply = await tool(r, 'answer_attention', { item: 'A4', answer: 'approve' });
+    should(reply.isError).be.true();
+    should(reply.text).containEql('only the Ferretry app can answer it');
+    should(r.delegate.calls.some(entry => entry.call.method === 'POST')).be.false();
+  });
+
   it('puts a request id on every send, start and restart and on nothing else', async () => {
     const r = await everyCall();
     const writes = r.delegate.calls.filter(
