@@ -32,6 +32,9 @@ const DEADLINES_MS: Readonly<Record<string, number>> = {
 };
 const DEFAULT_DEADLINE_MS = 60_000;
 
+/** How long a call of this kind may take before its thread is given up on (the native host's and the worker thread's alike). */
+export const deadlineOf = (kind: string): number => DEADLINES_MS[kind] ?? DEFAULT_DEADLINE_MS;
+
 /** How long a host that was asked to end has before it is killed. */
 const END_GRACE_MS = 2_000;
 
@@ -45,16 +48,16 @@ const SIGNALS: Readonly<Record<number, string>> = {
   4: 'SIGILL',
   6: 'SIGABRT',
   7: 'SIGBUS',
-  9: 'SIGKILL',
   11: 'SIGSEGV',
 };
 
 /** What a host's exit says, in plain words (no signal names a person must decode alone). */
 function endedWith(code: number | null): string {
   if (code === null) return 'it was ended by the system';
+  // SIGKILL (137) is not a crash of the host's own: nothing in it faulted. The system ended it, and out of memory is the usual reason.
+  if (code === 137) return 'it was ended by the system, probably for lack of memory';
   const signal = SIGNALS[code > 128 ? code - 128 : code];
   if (code > 128 && signal !== undefined) return `it crashed (${signal})`;
-  if (code === 137) return 'it was ended by the system, probably for lack of memory';
   return `it exited (code ${code})`;
 }
 
@@ -157,7 +160,7 @@ export function startChildThread<Call extends { readonly kind: string }, Reply e
           reject(error instanceof Error ? error : new Error(String(error)));
           return;
         }
-        const deadline = DEADLINES_MS[request.kind] ?? DEFAULT_DEADLINE_MS;
+        const deadline = deadlineOf(request.kind);
         const cancel = clock.after(milliseconds(deadline), () => {
           if (waiting.has(id)) fail(`it did not answer in ${Math.round(deadline / 1000)} seconds`);
         });

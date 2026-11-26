@@ -164,12 +164,15 @@ export class ConfigWardenConfigStore implements WardenConfigStore {
         return [key, Object.fromEntries(Object.keys(named[key] as object).map(sub => [sub, section[sub]]))];
       }),
     );
-    return outcomeOf(
+    const saved = outcomeOf(
       await this.config.writeAsOwner(WARDEN_CONFIG, undefined, {
-        patch: naming ? { ...ownerPatch, jev: { key: WARDEN_JEV_KEY_REFERENCE } } : ownerPatch,
+        patch: ownerPatch,
         ...(within.length === 0 ? {} : { within }),
       }),
     );
+    // The key is its OWN save beside a held edit: `writeAsOwner` puts no secret reference into effect (only the caller's
+    // own write is judged on whether the caller is the owner), so riding it would hold the naming behind the unrelated edit.
+    return naming ? [...saved, ...(await this.nameJevKey())] : saved;
   }
 }
 

@@ -101,6 +101,14 @@ describe('the child thread', () => {
     }
   });
 
+  test('a host the system killed (SIGKILL, what out of memory looks like) says so, not "it crashed"', async () => {
+    const thread = hostThread();
+    const failure = (await thread
+      .call({ kind: 'speak', text: 'OOMKILL', speaker: 0 } as never)
+      .catch((e: unknown) => e)) as Error;
+    expect(failure.message).toBe('The reply voice stopped: it was ended by the system, probably for lack of memory.');
+  });
+
   test('a host that stops answering is killed at the deadline, not waited on', async () => {
     const clock = fixedClock();
     const thread = hostThread(clock);

@@ -47,6 +47,19 @@ describe('the speed-up wire', () => {
       false,
     );
   });
+
+  test.each(['javascript:alert(1)', 'http://console.groq.com/keys', 'data:text/html,x'])(
+    'a key link that is not HTTPS is refused: %s',
+    async keyUrl => {
+      const view = await fakeVoice({ keys: [] }).speedups();
+      const [first] = view.providers;
+      expect(SpeedupsViewSchema.safeParse({ ...view, providers: [{ ...first, keyUrl }] }).success).toBe(false);
+      expect(
+        SpeedupsViewSchema.safeParse({ ...view, providers: [{ ...first, keyUrl: 'https://console.groq.com/keys' }] })
+          .success,
+      ).toBe(true);
+    },
+  );
 });
 
 /** Today's `voiceLoosening` cases (`packages/fleet/tests/unit/config-files/kinds.test.ts`), case for case. */

@@ -3,6 +3,8 @@ import should from 'should';
 import { FakeAsks, sourceKey } from '@ferretry/core-asks/contract/testing';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { AsksWardenAgenda, NoticeEntries } from '../../daemon/asks.ts';
+import { StateListedNotices } from '../../daemon/adapters/state-store.ts';
+import { wardenState } from '../support/kernel.ts';
 import type { MachineRaise } from '../../daemon/lib/machine-notices.ts';
 import { conversationStuckInbox, conversationStuckInput } from '../../daemon/stuck-ports.ts';
 
@@ -258,7 +260,9 @@ describe('B187 a machine notice is one standing item on the machine board', () =
 
   it('B187 raises it once, keeps it while the list stands, re-raises it only for a new member, and closes it empty', async () => {
     const asks = new FakeAsks();
-    const notices = new AsksWardenAgenda(asks, new NoticeEntries()).machineNotices();
+    const notices = new AsksWardenAgenda(asks, new NoticeEntries()).machineNotices(
+      new StateListedNotices(wardenState()),
+    );
 
     await notices.raiseOrUpdate('warden:input-stuck', request('one'), ['nelly']);
     await notices.raiseOrUpdate('warden:input-stuck', request('one'), ['nelly']);
@@ -277,5 +281,26 @@ describe('B187 a machine notice is one standing item on the machine board', () =
     should(await open(asks)).have.length(0);
     // A refreshed, never-listed cause can be closed too.
     await notices.resolve('warden:inbox-stuck');
+  });
+
+  it('C-109 a notice the owner closed stays closed after the daemon restarts, and a new member still raises it', async () => {
+    const asks = new FakeAsks();
+    const state = wardenState();
+    const boot = () => new AsksWardenAgenda(asks, new NoticeEntries()).machineNotices(new StateListedNotices(state));
+
+    await boot().raiseOrUpdate('warden:input-stuck', request('one'), ['nelly']);
+    const raised = await open(asks);
+    await asks.close({ ferret: raised[0]?.ferret as never, id: raised[0]?.id as never }, 'dismissed');
+
+    // A new process: nothing is remembered in memory, the same member must not bring it back.
+    await boot().raiseOrUpdate('warden:input-stuck', request('one'), ['nelly']);
+    should(await open(asks)).have.length(0);
+    await boot().raiseOrUpdate('warden:input-stuck', request('two'), ['nelly', 'ryu']);
+    should(await open(asks)).have.length(1);
+
+    // Resolved, the cause is forgotten: the same member later is news again.
+    await boot().resolve('warden:input-stuck');
+    await boot().raiseOrUpdate('warden:input-stuck', request('one'), ['nelly']);
+    should(await open(asks)).have.length(1);
   });
 });

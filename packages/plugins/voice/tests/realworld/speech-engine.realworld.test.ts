@@ -74,7 +74,10 @@ describe.skipIf(FILES === undefined)('the machine speech engine, with the real m
       files,
       clock: { after: () => () => undefined },
       machine: () => 'this box',
-      start: kind => (kind === 'native' ? (nativeHost('speech') as SpeechThread) : startSpeechThread(bunWorkers())),
+      start: kind =>
+        kind === 'native'
+          ? (nativeHost('speech') as SpeechThread)
+          : startSpeechThread(bunWorkers(), { after: () => () => undefined }),
       availableMemory: () => undefined,
       log: {
         info: (message, fields) => console.log(message, fields ?? ''),
