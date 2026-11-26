@@ -88,7 +88,10 @@ export function useFerretActions(
   const daemon = router === null ? undefined : daemonOfRoute(router.route);
   const [notice, setNotice] = useState<string | null>(null);
   const [alert, setAlert] = useState<FerretActionAlert | null>(null);
-  const refusal = useRestartRefusal(() => void reload(), ferret.id);
+  const refusal = useRestartRefusal(view => {
+    setNotice(view.notice ?? null);
+    void reload();
+  }, ferret.id);
   const clipboard = useMemo(() => browserClipboardWriter(), []);
   const offered = useOfferedRows();
 
@@ -103,10 +106,11 @@ export function useFerretActions(
     await work();
     await reload();
   };
-  const restart = async (run: () => Promise<unknown>): Promise<void> => {
+  const restart = async (run: () => Promise<FerretSummary>): Promise<void> => {
     setAlert(null);
     try {
-      await run();
+      const answer = await run();
+      setNotice(answer.notice ?? null);
       await reload();
     } catch (reason) {
       // A restart the daemon paused is held by the panel below; anything else is the caller's to report.
@@ -136,7 +140,11 @@ export function useFerretActions(
       await restart(async () => await restartOnEarlierConversation(client, ferret, newRestartRequestId())),
     setPinned: async pinned => await act(async () => await setFerretPinned(client, ferret.id, pinned)),
     stop: async () => await act(async () => await stopFerret(client, ferret.id)),
-    resume: async () => await act(async () => await resumeFerret(client, ferret.id)),
+    resume: async () =>
+      await act(async () => {
+        const answer = await resumeFerret(client, ferret.id);
+        setNotice(answer.notice ?? null);
+      }),
     renderRename: (host: FerretActionFormHost) => (
       <RenameForm
         ferret={ferret}

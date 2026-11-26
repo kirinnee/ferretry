@@ -11,6 +11,7 @@ export class ResumeSessionController {
   async execute(id: string, flags: { message?: string; json?: boolean } = {}): Promise<void> {
     const message = flags.message?.trim();
     const resumed = await this.api.resume(id, message === undefined || message === '' ? undefined : message);
+    if (resumed.notice !== undefined) this.presenter.note(resumed.notice);
     this.presenter.view(await this.api.get(resumed.id), flags.json === true);
   }
 }

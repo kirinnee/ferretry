@@ -71,7 +71,7 @@ export type RestartQueued = z.infer<typeof RestartQueuedSchema>;
 
 /** The answer to a restart: which ferrets restarted now, which wait, which were left alone, which failed. */
 export const RestartResultSchema = z.strictObject({
-  restarted: z.array(z.strictObject(NamedSchema)),
+  restarted: z.array(z.strictObject({ ...NamedSchema, notice: z.string().min(1).max(4096).optional() })),
   queued: z.array(RestartQueuedSchema),
   skipped: z.array(z.strictObject({ ...NamedSchema, reason: RestartSkipReasonSchema })),
   failed: z.array(z.strictObject({ ...NamedSchema, reason: z.string().min(1) })),

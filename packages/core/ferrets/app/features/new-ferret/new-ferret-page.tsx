@@ -209,6 +209,7 @@ export function NewFerretPage({
   const [submitting, setSubmitting] = useState(false);
   const attempt = useRef<StartAttempt | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  const [started, setStarted] = useState<{ readonly id: string; readonly notice: string } | null>(null);
   const [chosenRuntime, setChosenRuntime] = useState<ChosenFerretAccount | null>(null);
   const [noRunnableAccount, setNoRunnableAccount] = useState(false);
   const [folders, setFolders] = useState<FolderRead>(LOADING_FOLDERS);
@@ -356,9 +357,11 @@ export function NewFerretPage({
       // The attempt is kept until a start succeeds: a resubmit of the same draft after a lost answer is the same
       // request (same id), so the daemon answers the ferret it already started instead of starting a second one.
       attempt.current = startAttemptFor(sent, attempt.current);
-      const id = await startFerret(client, sent, attempt.current);
+      const { id, notice } = await startFerret(client, sent, attempt.current);
       attempt.current = undefined;
-      onNavigate(ferretChatHref(daemon, id));
+      // The ferret is running, just without something it asked for (Fast): say so in one line and let the person open it.
+      if (notice !== undefined) setStarted({ id, notice });
+      else onNavigate(ferretChatHref(daemon, id));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
       setSubmitting(false);
@@ -629,31 +632,48 @@ export function NewFerretPage({
             </div>
           ) : null}
 
-          <div className="flex flex-wrap items-center justify-end gap-sm">
-            {/* The reason sits beside the button it explains and is the button's description, so a screen reader hears
+          {started === null ? null : (
+            <div className="flex flex-wrap items-center justify-between gap-sm">
+              <p
+                className="m-0 min-w-0 basis-full text-ui leading-base text-fg-soft [overflow-wrap:anywhere] sm:basis-0 sm:flex-1"
+                data-new-ferret-notice=""
+                role="status"
+              >
+                {started.notice}
+              </p>
+              <Button onClick={() => onNavigate(ferretChatHref(daemon, started.id))} type="button">
+                Open ferret
+              </Button>
+            </div>
+          )}
+
+          {started !== null ? null : (
+            <div className="flex flex-wrap items-center justify-end gap-sm">
+              {/* The reason sits beside the button it explains and is the button's description, so a screen reader hears
                 why it is unavailable. A disabled primary still reads as a filled accent button at 55% opacity — which
                 is how it looked pressable — so until it can be pressed it wears the outline look instead. */}
-            {blocker === null ? null : (
-              <p
-                className="m-0 min-w-0 basis-full text-right text-meta leading-base text-muted sm:basis-0 sm:flex-1"
-                id={CREATE_BLOCKER_ID}
+              {blocker === null ? null : (
+                <p
+                  className="m-0 min-w-0 basis-full text-right text-meta leading-base text-muted sm:basis-0 sm:flex-1"
+                  id={CREATE_BLOCKER_ID}
+                >
+                  {blocker}
+                </p>
+              )}
+              <Button onClick={() => onNavigate(homePath)} type="button" variant="ghost">
+                Cancel
+              </Button>
+              <Button
+                aria-describedby={blocker === null ? undefined : CREATE_BLOCKER_ID}
+                disabled={!canSubmit}
+                onClick={() => void submit()}
+                type="button"
+                variant={canSubmit || submitting ? 'primary' : 'outline'}
               >
-                {blocker}
-              </p>
-            )}
-            <Button onClick={() => onNavigate(homePath)} type="button" variant="ghost">
-              Cancel
-            </Button>
-            <Button
-              aria-describedby={blocker === null ? undefined : CREATE_BLOCKER_ID}
-              disabled={!canSubmit}
-              onClick={() => void submit()}
-              type="button"
-              variant={canSubmit || submitting ? 'primary' : 'outline'}
-            >
-              {submitting ? 'Creating…' : 'Create ferret'}
-            </Button>
-          </div>
+                {submitting ? 'Creating…' : 'Create ferret'}
+              </Button>
+            </div>
+          )}
         </PanelBody>
       </Card>
     </main>

@@ -15,7 +15,15 @@ import {
 import type { IRestartGateway } from './restart/ports.ts';
 import type { ListedFerret } from './session/display.ts';
 import type { PinnedView, ISessionPinGateway } from './session/pin-agent.ts';
-import type { ISessionApi, RenameChange, SignalAnswer, SignalKind, SignalOptions, StartBody } from './session/ports.ts';
+import type {
+  ISessionApi,
+  RenameChange,
+  SignalAnswer,
+  SignalKind,
+  SignalOptions,
+  StartAnswer,
+  StartBody,
+} from './session/ports.ts';
 import type { ISessionSubtree } from './session/subtree-controller.ts';
 import type { CredentialRevoked, ISessionCredentialGateway } from './session/revoke-credential.ts';
 import type { IStopSessionGateway } from './stop/types.ts';
@@ -158,7 +166,7 @@ export class ClientSessionApi
     return Array.isArray(answer) ? answer.filter((name): name is string => typeof name === 'string') : [];
   }
 
-  async start(body: StartBody, given?: string): Promise<{ readonly id: string }> {
+  async start(body: StartBody, given?: string): Promise<StartAnswer> {
     // Today's protocol start: one id and one body snapshot, reused by both POSTs and the recovery read. A caller's
     // `--request-id` is that id, so a later run with the same key answers the ferret this one started.
     const requestId = given ?? randomUUID();
@@ -168,13 +176,13 @@ export class ClientSessionApi
     // The one header a half may set (PluginCallHeaders); the shell forwards it, and a start without it is refused.
     let originalError: unknown;
     try {
-      return await this.client.call<{ id: string }>(FERRET_ROUTES.start, init);
+      return await this.client.call<StartAnswer>(FERRET_ROUTES.start, init);
     } catch (error) {
       if (!lostStartAnswer(error)) throw error;
       originalError = error;
     }
     try {
-      return await this.client.call<{ id: string }>(FERRET_ROUTES.start, init);
+      return await this.client.call<StartAnswer>(FERRET_ROUTES.start, init);
     } catch (error) {
       if (!lostStartAnswer(error)) throw error;
     }
@@ -200,8 +208,8 @@ export class ClientSessionApi
     });
   }
 
-  async resume(reference: string, message?: string): Promise<{ readonly id: string }> {
-    return await this.client.call<{ id: string }>(FERRET_ROUTES.resume, {
+  async resume(reference: string, message?: string): Promise<StartAnswer> {
+    return await this.client.call<StartAnswer>(FERRET_ROUTES.resume, {
       ...at(reference),
       ...(message === undefined ? {} : { body: { message } }),
     });

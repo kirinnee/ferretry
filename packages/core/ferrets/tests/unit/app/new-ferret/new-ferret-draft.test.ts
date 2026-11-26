@@ -94,8 +94,8 @@ describe('buildStartBody', () => {
 describe('startFerret', () => {
   it('posts the body through the route key and answers the new ferret’s id', async () => {
     const calls: Call[] = [];
-    const id = await startFerret(scripted({ 'POST /v1/ferrets': { id: 'f9' } }, calls), draft());
-    expect(id).toBe('f9');
+    const started = await startFerret(scripted({ 'POST /v1/ferrets': { id: 'f9' } }, calls), draft());
+    expect(started).toEqual({ id: 'f9' });
     expect(calls).toEqual([
       {
         route: 'POST /v1/ferrets',
@@ -105,6 +105,13 @@ describe('startFerret', () => {
         headers: { 'x-fy-request-id': expect.any(String) },
       },
     ]);
+  });
+
+  it('E-266 hands back the daemon’s “Started without Fast” sentence with the id, and nothing when there is none', async () => {
+    const notice = 'Started without Fast: Codex’s model list is still loading; try again in a few seconds';
+    const noted = await startFerret(scripted({ 'POST /v1/ferrets': { id: 'f9', notice } }), draft());
+    expect(noted).toEqual({ id: 'f9', notice });
+    expect(await startFerret(scripted({ 'POST /v1/ferrets': { id: 'f9' } }), draft())).toEqual({ id: 'f9' });
   });
 
   it('carries a request id the daemon requires (a start with none is refused), the caller’s own when given', async () => {
@@ -160,9 +167,9 @@ describe('a start whose answer was lost', () => {
     // The page keeps the attempt and the person presses Submit again with the draft unchanged.
     const again = startAttemptFor(draft(), first);
     expect(again).toBe(first);
-    const id = await startFerret(world.client, draft(), again);
+    const started = await startFerret(world.client, draft(), again);
 
-    expect(id).toBe('f1');
+    expect(started).toEqual({ id: 'f1' });
     expect(world.started.size).toBe(1);
     expect(new Set(world.posts).size).toBe(1);
   });
@@ -190,7 +197,7 @@ describe('a start whose answer was lost', () => {
     );
     const attempt = startAttemptFor(draft());
 
-    expect(await startFerret(client, draft(), attempt)).toBe('f7');
+    expect(await startFerret(client, draft(), attempt)).toEqual({ id: 'f7' });
 
     expect(posts).toBe(2);
     const recovery = calls.at(-1);
@@ -246,6 +253,6 @@ describe('a start whose answer was lost', () => {
     const attempt = startAttemptFor(draft());
 
     await expect(startFerret(world.client, draft(), attempt)).rejects.toThrow('fetch failed');
-    expect(await startFerret(world.client, draft(), attempt)).toBe('f1');
+    expect(await startFerret(world.client, draft(), attempt)).toEqual({ id: 'f1' });
   });
 });

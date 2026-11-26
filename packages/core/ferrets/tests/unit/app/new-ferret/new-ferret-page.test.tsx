@@ -307,6 +307,27 @@ describe('NewFerretPage', () => {
     expect(harness.navigated).toEqual(['/d/daemon%2Fa/ferrets/new-ferret/chat']);
   });
 
+  it('E-266 says “Started without Fast” in one plain line and waits for “Open ferret”, instead of leaving at once', async () => {
+    const notice = 'Started without Fast: Codex’s model list is still loading; try again in a few seconds';
+    const harness = page({ start: { id: 'new-ferret', notice } });
+    fill(harness.view);
+
+    await runAsync(async () => {
+      button(harness.view, 'Create ferret').props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(harness.view.root.findByProps({ 'data-new-ferret-notice': '' }).children.join('')).toBe(notice);
+    expect(harness.navigated).toEqual([]);
+    expect(
+      harness.view.root.findAll(node => node.type === 'button' && node.children.join('') === 'Create ferret'),
+    ).toEqual([]);
+
+    run(() => button(harness.view, 'Open ferret').props.onClick());
+    expect(harness.navigated).toEqual(['/d/daemon%2Fa/ferrets/new-ferret/chat']);
+  });
+
   it('starts with the folder a project named in the box, and only prefills: the daemon still decides', async () => {
     const harness = page({
       props: { initialFolder: '/etc' },

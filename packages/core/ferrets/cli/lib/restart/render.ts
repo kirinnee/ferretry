@@ -18,7 +18,7 @@ export function renderRestartResult(result: RestartResult): readonly string[] {
   if (restarted.length + queued.length + skipped.length + failed.length === 0) return ['Nothing to restart.'];
   return [
     `Restarted now: ${restarted.length}`,
-    ...restarted.map(entry => `  ${label(entry)}`),
+    ...restarted.map(entry => `  ${label(entry)}${entry.notice === undefined ? '' : `: ${entry.notice}`}`),
     `Queued for their next idle moment: ${queued.length}`,
     ...queued.map(entry => `  ${label(entry)}: ${entry.detail ?? WHY[entry.reason]}`),
     ...(skipped.length === 0 ? [] : [`Left alone: ${skipped.length}`]),
