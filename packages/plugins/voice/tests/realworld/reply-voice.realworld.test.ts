@@ -104,7 +104,10 @@ describe.skipIf(!ASKED)('the reply voice, with the real model', () => {
         files,
         clock: { after: () => () => undefined },
         machine: () => 'this box',
-        start: kind => (kind === 'native' ? (nativeHost('reply') as ReplyThread) : startReplyThread(bunWorkers())),
+        start: kind =>
+          kind === 'native'
+            ? (nativeHost('reply') as ReplyThread)
+            : startReplyThread(bunWorkers(), { after: () => () => undefined }),
         availableMemory: () => undefined,
         log: { info: log, warn: log },
         catalog,

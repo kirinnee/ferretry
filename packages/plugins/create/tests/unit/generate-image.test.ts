@@ -62,7 +62,13 @@ class FakeFal {
           ['content-type', this.pictureType],
           ...(this.cdn === 'declares-huge' ? ([['content-length', String(64 * 1024 * 1024)]] as const) : []),
         ]) as unknown as Headers,
-        arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+        // The body is what the tool reads: a stream, as a real answer has.
+        body: new ReadableStream<Uint8Array>({
+          start: controller => {
+            controller.enqueue(bytes);
+            controller.close();
+          },
+        }),
       } as unknown as Response;
     }
     throw new Error(`the fake fal was asked for ${url.host}`);

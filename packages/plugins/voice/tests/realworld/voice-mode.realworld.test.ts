@@ -85,7 +85,10 @@ describe.skipIf(!ASKED)('voice mode in a real browser with the real speech engin
       native: nativeFor(process.env.FY_STT_ENGINE),
       clock: { after: (delay, fn) => realClock.after(delay as number, fn) },
       machine: () => 'this box',
-      start: kind => (kind === 'native' ? (nativeHost('speech') as SpeechThread) : startSpeechThread(bunWorkers())),
+      start: kind =>
+        kind === 'native'
+          ? (nativeHost('speech') as SpeechThread)
+          : startSpeechThread(bunWorkers(), { after: (delay, fn) => realClock.after(delay as number, fn) }),
       availableMemory: () => undefined,
       log: { info: () => undefined, warn: () => undefined },
     });

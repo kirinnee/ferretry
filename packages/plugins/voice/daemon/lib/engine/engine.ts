@@ -12,7 +12,7 @@ import {
 } from '../../../contract/index.ts';
 import { NATIVE_ADDON_ROLE, type NativeParts } from '../native/catalog.ts';
 import { asUnavailable, installNativeFirst, NativeUnavailable, reasonOf, type RuntimeKind } from '../native/install.ts';
-import { unverified } from '../native/verify.ts';
+import { isPinned, unverified } from '../native/verify.ts';
 import { MAX_CONSECUTIVE_STOPS, StopLedger, wasStopped } from '../native/stopped.ts';
 import { ENGINE_FILES, ENGINE_LABEL, type EngineFile } from './catalog.ts';
 import { ensureRoom, installFiles, missingOf } from './installer.ts';
@@ -477,6 +477,11 @@ export class SpeechEngine implements VoiceEngineApi {
       const file = this.catalog.find(candidate => candidate.role === role);
       const bytes = file === undefined ? undefined : await this.parts.files.read(file);
       if (bytes === undefined) throw new VoiceEngineError('not_ready', 'Speech is not installed on this machine yet.');
+      // The bytes sent to the worker are hashed as they stand: a file changed on disk since it was saved is not loaded, and is deleted.
+      if (file !== undefined && !isPinned(bytes, file)) {
+        await this.parts.files.remove(file);
+        throw new VoiceEngineError('hash_mismatch', SENTENCES.hash_mismatch);
+      }
       // The state read hands over a whole buffer: transfer it as it is, never a second 650 MB copy.
       out[role] =
         bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
@@ -490,9 +495,9 @@ export class SpeechEngine implements VoiceEngineApi {
     const files = this.parts.files;
     let call: Parameters<SpeechThread['call']>;
     if (kind === 'native') {
-      // EVERY native load re-hashes the addon and both shared libraries (about 0.1 s next to the model load): the files sit
-      // in a folder other programs of this user can write, and what is hashed here is what is loaded next.
-      const bad = await unverified(files, this.nativeAddonFiles);
+      // EVERY native load re-hashes the addon, both shared libraries AND the models (a second or two on top of the model
+      // load): the files sit in a folder other programs of this user can write, and what is hashed here is what is loaded next.
+      const bad = await unverified(files, this.nativeSet);
       if (bad.length > 0) {
         // Not the pinned bytes: not loaded, and deleted, so the next Install fetches them again.
         for (const file of bad) await files.remove(file);
