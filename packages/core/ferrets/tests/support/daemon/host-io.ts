@@ -179,12 +179,12 @@ export class NodeWorktreeFileSystem implements WorktreeFileSystem {
     await root.quarantineRename!(from.value, to.value, { device: device!, inode: inode! });
   }
 
-  async removeTree(target: string, expected: string): Promise<void> {
+  async removeTree(target: string, expected: string, beforeDelete?: () => Promise<void>): Promise<void> {
     const root = await this.#removalRoot(target);
     const at = root.resolve(target);
     if (!at.ok) throw new Error('fixture outside root');
     const [device, inode] = expected.split(':').map(BigInt);
-    await root.remove(at.value, { expectedIdentity: { device: device!, inode: inode! } });
+    await root.remove(at.value, { expectedIdentity: { device: device!, inode: inode! }, beforeDelete });
   }
 
   async makeDirectory(target: string, mode: number): Promise<void> {

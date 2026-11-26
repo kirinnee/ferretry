@@ -18,17 +18,34 @@ export function rootRemoval<S extends RemovalScope>(checks: {
   readonly heldMember: (scope: S, identity: FileIdentity) => Promise<boolean>;
   readonly refuseHeldName: (scope: S, path: string) => Promise<void>;
   readonly refuse: (reason: RootRefusal) => never;
-}): (scope: S, full: string, onlyIfEmpty: boolean, expectedIdentity?: RootIdentity) => Promise<void> {
+}): (
+  scope: S,
+  full: string,
+  onlyIfEmpty: boolean,
+  expectedIdentity?: RootIdentity,
+  beforeDelete?: () => Promise<void>,
+) => Promise<void> {
   const { openCheckedFolder, folderProblem, heldMember, refuseHeldName, refuse } = checks;
   const errnoOf = (error: unknown): string | undefined => (error as { code?: string }).code;
 
   /** Today's `removeEntryWithin`: one name at a time, each folder opened without following a link and proven. */
-  async function removeWithin(scope: S, through: string, expected: FileIdentity): Promise<void> {
+  async function removeWithin(
+    scope: S,
+    through: string,
+    expected: FileIdentity,
+    device: bigint,
+    inspect = false,
+    beforeDelete?: () => Promise<void>,
+  ): Promise<void> {
     if (await heldMember(scope, expected)) refuse('fenced');
     if (expected.kind !== 'directory') {
-      await scope.fs.unlink(through);
+      if (!inspect) {
+        await beforeDelete?.();
+        await scope.fs.unlink(through);
+      }
       return;
     }
+    if (expected.device !== device) refuse('cross_device');
     const folder = await scope.fs.openDirectory(through).catch(() => refuse('changed'));
     try {
       if (!same(expected, folder.identity)) refuse('changed');
@@ -37,13 +54,14 @@ export function rootRemoval<S extends RemovalScope>(checks: {
       for (const name of await scope.fs.list(self)) {
         const child = folder.entryPath(name) as string;
         const identity = await scope.fs.identity(child);
-        if (identity !== undefined) await removeWithin(scope, child, identity);
+        if (identity !== undefined) await removeWithin(scope, child, identity, device, inspect, beforeDelete);
       }
     } finally {
       await folder.close();
     }
+    if (!inspect) await beforeDelete?.();
     if (!same(expected, await scope.fs.identity(through))) refuse('changed');
-    await scope.fs.rmdir(through);
+    if (!inspect) await scope.fs.rmdir(through);
   }
 
   /**
@@ -59,25 +77,34 @@ export function rootRemoval<S extends RemovalScope>(checks: {
     removal: FolderRemoval,
     name: string,
     expected: FileIdentity,
+    device: bigint,
+    inspect = false,
+    beforeDelete?: () => Promise<void>,
   ): Promise<void> {
     if (await heldMember(scope, expected)) refuse('fenced');
     if (expected.kind !== 'directory') {
-      await steps.unlink(name).catch(error => heldFailure(error));
+      if (!inspect) {
+        await beforeDelete?.();
+        await steps.unlink(name).catch(error => heldFailure(error));
+      }
       return;
     }
+    if (expected.device !== device) refuse('cross_device');
     const child = await removal.openFolder(name).catch(() => refuse('changed'));
     try {
       if (!same(expected, child.identity)) refuse('changed');
       const inside = child.steps.removal as FolderRemoval;
       for (const member of await inside.list().catch(error => heldFailure(error))) {
         const identity = await inside.lstat(member).catch(error => heldFailure(error));
-        if (identity !== undefined) await removeWithinHeld(scope, child.steps, inside, member, identity);
+        if (identity !== undefined)
+          await removeWithinHeld(scope, child.steps, inside, member, identity, device, inspect, beforeDelete);
       }
     } finally {
       await child.close();
     }
+    if (!inspect) await beforeDelete?.();
     if (!same(expected, await removal.lstat(name).catch(error => heldFailure(error)))) refuse('changed');
-    await removal.rmdir(name).catch(error => heldFailure(error));
+    if (!inspect) await removal.rmdir(name).catch(error => heldFailure(error));
   }
 
   /** What a step through a held folder that failed means to the caller: a folder that is no longer the proven one is `changed`; anything else is the host's own error. */
@@ -96,16 +123,21 @@ export function rootRemoval<S extends RemovalScope>(checks: {
     leaf: string,
     onlyIfEmpty: boolean,
     expectedIdentity?: RootIdentity,
+    beforeDelete?: () => Promise<void>,
   ): Promise<void> {
     const identity = await removal.lstat(leaf).catch(error => heldFailure(error));
     if (identity === undefined) return;
     if (expectedIdentity !== undefined && (identity.kind !== 'directory' || !same(expectedIdentity, identity)))
       refuse('changed');
     if (onlyIfEmpty && identity.kind === 'directory') {
+      await beforeDelete?.();
       await removeEmptyFolder(() => removal.rmdir(leaf).catch(error => heldFailure(error)));
       return;
     }
-    await removeWithinHeld(scope, steps, removal, leaf, identity);
+    // Inspect the entire tree first: a known mount must not cost even an earlier sibling's contents.
+    if (expectedIdentity !== undefined)
+      await removeWithinHeld(scope, steps, removal, leaf, identity, identity.device, true);
+    await removeWithinHeld(scope, steps, removal, leaf, identity, identity.device, false, beforeDelete);
   }
 
   /**
@@ -130,6 +162,7 @@ export function rootRemoval<S extends RemovalScope>(checks: {
     full: string,
     onlyIfEmpty: boolean,
     expectedIdentity?: RootIdentity,
+    beforeDelete?: () => Promise<void>,
   ): Promise<void> {
     const leaf = basename(full);
     const parent = dirname(full);
@@ -145,7 +178,7 @@ export function rootRemoval<S extends RemovalScope>(checks: {
         // Linux, for an owner's root as for an internal one.
         const steps = folder.at;
         if (steps?.removal !== undefined) {
-          await removeHeld(scope, steps, steps.removal, leaf, onlyIfEmpty, expectedIdentity);
+          await removeHeld(scope, steps, steps.removal, leaf, onlyIfEmpty, expectedIdentity, beforeDelete);
           if (expectedIdentity !== undefined) await folder.sync();
           return;
         }
@@ -161,6 +194,7 @@ export function rootRemoval<S extends RemovalScope>(checks: {
         const found = await scope.fs.identity(join(parent, leaf));
         if (found === undefined) return;
         if (found.kind === 'directory') return refuse('no_descriptor_reach');
+        await beforeDelete?.();
         await scope.fs.unlink(join(parent, leaf));
         return;
       }
@@ -169,10 +203,12 @@ export function rootRemoval<S extends RemovalScope>(checks: {
       if (expectedIdentity !== undefined && (identity.kind !== 'directory' || !same(expectedIdentity, identity)))
         refuse('changed');
       if (onlyIfEmpty && identity.kind === 'directory') {
+        await beforeDelete?.();
         await removeEmptyFolder(() => scope.fs.rmdir(through));
         return;
       }
-      await removeWithin(scope, through, identity);
+      if (expectedIdentity !== undefined) await removeWithin(scope, through, identity, identity.device, true);
+      await removeWithin(scope, through, identity, identity.device, false, beforeDelete);
       if (expectedIdentity !== undefined) await folder.sync();
     } finally {
       await folder.close();

@@ -91,12 +91,11 @@ describe('Tidy data-loss regressions', () => {
     const newer = (
       await setupGit(w.repository.root, 'commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'unpushed work')
     ).trim();
-    const spawn = w.io.git.runBytes;
-    w.io.git.runBytes = async (program, args, options) => {
-      const result = await spawn(program, args, options);
-      if (args.includes('prune') && args.includes('worktree') && result.exitCode === 0)
+    const removeTree = w.io.fileSystem.removeTree;
+    w.io.fileSystem.removeTree = async (target, expected) => {
+      await removeTree(target, expected);
+      if (path.dirname(target) === path.join(w.repository.root, '.git/worktrees'))
         await setupGit(w.repository.root, 'update-ref', 'refs/heads/feature', newer);
-      return result;
     };
     const result = await w.built.service.remove(w.request);
     expect(result.branchRetained).toBe(true);
@@ -107,12 +106,11 @@ describe('Tidy data-loss regressions', () => {
   test('R1: a reviewed ref made symbolic after checkout removal retains both branches', async () => {
     const w = await fixture('symbolic-ref');
     await setupGit(w.repository.root, 'branch', 'unrelated', w.request.expectedHead!);
-    const spawn = w.io.git.runBytes;
-    w.io.git.runBytes = async (program, args, options) => {
-      const result = await spawn(program, args, options);
-      if (args.includes('prune') && args.includes('worktree') && result.exitCode === 0)
+    const removeTree = w.io.fileSystem.removeTree;
+    w.io.fileSystem.removeTree = async (target, expected) => {
+      await removeTree(target, expected);
+      if (path.dirname(target) === path.join(w.repository.root, '.git/worktrees'))
         await setupGit(w.repository.root, 'symbolic-ref', 'refs/heads/feature', 'refs/heads/unrelated');
-      return result;
     };
 
     const result = await w.built.service.remove(w.request);

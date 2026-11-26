@@ -217,6 +217,41 @@ function build(
 const thrown = async (operation: Promise<unknown>): Promise<unknown> =>
   await operation.then(() => undefined).catch((error: unknown) => error);
 
+describe('unresolved identity journals', () => {
+  it('should refuse a fresh removal without rewriting an unresolved journal', async () => {
+    const entry = record({
+      removalStartedAt: '2026-08-04T01:00:00.000Z',
+      removalIdentity: { checkout: '1:11', gitDirectory: '1:12', commonDirectory: '1:13' },
+    });
+    const { subject, registry, operations } = build({
+      entries: [entry],
+      operations: new RecordingOperations({ presence: { kind: 'unverified', reason: 'foreign quarantine' } }),
+    });
+    should(
+      await thrown(subject.remove({ path: entry.path, overrides: [], deleteBranch: false, confirmations: [] })),
+    ).match({ code: 'unsafe_remove' });
+    should(operations.removals).eql([]);
+    should(registry.history).eql([]);
+    should(registry.state.worktrees[0]).eql(entry);
+  });
+
+  it('should refuse an unresolved ownership intent before returning an owned adopted row', async () => {
+    const entry = record({ origin: 'adopted' });
+    const { createdAt, ...rest } = entry;
+    const { subject, registry } = build({
+      entries: [entry],
+      intents: [{ ...rest, declaredAt: createdAt }],
+      operations: new RecordingOperations({
+        adoption: { kind: 'unverified', reason: 'unresolved intent' },
+        presence: { kind: 'owned' },
+      }),
+    });
+    should(await thrown(subject.adopt(entry.path))).match({ code: 'destination_exists' });
+    should(registry.history).eql([]);
+    should(registry.state.intents).have.length(1);
+  });
+});
+
 describe('reviewed worktree consent inside the lifecycle', () => {
   const identity = {
     recordId: record().ownershipToken,

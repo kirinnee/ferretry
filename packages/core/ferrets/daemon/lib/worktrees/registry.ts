@@ -1,6 +1,6 @@
 import { type ManagedWorktreeDocument, ManagedWorktreeDocumentSchema } from '../../../contract/state.ts';
 import { WorktreeError } from './errors.ts';
-import type { ManagedWorktree, ManagedWorktreeIntent, WorktreeAdoptionIdentity } from './types.ts';
+import type { ManagedWorktree, ManagedWorktreeIntent, WorktreeRemovalIdentity } from './types.ts';
 
 /**
  * The durable record of every checkout this daemon created, and of every one it was part-way through.
@@ -102,7 +102,7 @@ export function withRemovalStarted(
   state: ManagedWorktreeRegistryState,
   path: string,
   startedAt: string,
-  identity?: WorktreeAdoptionIdentity,
+  identity?: WorktreeRemovalIdentity,
 ): ManagedWorktreeRegistryState {
   return {
     ...state,

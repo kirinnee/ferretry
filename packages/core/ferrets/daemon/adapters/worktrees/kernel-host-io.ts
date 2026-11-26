@@ -97,10 +97,10 @@ export function createKernelWorktreeHostIo(input: KernelWorktreeHostInputs): Ker
       const [device, inode] = expected.split(':').map(BigInt);
       await root.quarantineRename(fenced, to.value, { device: device!, inode: inode! });
     },
-    removeTree: async (target, expected) => {
+    removeTree: async (target, expected, beforeDelete) => {
       const { root, fenced } = route(target);
       const [device, inode] = expected.split(':').map(BigInt);
-      await root.remove(fenced, { expectedIdentity: { device: device!, inode: inode! } });
+      await root.remove(fenced, { expectedIdentity: { device: device!, inode: inode! }, beforeDelete });
     },
     makeDirectory: async (target, mode) => {
       const { root, fenced } = route(target);

@@ -39,6 +39,7 @@ import type {
   RemovedManagedWorktree,
   RemoveManagedWorktreeInput,
   WorktreeAdoptionIdentity,
+  RecordRemovalIdentity,
 } from './types.ts';
 
 /**
@@ -150,7 +151,7 @@ export interface ManagedWorktreeOperations {
   /** What became of a declared creation: is it there, is it ours, or was it never made. */
   adopt(intent: ManagedWorktreeIntent): Promise<ManagedWorktreeAdoption>;
   /** Whether the exact checkout incarnation a record names is still at its path. */
-  presence(entry: ManagedWorktree): Promise<ManagedWorktreePresence>;
+  presence(entry: ManagedWorktree, recordRemovalIdentity?: RecordRemovalIdentity): Promise<ManagedWorktreePresence>;
 }
 
 /** The intent a plan describes, which is everything about the checkout except the directory Git makes. */
@@ -440,6 +441,11 @@ export class ManagedWorktreeService {
       this.#managedRoot();
       const state = await this.#settled();
       const existing = state.worktrees.find(row => row.path === path && row.removedAt === undefined);
+      if (state.intents.some(row => row.path === path) || (existing !== undefined && isRemovalInterrupted(existing)))
+        throw new WorktreeError(
+          'destination_exists',
+          'the path has an unresolved ownership or removal intent; only recovery may act on it',
+        );
       if (existing?.origin === 'adopted' && (await this.operations.presence(existing)).kind === 'owned')
         return {
           worktree: await this.#view(existing, await this.sessions.sessions(), await this.terminals.roots()),
@@ -519,7 +525,13 @@ export class ManagedWorktreeService {
       }
     }
     for (const entry of current.worktrees.filter(isRemovalInterrupted)) {
-      const presence = await this.operations.presence(entry);
+      const presence = await this.operations.presence(
+        entry,
+        async identity =>
+          await this.registry.write(state =>
+            withRemovalStarted(state, entry.path, entry.removalStartedAt ?? this.clock.nowIso(), identity),
+          ),
+      );
       if (presence.kind === 'owned') {
         await this.registry.write(state => withRemovalAbandoned(state, entry.path));
       } else if (presence.kind === 'absent') {
@@ -538,7 +550,15 @@ export class ManagedWorktreeService {
    */
   async #reconcileFailedRemoval(managed: ManagedWorktree): Promise<void> {
     managed = (await this.registry.read()).worktrees.find(entry => entry.path === managed.path) ?? managed;
-    const presence = await this.operations.presence(managed).catch(() => undefined);
+    const presence = await this.operations
+      .presence(
+        managed,
+        async identity =>
+          await this.registry.write(state =>
+            withRemovalStarted(state, managed.path, managed.removalStartedAt ?? this.clock.nowIso(), identity),
+          ),
+      )
+      .catch(() => undefined);
     if (presence?.kind === 'owned') {
       await this.registry.write(state => withRemovalAbandoned(state, managed.path));
     } else if (presence?.kind === 'absent') {
@@ -570,6 +590,11 @@ export class ManagedWorktreeService {
         `the worktree at ${path} was already removed at ${managed.removedAt}`,
       );
     }
+    if (isRemovalInterrupted(managed) || state.intents.some(intent => intent.path === path))
+      throw new WorktreeError(
+        'unsafe_remove',
+        'the path has an unresolved ownership or removal intent; only recovery may act on it',
+      );
     return { managed, managedRoot: this.#managedRoot() };
   }
 

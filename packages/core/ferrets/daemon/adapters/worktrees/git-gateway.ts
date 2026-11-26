@@ -375,11 +375,4 @@ export class GitWorktreeGateway {
       'git branch delete',
     );
   }
-
-  /** Git only prunes metadata after the kernel removed the verified quarantine. */
-  async prune(cwd: GitWorkingDirectory): Promise<void> {
-    await runGit(this.runner, cwd, ['worktree', 'prune', '--expire=now'], 'git worktree prune', [0], {
-      timeoutMs: 120_000,
-    });
-  }
 }

@@ -127,15 +127,13 @@ export class InPlaceWorktrees {
             )
           : await this.base.examine(input),
       remove: async input => await this.#scoped(input.managed, async adapter => await adapter.remove(input), true),
-      presence: async entry => {
+      presence: async (entry, recordRemovalIdentity) => {
         if (entry.removalIdentity !== undefined) {
           try {
             const resumed = await this.#read(async reader => {
               await reader.rows(entry.commonDir);
               await reader.verifyRepository(entry.removalIdentity!.commonDirectory);
-              return await recoverQuarantine(this.files, entry, async () => {
-                await reader.prune(undefined, entry.removalIdentity!.commonDirectory);
-              });
+              return await recoverQuarantine(this.files, entry, recordRemovalIdentity);
             });
             if (resumed !== undefined) return resumed;
           } catch (error) {
@@ -208,11 +206,6 @@ export class InPlaceWorktrees {
         };
         const runner: GitRunner = {
           run: async invocation => {
-            if (invocation.args[0] === 'worktree' && invocation.args[1] === 'prune')
-              return await reader.prune(
-                invocation.signal,
-                recovery === undefined ? undefined : identityOf(recovery).commonDirectory,
-              );
             const cwd = invocation.cwd;
             const held = cwd === undefined ? undefined : pins.get(cwd);
             const folder = typeof cwd === 'string' ? cwd : held?.rootReal;

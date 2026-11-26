@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:
 import { tmpdir } from 'node:os';
 import type { FencedPath, RootHandle } from '../../../contract/index.ts';
 import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
+import type { FolderSteps } from '../../../host/adapters/pinned/descriptor-folder.ts';
 import { rootsPortFor } from '../../../host/roots.ts';
 import { loadDescriptorCalls } from '../../../host/adapters/pinned/descriptor-calls.ts';
 import { loadProcessBracket } from '../../../host/adapters/pinned/descriptor-bracket.ts';
@@ -16,6 +17,63 @@ const at = (root: RootHandle, name: string): FencedPath => {
   if (!resolved.ok) throw new Error(resolved.error);
   return resolved.value;
 };
+
+for (const descriptorPath of [true, false]) {
+  test(`a veto after the device preflight keeps every checkout entry (descriptor path ${descriptorPath})`, async () => {
+    const fs = nodeFs(
+      () => crypto.randomUUID(),
+      descriptorPath
+        ? {}
+        : {
+            descriptorFolder: '/nonexistent-descriptor-folder',
+            descriptorCalls: loadDescriptorCalls,
+            bracket: loadProcessBracket,
+          },
+    );
+    let lateLock = false;
+    const wrap = (steps: FolderSteps): FolderSteps => {
+      const removal = steps.removal;
+      return removal === undefined
+        ? steps
+        : {
+            ...steps,
+            removal: {
+              ...removal,
+              list: async () => {
+                const names = await removal.list();
+                lateLock = true;
+                return names;
+              },
+              openFolder: async name => {
+                const child = await removal.openFolder(name);
+                return { ...child, steps: wrap(child.steps) };
+              },
+            },
+          };
+    };
+    const f = await fresh({
+      ...fs,
+      list: async target => {
+        const names = await fs.list(target);
+        lateLock = true;
+        return names;
+      },
+      openDirectory: async target => {
+        const folder = await fs.openDirectory(target);
+        return { ...folder, at: folder.at === undefined ? undefined : wrap(folder.at) };
+      },
+    });
+    await expect(
+      f.root.remove(f.checkout, {
+        expectedIdentity: f.identity,
+        beforeDelete: async () => {
+          if (lateLock) throw new Error('synthetic late lock');
+        },
+      }),
+    ).rejects.toThrow('synthetic late lock');
+    expect(await readFile(`${f.checkout}/keep`, 'utf8')).toBe('verified');
+  });
+}
 async function fresh(fs: HostFs = nodeFs(() => crypto.randomUUID())) {
   const parent = await realpath(await mkdtemp(`${tmpdir()}/fy-quarantine-`));
   parents.push(parent);
@@ -178,3 +236,66 @@ test('unavailable exclusive rename still quarantines and deletes a matching tree
   await f.root.remove(quarantine, { expectedIdentity: f.identity });
   expect(await f.root.lstat(quarantine)).toBeUndefined();
 });
+
+for (const descriptorPath of [true, false]) {
+  test(`a descendant on another device refuses the whole tree before deletion (descriptor path ${descriptorPath})`, async () => {
+    const fs = nodeFs(
+      () => crypto.randomUUID(),
+      descriptorPath
+        ? {}
+        : {
+            descriptorFolder: '/nonexistent-descriptor-folder',
+            descriptorCalls: loadDescriptorCalls,
+            bracket: loadProcessBracket,
+          },
+    );
+    const mounted = <T extends { readonly device: bigint }>(identity: T): T => ({
+      ...identity,
+      device: identity.device + 1n,
+    });
+    const wrap = (steps: FolderSteps): FolderSteps => {
+      const removal = steps.removal;
+      if (removal === undefined) return steps;
+      return {
+        ...steps,
+        removal: {
+          ...removal,
+          lstat: async name => {
+            const identity = await removal.lstat(name);
+            return name === 'z-mount' && identity !== undefined ? mounted(identity) : identity;
+          },
+          openFolder: async name => {
+            const child = await removal.openFolder(name);
+            return {
+              ...child,
+              identity: name === 'z-mount' ? mounted(child.identity) : child.identity,
+              steps: wrap(child.steps),
+            };
+          },
+        },
+      };
+    };
+    const f = await fresh({
+      ...fs,
+      identity: async target => {
+        const identity = await fs.identity(target);
+        return target.endsWith('/z-mount') && identity !== undefined ? mounted(identity) : identity;
+      },
+      openDirectory: async target => {
+        const folder = await fs.openDirectory(target);
+        return {
+          ...folder,
+          identity: target.endsWith('/z-mount') ? mounted(folder.identity) : folder.identity,
+          at: folder.at === undefined ? undefined : wrap(folder.at),
+        };
+      },
+    });
+    await mkdir(`${f.checkout}/z-mount`);
+    await writeFile(`${f.checkout}/z-mount/keep`, 'mounted content');
+    await expect(f.root.remove(f.checkout, { expectedIdentity: f.identity })).rejects.toMatchObject({
+      refusal: 'cross_device',
+    });
+    expect(await readFile(`${f.checkout}/keep`, 'utf8')).toBe('verified');
+    expect(await readFile(`${f.checkout}/z-mount/keep`, 'utf8')).toBe('mounted content');
+  });
+}

@@ -31,7 +31,7 @@ import type {
 } from '../../lib/worktrees/types.ts';
 import type { GitWorktreeGateway } from './git-gateway.ts';
 import type { WorktreeOperationQueue } from './queue.ts';
-import { quarantinePath, removalIdentity } from './quarantine.ts';
+import { quarantinePath, removalIdentity, verifyRemovalMetadata, removeRecordedMetadata } from './quarantine.ts';
 
 const OWNERSHIP_MARKER = 'worktree-owner';
 
@@ -659,15 +659,21 @@ export class ManagedWorktreeAdapter {
           await input.recordRemovalIdentity?.(identity);
           const quarantine = quarantinePath(input.managed);
           try {
+            await verifyRemovalMetadata(this.fileSystem, input.managed, identity);
             await this.fileSystem.quarantineRename(input.managed.path, quarantine, identity.checkout);
-            await this.fileSystem.removeTree(quarantine, identity.checkout);
+            await verifyRemovalMetadata(this.fileSystem, input.managed, identity);
+            await this.fileSystem.removeTree(
+              quarantine,
+              identity.checkout,
+              async () => await verifyRemovalMetadata(this.fileSystem, input.managed, identity),
+            );
+            await removeRecordedMetadata(this.fileSystem, input.managed, identity, input.recordRemovalIdentity);
           } catch (error) {
             throw new WorktreeError(
               'unsafe_remove',
               `removal refused; inspect recovery path ${quarantine}: ${message(error)}`,
             );
           }
-          await this.gateway.prune(input.managed.commonDir);
         },
       );
       const retained = { path: fresh.decision.path, branch: input.managed.branch, removedAt: this.clock.nowIso() };

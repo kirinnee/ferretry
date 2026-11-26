@@ -1,7 +1,7 @@
 import { isListableCommonDirectory } from '../../../contract/index.ts';
 import { WorktreeError } from '../../lib/worktrees/errors.ts';
 import { parseWorktreeList } from '../../lib/worktrees/parser.ts';
-import type { GitExecution, GitRunner } from '../../lib/worktrees/ports.ts';
+import type { GitRunner } from '../../lib/worktrees/ports.ts';
 import type { WorktreeListEntry } from '../../lib/worktrees/types.ts';
 import { decodeGitOutput, stripFinalLineFeed } from '../git/result.ts';
 import type { RepoCheckoutPin, RepoDirectoryPin, RepoWorktreeAccess } from './repo-access.ts';
@@ -84,21 +84,6 @@ export class GitRepoWorktreeRows {
     )
       throw notACommonDirectory();
     await repository.verify();
-  }
-
-  /** Metadata-only mutation in U3's held, authorized, offline common directory; no checkout pathname is deleted. */
-  async prune(signal?: AbortSignal, expected?: string): Promise<GitExecution> {
-    signal?.throwIfAborted();
-    await this.verifyRepository(expected);
-    const result = await this.runner.run({
-      cwd: this.repository!.cwd,
-      signal,
-      args: ['--git-dir=.', 'worktree', 'prune', '--expire=now'],
-    });
-    await this.verifyRepository(expected);
-    if (result.timedOut || result.exitCode !== 0 || result.stdoutTruncated)
-      throw new WorktreeError('verification_failed', 'Git could not prune the removed worktree metadata');
-    return result;
   }
 
   async inCheckout<T>(

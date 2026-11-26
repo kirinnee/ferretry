@@ -433,7 +433,12 @@ export interface RootHandle {
    */
   remove(
     path: FencedPath,
-    options?: { readonly onlyIfEmpty?: boolean; readonly expectedIdentity?: RootIdentity },
+    options?: {
+      readonly onlyIfEmpty?: boolean;
+      readonly expectedIdentity?: RootIdentity;
+      /** Veto before each unlink/rmdir, after any directory preflight. Throwing preserves remaining entries. */
+      readonly beforeDelete?: () => Promise<void>;
+    },
   ): Promise<void>;
   /**
    * Work/worktrees only: moves a directory to a `.fy-remove-*` sibling through its held parent, without following

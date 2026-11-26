@@ -220,6 +220,7 @@ export type RootRefusal =
   | 'not_declared'
   | 'hard_link'
   | 'changed'
+  | 'cross_device'
   | 'not_a_file'
   | 'no_descriptor_reach'
   | 'not_empty';
@@ -2777,7 +2778,13 @@ function rootHandle(setup: HandleSetup): RootHandle {
         const found = await scope.fs.identity(full);
         if (found !== undefined && found.kind !== 'link' && heldByFence(fence, [toComponent(found)])) refuse('fenced');
       }
-      await removeChecked(scope, full, removeOptions?.onlyIfEmpty === true, removeOptions?.expectedIdentity);
+      await removeChecked(
+        scope,
+        full,
+        removeOptions?.onlyIfEmpty === true,
+        removeOptions?.expectedIdentity,
+        removeOptions?.beforeDelete,
+      );
       PLACED_LINKS.forgetUnder(full);
     },
     quarantineRename: async (from, to, expected) => {
