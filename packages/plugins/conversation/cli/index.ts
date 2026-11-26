@@ -80,11 +80,12 @@ export default implementCli(manifest, {
         const ferret = first(invocation, 'ferret');
         const caller = text(invocation, 'session');
         const messageFile = text(invocation, 'message-file');
-        // No words and no file: a message piped in (`fy send wren <<'EOF'`) is the message. A terminal is never read.
+        // No words and no file: a message piped in (`fy send wren <<'EOF'`) is the message. A terminal on stdin is never read,
+        // whatever stdout is (`fy send wren > log` must refuse, not wait for the terminal's EOF).
         const typed = joinedFrom(invocation.args.slice(1));
         const message =
           typed ??
-          (messageFile === undefined && !ctx.io.isTty && ctx.readText !== undefined
+          (messageFile === undefined && !(ctx.io.stdinIsTty ?? ctx.io.isTty) && ctx.readText !== undefined
             ? joinedFrom([await ctx.readText('-').catch(() => '')])
             : undefined);
         const kind = text(invocation, 'kind');

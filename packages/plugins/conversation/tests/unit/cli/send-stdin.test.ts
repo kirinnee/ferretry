@@ -7,6 +7,7 @@ import manifest from '../../../manifest.ts';
 function send(options: {
   readonly stdin?: string;
   readonly isTty?: boolean;
+  readonly stdinIsTty?: boolean;
   readonly args: readonly string[];
   readonly flags?: VerbInvocation['options'];
 }) {
@@ -31,7 +32,12 @@ function send(options: {
   const half = cli.build?.({
     manifest,
     client,
-    io: { out: () => undefined, err: (text: string) => err.push(text), isTty: options.isTty ?? false },
+    io: {
+      out: () => undefined,
+      err: (text: string) => err.push(text),
+      isTty: options.isTty ?? false,
+      stdinIsTty: options.stdinIsTty ?? options.isTty ?? false,
+    },
     readText,
   } as never);
   if (half === undefined) throw new Error('the conversation cli half is real');
@@ -61,6 +67,21 @@ describe('fy send reads a piped message (D-04)', () => {
     expect(s.err.join('')).toContain('no message: pass the text, --message-file <file>, or pipe it in');
     expect(s.err.join('')).not.toContain('attachments');
     expect(s.bodies).toEqual([]);
+  });
+
+  it('a terminal on stdin alone is never read, even when stdout is redirected (fy send x > log)', async () => {
+    const s = send({ args: ['f1'], stdin: 'would block', isTty: false, stdinIsTty: true });
+    expect(await s.run()).toBe(2);
+    expect(s.reads()).toBe(0);
+    expect(s.err.join('')).toContain('no message: pass the text, --message-file <file>, or pipe it in');
+    expect(s.bodies).toEqual([]);
+  });
+
+  it('typed words still win when stdin is a terminal and stdout is redirected', async () => {
+    const s = send({ args: ['f1', 'typed'], stdin: 'ignored', isTty: false, stdinIsTty: true });
+    expect(await s.run()).toBe(0);
+    expect(s.bodies[0]?.message).toBe('typed');
+    expect(s.reads()).toBe(0);
   });
 
   it('an empty pipe is the same refusal', async () => {

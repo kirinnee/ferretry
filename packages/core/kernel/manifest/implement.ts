@@ -497,6 +497,8 @@ export interface TerminalIo {
   out(text: string): void;
   err(text: string): void;
   readonly isTty: boolean;
+  /** stdin alone is a terminal (stdout may be redirected): a verb that would otherwise read a piped message must not wait on it. Absent: `isTty` decides. */
+  readonly stdinIsTty?: boolean;
   /**
    * Asks one question and returns the typed line. Present ONLY when stdin and stdout are both a terminal, so a script
    * is never asked anything. The answer is echoed as it is typed: NEVER use it for a password or any secret.
