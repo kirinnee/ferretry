@@ -130,6 +130,11 @@ const stepUpCases: SchemaCase[] = [
       alsoAddedLater: 1,
     },
   },
+  {
+    name: 'browser failure report',
+    schema: stepUp.PasskeyFailureReportSchema,
+    value: { ceremony: 'unlock', reason: 'cancelled' },
+  },
   { name: 'window request', schema: stepUp.PasskeyWindowRequestSchema, value: { deviceId: DEVICE_ID } },
   {
     name: 'stored proof',

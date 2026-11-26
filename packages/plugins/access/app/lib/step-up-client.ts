@@ -1,3 +1,4 @@
+import { z } from 'zod';
 /**
  * The browser's half of the passkey routes (`docs/design/zero-trust.md` B2).
  *
@@ -12,6 +13,7 @@
 
 import { type StepUpAct, UnlockGrantedSchema } from '@ferretry/core-gate/contract';
 import {
+  type PasskeyFailureReport,
   type PasskeyRegistration,
   type PasskeyRegistrationOptions,
   PasskeyRegistrationOptionsSchema,
@@ -82,4 +84,11 @@ export async function unlockOptions(client: StepUpClient, origin: string): Promi
 /** Submits that confirmation. It is never a step-up: the acts that need one still ask for their own. */
 export async function submitUnlock(client: StepUpClient, assertion: StepUpAssertion): Promise<UnlockGranted> {
   return await client.request('/v1/unlock', UnlockGrantedSchema, json(assertion));
+}
+
+/** Best effort, bounded, and classifications only: reporting can neither confirm nor hide a failure. */
+export function reportPasskeyFailure(client: StepUpClient, report: PasskeyFailureReport): void {
+  void client
+    .request('/v1/passkeys/failure', z.strictObject({}), { ...json(report), signal: AbortSignal.timeout(2_000) })
+    .catch(() => undefined);
 }

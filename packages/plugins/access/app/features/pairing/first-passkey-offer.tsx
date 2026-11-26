@@ -132,7 +132,7 @@ export function FirstPasskeyOffer({
     setBusy(true);
     setFailure(null);
     try {
-      await addPasskeyCeremony(credentials(), state.client, here, supported());
+      await addPasskeyCeremony(credentials(), state.client, here, supported(), connection.daemonId);
     } catch (reason) {
       setFailure(passkeyFailureSentence(reason, here));
       setBusy(false);
@@ -141,7 +141,7 @@ export function FirstPasskeyOffer({
     setState({ kind: 'added' });
     setBusy(false);
     settled.current?.('added');
-  }, [credentials, origin, state, supported]);
+  }, [connection.daemonId, credentials, origin, state, supported]);
 
   if (state.kind === 'hidden') return null;
   if (state.kind === 'added')

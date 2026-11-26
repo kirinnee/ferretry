@@ -203,7 +203,7 @@ describe('adding a passkey', () => {
 
     // Assert
     should(failure).be.instanceOf(PasskeyCeremonyError);
-    should(order).eql(['/v1/passkeys/options', 'get']);
+    should(order).eql(['/v1/passkeys/options', 'get', '/v1/passkeys/failure']);
   });
 });
 

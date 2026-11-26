@@ -331,7 +331,7 @@ export class AccessRuntime {
         }),
       ),
       ...pushRoutes(push, guard),
-      ...this.#stepUpRoutes(stepUp),
+      ...this.#stepUpRoutes(stepUp, grantAudit),
     ])
       routes.set(routeKey(route), route.handle);
     if (unlockNotice !== undefined) kernel.log.warn(unlockNotice);
@@ -378,7 +378,7 @@ export class AccessRuntime {
    * The step-up routes, with each staged act's binding asked of its provider at the moment a device asks for the
    * challenge (G83, S90): absent provider, no challenge — the same as today's daemon built without that stage.
    */
-  #stepUpRoutes(stepUp: StepUpService): readonly ApiRoute[] {
+  #stepUpRoutes(stepUp: StepUpService, journal: JournalGrantAudit): readonly ApiRoute[] {
     const stage = (act: StagedStepUpAct): StagedStepUp | undefined => this.#deps.stages?.(act);
     return stepUpRoutes(
       stepUp,
@@ -386,8 +386,19 @@ export class AccessRuntime {
       { boundSubjectOf: id => stage('approve-task-plan')?.subjectOf?.(id, '') },
       { challengeOf: (id, deviceId) => stage('approve-sign-in-rule')?.challengeOf?.(id, deviceId) },
       { boundSubjectOf: (id, kind, deviceId) => stage('approve-paste-rule')?.subjectOf?.(id, deviceId, kind) },
-      note => {
-        // Said, not audited: a refusal is not a change, and the audit log is names of what happened to the machine.
+      async note => {
+        // A rejected verification is a security event; only the fixed refusal and proved device reach the journal.
+        if (note.reason === 'not-verified' && note.deviceId !== undefined) {
+          try {
+            await journal.record({
+              actor: `device:${note.deviceId}`,
+              changes: ['passkey.verification-refused=not-verified'],
+              at: this.#deps.kernel.clock.now(),
+            });
+          } catch {
+            this.#deps.kernel.log.warn('a passkey refusal could not be journalled');
+          }
+        }
         const { log } = this.#deps.kernel;
         const line = `a passkey request was refused: ${note.reason}`;
         const fields = { request: note.request, ...(note.deviceId === undefined ? {} : { deviceId: note.deviceId }) };
@@ -409,6 +420,13 @@ export class AccessRuntime {
           request: note.request,
           outcome: note.outcome,
           ...(note.deviceId === undefined ? {} : { deviceId: note.deviceId }),
+        });
+      },
+      async note => {
+        await journal.record({
+          actor: `device:${note.deviceId}`,
+          changes: [`passkey.browser-failed=${note.ceremony}:${note.reason}`],
+          at: this.#deps.kernel.clock.now(),
         });
       },
     );
