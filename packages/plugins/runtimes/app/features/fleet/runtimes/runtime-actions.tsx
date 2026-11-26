@@ -574,7 +574,7 @@ function RunningFerrets({
     <div className="flex flex-col gap-2">
       <ul
         aria-label="Ferrets running on it"
-        className="m-0 flex max-h-[30dvh] list-none flex-col divide-y divide-border-soft overflow-y-auto rounded-control border border-border-soft p-0"
+        className="m-0 flex max-h-[30dvh] list-none flex-col divide-y divide-border-soft overflow-y-auto rounded-panel border border-border-soft p-0"
         data-runtime-running=""
       >
         {running.map(session => (

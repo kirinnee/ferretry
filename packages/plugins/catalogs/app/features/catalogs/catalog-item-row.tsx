@@ -356,7 +356,7 @@ export function CatalogItemRow({
         removing === install.installId ? (
           <div
             key={install.installId}
-            className="mx-xs mb-xs flex min-w-0 flex-col gap-xs rounded-control border border-warn-border bg-warn-bg p-control-x py-2 text-warn"
+            className="mx-xs mb-xs flex min-w-0 flex-col gap-xs rounded-panel border border-warn-border bg-warn-bg p-panel py-2 text-warn"
             data-catalog-remove-confirm=""
           >
             <p className="m-0 break-words text-cell font-semibold">

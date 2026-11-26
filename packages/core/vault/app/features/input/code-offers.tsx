@@ -35,7 +35,7 @@ export function CodeButtons({ offer, keys, disabled, onUse }: CodeButtonsProps) 
   const primary = offer.primary === true;
   return (
     <div
-      className={`flex min-w-0 flex-col gap-2 rounded-control border bg-surface-2 p-3 ${primary ? 'border-accent' : 'border-border-strong'}`}
+      className={`flex min-w-0 flex-col gap-2 rounded-panel border bg-surface-2 p-panel ${primary ? 'border-accent' : 'border-border-strong'}`}
       data-input-offer-codes={offer.id}
       data-input-primary={primary ? '' : undefined}
     >

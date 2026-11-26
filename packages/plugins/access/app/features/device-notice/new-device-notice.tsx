@@ -266,7 +266,7 @@ function MachineNewDevices({
         <div
           role="status"
           data-new-device-removed={removed.device.id}
-          className="flex min-w-0 flex-wrap items-center gap-2 rounded-control border border-ok-border bg-ok-bg px-3 py-2 text-ui leading-base text-ok"
+          className="flex min-w-0 flex-wrap items-center gap-2 rounded-panel border border-ok-border bg-ok-bg px-panel py-2 text-ui leading-base text-ok"
         >
           <Check size={14} aria-hidden="true" className="shrink-0" />
           <span className="min-w-0 flex-1">{removedDeviceText(removed.device, machine)}</span>
@@ -289,7 +289,7 @@ function MachineNewDevices({
               data-new-device={device.id}
               data-new-device-compact=""
               data-kb-hide=""
-              className="flex min-w-0 items-center gap-2 rounded-control border border-warn-border bg-warn-bg py-0.5 pl-3 pr-0.5 text-meta leading-base text-warn"
+              className="flex min-w-0 items-center gap-2 rounded-panel border border-warn-border bg-warn-bg py-1 pl-panel pr-1 text-meta leading-base text-warn"
             >
               <ShieldAlert size={14} aria-hidden="true" className="shrink-0" />
               <span className="min-w-0 flex-1 truncate">New device paired: “{device.name}”</span>
@@ -325,7 +325,7 @@ function MachineNewDevices({
             key={device.id}
             role="status"
             data-new-device={device.id}
-            className="flex min-w-0 flex-col gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+            className="flex min-w-0 flex-col gap-2 rounded-panel border border-warn-border bg-warn-bg px-panel py-2 text-ui leading-base text-warn"
           >
             {details(device)}
           </div>

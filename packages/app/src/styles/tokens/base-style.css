@@ -33,6 +33,10 @@
   --radius-badge: var(--radius-xs);
   --radius-tab: var(--radius-sm);
   --radius-input: var(--radius-sm);
+  /* The LARGEST corner of the two roles, as ONE length, for the padding floor below (a calc cannot take a four-corner list). A style whose role
+     tokens are a list of corners (Anti-Posh) states the largest one here; every other style inherits the role itself. */
+  --radius-control-max: var(--radius-control);
+  --radius-panel-max: var(--radius-panel);
   --radius-dot: 9999px; /* never themed — shape is a non-colour status signal */
   --notch: 0px;
   --clip-control: none;
@@ -76,9 +80,14 @@
   --control-h-desktop: 28px;
   --control-h-sm-desktop: 24px;
   --row-min-h-desktop: 34px;
-  --pad-control-x: 10px;
+  /* ROUND-SAFE PADDING (see "ROUND-SAFE GEOMETRY" under the radius ramp): a style states the padding it WANTS; what a control or a
+     panel really gets is never less than half its own corner radius, so text never meets the curve. Styles set the
+     `-want` pair and never the derived one. */
+  --pad-control-x-want: 10px;
+  --pad-control-x: max(var(--pad-control-x-want), calc(var(--radius-control-max) * 0.5));
   --pad-badge-x: 8px;
-  --pad-panel: 10px;
+  --pad-panel-want: 10px;
+  --pad-panel: max(var(--pad-panel-want), calc(var(--radius-panel-max) * 0.5));
   --pad-row-y: 6px;
   --pad-cell-x: 8px;
   --gap-xs: 4px;
@@ -144,7 +153,21 @@
   --radius-sm: 6px;
   --radius-md: 9px;
   --radius-lg: 13px;
-  --radius-pill: 9999px;
+  /* ROUND-SAFE GEOMETRY (owner, 2026-11-25: "for high rounded, we need to take that into consideration when writing").
+     Every surface is written for the HIGHEST rounding. Two halves, both here, so a card, banner, toast, dialog, input
+     or tile inherits them and nothing is patched per component:
+       1. CAP. "Fully round" is `--radius-round`: half the 44px touch target. A single-line control (28-44px tall) is still
+          a full pill (the browser clamps the radius to half the height); a box taller than that, a multi-line banner or a
+          tile, gets an ordinary 22px corner and is NEVER a stadium. Styles say `var(--radius-round)`, never `999px`.
+          `--radius-pill` is the same value; the literal `rounded-full` stays 9999px for dots and avatars, which are
+          square boxes and so circles at any size (never for a box that can grow tall).
+       2. INSET. The inline padding of a control or panel grows with its radius (`--pad-control-x` / `--pad-panel` above).
+     Authoring rule: a container takes `rounded-panel`, a control `rounded-control`, with theme padding (`px-control-x`,
+     `p-panel`); a literal radius or a literal padding smaller than those is a bug at the highest rounding.
+     `tests/support/browser/round-safe.ts` is the geometric gate that fails when content leaves a box's inner rounded rect. */
+  --radius-cap: 22px;
+  --radius-round: var(--radius-cap);
+  --radius-pill: var(--radius-round);
   --border-width: 1px;
   --border-width-heavy: 2px;
   --bubble-fg: var(--fg);

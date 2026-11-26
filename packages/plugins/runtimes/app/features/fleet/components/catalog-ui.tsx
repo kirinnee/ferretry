@@ -43,7 +43,7 @@ export function CatalogNote({
 }) {
   return (
     <div
-      className={cn('flex min-w-0 flex-col gap-1 rounded-control border p-panel', NOTE_TONE[tone])}
+      className={cn('flex min-w-0 flex-col gap-1 rounded-panel border p-panel', NOTE_TONE[tone])}
       data-catalog-note={spot ?? tone}
       role={role}
     >

@@ -160,7 +160,7 @@ export function CodexLoginPanel({
       </header>
 
       <div className="space-y-4 p-panel">
-        <div className="flex items-start gap-2 rounded-control border border-border bg-surface-2 px-3 py-2 text-ui leading-base text-muted">
+        <div className="flex items-start gap-2 rounded-panel border border-border bg-surface-2 px-panel py-2 text-ui leading-base text-muted">
           <ShieldCheck size={17} className="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
           <p className="m-0">{wording.coverage}</p>
         </div>
@@ -168,7 +168,7 @@ export function CodexLoginPanel({
         {refusal === null ? null : (
           <p
             role="alert"
-            className="m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+            className="m-0 flex items-start gap-2 rounded-panel border border-warn-border bg-warn-bg px-panel py-2 text-ui leading-base text-warn"
           >
             <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
             {refusal}
@@ -199,11 +199,11 @@ export function CodexLoginPanel({
 
         {flow?.state === 'awaiting-approval' ? (
           <div className="space-y-4">
-            <div className="rounded-control border border-accent/40 bg-accent-soft p-3">
+            <div className="rounded-panel border border-accent/40 bg-accent-soft p-panel">
               <p className="m-0 text-meta font-semibold text-accent">1 · Open this link anywhere</p>
               <SignInLink url={flow.verificationUrl} copy={copy} name="Codex" />
             </div>
-            <div className="rounded-control border border-border bg-surface-2 p-3">
+            <div className="rounded-panel border border-border bg-surface-2 p-panel">
               <p className="m-0 text-meta font-semibold text-muted">2 · Type this code there</p>
               <div className="mt-2 flex min-w-0 items-center gap-2">
                 <code
@@ -252,17 +252,17 @@ export function CodexLoginPanel({
                 {flow.deviceCode === 'unavailable' ? (
                   <p
                     data-codex-login-device-unavailable=""
-                    className="m-0 flex items-start gap-2 rounded-control border border-border bg-surface-2 px-3 py-2 text-ui leading-base text-fg"
+                    className="m-0 flex items-start gap-2 rounded-panel border border-border bg-surface-2 px-panel py-2 text-ui leading-base text-fg"
                   >
                     <TriangleAlert size={17} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
                     This account doesn’t allow device codes, so Codex will sign in with a link instead.
                   </p>
                 ) : null}
-                <div className="rounded-control border border-accent/40 bg-accent-soft p-3">
+                <div className="rounded-panel border border-accent/40 bg-accent-soft p-panel">
                   <p className="m-0 text-meta font-semibold text-accent">1 · Open this link and sign in</p>
                   <SignInLink url={flow.verificationUrl} copy={copy} name="Codex" />
                 </div>
-                <div className="rounded-control border border-border bg-surface-2 p-3">
+                <div className="rounded-panel border border-border bg-surface-2 p-panel">
                   <p className="m-0 text-meta font-semibold text-fg">
                     2 · Copy the address of the page that won’t load
                   </p>
@@ -319,7 +319,7 @@ export function CodexLoginPanel({
 
         {flow?.state === 'complete' ? (
           <div
-            className="flex items-start gap-3 rounded-control border border-ok/40 bg-ok-bg p-3 text-ui leading-base text-fg"
+            className="flex items-start gap-3 rounded-panel border border-ok/40 bg-ok-bg p-panel text-ui leading-base text-fg"
             role="status"
           >
             <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
@@ -332,7 +332,7 @@ export function CodexLoginPanel({
         {flow?.state === 'failed' ? (
           <div
             role="alert"
-            className="space-y-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+            className="space-y-2 rounded-panel border border-warn-border bg-warn-bg px-panel py-2 text-ui leading-base text-warn"
           >
             {/* An ending about the code or the address needs a fresh attempt, not the host command every
                 other failure names. */}

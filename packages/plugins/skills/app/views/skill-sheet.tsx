@@ -50,7 +50,7 @@ export function FailureLine({
 }) {
   return (
     <div
-      className="flex min-w-0 flex-col items-start gap-xs rounded-control border border-err-border bg-err-bg p-control-x py-2 text-err"
+      className="flex min-w-0 flex-col items-start gap-xs rounded-panel border border-err-border bg-err-bg p-panel py-2 text-err"
       role="alert"
       data-skill-failure=""
     >

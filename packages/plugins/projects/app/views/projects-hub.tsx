@@ -116,7 +116,7 @@ function RegisteredNotice({
   if (status?.phase !== 'registered') return null;
   return (
     <div
-      className="flex flex-wrap items-start gap-sm rounded-control border border-ok-border bg-ok-bg px-control-x py-2"
+      className="flex flex-wrap items-start gap-sm rounded-panel border border-ok-border bg-ok-bg px-panel py-2"
       data-project-registered={status.project.id}
       role="status"
     >

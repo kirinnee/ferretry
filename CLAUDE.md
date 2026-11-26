@@ -47,6 +47,7 @@ This file is a pure index — the linked documents own their subjects.
 | [Conventional Commits](docs/standards/conventional-commits/index.md)             | Commit grammar and the commit-msg gate              |
 | [Semantic Release](docs/standards/semantic-release/index.md)                     | Versioning and the release pipeline                 |
 | [Contributor Docs](docs/standards/contributor-docs/index.md)                     | How to write documentation in this repo             |
+| [Theme](docs/standards/theme/index.md)                                           | Round-safe geometry: write for the highest rounding |
 
 Parked subjects (deliberately stubbed, read before reviving):
 [Docker](docs/standards/docker/index.md) · [Authorization](docs/standards/authorization/index.md).

@@ -235,7 +235,7 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
             </dl>
             {structured.warnings.length > 0 ? (
               <div
-                className="mt-2 flex flex-col gap-1 rounded-control border border-err-border bg-err-bg px-2 py-1.5 text-meta leading-base text-err"
+                className="mt-2 flex flex-col gap-1 rounded-panel border border-err-border bg-err-bg px-panel py-1.5 text-meta leading-base text-err"
                 data-step-up-warnings=""
                 role="note"
               >

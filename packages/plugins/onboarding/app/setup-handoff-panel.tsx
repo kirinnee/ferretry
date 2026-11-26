@@ -118,7 +118,7 @@ export function SetupHandoffPanel({ url, plainUrl, receiver, write, share, label
           This link is too long to draw as a code a phone can scan. Copy or share the link below instead.
         </p>
       ) : receiver === 'phone' && modules !== undefined ? (
-        <div className="flex min-w-0 items-center gap-3 rounded-control border border-border bg-surface-2 p-3">
+        <div className="flex min-w-0 items-center gap-3 rounded-panel border border-border bg-surface-2 p-panel">
           <HandoffQr modules={modules} label={label} />
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <p className="m-0 text-meta leading-base text-fg">Point your phone's camera at this.</p>

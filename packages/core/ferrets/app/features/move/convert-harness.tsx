@@ -218,7 +218,7 @@ export function ConvertHarness({ summary, slot, readPreview, move, onCancel, onM
         ) : preview.status === 'refused' ? (
           <section
             aria-labelledby={`${headingId}-refused`}
-            className="rounded-control border border-err bg-surface-2 p-4"
+            className="rounded-panel border border-err bg-surface-2 p-4"
             data-convert-refused=""
             role="alert"
           >
@@ -229,7 +229,7 @@ export function ConvertHarness({ summary, slot, readPreview, move, onCancel, onM
             <p className="mt-2 text-ui leading-base text-muted">Nothing was changed.</p>
           </section>
         ) : preview.status === 'failed' ? (
-          <section className="rounded-control border border-err bg-surface-2 p-4" data-convert-failed="" role="alert">
+          <section className="rounded-panel border border-err bg-surface-2 p-4" data-convert-failed="" role="alert">
             <p className="m-0 break-words text-ui leading-base text-err">{preview.message}</p>
             <Button className="mt-3 min-h-[44px]" onClick={() => setRetry(count => count + 1)} type="button">
               Try again
@@ -240,7 +240,7 @@ export function ConvertHarness({ summary, slot, readPreview, move, onCancel, onM
         )}
 
         {failure?.kind === 'message' ? (
-          <section className="rounded-control border border-err bg-surface-2 p-4" data-convert-failure="" role="alert">
+          <section className="rounded-panel border border-err bg-surface-2 p-4" data-convert-failure="" role="alert">
             <p className="m-0 break-words text-ui leading-base text-err">{failure.text}</p>
             <p className="mt-2 text-ui leading-base text-muted">Nothing was changed.</p>
           </section>
@@ -249,7 +249,7 @@ export function ConvertHarness({ summary, slot, readPreview, move, onCancel, onM
         {failure?.kind === 'inflight' ? (
           <section
             aria-label="Move paused"
-            className="rounded-control border border-warn-border bg-surface-2 p-4"
+            className="rounded-panel border border-warn-border bg-surface-2 p-4"
             data-convert-paused=""
             role="alert"
           >
@@ -327,7 +327,7 @@ function PreviewBody({ preview }: { readonly preview: Extract<ConversionPreview,
       {sentences.notCarried === null ? null : (
         <p className="m-0 text-ui leading-base text-muted">{sentences.notCarried}</p>
       )}
-      <p className="m-0 rounded-control border border-border-soft bg-surface-2 p-3 text-ui leading-base text-muted">
+      <p className="m-0 rounded-panel border border-border-soft bg-surface-2 p-panel text-ui leading-base text-muted">
         {sentences.note}
       </p>
       <p className="m-0 text-meta leading-base text-muted">{sentences.versions}</p>

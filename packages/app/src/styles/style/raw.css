@@ -70,8 +70,8 @@
   --control-h-desktop: 32px;
   --control-h-sm-desktop: 28px;
   --row-min-h-desktop: 40px;
-  --pad-control-x: 12px;
-  --pad-panel: 12px;
+  --pad-control-x-want: 12px;
+  --pad-panel-want: 12px;
   --pad-row-y: 8px;
   --pad-cell-x: 10px;
   --gap-xs: 6px;

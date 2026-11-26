@@ -17,7 +17,7 @@ export type LocationDraft =
   | { readonly kind: 'failed'; readonly error: LocationError };
 
 const CHIP =
-  'flex flex-col gap-1 rounded-control border border-border bg-surface-2 px-control-x py-2 text-ui leading-base text-fg';
+  'flex flex-col gap-1 rounded-panel border border-border bg-surface-2 px-panel py-2 text-ui leading-base text-fg';
 
 /** The fix as it reads in a sent message. */
 export function LocationChip({ fix }: { readonly fix: LocationFix }) {

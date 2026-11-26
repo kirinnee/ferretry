@@ -49,6 +49,8 @@
   --radius-lg: 4px 10px 5px 11px;
   --radius-control: 2px 7px 3px 6px;
   --radius-panel: 3px 9px 4px 10px;
+  --radius-control-max: 7px;
+  --radius-panel-max: 10px;
   --radius-badge: 2px 8px 2px 8px;
   --radius-tab: 3px 8px 0 0;
   --radius-input: 1px 5px 2px 5px;
@@ -91,8 +93,8 @@
   --control-h-desktop: 30px;
   --control-h-sm-desktop: 26px;
   --row-min-h-desktop: 36px;
-  --pad-control-x: 11px;
-  --pad-panel: 13px;
+  --pad-control-x-want: 11px;
+  --pad-panel-want: 13px;
   --pad-row-y: 6px;
   --pad-cell-x: 9px;
   --gap-xs: 5px;

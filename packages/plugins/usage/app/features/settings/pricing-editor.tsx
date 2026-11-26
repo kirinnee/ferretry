@@ -51,7 +51,7 @@ function Field({
   );
 }
 
-const NOTE = 'm-0 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-meta leading-base text-warn';
+const NOTE = 'm-0 rounded-panel border border-warn-border bg-warn-bg px-panel py-2 text-meta leading-base text-warn';
 
 export function PricingEditor({
   draft,
