@@ -296,7 +296,10 @@ for (const style of ['glass', 'neumorphism'] as const)
               expect(read.panel.layers.length, 'one frost highlight on a panel').toBe(1);
               expect(read.panel.layers[0]).toMatch(/linear-gradient\(/u);
               expect(read.groupBlur, 'a group pane blurs the backdrop').toContain('blur(18px)');
-              expect(px(read.button.radius), 'a glass button is a pill').toBeGreaterThan(100);
+              expect(
+                px(read.button.radius),
+                'a glass button is a pill (the capped fully-round radius)',
+              ).toBeGreaterThanOrEqual(20);
               expect(read.button.blur, 'and a small pane of its own: it blurs what is behind it').toContain(
                 'blur(10px)',
               );
@@ -340,7 +343,10 @@ for (const style of ['glass', 'neumorphism'] as const)
               expect(read.gradients.panels).toBe(0);
               expect(read.panel.shadow).toBe(true);
               expect(read.field.shadow, 'a field is a well').toBe(true);
-              expect(px(read.button.radius), 'a button is still a pill').toBeGreaterThan(100);
+              expect(
+                px(read.button.radius),
+                'a button is still a pill (the capped fully-round radius)',
+              ).toBeGreaterThanOrEqual(20);
               expect(read.motion.press).toBe('0px');
               expect(milliseconds(read.motion.base)).toBe(340);
               expect(milliseconds(read.motion.slow)).toBe(520);

@@ -59,7 +59,7 @@
   --control-h-sm-desktop: 24px;
   --row-min-h-desktop: 32px;
   --pad-row-y: 5px;
-  --pad-panel: 12px;
+  --pad-panel-want: 12px;
   --rail-active: none;
   /* Flat surface — the diagonal accent-tint wash on panels was another decorative
    tell; the panel now reads its identity from the grid texture and the seated

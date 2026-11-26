@@ -172,8 +172,8 @@
 }
 .fy-nav--rail .fy-nav__item .fy-nav__badge {
   position: absolute;
-  top: 2px;
-  right: 0;
+  top: 4px;
+  right: 4px; /* in from the item's corner: a count that sat on the curve poked out of it at the roundest looks */
   margin-left: 0;
 }
 .fy-nav__initial {
@@ -274,8 +274,8 @@
 .fy-nav--dock-icons .fy-nav__badge,
 .fy-nav--dock-rail .fy-nav__badge {
   position: absolute;
-  top: 0;
-  right: 0;
+  top: 4px;
+  right: 4px;
   margin-left: 0;
 }
 /* A finger needs a 44px cell (design-system.css floors every link under a coarse pointer), and seven of them are wider than a drawer:

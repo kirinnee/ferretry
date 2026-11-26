@@ -61,7 +61,7 @@ export function TwoFactorSeedCard({
       )}
 
       {facts.mismatch ? (
-        <div className="flex min-w-0 flex-col gap-2 rounded-control border border-warn p-2" data-seed-mismatch="">
+        <div className="flex min-w-0 flex-col gap-2 rounded-panel border border-warn p-panel" data-seed-mismatch="">
           <p className="m-0 text-cell text-warn">
             This key does not look like it belongs to this account. If you did not expect that, Deny.
           </p>

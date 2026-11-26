@@ -62,8 +62,8 @@
   --control-h-desktop: 30px;
   --control-h-sm-desktop: 26px;
   --row-min-h-desktop: 36px;
-  --pad-control-x: 12px;
-  --pad-panel: 12px;
+  --pad-control-x-want: 12px;
+  --pad-panel-want: 12px;
   --pad-row-y: 7px;
   /* A signal, not a shadow: the same glow at three reaches. The palette's accent supplies the colour. */
   --glow-alpha: 0.32;

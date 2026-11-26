@@ -22,7 +22,7 @@ export function DeviceRefusedNotice({ machineName, onPairAgain }: DeviceRefusedN
     <section
       aria-labelledby="fy-device-refused-title"
       data-device-refused=""
-      className="mx-auto mt-6 flex w-full max-w-[680px] min-w-0 flex-col items-start gap-2 rounded-control border border-border-strong bg-surface-2 px-3 py-3"
+      className="mx-auto mt-6 flex w-full max-w-[680px] min-w-0 flex-col items-start gap-2 rounded-panel border border-border-strong bg-surface-2 px-panel py-3"
     >
       <h2 id="fy-device-refused-title" className="m-0 flex items-center gap-1 text-ui font-semibold text-fg">
         <KeyRound size={16} className="shrink-0 text-warn" aria-hidden="true" />

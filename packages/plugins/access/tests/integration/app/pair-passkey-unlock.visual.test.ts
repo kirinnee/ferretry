@@ -168,7 +168,7 @@ describe('the unlock prompt, when it does show, is not full width at 390 (S-68, 
 describe('the pair screens hang off one left edge at every width (S-8)', () => {
   for (const variant of VARIANTS)
     for (const stage of ['confirm', 'connected'] as const)
-      it(`${variant.name} ${stage}: mascot, heading and the first line start at the column\'s left edge`, async () => {
+      it(`${variant.name} ${stage}: the mascot is centred over the column; the heading and the first line start at its left edge`, async () => {
         const { context, tab } = await open(variant, 'offer=open');
         try {
           await tab.waitForSelector('[data-pair-device-rename]');
@@ -186,7 +186,10 @@ describe('the pair screens hang off one left edge at every width (S-8)', () => {
             range.selectNodeContents(heading);
             return {
               column: left('.fy-pair-scene main'),
-              hero: left('.fy-pair-hero'),
+              hero: (() => {
+                const box = (document.querySelector('.fy-pair-hero') as HTMLElement).getBoundingClientRect();
+                return (box.left + box.right) / 2;
+              })(),
               heading: range.getBoundingClientRect().left,
               headingAlign: getComputedStyle(heading).textAlign,
               buttons: (document.querySelector('[data-action-row] .kt-btn') as HTMLElement).getBoundingClientRect()
@@ -199,7 +202,14 @@ describe('the pair screens hang off one left edge at every width (S-8)', () => {
             ),
           );
           const edge = edges.column + padding;
-          expect(Math.abs(edges.hero - edge), 'mascot at the left edge').toBeLessThanOrEqual(1);
+          // &B211: the ferret is centred over the column (its content box), not hung off the column's left edge.
+          const columnRight = await tab.evaluate(() => {
+            const main = document.querySelector('.fy-pair-scene main') as HTMLElement;
+            return main.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(main).paddingRight);
+          });
+          expect(Math.abs(edges.hero - (edge + columnRight) / 2), 'mascot centred over the column').toBeLessThanOrEqual(
+            2,
+          );
           expect(Math.abs(edges.heading - edge), 'heading at the left edge').toBeLessThanOrEqual(1);
           expect(['left', 'start']).toContain(edges.headingAlign);
           if (!(variant.phone === false && stage === 'connected'))

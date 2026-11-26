@@ -108,7 +108,7 @@ function CardRow({
       ) : state.step === 'confirming' ? (
         <fieldset
           aria-label={`Close ${id}`}
-          className="m-0 flex min-w-0 flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
+          className="m-0 flex min-w-0 flex-col gap-2 rounded-panel border border-border bg-surface-2 p-panel"
           data-agenda-card-confirm=""
         >
           <p className="m-0 text-ui text-fg">

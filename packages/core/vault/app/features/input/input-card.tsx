@@ -577,7 +577,7 @@ function SealedPasteSection({
   return (
     <div className="flex min-w-0 flex-col gap-2" data-input-paste="">
       <dl
-        className="m-0 grid min-w-0 grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-control border border-border-strong bg-surface-2 p-3 text-ui"
+        className="m-0 grid min-w-0 grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-panel border border-border-strong bg-surface-2 p-panel text-ui"
         data-input-paste-route=""
       >
         <dt className="text-faint">Copy</dt>
@@ -744,7 +744,7 @@ export function InputCard({
       </header>
 
       <div
-        className="flex min-w-0 flex-col gap-1 rounded-control border border-border-strong bg-surface-2 p-3"
+        className="flex min-w-0 flex-col gap-1 rounded-panel border border-border-strong bg-surface-2 p-panel"
         data-input-facts=""
       >
         {facts === undefined ? (
@@ -784,7 +784,7 @@ export function InputCard({
       (request.source !== undefined && request.risk.level === 'green') ? null : replacesSecret(request) ? (
         // Overwriting a secret cannot be undone: said loudly, in its own box, and the approval below is a destructive one.
         <div
-          className="flex gap-2 rounded-control border border-err bg-surface-2 p-3 text-ui font-semibold text-err"
+          className="flex gap-2 rounded-panel border border-err bg-surface-2 p-panel text-ui font-semibold text-err"
           data-input-replace=""
           data-input-risk={request.risk.level}
           role="alert"
@@ -795,7 +795,7 @@ export function InputCard({
       ) : request.risk.level === 'amber' ? (
         // The daemon could not promise the value was never seen: a warning the owner must be able to notice, never footer help.
         <div
-          className="flex gap-2 rounded-control border border-warn bg-warn/10 p-3 text-ui font-semibold text-fg"
+          className="flex gap-2 rounded-panel border border-warn bg-warn/10 p-panel text-ui font-semibold text-fg"
           data-input-risk={request.risk.level}
           data-input-warning=""
           role="status"

@@ -57,9 +57,9 @@
   --control-h-desktop: 36px;
   --control-h-sm-desktop: 28px;
   --row-min-h-desktop: 38px;
-  --pad-control-x: 22px;
+  --pad-control-x-want: 22px;
   --pad-badge-x: 11px;
-  --pad-panel: 14px;
+  --pad-panel-want: 14px;
   --pad-row-y: 7px;
   --pad-cell-x: 10px;
   --gap-xs: 5px;

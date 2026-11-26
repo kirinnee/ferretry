@@ -273,7 +273,7 @@ function LookAlikeBanner({
   return (
     <section
       aria-label="These may be one account"
-      className="flex min-w-0 flex-col gap-2 rounded-control border border-warn bg-warn-bg p-3"
+      className="flex min-w-0 flex-col gap-2 rounded-panel border border-warn bg-warn-bg p-panel"
       data-accounts-lookalike=""
     >
       <p className="m-0 min-w-0 break-words text-ui text-fg">

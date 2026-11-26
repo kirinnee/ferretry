@@ -82,7 +82,7 @@ function WherePanel({
   return (
     <section
       aria-labelledby={headingId}
-      className="mt-2 rounded-control border border-border-strong bg-surface p-3"
+      className="mt-2 rounded-panel border border-border-strong bg-surface p-panel"
       data-where-surface="panel"
       onKeyDown={onKeyDown}
       ref={panel}

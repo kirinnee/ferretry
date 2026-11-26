@@ -254,7 +254,7 @@ export function McpSignInSheet({
             <>
               <div
                 role="status"
-                className="flex items-start gap-3 rounded-control border border-ok/40 bg-ok-bg p-3 text-ui leading-base text-fg"
+                className="flex items-start gap-3 rounded-panel border border-ok/40 bg-ok-bg p-panel text-ui leading-base text-fg"
               >
                 <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
                 <div className="min-w-0">
@@ -274,7 +274,7 @@ export function McpSignInSheet({
             <>
               <p
                 role="alert"
-                className="m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+                className="m-0 flex items-start gap-2 rounded-panel border border-warn-border bg-warn-bg px-panel py-2 text-ui leading-base text-warn"
               >
                 <Clock3 size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
                 This sign-in expired. Start again.
@@ -297,7 +297,7 @@ export function McpSignInSheet({
             <>
               {flow.note === undefined ? null : (
                 <p
-                  className="m-0 rounded-control border border-border bg-surface-2 px-3 py-2 text-ui leading-base text-muted"
+                  className="m-0 rounded-panel border border-border bg-surface-2 px-panel py-2 text-ui leading-base text-muted"
                   data-mcp-sign-in-note=""
                 >
                   {flow.note}
@@ -307,7 +307,7 @@ export function McpSignInSheet({
                 <p
                   role="alert"
                   data-mcp-sign-in-refusal=""
-                  className="m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+                  className="m-0 flex items-start gap-2 rounded-panel border border-warn-border bg-warn-bg px-panel py-2 text-ui leading-base text-warn"
                 >
                   <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
                   {refusal}

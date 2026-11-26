@@ -60,7 +60,7 @@ export function CleanUpJobCard({
   const started = Date.parse(job.startedAt);
   return (
     <div
-      className="flex min-w-0 flex-col gap-1 rounded-control border border-border-strong bg-surface-2 p-3"
+      className="flex min-w-0 flex-col gap-1 rounded-panel border border-border-strong bg-surface-2 p-panel"
       data-clean-up-job={job.status}
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -103,7 +103,7 @@ function PromptDiff({ before, after }: { readonly before: string; readonly after
   const parts = useMemo(() => diffText(before, after), [before, after]);
   return (
     <p
-      className="m-0 min-w-0 whitespace-pre-wrap break-words rounded-control border border-border-soft bg-surface p-3 text-ui leading-base"
+      className="m-0 min-w-0 whitespace-pre-wrap break-words rounded-panel border border-border-soft bg-surface p-panel text-ui leading-base"
       data-clean-up-diff=""
     >
       {parts.map((part, index) =>
@@ -152,7 +152,7 @@ export function CleanUpReview({
   const unchanged = !fresh && suggestion.before.trim() === suggestion.after.trim();
   return (
     <section
-      className="flex min-w-0 flex-col gap-3 rounded-control border border-accent bg-surface-2 p-3"
+      className="flex min-w-0 flex-col gap-3 rounded-panel border border-accent bg-surface-2 p-panel"
       aria-labelledby={headingId}
       data-clean-up-review=""
     >
@@ -183,7 +183,7 @@ export function CleanUpReview({
       ) : null}
       {fresh ? (
         <p
-          className="m-0 min-w-0 whitespace-pre-wrap break-words rounded-control border border-border-soft bg-surface p-3 text-ui leading-base"
+          className="m-0 min-w-0 whitespace-pre-wrap break-words rounded-panel border border-border-soft bg-surface p-panel text-ui leading-base"
           data-clean-up-fresh=""
         >
           {suggestion.after}
