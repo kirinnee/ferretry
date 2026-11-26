@@ -14,7 +14,14 @@
  * A passkey belongs to THIS app's origin, not to the hostname serving /mcp, so the daemon's waiting page shows a short
  * match code and sends the owner here. Nothing secret is on this screen to leak: public ids, a code, names and times.
  */
-import { controlState, SettingGroup, SettingRow, SettingSwitch, useViewPlace } from '@ferretry/app';
+import {
+  controlState,
+  SettingGroup,
+  SettingRow,
+  SettingSwitch,
+  UPDATE_DAEMON_COMMAND,
+  useViewPlace,
+} from '@ferretry/app';
 import { Loading, SetupNote, useNow } from '@ferretry/app/ui';
 import { useEffect, useState } from 'react';
 import type { ConnectorGrantView, ConnectorStatus } from '../../contract/index.ts';
@@ -176,7 +183,7 @@ export function ConnectorSettings({
       {connector.read.kind === 'loading' ? <Loading kind="page" label="Reading the connector…" /> : null}
       {connector.read.kind === 'outdated' ? (
         <SetupNote tone="warn" name="connector-outdated" title={NEEDS_UPDATE}>
-          Update it with `fy update`, then reload this page.
+          Update it with `{UPDATE_DAEMON_COMMAND}`, then reload this page.
         </SetupNote>
       ) : null}
       {connector.read.kind === 'failed' ? (
