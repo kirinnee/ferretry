@@ -5,8 +5,7 @@ import {
   type SendCancelEffect,
   type SendDisposition,
 } from '../../../contract/index.ts';
-import type { ClockPort, SerialExecutor } from '../../../contract/index.ts';
-import type { SessionId } from '../../../contract/index.ts';
+import type { ClockPort, SerialExecutor, SessionId, SessionSendSettings } from '../../../contract/index.ts';
 import {
   authorizeSend,
   endsPeerWait,
@@ -22,7 +21,6 @@ import {
   turnInstruction,
   typedIntoBusyPane,
 } from '../../../contract/index.ts';
-import type { SessionSendSettings } from '../../../contract/index.ts';
 import {
   retractedPointer,
   sameComposerText,
@@ -31,8 +29,7 @@ import {
   strandableText,
   strandedSend,
 } from '../../../contract/index.ts';
-import type { SendRetractionProof } from '../../../contract/index.ts';
-import { isOpenSend } from '../../../contract/index.ts';
+import { heldForTyping, isOpenSend, type SendRetractionProof } from '../../../contract/index.ts';
 import { type LedgerPath as SendPath, type LedgerRecord as SendRecord } from '../../../contract/index.ts';
 import {
   type ComposerDraftAction,
@@ -430,6 +427,8 @@ export class SessionSendService {
           `session ${id} is still starting; its agent is holding an earlier message until startup ends, so send ${sendId} is not typed yet`,
           'busy',
         );
+      const sender = options.by === 'person' ? 'human' : (current.senderKind ?? 'daemon');
+      if (heldForTyping(observed, sender)) throw new SendRetypeWithheld(`a person is typing in session ${id}`, 'busy');
       const text = current.matchText ?? current.message;
       // EVERY retry is checked against the pane, the daemon's as well as a person's: a message still
       // typed in the composer, or held in the harness's queue, is not lost, and retyping it would be the
@@ -508,10 +507,10 @@ export class SessionSendService {
       await this.ports.repository.journal(id, 'control.send_retried', { sendId, attempt, by: options.by });
       try {
         if (routing === 'idle') {
-          await this.ports.terminal.deliver(id, text);
+          await this.ports.terminal.deliver(id, text, sender);
           return next;
         }
-        return (await this.queued(id, next, await this.ports.terminal.queue(id, text))) ?? next;
+        return (await this.queued(id, next, await this.ports.terminal.queue(id, text, sender))) ?? next;
       } catch (error) {
         if (error instanceof SendLandingUnconfirmed) throw await this.unconfirmed(id, next);
         if (
@@ -1070,9 +1069,9 @@ export class SessionSendService {
 
   /**
    * One verified Enter for a send's own text left typed in the composer, under the caller's lock. Refused —
-   * nothing pressed — unless the send can still be stranded, the pane is idle and undialogued, the
-   * composer holds EXACTLY this send's text, and the send has Enters left under `limit`. `observed` is a
-   * frame the caller read under the same lock, so the pane is not captured twice for one decision.
+   * nothing pressed or counted — unless the send can still be stranded, the pane is idle, undialogued, nobody typing
+   * in it (the typing hold), the composer holds EXACTLY this send's text, and the send has Enters left under `limit`.
+   * `observed` is a frame the caller read under the same lock, so the pane is not captured twice for one decision.
    */
   private async enterOwnText(
     id: SessionId,
@@ -1088,14 +1087,14 @@ export class SessionSendService {
     const text = strandableText(record, records);
     if (text === undefined || (record.submitNudges ?? 0) >= limit) return { outcome: 'refused', record };
     const pane = observed ?? (await this.ports.terminal.observe(id));
-    if (!this.finishable(pane) || pane.draft === undefined || !showsOwnText(pane.draft, text))
-      return { outcome: 'refused', record };
+    const draft = !this.finishable(pane) || heldForTyping(pane, 'daemon') ? undefined : pane.draft;
+    if (draft === undefined || !showsOwnText(draft, text)) return { outcome: 'refused', record };
     // The same uniqueness every caller gets: when another unsettled send could equally be what the box holds
     // (two pastes whose placeholders read alike), neither is provably this one, and nothing is pressed.
-    if (strandedSend(pane.draft, records)?.sendId !== record.sendId) return { outcome: 'refused', record };
+    if (strandedSend(draft, records)?.sendId !== record.sendId) return { outcome: 'refused', record };
     if (!(await this.provablyStranded(id, record))) return { outcome: 'refused', record };
     // A taken-back pointer is pressed only when the box is the WHOLE pointer — never a clipped or edited drawing of it.
-    if (record.fate === 'delivered' && !sameComposerText(pane.draft, text)) return { outcome: 'refused', record };
+    if (record.fate === 'delivered' && !sameComposerText(draft, text)) return { outcome: 'refused', record };
     const counted = await this.ports.ledger.settle(id, record.sendId, { submitNudges: (record.submitNudges ?? 0) + 1 });
     return await this.finishStranded(await this.require(id), counted ?? record, by);
   }
@@ -1202,7 +1201,8 @@ export class SessionSendService {
     by: 'send' | 'daemon' | 'queue' | 'warden',
   ): Promise<{ readonly outcome: ComposerSubmitOutcome; readonly record: SendRecord }> {
     const retracted = record.fate === 'delivered';
-    const outcome = await this.ports.terminal.submitComposer(target.id, record.matchText ?? record.message, retracted);
+    const text = record.matchText ?? record.message;
+    const outcome = await this.ports.terminal.submitComposer(target.id, text, retracted, 'daemon');
     await this.ports.repository.journal(target.id, 'control.send_resubmitted', {
       sendId: record.sendId,
       outcome,
