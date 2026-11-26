@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { byRecordedHarness, type RecordedFamily } from '@ferretry/core-ferrets/contract';
 import { LESSONS_ABSENT_FILE_ETAG } from '../../contract/index.ts';
 
 /**
@@ -91,10 +92,16 @@ export interface RepoInstructionFiles {
 
 /**
  * Which file a repo lesson goes into: the AGENTS.md that is there, else the CLAUDE.md that is there,
- * else the one the ferret's own CLI reads (Claude Code: CLAUDE.md; Codex: AGENTS.md).
+ * else the one the ferret's own CLI reads (Claude Code: CLAUDE.md; Codex: AGENTS.md). A harness this build has no
+ * instruction file for (a third one, or a ferret that is gone) is `undefined`: nothing is created on a guess, and the
+ * caller says so. `family` is the table's row for the ferret's harness KEY (never guessed from a word).
  */
-export function repoInstructionsFileName(present: RepoInstructionFiles, harness: 'claude' | 'codex'): string {
+export function repoInstructionsFileName(
+  present: RepoInstructionFiles,
+  family: RecordedFamily | undefined,
+): string | undefined {
   if (present.agents) return 'AGENTS.md';
   if (present.claude) return 'CLAUDE.md';
-  return harness === 'claude' ? 'CLAUDE.md' : 'AGENTS.md';
+  if (family === undefined) return undefined;
+  return byRecordedHarness(family, { claude: () => 'CLAUDE.md', codex: () => 'AGENTS.md' });
 }

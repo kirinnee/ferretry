@@ -1,3 +1,4 @@
+import type { RecordedFamily } from '@ferretry/core-ferrets/contract';
 import type { TmuxLaunch } from './contracts.ts';
 
 /**
@@ -13,8 +14,13 @@ export interface TmuxLaunchGuard {
   check(launch: TmuxLaunch): Promise<void>;
 }
 
-/** The harnesses a generated runtime wrapper execs BY NAME, so a guard has to resolve both itself. */
-export const GUARDED_HARNESS_NAMES = ['claude', 'codex'] as const;
+/**
+ * The command each harness family's generated runtime wrapper execs BY NAME, so a guard has to resolve every one itself.
+ * Keyed by the family table (Ferrets' `records.ts`): a family added there has no row here until its command is named, and
+ * the compiler refuses the gap, so a new harness is never one a test can launch for real unguarded.
+ */
+const GUARDED_COMMAND_OF: Readonly<Record<RecordedFamily, string>> = { claude: 'claude', codex: 'codex' };
+export const GUARDED_HARNESS_NAMES: readonly string[] = Object.values(GUARDED_COMMAND_OF);
 
 /** Any launch a guard refused. A runner catches exactly this kind, logs its sentence and answers a closed refusal. */
 export abstract class LaunchGuardRefusal extends Error {}

@@ -27,6 +27,7 @@
  *
  * Pure but for its ports.
  */
+import { harnessProductName } from '@ferretry/core-ferrets/contract';
 import { z } from 'zod';
 import { clipAtWord, MAX_AGENDA_DETAIL_LENGTH, MAX_AGENDA_SUBJECT_LENGTH } from './protocol.ts';
 import type { MachineMembersStore } from './machine-notices.ts';
@@ -104,7 +105,7 @@ const KIND_SLUG = /^[a-z][a-z0-9-]{0,39}$/;
  */
 export function dialogNotice(watched: WatchedDialog): DialogNotice {
   const { dialog, name, sessionId } = watched;
-  const harness = dialog.harness === 'codex' ? 'Codex' : dialog.harness === undefined ? 'its harness' : 'Claude Code';
+  const harness = dialog.harness === undefined ? 'its harness' : harnessProductName(dialog.harness);
   const kind = KIND_SLUG.test(dialog.kind) ? dialog.kind : 'other';
   const said = `${name} is waiting on a ${kind} prompt in ${harness}`;
   return {

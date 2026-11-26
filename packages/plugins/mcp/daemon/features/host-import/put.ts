@@ -24,17 +24,10 @@
  * on `PATH` and nothing is spawned at import. It runs only when a ferret launches with that server, and only because the
  * person ticked it.
  */
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import { recordedKeyOfWord } from '@ferretry/core-ferrets/contract';
 import type { ComponentPutOptions, ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
 import { ITEM_NAME_PATTERN } from '@ferretry/std';
 import type { McpConfigWrite } from './ports.ts';
-
-/** Runtimes' word for a harness, and the harness key itself, to the key an MCP item carries (own properties only). */
-const HARNESS_KEY_OF: Readonly<Record<string, KnownHarnessKey | undefined>> = Object.assign(Object.create(null), {
-  claude: 'claude-code',
-  'claude-code': 'claude-code',
-  codex: 'codex',
-});
 
 const refused = (reason: string): ComponentPutResult => ({ ok: false, reason });
 
@@ -64,7 +57,7 @@ export function hostImportPut(
     const harness = (document as { harness?: unknown }).harness;
     let text = documentText;
     if (harness !== undefined) {
-      const key = typeof harness === 'string' ? HARNESS_KEY_OF[harness] : undefined;
+      const key = typeof harness === 'string' ? recordedKeyOfWord(harness) : undefined;
       if (key === undefined) return refused(`The server for ${file} names a harness this plugin does not know.`);
       text = `${JSON.stringify({ ...document, harness: key }, null, 2)}\n`;
     }

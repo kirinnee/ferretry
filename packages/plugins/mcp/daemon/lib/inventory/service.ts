@@ -27,7 +27,7 @@ import {
   type McpSignInTarget,
   sha256Hex,
 } from '../../../contract/index.ts';
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import { byRecordedHarnessKey, RECORDED_HARNESS_KEYS, type RecordedHarnessKey } from '@ferretry/core-ferrets/contract';
 import {
   type ClaudeApprovalKeys,
   claudeApproval,
@@ -45,7 +45,8 @@ import { type McpInventoryFolder, type McpProjectFolders, mcpFolderSubject } fro
 
 // ── Ports ────────────────────────────────────────────────────────────────────────────────────────
 
-export type McpHarness = KnownHarnessKey;
+/** The harnesses this plugin reads MCP documents of: the family table's keys, each with a {@link LAYOUTS} entry. */
+export type McpHarness = RecordedHarnessKey;
 
 /** What the inventory needs of one ferret: where it works, which harness, which runtime it spends. */
 export interface McpFerretView {
@@ -138,10 +139,42 @@ const CODEX_PROJECT_SIGN_IN =
 const serverId = (scope: McpScope, harness: McpHarness, source: string | undefined, name: string): string =>
   sha256Hex(`${scope}\n${harness}\n${source ?? ''}\n${name}`).slice(0, 24);
 
-const harnessPaths = (harness: McpHarness, home: string) =>
-  harness === 'claude-code'
-    ? { config: posix.join(home, '.claude.json'), settings: posix.join(home, 'settings.json') }
-    : { config: posix.join(home, 'config.toml'), settings: undefined };
+/** How one harness lays its MCP documents out: where, in which format, read by which parser. */
+interface McpLayout {
+  readonly format: 'json' | 'toml';
+  readonly servers: (document: unknown) => DeclarationsRead;
+  /** The runtime home's config and (when the harness has one) its approval settings. */
+  readonly home: (home: string) => { readonly config: string; readonly settings: string | undefined };
+  /** The repo's own file. */
+  readonly projectFile: (root: string) => string;
+  /** Claude's local scope (`projects[<root>].mcpServers`) and the approval documents a project carries itself. */
+  readonly local: boolean;
+  /** Why a project server's sign-in cannot be driven through this harness, when it cannot. */
+  readonly projectSignInUnsupported: string | undefined;
+}
+
+const CLAUDE_LAYOUT: McpLayout = {
+  format: 'json',
+  servers: claudeServers,
+  home: home => ({ config: posix.join(home, '.claude.json'), settings: posix.join(home, 'settings.json') }),
+  projectFile: root => posix.join(root, '.mcp.json'),
+  local: true,
+  projectSignInUnsupported: undefined,
+};
+const CODEX_LAYOUT: McpLayout = {
+  format: 'toml',
+  servers: codexServers,
+  home: home => ({ config: posix.join(home, 'config.toml'), settings: undefined }),
+  projectFile: root => posix.join(root, '.codex', 'config.toml'),
+  local: false,
+  projectSignInUnsupported: CODEX_PROJECT_SIGN_IN,
+};
+
+/** The layout of a harness the family table names; any other key is refused by name, never given Claude's. */
+const layoutOf = (harness: McpHarness): McpLayout =>
+  byRecordedHarnessKey(harness, { claude: () => CLAUDE_LAYOUT, codex: () => CODEX_LAYOUT });
+
+const harnessPaths = (harness: McpHarness, home: string) => layoutOf(harness).home(home);
 
 /** Approval documents a project carries itself (`.claude/settings.json` and its local twin). */
 const projectSettingsPaths = (root: string): readonly string[] => [
@@ -276,8 +309,7 @@ export class McpInventoryService {
     const servers: ResolvedMcpServer[] = [this.#ferretry(harness, account === undefined ? [] : [account])];
     if (account !== undefined) servers.push(...(await this.#home(account, components, files)));
     servers.push(...(await this.#project(folder, harness, account === undefined ? [] : [account], files)));
-    if (account !== undefined && harness === 'claude-code')
-      servers.push(...(await this.#local(account, folder, files)));
+    if (account !== undefined && layoutOf(harness).local) servers.push(...(await this.#local(account, folder, files)));
     return [withShadows(servers), connections, files.problems];
   }
 
@@ -290,14 +322,14 @@ export class McpInventoryService {
     ]);
     const files = reading(this.deps.documents);
     const servers: ResolvedMcpServer[] = [];
-    for (const harness of ['claude-code', 'codex'] as const) {
+    for (const harness of RECORDED_HARNESS_KEYS) {
       const runtimes = accounts.filter(account => account.harness === harness);
       if (runtimes.length === 0) continue;
       servers.push(this.#ferretry(harness, runtimes));
       for (const account of runtimes) servers.push(...(await this.#home(account, components, files)));
       for (const folder of folders) {
         servers.push(...(await this.#project(folder, harness, runtimes, files)));
-        if (harness === 'claude-code')
+        if (layoutOf(harness).local)
           for (const account of runtimes) servers.push(...(await this.#local(account, folder, files)));
       }
     }
@@ -321,10 +353,9 @@ export class McpInventoryService {
     components: readonly McpInventoryComponent[],
     files: Reading,
   ): Promise<ResolvedMcpServer[]> {
-    const source = harnessPaths(account.harness, account.home).config;
-    const read = (account.harness === 'claude-code' ? claudeServers : codexServers)(
-      await files.read(source, account.harness === 'claude-code' ? 'json' : 'toml'),
-    );
+    const layout = layoutOf(account.harness);
+    const source = layout.home(account.home).config;
+    const read = layout.servers(await files.read(source, layout.format));
     noteProblems(files.problems, source, read);
     return read.servers
       .filter(declaration => declaration.name !== FERRETRY_TOOLS_SERVER)
@@ -358,21 +389,16 @@ export class McpInventoryService {
     accounts: readonly McpInventoryAccount[],
     files: Reading,
   ): Promise<ResolvedMcpServer[]> {
-    const source =
-      harness === 'claude-code'
-        ? posix.join(folder.root, '.mcp.json')
-        : posix.join(folder.root, '.codex', 'config.toml');
-    const read = (harness === 'claude-code' ? claudeServers : codexServers)(
-      await files.read(source, harness === 'claude-code' ? 'json' : 'toml'),
-    );
+    const layout = layoutOf(harness);
+    const source = layout.projectFile(folder.root);
+    const read = layout.servers(await files.read(source, layout.format));
     noteProblems(files.problems, source, read);
     if (read.servers.length === 0) return [];
-    const projectSettings =
-      harness === 'claude-code'
-        ? await Promise.all(
-            projectSettingsPaths(folder.root).map(async path => claudeApprovalKeys(await files.read(path, 'json'))),
-          )
-        : [];
+    const projectSettings = layout.local
+      ? await Promise.all(
+          projectSettingsPaths(folder.root).map(async path => claudeApprovalKeys(await files.read(path, 'json'))),
+        )
+      : [];
     const servers: ResolvedMcpServer[] = [];
     for (const declaration of read.servers) {
       const runtimes: McpRuntimeUse[] = [];
@@ -387,7 +413,9 @@ export class McpInventoryService {
           : {
               subject: mcpFolderSubject(folder, declaration.name),
               required: false,
-              ...(harness === 'codex' ? { unsupported: CODEX_PROJECT_SIGN_IN } : {}),
+              ...(layout.projectSignInUnsupported === undefined
+                ? {}
+                : { unsupported: layout.projectSignInUnsupported }),
             };
       servers.push({
         id: serverId('project', harness, source, declaration.name),
@@ -412,16 +440,20 @@ export class McpInventoryService {
     files: Reading,
   ): Promise<McpApproval> {
     const paths = harnessPaths(account.harness, account.home);
-    if (account.harness === 'codex') {
-      if (declaration.disabled === true) return 'disabled';
-      return codexTrusted(await files.read(paths.config, 'toml'), root) ? 'approved' : 'pending';
-    }
-    const home = await files.read(paths.config, 'json');
-    const settings = paths.settings === undefined ? {} : await files.read(paths.settings, 'json');
-    return claudeApproval(declaration.name, claudeProjectEntry(home, root), [
-      claudeApprovalKeys(settings),
-      ...projectSettings,
-    ]);
+    return await byRecordedHarnessKey(account.harness, {
+      claude: async () => {
+        const home = await files.read(paths.config, 'json');
+        const settings = paths.settings === undefined ? {} : await files.read(paths.settings, 'json');
+        return claudeApproval(declaration.name, claudeProjectEntry(home, root), [
+          claudeApprovalKeys(settings),
+          ...projectSettings,
+        ]);
+      },
+      codex: async (): Promise<McpApproval> => {
+        if (declaration.disabled === true) return 'disabled';
+        return codexTrusted(await files.read(paths.config, 'toml'), root) ? 'approved' : 'pending';
+      },
+    });
   }
 
   /** Claude's local scope: `projects[<root>].mcpServers` in the runtime's own `.claude.json`. */

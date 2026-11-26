@@ -12,6 +12,7 @@
  * dialog whose affirmative path is READ OFF THE PANE. Nothing here guesses a key count, and a
  * recognised dialog whose options cannot be parsed returns nothing rather than a blind Enter.
  */
+import { byRecordedHarness } from '@ferretry/core-ferrets/contract';
 import { parseHarnessDialog } from './harness-dialog.ts';
 
 /** A dialog whose affirmative path is known, and the exact keys that take it. */
@@ -189,7 +190,9 @@ function autoDefaultNudgeAction(pane: string): StartupDialogAction | undefined {
  */
 export function codexUpdateAction(pane: string): StartupDialogAction | undefined {
   const dialog = parseHarnessDialog(pane);
-  if (dialog?.kind !== 'update' || dialog.harness !== 'codex' || dialog.selected === undefined) return undefined;
+  if (dialog?.kind !== 'update' || dialog.selected === undefined) return undefined;
+  // Only Codex's update prompt is answered here: Claude's is never skipped on a guess.
+  if (!byRecordedHarness(dialog.harness, { claude: () => false, codex: () => true })) return undefined;
   const skip = dialog.options.find(option => option.label.toLowerCase() === 'skip');
   if (skip === undefined) return undefined;
   const distance = skip.number - dialog.selected;
