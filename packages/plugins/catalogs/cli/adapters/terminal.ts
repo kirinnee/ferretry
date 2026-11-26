@@ -21,24 +21,27 @@ interface CliExtras {
 
 const extras = (ctx: CliContext<never>): CliExtras => ctx as unknown as CliExtras;
 
-/** The shell's terminal carries no colour; today's `ConsoleIo` tinted `success` and `warn` and wrote both to stdout. */
+/**
+ * The shell's terminal carries no colour; today's `ConsoleIo` tinted `success` and `warn` and wrote both to stdout. Each
+ * message is one line, as `console.log` made it: the terminal's `out` writes exactly what it is given, so the newline is here.
+ */
 class TerminalOutput implements ICatalogOutput, ICatalogInstallOutput {
   #exitCode = 0;
   constructor(private readonly io: TerminalIo) {}
   report(message: string): void {
-    this.io.out(message);
+    this.io.out(`${message}\n`);
   }
   success(message: string): void {
-    this.io.out(message);
+    this.io.out(`${message}\n`);
   }
   warn(message: string): void {
-    this.io.out(message);
+    this.io.out(`${message}\n`);
   }
   error(message: string): void {
-    this.io.err(message);
+    this.io.err(`${message}\n`);
   }
   diagnostic(message: string): void {
-    this.io.err(message);
+    this.io.err(`${message}\n`);
   }
   setExitCode(code: number): void {
     this.#exitCode = code;

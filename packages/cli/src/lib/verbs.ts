@@ -258,10 +258,18 @@ const SHELL_ALIAS_LINES = [
   { verb: 'daemon tunnel', alias: 'tunnel' },
   { verb: 'daemon update', alias: 'update' },
   { verb: 'daemon import', alias: 'runtime link' },
+  // A list spelled the other way: `project list` and `profile ls` are the verbs, and each runs silently as the other.
+  { verb: 'project ls', alias: 'project list', hidden: true, quiet: true },
+  { verb: 'profile list', alias: 'profile ls', hidden: true, quiet: true },
   // The Board's old noun: typed from habit, from an old transcript or from an agent's old instructions. It runs
   // `task` and says so on stderr; it is not listed in `--help`.
   { verb: 'card', alias: 'task', hidden: true },
-] as const satisfies readonly { readonly verb: string; readonly alias: string; readonly hidden?: true }[];
+] as const satisfies readonly {
+  readonly verb: string;
+  readonly alias: string;
+  readonly hidden?: true;
+  readonly quiet?: true;
+}[];
 
 export interface VerbEntry {
   /** The words a person types, in order. */
@@ -279,6 +287,8 @@ export interface VerbEntry {
   readonly alias?: string;
   /** Left out of `--help`: an old spelling that still runs, and says what replaced it on stderr. */
   readonly hidden?: true;
+  /** A hidden alias that runs without the "is now" line on stderr: a second spelling, not a renamed one. */
+  readonly quiet?: true;
   /** Declared the default of its group: the bare group runs it. */
   readonly default?: true;
 }
@@ -342,6 +352,7 @@ export function buildVerbTable(registry: CommandRegistry): VerbTable {
       ],
       alias: old.alias,
       ...('hidden' in old ? { hidden: true as const } : {}),
+      ...('quiet' in old ? { quiet: true as const } : {}),
     });
   for (const plugin of registry.plugins)
     for (const decl of declaredVerbs(plugin)) {
