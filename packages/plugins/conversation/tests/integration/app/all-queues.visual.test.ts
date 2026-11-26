@@ -129,3 +129,83 @@ describe('the All queues screen', () => {
       }
     }, 60_000);
 });
+
+// G6 (W-05): the search box on the screen the command bar's "Queue" opens, in a real browser: typed, narrowed, cleared by
+// Escape, and the "no match" state, at 390 and 1440 wide, light and dark, in the default style and the roundest one.
+describe('searching the queue (G6)', () => {
+  for (const width of [390, 1_440] as const)
+    for (const scheme of ['light', 'dark'] as const)
+      for (const family of ['studio', 'genz'] as const)
+        it(`narrows by what is typed and says what matched nothing, on ${width} wide in ${family} ${scheme}`, async () => {
+          const context = await browser.newContext({
+            viewport: { width, height: width === 390 ? 844 : 900 },
+            colorScheme: scheme,
+            deviceScaleFactor: width === 390 ? 2 : 1,
+          });
+          try {
+            const origin = server?.url.origin ?? '';
+            await context.route('**/*', async route =>
+              new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+            );
+            const tab = await context.newPage();
+            const errors: string[] = [];
+            tab.on('pageerror', error => errors.push(error.message));
+            await tab.goto(`${origin}/?theme=studio-${scheme}&style=${family}`);
+            const box = tab.getByRole('searchbox', { name: 'Search messages' });
+            await box.waitFor({ timeout: 10_000 });
+            expect(await tab.locator('[data-queue-row]').count()).toBe(3);
+
+            // Keyboard only: focus the box, type, and the list narrows to the one message that says it.
+            await box.focus();
+            await tab.keyboard.type('CHANGELOG');
+            expect(await tab.locator('[data-queue-row]').count()).toBe(1);
+            expect(await tab.locator('[data-queue-group]').count()).toBe(1);
+            if (shotsDir !== '') {
+              await tab.waitForTimeout(150);
+              await tab.screenshot({
+                path: join(shotsDir, `search-${width}-${family}-${scheme}-narrowed.png`),
+                fullPage: true,
+              });
+            }
+
+            await tab.keyboard.press('Escape');
+            expect(await box.inputValue()).toBe('');
+            expect(await tab.locator('[data-queue-row]').count()).toBe(3);
+
+            // A message the ferret already read is not listed, but the search finds it, and the ferret's card comes with it.
+            await tab.keyboard.type('rollback');
+            expect(await tab.locator('[data-queue-row]').count()).toBe(1);
+            expect(await tab.locator('[data-queue-group]').count()).toBe(1);
+            expect(await tab.locator('.fy-queue-ferret').allInnerTexts()).toEqual(['Idle']);
+            if (shotsDir !== '') {
+              await tab.waitForTimeout(150);
+              await tab.screenshot({
+                path: join(shotsDir, `search-${width}-${family}-${scheme}-finished.png`),
+                fullPage: true,
+              });
+            }
+            await tab.keyboard.press('Escape');
+            expect(await tab.locator('[data-queue-row]').count()).toBe(3);
+
+            await tab.keyboard.type('zebra');
+            expect(await tab.locator('[data-queue-row]').count()).toBe(0);
+            expect(await tab.locator('[data-queue-no-match]').innerText()).toContain('No message matched “zebra”');
+            // The status region was on the page, empty, before the first search found nothing.
+            expect(await tab.locator('[data-queue-search-status][role="status"]').count()).toBe(1);
+            expect(await tab.locator('[data-queue-empty]').count()).toBe(0);
+            expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+            if (shotsDir !== '') {
+              await tab.waitForTimeout(150);
+              await tab.screenshot({
+                path: join(shotsDir, `search-${width}-${family}-${scheme}-nomatch.png`),
+                fullPage: true,
+              });
+            }
+            await tab.getByRole('button', { name: 'Clear search' }).first().click();
+            expect(await tab.locator('[data-queue-row]').count()).toBe(3);
+            expect(errors).toEqual([]);
+          } finally {
+            await context.close();
+          }
+        }, 60_000);
+});

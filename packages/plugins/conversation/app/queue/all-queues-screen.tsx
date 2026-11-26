@@ -22,7 +22,7 @@ import { MessageSent } from '../../contract/index.ts';
 import { useConversationClient, useConversationDaemon } from '../client.ts';
 import { useSendOutbox } from '../composer/send-outbox-wiring.ts';
 import { NO_OUTBOX, POLL_MS, QueuePageView, type QueueRowHandlers } from './queue-page.tsx';
-import { type QueueGroup, ferretRows, waitingGroups } from './queue-view.ts';
+import { type QueueGroup, ferretRows, queueGroups } from './queue-view.ts';
 import { queueActions, readFerretQueuePage } from './send-queue.ts';
 
 /** Ferrets' `GET /v1/ferrets`: every ferret's summary. */
@@ -159,7 +159,7 @@ export function AllQueues({ client, daemon }: { readonly client: PluginClient; r
         rows: ferretRows(daemon, entry.ferretId, entry.ferretId, [], outbox),
       });
     }
-    return waitingGroups(out);
+    return queueGroups(out);
   }, [daemon, ferrets, outbox, queues, unread]);
 
   const handlers = useMemo<QueueRowHandlers>(
@@ -186,6 +186,7 @@ export function AllQueues({ client, daemon }: { readonly client: PluginClient; r
       }}
       showMachine={false}
       title="All queues"
+      waitingOnly
     />
   );
 }
