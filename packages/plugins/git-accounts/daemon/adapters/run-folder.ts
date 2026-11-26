@@ -1,5 +1,5 @@
 /** The agents' folder over this plugin's own kernel-made `downloads` root: `<home>/state/git-accounts/downloads`. */
-import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
+import type { FencedPath, RootHandle, RootsPort } from '@ferretry/kernel/contract';
 import type { RunFolder } from '../features/ssh-keys/agents.ts';
 
 type RunRoot = Pick<
@@ -41,6 +41,46 @@ export function rootRunFolder(root: RunRoot): RunFolder {
       await root.setMode(folder, WORKING_MODE);
       for (const entry of await root.list(folder)) await root.remove(`${folder}/${entry}` as FencedPath);
       await root.setMode(folder, mode);
+    },
+  };
+}
+
+/**
+ * Shim repair owns two EXACT scopes under agent-homes, separate from downloads. Each base is checked against the
+ * home anchor; a symlink to a sibling is refused. Removing the config is ONE descriptor-relative tree removal,
+ * rather than a list followed by separately resolved removes that a swapped parent could redirect.
+ */
+export function rootGhShimFolder(roots: Pick<RootsPort, 'root'>): RunFolder {
+  const managed = roots.root('agent-homes', { subfolder: 'gh' });
+  const shims = roots.root('agent-homes', { subfolder: 'gh/shims' });
+  const config = roots.root('agent-homes', { subfolder: 'gh/pane-gh-config' });
+  const locate = (root: RootHandle, name = '.'): FencedPath => {
+    const found = root.resolve(name);
+    if (!found.ok) throw new Error('git-accounts: GitHub client unavailable');
+    return found.value;
+  };
+  const path = locate(managed).replace(/\/\.?$/u, '');
+  return {
+    path,
+    isPrivate: async () => {
+      await managed.makeDirectory(locate(managed), { mode: 0o700 });
+      return (await managed.checkPrivateChain(locate(managed))).ok;
+    },
+    remove: async () => {
+      throw new Error('git-accounts: shim removal is not supported');
+    },
+    publish: async (name, text, mode) => {
+      if (name !== 'shims/gh') throw new Error('git-accounts: unexpected shim name');
+      await shims.publish(locate(shims, 'gh'), new TextEncoder().encode(text), { mode });
+    },
+    emptyDirectory: async (name, mode) => {
+      if (name !== 'pane-gh-config') throw new Error('git-accounts: unexpected config folder');
+      // Creating through the scoped base proves it is a plain folder before any recursive removal.
+      await config.makeDirectory(locate(config), { mode: 0o700 });
+      await managed.setMode(locate(config), 0o700);
+      await config.remove(locate(config));
+      await config.makeDirectory(locate(config), { mode });
+      await managed.setMode(locate(config), mode);
     },
   };
 }

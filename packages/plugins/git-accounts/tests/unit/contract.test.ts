@@ -192,6 +192,7 @@ describe('git-accounts manifest', () => {
       'hostFacts',
       'network',
       'roots',
+      'setMode',
       'spawn',
       'which',
     ]);
