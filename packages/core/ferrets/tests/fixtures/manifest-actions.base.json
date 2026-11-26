@@ -1237,6 +1237,10 @@
           "help": "the session that will own the new checkout"
         },
         {
+          "flag": "--project <name>",
+          "help": "file the checkout in this registered project's folder of worktrees"
+        },
+        {
           "flag": "--json",
           "help": "print the protocol payload instead of the human rendering"
         }
@@ -1271,6 +1275,10 @@
         {
           "flag": "--session <id>",
           "help": "the session that will own the new checkout"
+        },
+        {
+          "flag": "--project <name>",
+          "help": "file the checkout in this registered project's folder of worktrees"
         },
         {
           "flag": "--json",
