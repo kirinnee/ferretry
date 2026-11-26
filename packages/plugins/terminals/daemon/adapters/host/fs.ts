@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 /**
  * THE ONE PLACE TERMINALS READS THE MACHINE DIRECTLY (a permanent per-file exemption, DECISIONS-2 #21).
  *
@@ -45,6 +46,22 @@ export const hostUserId: number | undefined = process.getuid?.();
 /** Sends one signal to one pid (`process.kill`). The caller has already re-proved which process that pid is. */
 export function signalProcess(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void {
   process.kill(pid, signal);
+}
+
+/** False only when the OS proves a remembered pane process is gone; permission errors stay live/unknown. */
+export async function processMayExist(pid: number): Promise<boolean> {
+  try {
+    process.kill(pid, 0);
+    if (hostPlatform === 'linux') {
+      // A zombie still has a PID but holds no cwd. Container init may leave it unreaped indefinitely.
+      const stat = await readFile('/proc/' + pid + '/stat', 'utf8');
+      const state = stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
+      if (state === 'Z' || state === 'X') return false;
+    }
+    return true;
+  } catch (error) {
+    return !['ESRCH', 'ENOENT'].includes((error as NodeJS.ErrnoException).code ?? '');
+  }
 }
 
 /** Finds a bare command name on the colon-separated search path it is GIVEN (never this process's own `PATH`). */
