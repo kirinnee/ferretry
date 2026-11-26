@@ -25,9 +25,18 @@ const T0 = Date.UTC(2026, 10, 16, 18, 0, 0);
 const AGENT = { kind: 'agent' } as never;
 const PANE = { alive: true, dead: false, promptReady: true, activeWork: false };
 
-function world(mode: 'auto' | 'interactive') {
+function world(
+  mode: 'auto' | 'interactive',
+  /** The pane is quiet for this many looks, then a person starts typing: a hold that begins DURING a wait. */
+  quietLooks = 0,
+  /** The idle delivery answers busy, as a pane mid-turn does, so the send goes to the harness's own queue. */
+  busy = false,
+) {
   const log: QueueEvent[] = [];
   const typed: string[] = [];
+  const queuedKeys: string[] = [];
+  const settled: unknown[] = [];
+  let looks = 0;
   let typing = true;
   let seconds = 0;
   const clock = { now: () => new Date(T0 + seconds++ * 1_000).toISOString() as Instant };
@@ -45,18 +54,24 @@ function world(mode: 'auto' | 'interactive') {
     get: async () => summary,
     list: async () => [summary],
     harness: async () => ({
-      observe: async () => ({ ok: true, value: typing ? { ...PANE, typing: true } : PANE }),
-      deliver: async ({ text }: { text: string }) => {
+      observe: async () => ({ ok: true, value: typing && ++looks > quietLooks ? { ...PANE, typing: true } : PANE }),
+      deliver: async ({ text, beforeWrite }: { text: string; beforeWrite?: () => Promise<void> }) => {
+        // The runner's own order: the readiness wait, then `beforeWrite`, then the first key.
+        if (busy) return { ok: false, error: { refused: 'not_ready', why: 'busy' } };
+        await beforeWrite?.();
         typed.push(text);
         return { ok: true, value: { typed: true } };
       },
-      queue: async () => ({ ok: true, value: undefined }),
+      queue: async (text: string) => {
+        queuedKeys.push(text);
+        return { ok: true, value: 'held' };
+      },
     }),
   };
   const ledger = {
     list: async () => [],
     accept: async () => ({ created: true }),
-    settle: async () => ({}),
+    settle: async (_id: unknown, _sendId: unknown, change: unknown) => (settled.push(change), {}),
     withdraw: async () => undefined,
     revise: async () => undefined,
   };
@@ -84,7 +99,7 @@ function world(mode: 'auto' | 'interactive') {
   const quiet = (): void => {
     typing = false;
   };
-  return { send, queued, typed, quiet };
+  return { send, queued, typed, queuedKeys, settled, quiet };
 }
 
 describe('the typing hold in the draft guard', () => {
@@ -131,5 +146,36 @@ describe('the typing hold in the draft guard', () => {
     }
 
     should(typed).deepEqual([]);
+  });
+
+  it('should re-check at the write, after the readiness wait: an Agenda nudge, the Warden and a notice are kept, never typed', async () => {
+    for (const flag of [{ agenda: true }, { warden: true }, { notice: true }] as const) {
+      // Quiet at the pre-check, typing when `beforeWrite` looks again, after the wait.
+      const { send, typed, settled } = world('interactive', 1);
+
+      const sent = await send.submit(ID, { sendId: 'own', message: 'm', origin: AGENT, ...flag });
+
+      should(sent.waitReason).equal('typing');
+      should(typed).deepEqual([]);
+      should(settled).containEql({ untyped: true });
+    }
+  });
+
+  it('should re-check before the busy fallback queue key, and never press it while a person types', async () => {
+    const { send, queuedKeys, settled } = world('interactive', 1, true);
+
+    const sent = await send.submit(ID, { sendId: 'busy', message: 'a nudge', origin: AGENT, agenda: true });
+
+    should(sent.waitReason).equal('typing');
+    should(queuedKeys).deepEqual([]);
+    should(settled).containEql({ untyped: true });
+  });
+
+  it('should never hold a person’s own send at the write either', async () => {
+    const { send, typed } = world('auto', 1);
+
+    await send.submit(ID, { sendId: 'mine', message: 'hello from me', origin: PERSON_ORIGIN });
+
+    should(typed).deepEqual(['hello from me']);
   });
 });

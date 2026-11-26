@@ -61,7 +61,7 @@ import {
   SessionSendService,
 } from './lib/delivery/index.ts';
 import { SessionSendError } from './lib/delivery/mounts/session-send.ts';
-import { answerOf, heldForTyping, typingSenderOf } from '../contract/index.ts';
+import { answerOf, heldForTyping, TypingHeld, typingSenderOf } from '../contract/index.ts';
 import { QueueRefused, type SessionQueue, type SessionQueueStore } from '../contract/index.ts';
 import {
   type HarnessGate,
@@ -1045,7 +1045,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
   const typeOnPane = async (ferret: SessionId, request: TypedSend, first: SendTarget): Promise<SendResult> => {
     // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
     // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
-    const bound = await terminal.bind(ferret);
+    const bound = await terminal.bind(ferret, typingSenderOf(request));
     await refuseWhileAsking(ferret);
     const { text, fromName } = await typedText(ferret, request);
     // SEND-NOW: the turn is stopped FIRST and BEFORE the record exists: a stop that is refused (a hold, a gone pane, a
@@ -1124,11 +1124,11 @@ export function buildSendHalf(deps: SendHalfDeps) {
           });
         throw new SessionSendError('unconfirmed', error.message, undefined, request.sendId);
       }
-      // NEVER DROPPED: a box that could not be proven empty typed nothing, and nothing has changed by refusing. The
-      // owner's message and a ferret's are KEPT open as `untyped`, and the tracker types them the first time the box
-      // reads clear — saying so out loud past its stuck limit. The Warden re-plans its own and a daemon notice ends here.
-      if (error instanceof UnreadableComposer && request.warden !== true && request.notice !== true) {
-        const kept = await keepUntyped(ferret, request.sendId, 'unreadable');
+      // NEVER DROPPED: a box that could not be proven empty, or a person typing (the hold), typed nothing: the send is KEPT
+      // `untyped` and typed once it reads clear. The typing hold keeps the Warden's and a notice too; an unreadable box ends them.
+      const typing = error instanceof TypingHeld;
+      if (typing || (error instanceof UnreadableComposer && request.warden !== true && request.notice !== true)) {
+        const kept = await keepUntyped(ferret, request.sendId, typing ? 'typing' : 'unreadable');
         if (kept !== undefined) return kept;
       }
       await ledger.withdraw(ferret, request.sendId, 'nothing was typed').catch(() => undefined);

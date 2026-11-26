@@ -22,9 +22,14 @@ async function world() {
   const root = await mkdtemp(join(tmpdir(), 'fy-typing-'));
   const socket = join(root, 's');
   const server = new KernelTmuxProcess(bunSpawn({ PATH: process.env.PATH ?? '/usr/bin:/bin' }), socket, tmux);
-  const created = await server.execute(['new-session', '-d', '-s', 'agent', '-x', '80', '-y', '10', 'cat']);
+  const created = await server.execute(['new-session', '-d', '-s', 'agent', '-x', '120', '-y', '40', 'sleep 600']);
   expect(created.code).toBe(0);
+  // Two panes in ONE session: the second is the one a person looks at, the first is its untouched sibling.
+  expect((await server.execute(['split-window', '-t', 'agent', '-h', 'sleep 600'])).code).toBe(0);
   const paneId = (await server.execute(['display-message', '-p', '-t', 'agent', '#{pane_id}'])).stdout.trim();
+  const sibling = (await server.execute(['list-panes', '-t', 'agent', '-F', '#{pane_id}'])).stdout
+    .split('\n')
+    .find(id => id !== '' && id !== paneId) as string;
   // The daemon's clock, moved forward for ONE look so the 5 s hold can be waited out without waiting.
   let skew = 0;
   const hold = new TypingHold(() => Date.now() + skew);
@@ -35,12 +40,13 @@ async function world() {
   return {
     server,
     paneId,
+    sibling,
     hold,
     console: new SessionConsoleService(proof, server, hold),
-    held: async (later = 0) => {
+    held: async (later = 0, pane = paneId) => {
       skew = later;
       try {
-        return await hold.held(server, paneId, 'agent');
+        return await hold.held(server, pane, 'agent');
       } finally {
         skew = 0;
       }
@@ -76,7 +82,7 @@ async function world() {
 }
 
 describe('the typing hold over a real tmux', () => {
-  it('should see a key typed through tmux attach, and let go after the hold, with no hook set', async () => {
+  it('should see a key typed through tmux attach in the pane looked at, and let go after the hold, with no hook set', async () => {
     const subject = await world();
     try {
       const person = subject.attach();
@@ -84,11 +90,16 @@ describe('the typing hold over a real tmux', () => {
         async () => ((await subject.server.execute(['list-clients'])).stdout.trim() === '' ? undefined : true),
         'the client to attach',
       );
-      // Its attaching is not typing: only input is, and the second the client began is long past the hold.
-      expect(await subject.held(6_000)).toBe(false);
+      // Attaching is not typing: a bare attach holds no pane at all, however fresh the attach second is.
+      expect(await subject.held()).toBe(false);
+      expect(await subject.held(0, subject.sibling)).toBe(false);
 
+      // tmux stamps whole seconds, so a key is told from the attach once a second has passed.
+      await Bun.sleep(1_100);
       person.type('hello');
       await waitForValue(async () => ((await subject.held()) ? true : undefined), 'the typed key to hold the pane');
+      // The key went to the pane the client looks at; the untouched sibling of the SAME session is not theirs.
+      expect(await subject.held(0, subject.sibling)).toBe(false);
       expect(await subject.held(6_000)).toBe(false);
       // A hook set on the server would list as `name[0] command`: the bare names are tmux's own unset ones.
       expect((await subject.server.execute(['show-hooks', '-g'])).stdout).not.toMatch(/\[\d+\]/u);

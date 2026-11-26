@@ -17,7 +17,7 @@ const clock = () => {
   };
 };
 
-/** A tmux that answers `list-clients` with the lines given (`seconds|control`), or refuses. */
+/** A tmux that answers `list-clients` with the lines given (`input|attached|control|pane`), or refuses. */
 const tmuxWith = (lines: readonly string[], code = 0) => ({
   execute: async (args: readonly string[]) => ({
     code,
@@ -26,6 +26,9 @@ const tmuxWith = (lines: readonly string[], code = 0) => ({
   }),
 });
 const seconds = (offsetMs: number): number => Math.floor((T0 + offsetMs) / 1_000);
+/** One attached person's client: its last input and its attach (ms from now), and the pane it is looking at. */
+const client = (inputMs: number, attachedMs: number, pane: string): string =>
+  `${seconds(inputMs)}|${seconds(attachedMs)}|0|${pane}`;
 
 describe('the typing hold', () => {
   it('should hold a pane a person typed into for 5 s, and let go after', async () => {
@@ -62,21 +65,73 @@ describe('the typing hold', () => {
     expect(await hold.held(tmuxWith([]), '%2', 'fy-b')).toBe(false);
   });
 
-  it('should see an attached client’s keys by its input second, within the hold', async () => {
+  it('should see a key in the pane the attached client is looking at, within the hold', async () => {
+    const hold = new TypingHold(clock().nowMs);
+
+    expect(await hold.held(tmuxWith([client(-1_000, -60_000, '%1')]), '%1', 'fy-a')).toBe(true);
+    expect(await new TypingHold(clock().nowMs).held(tmuxWith([client(-6_000, -60_000, '%1')]), '%1', 'fy-a')).toBe(
+      false,
+    );
+  });
+
+  it('should not hold a sibling pane the client is not looking at', async () => {
+    const hold = new TypingHold(clock().nowMs);
+    const listing = tmuxWith([client(-1_000, -60_000, '%1')]);
+
+    expect(await hold.held(listing, '%1', 'fy-a')).toBe(true);
+    expect(await hold.held(listing, '%2', 'fy-a')).toBe(false);
+  });
+
+  it('should not take attaching for typing: a stamp no later than the attach is no key', async () => {
+    const hold = new TypingHold(clock().nowMs);
+
+    expect(await hold.held(tmuxWith([client(-1_000, -1_000, '%1')]), '%1', 'fy-a')).toBe(false);
+    expect(await hold.held(tmuxWith([client(-1_000, 0, '%1')]), '%1', 'fy-a')).toBe(false);
+  });
+
+  it('should never hold for a stamp from the future, however far ahead or long after', async () => {
     const time = clock();
     const hold = new TypingHold(time.nowMs);
+    const tomorrow = tmuxWith([client(86_400_000, -60_000, '%1')]);
 
-    expect(await hold.held(tmuxWith([`${seconds(-1_000)}|0`]), '%1', 'fy-a')).toBe(true);
-    expect(await hold.held(tmuxWith([`${seconds(-6_000)}|0`]), '%1', 'fy-a')).toBe(false);
+    expect(await hold.held(tomorrow, '%1', 'fy-a')).toBe(false);
+    time.tick(3_600_000);
+    expect(await hold.held(tomorrow, '%1', 'fy-a')).toBe(false);
+  });
+
+  it('should let go 5 s after the stamp was first seen, however the stamp keeps reading', async () => {
+    const time = clock();
+    const hold = new TypingHold(time.nowMs);
+    // One stamp, 1 s old when first read, and tmux's clock says it is still fresh for a long while (a stuck stamp).
+    const stamp = Math.floor((T0 - 1_000) / 1_000);
+    const stuck = { execute: async () => ({ code: 0, stdout: `${stamp}|${stamp - 60}|0|%1`, stderr: '' }) };
+
+    expect(await hold.held(stuck, '%1', 'fy-a')).toBe(true);
+    time.tick(TYPING_HOLD_MS - 1_001);
+    expect(await hold.held(stuck, '%1', 'fy-a')).toBe(true);
+    time.tick(2_000);
+    expect(await hold.held(stuck, '%1', 'fy-a')).toBe(false);
+  });
+
+  it('should count a Console key that lands while tmux is being asked', async () => {
+    const hold = new TypingHold(clock().nowMs);
+    const slow = {
+      execute: async () => {
+        hold.pressed('%1');
+        return { code: 0, stdout: '', stderr: '' };
+      },
+    };
+
+    expect(await hold.held(slow, '%1', 'fy-a')).toBe(true);
   });
 
   it('should never count a control-mode client (the daemon’s own), a failed read or garbage', async () => {
     const hold = new TypingHold(clock().nowMs);
-    const fresh = `${seconds(0)}|`;
+    const fresh = `${seconds(-1_000)}|${seconds(-60_000)}`;
 
-    expect(await hold.held(tmuxWith([`${fresh}1`]), '%1', 'fy-a')).toBe(false);
-    expect(await hold.held(tmuxWith([`${fresh}0`], 1), '%1', 'fy-a')).toBe(false);
-    expect(await hold.held(tmuxWith(['x|0', '', '0|0']), '%1', 'fy-a')).toBe(false);
+    expect(await hold.held(tmuxWith([`${fresh}|1|%1`]), '%1', 'fy-a')).toBe(false);
+    expect(await hold.held(tmuxWith([`${fresh}|0|%1`], 1), '%1', 'fy-a')).toBe(false);
+    expect(await hold.held(tmuxWith(['x|y|0|%1', '', '0|0|0|%1']), '%1', 'fy-a')).toBe(false);
     expect(await hold.held({ execute: async () => Promise.reject(new Error('no server')) }, '%1', 'fy-a')).toBe(false);
   });
 
