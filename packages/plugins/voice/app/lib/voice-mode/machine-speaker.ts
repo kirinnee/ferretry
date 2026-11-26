@@ -12,7 +12,8 @@
  *   - `segment` when a caption's first sound arrives, `end` once all of it has arrived AND been played, `stopped` after
  *     `stop()` (the person's own "stop", or barge-in).
  *
- * `stop()` silences the player and tells the machine to drop what it has not yet spoken. Nothing here keeps the words.
+ * `stop()` silences the player and tells the machine to drop what it has not yet spoken, and where the person's ears were, so
+ * the ferret can be told what was heard. A reading replaced by the next one is flushed without that. Nothing here keeps the words.
  */
 import type { ReplyState } from '../../../contract/index.ts';
 import type { SpeakerEvent, SpeakerPort, SpeakRequest } from '../voice-chat/ports.ts';
@@ -20,7 +21,7 @@ import type { ReplyPlayer, SpeechLineEvent, VoiceStreamHandle } from '../stream/
 
 export interface MachineSpeakerDeps {
   /** The open stream, once there is one. */
-  readonly stream: () => Pick<VoiceStreamHandle, 'speak' | 'hush'> | undefined;
+  readonly stream: () => Pick<VoiceStreamHandle, 'speak' | 'hush' | 'interrupt'> | undefined;
   /** Where the machine's reply voice is; `undefined` before the stream said. */
   readonly replyState: () => ReplyState | undefined;
   readonly player: Pick<ReplyPlayer, 'remainingMs'>;
@@ -57,11 +58,12 @@ export function createMachineSpeaker(deps: MachineSpeakerDeps): MachineSpeaker {
   const every = deps.every ?? setIntervalClock;
   let current: Reading | null = null;
 
-  const finish = (reading: Reading, event: SpeakerEvent, hush: boolean): void => {
+  const finish = (reading: Reading, event: SpeakerEvent, hush: 'none' | 'flush' | 'person'): void => {
     if (current !== reading) return;
     current = null;
     reading.stopDrain?.();
-    if (hush) deps.stream()?.hush();
+    if (hush === 'person') deps.stream()?.interrupt();
+    else if (hush === 'flush') deps.stream()?.hush();
     deps.onActive?.(false);
     reading.onEvent(event);
   };
@@ -71,7 +73,7 @@ export function createMachineSpeaker(deps: MachineSpeakerDeps): MachineSpeaker {
     voices: () => [],
     unlock: () => undefined,
     speak(request: SpeakRequest, onEvent) {
-      if (current !== null) finish(current, { type: 'stopped' }, true);
+      if (current !== null) finish(current, { type: 'stopped' }, 'flush');
       const stream = deps.stream();
       if (stream === undefined || deps.replyState() === 'absent') {
         onEvent({ type: 'error', reason: 'unavailable' });
@@ -89,7 +91,7 @@ export function createMachineSpeaker(deps: MachineSpeakerDeps): MachineSpeaker {
       deps.onActive?.(true);
     },
     stop() {
-      if (current !== null) finish(current, { type: 'stopped' }, true);
+      if (current !== null) finish(current, { type: 'stopped' }, 'person');
     },
     onSpeech(event) {
       const reading = current;
@@ -103,13 +105,13 @@ export function createMachineSpeaker(deps: MachineSpeakerDeps): MachineSpeaker {
         }
       } else if (event.event === 'failed') {
         // Nothing was heard: another voice may read it all. Something was: the rest is dropped, never read again.
-        finish(reading, { type: 'error', reason: reading.heard ? 'failed' : 'unavailable' }, true);
+        finish(reading, { type: 'error', reason: reading.heard ? 'failed' : 'unavailable' }, 'flush');
       } else {
         reading.pending.delete(event.id);
         if (reading.pending.size === 0) {
           // All the sound is here; the reading ends when it has been heard.
           reading.stopDrain = every(() => {
-            if (deps.player.remainingMs() <= 0) finish(reading, { type: 'end' }, false);
+            if (deps.player.remainingMs() <= 0) finish(reading, { type: 'end' }, 'none');
           }, DRAIN_CHECK_MS);
         }
       }

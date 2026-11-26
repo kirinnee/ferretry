@@ -53,7 +53,7 @@ function realSink() {
         return [{ id, text }];
       },
       drop: ids => void dropped.push(...ids),
-      hush: () => undefined,
+      interrupt: () => undefined,
     }),
     replyState: () => 'ready',
     player: { remainingMs: () => 0 },

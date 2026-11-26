@@ -7,6 +7,7 @@ import { createMachineSpeaker } from '../../../app/lib/voice-mode/machine-speake
 function rig(options: { state?: ReplyState | undefined; stream?: boolean; remaining?: number } = {}) {
   const sent: string[] = [];
   let hushes = 0;
+  let interrupts = 0;
   let ids = 0;
   let remaining = options.remaining ?? 0;
   let tick: (() => void) | undefined;
@@ -22,6 +23,10 @@ function rig(options: { state?: ReplyState | undefined; stream?: boolean; remain
             },
             hush: () => {
               hushes += 1;
+            },
+            interrupt: () => {
+              hushes += 1;
+              interrupts += 1;
             },
           },
     replyState: () => ('state' in options ? options.state : 'ready'),
@@ -43,6 +48,8 @@ function rig(options: { state?: ReplyState | undefined; stream?: boolean; remain
     active,
     request,
     hushes: () => hushes,
+    /** Of those, the ones that carry where the person's ears were (the person stopped it). */
+    interrupts: () => interrupts,
     ticking: () => tick !== undefined,
     tick: () => tick?.(),
     setRemaining: (ms: number) => {
@@ -129,6 +136,24 @@ describe('the machine speaker', () => {
     late.speaker.onSpeech({ id: 1, event: 'failed', code: 'reply_failed' });
     expect(late.events.at(-1)).toEqual({ type: 'error', reason: 'failed' });
     expect(late.hushes()).toBe(1);
+  });
+
+  test('V3: the person’s stop says where their ears were; a reading replaced, or failed, is only flushed', () => {
+    const stopped = rig();
+    stopped.start(['One.']);
+    stopped.speaker.onSpeech({ id: 0, event: 'started' });
+    stopped.speaker.stop();
+    expect([stopped.hushes(), stopped.interrupts()]).toEqual([1, 1]);
+    const replaced = rig();
+    replaced.start(['First.']);
+    replaced.speaker.onSpeech({ id: 0, event: 'started' });
+    replaced.speaker.speak(replaced.request(['Second.']), event => void replaced.events.push(event));
+    expect([replaced.hushes(), replaced.interrupts()]).toEqual([1, 0]);
+    const failed = rig();
+    failed.start(['One.']);
+    failed.speaker.onSpeech({ id: 0, event: 'started' });
+    failed.speaker.onSpeech({ id: 0, event: 'failed', code: 'x' });
+    expect([failed.hushes(), failed.interrupts()]).toEqual([1, 0]);
   });
 
   test('a new reading replaces the one before it, which is hushed', () => {
@@ -262,7 +287,7 @@ describe('the machine speaker on its own clock', () => {
   test('has no device voices to offer, nothing to unlock, and ends a finished reading on a real timer', async () => {
     const events: SpeakerEvent[] = [];
     const speaker = createMachineSpeaker({
-      stream: () => ({ speak: text => [{ id: 0, text }], hush: () => undefined }),
+      stream: () => ({ speak: text => [{ id: 0, text }], hush: () => undefined, interrupt: () => undefined }),
       replyState: () => 'ready',
       player: { remainingMs: () => 0 },
     });
@@ -281,7 +306,7 @@ describe('the machine speaker when the stream has ended', () => {
     const events: SpeakerEvent[] = [];
     const active: boolean[] = [];
     const speaker = createMachineSpeaker({
-      stream: () => ({ speak: () => [], hush: () => undefined }),
+      stream: () => ({ speak: () => [], hush: () => undefined, interrupt: () => undefined }),
       replyState: () => 'ready',
       player: { remainingMs: () => 0 },
       onActive: on => void active.push(on),
