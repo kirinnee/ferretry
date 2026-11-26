@@ -8,6 +8,7 @@ type Call = { route: string; init?: Parameters<PluginClient['call']>[1] };
 function world(
   answers: Record<string, unknown>,
   terminal?: { readonly confirm: (question: string) => Promise<boolean> },
+  env?: Record<string, string>,
 ) {
   const calls: Call[] = [];
   const out: string[] = [];
@@ -25,7 +26,13 @@ function world(
     err: text => void err.push(text),
     isTty: terminal !== undefined,
   };
-  const half = cli.build?.({ manifest: cli.manifest, client, io, ...(terminal === undefined ? {} : terminal) });
+  const half = cli.build?.({
+    manifest: cli.manifest,
+    client,
+    io,
+    ...(terminal === undefined ? {} : terminal),
+    ...(env === undefined ? {} : { env }),
+  });
   if (half === undefined) throw new Error('missing CLI half');
   const verb = (line: string, invocation: Partial<VerbInvocation> = {}) =>
     (half.verbs as Record<string, (i: VerbInvocation) => Promise<number>>)[line]?.({
@@ -48,6 +55,21 @@ describe('fy notify', () => {
     await loud.verb('notify', { args: ['Deploy needs you'], options: { ferret: 'f1', buzz: true } });
     expect(loud.calls[0]?.init?.body).toMatchObject({ ping: true });
     expect(loud.out.join('')).toMatch(/phone buzzes/u);
+  });
+
+  test('C-12 notify honours its documented -s/--session, and falls back to the ferret it runs inside', async () => {
+    for (const options of [{ session: 'f2' }, { s: 'f2' }] as Record<string, string>[]) {
+      const named = world({ 'POST /v1/ferrets/:ferretId/agenda': {} });
+      expect(await named.verb('notify', { args: ['Build is green'], options })).toBe(0);
+      expect(named.calls[0]?.init?.params).toEqual({ ferretId: 'f2' });
+    }
+    const inside = world({ 'POST /v1/ferrets/:ferretId/agenda': {} }, undefined, { FY_SESSION_ID: 'f9' });
+    expect(await inside.verb('notify', { args: ['Build is green'] })).toBe(0);
+    expect(inside.calls[0]?.init?.params).toEqual({ ferretId: 'f9' });
+    // An explicit --session wins over the ferret it runs inside.
+    const both = world({ 'POST /v1/ferrets/:ferretId/agenda': {} }, undefined, { FY_SESSION_ID: 'f9' });
+    await both.verb('notify', { args: ['Build is green'], options: { session: 'f2' } });
+    expect(both.calls[0]?.init?.params).toEqual({ ferretId: 'f2' });
   });
 
   test("--ping, v4's spelling of --buzz, buzzes the phone too", async () => {

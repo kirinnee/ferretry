@@ -38,8 +38,9 @@ describe('the catalogs CLI terminal', () => {
     out.setExitCode(3);
 
     // Assert
-    should(stand.out).eql(['report', 'success', 'warn']);
-    should(stand.err).eql(['error', 'diagnostic']);
+    // D-47: each message is a whole line (the terminal's out writes exactly what it is given).
+    should(stand.out).eql(['report\n', 'success\n', 'warn\n']);
+    should(stand.err).eql(['error\n', 'diagnostic\n']);
     should(before).equal(0);
     should(out.exitCode).equal(3);
   });

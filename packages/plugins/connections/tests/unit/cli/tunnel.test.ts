@@ -41,7 +41,8 @@ describe('tunnel CLI', () => {
       { route: 'PUT /v1/tunnel', init: { body: { enabled: true } } },
       { route: 'PUT /v1/tunnel', init: { body: { enabled: false } } },
     ]);
-    expect(lines.every(line => line.endsWith('Applied without a restart.'))).toBe(true);
+    // D-47: every answer is a whole line: the terminal's `out` writes exactly what it is given.
+    expect(lines.every(line => line.endsWith('Applied without a restart.\n'))).toBe(true);
   });
   it('a switch held for the owner is said as a pending approval with the way to approve it, and is not a failure', async () => {
     const lines: string[] = [];
@@ -59,7 +60,7 @@ describe('tunnel CLI', () => {
     const { verbs, lines } = harness();
     await verbs['tunnel status']!({ args: [], options: {} });
     await verbs['tunnel status']!({ args: [], options: { json: true } });
-    expect(lines).toEqual([TUNNEL_OFF_SENTENCE, JSON.stringify(view)]);
+    expect(lines).toEqual([`${TUNNEL_OFF_SENTENCE}\n`, `${JSON.stringify(view)}\n`]);
   });
   it('V-0245 the bare tunnel verb is declared and shows the live status, as status does', async () => {
     const { calls, lines, verbs } = harness();
@@ -70,7 +71,7 @@ describe('tunnel CLI', () => {
       { route: 'GET /v1/tunnel', init: undefined },
       { route: 'GET /v1/tunnel', init: undefined },
     ]);
-    expect(lines).toEqual([TUNNEL_OFF_SENTENCE, JSON.stringify(view)]);
+    expect(lines).toEqual([`${TUNNEL_OFF_SENTENCE}\n`, `${JSON.stringify(view)}\n`]);
   });
   it('an invalid daemon answer is refused rather than printed', async () => {
     const verbs = realVerbs({ call: async () => ({}), subscribe: () => () => undefined } as PluginClient, {
