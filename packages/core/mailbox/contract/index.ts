@@ -77,7 +77,7 @@ export type {
   TranscriptWindow,
   TranscriptSource,
 } from './transcript.ts';
-export { harnessFamily } from './harness-family.ts';
+export { byHarnessFamily, type FamilyCases, harnessFamily } from './harness-family.ts';
 export * from './lib/queue/rotation.ts';
 export {
   type Enqueued,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RecordedHarnessSchema } from '@ferretry/core-ferrets/contract';
 
 /** Timestamps on the ferret's own record stay ISO text; the typed instants are the contract's. */
 const InstantSchema = z.string().min(1);
@@ -78,7 +79,7 @@ export type InteractionMode = z.infer<typeof InteractionModeSchema>;
 /** The dialog's identity: a digest of everything a person decides on, so a changed dialog is a new id. */
 const HarnessDialogIdSchema = z.string().regex(/^[0-9a-f]{16}$/u);
 /** Harness family shared by session records and transfer lineage leaves. */
-const HarnessSchema = z.enum(['claude', 'codex']);
+const HarnessSchema = RecordedHarnessSchema;
 /**
  * A HARNESS DIALOG, read off the agent's own pane.
  *

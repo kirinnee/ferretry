@@ -1,4 +1,5 @@
 import type { TranscriptHarness as Harness } from '../../reader/lib/transcript/types.ts';
+import { byHarnessFamily } from '../../seams/harness-family.ts';
 import { SOURCE_TEXT_MAX } from './conversation-text.ts';
 
 /**
@@ -52,27 +53,44 @@ export interface TranscriptNames {
 
 /** Each kind of name a transcript records, the latest of each. */
 export function transcriptNames(harness: Harness, text: string): TranscriptNames {
+  // A harness with no family names nothing here: its records are not read as Claude's or Codex's.
+  return byHarnessFamily<TranscriptNames>(harness, {
+    claude: () => claudeNames(text),
+    codex: () => codexNames(text),
+    unknown: () => ({}),
+  });
+}
+
+function claudeNames(text: string): TranscriptNames {
   let chosen: string | undefined;
   let generated: string | undefined;
-  for (const record of records(text, harness === 'codex' ? CODEX_NAME_MARKS : CLAUDE_NAME_MARKS)) {
-    if (harness === 'codex') {
-      const payload = record.payload;
-      if (
-        record.type === 'event_msg' &&
-        typeof payload === 'object' &&
-        payload !== null &&
-        (payload as Record<string, unknown>).type === 'thread_name_updated'
-      )
-        // Codex's own TUI writes automatic titles as the same `thread_name_updated` record a manual rename makes, so a
-        // name cannot be told apart: it is `generated` (the credential cue applies), never the owner's `chosen`.
-        generated = cleaned((payload as Record<string, unknown>).thread_name) ?? generated;
-      continue;
-    }
+  for (const record of records(text, CLAUDE_NAME_MARKS)) {
     if (record.type === 'custom-title') chosen = cleaned(record.customTitle) ?? chosen;
     else if (record.type === 'agent-name') chosen = cleaned(record.agentName) ?? chosen;
     else if (record.type === 'ai-title') generated = cleaned(record.aiTitle) ?? generated;
     else if (record.type === 'summary') generated = cleaned(record.summary) ?? generated;
   }
+  return namesOf(chosen, generated);
+}
+
+function codexNames(text: string): TranscriptNames {
+  let generated: string | undefined;
+  for (const record of records(text, CODEX_NAME_MARKS)) {
+    const payload = record.payload;
+    if (
+      record.type === 'event_msg' &&
+      typeof payload === 'object' &&
+      payload !== null &&
+      (payload as Record<string, unknown>).type === 'thread_name_updated'
+    )
+      // Codex's own TUI writes automatic titles as the same `thread_name_updated` record a manual rename makes, so a
+      // name cannot be told apart: it is `generated` (the credential cue applies), never the owner's `chosen`.
+      generated = cleaned((payload as Record<string, unknown>).thread_name) ?? generated;
+  }
+  return namesOf(undefined, generated);
+}
+
+function namesOf(chosen: string | undefined, generated: string | undefined): TranscriptNames {
   return { ...(chosen === undefined ? {} : { chosen }), ...(generated === undefined ? {} : { generated }) };
 }
 

@@ -301,7 +301,7 @@ export function SessionChatPage({
     () => (embedded ? undefined : paneFrameReader(client, ferretId)),
     [client, ferretId, embedded],
   );
-  const pane = usePaneActivity(readPane, working);
+  const pane = usePaneActivity(readPane, working, undefined, session.config.harness);
   // A ferret the chat could not read claims nothing: no spinner over a turn nobody saw start.
   const statusLive =
     !isUnread(session) && session.state.turnState === undefined && statusMark(session).klass === 'active';
@@ -529,9 +529,11 @@ export function SessionChatPage({
                   ferretId={ferretId}
                   {...(account === undefined ? {} : { account })}
                   {...(askApi === undefined ? {} : { api: askApi })}
-                  {...(session.config.harness === undefined || !isRecordedHarness(session.config.harness)
+                  {...(session.config.harness === undefined
                     ? {}
-                    : { harness: session.config.harness })}
+                    : isRecordedHarness(session.config.harness)
+                      ? { harness: session.config.harness }
+                      : { unreadableHarness: session.config.harness })}
                   {...(askId === undefined ? {} : { draftSlot: askId })}
                   {...(forForm
                     ? {

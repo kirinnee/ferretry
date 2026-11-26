@@ -11,17 +11,8 @@
 #
 # Parts: 1a = the check + runtimes daemon (done); 1b = runtimes contract, cli and app (done: no runtimes row stands);
 # 2 = logins (done: no logins row stands); 3a = core ferrets (done: no core/ferrets row stands); 3b = conversation,
-# mailbox, kernel and the cli; 4 = mcp, skills, packs, catalogs, warden, terminals, lessons, usage, onboarding.
+# mailbox, kernel and the cli (done: none of them has a row); 4 = mcp, skills, packs, catalogs, warden, terminals, lessons, usage, onboarding.
 
-packages/cli/src/lib/machine/flags.ts::branch=3  # part 3b
-packages/core/kernel/contract/doctor.ts::literal=1  # part 3b
-packages/core/mailbox/contract/ferret-types.ts::literal=1  # part 3b
-packages/core/mailbox/contract/harness-family.ts::literal=1  # part 3b
-packages/core/mailbox/contract/lib/send/handoff.ts::branch=1  # part 3b
-packages/core/mailbox/contract/lib/send/retraction.ts::branch=2  # part 3b
-packages/core/mailbox/contract/lib/send/tracking.ts::branch=1  # part 3b
-packages/core/mailbox/contract/transcript.ts::literal=1  # part 3b
-packages/core/mailbox/daemon/send-half.ts::branch=1  # part 3b
 packages/plugins/catalogs/app/features/add-skills/add-skills-model.ts::branch=1  # part 4
 packages/plugins/catalogs/app/features/add-skills/add-skills-model.ts::literal=3  # part 4
 packages/plugins/catalogs/app/features/catalogs/catalog-install-model.ts::branch=1  # part 4
@@ -35,19 +26,6 @@ packages/plugins/catalogs/contract/wire/catalog-install.ts::literal=2  # part 4
 packages/plugins/catalogs/contract/wire/foreign.ts::literal=1  # part 4
 packages/plugins/catalogs/daemon/lib/catalog-installs/service.ts::branch=4  # part 4
 packages/plugins/catalogs/daemon/lib/shared-catalogs/mcp-source.ts::literal=1  # part 4
-packages/plugins/conversation/app/chat/send-ledger.ts::literal=2  # part 3b
-packages/plugins/conversation/app/composer/composer-autocomplete-providers.ts::branch=3  # part 3b
-packages/plugins/conversation/app/composer/composer-autocomplete-providers.ts::literal=3  # part 3b
-packages/plugins/conversation/app/links/continue-model.ts::known=2  # part 3b
-packages/plugins/conversation/app/links/conversation-card.tsx::known=3  # part 3b
-packages/plugins/conversation/app/links/conversation-picker-model.ts::known=2  # part 3b
-packages/plugins/conversation/app/links/link-words.ts::branch=2  # part 3b
-packages/plugins/conversation/app/links/link-words.ts::known=4  # part 3b
-packages/plugins/conversation/app/transcript/pane-activity.ts::literal=1  # part 3b
-packages/plugins/conversation/daemon/links/lib/conversation-describer.ts::branch=2  # part 3b
-packages/plugins/conversation/daemon/links/lib/conversation-index.ts::branch=1  # part 3b
-packages/plugins/conversation/daemon/links/lib/conversation-name.ts::branch=2  # part 3b
-packages/plugins/conversation/daemon/reader/adapters/input-proof.ts::branch=2  # part 3b
 packages/plugins/lessons/contract/wire.ts::known=2  # part 4
 packages/plugins/lessons/daemon/adapters/ferret-sessions.ts::branch=1  # part 4
 packages/plugins/lessons/daemon/lib/apply.ts::branch=1  # part 4

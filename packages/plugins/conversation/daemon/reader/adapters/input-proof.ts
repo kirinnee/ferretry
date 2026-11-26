@@ -1,4 +1,4 @@
-import type { TranscriptEntry } from '@ferretry/core-ferrets/contract';
+import { byRecordedHarness, type TranscriptEntry } from '@ferretry/core-ferrets/contract';
 import { ClaudeObservedInputObserver, CodexObservedInputObserver } from '../lib/transcript/observed-input.ts';
 import type { ObservedHumanInput, TranscriptHarness, TranscriptInputObserver } from '../lib/transcript/types.ts';
 
@@ -48,18 +48,23 @@ function recordOf(harness: TranscriptHarness, entry: TranscriptEntry): unknown {
       },
     };
   if (entry.role !== 'user') return undefined;
-  return harness === 'claude'
-    ? { type: 'user', uuid: entry.id, timestamp: entry.at, message: { role: 'user', content: text } }
-    : {
-        type: 'response_item',
-        timestamp: entry.at,
-        payload: { type: 'message', id: entry.id, role: 'user', content: [{ type: 'input_text', text }] },
-      };
+  // A harness with no family has no record shape here: it throws (UnsupportedHarnessFamilyError) instead of passing for Codex.
+  return byRecordedHarness<unknown>(harness, {
+    claude: () => ({ type: 'user', uuid: entry.id, timestamp: entry.at, message: { role: 'user', content: text } }),
+    codex: () => ({
+      type: 'response_item',
+      timestamp: entry.at,
+      payload: { type: 'message', id: entry.id, role: 'user', content: [{ type: 'input_text', text }] },
+    }),
+  });
 }
 
 /** A fresh observer for a harness: it keeps the little state (Claude's removed-prompt ring) the matching needs. */
 export function inputObserverFor(harness: TranscriptHarness): TranscriptInputObserver {
-  return harness === 'claude' ? new ClaudeObservedInputObserver() : new CodexObservedInputObserver();
+  return byRecordedHarness<TranscriptInputObserver>(harness, {
+    claude: () => new ClaudeObservedInputObserver(),
+    codex: () => new CodexObservedInputObserver(),
+  });
 }
 
 /**
