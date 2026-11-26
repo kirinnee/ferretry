@@ -48,6 +48,7 @@ import {
   withSession,
 } from './auto-move.ts';
 import type { WardenMoveCandidates } from './prompt.ts';
+import { FactsUnavailableError } from './facts-unavailable.ts';
 import { fitOwnerNotice } from './owner-notice.ts';
 import { isoFromMs, pacificOf } from './time.ts';
 import type { WardenSessionView } from './types.ts';
@@ -483,6 +484,8 @@ export class WardenAutoMoveService {
       if ((await this.ports.agentOf(subject.id)) !== subject.agent) return { memory, moved: false };
       return await this.consider(subject, config, memory, nowMs, pace);
     } catch (error) {
+      // A provider outage is not this ferret's failure: it waits where it is, listed once, and the next sweep tries again.
+      if (error instanceof FactsUnavailableError) return await this.holdUnavailable(subject, memory, nowMs, error);
       // Nothing here may throw at the sweep or the budget tick: an unexpected failure is one failed action.
       this.ports.journal.record('fleet.warden_auto_move_failed', {
         sessionId: subject.id,
@@ -649,6 +652,30 @@ export class WardenAutoMoveService {
       trigger: subject.trigger,
     });
     return { memory: next, action: { ...base, outcome: 'done', detail }, moved: true };
+  }
+
+  /**
+   * Logins or Runtimes cannot answer, so no login can be chosen: no move on unknown facts. Unlike an error this is a
+   * RETRYABLE hold (not in {@link STICKY_REASONS}): the ferret is listed once, the key is remembered in the ledger (so
+   * a restart does not list it again), and the sweep after the provider is back moves it.
+   */
+  private async holdUnavailable(
+    subject: AutoMoveSubject,
+    memory: AutoMoveMemory,
+    nowMs: number,
+    error: FactsUnavailableError,
+  ): Promise<Considered> {
+    const because = TRIGGER_WORDS[subject.trigger](subject.agent);
+    const detail = `Not moved although ${because}: ${error.message}. It stays where it is, and the Warden tries again on the next sweep.`;
+    const held = this.hold(subject, memory, nowMs, 'unavailable', detail);
+    if (held.action !== undefined) {
+      this.ports.journal.record('fleet.warden_auto_move_unavailable', {
+        sessionId: subject.id,
+        message: error.message,
+      });
+      await this.listFailed(subject.id, detail);
+    }
+    return held;
   }
 
   /** Record a reason the ferret was not moved, once per episode. */
