@@ -38,7 +38,7 @@ describe('release files', () => {
   });
 
   it('names the installer, and ships with no trusted key until the owner adds one', () => {
-    should(installerCommand('ferretry')).equal(
+    should(installerCommand()).equal(
       'curl -fsSL https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash',
     );
     should(DAEMON_RELEASE_KEYS).deepEqual([]);

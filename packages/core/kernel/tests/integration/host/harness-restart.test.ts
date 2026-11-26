@@ -46,9 +46,21 @@ function words(script: string): string[] {
   return result;
 }
 
-async function restartedPane(harness: string, ink: 'typed' | 'placeholder' | 'unknown' = 'typed') {
+async function restartedPane(
+  harness: string,
+  ink: 'typed' | 'placeholder' | 'unknown' = 'typed',
+  staleHarness?: string,
+) {
   const id = ferretId('restart-fixture');
-  const state = { composer: '', working: false, atPrompt: true, ink, submitted: [] as string[], keys: [] as string[] };
+  const state = {
+    composer: '',
+    working: false,
+    atPrompt: true,
+    ink,
+    placeholderOnClear: false,
+    submitted: [] as string[],
+    keys: [] as string[],
+  };
   const answer = (stdout = '') => ({ exitCode: 0, signal: null, stdout, stderr: '' });
   const execute = (args: readonly string[], stdin?: string): ReturnType<typeof answer> => {
     if (args[0] === 'source-file') return execute(words(stdin ?? ''));
@@ -72,7 +84,10 @@ async function restartedPane(harness: string, ink: 'typed' | 'placeholder' | 'un
       else {
         const key = args.at(-1) ?? '';
         state.keys.push(key);
-        if (key === 'C-u') state.composer = '';
+        if (key === 'C-u') {
+          state.composer = state.placeholderOnClear ? 'Ask anything… "fixture"' : '';
+          if (state.placeholderOnClear) state.ink = 'placeholder';
+        }
         if (key === 'Enter') {
           state.submitted.push(state.composer);
           state.composer = '';
@@ -137,11 +152,49 @@ async function restartedPane(harness: string, ink: 'typed' | 'placeholder' | 'un
     }),
     id,
   );
+  if (staleHarness !== undefined)
+    first.state('ferrets').plant(
+      FerretFiles,
+      JSON.stringify({
+        format: 1,
+        id: ferretId('stale-record'),
+        name: 'stale-record',
+        role: 'lead',
+        harness: staleHarness,
+        runner: 'tmux',
+        handle: '%7',
+        folder: '/work/fixture',
+        state: 'idle',
+        createdAt: T0,
+        stateAt: T0,
+      }),
+      'stale-record',
+    );
   const host = await first.restart();
   expect(builds).toBe(2);
   const seam = await host.provided(FerretsPort).harness?.(id);
   if (seam === undefined) throw new Error('restart must restore the harness facade');
   return { host, seam, state };
+}
+
+for (const harness of ['claude-code', 'codex', 'opencode']) {
+  test(`restart refuses a stale record's reused pane without replacing the live ${harness} reader`, async () => {
+    const { host, seam, state } = await restartedPane(
+      harness,
+      'typed',
+      harness === 'opencode' ? 'claude-code' : 'opencode',
+    );
+    try {
+      expect(await seam.observe?.()).toMatchObject({ ok: true, value: { promptReady: true } });
+      expect(await seam.deliver({ text: 'owned pane' })).toMatchObject({ ok: true });
+      expect(state.submitted).toEqual(['owned pane']);
+      const stale = await host.provided(FerretsPort).harness?.(ferretId('stale-record'));
+      expect(await stale?.deliver({ text: 'stale write' })).toMatchObject({ ok: false });
+      expect(state.submitted).toEqual(['owned pane']);
+    } finally {
+      await host.stop();
+    }
+  });
 }
 
 for (const harness of ['claude-code', 'codex', 'opencode']) {
@@ -165,7 +218,10 @@ for (const ink of ['unknown', 'placeholder'] as const) {
       state.composer = text;
       for (const strict of [false, true]) {
         expect(await seam.submitComposer?.(text, strict)).toEqual({ ok: true, value: 'absent' });
-        expect(await seam.clearComposer?.(text)).toEqual({ ok: true, value: 'stuck' });
+        expect(await seam.clearComposer?.(text)).toEqual({
+          ok: true,
+          value: ink === 'placeholder' ? 'absent' : 'stuck',
+        });
       }
       expect(state.keys).toEqual([]);
       expect(state.composer).toBe(text);
@@ -192,6 +248,24 @@ test('mailbox submit and repair accept positively identified native input and re
     expect(await seam.submitComposer?.(text)).toEqual({ ok: true, value: 'absent' });
     expect(await seam.clearComposer?.(text)).toEqual({ ok: true, value: 'stuck' });
     expect(state.keys).toEqual(keys);
+  } finally {
+    await host.stop();
+  }
+});
+
+test('native mailbox repair recognises the empty placeholder after erasing and never claims an erased draft remains', async () => {
+  const { host, seam, state } = await restartedPane('opencode');
+  try {
+    state.composer = 'mailbox draft';
+    state.placeholderOnClear = true;
+    expect(await seam.clearComposer?.('mailbox draft')).toEqual({ ok: true, value: 'cleared' });
+    expect(state.keys).toEqual(['C-u']);
+    expect(await seam.clearComposer?.('mailbox draft')).toEqual({ ok: true, value: 'absent' });
+    expect(await seam.heldAt?.('mailbox draft')).toEqual({ ok: true, value: undefined });
+    const observed = await seam.observe?.();
+    expect(observed?.ok).toBe(true);
+    if (observed?.ok) expect(observed.value.draft).toBeUndefined();
+    expect(state.keys).toEqual(['C-u']);
   } finally {
     await host.stop();
   }

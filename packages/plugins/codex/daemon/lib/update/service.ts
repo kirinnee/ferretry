@@ -66,8 +66,6 @@ export class HarnessUpdateRefusal extends Error {
 }
 
 export interface HarnessUpdateServiceOptions {
-  /** The product name, for the verification link. */
-  readonly product: string;
   /** The home directory the machine's package managers keep their per-user tools under. */
   readonly homeDirectory: () => Promise<string>;
   /** The daemon's ONE Codex resolution rule. */
@@ -161,7 +159,7 @@ export class HarnessUpdateService implements HarnessUpdateSubsystem {
       method: snapshot.method,
       plan: snapshot.method === null ? null : codexUpdatePlan(snapshot.method, undefined),
       check,
-      verified: { version: VERIFIED_CODEX_VERSION, url: verificationUrl(this.#options.product) },
+      verified: { version: VERIFIED_CODEX_VERSION, url: verificationUrl() },
       verification: codexVerification(installed),
       available:
         snapshot.method !== null &&

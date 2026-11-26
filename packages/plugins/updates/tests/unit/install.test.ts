@@ -1,4 +1,6 @@
 import { describe, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { InstantSchema } from '@ferretry/std';
 import should from 'should';
 import * as update from '../../contract/index.ts';
@@ -16,6 +18,9 @@ import {
   parseGitHubNewestTag,
   planUpdate,
   releaseDownloadBase,
+  RELEASE_OWNER,
+  RELEASE_REPO,
+  RELEASE_SLUG,
   releaseFlakeReference,
   releaseTagsApiUrl,
   releaseTapName,
@@ -328,14 +333,29 @@ describe('descriptions', () => {
     );
   });
 
-  it('builds the release addresses from the product', () => {
-    should(releaseFlakeReference('ferretry')).equal('github:kirinnee/ferretry');
-    should(releaseTapName('ferretry')).equal('kirinnee/ferretry');
-    should(releaseTapUrl('ferretry')).equal('https://github.com/kirinnee/ferretry');
-    should(latestReleaseApiUrl('ferretry')).equal('https://api.github.com/repos/kirinnee/ferretry/releases/latest');
-    should(releaseDownloadBase('ferretry', '4.29.0')).equal(
-      'https://github.com/kirinnee/ferretry/releases/download/v4.29.0',
+  it('names the release repository from the root package.json, which is NOT the product name', () => {
+    const { repository } = JSON.parse(readFileSync(join(import.meta.dir, '../../../../../package.json'), 'utf8'));
+    should(repository).equal(`github:${RELEASE_OWNER}/${RELEASE_REPO}`);
+    should(RELEASE_SLUG).equal(repository.replace(/^github:/u, ''));
+    // Every address is built from the repository, and none takes a product: a repository moved to a name other than the
+    // product's cannot leave updates and downloads pointing at the old one.
+    should(releaseFlakeReference()).equal(`github:${RELEASE_SLUG}`);
+    should(releaseTapName()).equal(RELEASE_SLUG);
+    should(releaseTapUrl()).equal(`https://github.com/${RELEASE_SLUG}`);
+    should(releaseDownloadBase('4.29.0')).startWith(`https://github.com/${RELEASE_SLUG}/releases/download/`);
+    should(latestReleaseApiUrl()).equal(`https://api.github.com/repos/${RELEASE_SLUG}/releases/latest`);
+    should(releaseTagsApiUrl()).startWith(`https://api.github.com/repos/${RELEASE_SLUG}/tags`);
+    should(parseGitHubNewestTag([{ name: 'v4.30.1' }])?.url).equal(
+      `https://github.com/${RELEASE_SLUG}/releases/tag/v4.30.1`,
     );
+  });
+
+  it('builds the release addresses from the repository', () => {
+    should(releaseFlakeReference()).equal('github:kirinnee/ferretry');
+    should(releaseTapName()).equal('kirinnee/ferretry');
+    should(releaseTapUrl()).equal('https://github.com/kirinnee/ferretry');
+    should(latestReleaseApiUrl()).equal('https://api.github.com/repos/kirinnee/ferretry/releases/latest');
+    should(releaseDownloadBase('4.29.0')).equal('https://github.com/kirinnee/ferretry/releases/download/v4.29.0');
   });
 });
 
@@ -370,16 +390,14 @@ describe('latest release', () => {
   });
 
   it('reads the highest stable tag, ignoring pre-releases and names that are not versions', () => {
-    should(releaseTagsApiUrl('ferretry')).equal('https://api.github.com/repos/kirinnee/ferretry/tags?per_page=30');
+    should(releaseTagsApiUrl()).equal('https://api.github.com/repos/kirinnee/ferretry/tags?per_page=30');
     const names = (...list: string[]) => list.map(name => ({ name }));
-    should(
-      parseGitHubNewestTag('ferretry', names('v4.29.0', 'v4.30.1', 'v4.30.0', 'v5.0.0-rc.1', 'nightly', '4.31.0')),
-    ).deepEqual({
+    should(parseGitHubNewestTag(names('v4.29.0', 'v4.30.1', 'v4.30.0', 'v5.0.0-rc.1', 'nightly', '4.31.0'))).deepEqual({
       version: '4.30.1',
       url: 'https://github.com/kirinnee/ferretry/releases/tag/v4.30.1',
     });
-    should(parseGitHubNewestTag('ferretry', names('nightly', 'v5.0.0-rc.1'))).be.undefined();
-    should(parseGitHubNewestTag('ferretry', 'nope')).be.undefined();
+    should(parseGitHubNewestTag(names('nightly', 'v5.0.0-rc.1'))).be.undefined();
+    should(parseGitHubNewestTag('nope')).be.undefined();
   });
 
   it('compares versions, and never calls an unparseable one newer', () => {

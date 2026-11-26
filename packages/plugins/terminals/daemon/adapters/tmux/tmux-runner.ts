@@ -383,11 +383,13 @@ export class TmuxRunner implements Runner {
     handle: RunnerHandle,
     harness?: string,
     screenReader?: RunSpec['screenReader'],
+    ferret?: FerretId,
   ): Promise<Result<RunningFerret, AttachRefusal>> {
     if (!PANE_ID.test(handle)) return err('unsupported');
     const facts = await this.facts(handle);
     if (facts === undefined || facts.dead) return err('gone');
     if (!isFerretSession(facts.session)) return err('not-a-ferret');
+    if (!TmuxRunner.owns(facts, ferret)) return err('mismatch');
     if (harness !== undefined && (this.#launches.get(handle)?.key !== harness || screenReader !== undefined))
       this.#launches.set(handle, {
         through: new Set(),
@@ -1059,9 +1061,7 @@ export class TmuxRunner implements Runner {
   }
 
   /**
-   * Whether the pane `facts` describes is `ferret`'s own. A pane id is not an identity: the private server hands `%0` out
-   * again after it restarts, so a handle a record kept can name ANOTHER ferret's pane, and a stop through it would end
-   * that ferret. With no `ferret` the caller vouches for the handle itself (a launch cleaning up a pane it just made).
+   * The exact session proves ownership; a reused pane ID does not. Omitted `ferret` trusts a newly launched handle.
    */
   private static owns(facts: PaneFacts, ferret: FerretId | undefined): boolean {
     return ferret === undefined || facts.session === ferretTmuxSession(ferret);

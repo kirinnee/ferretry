@@ -63,7 +63,9 @@ export class FerretSessionLifecycleLauncher implements SessionLifecycleLauncher 
     const attached =
       handle === undefined
         ? undefined
-        : await this.ports.runner()?.attach(handle, this.ports.harnessOf?.(this.ferret(record)));
+        : await this.ports
+            .runner()
+            ?.attach(handle, this.ports.harnessOf?.(this.ferret(record)), undefined, this.ferret(record));
     return attached?.ok === true ? attached.value.pid : undefined;
   }
 
