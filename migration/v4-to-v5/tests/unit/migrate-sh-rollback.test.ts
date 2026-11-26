@@ -35,26 +35,27 @@ const exists = (path: string): Promise<boolean> =>
 const failedHome = (sb: Sandbox): string => `${sb.v4home}-v5-failed-2026-11-13-1200`;
 
 describe('convert: exit codes are checked, in order', () => {
-  test('a dry run that says exit 3 stops everything: the real run never starts and no home exists', async () => {
+  test('a dry run that says exit 3 stops backup: nothing moves and the real run never starts', async () => {
     const sb = await box();
-    await advance(sb, 'backup');
+    await advance(sb, 'quiet');
     await sb.state('dry.code', '3');
-    const result = await sb.run('convert');
+    const result = await sb.run('backup', ['--owner-yes']);
     expect(result.code).toBe(3);
     expect(
       (await sb.calls()).filter(line => line.startsWith('bun src/main.ts') && !line.includes('--dry-run')),
     ).toEqual([]);
-    expect(await exists(sb.v4home)).toBe(false);
-    expect(await sb.notesText()).not.toContain('# converting');
+    expect(await exists(sb.v4home)).toBe(true);
+    expect(await sb.notesText()).not.toContain('# backing-up');
   });
 
   test('a refusal (exit 2) is passed through; a failed real run (exit 3) leaves no `converted` milestone', async () => {
     const sb = await box();
-    await advance(sb, 'backup');
+    await advance(sb, 'quiet');
     await sb.state('dry.code', '2');
-    expect((await sb.run('convert')).code).toBe(2);
+    expect((await sb.run('backup', ['--owner-yes'])).code).toBe(2);
     await sb.state('dry.code', '0');
     await sb.state('real.code', '3');
+    expect((await sb.run('backup', ['--owner-yes'])).code).toBe(0);
     const result = await sb.run('convert');
     expect(result.code).toBe(3);
     const notes = await sb.notesText();
@@ -69,7 +70,9 @@ describe('convert: exit codes are checked, in order', () => {
     const result = await sb.run('convert');
     expect(result.code).toBe(1);
     expect(result.err).toContain('local changes');
-    expect((await sb.calls()).filter(line => line.startsWith('bun src/main.ts'))).toEqual([]);
+    expect(
+      (await sb.calls()).filter(line => line.startsWith('bun src/main.ts') && !line.includes('--dry-run')),
+    ).toEqual([]);
   });
 
   test('backup refuses without the owner, before quiet, and over an existing backup', async () => {
@@ -300,11 +303,11 @@ describe('rollback: by recorded state', () => {
     expect(await sb.calls()).toContain('fy daemon start');
   });
 
-  test('after a dry run exit 3 (no H ever created) the guarded move still works', async () => {
+  test('after a dry run exit 3 (nothing moved, no new home) rollback still works', async () => {
     const sb = await box();
-    await advance(sb, 'backup');
+    await advance(sb, 'quiet');
     await sb.state('dry.code', '3');
-    expect((await sb.run('convert')).code).toBe(3);
+    expect((await sb.run('backup', ['--owner-yes'])).code).toBe(3);
     expect((await sb.run('rollback', ['--owner-yes'])).code).toBe(0);
     expect(await exists(failedHome(sb))).toBe(false);
   });

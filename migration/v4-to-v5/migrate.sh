@@ -13,8 +13,8 @@ set -euo pipefail
 #   preflight [--kind homebrew|nix-profile|standalone|manual]   tools, versions, release, disk; creates the notes file
 #   baseline  --asks-open N [--answered-ask TEXT]               what v4 holds now (names, ids, lanes, panes; no secrets)
 #   quiet     --owner-confirmed                                 prove no pane writes, stop the v4 daemon, prove it again
-#   backup    --owner-yes                                       mv H B
-#   convert                                                     converter dry run, then the real run
+#   backup    --owner-yes                                       converter dry run on H (nothing moved), then mv H B
+#   convert                                                     the converter real run (the dry run passed in backup)
 #   install   [--rehearsal-build DIR]                           put v5 programs in place (never starts the daemon)
 #   start                                                       fyd --check, one deliberate daemon start, then config check
 #   verify                                                      compare v5 with the baseline, print a table, fy doctor
@@ -539,7 +539,7 @@ quiet)
   queued=""
   emptyq=""
   oddq=""
-  for f in "${H}"/state/sessions/*/agenda-*.pending.json "${H}/fleet/.fy-fleet-apply.lock" "${H}"/fleet/shared/*/.migration-journal; do
+  for f in "${H}"/state/sessions/*/agenda-*.pending.json "${H}"/state/sessions/*/agenda-*.pending "${H}/fleet/.fy-fleet-apply.lock" "${H}"/fleet/shared/*/.migration-journal; do
     if [ -e "${f}" ]; then
       # agenda-changes.pending.json is v4's QUEUE of agenda-change notices for a ferret's next turn end. It is queued
       # state, not an in-flight write: a quiet window has no turns, so it can never drain, and starting v4 does not
@@ -602,6 +602,25 @@ backup)
   # The quiet phase stopped the daemon; a daemon that is live or UNKNOWN now (restarted since, or never stopped) would keep running on a
   # home that moves under it. Nothing is moved: the quiet window no longer holds, so it is rebuilt from the start.
   if daemon_live; then fail "a daemon is running or may be (${DAEMON_WHY}): the quiet window no longer holds. Nothing was moved and nothing was written: stop that daemon yourself, run quiet again, then run backup again"; fi
+  # The converter's dry run reads H read-only (v4 is stopped and quiet, so the converter accepts it) BEFORE anything moves: a
+  # converter that would refuse or fail is found now, with nothing moved, not after the move.
+  src="$(note_get SRC)"
+  [ "$(git -C "${src}" rev-parse HEAD)" = "$(note_get COMMIT)" ] || fail "the converter checkout moved off the recorded commit. Nothing was moved. Run rollback --owner-yes if v4 must come back, then run preflight again from a fresh checkout"
+  [ -z "$(git -C "${src}" status --porcelain)" ] || fail "the converter checkout has local changes. Nothing was moved: undo them, then run backup again"
+  dry_report="$(dirname "${NOTES}")/v4-v5-dry-run-$(note_get STAMP).json"
+  (cd "${CONVERTER_DIR}" && bun install --frozen-lockfile) || fail "bun install failed in ${CONVERTER_DIR}. Nothing was moved"
+  say "🔨 converter dry run on ${H} (read-only: creates and changes nothing; nothing is moved yet)"
+  mark dry-running
+  status=0
+  (cd "${CONVERTER_DIR}" && bun src/main.ts --from "${H}" --to "${B}.dry-target" --dry-run --report "${dry_report}") || status=$?
+  case "${status}" in
+  0) ;;
+  3) echo "❌ the dry run says a step would not convert (exit 3): read the summary to the owner. NOTHING was moved and v4 is still stopped: run rollback --owner-yes (or fy daemon start with the v4 fy) to bring v4 back, and wait for a fixed converter" >&2 && exit 3 ;;
+  2) echo "❌ the converter refused (exit 2): not a stopped 4.291.x home, the v4 daemon holds its lock, or the target is not empty. NOTHING was moved" >&2 && exit 2 ;;
+  *) fail "the converter dry run exited ${status}. Nothing was moved" ;;
+  esac
+  [ ! -e "${B}.dry-target" ] || fail "the dry run created ${B}.dry-target: that must never happen"
+  mark dry-run-ok
   mark backing-up
   mv "${H}" "${B}" || fail "mv ${H} ${B} failed"
   chmod 700 "${B}" || fail "chmod 700 ${B} failed"
@@ -616,24 +635,11 @@ convert)
   src="$(note_get SRC)"
   has_mark backed-up || fail "run backup first"
   rehearsal_phase_guard "${H}"
-  [ "$(git -C "${src}" rev-parse HEAD)" = "$(note_get COMMIT)" ] || fail "the converter checkout moved off the recorded commit"
+  [ "$(git -C "${src}" rev-parse HEAD)" = "$(note_get COMMIT)" ] || fail "the converter checkout moved off the recorded commit: run rollback --owner-yes, then preflight again from a fresh checkout"
   [ -z "$(git -C "${src}" status --porcelain)" ] || fail "the converter checkout has local changes"
   [ ! -e "${H}" ] || fail "${H} exists: the converter writes a new home"
-  dry_report="$(dirname "${NOTES}")/v4-v5-dry-run-$(note_get STAMP).json"
   (cd "${CONVERTER_DIR}" && bun install --frozen-lockfile) || fail "bun install failed in ${CONVERTER_DIR}"
-
-  say "🔨 converter dry run (creates and changes no home)"
-  mark dry-running
-  status=0
-  (cd "${CONVERTER_DIR}" && bun src/main.ts --from "${B}" --to "${H}" --dry-run --report "${dry_report}") || status=$?
-  case "${status}" in
-  0) ;;
-  3) echo "❌ the dry run says a step would not convert (exit 3): read the summary to the owner; nothing was changed" >&2 && exit 3 ;;
-  2) echo "❌ the converter refused (exit 2): not a stopped 4.291.x home, the v4 daemon holds its lock, or the target is not empty" >&2 && exit 2 ;;
-  *) fail "the converter dry run exited ${status}" ;;
-  esac
-  mark dry-run-ok
-  [ ! -e "${H}" ] || fail "the dry run created ${H}: that must never happen"
+  has_mark dry-run-ok || fail "the converter dry run has not passed: run backup first (it dry-runs before anything moves)"
 
   say "🔨 converter real run"
   mark converting

@@ -120,7 +120,7 @@ describe('migrate.sh happy path (Homebrew v4 cask, released v5.0.0)', () => {
     await expect(stat(sb.v4home)).rejects.toThrow();
   });
 
-  test('convert runs the dry run, then the real run, in that order, each with its exit code checked', async () => {
+  test('backup runs the dry run (before the move), then convert runs the real run, each with its exit code checked', async () => {
     await advance(sb, 'backup');
     const result = await sb.run('convert');
     expect(result.code).toBe(0);

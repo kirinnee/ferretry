@@ -50,6 +50,7 @@ import {
   type V4ConfigFile,
   YAML_OPTIONS,
 } from '../v4/config.ts';
+import { pathSegment } from '../key-path.ts';
 import { failureNote, V4InputError } from '../v4/documents.ts';
 import { PREVIEW_CODEX_RUNTIMES, PREVIEW_SETTINGS_ITEM } from '../v5/preview-env.ts';
 import { type Budget, buildShell, rebuildBudget } from './preview-logins.ts';
@@ -783,11 +784,11 @@ async function planHarnessComponent(
       for (const [key, value] of Object.entries(v4.env)) {
         if (typeof value === 'string' && /\$\{secret:[^}]*\}/u.test(value))
           entry.reasons.push(
-            `env ${key} is a \${secret:...} reference, which v5 resolves only in the launch environment and never inside a settings document`,
+            `env ${pathSegment(key)} is a \${secret:...} reference, which v5 resolves only in the launch environment and never inside a settings document`,
           );
         else if (typeof value === 'string') env[key] = value;
         else if (typeof value === 'number' || typeof value === 'boolean') env[key] = String(value);
-        else entry.reasons.push(`env ${key} is not text, a number or a boolean`);
+        else entry.reasons.push(`env ${pathSegment(key)} is not text, a number or a boolean`);
       }
       if (Object.keys(env).length > 0) {
         if (harnessName === 'codex') {

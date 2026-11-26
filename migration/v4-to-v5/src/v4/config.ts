@@ -599,7 +599,11 @@ function spelledTextLooksLikeCredential(source: string): boolean {
     [match[1] as string]: match[2] as string,
   }));
   // Leaf rules only here: the document rule above reads a whole text, so reading its words again would never end.
-  return walkStrings({ words, assigned }, (path, word) => leafLooksSecret(nameOf(path), word)).length > 0;
+  // A NAME (isKey) is judged as itself, never as the value of a credential-named key: `ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}` carries.
+  return (
+    walkStrings({ words, assigned }, (path, word, isKey) => leafLooksSecret(isKey ? undefined : nameOf(path), word))
+      .length > 0
+  );
 }
 
 // ── the modeline ─────────────────────────────────────────────────────────────────────────────────────────────────
