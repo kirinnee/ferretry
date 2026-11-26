@@ -201,7 +201,12 @@ export interface Runner {
    */
   stop(handle: RunnerHandle, how: 'polite' | 'now', ferret?: FerretId): Promise<void>;
   resume(spec: RunSpec, harnessConversationId: string): Promise<Result<RunningFerret, StartRefusal>>;
-  attach(handle: RunnerHandle, harness?: string): Promise<Result<RunningFerret, AttachRefusal>>;
+  /** The harness owner supplies the registered reader; the runner cannot invoke another plugin's provider hook. */
+  attach(
+    handle: RunnerHandle,
+    harness?: string,
+    screenReader?: HarnessScreenReader,
+  ): Promise<Result<RunningFerret, AttachRefusal>>;
   alive(handle: RunnerHandle, ferret?: FerretId): Promise<boolean>;
   /**
    * A raw process signal: `interrupt` is the runner's own interrupt key (tmux: `C-c`), which can QUIT a harness at an

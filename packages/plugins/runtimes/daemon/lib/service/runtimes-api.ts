@@ -191,6 +191,9 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
   const defaultRuntime = async (): Promise<RuntimeId | undefined> => {
     const named = deps.defaultSetting();
     if (named !== undefined && deps.runtimes().has(named)) return RuntimeIdSchema.parse(named);
+    // The configured fallback is selected from metadata too: resolve must gate its login before any status read.
+    if (named === undefined && deps.runtimes().get(FALLBACK_DEFAULT_RUNTIME)?.harness !== undefined)
+      return RuntimeIdSchema.parse(FALLBACK_DEFAULT_RUNTIME);
     // A saved default that points at a runtime that is no longer here (a derived one whose login needs sign-in) is unset.
     if (named !== undefined && (await effective(await loginsById(deps.logins))).runtimes.has(named))
       return RuntimeIdSchema.parse(named);

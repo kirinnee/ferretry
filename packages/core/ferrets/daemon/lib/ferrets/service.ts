@@ -1701,7 +1701,7 @@ export class FerretsService implements FerretsApi {
     if (record === undefined) return failed('refused', `no ferret ${ferret}`);
     const runner = this.ports.runner();
     if (runner === undefined) return failed('runner_unavailable', 'no runner plugin is on');
-    const adopted = await runner.attach(handle, record.harness);
+    const adopted = await runner.attach(handle, record.harness, this.ports.harness(record.harness)?.screenReader);
     if (!adopted.ok) return failed('failed', `the runner would not adopt ${handle}: ${adopted.error}`);
     // A stopped ferret's end cause goes with the stop: the cause is present only while the state is stopped.
     const { cause: _ended, ...revived } = record;

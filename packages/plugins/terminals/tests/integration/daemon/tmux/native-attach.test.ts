@@ -5,7 +5,6 @@ import { testActRunner, TestMintedIds } from '@ferretry/kernel/testing';
 
 test('attach restores only the persisted registered reader after a runner restart', async () => {
   const calls: Array<readonly string[]> = [];
-  let key: string | undefined;
   const reader: HarnessScreenReader = {
     key: 'opencode',
     read: () => ({
@@ -29,10 +28,6 @@ test('attach restores only the persisted registered reader after a runner restar
               : '› Legacy-looking placeholder',
         };
       },
-    },
-    screenReaderOf: registered => {
-      key = registered;
-      return registered === 'opencode' ? reader : undefined;
     },
     spawn: {
       run: async () => {
@@ -59,8 +54,9 @@ test('attach restores only the persisted registered reader after a runner restar
     instantOf: () => 'then' as never,
   });
   const handle = '%9' as RunnerHandle;
+  expect((await runner.attach(handle, 'opencode', reader)).ok).toBe(true);
+  // A lifecycle pid check must preserve the native binding made at hydration/start.
   expect((await runner.attach(handle, 'opencode')).ok).toBe(true);
-  expect(key).toBe('opencode');
   expect((await runner.observe(handle))?.draft).toBe('native draft');
   expect(calls.some(args => ['send-keys', 'paste-buffer', 'load-buffer'].includes(args[0] ?? ''))).toBe(false);
   expect((await runner.attach(handle, 'unknown-third')).ok).toBe(true);

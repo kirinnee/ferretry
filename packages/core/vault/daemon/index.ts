@@ -69,7 +69,7 @@ import { DeclaredMaskSource } from './lib/secrets/mask-source.ts';
 import { combinedValues, SecretRedactor } from './lib/secrets/redaction.ts';
 import { UnknownSecretError } from './lib/secrets/types.ts';
 import { SecretUseError, SecretUseService } from './lib/secrets/use.ts';
-import { allowedDestination } from '../contract/index.ts';
+import { allowedDestination, optionalSecretReferenceOf, secretReferencesIn } from '../contract/index.ts';
 import { SecretDirectory, SecretVault } from './lib/secrets/vault.ts';
 
 /**
@@ -201,14 +201,9 @@ export default implementDaemon(manifest, {
       }
     };
 
-    /**
-     * `${secret:NAME}` in a ferret child's environment (S62–S64): every name resolved, or the launch refused. A
-     * variable whose whole value is `${secret?:NAME}` is set when held and left out when not (`launchEnvironment`).
-     *
-     * The handle records the plugin it was minted for (`requester`: the needer this port was built for) and whether its
-     * `PATH` as asked named a secret, so `searchPathOf` (Q7) answers only the kernel's readers for that plugin and
-     * never a secret-derived PATH. A call with no requester mints a handle no plugin may search.
-     */
+    // Resolve every required reference or refuse; omit absent whole-value `${secret?:NAME}` references (S62–S64).
+    // The handle binds requester and whether PATH named a secret; Q7 permits only that plugin's non-secret PATH.
+    // A handle minted without a requester cannot be searched by a plugin.
     const mintChildEnvironment = async (
       env: Readonly<Record<string, string>>,
       requester: string | undefined,
@@ -219,10 +214,17 @@ export default implementDaemon(manifest, {
       const values = await vault.values();
       const resolved = launchEnvironment(asked, values);
       if (!resolved.ok) return err({ unknown: resolved.unknown });
-      // Classify ONLY here: resolved values never leave the sealed Vault -> child use path.
-      // OAuth access/refresh material is refused regardless of the variable or provider carrying it.
-      if (harness === 'opencode' && Object.values(resolved.value).some(value => /\bsk-ant-o(?:at|rt)\d+-/u.test(value)))
-        return err({ unknown: [], code: 'subscription_login' });
+      // Classify only inside the sealed Vault -> child path, regardless of variable or provider.
+      if (harness === 'opencode') {
+        const referenced = Object.values(asked).flatMap(raw => {
+          const optional = optionalSecretReferenceOf(raw);
+          return optional === undefined ? secretReferencesIn(raw) : [optional];
+        });
+        // Classify each referenced value BEFORE template context can hide its token boundary. Unused secrets do not count.
+        const material = [...referenced.map(name => values.get(name)), ...Object.values(resolved.value)];
+        if (material.some(value => value !== undefined && /\bsk-ant-o(?:at|rt)\d+-/u.test(value)))
+          return err({ unknown: [], code: 'subscription_login' });
+      }
       return ok(
         environments.mint(resolved.value, {
           ...(requester === undefined ? {} : { requester }),
@@ -236,11 +238,8 @@ export default implementDaemon(manifest, {
       harness?: string,
     ): ReturnType<VaultApi['childEnvironment']> => await mintChildEnvironment(env, undefined, harness);
 
-    /**
-     * The kernel's own `${secret:NAME}` lookup (`kernel.secrets`): the value for a NAME, as today's consumers took it
-     * (`(await secretVault.values()).get(name)`). A store that cannot be opened raises, which the kernel answers as
-     * `unknown`. Held by the kernel alone: no route, tool or other plugin is handed it.
-     */
+    // Kernel-only `${secret:NAME}` lookup: an unreadable store raises, answered as `unknown`.
+    // No route, tool or other plugin receives this resolver.
     const secretResolver: SecretResolver = {
       resolve: async name => (await vault.values()).get(name as SecretName),
     };
