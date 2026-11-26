@@ -440,6 +440,7 @@ const fakePlayer: ReplyPlayer = {
   play: pcm => {
     fake.played += pcm.length;
   },
+  position: () => undefined,
   stop: () => undefined,
   remainingMs: () => 0,
   close: () => {

@@ -10,7 +10,7 @@
  * say ends in the `failed` / no-op state, never an exception.
  */
 
-import type { SpeakerEvent, SpeakerPort, SpeakerVoice, SpeakRequest } from './ports.ts';
+import type { SpeakerEvent, SpeakerPort, SpeakerVoice, SpeakRequest, StopReason } from './ports.ts';
 import { readingCapForSeconds, speakableSegments } from './speakable.ts';
 import { chooseVoice, clampSpeechRate, DEFAULT_SPEECH_RATE, voiceNote } from './voice-choice.ts';
 
@@ -62,8 +62,8 @@ export interface ReadAloudController {
   subscribe(listener: () => void): () => void;
   /** Read `markdown` aloud as message `key`, replacing any reading. Call it from the tap itself (iOS). */
   read(key: string, markdown: string, options?: ReadOptions): void;
-  /** Stop whatever is being read. */
-  stop(): void;
+  /** Stop whatever is being read. `reason` is who stopped it (see {@link SpeakerPort.stop}); absent: automatic. */
+  stop(reason?: StopReason): void;
   /** What to say about the voice a reading would use right now, before anything is read: null for a device voice. */
   previewVoiceNote(voiceId?: string | null): string | null;
   /** Stop and forget the message (and its sentences): the conversation it belonged to has been left. */
@@ -224,11 +224,11 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
         if (state !== IDLE) set(IDLE);
       }
     },
-    stop: () => {
+    stop: reason => {
       if (state.status !== 'reading') return;
       // The speaker answers with `stopped`; if it cannot, the state still has to say so.
       try {
-        speaking().stop();
+        speaking().stop(reason);
       } finally {
         if (state.status === 'reading') set({ ...state, status: 'stopped' });
       }

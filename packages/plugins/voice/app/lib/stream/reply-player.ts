@@ -4,6 +4,8 @@ import type { ReplyPlayer } from './voice-stream.ts';
 /** The slice of the browser's audio this file touches, so a suite can stand one in. */
 export interface PlayerContext {
   readonly currentTime: number;
+  /** Seconds between a sample being scheduled and the person hearing it; absent where the browser does not say. */
+  readonly outputLatency?: number;
   readonly state: string;
   readonly destination: unknown;
   resume(): Promise<void>;
@@ -37,10 +39,26 @@ export const PLAYBACK_LEAD_S = 0.15;
 export function createReplyPlayer(context: PlayerContext = browserContext()): ReplyPlayer {
   let nextAt = 0;
   const playing = new Set<{ stop(): void }>();
+  /** Sound scheduled and not yet wholly heard, in order, and the sound already heard of the line that came before them. */
+  const queue: { readonly id: number; readonly at: number; readonly samples: number }[] = [];
+  let done: { id: number; samples: number } | undefined;
+  /** The moment the person hears now: what the context is at, less what the output still holds. */
+  const heardNow = (): number => context.currentTime - (context.outputLatency ?? 0);
+  const prune = (now: number): void => {
+    for (
+      let head = queue[0];
+      head !== undefined && head.at + head.samples / STREAM_SAMPLE_RATE <= now;
+      head = queue[0]
+    ) {
+      done = { id: head.id, samples: (done?.id === head.id ? done.samples : 0) + head.samples };
+      queue.shift();
+    }
+  };
   void context.resume().catch(() => undefined);
   return {
-    play(pcm) {
+    play(pcm, id) {
       if (pcm.length === 0) return;
+      prune(heardNow());
       if (context.state === 'suspended') void context.resume().catch(() => undefined);
       const samples = new Float32Array(pcm.length);
       for (let index = 0; index < pcm.length; index += 1) samples[index] = (pcm[index] ?? 0) / 32768;
@@ -53,7 +71,16 @@ export function createReplyPlayer(context: PlayerContext = browserContext()): Re
       source.onended = () => playing.delete(source);
       playing.add(source);
       source.start(at);
+      queue.push({ id, at, samples: samples.length });
       nextAt = at + samples.length / STREAM_SAMPLE_RATE;
+    },
+    position() {
+      const now = heardNow();
+      prune(now);
+      const head = queue[0];
+      if (head === undefined) return done;
+      const into = Math.min(head.samples, Math.max(0, Math.round((now - head.at) * STREAM_SAMPLE_RATE)));
+      return { id: head.id, samples: (done?.id === head.id ? done.samples : 0) + into };
     },
     stop() {
       for (const source of playing) {
@@ -64,6 +91,8 @@ export function createReplyPlayer(context: PlayerContext = browserContext()): Re
         }
       }
       playing.clear();
+      queue.length = 0;
+      done = undefined;
       nextAt = 0;
     },
     remainingMs: () => Math.max(0, nextAt - context.currentTime) * 1000,

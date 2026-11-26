@@ -4,6 +4,7 @@ import * as api from '../../../app/features/accounts/accounts-api.ts';
 import { SignInRuleSuggestionHost } from '../../../app/features/secure-copy/sign-in-rule-suggestion-host.tsx';
 import { TaskPlanHost } from '../../../app/features/secure-copy/task-plan-host.tsx';
 import { PhoneApprovalHost } from '../../../app/features/sign-in-approval/phone-approval-host.tsx';
+import { RecipeProposalHost } from '../../../app/features/sign-in-approval/recipe-proposal-host.tsx';
 import { TwoFactorSeedHost } from '../../../app/features/two-factor/two-factor-seed-host.tsx';
 import { grantRefusalNotice } from '../../../app/shell.tsx';
 import half from '../../../app/index.ts';
@@ -110,9 +111,12 @@ describe('the app half', () => {
     const phone = drawn({ kind: 'phone-approval', id: `pa_${'0'.repeat(23)}1` });
     should(phone.type).equal(PhoneApprovalHost);
     should(phone.props).match({ approvalId: `pa_${'0'.repeat(23)}1`, ferret: 'sess-1' });
+    const recipe = drawn({ kind: 'recipe-proposal', signIn: 'si_0000000000000001', proposal: 'rp_0123456789abcdef' });
+    should(recipe.type).equal(RecipeProposalHost);
+    should(recipe.props).match({ signIn: 'si_0000000000000001', proposal: 'rp_0123456789abcdef' });
   });
 
-  it('should draw a ref it cannot read a card for, a suspended rule and a recipe proposal as the daemon’s words and where to act', () => {
+  it('should draw a ref it cannot read a card for, and a suspended rule as the daemon’s words and where to act', () => {
     const { client } = recording({});
     const Renderer = ({ value }: { value: unknown }) => signInApprovalCard(client, value, undefined);
     const plain = (ref: unknown, ferret = 'sess-1') =>
@@ -127,9 +131,6 @@ describe('the app half', () => {
     ).be.null();
     const text = (node: unknown): string => JSON.stringify(node);
     should(text(plain({ kind: 'rule-suspended', rule: RULE_ID }))).containEql('Standing sign-in rules');
-    should(
-      text(plain({ kind: 'recipe-proposal', signIn: 'si_0000000000000001', proposal: 'rp_0123456789abcdef' })),
-    ).containEql('Settings › Accounts');
   });
 
   it('should fill every panel the manifest declares, including the two on the Vault’s input card', () => {

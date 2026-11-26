@@ -842,7 +842,7 @@ its body is read, exactly as for the vault (honest-client until a ferret has its
 | `POST /v1/accounts/:id/rename`, `DELETE /v1/accounts/:id` | rename (`[[ID]]` in recipes follows); delete (its sign-ins go with it) |
 | `POST /v1/accounts/:id/sign-ins`                          | add a sign-in `{ place, method?, recipe?, autoApplyRecipe? }`          |
 | `PUT` / `DELETE /v1/accounts/sign-ins/:si`                | change or remove one sign-in                                           |
-| `POST /v1/accounts/sign-ins/:si/recipe/proposals/:pid`    | the owner approves or declines a ferret's recipe                       |
+| `POST /v1/accounts/sign-ins/:si/recipe/proposals/:pid`    | the owner approves or declines a ferret's recipe; `{decision, pin?}`   |
 | `POST /v1/accounts/:id/merge {from}`, `…/apart {from}`    | "these look like one account": merge, or keep apart                    |
 | `PUT /v1/accounts/defaults`                               | owner only: the default account for a place (below)                    |
 
