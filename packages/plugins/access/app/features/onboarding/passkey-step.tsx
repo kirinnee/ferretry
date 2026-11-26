@@ -124,7 +124,7 @@ export function PasskeyStep({
       setFailure(null);
       step.busy('Waiting for your device…');
       try {
-        await addPasskeyCeremony(credentials(), held.client, here, supported());
+        await addPasskeyCeremony(credentials(), held.client, here, supported(), daemonId);
       } catch (reason) {
         step.busy(null);
         setFailure(passkeyFailureSentence(reason, here));
@@ -136,7 +136,7 @@ export function PasskeyStep({
       setAdded(true);
       step.done();
     },
-    [credentials, origin, step, supported],
+    [credentials, daemonId, origin, step, supported],
   );
 
   // Two explicit buttons, never a selection: a radio fires on Arrow/Home/End, and moving through choices must not
