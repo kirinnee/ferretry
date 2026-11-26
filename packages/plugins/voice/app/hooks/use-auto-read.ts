@@ -182,12 +182,15 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
    * takes it away, so a late failure never speaks at someone who has moved on.
    */
   const recovery = useRef<object | null>(null);
+  /** The words of the end-of-turn reading this hook started from what voice mode did not say live (not what it read of a prompt). */
+  const fallback = useRef<{ readonly key: string; readonly words: string } | null>(null);
 
   const state = useSyncExternalStore(controller.subscribe, controller.getState, () => IDLE);
   const reading = mine.current !== null && state.status === 'reading' && state.key === mine.current;
 
   const stop = useCallback(() => {
     recovery.current = null;
+    fallback.current = null;
     if (mine.current !== null && controller.getState().key === mine.current) controller.stop();
     mine.current = null;
   }, [controller]);
@@ -202,9 +205,16 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
         recovery.current = null;
         const current = latest.current;
         if (!current.enabled || !current.visible || !controller.supported) return;
-        const words = unsaidOf(pick);
-        if (words === '') return;
+        const owed = unsaidOf(pick);
+        if (owed === '') return;
+        // Lines the earlier fallback has not finished saying stay in the reading: a second failure adds to it, never replaces it.
+        const before = fallback.current;
+        const state = controller.getState();
+        const unfinished =
+          before !== null && before.key === pick.key && state.key === pick.key && state.status === 'reading';
+        const words = unfinished ? `${before.words}\n\n${owed}` : owed;
         mine.current = pick.key;
+        fallback.current = { key: pick.key, words };
         controller.read(pick.key, words, readOptionsOf(current.settings));
       };
       return latest.current.unsaid?.(pick, again) ?? pick.markdown;
@@ -280,6 +290,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
         const words = step.fire.outcome === 'needs-input' ? pick.markdown : unsaidOf(pick);
         if (words === '') return;
         mine.current = pick.key;
+        fallback.current = step.fire.outcome === 'needs-input' ? null : { key: pick.key, words };
         if (step.fire.outcome === 'needs-input')
           asked.current = { turnAt: parseInstant(current.turnStateAt), words: pick.markdown };
         controller.read(pick.key, words, readOptionsOf(current.settings));
@@ -306,6 +317,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
           const words = unsaidOf(pick);
           if (words === '') return;
           mine.current = pick.key;
+          fallback.current = { key: pick.key, words };
           controller.read(pick.key, words, readOptionsOf(current.settings));
         }
       }
@@ -322,6 +334,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     pending.current = null;
     asked.current = null;
     recovery.current = null;
+    fallback.current = null;
     mine.current = null;
     return () => {
       if (timer.current !== null) clearTimeout(timer.current);
