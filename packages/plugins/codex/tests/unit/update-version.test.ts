@@ -73,7 +73,7 @@ describe('what Ferretry verified', () => {
   });
 
   it('points at the contract guard README of the product', () => {
-    should(verificationUrl('ferretry')).equal(
+    should(verificationUrl()).equal(
       'https://github.com/kirinnee/ferretry/blob/main/packages/fleet/tests/contract/README.md',
     );
   });

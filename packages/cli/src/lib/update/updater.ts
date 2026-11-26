@@ -10,7 +10,7 @@ import {
   type LatestRelease,
   VersionSchema,
   planUpdate,
-  RELEASE_OWNER,
+  RELEASE_SLUG,
   releaseFlakeReference,
   releaseTapName,
   releaseTapUrl,
@@ -165,12 +165,12 @@ export class DaemonUpdater {
       target = latest.release.version;
       if (
         method.kind === 'homebrew' &&
-        method.cask === `${releaseTapName(this.deps.product)}/${this.deps.product}@4` &&
+        method.cask === `${releaseTapName()}/${this.deps.product}@4` &&
         (options.major === true || options.to !== undefined) &&
         isNewerMajorVersion('4.0.0', target)
       ) {
         throw new DaemonUpdateRefusedError(
-          `The ${this.deps.product}@4 package stays on v4. To move to ${target.split('.').slice(0, 2).join('.')} after preparing the home, run: brew uninstall --cask ${this.deps.product}@4 && brew install --cask ${releaseTapName(this.deps.product)}/${this.deps.product}`,
+          `The ${this.deps.product}@4 package stays on v4. To move to ${target.split('.').slice(0, 2).join('.')} after preparing the home, run: brew uninstall --cask ${this.deps.product}@4 && brew install --cask ${releaseTapName()}/${this.deps.product}`,
         );
       }
       let intent: UpdateIntent = { daemon, method, plan, current, target, running: health !== undefined, startedAt };
@@ -193,7 +193,7 @@ export class DaemonUpdater {
     if (to !== undefined) {
       if (!VersionSchema.safeParse(to).success) return { failure: `${to} is not a version` };
       return {
-        release: { version: to, url: `https://github.com/${RELEASE_OWNER}/${this.deps.product}/releases/tag/v${to}` },
+        release: { version: to, url: `https://github.com/${RELEASE_SLUG}/releases/tag/v${to}` },
       };
     }
     const answer = await this.deps.latest.latest();
@@ -217,14 +217,10 @@ export class DaemonUpdater {
     const packages = this.deps.packages;
     let artifact: NonNullable<UpdateIntent['artifact']>;
     if (method.kind === 'homebrew') {
-      const tap = releaseTapName(this.deps.product);
+      const tap = releaseTapName();
       if (options.json !== true)
         this.deps.out.warn(`refreshing the Homebrew tap ${tap} so brew can see ${intent.target} (brew update)`);
-      const refreshed = await packages.brewRefresh(
-        tap,
-        releaseTapUrl(this.deps.product),
-        stepObserver(this.progress, intent.target),
-      );
+      const refreshed = await packages.brewRefresh(tap, releaseTapUrl(), stepObserver(this.progress, intent.target));
       if (refreshed.code !== 0)
         throw new DaemonUpdateRefusedError(
           failedCommand('brew update', refreshed.stderr, refreshed.code, this.#brewRecovery(method.cask)).message,
@@ -235,7 +231,7 @@ export class DaemonUpdater {
       artifact = found;
     } else {
       const found = await packages.nixResolve(
-        releaseFlakeReference(this.deps.product),
+        releaseFlakeReference(),
         method.kind === 'nix-profile' ? method.element : undefined,
       );
       if ('failure' in found)
@@ -326,16 +322,16 @@ export class DaemonUpdater {
     const route =
       method.kind === 'homebrew'
         ? major === '4'
-          ? `brew install --cask ${releaseTapName(this.deps.product)}/${this.deps.product}@4`
+          ? `brew install --cask ${releaseTapName()}/${this.deps.product}@4`
           : undefined
-        : `nix profile install github:${RELEASE_OWNER}/${this.deps.product}/v${safeTarget}`;
+        : `nix profile install github:${RELEASE_SLUG}/v${safeTarget}`;
     const stays = reason.includes(`Your daemon stays on ${current}.`) ? '' : ` Your daemon stays on ${current}.`;
     const tail = route === undefined ? '' : ` To stay on v${major}, run: ${route}`;
     return `${reason}${reason.endsWith('.') ? '' : '.'}${stays}${tail}`;
   }
 
   #majorUpdateMessage(current: string, target: string): string {
-    const notes = `https://github.com/${RELEASE_OWNER}/${this.deps.product}/releases/tag/v${target}`;
+    const notes = `https://github.com/${RELEASE_SLUG}/releases/tag/v${target}`;
     return `${target} is the next major version, not a plain update: it comes with its own steps. Read that release's notes first: ${notes}. Your daemon stays on ${current}. --major allows the move.`;
   }
 
@@ -414,9 +410,9 @@ export class DaemonUpdater {
 
   /** The exact commands that recover a Homebrew install by hand, for every message that says it failed. */
   #brewRecovery(cask: string): string {
-    const tap = releaseTapName(this.deps.product);
+    const tap = releaseTapName();
     const client = this.deps.clientName;
-    return `To recover by hand run: brew update && brew upgrade --cask ${cask} && ${client} daemon restart; if the tap is wedged: brew untap ${tap} && brew tap ${tap} ${releaseTapUrl(this.deps.product)} && brew reinstall --cask ${cask}`;
+    return `To recover by hand run: brew update && brew upgrade --cask ${cask} && ${client} daemon restart; if the tap is wedged: brew untap ${tap} && brew tap ${tap} ${releaseTapUrl()} && brew reinstall --cask ${cask}`;
   }
 
   /** `#upgrade`, with its steps settled whichever way it ended. */
@@ -535,8 +531,8 @@ export class DaemonUpdater {
       const recovery =
         intent.method.kind === 'homebrew'
           ? pinned
-            ? `brew uninstall --cask ${this.deps.product} && brew install --cask ${releaseTapName(this.deps.product)}/${this.deps.product}@4 && ${this.deps.clientName} daemon restart`
-            : `brew uninstall --cask ${this.deps.product}, then install ${intent.current} again from https://github.com/${RELEASE_OWNER}/${this.deps.product}/releases/tag/v${intent.current} and run ${this.deps.clientName} daemon restart`
+            ? `brew uninstall --cask ${this.deps.product} && brew install --cask ${releaseTapName()}/${this.deps.product}@4 && ${this.deps.clientName} daemon restart`
+            : `brew uninstall --cask ${this.deps.product}, then install ${intent.current} again from https://github.com/${RELEASE_SLUG}/releases/tag/v${intent.current} and run ${this.deps.clientName} daemon restart`
           : intent.method.kind === 'nix-profile' || intent.method.kind === 'nix-shell'
             ? 'nix profile rollback'
             : 'restore the previous binaries';

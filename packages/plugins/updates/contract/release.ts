@@ -7,31 +7,35 @@ import { z } from 'zod';
 import { compareVersions, isNewerMajorVersion, VersionSchema } from './version.ts';
 
 /**
- * The GitHub account that publishes releases. The repository is the PRODUCT name, which callers pass
- * in from their own single source (`productName`), so a product rename carries it.
+ * The GitHub account and repository that publish releases: the root `package.json` `repository` field
+ * ("github:<owner>/<repo>") is the one source, and `scripts/local/move-repo.sh` moves both constants with it
+ * (`cli-contracts.sh repo-owner-single-source` refuses them drifting). The repository is NOT the product name:
+ * a repository moved to `newco/fy-home` still ships the product `ferretry`.
  */
 export const RELEASE_OWNER = 'kirinnee';
+export const RELEASE_REPO = 'ferretry';
 
-/** The `nix profile install` / flake reference for a product. */
-export const releaseFlakeReference = (product: string): string => `github:${RELEASE_OWNER}/${product}`;
+/** `<owner>/<repo>`: the one spelling every release address below is built from. */
+export const RELEASE_SLUG = `${RELEASE_OWNER}/${RELEASE_REPO}`;
 
-/** The Homebrew tap a product's cask lives in: this repository, named `<owner>/<product>`. */
-export const releaseTapName = (product: string): string => `${RELEASE_OWNER}/${product}`;
+/** The `nix profile install` / flake reference of this repository. */
+export const releaseFlakeReference = (): string => `github:${RELEASE_SLUG}`;
+
+/** The Homebrew tap the cask lives in: this repository, named `<owner>/<repo>`. */
+export const releaseTapName = (): string => RELEASE_SLUG;
 
 /** Where that tap is cloned from; the tap is the whole repository, so it has no `homebrew-` prefix. */
-export const releaseTapUrl = (product: string): string => `https://github.com/${RELEASE_OWNER}/${product}`;
+export const releaseTapUrl = (): string => `https://github.com/${RELEASE_SLUG}`;
 
-/** The GitHub API address of a product's latest published release. */
-export const latestReleaseApiUrl = (product: string): string =>
-  `https://api.github.com/repos/${RELEASE_OWNER}/${product}/releases/latest`;
+/** The GitHub API address of the latest published release. */
+export const latestReleaseApiUrl = (): string => `https://api.github.com/repos/${RELEASE_SLUG}/releases/latest`;
 
-/** The GitHub API address of a product's most recent tags — newer than the latest release while one is publishing. */
-export const releaseTagsApiUrl = (product: string): string =>
-  `https://api.github.com/repos/${RELEASE_OWNER}/${product}/tags?per_page=30`;
+/** The GitHub API address of the most recent tags — newer than the latest release while one is publishing. */
+export const releaseTagsApiUrl = (): string => `https://api.github.com/repos/${RELEASE_SLUG}/tags?per_page=30`;
 
 /** The download base of one tagged release's assets. */
-export const releaseDownloadBase = (product: string, version: string): string =>
-  `https://github.com/${RELEASE_OWNER}/${product}/releases/download/v${version}`;
+export const releaseDownloadBase = (version: string): string =>
+  `https://github.com/${RELEASE_SLUG}/releases/download/v${version}`;
 
 export const LatestReleaseSchema = z.strictObject({
   version: VersionSchema,
@@ -76,7 +80,7 @@ const GitHubTagsSchema = z.array(z.looseObject({ name: z.string() }));
  * source-built install (nix) will actually get; it is never the target of an install that downloads
  * release assets.
  */
-export function parseGitHubNewestTag(product: string, value: unknown): LatestRelease | undefined {
+export function parseGitHubNewestTag(value: unknown): LatestRelease | undefined {
   const parsed = GitHubTagsSchema.safeParse(value);
   if (!parsed.success) return undefined;
   let newest: string | undefined;
@@ -86,7 +90,7 @@ export function parseGitHubNewestTag(product: string, value: unknown): LatestRel
     if (newest === undefined || compareVersions(version, newest) === 1) newest = version;
   }
   if (newest === undefined) return undefined;
-  return { version: newest, url: `https://github.com/${RELEASE_OWNER}/${product}/releases/tag/v${newest}` };
+  return { version: newest, url: `https://github.com/${RELEASE_SLUG}/releases/tag/v${newest}` };
 }
 
 /** Whether a newer release is available within this major. A new major needs its migration, so it is never a plain update. */
