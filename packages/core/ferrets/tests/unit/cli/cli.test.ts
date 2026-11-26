@@ -475,7 +475,14 @@ describe('wait and instructions', () => {
     });
     const finished = run({ [FERRET_ROUTES.get]: done });
     expect(await finished.verb('wait <id>', ['lead'])).toBe(0);
-    expect(finished.calls).toEqual([{ route: 'GET /v1/ferrets/:ferretId', init: { params: { ferretId: 'lead' } } }]);
+    // The journal baseline is taken first, at invocation, so a request published after it is never skipped.
+    expect(finished.calls).toEqual([
+      {
+        route: 'GET /v1/ferrets/:ferretId/events',
+        init: { params: { ferretId: 'lead' }, query: { after: '0', limit: '1000' }, quiet: true },
+      },
+      { route: 'GET /v1/ferrets/:ferretId', init: { params: { ferretId: 'lead' } } },
+    ]);
     expect(finished.out).toEqual(['lead is stopped']);
     const ended = run({ [FERRET_ROUTES.get]: sessionView({ id: 'lead', state: 'stopped' }) });
     expect(await ended.verb('wait <id>', ['lead'])).toBe(1);
