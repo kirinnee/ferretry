@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
+import { generateKeyPairSync } from 'node:crypto';
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -20,6 +21,10 @@ function tree(options: { readonly previewKey?: string } = {}): string {
   }
   chmodSync(join(directory, 'scripts/ci/hosted-app-origin.sh'), 0o755);
   mkdirSync(join(directory, 'packages/app'), { recursive: true });
+  copyFileSync(
+    join(root, 'packages/app/release-signing-key.pub'),
+    join(directory, 'packages/app/release-signing-key.pub'),
+  );
   if (options.previewKey !== undefined)
     writeFileSync(join(directory, 'packages/app/release-signing-key.preview.pub'), options.previewKey);
   return directory;
@@ -62,7 +67,7 @@ describe('scripts/ci/hosted-app-origin.sh', () => {
   });
 
   test('a named app has its own origin, key file and daemon defines', () => {
-    const pem = '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAabc=\n-----END PUBLIC KEY-----\n';
+    const pem = generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString();
     const directory = tree({ previewKey: pem });
     const named = 'https://ferretry-v5.pages.dev';
     expect(run(directory, [], named).out).toBe(`${named}\n`);
@@ -74,10 +79,23 @@ describe('scripts/ci/hosted-app-origin.sh', () => {
     );
     const defines = run(directory, ['--defines'], named).out.trimEnd().split('\n');
     expect(defines[0]).toBe(`__FY_HOSTED_APP_ORIGIN__="${named}"`);
-    expect(defines[1]).toBe(
-      '__FY_HOSTED_APP_RELEASE_KEY__="-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAabc=\\n-----END PUBLIC KEY-----\\n"',
-    );
     expect(JSON.parse(defines[1]!.slice('__FY_HOSTED_APP_RELEASE_KEY__='.length))).toBe(pem);
+  });
+
+  test('define generation refuses malformed or wrong-algorithm selected keys before emitting defines', () => {
+    const rsa = generateKeyPairSync('rsa', { modulusLength: 1024 }).publicKey;
+    const privatePem = generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    for (const pem of ['dummy malformed PEM', '', rsa.export({ type: 'spki', format: 'pem' }).toString(), privatePem]) {
+      const directory = tree({ previewKey: pem });
+      writeFileSync(join(directory, 'packages/app/release-signing-key.pub'), pem);
+      for (const origin of [undefined, 'https://preview.example']) {
+        const result = run(directory, ['--defines'], origin);
+        expect(result.status).toBe(1);
+        expect(result.out).toBe('');
+        expect(result.err).toContain('must be a valid Ed25519 public key');
+        expect(result.err).not.toContain('dummy malformed PEM');
+      }
+    }
   });
 
   test('a named app with no committed key still sets the origin and says the key is missing', () => {

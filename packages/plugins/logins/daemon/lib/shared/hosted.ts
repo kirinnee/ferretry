@@ -1,4 +1,5 @@
 import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract';
+import { createPublicKey } from 'node:crypto';
 
 /** The hosted app's origin: where the published model catalog and its signed release list are read from. Owned by the kernel's `hosted-app` module. */
 export { HOSTED_APP_ORIGIN };
@@ -19,7 +20,17 @@ MCowBQYDK2VwAyEAnoDPIkeAlpqBnzRttizycYDdns+41tiEHbGKK+7t+78=
  * 5.0 preview) is given THAT app's key by the same build script that gives it the origin, so the daemon verifies the
  * catalog the origin it points at actually serves.
  */
-export const HOSTED_APP_RELEASE_KEY =
-  typeof __FY_HOSTED_APP_RELEASE_KEY__ === 'string' && __FY_HOSTED_APP_RELEASE_KEY__.includes('BEGIN PUBLIC KEY')
-    ? __FY_HOSTED_APP_RELEASE_KEY__
-    : PRODUCTION_RELEASE_KEY;
+export const HOSTED_APP_RELEASE_KEY = (() => {
+  if (typeof __FY_HOSTED_APP_RELEASE_KEY__ === 'undefined') return PRODUCTION_RELEASE_KEY;
+  try {
+    if (
+      typeof __FY_HOSTED_APP_RELEASE_KEY__ === 'string' &&
+      __FY_HOSTED_APP_RELEASE_KEY__.trim().startsWith('-----BEGIN PUBLIC KEY-----') &&
+      createPublicKey(__FY_HOSTED_APP_RELEASE_KEY__).asymmetricKeyType === 'ed25519'
+    )
+      return __FY_HOSTED_APP_RELEASE_KEY__;
+  } catch {
+    // A supplied build key is authoritative. Never silently trust production, or quote the rejected value.
+  }
+  throw new Error('The hosted app release key must be an Ed25519 public key.');
+})();

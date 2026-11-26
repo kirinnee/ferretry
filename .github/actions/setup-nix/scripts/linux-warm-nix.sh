@@ -23,8 +23,7 @@
 #   MAX_AGE_DAYS        refuse a snapshot older than this and reinstall (default 7), so
 #                       the Determinate Nix version still follows the installer's stable
 #   FLAKEHUB_LOGIN      'false' skips the FlakeHub login (default 'true')
-#   GITHUB_TOKEN_VALUE  optional; becomes `access-tokens = <server host>=...` like the
-#                       installer action does
+#   GitHub fetches use public access: no job token is persisted in test-readable Nix configuration.
 #   DURIAN_NIX_STATE_DIR / DURIAN_NIX_ETC_DIR / DURIAN_NIX_BIN_DIR override locations (tests)
 set -euo pipefail
 
@@ -163,12 +162,6 @@ write_custom_conf() {
   echo "# Written by AtomiCloud/actions.setup-nix (warm /nix bootstrap)."
   echo "# Mirrors what DeterminateSystems/nix-installer-action writes at install time."
   echo
-  if [ -n "${GITHUB_TOKEN_VALUE:-}" ]; then
-    tok_host="${GITHUB_SERVER_URL:-https://github.com}"
-    tok_host="${tok_host#*://}"
-    tok_host="${tok_host%%/*}"
-    echo "access-tokens = ${tok_host:-github.com}=${GITHUB_TOKEN_VALUE}"
-  fi
   echo "trusted-users = root ${user}"
   if command -v jq >/dev/null 2>&1; then
     tags="$(jq -cn --arg a "${GITHUB_WORKFLOW_REF:-}" --arg b "${GITHUB_WORKFLOW_SHA:-}" \
