@@ -56,6 +56,39 @@ describe('OpenCode V2 session export captures', () => {
     expect(exportEntries(decodeExport(raw, raw.info.id)).filter(entry => entry.role === 'assistant')).toHaveLength(1);
   });
 
+  test('a native tool output is retained when the export carries output rather than content blocks', async () => {
+    const raw = await capture('export-after');
+    const tool = raw.messages.find((entry: { id: string }) => entry.id === 'msg_spike_004').content[0];
+    delete tool.state.content;
+    tool.state.output = 'native output';
+    expect(exportEntries(decodeExport(raw, raw.info.id)).find(entry => entry.role === 'tool')?.text).toBe(
+      'native output',
+    );
+  });
+
+  test('a polling failure propagates, while aborting during a failed wait closes the stream', async () => {
+    const snapshot = decodeExport(await capture('export-before'), 'ses_spike_001');
+    for (const abort of [false, true]) {
+      const controller = new AbortController();
+      const reader = exportReader({
+        snapshot: async () => snapshot,
+        mask: async entry => entry,
+        nowMs: () => 0,
+        wait: async () => {
+          if (abort) controller.abort();
+          throw new Error('poll failed');
+        },
+      });
+      const consume = async () => {
+        for await (const _entry of reader.follow(controller.signal)) {
+          /* drain */
+        }
+      };
+      if (abort) await expect(consume()).resolves.toBeUndefined();
+      else await expect(consume()).rejects.toThrow('poll failed');
+    }
+  });
+
   test('polling coalesces reads, masks entries, deduplicates snapshots and cancels', async () => {
     const before = decodeExport(await capture('export-before'), 'ses_spike_001');
     const after = decodeExport(await capture('export-after'), 'ses_spike_001');
