@@ -71,7 +71,7 @@ export interface LiveSink {
 
 export interface LiveLinesDeps {
   /** The open stream, once there is one. */
-  readonly stream: () => Pick<VoiceStreamHandle, 'speak' | 'drop' | 'hush'> | undefined;
+  readonly stream: () => Pick<VoiceStreamHandle, 'speak' | 'drop' | 'interrupt'> | undefined;
   /** Where the machine's reply voice is; `undefined` before the stream said. */
   readonly replyState: () => ReplyState | undefined;
   readonly player: Pick<ReplyPlayer, 'remainingMs'>;
@@ -217,7 +217,7 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
     },
     hush() {
       if (entries.length === 0 && !active) return;
-      deps.stream()?.hush();
+      deps.stream()?.interrupt();
       abandon();
     },
     dispose: abandon,

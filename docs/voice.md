@@ -607,6 +607,26 @@ machine hears the same speech and sends it after the pause as usual, so the pers
   line that was sent and nobody has heard: the machine takes it out of its queue, does not send any sound made for it and throws
   it away if it is being made. A line whose first sound has gone down is left to finish (the person has heard its start), and the
   browser ignores sound of a dropped line that still arrives.
+- **What the person heard (V2) and the note to the ferret (V3).** The device is the only one that knows how much of a reply reached
+  the person's ears, so when the PERSON stops it (they talked over it, or said stop) the hush frame carries **`cut`**:
+  `{id, samples}`, line `id` had played `samples` samples (16 kHz) of its sound and every line before it had played whole. The
+  player (`reply-player.ts`) works that out from the schedule it keeps (less the output latency the browser reports);
+  `VoiceStreamHandle.interrupt()` sends it, where nothing had played yet means `{id: 0, samples: 0}`, "nothing heard". A
+  reading that is only replaced by the next one, or that failed, sends the plain hush (no `cut`) and nobody is told anything.
+  Numbers only: no audio and no words go up. The machine (`daemon/lib/stream/said.ts`) holds the words of every line it was
+  asked to speak and the length of each piece it made, and walks them in order: every line before the cut whole, the cut line up
+  to its samples, the rest not at all. **Pieces are exact boundaries; inside a piece the word position is an estimate** (the share
+  of the piece's sound that played times its words, rounded down; the voice returns no word timings), so the note is right to
+  about **a word or two either way**, and `instructions/voice.md` says so to the ferret. A line that was dropped, or that the
+  machine could not speak (the device reads it itself), is not counted. The words live in the stream's memory only: never audio,
+  never a log line (the log carries counts), gone when the stream ends. Then the note is
+  `[heard up to: "<last 12 words heard>"; not heard: "<first 30 words not heard>"]` (`heard up to: nothing` when nothing was; a
+  `…` marks a cut-short quote; a reply heard to its end makes no note). It is **prefixed to the person's next `(voice)` message**
+  (`[heard …] (voice) <words>`, the message's own send id), or **sent on its own** when the person said nothing: a turn with no
+  words sends it at once, a stop with no speech after it sends it one pause later, under its own id `<streamId>:heard:<n>`
+  (one per cut-in). A refused send keeps the note for the next message; a second cut before the ferret was told adds what was not
+  heard and keeps the newer place. Declared gap: the phone's own voice (no machine stream) reports no position, so it tells the
+  ferret nothing; and a reply the person talked over softly enough that barge-in never fired is not noted either.
 - **Speaking while the ferret works (V4).** A `<voice>` line the ferret finishes mid-turn is handed to the machine's voice at
   once, behind the piece that is playing, and never waits for the turn to end (`useLiveVoiceLines` reads the closed lines of
   the rows; `createLiveLines` is the machine voice). Progress lines can arrive faster than they are spoken, so a waiting line is dropped only when it is **known to be progress**: the ferret used a

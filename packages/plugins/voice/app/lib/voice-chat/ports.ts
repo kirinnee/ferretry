@@ -46,6 +46,9 @@ export interface SpeakRequest {
   readonly language?: string;
 }
 
+/** Who stopped a reading: the person (a cut-off, which the ferret is told of) or anything else (no one's choice, told to no one). */
+export type StopReason = 'person' | 'automatic';
+
 export interface SpeakerPort {
   /** False where the device has no speech at all, so a screen offers no Read aloud. */
   readonly supported: boolean;
@@ -58,6 +61,10 @@ export interface SpeakerPort {
   unlock(): void;
   /** Say the request, replacing any reading already going (which hears `stopped`). */
   speak(request: SpeakRequest, onEvent: (event: SpeakerEvent) => void): void;
-  /** Stop at once. The reading in progress hears `stopped`; with none, nothing happens. */
-  stop(): void;
+  /**
+   * Stop at once. The reading in progress hears `stopped`; with none, nothing happens. `reason` says WHO stopped it: only the
+   * person is a cut-off the machine's voice reports (where their ears were); anything else (the tab going to the background, a
+   * setting changing, a reading replaced) is no one's choice, and the voice stops without a word to the ferret. Absent: automatic.
+   */
+  stop(reason?: StopReason): void;
 }

@@ -50,7 +50,8 @@ interface Raise {
   readonly howToResolve: string;
 }
 
-type Raised = { ok: true; id: string } | { ok: false; message: string };
+/** `ferret` is the board the ask LANDED on: a sub-ferret's ask may be raised on its lead's, and `id` is numbered there. */
+type Raised = { ok: true; id: string; ferret: string } | { ok: false; message: string };
 
 /** The raise and close every adapter below shares. Asks' refusals come back as words, never thrown into the service. */
 export class SignInApprovalAsks {
@@ -72,7 +73,8 @@ export class SignInApprovalAsks {
       ferret,
     };
     try {
-      return { ok: true, id: (await this.asks.raise(draft)).id };
+      const landed = await this.asks.raise(draft);
+      return { ok: true, id: landed.id, ferret: landed.ferret };
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'the ask could not be raised' };
     }

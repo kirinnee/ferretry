@@ -550,6 +550,7 @@ for (const decision of ['approve', 'decline'] as const) {
                 sessionId: 'F1',
                 proposedAt: '2026-11-01T00:00:00.000Z',
                 agendaItemId: ask.id,
+                agendaSession: 'F1',
               },
             ],
           },

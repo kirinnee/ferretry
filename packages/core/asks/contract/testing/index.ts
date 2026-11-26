@@ -17,10 +17,12 @@ import {
   type AskSourceSpec,
   type AskSummary,
   type AsksApi,
+  AgendaAskRefSchema,
   AskItemSchema,
   type AskBoardSnapshot,
   type AskOwnerAction,
   AskOwnerActionError,
+  BUILT_IN_SOURCES,
   type CloseReason,
   type EntryId,
   type SourceKey,
@@ -29,6 +31,13 @@ import {
 const AT = '2026-11-07T12:00:00.000Z';
 export const sourceKey = (key: string): SourceKey => key as SourceKey;
 export const entryId = (id: string): EntryId => id as EntryId;
+
+/** The `askRef` a registered source's ask carries on its item (none for a built-in source or a ref without a kind). */
+const askRefOf = (source: string, ref: unknown): { readonly askRef?: Record<string, unknown> & { kind: string } } => {
+  if ((BUILT_IN_SOURCES as readonly string[]).includes(source)) return {};
+  const parsed = AgendaAskRefSchema.safeParse(ref);
+  return parsed.success ? { askRef: parsed.data } : {};
+};
 
 /** Where an ask lives: its ferret's board, then its id there. */
 const keyOf = (ask: AskRef): string => `${ask.ferret}~${ask.id}`;
@@ -67,10 +76,13 @@ export class FakeAsks implements AsksApi {
           sourceRef: `ask:${ask.source}:${ask.entry}`,
           why: draft?.why ?? 'because',
           howToResolve: draft?.howToResolve ?? draft?.why ?? 'Read it.',
+          ...(draft?.context === undefined ? {} : { context: draft.context }),
           waitingSince: ask.raisedAt,
           raisedBy: ask.raisedBy.kind === 'owner' ? 'human' : ask.raisedBy.kind === 'ferret' ? 'agent' : 'daemon',
           raisedBySession: ask.raisedBy.kind === 'ferret' ? ferret : null,
           raisedByName: null,
+          // The real port keeps a registered source's own ref on the item, for that source's owner to draw.
+          ...askRefOf(ask.source, draft?.ref),
           ...(this.#parked.has(key) ? { parked: { reason: 'snoozed', at: AT, until: this.#parked.get(key) } } : {}),
         });
       };
