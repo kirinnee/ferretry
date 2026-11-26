@@ -219,7 +219,7 @@ export function SecuritySurface({
     setBusy(true);
     setFailure(null);
     try {
-      await addPasskeyCeremony(credentials(), client, here, supported());
+      await addPasskeyCeremony(credentials(), client, here, supported(), connection.daemonId);
     } catch (reason) {
       setFailure(passkeyFailureSentence(reason, here));
       setBusy(false);
@@ -231,7 +231,7 @@ export function SecuritySurface({
       setFailure(REFRESH_FAILURE);
     }
     setBusy(false);
-  }, [credentials, loaded, origin, supported]);
+  }, [connection.daemonId, credentials, loaded, origin, supported]);
   return (
     <AccessTab name="security">
       {loaded.kind === 'ready' ? (
