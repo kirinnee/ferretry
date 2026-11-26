@@ -37,6 +37,8 @@ export interface TunnelCarrierHandle {
   readonly status: TunnelCarrierStatus;
   start(): void;
   idle(): Promise<void>;
+  /** Resolves once the local decision (is `cloudflared` here?) is made, without waiting for the hosted service. */
+  located(): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -137,6 +139,8 @@ export class TunnelCarrierSwitch implements TunnelSwitchPort {
     this.#replace();
     // An off carrier's whole work is the release; it is bounded by the provisioner's own timeout.
     if (!enabled) await this.#carrier?.idle();
+    // An ON answers with the local decision made, so a missing `cloudflared` is in the reply, not found out a poll later.
+    else await this.#carrier?.located();
     return this.view();
   }
 

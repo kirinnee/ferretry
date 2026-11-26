@@ -18,6 +18,8 @@ import type { AdapterHost, ConfigFileService, HostFiles } from './ports.ts';
 
 /** The largest file a folder read carries; a larger one is skipped and named. */
 const MAX_FOLDER_FILE_BYTES = 256 * 1024;
+/** The most bytes one folder read takes in all (the per-file cap times the file cap is 125 MiB); the rest are skipped and named. */
+export const MAX_FOLDER_TOTAL_BYTES = 8 * 1024 * 1024;
 /** The most files one folder read takes; the rest are skipped and named. */
 export const MAX_FOLDER_FILES = 500;
 
@@ -36,6 +38,7 @@ export async function readTextFolder(
   const found: { path: string; content: string }[] = [];
   const skipped: { path: string; reason: string }[] = [];
   const decoder = new TextDecoder('utf-8', { fatal: true });
+  let total = 0;
   const walk = async (relative: string): Promise<void> => {
     const names = await files.list(join(root, relative));
     if (names === undefined) return;
@@ -60,9 +63,14 @@ export async function readTextFolder(
         skipped.push({ path, reason: 'it is too large' });
         continue;
       }
+      if (total + entry.size > MAX_FOLDER_TOTAL_BYTES) {
+        skipped.push({ path, reason: 'the folder is larger than an import takes' });
+        continue;
+      }
       try {
         const bytes = await files.readBytes(join(root, path));
         if (bytes === undefined) continue;
+        total += entry.size;
         found.push({ path, content: decoder.decode(bytes) });
       } catch {
         skipped.push({ path, reason: 'it is not text' });

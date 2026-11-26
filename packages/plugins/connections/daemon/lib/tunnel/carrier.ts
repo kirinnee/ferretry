@@ -122,6 +122,7 @@ const TURN_ON = 'turn on with `fy tunnel on`';
 export class TunnelCarrier {
   #stopped = false;
   #work: Promise<void> = Promise.resolve();
+  #decided: Promise<void> = Promise.resolve();
   #client: TunnelProvisioningClient | undefined;
   #origin: string | undefined;
   #listener: TunnelListenerHandle | undefined;
@@ -169,7 +170,19 @@ export class TunnelCarrier {
     const located = this.deps.cloudflared.locate();
     // A finder that answers at once decides before this returns; the kernel's answers later, behind `idle`.
     if (located instanceof Promise) {
-      this.#track(this.#bringUpWhenLocated(located));
+      const decided = located.then(location => {
+        if (!this.#stopped && location.kind === 'absent') this.#unavailable(cloudflaredRemedy(location.reason));
+        return location;
+      });
+      this.#decided = decided.then(
+        () => undefined,
+        () => undefined,
+      );
+      this.#track(
+        decided.then(async location => {
+          if (!this.#stopped && location.kind === 'found') await this.#bringUp(location.path);
+        }),
+      );
       return;
     }
     if (located.kind === 'absent') {
@@ -179,11 +192,12 @@ export class TunnelCarrier {
     this.#track(this.#bringUp(located.path));
   }
 
-  async #bringUpWhenLocated(located: Promise<CloudflaredLocation>): Promise<void> {
-    const location = await located;
-    if (this.#stopped) return;
-    if (location.kind === 'absent') this.#unavailable(cloudflaredRemedy(location.reason));
-    else await this.#bringUp(location.path);
+  /**
+   * Resolves once `cloudflared` has been looked for: a missing one is already `unavailable` by then. It does not wait for
+   * the hosted service, so an enable can say "install cloudflared" in its own reply without waiting on the network.
+   */
+  async located(): Promise<void> {
+    await this.#decided;
   }
 
   /** Resolves once the work in flight right now has settled. */

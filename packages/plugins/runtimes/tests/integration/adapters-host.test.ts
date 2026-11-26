@@ -19,7 +19,12 @@ import { readFleetManifest } from '../../daemon/adapters/manifest-file.ts';
 import { type ConfigFilesPort, refusedHostFiles } from '../../daemon/adapters/ports.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../../daemon/adapters/runtime-ids-file.ts';
 import { RuntimeSessionRecords } from '../../daemon/adapters/runtime-session-records.ts';
-import { MAX_FOLDER_FILES, readTextFolder, skillItemsIn } from '../../daemon/adapters/setup-files.ts';
+import {
+  MAX_FOLDER_FILES,
+  MAX_FOLDER_TOTAL_BYTES,
+  readTextFolder,
+  skillItemsIn,
+} from '../../daemon/adapters/setup-files.ts';
 import { ABSENT_DOCUMENT_REVISION } from '../../daemon/lib/provisioning.ts';
 import { nodeHostFiles } from './support/node-host.ts';
 
@@ -279,6 +284,25 @@ describe('reading folders as text', () => {
     should(reading.files.length).equal(MAX_FOLDER_FILES);
     should(reading.skipped).deepEqual([
       { path: `f${String(MAX_FOLDER_FILES).padStart(4, '0')}`, reason: 'the folder has too many files' },
+    ]);
+  });
+
+  it('should take no more than the total byte limit and name the rest', async () => {
+    // Arrange — each file is under the per-file cap; together they are over the total.
+    const root = await temp();
+    const each = 256 * 1024;
+    const count = MAX_FOLDER_TOTAL_BYTES / each + 2;
+    for (let index = 0; index < count; index += 1)
+      await put(path.join(root, `f${String(index).padStart(2, '0')}`), 'x'.repeat(each));
+
+    // Act
+    const reading = await readTextFolder(nodeHostFiles, root);
+
+    // Assert
+    should(reading.files.length).equal(MAX_FOLDER_TOTAL_BYTES / each);
+    should(reading.skipped.map(item => item.reason)).deepEqual([
+      'the folder is larger than an import takes',
+      'the folder is larger than an import takes',
     ]);
   });
 

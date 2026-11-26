@@ -225,10 +225,16 @@ export class McpCheckService {
       if (!(error instanceof McpProbeFailure)) throw error;
       const lead = FAILURE_LEAD[error.kind];
       const stored = [...missing].filter(name => opaque.has(name)).sort();
+      // A command's child is handed the runtime's stored secrets as its own environment (`#sealed`), so the check DOES present
+      // them there; what it cannot do is copy one into another variable or an argument, which is the one thing a `${NAME}` is.
+      const heldWords =
+        spec.transport === 'stdio'
+          ? `Held in a stored secret, which a check hands the command only as its own environment, never copied into another value or an argument: `
+          : `Held in a stored secret, which a check does not present: `;
       const unsetNames = [...missing].filter(name => !opaque.has(name)).sort();
       const unset =
         (unsetNames.length === 0 ? '' : ` Not set for this check: ${unsetNames.join(', ')}.`) +
-        (stored.length === 0 ? '' : ` Held in a stored secret, which a check does not present: ${stored.join(', ')}.`);
+        (stored.length === 0 ? '' : ` ${heldWords}${stored.join(', ')}.`);
       let detail = '';
       try {
         detail = error.message === '' ? '' : ` ${await scrub(error.message)}`;

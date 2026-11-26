@@ -336,6 +336,17 @@ describe('the hosted tunnel carrier', () => {
     should(world.notices.stated[0]).match(/^tunnel carrier off — cloudflared is not on this daemon’s PATH/u);
   });
 
+  it('should say a missing cloudflared once located() settles, without waiting for the hosted service', async () => {
+    // Act: the service never answers; only the local lookup has.
+    const subject = carrier({ cloudflared: { locate: async () => CLOUDFLARED_NOT_ON_PATH } });
+    subject.start();
+    await subject.located();
+
+    // Assert
+    should(subject.status.state).equal('unavailable');
+    should(subject.status.reason).match(/^cloudflared is not on this daemon’s PATH/u);
+  });
+
   it('should bring the tunnel up from a finder that answers later', async () => {
     // Act
     const subject = await started({ cloudflared: { locate: async () => CLOUDFLARED } });

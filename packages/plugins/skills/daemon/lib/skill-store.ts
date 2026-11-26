@@ -274,20 +274,23 @@ export class SkillStore {
 
   /**
    * Every file, link or unreadable folder in `installed/<name>/` as it is on disk now (not as remembered), by path,
-   * sorted; empty folders are not listed. Bounded: past {@link MAX_WALKED_ENTRIES} a last entry says there is more.
+   * sorted; empty folders are not listed. Bounded: past {@link MAX_WALKED_ENTRIES} entries looked at (folders too) a last entry says there is more.
    */
   async walk(name: string): Promise<readonly InstalledEntry[]> {
     if (!usableSkillName(name)) return [];
     const found: InstalledEntry[] = [];
     const pending: { readonly relative: string; readonly depth: number }[] = [{ relative: '', depth: 0 }];
+    // Every entry looked at counts, a plain folder included: a skill of a million empty folders lists nothing and still costs the walk.
+    let seen = 0;
     for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
       const at = next.relative === '' ? name : `${name}/${next.relative}`;
       for (const entry of await this.state.entries(SKILLS_INSTALLED_STATE, at)) {
         const path = next.relative === '' ? entry.name : `${next.relative}/${entry.name}`;
-        if (found.length >= MAX_WALKED_ENTRIES) {
+        if (seen >= MAX_WALKED_ENTRIES) {
           found.push({ path: '(more entries than a skill holds)', kind: 'directory' });
           return found.toSorted((left, right) => left.path.localeCompare(right.path));
         }
+        seen += 1;
         if (entry.kind !== 'directory') found.push({ path, kind: entry.kind });
         else if (next.depth + 1 >= MAX_PATH_DEPTH || !SEGMENT.test(entry.name)) found.push({ path, kind: 'directory' });
         else pending.push({ relative: path, depth: next.depth + 1 });

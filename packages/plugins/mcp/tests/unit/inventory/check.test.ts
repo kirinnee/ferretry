@@ -11,7 +11,7 @@ import {
   mcpCheckBaseEnvironment,
 } from '../../../daemon/lib/inventory/check.ts';
 import { type McpInventoryRefusal, McpInventoryService } from '../../../daemon/lib/inventory/service.ts';
-import { documents, inventoryWorld, PROJECT, PROJECT_KEY, session } from './support.ts';
+import { CLAUDE_HOME, documents, inventoryWorld, PROJECT, PROJECT_KEY, session } from './support.ts';
 
 const TOKEN = 'project-access-token-value';
 const ACCESS_SECRET = 'MCP_DOCS_0123456789ABCDEF_ACCESS';
@@ -210,6 +210,33 @@ describe('McpCheckService', () => {
     should(result.outcome).equal('connected');
     should(seen).deepEqual(['allow uvx', 'probing', 'release']);
     should(JSON.stringify(probe.specs[0])).not.containEql('secret:');
+  });
+
+  it('should not tell a stdio check that a stored secret is not presented, when the command is handed it', async () => {
+    // Arrange — the command's variable names a secret-bound launch variable, which fills no value but is sealed into the child.
+    const files = documents();
+    const home = files.get(`${CLAUDE_HOME}/.claude.json`) as { mcpServers: { scratch: object } };
+    home.mcpServers.scratch = { command: 'uvx', args: ['scratch'], env: { K: '${API_KEY}' } };
+    const inventory = new McpInventoryService(inventoryWorld(files).deps);
+    const service = new McpCheckService({
+      inventory,
+      probe: new FakeProbe(new McpProbeFailure('protocol', '')),
+      launchEnvironment: async () => ({ API_KEY: '${secret:WORK_KEY}' }),
+      opaqueVariables: async () => ['API_KEY'],
+      baseEnvironment: () => ({}),
+      sealEnvironment: async () => ({ ok: true, env: { names: [] } as never }),
+      credential: async () => undefined,
+      redactor: { redact: async text => text },
+      now: () => 0,
+    });
+
+    // Act
+    const result = await service.check(await idOf(inventory, 'scratch', 'user'), 's1');
+
+    // Assert
+    should(result.message).not.containEql('does not present');
+    should(result.message).containEql('only as its own environment');
+    should(result.message).containEql('API_KEY');
   });
 
   it('should read a 401 as needing a sign-in', async () => {
