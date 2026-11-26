@@ -44,6 +44,7 @@ export const V4_DAEMON_KEYS = [
   'accountModel',
   'secretEnvironment',
   'grants',
+  'connector',
 ] as const;
 export type V4DaemonKey = (typeof V4_DAEMON_KEYS)[number];
 
@@ -215,6 +216,8 @@ export const V4DaemonDocument = z.strictObject({
   accountModel: z.unknown().optional(),
   secretEnvironment: z.record(z.string(), z.string()).optional(),
   grants: V4GrantsBlock.optional(),
+  /** Read by v4 as `unknown` on purpose (a typo switches the connector off, never refuses the boot); the Connector step checks it. */
+  connector: z.unknown().optional(),
 });
 export type V4DaemonDocument = z.infer<typeof V4DaemonDocument>;
 
