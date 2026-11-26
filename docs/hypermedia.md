@@ -15,7 +15,7 @@ prompt and this guide must not present a part whose renderer is not drawing, bec
 parts are deliberately NOT taught: a Durian `chart` fence is held as plain code (r12 H4 review: a chart's formulas have no
 bound on their work), so a chart is the `fy-render` chart; and the parts of Durian 0.7.0's folders (`diff`, `graph`, `log`, `http`, ...) are held
 as plain code too until a unit reviews and draws each (the `codewalk` was held for its HTML notes and is drawn since U1). `mermaid` is no
-longer a Durian part: it is our own host block, kept so an old message's diagram still draws (decision D2), and is drawn whole (a `%% @step` line is a comment). `tests/unit/app/hypermedia/teaching-examples.test.tsx` fails the change that teaches a part the app does not draw:
+longer a Durian part: it is our own host block, kept so an old message's diagram still draws (decision D2), and keeps its steps: a diagram with at least two `%% @step <title>` lines is drawn one step at a time, as Durian 0.6.2 did (the title is the caption; Back, a slider and Next move between steps; step k is the head and every line up to the end of step k). `tests/unit/app/hypermedia/teaching-examples.test.tsx` fails the change that teaches a part the app does not draw:
 every example of the guide must pass `fy render check` and draw, or be one it names as shown as code.
 **Interim (r12 H11a, until the parser runs off the main thread):** an `animation` fence and the `:::tabs` and
 `:::accordion` containers are shown as code too, their source as written, and the guide says so; and a message over the

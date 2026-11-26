@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { type ReferenceSurface, ReferenceSurfaceProvider } from '@ferretry/app';
-import { interact, mount } from '@ferretry/app/testing';
+import { interact, mount, must } from '@ferretry/app/testing';
 import { resolve } from 'node:path';
 import type { ReactNode } from 'react';
 import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
@@ -108,21 +108,104 @@ describe('a mermaid fence is a host block of ours, drawn by our renderer (Durian
     await unmount();
   });
 
-  it('draws a stepped diagram whole, once (a step line is a comment to mermaid)', async () => {
+  const STEPPED = fence(
+    'mermaid',
+    'flowchart LR',
+    '%% @step First arrow',
+    '  A --> B',
+    '%% @step Second arrow',
+    '  B --> C',
+  );
+  const NEXT = '.fy-hm-mermaid-steps .btn-go:not(:disabled)';
+  const BACK = '.fy-hm-mermaid-steps .ctl .btn:not(.btn-go)';
+  const caption = (root: ParentNode): string =>
+    [...root.querySelectorAll('.fy-hm-mermaid-steps .dh-step-title > span:not(.dh-step-hidden)')]
+      .map(span => span.textContent)
+      .join('|');
+
+  it('starts a step only when it is first shown (a stepped diagram is not a frame per step)', async () => {
     const asked: string[] = [];
-    const steps = fence(
-      'mermaid',
-      'flowchart LR',
-      '%% @step First arrow',
-      '  A --> B',
-      '%% @step Second arrow',
-      '  B --> C',
+    const { container, unmount } = await draw(STEPPED, surfaceWith(asked));
+    expect(asked).toEqual(['type: mermaid\nalt: First arrow\n---\nflowchart LR\n  A --> B']);
+    const next = must(container.querySelector<HTMLButtonElement>(NEXT), 'the next-step button');
+    await interact(() => next.click());
+    // Step 2 builds on step 1: the head and every line up to the end of the step, and no marker line.
+    expect(asked).toEqual([
+      'type: mermaid\nalt: First arrow\n---\nflowchart LR\n  A --> B',
+      'type: mermaid\nalt: Second arrow\n---\nflowchart LR\n  A --> B\n  B --> C',
+    ]);
+    for (const body of asked) expect(body).not.toContain('@step');
+    await unmount();
+  });
+
+  it('shows each step’s caption, and the count, as the reader moves', async () => {
+    const { container, unmount } = await draw(STEPPED, surfaceWith([]));
+    expect(caption(container)).toBe('First arrow');
+    expect(container.querySelector('.fy-hm-mermaid-steps .ctl-count')?.textContent).toBe('1 / 2');
+    expect(container.querySelector('.fy-hm-mermaid-steps .cw-num')?.textContent).toBe('1');
+    await interact(() => must(container.querySelector<HTMLButtonElement>(NEXT), 'next').click());
+    expect(caption(container)).toBe('Second arrow');
+    expect(container.querySelector('.fy-hm-mermaid-steps .ctl-count')?.textContent).toBe('2 / 2');
+    // At the last step Next is off; at the first, Back is.
+    expect(container.querySelector(NEXT)).toBeNull();
+    await unmount();
+  });
+
+  it('goes back without drawing a step again, and shows only the active step', async () => {
+    const asked: string[] = [];
+    const { container, unmount } = await draw(STEPPED, surfaceWith(asked));
+    expect(must(container.querySelector<HTMLButtonElement>(BACK), 'back').disabled).toBe(true);
+    await interact(() => must(container.querySelector<HTMLButtonElement>(NEXT), 'next').click());
+    await interact(() => must(container.querySelector<HTMLButtonElement>(BACK), 'back').click());
+    expect(caption(container)).toBe('First arrow');
+    expect(asked.length).toBe(2);
+    const steps = [...container.querySelectorAll('.fy-hm-mermaid-step')];
+    expect(steps.map(step => step.hasAttribute('data-active'))).toEqual([true, false]);
+    expect(steps.map(step => step.getAttribute('aria-hidden'))).toEqual([null, 'true']);
+    await unmount();
+  });
+
+  it('moves with the slider and with the arrow keys of the group', async () => {
+    const asked: string[] = [];
+    const { container, unmount } = await draw(STEPPED, surfaceWith(asked));
+    const slider = must(container.querySelector<HTMLInputElement>('.fy-hm-mermaid-steps .ctl-range'), 'the slider');
+    expect(slider.max).toBe('1');
+    const group = must(container.querySelector<HTMLElement>('.fy-hm-mermaid-steps'), 'the step group');
+    await interact(() => {
+      group.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      return Promise.resolve();
+    });
+    expect(caption(container)).toBe('Second arrow');
+    expect(asked.length).toBe(2);
+    await interact(() => {
+      group.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+      return Promise.resolve();
+    });
+    expect(caption(container)).toBe('First arrow');
+    await unmount();
+  });
+
+  it('draws a diagram with no step line, or one, whole and with no controls (a lone step line is a comment)', async () => {
+    for (const body of [
+      ['flowchart LR', '  A --> B'],
+      ['flowchart LR', '%% @step Only', '  A --> B'],
+    ]) {
+      const asked: string[] = [];
+      const { container, unmount } = await draw(fence('mermaid', ...body), surfaceWith(asked));
+      expect(asked.length).toBe(1);
+      expect(container.querySelector('.fy-hm-mermaid-steps, .ctl')).toBeNull();
+      await unmount();
+    }
+  });
+
+  it('keeps the author’s :::llm text beside a stepped diagram, once', async () => {
+    const { container, unmount } = await draw(
+      [STEPPED, '', ':::llm', 'A flows to B, then C.', ':::'].join('\n'),
+      surfaceWith([]),
     );
-    const { container, unmount } = await draw(steps, surfaceWith(asked));
-    expect(asked.length).toBe(1);
-    expect(asked[0]).toContain('A --> B');
-    expect(asked[0]).toContain('B --> C');
-    expect(container.querySelector('.dg .btn-go')).toBeNull();
+    const [only, ...others] = disclosures(container);
+    expect(others).toEqual([]);
+    expect(only?.querySelector('pre')?.textContent).toBe('A flows to B, then C.');
     await unmount();
   });
 
@@ -136,14 +219,19 @@ describe('a mermaid fence is a host block of ours, drawn by our renderer (Durian
     await unmount();
   });
 
-  it('keeps a title on ONE header line, so it cannot add a header of its own', async () => {
+  it('keeps a title, and a step title, on ONE header line, so neither can add a header of its own', async () => {
     const asked: string[] = [];
-    const { unmount } = await draw(
-      fence('mermaid title="Then alt: other"', 'flowchart LR', '  A --> B'),
+    const { container, unmount } = await draw(
+      [
+        fence('mermaid title="Then alt: other"', 'flowchart LR', '  A --> B'),
+        fence('mermaid', 'flowchart LR', '%% @step Then alt: other', '  A --> B', '%% @step And then', '  B --> C'),
+      ].join('\n\n'),
       surfaceWith(asked),
     );
-    expect(asked.length).toBe(1);
+    expect(asked.length).toBe(2);
     for (const body of asked) expect(body.split('\n').filter(line => line.startsWith('alt:')).length).toBe(1);
+    expect(asked[1]).toContain('alt: Then alt: other');
+    expect(container.querySelectorAll('.fy-hm-mermaid-steps').length).toBe(1);
     await unmount();
   });
 

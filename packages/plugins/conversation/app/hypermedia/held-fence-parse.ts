@@ -1,6 +1,7 @@
 import type { BlockDef, FolderPartName } from 'durian-markdown';
 import { DURIAN_FENCE, durianCloser, durianFences, linesOf } from './fence-boundaries.ts';
 import { durianAsIs } from './fy-render-parse.ts';
+import { type MermaidStep, mermaidSteps } from './mermaid-steps.ts';
 
 /**
  * THE PARSER HALF OF THE PARTS HELD AS THE CODE THEY ARE, BEFORE DURIAN READS THEM (the renderer half, and the reasons, are
@@ -196,7 +197,8 @@ export function holdFences(text: string, awaitingAnimation = false): string {
  * of that name carries the fence's source to the component that hands it to our own diagram renderer (`mermaid-slot.tsx`, the
  * sandbox frame `fy-render` already uses). It exists so a diagram written for Durian 0.6.2 still draws in an old message; it is
  * not taught (decision D2). A `%%{...}%%` directive line is dropped, as Durian 0.6.2 did, so a diagram cannot ask mermaid for
- * settings of its own; `%% @step` lines are comments to mermaid and stay, so the whole diagram draws at once.
+ * settings of its own. `%% @step` lines keep their meaning: the parser says where each step ends (`mermaid-steps.ts`) and the component
+ * steps through them, with their captions, as Durian 0.6.2 did.
  */
 export const MERMAID_BLOCK_NAME = 'mermaid';
 
@@ -211,6 +213,8 @@ const withoutMermaidDirectives = (body: string): string =>
 export interface HeldFenceData {
   readonly body: string;
   readonly generated: string | null;
+  /** A `mermaid` fence's steps (`%% @step`), when it has at least two: where each ends in `body`, and its caption. */
+  readonly steps?: readonly MermaidStep[];
 }
 
 /**
@@ -227,10 +231,15 @@ export function heldFenceParseBlocks(heldText: string): readonly BlockDef<HeldFe
   );
   const mermaid: BlockDef<HeldFenceData> = {
     name: MERMAID_BLOCK_NAME,
-    parse: input => ({
-      body: withoutMermaidDirectives(input.body),
-      generated: durianAsIs(lines[input.line - 1], input.body, input.attrs),
-    }),
+    parse: input => {
+      const body = withoutMermaidDirectives(input.body);
+      const steps = mermaidSteps(body);
+      return {
+        body,
+        generated: durianAsIs(lines[input.line - 1], input.body, input.attrs),
+        ...(steps.length === 0 ? {} : { steps }),
+      };
+    },
   };
   // A held container shows its own lines: what followed its name is read back from the fence it became.
   const containers = Object.entries(CONTAINERS_HELD).map(
