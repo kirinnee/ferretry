@@ -32,6 +32,13 @@ const choices: readonly RuntimeModelChoice[] = [
 ];
 const catalog = () => choices;
 
+/** E-266: fast mode that cannot be verified does not fail the start; it goes on without fast and says why. */
+const without = (why: string) => ({
+  allow: false,
+  reason: `Started without Fast: ${why}`,
+  code: 'fast_unverified',
+});
+
 describe('codex takes start.decide', () => {
   test('(no guarantees row) the manifest takes start.decide', () => {
     expect(manifest.hooks?.takes?.some(take => take.hook.name === StartDecide.name)).toBe(true);
@@ -55,13 +62,13 @@ describe('codex takes start.decide', () => {
     expect(fastStartDecision(input({ fast: true }), slowDefault)).toMatchObject({ allow: false });
   });
 
-  test('U0 with nothing held, a model the openai catalog lists is refused as "not confirmed" and an unlisted one as "loading"; never allowed', () => {
+  test('U0 with nothing held, a model the openai catalog lists starts without fast saying "not confirmed", an unlisted one saying "loading"; never allowed', () => {
     const none = (): undefined => undefined;
     const known = (): readonly RuntimeModelChoice[] => [
       { value: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', reasoningEfforts: [], isDefault: true },
     ];
     const listed = fastStartDecision(input({ model: 'gpt-6.1-sol', fast: true }), none, () => false, known);
-    expect(listed).toEqual({ allow: false, reason: FAST_NOT_CONFIRMED('GPT-6.1 Sol'), code: 'unservable_model' });
+    expect(listed).toEqual(without(FAST_NOT_CONFIRMED('GPT-6.1 Sol')));
     // With a read waiting out its backoff, the refusal says when.
     const waiting = fastStartDecision(
       input({ model: 'gpt-6.1-sol', fast: true }),
@@ -77,7 +84,7 @@ describe('codex takes start.decide', () => {
     // A model in neither catalog keeps today's sentence.
     expect(fastStartDecision(input({ model: 'gpt-unknown', fast: true }), none, () => false, known)).toMatchObject({
       allow: false,
-      reason: CATALOG_LOADING,
+      reason: `Started without Fast: ${CATALOG_LOADING}`,
     });
     // A start that did not ask for fast is never held up.
     expect(fastStartDecision(input({ model: 'gpt-6.1-sol' }), none, () => false, known)).toEqual({ allow: true });
@@ -105,29 +112,23 @@ describe('codex takes start.decide', () => {
     expect(openaiFallbackChoices({ catalogs: [] })).toBeUndefined();
   });
 
-  test('(no guarantees row) #35 a fast start with NO catalog held is refused at once, with the loading sentence and the existing code', () => {
+  test('(no guarantees row) E-266 a fast start with NO catalog held goes on without fast at once, saying the list is loading', () => {
     const none = (): undefined => undefined;
-    const refused = {
-      allow: false,
-      reason: "Codex's model list is still loading; try again in a few seconds",
-      code: 'unservable_model',
-    };
-    expect(CATALOG_LOADING).toBe(refused.reason);
+    const refused = without("Codex's model list is still loading; try again in a few seconds");
+    expect(CATALOG_LOADING).toBe("Codex's model list is still loading; try again in a few seconds");
     expect(fastStartDecision(input({ model: 'gpt-daybreak', fast: true }), none)).toEqual(refused);
     expect(fastStartDecision(input({ model: 'gpt-6-sol', fast: true }), none)).toEqual(refused);
     expect(fastStartDecision(input({ fast: true }), none)).toEqual(refused);
   });
 
-  test('(no guarantees row) r3 LOW-C no catalog held and no Codex binary found is refused with a true sentence and the same closed code, never "still loading"', () => {
+  test('(no guarantees row) r3 LOW-C no catalog held and no Codex binary found goes on without fast with a true sentence, never "still loading"', () => {
     const none = (): undefined => undefined;
     const refused = fastStartDecision(input({ model: 'gpt-daybreak', fast: true }), none, () => true);
-    expect(refused).toEqual({
-      allow: false,
-      reason: 'Codex could not be found, so its fast mode cannot be checked',
-      code: 'unservable_model',
+    expect(refused).toEqual(without('Codex could not be found, so its fast mode cannot be checked'));
+    expect(CODEX_NOT_FOUND).toBe('Codex could not be found, so its fast mode cannot be checked');
+    expect(fastStartDecision(input({ fast: true }), none, () => false)).toMatchObject({
+      reason: `Started without Fast: ${CATALOG_LOADING}`,
     });
-    expect(CODEX_NOT_FOUND).toBe((refused as { reason: string }).reason);
-    expect(fastStartDecision(input({ fast: true }), none, () => false)).toMatchObject({ reason: CATALOG_LOADING });
     // A held catalog decides; a missing binary does not undo it.
     expect(fastStartDecision(input({ model: 'gpt-6-sol', fast: true }), catalog, () => true)).toEqual({ allow: true });
     // Not asking for fast is never held up by it.
@@ -141,24 +142,16 @@ describe('codex takes start.decide', () => {
     expect(fastStartDecision(input({ harness: 'claude-code', model: 'x', fast: true }), none)).toEqual({ allow: true });
   });
 
-  test('rv-2372 #2 fast is allowed ONLY when the resolved held choice has fast === true: an unlisted model, a row with no fast-tier evidence and no model at all are all refused with clear text', () => {
-    expect(fastStartDecision(input({ model: 'gpt-unlisted', fast: true }), catalog)).toEqual({
-      allow: false,
-      reason: "Codex's model list does not include gpt-unlisted, so its fast mode cannot be confirmed",
-      code: 'unservable_model',
-    });
+  test('rv-2372 #2 fast is allowed ONLY when the resolved held choice has fast === true: an unlisted model, a row with no fast-tier evidence and no model at all start WITHOUT fast with clear text (E-266); a row that says fast: false is still refused', () => {
+    expect(fastStartDecision(input({ model: 'gpt-unlisted', fast: true }), catalog)).toEqual(
+      without("Codex's model list does not include gpt-unlisted, so its fast mode cannot be confirmed"),
+    );
     const unsaid = () => [{ value: 'gpt-x', label: 'GPT X', reasoningEfforts: [] }] as readonly RuntimeModelChoice[];
-    expect(fastStartDecision(input({ model: 'gpt-x', fast: true }), unsaid)).toEqual({
-      allow: false,
-      reason: "Codex's model list does not say GPT X has fast mode, so it cannot be confirmed",
-      code: 'unservable_model',
-    });
+    expect(fastStartDecision(input({ model: 'gpt-x', fast: true }), unsaid)).toEqual(
+      without("Codex's model list does not say GPT X has fast mode, so it cannot be confirmed"),
+    );
     const noDefault = () => [{ ...choices[0], isDefault: undefined }] as readonly RuntimeModelChoice[];
-    expect(fastStartDecision(input({ fast: true }), noDefault)).toEqual({
-      allow: false,
-      reason: NO_MODEL_FOR_FAST,
-      code: 'unservable_model',
-    });
+    expect(fastStartDecision(input({ fast: true }), noDefault)).toEqual(without(NO_MODEL_FOR_FAST));
     expect(fastStartDecision(input({ model: 'gpt-6-sol', fast: true }), catalog)).toEqual({ allow: true });
   });
 

@@ -1,4 +1,4 @@
-import type { CallContext } from '@ferretry/kernel/contract';
+import { type CallContext, jsonResponse } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import {
   type FerretId,
@@ -189,7 +189,11 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       async (call: CallContext) => {
         if (MOVE_ACTING_ROUTES.includes(key)) mayAct(call, await pathFerret(call));
         await storeLoaded;
-        return await moves.routes[key](call);
+        const answer = await moves.routes[key](call);
+        if (key !== 'POST /v1/ferrets/:ferretId/move' || answer.status !== 200) return answer;
+        // A Restart or move that went on without Fast says why in its own answer, as a start's and a resume's do.
+        const notice = registry.detailsOf(await pathFerret(call))?.notice;
+        return notice === undefined ? answer : jsonResponse({ ...JSON.parse(answer.body), notice });
       },
     ]),
   ) as typeof moves.routes;

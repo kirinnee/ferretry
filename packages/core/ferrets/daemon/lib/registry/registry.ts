@@ -76,6 +76,7 @@ export function summaryOf(
   const killAfterSeconds = details.options?.killAfterSeconds;
   return {
     ...waits,
+    ...(details.notice === undefined ? {} : { notice: details.notice }),
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
     ...(fast === undefined ? {} : { fast }),

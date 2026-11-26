@@ -6,6 +6,7 @@ import type {
   SignalAnswer,
   SignalKind,
   SignalOptions,
+  StartAnswer,
   StartBody,
 } from '../../../../cli/lib/session/ports.ts';
 import { SessionPresenter } from '../../../../cli/lib/session/presenter.ts';
@@ -58,6 +59,7 @@ export class RecordingApi implements ISessionApi {
       rename?: FerretSummary;
       signal?: SignalAnswer;
       failWith?: Error;
+      startNotice?: string;
     } = {},
   ) {}
 
@@ -82,9 +84,9 @@ export class RecordingApi implements ISessionApi {
     return this.responses.suggestNames ?? [];
   }
 
-  async start(body: StartBody, requestId?: string): Promise<{ readonly id: string }> {
+  async start(body: StartBody, requestId?: string): Promise<StartAnswer> {
     this.record('start', ...(requestId === undefined ? [body] : [body, requestId]));
-    return { id: 'ses-1' };
+    return { id: 'ses-1', ...(this.responses.startNotice === undefined ? {} : { notice: this.responses.startNotice }) };
   }
 
   async stop(

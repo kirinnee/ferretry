@@ -75,29 +75,33 @@ export function registeredHarnessCases(): void {
       expect(box.jobs[0]).not.toHaveProperty('lane');
     });
 
-    test('(no guarantees row) #35 with NOTHING persisted and no read landed, a fast Codex start is refused at once; a start that did not ask for fast is not', async () => {
+    test('(no guarantees row) #35 with NOTHING persisted and no read landed, a fast Codex start goes on without fast at once (E-266); a start that did not ask for fast is not', async () => {
       const box = fixture();
       const decide = decideOf(box.buildHalf());
-      expect(await decide(fastInput())).toEqual({ allow: false, reason: LOADING, code: 'unservable_model' });
+      expect(await decide(fastInput())).toEqual({
+        allow: false,
+        reason: `Started without Fast: ${LOADING}`,
+        code: 'fast_unverified',
+      });
       expect(await decide(fastInput({ fast: false }))).toEqual({ allow: true });
       expect(await decide(fastInput({ fast: undefined }))).toEqual({ allow: true });
       // Asking for the catalog is what the refusal triggers: the job is kicked, not waited for.
       expect(box.kicks).toEqual(['codex-fast-catalog']);
     });
 
-    test('(no guarantees row) r3 LOW-C once the boot read finds no Codex binary, a fast start is refused with "could not be found", not "still loading"; a non-fast start is not', async () => {
+    test('(no guarantees row) r3 LOW-C once the boot read finds no Codex binary, a fast start goes on without fast saying "could not be found", not "still loading"; a non-fast start is not', async () => {
       const box = fixture();
       box.missingCodex();
       const decide = decideOf(box.buildHalf());
       // Before any read has looked, the true answer is still "loading".
-      expect(await decide(fastInput())).toMatchObject({ allow: false, reason: LOADING });
+      expect(await decide(fastInput())).toMatchObject({ allow: false, reason: `Started without Fast: ${LOADING}` });
       const job = box.jobs.find(candidate => candidate.id === 'codex-fast-catalog');
       await job?.run(new AbortController().signal);
       expect(box.catalogChildren).toHaveLength(0);
       expect(await decide(fastInput())).toEqual({
         allow: false,
-        reason: 'Codex could not be found, so its fast mode cannot be checked',
-        code: 'unservable_model',
+        reason: 'Started without Fast: Codex could not be found, so its fast mode cannot be checked',
+        code: 'fast_unverified',
       });
       expect(await decide(fastInput({ fast: false }))).toEqual({ allow: true });
     });
@@ -134,7 +138,7 @@ export function registeredHarnessCases(): void {
       const box = fixture();
       box.freeSleep();
       const decide = decideOf(box.buildHalf());
-      expect(await decide(fastInput())).toMatchObject({ allow: false, reason: LOADING });
+      expect(await decide(fastInput())).toMatchObject({ allow: false, reason: `Started without Fast: ${LOADING}` });
       const job = box.jobs.find(candidate => candidate.id === 'codex-fast-catalog');
       await job?.run(new AbortController().signal);
       expect(box.catalogChildren).toHaveLength(1);
@@ -145,11 +149,11 @@ export function registeredHarnessCases(): void {
       expect(box.state.get('fastCatalog')).toMatchObject({ format: 1, choices: [{ value: 'gpt-6-sol' }] });
       // The read landed, so the next fast start is decided from it.
       expect(await decide(fastInput({ model: 'gpt-6-sol' }))).toEqual({ allow: true });
-      // A model the read list does not carry is not confirmed, so fast is refused (rv-2372 #2).
+      // A model the read list does not carry is not confirmed, so the start goes on without fast (E-266).
       expect(await decide(fastInput({ model: 'gpt-x' }))).toEqual({
         allow: false,
-        reason: "Codex's model list does not include gpt-x, so its fast mode cannot be confirmed",
-        code: 'unservable_model',
+        reason: "Started without Fast: Codex's model list does not include gpt-x, so its fast mode cannot be confirmed",
+        code: 'fast_unverified',
       });
 
       const stopped = fixture();

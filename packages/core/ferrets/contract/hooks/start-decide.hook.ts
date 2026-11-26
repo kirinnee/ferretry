@@ -40,9 +40,11 @@ export type StartDecideInput = z.infer<typeof StartDecideInputSchema>;
 /**
  * The refusal codes a `start.decide` taker may attach to its `no`: CLOSED, declared here, so a plugin can never mint a
  * code or a status. `unservable_model` is a start that asked for something its model cannot give (fast mode on a model
- * without it); Ferrets answers it `409 unservable_model`. A code outside this list reads as a plain `refused`.
+ * without it); Ferrets answers it `409 unservable_model`. `fast_unverified` is fast mode the taker cannot verify for the model:
+ * a START goes on without fast and says why (`decideStart`), a resume drops it, and anywhere else it reads as `unservable_model`.
+ * A code outside this list reads as a plain `refused`.
  */
-export const StartRefusalCodeSchema = z.enum(['unservable_model']);
+export const StartRefusalCodeSchema = z.enum(['unservable_model', 'fast_unverified']);
 export type StartRefusalCode = z.infer<typeof StartRefusalCodeSchema>;
 
 /**

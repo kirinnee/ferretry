@@ -113,6 +113,8 @@ export const AgentPinsFile = defineState({
  * as no options and no title: it is what the summary shows, never what anything is allowed.
  */
 export const FerretDetailsSchema = z.strictObject({
+  /** Why the latest launch went on without a requested option; kept for retries and recovery. */
+  notice: z.string().min(1).max(4096).optional(),
   options: StartOptionsSchema.omit({ title: true, initialAttachments: true }).optional(),
   title: FerretTitleSchema.optional(),
   /** Who chose `title` (`FerretTitleSourceSchema`); absent on a file written before the field: the owner's. */
