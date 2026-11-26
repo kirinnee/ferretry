@@ -11,7 +11,7 @@ export function ChangedElsewhereNote({ onReload, field }: { readonly onReload: (
   return (
     <p
       role="status"
-      className="m-0 mt-1 flex flex-wrap items-center gap-2 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
+      className="m-0 mt-1 flex flex-wrap items-center gap-2 rounded-panel border border-warn-border bg-warn-bg px-panel py-1 text-meta leading-base text-warn"
       data-changed-elsewhere={field}
     >
       <span className="min-w-0">{CHANGED_ELSEWHERE_SENTENCE}</span>

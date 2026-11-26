@@ -597,7 +597,7 @@ export function NewFerretPage({
 
           {error ? (
             <div
-              className="rounded-control border border-err-border bg-err-bg px-control-x py-row-y text-ui text-err"
+              className="rounded-panel border border-err-border bg-err-bg px-panel py-row-y text-ui text-err"
               role="alert"
             >
               {error}

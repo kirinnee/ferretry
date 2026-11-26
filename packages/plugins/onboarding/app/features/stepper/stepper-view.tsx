@@ -57,7 +57,7 @@ export function StepperView({ steps, action, onDismiss }: StepperViewProps): Rea
   return (
     <section
       aria-labelledby="first-run-stepper-heading"
-      className="mx-auto mt-2 w-full max-w-[1320px] min-w-0 rounded-control border border-border-strong bg-surface-2 px-3 py-2"
+      className="mx-auto mt-2 w-full max-w-[1320px] min-w-0 rounded-panel border border-border-strong bg-surface-2 px-panel py-2"
       data-first-run-stepper={finished ? 'done' : 'open'}
     >
       <LivingBackground fill="parent" />

@@ -246,7 +246,7 @@ export function AnalyticsOverviewPage({ machines, requestAnalytics, now, timeZon
         ) : answered.length === 0 ? (
           <p
             role="alert"
-            className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-cell text-err"
+            className="m-0 rounded-panel border border-err-border bg-err-bg px-panel py-2 text-cell text-err"
           >
             No machine answered, so there is nothing to show. Nothing was assumed to be zero.
           </p>
@@ -390,7 +390,7 @@ function OverviewSections({
       )}
 
       <section aria-label="Over time" className="kt-panel grid min-w-0 gap-sm px-md py-md">
-        <div className="sm:w-fit sm:min-w-[24rem]">
+        <div className="min-w-0 sm:w-fit sm:min-w-[24rem]">
           <Segmented<OverviewMetric>
             fit
             label="Measure"

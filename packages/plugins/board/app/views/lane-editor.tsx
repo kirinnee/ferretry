@@ -149,7 +149,7 @@ function GateOptions({
           const value = outcomeValue(option.outcome);
           return (
             <li
-              className="relative grid gap-xs rounded-control border border-border bg-surface p-xs pr-14 sm:pr-8 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center"
+              className="relative grid gap-xs rounded-panel border border-border bg-surface p-panel pr-14 sm:pr-8 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center"
               key={option.id}
               data-gate-option={option.id}
             >
@@ -238,7 +238,7 @@ function TemplatePicker({
       <ul className="m-0 grid list-none gap-xs p-0 md:grid-cols-2">
         {TEMPLATE_ORDER.map(template => (
           <li
-            className="grid gap-xs rounded-control border border-border-strong bg-surface-2 p-control-x"
+            className="grid gap-xs rounded-panel border border-border-strong bg-surface-2 p-panel"
             key={template}
             data-lane-template={template}
           >
@@ -288,10 +288,7 @@ function LaneRow({
       ),
     );
   return (
-    <li
-      className="grid gap-xs rounded-control border border-border-strong bg-surface-2 p-control-x"
-      data-lane-row={lane.id}
-    >
+    <li className="grid gap-xs rounded-panel border border-border-strong bg-surface-2 p-panel" data-lane-row={lane.id}>
       <div className="flex flex-wrap items-center gap-xs">
         <input
           className={`${fieldClass} w-40 grow`}
@@ -425,7 +422,7 @@ function DeletePrompt({
   const others = draft.lanes.filter(entry => entry.id !== laneId);
   return (
     <section
-      className="flex flex-wrap items-center gap-xs rounded-control border border-warn bg-surface-2 p-control-x"
+      className="flex flex-wrap items-center gap-xs rounded-panel border border-warn bg-surface-2 p-panel"
       aria-label={`Delete ${lane?.name ?? laneId}`}
       data-lane-delete={laneId}
     >
@@ -542,7 +539,7 @@ function LaneSetEditor({
     <div className="grid gap-sm" data-lane-editor={project.id}>
       {proposed && (
         <section
-          className="flex flex-wrap items-center justify-between gap-sm rounded-control border border-border-strong bg-surface-2 p-control-x"
+          className="flex flex-wrap items-center justify-between gap-sm rounded-panel border border-border-strong bg-surface-2 p-panel"
           role="status"
           data-lane-banner="unconfirmed"
         >
@@ -562,7 +559,7 @@ function LaneSetEditor({
 
       {pending !== undefined && (
         <section
-          className="flex flex-wrap items-center justify-between gap-sm rounded-control border border-border-strong bg-surface-2 p-control-x"
+          className="flex flex-wrap items-center justify-between gap-sm rounded-panel border border-border-strong bg-surface-2 p-panel"
           role="status"
           data-lane-banner="pending"
         >

@@ -101,7 +101,7 @@ export function Composer({
         </span>
       </header>
       {preview ? (
-        <div className="min-h-[7.5rem] rounded-control border border-border-soft p-sm" data-compose-preview="">
+        <div className="min-h-[7.5rem] rounded-panel border border-border-soft p-panel" data-compose-preview="">
           {blank ? (
             <p className="m-0 text-meta text-faint">Nothing to preview yet.</p>
           ) : (

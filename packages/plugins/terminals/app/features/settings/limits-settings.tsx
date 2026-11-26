@@ -71,7 +71,7 @@ function LimitsCard({ view }: { readonly view: LimitsPanelView }) {
         <div className="mb-8 flex flex-col gap-2">
           {view.warnings.map(warning => (
             <p
-              className="m-0 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-meta leading-base text-warn"
+              className="m-0 rounded-panel border border-warn-border bg-warn-bg px-panel py-2 text-meta leading-base text-warn"
               key={warning}
               role="alert"
             >

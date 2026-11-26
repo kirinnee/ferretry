@@ -197,7 +197,7 @@ export function PairScanner({
 
       {scan.code === 'permission-denied' ? (
         <div
-          className="flex flex-col gap-1 rounded-control border border-border bg-surface-2 px-control-x py-3"
+          className="flex flex-col gap-1 rounded-panel border border-border bg-surface-2 px-panel py-3"
           data-camera-howto=""
         >
           <span className="text-ui font-semibold text-fg">To scan, turn the camera back on:</span>

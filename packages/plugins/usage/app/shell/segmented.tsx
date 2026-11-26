@@ -32,7 +32,11 @@ export function Segmented<T extends string>({
       role="toolbar"
       aria-label={label}
       data-segmented={name}
-      className="flex min-w-0 gap-1 rounded-control border border-border bg-surface-2 p-0.5"
+      className={cn(
+        'flex min-w-0 max-w-full gap-1 rounded-control border border-border bg-surface-2 p-0.5',
+        // Segments that keep their words (`fit`) scroll inside the control when the row is narrower than they are, never out of the box around it.
+        fit && 'overflow-x-auto scroll-thin',
+      )}
     >
       {options.map(option => (
         <button
@@ -44,8 +48,10 @@ export function Segmented<T extends string>({
           data-segment={option.id}
           onClick={() => onChoose(option.id)}
           className={cn(
-            'h-control-sm min-w-0 whitespace-nowrap rounded-control px-2 text-ui font-medium transition-colors',
-            fit ? 'flex-auto' : 'flex-1',
+            'h-control-sm min-w-0 whitespace-nowrap rounded-control text-ui font-medium transition-colors',
+            // A segment that keeps its words sits at the end of a curved control, so its inline padding is the shared floor.
+            fit ? 'px-control-x' : 'px-2',
+            fit ? 'flex-auto shrink-0' : 'flex-1',
             option.id === value ? 'bg-surface text-fg shadow-control' : 'text-muted hover:text-fg',
             option.disabled === true && 'cursor-not-allowed opacity-60 hover:text-muted',
           )}

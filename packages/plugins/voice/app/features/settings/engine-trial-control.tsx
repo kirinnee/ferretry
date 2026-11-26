@@ -82,7 +82,7 @@ export function EngineTrialControl({
 
   if (state.kind === 'running')
     return (
-      <div className="flex flex-col gap-2 rounded-control border border-border bg-surface p-2" data-trial="running">
+      <div className="flex flex-col gap-2 rounded-panel border border-border bg-surface p-panel" data-trial="running">
         <p className="m-0 flex items-center gap-1 text-meta text-fg" role="status">
           <Mic size={14} aria-hidden="true" className="shrink-0 text-accent" />
           <span>{TRIAL_PHASE_COPY[state.update.phase]}</span>
@@ -106,7 +106,7 @@ export function EngineTrialControl({
   return (
     <div className="flex flex-col gap-2">
       {state.kind === 'done' ? (
-        <div className="flex flex-col gap-1 rounded-control border border-border bg-surface p-2" data-trial="done">
+        <div className="flex flex-col gap-1 rounded-panel border border-border bg-surface p-panel" data-trial="done">
           <p className="m-0 text-ui leading-base text-fg">
             {state.result.text === '' ? <span className="text-faint">(nothing heard)</span> : `“${state.result.text}”`}
           </p>

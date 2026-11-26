@@ -340,7 +340,7 @@ const runFailure = (reason: unknown): RunFailure =>
  * machine's bare 500 (B149).
  */
 function RunFailureNotice({ failure }: { readonly failure: RunFailure }) {
-  const box = 'm-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-cell text-err';
+  const box = 'm-0 rounded-panel border border-err-border bg-err-bg px-panel py-2 text-cell text-err';
   if (failure.kind === 'one')
     return (
       <p role="alert" className={box}>

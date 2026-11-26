@@ -471,7 +471,7 @@ function RuntimeOutcome({ failure, notice }: { readonly failure: string | null; 
       ) : null}
       {failure ? (
         <p
-          className="mt-2 rounded-control border border-err-border bg-surface-2 p-3 text-err text-ui leading-base"
+          className="mt-2 rounded-panel border border-err-border bg-surface-2 p-panel text-err text-ui leading-base"
           role="alert"
         >
           {failure}
@@ -697,7 +697,7 @@ export function RuntimeModelChoices({
       );
     return (
       <p
-        className="mt-2 rounded-control border border-err-border bg-surface-2 p-3 text-err text-ui leading-base"
+        className="mt-2 rounded-panel border border-err-border bg-surface-2 p-panel text-err text-ui leading-base"
         role="alert"
       >
         Account-aware model choices are unavailable: {runtimeModelCatalogErrorMessage(error)}
@@ -892,7 +892,7 @@ export function RuntimeReasoningChoices({
 }: RuntimeReasoningChoicesProps) {
   if (model.reasoningEfforts.length === 0)
     return (
-      <p className="mt-2 rounded-control border border-err-border bg-surface-2 p-3 text-err text-ui" role="alert">
+      <p className="mt-2 rounded-panel border border-err-border bg-surface-2 p-panel text-err text-ui" role="alert">
         {model.label} did not advertise any supported reasoning levels. Use Codex’s native Terminal picker instead.
       </p>
     );
@@ -1152,7 +1152,7 @@ export function RuntimeEffortControls({
             </p>
           ) : catalogError ? (
             <p
-              className="m-0 rounded-control border border-err-border bg-surface-2 p-3 text-err text-ui leading-base"
+              className="m-0 rounded-panel border border-err-border bg-surface-2 p-panel text-err text-ui leading-base"
               role="alert"
             >
               Account-aware reasoning choices are unavailable: {runtimeModelCatalogErrorMessage(catalogError)}
@@ -1169,7 +1169,10 @@ export function RuntimeEffortControls({
               submittingEffort={codexSubmittingEffort ?? undefined}
             />
           ) : (
-            <p className="m-0 rounded-control border border-err-border bg-surface-2 p-3 text-err text-ui" role="alert">
+            <p
+              className="m-0 rounded-panel border border-err-border bg-surface-2 p-panel text-err text-ui"
+              role="alert"
+            >
               The running model ({runningModel ?? 'unknown'}) is not in this account’s current Codex catalog. Refresh
               the session or use the native Terminal picker.
             </p>

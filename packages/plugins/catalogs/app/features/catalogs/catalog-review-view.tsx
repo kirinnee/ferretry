@@ -173,7 +173,7 @@ function WarningItem({ row }: { readonly row: WarningRow }) {
   const Icon = TONE_ICON[row.tone];
   return (
     <li
-      className={cn('flex min-w-0 items-start gap-2 rounded-control border p-control-x py-2', TONE_CLASS[row.tone])}
+      className={cn('flex min-w-0 items-start gap-2 rounded-panel border p-panel py-2', TONE_CLASS[row.tone])}
       data-warning={row.code}
       data-warning-tone={row.tone}
     >

@@ -64,7 +64,7 @@ function MachineRow({
   const disabled = busy || (on ? false : row.status !== 'off' || !canEnrol);
   return (
     <li
-      className="flex flex-col gap-1 rounded-control border border-border bg-surface-2 px-control-x py-2"
+      className="flex flex-col gap-1 rounded-panel border border-border bg-surface-2 px-panel py-2"
       data-machine-notification={row.daemonId}
       data-machine-status={row.status}
     >
@@ -187,7 +187,7 @@ export function NotificationsOffBanner({ rows, canEnrol, busy, onEnable }: Notif
       {off.map(row => (
         <li
           key={row.daemonId}
-          className="flex flex-wrap items-center gap-2 rounded-control border border-warn bg-warn-bg px-control-x py-2"
+          className="flex flex-wrap items-center gap-2 rounded-panel border border-warn bg-warn-bg px-panel py-2"
           data-notifications-off-machine={row.daemonId}
           role="status"
         >

@@ -153,7 +153,7 @@ export function ClaudeLoginPanel({
       </header>
 
       <div className="space-y-4 p-panel">
-        <div className="flex items-start gap-2 rounded-control border border-border bg-surface-2 px-3 py-2 text-ui leading-base text-muted">
+        <div className="flex items-start gap-2 rounded-panel border border-border bg-surface-2 px-panel py-2 text-ui leading-base text-muted">
           <ShieldCheck size={17} className="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
           <p className="m-0">{wording.coverage}</p>
         </div>
@@ -161,7 +161,7 @@ export function ClaudeLoginPanel({
         {refusal === null || waitingForCode ? null : (
           <p
             role="alert"
-            className="fy-shake m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+            className="fy-shake m-0 flex items-start gap-2 rounded-panel border border-warn-border bg-warn-bg px-panel py-2 text-ui leading-base text-warn"
           >
             <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
             {refusal}
@@ -203,7 +203,7 @@ export function ClaudeLoginPanel({
             <fieldset disabled={busy} className="m-0 min-w-0 border-0 p-0">
               <div className="fy-sd-layout">
                 <div className="fy-sd-steps space-y-4" data-sign-in-steps="">
-                  <div className="rounded-control border border-accent/40 bg-accent-soft p-3">
+                  <div className="rounded-panel border border-accent/40 bg-accent-soft p-panel">
                     <p className="m-0 text-meta font-semibold text-accent">1 · Open this link anywhere</p>
                     <SignInLink url={flow.verificationUrl} copy={copy} />
                   </div>
@@ -235,7 +235,7 @@ export function ClaudeLoginPanel({
                     {refusal === null ? null : (
                       <p
                         role="alert"
-                        className="fy-shake m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+                        className="fy-shake m-0 flex items-start gap-2 rounded-panel border border-warn-border bg-warn-bg px-panel py-2 text-ui leading-base text-warn"
                       >
                         <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
                         {refusal}
@@ -245,7 +245,7 @@ export function ClaudeLoginPanel({
                       <p
                         role="alert"
                         data-claude-login-rejected=""
-                        className="fy-shake m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+                        className="fy-shake m-0 flex items-start gap-2 rounded-panel border border-warn-border bg-warn-bg px-panel py-2 text-ui leading-base text-warn"
                       >
                         <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
                         <span>
@@ -263,7 +263,7 @@ export function ClaudeLoginPanel({
 
         {flow?.state === 'complete' ? (
           <div
-            className="flex items-start gap-3 rounded-control border border-ok/40 bg-ok-bg p-3 text-ui leading-base text-fg"
+            className="flex items-start gap-3 rounded-panel border border-ok/40 bg-ok-bg p-panel text-ui leading-base text-fg"
             role="status"
           >
             <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
@@ -276,7 +276,7 @@ export function ClaudeLoginPanel({
         {flow?.state === 'failed' ? (
           <div
             role="alert"
-            className="space-y-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+            className="space-y-2 rounded-panel border border-warn-border bg-warn-bg px-panel py-2 text-ui leading-base text-warn"
           >
             <p className="m-0 flex items-start gap-2">
               <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />

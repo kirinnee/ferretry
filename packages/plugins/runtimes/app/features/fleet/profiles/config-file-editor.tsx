@@ -60,8 +60,8 @@ function ConfigIssueList({ issues }: { readonly issues: readonly ConfigIssue[] }
           data-config-issue={issue.severity}
           className={
             issue.severity === 'error'
-              ? 'flex min-w-0 items-start gap-2 rounded-control border border-err-border bg-err-bg px-3 py-2'
-              : 'flex min-w-0 items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2'
+              ? 'flex min-w-0 items-start gap-2 rounded-panel border border-err-border bg-err-bg px-panel py-2'
+              : 'flex min-w-0 items-start gap-2 rounded-panel border border-warn-border bg-warn-bg px-panel py-2'
           }
         >
           {issue.severity === 'error' ? (
@@ -281,7 +281,7 @@ export function ConfigFileEditor({
               {save.status === 'conflict' ? (
                 <div
                   role="alert"
-                  className="flex min-w-0 flex-wrap items-center gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2"
+                  className="flex min-w-0 flex-wrap items-center gap-2 rounded-panel border border-warn-border bg-warn-bg px-panel py-2"
                   data-config-save="conflict"
                 >
                   <span className="min-w-0 flex-1 text-ui leading-base text-warn">{CONFLICT_SENTENCE}</span>
@@ -308,7 +308,7 @@ export function ConfigFileEditor({
               {save.status === 'pending' ? (
                 <div
                   role="status"
-                  className="flex min-w-0 flex-col gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2"
+                  className="flex min-w-0 flex-col gap-2 rounded-panel border border-warn-border bg-warn-bg px-panel py-2"
                   data-config-save="pending"
                 >
                   <span className="text-ui leading-base text-fg">

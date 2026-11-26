@@ -185,7 +185,7 @@ function TunnelOffer({ offer }: { readonly offer: TunnelSwitchOffer }) {
       <section
         aria-labelledby={`${id}-question`}
         data-tunnel-offer="held"
-        className="flex min-w-0 flex-col gap-1 rounded-control border border-border bg-surface-2 px-control-x py-2 fy-cp__wide"
+        className="flex min-w-0 flex-col gap-1 rounded-panel border border-border bg-surface-2 px-panel py-2 fy-cp__wide"
       >
         <p id={`${id}-question`} role="status" className="m-0 text-ui font-semibold text-fg" data-tunnel-held="">
           {TUNNEL_HELD_TITLE}
@@ -225,7 +225,7 @@ function TunnelOffer({ offer }: { readonly offer: TunnelSwitchOffer }) {
     <section
       aria-labelledby={`${id}-question`}
       data-tunnel-offer=""
-      className="flex min-w-0 flex-col gap-1 rounded-control border border-border bg-surface-2 px-control-x py-2 fy-cp__wide"
+      className="flex min-w-0 flex-col gap-1 rounded-panel border border-border bg-surface-2 px-panel py-2 fy-cp__wide"
     >
       <p id={`${id}-question`} className="m-0 text-ui font-semibold text-fg">
         {TUNNEL_OFFER_QUESTION}

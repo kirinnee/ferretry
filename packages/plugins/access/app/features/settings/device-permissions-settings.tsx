@@ -59,7 +59,7 @@ function PermissionRow({ info, state, facts, onRequest }: RowProps) {
   const steps = howToEnable(info.id, facts);
   return (
     <li
-      className="flex flex-col gap-2 rounded-control border border-border bg-surface-2 px-control-x py-3"
+      className="flex flex-col gap-2 rounded-panel border border-border bg-surface-2 px-panel py-3"
       data-permission={info.id}
       data-state={state ?? 'checking'}
     >
