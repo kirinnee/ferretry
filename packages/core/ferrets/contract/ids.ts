@@ -44,6 +44,12 @@ export const KNOWN_HARNESS_KEYS = ['claude-code', 'codex'] as const;
 export type KnownHarnessKey = (typeof KNOWN_HARNESS_KEYS)[number];
 
 /**
+ * The plugins allowed to provide a harness under `harnesses` (the hook's `takers`, a security-path allowlist): the ids of
+ * the harness plugins this build ships. A third harness plugin is added HERE, beside the keys it declares, and nowhere else.
+ */
+export const HARNESS_PLUGIN_IDS: readonly string[] = [...KNOWN_HARNESS_KEYS];
+
+/**
  * The closed spelling of those two keys, for a consumer that has not been opened yet (runtimes plan U4b opens each plugin
  * in its own step): its wire keeps rejecting any other key at its own boundary, exactly as before, and its code keeps
  * the two-literal type. A consumer that has been opened uses {@link HarnessKeySchema} and `harnessFacts` instead.

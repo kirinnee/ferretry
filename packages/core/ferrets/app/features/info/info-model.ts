@@ -11,7 +11,7 @@
  * by those plugins' own `ferret.side` panels.
  */
 
-import type { FerretSummary } from '../../../contract/index.ts';
+import { type FerretSummary, harnessProductName, harnessShortName } from '../../../contract/index.ts';
 import type { ManagedWorktree } from './info-wire.ts';
 
 export type InfoTab = 'overview' | 'runtime';
@@ -41,11 +41,10 @@ export const INFO_HINT = {
 } as const;
 
 /** The CLI a harness is, in words. */
-export const harnessLabel = (ferret: FerretSummary): string => (ferret.harness === 'codex' ? 'Codex' : 'Claude Code');
+export const harnessLabel = (ferret: FerretSummary): string => harnessProductName(ferret.harness);
 
 /** A login only one CLI can use carries that CLI as a scope chip. */
-export const loginScope = (ferret: FerretSummary): string =>
-  ferret.harness === 'codex' ? 'Codex-only' : 'Claude-only';
+export const loginScope = (ferret: FerretSummary): string => `${harnessShortName(ferret.harness)}-only`;
 
 /** The state, in the person's words. */
 export const STATE_WORD: Readonly<Record<FerretSummary['state'], string>> = {

@@ -12,7 +12,13 @@ import { Spinner } from '@ferretry/app/ui';
 import { AlertOctagon, AlertTriangle, ArrowRight, MessageSquare, RefreshCw, ShieldAlert } from 'lucide-react';
 import { type FormEvent, type ReactNode, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ConvertibleSummary } from './conversion-model.ts';
-import type { AskToStopJobsResult, ChosenFerretAccount, FerretSummary, InflightItem } from '../../../contract/index.ts';
+import {
+  type AskToStopJobsResult,
+  type ChosenFerretAccount,
+  type FerretSummary,
+  harnessProductName,
+  type InflightItem,
+} from '../../../contract/index.ts';
 import { Button } from '../../ui.ts';
 import { AccountSlot, type RenderAccountSlot } from './account-slot.tsx';
 import { moveCallFailure } from './call-failure.ts';
@@ -249,9 +255,8 @@ export function ChangeAccount({ summary, slot, move, askToStopJobs, onCancel, on
               Target account
             </h2>
             <p className="mt-1 text-meta leading-base text-muted">
-              Only this daemon’s {summary.harness === 'codex' ? 'Codex' : 'Claude Code'} accounts are offered. A wrapper
-              it has never published is still submitted exactly as typed — the daemon is the thing that accepts or
-              refuses one.
+              Only this daemon’s {harnessProductName(summary.harness)} accounts are offered. A wrapper it has never
+              published is still submitted exactly as typed — the daemon is the thing that accepts or refuses one.
             </p>
             {/* Not a wrapping `<label>`: the rows are inside this control, and a click on one inside a label would
                 be re-dispatched at the input and close the panel under the finger. */}

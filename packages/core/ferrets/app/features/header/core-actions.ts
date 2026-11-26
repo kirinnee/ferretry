@@ -26,7 +26,12 @@ import {
   Square,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { type FerretSummary, isKnownHarnessKey, type KnownHarnessKey } from '../../../contract/index.ts';
+import {
+  conversionTargetOf,
+  type FerretSummary,
+  harnessShortName,
+  isConvertibleHarness,
+} from '../../../contract/index.ts';
 import type { FerretActionContribution, FerretActionFormHost } from './registry.ts';
 import { reviveOffer } from './revive-offer.ts';
 
@@ -70,9 +75,6 @@ export const FERRET_ACTION_IDS = {
   resume: 'resume',
   stop: 'stop',
 } as const;
-
-const HARNESS_SHORT: Readonly<Record<KnownHarnessKey, string>> = { 'claude-code': 'Claude', codex: 'Codex' };
-const otherHarness = (harness: KnownHarnessKey): KnownHarnessKey => (harness === 'codex' ? 'claude-code' : 'codex');
 
 const over = (ferret: FerretSummary): boolean => ferret.state === 'stopped';
 
@@ -138,11 +140,11 @@ export const CORE_FERRET_ACTIONS: readonly FerretActionContribution<CoreActionCo
     group: 'move',
     order: 20,
     build: context =>
-      context.canControl && context.openConvert !== undefined && isKnownHarnessKey(context.ferret.harness)
+      context.canControl && context.openConvert !== undefined && isConvertibleHarness(context.ferret.harness)
         ? {
             kind: 'run',
             id: FERRET_ACTION_IDS.convert,
-            label: `Move to ${HARNESS_SHORT[otherHarness(context.ferret.harness)]}…`,
+            label: `Move to ${harnessShortName(conversionTargetOf(context.ferret.harness))}…`,
             icon: ArrowLeftRight,
             run: context.openConvert,
           }

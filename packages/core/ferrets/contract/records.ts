@@ -20,8 +20,20 @@ export const StoredSessionIdSchema = z
   .regex(/^[a-z0-9][a-z0-9._-]{0,127}$/, 'session id must be 1-128 lowercase ASCII path-safe characters')
   .brand<'SessionId'>();
 
+/**
+ * The ONE table of the harness families today's records name, keyed by the harness plugin's key. A session document, a
+ * transcript tag and a lease say `claude` or `codex` (the family), never `claude-code`; this table is the only place
+ * that pairs the two spellings, and every closed consumer derives from it. A third harness adds its row here and the
+ * compiler lists every {@link byRecordedHarness} call that still needs its case: nothing is quietly read as another family.
+ */
+const FAMILY_OF_KEY = { 'claude-code': 'claude', codex: 'codex' } as const;
+
+/** The harness family a record names, derived from {@link FAMILY_OF_KEY}. */
+export type RecordedFamily = (typeof FAMILY_OF_KEY)[keyof typeof FAMILY_OF_KEY];
+const RECORDED_FAMILIES = Object.values(FAMILY_OF_KEY) as [RecordedFamily, ...RecordedFamily[]];
+
 /** The harness family today's records name (`claude`, `codex`; today's `HarnessSchema`). */
-export const RecordedHarnessSchema = z.enum(['claude', 'codex']);
+export const RecordedHarnessSchema = z.enum(RECORDED_FAMILIES);
 
 /**
  * The harness a session document names: the family for the two harnesses this build ships (`claude`, `codex`), and the
@@ -35,11 +47,60 @@ export const OpenRecordedHarnessSchema = z
   .transform(value => value as OpenRecordedHarness);
 
 /** Whether a session's harness is one of the two families a closed consumer can read. */
-export const isRecordedHarness = (harness: string): harness is z.infer<typeof RecordedHarnessSchema> =>
-  harness === 'claude' || harness === 'codex';
+export const isRecordedHarness = (harness: string): harness is RecordedFamily =>
+  (RECORDED_FAMILIES as readonly string[]).includes(harness);
 
 /** The harness a session document stamps for a ferret's harness key: the family for the two known, the key itself otherwise. */
-export const recordedHarnessOf = (key: string): OpenRecordedHarness => (key === 'claude-code' ? 'claude' : key);
+export const recordedHarnessOf = (key: string): OpenRecordedHarness =>
+  Object.hasOwn(FAMILY_OF_KEY, key) ? FAMILY_OF_KEY[key as keyof typeof FAMILY_OF_KEY] : key;
+
+/** The plugin key a recorded harness names (`claude` is the plugin `claude-code`); a key a document stamped for a third harness is its own key. */
+export const harnessKeyOfRecorded = (recorded: string): string =>
+  (Object.keys(FAMILY_OF_KEY) as (keyof typeof FAMILY_OF_KEY)[]).find(key => FAMILY_OF_KEY[key] === recorded) ??
+  recorded;
+
+/** Thrown where a harness this table has no family for reaches code that would otherwise have read it as one of the two. */
+export class UnsupportedHarnessFamilyError extends Error {
+  constructor(readonly harness: string) {
+    super(`the ${harness} harness is not one of the harnesses this part of Ferretry can read yet`);
+    this.name = 'UnsupportedHarnessFamilyError';
+  }
+}
+
+/** The behaviour of each harness family, both written out. */
+export interface ByRecordedHarness<T> {
+  readonly claude: () => T;
+  readonly codex: () => T;
+}
+
+/**
+ * Runs the case for `harness` (a family or a plugin key). A harness with no family THROWS
+ * {@link UnsupportedHarnessFamilyError}: this replaces every two-way ternary and every "not Claude" guard on a harness, which
+ * would have treated a third harness as one of the two.
+ */
+export function byRecordedHarness<T>(harness: string, cases: ByRecordedHarness<T>): T {
+  const family = recordedHarnessOf(harness);
+  if (!isRecordedHarness(family)) throw new UnsupportedHarnessFamilyError(harness);
+  return cases[family]();
+}
+
+/** How a person reads each harness's product name (`Claude Code`, `Codex`). */
+const PRODUCT_NAME: Readonly<Record<RecordedFamily, string>> = { claude: 'Claude Code', codex: 'Codex' };
+/** How a person reads each harness's short name (`Claude`, `Codex`). */
+const SHORT_NAME: Readonly<Record<RecordedFamily, string>> = { claude: 'Claude', codex: 'Codex' };
+
+const nameOf = (names: Readonly<Record<RecordedFamily, string>>, harness: string): string => {
+  const family = recordedHarnessOf(harness);
+  return isRecordedHarness(family) ? names[family] : harness;
+};
+
+/**
+ * The product name of a harness, for a label. Total: a harness this table does not name is called by its own key, never
+ * by Claude's name. The harness's own `facts.displayName` (the registry) is the owner of the real name for a third one.
+ */
+export const harnessProductName = (harness: string): string => nameOf(PRODUCT_NAME, harness);
+/** The short name of a harness, for a sentence (`Claude`, `Codex`); an unnamed harness is called by its own key. */
+export const harnessShortName = (harness: string): string => nameOf(SHORT_NAME, harness);
 
 /** Where a session stands, as today's wire spells it (`SessionStatusSchema`): the fork's summary names one. */
 export const SessionStatusSchema = z.enum([

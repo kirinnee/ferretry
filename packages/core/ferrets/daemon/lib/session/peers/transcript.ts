@@ -6,8 +6,10 @@
  * The transcript types are copied verbatim; the incremental tail reader is an interface the host supplies.
  */
 
+import type { RecordedFamily } from '../../../../contract/records.ts';
+
 /** Transcript formats supported by the daemon. */
-export type TranscriptHarness = 'claude' | 'codex';
+export type TranscriptHarness = RecordedFamily;
 
 /** The author represented by a normalized transcript event. */
 export type TranscriptRole = 'user' | 'assistant' | 'developer' | 'system' | 'tool';

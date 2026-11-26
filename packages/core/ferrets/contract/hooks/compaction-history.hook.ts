@@ -1,12 +1,13 @@
 import { defineHook } from '@ferretry/kernel/contract';
 import { z } from 'zod';
+import { RecordedHarnessSchema } from '../records.ts';
 
 /** A watched compaction longer than this was not one compaction (a parked pane, a clock jump). */
 export const MAX_COMPACTION_MS = 30 * 60_000;
 
 /** One compaction this daemon watched from start to end: what the history keeps, and the only fields it keeps. */
 export const CompactionRecordSchema = z.strictObject({
-  harness: z.enum(['claude', 'codex']),
+  harness: RecordedHarnessSchema,
   model: z.string().min(1).optional(),
   durationMs: z.number().int().positive().max(MAX_COMPACTION_MS),
   tokensBefore: z.number().int().nonnegative().optional(),
