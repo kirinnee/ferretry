@@ -27,8 +27,12 @@ describe('the root tsconfig.json (what Bun reads)', () => {
     expect(declarations).toEqual([]);
   });
 
-  it('maps no `durian-markdown` specifier at all', () => {
-    expect(Object.keys(paths('tsconfig.json')).filter(name => name.startsWith('durian-markdown'))).toEqual([]);
+  it('maps only the stylesheet stand-in of `durian-markdown`: the package ships no dist/, and a test that imports it needs the empty file', () => {
+    const mapped = paths('tsconfig.json');
+    expect(Object.keys(mapped).filter(name => name.startsWith('durian-markdown'))).toEqual([
+      'durian-markdown/styles.css',
+    ]);
+    expect(mapped['durian-markdown/styles.css']?.every(target => target.endsWith('.css'))).toBe(true);
   });
 
   it('resolves `durian-markdown` and every entry we import to the package source, not to a declaration', () => {

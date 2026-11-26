@@ -23,9 +23,11 @@
     // to that one copy, so the root project can check them without a second dependency.
     // The `durian-markdown` declarations are NOT mapped here: this file is what Bun reads at runtime, and Bun 1.3.13 follows
     // a `paths` entry to a declaration file and hands a test or a scene build `undefined` for every name. They are in
-    // `tsconfig.typecheck.json`, the one the type checker is pointed at.
+    // `tsconfig.typecheck.json`, the one the type checker is pointed at. The stylesheet IS mapped, because it is a stand-in and not a
+    // declaration: the package ships no `dist/`, and every test that imports `durian-markdown/styles.css` needs this empty file at runtime.
     "paths": {
-      "playwright-core": ["./packages/app/node_modules/playwright-core"]
+      "playwright-core": ["./packages/app/node_modules/playwright-core"],
+      "durian-markdown/styles.css": ["./packages/plugins/conversation/app/hypermedia/types/durian-markdown-styles.css"]
     }
   },
   "include": [
