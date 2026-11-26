@@ -27,6 +27,8 @@ function rig(options: { reply?: boolean } = {}) {
   const sent: (string | Uint8Array)[] = [];
   let listeners!: PluginSocketListeners;
   const played: Int16Array[] = [];
+  const playedFor: number[] = [];
+  let heardAt: { id: number; samples: number } | undefined;
   let playerStops = 0;
   let clock = 1_000;
   const socket: PluginSocket = { send: frame => void sent.push(frame), close: () => undefined };
@@ -38,7 +40,11 @@ function rig(options: { reply?: boolean } = {}) {
   };
   const mic: MicSource = { start: async () => undefined, stop: () => undefined };
   const player: ReplyPlayer = {
-    play: pcm => void played.push(pcm),
+    position: () => heardAt,
+    play: (pcm, line) => {
+      played.push(pcm);
+      playedFor.push(line);
+    },
     stop: () => {
       playerStops += 1;
     },
@@ -72,6 +78,11 @@ function rig(options: { reply?: boolean } = {}) {
     events,
     sent,
     played,
+    playedFor,
+    /** Where the person's ears are, as the player would say. */
+    hearing: (cut: { id: number; samples: number } | undefined) => {
+      heardAt = cut;
+    },
     stops: () => playerStops,
     listeners: () => listeners,
     advance: (ms: number) => {
@@ -273,6 +284,40 @@ describe('hush (barge-in) on the browser end', () => {
       unit({ reply: 'ready', audio: { id: 2, samples: 100, last: true } }, new Int16Array(100).fill(5)),
     );
     expect(r.played).toHaveLength(2);
+  });
+
+  test('V2: the sound is played under the id of its line, so the player can say which line the ears are in', () => {
+    const r = rig();
+    r.listeners().onOpen?.();
+    r.handle.speak('First.');
+    r.listeners().onFrame?.(
+      unit({ reply: 'ready', audio: { id: 0, samples: 100, last: true } }, new Int16Array(100).fill(5)),
+    );
+    expect(r.playedFor).toEqual([0]);
+  });
+
+  test('V3: interrupt (the person stopped it) is a hush that carries where their ears were; a plain hush carries nothing', () => {
+    const r = rig();
+    r.listeners().onOpen?.();
+    r.handle.speak('First.');
+    r.hearing({ id: 0, samples: 1_234 });
+    r.handle.interrupt();
+    const frames = (): string[] =>
+      r.sent.filter((frame): frame is string => typeof frame === 'string' && frame.length === SPEAK_FRAME_BYTES);
+    expect(decodeLineFrame(frames().at(-1) ?? '')).toEqual({ t: 'hush', cut: { id: 0, samples: 1_234 } });
+    expect(r.stops()).toBe(1);
+    r.handle.hush();
+    expect(decodeLineFrame(frames().at(-1) ?? '')).toEqual({ t: 'hush' });
+  });
+
+  test('V3: nothing has played yet is "nothing heard", not "no position"', () => {
+    const r = rig();
+    r.listeners().onOpen?.();
+    r.handle.speak('First.');
+    r.hearing(undefined);
+    r.handle.interrupt();
+    const last = r.sent.filter((frame): frame is string => typeof frame === 'string').at(-1) ?? '';
+    expect(decodeLineFrame(last)).toEqual({ t: 'hush', cut: { id: 0, samples: 0 } });
   });
 
   test('a stream that did not ask for the reply voice sends nothing for a hush', () => {

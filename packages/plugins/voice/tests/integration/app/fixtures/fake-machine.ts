@@ -218,6 +218,7 @@ export function machine(params: URLSearchParams) {
     stop: () => undefined,
   };
   const player: ReplyPlayer = {
+    position: () => undefined,
     play: () => undefined,
     stop: () => undefined,
     remainingMs: () => 0,

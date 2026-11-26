@@ -418,16 +418,30 @@ export function decodeSpeakFrame(text: string): SpeakFrame {
 }
 
 /**
+ * WHERE THE PERSON'S EARS WERE when a reply was cut off (V2): line `id` had played `samples` samples (16 kHz) of its sound, and
+ * every line before it had played whole. The device is the only one that knows, so it says; the machine, which knows each
+ * line's words and how long each piece of it is, turns that into the words heard. Numbers only, never audio, never words.
+ */
+export const SpeechCutSchema = z.strictObject({
+  id: z.number().int().nonnegative().max(SPEAK_ID_MAX),
+  samples: z.number().int().nonnegative(),
+});
+export type SpeechCut = z.infer<typeof SpeechCutSchema>;
+
+/**
  * BARGE-IN (unit 7): the person talked over the reply. The browser stops its own sound at once, and this tells the machine
  * to drop every line it has not yet spoken and to throw away the one it is making, so a long reply is not made and sent to
  * a device that has already stopped listening. It is a text frame of the same fixed size as a `speak` frame, so a relay
  * sees the same thing whichever it is.
+ *
+ * A hush that carries `cut` is the PERSON stopping the reply (talking over it, or "stop"): the machine then tells the ferret what
+ * was heard and what was not (`daemon/lib/stream/said.ts`). Without `cut` it is only a reading being replaced, and nothing is told.
  */
-export const HushFrameSchema = z.strictObject({ t: z.literal('hush') });
+export const HushFrameSchema = z.strictObject({ t: z.literal('hush'), cut: SpeechCutSchema.optional() });
 export type HushFrame = z.infer<typeof HushFrameSchema>;
 
-export function encodeHushFrame(): string {
-  const json = JSON.stringify({ t: 'hush' });
+export function encodeHushFrame(cut?: SpeechCut): string {
+  const json = JSON.stringify(HushFrameSchema.parse(cut === undefined ? { t: 'hush' } : { t: 'hush', cut }));
   return json + ' '.repeat(SPEAK_FRAME_BYTES - byteLength(json));
 }
 

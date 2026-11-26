@@ -13,6 +13,7 @@ import {
   type ReplyAudio,
   type ReplyState,
   type ReplySpeakerApi,
+  type SpeechCut,
   type StreamSnapshot,
   type StreamStart,
   StreamStartSchema,
@@ -36,6 +37,7 @@ import {
   snapshotBytes,
 } from '../../../contract/index.ts';
 import { splitForSpeech } from '../reply/chunks.ts';
+import { createSaid } from './said.ts';
 import { SampleBuffer, SECOND } from './samples.ts';
 
 /** Sentences a person reads, one per refusal code. None carries a transcript. */
@@ -133,6 +135,8 @@ const IDLE_KEEP = Math.round(1.5 * SECOND);
 const BACKLOG_KEEP = 5 * SECOND;
 const FINAL_BASE_MS = 5_000;
 const NO_START_MS = 5_000;
+const NOTE_RETRY_MS = 2_000; // a refused cut-off note is sent again after this, doubling each time...
+const NOTE_RETRY_MAX_MS = 30_000; // ...up to this
 /** Units allowed in any 5 s: the nominal 125, with a quarter of headroom (design §3.1). */
 const RATE_WINDOW_MS = 5_000;
 const RATE_LIMIT = Math.floor((RATE_WINDOW_MS / UNIT_MS) * 1.25);
@@ -217,12 +221,12 @@ export class VoiceStream implements SocketHandler {
   private readonly outgoing: Outgoing[] = [];
   private outgoingSamples = 0;
   private draining = false;
+  /** What the person has heard of the reply, and the note for the ferret when they cut it off. Words stay here, in memory. */
+  private readonly said = createSaid();
   /** Bumped by every hush: a line being made when it changed is thrown away, never queued. */
   private hushes = 0;
   /** Lines the device took back before any of their sound went down: the one being made is thrown away when it finishes. */
   private readonly dropped = new Set<number>();
-  /** Lines whose first sound has gone down the stream (so a drop is too late); forgotten when the line ends. */
-  private readonly sounding = new Set<number>();
   /** The line being made right now. */
   private making: number | undefined;
 
@@ -376,7 +380,7 @@ export class VoiceStream implements SocketHandler {
     if (this.start?.reply !== 'machine') throw new StreamProtocolError('this stream did not ask for the reply voice');
     const frame = decodeLineFrame(text);
     if (frame.t === 'hush') {
-      this.hush();
+      this.hush(frame.cut);
       return;
     }
     if (frame.t === 'drop') {
@@ -393,6 +397,7 @@ export class VoiceStream implements SocketHandler {
       this.queueSound({ id: frame.id, pcm: new Int16Array(0), offset: 0, last: true, failed: refusal });
       return;
     }
+    this.said.line(frame.id, frame.text);
     this.spokenQueue.push({ id: frame.id, text: frame.text });
     void this.drain();
   }
@@ -400,24 +405,26 @@ export class VoiceStream implements SocketHandler {
   /**
    * The person talked over the reply (barge-in): every line not yet spoken, and every sound not yet sent, is dropped, and the
    * line being made is thrown away when it finishes. Nothing is reported back: the device has already stopped playing, and
-   * ignores any sound of a line it sent before it hushed.
+   * ignores any sound of a line it sent before it hushed. With `cut` the PERSON stopped it, and the ferret is told what was heard
+   * (the note rides the next message, or goes alone once nobody is speaking); without, a reading was replaced.
    */
-  private hush(): void {
+  private hush(cut?: SpeechCut): void {
+    if (cut === undefined) this.said.clear();
+    else if (this.said.cut(cut)) this.noteSoon((this.pauseSamples / SECOND) * 1000);
     this.hushes += 1;
     this.dropped.clear();
-    this.sounding.clear();
     this.spokenQueue.length = 0;
     this.outgoing.length = 0;
     this.outgoingSamples = 0;
   }
 
   /**
-   * One waiting line is no longer wanted (a newer progress line outdated it): it is taken out of the queue and any sound made
-   * for it is not sent, and the line being made is thrown away when it finishes. A line whose first sound has gone down
-   * is left alone: the person has heard its start. Nothing is reported back; the device forgot the line when it asked.
+   * One line is no longer wanted (a newer progress line outdated it): it is taken out of the queue, any sound made for it is not
+   * sent, and the line being made is thrown away when it finishes. The device decides WHEN to ask (never for a line it has heard,
+   * and it discards every sound of one it takes back), so whatever of this line is on its way was never heard. Nothing is reported back.
    */
   private drop(id: number): void {
-    if (this.sounding.has(id)) return;
+    this.said.skip(id);
     this.dropped.add(id);
     const waiting = this.spokenQueue.findIndex(line => line.id === id);
     if (waiting !== -1) this.spokenQueue.splice(waiting, 1);
@@ -496,8 +503,10 @@ export class VoiceStream implements SocketHandler {
       try {
         made = await reply.speak(piece);
       } catch {
-        if (!this.ended && hushes === this.hushes)
+        if (!this.ended && hushes === this.hushes) {
+          if (index === 0) this.said.skip(id);
           this.queueSound({ id, pcm: new Int16Array(0), offset: 0, last: true, failed: LINE_FAILED });
+        }
         return;
       }
       if (this.ended || hushes !== this.hushes) return;
@@ -511,6 +520,7 @@ export class VoiceStream implements SocketHandler {
         speakMs: Math.round(made.speakMs),
         audioMs: Math.round((pcm.length / SECOND) * 1000),
       });
+      this.said.made(id, pcm.length);
       this.queueSound({ id, pcm, offset: 0, last: index === pieces.length - 1 });
     }
   }
@@ -539,11 +549,7 @@ export class VoiceStream implements SocketHandler {
         break;
       }
     }
-    if (filled > 0) this.sounding.add(head.id);
-    if (last) {
-      this.sounding.delete(head.id);
-      this.dropped.delete(head.id);
-    }
+    if (last) this.dropped.delete(head.id);
     return {
       audio: { id: head.id, samples: filled, last, ...(failed === undefined ? {} : { failed }) },
       pcm: pcm.subarray(0, filled),
@@ -766,13 +772,20 @@ export class VoiceStream implements SocketHandler {
     if (!this.parts.mayChat()) return this.settle({ turn, outcome: 'failed', code: 'fleet_not_granted' });
     this.sentTurns.add(turn);
     const sendId = `${this.parts.streamId}:${turn}`;
+    // A cut-off reply is told to the ferret in front of the person's next words: this message is the note's one way out until it is refused.
+    const sending = this.said.carry();
+    const message = `${sending.note === undefined ? '' : `${sending.note.text} `}(voice) ${text}`;
     let result: Awaited<ReturnType<NonNullable<StreamParts['send']>>>;
     try {
-      result = await this.parts.send(ferretId, `(voice) ${text}`, sendId);
+      result = await this.parts.send(ferretId, message, sendId);
     } catch {
       result = { ok: false, code: 'send_refused' };
     }
-    if (!result.ok) return this.settle({ turn, outcome: 'failed', code: result.code });
+    if (!result.ok) {
+      this.said.failed(sending);
+      return this.settle({ turn, outcome: 'failed', code: result.code });
+    }
+    this.said.delivered(sending);
     this.parts.recordSent(ferretId);
     this.parts.log.info('voice.stream.sent', { stream: this.parts.streamId, turn });
     this.settle({ turn, outcome: 'sent', sendId });
@@ -820,6 +833,35 @@ export class VoiceStream implements SocketHandler {
     this.last = outcome;
     this.failures = 0;
     this.phase = 'idle';
+    if (outcome.outcome !== 'sent') this.noteSoon(0);
+  }
+
+  /**
+   * Once nobody is speaking (at once after a turn with no words: the pause has passed), a waiting note goes to the ferret on its own, under one send id for this cut-in. A refusal is tried
+   * again under the SAME id, later each time, while the stream is open.
+   */
+  private noteSoon(ms: number, attempt = 0): void {
+    if (this.said.note() === undefined) return;
+    this.parts.clock.after(milliseconds(ms), () => {
+      const { ferretId, parts } = this;
+      if (this.ended || this.phase !== 'idle' || ferretId === undefined || parts.send === undefined || !parts.mayChat())
+        return;
+      const sending = this.said.alone();
+      if (sending === undefined) return;
+      const { text, n } = sending.note;
+      void parts
+        .send(ferretId, text, `${parts.streamId}:heard:${n}`)
+        .catch(() => undefined)
+        .then(sent => {
+          if (sent?.ok === true) {
+            this.said.delivered(sending);
+            parts.recordSent(ferretId);
+          } else {
+            this.said.failed(sending);
+            this.noteSoon(Math.min(NOTE_RETRY_MS * 2 ** attempt, NOTE_RETRY_MAX_MS), attempt + 1);
+          }
+        });
+    });
   }
 
   private failTurn(code: string): void {
