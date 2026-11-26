@@ -76,6 +76,7 @@ export class FakeAsks implements AsksApi {
           sourceRef: `ask:${ask.source}:${ask.entry}`,
           why: draft?.why ?? 'because',
           howToResolve: draft?.howToResolve ?? draft?.why ?? 'Read it.',
+          ...(draft?.context === undefined ? {} : { context: draft.context }),
           waitingSince: ask.raisedAt,
           raisedBy: ask.raisedBy.kind === 'owner' ? 'human' : ask.raisedBy.kind === 'ferret' ? 'agent' : 'daemon',
           raisedBySession: ask.raisedBy.kind === 'ferret' ? ferret : null,

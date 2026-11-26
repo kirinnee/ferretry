@@ -74,7 +74,10 @@ async function proposed(h: TestHost, asks: FakeAsks, text = 'New steps') {
       ...index.signIns,
       [signIn.id]: {
         ...index.signIns[signIn.id]!,
-        proposals: [{ ...proposal(RP, text), agendaItemId: ask.id }, proposal(OTHER, 'Another steps')],
+        proposals: [
+          { ...proposal(RP, text), agendaItemId: ask.id, agendaSession: 'F1' },
+          proposal(OTHER, 'Another steps'),
+        ],
       },
     },
   });

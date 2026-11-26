@@ -66,6 +66,23 @@ describe('what an owner’s ask renderer receives', () => {
     expect(askRendererFor(bare, from)).toBeUndefined();
   });
 
+  it('leaves every other sign-in-approval ask to the Agenda’s own actions: only a recipe proposal is drawn from its ref', () => {
+    // A redirected task plan carries the LEAD's id for a plan that is the child's: no Accounts form can find it, and an empty
+    // one would replace the card's normal actions. So nothing is handed over: no renderer, and no form slot in the Inbox.
+    const inbox = { connectionFor: () => ({ daemonId: 'workshop' }) } as unknown as AgendaInbox;
+    const refs = [
+      { kind: 'task-plan', planId: 'plan_0123456789abcdef' },
+      { kind: 'copy-plan', planId: 'plan_0123456789abcdef' },
+      { kind: 'rule-suggestion', suggestion: 'srg_dddddddddddddddd' },
+      { kind: 'phone-approval', id: 'pa_0123456789abcdef' },
+    ];
+    for (const ref of refs) {
+      const raised = agendaItem('A11', { sourceRef: 'ask:sign-in-approval:x', askRef: ref } as never);
+      expect(askRendererFor(raised, from)).toBeUndefined();
+      expect(askFormFor(inbox, inboxCard(raised), () => undefined)).toEqual({});
+    }
+  });
+
   it('hands the input renderer the request the card was raised for, from its input or its obligation', () => {
     const id = 'ab'.repeat(16);
     const own = agendaItem('A5', { kind: 'input', input: { requestId: id } } as never);

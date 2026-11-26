@@ -14,7 +14,13 @@ import { type AskDraft, type AskRef } from '@ferretry/core-asks/contract';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type { TestHost } from '@ferretry/kernel/testing';
 import type { AccountList, SignInSummary } from '../../../contract/routes/index.ts';
-import { BASE_RECIPE, PROPOSED_RECIPE, PROPOSER, proposedWorld } from '../../support/daemon/proposed-world.ts';
+import {
+  BASE_RECIPE,
+  PROPOSAL_WHY,
+  PROPOSED_RECIPE,
+  PROPOSER,
+  proposedWorld,
+} from '../../support/daemon/proposed-world.ts';
 
 const LEAD = 'LEAD';
 
@@ -122,5 +128,17 @@ it('G7 a proposal whose ask landed on another board closes that ask on Approve a
     } finally {
       await h.stop();
     }
+  }
+});
+
+it('G7 the ask carries a fixed sentence, never the recipe lines or the ferret’s reason (a ferret can read other asks)', async () => {
+  const { h, item } = await proposedWorld();
+  try {
+    expect(item.context).toBe('A ferret proposed a sign-in recipe change — review it here');
+    const everything = JSON.stringify(item);
+    expect(everything).not.toContain('Choose the passkey');
+    expect(everything).not.toContain(PROPOSAL_WHY);
+  } finally {
+    await h.stop();
   }
 });

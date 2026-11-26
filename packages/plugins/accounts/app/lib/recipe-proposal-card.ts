@@ -34,7 +34,7 @@ export type RecipeCardModel =
       readonly pin: string;
     };
 
-/** The card for one proposal, or why there is none. A damaged list, or a proposal with no pin, is never approvable. */
+/** The card for one proposal, or why there is none. A damaged list, or a proposal the daemon names unreadable (or with no pin), is never approvable. */
 export function recipeCardModel(list: AccountList, signIn: SignInId, proposal: string): RecipeCardModel {
   if (list.health === 'damaged') return { kind: 'unreadable' };
   const found = list.signIns.find(each => each.id === signIn);
@@ -42,7 +42,7 @@ export function recipeCardModel(list: AccountList, signIn: SignInId, proposal: s
   const waiting = found.proposals?.find(each => each.id === proposal);
   if (waiting === undefined) return { kind: 'gone' };
   const account = list.accounts.find(each => each.id === found.account);
-  if (account === undefined || waiting.pin === undefined) return { kind: 'unreadable' };
+  if (account === undefined || waiting.unreadable === true || waiting.pin === undefined) return { kind: 'unreadable' };
   return {
     kind: found.recipe === waiting.base ? 'ready' : 'stale',
     signIn,

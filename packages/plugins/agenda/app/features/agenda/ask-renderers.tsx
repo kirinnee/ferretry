@@ -96,8 +96,9 @@ export const askRendererFor = (
       slot: 'plan',
       value: onScreen(item, { kind: 'two-factor-seed', stage: item.twoFactorSeed.stage }, from),
     };
-  // An ask Accounts raised through Asks: the daemon's own ref (a recipe proposal, a plan...) is the ref its card is drawn from.
-  if (item.askRef !== undefined && item.sourceRef?.startsWith(SIGN_IN_APPROVAL_OBLIGATION) === true)
+  // A recipe proposal Accounts raised through Asks is drawn from the ref the daemon kept. ONLY that kind: another Accounts ask
+  // (a redirected task plan carries the lead's id) keeps the card's own actions rather than an empty form replacing them.
+  if (item.askRef?.kind === 'recipe-proposal' && item.sourceRef?.startsWith(SIGN_IN_APPROVAL_OBLIGATION) === true)
     return { key: SIGN_IN_APPROVAL_RENDERER, slot: 'plan', value: onScreen(item, item.askRef, from) };
   if (item.kind === 'input') {
     const request = inputRequestOf(item);

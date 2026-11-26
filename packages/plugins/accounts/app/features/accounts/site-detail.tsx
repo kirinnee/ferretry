@@ -26,6 +26,7 @@ import {
   scopedLinesFor,
   siteDefaultFor,
 } from '../../lib/accounts-screen.ts';
+import { RECIPE_CARD_WORDS } from '../../lib/recipe-proposal-card.ts';
 import { methodOfDraft, type SignInDraft, signInProblem } from '../../lib/login-form.ts';
 import { type AccountOps, INPUT, Refusal, Tabs } from './accounts-parts.tsx';
 import { MethodFields } from './method-fields.tsx';
@@ -284,22 +285,32 @@ function RecipeTab({ signIn, ops, busy, error, rules }: SiteDetailProps): ReactN
                 className="flex min-w-0 flex-col gap-2 rounded-panel border border-border bg-surface p-panel"
                 data-accounts-proposal={proposal.id}
               >
-                <p className="m-0 min-w-0 break-words text-cell text-fg" data-accounts-proposal-why="">
-                  The ferret says: {proposal.why}
-                </p>
+                {proposal.unreadable === true ? null : (
+                  <p className="m-0 min-w-0 break-words text-cell text-fg" data-accounts-proposal-why="">
+                    The ferret says: {proposal.why}
+                  </p>
+                )}
                 <p className="m-0 text-meta text-faint">{proposal.proposedAt.slice(0, 10)}</p>
-                <RecipeDiff base={proposal.base} recipe={proposal.recipe} />
+                {proposal.unreadable === true ? (
+                  <p className="m-0 min-w-0 break-words text-cell text-warn" data-accounts-proposal-unreadable="">
+                    {RECIPE_CARD_WORDS.unreadable}
+                  </p>
+                ) : (
+                  <RecipeDiff base={proposal.base} recipe={proposal.recipe} />
+                )}
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    className="kt-btn min-h-[44px]"
-                    data-accounts-proposal-approve=""
-                    data-variant="primary"
-                    disabled={busy}
-                    onClick={() => void ops.decide(signIn.id, proposal.id, 'approve')}
-                    type="button"
-                  >
-                    <Check aria-hidden="true" size={14} /> Approve
-                  </button>
+                  {proposal.unreadable === true ? null : (
+                    <button
+                      className="kt-btn min-h-[44px]"
+                      data-accounts-proposal-approve=""
+                      data-variant="primary"
+                      disabled={busy}
+                      onClick={() => void ops.decide(signIn.id, proposal.id, 'approve')}
+                      type="button"
+                    >
+                      <Check aria-hidden="true" size={14} /> Approve
+                    </button>
+                  )}
                   <button
                     className="kt-btn min-h-[44px]"
                     data-accounts-proposal-decline=""

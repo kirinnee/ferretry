@@ -244,3 +244,20 @@ describe('a ferret’s recipe proposal on its ask card', () => {
     }
   });
 });
+
+describe('a proposal the daemon names unreadable', () => {
+  it('is never approvable on the card, even when a pin came with it', async () => {
+    const shown = listing();
+    const list = AccountListSchema.parse({
+      ...shown,
+      signIns: [{ ...shown.signIns[0], proposals: [{ ...shown.signIns[0]?.proposals?.[0], unreadable: true }] }],
+    });
+    const { mounted } = await drawn(list);
+    try {
+      expect(mounted.container.textContent).toContain(RECIPE_CARD_WORDS.unreadable);
+      expect(button(mounted.container, 'approve')).toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+});

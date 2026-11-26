@@ -251,6 +251,8 @@ export const LoginRecipeProposalSchema = z.strictObject({
   proposedAt: InstantSchema,
   /** Served only, never stored: what an approval names, so the owner approves exactly the text they were shown. */
   pin: RecipePinSchema.optional(),
+  /** Served only, never stored: the daemon could not mask this proposal's words, so none is shown and none can be approved. */
+  unreadable: z.literal(true).optional(),
 });
 export type LoginRecipeProposal = z.infer<typeof LoginRecipeProposalSchema>;
 
