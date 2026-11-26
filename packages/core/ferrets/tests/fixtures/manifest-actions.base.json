@@ -469,6 +469,21 @@
         {
           "flag": "-r, --reason <text>",
           "help": "reason recorded against every stopped session"
+        },
+        {
+          "flag": "-n, --dry-run",
+          "help": "a bulk mode’s switch: put it after the mode",
+          "hidden": true
+        },
+        {
+          "flag": "-y, --yes",
+          "help": "a bulk mode’s switch: put it after the mode",
+          "hidden": true
+        },
+        {
+          "flag": "--include-caller",
+          "help": "a bulk mode’s switch: put it after the mode",
+          "hidden": true
         }
       ],
       "summary": "stop one ferret by id or callsign (it can resume), or ferrets in bulk with a sub-verb below",

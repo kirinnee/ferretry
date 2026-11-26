@@ -1,7 +1,7 @@
 import type { VerbInvocation } from '@ferretry/kernel/manifest';
 import { BulkStopController } from '../lib/stop/controller.ts';
 import type { BulkStopSelector } from '../lib/stop/types.ts';
-import { on, text } from '../lib/verb-io.ts';
+import { on, text, typed } from '../lib/verb-io.ts';
 import { BINARY, defineVerbs, type VerbContext } from './context.ts';
 
 /** Usage sentence `fy stop` prints when it is typed bare. */
@@ -58,8 +58,8 @@ export default defineVerbs(c => {
     if (!Object.hasOwn(stopModes, mode)) {
       // A bare word is a ferret only when nothing else was typed: a switch before a mode (`stop -n cascade wren`) swallows
       // the mode and leaves `wren` alone, which must never stop it for real.
-      const onlyReason = Object.keys(invocation.options).every(name => name === 'reason' || name === 'r');
-      return rest.length === 0 && onlyReason ? await stopOne(invocation) : await stopUsage(invocation);
+      const bulkSwitch = typed(invocation, 'dry-run', 'n', 'yes', 'y', 'include-caller');
+      return rest.length === 0 && !bulkSwitch ? await stopOne(invocation) : await stopUsage(invocation);
     }
     if (rest.length === 0) return await stopUsage(invocation);
     return await stopModes[mode as keyof typeof stopModes]({ ...invocation, args: rest });
