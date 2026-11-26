@@ -507,7 +507,14 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       // The write was an await too. If the request vanished or lost its trust inside it, the approval is void: the
       // grant just written is taken back out, nothing is republished and no approval is audited.
       if (this.ports.memory.pending.get(key) !== request || !this.trusted(request)) {
-        await this.persist(state);
+        try {
+          await this.persist(state);
+        } catch {
+          // The take-back could not be written. The request was never marked approved, so no code can ever be
+          // minted for this grant and it holds no credential; it stays inert. The owner is told the sign-in
+          // expired, and the in-memory index forgets it so nothing in this process can use it either.
+          this.ports.memory.index.replace(state);
+        }
         return { ok: false, code: 'expired', message: 'This sign-in expired.' };
       }
       this.ports.memory.pending.set(key, { ...request, decision: 'approved', grantId: grant.id });

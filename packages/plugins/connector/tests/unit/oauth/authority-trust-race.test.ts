@@ -23,6 +23,13 @@ function world() {
   let hold: { readonly matches: (text: string) => boolean; reached: () => void; released: Promise<void> } | undefined;
   let holdLoad: { reached: () => void; released: Promise<void> } | undefined;
   let holdSave: { reached: () => void; released: Promise<void> } | undefined;
+  let failing: Set<number> | undefined;
+  let sinceArmed = 0;
+  /** Fail the nth store write from now (1 = the very next), once each. */
+  const failSaves = (...nth: number[]) => {
+    failing = new Set(nth);
+    sinceArmed = 0;
+  };
 
   const arm = (matches: (text: string) => boolean): Gate => {
     let reached!: () => void;
@@ -64,6 +71,7 @@ function world() {
   };
   const store = {
     save: async (value: Parameters<typeof f.options.store.save>[0]) => {
+      if (failing && failing.has(++sinceArmed)) throw new Error('disk full');
       const current = holdSave;
       if (current) {
         holdSave = undefined;
@@ -154,6 +162,7 @@ function world() {
     arm,
     armLoad,
     armSave,
+    failSaves,
     start,
     pendingId,
     approve,
@@ -249,6 +258,64 @@ describe('connector authority — trust that changes inside an await', () => {
     expect(w.f.saves()).toBe(3); // registration, the grant, and the rollback
     expect(w.f.events.some(event => event.kind === 'connector.grant.approved')).toBe(false);
     expect([...w.f.memory.pending.values()].some(request => request.decision)).toBe(false); // nothing was approved in memory
+  });
+
+  test('approve: a failed grant write writes, decides and audits nothing', async () => {
+    const w = world();
+    await w.start();
+    const id = await w.pendingId();
+    const registered = w.f.state();
+    w.failSaves(1);
+    await expect(w.authority.approve(id, 'admin-cli')).rejects.toThrow('disk full');
+    expect(w.f.state()).toEqual(registered);
+    expect(w.f.events.some(event => event.kind === 'connector.grant.approved')).toBe(false);
+    expect([...w.f.memory.pending.values()].some(request => request.decision)).toBe(false);
+    // The sign-in is still waiting, so the owner can approve it again once the disk answers.
+    expect(await w.authority.approve(id, 'admin-cli')).toMatchObject({ ok: true });
+  });
+
+  test('approve: trust lost during the grant write and the take-back also failing leaves an inert, unapproved grant', async () => {
+    const w = world();
+    const { handle } = await w.start();
+    const id = await w.pendingId();
+    const gate = w.armSave();
+    w.failSaves(2); // the grant write succeeds, its take-back does not
+    const outcome = w.authority.approve(id, 'admin-cli');
+    await gate.reached;
+    w.removeCallback();
+    gate.release();
+    expect(await outcome).toMatchObject({ ok: false, code: 'expired' });
+    expect(w.f.events.some(event => event.kind === 'connector.grant.approved')).toBe(false);
+    expect([...w.f.memory.pending.values()].some(request => request.decision)).toBe(false);
+    w.noTokens(); // whatever is left in the store holds no credential
+    await expect(w.authority.waitPage(handle)).rejects.toMatchObject({ error: 'invalid_request' });
+    expect(w.f.memory.codes.size).toBe(0);
+  });
+
+  test('wait page: a callback removed during the exact handle digest answers unknown and emits no code', async () => {
+    const w = world();
+    const { handle } = await w.start();
+    await w.approve();
+    const gate = w.arm(text => text === handle); // the HANDLE digest, not the code digest
+    const outcome = w.authority.waitPage(handle).then(
+      () => 'redirect',
+      (error: { error?: string }) => error.error,
+    );
+    await gate.reached;
+    w.removeCallback();
+    gate.release();
+    expect(await outcome).toBe('invalid_request');
+    expect(w.f.memory.codes.size).toBe(0);
+  });
+
+  test('wait page: a near-miss handle is unknown and spends nothing of the real one', async () => {
+    const w = world();
+    const { handle } = await w.start();
+    await w.approve();
+    const nearMiss = `${handle.slice(0, -1)}${handle.endsWith('A') ? 'B' : 'A'}`;
+    await expect(w.authority.waitPage(nearMiss)).rejects.toMatchObject({ error: 'invalid_request' });
+    expect(w.f.memory.codes.size).toBe(0);
+    expect((await w.authority.waitPage(handle)).kind).toBe('redirect');
   });
 
   test('redeem: a callback removed during the PKCE digest mints no token', async () => {
