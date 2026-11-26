@@ -1,13 +1,15 @@
 /**
- * Ferretry's `gh` on every ferret's `PATH` (r9 B10): a two-line `sh` file named `gh` that hands its arguments, untouched,
+ * Ferretry's `gh` on every ferret's `PATH` (r9 B10): a `sh` file named `gh` that checks the installed client and hands its arguments, untouched,
  * to `fy gh -- …`, which asks the daemon to run the real `gh` as the connected account (B9). The ferret never holds a
  * token and a `gh` it finds first on `PATH` is this file.
  *
- * Where it lives: the folder the plugin already owns for the agents (`RunFolder`, the kernel-made `downloads` root),
- * under `shims/`, so there is one private home and nothing new for the fence to learn about. The folder is `0700` and the
+ * Where it lives: exact managed scopes under this plugin's `agent-homes/gh`, separate from downloads.
+ * The folder is `0700` and the
  * file `0755`: the same user (the ferret) runs it, nobody else can write it.
  */
 import type { RunFolder } from '../ssh-keys/agents.ts';
+import type { BoundProgram } from '@ferretry/kernel/contract';
+import { LaunchRefusal } from '@ferretry/core-ferrets/contract';
 
 /** `<run folder>/shims`: put first on every pane's `PATH`. */
 const SHIM_FOLDER = 'shims';
@@ -20,8 +22,14 @@ const PANE_CONFIG_MODE = 0o500;
 /** One word for `sh`: the name stays plain, anything odd is single-quoted. */
 const word = (text: string): string => (/^[A-Za-z0-9_./-]+$/u.test(text) ? text : `'${text.replaceAll("'", "'\\''")}'`);
 
-/** The shim's text. `client` is the product's own CLI name (`fy`), found on the pane's `PATH` like every other `fy` call. */
-export const shimScript = (client: string): string => `#!/bin/sh\nexec ${word(client)} gh -- "$@"\n`;
+/** The shim's text. Only a bound canonical installed client and its trusted identity verifier are accepted. */
+export const shimScript = (client: BoundProgram): string => `#!/bin/sh
+if [ -L ${word(client.program)} ] || [ "$(LC_ALL=C ${client.check.argv.map(word).join(' ')} 2>/dev/null)" != ${word(client.check.expected)} ]; then
+  printf '%s\\n' 'GitHub client unavailable' >&2
+  exit 1
+fi
+exec ${word(client.program)} gh -- "$@"
+`;
 
 export interface GhShimFolders {
   /** `<run folder>/shims`: the folder a pane's `PATH` starts with. */
@@ -35,13 +43,20 @@ export const ghShimFolders = (folder: RunFolder): GhShimFolders => ({
   paneConfig: `${folder.path}/${PANE_CONFIG_FOLDER}`,
 });
 
+/** Every pane needs an empty config even when client discovery or shim publication fails. Fail closed if unavailable. */
+export async function closeGhConfig(folder: RunFolder): Promise<string> {
+  if (!(await folder.isPrivate())) throw new LaunchRefusal('GitHub config unavailable');
+  await folder.emptyDirectory(PANE_CONFIG_FOLDER, PANE_CONFIG_MODE);
+  return ghShimFolders(folder).paneConfig;
+}
+
 /**
  * Writes the shim (and the pane's empty config folder) and answers the folders; `undefined` when they cannot be made
  * safely (the run folder is not private): the launch then closes the pane's `gh` config instead (`parts.ts`).
- * Written again on every boot, so a changed `fy` name or a hand-edited shim never survives a restart, and the pane's
+ * Written again on every boot and launch, so an edited or removed shim is repaired before the next launch, and the pane's
  * config folder is emptied again too (anything a ferret left in it is removed).
  */
-export async function installGhShim(folder: RunFolder, client: string): Promise<GhShimFolders | undefined> {
+export async function installGhShim(folder: RunFolder, client: BoundProgram): Promise<GhShimFolders | undefined> {
   if (!(await folder.isPrivate())) return undefined;
   await folder.publish(`${SHIM_FOLDER}/${SHIM_NAME}`, shimScript(client), 0o755);
   await folder.emptyDirectory(PANE_CONFIG_FOLDER, PANE_CONFIG_MODE);

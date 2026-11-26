@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { nodeFs } from '../../../host/adapters/node-fs.ts';
-import { checkDirectory, gatedPaths } from '../../../host/paths.ts';
+import { bindProgram, checkDirectory, gatedPaths } from '../../../host/paths.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { bootHost } from '../../../host/host.ts';
 import { realAdapters } from '../../../host/wiring.ts';
@@ -21,6 +21,180 @@ const folder = async (): Promise<string> => {
   parents.push(parent);
   return parent;
 };
+
+describe('bindProgram installed-client trust', () => {
+  function installed() {
+    const entry = (kind: 'file' | 'directory', inode: bigint) => ({
+      kind,
+      device: 1n,
+      inode,
+      links: 1,
+      size: 17,
+      mtimeMs: 1_000,
+      mtimeNs: 1_000_000_000n,
+      ctimeNs: 2_000_000_000n,
+      mode: 0o755,
+      owner: 0,
+      group: 0,
+    });
+    const files = new Map([
+      ['/', entry('directory', 1n)],
+      ['/installed', entry('directory', 2n)],
+      ['/installed/fy', entry('file', 3n)],
+      ['/usr', entry('directory', 4n)],
+      ['/usr/bin', entry('directory', 5n)],
+      ['/usr/bin/stat', entry('file', 6n)],
+    ]);
+    const writable = new Set<string>();
+    const fs = {
+      realpath: async (path: string) => (path === '/alias/fy' ? '/installed/fy' : path),
+      identity: async (path: string) => files.get(path),
+      writable: async (path: string) => writable.has(path),
+    };
+    return { fs, files, writable };
+  }
+
+  test('pins the canonical installed client and a runtime identity verifier without executing either', async () => {
+    const { fs } = installed();
+    expect(await bindProgram(fs, '/alias/fy')).toMatchObject({
+      program: '/installed/fy',
+      check: { expected: '1:3:17:1000000000:2000000000:0:493' },
+    });
+    const bound = await bindProgram(fs, '/alias/fy');
+    expect(bound?.check.argv).toContain(process.execPath);
+    expect(bound?.check.argv.at(-1)).toBe('/installed/fy');
+  });
+
+  test('refuses a client-name symlink to a different trusted program such as a shell or interpreter', async () => {
+    const { fs } = installed();
+    expect(
+      await bindProgram(
+        { ...fs, realpath: async path => (path === '/alias/fy' ? '/usr/bin/stat' : path) },
+        '/alias/fy',
+      ),
+    ).toBeUndefined();
+  });
+
+  test('refuses a writable client or any writable ancestor, including an ACL write grant', async () => {
+    for (const path of ['/installed/fy', '/installed', '/']) {
+      const { fs, writable } = installed();
+      writable.add(path);
+      expect(await bindProgram(fs, '/installed/fy')).toBeUndefined();
+    }
+  });
+
+  test('S2: NixOS binds and verifies without /usr/bin/stat or any external stat executable', async () => {
+    const { fs, files } = installed();
+    files.delete('/usr/bin/stat');
+    const bound = await bindProgram(fs, '/installed/fy');
+    expect(bound?.program).toBe('/installed/fy');
+    expect(await bound?.verify()).toBe(true);
+    expect(bound?.check.argv.join(' ')).not.toContain('/usr/bin/stat');
+  });
+
+  test('refuses a same-user readonly file (its owner can chmod it) and a group writable ancestor', async () => {
+    const { fs, files } = installed();
+    files.get('/installed/fy')!.owner = 1000;
+    expect(await bindProgram(fs, '/installed/fy')).toBeUndefined();
+    files.get('/installed/fy')!.owner = 0;
+    files.get('/installed')!.mode = 0o775;
+    expect(await bindProgram(fs, '/installed/fy')).toBeUndefined();
+  });
+
+  test('allows a root-owned sticky Nix-store ancestor only when the pane user cannot write there', async () => {
+    const { fs, files, writable } = installed();
+    files.get('/installed')!.mode = 0o1775;
+    expect((await bindProgram(fs, '/installed/fy'))?.program).toBe('/installed/fy');
+    writable.add('/installed');
+    expect(await bindProgram(fs, '/installed/fy')).toBeUndefined();
+  });
+
+  test('a changed identity during the bind or an unreadable chain proves nothing', async () => {
+    const { fs } = installed();
+    let looks = 0;
+    expect(
+      await bindProgram(
+        {
+          ...fs,
+          identity: async path => {
+            const found = await fs.identity(path);
+            if (path === '/installed/fy' && ++looks > 1 && found) return { ...found, inode: 99n };
+            return found;
+          },
+        },
+        '/installed/fy',
+      ),
+    ).toBeUndefined();
+    expect(
+      await bindProgram(
+        {
+          ...fs,
+          writable: async () => {
+            throw new Error('unreadable');
+          },
+        },
+        '/installed/fy',
+      ),
+    ).toBeUndefined();
+  });
+
+  test('a real agent-writable temporary client is refused', async () => {
+    const parent = await folder();
+    await writeFile(`${parent}/fy`, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    expect(await bindProgram(disk, `${parent}/fy`)).toBeUndefined();
+  });
+
+  test('R1: the running daemon trusts its own user-owned ~/.local/bin sibling, bound to identity', async () => {
+    const { fs, files, writable } = installed();
+    const local = '/home/owner/.local/bin';
+    for (const path of ['/home', '/home/owner', '/home/owner/.local', local]) {
+      files.set(path, { ...files.get('/installed')!, owner: 1000 });
+      writable.add(path);
+    }
+    files.set(`${local}/fy`, { ...files.get('/installed/fy')!, owner: 1000 });
+    files.set(`${local}/fyd`, { ...files.get('/installed/fy')!, inode: 77n, owner: 1000 });
+    writable.add(`${local}/fy`);
+    const bound = await bindProgram(fs, `${local}/fy`, {
+      executable: `${local}/fyd`,
+      client: 'fy',
+      daemon: 'fyd',
+    });
+    expect(bound?.program).toBe(`${local}/fy`);
+    expect(await bound?.verify()).toBe(true);
+    files.get(`${local}/fy`)!.mtimeNs += 1n;
+    expect(await bound?.verify()).toBe(false);
+    expect(await bindProgram(fs, `${local}/fy`)).toBeUndefined();
+  });
+
+  test('R2: a bound system gh rejects replacement and same-second same-size edits', async () => {
+    const { fs, files } = installed();
+    files.set('/installed/gh', { ...files.get('/installed/fy')! });
+    const bound = await bindProgram(fs, '/installed/gh');
+    expect(await bound?.verify()).toBe(true);
+    files.get('/installed/gh')!.mtimeNs += 1n;
+    expect(await bound?.verify()).toBe(false);
+  });
+
+  test('R2 portability: user-owned package-manager installs are identity-bound, never arbitrary symlink targets', async () => {
+    for (const prefix of ['/opt/homebrew', '/usr/local', '/home/linuxbrew/.linuxbrew']) {
+      const { fs, files, writable } = installed();
+      const named = `${prefix}/bin/gh`;
+      const real = `${prefix}/Cellar/gh/1/bin/gh`;
+      files.set(real, { ...files.get('/installed/fy')!, owner: 1000 });
+      writable.add(real);
+      const brew = { ...fs, realpath: async (path: string) => (path === named ? real : path) };
+      const bound = await bindProgram(brew, named);
+      expect(bound?.program).toBe(real);
+      expect(await bound?.verify()).toBe(true);
+      files.get(real)!.mtimeNs += 1n;
+      expect(await bound?.verify()).toBe(false);
+      files.set('/tmp/project/gh', { ...files.get(real)! });
+      expect(
+        await bindProgram({ ...brew, realpath: async path => (path === named ? '/tmp/project/gh' : path) }, named),
+      ).toBeUndefined();
+    }
+  });
+});
 
 describe('checkDirectory', () => {
   test('answers the real path of a directory', async () => {
@@ -86,6 +260,7 @@ describe('TT kernel.paths.checkDirectory is gated by permissions.checkDirectory'
       value: { realPath: '/x', insideStateHome: false, verify: async () => ({ ok: true as const, value: undefined }) },
     }),
     stateHomeHolding: async () => undefined,
+    bindProgram: async () => undefined,
     which: async () => undefined,
     locate: async () => ({ kind: 'absent' as const }),
     whichFor: async () => ({ kind: 'unprovable' as const }),

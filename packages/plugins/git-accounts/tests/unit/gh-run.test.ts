@@ -9,7 +9,7 @@ import {
   ownerStanding,
   StandInAdmission,
 } from '@ferretry/core-gate/contract/testing';
-import type { CallStanding, SpawnOptions, SpawnResult } from '@ferretry/kernel/contract';
+import type { CallStanding, PathsPort, SpawnOptions, SpawnResult } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { testHost } from '@ferretry/kernel/testing';
 import { FakeSealedDocuments } from '@ferretry/core-vault/contract/testing';
@@ -18,6 +18,7 @@ import daemon from '../../daemon/index.ts';
 import { GhRunner } from '../../daemon/features/gh-run/gh-runner.ts';
 import { FAKE_TOKEN, FakeGithub } from './fake-github.ts';
 import { GH_REAL, ghHost } from './gh-host.ts';
+import { testClient } from './run-folder.ts';
 
 const CLIENT = 'Ov23FAKECLIENTID';
 const ACCOUNT = 'gha_4242';
@@ -50,6 +51,7 @@ async function boot(
     ferretFolders?: Record<string, string>;
     standing?: () => CallStanding;
     spawn?: (call: Call) => SpawnResult | Promise<SpawnResult>;
+    bindProgram?: PathsPort['bindProgram'];
     /** The daemon's PATH, the executables the kernel finds, and what it says is in the state home (default: a plain /usr/bin/gh). */
     where?: { path?: string; executables?: readonly string[]; held?: (path: string) => Promise<string | undefined> };
   } = {},
@@ -62,7 +64,11 @@ async function boot(
   const calls: Call[] = [];
   const host = await testHost({
     plugins: [daemon],
-    ...ghHost(options.where?.path, options.where?.executables),
+    ...ghHost(
+      options.where?.path,
+      options.where?.executables === undefined ? undefined : [...options.where.executables, '/usr/bin/git'],
+    ),
+    ...(options.bindProgram === undefined ? {} : { bindProgram: options.bindProgram }),
     ...(options.where?.held === undefined ? {} : { stateHomeHolding: options.where.held }),
     gate: new StandInAdmission(() => (connecting ? ownerStanding() : (options.standing ?? (() => ownerStanding()))())),
     fakes: { sealed, gate },
@@ -119,6 +125,73 @@ describe('the gh that gets a token is the real one, never a file in the state ho
   const SHIMS = `${HOME}/state/git-accounts/downloads/shims`;
   const held = async (path: string) => (path === HOME || path.startsWith(`${HOME}/`) ? HOME : undefined);
 
+  test('R2: a planted gh earlier on PATH is refused before any credential-bearing child starts', async () => {
+    const { root } = projectFolder();
+    const world = await boot({
+      projects: [linked(root)],
+      where: { path: `${root}:/usr/bin`, executables: [`${root}/gh`, '/usr/bin/gh'] },
+      bindProgram: async () => undefined,
+    });
+    expect((await world.gh(['pr', 'list'], root)).json()).toEqual({ refused: expect.any(String) });
+    expect(world.calls).toEqual([]);
+    expect(everything(world)).not.toContain(FAKE_TOKEN);
+  });
+
+  test('R2: gh swapped after selection is refused immediately before exec, with no token passed', async () => {
+    const { root } = projectFolder();
+    let verified = false;
+    const world = await boot({
+      projects: [linked(root)],
+      bindProgram: async program => ({
+        program,
+        check: { argv: ['/usr/bin/stat', program], expected: 'synthetic' },
+        verify: async () => {
+          verified = true;
+          return false;
+        },
+      }),
+    });
+    expect((await world.gh(['pr', 'list'], root)).json()).toEqual({ refused: expect.any(String) });
+    expect(verified).toBe(true);
+    expect(world.calls).toEqual([]);
+    expect(everything(world)).not.toContain(FAKE_TOKEN);
+  });
+
+  test('R2: an untrusted git is refused before gh receives the token', async () => {
+    const { root } = projectFolder();
+    const world = await boot({
+      projects: [linked(root)],
+      bindProgram: async program => (program.endsWith('/git') ? undefined : testClient(program)),
+    });
+    expect((await world.gh(['pr', 'list'], root)).json()).toEqual({
+      refused: expect.stringContaining('git is not in a trusted installation'),
+    });
+    expect(world.calls).toEqual([]);
+    expect(everything(world)).not.toContain(FAKE_TOKEN);
+  });
+
+  test('R2: git swapped after selection refuses the credential-bearing gh exec', async () => {
+    const { root } = projectFolder();
+    let gitChecked = false;
+    const world = await boot({
+      projects: [linked(root)],
+      bindProgram: async program => ({
+        ...testClient(program),
+        verify: async () => {
+          if (program.endsWith('/git')) {
+            gitChecked = true;
+            return false;
+          }
+          return true;
+        },
+      }),
+    });
+    expect((await world.gh(['pr', 'list'], root)).json()).toEqual({ refused: expect.any(String) });
+    expect(gitChecked).toBe(true);
+    expect(world.calls).toEqual([]);
+    expect(everything(world)).not.toContain(FAKE_TOKEN);
+  });
+
   test('a daemon PATH that starts with the shim folder (written there by a pane) still runs the real gh, by absolute path', async () => {
     const { root } = projectFolder();
     const world = await boot({
@@ -130,7 +203,7 @@ describe('the gh that gets a token is the real one, never a file in the state ho
     expect(world.calls.map(call => call.program)).toEqual(['/usr/bin/gh']);
     // The sealed child would otherwise inherit that PATH: it is given its own, with no state-home folder in it (L52).
     const env = world.calls[0]?.options?.env as Record<string, string>;
-    expect(env.PATH).toBe('/usr/bin');
+    expect(env.PATH).toBe('/usr/bin:/bin');
     expect(env.PATH).not.toContain(SHIMS);
   });
 
@@ -446,6 +519,40 @@ describe('bounds', () => {
     while (release.length < 5) await Bun.sleep(1);
     release[4]?.();
     expect(await again).toMatchObject({ exitCode: 0 });
+  });
+
+  test('E69: a device with four mounted GH runs cannot starve another device, the owner or a ferret', async () => {
+    const release: (() => void)[] = [];
+    let standing = deviceStanding('phone');
+    let started = 0;
+    const world = await boot({
+      projects: [linked('/w')],
+      standing: () => standing,
+      ferretFolders: { phone: '/w' },
+      spawn: () => {
+        started += 1;
+        return started <= 4 ? new Promise(resolve => release.push(() => resolve(OK))) : OK;
+      },
+    });
+    const pending = Array.from({ length: 4 }, () => world.gh(['pr', 'list'], '/w'));
+    try {
+      for (let tick = 0; release.length < 4 && tick < 1000; tick += 1) await Bun.sleep(1);
+      expect(release).toHaveLength(4);
+      expect((await world.gh(['pr', 'list'], '/w')).json()).toHaveProperty('refused');
+      // A fresh session for the same paired device still shares that device's allowance.
+      standing = deviceStanding('phone');
+      expect((await world.gh(['pr', 'list'], '/w')).json()).toHaveProperty('refused');
+      standing = deviceStanding('laptop');
+      expect((await world.gh(['pr', 'list'], '/w')).json()).toMatchObject({ exitCode: 0 });
+      standing = ownerStanding();
+      expect((await world.gh(['pr', 'list'], '/w')).json()).toMatchObject({ exitCode: 0 });
+      standing = ferretStanding('phone' as never);
+      expect((await world.gh(['pr', 'list'], '/w')).json()).toMatchObject({ exitCode: 0 });
+    } finally {
+      for (const done of release) done();
+      await Promise.all(pending);
+      await world.host.stop();
+    }
   });
 
   test('a followed run gets the long clock, an ordinary one the short', async () => {

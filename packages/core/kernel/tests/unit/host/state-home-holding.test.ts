@@ -166,6 +166,7 @@ describe('S47 kernel.paths.stateHomeHolding is gated by permissions.checkDirecto
       value: { realPath: '/x', insideStateHome: false, verify: async () => ({ ok: true as const, value: undefined }) },
     }),
     stateHomeHolding: async () => '/home/fy',
+    bindProgram: async () => undefined,
     which: async () => undefined,
     locate: async () => ({ kind: 'absent' as const }),
     whichFor: async () => ({ kind: 'unprovable' as const }),
