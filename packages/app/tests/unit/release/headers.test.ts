@@ -5,6 +5,8 @@ import should from 'should';
 
 /** The map tile host the page policy names (Conversation's fy-render maps). */
 const MAP_TILE_ORIGIN = 'https://tile.openstreetmap.org';
+/** The one third-party frame the page policy names: the opt-in Google Maps Embed API (Conversation's map style). */
+const GOOGLE_EMBED_FRAME_SOURCE = 'https://www.google.com/maps/embed/v1/';
 import { contentTypeFor, parseReleaseHeaders, releaseHeadersFor } from '../../../src/release/headers.ts';
 
 const headerMap = (headers: readonly (readonly [string, string])[]): Record<string, string> =>
@@ -146,5 +148,19 @@ describe('the committed public/_headers', () => {
     // Assert — a bare `https:` would make every Markdown image a request this policy permits.
     should(sources).eql(["'self'", 'data:', 'blob:', MAP_TILE_ORIGIN]);
     should(sources).not.containEql('https:');
+  });
+
+  it('lets a frame come from this origin and the Google Maps embed path and nowhere else', async () => {
+    // Arrange
+    const rules = await committed();
+
+    // Act
+    const policy = headerMap(releaseHeadersFor('/app/', 'app/index.html', rules))['content-security-policy'] ?? '';
+    const frameSrc = policy.split(';').filter(directive => directive.trim().startsWith('frame-src'));
+    const sources = (frameSrc[0] ?? '').trim().split(/\s+/u).slice(1);
+
+    // Assert — one directive, the path prefix and not the whole google.com origin, never a bare scheme or a wildcard.
+    should(frameSrc).have.length(1);
+    should(sources).eql(["'self'", GOOGLE_EMBED_FRAME_SOURCE]);
   });
 });
