@@ -19,6 +19,7 @@ import {
   composerHoldsOtherText,
   devChannelsAction,
   composerInput,
+  composerLanding,
   countlessPasteOf,
   draftBlockingReadiness,
   frameCursor,
@@ -316,7 +317,11 @@ export class TmuxPaneDelivery {
       // &B153: a prompt, permission request or dialog that came up after the fill takes Enter as its answer — a
       // background agent's permission prompt was up beside marge's turn on 2026-11-06. Nothing is pressed; the send
       // is typed and unconfirmed, and the stranded-send repair presses only at an undialogued pane.
-      if (before.screen === undefined ? blockedByDialog(before.visible) : !before.screen.atPrompt)
+      if (
+        before.screen === undefined
+          ? blockedByDialog(before.visible)
+          : !before.screen.atPrompt || composerLanding(before, text, evidence === 'placeholder') !== evidence
+      )
         throw new ComposerUnconfirmedError(
           `the turn was typed into tmux session ${session}, and a prompt came up on screen before Enter; Enter was not pressed`,
           1,

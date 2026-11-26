@@ -12,7 +12,7 @@ export interface LaunchChain extends RegisteredScreen {
   readonly harness: string;
 }
 export function launchChainOf(spec: RunSpec): LaunchChain | undefined {
-  const harness = spec.execChain?.at(-1);
+  const harness = spec.execChain?.at(-1) ?? spec.harness;
   return harness === undefined
     ? undefined
     : {
@@ -26,7 +26,10 @@ const UNKNOWN: HarnessScreenReading = { working: true, atPrompt: false, composer
 
 /** Identity is the registered launch key. Screen content can never select a reader or a legacy family. */
 function readerFor(launch: RegisteredScreen | undefined): HarnessScreenReader | undefined {
-  if (launch?.screenReader === undefined) return undefined;
+  if (launch?.screenReader === undefined)
+    return launch?.key === 'claude-code' || launch?.key === 'codex'
+      ? undefined
+      : { key: launch?.key ?? '', read: () => UNKNOWN };
   return launch.key === launch.screenReader.key ? launch.screenReader : { key: launch.key ?? '', read: () => UNKNOWN };
 }
 

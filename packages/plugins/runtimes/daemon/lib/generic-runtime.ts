@@ -87,7 +87,7 @@ export class GenericRuntimes {
     private readonly deps: {
       readonly kernel: KernelPorts;
       readonly ferrets: Pick<FerretsApi, 'harnesses' | 'harnessFacts' | 'harnessRuntime'>;
-      readonly logins: Pick<LoginsApi, 'list' | 'get'>;
+      readonly logins: Pick<LoginsApi, 'list' | 'get' | 'launchRefusal'>;
     },
   ) {
     this.#changes = new FleetProposalStore({
@@ -184,6 +184,8 @@ export class GenericRuntimes {
     if (this.deps.kernel.config.fileState(runtimeItems, name).state === 'invalid')
       return refused(`Runtime ${name} could not be read`);
     if (file.shell !== undefined) return unsupported(registered.label);
+    const compatibility = await this.deps.logins.launchRefusal(file.login, registered.key);
+    if (compatibility !== undefined) return refused(compatibility);
     const login = await this.deps.logins.get(LoginIdSchema.parse(file.login)).catch(() => undefined);
     if (login === undefined) return refused(`Login ${file.login} does not exist`);
     if (!login.harnesses.includes(registered.key))
@@ -334,11 +336,16 @@ export class GenericRuntimes {
         const name = this.deps.kernel.config.file(runtimesConfig)?.defaultRuntime;
         return name !== undefined && this.nativeFile(name) ? (name as RuntimeId) : await base.default();
       },
-      resolve: async name => {
+      resolve: async (name, harness) => {
         name ??= this.deps.kernel.config.file(runtimesConfig)?.defaultRuntime as RuntimeId | undefined;
-        if (name === undefined) return await base.resolve(name);
-        if (!this.nativeFile(name)) return await base.resolve(name);
+        if (name === undefined || !this.nativeFile(name)) return await base.resolve(name, harness);
         try {
+          const file = this.file(name);
+          if (file !== undefined && harness !== undefined && harness !== file.harness) {
+            const refusal = await this.deps.logins.launchRefusal(file.login, harness);
+            if (refusal !== undefined)
+              return { ok: false as const, refusal: 'not_signed_in' as const, sentence: refusal };
+          }
           const runtime = (await this.read(name)).summary;
           return runtime.launch.available
             ? { ok: true as const, runtime }

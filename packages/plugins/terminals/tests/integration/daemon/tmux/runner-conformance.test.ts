@@ -153,7 +153,13 @@ function tmuxWorld() {
   return {
     runner,
     paneOf,
-    spec: { ferret: ferretId('f1'), command: ['harness'], cwd: fenced('/work'), env: emptyChildEnvironment() },
+    spec: {
+      ferret: ferretId('f1'),
+      harness: 'claude-code',
+      command: ['harness'],
+      cwd: fenced('/work'),
+      env: emptyChildEnvironment(),
+    },
     // A ferret pane a previous daemon started: it is in the server, and this runner never launched it.
     adoptable: async () => add('fy-f0', 'harness').id as RunnerHandle,
     starts: () => starts,
@@ -221,7 +227,11 @@ describe('registered plugin screen reader through the guarded runner', () => {
 });
 
 /** The spec of a Codex launch: it execs `env`, the interpreter its installed script runs on, then the harness. */
-const codexSpec = (spec: RunSpec): RunSpec => ({ ...spec, execChain: ['env', 'bash', 'sh', 'node', 'harness'] });
+const codexSpec = (spec: RunSpec): RunSpec => ({
+  ...spec,
+  harness: 'codex',
+  execChain: ['env', 'bash', 'sh', 'node', 'harness'],
+});
 
 /** The spec of a Claude launch: it execs `env`, the seed shell, then the harness (named `harness` in this world). */
 const claudeSpec = (spec: RunSpec): RunSpec => ({ ...spec, execChain: ['env', 'sh', 'harness'] });
@@ -413,7 +423,7 @@ describe('TmuxRunner startup dialogs answer only the REGISTERED harness (a scree
   /** A pane parked on `screen`, launched by a harness registered under `harness`; delivery then tries a first turn. */
   async function parkedOn(screen: string, harness: string | undefined, chain: RunSpec['execChain']) {
     const world = tmuxWorld();
-    const spec = { ...world.spec, execChain: chain, ...(harness === undefined ? {} : { harness }) };
+    const spec = { ...world.spec, execChain: chain, harness };
     const started = await world.runner.start(spec);
     if (!started.ok) throw new Error('the fixture pane did not start');
     const pane = world.paneOf(started.value.handle);

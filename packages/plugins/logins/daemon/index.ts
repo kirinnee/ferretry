@@ -359,6 +359,14 @@ export function buildLoginsDaemon() {
         modelCatalogsView(await catalogs.catalogs(), publishedState(await published.status()));
 
       const api: Omit<LoginsApi, 'authorizeFetch'> = {
+        launchRefusal: async (id, harness) => {
+          const file = files().get(id);
+          if (harness !== 'opencode') return undefined;
+          if (file === undefined) return 'Choose an API-key or endpoint login for OpenCode';
+          return file.store === 'environment'
+            ? undefined
+            : 'OpenCode refuses subscription sign-ins, including Anthropic Claude subscriptions; choose an API key or endpoint login';
+        },
         list: () => credentials.list(),
         // Read live from each login's own file, kept nowhere: Runtimes asks on every read of its model.
         environmentTemplates: async () =>

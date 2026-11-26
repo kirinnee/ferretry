@@ -9,6 +9,7 @@ function fixture() {
   let stores = 0;
   const files = new Map<string, LoginFile>([
     ['subscription', { harness: 'claude-code', store: 'ferretry' } as LoginFile],
+    ['openai', { harness: 'codex', store: 'ferretry' } as LoginFile],
     [
       'key',
       {
@@ -75,6 +76,7 @@ test('an Anthropic subscription is refused by login kind before env, credential 
   const f = fixture();
   expect(f.kinds.anthropic.harnesses).toEqual(['claude-code']);
   await expect(f.kinds.anthropic.env('subscription', 'opencode')).rejects.toThrow('Anthropic subscription');
+  await expect(f.kinds.openai.env('openai', 'opencode')).rejects.toThrow('API-key and endpoint');
   expect(f.credentials()).toBe(0);
   expect(f.stores()).toBe(0);
   expect(credentialHarnessKeys({ harness: 'claude', store: 'ferretry' })).toEqual(['claude-code']);

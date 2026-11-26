@@ -35,6 +35,17 @@ const port: TmuxCommandPort = {
   }),
 };
 
+test('unknown registered harnesses without a reader never use legacy readiness', async () => {
+  for (const key of ['opencode', 'fake-third', 'claude', undefined]) {
+    const frame = await harnessController(port, { key }).state('fy-test');
+    expect(frame.screen?.composer).toBeNull();
+    expect(frame.promptReady).toBe(false);
+  }
+  for (const key of ['claude-code', 'codex']) {
+    expect((await harnessController(port, { key }).state('fy-test')).screen).toBeUndefined();
+  }
+});
+
 test('only the registered key selects a plugin screen reader', async () => {
   let reads = 0;
   const reader: HarnessScreenReader = {
@@ -56,6 +67,64 @@ test('only the registered key selects a plugin screen reader', async () => {
   expect(reads).toBe(1);
 });
 
+test('native controller derives text and ink from one capture and refuses a cursor that moved across it', async () => {
+  let metadataReads = 0;
+  const captures: Array<readonly string[]> = [];
+  const nativePort: TmuxCommandPort = {
+    execute: async args => {
+      if (args[0] === 'capture-pane') captures.push(args);
+      return {
+        code: 0,
+        stderr: '',
+        stdout:
+          args[0] === 'display-message' ? `0||${++metadataReads}|0|24|100` : '\x1b[38;2;128;128;128m› Changed frame',
+      };
+    },
+  };
+  let reads = 0;
+  const frame = await harnessController(nativePort, {
+    key: 'opencode',
+    screenReader: {
+      key: 'opencode',
+      read: () => {
+        reads++;
+        return { working: false, atPrompt: true, composer: null };
+      },
+    },
+  }).state('fy-test', { history: false });
+  expect(captures).toHaveLength(1);
+  expect(captures[0]).toContain('-e');
+  expect(frame.visible).toBe('› Changed frame');
+  expect(reads).toBe(0);
+  expect(frame.screen?.composer).toBeNull();
+  expect(frame.promptReady).toBe(false);
+});
+
+test('a failed native capture cannot become an empty composer or invoke the reader', async () => {
+  let reads = 0;
+  const failed: TmuxCommandPort = {
+    execute: async args => ({
+      code: args[0] === 'capture-pane' ? 1 : 0,
+      stdout: args[0] === 'display-message' ? '0||2|0|24|100' : '',
+      stderr: '',
+    }),
+  };
+  const frame = await harnessController(failed, {
+    key: 'opencode',
+    screenReader: {
+      key: 'opencode',
+      read: () => {
+        reads++;
+        throw new Error('must not read a failed capture');
+      },
+    },
+  }).state('fy-test');
+  expect(reads).toBe(0);
+  expect(frame.visible).toBe('');
+  expect(frame.screen?.composer).toBeNull();
+  expect(frame.promptReady).toBe(false);
+});
+
 test('the plugin composer reading is used for draft and landing evidence; unknown never falls back to legacy text', () => {
   const reading = {
     working: false,
@@ -70,7 +139,8 @@ test('the plugin composer reading is used for draft and landing evidence; unknow
   const looked = turnLookOf(unknown, () => 'digest');
   expect(looked.working).toBe(true);
   expect(looked.atPrompt).toBe(false);
-  expect(readHarnessPane(pane, undefined)).toEqual(pane);
+  expect(readHarnessPane(pane, { key: 'claude-code' })).toEqual(pane);
+  expect(readHarnessPane(pane, undefined).screen?.composer).toBeNull();
   const legacy = { ...frame, visible: 'Waiting for startup', promptReady: false };
   expect(draftBlockingReadiness(legacy)).toBe('draft only');
   expect(startupSettleStep(legacy)).toEqual({ kind: 'settled' });

@@ -417,6 +417,50 @@ test('login capability, sign-in and empty discovery prevent native launch, and i
   });
 });
 
+test('native runtime compatibility is checked before any login status or credential-store read', async () => {
+  const f = await fixture();
+  let reads = 0;
+  const destinations: string[] = [];
+  f.logins.get = async () => {
+    reads += 1;
+    throw new Error('status/store must not be read');
+  };
+  f.logins.list = async () => {
+    reads += 1;
+    throw new Error('status/store must not be read');
+  };
+  f.logins.launchRefusal = async (_login, destination) => {
+    destinations.push(destination);
+    return 'Subscription sign-ins cannot be spent by this native harness';
+  };
+  expect(await f.api.resolve(RuntimeIdSchema.parse('custom'))).toMatchObject({
+    ok: false,
+    sentence: expect.stringContaining('Subscription'),
+  });
+  expect(await f.start()).toEqual({
+    allow: false,
+    reason: 'Subscription sign-ins cannot be spent by this native harness',
+  });
+  expect(await f.api.resolve(RuntimeIdSchema.parse('custom'), 'opencode')).toMatchObject({
+    ok: false,
+    refusal: 'not_signed_in',
+  });
+  expect(destinations).toEqual(['fourth', 'fourth', 'opencode']);
+  expect(reads).toBe(0);
+});
+
+test('a machine with no native runtime files still delegates profile proposals, export and self-copy refusal', async () => {
+  const f = await fixture({ configured: false });
+  expect(
+    (await f.proposal({ kind: 'profile.put', name: 'other', layers: ['modelSets/pinned'], create: true })).status,
+  ).toBe(200);
+  const exported = await f.host.request('GET', '/v1/runtimes/export');
+  expect(exported.status).toBe(200);
+  const reviewed = await f.host.request('POST', '/v1/runtimes/clone/review', { body: { bundle: exported.json() } });
+  expect(reviewed.status).toBe(409);
+  expect(JSON.stringify(reviewed.body)).toContain('itself');
+});
+
 test('reviewing a native model-set edit preserves runtime fields and rejects stale model-set snapshots', async () => {
   const f = await fixture({ profile: ['modelSets/pinned'] });
   expect(await f.api.layers(RuntimeIdSchema.parse('custom'))).toBeDefined();

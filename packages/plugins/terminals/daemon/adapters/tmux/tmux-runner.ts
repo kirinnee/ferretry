@@ -296,6 +296,8 @@ export interface PaneProcessHost {
 }
 
 export interface TmuxRunnerOptions {
+  /** Only a registered harness supplies an adopted pane's reader. */
+  readonly screenReaderOf?: (key: string) => RunSpec['screenReader'];
   readonly tmux: TmuxCommandPort;
   /** Whether a person is typing into a pane; every observation says so. */
   readonly typing?: TypingHold;
@@ -357,19 +359,10 @@ export class TmuxRunner implements Runner {
   /** One launch at a time: `update-environment` is a server-wide option, set and put back inside one launch. */
   #launching: Promise<unknown> = Promise.resolve();
 
-  /**
-   * The last frame each watched pane was captured in (today's `PaneFrames`), by pane id: a look asks tmux ONE question
-   * for the pane's activity stamp and captures the screen again only when that stamp says it may have changed. Held as
-   * tmux printed it and masked on every look, so a value the Vault learns later is masked in a frame captured before.
-   * Forgotten when the pane is gone, dead, or stopped (politely or not).
-   */
+  /** Frames by pane id: recaptured when activity changes, remasked on every look, forgotten when gone or stopped. */
   readonly #frames = new Map<string, CapturedFrame>();
 
-  /**
-   * Moved as every stop ENDS (after it forgot the frame again). A look keeps the frame it captured only when this did not
-   * move while it ran: a look in flight across a stop's end would otherwise put back the pane text the stop forgot, and
-   * after a stop the watch never looks again to forget it. A look that lands before the stop ends is forgotten by it.
-   */
+  /** A stop increments this after forgetting its frame: an in-flight look may never put that frame back. */
   #stopEpoch = 0;
 
   readonly #launches = new Map<string, LaunchChain>();
@@ -390,11 +383,18 @@ export class TmuxRunner implements Runner {
     return await this.start(spec);
   }
 
-  async attach(handle: RunnerHandle): Promise<Result<RunningFerret, AttachRefusal>> {
+  async attach(handle: RunnerHandle, harness?: string): Promise<Result<RunningFerret, AttachRefusal>> {
     if (!PANE_ID.test(handle)) return err('unsupported');
     const facts = await this.facts(handle);
     if (facts === undefined || facts.dead) return err('gone');
     if (!isFerretSession(facts.session)) return err('not-a-ferret');
+    if (harness !== undefined)
+      this.#launches.set(handle, {
+        through: new Set(),
+        harness: facts.command ?? '',
+        key: harness,
+        screenReader: this.options.screenReaderOf?.(harness),
+      });
     // Adopted as it is: nothing is sent to the pane, nothing restarted.
     const running: RunningFerret = {
       handle,

@@ -23,9 +23,9 @@ export interface RuntimeStartSource {
    * Whether the login NAMED (`--login`, or the one a stored record holds) may be spent now: a login that is switched off or
    * over its spend budget is refused here, so it can never be spent whether it is named directly or reached through a runtime.
    */
-  login(login: string): Promise<LoginStartResolution>;
+  login(login: string, harness?: string): Promise<LoginStartResolution>;
   /** The runtime NAMED `runtime`, resolved; or the plain sentence saying why it cannot serve a launch now. */
-  resolve(runtime: string): Promise<RuntimeStartResolution>;
+  resolve(runtime: string, harness?: string): Promise<RuntimeStartResolution>;
   /**
    * The machine's default runtime for new agents (the setting, else the machine's own fallback), or `undefined` when this
    * machine has none. A start that names no runtime, login or harness is a start on it (v4 parity), so it is recorded with

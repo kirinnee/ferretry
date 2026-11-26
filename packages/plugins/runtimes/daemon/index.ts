@@ -655,7 +655,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           'runtime.start:runtimes': {
             ...generic.start(
               runtimeStartAnswer({
-                resolve: async id => await api.resolve(id),
+                resolve: async (id, harness) => await api.resolve(id, harness),
                 default: async () => await api.default(),
                 logins: ctx.needs.logins,
                 // What the runtime serves, for a move or handover to plan its model on (`catalog?`): the published view.

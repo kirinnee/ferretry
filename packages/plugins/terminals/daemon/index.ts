@@ -14,7 +14,7 @@
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { ferretOf } from '@ferretry/core-gate/contract';
-import type { FerretsApi } from '@ferretry/core-ferrets/contract';
+import { Harnesses, type FerretsApi } from '@ferretry/core-ferrets/contract';
 import {
   type InputFieldValue,
   type InputTarget,
@@ -620,6 +620,10 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       )
     : undefined;
   const runner = new TmuxRunner({
+    screenReaderOf: key => {
+      const harness = ctx.hooks.provider(Harnesses, key);
+      return harness === 'unavailable' ? undefined : harness.screenReader;
+    },
     tmux,
     typing,
     ...(launchGuard === undefined ? {} : { launchGuard }),

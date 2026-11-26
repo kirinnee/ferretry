@@ -25,6 +25,12 @@ test('typed placeholder words at Home are a draft, not an empty composer', async
   expect(read.composer?.text).toContain('Ask anything');
 });
 
+test('ink from a different frame cannot classify a native composer', async () => {
+  const visible = await captured();
+  const attributed = visible.replace('Ask anything', '\x1b[38;2;128;128;128mAsk something else');
+  expect(opencodeScreen.read({ visible, attributed, cursorX: 3, cursorY: 0 }).composer).toBeNull();
+});
+
 test('unknown dialogs and an unplaced cursor never authorize typing', async () => {
   expect(opencodeScreen.read({ visible: '› Try a Codex prompt', cursorX: 2, cursorY: 0 }).composer).toBeNull();
   const visible = await captured();

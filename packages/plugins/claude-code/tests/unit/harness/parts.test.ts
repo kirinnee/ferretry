@@ -29,6 +29,7 @@ const SERVED = {
 
 /** What `Harness` declares and Claude Code does not serve (its own conversation naming, no protocol send, no move). */
 const NOT_SERVED = [
+  'screenReader',
   'adoptConversation',
   'exportConversation',
   'fork',
@@ -64,6 +65,7 @@ describe('the Claude harness parts', () => {
   it('keeps every member of Harness either served or deliberately left out', () => {
     const served = new Set<string>(Object.values(SERVED).flat());
     const ABSENT: Record<keyof Harness, true> = {
+      screenReader: true,
       accepts: true,
       adoptConversation: true,
       conversations: true,

@@ -1,4 +1,4 @@
-import type { ChildEnvironment, FerretId, SecretResolver } from '@ferretry/kernel/contract';
+import type { FerretId, SecretResolver } from '@ferretry/kernel/contract';
 import type { FerretState } from '@ferretry/core-ferrets/contract';
 import { auditKind } from '@ferretry/core-gate/contract';
 import { implementDaemon, type Needer, neederMayReach, perNeeder } from '@ferretry/kernel/manifest';
@@ -212,12 +212,17 @@ export default implementDaemon(manifest, {
     const mintChildEnvironment = async (
       env: Readonly<Record<string, string>>,
       requester: string | undefined,
-    ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>> => {
+      harness?: string,
+    ): ReturnType<VaultApi['childEnvironment']> => {
       // ONE reading of the caller's object: the PATH judged for a secret reference is the PATH that is resolved.
       const asked: Readonly<Record<string, string>> = Object.freeze({ ...env });
       const values = await vault.values();
       const resolved = launchEnvironment(asked, values);
       if (!resolved.ok) return err({ unknown: resolved.unknown });
+      // Classify ONLY here: resolved values never leave the sealed Vault -> child use path.
+      // OAuth access/refresh material is refused regardless of the variable or provider carrying it.
+      if (harness === 'opencode' && Object.values(resolved.value).some(value => /\bsk-ant-o(?:at|rt)\d+-/u.test(value)))
+        return err({ unknown: [], code: 'subscription_login' });
       return ok(
         environments.mint(resolved.value, {
           ...(requester === undefined ? {} : { requester }),
@@ -228,8 +233,8 @@ export default implementDaemon(manifest, {
     const childEnvironment = async (
       _ferret: FerretId,
       env: Readonly<Record<string, string>>,
-    ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>> =>
-      await mintChildEnvironment(env, undefined);
+      harness?: string,
+    ): ReturnType<VaultApi['childEnvironment']> => await mintChildEnvironment(env, undefined, harness);
 
     /**
      * The kernel's own `${secret:NAME}` lookup (`kernel.secrets`): the value for a NAME, as today's consumers took it
@@ -439,8 +444,8 @@ export default implementDaemon(manifest, {
      */
     const apiFor = (needer: Needer): VaultApi => {
       // Every needer's handles name it as their requester (`searchPathOf`), the core ones included.
-      const ownChildEnvironment: VaultApi['childEnvironment'] = async (_ferret, env) =>
-        await mintChildEnvironment(env, needer.id);
+      const ownChildEnvironment: VaultApi['childEnvironment'] = async (_ferret, env, harness) =>
+        await mintChildEnvironment(env, needer.id, harness);
       if (isCoreNeeder(needer)) return { ...full, childEnvironment: ownChildEnvironment };
       // The phone approval's reach is by name: the service that looks (Accounts) and the tools that raise (Browsers, Terminals).
       // Every other needer is handed none of it, so a plugin cannot read a page's number or the prompt of
@@ -544,11 +549,11 @@ export default implementDaemon(manifest, {
             placed?.data,
           );
         },
-        childEnvironment: async (ferret, asked) => {
+        childEnvironment: async (ferret, asked, harness) => {
           const env = SecretUseRequestSchema.shape.env.parse({ ...asked });
           const refused = secretsNamedBy({ secrets: [], env }).filter(name => !mayUseSecret(needer, name));
           if (refused.length > 0) return err({ unknown: refused });
-          return await ownChildEnvironment(ferret, env);
+          return await ownChildEnvironment(ferret, env, harness);
         },
         ...(needer.permissions.profileSecrets === true
           ? {
