@@ -361,10 +361,10 @@ export class StepUpGate {
 
   #settle(daemonId: DaemonId, stepped: boolean): void {
     const waiting = this.#waiting.get(daemonId);
-    if (waiting === undefined) return;
-    this.#waiting.delete(daemonId);
     if (stepped) this.#dismissed.delete(daemonId);
     else this.#dismissed.add(daemonId);
+    if (waiting === undefined) return;
+    this.#waiting.delete(daemonId);
     for (const resolve of waiting?.resolvers ?? []) resolve(stepped);
     if (this.#prompt?.daemon.daemonId === daemonId) this.#prompt = null;
     if (this.#prompt === null) this.#showNext();

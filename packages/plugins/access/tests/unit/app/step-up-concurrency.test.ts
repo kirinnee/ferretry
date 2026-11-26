@@ -55,3 +55,14 @@ test('E-397 inline first and modal share refusals without unlocking waiting requ
   pending[1]!.resolve();
   await retry;
 });
+
+test('E-397 inline success clears a previous cancel even when no requests currently wait', async () => {
+  const gate = new StepUpGate({ ceremony: async () => {}, describe: () => '' });
+  gate.focus(first.daemonId);
+  const cancelled = gate.require(first);
+  gate.dismiss();
+  expect(await cancelled).toBe(false);
+  await gate.confirmInline(first);
+  void gate.require(first, 'read', 'background');
+  expect(gate.snapshot()?.daemon.daemonId).toBe(first.daemonId);
+});
