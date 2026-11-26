@@ -79,7 +79,7 @@ const WORKER_SCRIPT = new RegExp(
  * files of Voice's worker folder. Nothing else under `/assets/` is a worker.
  */
 const SPEECH_WORKER_SCRIPT =
-  /^(?:\/assets\/(?:parakeet|sherpa|google|vosk|whisper)-worker-[A-Za-z0-9_-]+\.js|\/@fs(?:\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._ -]+)+\/packages\/plugins\/voice\/app\/worker\/(?:parakeet|sherpa|google|vosk|whisper)-worker\.ts\?worker_file&type=module)$/u;
+  /^(?:\/assets\/(?:parakeet|sherpa|google|vosk|whisper)-worker-[A-Za-z0-9_-]+\.js|\/@fs(?:\/(?!\.{1,2}(?:\/|$))(?:[A-Za-z0-9._ -]|%20)+)+\/packages\/plugins\/voice\/app\/worker\/(?:parakeet|sherpa|google|vosk|whisper)-worker\.ts\?worker_file&type=module)$/u;
 
 /** Whether a URL is one of the app's own SPEECH worker scripts (not the service worker). */
 export const isSpeechWorkerScriptUrl = (url: string): boolean => SPEECH_WORKER_SCRIPT.test(url);

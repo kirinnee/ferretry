@@ -99,6 +99,8 @@ describe('isWorkerScriptUrl', () => {
   it('accepts the dev server\u2019s address of Voice\u2019s workers wherever the checkout is, and no other file or path', () => {
     expect(isWorkerScriptUrl(DEV('parakeet', '/Users/jo-1/My Code/ferretry.worktrees/g22'))).toBe(true);
     expect(isWorkerScriptUrl(DEV('whisper', '/home/dev/a.b_c-d'))).toBe(true);
+    // A URL parser writes a space as %20; any other escape is refused.
+    expect(isWorkerScriptUrl(DEV('whisper', '/home/dev/My%20Code'))).toBe(true);
     // The shape measured from a running dev server in a worktree (a dot-led folder name).
     expect(isWorkerScriptUrl(DEV('google', '/home/dev/Workspace/ferretry/.worktrees/g22'))).toBe(true);
     for (const url of [
@@ -106,6 +108,8 @@ describe('isWorkerScriptUrl', () => {
       DEV('parakeet', '/home/dev/../../etc'),
       DEV('parakeet', '/home/dev/./x'),
       DEV('parakeet', '/..'),
+      DEV('parakeet', '/home/dev/%2e%2e'),
+      DEV('parakeet', '/home/dev/a%2Fb'),
       DEV('parakeet', '/home/dev//x'),
       DEV('parakeet').replace('/@fs', '/@fsx'),
       DEV('parakeet').replace('/plugins/voice/', '/plugins/other/'),

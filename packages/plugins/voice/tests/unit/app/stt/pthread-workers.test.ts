@@ -26,9 +26,10 @@ describe('vetThreadUrl', () => {
   });
 
   it('trusts the dev server’s address of the same module', () => {
-    should(vetThreadUrl('/src/worker/parakeet-worker.ts?worker_file&type=module', scope, trust)).equal(
-      'trusted:/src/worker/parakeet-worker.ts?worker_file&type=module',
-    );
+    const dev =
+      '/@fs/home/dev/My Code/ferretry/packages/plugins/voice/app/worker/parakeet-worker.ts?worker_file&type=module';
+    // The URL parser writes the space as %20 in the path the policy is asked about.
+    should(vetThreadUrl(dev, scope, trust)).equal(`trusted:${dev.replace(' ', '%20')}`);
   });
 
   it('hands every other URL on unchanged, for the browser to refuse as before', () => {
