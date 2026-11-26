@@ -7,6 +7,9 @@ set -euo pipefail
 # This script rewrites those sources plus the few static files that cannot derive them,
 # then reports any leftovers.
 #
+# The GitHub owner/repo slug is a third fact with its own command: scripts/local/move-repo.sh (run it first
+# when the repo name changes with the product).
+#
 # Usage: scripts/local/rename.sh [--product <name>] [--bin <name>]
 
 new_product=""
