@@ -6,6 +6,7 @@
  * Ferrets is core and cannot import a plugin's code (§2.1); this is the part the session code reads, injected by the
  * host.
  */
+import { byRecordedHarness } from '../../../../contract/records.ts';
 import type { Harness } from '../../protocol/session-base.ts';
 import type { HarnessKind } from './fleet.ts';
 import type { TranscriptProvenance } from '../../protocol/session.ts';
@@ -19,7 +20,10 @@ import type { TranscriptProvenance } from '../../protocol/session.ts';
  * writes.
  */
 export function handoffReadArguments(harness: HarnessKind, folders: readonly string[]): readonly string[] {
-  return harness === 'claude' ? folders.map(folder => `--allowedTools=Read(/${folder}/**)`) : [];
+  return byRecordedHarness(harness, {
+    claude: () => folders.map(folder => `--allowedTools=Read(/${folder}/**)`),
+    codex: () => [],
+  });
 }
 
 // --- session/transcript/claude-path.ts --------------------------------------------------------------------------
@@ -156,14 +160,17 @@ export function transcriptLaunchArguments(
   harness: HarnessKind,
   provenance: TranscriptProvenance | undefined,
 ): readonly string[] {
-  if (harness !== 'claude') {
-    // The schema makes an id present exactly when the identity is established.
-    const id = provenance?.harnessSessionId;
-    const token = provenance?.correlationToken;
-    return [
-      ...(id === undefined ? [] : [CODEX_RESUME, id]),
-      ...(token === undefined ? [] : codexCorrelationArguments(token)),
-    ];
-  }
-  return provenance?.harnessSessionId === undefined ? [] : claudeSessionArguments(provenance.harnessSessionId);
+  return byRecordedHarness(harness, {
+    claude: () =>
+      provenance?.harnessSessionId === undefined ? [] : claudeSessionArguments(provenance.harnessSessionId),
+    codex: () => {
+      // The schema makes an id present exactly when the identity is established.
+      const id = provenance?.harnessSessionId;
+      const token = provenance?.correlationToken;
+      return [
+        ...(id === undefined ? [] : [CODEX_RESUME, id]),
+        ...(token === undefined ? [] : codexCorrelationArguments(token)),
+      ];
+    },
+  });
 }

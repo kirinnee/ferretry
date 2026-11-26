@@ -23,7 +23,7 @@ import {
   conversionFailure,
   conversionSentences,
   type ConvertibleSummary,
-  HARNESS_SHORT,
+  harnessShort,
   otherHarness,
   refusedCause,
 } from './conversion-model.ts';
@@ -57,8 +57,8 @@ export function ConvertHarness({ summary, slot, readPreview, move, onCancel, onM
   const fieldId = useId().replace(/:/gu, '');
   const source = summary.harness;
   const target = otherHarness(source);
-  const targetName = HARNESS_SHORT[target];
-  const sourceName = HARNESS_SHORT[source];
+  const targetName = harnessShort(target);
+  const sourceName = harnessShort(source);
   const [agent, setAgent] = useState('');
   const [chosen, setChosen] = useState<ChosenFerretAccount | null>(null);
   // Without a picker (no Runtimes on this daemon) the wrapper is typed, and read only when the reader asks.

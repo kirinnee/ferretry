@@ -273,3 +273,57 @@ describe('AllQueuesScreen', () => {
     expect(mounted.toJSON()).toBeNull();
   });
 });
+
+describe('AllQueuesScreen search (G6 · W-05)', () => {
+  const box = () => mounted!.root.findByProps({ 'data-queue-search': '' });
+  const type = async (value: string): Promise<void> =>
+    await runAsync(async () => box().props.onChange({ target: { value } }));
+  const finished = (id: string, words: string, state: 'read' | 'delivered', minute = 0) => ({
+    ...queued(id, words, minute),
+    state,
+  });
+
+  test('without a search, a finished message stays out of the waiting list', async () => {
+    open(daemon({ f1: { messages: [queued('q1', 'needle waits'), finished('r1', 'needle done', 'read', 1)] } }));
+    await read();
+    expect(rowIds()).toEqual(['q1']);
+  });
+
+  test('a search finds a finished message as well as a waiting one', async () => {
+    open(daemon({ f1: { messages: [queued('q1', 'needle waits'), finished('r1', 'needle done', 'read', 1)] } }));
+    await read();
+    await type('needle');
+    expect(rowIds().sort()).toEqual(['q1', 'r1']);
+    await type('');
+    expect(rowIds()).toEqual(['q1']);
+  });
+
+  test('a ferret whose only matching message is finished keeps its card while searching', async () => {
+    open(
+      daemon({
+        f1: { messages: [queued('q1', 'something else')] },
+        f2: { messages: [queued('q2', 'other'), finished('r2', 'needle finished', 'delivered', 1)] },
+      }),
+    );
+    await read();
+    await type('needle');
+    expect(rowIds()).toEqual(['r2']);
+    expect(mounted!.root.findAllByProps({ 'data-queue-group': 'd1/f2' })).not.toHaveLength(0);
+    expect(mounted!.root.findAllByProps({ 'data-queue-no-match': '' })).toHaveLength(0);
+  });
+
+  test('a matching message that is read during a live search stays on screen', async () => {
+    const client = daemon({ f1: { messages: [queued('q1', 'needle waits')] } });
+    open(client);
+    await read();
+    await type('needle');
+    expect(rowIds()).toEqual(['q1']);
+    client.on(QUEUE, call =>
+      call.params.ferretId === 'f1' ? { messages: [finished('q1', 'needle waits', 'read')] } : { messages: [] },
+    );
+    await runAsync(async () => client.emit('conversation.queue-changed', { ferret: 'f1' }));
+    await settleUntil(() => page().includes('the ferret read it'), 'queue read again', runAsync);
+    expect(rowIds()).toEqual(['q1']);
+    expect(mounted!.root.findAllByProps({ 'data-queue-no-match': '' })).toHaveLength(0);
+  });
+});

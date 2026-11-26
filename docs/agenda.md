@@ -47,6 +47,16 @@ they would want to hear about in the same place, against the same background, an
   their ask is answered too. What the item needs from the owner right now is still recorded as its **stage**
   (explainer → question → plan → tracker → test, [below](#stage-the-tabs-and-the-detail)), but the prompt no longer
   teaches it as the item's type.
+- **Open asks stay floated; answered ones go to History.** Every ask or answer on a topic stacks onto the SAME item (the
+  owner, on !A404: _"don't let go of unresolved questions"_). **EVERY open ask stays floated** in the premise and in
+  "What I need from you" — the item's own ask first, then each task ask, before the why, the steps and the impact — and
+  an answered question moves to the **History** fold (near the foot of the item), oldest first. The fold
+  counts the asks the owner **answered, read from the asks' own state** (the item's stored answer and each task ask's
+  answer), not the messages in the conversation, so an answer with no transcript row still has its fold and a message
+  the machine never took (still on the device, or refused) counts as nothing. Open machine-input and plan forms float
+  with the other asks. A new item is opened only for a clearly separate topic. The daemon already keeps the other asks
+  open when the owner answers ONE ask of a multi-ask item (an open task ask keeps the item in Needs you), so the ferret
+  does not re-ask by hand.
 - **Always current: read, then patch.** Every update reads the item whole first (`fy agenda show <id> --yaml`, with
   its revision), rewrites every part that is out of date — premise, context, the ask (what the owner is asked for),
   its options and how to reply, still-open and each tab — and writes it back as one patch

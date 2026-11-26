@@ -3,6 +3,7 @@ import type {
   SessionLiveActivity,
   SessionLiveTokensSource,
 } from '../../protocol/session-live.ts';
+import { byRecordedHarness } from '../../../../contract/records.ts';
 import type { TranscriptEvent, TranscriptHarness, TranscriptUsageEvent } from '../peers/transcript.ts';
 
 /**
@@ -111,9 +112,10 @@ const turnBoundaryMs = (events: readonly TranscriptEvent[], turnStartedMs: numbe
 
 /** Everything sent to the model on one call, counted the way Analytics counts input. */
 const grossInput = (harness: TranscriptHarness, usage: TranscriptUsageEvent['usage']): number =>
-  harness === 'claude'
-    ? (usage.inputTokens ?? 0) + (usage.cachedInputTokens ?? 0) + (usage.cacheCreationInputTokens ?? 0)
-    : (usage.inputTokens ?? 0);
+  byRecordedHarness(harness, {
+    claude: () => (usage.inputTokens ?? 0) + (usage.cachedInputTokens ?? 0) + (usage.cacheCreationInputTokens ?? 0),
+    codex: () => usage.inputTokens ?? 0,
+  });
 
 /**
  * The turn's token totals from a transcript tail, or `undefined` when the tail cannot state them.

@@ -153,7 +153,6 @@ describe('the app surfaces Conversation owns', () => {
   test.skip('S-0319 the queue-view feature — pending port: Conversation app half', () => {});
   test.skip('S-0332 the stuck-messages feature — pending port: Conversation app half', () => {});
   test.skip('S-0394 the imported-history screen, now links — pending port: Conversation app half', () => {});
-  test.skip('S-0531 the All queues palette destination — pending port: Conversation app half', () => {});
   test.skip('S-0509 the message-marks setting — pending port: Conversation app half', () => {});
   test.skip('S-0272 the transcription log setting — pending port: Conversation app half', () => {});
   test.skip('S-0475 S-0498 voice chat reading every message or the last of a turn — not Conversation’s: voice', () => {});
