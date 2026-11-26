@@ -56,6 +56,7 @@ describe('the Voice mode button', () => {
       machine: 'desk',
       banner: null,
       notice: null,
+      session: expect.stringMatching(/^vm-/u),
     });
     expect(button.disabled).toBe(true);
   });
@@ -84,6 +85,7 @@ describe('the Voice mode button', () => {
       machine: '',
       banner: "Your machine cannot be reached, so voice mode runs on this phone's own speech.",
       notice: null,
+      session: expect.stringMatching(/^vm-/u),
     });
   });
 
@@ -96,6 +98,7 @@ describe('the Voice mode button', () => {
       machine: '',
       banner: 'You chose to keep audio on this phone, so voice mode runs on its own speech.',
       notice: null,
+      session: expect.stringMatching(/^vm-/u),
     });
   });
 });

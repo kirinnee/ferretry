@@ -69,6 +69,7 @@ interface Fake {
   lines: string[];
   hushes: number;
   sent: string[];
+  entries: { ferretId: string; session: string }[];
 }
 
 describe('Voice mode panel', () => {
@@ -124,6 +125,7 @@ describe('Voice mode panel', () => {
             v: 1,
             purpose: 'chat',
             ferretId: 'ferret-1',
+            session: expect.stringMatching(/^vm-[0-9a-f-]{36}$/u),
             reply: 'machine',
           });
           await tab.locator('[data-voice-mode-words]').filter({ hasText: 'please check the build' }).waitFor();
@@ -229,7 +231,11 @@ describe('Voice mode panel', () => {
           expect(await overflow(tab)).toBeLessThanOrEqual(0);
           await shot(tab, 'phone-hearing');
           await tab.locator('[data-voice-mode-outcome]').filter({ hasText: 'Sent.' }).waitFor({ timeout: 15_000 });
+          // The phone asks the machine to tell the ferret ONCE; what it sent to the ferret is the utterance alone.
           expect((await fakeOf(tab)).sent).toEqual(['(voice) Please check the build']);
+          expect((await fakeOf(tab)).entries).toEqual([
+            { ferretId: 'ferret-1', session: expect.stringMatching(/^vm-/u) },
+          ]);
           await shot(tab, 'phone-sent');
           await tab.locator('[data-voice-mode-end]').click();
           await tab.locator('[data-fake-composer]').waitFor({ state: 'visible' });

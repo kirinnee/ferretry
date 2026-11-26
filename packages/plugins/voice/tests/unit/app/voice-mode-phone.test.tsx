@@ -128,9 +128,16 @@ const phone = () => {
   const meter: MicMeter = { monitor, release: () => undefined };
   const port: MicMeterPort = { open: async () => meter };
   const calls: SentCall[] = [];
+  /** The asks to the machine to tell the ferret (`POST /v1/voice/entry`): kept apart from the utterances the person spoke. */
+  const entries: { route: string; ferretId: string; session: string }[] = [];
   const refusals: { count: number; message: string } = { count: 0, message: 'The machine is not answering.' };
   const client = {
     call: async (route: string, init?: { params?: Record<string, string>; body?: unknown; headers?: unknown }) => {
+      if (route === 'POST /v1/voice/entry') {
+        const ask = init?.body as { ferretId: string; session: string };
+        entries.push({ route, ferretId: ask.ferretId, session: ask.session });
+        return { sent: true } as never;
+      }
       const body = init?.body as { message: string; sendId: string };
       calls.push({
         route,
@@ -159,6 +166,7 @@ const phone = () => {
   return {
     provider,
     calls,
+    entries,
     client,
     refusals,
     reader,
@@ -226,6 +234,38 @@ const say = async (p: ReturnType<typeof phone>, words: string): Promise<void> =>
   p.advance(PAUSE_MS + 100);
   await wait(260);
 };
+
+describe('V1: the phone engine tells the ferret too', () => {
+  test('voice mode entered on the phone asks the MACHINE to tell the ferret, once, under the voice-mode session; the phone sends no entry itself', async () => {
+    const p = phone();
+    const store = createVoiceModeStore();
+    store.start('ferret-1', 'desk', keptOnPhoneBanner);
+    mounted = await mount(phoneTree(p, store));
+    await until(() => p.entries.length === 1, 'the ask');
+    expect(p.entries[0]).toEqual({
+      route: 'POST /v1/voice/entry',
+      ferretId: 'ferret-1',
+      session: store.get('ferret-1').session,
+    });
+    // A re-render is not an entry.
+    await mounted.render(phoneTree(p, store));
+    await wait(100);
+    expect(p.entries).toHaveLength(1);
+    expect(p.calls).toEqual([]);
+  });
+
+  test('a machine lost mid-chat hands over inside the same session: the phone asks under the session the machine used', async () => {
+    const r = machineRig();
+    mounted = await mount(r.tree());
+    await interact(() => r.store.start('ferret-1', 'desk'));
+    const session = r.store.get('ferret-1').session;
+    await interact(() => r.listeners().onOpen?.());
+    await interact(() => r.listeners().onFrame(unit()));
+    await interact(() => r.listeners().onClose('lost', 1006));
+    await until(() => r.p.entries.length === 1, 'the phone to say it');
+    expect(r.p.entries[0]?.session).toBe(session);
+  }, 20_000);
+});
 
 describe('the panel on the phone’s own engine', () => {
   test('it says why it is on the phone, listens by itself, and sends each utterance once as (voice) words with a stable id', async () => {
