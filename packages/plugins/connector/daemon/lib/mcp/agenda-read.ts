@@ -123,7 +123,7 @@ function overviewOf(item: AgendaItem, who: AttentionContext): string {
     `Title: ${filled(title) ? title : item.subject}`,
     ...(filled(title) && title !== item.subject ? [`Summary: ${item.subject}`] : []),
     `Raised by: ${who.asker}${who.ferret === undefined || who.ferret === who.asker ? '' : ` (on ${who.ferret}'s agenda)`}`,
-    `State: ${stateWords(item)}. Kind: ${kind}.`,
+    `State: ${stateWords(item)}. Kind: ${kind}.${(item.askVersion ?? 1) > 1 ? ` Revised: version ${String(item.askVersion)}.` : ''}`,
     `Waiting since: ${item.waitingSince} (${ago(who.now, item.waitingSince)}).`,
     ...(who.appOnly ? ['Only the Ferretry app can answer this one (it needs a passkey or a form).'] : []),
     ...field('The question', item.why),

@@ -83,7 +83,9 @@ export async function attentionLine(
   const options = optionsOf(item);
   const choices = options.length === 0 ? '' : ` Options: ${options.join(', ')}.`;
   const appOnly = needsTheApp(item) ? ' Only the Ferretry app can answer this one.' : '';
-  return `!${item.id} — from ${askerOf(item, byId)} — ${await itemName(env, item, 80)} — ${await shortClean(env, item.why, 240)}${choices}${appOnly}`;
+  const revised =
+    (item.askVersion ?? 1) > 1 ? ` (revised: say version ${String(item.askVersion)} when you answer)` : '';
+  return `!${item.id}${revised} — from ${askerOf(item, byId)} — ${await itemName(env, item, 80)} — ${await shortClean(env, item.why, 240)}${choices}${appOnly}`;
 }
 
 /** "A12", "!A12", "a 12", "12" → "A12"; undefined when it is none of those. */
@@ -174,8 +176,14 @@ export function shapeAnswer(item: AgendaItem, answer: string): AnswerShape {
     }
     case 'multiple-choice': {
       const labels = ask.options.map(option => option.label);
+      // An exact label (case and spacing folded only) always wins. A looser match never decides between labels that carry a
+      // digit: the name folding collapses doubled characters, so "100" would otherwise pick "10".
+      const plain = (text: string): string => text.trim().replace(/\s+/gu, ' ').toLowerCase();
+      const same = labels.filter(label => plain(label) === plain(answer));
+      if (same.length === 1)
+        return { kind: 'response', response: { kind: 'multiple-choice', choice: same[0] as string } };
       const result = matchName(answer, labels, label => ({ exact: [label], names: [] }));
-      if (result.kind === 'one')
+      if (result.kind === 'one' && !/\d/u.test(answer) && !/\d/u.test(result.item))
         return { kind: 'response', response: { kind: 'multiple-choice', choice: result.item } };
       return { kind: 'refuse', sentence: `Pick one of these: ${labels.join(', ')}.`, refused: false };
     }

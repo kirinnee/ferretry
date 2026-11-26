@@ -340,6 +340,7 @@ const answerAttention: ConnectorToolSpec<{
   item: z.ZodString;
   answer: z.ZodString;
   ferret: z.ZodOptional<z.ZodString>;
+  version: z.ZodOptional<z.ZodNumber>;
 }> = {
   name: 'answer_attention',
   title: 'Answer an open question',
@@ -357,8 +358,17 @@ const answerAttention: ConnectorToolSpec<{
       .max(200)
       .optional()
       .describe('Only when two ferrets have an item with the same id: which one asked.'),
+    version: z
+      .number()
+      .int()
+      .min(1)
+      .max(1_000_000)
+      .optional()
+      .describe(
+        'Only for an item marked "revised": the version number it names, so the answer is for the question that was read out.',
+      ),
   },
-  run: async ({ item, answer, ferret }, env) => {
+  run: async ({ item, answer, ferret, version }, env) => {
     const id = parseAttentionRef(item);
     if (id === undefined) throw new ToolFailure(`"${oneLine(item)}" is not an item id. Ids look like A12.`);
     const [items, sessions] = await Promise.all([env.gateway.openAgenda(), env.gateway.ferrets()]);
@@ -371,6 +381,15 @@ const answerAttention: ConnectorToolSpec<{
       throw new ToolFailure(`Item ${id} is open for more than one ferret (${askers}). Which ferret asked?`);
     }
     const target = found[0] as (typeof found)[number];
+    // The answer is for the question the owner heard. A question a ferret has revised since it was first asked can only be
+    // answered by naming its version, which list_attention and get_attention say when they read it out: a stale reading
+    // (no version, or an older one) is refused with the question as it is now, and nothing is sent.
+    if ((version ?? 1) !== (target.item.askVersion ?? 1)) {
+      throw new ToolFailure(
+        `That question changed, so nothing was sent; here it is now: ${await attentionLine(env, target.item, byId)}`,
+        { sessionId: target.sessionId },
+      );
+    }
     const shaped = shapeAnswer(target.item, answer);
     if (shaped.kind === 'refuse')
       throw new ToolFailure(shaped.sentence, { refused: shaped.refused, sessionId: target.sessionId });

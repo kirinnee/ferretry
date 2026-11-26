@@ -273,8 +273,28 @@ describe('an answer carries the ask it was given to (finding 4)', () => {
       .on(ferretsRoute([LIZ, MARIN]))
       .on(openRoute({ [LIZ.id]: [item(3, 'Which?')] }))
       .on(answered(LIZ.id));
-    await tool(r, 'answer_attention', { item: 'A12', answer: 'sqlite' });
+    await tool(r, 'answer_attention', { item: 'A12', answer: 'sqlite', version: 3 });
     should((posts(r)[0]?.call.body as { askVersion?: number } | undefined)?.askVersion).equal(3);
+  });
+
+  it('refuses an answer that names no version, or an older one, for a question that has been revised, and sends nothing', async () => {
+    const r = rig();
+    r.delegate
+      .on(ferretsRoute([LIZ, MARIN]))
+      .on(openRoute({ [LIZ.id]: [item(2, 'May I force-push main?')] }))
+      .on(answered(LIZ.id));
+    for (const args of [
+      { item: 'A12', answer: 'sqlite' },
+      { item: 'A12', answer: 'sqlite', version: 1 },
+    ]) {
+      const reply = await tool(r, 'answer_attention', args);
+      should(reply.isError).be.true();
+      should(reply.text).startWith(
+        'That question changed, so nothing was sent; here it is now: !A12 (revised: say version 2 when you answer)',
+      );
+      should(reply.text).containEql('May I force-push main?');
+    }
+    should(posts(r).length).equal(0);
   });
 
   it('says what the question is now when the ask changed, and records an error, not a success', async () => {
@@ -293,7 +313,7 @@ describe('an answer carries the ask it was given to (finding 4)', () => {
     const reply = await tool(r, 'answer_attention', { item: 'A12', answer: 'sqlite' });
     should(reply.isError).be.true();
     should(reply.text).startWith(
-      'That question changed, so nothing was sent; here it is now: !A12 — from Lizzette — Pick — Which cache?',
+      'That question changed, so nothing was sent; here it is now: !A12 (revised: say version 2 when you answer) — from Lizzette — Pick — Which cache?',
     );
     should(reply.text).containEql('Options: Postgres, SQLite.');
     should(r.calls.records[0]?.outcome).equal('error');
@@ -495,5 +515,39 @@ describe('the endpoint around the SDK (lines its own gates leave)', () => {
     const response = await post(r.endpoint, callTool('list_ferrets', {}), { headers: { accept: 'text/plain' } });
     should(response?.status).equal(200);
     should(JSON.parse(response?.body ?? '{}').result.isError).be.undefined();
+  });
+});
+
+describe('what a spoken answer may pick, and what the log may hold of a refused call', () => {
+  const numbered = agendaItem({
+    id: 'A20',
+    subject: 'How many?',
+    why: 'Pick a number',
+    ask: { kind: 'multiple-choice', options: [{ label: '10' }, { label: '50' }] },
+  });
+
+  it('never lets "100" pick "10": a digit in the answer or the label only matches exactly', async () => {
+    const r = rig();
+    r.delegate
+      .on(ferretsRoute([LIZ, MARIN]))
+      .on(openRoute({ [LIZ.id]: [numbered] }))
+      .on(answered(LIZ.id));
+    const reply = await tool(r, 'answer_attention', { item: 'A20', answer: '100' });
+    should(reply.isError).be.true();
+    should(reply.text).containEql('Pick one of these: 10, 50.');
+    should(posts(r).length).equal(0);
+    const exact = await tool(r, 'answer_attention', { item: 'A20', answer: ' 50 ' });
+    should(exact.isError).be.false();
+  });
+
+  it('writes no nested or oversized argument of a refused call to the log', async () => {
+    const r = rig();
+    r.state.access = READ_ACCESS;
+    const huge = { ['fyc_at_' + 'z'.repeat(43)]: 'x'.repeat(200_000), more: ['y'.repeat(200_000)] };
+    await tool(r, 'send_to_ferret', { ferret: huge, message: 'hello' });
+    const line = JSON.stringify(r.calls.records);
+    should(line.length).be.below(2_000);
+    should(line).not.containEql('fyc_at_');
+    should(r.calls.records[0]?.outcome).equal('refused');
   });
 });

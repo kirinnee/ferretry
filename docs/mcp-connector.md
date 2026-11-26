@@ -497,6 +497,10 @@ Hides one open agenda item until a time and lists it again afterwards — the da
   someone decides a voice may answer it; `list_attention` still lists such an item and says only the app can
   answer it. This is the second defence: the daemon's boundary refuses these acts first, because tool requests
   arrive governed.
+- **An answer is for the question that was read out.** `list_attention` and `get_attention` mark a question a ferret has
+  revised ("revised: say version N"), and `answer_attention` takes that `version`: an answer that names none, or an older one,
+  for a revised question is refused with the question as it is now, and nothing is sent. A spoken choice never matches a
+  label loosely when either side has a digit ("100" is not "10").
 - **An answer names the ask it was given to.** The resolve body carries the item's `askVersion`; if the ferret
   has replaced the ask since, the daemon refuses `ask_changed` and the tool says "That question changed, so
   nothing was sent; here it is now: …" so the owner answers the question that is really being asked.

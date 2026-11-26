@@ -134,7 +134,13 @@ export class ConnectorToolbox {
 function declaredOnly(spec: ConnectorToolSpec, value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null) return {};
   const declared = new Set(Object.keys(spec.input));
-  return Object.fromEntries(Object.entries(value).filter(([key]) => declared.has(key)));
+  // Scalars only, so a call that was refused before its arguments were validated (a nested object, a huge array) can neither
+  // smuggle caller-chosen key names into the log nor make one line large enough to rotate away the others.
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      ([key, entry]) => declared.has(key) && ['string', 'number', 'boolean'].includes(typeof entry),
+    ),
+  );
 }
 
 /** Message/answer/task text is cut to 500 characters in the calls log: the log says WHAT was done, not the whole text. */
