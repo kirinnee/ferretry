@@ -100,6 +100,21 @@ describe('sameLoginAndProfile', () => {
 });
 
 describe('profileFit', () => {
+  it('does not treat a legacy model pin as proof that it fits a registered native runtime', () => {
+    const pinned = profile({
+      name: 'pinned',
+      layers: ['modelSets/claude'],
+      scope: { kind: 'scoped', scope: 'generic' },
+    });
+    expect(profileFit(pinned, 'opencode', true).fits).toBe(false);
+    expect(profileFit(profile({ name: 'plain', layers: [] }), 'opencode', true).fits).toBe(true);
+    expect(
+      profileFit(pinned, 'opencode', true, { model: 'claude-opus-5-5', choices: [{ id: 'mistral/codestral' }] }).fits,
+    ).toBe(false);
+    expect(
+      profileFit(pinned, 'opencode', true, { model: 'mistral/codestral', choices: [{ id: 'mistral/codestral' }] }).fits,
+    ).toBe(true);
+  });
   it('P7: refuses a profile for the other tool, and a mixed one in its own sentence', () => {
     expect(profileFit(profile({ name: 'C', scope: { kind: 'scoped', scope: 'codex' } }), 'claude-code')).toEqual({
       fits: false,

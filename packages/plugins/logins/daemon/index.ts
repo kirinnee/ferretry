@@ -104,6 +104,7 @@ export function buildLoginsDaemon() {
         () => catalogs.catalogs(),
       );
       const catalogs: ModelCatalogService = new ModelCatalogService({
+        discovery: () => published.discovery(),
         files: async () => {
           const out: Record<string, import('./lib/catalog/schema.ts').ModelCatalog> = {};
           for (const [id, file] of modelFiles(config)) {

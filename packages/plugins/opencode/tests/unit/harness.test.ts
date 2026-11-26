@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { definePort, type KernelPorts } from '@ferretry/kernel/contract';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { testHost, fixedClock } from '@ferretry/kernel/testing';
+import { ModelCatalogSourcesSchema } from '@ferretry/plugin-logins/contract';
 import {
   Harnesses,
   StartDecide,
@@ -62,6 +63,38 @@ async function fixture(options: { version?: string; subscription?: boolean; expo
     clock: fixedClock('2026-11-26T08:00:00Z'),
     uses: {
       logins: {
+        environmentTemplates: async () => [
+          {
+            id: 'key',
+            kind: 'templates',
+            harness: 'opencode',
+            preset: 'deepseek',
+            env: { DEEPSEEK_API_KEY: '${secret:DEEPSEEK_API_KEY}' },
+          },
+        ],
+        modelSources: async () =>
+          ModelCatalogSourcesSchema.parse({
+            catalogs: {
+              deepseek: {
+                id: 'deepseek',
+                origin: 'file',
+                label: 'DeepSeek',
+                docs: 'https://models.dev',
+                verified: '2026-11-26',
+                opencode: { models: [{ id: 'deepseek-flash', label: 'DeepSeek Flash', tier: 'fast', default: true }] },
+              },
+            },
+            presets: [{ id: 'deepseek', catalog: 'deepseek', variables: {} }],
+            discovery: {
+              providers: {
+                deepseek: {
+                  name: 'DeepSeek',
+                  env: ['DEEPSEEK_API_KEY'],
+                  models: { 'deepseek-flash': { name: 'DeepSeek Flash', tool_call: true } },
+                },
+              },
+            },
+          }),
         launchRefusal: async () =>
           options.subscription
             ? 'OpenCode refuses subscription sign-ins, including Anthropic Claude subscriptions; choose an API key or endpoint login'
@@ -101,6 +134,21 @@ harnessConformance('registered OpenCode V2', async () => {
 });
 
 describe('OpenCode private launches', () => {
+  test('the registered OpenCode descriptor exposes private home names, V2 detection and separate public discovery', async () => {
+    const f = await fixture();
+    const runtime = f.harness.runtime;
+    expect(runtime).toBeDefined();
+    if (runtime === undefined) throw new Error('the registered OpenCode harness has no runtime descriptor');
+    expect(runtime.binary).toBe('/fake/opencode');
+    expect(runtime.homeEnv).toMatchObject({ HOME: 'home', OPENCODE_DB: 'data/opencode.db', TMPDIR: 'tmp' });
+    expect(await runtime.detect()).toMatchObject({ found: true, version: '2.4.2' });
+    expect(await runtime.models('key')).toEqual({
+      choices: [{ id: 'deepseek/deepseek-flash', label: 'DeepSeek Flash' }],
+      default: 'deepseek/deepseek-flash',
+    });
+    expect(await runtime.models('missing')).toEqual({ choices: [] });
+    await f.host.stop();
+  });
   test('native command arrays are preserved; malformed commands and unqualified models refuse before launch', async () => {
     const f = await fixture();
     await f.harness.prepareHome({

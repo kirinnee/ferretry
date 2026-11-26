@@ -7,8 +7,8 @@
  *   [MODEL_CATALOG_VERSION=<n>] bun run scripts/publish-model-catalog.ts <distDirectory>
  *
  * THE VERSION is the number of commits that changed `daemon/data/models/` — it moves exactly when a
- * catalog does, so a daemon downloads nothing when only the app changed. A daemon compares it for
- * equality only, so the count restarting at this path is safe. It needs the history, so the Pages build
+ * catalog does. The version hint also carries the digest of the complete signed catalog, so changed
+ * models.dev suggestions are discovered even when the curated version stays the same. It needs the history, so the Pages build
  * checks out with `fetch-depth: 0` and sets `MODEL_CATALOG_REQUIRE_HISTORY=1`, which turns a shallow
  * checkout into a failed build instead of a catalog stuck at one version. Anywhere else a shallow
  * checkout publishes version 0, which no deployed catalog equals.

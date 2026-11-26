@@ -257,6 +257,11 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
         // Only references and plain settings leave; a value that looks like a secret is dropped, not passed on.
         if (!looksLikeRawSecret(name, value)) out[name] = value;
       }
+      // This preset's Claude variable and OpenCode's native provider spend the same opaque reference.
+      if (harness === 'opencode' && file.preset === 'qwen-coding-plan') {
+        const reference = out.ALIBABA_CODING_PLAN_API_KEY ?? out.DASHSCOPE_API_KEY ?? out.ANTHROPIC_AUTH_TOKEN;
+        if (reference !== undefined) out.ALIBABA_CODING_PLAN_API_KEY = reference;
+      }
       return out;
     },
   });

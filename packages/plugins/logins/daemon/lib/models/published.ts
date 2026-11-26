@@ -2,8 +2,8 @@
  * Following the model catalog Ferretry publishes (docs/model-catalog.md § Live updates), so a model
  * list changes on every paired daemon without a release.
  *
- * ONE SMALL READ DECIDES. `catalog/version.json` is compared with the version this machine holds:
- * equal means nothing is downloaded; different ("diff == update") means the full catalog is read and
+ * ONE SMALL READ DECIDES. `catalog/version.json` is compared with the verified version and digest held:
+ * both equal means nothing is downloaded; different means the full catalog is read and
  * CHECKED before it is used —
  *
  * 1. the hosted app's `release-manifest.sig` must be an Ed25519 signature, by the key compiled into
@@ -27,6 +27,7 @@ import {
   readPublishedModelCatalog,
 } from '../catalog/published.ts';
 import type { ModelCatalogRefreshResult } from '../../../contract/index.ts';
+import { ModelDiscoverySchema, type ModelDiscovery } from '../../../contract/index.ts';
 
 /** The signed release list and its signature, at the hosted app's root (docs/pwa-release-signing.md). */
 const RELEASE_LIST_FILE = 'release-manifest.json';
@@ -69,6 +70,8 @@ interface Held {
   readonly fetchedAt?: string;
   readonly checkedAt?: string;
   readonly last?: ModelCatalogRefreshResult;
+  readonly digest?: string;
+  readonly proof?: { readonly list: string; readonly signature: string; readonly catalog: string };
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -80,6 +83,12 @@ function heldFrom(value: unknown): Held {
   return {
     ...(typeof value.version === 'number' ? { version: value.version } : {}),
     ...('document' in value ? { document: value.document } : {}),
+    ...(isRecord(value.proof) &&
+    typeof value.proof.list === 'string' &&
+    typeof value.proof.signature === 'string' &&
+    typeof value.proof.catalog === 'string'
+      ? { proof: { list: value.proof.list, signature: value.proof.signature, catalog: value.proof.catalog } }
+      : {}),
     ...(typeof value.fetchedAt === 'string' ? { fetchedAt: value.fetchedAt } : {}),
     ...(typeof value.checkedAt === 'string' ? { checkedAt: value.checkedAt } : {}),
     ...(isRecord(value.last) && typeof value.last.outcome === 'string'
@@ -180,7 +189,35 @@ export class PublishedModelCatalogService {
   }
 
   async #read(): Promise<Held> {
-    this.#held ??= heldFrom(await this.deps.cache.read().catch(() => undefined));
+    if (this.#held === undefined) {
+      const cached = heldFrom(await this.deps.cache.read().catch(() => undefined));
+      if (cached.document === undefined) this.#held = cached;
+      else {
+        const proof = cached.proof;
+        const verified =
+          proof === undefined
+            ? { ok: false as const, reason: 'signature proof is missing' }
+            : await verifyPublishedCatalog({
+                publicKeyPem: this.deps.publicKeyPem,
+                list: new TextEncoder().encode(proof.list),
+                signature: proof.signature,
+                catalog: new TextEncoder().encode(proof.catalog),
+              });
+        const valid =
+          verified.ok &&
+          readPublishedModelCatalog(verified.value)?.version === cached.version &&
+          JSON.stringify(verified.value) === JSON.stringify(cached.document);
+        this.#held =
+          valid && proof !== undefined
+            ? { ...cached, digest: await sha256(new TextEncoder().encode(proof.catalog)) }
+            : {
+                last: {
+                  outcome: 'refused',
+                  reason: `the cached catalog signature proof was refused: ${verified.ok ? 'the cached document changed' : verified.reason}`,
+                },
+              };
+      }
+    }
     return this.#held;
   }
 
@@ -195,9 +232,16 @@ export class PublishedModelCatalogService {
     return held.document === undefined ? undefined : readPublishedModelCatalog(held.document)?.catalogs;
   }
 
+  /** Discovery is projected only from the same verified document as the curated catalog. */
+  async discovery(): Promise<ModelDiscovery | undefined> {
+    const held = await this.#read();
+    const suggestions = held.document === undefined ? undefined : readPublishedModelCatalog(held.document)?.suggestions;
+    return suggestions === undefined ? undefined : ModelDiscoverySchema.parse(suggestions);
+  }
+
   /** The version held and when it was last fetched and checked. */
-  async status(): Promise<Omit<Held, 'document'>> {
-    const { document: _document, ...status } = await this.#read();
+  async status(): Promise<Omit<Held, 'document' | 'proof' | 'digest'>> {
+    const { document: _document, proof: _proof, digest: _digest, ...status } = await this.#read();
     return status;
   }
 
@@ -228,6 +272,8 @@ export class PublishedModelCatalogService {
       await this.#keep({
         version: result.version,
         document: result.document,
+        proof: result.proof,
+        digest: result.digest,
         fetchedAt: checkedAt,
         checkedAt,
         last: result.result,
@@ -247,6 +293,8 @@ export class PublishedModelCatalogService {
         readonly kind: 'updated';
         readonly version: number;
         readonly document: unknown;
+        readonly proof: NonNullable<Held['proof']>;
+        readonly digest: string;
         readonly result: ModelCatalogRefreshResult;
       }
     | { readonly kind: 'kept'; readonly result: ModelCatalogRefreshResult }
@@ -265,12 +313,16 @@ export class PublishedModelCatalogService {
     const versionBytes = await read(PUBLISHED_MODEL_CATALOG_VERSION_FILE);
     if (typeof versionBytes === 'string') return kept('unreachable', versionBytes);
     let published: number;
+    let digest: string | undefined;
     try {
-      published = PublishedModelCatalogVersionSchema.parse(JSON.parse(new TextDecoder().decode(versionBytes))).version;
+      const hint = PublishedModelCatalogVersionSchema.parse(JSON.parse(new TextDecoder().decode(versionBytes)));
+      published = hint.version;
+      digest = hint.digest;
     } catch {
       return kept('refused', 'the published catalog version is not a version');
     }
-    if (published === held.version && held.document !== undefined) return kept('unchanged');
+    if (published === held.version && digest !== undefined && digest === held.digest && held.document !== undefined)
+      return kept('unchanged');
     const [list, signature, catalog] = await Promise.all([
       read(RELEASE_LIST_FILE),
       read(RELEASE_SIGNATURE_FILE),
@@ -284,14 +336,24 @@ export class PublishedModelCatalogService {
       catalog: catalog as Bytes,
     });
     if (!verified.ok) return kept('refused', verified.reason);
+    const actualDigest = await sha256(catalog as Bytes);
+    if (digest !== undefined && digest !== actualDigest)
+      return kept('refused', 'the published catalog digest changed while it was read; the next check takes it');
     const document = readPublishedModelCatalog(verified.value);
     if (document === undefined) return kept('refused', 'the published catalog is not a catalog document');
     if (document.version !== published)
       return kept('refused', 'the published catalog changed while it was read; the next check takes it');
+    if (published === held.version && actualDigest === held.digest) return kept('unchanged');
     return {
       kind: 'updated',
       version: published,
       document: verified.value,
+      digest: actualDigest,
+      proof: {
+        list: new TextDecoder().decode(list as Bytes),
+        signature: new TextDecoder().decode(signature as Bytes),
+        catalog: new TextDecoder().decode(catalog as Bytes),
+      },
       result: { outcome: 'updated', version: published },
     };
   }

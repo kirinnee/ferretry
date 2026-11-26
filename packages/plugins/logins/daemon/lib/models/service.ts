@@ -6,7 +6,7 @@
  * A catalog is data — labels, model ids, tiers — and never a credential or a permission, so the whole
  * set may travel to any caller with `fleet.use`.
  */
-import type { LocalModels } from '../../../contract/index.ts';
+import type { LocalModels, ModelDiscovery } from '../../../contract/index.ts';
 import type { ModelCatalog } from '../catalog/schema.ts';
 import { type ModelCatalogSources, modelCatalogs } from '../catalog/catalog.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
@@ -14,6 +14,7 @@ import type { ProviderPreset } from '../presets/schema.ts';
 import { checkedBuiltInModelCatalogs } from '../built-ins.ts';
 
 export interface ModelCatalogServiceDeps {
+  discovery?(): Promise<ModelDiscovery | undefined>;
   /** This machine's own catalog files that check, by id. */
   files(): Promise<Readonly<Record<string, ModelCatalog>>>;
   /** The last published catalog this machine fetched and verified, when there is one. */
@@ -44,6 +45,12 @@ export class ModelCatalogService {
   async sources(): Promise<ModelCatalogSources> {
     const [catalogs, presets] = await Promise.all([this.catalogs(), this.deps.presets()]);
     const ollama = this.deps.ollama?.();
-    return { catalogs, presets, ...(ollama === undefined ? {} : { local: { ollama } }) };
+    const discovery = await this.deps.discovery?.();
+    return {
+      catalogs,
+      presets,
+      ...(discovery === undefined ? {} : { discovery }),
+      ...(ollama === undefined ? {} : { local: { ollama } }),
+    };
   }
 }

@@ -55,6 +55,98 @@ const CODEX: ChosenFerretAccount = {
 };
 
 describe('NewFerretPage', () => {
+  it('clears an incompatible native model when switching runtimes and refuses unavailable ids', async () => {
+    const deepseek: ChosenFerretAccount = {
+      ...CLAUDE,
+      kind: 'opencode',
+      wrapper: 'deepseek',
+      defaultModel: null,
+      requiresModel: true,
+      models: [{ id: 'deepseek/flash', available: true }],
+    };
+    const mistral: ChosenFerretAccount = {
+      ...deepseek,
+      wrapper: 'mistral',
+      models: [
+        { id: 'mistral/codestral', available: true },
+        { id: 'mistral/retired', available: false },
+      ],
+    };
+    const h = page();
+    run(() => {
+      h.slot()!.onValueChange(deepseek.wrapper);
+      h.slot()!.onChosen(deepseek);
+    });
+    change(h.view, 'fy-new-ferret-folder', '/fixture');
+    change(h.view, 'fy-new-ferret-prompt', 'Inspect fixture');
+    change(h.view, 'fy-new-ferret-model', 'deepseek/flash');
+    expect(button(h.view, 'Create ferret').props.disabled).toBeFalse();
+    run(() => {
+      h.slot()!.onValueChange(mistral.wrapper);
+      h.slot()!.onChosen(mistral);
+    });
+    expect(input(h.view, 'fy-new-ferret-model').props.value).toBe('');
+    for (const invalid of ['deepseek/flash', 'mistral/retired', 'unknown']) {
+      change(h.view, 'fy-new-ferret-model', invalid);
+      expect(button(h.view, 'Create ferret').props.disabled).toBeTrue();
+      await runAsync(async () => button(h.view, 'Create ferret').props.onClick());
+      expect(post(h)).toBeUndefined();
+    }
+    change(h.view, 'fy-new-ferret-model', 'mistral/codestral');
+    expect(button(h.view, 'Create ferret').props.disabled).toBeFalse();
+    await runAsync(async () => button(h.view, 'Create ferret').props.onClick());
+    expect(post(h)?.body).toMatchObject({ runtime: 'mistral', model: 'mistral/codestral' });
+  });
+  it('keeps Create off between choosing another native runtime and being told its models, so the old model is never sent', async () => {
+    const native = (wrapper: string, model: string): ChosenFerretAccount => ({
+      ...CLAUDE,
+      kind: 'opencode',
+      wrapper,
+      defaultModel: null,
+      requiresModel: true,
+      models: [{ id: model, available: true }],
+    });
+    const deepseek = native('opencode-deepseek', 'deepseek/deepseek-v4-pro');
+    const mistral = native('opencode-mistral', 'mistral/codestral');
+    const h = page();
+    run(() => {
+      h.slot()!.onValueChange(deepseek.wrapper);
+      h.slot()!.onChosen(deepseek);
+    });
+    change(h.view, 'fy-new-ferret-folder', '/fixture');
+    change(h.view, 'fy-new-ferret-prompt', 'Inspect fixture');
+    change(h.view, 'fy-new-ferret-model', 'deepseek/deepseek-v4-pro');
+    expect(button(h.view, 'Create ferret').props.disabled).toBeFalse();
+    // The picker's value changes first; the account it chose is delivered only after, in its own effect.
+    run(() => h.slot()!.onValueChange(mistral.wrapper));
+    expect(button(h.view, 'Create ferret').props.disabled).toBeTrue();
+    await runAsync(async () => button(h.view, 'Create ferret').props.onClick());
+    expect(post(h)).toBeUndefined();
+    run(() => h.slot()!.onChosen(mistral));
+    expect(button(h.view, 'Create ferret').props.disabled).toBeTrue();
+    change(h.view, 'fy-new-ferret-model', 'mistral/codestral');
+    expect(button(h.view, 'Create ferret').props.disabled).toBeFalse();
+    await runAsync(async () => button(h.view, 'Create ferret').props.onClick());
+    expect(post(h)?.body).toMatchObject({ runtime: 'opencode-mistral', model: 'mistral/codestral' });
+  });
+  it('requires an explicit model when a registered runtime has no exact discovery default', async () => {
+    const account: ChosenFerretAccount = {
+      ...CLAUDE,
+      defaultModel: null,
+      requiresModel: true,
+      models: [{ id: 'deepseek/deepseek-flash', label: 'DeepSeek Flash', available: true, fast: false }],
+    };
+    const h = page({ panel: slot => <StubPicker account={account} slot={slot} /> });
+    run(() => h.view.root.findByProps({ 'data-stub-runtime': account.wrapper }).props.onClick());
+    change(h.view, 'fy-new-ferret-folder', '/work/ferretry');
+    change(h.view, 'fy-new-ferret-prompt', 'Read the project');
+    expect(button(h.view, 'Create ferret').props.disabled).toBeTrue();
+    expect(JSON.stringify(h.view.toJSON())).toContain('Choose a model before creating this ferret.');
+    change(h.view, 'fy-new-ferret-model', 'deepseek/deepseek-flash');
+    expect(button(h.view, 'Create ferret').props.disabled).toBeFalse();
+    await runAsync(async () => button(h.view, 'Create ferret').props.onClick());
+    expect(post(h)?.body).toMatchObject({ model: 'deepseek/deepseek-flash' });
+  });
   it('renders the typed fallback where no panel is contributed and keeps Create disabled until runtime, folder and prompt are present', () => {
     const { view } = page();
 

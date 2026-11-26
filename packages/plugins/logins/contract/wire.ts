@@ -15,6 +15,7 @@
  */
 import { type Brand, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
+import { ModelDiscoverySchema } from './model-discovery.ts';
 import { malformedSecretReference } from '@ferretry/core-vault/contract';
 import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { HarnessKeyOnWireSchema } from './harness-words.ts';
@@ -1425,12 +1426,11 @@ export const ModelCatalogFileSchema = z.strictObject({
 export type ModelCatalogFile = z.infer<typeof ModelCatalogFileSchema>;
 
 /**
- * What `LoginsApi.modelSources` answers: every catalog in effect WHOLE (the models a runtime on a login offers, with the
- * words a picker shows), the slice of each preset that says which catalog a login reads and which variables are the
- * person's own, and what the last read of a local server found. Public catalog data only: no login, key, variable value
- * or credential is in it (a preset's variables are named, never valued).
+ * Public catalog, verified discovery, preset names and local model metadata for runtime pickers.
+ * No login, key, variable value or credential is in it; variables are named only.
  */
 export const ModelCatalogSourcesSchema = z.strictObject({
+  discovery: ModelDiscoverySchema.optional(),
   catalogs: z.record(
     z.string().min(1),
     ModelCatalogFileSchema.extend({
