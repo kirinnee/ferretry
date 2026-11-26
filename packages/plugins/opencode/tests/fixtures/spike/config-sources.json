@@ -1,0 +1,29 @@
+[
+  {
+    "type": "directory",
+    "path": "/fixture/opencode/a/config/opencode"
+  },
+  {
+    "type": "document",
+    "path": "/fixture/opencode/a/project/opencode.json",
+    "info": {
+      "permissions": [
+        {
+          "action": "shell",
+          "resource": "*",
+          "effect": "ask"
+        },
+        {
+          "action": "read",
+          "resource": "denied.txt",
+          "effect": "deny"
+        }
+      ],
+      "agents": {
+        "build": {
+          "steps": 2
+        }
+      }
+    }
+  }
+]

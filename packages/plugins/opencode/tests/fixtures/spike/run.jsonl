@@ -1,0 +1,3 @@
+{"type":"step_start","timestamp":1795666789584,"sessionID":"ses_spike_001","part":{"id":"prt_spike_001","sessionID":"ses_spike_001","messageID":"msg_spike_001","type":"step-start"}}
+{"type":"text","timestamp":1795666789598,"sessionID":"ses_spike_001","part":{"id":"prt_spike_002","sessionID":"ses_spike_001","messageID":"msg_spike_001","type":"text","text":"FERRETRY_SPIKE_OK","time":{"start":1795666789591,"end":1795666789598}}}
+{"type":"step_finish","timestamp":1795666789603,"sessionID":"ses_spike_001","part":{"id":"prt_spike_003","sessionID":"ses_spike_001","messageID":"msg_spike_001","type":"step-finish","reason":"stop","cost":0.0009854999999999998,"tokens":{"input":6534,"output":9,"reasoning":0,"cache":{"read":0,"write":0}}}}

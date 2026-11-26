@@ -1,0 +1,31 @@
+PID mkdir("/fixture/opencode/a/cache/opencode/bin", 0777) = -1 EEXIST (File exists)
+PID mkdir("/fixture/opencode/a/state/opencode", 0777) = -1 EEXIST (File exists)
+PID mkdir("/fixture/opencode/a/cache/opencode/bin", 0777) = -1 EEXIST (File exists)
+PID mkdir("/fixture/opencode/a/state/opencode", 0777 <unfinished ...>
+PID mkdir("/fixture/opencode/a/cache/opencode/bin", 0777 <unfinished ...>
+PID mkdir("/fixture/opencode/a/state/opencode", 0777 <unfinished ...>
+PID mkdir("/fixture/opencode/a/state/opencode", 0777) = -1 EEXIST (File exists)
+PID mkdir("/fixture/opencode/a/cache/opencode/bin", 0777) = -1 EEXIST (File exists)
+PID openat(AT_FDCWD, "/fixture/opencode/a/data/private.db", O_RDWR|O_CREAT|O_NOFOLLOW|O_CLOEXEC, 0644) = 9
+PID openat(AT_FDCWD, "/fixture/opencode/a/data/private.db-wal", O_RDWR|O_CREAT|O_NOFOLLOW|O_CLOEXEC, 0600) = 10
+PID openat(AT_FDCWD, "/fixture/opencode/a/data/private.db-shm", O_RDWR|O_CREAT|O_NOFOLLOW|O_CLOEXEC, 0600) = 11
+PID openat(AT_FDCWD, "/fixture/opencode/a/config/opencode/opencode.jsonc", O_RDONLY|O_LARGEFILE|O_CLOEXEC|O_PATH) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/config/opencode/opencode.json", O_RDONLY|O_LARGEFILE|O_CLOEXEC|O_PATH) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/opencode.json", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/opencode.jsonc", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/project/opencode.json", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/project/opencode.jsonc", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/config/opencode/opencode.json", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/config/opencode/opencode.jsonc", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/state/opencode/pty/00000000-0000-4000-8000-000000000001/service.json", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/state/opencode/pty/00000000-0000-4000-8000-000000000001/service.json", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/config/opencode/opencode.json", O_RDONLY|O_LARGEFILE|O_CLOEXEC|O_PATH) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/config/opencode/opencode.jsonc", O_RDONLY|O_LARGEFILE|O_CLOEXEC|O_PATH) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/opencode.json", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/opencode.jsonc", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/project/opencode.json", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/project/opencode.jsonc", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/config/opencode/opencode.json", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID openat(AT_FDCWD, "/fixture/opencode/a/config/opencode/opencode.jsonc", O_RDONLY|O_NOCTTY|O_LARGEFILE|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+PID unlink("/fixture/opencode/a/data/private.db-shm") = 0
+PID unlink("/fixture/opencode/a/data/private.db-wal") = 0
