@@ -1,5 +1,5 @@
 import { err, ok, type Result } from '@ferretry/std';
-import { dirname, isAbsolute } from 'node:path';
+import { basename, dirname, isAbsolute } from 'node:path';
 import type { CheckedDirectory, DirectoryRefusal, PathsPort } from '../contract/ports.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import { fencedReal, fenceOf, sameObject, walkPhysically, walkUnchanged } from './fence-guard.ts';
@@ -11,6 +11,8 @@ export async function bindProgram(fs: Pick<HostFs, 'realpath' | 'identity' | 'wr
   const trusted = async (named: string) => {
     if (!isAbsolute(named)) return undefined;
     const real = await fs.realpath(named);
+    // A planted `fy -> /bin/sh` is still a planted client: system ownership alone would trust the interpreter.
+    if (basename(real) !== basename(named)) return undefined;
     const file = await fs.identity(real);
     if (file?.kind !== 'file' || (file.mode & 0o111) === 0) return undefined;
     for (let at = real; ; at = dirname(at)) {

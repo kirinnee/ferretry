@@ -2396,7 +2396,8 @@ project or not, so the host's `gh` is ignored everywhere) with:
   followed by `gh -- "$@"`. The client and every canonical ancestor must be root-owned
   and not writable by the daemon's user (ACLs included). Group/world write is refused except on root-owned sticky
   directories such as the multi-user Nix store: those protect root-owned entries and must still be unwritable by
-  the pane user. An executable planted in a worktree, downloads, a state
+  the pane user. The canonical basename must retain the client name: a planted client-name link to a system shell
+  or interpreter is refused too. An executable planted in a worktree, downloads, a state
   folder or `/tmp`, and user-owned installs that the same user could chmod, are refused. A preview pane need not find that client on its own PATH. `fy gh` sends the argument list and the folder to
   `POST /v1/git-accounts/gh/run` on the ferret's own credential and prints the masked answer with `gh`'s exit code. It
   has **no policy of its own**: the daemon (B9, then the seam under it) decides, so nothing here can widen what runs.

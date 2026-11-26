@@ -65,6 +65,16 @@ describe('bindProgram installed-client trust', () => {
     expect(bound?.check.argv.at(-1)).toBe('/installed/fy');
   });
 
+  test('refuses a client-name symlink to a different trusted program such as a shell or interpreter', async () => {
+    const { fs } = installed();
+    expect(
+      await bindProgram(
+        { ...fs, realpath: async path => (path === '/alias/fy' ? '/usr/bin/stat' : path) },
+        '/alias/fy',
+      ),
+    ).toBeUndefined();
+  });
+
   test('refuses a writable client or any writable ancestor, including an ACL write grant', async () => {
     for (const path of ['/installed/fy', '/installed', '/usr/bin/stat', '/usr/bin', '/']) {
       const { fs, writable } = installed();

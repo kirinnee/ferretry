@@ -40,6 +40,7 @@ export interface PathsPort {
    * Bind an installed executable to its canonical name and identity, without running it. The file AND every
    * canonical ancestor must be root-owned and not writable by this process (ACLs included). Group/world write is
    * refused except on root-owned sticky directories (the multi-user Nix store), which protect root-owned entries.
+   * The canonical basename must retain the requested program name, so a client-name link to a shell is refused.
    * Refuses user installs, worktrees, downloads and temporary folders. Requires permissions.which.
    * The returned trusted stat command lets a shell shim recheck dev/inode/size/mtime/ctime immediately before exec.
    */
