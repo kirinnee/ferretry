@@ -149,8 +149,11 @@ no token and the strict wire schemas leave no field for one.
 - **Connected apps** — what each may do, who approved it, when it last called; **Revoke** behind a confirm that says it
   stops on its very next call. Live apps are listed before revoked ones.
 - It reads again every 2 s while open and visible, and keeps what it shows through a failed read.
-- **Version skew.** A machine that answers `404 unknown_route` for `GET /v1/connector` gets "This machine needs an update
-  to use the Claude connector." with the update command.
+- **Version skew.** A daemon built before the connector does not list it, so the shell's inventory gate stops the tab
+  before it can ask anything, and the shell's own line says "Connector is not on this daemon, which is older than this
+  app: run `fy update` on that machine." (any plugin a daemon older than the app does not list reads so). A machine that
+  lists the connector but answers `404 unknown_route` for `GET /v1/connector` gets the tab's own "needs an update" note
+  with the same command. The visual test draws the shell over a pre-connector inventory.
 - **Round-safe.** The tab is built from the settings kit's rows, so it follows the theme's corners; no text, icon or
   button of it may sit where a corner is cut away, which the visual test checks at the highest rounding (Neumorphism).
 

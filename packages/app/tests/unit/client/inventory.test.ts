@@ -119,4 +119,14 @@ describe('sentences', () => {
       wholeDaemonSentence('reload-app'),
     );
   });
+
+  test('a plugin an OLDER daemon does not list says to update it, with the command; otherwise it is plainly not available', () => {
+    const titleOf = (id: string) => id;
+    expect(blockedLine('Connector', { state: 'blocked', reason: 'missing' }, 'update-daemon', titleOf)).toBe(
+      'Connector is not on this daemon, which is older than this app: run `fy update` on that machine.',
+    );
+    expect(blockedLine('Connector', { state: 'blocked', reason: 'missing' }, 'reload-app', titleOf)).toBe(
+      'Connector is not available to this device on this daemon.',
+    );
+  });
 });

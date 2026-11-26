@@ -68,7 +68,14 @@ type Viewport = (typeof VIEWPORTS)[number];
 const STYLES = ['studio', 'neumorphism'] as const;
 const STATES = ['off', 'on', 'tunnel', 'pending', 'apps'] as const;
 
-const open = async (viewport: Viewport, scheme: 'light' | 'dark', style: string, state: string, query = '') => {
+const open = async (
+  viewport: Viewport,
+  scheme: 'light' | 'dark',
+  style: string,
+  state: string,
+  query = '',
+  drawn = '[data-settings="connector"] [data-setting-group]',
+) => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     deviceScaleFactor: viewport.phone ? 2 : 1,
@@ -86,7 +93,7 @@ const open = async (viewport: Viewport, scheme: 'light' | 'dark', style: string,
   page.on('pageerror', error => problems.push(error.message));
   await page.goto(`${origin}/d/ws/settings/connector?theme=studio-${scheme}&state=${state}${query}`);
   try {
-    await page.waitForSelector('[data-settings="connector"] [data-setting-group]');
+    await page.waitForSelector(drawn);
   } catch (error) {
     const seen = (
       await page
@@ -266,6 +273,32 @@ describe('Settings › Claude connector, in the real settings shell', () => {
             expect(problems).toEqual([]);
             if (shotsDir !== '')
               await page.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${style}-revoke.png`) });
+          } finally {
+            await close();
+          }
+        });
+
+  // A daemon built BEFORE the connector existed lists no connector, so the shell's inventory gate blocks the tab before the
+  // tab can ask the daemon anything. The shell's own line must then say what is true and what to run.
+  for (const viewport of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      for (const style of STYLES)
+        it(`a daemon older than the connector says to update it, with the command (${viewport.name}, ${scheme}, ${style})`, async () => {
+          const { page, problems, close } = await open(viewport, scheme, style, 'predates', '', '.fy-shell-line');
+          try {
+            const line = page.locator('.fy-shell-line').first();
+            const said = await line.innerText();
+            expect(said).toContain('older than this app');
+            expect(said).toContain('fy update');
+            expect(said).not.toContain('not available to this device');
+            expect(await page.locator('[data-settings="connector"]').count(), 'the gate stays shut').toBe(0);
+            expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+            const box = await line.boundingBox();
+            expect((box?.x ?? -1) >= 0 && (box?.x ?? 0) + (box?.width ?? 0) <= viewport.width).toBe(true);
+            expect(await cornerViolations(page, '.fy-shell-line'), 'the line meets a rounded corner').toEqual([]);
+            expect(problems).toEqual([]);
+            if (shotsDir !== '')
+              await page.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${style}-predates.png`) });
           } finally {
             await close();
           }

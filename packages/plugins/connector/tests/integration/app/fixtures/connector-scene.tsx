@@ -6,7 +6,8 @@
  *   /d/ws/settings/connector                the tab (the address the daemon's waiting page links to)
  *   ?theme=<family>-<mode>
  *   ?state=off|on|tunnel|pending|apps       what the machine says (default: pending)
- *   ?request=cr_…                           the sign-in the waiting page's link named
+ *   ?state=predates                         a daemon older than the connector: no connector in its plugin list
+ *   ?request=cr_…                         the sign-in the waiting page's link named
  */
 import { renderSettingsShell } from '@ferretry/app/testing/settings-shell';
 import manifest from '../../../../manifest.ts';
@@ -96,4 +97,10 @@ function ConnectorTab() {
   return <ConnectorSettings client={client} now={NOW} />;
 }
 
-renderSettingsShell({ manifest, bodies: { connector: ConnectorTab } });
+// `?state=predates`: a daemon built BEFORE the connector existed (older than this app, no connector in its plugin list).
+const predates = params.get('state') === 'predates';
+renderSettingsShell({
+  manifest,
+  bodies: { connector: ConnectorTab },
+  options: predates ? { daemonVersion: '4.9.0', without: ['connector'] } : {},
+});
