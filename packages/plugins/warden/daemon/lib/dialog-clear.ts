@@ -99,11 +99,16 @@ export class WardenDialogClear {
       let cleared = 0;
       for (const watched of dialogs) {
         const { sessionId } = watched;
+        // A ferret whose registered harness has no family row is never keyed: no rule, no key, the owner is told.
+        // The screen's own words may only CONFIRM the registered family, never choose one.
+        const registered = watched.harness;
         // The words are read only for a screen some rule is about, and must be the very dialog the look saw.
-        const read = rules.some(each => each.kind === watched.dialog.kind)
-          ? await this.ports.words(sessionId)
-          : undefined;
-        const dialog = read?.id === watched.dialog.id ? read : undefined;
+        const read =
+          registered !== undefined && rules.some(each => each.kind === watched.dialog.kind)
+            ? await this.ports.words(sessionId)
+            : undefined;
+        const dialog =
+          registered !== undefined && read?.id === watched.dialog.id && read.harness === registered ? read : undefined;
         const rule = dialog === undefined ? undefined : ruleFor(dialog, rules);
         if (dialog === undefined || rule === undefined) {
           toTell.push(watched);

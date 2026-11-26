@@ -1,3 +1,4 @@
+import { byRecordedHarness } from '@ferretry/core-ferrets/contract';
 import type { Harness } from '../protocol/harness.ts';
 import type {
   PermissionAction,
@@ -240,34 +241,36 @@ export function parsePermissionPrompt(pane: string): PermissionRequest | undefin
     .filter(meaningful)
     .map(bare);
 
-  let subject: Subject;
-  if (harness === 'codex') {
-    subject = codexSubject(question, lines.slice(Math.max(0, questionAt - 6), questionAt).map(bare), below);
-  } else {
-    let rule = -1;
-    for (let index = questionAt; index >= Math.max(0, questionAt - HEADER_REACH_LINES); index -= 1) {
-      if (RULE.test(bare(lines[index] as string))) {
-        rule = index;
-        break;
+  // The screen names its family (Codex's rows carry its own hint); each family's subject is read by its own parser, and the
+  // dispatch is the family table's, so a family added there must say how ITS prompt is read before this compiles.
+  const subject: Subject = byRecordedHarness(harness, {
+    codex: () => codexSubject(question, lines.slice(Math.max(0, questionAt - 6), questionAt).map(bare), below),
+    claude: () => {
+      let rule = -1;
+      for (let index = questionAt; index >= Math.max(0, questionAt - HEADER_REACH_LINES); index -= 1) {
+        if (RULE.test(bare(lines[index] as string))) {
+          rule = index;
+          break;
+        }
       }
-    }
-    // No rule in reach — a narrow or partly scrolled frame: the dialog is the block of rows that runs
-    // unbroken up to the question.
-    let top = rule + 1;
-    if (rule < 0) {
-      top = questionAt;
-      while (top > 0 && top > questionAt - 8 && bare(lines[top - 1] as string) !== '') top -= 1;
-    }
-    const dialog = lines
-      .slice(top, questionAt + 1)
-      .filter(meaningful)
-      .map(bare);
-    // A lone question is no title — except the plan dialog's, whose title IS its question.
-    const title = dialog[0] === question && question.toLowerCase() !== 'exit plan mode?' ? undefined : dialog[0];
-    // The plan dialog's title IS its question, so nothing sits between them.
-    const body = dialog.slice(1, title === question ? 1 : -1);
-    subject = claudeSubject(title, body, below);
-  }
+      // No rule in reach — a narrow or partly scrolled frame: the dialog is the block of rows that runs
+      // unbroken up to the question.
+      let top = rule + 1;
+      if (rule < 0) {
+        top = questionAt;
+        while (top > 0 && top > questionAt - 8 && bare(lines[top - 1] as string) !== '') top -= 1;
+      }
+      const dialog = lines
+        .slice(top, questionAt + 1)
+        .filter(meaningful)
+        .map(bare);
+      // A lone question is no title — except the plan dialog's, whose title IS its question.
+      const title = dialog[0] === question && question.toLowerCase() !== 'exit plan mode?' ? undefined : dialog[0];
+      // The plan dialog's title IS its question, so nothing sits between them.
+      const body = dialog.slice(1, title === question ? 1 : -1);
+      return claudeSubject(title, body, below);
+    },
+  });
 
   const options: PermissionOption[] = rows.map(row => {
     const label = clip(row.label.replace(KEY_HINT, '').trim(), LIMITS.label);

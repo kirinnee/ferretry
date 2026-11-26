@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { type ModelPriceCatalog } from '@ferretry/plugin-logins/contract';
+import { type ModelPriceCatalog, ModelPriceCatalogSchema } from '@ferretry/plugin-logins/contract';
 import {
   type AnalyticsPricingRate,
   AnalyticsPricingRateSchema,
@@ -53,7 +53,11 @@ const MAKER_CATALOGS: Readonly<Record<AnalyticsPricingRate['provider'], string>>
   alibaba: 'qwen',
 };
 
-const HALVES = ['claude', 'codex'] as const;
+/** The harness halves a priced catalog carries: whatever Logins' own price wire declares, so a half added there is read here. */
+type PriceHalf = Exclude<keyof ModelPriceCatalog, 'id'>;
+export const PRICED_HALVES: readonly PriceHalf[] = (
+  Object.keys(ModelPriceCatalogSchema.shape) as (keyof ModelPriceCatalog)[]
+).filter((key): key is PriceHalf => key !== 'id');
 const TIER_NAMES = ['opus', 'sonnet', 'haiku'] as const;
 
 const micros = (usd: number): number => Math.round(usd * 1_000_000);
@@ -86,7 +90,7 @@ function anthropicTierAliases(catalogs: readonly ModelPriceCatalog[]): ReadonlyM
 export function modelCatalogPricingRates(catalogs: readonly ModelPriceCatalog[]): readonly AnalyticsPricingRate[] {
   const byIdentity = new Map<string, Candidate[]>();
   for (const catalog of [...catalogs].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
-    for (const half of HALVES) {
+    for (const half of PRICED_HALVES) {
       for (const { id: modelId, price } of catalog[half]?.models ?? []) {
         const anthropic = price.provider === 'anthropic';
         // The rate schema is checked again so a rate built here can never be one the analytics contract would refuse.

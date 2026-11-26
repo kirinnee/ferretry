@@ -1,7 +1,7 @@
 import { posix } from 'node:path';
 import { milliseconds } from '@ferretry/std';
 import type { AsksApi } from '@ferretry/core-asks/contract';
-import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
+import { type FerretId, type FerretsApi, recordedFamilyOfKey } from '@ferretry/core-ferrets/contract';
 import type { KernelPorts } from '@ferretry/kernel/contract';
 import type { BoardApi } from '@ferretry/plugin-board/contract';
 import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
@@ -28,7 +28,6 @@ import {
 import { WardenFleetFacts } from './adapters/fleet-facts.ts';
 import {
   exchangeSends,
-  HARNESS_OF,
   limitedFerrets,
   livenessTargets,
   readFleet,
@@ -339,7 +338,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
       // The login the mover's own ranking would pick for it now (the first ready one), or none.
       candidate: async sessionId => {
         const ferret = await ferrets.get(sessionId as FerretId).catch(() => undefined);
-        const harness = ferret === undefined ? undefined : HARNESS_OF[ferret.harness];
+        const harness = ferret === undefined ? undefined : recordedFamilyOfKey(ferret.harness);
         if (ferret === undefined || harness === undefined || autoMoveService === undefined) return undefined;
         const config = parseStoredWardenConfig(await configStore.read()).config;
         const [candidates] = await autoMoveService.moveCandidates(

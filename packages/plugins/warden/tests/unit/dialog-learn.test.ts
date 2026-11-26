@@ -279,7 +279,7 @@ describe('the owner’s yes', () => {
       memory: { read: async () => ({}), write: async () => undefined },
       record: () => undefined,
     });
-    const next = await clear.clear([{ sessionId: 'f1', name: 'ada', dialog: screen }]);
+    const next = await clear.clear([{ sessionId: 'f1', name: 'ada', dialog: screen, harness: 'claude' }]);
     should(state.pressed).eql(['Down', 'Enter']);
     should(next.toTell).eql([]);
   });
