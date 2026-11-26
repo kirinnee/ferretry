@@ -83,7 +83,7 @@ describe('a start.decide refusal carrying a code', () => {
     expect(answer.status).toBe(201);
   });
 
-  test('E-266 a fast start the taker cannot verify goes on WITHOUT fast: 201, the reason in the answer, the taker asked again without fast, fast not recorded', async () => {
+  test('E-266 a fast start the taker cannot verify goes on WITHOUT fast: 201, the reason in the answer, the taker asked again with Fast explicitly off', async () => {
     const note = "Started without Fast: gpt-x isn't listed as supporting it on this login.";
     const seen: StartDecideInput[] = [];
     const h = await fresh(
@@ -93,7 +93,7 @@ describe('a start.decide refusal carrying a code', () => {
     const answer = await start(h, { name: 'wren', model: 'gpt-x', fast: true });
     expect(answer.status).toBe(201);
     expect(answer.json<{ notice?: string }>().notice).toBe(note);
-    expect(seen.map(input => input.fast)).toEqual([true, undefined]);
+    expect(seen.map(input => input.fast)).toEqual([true, false]);
     expect([...h.state('ferrets').files.values()].some(raw => String(raw).includes('"fast":true'))).toBe(false);
     // A start that did not ask for fast carries no notice.
     expect((await start(h, { name: 'tern', model: 'gpt-x' })).json<object>()).not.toHaveProperty('notice');

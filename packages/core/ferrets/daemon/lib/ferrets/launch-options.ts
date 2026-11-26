@@ -45,7 +45,7 @@ export const launchFastOf = (decided: DecidedFast | undefined, live: boolean | u
 /**
  * A resume's answer from `start.decide`, with fast mode verified like a start's: the fast mode the relaunch would carry
  * goes to the decision WITH the model and login it will run on (a start's own refusal rule), and a decision that says the
- * model cannot serve it (`unservable_model`) drops the fast mode instead of refusing the revive — a relaunch never passes
+ * model cannot serve it (`unservable_model`) explicitly switches fast off instead of refusing the revive — a relaunch never passes
  * an unverified paid tier, and never strands a session over one.
  */
 export async function decideResume(
@@ -54,7 +54,7 @@ export async function decideResume(
   keeps:
     | { readonly live: Promise<boolean | undefined> | undefined; readonly recorded: FerretDetails['options'] }
     | undefined,
-): Promise<{ readonly decision: HookDecision; readonly fast: boolean | undefined }> {
+): Promise<{ readonly decision: HookDecision; readonly fast: boolean | undefined; readonly notice?: string }> {
   // What the session is ON (a live `/fast` after the start wins), else what the start recorded; a move keeps nothing.
   const fast = keeps === undefined ? undefined : ((await keeps.live?.catch(() => undefined)) ?? keeps.recorded?.fast);
   if (fast !== true) return { decision: await decide(base), fast };
@@ -63,12 +63,16 @@ export async function decideResume(
   if (first.allow) return { decision: first, fast };
   if (first.code !== 'unservable_model' && first.code !== 'fast_unverified')
     return { decision: first, fast: undefined };
-  return { decision: await decide(base), fast: undefined };
+  return {
+    decision: await decide({ ...base, fast: false, ...(model === undefined ? {} : { model }) }),
+    fast: false,
+    notice: first.code === 'fast_unverified' ? first.reason : `Started without Fast: ${first.reason}`,
+  };
 }
 
 /**
  * A START's answer from `start.decide`, with one downgrade: a taker that cannot VERIFY fast mode for the model
- * (`fast_unverified`) does not fail the start. It is asked again without fast, the request loses its `fast` option, and the
+ * (`fast_unverified`) does not fail the start. It is asked again with fast explicitly off, the request records that, and the
  * taker's sentence comes back as `notice` for the start's answer to show. Any other refusal, and a start that did not ask
  * for fast, is exactly the taker's answer.
  */
@@ -79,7 +83,23 @@ export async function decideStart<R extends { readonly options?: { readonly fast
 ): Promise<{ readonly decision: HookDecision; readonly request: R; readonly notice?: string }> {
   const first = await decide(input);
   if (first.allow || first.code !== 'fast_unverified') return { decision: first, request };
-  const { fast: _dropped, ...rest } = input;
-  const { fast: _fast, ...options } = request.options ?? {};
-  return { decision: await decide(rest), request: { ...request, options }, notice: first.reason };
+  return {
+    decision: await decide({ ...input, fast: false }),
+    request: { ...request, options: { ...request.options, fast: false } },
+    notice: first.reason,
+  };
+}
+
+/** The last launch's outcome, persisted beside its effective options; a later ordinary launch clears the notice. */
+export function launchDetails(
+  before: FerretDetails | undefined,
+  fast: boolean | undefined,
+  notice?: string,
+): FerretDetails {
+  const { notice: _previous, ...kept } = before ?? {};
+  return {
+    ...kept,
+    ...(fast === undefined ? {} : { options: { ...kept.options, fast } }),
+    ...(notice === undefined ? {} : { notice }),
+  };
 }

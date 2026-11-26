@@ -94,7 +94,7 @@ export interface ISessionApi {
     how?: 'now' | 'polite',
   ): Promise<{ readonly id: string; readonly state?: string }>;
   /** Revives one ferret; `message` is recorded with the revival. */
-  resume(reference: string, message?: string): Promise<{ readonly id: string }>;
+  resume(reference: string, message?: string): Promise<StartAnswer>;
   /** A new first name, a new task title, or both. */
   rename(reference: string, change: RenameChange): Promise<FerretSummary>;
   signal(reference: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SignalAnswer>;

@@ -208,8 +208,8 @@ export class ClientSessionApi
     });
   }
 
-  async resume(reference: string, message?: string): Promise<{ readonly id: string }> {
-    return await this.client.call<{ id: string }>(FERRET_ROUTES.resume, {
+  async resume(reference: string, message?: string): Promise<StartAnswer> {
+    return await this.client.call<StartAnswer>(FERRET_ROUTES.resume, {
       ...at(reference),
       ...(message === undefined ? {} : { body: { message } }),
     });

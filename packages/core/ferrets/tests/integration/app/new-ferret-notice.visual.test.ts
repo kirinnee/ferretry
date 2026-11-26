@@ -71,7 +71,11 @@ const VARIANTS = [
 
 const NOTICE = '[data-new-ferret-notice]';
 
-const withTab = async (variant: (typeof VARIANTS)[number], run: (tab: Page) => Promise<void>): Promise<void> => {
+const withTab = async (
+  variant: (typeof VARIANTS)[number],
+  run: (tab: Page) => Promise<void>,
+  scene?: string,
+): Promise<void> => {
   const context = await browser.newContext({
     viewport: { width: variant.width, height: variant.height },
     colorScheme: variant.scheme,
@@ -86,8 +90,8 @@ const withTab = async (variant: (typeof VARIANTS)[number], run: (tab: Page) => P
   const tab = await context.newPage();
   tab.setDefaultTimeout(10_000);
   try {
-    await tab.goto(`${origin}/?theme=${variant.theme}`);
-    await tab.waitForSelector('#fy-new-ferret-prompt');
+    await tab.goto(`${origin}/?theme=${variant.theme}${scene === undefined ? '' : `&scene=${scene}`}`);
+    await tab.waitForSelector(scene === undefined ? '#fy-new-ferret-prompt' : '[data-scene-ready]');
     await tab.waitForTimeout(300);
     await run(tab);
   } finally {
@@ -122,3 +126,21 @@ describe('New ferret when the start went on without Fast', () => {
         ]);
       }));
 });
+
+for (const scene of ['resume', 'restart', 'toolbar'])
+  for (const variant of VARIANTS)
+    it(`E-266 R2 ${scene} ${variant.name}: the actual action shows the daemon's downgrade`, () =>
+      withTab(
+        variant,
+        async tab => {
+          await tab.getByRole('button', { name: scene === 'restart' ? 'Restart' : 'Resume', exact: true }).click();
+          const toast = tab.locator('[data-action-toast]');
+          await toast.getByRole('status').filter({ hasText: 'Started without Fast:' }).waitFor();
+          expect(await toast.textContent()).toContain('Started without Fast: Codex’s model list is still loading');
+          expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTrue();
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${scene}-${variant.name}.png`) });
+          await tab.getByRole('button', { name: 'Dismiss', exact: true }).click();
+          expect(await toast.textContent()).not.toContain('Started without Fast:');
+        },
+        scene,
+      ));

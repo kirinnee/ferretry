@@ -10,6 +10,7 @@ import {
   type DecidedFast,
   decideResume,
   decideStart,
+  launchDetails,
   launchFastOf,
   launchOptions,
   movedLaunchOptions,
@@ -795,8 +796,6 @@ export class FerretsService implements FerretsApi {
    * NOT `serial`: a start, stop or resume holds that queue for as long as it runs and some of them write details.
    */
   private readonly detailsQueue = new KeyedSerialExecutor();
-  /** Why a start went on without a fast mode it asked for (`decideStart`), by ferret; read once by the start answer. */
-  private readonly startNotices = new Map<FerretId, string>();
   /**
    * The pin-marked summary made from one registry summary, so the same summary with the same pin answers the same
    * object (R501: the fleet read reuses its body while nothing moved). Held weakly by the input summary.
@@ -1015,13 +1014,6 @@ export class FerretsService implements FerretsApi {
     }
   }
 
-  /** The sentence for a start that went on without the fast mode it asked for, once; nothing for any other start. */
-  takeStartNotice(id: FerretId): string | undefined {
-    const notice = this.startNotices.get(id);
-    this.startNotices.delete(id);
-    return notice;
-  }
-
   /** A system callsign (`learning-000001`) for a helper the daemon starts itself, issued by the bound issuer. */
   async systemCallsign(prefix: SystemCallsignPrefix): Promise<string> {
     await this.ports.ready?.();
@@ -1213,7 +1205,6 @@ export class FerretsService implements FerretsApi {
     // A refusal here is BEFORE the first write (details, record, token): `start()` gives the name back.
     if (!decided.decision.allow) return refusedBy(decided.decision);
     request = decided.request;
-    if (decided.notice !== undefined) this.startNotices.set(id, decided.notice);
     // A start that names a past conversation REQUIRES its transcript: staged before the first write, or refused here.
     const staged = await this.stageConversation(harnessKey, request.harnessConversation, request.by);
     if (!staged.ok) return staged;
@@ -1224,6 +1215,7 @@ export class FerretsService implements FerretsApi {
       // The opening attachments are this start's request alone: their bytes are never written into `details.json`.
       const { title, initialAttachments: _attached, allowScratch: _scratch, ...options } = request.options;
       await this.saveDetails(id, {
+        ...(decided.notice === undefined ? {} : { notice: decided.notice }),
         ...(Object.keys(options).length === 0 ? {} : { options }),
         ...(title === undefined ? {} : { title, titleSource: 'owner' as const }),
       });
@@ -1640,7 +1632,7 @@ export class FerretsService implements FerretsApi {
     // this binding held, which a folder already swapped into the state home satisfies.
     const bound = await this.bindLaunchFolder(retargeted.folder, options.origin, found.birth);
     if (!bound.ok) return bound;
-    const { decision, fast } = await decideResume(
+    const { decision, fast, notice } = await decideResume(
       input => this.ports.decide(input),
       {
         ferret,
@@ -1692,6 +1684,7 @@ export class FerretsService implements FerretsApi {
     // fast mode is dropped as the move drops it). They are written with the target, and a failed launch leaves them with
     // it, as the moves module leaves its own document: a plain resume or Restart relaunches on the target.
     if (target !== undefined) await this.moveOptions(ferret, target);
+    await this.updateDetails(ferret, current => launchDetails(current, fast, notice));
     await this.write(starting, settled.state, 'state');
     // Said once the relaunch is committed (the record is `starting`), still under this ferret's queue: the message, if
     // any, is the relaunch's own turn from here on.

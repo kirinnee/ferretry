@@ -27,6 +27,10 @@ import type { FeatureContribution, FerretsContext, FerretsFeature } from './type
 
 function register(f: FerretsContext): FeatureContribution | undefined {
   const { kernel, registry, service, ready, pathFerret, mayAct, body, parseJson, stateHomeReach, knownLaunchRoots } = f;
+  const noticeOf = (id: FerretId): { readonly notice?: string } => {
+    const notice = registry.detailsOf(id)?.notice;
+    return notice === undefined ? {} : { notice };
+  };
 
   /** SHA-256 hex of the exact body text, matching the digest the protocol client computes (today's `payloadDigests`). */
   const payloadDigest = (text: string): string =>
@@ -105,7 +109,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
           );
           if (!started.ok) return startFailure(started.error);
           startedFerret = started.value;
-          const notice = service.takeStartNotice(started.value);
+          const notice = registry.detailsOf(started.value)?.notice;
           return jsonResponse({ id: started.value, ...(notice === undefined ? {} : { notice }) }, 201);
         };
         // A start is IDEMPOTENT on its request id (today's retry contract): the same id and body answer the ferret it
@@ -121,7 +125,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
         return await oneAtATime(requestId, async () => {
           const held = await kernel.state.read(StartRequestsFile);
           const seen = lookupStartRequest(held.ok ? held.value : undefined, requestId, digest);
-          if (seen.kind === 'same') return jsonResponse({ id: seen.ferret });
+          if (seen.kind === 'same') return jsonResponse({ id: seen.ferret, ...noticeOf(seen.ferret) });
           if (seen.kind === 'conflict')
             throw new ApiError(
               409,
@@ -178,7 +182,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
           origin: launchOriginOf(call),
         });
         if (!resumed.ok) return startFailure(resumed.error);
-        return jsonResponse({ id: resumed.value });
+        return jsonResponse({ id: resumed.value, ...noticeOf(resumed.value) });
       },
       'POST /v1/ferrets/:ferretId/rename': async call => {
         const id = await pathFerret(call);
