@@ -4,6 +4,7 @@
  */
 import type { Word } from '@ferretry/kernel/contract';
 
+export * from './branches.ts';
 export * from './page.ts';
 export * from './post.ts';
 export * from './files.ts';

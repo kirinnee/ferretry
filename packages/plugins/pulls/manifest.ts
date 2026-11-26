@@ -12,6 +12,7 @@ import {
   PULLS_GUARD_POST,
   PULLS_WORDS,
   PullsChanged,
+  PullsPort,
   PullsConfigDef,
   WATCH_STATE,
 } from './contract/index.ts';
@@ -47,6 +48,8 @@ export default definePlugin({
   // E2 buzzes the phone through Access when it is there; without it the watch still keeps and shows PRs.
   // E7 records every post through Gate's audit door; with no Gate no post is made.
   uses: { access: AccessPort, gate: GatePort },
+  // G3 U5: the latest PR of each branch, for the worktree cleanup.
+  provides: { pulls: PullsPort },
 
   actions: {
     routes: [
@@ -82,6 +85,17 @@ export default definePlugin({
         noStore: true,
         audit: { skip: 'a read of one CI run’s job and step names, statuses and times' },
         guard: { none: 'job and step names, statuses and times only; no pane, page or vault text' },
+      }),
+      // G3 U5: the latest PR of each head branch, any state (ids, states, times, a commit id and a CI word; no text).
+      route('GET /v1/pulls/:project/:repo/branches', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: PULLS_CAPS.read,
+        noStore: true,
+        audit: PULLS_AUDIT_SKIP.read,
+        guard: {
+          none: 'PR numbers, states, times, a head commit id and a CI word for named branches; no title, no text, no token',
+        },
       }),
       // E6 · review threads of one PR (GraphQL; read when a PR page opens). Private code and strangers' text: not stored.
       route('GET /v1/pulls/:project/:repo/:number/threads', {

@@ -6,6 +6,7 @@ import manifest from '../manifest.ts';
 import { GithubClient } from './adapters/github/client.ts';
 import { configDoorOf } from './features/watch/config-door.ts';
 import { watchFeature } from './features/watch/index.ts';
+import { branchPullsPort } from './features/branches/index.ts';
 import { newPostLedger } from './features/post/index.ts';
 import { PullsCache } from './lib/cache/store.ts';
 import { WatchStore } from './features/watch/store.ts';
@@ -56,6 +57,8 @@ export default implementDaemon(manifest, {
     });
 
     return {
+      // G3 U5: Tidy asks which PR each worktree branch had.
+      provides: { pulls: branchPullsPort({ github, projects: needs.projects, nowMs: () => kernel.clock.nowMs() }) },
       routes: pullsRoutes(
         {
           github,
