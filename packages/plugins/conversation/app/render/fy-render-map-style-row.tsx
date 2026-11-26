@@ -130,7 +130,13 @@ export function MapStyleRow() {
                   data-map-style-key="input"
                   onTyped={setTyped}
                 />
-                <Button type="button" data-map-style-key="save" disabled={typed === 0} onClick={save}>
+                <Button
+                  type="button"
+                  className="min-h-control"
+                  data-map-style-key="save"
+                  disabled={typed === 0}
+                  onClick={save}
+                >
                   Save key
                 </Button>
               </div>
@@ -146,10 +152,15 @@ export function MapStyleRow() {
                   data-map-style-key="stored"
                 />
                 <div className="flex gap-2">
-                  <Button type="button" data-map-style-key="replace" onClick={() => setReplacing(true)}>
+                  <Button
+                    type="button"
+                    className="min-h-control"
+                    data-map-style-key="replace"
+                    onClick={() => setReplacing(true)}
+                  >
                     Replace
                   </Button>
-                  <Button type="button" data-map-style-key="remove" onClick={remove}>
+                  <Button type="button" className="min-h-control" data-map-style-key="remove" onClick={remove}>
                     Remove
                   </Button>
                 </div>
