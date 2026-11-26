@@ -1,6 +1,26 @@
 import type { Result } from '@ferretry/std';
 import type { ChildEnvironment } from '../bound.ts';
 
+/** Fixed package-manager installation roots; credential-bearing programs never trust arbitrary PATH prefixes. */
+export const PACKAGE_PROGRAM_PREFIXES = ['/opt/homebrew', '/usr/local', '/home/linuxbrew/.linuxbrew'] as const;
+
+/** Canonical gh/git package locations; a prefix link into a project or temporary directory does not qualify. */
+export function isPackageProgramPath(path: string): boolean {
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  if (name !== 'gh' && name !== 'git') return false;
+  if (/^\/nix\/store\/[^/]+\/bin\/(?:gh|git)$/u.test(path)) return true;
+  return PACKAGE_PROGRAM_PREFIXES.some(prefix => {
+    if (path === `${prefix}/bin/${name}`) return true;
+    if (!path.startsWith(`${prefix}/Cellar/${name}/`)) return false;
+    const tail = path.slice(`${prefix}/Cellar/${name}/`.length).split('/');
+    return (
+      tail[0] !== '' &&
+      (tail.slice(1).join('/') === `bin/${name}` ||
+        (name === 'git' && tail.slice(1).join('/') === 'libexec/git-core/git'))
+    );
+  });
+}
+
 export interface PathsPort {
   /** The owner's home directory as the OS reports it (Accounts orders sign-ins by work folders under it, I184). */
   home(): string;
@@ -41,8 +61,9 @@ export interface PathsPort {
    * canonical ancestor must be root-owned and not writable by this process (ACLs included). Group/world write is
    * refused except on root-owned sticky directories (the multi-user Nix store), which protect root-owned entries.
    * The canonical basename must retain the requested program name, so a client-name link to a shell is refused.
-   * Exception: the product client beside the running daemon's canonical executable (the installer's user-owned
-   * ~/.local/bin is supported). Other user installs, worktrees, downloads and temporary folders are refused.
+   * Exceptions: the product client beside the running daemon's canonical executable (user-owned ~/.local/bin),
+   * and gh/git in fixed Homebrew/Linuxbrew bin/Cellar locations or the Nix store. Other user installs, worktrees,
+   * downloads and temporary folders are refused; package-prefix symlinks into those locations are refused too.
    * Requires permissions.which. verify() rechecks the full identity, including nanosecond timestamps, before use.
    * The returned trusted stat command lets a shell shim recheck dev/inode/size/mtime/ctime immediately before exec.
    */

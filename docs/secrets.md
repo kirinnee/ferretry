@@ -2396,7 +2396,8 @@ project or not, so the host's `gh` is ignored everywhere) with:
   followed by `gh -- "$@"`. System clients and every canonical ancestor must be root-owned
   and not writable by the daemon's user (ACLs included). The product client beside the running daemon's canonical
   executable is also trusted, supporting the installer's user-owned `~/.local/bin`; it is bound to its file identity.
-  This exception never applies to the token-bearing real `gh`. Group/world write is refused except on root-owned sticky
+  The real `gh` and its `git` dependency have the separate fixed package-manager exceptions described below.
+  Group/world write is refused except on root-owned sticky
   directories such as the multi-user Nix store: those protect root-owned entries and must still be unwritable by
   the pane user. The canonical basename must retain the client name: a planted client-name link to a system shell
   or interpreter is refused too. An executable planted in a worktree, downloads, a state
@@ -2440,15 +2441,22 @@ The daemon never opens a file in an agent's folder.
 after the first `--` is passed byte for byte. It waits for the daemon's own budget (5 minutes for a followed
 `pr checks --watch`, plus a margin), not the CLI's default 60 s.
 
-**Which `gh` gets a token.** The daemon never starts `gh` by bare name. It resolves `gh` on its own `PATH` with every
-folder inside the state home removed, then binds its canonical path and identity. The file and all canonical ancestors
-must be root-owned and unwritable by the pane user, so worktrees, downloads, state, temporary and project folders are
-refused. Immediately before exec it rechecks device, inode, size, nanosecond modification/change times, owner, mode and
-the trusted path chain; a mismatch refuses without starting a credential-bearing child. The reason: a ferret pane's `PATH` starts with the shim folder, a file the
+**Which `gh` gets a token.** The daemon never starts `gh` by bare name. Both `gh` and `git` are selected in fixed order:
+`/opt/homebrew/bin`, `/usr/local/bin`, `/home/linuxbrew/.linuxbrew/bin`, the owner's `~/.nix-profile/bin`,
+`/nix/var/nix/profiles/default/bin`, `/run/current-system/sw/bin`, sorted canonical Nix-store bin directories, then
+`/usr/bin` and `/bin`. Arbitrary pane/daemon PATH entries do not enter that list. Canonical Homebrew/Linuxbrew targets
+must stay in the fixed prefix's bin or the matching gh/git Cellar package; Nix profile links must resolve into the store.
+Those package-manager installs may be user-owned. System installs otherwise require a root-owned, non-writable chain.
+Links into worktrees, downloads, state, temporary or arbitrary project folders are refused. Immediately before exec it rechecks both programs'
+device, inode, size, nanosecond modification/change times, owner, mode and
+the canonical installation location (and the non-writable chain for ordinary system installs); a mismatch refuses
+without starting a credential-bearing child. The reason: a ferret pane's `PATH` starts with the shim folder, a file the
 ferret can rewrite, and `fy daemon start|restart|update` run from a pane would write that `PATH` into the service unit.
 The CLI therefore also drops every state-home folder from the `PATH` it writes into the unit, plist or direct-start
-environment. The `gh` child gets the fixed minimal `PATH` `/usr/bin:/bin`, so descendants do not search the pane's
-folders or other user-owned installs. The service-unit filtering and execution-time binding cover different starts.
+environment. The `gh` child gets only the canonical bound `git` and `gh` directories, then `/usr/bin:/bin` (deduplicated).
+The bound git directory comes first so a different git beside gh cannot shadow it. This supports separate Nix-store
+packages and user-owned Homebrew locations without inheriting pane/profile directories. User-owned programs outside the
+fixed package-manager locations are refused. The service-unit filtering and execution-time binding cover different starts.
 
 **`fy gh-doctor`** (run in a pane) warns when `command -v gh` is not the shim (the first `gh` on `PATH` is somewhere
 else: a shell rc moved `PATH`), when the pane was not started with the shim, or when a GitHub token variable is set in
@@ -2468,8 +2476,9 @@ the pane. It prints the variable's NAME and never a value.
   untrusted client refuses linked launches; the next launch tries again. **GAP:** the shim itself remains a same-user file,
   so editing the shim after launch can affect already-running panes until the next launch or restart. Identity
   checks are a pre-exec check, not an open-descriptor exec; the root-owned, non-writable canonical chain prevents a
-  pane from swapping a system client in that interval. The own-install exception is user-writable, so a same-user
-  process can race its pre-exec check; that exception is identity-bound, not a same-user filesystem sandbox.
+  pane from swapping a system client in that interval. The product's own install and the fixed package-manager
+  exceptions may be user-writable: same-user edits before binding are trusted at those explicit install locations,
+  and a same-user process can race the pre-exec check. These exceptions are identity-bound, not a filesystem sandbox.
   A privileged installer can still change a system client in that interval.
   System `stat` timestamps are second-resolution in this fingerprint. Same-user filesystem writes are not a sandbox.
 - **GAP: the harness's own shell tool.** Whether Claude Code's and Codex's shell tools keep the shim first after they

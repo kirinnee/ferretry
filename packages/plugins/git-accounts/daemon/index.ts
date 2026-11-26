@@ -69,6 +69,7 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
       const runFolder = overrides.runFolder ?? rootRunFolder(kernel.roots.root('downloads'));
       // `gh` (a token), `ssh-agent` and `ssh-add` (the PRIVATE KEY on stdin) are found the same way: outside the state home, absolute.
       const locatorPorts = {
+        home: () => kernel.paths.home(),
         daemonPath: () => kernel.hostFacts.launchGuard().searchPath,
         which: (name: string, options: { readonly directories: readonly string[] }) =>
           kernel.paths.which(name, options),

@@ -142,7 +142,7 @@ export class GitAccountsService {
       if (!(await verify()))
         throw new ApiError(
           403,
-          'GitHub client unavailable: gh changed since selection.',
+          'GitHub client unavailable: gh or git changed since selection.',
           GIT_ACCOUNT_CODES.invalidRequest,
         );
       const result = await this.spawn.runBytes(program, [...spec.args], {

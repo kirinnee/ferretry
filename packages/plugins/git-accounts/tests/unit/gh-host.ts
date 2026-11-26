@@ -6,7 +6,7 @@ const GH_PATH = '/usr/bin';
 export const GH_REAL = `${GH_PATH}/gh`;
 
 /** `testHost` options that make the real `gh` findable at `/usr/bin/gh` (the daemon's `PATH` is `path`). */
-export function ghHost(path: string = GH_PATH, executables: readonly string[] = [GH_REAL]) {
+export function ghHost(path: string = GH_PATH, executables: readonly string[] = [GH_REAL, '/usr/bin/git']) {
   return {
     searchPath: path,
     executables,

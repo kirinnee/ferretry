@@ -18,6 +18,7 @@ import daemon from '../../daemon/index.ts';
 import { GhRunner } from '../../daemon/features/gh-run/gh-runner.ts';
 import { FAKE_TOKEN, FakeGithub } from './fake-github.ts';
 import { GH_REAL, ghHost } from './gh-host.ts';
+import { testClient } from './run-folder.ts';
 
 const CLIENT = 'Ov23FAKECLIENTID';
 const ACCOUNT = 'gha_4242';
@@ -63,7 +64,10 @@ async function boot(
   const calls: Call[] = [];
   const host = await testHost({
     plugins: [daemon],
-    ...ghHost(options.where?.path, options.where?.executables),
+    ...ghHost(
+      options.where?.path,
+      options.where?.executables === undefined ? undefined : [...options.where.executables, '/usr/bin/git'],
+    ),
     ...(options.bindProgram === undefined ? {} : { bindProgram: options.bindProgram }),
     ...(options.where?.held === undefined ? {} : { stateHomeHolding: options.where.held }),
     gate: new StandInAdmission(() => (connecting ? ownerStanding() : (options.standing ?? (() => ownerStanding()))())),
@@ -149,6 +153,41 @@ describe('the gh that gets a token is the real one, never a file in the state ho
     });
     expect((await world.gh(['pr', 'list'], root)).json()).toEqual({ refused: expect.any(String) });
     expect(verified).toBe(true);
+    expect(world.calls).toEqual([]);
+    expect(everything(world)).not.toContain(FAKE_TOKEN);
+  });
+
+  test('R2: an untrusted git is refused before gh receives the token', async () => {
+    const { root } = projectFolder();
+    const world = await boot({
+      projects: [linked(root)],
+      bindProgram: async program => (program.endsWith('/git') ? undefined : testClient(program)),
+    });
+    expect((await world.gh(['pr', 'list'], root)).json()).toEqual({
+      refused: expect.stringContaining('git is not in a trusted installation'),
+    });
+    expect(world.calls).toEqual([]);
+    expect(everything(world)).not.toContain(FAKE_TOKEN);
+  });
+
+  test('R2: git swapped after selection refuses the credential-bearing gh exec', async () => {
+    const { root } = projectFolder();
+    let gitChecked = false;
+    const world = await boot({
+      projects: [linked(root)],
+      bindProgram: async program => ({
+        ...testClient(program),
+        verify: async () => {
+          if (program.endsWith('/git')) {
+            gitChecked = true;
+            return false;
+          }
+          return true;
+        },
+      }),
+    });
+    expect((await world.gh(['pr', 'list'], root)).json()).toEqual({ refused: expect.any(String) });
+    expect(gitChecked).toBe(true);
     expect(world.calls).toEqual([]);
     expect(everything(world)).not.toContain(FAKE_TOKEN);
   });

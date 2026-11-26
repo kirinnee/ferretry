@@ -1,6 +1,11 @@
 import { err, ok, type Result } from '@ferretry/std';
 import { basename, dirname, isAbsolute } from 'node:path';
-import type { CheckedDirectory, DirectoryRefusal, PathsPort } from '../contract/ports.ts';
+import {
+  isPackageProgramPath,
+  type CheckedDirectory,
+  type DirectoryRefusal,
+  type PathsPort,
+} from '../contract/ports.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import { fencedReal, fenceOf, sameObject, walkPhysically, walkUnchanged } from './fence-guard.ts';
 import type { TruncationWatcher } from './fence-index.ts';
@@ -19,8 +24,7 @@ export async function bindProgram(
     if (basename(real) !== basename(named)) return undefined;
     const file = await fs.identity(real);
     if (file?.kind !== 'file' || (file.mode & 0o111) === 0) return undefined;
-    // Trust only this daemon's own canonical install, never a general user-writable PATH directory.
-    // The installer defaults to ~/.local/bin. This exception is for the product client, never gh/stat.
+    // The product client uses its own daemon install; gh/git additionally support fixed package-manager installs.
     let sibling = false;
     if (ownClient && install && basename(named) === install.client) {
       const daemon = await fs.realpath(install.executable);
@@ -31,7 +35,8 @@ export async function bindProgram(
         dirname(real) === dirname(daemon) &&
         basename(real) === install.client;
     }
-    for (let at = real; !sibling; at = dirname(at)) {
+    const packaged = isPackageProgramPath(real);
+    for (let at = real; !sibling && !packaged; at = dirname(at)) {
       const found = await fs.identity(at);
       // A root-owned sticky directory (the multi-user Nix store) cannot rename its root-owned children. It is safe
       // only when the daemon itself cannot write there; /tmp still fails the access check.

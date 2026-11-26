@@ -165,6 +165,26 @@ describe('bindProgram installed-client trust', () => {
     files.get('/installed/gh')!.mtimeNs += 1n;
     expect(await bound?.verify()).toBe(false);
   });
+
+  test('R2 portability: user-owned package-manager installs are identity-bound, never arbitrary symlink targets', async () => {
+    for (const prefix of ['/opt/homebrew', '/usr/local', '/home/linuxbrew/.linuxbrew']) {
+      const { fs, files, writable } = installed();
+      const named = `${prefix}/bin/gh`;
+      const real = `${prefix}/Cellar/gh/1/bin/gh`;
+      files.set(real, { ...files.get('/installed/fy')!, owner: 1000 });
+      writable.add(real);
+      const brew = { ...fs, realpath: async (path: string) => (path === named ? real : path) };
+      const bound = await bindProgram(brew, named);
+      expect(bound?.program).toBe(real);
+      expect(await bound?.verify()).toBe(true);
+      files.get(real)!.mtimeNs += 1n;
+      expect(await bound?.verify()).toBe(false);
+      files.set('/tmp/project/gh', { ...files.get(real)! });
+      expect(
+        await bindProgram({ ...brew, realpath: async path => (path === named ? '/tmp/project/gh' : path) }, named),
+      ).toBeUndefined();
+    }
+  });
 });
 
 describe('checkDirectory', () => {
