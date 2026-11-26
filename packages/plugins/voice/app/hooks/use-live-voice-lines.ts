@@ -50,6 +50,11 @@ export function useLiveVoiceLines(input: LiveVoiceLinesInput): {
     if (looked.progress.length > 0) sink?.outdate(looked.progress);
   }, [active, rows, live, visible]);
 
+  // The tab goes to the background: a line waiting or playing stops the way a reading does (a plain hush, no cut, no note).
+  useEffect(() => {
+    if (active && !visible) latest.current.sink()?.quiet();
+  }, [active, visible]);
+
   const unsaid = useRef(
     (pick: ReplyWords, again?: () => void): string => reader.current?.unsaid(pick, again) ?? pick.markdown,
   );

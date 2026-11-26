@@ -100,6 +100,7 @@ function rig(options: { attachMachine?: boolean; sink?: 'takes' | 'refuses' | 'n
               return true;
             },
             outdate: () => undefined,
+            quiet: () => undefined,
           };
   function Probe({ page }: { readonly page: Page }) {
     const lines = useLiveVoiceLines({
