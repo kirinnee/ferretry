@@ -14,15 +14,15 @@ export function buildTunnelVerbs(
       // A change that loosens how the machine is reached waits for the owner: said as a pending approval, not a failure.
       const held = TunnelHeldAnswerSchema.safeParse(answer);
       if (held.success) {
-        io.out(renderTunnelHeld(held.data));
+        io.out(`${renderTunnelHeld(held.data)}\n`);
         return 0;
       }
-      io.out(renderTunnelChange(TunnelStatusViewSchema.parse(answer)));
+      io.out(`${renderTunnelChange(TunnelStatusViewSchema.parse(answer))}\n`);
       return 0;
     };
   const status: VerbHandler = async ({ options }) => {
     const view = TunnelStatusViewSchema.parse(await client.call('GET /v1/tunnel'));
-    io.out(options.json === true ? JSON.stringify(view) : view.sentence);
+    io.out(`${options.json === true ? JSON.stringify(view) : view.sentence}\n`);
     return 0;
   };
   return {

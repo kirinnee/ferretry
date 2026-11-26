@@ -11,6 +11,10 @@ export class ConsoleIo implements TerminalIo {
     process.stderr.write(text);
   }
 
+  get stdinIsTty(): boolean {
+    return Boolean(process.stdin.isTTY);
+  }
+
   get isTty(): boolean {
     return Boolean(process.stdin.isTTY && process.stdout.isTTY);
   }

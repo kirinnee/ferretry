@@ -39,7 +39,9 @@ describe('planSend', () => {
 
   it('should refuse a send with no words, even with attachments', () => {
     // Arrange / Act / Assert
-    should(() => planSend({ attachmentPaths: ['shot.png'] }, HUMAN)).throw(/provide a message/);
+    should(() => planSend({ attachmentPaths: ['shot.png'] }, HUMAN)).throw(
+      /no message: pass the text, --message-file <file>, or pipe it in/,
+    );
   });
 
   it('should carry the attachment paths for the controller to upload', () => {

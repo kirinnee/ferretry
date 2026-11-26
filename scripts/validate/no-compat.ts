@@ -43,6 +43,10 @@ export const ALLOWED: ReadonlyMap<string, string> = new Map([
     "LiteLLM's own field name for the day a model goes away, read by name when the build adds dates; published as `retires`",
   ],
   [
+    'packages/cli/src/lib/renamed-verbs.ts#RENAMED#migrate',
+    'the v4 verb word a person types, named only to point at its 5.0 replacement (fy ferret move); it runs nothing',
+  ],
+  [
     'packages/plugins/runtimes/daemon/lib/account/fixed-layer.ts#CODEX_HIDDEN_NOTICES',
     "Codex's own [notice] config key names, which spell 'migration'; the harness defines them, not Ferretry",
   ],
