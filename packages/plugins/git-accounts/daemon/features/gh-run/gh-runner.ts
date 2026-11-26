@@ -82,18 +82,20 @@ export class GhRunner {
       return { refused: error.message.slice(0, MAX_REFUSAL_LENGTH) };
     }
     if (help !== undefined) {
-      try {
-        const result = await this.deps.help(help);
-        await this.#record(caller, result.exitCode === 0 ? 'succeeded' : 'failed', {
-          command: 'help',
-          ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
-        });
-        return result;
-      } catch (error) {
-        if (!(error instanceof ApiError) || error.code !== GIT_ACCOUNT_CODES.invalidRequest) throw error;
-        await this.#record(caller, 'refused', { command: 'help' });
-        return { refused: error.message.slice(0, MAX_REFUSAL_LENGTH) };
-      }
+      return this.#limited(caller, 'help', undefined, async () => {
+        try {
+          const result = await this.deps.help(help);
+          await this.#record(caller, result.exitCode === 0 ? 'succeeded' : 'failed', {
+            command: 'help',
+            ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
+          });
+          return result;
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.code !== GIT_ACCOUNT_CODES.invalidRequest) throw error;
+          await this.#record(caller, 'refused', { command: 'help' });
+          return { refused: error.message.slice(0, MAX_REFUSAL_LENGTH) };
+        }
+      });
     }
     const verdict = judgeGh(format.argv);
     if (verdict.kind === 'refuse') {
@@ -142,42 +144,55 @@ export class GhRunner {
       argv = withRepository(argv, repo);
     }
 
+    return this.#limited(caller, verdict.command, account.id, async () => {
+      try {
+        const result = await this.deps.accounts.run(account.id, {
+          program: 'gh',
+          args: format.filter === undefined ? argv : [...argv, '--jq', format.filter],
+          timeoutMs: isFollowing(argv) ? FOLLOW_RUN_MS : PLAIN_RUN_MS,
+        });
+        await this.#record(caller, result.exitCode === 0 ? 'succeeded' : 'failed', {
+          command: verdict.command,
+          account: account.id,
+          ...(repo === undefined ? {} : { repo }),
+          ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
+        });
+        return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+      } catch (error) {
+        // The seam under this one is narrower than this policy and says so in a sentence: pass that sentence on, cut to
+        // what an answer may carry (a long unknown flag makes a long sentence, and an over-long one would be a 500).
+        if (error instanceof ApiError && error.code === GIT_ACCOUNT_CODES.invalidRequest && error.status === 403)
+          return refused(error.message.slice(0, MAX_REFUSAL_LENGTH), { account: account.id });
+        // Any other failure is still a call somebody made as that account: one record (no argument, body or folder), then the error.
+        await this.#record(caller, 'failed', {
+          command: verdict.command,
+          account: account.id,
+          ...(repo === undefined ? {} : { repo }),
+        });
+        throw error;
+      }
+    });
+  }
+
+  async #limited(
+    caller: GhCaller,
+    command: string,
+    account: string | undefined,
+    work: () => Promise<GhRunAnswer>,
+  ): Promise<GhRunAnswer> {
     const key =
       caller.ferret !== undefined
         ? `ferret:${caller.ferret}`
         : caller.actor.kind === 'device' && caller.actor.deviceId !== undefined
           ? `device:${caller.actor.deviceId}`
           : 'person';
-    if ((this.#running.get(key) ?? 0) >= MAX_RUNS_PER_CALLER)
-      return refused("Ferretry's gh is already running 4 commands for you: wait for one to finish.", {
-        account: account.id,
-      });
+    if ((this.#running.get(key) ?? 0) >= MAX_RUNS_PER_CALLER) {
+      await this.#record(caller, 'refused', { command, ...(account === undefined ? {} : { account }) });
+      return { refused: "Ferretry's gh is already running 4 commands for you: wait for one to finish." };
+    }
     this.#running.set(key, (this.#running.get(key) ?? 0) + 1);
     try {
-      const result = await this.deps.accounts.run(account.id, {
-        program: 'gh',
-        args: format.filter === undefined ? argv : [...argv, '--jq', format.filter],
-        timeoutMs: isFollowing(argv) ? FOLLOW_RUN_MS : PLAIN_RUN_MS,
-      });
-      await this.#record(caller, result.exitCode === 0 ? 'succeeded' : 'failed', {
-        command: verdict.command,
-        account: account.id,
-        ...(repo === undefined ? {} : { repo }),
-        ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
-      });
-      return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
-    } catch (error) {
-      // The seam under this one is narrower than this policy and says so in a sentence: pass that sentence on, cut to
-      // what an answer may carry (a long unknown flag makes a long sentence, and an over-long one would be a 500).
-      if (error instanceof ApiError && error.code === GIT_ACCOUNT_CODES.invalidRequest && error.status === 403)
-        return refused(error.message.slice(0, MAX_REFUSAL_LENGTH), { account: account.id });
-      // Any other failure is still a call somebody made as that account: one record (no argument, body or folder), then the error.
-      await this.#record(caller, 'failed', {
-        command: verdict.command,
-        account: account.id,
-        ...(repo === undefined ? {} : { repo }),
-      });
-      throw error;
+      return await work();
     } finally {
       const left = (this.#running.get(key) ?? 1) - 1;
       if (left <= 0) this.#running.delete(key);

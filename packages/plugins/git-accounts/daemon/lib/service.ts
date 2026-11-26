@@ -183,20 +183,39 @@ export class GitAccountsService {
             'GitHub formatter unavailable: formatter changed since selection.',
             GIT_ACCOUNT_CODES.invalidRequest,
           );
-        const formatted = await this.spawn.runBytes(formatter.program, ['-r', '--', filter], {
-          env: {},
-          inheritEnv: false,
-          stdin: scrub(new TextDecoder().decode(result.stdout), false),
-          cwd: folder.path,
-          timeout,
-          maxStdoutBytes: MAX_GH_OUTPUT_BYTES,
-          maxStderrBytes: MAX_GH_OUTPUT_BYTES,
-        });
-        return {
-          exitCode: formatted.exitCode < 0 ? null : formatted.exitCode,
-          stdout: scrub(new TextDecoder().decode(formatted.stdout), formatted.stdoutTruncated),
-          stderr: scrub(result.stderr, result.stderrTruncated) + scrub(formatted.stderr, formatted.stderrTruncated),
-        };
+        // A separate empty cwd and explicit library path close both formatters' default module search paths.
+        const evaluator = await this.scratch.open();
+        try {
+          const formatted = await this.spawn.runBytes(formatter.program, ['-L', evaluator.path, '-r', '--', filter], {
+            env: {},
+            inheritEnv: false,
+            stdin: scrub(new TextDecoder().decode(result.stdout), false),
+            cwd: evaluator.path,
+            timeout,
+            maxStdoutBytes: MAX_GH_OUTPUT_BYTES,
+            maxStderrBytes: MAX_GH_OUTPUT_BYTES,
+          });
+          const joined =
+            scrub(result.stderr, result.stderrTruncated) + scrub(formatted.stderr, formatted.stderrTruncated);
+          const stderrBytes = new TextEncoder().encode(joined);
+          // Reserve the cut note and drop an incomplete UTF-8 character or token at the new boundary.
+          const stderr =
+            stderrBytes.byteLength > MAX_GH_OUTPUT_BYTES
+              ? scrubCut(
+                  new TextDecoder().decode(stderrBytes.subarray(0, MAX_GH_OUTPUT_BYTES - scrubCut('', '').length), {
+                    stream: true,
+                  }),
+                  token ?? '',
+                )
+              : joined;
+          return {
+            exitCode: formatted.exitCode < 0 ? null : formatted.exitCode,
+            stdout: scrub(new TextDecoder().decode(formatted.stdout), formatted.stdoutTruncated),
+            stderr,
+          };
+        } finally {
+          await evaluator.close().catch(() => undefined);
+        }
       }
       return {
         // `runBytes` answers -1 for a child it had to kill (or one a signal ended): no exit code of its own.

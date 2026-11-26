@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -488,6 +488,120 @@ describe('who may ask, and for which folder', () => {
 });
 
 describe('G21b tokenless formatting and help', () => {
+  for (const tool of ['jq', 'gojq']) {
+    test(`G21b review: ${tool} module and data imports never read planted files`, async () => {
+      const { root } = projectFolder();
+      const planted = join(root, 'planted.json');
+      const module = join(root, 'planted.jq');
+      const reads = join(root, 'reads');
+      const fake = join(root, `${tool}.js`);
+      writeFileSync(planted, '{"synthetic":"private"}');
+      writeFileSync(module, 'def value: "synthetic private";');
+      writeFileSync(
+        fake,
+        `
+        import { readFileSync, appendFileSync } from 'node:fs';
+        const filter = process.argv.at(-1);
+        if (/import|include|modulemeta/.test(filter)) {
+          for (const file of ${JSON.stringify([planted, module])}) {
+            readFileSync(file);
+            appendFileSync(${JSON.stringify(reads)}, file + '\\n');
+          }
+        }
+        console.log('{}');
+      `,
+      );
+      const world = await boot({
+        projects: [linked(root)],
+        where: { executables: [GH_REAL, `/usr/bin/${tool}`] },
+        spawn: call => {
+          if (call.program === GH_REAL) return { ...OK, stdout: '{}' };
+          const result = Bun.spawnSync([process.execPath, fake, ...call.args], {
+            env: call.options?.env as Record<string, string>,
+            cwd: String(call.options?.cwd),
+          });
+          return {
+            ...OK,
+            exitCode: result.exitCode,
+            stdout: result.stdout.toString(),
+            stderr: result.stderr.toString(),
+          };
+        },
+      });
+      try {
+        for (const filter of [
+          `import "${planted}" as $data; $data`,
+          `import "${module}" as data; data::value`,
+          `include "${module}"; value`,
+          '"modulemeta" | modulemeta',
+          '"import"',
+          '"include"',
+        ]) {
+          const answer = (await world.gh(['api', 'user', '--jq', filter], root)).json();
+          expect(existsSync(reads) ? readFileSync(reads, 'utf8') : '').toBe('');
+          expect(answer).toEqual({ refused: "module loading isn't allowed in --jq" });
+        }
+        expect(world.calls).toHaveLength(0);
+      } finally {
+        await world.host.stop();
+      }
+    });
+
+    test(`G21b review: ${tool} gets fresh empty cwd and library, stdin only and no HOME`, async () => {
+      const worlds: { cwd: string; library: string }[] = [];
+      const world = await boot({
+        projects: [linked('/w')],
+        where: { executables: [GH_REAL, `/usr/bin/${tool}`] },
+        spawn: call => {
+          const cwd = String(call.options?.cwd);
+          if (call.program === GH_REAL) {
+            writeFileSync(join(cwd, 'planted.json'), '{}');
+            return { ...OK, stdout: '{"number":42}\n' };
+          }
+          const library = call.args[1] as string;
+          expect(call.args).toEqual(['-L', expect.any(String), '-r', '--', '[input_filename, $__prog_args]']);
+          expect(call.options).toMatchObject({ env: {}, inheritEnv: false, stdin: '{"number":42}\n' });
+          expect(readdirSync(cwd)).toEqual([]);
+          expect(readdirSync(library)).toEqual([]);
+          expect(cwd).not.toBe(world.calls[0]?.options?.cwd);
+          worlds.push({ cwd, library });
+          return { ...OK, stdout: '[null,[]]\n' };
+        },
+      });
+      try {
+        for (let run = 0; run < 2; run += 1)
+          expect((await world.gh(['api', 'user', '-q', '[input_filename, $__prog_args]'], '/w')).json()).toMatchObject({
+            exitCode: 0,
+          });
+        expect(worlds[0]?.cwd).not.toBe(worlds[1]?.cwd);
+        for (const paths of worlds) {
+          expect(existsSync(paths.cwd)).toBe(false);
+          expect(existsSync(paths.library)).toBe(false);
+        }
+      } finally {
+        await world.host.stop();
+      }
+    });
+  }
+
+  test('G21b review: joined stderr stays within 4 MiB, including Unicode and the cut note', async () => {
+    const world = await boot({
+      projects: [linked('/w')],
+      where: { executables: [GH_REAL, '/usr/bin/jq'] },
+      spawn: call =>
+        call.program === GH_REAL
+          ? { ...OK, stdout: '{}', stderr: 'é'.repeat(1_500_000) }
+          : { ...OK, stderr: '界'.repeat(1_000_000) },
+    });
+    try {
+      const answer = (await world.gh(['api', 'user', '-q', '.'], '/w')).json<{ stderr: string }>();
+      expect(new TextEncoder().encode(answer.stderr).byteLength).toBeLessThanOrEqual(4 * 1024 * 1024);
+      expect(answer.stderr).toEndWith('[output cut]');
+    } finally {
+      await world.host.stop();
+    }
+  });
+
   test('the tokenless help entry refuses API work before consulting any account dependency', async () => {
     const unexpected = () => {
       throw new Error('tokenless help consulted an account dependency');
@@ -540,7 +654,11 @@ describe('G21b tokenless formatting and help', () => {
         exitCode: number;
       }>();
       expect(answer.exitCode).toBe(0);
-      expect(JSON.parse(answer.stdout)).toEqual({ env: {}, args: ['-r', '--', filter], input: '{"number":42}\n' });
+      expect(JSON.parse(answer.stdout)).toEqual({
+        env: {},
+        args: ['-L', expect.any(String), '-r', '--', filter],
+        input: '{"number":42}\n',
+      });
       expect(answer.stderr).toBe('gh warning\n');
       expect(world.calls).toHaveLength(2);
       expect(world.calls[0]?.args).toEqual(['pr', 'list', '-R', 'acme/app', '--json', 'number']);
@@ -650,6 +768,31 @@ describe('G21b tokenless formatting and help', () => {
 });
 
 describe('bounds', () => {
+  for (const scenario of ['unlinked help', 'unlinked version', 'help then API', 'API then help']) {
+    test(`G21b review: four-run budget includes ${scenario}`, async () => {
+      const release: (() => void)[] = [];
+      const world = await boot({
+        projects: scenario.startsWith('unlinked') ? [] : [linked('/w')],
+        spawn: () => (release.length < 4 ? new Promise(resolve => release.push(() => resolve(OK))) : OK),
+      });
+      const first =
+        scenario === 'API then help' ? ['pr', 'list'] : scenario === 'unlinked version' ? ['--version'] : ['help'];
+      const fifth = scenario === 'help then API' ? ['pr', 'list'] : ['--version'];
+      const pending = Array.from({ length: 4 }, () => world.gh(first, '/w'));
+      try {
+        for (let tick = 0; release.length < 4 && tick < 1000; tick += 1) await Bun.sleep(1);
+        expect(release).toHaveLength(4);
+        expect((await world.gh(fifth, '/w')).json()).toEqual({ refused: expect.stringContaining('already running 4') });
+        expect(world.calls).toHaveLength(4);
+      } finally {
+        for (const done of release) done();
+        await Promise.all(pending);
+      }
+      expect((await world.gh(['--version'], '/w')).json()).toMatchObject({ exitCode: 0 });
+      await world.host.stop();
+    });
+  }
+
   test('at most 4 runs at once for one caller; the 5th is refused until one finishes', async () => {
     const release: (() => void)[] = [];
     const runner = new GhRunner({

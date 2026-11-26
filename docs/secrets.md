@@ -2087,11 +2087,16 @@ close reopen`), `run` (`list view watch cancel rerun`), `workflow` (`list view`)
     the filter, runs the bound `gh` with `--json` fields (the `api` command already returns JSON), then sends only its
     scrubbed JSON stdout over stdin to an identity-bound `jq` or `gojq`. That child has an **empty environment**:
     no sealed allowlist, `HOME`, `PATH`, token or daemon/tool variables; `$ENV` and `env` are empty. Its only arguments
-    are `-r`, `--`, and the filter: no caller file arguments or formatter options. Discovery uses the same fixed
+    are `-L <empty directory>`, `-r`, `--`, and the filter: no caller file arguments or formatter options. Its working
+    directory is freshly created and empty, separate from gh's scratch folder, and is also its explicit empty library
+    path. Filters containing the words `import`, `include` or `modulemeta` anywhere (even inside strings) are refused
+    with “module loading isn't allowed in --jq”: modules and JSON data imports must never open daemon-readable files.
+    `input_filename` and `$__prog_args` receive no file arguments. Discovery uses the same fixed
     package/profile prefixes as gh, never pane PATH, and rechecks identity before exec. Missing trusted formatters
     refuse before gh starts, naming **Install jq or gojq**. A failed gh keeps its exit code and stderr without starting
     a formatter; a formatter's exit code and stderr pass through, with gh's stderr retained. Both captures stay capped
-    and scrubbed; truncated gh JSON refuses filtering with a sentence asking to narrow the request.
+    and scrubbed; the joined gh and formatter stderr is capped again at 4 MiB, including its cut note.
+    Truncated gh JSON refuses filtering with a sentence asking to narrow the request.
     **Templates (`--template`/`-T`) say “use --jq instead”**: gh's
     [formatting interface](https://cli.github.com/manual/gh_help_formatting) formats command results and exposes no
     standalone stdin template formatter. Ambiguous `-t` still needs the long flag;
@@ -2356,7 +2361,7 @@ every call that passes here must pass there too, so **the effective surface is t
 on when it refuses. B9 widens nothing under it; widening it needs a lead decision and a security review of its own.
 
 Bounds: 120 s per stage (gh and any tokenless formatter; a followed run, `run watch` or `pr checks --watch`, gets the seam's 300 s ceiling); at most 4 runs at
-once per ferret; **4 MiB per stream, enforced where the output is read**: the seam runs `gh` through the kernel's
+once per ferret (including help/version, even with no linked account); **4 MiB per stream, enforced where the output is read**: the seam runs `gh` through the kernel's
 capped reader (`spawn.runBytes`, 4 MiB each for stdout and stderr), so a huge `run view --log`, `pr diff` or
 `api --paginate` never sits whole in the daemon's memory. A stream that was cut ends with `[output cut]`, and the scrub
 runs on the kept text AND drops any tail that could be the start of a token (the account's own, or a `gh?_…` /

@@ -17,12 +17,10 @@ export function splitGhFormat(args: readonly string[]): { argv: readonly string[
       refuse('Ferretry has no safe stdin template formatter: use --jq instead.');
     if (arg === '--jq' || arg === '-q' || arg.startsWith('--jq=') || arg.startsWith('-q')) {
       if (filter !== undefined) refuse('Give gh only one --jq filter.');
-      const value = arg.startsWith('--jq=')
-        ? arg.slice(5)
-        : arg.startsWith('-q') && arg.length > 2
-          ? arg.slice(2)
-          : args[++at];
-      if (value === undefined) refuse('--jq needs a filter.');
+      const value =
+        (arg.startsWith('--jq=') ? arg.slice(5) : arg.startsWith('-q') && arg.length > 2 ? arg.slice(2) : args[++at]) ??
+        refuse('--jq needs a filter.');
+      if (/\b(?:import|include|modulemeta)\b/u.test(value)) refuse("module loading isn't allowed in --jq");
       filter = value;
     } else argv.push(arg);
   }
