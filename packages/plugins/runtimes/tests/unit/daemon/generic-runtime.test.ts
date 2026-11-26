@@ -746,3 +746,21 @@ test('install failure and missing install capability are typed, with no package 
     ]),
   });
 });
+
+test('the start source forwards a native runtime default model and turns a refused read into a typed refusal', async () => {
+  const f = await fixture();
+  const custom = RuntimeIdSchema.parse('custom');
+  const answer = { ok: true as const, harness: 'fourth', login: 'key' };
+  const source = f.generic.start({ resolve: async () => answer, login: async () => ({ ok: true }) });
+  expect(await source.resolve(custom)).toEqual({ ...answer, model: 'provider/model' });
+  f.models({ choices: [{ id: 'provider/model', label: 'Model' }] });
+  expect(await source.resolve(custom)).toEqual(answer);
+  f.modelFailure(true);
+  expect(await source.resolve(custom)).toEqual({
+    ok: false,
+    sentence: 'Fourth could not report its installation and models',
+  });
+  const refused = { ok: false as const, refusal: 'unknown' as const, sentence: 'not here' };
+  const passed = f.generic.start({ resolve: async () => refused, login: async () => ({ ok: true }) });
+  expect(await passed.resolve(custom)).toEqual(refused);
+});
