@@ -77,6 +77,7 @@ export function opencodeHarness(kernel: KernelPorts, config: () => HarnessConfig
   };
   return {
     key: 'opencode',
+    screenReader: opencodeScreen,
     facts: OPENCODE_FACTS,
     accepts: ['api-key', 'proxy', 'endpoint'],
     async discover() {

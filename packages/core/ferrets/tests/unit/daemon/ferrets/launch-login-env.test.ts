@@ -26,10 +26,12 @@ function fixture(options: {
   readonly loginLaunchEnv?: FerretsPorts['loginLaunchEnv'];
   readonly parts?: readonly LaunchPart[];
   readonly unknownSecrets?: readonly string[];
+  readonly harness?: string;
+  readonly subscriptionRefused?: boolean;
 }) {
   const registry = new FerretRegistry([]);
   const tokens = new FerretTokenDirectory();
-  const harness = new FakeHarness('claude-code');
+  const harness = new FakeHarness(options.harness ?? 'claude-code');
   const asked: Env[] = [];
   let next = 0;
   const ports: FerretsPorts = {
@@ -43,8 +45,8 @@ function fixture(options: {
     },
     save: async () => {},
     saveTokens: async () => {},
-    harness: key => (key === 'claude-code' ? harness : undefined),
-    harnessKeys: () => ['claude-code'],
+    harness: key => (key === harness.key ? harness : undefined),
+    harnessKeys: () => [harness.key],
     runner: () => new FakeRunner(),
     decide: async () => ({ allow: true }),
     launchParts: () => [{ parts: async () => options.parts ?? [] }],
@@ -55,8 +57,10 @@ function fixture(options: {
     ...(options.loginEnv === undefined ? {} : { loginEnv: options.loginEnv }),
     ...(options.loginLaunchEnv === undefined ? {} : { loginLaunchEnv: options.loginLaunchEnv }),
     vault: {
-      childEnvironment: async (_ferret, env) => {
+      childEnvironment: async (_ferret, env, destination) => {
+        expect(destination).toBe(harness.key);
         asked.push({ ...env });
+        if (options.subscriptionRefused) return err({ unknown: [], code: 'subscription_login' });
         const unknown = options.unknownSecrets ?? [];
         return unknown.length > 0 ? err({ unknown: [...unknown] }) : ok(emptyChildEnvironment());
       },
@@ -72,6 +76,14 @@ const env =
     ok(values);
 
 describe('a ferret launch carries its login’s environment', () => {
+  test('the sealed subscription policy returns a typed start refusal without launching a harness', async () => {
+    const f = fixture({ harness: 'opencode', subscriptionRefused: true });
+    const started = await f.service.start({ folder: '/work', harness: 'opencode', by: 'owner' }, PERSON_ORIGIN);
+    expect(started).toMatchObject({ ok: false, error: { code: 'refused' } });
+    if (started.ok) throw new Error('subscription must refuse');
+    expect(started.error.reason).toContain('subscription credentials');
+    expect(f.asked).toHaveLength(1);
+  });
   test('a literal and a ${secret:X} login value both reach the Vault by name, as written', async () => {
     const f = fixture({
       loginEnv: env({

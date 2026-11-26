@@ -155,6 +155,10 @@ export function fakeLogins(initial: readonly LoginView[] = []): FakeLogins {
   const list = (): LoginList => LoginListSchema.parse({ format: 1, machine: 'fake', logins });
   return {
     list: async () => list(),
+    launchRefusal: async (id, harness) =>
+      harness === 'opencode' && logins.find(login => login.id === id)?.store !== 'environment'
+        ? 'OpenCode refuses subscription sign-ins, including Anthropic Claude subscriptions; choose an API key or endpoint login'
+        : undefined,
     get: async id => logins.find(login => login.id === id),
     quota: async id => logins.find(login => login.id === id)?.usage,
     environmentTemplates: async () => templates,

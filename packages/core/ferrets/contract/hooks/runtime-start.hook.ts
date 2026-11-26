@@ -23,7 +23,7 @@ export interface RuntimeStartSource {
    * Whether the login NAMED (`--login`, or the one a stored record holds) may be spent now: a login that is switched off or
    * over its spend budget is refused here, so it can never be spent whether it is named directly or reached through a runtime.
    */
-  login(login: string): Promise<LoginStartResolution>;
+  login(login: string, harness?: string): Promise<LoginStartResolution>;
   /** The runtime NAMED `runtime`, resolved; or the plain sentence saying why it cannot serve a launch now. */
   resolve(runtime: string): Promise<RuntimeStartResolution>;
   /**

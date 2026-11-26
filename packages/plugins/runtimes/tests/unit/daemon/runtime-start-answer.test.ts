@@ -39,6 +39,23 @@ const period = (level: 'ok' | 'over_trigger' | 'over_hard') => ({
 const OK = login('oauth');
 
 describe('runtimeStartAnswer', () => {
+  test('a metadata compatibility refusal precedes every login status read', async () => {
+    let reads = 0;
+    const answer = runtimeStartAnswer({
+      ...resolving(READY),
+      logins: {
+        list: async () => {
+          reads++;
+          return { logins: [OK] } as never;
+        },
+        launchRefusal: async (_login, harness) => (harness === 'opencode' ? 'subscription refused' : undefined),
+      },
+    });
+    expect(await answer.login('oauth', 'opencode')).toEqual({ ok: false, sentence: 'subscription refused' });
+    expect(reads).toBe(0);
+    expect(await answer.login('oauth', 'claude-code')).toEqual({ ok: true });
+    expect(reads).toBe(1);
+  });
   test('a runtime that resolves answers its harness and its login, and only that runtime was asked', async () => {
     const { asked, resolve } = resolving(READY);
 

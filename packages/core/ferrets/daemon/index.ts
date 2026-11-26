@@ -300,6 +300,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // built below; every call here is made after it exists.
     launcher: heldLifecycleLauncher(() => service, {
       handleOf: ferret => registry.get(ferret)?.handle as RunnerHandle | undefined,
+      harnessOf: ferret => registry.get(ferret)?.harness,
       runner: runnerOf,
       sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
       nowMs: () => kernel.clock.nowMs(),
@@ -513,14 +514,14 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return found === 'unavailable' ? undefined : await found.defaultRuntime?.();
     },
     // Whether a login named with no runtime may be spent: Runtimes alone answers, the same check a runtime's login passes.
-    loginStart: async login => {
+    loginStart: async (login, harness) => {
       const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
       return found === 'unavailable'
         ? {
             ok: false,
             sentence: `login ${login} cannot be started: the Runtimes plugin is not running, so it cannot be checked`,
           }
-        : await found.login(login);
+        : await found.login(login, harness);
     },
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
     daemonPath: () => kernel.hostFacts.launchGuard().searchPath,

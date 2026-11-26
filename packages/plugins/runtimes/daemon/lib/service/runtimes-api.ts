@@ -41,7 +41,7 @@ export interface RuntimesApiDeps {
   defaultSetting(): string | undefined;
   /** The harness keys currently on (`FerretsApi.harnesses`). */
   harnesses(): readonly HarnessKey[];
-  readonly logins: Pick<LoginsApi, 'list'> & Partial<Pick<LoginsApi, 'environmentTemplates'>>;
+  readonly logins: Pick<LoginsApi, 'list'> & Partial<Pick<LoginsApi, 'environmentTemplates' | 'launchRefusal'>>;
   now(): number;
   /**
    * The runtime a name it no longer carries now answers to (`ids.json` `formerNames`), or `undefined` when none claims it
@@ -190,6 +190,7 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
 
   const defaultRuntime = async (): Promise<RuntimeId | undefined> => {
     const named = deps.defaultSetting();
+    if (named !== undefined && deps.runtimes().has(named)) return RuntimeIdSchema.parse(named);
     // A saved default that points at a runtime that is no longer here (a derived one whose login needs sign-in) is unset.
     if (named !== undefined && (await effective(await loginsById(deps.logins))).runtimes.has(named))
       return RuntimeIdSchema.parse(named);
@@ -218,6 +219,13 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
         };
       }
       let wanted = named;
+      const configured =
+        deps.runtimes().get(wanted) ??
+        deps.runtimes().get((await deps.currentName?.(wanted).catch(() => undefined)) ?? '');
+      if (configured?.harness !== undefined) {
+        const refusal = await deps.logins.launchRefusal?.(configured.login, configured.harness);
+        if (refusal !== undefined) return { ok: false, refusal: 'not_signed_in', sentence: refusal };
+      }
       const logins = await loginsById(deps.logins);
       const { runtimes, hasProfile } = await effective(logins);
       let file = runtimes.get(wanted);

@@ -27,7 +27,7 @@ export interface RuntimeStartAnswerDeps {
   readonly resolve: RuntimesApi['resolve'];
   /** The machine's default runtime; absent: the answer names none. */
   readonly default?: RuntimesApi['default'];
-  readonly logins: Pick<LoginsApi, 'list'>;
+  readonly logins: Pick<LoginsApi, 'list'> & Partial<Pick<LoginsApi, 'launchRefusal'>>;
   /**
    * The published runtimes (`RuntimesApi.catalog`), read for what a runtime serves. Absent: the answer has no `catalog`
    * member, which a move onto another runtime reads as "not built yet".
@@ -55,7 +55,9 @@ function whyNot(login: LoginView): string | undefined {
 }
 
 export function runtimeStartAnswer(deps: RuntimeStartAnswerDeps): RuntimeStartSource {
-  const login = async (name: string): Promise<LoginStartResolution> => {
+  const login = async (name: string, harness?: string): Promise<LoginStartResolution> => {
+    const refusal = harness === undefined ? undefined : await deps.logins.launchRefusal?.(name, harness);
+    if (refusal !== undefined) return { ok: false, sentence: refusal };
     const listed = await deps.logins.list().catch(() => undefined);
     if (listed === undefined)
       return { ok: false, sentence: `login ${name} could not be checked, so the ferret was not started` };

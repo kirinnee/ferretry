@@ -1,10 +1,9 @@
 import { expect, test } from 'bun:test';
-import { Runners, Logins, RuntimeStart } from '../../../../ferrets/contract/index.ts';
-import { FakeRunner, FakeRuntimeStart, FakeLoginKind } from '../../../../ferrets/contract/testing/index.ts';
+import { LaunchParts, Runners, type RunSpec } from '../../../../ferrets/contract/index.ts';
+import { FakeRunner } from '../../../../ferrets/contract/testing/index.ts';
 import { FakeGate, ownerStanding, StandInAdmission } from '../../../../gate/contract/testing/index.ts';
-import { FakeVault } from '../../../../vault/contract/testing/index.ts';
+import { VaultPort } from '../../../../vault/contract/index.ts';
 import { FakeAsks } from '../../../../asks/contract/testing/index.ts';
-import { fakeLogins, sampleLogin } from '../../../../../plugins/logins/contract/testing/index.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { daemonImplementations } from '../../../src/generated/plugins.ts';
 import { testHost } from '../../../testing/index.ts';
@@ -15,113 +14,158 @@ const real = (id: string) => {
   return found;
 };
 
-test('the real mounted start refuses an Anthropic subscription before env/credential/spawn and frees the next start', async () => {
-  const runner = new FakeRunner();
-  let environments = 0;
-  let credentials = 0;
-  let spawns = 0;
-  const login = new FakeLoginKind();
-  const terminals = implementDaemon(
-    definePlugin({
-      id: 'terminals',
-      title: 'Runner fixture',
-      version: '5.0.0',
-      api: 5,
-      core: false,
-      kinds: [],
-      hooks: { takes: [{ hook: Runners, key: 'tmux' }] },
-    }),
-    { build: () => ({ hooks: { 'runners:tmux': runner } }) },
-  );
-  const runtimes = implementDaemon(
-    definePlugin({
-      id: 'runtimes',
-      title: 'Runtime fixture',
-      version: '5.0.0',
-      api: 5,
-      core: false,
-      kinds: [],
-      hooks: { takes: [{ hook: RuntimeStart, key: 'runtimes' }] },
-    }),
-    { build: () => ({ hooks: { 'runtime.start:runtimes': new FakeRuntimeStart() } }) },
-  );
-  const logins = implementDaemon(
-    definePlugin({
-      id: 'logins',
-      title: 'Login fixture',
-      version: '5.0.0',
-      api: 5,
-      core: false,
-      kinds: [],
-      hooks: { takes: [{ hook: Logins, key: 'api-key' }] },
-    }),
-    {
-      build: () => ({
-        hooks: {
-          'logins:api-key': {
-            ...login,
-            key: 'api-key' as const,
-            harnesses: ['opencode'],
-            holds: () => true,
-            signIn: () => login.signIn(),
-            status: () => login.status(),
-            env: async () => {
-              environments++;
-              return {};
-            },
-            credential: async () => {
-              credentials++;
-              return { kind: 'none' as const };
+for (const through of ['login', 'runtime'] as const) {
+  test(`real Logins + Runtimes refuse a subscription through ${through} before status/store reads and reuse the callsign`, async () => {
+    let reads = 0;
+    let spawns = 0;
+    let profileEnvironment: Record<string, string> = {};
+    const specs: RunSpec[] = [];
+    const runner = new (class extends FakeRunner {
+      override async start(spec: RunSpec) {
+        specs.push(spec);
+        return await super.start(spec);
+      }
+    })();
+    const terminals = implementDaemon(
+      definePlugin({
+        id: 'terminals',
+        title: 'Runner fixture',
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        hooks: { takes: [{ hook: Runners, key: 'tmux' }] },
+      }),
+      { build: () => ({ hooks: { 'runners:tmux': runner } }) },
+    );
+    const profile = implementDaemon(
+      definePlugin({
+        id: 'profile-fixture',
+        title: 'Profile environment',
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        hooks: { takes: [{ hook: LaunchParts }] },
+      }),
+      {
+        build: () => ({
+          hooks: {
+            'launch.parts': () => [
+              {
+                id: 'profile-fixture',
+                item: {
+                  parts: async () => [{ kind: 'env', env: profileEnvironment }],
+                },
+              },
+            ],
+          },
+        }),
+      },
+    );
+    const original = real('logins');
+    const logins = implementDaemon(original.manifest, {
+      build: ctx => {
+        if (original.build === undefined) throw new Error('no Logins build');
+        const roots = ctx.kernel.roots;
+        return original.build({
+          ...ctx,
+          kernel: {
+            ...ctx.kernel,
+            roots: {
+              ...roots,
+              root: (name, scope) => {
+                const root = roots.root(name, scope);
+                if (name !== 'credentials') return root;
+                return new Proxy(root, {
+                  get(target, property) {
+                    const value = Reflect.get(target, property);
+                    return typeof value !== 'function'
+                      ? value
+                      : (...args: unknown[]) => {
+                          reads++;
+                          return value.apply(target, args);
+                        };
+                  },
+                });
+              },
             },
           },
-        },
-      }),
-    },
-  );
-  const loginView = fakeLogins([
-    sampleLogin('subscription', { store: 'ferretry' }),
-    sampleLogin('key', { store: 'environment' }),
-  ]);
-  const host = await testHost({
-    everyDirectory: true,
-    plugins: [real('ferrets'), real('opencode'), terminals, runtimes, logins],
-    gate: new StandInAdmission(() => ownerStanding()),
-    fakes: {
-      gate: new FakeGate(),
-      vault: new FakeVault(),
-      asks: new FakeAsks(),
-    },
-    uses: { logins: loginView },
-    config: { 'harness-opencode.yaml': { binary: '/fake/opencode' } },
-    spawn: () => {
-      spawns++;
-      return { exitCode: 0, signal: null, stdout: 'opencode v2.4.2\n', stderr: '' };
-    },
-  });
-  const start = (login: string, id: string) =>
-    host.request('POST', '/v1/ferrets', {
-      headers: { 'x-fy-request-id': id },
-      body: {
-        harness: 'opencode',
-        folder: '/work/project',
-        login,
-        model: 'deepseek/deepseek-flash',
-        mode: 'interactive',
+        });
       },
     });
-  try {
-    const refused = await start('subscription', 'request-one');
-    expect(refused.status).toBe(409);
-    expect(JSON.stringify(refused.body)).toContain('Anthropic Claude subscriptions');
-    expect([environments, credentials, spawns, runner.starts]).toEqual([0, 0, 0, 0]);
-    const accepted = await start('key', 'request-two');
-    expect(accepted.status).toBe(201);
-    expect(runner.starts).toBe(1);
-    expect([environments, credentials]).toEqual([1, 1]);
-    const repeated = await start('key', 'request-two');
-    expect(repeated.status).toBe(200);
-    expect(runner.starts).toBe(1);
-  } finally {
-    await host.stop();
-  }
-});
+    const host = await testHost({
+      everyDirectory: true,
+      plugins: [real('vault'), real('ferrets'), logins, real('runtimes'), real('opencode'), terminals, profile],
+      gate: new StandInAdmission(() => ownerStanding()),
+      fakes: { gate: new FakeGate(), asks: new FakeAsks() },
+      config: {
+        'harness-opencode.yaml': { binary: '/fake/opencode' },
+        logins: {
+          subscription: { harness: 'claude-code', store: 'ferretry' },
+          key: {
+            harness: 'claude-code',
+            store: 'environment',
+            preset: 'anthropic-api-key',
+            env: { ANTHROPIC_API_KEY: '${secret:KEY}' },
+          },
+          endpoint: {
+            harness: 'claude-code',
+            store: 'environment',
+            preset: 'deepseek',
+            env: { DEEPSEEK_API_KEY: '${secret:OAUTH}' },
+          },
+        },
+        runtimes: {
+          subscription: { harness: 'opencode', login: 'subscription', profile: 'plain' },
+          key: { harness: 'opencode', login: 'key', profile: 'plain' },
+          endpoint: { harness: 'opencode', login: 'endpoint', profile: 'plain' },
+        },
+        profiles: { plain: { contents: [] } },
+      },
+      spawn: () => {
+        spawns++;
+        return { exitCode: 0, signal: null, stdout: 'opencode v2.4.2\n', stderr: '' };
+      },
+    });
+    const start = (account: string, id: string, selector: 'login' | 'runtime' = through) =>
+      host.request('POST', '/v1/ferrets', {
+        headers: { 'x-fy-request-id': id },
+        body: {
+          harness: 'opencode',
+          name: id.startsWith('request-') ? 'reusable' : id,
+          folder: '/work/project',
+          [selector]: account,
+          model: 'deepseek/deepseek-flash',
+          mode: 'interactive',
+        },
+      });
+    try {
+      await host.provided(VaultPort).put('KEY', 'sk-ant-api03-SYNTHETIC-NOT-A-CREDENTIAL');
+      await host.provided(VaultPort).put('OAUTH', 'sk-ant-oat01-SYNTHETIC-NOT-A-CREDENTIAL');
+      reads = 0;
+      spawns = 0;
+      const refused = await start('subscription', 'request-one');
+      expect(refused.status).toBe(409);
+      expect(JSON.stringify(refused.body)).toContain('Anthropic Claude subscriptions');
+      expect([reads, spawns, specs.length]).toEqual([0, 0, 0]);
+      const accepted = await start('key', 'request-two', 'login');
+      expect(accepted).toMatchObject({ status: 201 });
+      expect(specs.length).toBe(1);
+      const endpoint = await start('endpoint', 'endpoint-refused', 'login');
+      expect(endpoint).toMatchObject({ status: 409 });
+      expect(JSON.stringify(endpoint.body)).toContain('subscription credentials');
+      expect(JSON.stringify(endpoint.body)).not.toContain('sk-ant-');
+      profileEnvironment = { PROFILE_SETTING: '${secret:OAUTH}' };
+      const profileRefused = await start('key', 'profile-refused', 'login');
+      expect(profileRefused).toMatchObject({ status: 409 });
+      expect(JSON.stringify(profileRefused.body)).toContain('subscription credentials');
+      expect(JSON.stringify(profileRefused.body)).not.toContain('sk-ant-');
+      expect(specs.length).toBe(1);
+      expect((await start('key', 'request-two', 'login')).status).toBe(200);
+      expect(specs.length).toBe(1);
+    } finally {
+      await host.stop();
+    }
+  });
+}

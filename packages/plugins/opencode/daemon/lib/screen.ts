@@ -1,4 +1,5 @@
 import type { HarnessScreenReader, HarnessScreenReading } from '@ferretry/core-ferrets/contract';
+import { stripVTControlCharacters } from 'node:util';
 
 const UNKNOWN: HarnessScreenReading = { working: true, atPrompt: false, composer: null };
 
@@ -26,6 +27,7 @@ function foreground(line: string, column: number): string | undefined {
 export const opencodeScreen: HarnessScreenReader = {
   key: 'opencode',
   read({ visible, attributed, cursorX, cursorY }) {
+    if (attributed !== undefined && stripVTControlCharacters(attributed) !== visible) return UNKNOWN;
     const lines = visible.replaceAll('\r\n', '\n').split('\n');
     const closing = lines.findLastIndex(line => /^\s*╹▀{3,}/u.test(line));
     if (
