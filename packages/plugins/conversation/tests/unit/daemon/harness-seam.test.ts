@@ -38,6 +38,7 @@ import {
   INTERRUPT_UNAVAILABLE,
   SEND_UNAVAILABLE,
   STRANDED_SENTENCE,
+  TypingHeld,
   UNCONFIRMED_SENTENCE,
 } from '@ferretry/core-mailbox/contract';
 import { writeAskedQuestion } from '../../../daemon/questions/adapters/state-asked-question.ts';
@@ -372,6 +373,17 @@ const opened = (ferrets: HarnessFerrets) => [
   ...new Map(ferrets.opens.map(open => [`${open.ferret}/${open.caller}`, open])).values(),
 ];
 
+/**
+ * What was typed, after proving every delivery carried the write-boundary check (`beforeWrite`) Ferrets' runner calls
+ * right before its first key. What that check DOES is proved once, below ("the typing hold is the check each delivery
+ * carries"), over the same fake.
+ */
+const deliveredWithHold = (ferrets: HarnessFerrets) =>
+  ferrets.delivered.map(delivery => {
+    expect(delivery.beforeWrite).toBeFunction();
+    return { text: delivery.text };
+  });
+
 const send = async (
   host: Awaited<ReturnType<typeof conversation>>['host'],
   id = 'req-1',
@@ -393,7 +405,7 @@ describe('Conversation types into a ferret through the Ferrets harness seam', ()
 
     expect(response.status).toBe(200);
     expect(response.json()).toMatchObject({ ferret: 'f1', disposition: 'sent', sendId: 'req-1', fate: 'accepted' });
-    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'hello there' }]);
     // Deliver ran with no act around it: the kernel's act (a bomb here) was never entered.
     expect(acted).toEqual([]);
     const sends = (await api().sends(F1)).sends;
@@ -427,7 +439,7 @@ describe('Conversation types into a ferret through the Ferrets harness seam', ()
 
     expect([response.status, response.json<{ code: string }>().code]).toEqual([404, 'not-found']);
     expect(response.json<{ error: string }>().error).toContain('session not found: ghost');
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect((await api().sends(ferretId('ghost'))).sends).toEqual([]);
     await host.stop();
   });
@@ -732,7 +744,7 @@ describe('a send to a ferret still working on its turn goes to the harness’s o
 
     expect(response.status).toBe(200);
     expect(response.json()).toMatchObject({ disposition: 'queued', sendId: 'req-1', fate: 'queued' });
-    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'hello there' }]);
     expect(ferrets.queued).toEqual(['hello there']);
     expect(await rows(api)).toEqual([
       { sendId: 'req-1', fate: 'queued', path: 'native-inline', typedNotSent: undefined, unaccountedReason: undefined },
@@ -1037,7 +1049,7 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
 
     expect(sent.ok).toBe(true);
     // Bare: no peer banner, so the agent does not read it as a teammate, and no sender id is named.
-    expect(ferrets.delivered).toEqual([{ text: 'are you stuck?' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'are you stuck?' }]);
     expect(opened(ferrets)).toEqual([{ ferret: F1, caller: undefined }]);
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
       ['s-w', 'daemon', undefined],
@@ -1064,7 +1076,7 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
     );
 
     expect(sent.ok).toBe(true);
-    expect(ferrets.delivered).toEqual([{ text: '[attention check] raise it' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: '[attention check] raise it' }]);
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
       ['s-a', 'daemon', undefined],
     ]);
@@ -1091,7 +1103,7 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
       expect(sent).toMatchObject({ ok: false, error: { code: 'send_refused' } });
       expect(JSON.stringify(sent)).toContain('never revives it');
       expect(ferrets.resumes).toEqual([]);
-      expect(ferrets.delivered).toEqual([]);
+      expect(deliveredWithHold(ferrets)).toEqual([]);
       expect((await api().sends(F1)).sends).toEqual([]);
       await host.stop();
     },
@@ -1105,7 +1117,7 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
 
     // The fake Ferrets relaunches without typing a pointer, so nothing was carried: refused, nothing typed.
     expect(sent.ok).toBe(false);
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect(ferrets.resumes).toEqual([{ ferret: F1, message: 'are you stuck?' }]);
     expect(await live(api)).toEqual([]);
     await host.stop();
@@ -1164,7 +1176,7 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
       const after = await rowOf();
       expect(after.held).toBe(true);
       expect(after.fate).toBe('accepted');
-      expect(ferrets.delivered).toEqual([]);
+      expect(deliveredWithHold(ferrets)).toEqual([]);
       expect(ferrets.queued).toEqual([]);
       // So its copy must not say a revive delivers it.
       const said = sendBadge(after as never).detail;
@@ -1181,7 +1193,7 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
     const sent = await api().send(ferretId('elsewhere'), { kind: 'warden' }, { message: 'are you stuck?' });
 
     expect(sent).toMatchObject({ ok: false, error: { code: 'not_found' } });
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     await host.stop();
   });
 
@@ -1191,7 +1203,7 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
       ok: false,
       error: { code: 'conversation_terminal_unavailable' },
     });
-    expect(closed.ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(closed.ferrets)).toEqual([]);
     await closed.host.stop();
   });
 
@@ -1201,6 +1213,64 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
     await send(host);
 
     expect(opened(ferrets)).toEqual([{ ferret: F1, caller: undefined }]);
+    await host.stop();
+  });
+});
+
+describe('the typing hold is the check each delivery carries (G9)', () => {
+  const pane = (typing: boolean) =>
+    Promise.resolve(ok({ alive: true, dead: false, promptReady: true, activeWork: false, typing }));
+
+  /** The write-boundary check Ferrets' runner was handed for the first delivery: the runner calls it before its first key. */
+  const holdOf = (ferrets: HarnessFerrets): (() => Promise<void>) => {
+    const hold = ferrets.delivered[0]?.beforeWrite;
+    if (hold === undefined) throw new Error('the delivery carried no write-boundary check');
+    return hold;
+  };
+
+  test('a person’s own `fy send` is never held: the check lets a typing pane through, and does not even look', async () => {
+    const { host, ferrets, api } = await conversation();
+    expect((await api().send(F1, { kind: 'owner' }, { message: 'mine', sendId: 's-h' })).ok).toBe(true);
+    let looks = 0;
+    ferrets.script.observe = () => {
+      looks += 1;
+      return pane(true);
+    };
+
+    await holdOf(ferrets)();
+
+    expect(looks).toBe(0);
+    await host.stop();
+  });
+
+  test('the Warden’s write is held while a person types in the pane, reads the pane again each time, and goes once they stop', async () => {
+    const { host, ferrets, api } = await conversation();
+    expect((await api().send(F1, { kind: 'warden' }, { message: 'are you stuck?', sendId: 's-w' })).ok).toBe(true);
+    const hold = holdOf(ferrets);
+
+    ferrets.script.observe = () => pane(true);
+    await expect(hold()).rejects.toBeInstanceOf(TypingHeld);
+    // A pane that went quiet after the wait: the same check, looking again, lets the write through.
+    ferrets.script.observe = () => pane(false);
+    await hold();
+    // A pane that cannot be read decides nothing here: the terminal's own checks do.
+    ferrets.script.observe = async () => err({ refused: 'no_pane' as const });
+    await hold();
+    await host.stop();
+  });
+
+  test('a ferret’s message through the route is held the same way, while a person types', async () => {
+    const { host, clock, ferrets } = await conversation(undefined, OPEN, {}, { sendStanding: ferretStanding(CALLER) });
+    expect(
+      (await send(host, 'req-h', 'f1', { message: 'psst', now: false, label: 'action' }, asFerret(CALLER))).status,
+    ).toBe(200);
+    await passed(clock);
+    const hold = holdOf(ferrets);
+
+    ferrets.script.observe = () => pane(true);
+    await expect(hold()).rejects.toBeInstanceOf(TypingHeld);
+    ferrets.script.observe = () => pane(false);
+    await hold();
     await host.stop();
   });
 });
@@ -1216,7 +1286,7 @@ describe('the CLI’s own send body goes: `now: false` and a label are not extra
 
     expect(response.status).toBe(200);
     expect(response.json()).toMatchObject({ disposition: 'sent', sendId: 'req-cli' });
-    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'hello there' }]);
     await host.stop();
   });
 
@@ -1233,7 +1303,7 @@ describe('the CLI’s own send body goes: `now: false` and a label are not extra
 
     expect(response.status).toBe(200);
     await passed(clock);
-    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'action')}hello there` }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: `${banner('message', 'action')}hello there` }]);
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from, row.fromName])).toEqual([
       ['req-cli', 'agent', CALLER, LEAD_NAME],
     ]);
@@ -1253,7 +1323,7 @@ describe('the CLI’s own send body goes: `now: false` and a label are not extra
 
       expect(sent.ok).toBe(true);
       if (label === 'action') await passed(clock);
-      expect(ferrets.delivered).toEqual([{ text: `${banner('message', label)}psst` }]);
+      expect(deliveredWithHold(ferrets)).toEqual([{ text: `${banner('message', label)}psst` }]);
       expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
         ['s-1', 'agent', CALLER],
       ]);
@@ -1272,7 +1342,7 @@ describe('the CLI’s own send body goes: `now: false` and a label are not extra
 
     expect(sent.ok).toBe(true);
     await passed(clock);
-    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'action')}psst` }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: `${banner('message', 'action')}psst` }]);
     await host.stop();
   });
 });
@@ -1290,7 +1360,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
     expect(sent.ok).toBe(true);
     const typed =
       '[message · blocker from ferret kamila (session lead) — not from the owner] To reply: fy send kamila "<reply>"\npsst';
-    expect(ferrets.delivered).toEqual([{ text: typed }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: typed }]);
     const rows = (await api().sends(F1)).sends;
     expect(rows.map(row => [row.sendId, row.message, row.senderKind, row.from, row.fromName])).toEqual([
       ['s-1', typed, 'agent', CALLER, LEAD_NAME],
@@ -1305,7 +1375,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
 
     await passed(clock);
 
-    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'action')}psst` }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: `${banner('message', 'action')}psst` }]);
     await host.stop();
   });
 
@@ -1327,7 +1397,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
 
     expect(response.status).toBe(200);
     await passed(clock);
-    expect(ferrets.delivered).toEqual([
+    expect(deliveredWithHold(ferrets)).toEqual([
       {
         text: '[message · action from ferret kamila (session lead) — not from the owner] To reply: fy send kamila "<reply>"\nhello there',
       },
@@ -1343,7 +1413,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
 
     await send(host, 'req-own', 'f1', { message: 'hello there', now: false, label: 'blocker' });
 
-    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'hello there' }]);
     await host.stop();
   });
 
@@ -1352,7 +1422,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
 
     await send(host, 'req-own', 'f1', { message: 'hello there', now: false, label: 'blocker' });
 
-    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'hello there' }]);
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
       ['req-own', 'human', undefined],
     ]);
@@ -1368,7 +1438,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
 
     await send(host, 'req-hdr', 'f1', { message: 'hello there', now: false, label: 'blocker' });
 
-    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'blocker')}hello there` }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: `${banner('message', 'blocker')}hello there` }]);
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
       ['req-hdr', 'agent', CALLER],
     ]);
@@ -1380,7 +1450,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
 
     await send(host, 'req-wdn', 'f1', { message: 'hello there', now: false, label: 'action' });
 
-    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'hello there' }]);
     // The Warden's token names no ferret: the daemon's words, never the person's (its lane is the daemon's, not the owner's).
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
       ['req-wdn', 'daemon', undefined],
@@ -1396,7 +1466,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
 
     await passed(clock);
 
-    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'action')}hello there` }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: `${banner('message', 'action')}hello there` }]);
     expect((await api().sends(F1)).sends.map(row => row.from)).toEqual([CALLER]);
     await host.stop();
   });
@@ -1412,7 +1482,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
 
     await send(host, 'req-old', 'f1', { message: 'hello there', now: false, label: 'action' });
 
-    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'hello there' }]);
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
       ['req-old', 'daemon', undefined],
     ]);
@@ -1447,7 +1517,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
 
     await passed(clock);
 
-    expect(ferrets.delivered).toEqual([{ text: `${banner('reply', 'action')}done` }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: `${banner('reply', 'action')}done` }]);
     await host.stop();
   });
 
@@ -1459,7 +1529,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
 
     await passed(clock);
 
-    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'action', 'gone-1', 'gone-1')}psst` }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: `${banner('message', 'action', 'gone-1', 'gone-1')}psst` }]);
     await host.stop();
   });
 
@@ -1470,7 +1540,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
 
     await passed(clock);
 
-    expect(ferrets.delivered).toEqual([{ text: 'note to self' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'note to self' }]);
     await host.stop();
   });
 
@@ -1480,7 +1550,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
     await api().send(F1, { kind: 'owner' }, { message: '  ship it \n', sendId: 's-1' });
     const empty = await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: '   ', sendId: 's-2' });
 
-    expect(ferrets.delivered).toEqual([{ text: 'ship it' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'ship it' }]);
     expect(empty).toMatchObject({ ok: false, error: { code: 'send_refused' } });
     expect((await api().sends(F1)).sends.map(row => row.sendId)).toEqual(['s-1']);
     await host.stop();
@@ -1513,9 +1583,9 @@ describe('a send carrying files or an fyi label types, and a file reaches the ag
     // An fyi never interrupts: it is held until its receiver's turn ends (ten minutes at most), then typed.
     expect(response.status).toBe(200);
     expect(response.json()).toMatchObject({ disposition: 'queued', fate: 'accepted' });
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     await passed(clock, 10 * 60_000 + 5_000);
-    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'fyi')}psst` }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: `${banner('message', 'fyi')}psst` }]);
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.fate, row.senderKind])).toEqual([
       ['req-fyi', 'accepted', 'agent'],
     ]);
@@ -1532,9 +1602,9 @@ describe('a send carrying files or an fyi label types, and a file reaches the ag
     );
 
     expect(sent).toMatchObject({ ok: true, value: { sendId: 's-1' } });
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     await passed(clock, 10 * 60_000 + 5_000);
-    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'fyi')}psst` }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: `${banner('message', 'fyi')}psst` }]);
     await host.stop();
   });
 
@@ -1551,7 +1621,7 @@ describe('a send carrying files or an fyi label types, and a file reaches the ag
     expect(ferrets.filesHanded[0]?.map(file => file.folder)).toEqual([id]);
     expect(new TextDecoder().decode(ferrets.filesHanded[0]?.[0]?.contents)).toBe('FIXTURE-PNG-BYTES');
     const path = `/state/ferrets/f1/attachments/${id}/${name}`;
-    expect(ferrets.delivered).toEqual([
+    expect(deliveredWithHold(ferrets)).toEqual([
       { text: `see the picture\n\nAttached files — open them from these paths:\n- ${path} (image/png)` },
     ]);
     // The app reads the list back out of the typed text.
@@ -1609,7 +1679,7 @@ describe('a send carrying files or an fyi label types, and a file reaches the ag
     expect(response.status).toBe(400);
     expect(response.json<{ error: string }>().error).toMatch(/^an attached file could not be handed to the agent: /);
     expect(ferrets.filesHanded).toEqual([]);
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
     await host.stop();
   });
@@ -1624,7 +1694,7 @@ describe('a send carrying files or an fyi label types, and a file reaches the ag
 
     expect(sent).toMatchObject({ ok: false, error: { code: 'invalid' } });
     expect(JSON.stringify(sent)).not.toContain('FIXTURE_SECRET');
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
     await host.stop();
   });
@@ -1640,7 +1710,7 @@ describe('a send carrying files or an fyi label types, and a file reaches the ag
 
     expect(refused).toMatchObject({ ok: false, error: { code: 'invalid' } });
     expect(plain).toMatchObject({ ok: true });
-    expect(ferrets.delivered).toEqual([{ text: 'hello' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'hello' }]);
     await host.stop();
   });
 
@@ -1648,7 +1718,7 @@ describe('a send carrying files or an fyi label types, and a file reaches the ag
     const { host, ferrets } = await conversation();
 
     expect((await send(host, 'req-x', 'f1', { message: 'hello there', attachmentIds: [] })).status).toBe(200);
-    expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'hello there' }]);
     expect(ferrets.filesHanded).toEqual([]);
     await host.stop();
   });
@@ -1668,7 +1738,7 @@ describe('a gate that is not open answers 503 before anything is opened, typed o
     ]);
     expect(response.json<{ error: string }>().error).toBe(SEND_UNAVAILABLE);
     expect(ferrets.opens).toEqual([]);
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
     await host.stop();
   });
@@ -1892,7 +1962,7 @@ describe('send path: the send-now and reply flags are carried', () => {
     const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
 
     expect(sent).toMatchObject({ ok: false, error: { code: 'plugin_unavailable' } });
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
     await host.stop();
   });
@@ -1912,7 +1982,7 @@ describe('send path: the send-now and reply flags are carried', () => {
 
     expect(sent.ok).toBe(true);
     expect(ferrets.stopsActive).toBe(0);
-    expect(ferrets.delivered).toEqual([{ text: 'now!' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'now!' }]);
     await host.stop();
   });
 
@@ -1955,7 +2025,7 @@ describe('send path: the send-now and reply flags are carried', () => {
 
     expect(sent).toMatchObject({ ok: false, error: { code: 'send_refused' } });
     expect(ferrets.stopsActive).toBe(0);
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
     await host.stop();
   });
@@ -1970,7 +2040,7 @@ describe('send path: the send-now and reply flags are carried', () => {
     expect(!sent.ok && sent.error.message).toContain(
       `holding an unanswered structured question (${QUESTION_TOOL_USE}); answer or abandon it before sending prose`,
     );
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect(ferrets.stopsActive).toBe(0);
     expect((await api().sends(F1)).sends).toEqual([]);
     await host.stop();
@@ -1986,7 +2056,7 @@ describe('send path: the send-now and reply flags are carried', () => {
 
     expect(sent).toMatchObject({ ok: true, value: { disposition: 'queued', waitReason: 'launching' } });
     expect(ferrets.stopsActive).toBe(0);
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
     await host.stop();
   });
@@ -2032,7 +2102,7 @@ describe('send path: the send-now and reply flags are carried', () => {
     });
     expect(ferrets.opens).toEqual([]);
     expect(ferrets.stopsActive).toBe(0);
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
     expect((await api().send(F1, { kind: 'owner' }, { message: 'plain', sendId: 's-2', now: false })).ok).toBe(true);
     await host.stop();
@@ -2051,7 +2121,7 @@ describe('send path: the send-now and reply flags are carried', () => {
     const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
 
     expect(sent).toMatchObject({ ok: false, error: { code } });
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
     await host.stop();
   });
@@ -2173,12 +2243,12 @@ describe('m2 one lane per ferret: typing, the acts and an interrupt press keys o
     await settle();
     const second = api().send(F1, { kind: 'owner' }, { message: 'two', sendId: 's-2' });
     await settle();
-    expect(ferrets.delivered).toEqual([{ text: 'one' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'one' }]);
 
     release();
     await first;
     await second;
-    expect(ferrets.delivered).toEqual([{ text: 'one' }, { text: 'two' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'one' }, { text: 'two' }]);
     await host.stop();
   });
 });
@@ -2764,7 +2834,7 @@ describe('a route that names a ferret takes its callsign as well as its id', () 
     const response = await send(host, 'req-none', 'nobody');
 
     expect(response.status).toBe(404);
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     await host.stop();
   });
 
@@ -2778,7 +2848,7 @@ describe('a route that names a ferret takes its callsign as well as its id', () 
     expect(response.status).toBe(409);
     expect(JSON.stringify(response.json())).toContain('ambiguous_name');
     expect(JSON.stringify(response.json())).toContain('f2');
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     await host.stop();
   });
 });
@@ -3123,7 +3193,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     try {
       expect(await row(api, 'lead-1')).toMatchObject({ fate: 'delivered', path: 'channel' });
       expect(await row(api, 'lead-2')).toMatchObject({ fate: 'delivered', path: 'channel' });
-      expect(ferrets.delivered).toEqual([]);
+      expect(deliveredWithHold(ferrets)).toEqual([]);
     } finally {
       await host.stop();
     }
@@ -3146,7 +3216,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
       ok: true,
       value: { sendId: 'lead-1', path: 'channel' },
     });
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect(ferrets.queued).toEqual([]);
     expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', senderKind: 'agent', from: 'lead' });
     // The MCP server polls, is OFFERED the exact text that would have been typed (banner included), and claims it.
@@ -3158,7 +3228,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     ferrets.reviewEntries = [unrelated, receipt, delivery];
     await pass(clock, 6_000);
     expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'delivered' });
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     await host.stop();
   });
 
@@ -3173,7 +3243,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     await pass(clock, 8_000);
 
     expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'queued', queueProof: 'transcript' });
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     await host.stop();
   });
 
@@ -3248,7 +3318,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     await pass(clock, 8_000);
 
     // Nothing was typed, nothing was lost, and the row was moved — not withdrawn and re-created.
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect(await rows(api, 'lead-1')).toHaveLength(1);
     expect(await row(api, 'lead-1')).toMatchObject({ path: 'direct', fate: 'accepted', attempt: 1 });
 
@@ -3276,7 +3346,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
 
     // Past the send's own window and past grant + window (19 s), a second short of grant + budget + window: nothing typed.
     await pass(clock, 11_000);
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'accepted' });
 
     await pass(clock, 2_000);
@@ -3315,7 +3385,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
 
     await pass(clock, 4_000);
     expect(await granted).toMatchObject({ data: { claimed: true } });
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'accepted' });
 
     // Its own deadline is grant + budget + window: only then is it typed, once.
@@ -3357,7 +3427,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
 
     await pass(clock, 6_000);
 
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'queued' });
     await host.stop();
   });
@@ -3374,7 +3444,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     // Agenda's turn-end check is the daemon speaking; it reaches the port as its own plugin.
     await apiFor('agenda').send(F1, { kind: 'agenda' }, { message: 'finish your turn', sendId: 'agenda-1' });
 
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     expect((await poll(host)).data).toEqual({
       messages: [{ sendId: 'agenda-1', text: 'finish your turn', from: 'Ferretry' }],
     });
@@ -3388,7 +3458,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
 
     await send(host, 'owner-1', 'f1', { message: 'from the owner' });
 
-    expect(ferrets.delivered).toEqual([{ text: 'from the owner' }]);
+    expect(deliveredWithHold(ferrets)).toEqual([{ text: 'from the owner' }]);
     expect((await poll(host)).data).toEqual({ messages: [] });
     await host.stop();
   });
@@ -3487,7 +3557,7 @@ describe('a send waits for a safe pane and is typed within a second of it cleari
 
       expect(kept.json()).toMatchObject({ fate: 'accepted', waitReason });
       await pass(clock, 3_000);
-      expect(ferrets.delivered).toEqual([]);
+      expect(deliveredWithHold(ferrets)).toEqual([]);
       expect(ferrets.queued).toEqual([]);
       pane = idle;
       await pass(clock, 1_000);
@@ -3516,7 +3586,7 @@ describe('a send waits for a safe pane and is typed within a second of it cleari
 
     expect(kept).toMatchObject({ ok: true, value: { fate: 'accepted', waitReason: 'draft' } });
     await pass(clock, 3_000);
-    expect(ferrets.delivered).toEqual([]);
+    expect(deliveredWithHold(ferrets)).toEqual([]);
     pane = ok({ alive: true, dead: false, promptReady: true, activeWork: false });
     await pass(clock, 1_000);
     expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message', 'blocker')}ship the report`]);

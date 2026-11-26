@@ -338,7 +338,9 @@ export class QueueDeliverer {
     }
     const members = plan.kind === 'single' ? [plan.message] : plan.members;
     const delivery: QueueDelivery = { sendId: members[0]?.id ?? '', members };
-    let reason = reasonForWaiting(view);
+    // Only a person's own words go in while a person is typing: anything else waits for the quiet.
+    const sender = members.every(member => member.sender === 'human') ? 'human' : 'agent';
+    let reason = reasonForWaiting(view, sender);
     let behind: string | undefined;
     // NEVER QUEUE BEHIND A GHOST (B144). A "draft" that is a send of this session's own, typed by the daemon
     // and never submitted, is nobody's to clear: it is finished here and the box read again. One that will
@@ -353,7 +355,7 @@ export class QueueDeliverer {
           await this.waiting(id, messages, 'unreadable');
           return false;
         }
-        reason = reasonForWaiting(view);
+        reason = reasonForWaiting(view, sender);
       }
     }
     // A pane that never came to a prompt is not handed the message again until one shows, or `recheckMs` has

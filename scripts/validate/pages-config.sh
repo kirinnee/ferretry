@@ -96,6 +96,17 @@ require_in_block '/*' "media-src 'self' blob: https:;"
 require_in_block '/*' "img-src 'self' data: blob: https://tile.openstreetmap.org;"
 refuse_in_block '/*' "img-src[^;]* https:( |;)" 'widened img-src to https:, which makes every Markdown image an automatic request'
 
+# FRAMES: `'self'` (the fy-render sandbox shells and card embeds are same-origin) and ONE third-party path, the
+# Google Maps EMBED API (docs/fy-render.md, "Maps": the opt-in Google map style). It is the origin + `/maps/embed/v1/`
+# prefix, and refused if widened to a bare scheme, a wildcard or the whole google.com origin. `default-src` stays
+# 'self', so nothing else on the page can frame anything.
+require_in_block '/*' "media-src 'self' blob: https:; frame-src 'self' https://www.google.com/maps/embed/v1/; connect-src"
+refuse_in_block '/*' "frame-src[^;]* (https:|\*|https://www\.google\.com/?)( |;)" 'widened frame-src beyond the Google Maps embed path'
+[[ "$(block_of '/*' | rg -o 'frame-src' | wc -l)" -eq 1 ]] || {
+  echo "❌ ${headers}: rule /* must carry exactly one frame-src" >&2
+  exit 1
+}
+
 # The shell's CONTENT policy lives in the generated document, not here. Assert the
 # `/*` policy was not widened to accommodate it: the app still frames nothing, and
 # it never gained the `'unsafe-eval'` the sandbox deliberately does without.

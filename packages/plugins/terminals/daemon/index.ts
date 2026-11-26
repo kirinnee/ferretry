@@ -78,6 +78,7 @@ import {
 import { ControlModeTmuxProcess, type ControlChild } from './adapters/tmux/control-tmux-process.ts';
 import { KernelTmuxProcess, TMUX_PROGRAM } from './adapters/tmux/kernel-tmux-process.ts';
 import { TmuxRunner, ferretTmuxSession } from './adapters/tmux/tmux-runner.ts';
+import { TypingHold } from './lib/session/console/index.ts';
 import { paneProcessHost } from './adapters/tmux/pane-process-host.ts';
 import { tmuxAvailabilityDoctor } from './adapters/tmux/tmux-availability-check.ts';
 import { RealHarnessLaunchGuard } from './adapters/tmux/harness-launch-guard.ts';
@@ -359,10 +360,13 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
   const effectiveLimits = testDaemon
     ? async (): Promise<{ readonly enabled: false }> => ({ enabled: false })
     : ferrets.effectiveLimits?.bind(ferrets);
+  // ONE hold for the daemon: the Console's keys stamp it, the runner's pane look reads it (the draft guard's `typing`).
+  const typing = new TypingHold(nowMs);
   const processes = buildProcesses({
     kernel,
     tmux,
     socketPath,
+    typing,
     ferrets,
     ...(effectiveLimits === undefined ? {} : { limits: effectiveLimits }),
     paneOf: async ferret => await panes.of(ferret),
@@ -617,6 +621,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     : undefined;
   const runner = new TmuxRunner({
     tmux,
+    typing,
     ...(launchGuard === undefined ? {} : { launchGuard }),
     log,
     spawn: kernel.spawn,
