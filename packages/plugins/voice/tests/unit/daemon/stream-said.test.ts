@@ -45,10 +45,11 @@ interface Sent {
   readonly sendId: string;
 }
 
-async function rig(options: { heard?: string; refuse?: number; crash?: string } = {}) {
+async function rig(options: { heard?: string; refuse?: number; crash?: string; hold?: Promise<void> } = {}) {
   const clock = fixedClock();
   const frames: Uint8Array[] = [];
   const sent: Sent[] = [];
+  const attempts: Sent[] = [];
   const logged: string[] = [];
   let counter = 0;
   let refusals = options.refuse ?? 0;
@@ -79,6 +80,8 @@ async function rig(options: { heard?: string; refuse?: number; crash?: string } 
     nonce: () => `${(counter++).toString(16).padStart(16, '0')}`.replace(/^0{16}$/u, '0000000000000001'),
     send: async (_ferretId, message, sendId) => {
       if (message.startsWith('(voice mode on)')) return { ok: true };
+      attempts.push({ message, sendId });
+      if (sendId === 'abc123:heard:1') await options.hold;
       if (refusals > 0) {
         refusals -= 1;
         return { ok: false, code: 'send_refused' };
@@ -107,6 +110,7 @@ async function rig(options: { heard?: string; refuse?: number; crash?: string } 
   let echo: string | undefined;
   const view = {
     sent,
+    attempts,
     logged,
     frames,
     /** Every line the machine answered, by id, with how much sound it sent. */
@@ -211,10 +215,39 @@ describe('V2: the words a cut falls on (pure)', () => {
     said.made(2, 1_000);
     expect(said.cut({ id: 2, samples: 0 })).toBe(true);
     expect(said.note()).toMatchObject({ n: 2, text: NOTE('"One two"', 'three four. Five six.') });
-    said.delivered(1);
-    expect(said.note()?.n).toBe(2);
-    said.delivered(2);
+    const taken = said.alone();
+    expect(taken?.note?.n).toBe(2);
     expect(said.note()).toBeUndefined();
+    said.delivered(taken ?? { upTo: 0 });
+    expect(said.note()).toBeUndefined();
+  });
+
+  test('a note taken by one send cannot be taken by another; a refusal gives it back, joined with any newer cut', () => {
+    const said = createSaid();
+    said.line(0, 'One two three four.');
+    said.made(0, 4_000);
+    said.cut({ id: 0, samples: 2_000 });
+    const first = said.carry();
+    expect(first.note?.n).toBe(1);
+    expect(said.alone()).toBeUndefined();
+    expect(said.carry().note).toBeUndefined();
+    said.line(1, 'Five six.');
+    said.made(1, 1_000);
+    said.cut({ id: 1, samples: 0 });
+    said.failed(first);
+    expect(said.note()).toMatchObject({ n: 2, text: NOTE('"One two"', 'three four. Five six.') });
+  });
+
+  test('an acknowledgement forgets only the lines that were there when its message left', () => {
+    const said = createSaid();
+    said.line(0, 'Old reply.');
+    said.made(0, 1_000);
+    const sending = said.carry();
+    said.line(1, 'Next reply now.');
+    said.made(1, 3_000);
+    said.delivered(sending);
+    expect(said.cut({ id: 1, samples: 1_000 })).toBe(true);
+    expect(said.note()?.text).toBe(NOTE('"Next"', 'reply now.'));
   });
 
   test('a line that was taken back is not counted', () => {
@@ -348,5 +381,79 @@ describe('V3: telling the ferret what was heard (on the stream)', () => {
       cut: { id: 3, samples: 9_600 },
     });
     expect(JSON.parse(encodeHushFrame())).toEqual({ t: 'hush' });
+  });
+
+  test('a standalone note still in flight cannot also prefix the next utterance', async () => {
+    const hold = Promise.withResolvers<void>();
+    const r = await rig({ hold: hold.promise });
+    await r.talk(600);
+    r.speak(0, 'Almost there now.');
+    await r.talk(400);
+    r.hush({ id: 0, samples: 6 * SAMPLES_PER_CHAR });
+    await r.talk(1_700);
+    expect(r.attempts.map(each => each.sendId)).toEqual(['abc123:heard:1']);
+    try {
+      await r.say();
+    } finally {
+      hold.resolve();
+    }
+    await r.talk(300);
+    expect(r.sent.filter(each => each.message.startsWith('[heard up to:'))).toHaveLength(1);
+    // The note went once, alone; the utterance is plain (it was sent while the note was held, so it lands first).
+    expect(r.sent.map(each => each.message)).toEqual([
+      '(voice) please check the build',
+      NOTE('"Almost"', 'there now.'),
+    ]);
+  });
+
+  test('a refused standalone note is sent again under the same id without another utterance', async () => {
+    const r = await rig({ refuse: 1 });
+    await r.talk(600);
+    r.speak(0, 'Almost there now.');
+    await r.talk(400);
+    r.hush({ id: 0, samples: 6 * SAMPLES_PER_CHAR });
+    await r.talk(8_000);
+    expect(r.attempts.map(each => each.sendId)).toEqual(['abc123:heard:1', 'abc123:heard:1']);
+    expect(r.sent).toEqual([{ message: NOTE('"Almost"', 'there now.'), sendId: 'abc123:heard:1' }]);
+  });
+
+  test("a late acknowledgement of a standalone note does not clear the next reply's lines", async () => {
+    const hold = Promise.withResolvers<void>();
+    const r = await rig({ hold: hold.promise });
+    await r.talk(600);
+    r.speak(0, 'Almost there now.');
+    await r.talk(400);
+    r.hush({ id: 0, samples: 6 * SAMPLES_PER_CHAR });
+    await r.talk(1_700);
+    expect(r.attempts.map(each => each.sendId)).toEqual(['abc123:heard:1']);
+    r.speak(1, 'Something else followed.');
+    await r.talk(400);
+    hold.resolve();
+    await r.talk(1_000);
+    r.hush({ id: 1, samples: 10 * SAMPLES_PER_CHAR });
+    await r.talk(2_000);
+    expect(r.sent).toEqual([
+      { message: NOTE('"Almost"', 'there now.'), sendId: 'abc123:heard:1' },
+      { message: NOTE('"Something"', 'else followed.'), sendId: 'abc123:heard:2' },
+    ]);
+  });
+
+  test('a drop the device sent after sound already left the machine still means that line was never heard', async () => {
+    const r = await rig();
+    await r.talk(600);
+    const stale = 'Stale progress you never heard.';
+    r.speak(0, stale);
+    await r.talk(400);
+    // Some of its sound is on the way, and has not reached the device: the device takes the line back and discards it.
+    expect(r.audio().get(0)).toBeGreaterThan(0);
+    expect(r.audio().get(0)).toBeLessThan(stale.length * SAMPLES_PER_CHAR);
+    r.drop(0);
+    r.speak(1, 'Current line keeps going.');
+    await r.talk(4_500);
+    r.hush({ id: 1, samples: 7 * SAMPLES_PER_CHAR });
+    await r.say();
+    expect(r.sent).toEqual([
+      { message: `${NOTE('"Current"', 'line keeps going.')} (voice) please check the build`, sendId: 'abc123:1' },
+    ]);
   });
 });

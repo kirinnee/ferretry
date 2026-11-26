@@ -68,6 +68,6 @@ export function useReadAloud(key: string): RowReadAloud {
         : controller.previewVoiceNote(settings === null ? undefined : settings.get().voiceId),
     // The voice, speed and length are read at the tap, so a change in Settings applies to the next reading.
     read: markdown => controller.read(key, markdown, settings === null ? {} : readOptionsOf(settings.get())),
-    stop: () => controller.stop(),
+    stop: () => controller.stop('person'),
   };
 }

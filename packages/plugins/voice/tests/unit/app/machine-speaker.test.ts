@@ -142,8 +142,13 @@ describe('the machine speaker', () => {
     const stopped = rig();
     stopped.start(['One.']);
     stopped.speaker.onSpeech({ id: 0, event: 'started' });
-    stopped.speaker.stop();
+    stopped.speaker.stop('person');
     expect([stopped.hushes(), stopped.interrupts()]).toEqual([1, 1]);
+    const automatic = rig();
+    automatic.start(['One.']);
+    automatic.speaker.onSpeech({ id: 0, event: 'started' });
+    automatic.speaker.stop();
+    expect([automatic.hushes(), automatic.interrupts()]).toEqual([1, 0]);
     const replaced = rig();
     replaced.start(['First.']);
     replaced.speaker.onSpeech({ id: 0, event: 'started' });

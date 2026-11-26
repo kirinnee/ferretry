@@ -22,6 +22,8 @@ const UNHEARD_WORDS = 30;
 const LINES_KEPT = 64;
 
 interface Line {
+  /** Which line this was to arrive at the stream, so a message forgets only the lines that were there when it left. */
+  readonly seq: number;
   readonly pieces: readonly string[];
   /** The sound of each piece made so far, in samples. */
   readonly made: number[];
@@ -33,6 +35,17 @@ export interface Note {
   readonly text: string;
   readonly heard: readonly string[];
   readonly unheard: readonly string[];
+}
+
+/**
+ * A note taken out of waiting to go to the ferret, by ONE path: carried by the person's next message ({@link Said.carry}) or sent
+ * by itself ({@link Said.alone}). Nothing else can pick the same note up until it is given back ({@link Said.failed}).
+ */
+export interface Sending {
+  /** The note this send carries, if there was one waiting. */
+  readonly note?: Note;
+  /** The lines that were here when it left: a send that is answered forgets these and never a line that came after. */
+  readonly upTo: number;
 }
 
 export interface Said {
@@ -48,8 +61,17 @@ export interface Said {
   clear(): void;
   /** The note waiting for the next message, if any. */
   note(): Note | undefined;
-  /** The message that carried note `n` was sent: the note is spent, and so are the lines. */
-  delivered(n: number): void;
+  /**
+   * The person's message is about to go: it takes the waiting note, if any, and answers the lines heard so far. Always
+   * answered with {@link delivered} or {@link failed}.
+   */
+  carry(): Sending;
+  /** The note waiting is about to go by itself: taken from waiting, with no lines answered. `undefined` when none waits. */
+  alone(): (Sending & { readonly note: Note }) | undefined;
+  /** The send was acknowledged: its note is spent, and the lines it answered are forgotten (never a line that came after it). */
+  delivered(sending: Sending): void;
+  /** The send was refused: its note waits again, with whatever was said since, and may go by either path. */
+  failed(sending: Sending): void;
 }
 
 const wordsOf = (text: string): string[] => text.split(/\s+/u).filter(word => word.length > 0);
@@ -71,7 +93,7 @@ export function noteText(heard: readonly string[], unheard: readonly string[]): 
  * of the sound.
  */
 export function splitHeard(
-  lines: Iterable<readonly [number, Line]>,
+  lines: Iterable<readonly [number, Pick<Line, 'pieces' | 'made'>]>,
   at: SpeechCut,
 ): { readonly heard: string[]; readonly unheard: string[] } {
   const heard: string[] = [];
@@ -98,11 +120,25 @@ export function splitHeard(
 
 export function createSaid(): Said {
   const lines = new Map<number, Line>();
+  /** The note waiting to be taken by a send. One in flight is not here: it is held by its send alone. */
   let pending: Note | undefined;
   let cuts = 0;
+  let arrived = 0;
+  /** A second cut before the ferret was told: what was not heard adds up, and the newer place wins when there is one. */
+  const join = (before: Note | undefined, heard: readonly string[], unheard: readonly string[], n: number): Note => {
+    const allHeard = heard.length > 0 || before === undefined ? heard : before.heard;
+    const allUnheard = [...(before?.unheard ?? []), ...unheard].slice(0, UNHEARD_WORDS + 1);
+    return {
+      n,
+      text: noteText(allHeard, allUnheard),
+      heard: allHeard.slice(-(HEARD_WORDS + 1)),
+      unheard: allUnheard,
+    };
+  };
   return {
     line(id, text) {
-      lines.set(id, { pieces: splitForSpeech(text), made: [] });
+      arrived += 1;
+      lines.set(id, { seq: arrived, pieces: splitForSpeech(text), made: [] });
       if (lines.size > LINES_KEPT) lines.delete(lines.keys().next().value as number);
     },
     made(id, samples) {
@@ -115,26 +151,30 @@ export function createSaid(): Said {
       const { heard, unheard } = splitHeard(lines, at);
       lines.clear();
       if (unheard.length === 0) return false;
-      // A second cut before the ferret was told: what was not heard adds up, and the newer place wins when there is one.
-      const before = pending;
-      const allHeard = heard.length > 0 || before === undefined ? heard : before.heard;
-      const allUnheard = [...(before?.unheard ?? []), ...unheard].slice(0, UNHEARD_WORDS + 1);
       cuts += 1;
-      pending = {
-        n: cuts,
-        text: noteText(allHeard, allUnheard),
-        heard: allHeard.slice(-(HEARD_WORDS + 1)),
-        unheard: allUnheard,
-      };
+      pending = join(pending, heard, unheard, cuts);
       return true;
     },
     clear() {
       lines.clear();
     },
     note: () => pending,
-    delivered(n) {
-      lines.clear();
-      if (pending?.n === n) pending = undefined;
+    carry() {
+      const note = pending;
+      pending = undefined;
+      return { ...(note === undefined ? {} : { note }), upTo: arrived };
+    },
+    alone() {
+      const note = pending;
+      pending = undefined;
+      return note === undefined ? undefined : { note, upTo: 0 };
+    },
+    delivered(sending) {
+      for (const [id, line] of lines) if (line.seq <= sending.upTo) lines.delete(id);
+    },
+    failed(sending) {
+      if (sending.note === undefined) return;
+      pending = pending === undefined ? sending.note : join(sending.note, pending.heard, pending.unheard, pending.n);
     },
   };
 }

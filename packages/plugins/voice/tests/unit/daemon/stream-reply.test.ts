@@ -413,7 +413,7 @@ describe('the voice stream: the reply voice', () => {
     expect(r.closes).toEqual([]);
   });
 
-  test('V4: a drop that comes too late (the line is already being sent down) leaves it to finish', async () => {
+  test('V4: a drop that comes after sound has gone down still takes the line back: the device never heard it and discards what is on the way', async () => {
     const r = await rig();
     await r.run(400);
     r.speak(0, 'A long first line to speak.');
@@ -421,7 +421,7 @@ describe('the voice stream: the reply voice', () => {
     expect(r.audio().some(unit => unit.snapshot.audio?.id === 0)).toBe(true);
     r.drop(0);
     await r.run(5_000);
-    expect(r.audio().some(unit => unit.snapshot.audio?.id === 0 && unit.snapshot.audio.last)).toBe(true);
+    expect(r.audio().some(unit => unit.snapshot.audio?.id === 0 && unit.snapshot.audio.last)).toBe(false);
   });
 
   test('V4: a drop while the line is being made throws it away when it is done', async () => {

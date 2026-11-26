@@ -12,8 +12,9 @@
  *   - `segment` when a caption's first sound arrives, `end` once all of it has arrived AND been played, `stopped` after
  *     `stop()` (the person's own "stop", or barge-in).
  *
- * `stop()` silences the player and tells the machine to drop what it has not yet spoken, and where the person's ears were, so
- * the ferret can be told what was heard. A reading replaced by the next one is flushed without that. Nothing here keeps the words.
+ * `stop()` silences the player and tells the machine to drop what it has not yet spoken. When it is the PERSON who stopped (the
+ * reason says so), it also tells where their ears were, so the ferret can be told what was heard; any other stop (a reading
+ * replaced, the tab going to the background) is a plain hush. Nothing here keeps the words.
  */
 import type { ReplyState } from '../../../contract/index.ts';
 import type { SpeakerEvent, SpeakerPort, SpeakRequest } from '../voice-chat/ports.ts';
@@ -90,8 +91,8 @@ export function createMachineSpeaker(deps: MachineSpeakerDeps): MachineSpeaker {
       current = { onEvent, captions, pending: new Set(captions.keys()), heard: false, caption: -1, stopDrain: null };
       deps.onActive?.(true);
     },
-    stop() {
-      if (current !== null) finish(current, { type: 'stopped' }, 'person');
+    stop(reason) {
+      if (current !== null) finish(current, { type: 'stopped' }, reason === 'person' ? 'person' : 'flush');
     },
     onSpeech(event) {
       const reading = current;
