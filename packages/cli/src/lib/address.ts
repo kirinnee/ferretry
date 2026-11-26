@@ -5,6 +5,10 @@
  */
 import { type DaemonRun, DaemonRunSchema, recordedBindAddress } from '@ferretry/kernel/contract';
 
+/** Whether `FY_URL` names the daemon: then the address is that one, whatever home this `fy` resolved. */
+export const daemonUrlPinned = (environment: { readonly FY_URL?: string | undefined }): boolean =>
+  (environment.FY_URL?.trim() ?? '') !== '';
+
 /** Loopback, never a routable interface: a daemon binds the machine it runs on and nothing else. */
 const LOOPBACK = '127.0.0.1';
 /** The port a daemon binds when its operator has named none: the same number as `DEFAULT_PORT` in the kernel's `host/fyd.ts`. */
@@ -86,8 +90,7 @@ export function parseDaemonRun(documentText: string | undefined): DaemonRun | un
 export function resolveDaemonUrl(explicitUrl: string, run: DaemonRun | undefined, homePort?: number): string {
   if (explicitUrl.trim() !== '') return explicitUrl.trim();
   if (run !== undefined) return recordedBindAddress(run);
-  // A configured 0 asks the OS for a port: there is nothing to dial until the daemon records the one it got.
-  return homePort === undefined || homePort === 0
-    ? DEFAULT_DAEMON_URL
-    : recordedBindAddress({ host: LOOPBACK, port: homePort });
+  // A configured 0 asks the OS for a port: there is nothing to dial until the daemon records the one it got. Dial the
+  // port that cannot answer, never 7457, which is another home's daemon.
+  return homePort === undefined ? DEFAULT_DAEMON_URL : recordedBindAddress({ host: LOOPBACK, port: homePort });
 }

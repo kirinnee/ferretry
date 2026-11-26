@@ -34,12 +34,14 @@ name are refused at start, in a sentence. `config/daemon.json` and `config/routi
 directory and are not configuration files in this sense: they are the daemon's own documents. The shell
 terminals open is one of them (`terminals.shell`, [terminals.md](terminals.md)).
 
-`fy config guide` needs no daemon. Every other verb asks it, because the daemon owns the checker and the files' state
-(any `fy` command starts one): `check` and `status` read `GET /v1/config/status`, `path` its directory, `schema` the
-file the daemon published under `config/.schema/`, `show` one file with its etag, `write` and `confirm` change
+`fy config guide` needs no daemon, and neither do `path` and `schema <name>` (with no `FY_URL`: they answer from this home,
+`schema` only for a name the daemon listed in `config/.schema/.published.json`, read as a regular file). Every other verb
+asks it, because the daemon owns the checker and the files' state (any `fy` command starts one): `check` and `status`
+read `GET /v1/config/status`, the schema list too, and a pinned `FY_URL` sends `path` and `schema` to the daemon it names;
+`show` one file with its etag, `write` and `confirm` change
 one. `fy config write <file> [--if-match <etag>]` reads the text from stdin and is refused whole unless it checks, with
 every located problem said, and `fy config confirm <file>` names the etag it reviewed. A bare `fy config` is
-`check`. (Declared GAP: v4 checked and read schemas with the daemon stopped.)
+`check`. (Declared GAP: `check` and the schema list need the daemon; v4 ran them with it stopped.)
 
 One item of a component folder has its own verbs, composed over the same routes: `fy mcp ls|show|add|edit|rm <name>` and
 `fy harness claude-code|codex settings|hooks ls|show|add|edit|rm <name>`. An item is a file, so an `add` or `edit`

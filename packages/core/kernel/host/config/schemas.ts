@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { AnyConfigDef as ConfigDef } from './claims.ts';
 import type { ConfigDeclaration } from './claims.ts';
-import { SCHEMA_FOLDER } from '@ferretry/std/yaml';
+import { SCHEMA_FOLDER, SCHEMA_MANIFEST } from '@ferretry/std/yaml';
 import { CONFIG_EXTENSION, ConfigPathClaimError, claimOf } from './claims.ts';
 
 /**
@@ -15,6 +15,15 @@ export const schemaFileName = (def: ConfigDef): string => {
     .replace(new RegExp(`\\${CONFIG_EXTENSION}$`, 'u'), '');
   return def.shape === 'collection' ? `${flat}--item.json` : `${flat}.json`;
 };
+
+/**
+ * Every file the daemon publishes under `config/.schema/`, in the order it writes them: each schema, then the manifest
+ * naming them, so a name is listed only once its file is there and `fy config schema` serves nothing the daemon did not write.
+ */
+export const schemaPublications = (defs: readonly ConfigDef[]): readonly { name: string; text: string }[] => [
+  ...defs.map(def => ({ name: schemaFileName(def), text: configJsonSchemaText(def) })),
+  { name: SCHEMA_MANIFEST, text: `${JSON.stringify(defs.map(schemaFileName).toSorted())}\n` },
+];
 
 /** Refuses two declarations that would publish one schema name: a later write would hide the earlier schema. */
 export function assertDistinctSchemaNames(declarations: readonly ConfigDeclaration[]): void {
