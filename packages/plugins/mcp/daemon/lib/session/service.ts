@@ -13,6 +13,7 @@
  *
  * Both scopes run {@link mcpServerRefusal} first, the same rule the form runs as a person types.
  */
+import { byRecordedHarnessKey } from '@ferretry/core-ferrets/contract';
 import { posix } from 'node:path';
 import {
   type McpItem,
@@ -281,7 +282,9 @@ export class SessionMcpService {
   }
 
   async #projectTarget(session: McpFerretView): Promise<ProjectTarget> {
-    if (session.harness === 'codex') return { unavailable: CODEX_PROJECT };
+    // Codex writes no per-project file for Ferretry to share; Claude's `.mcp.json` is the project file.
+    const codex = byRecordedHarnessKey(session.harness, { claude: () => false, codex: () => true });
+    if (codex) return { unavailable: CODEX_PROJECT };
     const folders = await this.deps.projectFolders();
     const root = projectRootFor(
       session.folder,

@@ -1,3 +1,4 @@
+import { isRecordedHarness } from '@ferretry/core-ferrets/contract';
 import { LessonsService } from '../../daemon/lib/index.ts';
 import type {
   LessonFilesPort,
@@ -132,6 +133,10 @@ export function lessonFacts(
   return {
     cwd: '/work/ferretry/packages/cli',
     harness: 'claude',
+    family:
+      overrides.harness === undefined || isRecordedHarness(overrides.harness)
+        ? (overrides.harness ?? 'claude')
+        : undefined,
     mode: 'interactive',
     createdAt: AT,
     running: true,

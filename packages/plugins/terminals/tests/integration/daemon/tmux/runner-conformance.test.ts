@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'bun:test';
 import type { RunnerHandle, RunSpec } from '@ferretry/core-ferrets/contract';
 import { emptyChildEnvironment, fenced, ferretId, runnerConformance } from '@ferretry/core-ferrets/contract/testing';
@@ -349,5 +351,58 @@ describe("TmuxRunner first turn at a pane still exec'ing its launch wrappers", (
     await expect(delivered).rejects.toThrow();
     expect(pane.writes).toBeGreaterThanOrEqual(2);
     expect(pane.server.submitted).toEqual([]);
+  });
+});
+
+describe('TmuxRunner startup dialogs answer only the REGISTERED harness (a screen never picks the family)', () => {
+  const FIXTURES = join(import.meta.dir, '../../../fixtures');
+  const codexUpdate = (): string =>
+    readFileSync(join(FIXTURES, 'harness-dialogs', 'codex-0.156.1-update.txt'), 'utf8').trimEnd();
+  const claudeTrust = (): string =>
+    readFileSync(join(FIXTURES, 'startup-dialogs', 'claude-2.1.281-folder-trust.txt'), 'utf8').trimEnd();
+
+  /** A pane parked on `screen`, launched by a harness registered under `harness`; delivery then tries a first turn. */
+  async function parkedOn(screen: string, harness: string | undefined, chain: RunSpec['execChain']) {
+    const world = tmuxWorld();
+    const spec = { ...world.spec, execChain: chain, ...(harness === undefined ? {} : { harness }) };
+    const started = await world.runner.start(spec);
+    if (!started.ok) throw new Error('the fixture pane did not start');
+    const pane = world.paneOf(started.value.handle);
+    pane.server.modalReplacesComposer = true;
+    pane.server.modal = screen;
+    const delivered = await world.runner.deliver(started.value.handle, { text: 'hello' }).then(
+      () => 'delivered',
+      () => 'refused',
+    );
+    return { pane, delivered };
+  }
+
+  it('should press NO key on a fake third harness that paints Codex’s update prompt (its key has no family row)', async () => {
+    const { pane, delivered } = await parkedOn(codexUpdate(), 'fake-third', ['env', 'sh', 'harness']);
+
+    expect(delivered).toBe('refused');
+    expect(pane.writes).toBe(0);
+  });
+
+  it('should press NO key on a third harness registered under the family word `claude`, whatever its screen says', async () => {
+    const { pane, delivered } = await parkedOn(claudeTrust(), 'claude', ['env', 'sh', 'harness']);
+
+    expect(delivered).toBe('refused');
+    expect(pane.writes).toBe(0);
+  });
+
+  it('should press NO key on a pane no launch named a harness for', async () => {
+    const { pane, delivered } = await parkedOn(codexUpdate(), undefined, ['env', 'sh', 'harness']);
+
+    expect(delivered).toBe('refused');
+    expect(pane.writes).toBe(0);
+  });
+
+  it('should still answer Codex’s update prompt and Claude’s folder trust for the harnesses registered as those', async () => {
+    const codex = await parkedOn(codexUpdate(), 'codex', ['env', 'bash', 'sh', 'node', 'harness']);
+    const claude = await parkedOn(claudeTrust(), 'claude-code', ['env', 'sh', 'harness']);
+
+    expect(codex.pane.writes).toBeGreaterThan(0);
+    expect(claude.pane.writes).toBeGreaterThan(0);
   });
 });

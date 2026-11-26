@@ -128,7 +128,10 @@ describe('warden provenance parsing', () => {
       label: 'an unknown model source',
       value: { ...buildWardenSpawnProvenance(facts, preferred), modelSource: 'vibes' },
     },
-    { label: 'an unknown harness', value: { ...buildWardenSpawnProvenance(facts, preferred), harness: 'gpt' } },
+    {
+      label: 'a harness that is not spelled as a harness key',
+      value: { ...buildWardenSpawnProvenance(facts, preferred), harness: 'Not A Key' },
+    },
     { label: 'an unknown policy', value: { ...buildWardenSpawnProvenance(facts, preferred), policy: 'random' } },
     { label: 'an unknown selection', value: { ...buildWardenSpawnProvenance(facts, preferred), selection: 'vibes' } },
     {

@@ -14,6 +14,7 @@
  *
  * Pure but for its ports.
  */
+import { isRecordedHarness } from '@ferretry/core-ferrets/contract';
 import {
   type DialogLearnAnswer,
   type DialogProposal,
@@ -74,7 +75,7 @@ export function proposeRule(input: {
     return { ...base, note: 'a tool permission prompt is never taught: it is yours to answer.' };
   if (dialog.kind === 'usage-limit') return { ...base, note: 'a spent login is the auto-move’s, not a rule’s.' };
   const harness = dialog.harness;
-  if (harness !== 'claude' && harness !== 'codex')
+  if (harness === undefined || !isRecordedHarness(harness))
     return { ...base, note: 'which harness drew this screen is not known, so no rule can name it.' };
   const asked = input.row === undefined ? undefined : dialog.options.find(option => option.number === input.row);
   if (input.row !== undefined && asked === undefined)

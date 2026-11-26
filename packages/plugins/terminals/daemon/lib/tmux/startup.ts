@@ -12,6 +12,7 @@
  * dialog whose affirmative path is READ OFF THE PANE. Nothing here guesses a key count, and a
  * recognised dialog whose options cannot be parsed returns nothing rather than a blind Enter.
  */
+import { byRecordedHarness, recordedFamilyOfKey } from '@ferretry/core-ferrets/contract';
 import { parseHarnessDialog } from './harness-dialog.ts';
 
 /** A dialog whose affirmative path is known, and the exact keys that take it. */
@@ -39,6 +40,13 @@ export interface StartupDialogOptions {
    * every future session on that account resumes.
    */
   readonly resumeMenuChoice?: 'full' | 'summary';
+  /**
+   * The REGISTERED key of the harness whose pane this is. When given, a key the family table has no row for (a third
+   * harness, the family word `claude`, an empty string for a pane no launch identified) is answered NOTHING: no
+   * family's legacy update/trust/resume answer is pressed on a guess read off the screen, and the caller waits and
+   * says why. Absent: the caller has no identity to gate on (a pure read of a frame).
+   */
+  readonly harness?: string;
 }
 
 /** One rendered menu row: whether the cursor sits on it, and its lowercased label. */
@@ -189,7 +197,9 @@ function autoDefaultNudgeAction(pane: string): StartupDialogAction | undefined {
  */
 export function codexUpdateAction(pane: string): StartupDialogAction | undefined {
   const dialog = parseHarnessDialog(pane);
-  if (dialog?.kind !== 'update' || dialog.harness !== 'codex' || dialog.selected === undefined) return undefined;
+  if (dialog?.kind !== 'update' || dialog.selected === undefined) return undefined;
+  // Only Codex's update prompt is answered here: Claude's is never skipped on a guess.
+  if (!byRecordedHarness(dialog.harness, { claude: () => false, codex: () => true })) return undefined;
   const skip = dialog.options.find(option => option.label.toLowerCase() === 'skip');
   if (skip === undefined) return undefined;
   const distance = skip.number - dialog.selected;
@@ -254,6 +264,8 @@ function affirmativeRow(options: readonly MenuOption[]): number {
  * find nothing and the pane would sit there.
  */
 export function startupDialogAction(pane: string, options: StartupDialogOptions = {}): StartupDialogAction | undefined {
+  // A harness the family table has no row for gets none of the legacy family answers: the screen never picks one.
+  if (options.harness !== undefined && recordedFamilyOfKey(options.harness) === undefined) return undefined;
   const resumeMenu = resumeMenuAction(pane, options.resumeMenuChoice ?? 'full');
   if (resumeMenu !== undefined) return resumeMenu;
   // Its rows carry no numbers, so it has its own row parser rather than the affirmative search below.

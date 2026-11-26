@@ -1,7 +1,7 @@
 import {
   type HarnessKey,
-  isKnownHarnessKey,
-  type KnownHarnessKey,
+  isRecordedHarnessKey,
+  type RecordedHarnessKey,
   type LaunchPart,
   type LaunchPartSource,
   type LaunchSpec,
@@ -37,7 +37,7 @@ type McpLaunchPart = Extract<LaunchPart, { readonly kind: 'mcp' }>;
  */
 export function mcpParts(
   items: ReadonlyMap<string, McpItem>,
-  harness: KnownHarnessKey,
+  harness: RecordedHarnessKey,
   format?: McpDocumentFormat,
 ): readonly McpLaunchPart[] {
   const parts: McpLaunchPart[] = [];
@@ -162,7 +162,7 @@ export class McpLaunchParts implements LaunchPartSource {
     const items = new Map([...this.deps.items()].filter(([name]) => layered.has(name)));
     const format = this.deps.mcpFormat(spec.harness);
     // A harness whose MCP format this plugin does not write gets no servers from it: never another harness's.
-    const servers = isKnownHarnessKey(spec.harness) ? mcpParts(items, spec.harness, format) : [];
+    const servers = isRecordedHarnessKey(spec.harness) ? mcpParts(items, spec.harness, format) : [];
     const signedIn = new Map<string, { readonly names: McpOAuthSecretNames; readonly url: string }>();
     const named = new Set<SecretName>();
     for (const part of servers) {

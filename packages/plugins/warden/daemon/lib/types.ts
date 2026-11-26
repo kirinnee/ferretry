@@ -8,6 +8,7 @@
  * session in a status the warden had never heard of.
  */
 
+import type { RecordedFamily } from '@ferretry/core-ferrets/contract';
 import type { SessionStatus, SessionTurnState } from './protocol.ts';
 
 /** Label that marks a fleet-warden session. Warden sessions — and everything
@@ -84,7 +85,7 @@ export interface WardenSessionConfig {
   readonly credentialRevoked?: boolean;
   readonly agent?: string;
   /** The harness the session runs, as its configuration records it: what a move must stay on. */
-  readonly harness?: 'claude' | 'codex';
+  readonly harness?: RecordedFamily;
   readonly model?: string;
   /**
    * The model a start RESOLVED when the account pinned none.
