@@ -247,7 +247,7 @@ export class FileTranscriptReads
       return stat === undefined ? undefined : { file: where.token, size: stat.size, mtimeMs: stat.mtimeMs };
     };
     const events = await this.#tails.tail(ferret, where.token, limit, fingerprint, async () => await read());
-    return events === undefined ? { kind: 'unreadable' } : { kind: 'read', events };
+    return events === undefined ? { kind: 'unreadable' } : { kind: 'read', events, file: where.token };
   }
 
   async page(

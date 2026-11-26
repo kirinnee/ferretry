@@ -132,7 +132,7 @@ export type TranscriptTailResult =
   /** The exact file was proved, but it disappeared or could not be parsed when it was read. */
   | { readonly kind: 'unreadable' }
   /** A file was resolved and read. `events` may legitimately be empty — the agent has not spoken yet. */
-  | { readonly kind: 'read'; readonly events: readonly TranscriptEvent[] };
+  | { readonly kind: 'read'; readonly events: readonly TranscriptEvent[]; readonly file?: string };
 
 export interface SessionTranscriptTail {
   tail(sessionId: string, limit: number): Promise<TranscriptTailResult>;

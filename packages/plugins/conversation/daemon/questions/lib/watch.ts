@@ -53,6 +53,12 @@ export interface QuestionWatchDeps {
    */
   transcriptEvents?(ferret: string, limit?: number): Promise<readonly TranscriptEvent[] | 'unreadable' | undefined>;
   /**
+   * Which conversation file the ferret's transcript is NOW (the rollout's own path); `undefined` when it cannot be told.
+   * It is the only evidence that a stored Codex question's conversation was replaced: a tail that merely lacks the call is
+   * not (the reader keeps a bounded window and drops completeness). Absent: a changed conversation is never inferred.
+   */
+  transcriptFile?(ferret: string): Promise<string | undefined>;
+  /**
    * The one writer for a question the transcript projected (it has no hook payload): stored whole, or `undefined`.
    * `askedAt` is the call's own time, or absent when the event carried none (the writer stamps the instant it saw it).
    */
@@ -159,6 +165,8 @@ export class QuestionWatch {
   readonly #looking = new Map<string, Promise<void>>();
   /** Looks in a row at which a stored pane question's form was missing from a readable pane. */
   readonly #gone = new Map<string, number>();
+  /** The conversation file a stored Codex question's call was last seen in: what a different file is compared with. */
+  readonly #rollout = new Map<string, string>();
 
   constructor(private readonly deps: QuestionWatchDeps) {}
 
@@ -196,6 +204,7 @@ export class QuestionWatch {
     this.#seen.delete(ferret);
     this.#failed.delete(ferret);
     this.#gone.delete(ferret);
+    this.#rollout.delete(ferret);
   }
 
   async #lookNow(ferret: string, family: string | undefined, working: boolean): Promise<void> {
@@ -320,6 +329,7 @@ export class QuestionWatch {
       const stored = await write(ferret, pending, pending.askedAt);
       this.#seen.set(ferret, key);
       this.#failed.delete(ferret);
+      await this.#noteRollout(ferret);
       if (stored !== undefined) await this.deps.asked(ferret, stored.toolUseId);
     } catch (error) {
       if (this.#seen.get(ferret) === key) throw error;
@@ -392,31 +402,41 @@ export class QuestionWatch {
     if (stored !== undefined) await this.deps.asked(ferret, stored.toolUseId);
   }
 
+  /** Remembers which conversation file the stored question's call is in (a read that fails decides nothing). */
+  async #noteRollout(ferret: string): Promise<void> {
+    const file = await this.deps.transcriptFile?.(ferret).catch(() => undefined);
+    if (file !== undefined) this.#rollout.set(ferret, file);
+  }
+
   /**
    * Whether the transcript positively releases the STORED question, independently of the projector's one final pick (a
    * result whose call left the newest tail, or an earlier question's result behind a later question, projects to none):
    *
    * 1. its exact tool-result is among the events: released;
    * 2. its exact call is among them with no result: still open (a turn event is never release evidence);
-   * 3. neither, and the tail is not full: the whole transcript is in view and the call is not in it, so the
-   *    conversation is not the one that asked (a new, cleared or resumed conversation): released. An EMPTY read
-   *    decides nothing (a transcript still being written);
-   * 4. neither, and the tail is full: a wider read looks for the same ids; a result there releases, a call there keeps
-   *    it, and any other wide read holding neither (full: the call is more than {@link QUESTION_DEEP_EVENTS} events
-   *    old, which an open form never writes; short: the whole transcript lacks it) is a positive release.
+   * 3. neither: a tail that lacks the call proves nothing (the reader's window is bounded and says neither where it began
+   *    nor whether it is whole), so a full tail takes one wider read for the exact ids (a result there releases, a call
+   *    there keeps it), and then the ONLY release is positive evidence the conversation was replaced: the ferret's
+   *    transcript is a different file from the one the call was seen in.
    *
-   * An unreadable wide read decides nothing.
+   * An unreadable wide read decides nothing. An empty read decides nothing (a transcript still being written).
    */
   async #codexReleased(ferret: string, toolUseId: string, events: readonly TranscriptEvent[]): Promise<boolean> {
     if (events.some(event => resultsTool(event, toolUseId))) return true;
-    if (events.some(event => callsTool(event, toolUseId))) return false;
+    if (events.some(event => callsTool(event, toolUseId))) {
+      if (!this.#rollout.has(ferret)) await this.#noteRollout(ferret);
+      return false;
+    }
     if (events.length === 0) return false;
-    if (events.length < QUESTION_TAIL_EVENTS) return true;
-    const wide = await this.deps.transcriptEvents?.(ferret, QUESTION_DEEP_EVENTS);
-    if (wide === undefined || wide === 'unreadable') return false;
-    if (wide.some(event => resultsTool(event, toolUseId))) return true;
-    if (wide.some(event => callsTool(event, toolUseId))) return false;
-    return wide.length > 0;
+    if (events.length >= QUESTION_TAIL_EVENTS) {
+      const wide = await this.deps.transcriptEvents?.(ferret, QUESTION_DEEP_EVENTS);
+      if (wide === undefined || wide === 'unreadable') return false;
+      if (wide.some(event => resultsTool(event, toolUseId))) return true;
+      if (wide.some(event => callsTool(event, toolUseId))) return false;
+    }
+    const known = this.#rollout.get(ferret);
+    const now = await this.deps.transcriptFile?.(ferret).catch(() => undefined);
+    return known !== undefined && now !== undefined && now !== known;
   }
 
   /** `true` the question is over, `false` still open, `undefined` the transcript could not be read. */

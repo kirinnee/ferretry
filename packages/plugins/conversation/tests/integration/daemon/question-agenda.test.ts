@@ -11,6 +11,8 @@ import {
 } from '@ferretry/core-asks/contract';
 import type { Instant } from '@ferretry/std';
 import { CONVERSATION_STATE, QuestionSchema } from '../../../contract/index.ts';
+import { ownerStanding } from '@ferretry/core-gate/contract/testing';
+import { asksHalf } from '../../../../../core/asks/tests/support/daemon/asks-half.ts';
 import { memoryStatePort } from '../../support/state.ts';
 import type { HarnessGate } from '@ferretry/core-mailbox/contract';
 import { buildConversationA } from '../../support/conversation-half.ts';
@@ -107,6 +109,8 @@ function daemon(options: {
   files: Map<string, unknown>;
   asks: ReturnType<typeof fakeAsks>;
   events: { current: readonly TranscriptEvent[] };
+  /** The conversation file the ferret's transcript is now (a replaced conversation is a different one). */
+  file?: { current: string | undefined };
   /** Another Ferrets (a live form to type into, more than one ferret): the default has one Codex ferret. */
   ferrets?: unknown;
 }) {
@@ -154,6 +158,7 @@ function daemon(options: {
     } as never,
     gate: CLOSED,
     questionEvents: async () => options.events.current,
+    questionFile: async () => options.file?.current,
   });
   /** One 2 s tick of the question watch (the Agenda's reconcile, then a look), run to the end. */
   const tick = async (): Promise<void> => {
@@ -168,7 +173,8 @@ const world = () => {
   const files = new Map<string, unknown>();
   const asks = fakeAsks();
   const events = { current: [] as readonly TranscriptEvent[] };
-  return { files, asks, events, boot: () => daemon({ files, asks, events }) };
+  const file = { current: 'rollout-a.jsonl' as string | undefined };
+  return { files, asks, events, file, boot: () => daemon({ files, asks, events, file }) };
 };
 
 describe('a stored question reaches the Agenda as one Asks obligation', () => {
@@ -306,14 +312,27 @@ describe('a stored question reaches the Agenda as one Asks obligation', () => {
     ]);
   });
 
-  test('a conversation that changed under a stored question (a short history without its call) closes the card (D-02)', async () => {
+  test('a short tail without the call, in the SAME conversation, leaves the card open (a bounded tail proves nothing)', async () => {
+    const w = world();
+    const d = w.boot();
+    w.events.current = [callEvent('call_1')];
+    await d.tick();
+    w.events.current = [resultEvent('call_unrelated')];
+    await d.tick();
+    await d.tick();
+    expect(w.asks.open()).toHaveLength(1);
+    expect(d.stored()).toBeDefined();
+  });
+
+  test('a conversation that changed under a stored question (another rollout file) closes the card (D-02)', async () => {
     const w = world();
     const d = w.boot();
     w.events.current = [callEvent('call_1')];
     await d.tick();
     expect(w.asks.open()).toHaveLength(1);
-    // A new conversation: its whole, short history does not hold the call that was asked.
+    // A new conversation: the ferret's transcript is another file, whose short history lacks the call that was asked.
     w.events.current = [resultEvent('call_unrelated')];
+    w.file.current = 'rollout-b.jsonl';
     await d.tick();
     expect(w.asks.items.map(item => [item.draft.entry, item.state, item.reason])).toEqual([
       ['cody:call_1', 'closed', 'answered'],
@@ -613,5 +632,85 @@ describe('a ferret parked on a permission prompt reaches the Agenda on the same 
     };
     await d.tick();
     expect(d.warned.filter(line => line.includes('could not list the ferrets for their prompts'))).toHaveLength(2);
+  });
+});
+
+/**
+ * A question replaced WHILE the owner's Agenda answer is being typed into the old one (review MUST 2, D-03), over the REAL
+ * Asks: the watch must not close the old card mid-answer (the Agenda resolves it on success), but when the pane then
+ * rejects the old answer Asks leaves the card open, and nothing else would ever close it: both cards would stay.
+ */
+describe('a question replaced during an Agenda answer, over the real Asks', () => {
+  const BOARD = 'POST /v1/ferrets/:ferretId/agenda';
+
+  async function boot(paneRejects: boolean) {
+    const pane = new Pane();
+    const w = world();
+    const mounted: { current?: ReturnType<typeof daemon> } = {};
+    const source = {
+      schema: QuestionSchema,
+      title: 'Question',
+      form: true,
+      apply: async (answer: never) =>
+        await (mounted.current as ReturnType<typeof daemon>).half.applyQuestionAnswer(answer),
+    };
+    const real = await asksHalf({ 'ask.sources:question': source });
+    // The pane takes the first answer's arrow, then the replacement lands before Enter is typed.
+    const typed = pane.harness.form.key;
+    pane.harness.form.key = async (key: string) => {
+      if (key !== 'Enter') return await typed(key);
+      w.events.current = [callEvent('t2', 'Which colour?')];
+      await mounted.current?.tick();
+      return paneRejects
+        ? { ok: false, value: undefined, error: { refused: 'not_ready', why: 'busy' } }
+        : await typed(key);
+    };
+    const d = daemon({
+      files: w.files,
+      asks: { api: real.asksFor('conversation') } as never,
+      events: w.events,
+      ferrets: ferretsOf({ cody: pane }),
+    });
+    mounted.current = d;
+    w.files.set('cody/question.json', FORM);
+    await d.tick();
+    return { w, d, real };
+  }
+  const entries = async (real: Awaited<ReturnType<typeof boot>>['real'], state: 'open' | 'closed') =>
+    (await real.asks.open({ state })).map(item => String(item.entry)).sort();
+  const answerOld = async (real: Awaited<ReturnType<typeof boot>>['real']) =>
+    await real.call(
+      BOARD,
+      { ferretId: 'cody' },
+      { action: 'resolve', id: 'A1', response: { kind: 'form', answers: [{ id: '1', picked: 'No' }] } },
+      ownerStanding('ui'),
+    );
+
+  test('a rejected old answer leaves ONLY the replacement card open', async () => {
+    const { d, real } = await boot(true);
+    expect(await entries(real, 'open')).toEqual(['cody:t1']);
+
+    const response = await answerOld(real);
+    for (let i = 0; i < 4; i += 1) await d.tick();
+    await real.settle();
+
+    expect(response.status).toBe(409);
+    expect(await entries(real, 'open')).toEqual(['cody:t2']);
+    expect(await entries(real, 'closed')).toEqual(['cody:t1']);
+    await real.close();
+  });
+
+  test('an accepted old answer keeps its own receipt and opens the replacement', async () => {
+    const { d, real } = await boot(false);
+
+    const response = await answerOld(real);
+    for (let i = 0; i < 4; i += 1) await d.tick();
+    await real.settle();
+
+    expect(response.status).toBe(200);
+    expect(await entries(real, 'open')).toEqual(['cody:t2']);
+    const [receipt] = await real.asks.answers({ source: 'question' as never, entry: 'cody:t1' as never });
+    expect(receipt).toMatchObject({ effect: 'clarify' });
+    await real.close();
   });
 });
