@@ -31,8 +31,9 @@ async function canonicalRecord(
   for (const record of records) {
     try {
       if ((await fileSystem.realPath(record.path)) === expected) return record;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    } catch {
+      // A sibling this daemon cannot resolve (deleted by hand, or outside every root it may reach: a hand-made worktree in
+      // another folder) is not the checkout being looked for, and must not make every other row unreadable.
     }
   }
   return undefined;
@@ -180,16 +181,20 @@ export class GitWorktreeGateway {
    * this must not consider: `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1` mean "every
    * scope" is exactly the repository's own configuration and whatever it includes.
    */
-  async assertCheckoutFiltersSafe(cwd: GitWorkingDirectory): Promise<void> {
+  async assertCheckoutFiltersSafe(cwd: GitWorkingDirectory, readsWorkingTree = false): Promise<void> {
     const execution = await this.runner.run({
       cwd,
       args: ['config', '--list', '--includes', '--name-only', '-z'],
     });
     if (!execution.timedOut && execution.exitCode === 1) return;
     requireGitExit('git filter inspection', execution);
+    const program = readsWorkingTree ? /^filter\..*\.(clean|smudge|process)$/iu : /^filter\..*\.(smudge|process)$/iu;
     const names = decodeGitOutput(execution)
       .split('\0')
-      .filter(value => /^filter\..*\.(smudge|process)$/u.test(value));
+      .filter(value => program.test(value));
+    if (execution.stdoutTruncated || execution.stderrTruncated) {
+      throw new WorktreeError('verification_failed', 'Git filter configuration could not be fully read');
+    }
     if (names.length > 0) {
       throw new WorktreeError(
         'unsafe_checkout_filter',
@@ -216,6 +221,12 @@ export class GitWorktreeGateway {
   }
 
   async status(cwd: string): Promise<WorktreeStatusSummary> {
+    await this.assertCheckoutFiltersSafe(cwd, true);
+    // Status recurses into submodules, whose config and metadata have not passed this repository's guard.
+    const index = await runGit(this.runner, cwd, ['ls-files', '--stage', '-z'], 'git submodule inspection');
+    if (index.stdoutTruncated || /(?:^|\0)160000 /u.test(decodeGitOutput(index))) {
+      throw new WorktreeError('verification_failed', 'submodule filter safety could not be established');
+    }
     const execution = await runGit(
       this.runner,
       cwd,

@@ -7,6 +7,7 @@ import type {
   SpawnBytesResult,
 } from '@ferretry/kernel/contract';
 import type { GitByteSpawn } from '../git/runner.ts';
+import { createRepoWorktreeAccess, type RepoWorktreeAccess } from './repo-access.ts';
 import type { GitWorkingDirectory, WorktreeDirectoryPinner, WorktreeFileSystem } from '../../lib/worktrees/ports.ts';
 
 /**
@@ -44,12 +45,14 @@ export interface KernelWorktreeHostInputs {
         readonly timeout?: import('@ferretry/std').Duration;
         readonly maxStdoutBytes?: number;
         readonly maxStderrBytes?: number;
+        readonly signal?: AbortSignal;
       },
     ): Promise<SpawnBytesResult>;
   };
 }
 
 export interface KernelWorktreeHostIo {
+  readonly repoAccess: RepoWorktreeAccess;
   readonly git: GitByteSpawn;
   readonly fileSystem: WorktreeFileSystem;
   readonly pinner: WorktreeDirectoryPinner;
@@ -128,5 +131,5 @@ export function createKernelWorktreeHostIo(input: KernelWorktreeHostInputs): Ker
     },
   };
 
-  return { git, fileSystem, pinner, managedRoot };
+  return { git, fileSystem, pinner, managedRoot, repoAccess: createRepoWorktreeAccess(route) };
 }
