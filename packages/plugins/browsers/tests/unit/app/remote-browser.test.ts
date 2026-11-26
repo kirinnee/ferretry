@@ -344,9 +344,12 @@ const daemonFrameEnvelope = (pageId: string, jpeg: readonly number[]): ArrayBuff
 };
 
 describe('D-87 which stream refusals a passkey can answer', () => {
-  it('takes a 401 or 403 refusal to open as one, and nothing else', () => {
-    expect(streamWantsConfirmation('the daemon refused this stream: 403')).toBe(true);
-    expect(streamWantsConfirmation('the daemon refused this stream: 401')).toBe(true);
+  it('takes typed passkey refusals and sealed admission loss, never a generic HTTP denial', () => {
+    expect(streamWantsConfirmation('grant_step_up_required')).toBe(true);
+    expect(streamWantsConfirmation('unlock_required')).toBe(true);
+    expect(streamWantsConfirmation('this stream is no longer allowed')).toBe(true);
+    expect(streamWantsConfirmation('the daemon refused this stream: 403')).toBe(false);
+    expect(streamWantsConfirmation('the daemon refused this stream: 401')).toBe(false);
     expect(streamWantsConfirmation('the daemon refused this stream: 404')).toBe(false);
     expect(streamWantsConfirmation('the daemon refused this stream: 4030')).toBe(false);
     expect(streamWantsConfirmation('browser use is not granted')).toBe(false);

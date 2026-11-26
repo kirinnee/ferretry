@@ -80,10 +80,16 @@ export function RemoteBrowserStatusBar({ status, connection, busy = false }: Rem
       </Badge>
       <Badge
         tone={lastActor?.kind === 'human' ? 'accent' : 'pend'}
-        className="inline-flex min-w-0 shrink items-center gap-1 truncate"
+        className="inline-flex min-w-0 max-w-[35%] shrink-0 items-center gap-1"
       >
-        {lastActor?.kind === 'human' ? <UserRound size={13} /> : <Bot size={13} />}
-        {lastActor ? `${lastActor.kind === 'human' ? 'You' : 'Agent'} · ${lastActor.action}` : 'No input yet'}
+        {lastActor?.kind === 'human' ? (
+          <UserRound size={13} className="shrink-0" />
+        ) : (
+          <Bot size={13} className="shrink-0" />
+        )}
+        <span className="min-w-0 truncate">
+          {lastActor ? `${lastActor.kind === 'human' ? 'You' : 'Agent'} · ${lastActor.action}` : 'No input yet'}
+        </span>
       </Badge>
       {status?.state === 'running' && status.proxy !== undefined ? (
         <Badge
@@ -97,13 +103,13 @@ export function RemoteBrowserStatusBar({ status, connection, busy = false }: Rem
         </Badge>
       ) : null}
       <span
-        className={`min-w-[5.5rem] flex-1 truncate text-meta text-muted transition-opacity ${activity === '' ? 'opacity-0' : 'opacity-100'}`}
+        className={`min-w-0 flex-1 truncate text-meta text-muted transition-opacity ${activity === '' ? 'opacity-0' : 'opacity-100'}`}
         aria-live="polite"
         data-browser-activity=""
       >
         {activity}
       </span>
-      <span className="ml-auto max-w-[45%] shrink-0 truncate text-meta text-muted">
+      <span className="ml-auto min-w-0 max-w-[45%] shrink truncate text-meta text-muted">
         {connection === 'connected'
           ? 'Live'
           : connection === 'connecting'

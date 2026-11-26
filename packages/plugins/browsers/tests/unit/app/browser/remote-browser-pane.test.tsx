@@ -537,17 +537,14 @@ describe('RemoteBrowserPane stream refusal', () => {
     expect(stream.opened).toHaveLength(1);
 
     await runAsync(async () =>
-      stream.opened[0]?.emit(
-        'close',
-        new CloseEvent('close', { code: 1008, reason: 'the daemon refused this stream: 403' }),
-      ),
+      stream.opened[0]?.emit('close', new CloseEvent('close', { code: 1008, reason: 'grant_step_up_required' })),
     );
     expect(json(renderer)).toContain('Confirm with passkey');
     expect(transport.dispatched()).toEqual([]);
 
     await runAsync(async () => control(renderer, 'Confirm with passkey').props.onClick());
-    // The press is the explicit act that may ask for the passkey; nothing before it did.
-    expect(transport.dispatched()).toEqual([{ action: 'start' }]);
+    // The stream itself asks for the proof: a preceding start must not spend a single-use confirmation.
+    expect(transport.dispatched()).toEqual([]);
     expect(stream.opened).toHaveLength(2);
   });
 });

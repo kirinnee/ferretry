@@ -63,9 +63,14 @@ for (const look of LOOKS) {
             await page.waitForSelector('[data-remote-browser-confirm]');
             await page.evaluate(async () => await document.fonts.ready);
             await page.waitForTimeout(300);
+            const clippedStatus = await page.locator('[data-browser-status-row]').evaluate(row => {
+              const bounds = row.getBoundingClientRect();
+              return [...row.children].some(child => child.getBoundingClientRect().right > bounds.right);
+            });
+            expect(clippedStatus).toBe(false);
 
             const words = await page.locator('.fy-remote-browser-error').textContent();
-            expect(words ?? '').toContain('the daemon refused this stream: 403');
+            expect(words ?? '').toContain('Confirm it’s you to show the remote display.');
             expect(await page.getByRole('button', { name: 'Retry display' }).isVisible()).toBe(true);
             expect(await page.getByRole('button', { name: 'Confirm with passkey' }).isVisible()).toBe(true);
             const overflow = await page.evaluate(

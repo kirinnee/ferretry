@@ -202,7 +202,7 @@ export function RemoteBrowserPane({
   // (daemonId, sessionId) scope exists to make impossible.
   if (daemon.daemonId !== scope.daemonId) throw new Error('remote browser scope must belong to the paired daemon');
 
-  const { status, error, busy, needsPasskey, runAction, confirm, reportError, clearError } = useRemoteBrowser({
+  const { status, error, busy, needsPasskey, runAction, reportError, clearError } = useRemoteBrowser({
     daemon,
     scope,
     isActive,
@@ -491,7 +491,6 @@ export function RemoteBrowserPane({
           onHumanActivity={onHumanActivity}
           onTouchInputFocus={() => textInputRef.current?.focus({ preventScroll: true })}
           socketFactory={socketFactory}
-          onConfirm={confirm}
           createObjectUrl={createObjectUrl}
           revokeObjectUrl={revokeObjectUrl}
         />

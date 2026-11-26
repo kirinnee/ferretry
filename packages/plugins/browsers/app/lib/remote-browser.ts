@@ -1,4 +1,6 @@
 import { FY_REQUEST_ID_HEADER } from '@ferretry/app';
+import { STEP_UP_REQUIRED_CODE, UNLOCK_REQUIRED_CODE } from '@ferretry/core-gate/contract';
+import { SOCKET_CLOSES } from '@ferretry/kernel/contract';
 import { BROWSER_MAX_PAGE_ID_LENGTH, BROWSER_VIEWER_QUERY, BrowserStreamHelloSchema } from '../../contract/index.ts';
 import {
   type BrowserAction,
@@ -138,7 +140,11 @@ export interface RemoteBrowserSocket {
   close(code?: number, reason?: string): void;
 }
 
-export type RemoteBrowserSocketFactory = (daemon: BrowserDaemon, scope: BrowserSessionScope) => RemoteBrowserSocket;
+export type RemoteBrowserSocketFactory = (
+  daemon: BrowserDaemon,
+  scope: BrowserSessionScope,
+  options?: { readonly confirm?: true },
+) => RemoteBrowserSocket;
 
 /**
  * The close a refused display reports: `1008` for a refusal asking again cannot change — the caller
@@ -155,7 +161,8 @@ const REFUSED_STREAM = /refused this stream: (\d{3})/u;
  * Whether a stream the daemon refused to open was refused for want of this device’s say-so (401 or 403): the one refusal a
  * passkey confirmation can answer. Said in the sentence the stream ended with; it never names a credential.
  */
-export const streamWantsConfirmation = (reason: string): boolean => /refused this stream: (?:401|403)\b/u.test(reason);
+export const streamWantsConfirmation = (reason: string): boolean =>
+  reason === STEP_UP_REQUIRED_CODE || reason === UNLOCK_REQUIRED_CODE || reason === SOCKET_CLOSES.admissionLost.reason;
 
 const SOCKET_CONNECTING = 0;
 const SOCKET_OPEN = 1;
@@ -308,7 +315,7 @@ class RemoteBrowserStreamSocket implements RemoteBrowserSocket {
  * The live display as one guarded socket on the shell's client: the contract-hash guard runs before it opens, and
  * the credential is the device's, never this module's.
  */
-export const remoteBrowserSocketFactory: RemoteBrowserSocketFactory = (daemon, scope) => {
+export const remoteBrowserSocketFactory: RemoteBrowserSocketFactory = (daemon, scope, options) => {
   assertScopeDaemon(daemon, scope);
   const socket = new RemoteBrowserStreamSocket(scope.viewer);
   if (!canOpenSocket(daemon.client)) {
@@ -318,9 +325,19 @@ export const remoteBrowserSocketFactory: RemoteBrowserSocketFactory = (daemon, s
   try {
     socket.attach(
       daemon.client.socket(SESSION_BROWSER_ROUTES.stream, sessionParams(scope), {
+        ...options,
         onOpen: () => socket.opened(),
         onFrame: frame => socket.receive(frame),
-        onClose: (reason, code) => socket.ended(reason, code),
+        onClose: (reason, code, refusal) => {
+          const machineCode =
+            refusal?.body !== null && typeof refusal?.body === 'object'
+              ? (refusal.body as { readonly code?: unknown }).code
+              : undefined;
+          socket.ended(
+            machineCode === STEP_UP_REQUIRED_CODE || machineCode === UNLOCK_REQUIRED_CODE ? machineCode : reason,
+            refusal === undefined ? code : refusalClose(refusal.status),
+          );
+        },
       }),
     );
   } catch (caught) {

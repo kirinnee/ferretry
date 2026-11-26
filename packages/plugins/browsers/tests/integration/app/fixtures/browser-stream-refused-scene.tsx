@@ -1,8 +1,8 @@
 /**
  * The browser entry for "the display was refused for want of the passkey" (G18 D-87): the REAL `RemoteBrowserPane` (its hook,
  * its viewer and its chrome) over a fake transport that reports a running browser, and a socket the daemon refuses at once
- * (`the daemon refused this stream: 403`, close 1008). Nothing here reads a network; every name and address is fake. The
- * confirmation is the pane's own `start` action, which the transport counts in `window.__confirmed`; the scene counts the
+ * (`grant_step_up_required`, close 1008). Nothing here reads a network; every name and address is fake. The
+ * confirmation is carried by the actual stream, counted in `window.__confirmed`; the scene counts the
  * streams it opened in `window.__streams`.
  *
  *   ?theme=<palette>-<mode>
@@ -51,10 +51,7 @@ const status = {
 
 const transport: RemoteBrowserTransport = {
   readStatus: async () => status,
-  runAction: async (_daemon, _scope, action) => {
-    if (action.action === 'start') window.__confirmed += 1;
-    return { status };
-  },
+  runAction: async () => ({ status }),
 };
 
 /** A stream the daemon refuses as soon as someone listens. */
@@ -63,11 +60,12 @@ class RefusedSocket implements RemoteBrowserSocket {
   binaryType: BinaryType = 'arraybuffer';
   readonly #listeners = new Map<string, ((event: Event) => void)[]>();
 
-  constructor() {
+  constructor(confirm?: true) {
     window.__streams += 1;
+    if (confirm) window.__confirmed += 1;
     setTimeout(() => {
       this.readyState = 3;
-      const event = new CloseEvent('close', { code: 1008, reason: 'the daemon refused this stream: 403' });
+      const event = new CloseEvent('close', { code: 1008, reason: 'grant_step_up_required' });
       for (const listener of this.#listeners.get('close') ?? []) listener(event);
     }, 0);
   }
@@ -90,7 +88,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
       scope={scope}
       transport={transport}
       schedule={() => () => undefined}
-      socketFactory={() => new RefusedSocket()}
+      socketFactory={(_daemon, _scope, options) => new RefusedSocket(options?.confirm)}
     />
   </div>,
 );

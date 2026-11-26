@@ -270,40 +270,39 @@ describe('RemoteBrowserViewer', () => {
 
   it('D-87 offers the passkey, not only Retry, when the daemon refused the display for want of it, and asks again once it went through', async () => {
     const sockets: FakeSocket[] = [];
-    let confirmations = 0;
+    const confirmations: (true | undefined)[] = [];
     const renderer = render(
       <RemoteBrowserViewer
         daemon={daemonA}
         scope={daemonSessionScope(daemonA, 'session-a')}
         status={running('session-a')}
         reconnectAfterMs={1}
-        onConfirm={async () => {
-          confirmations += 1;
-          return true;
-        }}
-        socketFactory={() => {
+        socketFactory={(_daemon, _scope, options) => {
+          confirmations.push(options?.confirm);
           const socket = new FakeSocket();
           sockets.push(socket);
           return socket;
         }}
       />,
     );
-    run(() =>
-      sockets[0]?.emit('close', new CloseEvent('close', { code: 1008, reason: 'the daemon refused this stream: 403' })),
-    );
+    run(() => sockets[0]?.emit('close', new CloseEvent('close', { code: 1008, reason: 'grant_step_up_required' })));
     const confirm = () => renderer.root.findAll(node => node.props['data-remote-browser-confirm'] !== undefined)[0];
     expect(JSON.stringify(renderer.toJSON())).toContain('Confirm with passkey');
     expect(sockets).toHaveLength(1);
 
     await runAsync(async () => {
       confirm()?.props.onClick();
+      confirm()?.props.onClick();
       await Promise.resolve();
     });
-    expect(confirmations).toBe(1);
+    expect(confirmations).toEqual([undefined, true]);
     expect(sockets).toHaveLength(2);
+    expect(confirm()?.props.disabled).toBe(true);
+    run(() => sockets[1]?.emit('open', new Event('open')));
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Confirm with passkey');
   });
 
-  it('D-87 asks again only after the confirmation went through, and offers it for no other refusal', async () => {
+  it('D-87 offers confirmation for sealed loss of an open stream, but no generic 401/403 hard denial', async () => {
     const sockets: FakeSocket[] = [];
     const renderer = render(
       <RemoteBrowserViewer
@@ -311,7 +310,6 @@ describe('RemoteBrowserViewer', () => {
         scope={daemonSessionScope(daemonA, 'session-a')}
         status={running('session-a')}
         reconnectAfterMs={1}
-        onConfirm={async () => false}
         socketFactory={() => {
           const socket = new FakeSocket();
           sockets.push(socket);
@@ -324,15 +322,27 @@ describe('RemoteBrowserViewer', () => {
     expect(JSON.stringify(renderer.toJSON())).not.toContain('Confirm with passkey');
 
     run(() => renderer.root.findAllByType('button')[0]?.props.onClick());
+    for (const status of [401, 403]) {
+      run(() =>
+        sockets[1]?.emit(
+          'close',
+          new CloseEvent('close', { code: 1008, reason: `the daemon refused this stream: ${status}` }),
+        ),
+      );
+      expect(JSON.stringify(renderer.toJSON())).not.toContain('Confirm with passkey');
+    }
+    run(() => sockets[1]?.emit('open', new Event('open')));
     run(() =>
-      sockets[1]?.emit('close', new CloseEvent('close', { code: 1008, reason: 'the daemon refused this stream: 401' })),
+      sockets[1]?.emit('close', new CloseEvent('close', { code: 1008, reason: 'this stream is no longer allowed' })),
     );
+    expect(JSON.stringify(renderer.toJSON())).toContain('Confirm with passkey');
     await runAsync(async () => {
       renderer.root.findAll(node => node.props['data-remote-browser-confirm'] !== undefined)[0]?.props.onClick();
       await Promise.resolve();
     });
-    // The confirmation did not go through: no new stream.
-    expect(sockets).toHaveLength(2);
+    expect(sockets).toHaveLength(3);
+    run(() => sockets[2]?.emit('close', new CloseEvent('close', { code: 1008, reason: 'grant_step_up_required' })));
+    expect(JSON.stringify(renderer.toJSON())).toContain('Confirm with passkey');
   });
 
   it('opens the display on the daemon’s guarded socket when no transport is injected', async () => {

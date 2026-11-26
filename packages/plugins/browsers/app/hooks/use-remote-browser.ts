@@ -67,8 +67,6 @@ export interface RemoteBrowserModel {
   /** The last answer was the daemon asking for this device's passkey: the browser's state is unknown, not stopped. */
   readonly needsPasskey: boolean;
   readonly runAction: (action: BrowserAction) => void;
-  /** The person’s own press for the passkey: runs the one act that asks for it, and answers whether it went through. */
-  readonly confirm: () => Promise<boolean>;
   readonly refresh: () => void;
   readonly reportError: (message: string) => void;
   readonly clearError: () => void;
@@ -190,7 +188,6 @@ export function useRemoteBrowser({
     },
     [perform],
   );
-  const confirm = useCallback(async (): Promise<boolean> => await perform({ action: 'start' }), [perform]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -207,5 +204,5 @@ export function useRemoteBrowser({
   const reportError = useCallback((message: string) => setError(message), []);
   const clearError = useCallback(() => setError(null), []);
 
-  return { status, error, busy, needsPasskey, runAction, confirm, refresh, reportError, clearError };
+  return { status, error, busy, needsPasskey, runAction, refresh, reportError, clearError };
 }
