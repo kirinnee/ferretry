@@ -362,6 +362,7 @@ export class ManagedWorktreeAdapter {
       managed: {
         version: 1,
         ...(intent.origin === undefined ? {} : { origin: intent.origin }),
+        ...(intent.adoptionIdentity === undefined ? {} : { adoptionIdentity: intent.adoptionIdentity }),
         path: intent.path,
         branch: intent.branch,
         repositoryRoot: intent.repositoryRoot,

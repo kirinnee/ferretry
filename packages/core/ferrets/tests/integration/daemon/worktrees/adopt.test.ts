@@ -138,6 +138,45 @@ describe('adopt in place through the real roots and Git', () => {
     should(await Bun.file(path.join(world.target, 'keep.txt')).text()).equal('foreign checkout\n');
   });
 
+  for (const recover of [false, true]) {
+    it(`should refuse a replacement with matching metadata after ${recover ? 'recovered' : 'successful'} adoption`, async () => {
+      const world = await fixture(`adopt-settled-replacement-${recover}`);
+      const writeText = world.io.fileSystem.writeText;
+      if (recover) {
+        world.io.fileSystem.writeText = async (...args) => {
+          await writeText(...args);
+          throw new Error('synthetic crash after marker');
+        };
+        await world
+          .call('POST /v1/worktrees/adopt', { body: { path: world.target } })
+          .should.be.rejectedWith(/synthetic crash/);
+        world.io.fileSystem.writeText = writeText;
+      }
+      should((await world.call('POST /v1/worktrees/adopt', { body: { path: world.target } })).status).equal(200);
+      const original = `${world.target}-original`;
+      const pointer = await Bun.file(path.join(world.target, '.git')).text();
+      const content = await Bun.file(path.join(world.target, 'README.md')).text();
+      await rename(world.target, original);
+      await mkdir(world.target);
+      await Bun.write(path.join(world.target, '.git'), pointer);
+      await Bun.write(path.join(world.target, 'README.md'), content);
+
+      // The replacement is clean and points to the SAME metadata and ownership marker. Only the persisted
+      // checkout identity distinguishes it; Git's ordinary cleanliness and ownership checks all accept it.
+      const removed = await world.call('POST /v1/worktrees/remove', {
+        body: { path: world.target, overrides: ['accept_unpushed_commits'], deleteBranch: false, confirmations: [] },
+      });
+      should(removed.status).equal(409);
+      should(await Bun.file(path.join(world.target, 'README.md')).text()).equal(content);
+      should(await Bun.file(path.join(original, 'README.md')).text()).equal(content);
+      const registry = JSON.parse(world.state.raw(WorktreesFile)!);
+      should(registry.format).equal(1);
+      should(registry.intents).eql([]);
+      should(registry.worktrees[0].removedAt).be.undefined();
+      should(registry.worktrees[0].adoptionIdentity.checkout).match(/^\d+:\d+$/);
+    });
+  }
+
   it('should retain the pre-existing branch unless its separate deletion confirmations are supplied', async () => {
     const world = await fixture('adopt-delete-branch');
     should((await world.call('POST /v1/worktrees/adopt', { body: { path: world.target } })).status).equal(200);

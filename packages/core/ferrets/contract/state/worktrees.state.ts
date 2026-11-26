@@ -3,9 +3,16 @@ import { z } from 'zod';
 
 // ─── worktrees.json (today's managed worktree registry, `lib/worktrees/registry.ts`) ────────────────────────────
 
+const AdoptionIdentitySchema = z.strictObject({
+  checkout: z.string().regex(/^\d+:\d+$/),
+  gitDirectory: z.string().regex(/^\d+:\d+$/),
+  commonDirectory: z.string().regex(/^\d+:\d+$/),
+});
+
 export const ManagedWorktreeRecordSchema = z.strictObject({
   version: z.literal(1),
   origin: z.enum(['managed', 'adopted']).optional(),
+  adoptionIdentity: AdoptionIdentitySchema.optional(),
   path: z.string().min(1),
   branch: z.string().min(1),
   repositoryRoot: z.string().min(1),
@@ -26,13 +33,7 @@ export const ManagedWorktreeIntentSchema = z.strictObject({
   version: z.literal(1),
   origin: z.enum(['managed', 'adopted']).optional(),
   gitDir: z.string().min(1).optional(),
-  adoptionIdentity: z
-    .strictObject({
-      checkout: z.string().regex(/^\d+:\d+$/),
-      gitDirectory: z.string().regex(/^\d+:\d+$/),
-      commonDirectory: z.string().regex(/^\d+:\d+$/),
-    })
-    .optional(),
+  adoptionIdentity: AdoptionIdentitySchema.optional(),
   path: z.string().min(1),
   branch: z.string().min(1),
   repositoryRoot: z.string().min(1),

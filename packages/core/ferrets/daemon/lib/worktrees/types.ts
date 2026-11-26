@@ -73,6 +73,7 @@ export interface WorktreeListEntry {
  */
 export interface ManagedWorktree {
   readonly origin?: 'managed' | 'adopted';
+  readonly adoptionIdentity?: WorktreeAdoptionIdentity;
   readonly version: 1;
   readonly path: string;
   readonly branch: string;
@@ -141,7 +142,7 @@ export type ManagedWorktreeAdoption =
   | { readonly kind: 'absent' }
   | { readonly kind: 'unverified'; readonly reason: string };
 
-/** Held directory identities at adoption authorization, persisted only until the marker write is settled. */
+/** Directory identities authorized at adoption, kept through settlement and checked before removal. */
 export interface WorktreeAdoptionIdentity {
   readonly checkout: string;
   readonly gitDirectory: string;

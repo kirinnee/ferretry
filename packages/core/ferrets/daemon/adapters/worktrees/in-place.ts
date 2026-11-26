@@ -84,6 +84,7 @@ export class InPlaceWorktrees {
             const record: ManagedWorktree = {
               version: 1,
               origin: 'adopted',
+              adoptionIdentity: identityOf(held),
               path: folder,
               branch: checkout.branch,
               repositoryRoot: checkout.repositoryRoot,
@@ -127,15 +128,17 @@ export class InPlaceWorktrees {
           : await this.base.examine(input),
       remove: async input =>
         input.managed.origin === 'adopted'
-          ? await this.#scoped(input.managed, async adapter => await adapter.remove(input))
+          ? await this.#scoped(input.managed, async adapter => await adapter.remove(input), true)
           : await this.base.remove(input),
-      presence: async entry =>
-        entry.origin === 'adopted'
-          ? await this.#scoped(entry, async adapter => await adapter.presence(entry)).catch(error => ({
-              kind: 'unverified' as const,
-              reason: reasonOf(error),
-            }))
-          : await this.base.presence(entry),
+      presence: async entry => {
+        if (entry.origin !== 'adopted') return await this.base.presence(entry);
+        try {
+          if ((await this.files.type(entry.path)) === 'missing') return { kind: 'absent' };
+          return await this.#scoped(entry, async adapter => await adapter.presence(entry));
+        } catch (error) {
+          return { kind: 'unverified', reason: reasonOf(error) };
+        }
+      },
       adopt: async intent =>
         intent.origin === 'adopted'
           ? await this.#scoped(intent, async adapter => await adapter.adopt(intent)).catch(error => ({
@@ -158,11 +161,12 @@ export class InPlaceWorktrees {
   async #scoped<T>(
     record: ManagedWorktree | ManagedWorktreeIntent,
     use: (adapter: ManagedWorktreeAdapter) => Promise<T>,
+    removesCheckout = false,
   ): Promise<T> {
     if ((await this.stateHomeHolding(record.path)) !== undefined) throw refused('the checkout is inside a state home');
     return await this.#read(async reader => {
       await reader.rows(record.commonDir);
-      const recoveryIdentity = 'adoptionIdentity' in record ? record.adoptionIdentity : undefined;
+      const recoveryIdentity = record.adoptionIdentity;
       const recovery = recoveryIdentity === undefined ? undefined : await reader.holdCheckout(record.path);
       try {
         if (recovery !== undefined && recoveryIdentity !== undefined) {
@@ -195,6 +199,7 @@ export class InPlaceWorktrees {
             const held = cwd === undefined ? undefined : pins.get(cwd);
             const folder = typeof cwd === 'string' ? cwd : held?.rootReal;
             if (folder === undefined) throw refused('the Git working directory is not authorized');
+            if (folder === record.path) await recovery?.verify();
             return await reader.inCheckout(
               folder,
               invocation.signal,
@@ -213,7 +218,7 @@ export class InPlaceWorktrees {
             pinner,
           ),
         );
-        await recovery?.verify();
+        if (!removesCheckout) await recovery?.verify();
         return result;
       } finally {
         await recovery?.close();
