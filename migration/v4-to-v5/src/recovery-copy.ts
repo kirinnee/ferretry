@@ -7,6 +7,7 @@ interface Entry {
   readonly path: string;
   readonly type: string;
   readonly size: number;
+  readonly mode: number;
   readonly sha256?: string;
   readonly link?: string;
 }
@@ -17,8 +18,9 @@ export async function manifest(root: string): Promise<readonly Entry[]> {
   async function walk(relative: string): Promise<void> {
     const path = join(root, relative);
     const info = await lstat(path);
+    const mode = info.mode & 0o7777;
     if (info.isDirectory()) {
-      entries.push({ path: relative, type: 'directory', size: 0 });
+      entries.push({ path: relative, type: 'directory', size: 0, mode });
       for (const name of (await readdir(path)).sort()) await walk(join(relative, name));
     } else if (info.isFile()) {
       const hash = new Bun.CryptoHasher('sha256');
@@ -28,10 +30,10 @@ export async function manifest(root: string): Promise<readonly Entry[]> {
       } finally {
         await file.close();
       }
-      entries.push({ path: relative, type: 'file', size: info.size, sha256: hash.digest('hex') });
+      entries.push({ path: relative, type: 'file', size: info.size, mode, sha256: hash.digest('hex') });
     } else if (info.isSymbolicLink())
-      entries.push({ path: relative, type: 'link', size: 0, link: await readlink(path) });
-    else if (info.isSocket()) entries.push({ path: relative, type: 'socket', size: 0 });
+      entries.push({ path: relative, type: 'link', size: 0, mode, link: await readlink(path) });
+    else if (info.isSocket()) entries.push({ path: relative, type: 'socket', size: 0, mode });
     else throw new Error('home contains an unsupported special file; nothing was moved');
   }
   await walk('');
@@ -40,11 +42,22 @@ export async function manifest(root: string): Promise<readonly Entry[]> {
 
 export function verifyManifests(source: readonly Entry[], copied: readonly Entry[]): void {
   if (JSON.stringify(source) !== JSON.stringify(copied))
-    throw new Error('recovery copy verification failed (file count, sizes or content hashes); nothing was moved');
+    throw new Error(
+      'recovery copy verification failed (file count, modes, sizes or content hashes); nothing was moved',
+    );
 }
 
 /** Kernel no-replace rename: neither a file nor a directory planted at the target can be overwritten or nested. */
 export function moveNoReplace(from: string, to: string): void {
+  renamePaths(from, to, false);
+}
+
+/** Atomically exchange a blocking placeholder with an already locked new home: there is no absent-home window. */
+export function exchangePaths(from: string, to: string): void {
+  renamePaths(from, to, true);
+}
+
+function renamePaths(from: string, to: string, exchange: boolean): void {
   const source = Buffer.from(`${from}\0`),
     target = Buffer.from(`${to}\0`);
   let result: number;
@@ -53,7 +66,7 @@ export function moveNoReplace(from: string, to: string): void {
       renamex_np: { args: [FFIType.ptr, FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
     });
     try {
-      result = lib.symbols.renamex_np(ptr(source), ptr(target), 4);
+      result = lib.symbols.renamex_np(ptr(source), ptr(target), exchange ? 2 : 4);
     } finally {
       // RENAME_EXCL
       lib.close();
@@ -63,13 +76,18 @@ export function moveNoReplace(from: string, to: string): void {
       renameat2: { args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.u32], returns: FFIType.i32 },
     });
     try {
-      result = lib.symbols.renameat2(-100, ptr(source), -100, ptr(target), 1);
+      result = lib.symbols.renameat2(-100, ptr(source), -100, ptr(target), exchange ? 2 : 1);
     } finally {
       // RENAME_NOREPLACE
       lib.close();
     }
   }
-  if (result !== 0) throw new Error('cannot move home without replacing a destination; nothing was moved');
+  if (result !== 0)
+    throw new Error(
+      exchange
+        ? 'cannot exchange the cutover placeholder and locked new home'
+        : 'cannot move home without replacing a destination; nothing was moved',
+    );
 }
 
 export async function recoveryCopy(

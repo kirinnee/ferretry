@@ -22,6 +22,8 @@ export type Preflight =
 export interface LockProbe {
   /** `true` held, `false` not held, `undefined` cannot tell on this host. */
   held(path: string): Promise<boolean | undefined>;
+  /** Only the cutover's already locked, otherwise empty target may contain daemon.lock before conversion. */
+  reservedTarget?(path: string): Promise<boolean>;
 }
 
 export async function preflight(from: string, to: string, lock: LockProbe): Promise<Preflight> {
@@ -95,8 +97,14 @@ export async function preflight(from: string, to: string, lock: LockProbe): Prom
   const target = await stat(place.path).catch(() => undefined);
   if (target !== undefined) {
     if (!target.isDirectory()) problems.push(`${to} exists and is not a folder`);
-    else if ((await readdir(place.path)).length > 0)
-      problems.push(`${to} is not empty; the converter only writes a NEW home`);
+    else {
+      const contents = await readdir(place.path);
+      const reserved =
+        contents.length === 1 &&
+        contents[0] === 'daemon.lock' &&
+        (await lock.reservedTarget?.(join(place.path, 'daemon.lock'))) === true;
+      if (contents.length > 0 && !reserved) problems.push(`${to} is not empty; the converter only writes a NEW home`);
+    }
   }
   if (inside(resolvedFrom, place.path) || inside(place.path, resolvedFrom)) {
     problems.push(`${to} and ${from} overlap; the new home must be a separate folder`);

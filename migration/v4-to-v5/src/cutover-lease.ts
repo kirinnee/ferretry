@@ -1,7 +1,10 @@
 /** A cutover owns the SAME SQLite transaction v4 owns, across the backup and convert shell invocations. */
 import { Database } from 'bun:sqlite';
+import { mkdirSync, unlinkSync } from 'node:fs';
 import { chmod, lstat, mkdir, rm, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { assertPlaceholder, moveHome, restoreHome, sameLock } from './cutover-home.ts';
+import { exchangePaths } from './recovery-copy.ts';
 
 const socketPath = (dir: string) => join(dir, 'lease.sock');
 
@@ -36,6 +39,17 @@ export async function releaseLease(dir: string): Promise<void> {
   await rm(dir, { recursive: true });
 }
 
+async function changeHome(dir: string, action: string, args: readonly string[]): Promise<void> {
+  await privateDirectory(dir);
+  const response = await fetch(`http://localhost/${action}`, {
+    unix: socketPath(dir),
+    method: 'POST',
+    body: JSON.stringify(args),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!response.ok) throw new Error('cutover home operation refused; nothing was moved by this request');
+}
+
 async function takeV4Lock(home: string) {
   if (!(await lstat(home)).isDirectory()) throw new Error('v4 home is not a real directory');
   const lockPath = join(home, 'daemon.lock');
@@ -59,23 +73,59 @@ async function serve(home: string, dir: string): Promise<void> {
   await privateDirectory(dir);
   const { db, identity } = await takeV4Lock(home);
   let held = true;
+  let target: Awaited<ReturnType<typeof takeV4Lock>> | undefined;
+  let movedTo: string | undefined;
   const server = Bun.serve({
     unix: socketPath(dir),
     async fetch(request) {
       const url = new URL(request.url);
       if (url.pathname === '/check') {
         const path = url.searchParams.get('path');
-        const info = path === null ? undefined : await lstat(path).catch(() => undefined);
         return new Response(null, {
-          status: held && info?.isFile() === true && info.dev === identity.dev && info.ino === identity.ino ? 204 : 409,
+          status:
+            held &&
+            path !== null &&
+            (sameLock(path, identity) || (target !== undefined && sameLock(path, target.identity)))
+              ? 204
+              : 409,
         });
+      }
+      if (request.method === 'POST' && ['/move', '/prepare', '/restore'].includes(url.pathname)) {
+        try {
+          const [backup, notesOrMode] = (await request.json()) as string[];
+          if (!held || backup === undefined) throw new Error('lease is not held');
+          if (url.pathname === '/move') {
+            if (movedTo !== undefined || notesOrMode === undefined) throw new Error('home already moved');
+            // The same process acquired the SQLite lock, verifies its inode and performs the rename.
+            moveHome(dir, home, backup, notesOrMode, identity);
+            movedTo = backup;
+          } else if (url.pathname === '/prepare') {
+            if (movedTo !== backup || target !== undefined) throw new Error('home is not ready for conversion');
+            assertPlaceholder(dir, home, backup);
+            const staged = join(dir, 'new-home');
+            mkdirSync(staged, { mode: 0o700 });
+            target = await takeV4Lock(staged);
+            // Recheck after the asynchronous lock acquisition; swap never exposes an absent or unlocked home.
+            assertPlaceholder(dir, home, backup);
+            exchangePaths(staged, home);
+          } else {
+            if (!sameLock(join(backup, 'daemon.lock'), identity) || notesOrMode === undefined)
+              throw new Error('backup lock changed');
+            restoreHome(dir, home, backup, parseInt(notesOrMode, 8));
+          }
+          return new Response(null, { status: 204 });
+        } catch {
+          return new Response(null, { status: 409 });
+        }
       }
       if (url.pathname === '/release' && request.method === 'POST') {
         held = false;
         db.close(); // A successful response acknowledges the actual unlock, not a timer that might run later.
-        setTimeout(() => {
-          server.stop(true);
-        }, 50);
+        target?.db.close();
+        if (target !== undefined && sameLock(join(home, 'daemon.lock'), target.identity))
+          unlinkSync(join(home, 'daemon.lock')); // Only the empty lock created for this conversion, never v4 data.
+        // Stop accepting now, letting this response finish. A delayed stop could unlink a new keeper's socket.
+        void server.stop();
         return new Response(null, { status: 204 });
       }
       return new Response(null, { status: 404 });
@@ -106,7 +156,7 @@ async function start(home: string, dir: string): Promise<void> {
 }
 
 if (import.meta.main) {
-  const [command, first, second] = process.argv.slice(2);
+  const [command, first, second, third] = process.argv.slice(2);
   try {
     if (command === 'start' && first !== undefined && second !== undefined) await start(first, second);
     else if (command === 'serve' && first !== undefined && second !== undefined) await serve(first, second);
@@ -115,7 +165,22 @@ if (import.meta.main) {
       if (!(await checkLease(first, second)))
         throw new Error('cutover exclusion was lost; do not convert, roll back first');
     } else if (command === 'release' && first !== undefined) await releaseLease(first);
-    else throw new Error('invalid cutover lease command');
+    else if ((command === 'move' || command === 'prepare') && first !== undefined && second !== undefined)
+      await changeHome(first, command, third === undefined ? [second] : [second, third]);
+    else if (command === 'restore' && first !== undefined && second !== undefined && third !== undefined) {
+      const mode = process.argv[6] ?? '700';
+      try {
+        await changeHome(first, 'restore', [second, mode]);
+      } catch {
+        // A dead keeper cannot help. Reacquire the actual backup lock here before restoring anything.
+        const lock = await takeV4Lock(second);
+        try {
+          restoreHome(first, third, second, parseInt(mode, 8));
+        } finally {
+          lock.db.close();
+        }
+      }
+    } else throw new Error('invalid cutover lease command');
   } catch {
     console.error(
       'Cannot prove v4 stopped and exclusively locked. Nothing was moved by this command. Stop v4 and run quiet again, or roll back if backup already moved.',

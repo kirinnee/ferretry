@@ -117,7 +117,8 @@ describe('migrate.sh happy path (Homebrew v4 cask, released v5.0.0)', () => {
     const b = `${sb.v4home}-before-2026-11-13-1200`;
     expect(((await stat(b)).mode & 0o777).toString(8)).toBe('700');
     expect(await readFile(join(b, 'layout-version'), 'utf8')).toBe('2\n');
-    await expect(stat(sb.v4home)).rejects.toThrow();
+    expect((await stat(sb.v4home)).isFile()).toBe(true);
+    expect(await readFile(sb.v4home, 'utf8')).toContain('migrating to Ferretry 5');
   });
 
   test('backup runs the dry run (before the move), then convert runs the real run, each with its exit code checked', async () => {

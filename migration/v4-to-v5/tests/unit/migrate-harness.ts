@@ -186,7 +186,7 @@ export async function makeSandbox(options: SandboxOptions = {}): Promise<Sandbox
   await cp(join(dirname(SCRIPT), 'left-behind.txt'), join(repo, 'migration', 'v4-to-v5', 'left-behind.txt'));
   await cp(join(dirname(SCRIPT), 'bun-version'), join(repo, 'migration', 'v4-to-v5', 'bun-version'));
   await mkdir(join(repo, 'migration/v4-to-v5/src'), { recursive: true });
-  for (const helper of ['cutover-lease.ts', 'recovery-copy.ts'])
+  for (const helper of ['cutover-lease.ts', 'cutover-home.ts', 'recovery-copy.ts'])
     await cp(join(import.meta.dir, '../../src', helper), join(repo, 'migration/v4-to-v5/src', helper));
   await writeFile(join(repo, '.gitignore'), 'node_modules\n');
   await git(repo, 'init', '-q', '-b', 'main');

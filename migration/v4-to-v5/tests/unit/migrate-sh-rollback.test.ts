@@ -451,7 +451,7 @@ describe('rollback: by recorded state', () => {
 
   test('a live daemon when the notes record NO v5 launch is NOT left alone: stopped the documented way (after the quiet check), then the home moves', async () => {
     const sb = await box();
-    await advance(sb, 'backup');
+    await advance(sb, 'convert'); // backup alone now blocks any daemon at H with a regular file.
     await sb.daemonUp();
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(0);
@@ -463,7 +463,7 @@ describe('rollback: by recorded state', () => {
 
   test('the same with a stop that fails: refused before any move (the old bypass is gone)', async () => {
     const sb = await box();
-    await advance(sb, 'backup');
+    await advance(sb, 'convert');
     await sb.daemonUp();
     await sb.fake('fy', [
       { match: '--version', run: 'cat "$D/fy.version"' },

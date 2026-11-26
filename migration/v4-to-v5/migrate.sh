@@ -596,7 +596,7 @@ backup)
   [ "${owner_yes}" = 1 ] || fail "tell the owner: 'I will move ${H} to ${B}; that folder is the backup and stays untouched until you delete it', then pass --owner-yes"
   has_mark quiet || fail "run quiet first"
   rehearsal_phase_guard "${H}"
-  if has_mark backed-up && [ -d "${B}" ] && [ ! -e "${H}" ]; then
+  if has_mark backed-up && [ -d "${B}" ] && [ -f "${H}" ]; then
     say "✅ already backed up at ${B}"
     exit 0
   fi
@@ -635,12 +635,13 @@ backup)
   say "⚙️ making and verifying the independent recovery copy (counts, sizes and SHA-256 hashes)"
   (cd "${CONVERTER_DIR}" && bun src/recovery-copy.ts copy "${H}" "${B}.recovery") || fail "recovery copy failed; nothing was moved"
   note_set RECOVERY "${B}.recovery"
-  (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts check "${lease}" "${H}/daemon.lock") || fail "cutover exclusion was lost; nothing was moved"
   [ ! -e "${B}" ] && [ ! -L "${B}" ] || fail "${B} appeared during backup; nothing was moved"
+  # A chmod failure must happen while the original home is still in place.
+  chmod 700 "${H}" || fail "chmod 700 ${H} failed; nothing was moved"
   mark backing-up
-  (cd "${CONVERTER_DIR}" && bun src/recovery-copy.ts move "${H}" "${B}") || fail "cannot move ${H} to ${B} without replacing a destination"
-  chmod 700 "${B}" || fail "chmod 700 ${B} failed"
-  mark backed-up
+  # The lock keeper verifies and renames in its own process, plants the blocking file at H, and marks success.
+  # It restores H under the lock if anything after its rename fails.
+  (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts move "${lease}" "${B}" "${NOTES}") || fail "cutover exclusion was lost or the move failed; inspect the original home before retrying"
   trap - EXIT # The lease remains held until convert finishes or rollback releases it.
   say "✅ backed up: ${B} (mode 700). Send nothing to any ferret and type into no pane until v5 is started"
   ;;
@@ -654,12 +655,14 @@ convert)
   rehearsal_phase_guard "${H}"
   [ "$(git -C "${src}" rev-parse HEAD)" = "$(note_get COMMIT)" ] || fail "the converter checkout moved off the recorded commit: run rollback --owner-yes, then preflight again from a fresh checkout"
   [ -z "$(git -C "${src}" status --porcelain)" ] || fail "the converter checkout has local changes"
-  [ ! -e "${H}" ] || fail "${H} exists: the converter writes a new home"
   (cd "${CONVERTER_DIR}" && bun install --frozen-lockfile) || fail "bun install failed in ${CONVERTER_DIR}"
   has_mark dry-run-ok || fail "the converter dry run has not passed: run backup first (it dry-runs before anything moves)"
   lease="$(note_get LEASE)"
   [ -n "${lease}" ] || fail "no cutover lease recorded; roll back before trying again"
   (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts check "${lease}" "${B}/daemon.lock") || fail "cutover exclusion was lost; roll back before trying again"
+  # Exchange the placeholder for an already SQLite-locked empty target. A v4 restart at the ORIGINAL path is
+  # refused both between phases (a regular file) and during conversion (the actual v4 lock).
+  (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts prepare "${lease}" "${B}") || fail "cannot reserve the new home under the cutover lock; roll back before trying again"
 
   say "🔨 converter real run"
   mark converting
@@ -1260,7 +1263,7 @@ rollback)
 
   # 2. Homes. Only move H aside when the backup exists (otherwise H still IS the v4 home).
   if [ -d "${B}" ]; then
-    if [ -e "${H}" ]; then
+    if [ -d "${H}" ]; then
       failed="${H}-v5-failed-${stamp}"
       [ ! -e "${failed}" ] || failed="${failed}-$$"
       mv "${H}" "${failed}" || fail "cannot move ${H} aside"
@@ -1269,9 +1272,13 @@ rollback)
       say "📝 the v5 home was moved to ${failed} (nothing deleted; it holds copies of sealed files: the owner decides when to delete it)"
     fi
     lease="$(note_get LEASE)"
-    if [ -n "${lease}" ]; then (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts release "${lease}") >/dev/null 2>&1 || true; fi
-    mv "${B}" "${H}" || fail "cannot restore ${B} to ${H}"
     original_mode="$(note_get HOME_MODE)"
+    if [ -n "${lease}" ]; then
+      (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts restore "${lease}" "${B}" "${H}" "${original_mode:-700}") || fail "cannot restore backup: cutover placeholder changed or lock unavailable; nothing was removed"
+      (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts release "${lease}") >/dev/null 2>&1 || true
+    else
+      (cd "${CONVERTER_DIR}" && bun src/recovery-copy.ts move "${B}" "${H}") || fail "cannot restore ${B} to ${H} without replacing a destination"
+    fi
     if [ -n "${original_mode}" ]; then chmod "${original_mode}" "${H}" || fail "cannot restore original home mode"; fi
   elif [ -e "${H}" ] && [ -f "${H}/layout-version" ]; then
     say "📝 no backup folder and ${H} is still a v4 home: nothing moved"

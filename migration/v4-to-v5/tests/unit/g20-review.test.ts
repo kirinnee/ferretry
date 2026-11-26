@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, setDefaultTimeout, test } from 'bun:test';
-import { chmod, link, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { settingsStep } from '../../src/steps/settings.ts';
 import { hostLockProbe } from '../../src/preflight.ts';
@@ -208,22 +208,154 @@ const helperRules = [
 
 test('MUST 1: racing v4 restarts during dry and real passes cannot acquire the daemon lock', async () => {
   await advance(sb, 'quiet');
-  const attempt = `import {Database} from 'bun:sqlite'; import {writeFileSync} from 'node:fs'; const db=new Database(process.argv[1],{create:true}); try {db.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE'); writeFileSync(process.argv[2], 'acquired');} catch {writeFileSync(process.argv[2], 'blocked');} db.close();`;
+  const attempt = `import {Database} from 'bun:sqlite'; import {mkdirSync,writeFileSync} from 'node:fs'; let db; try {mkdirSync(process.argv[1],{recursive:true}); db=new Database(process.argv[1]+'/daemon.lock',{create:true}); db.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE'); writeFileSync(process.argv[2], 'acquired');} catch {writeFileSync(process.argv[2], 'blocked');} finally {db?.close();}`;
   await sb.fake('bun', [
     ...helperRules,
     {
       match: 'src/main.ts*--dry-run*',
-      run: `${q(process.execPath)} -e ${q(attempt)} "$FAKE_H/daemon.lock" "$D/restart-dry"`,
+      run: `${q(process.execPath)} -e ${q(attempt)} "$FAKE_H" "$D/restart-dry"`,
     },
     {
       match: 'src/main.ts*',
-      run: `${q(process.execPath)} -e ${q(attempt)} "$3/daemon.lock" "$D/restart-real"; mkdir -p "$FAKE_H"; echo '{}' > "$FAKE_H/home.json"`,
+      run: `${q(process.execPath)} -e ${q(attempt)} "$FAKE_H" "$D/restart-real"; mkdir -p "$FAKE_H"; echo '{}' > "$FAKE_H/home.json"`,
     },
   ]);
   expect((await sb.run('backup', ['--owner-yes'])).code).toBe(0);
   expect((await sb.run('convert')).code).toBe(0);
   expect(await sb.readState('restart-dry')).toBe('blocked');
   expect(await sb.readState('restart-real')).toBe('blocked');
+});
+
+test('R1: loss of the keeper before the move cannot rename a home a restarted v4 owns', async () => {
+  await advance(sb, 'quiet');
+  const daemon = `import {Database} from 'bun:sqlite'; import {mkdirSync,writeFileSync} from 'node:fs'; mkdirSync(process.argv[1],{recursive:true}); const db=new Database(process.argv[1]+'/daemon.lock',{create:true}); db.exec('PRAGMA journal_mode=MEMORY; BEGIN EXCLUSIVE'); writeFileSync(process.argv[2],'locked'); setTimeout(()=>db.close(),300000);`;
+  await sb.fake('bun', [
+    {
+      match: 'src/cutover-lease.ts*',
+      run: `if { [ "$2" = check ] && [ "$4" = "$FAKE_H/daemon.lock" ]; } || [ "$2" = move ]; then
+        if [ "$2" = check ]; then ${q(process.execPath)} "$@" || exit $?; lease="$3"; else lease="$3"; fi
+        ${q(process.execPath)} src/cutover-lease.ts release "$lease" || exit $?
+        ${q(process.execPath)} -e ${q(daemon)} "$FAKE_H" "$D/race-locked" >/dev/null 2>&1 &
+        echo $! >> "$D/fixture.pids"
+        for i in {1..200}; do [ -f "$D/race-locked" ] && break; command -p sleep 0.01; done
+        [ -f "$D/race-locked" ] || exit 98
+        if [ "$2" = check ]; then exit 0; fi
+      fi
+      exec ${q(process.execPath)} "$@"`,
+    },
+    ...helperRules,
+    { match: 'src/main.ts*--dry-run*' },
+  ]);
+  const result = await sb.run('backup', ['--owner-yes']);
+  expect(await sb.readState('race-locked')).toBe('locked');
+  expect(result.code).not.toBe(0);
+  expect(await readFile(join(sb.v4home, 'layout-version'), 'utf8')).toBe('2\n');
+});
+
+test('R1: original home remains a blocking file until conversion, and rollback restores v4', async () => {
+  await advance(sb, 'backup');
+  expect((await lstat(sb.v4home)).isFile()).toBe(true);
+  expect(await readFile(sb.v4home, 'utf8')).toContain('migrating to Ferretry 5');
+  const child = Bun.spawnSync([
+    process.execPath,
+    '-e',
+    `import {mkdirSync} from 'node:fs'; mkdirSync(process.argv[1],{recursive:true});`,
+    sb.v4home,
+  ]);
+  expect(child.exitCode).not.toBe(0);
+  expect((await sb.run('rollback', ['--owner-yes'])).code).toBe(0);
+  expect(await readFile(join(sb.v4home, 'layout-version'), 'utf8')).toBe('2\n');
+});
+
+test.each(['file', 'directory'])('R2: recovery verification rejects changed %s modes', async kind => {
+  await mkdir(f.to);
+  await writeFile(join(f.from, 'data'), 'kept');
+  await writeFile(join(f.to, 'data'), 'kept');
+  await chmod(f.from, 0o700);
+  await chmod(f.to, kind === 'directory' ? 0o750 : 0o700);
+  await chmod(join(f.from, 'data'), 0o640);
+  await chmod(join(f.to, 'data'), kind === 'file' ? 0o644 : 0o640);
+  const original = await manifest(f.from),
+    copied = await manifest(f.to);
+  expect(() => verifyManifests(original, copied)).toThrow();
+});
+
+test('R3: injected chmod failure leaves the original home in place with every session', async () => {
+  await advance(sb, 'quiet');
+  await sb.fake('chmod', [{ match: '700 *', code: 1 }]);
+  const result = await sb.run('backup', ['--owner-yes']);
+  expect(result.code).not.toBe(0);
+  expect(await readFile(join(sb.v4home, 'layout-version'), 'utf8')).toBe('2\n');
+  expect(await readFile(join(sb.v4home, 'state/sessions/f1/terminal-pane.json'), 'utf8')).toContain('f1');
+});
+
+test('R1: rollback refuses a replacement file even when it has the placeholder text', async () => {
+  await advance(sb, 'backup');
+  const text = await readFile(sb.v4home, 'utf8');
+  // Keep the original inode alive so the replacement cannot reuse it.
+  await rename(sb.v4home, sb.v4home + '.original-placeholder');
+  await writeFile(sb.v4home, text);
+  expect((await sb.run('rollback', ['--owner-yes'])).code).not.toBe(0);
+  expect(await readFile(sb.v4home, 'utf8')).toBe(text);
+  await unlink(sb.v4home);
+  await rename(sb.v4home + '.original-placeholder', sb.v4home);
+  expect((await sb.run('rollback', ['--owner-yes'])).code).toBe(0);
+});
+
+test('R1/R3: keeper restores after a post-rename mark failure, and real conversion accepts its locked target', async () => {
+  await writeFile(join(f.from, 'layout-version'), '2\n');
+  const lease = join(f.root, 'lease'),
+    backup = f.from + '-backup';
+  const helper = async (...args: string[]) => {
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, '../../src/cutover-lease.ts'), ...args], {
+      env: { ...process.env, HOME: f.root, FY_HOME: f.from },
+      stdout: 'ignore',
+      stderr: 'pipe',
+    });
+    return await child.exited;
+  };
+  expect(await helper('start', f.from, lease)).toBe(0);
+  try {
+    // Appending a milestone to a directory fails AFTER the rename and placeholder creation.
+    expect(await helper('move', lease, backup, f.root)).not.toBe(0);
+    expect(await readFile(join(f.from, 'layout-version'), 'utf8')).toBe('2\n');
+  } finally {
+    await releaseLease(lease);
+  }
+  // A fresh attempt also proves a restored home can be migrated without losing any synthetic data.
+  expect(await helper('start', f.from, lease)).toBe(0);
+  try {
+    expect(await helper('move', lease, backup, join(f.root, 'notes'))).toBe(0);
+    expect(await helper('prepare', lease, backup)).toBe(0);
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        join(import.meta.dir, '../../src/main.ts'),
+        '--from',
+        backup,
+        '--to',
+        f.from,
+        '--cutover-lease',
+        lease,
+        '--original-home',
+        f.from,
+      ],
+      {
+        env: { ...process.env, HOME: f.root, FY_HOME: f.from },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
+    const [code, err] = await Promise.all([
+      child.exited,
+      new Response(child.stderr).text(),
+      new Response(child.stdout).text(),
+    ]);
+    expect({ code, err }).toEqual({ code: 0, err: '' });
+    expect(JSON.parse(await readFile(join(f.from, 'home.json'), 'utf8'))).toBeObject();
+  } finally {
+    await releaseLease(lease);
+  }
 });
 
 test('MUST 1: a destination planted during the dry run cannot nest or replace the home', async () => {
@@ -283,19 +415,14 @@ test('MUST 1: equal counts and sizes with different contents fail hash verificat
   expect(() => verifyManifests(original, damaged)).toThrow('content hashes');
 });
 
-test('MUST 1: a lost lease refuses the real conversion before creating a new home', async () => {
+test('MUST 1: a lost lease refuses the real conversion and preserves the blocking placeholder', async () => {
   await advance(sb, 'backup');
   const lease = (await sb.notesText()).match(/^LEASE=(.*)$/m)?.[1] ?? '';
   await releaseLease(lease);
   const result = await sb.run('convert');
   expect(result.code).not.toBe(0);
   expect(result.err).toContain('exclusion was lost');
-  expect(
-    await stat(sb.v4home).then(
-      () => true,
-      () => false,
-    ),
-  ).toBe(false);
+  expect((await lstat(sb.v4home)).isFile()).toBe(true);
 });
 
 test('MUST 1: a failed dry pass releases its lease so backup can be retried', async () => {

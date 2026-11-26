@@ -75,6 +75,7 @@ async function main(argv: readonly string[]): Promise<number> {
         ? hostLockProbe()
         : {
             held: async path => ((await checkLease(values['cutover-lease']!, path)) ? false : undefined),
+            reservedTarget: path => checkLease(values['cutover-lease']!, path),
           },
     ...(values['original-home'] === undefined ? {} : { originalV4Home: resolve(values['original-home']) }),
     now: () => new Date(),

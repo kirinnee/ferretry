@@ -110,7 +110,10 @@ run the check again.
 `rollback` needs no `fy` check: it runs no `fy` itself and chooses v4 or v5 from the notes. After a rollback, `fy --version`
 must print 4.291.x (v4 is back), and any `fy` after that is the v4 one.
 
-The cutover lock stays held between `backup` and `convert`. If the lease is lost, stop and roll back before trying again.
+The cutover lock stays held between `backup` and `convert`. The lock-owning process performs the rename and leaves a
+regular file at the original home path, saying where the backup is, so v4 cannot bootstrap an empty home there. `convert`
+atomically exchanges that file for an already locked target and holds both SQLite locks through conversion. Rollback
+removes the placeholder only if its identity and contents still match. If the lease is lost, stop and roll back before trying again.
 The dry run and real conversion both resolve absolute v4 asset paths against the original home. A disk-space shortfall
 or failed copy verification refuses the move; partial recovery copies stay available for inspection.
 
