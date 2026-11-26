@@ -16,6 +16,7 @@
 import { type Brand, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
 import { malformedSecretReference } from '@ferretry/core-vault/contract';
+import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { HarnessKeyOnWireSchema } from './harness-words.ts';
 import { nameLooksLikeKey, storedEnvironmentIssue } from './secret-shape.ts';
 import { LocalModelsSchema, ModelTierSchema } from './model-catalog-wire.ts';
@@ -412,7 +413,7 @@ export const LoginViewSchema = z.strictObject({
   id: LoginIdSchema,
   harness: HarnessKindSchema,
   /** Every harness it drives, Claude Code first: one for a sign-in, both for an environment login with a `claude-code:` and a `codex:` half. */
-  harnesses: z.array(HarnessKindSchema).min(1).readonly(),
+  harnesses: z.array(HarnessKeySchema).min(1).readonly(),
   store: LoginStoreSchema,
   /** The login's email, when the harness recorded one. Display only. */
   email: NonEmptyStringSchema.optional(),

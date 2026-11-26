@@ -137,7 +137,11 @@ export interface VaultApi {
   childEnvironment(
     ferret: FerretId,
     env: Readonly<Record<string, string>>,
-  ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>>;
+    /** Destination policy, enforced INSIDE the sealed use path on all resolved variable values. */
+    harness?: string,
+  ): Promise<
+    Result<ChildEnvironment, { readonly unknown: readonly SecretName[]; readonly code?: 'subscription_login' }>
+  >;
   /**
    * {@link childEnvironment} for ONE command started for `runtime`: besides what the caller may use, the secrets that
    * runtime's profile references (`ProfileSecrets`, Runtimes' answer) are allowed, for this call only; nothing is kept,

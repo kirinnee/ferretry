@@ -27,7 +27,7 @@ export interface RuntimeStartAnswerDeps {
   readonly resolve: RuntimesApi['resolve'];
   /** The machine's default runtime; absent: the answer names none. */
   readonly default?: RuntimesApi['default'];
-  readonly logins: Pick<LoginsApi, 'list'>;
+  readonly logins: Pick<LoginsApi, 'list'> & Partial<Pick<LoginsApi, 'launchRefusal'>>;
   /**
    * The published runtimes (`RuntimesApi.catalog`), read for what a runtime serves. Absent: the answer has no `catalog`
    * member, which a move onto another runtime reads as "not built yet".
@@ -55,7 +55,9 @@ function whyNot(login: LoginView): string | undefined {
 }
 
 export function runtimeStartAnswer(deps: RuntimeStartAnswerDeps): RuntimeStartSource {
-  const login = async (name: string): Promise<LoginStartResolution> => {
+  const login = async (name: string, harness?: string): Promise<LoginStartResolution> => {
+    const refusal = harness === undefined ? undefined : await deps.logins.launchRefusal?.(name, harness);
+    if (refusal !== undefined) return { ok: false, sentence: refusal };
     const listed = await deps.logins.list().catch(() => undefined);
     if (listed === undefined)
       return { ok: false, sentence: `login ${name} could not be checked, so the ferret was not started` };
@@ -64,10 +66,10 @@ export function runtimeStartAnswer(deps: RuntimeStartAnswerDeps): RuntimeStartSo
     const reason = whyNot(found);
     return reason === undefined ? { ok: true } : { ok: false, sentence: reason };
   };
-  const resolve = async (runtime: string): Promise<RuntimeStartResolution> => {
+  const resolve = async (runtime: string, harness?: string): Promise<RuntimeStartResolution> => {
     const id = RuntimeIdSchema.safeParse(runtime);
     if (!id.success) return { ok: false, sentence: `${JSON.stringify(runtime)} is not a runtime name; ${REMEDY}` };
-    const resolved = await deps.resolve(id.data);
+    const resolved = await deps.resolve(id.data, harness);
     if (!resolved.ok)
       return { ok: false, sentence: `runtime ${id.data} was not started: ${resolved.sentence}; ${REMEDY}` };
     const spendable = await login(resolved.runtime.login);

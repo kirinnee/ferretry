@@ -76,6 +76,8 @@ export interface LoginsApi {
   /** Every login on this machine, with status, usage, budget and what signing out would do. */
   list(): Promise<LoginList>;
   get(id: z.output<typeof LoginIdSchema>): Promise<LoginView | undefined>;
+  /** Launch compatibility from parsed configuration ONLY, before any status, store or credential read. */
+  launchRefusal(id: string, harness: string): Promise<string | undefined>;
   /**
    * The variable TEMPLATES of every environment login, read live from each login's own file: plain values and
    * `${secret:NAME}` references as written, never a secret's value (the file schema refuses a raw one) and never the

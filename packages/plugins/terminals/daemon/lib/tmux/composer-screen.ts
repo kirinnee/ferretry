@@ -62,6 +62,8 @@ import { paneShowsStartupWait } from './pane.ts';
  * coordinates, and — when the composer's rows were captured with attributes — how they are inked.
  */
 export interface ComposerCursor {
+  /** The registered harness's own reading; null refuses a legacy fallback. */
+  readonly reading?: ComposerReading | null;
   readonly x?: number | undefined;
   readonly y?: number | undefined;
   /** Whether the composer's glyphs are all dim (a placeholder) or not (input). Decides over the cursor. */
@@ -236,6 +238,7 @@ export function composerRows(visible: string): ComposerRows | undefined {
  * closer — which is also where Codex's footer begins, one blank row below the composer.
  */
 export function readComposer(visible: string, cursor: ComposerCursor = {}): ComposerReading | undefined {
+  if (cursor.reading !== undefined) return cursor.reading ?? undefined;
   const lines = visible.replaceAll('\r\n', '\n').split('\n');
   const at = lineIndexOfComposer(lines);
   if (at === undefined) return undefined;

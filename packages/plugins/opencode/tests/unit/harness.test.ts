@@ -61,7 +61,12 @@ async function fixture(options: { version?: string; subscription?: boolean; expo
     plugins: [harnessOwner, daemon],
     clock: fixedClock('2026-11-26T08:00:00Z'),
     uses: {
-      logins: { get: async () => ({ store: options.subscription ? 'ferretry' : 'environment', harness: 'claude' }) },
+      logins: {
+        launchRefusal: async () =>
+          options.subscription
+            ? 'OpenCode refuses subscription sign-ins, including Anthropic Claude subscriptions; choose an API key or endpoint login'
+            : undefined,
+      },
     },
     config: { 'harness-opencode.yaml': { binary: '/fake/opencode' } },
     spawn(program, args, spawnOptions) {

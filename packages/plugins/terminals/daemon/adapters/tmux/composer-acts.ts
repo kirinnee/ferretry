@@ -43,6 +43,8 @@ function holdsExactly(frame: DeliveryFrame, text: string, strict = false): boole
   )
     return false;
   const composer = readComposer(frame.visible, frameCursor(frame));
+  if (frame.screen !== undefined && (!frame.screen.atPrompt || frame.screen.working || composer?.placeholder !== false))
+    return false;
   if (composer === undefined || composer.placeholder === true) return false;
   const input = composerInput(composer);
   if (strict) return sameDrawnText(input, text);
@@ -134,6 +136,11 @@ export class ComposerActs {
       // A parked composer holds a message Codex already accepted: C-u would erase text that is about to be sent.
       if (paneShowsStartupWait(frame.visible)) return 'stuck';
       const composer = readComposer(frame.visible, frameCursor(frame));
+      if (
+        frame.screen !== undefined &&
+        (!frame.screen.atPrompt || frame.screen.working || composer?.placeholder === undefined)
+      )
+        return 'stuck';
       if (composer?.placeholder === undefined) return 'stuck';
       if (round === 0)
         rounds = 2 * Math.max(text.split('\n').length, composer.text.split('\n').length) + this.keys.clearMargin;

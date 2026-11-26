@@ -14,7 +14,7 @@
  *
  * Pure.
  */
-import { type HarnessKind, supportedKinds } from './harness.ts';
+import { type HarnessKind, harnessKey, supportedKinds } from './harness.ts';
 import type { CodexProvider } from './environment.ts';
 
 /** What one CLI is given by a login: its variables, and — Codex — the model provider it points at. */
@@ -68,6 +68,12 @@ export const credentialHarnesses = (credential: HalvedCredential): readonly Harn
   const halves = credentialHalves(credential);
   return ORDER.filter(harness => halves[harness] !== undefined);
 };
+
+/** Registered harnesses that can spend this login; OpenCode accepts environment logins only. */
+export const credentialHarnessKeys = (credential: HalvedCredential): readonly string[] => [
+  ...credentialHarnesses(credential).map(harnessKey),
+  ...(credential.store === 'environment' ? ['opencode'] : []),
+];
 
 /** What `harness` is given by the login, or `undefined` when the login does not drive it. */
 export const credentialHalf = (credential: HalvedCredential, harness: HarnessKind): CredentialHalf | undefined =>

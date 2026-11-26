@@ -82,9 +82,9 @@ const FIELDS: Readonly<Record<KindKey, readonly LoginField[]>> = {
 const HARNESSES: Readonly<Record<KindKey, readonly HarnessKey[]>> = {
   anthropic: [harnessKey('claude')],
   openai: [harnessKey('codex')],
-  'api-key': [harnessKey('claude'), harnessKey('codex')],
-  proxy: [harnessKey('claude'), harnessKey('codex')],
-  endpoint: [harnessKey('claude'), harnessKey('codex')],
+  'api-key': [harnessKey('claude'), harnessKey('codex'), 'opencode'],
+  proxy: [harnessKey('claude'), harnessKey('codex'), 'opencode'],
+  endpoint: [harnessKey('claude'), harnessKey('codex'), 'opencode'],
 };
 
 const POLL_MS = 250;
@@ -243,7 +243,14 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
       : {}),
     async env(login, harness) {
       const file = known(login, key);
-      const half = byHarness(harness, { claude: () => file.claude, codex: () => file.codex });
+      if (harness === 'opencode' && key === 'anthropic')
+        throw new Error('OpenCode refuses an Anthropic subscription; choose an API key or endpoint login');
+      if (harness === 'opencode' && file.store !== 'environment')
+        throw new Error('OpenCode accepts API-key and endpoint logins only');
+      const half =
+        harness === 'opencode'
+          ? { env: { ...file.claude?.env, ...file.codex?.env } }
+          : byHarness(harness, { claude: () => file.claude, codex: () => file.codex });
       const merged = { ...(file.env ?? {}), ...(half?.env ?? {}) };
       const out: Record<string, string> = {};
       for (const [name, value] of Object.entries(merged)) {

@@ -58,7 +58,7 @@ import {
   storeInspectionWords,
   usableCredentialReading,
 } from '../shared/store-inspection.ts';
-import { credentialHarnesses } from '../shared/halves.ts';
+import { credentialHarnesses, credentialHarnessKeys } from '../shared/halves.ts';
 import type { FleetUsageWindow } from './usage.ts';
 import { type HarnessKind, harnessKey, isHarness, isKind } from '../shared/harness.ts';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
@@ -888,7 +888,7 @@ export class FleetCredentialsService {
     return LoginViewSchema.parse({
       id: entry.id,
       harness: harnessKey(entry.credential.harness),
-      harnesses: credentialHarnesses(entry.credential).map(harnessKey),
+      harnesses: credentialHarnessKeys(entry.credential),
       store: entry.credential.store,
       ...(email === undefined ? {} : { email }),
       ...(entry.credential.label === undefined ? {} : { label: entry.credential.label }),

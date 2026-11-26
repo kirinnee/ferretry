@@ -648,7 +648,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           // A start that names a runtime spends that runtime's login: its harness and login, or why it cannot start now.
           'runtime.start:runtimes': {
             ...runtimeStartAnswer({
-              resolve: async id => await api.resolve(id),
+              resolve: async (id, harness) => await api.resolve(id, harness),
               default: async () => await api.default(),
               logins: ctx.needs.logins,
               // What the runtime serves, for a move or handover to plan its model on (`catalog?`): the published view.

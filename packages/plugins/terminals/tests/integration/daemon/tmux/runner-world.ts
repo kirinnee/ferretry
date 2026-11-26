@@ -121,8 +121,21 @@ export function subject(options: { readonly unguarded?: boolean; readonly redact
             sleep: async ms => server.advance(ms),
           },
   });
+  // This fixture is a persisted Claude pane; establish its registered key before any operation.
+  const attached = runner.attach(handle, 'claude-code');
+  const adopted = new Proxy(runner, {
+    get(target, property) {
+      const value = Reflect.get(target, property);
+      return typeof value !== 'function'
+        ? value
+        : async (...args: unknown[]) => {
+            await attached;
+            return await value.apply(target, args);
+          };
+    },
+  });
   return {
-    runner,
+    runner: adopted,
     server,
     acts,
     guards,

@@ -107,7 +107,7 @@ export interface RuntimesApi extends RuntimeHomesApi, RuntimeLayersApi {
   /** The machine's default runtime, resolved: the setting, else `claude-default` when it is an agent runtime here. */
   default(): Promise<RuntimeId | undefined>;
   /** What a start on this runtime (or the default, when `id` is omitted) would use, or why it cannot start. */
-  resolve(id?: RuntimeId): Promise<ResolveResult>;
+  resolve(id?: RuntimeId, harness?: string): Promise<ResolveResult>;
   /**
    * Every runtime with its models, wrapper and login, as `GET /v1/runtimes` answers: what `fy recommend` offers a start
    * from (Packs reads what can start now).
