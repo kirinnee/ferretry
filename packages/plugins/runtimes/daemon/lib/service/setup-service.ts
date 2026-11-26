@@ -86,7 +86,7 @@ import type { FleetDocumentWrite, FleetModelApplyPlan } from '../provisioning.ts
 import { notingLanded } from './apply-bracket.ts';
 import { type ApplyLedger, namingWhatLanded } from './apply-ledger.ts';
 import { configurationLanded, failedApplySentence, landedWithCommittedFleet } from './failed-apply.ts';
-import { importSummary } from './import-summary.ts';
+import { importSummary, type LeftOut, notImported, takeFolder } from './import-summary.ts';
 import { putConfigFile, writeConfigFiles } from './setup-config-files.ts';
 import { reportLeft, writeVaultAndLogins } from './setup-vault-logins.ts';
 import {
@@ -352,8 +352,6 @@ interface Composed extends LoginEnvPlan {
   /** Values to store before the apply. Never in a description, a digest or a log. */
   readonly secrets: readonly { readonly name: string; readonly value: string }[];
   readonly lines: readonly string[];
-  /** The one sentence naming the folder files an import left out and why; absent when nothing was left out. */
-  readonly notImported?: string;
   readonly summary: string;
   /** What the person reviewed, so the apply runs that and nothing else. Holds no value. */
   readonly fingerprint: string;
@@ -361,17 +359,6 @@ interface Composed extends LoginEnvPlan {
   readonly configWrites?: readonly ConfigWrite[];
   /** The imported components another plugin owns, handed to their owners at the apply (`owner-hand-over.ts`). */
   readonly owners?: OwnedComponents;
-}
-
-/** The most left-out files one sentence names; the rest are counted. */
-const MAX_LEFT_OUT_NAMED = 20;
-
-/** "Not imported: a (why), b (why), and N more." — every file a folder read skipped, so a partial import never reads as whole. */
-function notImportedSentence(left: readonly { readonly path: string; readonly reason: string }[]): string | undefined {
-  if (left.length === 0) return undefined;
-  const named = left.slice(0, MAX_LEFT_OUT_NAMED).map(entry => `${entry.path} (${entry.reason})`);
-  const more = left.length - named.length;
-  return `Not imported: ${named.join(', ')}${more > 0 ? `, and ${String(more)} more` : ''}.`;
 }
 
 // ── The service ──────────────────────────────────────────────────────────────────────────────────
@@ -667,7 +654,6 @@ export class FleetSetupService {
       ),
       ...handed.sentences,
       ...envSentences,
-      ...(composed.notImported === undefined ? [] : [composed.notImported]),
     ];
     reportLeft(caller, held, 0);
     if (held > 0)
@@ -762,7 +748,7 @@ export class FleetSetupService {
     // No hook is imported: a second guard behind the planner, so a hooks component never reaches a file or a profile.
     model = withoutHookChanges(reading.model, model);
     const assets: CloneFile[] = [];
-    const leftOut: { path: string; reason: string }[] = [];
+    const leftOut: LeftOut[] = [];
     for (const file of [...plan.files, ...updates.flatMap(update => update.files)]) {
       if (file.path.startsWith('components/hooks/')) continue;
       if (file.kind === 'write') {
@@ -770,10 +756,8 @@ export class FleetSetupService {
         continue;
       }
       const folder = await this.deps.readFolder(file.from);
-      for (const entry of folder.files) assets.push({ path: `${file.path}/${entry.path}`, content: entry.content });
-      for (const entry of folder.skipped) leftOut.push({ path: `${file.path}/${entry.path}`, reason: entry.reason });
+      leftOut.push(...takeFolder(folder, file.path, assets));
     }
-    const notImported = notImportedSentence(leftOut);
     // The body a handed-over settings component was made from is never written under the fleet's assets.
     const written =
       this.deps.components === undefined ? assets : withoutHandedBodies(assets, reading.model, model, touched);
@@ -819,7 +803,7 @@ export class FleetSetupService {
         secrets.map(secret => secret.name),
         reused,
       ),
-      ...(notImported === undefined ? [] : [notImported]),
+      ...notImported(leftOut),
     ];
     return {
       model,
@@ -827,8 +811,7 @@ export class FleetSetupService {
       secrets,
       reused,
       lines,
-      ...(notImported === undefined ? {} : { notImported }),
-      summary: importSummary(catalog.machineName(), plan, reading.model),
+      summary: importSummary(catalog.machineName(), plan, reading.model, leftOut),
       fingerprint: this.#fingerprint(
         documents,
         planned.map(secret => this.deps.digest(`${secret.name}\n${secret.value}`)),
