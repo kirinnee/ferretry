@@ -70,7 +70,7 @@ function fixture(
   const registry = new FerretRegistry([]);
   const harness = new FakeHarness('claude-code');
   const loginsAsked: string[] = [];
-  const decided: { runtime?: string; login?: string; harness: string }[] = [];
+  const decided: { runtime?: string; login?: string; harness: string; model?: string }[] = [];
   let next = 0;
   const ports: FerretsPorts = {
     now: () => T0,
@@ -91,6 +91,7 @@ function fixture(
         harness: input.harness,
         ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
         ...(input.login === undefined ? {} : { login: input.login }),
+        ...(input.model === undefined ? {} : { model: input.model }),
       });
       // Usage's `start.decide`: a login over its budget is paused, whoever asks and on whatever path.
       return input.login === CAPPED
@@ -152,6 +153,57 @@ describe('a start by runtime launches with the runtime’s login', () => {
 
     expect(started.ok).toBe(false);
     expect(started.ok ? '' : started.error.reason).toContain('needs sign in');
+    expect(f.registry.list()).toEqual([]);
+    expect(f.harness.launched).toEqual([]);
+  });
+
+  test('C-51: a start on the default runtime records the model that runtime selects, and a caller’s own model still wins', async () => {
+    const modelled: Resolve = async () => ({
+      ok: true,
+      harness: 'claude-code',
+      login: 'oauth',
+      model: 'selected-model',
+    });
+    const bare = fixture(modelled, undefined, async () => 'rt');
+    const explicit = fixture(modelled, undefined, async () => 'rt');
+
+    startedId(await bare.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN));
+    startedId(
+      await explicit.service.start({ folder: '/work', by: 'owner', options: { model: 'asked-model' } }, PERSON_ORIGIN),
+    );
+
+    expect(bare.decided[0]?.model).toBe('selected-model');
+    expect(explicit.decided[0]?.model).toBe('asked-model');
+  });
+
+  test('C-62: a default-runtime lookup that fails refuses the start in one plain sentence, never a start on whatever harness is first', async () => {
+    const f = fixture(rt, undefined, async () => {
+      throw new Error('runtimes is restarting');
+    });
+
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+
+    expect(started.ok).toBe(false);
+    expect(started.ok ? '' : started.error.reason).toBe(
+      'the machine’s default runtime could not be looked up, so the ferret was not started',
+    );
+    expect(f.registry.list()).toEqual([]);
+    expect(f.harness.launched).toEqual([]);
+  });
+
+  test('C-62: a default-runtime lookup that never settles is refused at the deadline, writing and launching nothing', async () => {
+    const clock = drivenClock();
+    const f = fixture(rt, clock.after, async () => await new Promise<string | undefined>(() => {}));
+
+    const starting = f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    clock.advance(RUNTIME_START_DEADLINE_MS);
+
+    const started = await starting;
+    expect(started.ok).toBe(false);
+    expect(started.ok ? '' : started.error.reason).toBe(
+      'the machine’s default runtime could not be looked up in time; try again',
+    );
     expect(f.registry.list()).toEqual([]);
     expect(f.harness.launched).toEqual([]);
   });

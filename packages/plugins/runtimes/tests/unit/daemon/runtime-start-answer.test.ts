@@ -39,6 +39,19 @@ const period = (level: 'ok' | 'over_trigger' | 'over_hard') => ({
 const OK = login('oauth');
 
 describe('runtimeStartAnswer', () => {
+  test('C-62: a default-runtime lookup that fails rejects, so Ferrets refuses instead of reading "no default"', async () => {
+    const failing = runtimeStartAnswer({
+      ...resolving(READY),
+      logins: listing(OK),
+      default: async () => {
+        throw new Error('settings unreadable');
+      },
+    });
+    await expect(failing.defaultRuntime?.()).rejects.toThrow('settings unreadable');
+    const named = runtimeStartAnswer({ ...resolving(READY), logins: listing(OK), default: async () => 'rt' as never });
+    expect(await named.defaultRuntime?.()).toBe('rt');
+    expect(await runtimeStartAnswer({ ...resolving(READY), logins: listing(OK) }).defaultRuntime?.()).toBeUndefined();
+  });
   test('a metadata compatibility refusal precedes every login status read', async () => {
     let reads = 0;
     const answer = runtimeStartAnswer({

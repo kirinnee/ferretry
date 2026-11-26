@@ -7,6 +7,9 @@ describe('where the client dials: FY_URL, the run record, the home’s configure
   test('with no run record the home’s configured port is dialled, never 7457', () => {
     expect(resolveDaemonUrl('', undefined, 7603)).toBe('http://127.0.0.1:7603');
   });
+  test('C-50: a configured port 0 never dials another home’s daemon at 7457: the dial is one that cannot answer', () => {
+    expect(resolveDaemonUrl('', undefined, 0)).toBe('http://127.0.0.1:0');
+  });
   test('the run record (the bind the daemon really took) beats the configured port', () => {
     expect(resolveDaemonUrl('', run, 7603)).toBe('http://127.0.0.1:7777');
   });

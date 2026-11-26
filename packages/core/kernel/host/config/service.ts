@@ -71,7 +71,7 @@ import {
   defaultsOf,
   evaluateConfig,
 } from './evaluate.ts';
-import { assertDistinctSchemaNames, configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
+import { assertDistinctSchemaNames, schemaModeline, schemaPublications } from './schemas.ts';
 import { type ConfigTreeEvents, watchConfigFiles } from './watcher.ts';
 import { readConfigDisk } from './disk.ts';
 import { CONFIG_FILE_MAX_BYTES, editConfigText, readConfigTextToEdit, SCHEMA_FOLDER } from '@ferretry/std/yaml';
@@ -1545,9 +1545,8 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     });
 
   const publishSchemas = async (): Promise<void> => {
-    for (const { def } of declarations) {
-      const target = `${root}/${SCHEMA_FOLDER}/${schemaFileName(def)}`;
-      const text = configJsonSchemaText(def);
+    for (const { name, text } of schemaPublications(declarations.map(({ def }) => def))) {
+      const target = `${root}/${SCHEMA_FOLDER}/${name}`;
       if ((await fs.readText(target).catch(() => undefined)) !== text)
         await fs.writeAtomic(target, text, PRIVATE_FILE_MODE);
     }
