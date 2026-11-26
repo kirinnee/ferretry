@@ -1,5 +1,8 @@
 import { implementCli } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { buildConnectorVerbs } from './lib/commands.ts';
 
-/** Connector (cli half): no verb yet; `fy connector` arrives with the wiring unit. Every subsystem ships three halves, so this is the empty one. */
-export default implementCli(manifest, { build: () => ({ verbs: {} }) });
+/** Connector (cli half): `fy connector`, `fy connector status|approve|deny|revoke`. */
+export default implementCli(manifest, {
+  build: ({ client, io, clock }) => ({ verbs: buildConnectorVerbs(client, io, () => clock?.nowMs() ?? 0) }),
+});

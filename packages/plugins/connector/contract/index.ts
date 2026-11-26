@@ -10,6 +10,7 @@ import { ConnectorStateFileSchema } from './state.ts';
 
 export * from './config.ts';
 export * from './state.ts';
+export * from './policy.ts';
 export * from './wire.ts';
 
 export const CONNECTOR = 'connector' as const;

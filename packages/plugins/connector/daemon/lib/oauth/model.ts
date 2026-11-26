@@ -23,6 +23,8 @@ export interface ConnectorCrypto {
 export interface PendingAuthorization {
   readonly view: ConnectorPendingView;
   readonly clientId: string;
+  /** The origin (OAuth issuer) this sign-in was started under; it is good for no other (see `ConnectorAuthority.trusted`). */
+  readonly issuer: string;
   /** Where the sign-in came from (`ApiRequest.clientAddress`); absent counts as the shared `unknown` source. */
   readonly source?: string;
   readonly redirectUri: string;
@@ -35,6 +37,8 @@ export interface PendingAuthorization {
 export interface AuthorizationCode {
   readonly grantId: string;
   readonly clientId: string;
+  /** The origin (OAuth issuer) that issued this code; redeemed under any other it mints nothing. */
+  readonly issuer: string;
   readonly redirectUri: string;
   readonly challenge: string;
   readonly expiresAt: number;
@@ -175,6 +179,20 @@ export class ConnectorMemory {
   }
 }
 
+/**
+ * Why a sign-in could not continue, in the person's terms. Each reason has one page (`daemon/lib/http/pages.ts`) that says
+ * what happened and how to connect again; the OAuth error code stays for Claude and for the small print.
+ */
+export type ReconnectReason = 'sign_in_gone' | 'cancelled' | 'unrecognised' | 'busy' | 'slow_down' | 'trouble';
+/** The sentence every error Claude may show ends with: exactly where to connect again. */
+export const RECONNECT_HINT = 'Reconnect in Claude: Settings > Connectors > Ferretry > Connect.';
+/** The one description every dead grant, code or token carries, whatever made it unusable. */
+export const DEAD_CONNECTION_TEXT = `This connection is no longer valid: it expired or was disconnected. ${RECONNECT_HINT}`;
+/** The one description every `invalid_client` refusal carries, whatever made the client unacceptable. */
+export const INVALID_CLIENT_TEXT = `Ferretry does not recognise this connection. ${RECONNECT_HINT}`;
+/** What a person is told when a rotated-away credential is presented again and the grant is ended for safety. */
+export const CANCELLED_FOR_SAFETY_TEXT = `Ferretry cancelled this connection to keep your account safe; connecting again is safe. ${RECONNECT_HINT}`;
+
 export class OAuthError extends Error {
   constructor(
     readonly error: string,
@@ -183,6 +201,8 @@ export class OAuthError extends Error {
     readonly retryAfter?: number,
     /** RFC 6749 §4.1.2.1: where the user agent goes with this error, once client and redirect_uri are trusted. */
     readonly redirectTo?: string,
+    /** Which "connect again" page a person sees for this failure; absent means it is chosen from the status. */
+    readonly reason?: ReconnectReason,
   ) {
     super(description);
   }

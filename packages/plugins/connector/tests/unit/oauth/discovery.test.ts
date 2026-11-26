@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { DEAD_CONNECTION_TEXT } from '../../../daemon/lib/oauth/model.ts';
 import {
   authorizationServerMetadata,
   protectedResourceMetadata,
@@ -51,6 +52,6 @@ describe('the 401 a client with no usable token is sent', () => {
   test('says invalid_token when a token was presented and refused', () => {
     const answer = unauthorizedResponse(endpoints, { tokenPresented: true });
     expect(answer.headers.get('www-authenticate')).toEndWith(', error="invalid_token"');
-    expect(JSON.parse(answer.body)).toEqual({ error: 'invalid_token' });
+    expect(JSON.parse(answer.body)).toEqual({ error: 'invalid_token', error_description: DEAD_CONNECTION_TEXT });
   });
 });

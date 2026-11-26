@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { DEVICE_SETTINGS_HREF } from '../../../src/router/routes.ts';
+import { STOP_SETTINGS_HREF } from '../../../src/shell/machine-stop.ts';
 import { RelaySessionError } from '../../../src/session/session-client.ts';
 import { RELAY_CLOSE_CODES } from '../../../src/session/wire/index.ts';
-import { UNREADABLE_INVENTORY_SENTENCE } from '../../../src/client/sentences.ts';
 import { App } from '../../../src/shell/app.tsx';
 import type { ShellWindow } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
@@ -41,7 +41,8 @@ afterEach(() => {
 
 const CAUSE = 'Relay only — there is no relay for this machine right now.';
 
-async function render() {
+/** `unreachable`: the only paired machine has no carrier to open a session over (no key kept for it, or no route). */
+async function render(options: { readonly unreachable?: boolean } = {}) {
   const transport = new FakeTransport(() => {
     throw new RelaySessionError(CAUSE, RELAY_CLOSE_CODES.daemonAbsent);
   });
@@ -53,7 +54,7 @@ async function render() {
     appVersion: '5.0.0',
     surfaces: [...CORE],
     daemons,
-    connect: async () => transport,
+    connect: async () => (options.unreachable === true ? undefined : transport),
   });
   go('/d/d1');
   const view = await mount(
@@ -73,11 +74,11 @@ describe('a machine whose plugin list could not be read through its carrier', ()
   test('the block says so, names the carrier’s cause, and offers the Connection setting', async () => {
     const view = await render();
     const main = view.container.querySelector('main')?.textContent ?? '';
-    expect(main).toContain(UNREADABLE_INVENTORY_SENTENCE);
-    expect(main).toContain(`Why: ${CAUSE}`);
+    expect(view.container.querySelector('h1')?.textContent).toBe("Can't read what laptop offers right now");
+    expect(main).toContain(`Reference: ${CAUSE.replace(/[.\s]+$/u, '')}`);
     const link = view.container.querySelector('[data-whole-daemon-connection] a') as HTMLAnchorElement;
     expect(link.textContent).toBe('Connection settings');
-    expect(link.getAttribute('href')).toBe(DEVICE_SETTINGS_HREF);
+    expect(link.getAttribute('href')).toBe(STOP_SETTINGS_HREF);
     await view.unmount();
   });
 
@@ -88,6 +89,22 @@ describe('a machine whose plugin list could not be read through its carrier', ()
     await settle();
     expect(window.location.pathname).toBe(DEVICE_SETTINGS_HREF);
     expect(view.container.querySelector('[data-whole-daemon-connection]')).toBeNull();
+    await view.unmount();
+  });
+});
+
+describe('a machine this browser cannot reach at all (no key kept, no carrier)', () => {
+  test('Connection settings leaves the stop page for This device’s settings, not back into the machine', async () => {
+    const view = await render({ unreachable: true });
+    expect(view.container.querySelector('[data-machine-stop]')?.getAttribute('data-machine-stop')).toBe('no-key');
+    const link = view.container.querySelector('[data-whole-daemon-connection] a') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe(STOP_SETTINGS_HREF);
+    await interact(async () => link.click());
+    await settle();
+    // The recovery page stays: it must not treat the unreachable machine as usable and bounce to /d/d1/settings/device.
+    expect(window.location.pathname).toBe(DEVICE_SETTINGS_HREF);
+    expect(view.container.querySelector('[data-machine-stop]')).toBeNull();
+    expect(view.container.querySelector('h1')?.textContent).toBe('This device');
     await view.unmount();
   });
 });

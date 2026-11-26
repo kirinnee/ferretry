@@ -259,6 +259,7 @@ export const STEP_UP_ACT_NAMES = [
   'show-terminals',
   'test-browser-proxy',
   'show-sign-in-plans',
+  'approve-connector',
 ] as const;
 export type StepUpActName = (typeof STEP_UP_ACT_NAMES)[number];
 
@@ -291,6 +292,7 @@ export const STEP_UP_ACTS = {
   showTerminals: act('show-terminals'),
   testBrowserProxy: act('test-browser-proxy'),
   showSignInPlans: act('show-sign-in-plans'),
+  approveConnector: act('approve-connector'),
 } as const;
 export type StepUpAct = (typeof STEP_UP_ACTS)[keyof typeof STEP_UP_ACTS];
 

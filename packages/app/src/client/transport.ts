@@ -136,6 +136,21 @@ export function isCarrierOutage(error: unknown): boolean {
  */
 export const DEVICE_REFUSED_CLOSE_CODE = 4403;
 
+/**
+ * The close code a daemon ends a session with when it does not speak the version this app asked for (the session wire's
+ * `RELAY_CLOSE_CODES.versionUnsupported`; a parity test pins the two together): the daemon's own "update this app".
+ */
+export const VERSION_UNSUPPORTED_CLOSE_CODE = 4426;
+
+/** Whether a transport failure is the daemon saying it does not speak this app's version. Total. */
+export function isVersionUnsupported(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.name === 'RelaySessionError' &&
+    (error as { readonly code?: unknown }).code === VERSION_UNSUPPORTED_CLOSE_CODE
+  );
+}
+
 /** Whether a transport failure is the daemon saying it no longer accepts this device (revoked, or unused for too long). */
 export function isDeviceRefusal(error: unknown): boolean {
   return (

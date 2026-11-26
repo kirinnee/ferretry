@@ -70,6 +70,30 @@ describe('fy daemon audit', () => {
   });
 });
 
+describe('a plugin own audit kinds', () => {
+  test('every Claude connector kind prints as a sentence, and its actor as the connector', () => {
+    const kinds = [
+      'connector.client-registered',
+      'connector.grant-approved',
+      'connector.grant-denied',
+      'connector.grant-revoked',
+      'connector.refresh-reused',
+      'connector.tool',
+    ];
+    const records = kinds.map((event, i) => ({
+      at: `2026-11-25T10:00:0${String(i)}.000Z`,
+      event,
+      outcome: 'succeeded',
+      actor: { kind: 'connector' },
+      detail: { grant: 'cg_abcdefghij' },
+    }));
+    const text = renderAudit({ records, kept: records, keptTotal: records.length, unreadable: 0 } as never);
+    for (const kind of kinds) expect(text, kind).not.toContain(kind);
+    expect(text).toContain('A Claude connector sign-in was approved');
+    expect(text).toContain('by a remote MCP connector');
+  });
+});
+
 describe('fy daemon security', () => {
   test('V-0240 show prints every setting with its bounds', async () => {
     const { verbs, out } = run(view);

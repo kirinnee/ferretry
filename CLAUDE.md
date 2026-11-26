@@ -302,6 +302,13 @@ while its record, its directory and every read of it stay; a write or a pin brin
 never archived.
 The rule, what keeps a session live, the timer and the declared gaps are [docs/session-archive.md](docs/session-archive.md).
 
+The **Claude connector** (`packages/plugins/connector`) lets the Claude app reach a machine's ferrets as a remote MCP
+server, behind an OAuth server the daemon runs and a per-sign-in passkey approval. Its OAuth and `/mcp` routes are
+**public-door routes** — served only to a door arrival (its own `127.0.0.1` listener, or the built-in tunnel while no
+`publicUrl` is set), never on the API listener, with Gate reading no credential there — and its `/v1/connector` routes
+are a person's. The contract, the pages a person sees and what is built so far are
+[docs/mcp-connector.md](docs/mcp-connector.md); implement against that document.
+
 ## Project record
 
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security

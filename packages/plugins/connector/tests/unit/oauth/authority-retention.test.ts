@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ConnectorAuthority, type ExchangeInput } from '../../../daemon/lib/oauth/authority.ts';
-import { ConnectorMemory, base64url } from '../../../daemon/lib/oauth/model.ts';
+import { ConnectorMemory, DEAD_CONNECTION_TEXT, base64url } from '../../../daemon/lib/oauth/model.ts';
 import { ConnectorRateLimiter } from '../../../daemon/lib/oauth/rate-limiter.ts';
 import { fixture, redirectUri, verifier } from '../../support/oauth-fixture.ts';
 
@@ -100,7 +100,7 @@ describe('rotated refresh digests are bounded (finding 2)', () => {
     f.advance(31 * DAY);
     await expect(f.authority.exchange(...refresh(flow.client.client_id, first))).rejects.toMatchObject({
       error: 'invalid_grant',
-      description: 'Invalid or expired refresh token.',
+      description: DEAD_CONNECTION_TEXT,
     });
     expect(f.state().grants[0]?.revokedAt).toBeUndefined();
   });
