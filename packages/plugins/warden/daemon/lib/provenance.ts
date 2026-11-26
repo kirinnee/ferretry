@@ -8,6 +8,7 @@
  * from it.
  */
 
+import { OpenRecordedHarnessSchema } from '@ferretry/core-ferrets/contract';
 import { displaySystemCallsign } from './protocol.ts';
 import { z } from 'zod';
 
@@ -23,7 +24,7 @@ export type WardenSelectionReason = z.infer<typeof WardenSelectionReasonSchema>;
 const WardenModelSourceSchema = z.enum(['harness', 'agent', 'configured', 'unknown']);
 type WardenModelSource = z.infer<typeof WardenModelSourceSchema>;
 
-const WardenHarnessSchema = z.enum(['claude', 'codex']);
+const WardenHarnessSchema = OpenRecordedHarnessSchema;
 type WardenHarness = z.infer<typeof WardenHarnessSchema>;
 
 /** Selection facts captured before a warden launch. `skipped` maps each account

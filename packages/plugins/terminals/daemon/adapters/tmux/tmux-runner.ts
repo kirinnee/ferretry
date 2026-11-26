@@ -232,6 +232,7 @@ const LAUNCH_CHAIN: ReadonlySet<string> = new Set([TMUX_PROGRAM, ...LAUNCH_WRAPP
 interface LaunchChain {
   readonly through: ReadonlySet<string>;
   readonly harness: string;
+  readonly key?: string; // the spec's registered harness key: startup answers are keyed on it, never on the screen
 }
 
 /**
@@ -583,7 +584,7 @@ export class TmuxRunner implements Runner {
       return await new TmuxPaneDelivery(new TmuxController(pane.port), pane.sleep).deliver(
         pane.session,
         delivery.text,
-        { resumeMenuChoice: delivery.resumeMenuChoice },
+        { resumeMenuChoice: delivery.resumeMenuChoice, harness: this.#launches.get(handle)?.key ?? '' },
         delivery.beforeWrite,
       );
     } catch (error) {
@@ -977,9 +978,8 @@ export class TmuxRunner implements Runner {
     // takes ~60 ms to reach the harness), and a program pinned then made the harness's own first frame read as a pane
     // that was no longer live, so every limited ferret's first turn failed untyped. Until a write is attempted, a pane
     // bound while it ran a launch wrapper moves along the launch chain only: another wrapper keeps waiting and the
-    // harness the launch spec named is pinned. Any other program (a shell, a harness that exited) is not adopted, and
-    // the read answers "no longer live" as for any change. From the first write on the program is fixed, and every
-    // write is still compared against it by the server in the write itself.
+    // harness the launch spec named is pinned. Any other program (a shell, a harness that exited) is not adopted and the
+    // read answers "no longer live". From the first write on the program is fixed, and the server compares every write.
     const chain = this.#launches.get(handle);
     let binding = original;
     let wrote = false;
@@ -1381,8 +1381,8 @@ export class TmuxRunner implements Runner {
       startedAt: this.options.now(),
     };
     const harness = spec.execChain?.at(-1);
-    if (harness !== undefined) this.#launches.set(paneId, { through: new Set(spec.execChain?.slice(0, -1)), harness });
-    else this.#launches.delete(paneId);
+    if (harness === undefined) this.#launches.delete(paneId);
+    else this.#launches.set(paneId, { through: new Set(spec.execChain?.slice(0, -1)), harness, key: spec.harness });
     await this.options.remember?.(spec.ferret, running);
     return ok(running);
   }

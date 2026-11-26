@@ -3,29 +3,27 @@
  * into a home) and the runtimes whose profile stack carries each MCP item. Read live, per call; Runtimes off answers
  * nothing (no accounts, no component carried by any runtime).
  */
-import {
-  isSupportedHarnessKey,
-  type RuntimeHome,
-  type RuntimesApi,
-  type RuntimeId,
-} from '@ferretry/plugin-runtimes/contract';
+import { isRecordedHarnessKey } from '@ferretry/core-ferrets/contract';
+import type { RuntimeHome, RuntimesApi, RuntimeId } from '@ferretry/plugin-runtimes/contract';
 import type { McpItem } from '../../../contract/index.ts';
 import type { McpInventoryAccount, McpInventoryComponent } from './service.ts';
 
 /** The slice of Runtimes this wiring reads. */
 export type RuntimesView = Pick<RuntimesApi, 'homes' | 'list' | 'layers'>;
 
-/** One account per runtime name a published home lists, in manifest order. A home of a harness MCP has no layout for lists none. */
+/** One account per runtime name a published home lists, in manifest order. A home of a harness MCP has no layout for (a key the family table has no row for, or the family word `claude`) lists none. */
 export function accountsOf(homes: readonly RuntimeHome[]): readonly McpInventoryAccount[] {
-  return homes.flatMap(home =>
-    (isSupportedHarnessKey(home.harness) ? home.runtimes : []).map(runtime => ({
+  return homes.flatMap(home => {
+    const harness = home.harness;
+    if (!isRecordedHarnessKey(harness)) return [];
+    return home.runtimes.map(runtime => ({
       runtime,
-      harness: home.harness as McpInventoryAccount['harness'],
+      harness,
       home: home.home,
       wrapper: home.wrapper,
       ...(home.secretEnv === undefined ? {} : { secretEnv: home.secretEnv }),
-    })),
-  );
+    }));
+  });
 }
 
 /**

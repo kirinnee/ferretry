@@ -1,3 +1,4 @@
+import type { OpenRecordedHarness, RecordedFamily } from '@ferretry/core-ferrets/contract';
 import { LESSONS_INSTRUCTION } from './instruction.ts';
 import type {
   LessonsApplyPreview,
@@ -30,7 +31,10 @@ import type { ScanRecord, StoredFerretLessons } from './types.ts';
 export interface LessonSessionFacts {
   readonly ferretId: string;
   readonly cwd: string;
-  readonly harness: 'claude' | 'codex';
+  /** The harness the ferret names: a family word for the two this build ships, the harness's own key for any other. */
+  readonly harness: OpenRecordedHarness;
+  /** The family table's row for the ferret's harness key; `undefined` for a harness it has none for (a decision never reads `harness` for that). */
+  readonly family?: RecordedFamily | undefined;
   readonly mode: 'interactive' | 'auto';
   readonly teammate?: string | undefined;
   /** The ferret's own name, a lead's included, so a view can name a ferret that is not a helper. */
@@ -131,6 +135,13 @@ export class LessonsError extends Error {
     this.name = 'LessonsError';
   }
 }
+
+/**
+ * The family a repo lesson is written for when NO ferret filed it any more (its session is gone, or the observation names
+ * none): Claude's CLAUDE.md, as the preview shows the owner before anything is written. A ferret that IS known but whose
+ * harness the family table has no row for is never this: it is refused by name.
+ */
+const NO_FILER_FAMILY: RecordedFamily = 'claude';
 
 /** Where an Apply writes, decided from the lesson and the files that are there. */
 interface ApplyTarget {
@@ -298,23 +309,28 @@ export class LessonsService {
     if (root === undefined) throw new LessonsError('invalid', `lesson ${proposal.id} has no project to write to`);
     const agents = this.deps.files.join(root, 'AGENTS.md');
     const claude = this.deps.files.join(root, 'CLAUDE.md');
-    const [agentsText, claudeText, harness] = await Promise.all([
+    const [agentsText, claudeText, filer] = await Promise.all([
       this.deps.files.read(agents),
       this.deps.files.read(claude),
-      this.harnessOf(proposal),
+      this.filerOf(proposal),
     ]);
     const name = repoInstructionsFileName(
       { agents: agentsText !== undefined, claude: claudeText !== undefined },
-      harness,
+      filer === undefined ? NO_FILER_FAMILY : filer.family,
     );
+    // A filer whose harness the table has no instruction file for is refused by name: nothing is created on a guess.
+    if (name === undefined)
+      throw new LessonsError(
+        'invalid',
+        `lesson ${proposal.id} has no AGENTS.md or CLAUDE.md to write to in ${root}, and the ${filer?.harness ?? 'filing'} harness has no instruction file this build knows; create the file you want it in and apply again`,
+      );
     return { path: this.deps.files.join(root, name), capability: 'filesystem', notes: [] };
   }
 
-  /** The CLI of the ferret that filed the lesson, which decides the file a new repo lesson creates. */
-  private async harnessOf(proposal: Proposal): Promise<'claude' | 'codex'> {
+  /** The ferret that filed the lesson, whose CLI decides the file a new repo lesson creates. */
+  private async filerOf(proposal: Proposal): Promise<LessonSessionFacts | undefined> {
     const ferretId = (await this.deps.store.observationsById()).get(proposal.observationIds[0] ?? '')?.ferretId;
-    const facts = ferretId === undefined ? undefined : await this.deps.sessions.facts(ferretId);
-    return facts?.harness ?? 'claude';
+    return ferretId === undefined ? undefined : await this.deps.sessions.facts(ferretId);
   }
 
   private async accepted(id: string): Promise<Proposal> {

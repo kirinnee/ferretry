@@ -1,3 +1,4 @@
+import { RecordedHarnessSchema } from '@ferretry/core-ferrets/contract';
 import { defineConfig, defineHook, defineState } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 
@@ -16,8 +17,8 @@ import { z } from 'zod';
  * (it presses keys on a ferret), so an edit by anyone but the owner is held for the owner (docs/config-files.md).
  */
 
-/** The harnesses a rule is for, spelled as Ferrets records a ferret's dialog (`claude`, never `claude-code`). */
-export const DIALOG_RULE_HARNESSES = ['claude', 'codex'] as const;
+/** The harnesses a rule is for: Ferrets' family table, spelled as Ferrets records a ferret's dialog (`claude`, never `claude-code`). */
+export const DIALOG_RULE_HARNESSES = RecordedHarnessSchema.options;
 export type DialogRuleHarness = (typeof DIALOG_RULE_HARNESSES)[number];
 
 /**

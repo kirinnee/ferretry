@@ -3,6 +3,7 @@
  * today's `pack/quota.ts` and `pack/recommend.ts` (Packs owns them; Move is their second reader, and the two cannot
  * drift apart unnoticed). The fleet shapes are the smallest structural ones these functions touch.
  */
+import type { RecordedFamily } from '@ferretry/core-ferrets/contract';
 import { type PaneLimit, paneLimitHolds } from './foreign-pane-limit.ts';
 
 export type PackQuotaState = 'plenty' | 'some' | 'low' | 'exhausted' | 'unknown';
@@ -57,7 +58,7 @@ interface BudgetPeriod {
 export interface FleetRuntimeView {
   readonly name: string;
   readonly wrapper: string;
-  readonly harness: 'claude' | 'codex';
+  readonly harness: RecordedFamily;
   readonly credential: { readonly id: string; readonly status?: string; readonly store?: string };
   readonly disabled?: unknown;
   readonly launch: { readonly available: boolean; readonly reason?: string };

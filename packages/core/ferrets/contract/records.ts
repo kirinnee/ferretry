@@ -1,3 +1,4 @@
+import { KEBAB_NAME } from '@ferretry/std';
 import { z } from 'zod';
 
 /**
@@ -43,15 +44,41 @@ export const RecordedHarnessSchema = z.enum(RECORDED_FAMILIES);
 export type OpenRecordedHarness = z.infer<typeof RecordedHarnessSchema> | (string & {});
 export const OpenRecordedHarnessSchema = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9-]{0,39}$/u, 'a harness is lowercase letters, digits and -')
+  .regex(KEBAB_NAME, 'a harness is lowercase letters, digits and -')
+  .max(40)
   .transform(value => value as OpenRecordedHarness);
 
 /** Whether a session's harness is one of the two families a closed consumer can read. */
 export const isRecordedHarness = (harness: string): harness is RecordedFamily =>
   (RECORDED_FAMILIES as readonly string[]).includes(harness);
 
+/** The plugin key of a harness the family table has a row for (`claude-code`, `codex`), derived from {@link FAMILY_OF_KEY}. */
+export type RecordedHarnessKey = keyof typeof FAMILY_OF_KEY;
+/** Every plugin key the family table has a row for. */
+export const RECORDED_HARNESS_KEYS = Object.keys(FAMILY_OF_KEY) as [RecordedHarnessKey, ...RecordedHarnessKey[]];
+/** A plugin key the family table has a row for, as a wire value: any other key is refused at the boundary that uses it. */
+export const RecordedHarnessKeySchema = z.enum(RECORDED_HARNESS_KEYS);
+
 /** Whether `key` is the plugin key of a harness the family table has a row for (`claude-code`, `codex`); the family word `claude` is not a key. */
-export const isRecordedHarnessKey = (key: string): boolean => Object.hasOwn(FAMILY_OF_KEY, key);
+export const isRecordedHarnessKey = (key: string): key is RecordedHarnessKey => Object.hasOwn(FAMILY_OF_KEY, key);
+
+/**
+ * The table's key for a word a document names: the key itself, or the family word a record spells it with (`claude` is the
+ * plugin `claude-code`). Any other word has no key. For a boundary that reads a document written with either spelling.
+ */
+export const recordedKeyOfWord = (word: string): RecordedHarnessKey | undefined =>
+  isRecordedHarnessKey(word)
+    ? word
+    : isRecordedHarness(word)
+      ? RECORDED_HARNESS_KEYS.find(key => FAMILY_OF_KEY[key] === word)
+      : undefined;
+
+/**
+ * The family of a harness PLUGIN KEY: the table's row for exactly that key, or `undefined` for a key it has none for. The family
+ * word `claude` is not a key, so a third harness registered under it has no family (never Claude's).
+ */
+export const recordedFamilyOfKey = (key: string): RecordedFamily | undefined =>
+  isRecordedHarnessKey(key) ? FAMILY_OF_KEY[key as keyof typeof FAMILY_OF_KEY] : undefined;
 
 /** The harness a session document stamps for a ferret's harness key: the family for the two known, the key itself otherwise. */
 export const recordedHarnessOf = (key: string): OpenRecordedHarness =>
@@ -85,6 +112,16 @@ export function byRecordedHarness<T>(harness: string, cases: ByRecordedHarness<T
   const family = recordedHarnessOf(harness);
   if (!isRecordedHarness(family)) throw new UnsupportedHarnessFamilyError(harness);
   return cases[family]();
+}
+
+/**
+ * Runs the case for a harness PLUGIN KEY, matched EXACTLY against the table: a key it has no row for THROWS
+ * {@link UnsupportedHarnessFamilyError}, and so does the family word `claude`, which is not a key (a third harness may
+ * register under it and must never get Claude's case). Where a plugin holds a key, not a family token, this is the dispatch.
+ */
+export function byRecordedHarnessKey<T>(key: string, cases: ByRecordedHarness<T>): T {
+  if (!isRecordedHarnessKey(key)) throw new UnsupportedHarnessFamilyError(key);
+  return cases[FAMILY_OF_KEY[key]]();
 }
 
 /** How a person reads each harness's product name (`Claude Code`, `Codex`). */

@@ -1,5 +1,11 @@
 import { type AskSummary, type AsksApi, SourceKeySchema } from '@ferretry/core-asks/contract';
-import type { FerretEndCause, FerretId, FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
+import {
+  type FerretEndCause,
+  type FerretId,
+  type FerretsApi,
+  type FerretSummary,
+  recordedFamilyOfKey,
+} from '@ferretry/core-ferrets/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import {
   type ExchangeSend,
@@ -14,8 +20,6 @@ import {
   withBatchMembers,
   withLivenessLedger,
 } from './lib/index.ts';
-
-export const HARNESS_OF: Readonly<Record<string, 'claude' | 'codex'>> = { 'claude-code': 'claude', codex: 'codex' };
 
 interface TurnMemory {
   /** The conversation's own turn id last seen, and the ordinal the sweep counts it as. */
@@ -122,6 +126,8 @@ export function wardenFleetSession(
   questionSince?: string,
 ): WardenFleetSession {
   const stoppedAt = ferret.state === 'stopped' ? ferret.stateAt : undefined;
+  // A harness the table has no family for is read as none: the auto-move leaves it alone, it is never taken for Claude.
+  const family = recordedFamilyOfKey(ferret.harness);
   return {
     // Today's mapping (`fyd.ts` wardenFleetSession), field for field from what Ferrets records: the start's own mode,
     // its label (a warden is `label === WARDEN_LABEL`), the spawn stamp's lineage and the model. Nothing is read off
@@ -138,7 +144,7 @@ export function wardenFleetSession(
       // A projection of the spawn stamp: the detector's lineage shield survives the warden being pruned first.
       ...(ferret.provenance === undefined ? {} : { wardenLineage: ferret.provenance.wardenLineage }),
       agent: ferret.runtime ?? ferret.harness,
-      ...(HARNESS_OF[ferret.harness] === undefined ? {} : { harness: HARNESS_OF[ferret.harness] }),
+      ...(family === undefined ? {} : { harness: family }),
       ...(ferret.model === undefined ? {} : { model: ferret.model }),
       // The supervision times it was started with: the liveness reflex times each ferret by its own.
       ...(ferret.nudgeAfterSeconds === undefined ? {} : { nudgeAfterSeconds: ferret.nudgeAfterSeconds }),

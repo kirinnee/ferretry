@@ -243,7 +243,15 @@ function stand(pane: Pick<DialogClearPorts, 'frame' | 'key' | 'words'>, rules = 
   return { clear, events, nudges, memory: () => memory };
 }
 
-const watched = (screen: Screen): WatchedDialog => ({ sessionId: 'f1', name: 'ada', dialog: screen.dialog });
+const watched = (
+  screen: Screen,
+  harness: WatchedDialog['harness'] = screen.dialog.harness as WatchedDialog['harness'],
+): WatchedDialog => ({
+  sessionId: 'f1',
+  name: 'ada',
+  dialog: screen.dialog,
+  ...(harness === undefined ? {} : { harness }),
+});
 
 describe('every known screen has a rule that leaves it', () => {
   for (const screen of SCREENS) {
@@ -686,5 +694,70 @@ describe('the dialog watch with a clearer', () => {
     should(state.pressed).eql([]);
     should(events).containEql('fleet.warden_dialog_clear_unavailable');
     should(plan?.raise).have.length(1);
+  });
+});
+
+/** A fleet session whose registered key has no family row: it carries no harness at all. */
+const unregistered = (screen: Screen): WatchedDialog => ({ sessionId: 'f1', name: 'ada', dialog: screen.dialog });
+
+describe('the ferret’s REGISTERED harness chooses the rule and the keys, never the screen', () => {
+  const codex = SCREENS.find(each => each.rule === 'codex-hooks-list') as Screen;
+  const claude = SCREENS.find(each => each.rule === 'claude-settings-error') as Screen;
+
+  it('should press nothing on a third harness whose pane paints Codex’s screen (its key has no family row)', async () => {
+    // Arrange: a fake third harness; the screen reads as Codex's, but the ferret is registered as no known family.
+    const { state, ports } = fakePane(codex);
+    const { clear, events } = stand(ports);
+
+    // Act
+    const result = await clear.clear([unregistered(codex)]);
+
+    // Assert
+    should(state.pressed).eql([]);
+    should(result.cleared).equal(0);
+    should(result.toTell.map(each => each.sessionId)).eql(['f1']);
+    should(events).eql([]);
+  });
+
+  it('should press nothing on a third harness registered under the family word `claude` (it has no family either)', async () => {
+    // Arrange: such a fleet session carries no family (`recordedFamilyOfKey('claude')` is none), and its pane paints Claude's.
+    const { state, ports } = fakePane(claude);
+    const { clear } = stand(ports);
+
+    // Act
+    const result = await clear.clear([unregistered(claude)]);
+
+    // Assert
+    should(state.pressed).eql([]);
+    should(result.cleared).equal(0);
+    should(result.toTell).eql([unregistered(claude)]);
+  });
+
+  it('should press nothing when the screen words name another family than the registered one', async () => {
+    // Arrange: registered as Claude, the pane prints Codex's list: the screen may confirm, never choose.
+    const { state, ports } = fakePane(codex);
+    const { clear } = stand(ports);
+
+    // Act
+    const result = await clear.clear([watched(codex, 'claude')]);
+
+    // Assert
+    should(state.pressed).eql([]);
+    should(result.toTell.length).equal(1);
+  });
+
+  it('should still press Claude’s and Codex’s keys when the registered family and the screen agree', async () => {
+    for (const screen of [claude, codex]) {
+      // Arrange
+      const { state, ports } = fakePane(screen);
+      const { clear } = stand(ports);
+
+      // Act
+      const result = await clear.clear([watched(screen)]);
+
+      // Assert
+      should(state.pressed).eql(screen.keys);
+      should(result.cleared).equal(1);
+    }
   });
 });
