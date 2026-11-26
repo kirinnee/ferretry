@@ -233,6 +233,12 @@ are only good while it is on) and needs no restart; **grants stay listed and rev
 one never means switching the connector back on. The config is watched, so a changed `publicUrl`, `port` or
 `extraRedirectUris` applies live; there is no "restart it" refusal.
 
+**An approval is durable in three steps, each safe to die in.** The owner's approve writes a grant record marked
+`pending` first; judges trust once more, synchronously; audits `connector.grant.approved`; and only then writes the record
+as approved. A `pending` record is never connected: the index does not know it, the owner never sees it, a code cannot
+redeem it and it holds no credential, so a crash between any two steps leaves nothing a person or a credential can use,
+and the next write drops it. A connected grant therefore always has its approval already audited.
+
 **Trust that changes while a sign-in is in the air.** The address and the callback allow-list apply LIVE (above), so a
 flow already under way must not outlive the trust it was started under. Every pending sign-in and every unredeemed code is
 **bound to the origin (issuer) that issued it**, and the CURRENT callback policy is enforced again at every later step:
@@ -610,16 +616,17 @@ Hides one open agenda item until a time and lists it again afterwards — the da
   could not do it) or `refused` (`refused`: the tool or the daemon said not this, e.g. an item that needs the
   passkey, or a 401/403). A call refused at the gate (scope or grants) before the tool ran is in the calls log with
   outcome `refused` but not in the security log, because nothing was attempted.
-- **Declared gap — the calls log.** The plugin masks what it records (credential shapes, Vault values), but a host admin or
-  warden token literal typed into a tool's arguments is masked by the kernel only in responses, so the plugin cannot mask
-  it in the calls log. Nothing in the tool surface hands such a value to Claude; this is the residual.
+- **Declared gap — the calls log.** The plugin masks what it records (credential shapes, Vault values), and every
+  host-token-SHAPED run in a logged argument (43 characters of base64url, the form of a host admin or warden token). The
+  kernel masks the host's literals only in responses, so a bare literal is caught by its shape alone: a value of some other
+  shape typed into an argument is the residual. Nothing in the tool surface hands such a value to Claude.
 - **Before every delegated call** the endpoint checks that the connector is on AND the bearer still verifies as the same
   token of the same grant, so a revoke or an off stops the NEXT call of a request in flight (the one dispatch already
   running is the kernel's and cannot be cancelled). The calls log keeps only the arguments a tool declares, never a
   caller-chosen property name; a ferret-written text is cleaned before any tool cuts it short.
 - **The machine's own list is read from its own route** (`GET /v1/machine/agenda`): the all-ferrets roll-up leaves it out.
-- **Declared gaps (owned elsewhere).** An already-existing `calls.jsonl` with broader permissions keeps them on append
-  (the state port's file mode applies at creation; the connector creates it `0600`). A project nested inside a registered
+- **Declared gaps (owned elsewhere).** An append re-tightens an already-existing `calls.jsonl` with broader permissions
+  back to `0600` (the state port applies the mode on every write, not only at creation). A project nested inside a registered
   one that was removed after the lookup can still be launched while its parent is registered (core ferrets' launch check,
   not the connector's).
 - **Protocol version**: the endpoint's own refusal reply for a write tool a read-only token may not call never

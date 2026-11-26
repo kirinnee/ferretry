@@ -42,6 +42,14 @@ export const ReadCapabilityGrantsSchema = z.preprocess(raw => {
 export const StoredCapabilityGrantsSchema = z.preprocess(raw => {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw;
   const given = raw as Record<string, unknown>;
+  // Zod silently strips an own `__proto__` key (and would never see a symbol key), so the closed schema alone would
+  // accept a stored map carrying one. Every own key must be a capability this build knows, or the document is refused.
+  if (
+    Reflect.ownKeys(given).some(
+      key => typeof key !== 'string' || !(CAPABILITY_NAMES as readonly string[]).includes(key),
+    )
+  )
+    return null;
   return {
     ...Object.fromEntries(CAPABILITY_NAMES.filter(name => !(name in given)).map(name => [name, OFF])),
     ...given,

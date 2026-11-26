@@ -65,6 +65,12 @@ const GrantSchema = z.strictObject({
   approvedBy: z.string(),
   lastUsedAt: InstantSchema.optional(),
   revokedAt: InstantSchema.optional(),
+  /**
+   * Written by an approval BEFORE it is audited and flipped to approved. A pending record is never connected: the
+   * index does not know it, the owner never sees it and a code cannot redeem it, so a crash between the write and
+   * the audit leaves nothing but an inert record that the next write drops.
+   */
+  pending: z.literal(true).optional(),
   access: z.array(TokenSchema),
   refresh: z.array(TokenSchema),
   usedRefresh: z.array(UsedRefreshSchema),
