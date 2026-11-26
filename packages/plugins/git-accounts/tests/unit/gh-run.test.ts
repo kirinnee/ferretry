@@ -486,10 +486,152 @@ describe('who may ask, and for which folder', () => {
   });
 });
 
+describe('G21b tokenless formatting and help', () => {
+  for (const flag of ['-q', '-qattached', '--jq', '--jq=']) {
+    test(`${flag}: only JSON enters a separate child with an empty environment`, async () => {
+      const { root } = projectFolder();
+      const fake = join(root, 'fake.js');
+      const fakeGh = join(root, 'gh.js');
+      writeFileSync(fakeGh, 'console.error(JSON.stringify(process.env)); console.log(\'{"number":42}\');');
+      writeFileSync(
+        fake,
+        `#!/usr/bin/env bun\nconst input = await Bun.stdin.text();\nconsole.log(JSON.stringify({env:process.env, args:process.argv.slice(2), input}));\n`,
+        { mode: 0o755 },
+      );
+      const world = await boot({
+        projects: [linked(root)],
+        where: { executables: [GH_REAL, '/usr/bin/jq'] },
+        spawn: call => {
+          if (call.program === GH_REAL) {
+            const gh = Bun.spawnSync([process.execPath, fakeGh, ...call.args], {
+              env: call.options?.env as Record<string, string>,
+            });
+            expect(JSON.parse(gh.stderr.toString()).GH_TOKEN).toBe(FAKE_TOKEN);
+            return { ...OK, exitCode: gh.exitCode, stdout: gh.stdout.toString(), stderr: 'gh warning\n' };
+          }
+          // Use only a fake formatter. The kernel's empty-env behavior has its own subprocess regression test.
+          const result = Bun.spawnSync([process.execPath, fake, ...call.args], {
+            env: call.options?.env as Record<string, string>,
+            stdin: new TextEncoder().encode(String(call.options?.stdin ?? '')),
+          });
+          return {
+            ...OK,
+            exitCode: result.exitCode,
+            stdout: result.stdout.toString(),
+            stderr: result.stderr.toString(),
+          };
+        },
+      });
+      const filter = '[$ENV, env, .number]';
+      const args = flag === '-qattached' ? [`-q${filter}`] : flag.endsWith('=') ? [flag + filter] : [flag, filter];
+      const answer = (await world.gh(['pr', 'list', '--json', 'number', ...args], root)).json<{
+        stdout: string;
+        stderr: string;
+        exitCode: number;
+      }>();
+      expect(answer.exitCode).toBe(0);
+      expect(JSON.parse(answer.stdout)).toEqual({ env: {}, args: ['-r', '--', filter], input: '{"number":42}\n' });
+      expect(answer.stderr).toBe('gh warning\n');
+      expect(world.calls).toHaveLength(2);
+      expect(world.calls[0]?.args).toEqual(['pr', 'list', '-R', 'acme/app', '--json', 'number']);
+      expect(world.calls[0]?.options?.env).toHaveProperty('GH_TOKEN', FAKE_TOKEN);
+      expect(world.calls[1]?.options).toMatchObject({ env: {}, inheritEnv: false });
+    });
+  }
+
+  test('api jq accepts a JSON stream; gh errors and formatter errors retain their status and stderr', async () => {
+    let ghFails = true;
+    const world = await boot({
+      projects: [linked('/w')],
+      where: { executables: [GH_REAL, '/usr/bin/gojq'] },
+      spawn: call =>
+        call.program === GH_REAL
+          ? { ...OK, exitCode: ghFails ? 22 : 0, stdout: '{}\n{}\n', stderr: 'original gh error\n' }
+          : { ...OK, exitCode: 3, stderr: 'original jq error\n' },
+    });
+    expect((await world.gh(['api', 'user', '--paginate', '-q', '.'], '/w')).json()).toEqual({
+      exitCode: 22,
+      stdout: '{}\n{}\n',
+      stderr: 'original gh error\n',
+    });
+    expect(world.calls).toHaveLength(1);
+    ghFails = false;
+    expect((await world.gh(['api', 'user', '-q', '.'], '/w')).json()).toEqual({
+      exitCode: 3,
+      stdout: '',
+      stderr: 'original gh error\noriginal jq error\n',
+    });
+    expect(world.calls.at(-1)?.program).toBe('/usr/bin/gojq');
+  });
+
+  test('missing formatter names what to install before gh receives a token', async () => {
+    const world = await boot({ projects: [linked('/w')] });
+    expect((await world.gh(['api', 'user', '--jq', '.'], '/w')).json()).toEqual({
+      refused: expect.stringContaining('Install jq or gojq'),
+    });
+    expect(world.calls).toHaveLength(0);
+  });
+
+  test('a changed formatter refuses before a filter child is started', async () => {
+    let changed = false;
+    const world = await boot({
+      projects: [linked('/w')],
+      where: { executables: [GH_REAL, '/usr/bin/jq'] },
+      bindProgram: async program => ({
+        ...testClient(program),
+        verify: async () => !program.endsWith('/jq') || !changed,
+      }),
+      spawn: () => {
+        changed = true;
+        return { ...OK, stdout: '{}' };
+      },
+    });
+    expect((await world.gh(['api', 'user', '-q', '.'], '/w')).json()).toEqual({
+      refused: expect.stringContaining('formatter changed'),
+    });
+    expect(world.calls).toHaveLength(1);
+  });
+
+  for (const argv of [
+    ['--version'],
+    ['help'],
+    ['help', 'formatting'],
+    ['--help'],
+    ['pr', '--help'],
+    ['pr', 'list', '--help'],
+    ['auth', 'token', '--help'],
+    ['--help', 'pr', 'list'],
+  ]) {
+    test(`${argv.join(' ')} runs without a token or linked project`, async () => {
+      const world = await boot({ spawn: () => ({ ...OK, stdout: 'fake help\n', stderr: 'warning\n', exitCode: 2 }) });
+      expect((await world.gh(argv, '/unlinked')).json()).toEqual({
+        exitCode: 2,
+        stdout: 'fake help\n',
+        stderr: 'warning\n',
+      });
+      expect(world.calls).toHaveLength(1);
+      expect(world.calls[0]?.options?.env).not.toHaveProperty('GH_TOKEN');
+    });
+  }
+
+  for (const argv of [
+    ['pr', 'list', '--template', '{{.}}'],
+    ['api', 'user', '--template={{.}}'],
+    ['pr', 'list', '-T', '{{.}}'],
+  ]) {
+    test(`${argv.join(' ')} gives the safe formatter alternative`, async () => {
+      const world = await boot({ projects: [linked('/w')] });
+      expect((await world.gh(argv, '/w')).json()).toEqual({ refused: expect.stringContaining('use --jq instead') });
+      expect(world.calls).toHaveLength(0);
+    });
+  }
+});
+
 describe('bounds', () => {
   test('at most 4 runs at once for one caller; the 5th is refused until one finishes', async () => {
     const release: (() => void)[] = [];
     const runner = new GhRunner({
+      help: async () => OK,
       accounts: {
         list: async () =>
           [

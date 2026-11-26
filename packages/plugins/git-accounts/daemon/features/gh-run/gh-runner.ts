@@ -25,8 +25,10 @@ import {
   type GhRunRequest,
   type GitAccount,
   type GitAccountsApi,
+  type GitRunResult,
 } from '../../../contract/index.ts';
 import { accountForFolder } from '../../lib/account-for-folder.ts';
+import { ghHelpArgs, splitGhFormat } from '../../lib/gh-format.ts';
 import { fillPlaceholders, isFollowing, judgeGh, namesRepository, withRepository } from './gh-policy.ts';
 
 const PLAIN_RUN_MS = 120_000;
@@ -51,6 +53,7 @@ export interface GhCaller {
 
 export interface GhRunnerDeps {
   readonly accounts: Pick<GitAccountsApi, 'list' | 'run'>;
+  readonly help: (args: readonly string[]) => Promise<GitRunResult>;
   /** The registered projects; empty when Projects is not there. */
   readonly projects: () => Promise<readonly ProjectInfo[]>;
   /** A ferret's own work folder (real path, as Ferrets resolves it); `undefined` when it cannot be placed. */
@@ -69,7 +72,30 @@ export class GhRunner {
   constructor(private readonly deps: GhRunnerDeps) {}
 
   async run(caller: GhCaller, request: GhRunRequest): Promise<GhRunAnswer> {
-    const verdict = judgeGh(request.argv);
+    const help = ghHelpArgs(request.argv);
+    let format: ReturnType<typeof splitGhFormat>;
+    try {
+      format = splitGhFormat(help ?? request.argv);
+    } catch (error) {
+      if (!(error instanceof ApiError)) throw error;
+      await this.#record(caller, 'refused', { command: 'unknown' });
+      return { refused: error.message.slice(0, MAX_REFUSAL_LENGTH) };
+    }
+    if (help !== undefined) {
+      try {
+        const result = await this.deps.help(help);
+        await this.#record(caller, result.exitCode === 0 ? 'succeeded' : 'failed', {
+          command: 'help',
+          ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
+        });
+        return result;
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.code !== GIT_ACCOUNT_CODES.invalidRequest) throw error;
+        await this.#record(caller, 'refused', { command: 'help' });
+        return { refused: error.message.slice(0, MAX_REFUSAL_LENGTH) };
+      }
+    }
+    const verdict = judgeGh(format.argv);
     if (verdict.kind === 'refuse') {
       await this.#record(caller, 'refused', { command: verdict.command });
       return { refused: verdict.sentence };
@@ -130,7 +156,7 @@ export class GhRunner {
     try {
       const result = await this.deps.accounts.run(account.id, {
         program: 'gh',
-        args: argv,
+        args: format.filter === undefined ? argv : [...argv, '--jq', format.filter],
         timeoutMs: isFollowing(argv) ? FOLLOW_RUN_MS : PLAIN_RUN_MS,
       });
       await this.#record(caller, result.exitCode === 0 ? 'succeeded' : 'failed', {

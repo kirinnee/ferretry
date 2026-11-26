@@ -2,7 +2,13 @@
  * B9 resolves outside the state home, then binds gh to a canonical system installation and file identity.
  * Credential-bearing execution rechecks that binding and uses a fixed minimal child PATH.
  */
-import { ApiError, isPackageProgramPath, PACKAGE_PROGRAM_PREFIXES, type PathsPort } from '@ferretry/kernel/contract';
+import {
+  ApiError,
+  isPackageProgramPath,
+  PACKAGE_PROGRAM_PREFIXES,
+  type BoundProgram,
+  type PathsPort,
+} from '@ferretry/kernel/contract';
 import { dirname } from 'node:path';
 import { userInfo } from 'node:os';
 import { GIT_ACCOUNT_CODES } from '../../contract/index.ts';
@@ -10,11 +16,11 @@ import type { ProgramLocatorPorts, TrustedLaunch } from './program-locator.ts';
 
 export type GhLocatorPorts = ProgramLocatorPorts & Pick<PathsPort, 'bindProgram' | 'home'>;
 /** What a `gh` that gets a token is started with: the program, and the `PATH` its own children (`git`, a pager) search. */
-export type GhLaunch = TrustedLaunch & { verify(): Promise<boolean> };
+export type GhLaunch = TrustedLaunch & { verify(): Promise<boolean>; formatter?(): Promise<BoundProgram> };
 
 /** The `gh` to run and the `PATH` to run it with, or a refusal (a 403 `invalid_request` `ApiError`) saying why there is none. */
 export function ghLocator(ports: GhLocatorPorts): () => Promise<GhLaunch> {
-  const locate = async (name: 'gh' | 'git') => {
+  const locate = async (name: 'gh' | 'git' | 'jq' | 'gojq') => {
     try {
       // Fixed package/profile roots only. PATH must never select the set of trusted Nix-store packages.
       const profiles = [
@@ -61,6 +67,24 @@ export function ghLocator(ports: GhLocatorPorts): () => Promise<GhLaunch> {
     const git = await locate('git');
     // Bound git must win over any git beside gh. Never inherit pane/profile/PATH entries.
     const path = [...new Set([dirname(git.program), dirname(pinned.program), '/usr/bin', '/bin'])].join(':');
-    return { program: pinned.program, path, verify: async () => (await pinned.verify()) && (await git.verify()) };
+    return {
+      program: pinned.program,
+      path,
+      verify: async () => (await pinned.verify()) && (await git.verify()),
+      formatter: async () => {
+        for (const name of ['jq', 'gojq'] as const) {
+          try {
+            return await locate(name);
+          } catch {
+            /* Try the other fixed-prefix formatter. */
+          }
+        }
+        throw new ApiError(
+          403,
+          'GitHub formatter unavailable. Install jq or gojq in a trusted package installation.',
+          GIT_ACCOUNT_CODES.invalidRequest,
+        );
+      },
+    };
   };
 }

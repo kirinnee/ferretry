@@ -22,6 +22,7 @@ import { checkGhArgs, scrubCut, scrubToken } from './gh-guard.ts';
 import type { GithubHttp } from './github-http.ts';
 import type { AccountBook } from './accounts.ts';
 import type { GhLaunch } from './gh-locator.ts';
+import { ghHelpArgs, splitGhFormat } from './gh-format.ts';
 
 const MAX_BODY_BYTES = 256 * 1024;
 
@@ -83,12 +84,33 @@ export class GitAccountsService {
    * was cut ends with `[output cut]` and loses any tail that could be the start of a token.
    */
   async run(id: GitAccountId, spec: GitRunSpec): Promise<GitRunResult> {
+    return this.#run(id, spec);
+  }
+
+  /** Local documentation needs neither an account nor a token. */
+  async help(args: readonly string[]): Promise<GitRunResult> {
+    if (ghHelpArgs(args) === undefined)
+      throw new ApiError(403, 'Only gh help or --version runs without an account.', GIT_ACCOUNT_CODES.invalidRequest);
+    return this.#run(undefined, { program: 'gh', args });
+  }
+
+  async #run(id: GitAccountId | undefined, spec: GitRunSpec): Promise<GitRunResult> {
     if (spec.program !== 'gh')
       throw new ApiError(403, 'only gh runs with an account', GIT_ACCOUNT_CODES.invalidRequest);
-    checkGhArgs(spec.args);
+    const help = ghHelpArgs(spec.args);
+    const { argv, filter } = splitGhFormat(help ?? spec.args);
+    if (help === undefined) checkGhArgs(argv);
     // Which program runs is settled BEFORE the token is read: a `gh` that cannot be trusted never sees one.
-    const { program, path, verify } = await this.ghProgram();
-    const token = await this.#tokenOf(id);
+    const launch = await this.ghProgram();
+    const { program, path, verify } = launch;
+    const formatter = filter === undefined ? undefined : await launch.formatter?.();
+    if (filter !== undefined && formatter === undefined)
+      throw new ApiError(
+        403,
+        'GitHub formatter unavailable. Install jq or gojq in a trusted package installation.',
+        GIT_ACCOUNT_CODES.invalidRequest,
+      );
+    const token = help !== undefined || id === undefined ? undefined : await this.#tokenOf(id);
     const timeout = milliseconds(Math.min(Math.max(spec.timeoutMs ?? 60_000, 1_000), 300_000));
     const folder = await this.scratch.open();
     try {
@@ -109,7 +131,7 @@ export class GitAccountsService {
       const env: Record<string, string> = {
         // Fixed system folders, independent of the daemon's or pane's search path.
         PATH: path,
-        GH_TOKEN: token,
+        ...(token === undefined ? {} : { GH_TOKEN: token }),
         GH_HOST: 'github.com',
         GH_CONFIG_DIR: `${home}/config`,
         HOME: home,
@@ -145,7 +167,7 @@ export class GitAccountsService {
           'GitHub client unavailable: gh or git changed since selection.',
           GIT_ACCOUNT_CODES.invalidRequest,
         );
-      const result = await this.spawn.runBytes(program, [...spec.args], {
+      const result = await this.spawn.runBytes(program, [...argv], {
         env,
         sealed: true,
         timeout,
@@ -153,7 +175,29 @@ export class GitAccountsService {
         maxStdoutBytes: MAX_GH_OUTPUT_BYTES,
         maxStderrBytes: MAX_GH_OUTPUT_BYTES,
       });
-      const scrub = (text: string, cut: boolean) => (cut ? scrubCut(text, token) : scrubToken(text, token));
+      const scrub = (text: string, cut: boolean) => (cut ? scrubCut(text, token ?? '') : scrubToken(text, token ?? ''));
+      if (result.exitCode === 0 && !result.stdoutTruncated && formatter !== undefined && filter !== undefined) {
+        if (!(await formatter.verify()))
+          throw new ApiError(
+            403,
+            'GitHub formatter unavailable: formatter changed since selection.',
+            GIT_ACCOUNT_CODES.invalidRequest,
+          );
+        const formatted = await this.spawn.runBytes(formatter.program, ['-r', '--', filter], {
+          env: {},
+          inheritEnv: false,
+          stdin: scrub(new TextDecoder().decode(result.stdout), false),
+          cwd: folder.path,
+          timeout,
+          maxStdoutBytes: MAX_GH_OUTPUT_BYTES,
+          maxStderrBytes: MAX_GH_OUTPUT_BYTES,
+        });
+        return {
+          exitCode: formatted.exitCode < 0 ? null : formatted.exitCode,
+          stdout: scrub(new TextDecoder().decode(formatted.stdout), formatted.stdoutTruncated),
+          stderr: scrub(result.stderr, result.stderrTruncated) + scrub(formatted.stderr, formatted.stderrTruncated),
+        };
+      }
       return {
         // `runBytes` answers -1 for a child it had to kill (or one a signal ended): no exit code of its own.
         exitCode: result.exitCode < 0 ? null : result.exitCode,

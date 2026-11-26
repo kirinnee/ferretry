@@ -157,6 +157,7 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
       keys.gpg = gpgService;
       const gh = new GhRunner({
         accounts: service,
+        help: args => service.help(args),
         projects: async () => (await projects.current()?.list()) ?? [],
         workFolder: async ferret => (await ferrets.current()?.workFolder(ferret as never))?.folder,
         audit: async draft => await needs.gate.audit(draft),

@@ -2083,9 +2083,18 @@ secret ("Per-session scoping" above), and a GitHub token is too strong for that.
 close reopen`), `run` (`list view watch cancel rerun`), `workflow` (`list view`), `repo view`, `release`
     (`list view`) and `search` (`repos issues prs code commits`) take no flag that names a file or directory
     (`--body-file`, `-F`, `--notes-file`, `--input`) and no `--hostname`;
-  - **`--jq`, `-q`, `-t` and `--template` (`-T`) are refused on every command, in every spelling** (`--jq=x`, `-qx`):
-    gh's jq is gojq with the environment loader and Go templates are run by gh itself, so either can print the child's
-    environment (`env.GH_TOKEN`, `$ENV`) past the scrub. A caller post-processes the scrubbed `--json` output itself;
+  - **`--jq`/`-q` runs only in a separate tokenless formatter**, never in the child holding the token. The daemon strips
+    the filter, runs the bound `gh` with `--json` fields (the `api` command already returns JSON), then sends only its
+    scrubbed JSON stdout over stdin to an identity-bound `jq` or `gojq`. That child has an **empty environment**:
+    no sealed allowlist, `HOME`, `PATH`, token or daemon/tool variables; `$ENV` and `env` are empty. Its only arguments
+    are `-r`, `--`, and the filter: no caller file arguments or formatter options. Discovery uses the same fixed
+    package/profile prefixes as gh, never pane PATH, and rechecks identity before exec. Missing trusted formatters
+    refuse before gh starts, naming **Install jq or gojq**. A failed gh keeps its exit code and stderr without starting
+    a formatter; a formatter's exit code and stderr pass through, with gh's stderr retained. Both captures stay capped
+    and scrubbed; truncated gh stdout is returned with the existing cut note without formatting incomplete JSON.
+    **Templates (`--template`/`-T`) say “use --jq instead”**: gh's
+    [formatting interface](https://cli.github.com/manual/gh_help_formatting) formats command results and exposes no
+    standalone stdin template formatter. Ambiguous `-t` still needs the long flag;
   - **a repository is named `OWNER/REPO` or `github.com/OWNER/REPO` and nothing else** (`-R`/`--repo` and any repository
     argument of `repo`; characters `A-Za-z0-9._-`): no `@`, no `:`, no SSH form, no other host. `github.localhost` and
     `*.ghe.com` are refused anywhere in the argv, because gh sends `GH_TOKEN` to them (over plain http for the first); - `--` anywhere, any short-flag cluster (`-dF`, `-iFquery=@f`: a short flag is one letter, on its own), and any argument
@@ -2332,19 +2341,21 @@ to do instead:
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `auth` (anything but `auth status`), `auth status -t/--show-token`                                                                                                        | "Ferretry's gh never shows its token"                                |
 | `auth status`                                                                                                                                                             | answered by the daemon from the account record; no run               |
+| `--version`, `help`, `--help` anywhere                                                                                                                                    | bound gh runs without a token or linked account, with empty config   |
 | `config` (any)                                                                                                                                                            | nothing to configure                                                 |
 | `extension`/`ext`, `alias`, `codespace`/`cs`, an unknown top-level name                                                                                                   | not available                                                        |
 | `pr checkout`/`co`, `repo clone`/`sync`, `repo fork --clone`, `repo create --source/--push`, `gist clone`, `issue develop --checkout`, `run download`, `release download` | "use git: `git fetch origin pull/12/head:pr-12 && git switch pr-12`" |
 | `--hostname` (any)                                                                                                                                                        | github.com only                                                      |
 | `--body-file`, `-F`, `--notes-file`, `--input`                                                                                                                            | pass the text itself                                                 |
-| `--jq`/`-q`, `--template`/`-T` (they can read the environment)                                                                                                            | filter `--json` yourself                                             |
+| `--jq`/`-q` (including `--jq=…`, `-q…`)                                                                                                                                   | separate bound jq/gojq; empty environment; JSON stdin only           |
+| `--template`/`-T`                                                                                                                                                         | use --jq instead                                                     |
 | `pr create` without `--head`, or with `--fill`                                                                                                                            | give `--head`, `--title`, `--body`                                   |
 
 **The seam stays the authority.** `GitAccountsApi.run` (B1) has its own, narrower allow-list, reviewed on its own, and
 every call that passes here must pass there too, so **the effective surface is the intersection**. Its sentence is passed
 on when it refuses. B9 widens nothing under it; widening it needs a lead decision and a security review of its own.
 
-Bounds: 120 s per run (a followed run, `run watch` or `pr checks --watch`, the seam's 300 s ceiling); at most 4 runs at
+Bounds: 120 s per stage (gh and any tokenless formatter; a followed run, `run watch` or `pr checks --watch`, gets the seam's 300 s ceiling); at most 4 runs at
 once per ferret; **4 MiB per stream, enforced where the output is read**: the seam runs `gh` through the kernel's
 capped reader (`spawn.runBytes`, 4 MiB each for stdout and stderr), so a huge `run view --log`, `pr diff` or
 `api --paginate` never sits whole in the daemon's memory. A stream that was cut ends with `[output cut]`, and the scrub
@@ -2382,7 +2393,7 @@ host's own `gh` sign-in being used by ferrets; a repository's own git config or 
 **GAP — what the plan wanted and the seam still refuses.** No stdin and no file slots (`--body-file`, `-F`, `--input`,
 `release upload`, `gist create` from files); no `repo create|edit|fork`, `secret`, `variable`, `label`, `cache`, `ruleset`,
 `gist`, `project`, `org`, `browse`, `status`, `pr ready|status`, `workflow run|enable|disable`, `release create|edit|delete`,
-`issue delete|lock|pin|transfer|develop`, `--jq`: they pass the policy above and are then refused by the seam with its
+`issue delete|lock|pin|transfer|develop`: they pass the policy above and are then refused by the seam with its
 sentence. Followed runs are capped at the seam's 5 minutes, not 15. The repository comes from the last scan, so a folder
 whose remote changed since reads the old one until Projects rescans.
 
@@ -2406,7 +2417,9 @@ the launch refuses too. A successful repair supplies:
   folder or `/tmp` is refused unless it is the running daemon's own install. A preview pane need not find that client on its own PATH. `fy gh` sends the argument list and the folder to
   `POST /v1/git-accounts/gh/run` on the ferret's own credential and prints the masked answer with `gh`'s exit code. It
   has **no policy of its own**: the daemon (B9, then the seam under it) decides, so nothing here can widen what runs.
-  Outside a project linked to an account the shim answers with B9's sentence and starts nothing.
+  Outside a project linked to an account the shim answers with B9's sentence and starts nothing, except local help and
+  version requests. Those invoke only the bound gh, without a token, in the private empty config; help flags are
+  rebuilt as `gh help` with plain topic words so no unrelated option or command runs.
 - **An empty `GH_CONFIG_DIR`** (`…/agent-homes/gh/pane-gh-config`: no file in it, mode `0500`, emptied again at every launch), so a
   _real_ `gh` reached by accident (a shell rc that rewrites `PATH`) finds no sign-in and has nowhere to save one, instead
   of reading the host's `~/.config/gh`.

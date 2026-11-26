@@ -24,6 +24,8 @@ export interface SpawnOptions {
    * is NEVER added, whatever the program is called: a name is no evidence that a program is the trusted tool.
    */
   readonly sealed?: true;
+  /** `false` inherits no names at all, including sealed/tool overlays; only explicit `env` is supplied. */
+  readonly inheritEnv?: false;
   /** Runs inside this ferret's limits. */
   readonly forFerret?: FerretId;
   /**
