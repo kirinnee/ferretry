@@ -220,6 +220,12 @@ describe('fy config status / path / schema (V-0196, V-0193, V-0194)', () => {
     should(await runFy(['config', 'schema', 'warden'], stale.world)).equal(1);
     should(stale.io.stdout()).equal('');
     should(stale.transport.sent).have.length(1);
+    const broken = world(
+      { 'GET /v1/config/status': STATUS() },
+      { [MANIFEST]: 'not json', [`${DIRECTORY}/.schema/warden.json`]: '{"title":"unlisted"}\n' },
+    );
+    should(await runFy(['config', 'schema', 'warden'], broken.world)).equal(1);
+    should(broken.io.stdout()).equal('');
     const linkPath = `${DIRECTORY}/.schema/warden.json`;
     const linked = world(
       { 'GET /v1/config/status': STATUS() },

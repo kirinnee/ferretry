@@ -115,6 +115,18 @@ const readFile = async (ctx: ShellContext, path: string): Promise<z.infer<typeof
  * `<home>/config` with no daemon asked. A pinned `FY_URL` names a daemon that may keep another home, and `check` and
  * `write` go to it, so the directory is the one it reports.
  */
+/** The manifest's text as JSON: a list of schema file names; anything else lists nothing. */
+const ManifestSchema = z
+  .string()
+  .transform(text => {
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return undefined;
+    }
+  })
+  .pipe(z.array(z.string()));
+
 const configDirectory = async (ctx: ShellContext): Promise<string> =>
   daemonUrlPinned(ctx.world.environment) ? (await readStatus(ctx)).directory : `${ctx.world.home}/config`;
 
@@ -123,21 +135,9 @@ const configDirectory = async (ctx: ShellContext): Promise<string> =>
  * as a regular file (never through a link). `undefined` when it is not there, so the caller asks the daemon.
  */
 const publishedSchema = async (ctx: ShellContext, directory: string, file: string): Promise<string | undefined> => {
-  const read = ctx.world.readRegularText;
-  if (read === undefined) return undefined;
-  const listed = await read(`${directory}/${SCHEMA_FOLDER}/${SCHEMA_MANIFEST}`);
-  const names = listed === undefined ? undefined : z.array(z.string()).safeParse(parseJson(listed));
-  return names?.success === true && names.data.includes(file)
-    ? await read(`${directory}/${SCHEMA_FOLDER}/${file}`)
-    : undefined;
-};
-
-const parseJson = (text: string): unknown => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
+  const read = async (name: string) => await ctx.world.readRegularText?.(`${directory}/${SCHEMA_FOLDER}/${name}`);
+  const names = ManifestSchema.safeParse(await read(SCHEMA_MANIFEST));
+  return names.success && names.data.includes(file) ? await read(file) : undefined;
 };
 
 const binary = (ctx: ShellContext): string => ctx.world.identity.binary;
