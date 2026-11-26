@@ -14,7 +14,11 @@ const NOW = Date.parse('2026-11-08T12:00:00Z');
 it('a configured default or renamed runtime refuses incompatible login metadata before any status read', async () => {
   let reads = 0;
   const runtimes = createRuntimesApi({
-    runtimes: () => new Map([['work', { login: 'subscription', harness: 'opencode', profile: 'plain' }]]),
+    runtimes: () =>
+      new Map([
+        ['work', { login: 'subscription', harness: 'opencode', profile: 'plain' }],
+        ['inferred', { login: 'subscription', profile: 'plain' }],
+      ]),
     profiles: () => new Map(),
     defaultSetting: () => 'work',
     harnesses: () => ['opencode'],
@@ -35,6 +39,11 @@ it('a configured default or renamed runtime refuses incompatible login metadata 
       refusal: 'not_signed_in',
       sentence: 'subscription refused',
     });
+  should(await runtimes.resolve('inferred' as never, 'opencode')).deepEqual({
+    ok: false,
+    refusal: 'not_signed_in',
+    sentence: 'subscription refused',
+  });
   should(reads).equal(0);
 });
 

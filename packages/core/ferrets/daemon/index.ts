@@ -499,14 +499,14 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
     // Which harness and login a runtime starts with: Runtimes alone answers. With no Runtimes a start that names a
     // runtime is refused here, never launched signed out.
-    runtimeStart: async runtime => {
+    runtimeStart: async (runtime, harness) => {
       const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
       return found === 'unavailable'
         ? {
             ok: false,
             sentence: `runtime ${runtime} cannot be started: the Runtimes plugin is not running, so its login cannot be found`,
           }
-        : await found.resolve(runtime);
+        : await found.resolve(runtime, harness);
     },
     // The machine's default runtime, for a start that chose nothing: Runtimes alone answers; with no provider there is none.
     defaultRuntime: async () => {

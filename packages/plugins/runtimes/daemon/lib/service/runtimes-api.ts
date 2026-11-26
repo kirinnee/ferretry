@@ -209,7 +209,7 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
     listFor: async logins => await summariesOf(new Map(logins.map(login => [login.id, login]))),
     get: async id => (await summaries()).find(summary => summary.id === id),
     default: defaultRuntime,
-    resolve: async (id): Promise<ResolveResult> => {
+    resolve: async (id, harness): Promise<ResolveResult> => {
       const named = id ?? (await defaultRuntime());
       if (named === undefined) {
         return {
@@ -222,8 +222,9 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
       const configured =
         deps.runtimes().get(wanted) ??
         deps.runtimes().get((await deps.currentName?.(wanted).catch(() => undefined)) ?? '');
-      if (configured?.harness !== undefined) {
-        const refusal = await deps.logins.launchRefusal?.(configured.login, configured.harness);
+      const destination = harness ?? configured?.harness;
+      if (configured !== undefined && destination !== undefined) {
+        const refusal = await deps.logins.launchRefusal?.(configured.login, destination);
         if (refusal !== undefined) return { ok: false, refusal: 'not_signed_in', sentence: refusal };
       }
       const logins = await loginsById(deps.logins);

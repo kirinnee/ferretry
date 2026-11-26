@@ -213,7 +213,7 @@ export interface FerretsPorts {
    * Which harness and login a runtime starts with (Runtimes' `runtime.start`). Unbound only in a unit fixture; the daemon
    * always binds it, and with no provider it answers a refusal, so a runtime-named start never launches signed out.
    */
-  runtimeStart?(runtime: string): Promise<RuntimeStartResolution>;
+  runtimeStart?(runtime: string, harness?: string): Promise<RuntimeStartResolution>;
   /**
    * The machine's default runtime, or `undefined` when it has none (Runtimes' `runtime.start`, `defaultRuntime`). A start
    * that names no runtime, login or harness starts on it. Unbound in a unit fixture: such a start is then as it was.
@@ -2787,7 +2787,7 @@ export class FerretsService implements FerretsApi {
     }
     if (this.ports.runtimeStart === undefined) return ok(undefined);
     const answer = await this.withinDeadline(
-      this.ports.runtimeStart(runtime).catch(
+      this.ports.runtimeStart(runtime, asked.harness).catch(
         (): RuntimeStartResolution => ({
           ok: false,
           sentence: `runtime ${runtime} could not be checked, so the ferret was not started`,

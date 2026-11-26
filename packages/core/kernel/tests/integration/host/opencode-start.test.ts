@@ -14,7 +14,7 @@ const real = (id: string) => {
   return found;
 };
 
-for (const through of ['login', 'runtime'] as const) {
+for (const through of ['login', 'runtime', 'inferred-runtime'] as const) {
   test(`real Logins + Runtimes refuse a subscription through ${through} before status/store reads and reuse the callsign`, async () => {
     let reads = 0;
     let spawns = 0;
@@ -117,7 +117,11 @@ for (const through of ['login', 'runtime'] as const) {
           },
         },
         runtimes: {
-          subscription: { harness: 'opencode', login: 'subscription', profile: 'plain' },
+          subscription: {
+            ...(through === 'inferred-runtime' ? {} : { harness: 'opencode' }),
+            login: 'subscription',
+            profile: 'plain',
+          },
           key: { harness: 'opencode', login: 'key', profile: 'plain' },
           endpoint: { harness: 'opencode', login: 'endpoint', profile: 'plain' },
         },
@@ -128,7 +132,11 @@ for (const through of ['login', 'runtime'] as const) {
         return { exitCode: 0, signal: null, stdout: 'opencode v2.4.2\n', stderr: '' };
       },
     });
-    const start = (account: string, id: string, selector: 'login' | 'runtime' = through) =>
+    const start = (
+      account: string,
+      id: string,
+      selector: 'login' | 'runtime' = through === 'login' ? 'login' : 'runtime',
+    ) =>
       host.request('POST', '/v1/ferrets', {
         headers: { 'x-fy-request-id': id },
         body: {

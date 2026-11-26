@@ -66,10 +66,10 @@ export function runtimeStartAnswer(deps: RuntimeStartAnswerDeps): RuntimeStartSo
     const reason = whyNot(found);
     return reason === undefined ? { ok: true } : { ok: false, sentence: reason };
   };
-  const resolve = async (runtime: string): Promise<RuntimeStartResolution> => {
+  const resolve = async (runtime: string, harness?: string): Promise<RuntimeStartResolution> => {
     const id = RuntimeIdSchema.safeParse(runtime);
     if (!id.success) return { ok: false, sentence: `${JSON.stringify(runtime)} is not a runtime name; ${REMEDY}` };
-    const resolved = await deps.resolve(id.data);
+    const resolved = await deps.resolve(id.data, harness);
     if (!resolved.ok)
       return { ok: false, sentence: `runtime ${id.data} was not started: ${resolved.sentence}; ${REMEDY}` };
     const spendable = await login(resolved.runtime.login);
