@@ -18,3 +18,12 @@ export interface ModelCatalogView {
   readonly claude?: readonly ModelCatalogEntryView[] | undefined;
   readonly codex?: readonly ModelCatalogEntryView[] | undefined;
 }
+
+/**
+ * One harness's models in a catalog, by the harness's catalog half word (`harnessWords(key).catalogHalf`: `claude`,
+ * `codex`, and a third harness's own). A half the catalog does not carry is `undefined`, never another harness's list.
+ */
+export function halfOf(catalog: ModelCatalogView, half: string): readonly ModelCatalogEntryView[] | undefined {
+  const entries: unknown = Object.hasOwn(catalog, half) ? Reflect.get(catalog, half) : undefined;
+  return Array.isArray(entries) ? (entries as readonly ModelCatalogEntryView[]) : undefined;
+}

@@ -73,7 +73,7 @@ const refusal = (promise: Promise<unknown>) =>
   );
 
 describe('what the installer lists of Runtimes', () => {
-  test('names each runtime by its id and narrows the harness to codex or claude', async () => {
+  test('names each runtime by its id and carries its harness as the plugin key, a third included', async () => {
     const w = world({
       runtimeList: [
         { id: 'a', harness: 'codex', profile: 'p1' },
@@ -83,7 +83,7 @@ describe('what the installer lists of Runtimes', () => {
     expect(await w.runtime.runtimes()).toEqual({
       runtimes: [
         { id: 'a', name: 'a', profile: 'p1', harness: 'codex' },
-        { id: 'b', name: 'b', profile: 'p2', harness: 'claude' },
+        { id: 'b', name: 'b', profile: 'p2', harness: 'anything-else' },
       ],
     });
     expect(await w.runtime.profiles()).toEqual({ profiles: [{ name: 'default' }] });

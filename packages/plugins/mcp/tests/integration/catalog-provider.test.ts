@@ -288,3 +288,27 @@ describe('the .mcp.json of a project, when the root cannot give a straight answe
     expect(await refusal(files.replace(FILE, '{}', etag))).toBe(`${FILE} could not be written (disk full).`);
   });
 });
+
+describe('the runtimes a catalog MCP server can be installed into', () => {
+  test('names every runtime by its harness plugin KEY, so a third plugin registered under `claude` is never Claude Code', async () => {
+    const runtime = mcpCatalogRuntime({
+      runtimes: () =>
+        ({
+          list: async () => [
+            { id: 'a', harness: 'claude-code', profile: 'work' },
+            { id: 'b', harness: 'codex', profile: 'work' },
+            { id: 'c', harness: 'claude', profile: 'work' },
+            { id: 'd', harness: 'fake-third', profile: 'work' },
+          ],
+        }) as never,
+      items: () => new Map(),
+    } as never);
+    const listed = await runtime.runtimes();
+    expect(listed.runtimes.map(each => `${each.id}:${each.harness}`)).toEqual([
+      'a:claude-code',
+      'b:codex',
+      'c:claude',
+      'd:fake-third',
+    ]);
+  });
+});
