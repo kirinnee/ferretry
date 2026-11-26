@@ -42,6 +42,13 @@ class FakeCarrier implements TunnelCarrierHandle {
     this.log.push(`start ${this.entry.enabled ? 'on' : 'off'}${this.explicit ? '' : ' (implied)'}`);
   }
 
+  /** What `located` does: nothing to wait for unless the test sets `locating`, which it releases by settling it. */
+  locating: Promise<void> | undefined;
+
+  async located(): Promise<void> {
+    await this.locating;
+  }
+
   async idle(): Promise<void> {
     await this.#idle;
     this.log.push(`idle ${this.entry.enabled ? 'on' : 'off'}`);
@@ -67,12 +74,22 @@ interface World {
   holdWrite: readonly string[] | undefined;
   /** When true, every carrier settles as soon as it is made. */
   autoSettle: boolean;
+  /** Runs on each carrier as it is made. */
+  onMade: ((carrier: FakeCarrier) => void) | undefined;
 }
 
 let world: World;
 
 beforeEach(() => {
-  world = { log: [], carriers: [], writes: [], failWrite: undefined, holdWrite: undefined, autoSettle: true };
+  world = {
+    log: [],
+    carriers: [],
+    writes: [],
+    failWrite: undefined,
+    holdWrite: undefined,
+    autoSettle: true,
+    onMade: undefined,
+  };
 });
 
 function subject(entry: DaemonTunnelCarrierEntry = OFF, explicit = false): TunnelCarrierSwitch {
@@ -104,6 +121,7 @@ const applied = async (tunnel: TunnelCarrierSwitch, enabled: boolean) => {
 const factory = (entry: DaemonTunnelCarrierEntry, explicit: boolean): FakeCarrier => {
   const carrier = new FakeCarrier(entry, explicit, world.log);
   world.carriers.push(carrier);
+  world.onMade?.(carrier);
   if (world.autoSettle) carrier.settle();
   return carrier;
 };
@@ -146,6 +164,26 @@ describe('the tunnel switch', () => {
       tunnelUrl: null,
       sentence: 'Tunnel: on — asking the hosted service for a tunnel',
     });
+  });
+
+  it('should answer an ON with cloudflared missing in the reply itself, not as "provisioning"', async () => {
+    // Arrange — the carrier decides that cloudflared is absent only after the ON has started it.
+    const tunnel = subject(OFF, false);
+    tunnel.start(factory);
+    world.autoSettle = false;
+    const remedy = 'cloudflared is not on this daemon’s PATH';
+    world.onMade = carrier => {
+      carrier.locating = Promise.resolve().then(() => {
+        carrier.status = { state: 'unavailable', tunnelUrl: undefined, reason: remedy };
+      });
+    };
+
+    // Act
+    const view = await applied(tunnel, true);
+
+    // Assert
+    should(view.state).equal('unavailable');
+    should(view.sentence).containEql(remedy);
   });
 
   it('should switch off: write, stop the running carrier and answer only once the release has finished', async () => {

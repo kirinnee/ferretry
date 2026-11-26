@@ -15,8 +15,8 @@ export interface ApiRequest {
   readonly path: string;
   readonly query: QueryParameters;
   readonly headers: ApiHeaders;
-  /** Told the matched route template, for metrics. */
-  readonly onRoute?: (template: string) => void;
+  /** Told the matched route's declared `METHOD template`, for metrics; never called for a call that matched none. */
+  readonly onRoute?: (route: string) => void;
   readonly clientAddress?: string;
   readonly arrival: Arrival;
   /** Present only on a sealed session whose mode verified a holder; stamped by the kernel. */

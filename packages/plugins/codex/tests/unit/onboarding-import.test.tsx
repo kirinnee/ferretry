@@ -379,6 +379,26 @@ describe('import-run', () => {
     expect(harness.count('done')).toBe(1);
   });
 
+  test('an import that stopped part-way lists what landed and what did not, beside the refusal', async () => {
+    const harness = stepHarness({ segment: { importMode: 'everything' } });
+    const { container } = await mount(
+      'import-run',
+      harness,
+      machine(FULL, {
+        [APPLY]: () =>
+          Object.assign(new Error('the disk is full. Part of this change was applied.'), {
+            status: 409,
+            code: 'fleet_change_failed',
+            body: { landed: ['login codex-default'], notLanded: ['voice.yaml'] },
+          }),
+      }),
+    );
+    await press(container, '[data-import-run]');
+    const note = container.querySelector('[data-import-partial]');
+    expect(note?.querySelector('[data-import-landed]')?.textContent).toContain('login codex-default');
+    expect(note?.querySelector('[data-import-not-landed]')?.textContent).toContain('voice.yaml');
+  });
+
   test('nothing shown after a reload: nothing is left out, the page says what was not looked at, and it holds nobody', async () => {
     const harness = stepHarness({ segment: CHOOSE });
     const { container, calls } = await mount('import-run', harness, machine(FULL));

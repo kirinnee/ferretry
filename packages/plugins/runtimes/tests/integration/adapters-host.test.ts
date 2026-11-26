@@ -19,7 +19,14 @@ import { readFleetManifest } from '../../daemon/adapters/manifest-file.ts';
 import { type ConfigFilesPort, refusedHostFiles } from '../../daemon/adapters/ports.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../../daemon/adapters/runtime-ids-file.ts';
 import { RuntimeSessionRecords } from '../../daemon/adapters/runtime-session-records.ts';
-import { MAX_FOLDER_FILES, readTextFolder, skillItemsIn } from '../../daemon/adapters/setup-files.ts';
+import {
+  MAX_FOLDER_DEPTH,
+  MAX_FOLDER_ENTRIES,
+  MAX_FOLDER_FILES,
+  MAX_FOLDER_TOTAL_BYTES,
+  readTextFolder,
+  skillItemsIn,
+} from '../../daemon/adapters/setup-files.ts';
 import { ABSENT_DOCUMENT_REVISION } from '../../daemon/lib/provisioning.ts';
 import { nodeHostFiles } from './support/node-host.ts';
 
@@ -280,6 +287,106 @@ describe('reading folders as text', () => {
     should(reading.skipped).deepEqual([
       { path: `f${String(MAX_FOLDER_FILES).padStart(4, '0')}`, reason: 'the folder has too many files' },
     ]);
+  });
+
+  it('should take no more than the total byte limit and name the rest', async () => {
+    // Arrange — each file is under the per-file cap; together they are over the total.
+    const root = await temp();
+    const each = 256 * 1024;
+    const count = MAX_FOLDER_TOTAL_BYTES / each + 2;
+    for (let index = 0; index < count; index += 1)
+      await put(path.join(root, `f${String(index).padStart(2, '0')}`), 'x'.repeat(each));
+
+    // Act
+    const reading = await readTextFolder(nodeHostFiles, root);
+
+    // Assert
+    should(reading.files.length).equal(MAX_FOLDER_TOTAL_BYTES / each);
+    should(reading.skipped.map(item => item.reason)).deepEqual([
+      'the folder is larger than an import takes',
+      'the folder is larger than an import takes',
+    ]);
+  });
+
+  it('should enter no folder nested deeper than the depth limit and name it', async () => {
+    // Arrange
+    const root = await temp();
+    await put(path.join(root, 'top.md'), 'top');
+    const chain = Array.from({ length: MAX_FOLDER_DEPTH + 20 }, (_, index) => `d${String(index)}`);
+    await put(path.join(root, ...chain, 'deep.md'), 'deep');
+
+    // Act
+    const reading = await readTextFolder(nodeHostFiles, root);
+
+    // Assert
+    should(reading.files.map(file => file.path)).deepEqual(['top.md']);
+    should(reading.skipped).deepEqual([
+      { path: chain.slice(0, MAX_FOLDER_DEPTH + 1).join('/'), reason: 'it is nested too deep' },
+    ]);
+  });
+
+  it('should look at no more names than the entry limit, say so once, and stop', async () => {
+    // Arrange — a folder wider than the limit, over a host that counts every look.
+    let looks = 0;
+    const names = Array.from({ length: MAX_FOLDER_ENTRIES + 50 }, (_, index) => `f${String(index).padStart(5, '0')}`);
+    const host = {
+      list: async () => names,
+      lstat: async () => {
+        looks += 1;
+        return { kind: 'file' as const, size: 1 };
+      },
+      readBytes: async () => new Uint8Array([120]),
+    };
+
+    // Act
+    const reading = await readTextFolder(host, '/anywhere');
+
+    // Assert
+    should(looks).equal(MAX_FOLDER_ENTRIES);
+    should(reading.skipped.filter(item => item.reason === 'the folder has too many entries to read')).have.length(1);
+  });
+
+  it('should read at most one byte past the file cap, and skip a file that grew after it was looked at', async () => {
+    // Arrange — the listing said 10 bytes; the file is a gigabyte by the time it is read. A real read stops at its limit.
+    const limits: (number | undefined)[] = [];
+    const host = {
+      list: async () => ['grown.md'],
+      lstat: async () => ({ kind: 'file' as const, size: 10 }),
+      readBytes: async (_path: string, limit?: number) => {
+        limits.push(limit);
+        return new Uint8Array(Math.min(limit ?? 1_000_000_000, 1_000_000_000));
+      },
+    };
+
+    // Act
+    const reading = await readTextFolder(host, '/anywhere');
+
+    // Assert
+    should(limits).deepEqual([256 * 1024 + 1]);
+    should(reading).deepEqual({ files: [], skipped: [{ path: 'grown.md', reason: 'it is too large' }] });
+  });
+
+  it('should charge the bytes it read against the total, not the size the listing gave', async () => {
+    // Arrange — every file lists as 1 byte and reads as the per-file cap, so the total is reached by what was read.
+    const each = 256 * 1024;
+    const names = Array.from(
+      { length: MAX_FOLDER_TOTAL_BYTES / each + 3 },
+      (_, index) => `f${String(index).padStart(2, '0')}`,
+    );
+    const host = {
+      list: async () => names,
+      lstat: async () => ({ kind: 'file' as const, size: 1 }),
+      readBytes: async () => new Uint8Array(each).fill(120),
+    };
+
+    // Act
+    const reading = await readTextFolder(host, '/anywhere');
+
+    // Assert
+    should(reading.files).have.length(MAX_FOLDER_TOTAL_BYTES / each);
+    should(reading.skipped.map(item => item.reason)).deepEqual(
+      Array(3).fill('the folder is larger than an import takes'),
+    );
   });
 
   it('should list a skills store as its item folders, sorted, hidden ones left out', async () => {

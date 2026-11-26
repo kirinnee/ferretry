@@ -2749,6 +2749,7 @@ async function start(world: World): Promise<TestHost> {
       loop: {
         blockedMs: options.loopBlockedMs ?? (() => 0),
         observe: options.loopObserve ?? ((): (() => void) => () => {}),
+        observeWork: (): (() => void) => () => {},
       },
       // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in;
       // `send` places the value through this plugin's own fetch guard and `options.fetch`, as the real host does

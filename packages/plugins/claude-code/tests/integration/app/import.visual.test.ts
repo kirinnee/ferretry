@@ -39,6 +39,7 @@ const PAGES = [
   'run',
   'run-everything',
   'run-lost',
+  'run-partial',
 ] as const;
 
 let browser: Browser;
@@ -83,6 +84,14 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
+/** The scene's page clips at the window (the real shell scrolls inside it), so a shot grows the window to the whole page first. */
+const shoot = async (tab: Page, viewport: (typeof VIEWPORTS)[number], path: string): Promise<void> => {
+  const height = await tab.evaluate(() => document.body.scrollHeight);
+  await tab.setViewportSize({ width: viewport.width, height: Math.max(viewport.height, height + 24) });
+  await tab.waitForTimeout(150);
+  await tab.screenshot({ fullPage: true, path });
+};
+
 const newContext = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 'dark'): Promise<BrowserContext> => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
@@ -109,6 +118,11 @@ const open = async (
   if (fakeClock) await tab.clock.install();
   await tab.goto(`${server?.url.origin ?? ''}/?page=${page}&theme=studio-${mode}${extra}`);
   await tab.waitForSelector('[data-onboarding-step]');
+  // The partial shot is the run page after an import that stopped part-way.
+  if (page === 'run-partial') {
+    await tab.locator('[data-import-run]').click();
+    await tab.waitForSelector('[data-import-partial]');
+  }
   // Let the one-shot demos and the card animation finish: a shot shows the last frame.
   await tab.waitForTimeout(1_600);
   return tab;
@@ -139,8 +153,7 @@ describe('the Claude import pages', () => {
             // The radio is visually hidden (the card is the control), so it paints nothing over the text.
             expect((await card.locator('input').boundingBox())?.width ?? 0).toBeLessThanOrEqual(1);
           }
-          if (shotsDir !== '')
-            await tab.screenshot({ fullPage: true, path: join(shotsDir, `${page}-${viewport.name}-${mode}.png`) });
+          if (shotsDir !== '') await shoot(tab, viewport, join(shotsDir, `${page}-${viewport.name}-${mode}.png`));
           await context.close();
         }, 60_000);
 
@@ -383,4 +396,27 @@ describe('C59 O5: the import page lists every item, and working moves nothing', 
 
 afterAll(async () => {
   if (shotsDir !== '') await Bun.write(join(shotsDir, 'measured.json'), JSON.stringify(measured, null, 2));
+});
+
+describe('the part-way import note at the highest rounding (Neumorphism)', () => {
+  for (const viewport of VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`run-partial: the lists stay inside the note and the screen at ${viewport.name}, ${mode}`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'run-partial', mode);
+        await tab.evaluate(() => document.documentElement.setAttribute('data-style', 'neumorphism'));
+        await tab.waitForTimeout(300);
+        expect(await tab.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+        const note = (await tab.locator('[data-import-partial]').boundingBox()) as { x: number; width: number };
+        for (const item of await tab.locator('[data-import-partial] li').all()) {
+          const box = (await item.boundingBox()) as { x: number; width: number };
+          expect(box.x).toBeGreaterThanOrEqual(note.x);
+          expect(box.x + box.width).toBeLessThanOrEqual(note.x + note.width);
+        }
+        expect(await tab.locator('[data-import-landed] li').count()).toBeGreaterThan(0);
+        expect(await tab.locator('[data-import-not-landed] li').count()).toBeGreaterThan(0);
+        if (shotsDir !== '')
+          await shoot(tab, viewport, join(shotsDir, `run-partial-neumorphism-${viewport.name}-${mode}.png`));
+        await context.close();
+      }, 60_000);
 });
