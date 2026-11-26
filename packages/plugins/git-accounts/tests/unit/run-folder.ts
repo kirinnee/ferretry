@@ -1,5 +1,17 @@
 /** A real private folder with a short path, standing in for the plugin's `downloads` root (the kernel's test roots are in memory). */
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import type { BoundProgram } from '@ferretry/kernel/contract';
 import { tmpdir } from 'node:os';
 import type { RunFolder } from '../../daemon/features/ssh-keys/agents.ts';
 
@@ -45,3 +57,47 @@ export function tmpRunFolder(): RunFolder & { destroy(): void } {
 
 /** A test locator: the program names as they are (the supervisor's real one answers an absolute path, `program-locator.ts`). */
 export const bareNames = async (name: 'ssh-agent' | 'ssh-add'): Promise<string> => name;
+
+/** Synthetic binding only: production's trust check NEVER accepts these user-writable fixture binaries. */
+export function testClient(program: string): BoundProgram {
+  if (!existsSync(program))
+    return {
+      program,
+      check: { argv: ['/bin/echo', 'synthetic-binding'], expected: 'synthetic-binding' },
+      verify: async () => true,
+    };
+  const file = statSync(program, { bigint: true });
+  return {
+    program,
+    verify: async () => {
+      try {
+        const now = statSync(program, { bigint: true });
+        return (
+          now.dev === file.dev &&
+          now.ino === file.ino &&
+          now.size === file.size &&
+          now.mtimeNs === file.mtimeNs &&
+          now.ctimeNs === file.ctimeNs
+        );
+      } catch {
+        return false;
+      }
+    },
+    check: {
+      argv: [
+        '/usr/bin/stat',
+        ...(process.platform === 'darwin' ? ['-Lf', '%d:%i:%z:%m:%c:%u:%Lp'] : ['-Lc', '%d:%i:%s:%Y:%Z:%u:%a']),
+        program,
+      ],
+      expected: [
+        file.dev,
+        file.ino,
+        file.size,
+        file.mtimeNs / 1_000_000_000n,
+        file.ctimeNs / 1_000_000_000n,
+        file.uid,
+        (Number(file.mode) & 0o7777).toString(8),
+      ].join(':'),
+    },
+  };
+}

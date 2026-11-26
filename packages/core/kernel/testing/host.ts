@@ -66,7 +66,7 @@ import { NO_FILE_EVENTS, polledOnly, undeclaredFileEvents } from '../host/adapte
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
 import { NO_SELF_COUNTERS, undeclaredSelfCounters } from '../host/adapters/self-counters.ts';
 import { nodeFs } from '../host/adapters/node-fs.ts';
-import { gatedOverrides, gatedPaths, gatedWhich, stateHomeHolding } from '../host/paths.ts';
+import { bindProgram, gatedOverrides, gatedPaths, gatedWhich, stateHomeHolding } from '../host/paths.ts';
 import { handleReaders, locateCommand, whichCommand, whichForCommand } from '../host/which.ts';
 import {
   NO_PROCESS_TABLE,
@@ -313,6 +313,8 @@ export interface TestHostOptions {
   readonly stateHome?: string;
   /** An overriding fake for `kernel.paths.stateHomeHolding`: the home name for a path it holds, `undefined` for one it does not; it may throw. */
   readonly stateHomeHolding?: (absolutePath: string) => Promise<string | undefined>;
+  /** Explicit synthetic installed-program bindings; absent, the real trust rules run against the disk. */
+  readonly bindProgram?: import('../contract/ports.ts').PathsPort['bindProgram'];
   /** The absolute paths `kernel.paths.which` finds executable. Default: none. */
   readonly executables?: readonly string[];
   /** The `PATH` `kernel.paths.which` searches after the caller's own folders. Default: none. */
@@ -2620,6 +2622,13 @@ async function start(world: World): Promise<TestHost> {
             manifest.permissions?.whichOverrides,
             Object.freeze({
               home: () => options.ownerHome ?? '/home/owner',
+              bindProgram:
+                options.bindProgram ??
+                (async (path: string) =>
+                  await bindProgram(
+                    nodeFs(() => 'x'),
+                    path,
+                  )),
               // The real lookup (`host/which.ts`) over the test world: an executable is one the test named in
               // `options.executables`, and `PATH` is `options.searchPath`.
               which: async (name: string, whichOptions?: { readonly directories?: readonly string[] }) =>
