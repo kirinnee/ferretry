@@ -90,9 +90,9 @@ export const lifecyclePart: HarnessPart<'start' | 'resume' | 'stop'> = ({
     await recordLaunchSettings(spec.ferret, permissionMode, spec.runtime);
     const running =
       harnessConversation === undefined
-        ? await runner.start({ ferret: spec.ferret, command: argv, cwd: spec.folder, env, execChain })
+        ? await runner.start({ ferret: spec.ferret, command: argv, cwd: spec.folder, env, execChain, harness: 'codex' })
         : await runner.resume(
-            { ferret: spec.ferret, command: argv, cwd: spec.folder, env, execChain },
+            { ferret: spec.ferret, command: argv, cwd: spec.folder, env, execChain, harness: 'codex' },
             harnessConversation,
           );
     if (!running.ok) return running;

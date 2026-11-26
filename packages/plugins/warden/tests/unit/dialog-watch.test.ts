@@ -386,6 +386,21 @@ describe('reading the ferrets that are parked on a dialog', () => {
     ]);
   });
 
+  it('should carry the REGISTERED family of each ferret (none for a key the family table has no row for)', async () => {
+    // Arrange
+    const fleet = fleetOf(
+      { config: { harness: 'claude' } as WardenFleetSession['config'] },
+      { config: { harness: 'codex' } as WardenFleetSession['config'] },
+      {},
+    );
+
+    // Act
+    const found = await ferretDialogs(ferrets, async () => fleet);
+
+    // Assert
+    should(found.map(each => each.harness)).eql(['claude', 'codex', undefined]);
+  });
+
   it('should read none from a Ferrets that offers no prompt read', async () => {
     // Act
     const found = await ferretDialogs({} as Pick<FerretsApi, 'prompt'>, async () => fleetOf({}));

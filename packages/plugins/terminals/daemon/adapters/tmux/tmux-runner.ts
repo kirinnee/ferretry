@@ -378,6 +378,9 @@ export class TmuxRunner implements Runner {
   /** The chain each pane THIS runner launched was meant to exec through, by pane id (only a spec that named one). */
   readonly #launches = new Map<string, LaunchChain>();
 
+  /** The registered harness key each pane THIS runner launched runs, by pane id (only a spec that named one). */
+  readonly #keys = new Map<string, string>();
+
   constructor(private readonly options: TmuxRunnerOptions) {}
 
   async start(spec: RunSpec): Promise<Result<RunningFerret, StartRefusal>> {
@@ -583,7 +586,7 @@ export class TmuxRunner implements Runner {
       return await new TmuxPaneDelivery(new TmuxController(pane.port), pane.sleep).deliver(
         pane.session,
         delivery.text,
-        { resumeMenuChoice: delivery.resumeMenuChoice },
+        { resumeMenuChoice: delivery.resumeMenuChoice, harness: this.#keys.get(handle) ?? '' },
         delivery.beforeWrite,
       );
     } catch (error) {
@@ -1079,6 +1082,7 @@ export class TmuxRunner implements Runner {
     // Forgotten again as it ends, so no look that overlaps the stop keeps any (`#stopEpoch`).
     this.#frames.delete(handle);
     this.#launches.delete(handle);
+    this.#keys.delete(handle);
     try {
       const facts = await this.facts(handle);
       // Nothing, or ANOTHER ferret's pane (or a person's shell), behind this handle: the pane id says nothing about this
@@ -1383,6 +1387,8 @@ export class TmuxRunner implements Runner {
     const harness = spec.execChain?.at(-1);
     if (harness !== undefined) this.#launches.set(paneId, { through: new Set(spec.execChain?.slice(0, -1)), harness });
     else this.#launches.delete(paneId);
+    if (spec.harness === undefined) this.#keys.delete(paneId);
+    else this.#keys.set(paneId, spec.harness);
     await this.options.remember?.(spec.ferret, running);
     return ok(running);
   }

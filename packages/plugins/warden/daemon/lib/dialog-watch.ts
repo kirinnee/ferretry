@@ -27,7 +27,7 @@
  *
  * Pure but for its ports.
  */
-import { harnessProductName } from '@ferretry/core-ferrets/contract';
+import { harnessProductName, type RecordedFamily } from '@ferretry/core-ferrets/contract';
 import { z } from 'zod';
 import { clipAtWord, MAX_AGENDA_DETAIL_LENGTH, MAX_AGENDA_SUBJECT_LENGTH } from './protocol.ts';
 import type { MachineMembersStore } from './machine-notices.ts';
@@ -78,6 +78,11 @@ export function permissionAsDialog(permissionRequest: unknown): WatchedDialogWor
 export interface WatchedDialog {
   readonly sessionId: string;
   readonly name: string;
+  /**
+   * The family of the ferret's REGISTERED harness key (family-table membership, exact), or none for a key the table has no
+   * row for. Only this chooses a rule and a key: what the screen prints may confirm it and never replaces it.
+   */
+  readonly harness?: RecordedFamily;
   readonly dialog: WatchedDialogWords;
 }
 

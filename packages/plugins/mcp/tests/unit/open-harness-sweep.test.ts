@@ -159,6 +159,9 @@ describe('the harness an MCP item may be pinned to', () => {
       'claude-code',
     ]);
     expect(third.ok).toBe(false);
+    // The refusal names the file and the rejected harness key, so the person can find it.
+    expect(third.ok === false ? third.reason : '').toContain('the harness "fake-third"');
+    expect(third.ok === false ? third.reason : '').toContain('mcp/d.yaml');
     expect(proto.ok).toBe(false);
     expect(recordedKeyOfWord('claude')).toBe('claude-code');
   });

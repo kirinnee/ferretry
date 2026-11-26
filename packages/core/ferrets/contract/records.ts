@@ -1,3 +1,4 @@
+import { KEBAB_NAME } from '@ferretry/std';
 import { z } from 'zod';
 
 /**
@@ -43,7 +44,8 @@ export const RecordedHarnessSchema = z.enum(RECORDED_FAMILIES);
 export type OpenRecordedHarness = z.infer<typeof RecordedHarnessSchema> | (string & {});
 export const OpenRecordedHarnessSchema = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9-]{0,39}$/u, 'a harness is lowercase letters, digits and -')
+  .regex(KEBAB_NAME, 'a harness is lowercase letters, digits and -')
+  .max(40)
   .transform(value => value as OpenRecordedHarness);
 
 /** Whether a session's harness is one of the two families a closed consumer can read. */
