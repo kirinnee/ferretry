@@ -27,6 +27,21 @@ export function heldForTyping(pane: Pick<SendPaneObservation, 'typing'>, sender:
   return pane.typing === true && sender !== 'human';
 }
 
+/** Whose write a typing send is, for the typing hold: a person's own carries no flag and no sender session. */
+export function typingSenderOf(request: {
+  readonly senderSessionId?: string | undefined;
+  readonly by?: unknown;
+  readonly warden?: boolean | undefined;
+  readonly agenda?: boolean | undefined;
+  readonly notice?: boolean | undefined;
+  readonly monitor?: boolean | undefined;
+}): SendSenderKind {
+  if (request.senderSessionId !== undefined) return 'agent';
+  return request.by !== undefined || request.warden || request.agenda || request.notice || request.monitor
+    ? 'daemon'
+    : 'human';
+}
+
 /**
  * Why nothing may be typed into this session now, or `undefined` when its input box is free. `sender` is whose
  * message it is, which only the typing hold reads: a person's own is never held for typing.

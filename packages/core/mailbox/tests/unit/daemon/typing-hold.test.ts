@@ -121,13 +121,14 @@ describe('the typing hold in the draft guard', () => {
     should(typed).deepEqual(['hello from me']);
   });
 
-  it('should keep a direct Agenda nudge untyped while a person types, and refuse the Warden’s without typing', async () => {
+  it('should keep a direct Agenda nudge, Warden message and notice untyped while a person types', async () => {
     const { send, typed } = world('interactive');
 
-    const nudge = await send.submit(ID, { sendId: 'nudge:1', message: 'finish it', origin: AGENT, agenda: true });
-    should(nudge.waitReason).equal('typing');
-    const warden = send.submit(ID, { sendId: 'warden:1', message: 'revive', origin: AGENT, warden: true });
-    await should(warden).be.rejectedWith(/a person is typing/);
+    const flags = [{ agenda: true }, { warden: true }, { notice: true }] as const;
+    for (const [at, flag] of flags.entries()) {
+      const sent = await send.submit(ID, { sendId: `own:${at}`, message: 'm', origin: AGENT, ...flag });
+      should(sent.waitReason).equal('typing');
+    }
 
     should(typed).deepEqual([]);
   });
