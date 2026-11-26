@@ -1,3 +1,4 @@
+import { byRecordedHarness, type RecordedFamily } from '../../../../contract/records.ts';
 import type { ClockPort } from '../../../lib/ports.ts';
 import type { ObserverFacts } from '../../../lib/session/observer/facts.ts';
 import {
@@ -68,7 +69,7 @@ export interface SessionWorkerDeps {
   readonly post: (message: FromSessionWorker) => void;
   /** The session's own attached observe-only control client (`bin/session.worker.ts` builds it). */
   readonly tmux: (binding: SessionBinding['tmux']) => WorkerTmuxClient;
-  readonly transcripts: Readonly<Record<'claude' | 'codex', TranscriptSource>>;
+  readonly transcripts: Readonly<Record<RecordedFamily, TranscriptSource>>;
   readonly stat: (file: string) => Promise<{ readonly size: number; readonly mtimeMs: number } | undefined>;
   /**
    * The question Claude's hook recorded in `file` for `transcript` (`readAskedQuestion`). Total: an absent,
@@ -460,7 +461,8 @@ export class SessionWorkerRuntime {
   /** What Claude's question hook last recorded for this binding's transcript; nothing for Codex. */
   private async askedOf(binding: SessionBinding): Promise<AskedQuestion | undefined> {
     const transcript = binding.transcript;
-    if (binding.questionAsked === undefined || transcript?.harness !== 'claude') return undefined;
+    if (binding.questionAsked === undefined || transcript === undefined) return undefined;
+    if (!byRecordedHarness(transcript.harness, { claude: () => true, codex: () => false })) return undefined;
     return await this.deps.asked?.(binding.questionAsked, transcript.file);
   }
 

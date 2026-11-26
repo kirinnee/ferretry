@@ -18,7 +18,7 @@ import type { RenderAccountSlot } from './account-slot.tsx';
 import { ChangeAccount } from './change-account.tsx';
 import { moveCallFailure } from './call-failure.ts';
 import { ConvertHarness } from './convert-harness.tsx';
-import { HARNESS_SHORT, isConvertible, otherHarness } from './conversion-model.ts';
+import { harnessShort, isConvertible, otherHarness } from './conversion-model.ts';
 import { askToStopJobs, moveFerret, moveToOtherHarness, readConversionPreview, readFerret } from './move-api.ts';
 
 export interface MovePageProps {
@@ -73,7 +73,7 @@ export function MovePage({ client, ferret, slot, onClose, initialMode = 'account
 
   const summary = load.status === 'ready' || load.status === 'moved' ? load.summary : null;
   const otherName =
-    summary === null || !isConvertible(summary) ? 'the other CLI' : HARNESS_SHORT[otherHarness(summary.harness)];
+    summary === null || !isConvertible(summary) ? 'the other CLI' : harnessShort(otherHarness(summary.harness));
 
   return (
     <main aria-labelledby={headingId} className="flex min-h-0 flex-1 flex-col bg-surface" data-move-page="">

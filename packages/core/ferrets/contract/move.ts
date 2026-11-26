@@ -83,6 +83,19 @@ export const ConversionDroppedSchema = z.strictObject({
 export type ConversionDropped = z.infer<typeof ConversionDroppedSchema>;
 
 /**
+ * The harness each harness's conversation converts onto, by plugin key: the ONE table of which harnesses the
+ * cross-harness move knows (Claude Code and Codex convert into each other, today). A key with no row has no converter, so
+ * the move says so instead of guessing a target.
+ */
+const CONVERSION_TARGET = { 'claude-code': 'codex', codex: 'claude-code' } as const;
+
+/** A harness a conversation can be converted FROM (and onto): a key {@link CONVERSION_TARGET} names. */
+export type ConvertibleHarness = keyof typeof CONVERSION_TARGET;
+export const isConvertibleHarness = (key: string): key is ConvertibleHarness => Object.hasOwn(CONVERSION_TARGET, key);
+/** The harness a conversation on `key` converts onto. */
+export const conversionTargetOf = (key: ConvertibleHarness): ConvertibleHarness => CONVERSION_TARGET[key];
+
+/**
  * A conversion's account of itself — what a person confirms before "Move to Codex…" switches anything,
  * and what the session keeps afterwards.
  */
