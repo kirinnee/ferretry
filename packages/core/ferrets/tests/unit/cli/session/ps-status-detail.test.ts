@@ -68,6 +68,17 @@ describe('fy status shows model, turn, context and what it waits on (C-18, D-50)
     expect(lines).toContain('  /work/repo');
   });
 
+  test('token counts read as 800, 85K and 1.2M, and a context the harness has not reported says nothing', () => {
+    const lines = (live: Parameters<typeof renderFerret>[2]) => renderFerret(sessionView(), undefined, live);
+    expect(lines({ turns: 1, contextPercent: 0.4, contextWindow: 1_200_000, contextTokens: 800 })).toContain(
+      '  turn 1; context 0% (800 of 1.2M)',
+    );
+    expect(lines({ turns: 3, contextPercent: null, contextWindow: null, contextTokens: null })).toContain('  turn 3');
+    expect(lines({ turns: null, contextPercent: 50, contextWindow: null, contextTokens: null })).toContain(
+      '  context 50%',
+    );
+  });
+
   test('a declared wait says what on and for whom; no live read leaves only what the record knows', () => {
     const lines = renderFerret(sessionView({ state: 'idle', waiting: WAITING, observedModel: 'sonnet-5-5' }));
     expect(lines).toContain('  waiting on CI for oak');
