@@ -138,7 +138,7 @@ export class ComposerActs {
       const composer = readComposer(frame.visible, frameCursor(frame));
       if (
         frame.screen !== undefined &&
-        (!frame.screen.atPrompt || frame.screen.working || composer?.placeholder !== false)
+        (!frame.screen.atPrompt || frame.screen.working || composer?.placeholder === undefined)
       )
         return 'stuck';
       if (composer?.placeholder === undefined) return 'stuck';

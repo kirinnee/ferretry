@@ -6,6 +6,19 @@ export interface DecidedFast {
   readonly value: boolean | undefined;
 }
 
+/** A move keeps the other start options, replaces model/effort, and drops the old runtime's fast mode. */
+export function movedLaunchOptions(
+  before: FerretDetails['options'],
+  target: { readonly model?: string; readonly effort?: string },
+): NonNullable<FerretDetails['options']> {
+  const { effort: _effort, fast: _fast, ...kept } = before ?? {};
+  return {
+    ...kept,
+    ...(target.model === undefined ? {} : { model: target.model }),
+    ...(target.effort === undefined ? {} : { effort: target.effort }),
+  };
+}
+
 /**
  * The launch spec's share of a ferret's start options: `model` and `effort` on their own fields (where the harness
  * already reads them), and the rest whole, so a harness, runner or supervisor reads today's start fields from the spec.

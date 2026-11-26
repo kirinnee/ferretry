@@ -1,5 +1,12 @@
 import { expect, test } from 'bun:test';
-import { LaunchParts, Runners, type RunSpec } from '../../../../ferrets/contract/index.ts';
+import {
+  FerretsPort,
+  FerretTokensFile,
+  LaunchParts,
+  PERSON_ORIGIN,
+  Runners,
+  type RunSpec,
+} from '../../../../ferrets/contract/index.ts';
 import { FakeRunner } from '../../../../ferrets/contract/testing/index.ts';
 import { FakeGate, ownerStanding, StandInAdmission } from '../../../../gate/contract/testing/index.ts';
 import { VaultPort } from '../../../../vault/contract/index.ts';
@@ -96,7 +103,27 @@ for (const through of ['login', 'runtime', 'inferred-runtime', 'implicit-default
     });
     const host = await testHost({
       everyDirectory: true,
-      plugins: [real('vault'), real('ferrets'), logins, real('runtimes'), real('opencode'), terminals, profile],
+      plugins: [
+        real('vault'),
+        real('ferrets'),
+        logins,
+        real('runtimes'),
+        real('opencode'),
+        terminals,
+        profile,
+        implementDaemon(
+          definePlugin({
+            id: 'warden',
+            title: 'Replacement caller',
+            version: '5.0.0',
+            api: 5,
+            core: false,
+            kinds: [],
+            needs: { ferrets: FerretsPort },
+          }),
+          { build: () => ({}) },
+        ),
+      ],
       gate: new StandInAdmission(() => ownerStanding()),
       fakes: { gate: new FakeGate(), asks: new FakeAsks() },
       config: {
@@ -177,6 +204,24 @@ for (const through of ['login', 'runtime', 'inferred-runtime', 'implicit-default
       expect(JSON.stringify(profileRefused.body)).not.toContain('sk-ant-');
       expect(specs.length).toBe(1);
       expect((await start('key', 'request-two', 'login')).status).toBe(200);
+      expect(specs.length).toBe(1);
+      const ferrets = host.provided(FerretsPort, 'warden');
+      const id = accepted.json<{ id: Parameters<typeof ferrets.resume>[0] }>().id;
+      const before = await ferrets.get(id);
+      const tokens = host.state('ferrets').files.get(FerretTokensFile.path);
+      const handle = await ferrets.handle(id);
+      expect(handle).toBeDefined();
+      const refusedReplacement = await ferrets.resume(id, undefined, {
+        origin: PERSON_ORIGIN,
+        replaceLiveTerminal: true,
+      });
+      expect(refusedReplacement).toMatchObject({ ok: false, error: { code: 'refused' } });
+      expect(JSON.stringify(refusedReplacement)).toContain('subscription credentials');
+      expect(JSON.stringify(refusedReplacement)).not.toContain('sk-ant-');
+      expect(await ferrets.get(id)).toEqual(before);
+      expect(host.state('ferrets').files.get(FerretTokensFile.path)).toBe(tokens);
+      expect(await ferrets.handle(id)).toBe(handle);
+      expect(await runner.alive(handle!)).toBe(true);
       expect(specs.length).toBe(1);
     } finally {
       await host.stop();

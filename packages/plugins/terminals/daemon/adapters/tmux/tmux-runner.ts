@@ -383,11 +383,13 @@ export class TmuxRunner implements Runner {
     handle: RunnerHandle,
     harness?: string,
     screenReader?: RunSpec['screenReader'],
+    ferret?: FerretId,
   ): Promise<Result<RunningFerret, AttachRefusal>> {
     if (!PANE_ID.test(handle)) return err('unsupported');
     const facts = await this.facts(handle);
     if (facts === undefined || facts.dead) return err('gone');
     if (!isFerretSession(facts.session)) return err('not-a-ferret');
+    if (!TmuxRunner.owns(facts, ferret)) return err('mismatch');
     if (harness !== undefined && (this.#launches.get(handle)?.key !== harness || screenReader !== undefined))
       this.#launches.set(handle, {
         through: new Set(),
