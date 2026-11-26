@@ -238,9 +238,26 @@ describe('Codex windows are slotted by length, not position', () => {
     });
   });
 
-  it('should keep a lone window of unknown length at its position', () => {
+  it('should never call a window of unknown length the long window, alone or beside a known short one', () => {
+    // A lone unknown secondary used to show as "Week"; nothing says it is a week, so it is left out.
+    should(parseCodexRateLimits({ secondary: { used_percent: 9 } })).deepEqual({
+      hasQuotaSignal: false,
+      providerAtLimit: false,
+    });
+    should(
+      parseCodexUsageBody({ rate_limit: { secondary_window: { used_percent: 9 } } }, 1_000).longWindow,
+    ).be.undefined();
+    // A known 5-hour secondary used to push an unknown primary into the Week slot.
+    const pushed = parseCodexRateLimits({
+      primary: { used_percent: 9 },
+      secondary: { used_percent: 4, window_minutes: 300 },
+    });
+    should(pushed.longWindow).be.undefined();
+    should(pushed.shortWindow).deepEqual({ usedPercent: 4 });
+  });
+
+  it('should still give an unknown-length primary the short slot by position when nothing known has it', () => {
     should(parseCodexRateLimits({ primary: { used_percent: 9 } }).shortWindow).deepEqual({ usedPercent: 9 });
-    should(parseCodexRateLimits({ secondary: { used_percent: 9 } }).longWindow).deepEqual({ usedPercent: 9 });
   });
 
   it('should label a lone multi-day wham primary_window as the long window', () => {
@@ -284,8 +301,8 @@ describe('parseCodexUsageBody', () => {
           plan_type: 'pro',
           rate_limit: {
             limit_reached: true,
-            primary_window: { used_percent: 100, reset_after_seconds: 30 },
-            secondary_window: { used_percent: 40, reset_at: 1_786_500_000 },
+            primary_window: { used_percent: 100, reset_after_seconds: 30, limit_window_seconds: 18_000 },
+            secondary_window: { used_percent: 40, reset_at: 1_786_500_000, limit_window_seconds: 604_800 },
           },
         },
         1_000,

@@ -4,6 +4,10 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import should from 'should';
+import type {
+  OrphanChromeInspector,
+  ProcessIdentity,
+} from '../../../../daemon/worker/control/adapters/orphan-chrome.ts';
 import { BrowserProfileStore } from '../../../../daemon/worker/control/adapters/profile-store.ts';
 import { BrowserProfileBusyError } from '../../../../daemon/worker/control/profile.ts';
 
@@ -19,11 +23,36 @@ const alive = (pid: number): boolean => {
   }
 };
 
-/** A synthetic "Chrome": an idle process whose command line carries the given extra arguments. */
+/**
+ * A synthetic "Chrome": an idle process whose command line carries the given extra arguments. It ends when its stdin
+ * closes (cleanup), so no test ever signals a real process.
+ */
 function idleProcess(...args: string[]): number {
-  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', ...args], { stdio: 'ignore' });
+  const child = spawn(
+    process.execPath,
+    ['-e', "process.stdin.resume(); process.stdin.on('end', () => process.exit(0))", ...args],
+    { stdio: ['pipe', 'ignore', 'ignore'] },
+  );
   children.push(child);
   return child.pid as number;
+}
+
+/** A simulated process table over one pid: reads answer from `identity`, signals are logged and never sent. */
+function simulatedTable(identity: () => ProcessIdentity | undefined, onSignal?: (signal: string) => void) {
+  const signals: string[] = [];
+  const orphans: OrphanChromeInspector = {
+    identify: identity,
+    signalIf: (_pid, signal, accept) => {
+      const found = identity();
+      if (found === undefined) return 'gone';
+      if (!accept(found)) return 'rejected';
+      signals.push(signal);
+      onSignal?.(signal);
+      return 'delivered';
+    },
+    sleep: async () => undefined,
+  };
+  return { orphans, signals };
 }
 
 async function exitedPid(): Promise<number> {
@@ -32,10 +61,13 @@ async function exitedPid(): Promise<number> {
   return child.pid as number;
 }
 
-async function store(): Promise<BrowserProfileStore> {
+async function store(orphans?: OrphanChromeInspector): Promise<BrowserProfileStore> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'ferretry-browser-orphan-'));
   roots.push(root);
-  return new BrowserProfileStore(path.join(root, 'daemon'), { hostname: 'test-host' });
+  return new BrowserProfileStore(path.join(root, 'daemon'), {
+    hostname: 'test-host',
+    ...(orphans === undefined ? {} : { orphans }),
+  });
 }
 
 /** The profile as a dead daemon left it: a lease naming it and a Chrome pid. */
@@ -64,24 +96,28 @@ async function leftBehindByFerretry(subject: BrowserProfileStore, chromePid: num
   await writeFile(subject.leaseFile, JSON.stringify({ ...record, sessionId: 'dead', daemonPid: await exitedPid() }));
 }
 
-async function gone(pid: number): Promise<boolean> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (!alive(pid)) return true;
-    await Bun.sleep(20);
-  }
-  return false;
-}
-
 afterEach(async () => {
-  for (const child of children.splice(0)) child.kill('SIGKILL');
+  for (const child of children.splice(0)) child.stdin?.end();
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
 describe('BrowserProfileStore orphaned Chrome', () => {
   it('should stop a Chrome a dead daemon left on the profile and hand the profile out', async () => {
-    // Arrange
-    const subject = await store();
-    const orphan = idleProcess(`--user-data-dir=${subject.profile}`);
+    // Arrange: a simulated table, so nothing real is signalled; the Chrome exits after TERM.
+    let running = true;
+    const profileHolder: { profile?: string } = {};
+    const table = simulatedTable(
+      () =>
+        running && profileHolder.profile !== undefined
+          ? { startedAt: 'boot:100', args: ['chrome', `--user-data-dir=${profileHolder.profile}`] }
+          : undefined,
+      () => {
+        running = false;
+      },
+    );
+    const subject = await store(table.orphans);
+    profileHolder.profile = subject.profile;
+    const orphan = idleProcess('--anything');
     await leftBehindByFerretry(subject, orphan);
 
     // Act
@@ -89,7 +125,29 @@ describe('BrowserProfileStore orphaned Chrome', () => {
 
     // Assert
     should(lease.recoveredDeadOwner).be.true();
-    should(await gone(orphan)).be.true();
+    should(table.signals).deepEqual(['SIGTERM']);
+    should(alive(orphan)).be.true();
+  });
+
+  it('should record the start time of the process seen at the spawn, before any awaited file work', async () => {
+    // Arrange: the pid answers as the launched Chrome on the first read and as a replacement on every later one.
+    let reads = 0;
+    const table = simulatedTable(() => {
+      reads += 1;
+      return { startedAt: reads === 1 ? 'boot:launched' : 'boot:replacement', args: ['chrome'] };
+    });
+    const subject = await store(table.orphans);
+    const seed = await subject.acquire({ sessionId: 'seed' });
+
+    // Act: the caller reports the pid right after its spawn; the identity must be read in that same step.
+    const reported = seed.updateChromePid(4242);
+    const readsAtCall = reads;
+    await reported;
+
+    // Assert
+    should(readsAtCall).equal(1);
+    const record = JSON.parse(await readFile(subject.leaseFile, 'utf8')) as { chromeStartedAt?: string };
+    should(record.chromeStartedAt).equal('boot:launched');
   });
 
   it('should NEVER signal the owner own Chrome on the profile when the lease holds no Ferretry launch record', async () => {
@@ -190,8 +248,8 @@ describe('BrowserProfileStore orphaned Chrome', () => {
     const subject = new BrowserProfileStore(path.join(root, 'daemon'), {
       hostname: 'test-host',
       orphans: {
-        identify: async () => undefined,
-        signal: pid => {
+        identify: () => undefined,
+        signalIf: pid => {
           terminated.push(pid);
           return 'delivered';
         },

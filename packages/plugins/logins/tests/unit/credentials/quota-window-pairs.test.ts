@@ -7,24 +7,28 @@ import { login } from '../cli/fakes.ts';
 type Kind = 'long' | 'short' | 'unknown' | 'absent';
 const KINDS: readonly Kind[] = ['long', 'short', 'unknown', 'absent'];
 
-/** Who ends up in each slot, by NAME of the source window (the percent identifies it: primary 11, secondary 22). */
+/**
+ * Who ends up in each slot, by NAME of the source window (the percent identifies it: primary 11, secondary 22).
+ * A known length always wins; a window with no length is NEVER the long window, and only the primary may take the
+ * short slot by position, when no known window has it. Anything else with no length is left out.
+ */
 type Who = 'primary' | 'secondary' | undefined;
 const EXPECTED: Record<string, readonly [short: Who, long: Who]> = {
   'long+long': [undefined, 'primary'],
   'long+short': ['secondary', 'primary'],
-  'long+unknown': ['secondary', 'primary'],
+  'long+unknown': [undefined, 'primary'],
   'long+absent': [undefined, 'primary'],
   'short+long': ['primary', 'secondary'],
   'short+short': ['primary', undefined],
-  'short+unknown': ['primary', 'secondary'],
+  'short+unknown': ['primary', undefined],
   'short+absent': ['primary', undefined],
   'unknown+long': ['primary', 'secondary'],
-  'unknown+short': ['secondary', 'primary'],
-  'unknown+unknown': ['primary', 'secondary'],
+  'unknown+short': ['secondary', undefined],
+  'unknown+unknown': ['primary', undefined],
   'unknown+absent': ['primary', undefined],
   'absent+long': [undefined, 'secondary'],
   'absent+short': ['secondary', undefined],
-  'absent+unknown': [undefined, 'secondary'],
+  'absent+unknown': [undefined, undefined],
 };
 
 const PERCENT = { primary: 11, secondary: 22 } as const;
@@ -116,20 +120,62 @@ describe('every pair of Codex windows: a known length always beats position', ()
         // Assert
         const five = wanted[0] === undefined ? '5h: not measured yet' : `5h: ${wanted[0]}% used`;
         const week = wanted[1] === undefined ? 'Week: not measured yet' : `Week: ${wanted[1]}% used`;
-        expect(text).toEqual([five, week]);
+        // Nothing measured at all is said in words by the page, not drawn as two empty bars.
+        expect(text).toEqual(wanted.every(percent => percent === undefined) ? [] : [five, week]);
       });
     }
   }
 
-  it('should name the base mislabel: a known weekly primary beside a window with no length is never the 5h bar', () => {
+  it('should never put a window with no length in the long slot, whatever it sits beside', () => {
+    // Arrange: every pair, through both inputs, with the unknown window's percent searched for in the long slot.
+    for (const primary of KINDS) {
+      for (const secondary of KINDS) {
+        const rollouts = parseCodexRateLimits({
+          primary: rollout(primary, PERCENT.primary),
+          secondary: rollout(secondary, PERCENT.secondary),
+        });
+        const usage = parseCodexUsageBody(
+          {
+            rate_limit: {
+              primary_window: wham(primary, PERCENT.primary),
+              secondary_window: wham(secondary, PERCENT.secondary),
+            },
+          },
+          1_000,
+        );
+
+        // Assert
+        for (const reading of [rollouts, usage]) {
+          if (primary === 'unknown') expect(reading.longWindow?.usedPercent).not.toBe(PERCENT.primary);
+          if (secondary === 'unknown') expect(reading.longWindow?.usedPercent).not.toBe(PERCENT.secondary);
+        }
+      }
+    }
+  });
+
+  it('should name the base mislabel: a known 5h secondary pushed an unknown primary onto the Week bar', () => {
     // Act
     const reading = parseCodexRateLimits({
-      primary: { used_percent: 40, window_minutes: 10_080, resets_at: RESET },
-      secondary: { used_percent: 3, resets_at: RESET },
+      primary: { used_percent: 40, resets_at: RESET },
+      secondary: { used_percent: 3, window_minutes: 300, resets_at: RESET },
+    });
+    const view = login({
+      usage: {
+        fiveHour: reading.shortWindow ? { usedPercent: reading.shortWindow.usedPercent } : {},
+        weekly: reading.longWindow ? { usedPercent: reading.longWindow.usedPercent } : {},
+      },
     });
 
+    // Assert: the page shows the 5h reading and no Week figure at all.
+    expect((usageBars(view, 0) ?? []).map(usageBarText)).toEqual(['5h: 3% used', 'Week: not measured yet']);
+  });
+
+  it('should leave a lone window with no length off the Week bar', () => {
+    // Act
+    const reading = parseCodexRateLimits({ secondary: { used_percent: 30, resets_at: RESET } });
+
     // Assert
-    expect(reading.longWindow?.usedPercent).toBe(40);
-    expect(reading.shortWindow?.usedPercent).toBe(3);
+    expect(reading.longWindow).toBeUndefined();
+    expect(reading.hasQuotaSignal).toBe(false);
   });
 });

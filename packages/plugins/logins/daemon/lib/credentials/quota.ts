@@ -220,17 +220,20 @@ function slotByLength(w: CodexWindow): CodexSlot | undefined {
 }
 
 /**
- * Slots the Codex windows by what is KNOWN, and by position only where nothing is: a window whose length is given
- * takes the slot that length names whatever its position (a plan with one window reports it as `primary` however
- * long it is). A window with no length takes the slot a known one left free; with nothing known, the primary is
- * the short window and the secondary the long one. If two windows of one class are given, the slot keeps the
- * longer (long) or shorter (short) of them, the primary on a tie, and the other is left out rather than drawn
- * under a name that is not its length.
+ * Slots the Codex windows by what is KNOWN. A window whose length is given takes the slot that length names whatever
+ * its position (a plan with one window reports it as `primary` however long it is). If two windows of one class are
+ * given, the slot keeps the longer (long) or shorter (short) of them, the primary on a tie, and the other is left out
+ * rather than drawn under a name that is not its length.
+ *
+ * A window whose length is NOT given is never called the long window: nothing says it is a week, and "Week" on
+ * the page is a claim about how long the account must wait. By position alone only the primary — which Codex defines
+ * as the short window — may take the short slot, and only when no known window has. Any other unknown window is
+ * left out (absent, never mislabelled), like every reading this module cannot vouch for.
  */
 function codexReading(primary: CodexWindow, secondary: CodexWindow, providerAtLimit: boolean): QuotaReading {
   const entries = [
-    { window: primary, position: 'short' as const },
-    { window: secondary, position: 'long' as const },
+    { window: primary, position: 'primary' as const },
+    { window: secondary, position: 'secondary' as const },
   ].filter(entry => entry.window.window !== undefined);
   const placed: Partial<Record<CodexSlot, CodexWindow>> = {};
   for (const { window: candidate } of entries) {
@@ -245,10 +248,9 @@ function codexReading(primary: CodexWindow, secondary: CodexWindow, providerAtLi
     if (wins) placed[slot] = candidate;
   }
   for (const { window: candidate, position } of entries) {
-    if (slotByLength(candidate) !== undefined) continue;
-    const free = (['short', 'long'] as const).filter(slot => placed[slot] === undefined);
-    const slot = free.includes(position) ? position : free[0];
-    if (slot !== undefined) placed[slot] = candidate;
+    if (slotByLength(candidate) === undefined && position === 'primary' && placed.short === undefined) {
+      placed.short = candidate;
+    }
   }
   const short = placed.short ?? {};
   const long = placed.long ?? {};
@@ -261,8 +263,8 @@ function codexReading(primary: CodexWindow, secondary: CodexWindow, providerAtLi
 }
 
 /**
- * The `rate_limits` of a Codex rollout's `token_count` event: `primary` is the 5-hour window and
- * `secondary` the weekly one, each `{used_percent, resets_at}` with `resets_at` in epoch seconds.
+ * The `rate_limits` of a Codex rollout's `token_count` event: `primary` is usually the 5-hour window and
+ * `secondary` the weekly one (each says its own length as `window_minutes`, which wins), each `{used_percent, resets_at}` with `resets_at` in epoch seconds.
  *
  * An older rollout carries `resets_in_seconds` instead, relative to the event, so the event's own
  * instant is taken as `observedAt` and a relative reset without one is absent rather than guessed.

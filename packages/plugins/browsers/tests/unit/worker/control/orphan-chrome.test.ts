@@ -12,19 +12,26 @@ const launched: ProcessIdentity = { startedAt: 'boot:100', args: ['chrome', `--u
 const replacement: ProcessIdentity = { startedAt: 'boot:999', args: ['someone-else'] };
 const budget = { termPolls: 2, killPolls: 2 };
 
-/** A process table scripted per `identify` call; every signal is logged, and `onSignal` may change what comes next. */
+/**
+ * A process table scripted per `identify` call; every signal is logged. `signalIf` reads the identity the way the
+ * system's does — at the instant of the signal — and sends only if the caller accepts it. Nothing real is signalled.
+ */
 function scripted(
   identities: (call: number, signals: readonly string[]) => ProcessIdentity | undefined,
-  outcome: SignalOutcome = 'delivered',
+  outcome: 'delivered' | 'denied' = 'delivered',
 ) {
   const signals: string[] = [];
   let calls = 0;
+  const read = (): ProcessIdentity | undefined => {
+    calls += 1;
+    return identities(calls, signals);
+  };
   const inspector: OrphanChromeInspector = {
-    identify: async () => {
-      calls += 1;
-      return identities(calls, signals);
-    },
-    signal: (_pid, signal) => {
+    identify: read,
+    signalIf: (_pid, signal, accept): SignalOutcome => {
+      const identity = read();
+      if (identity === undefined) return 'gone';
+      if (!accept(identity)) return 'rejected';
       signals.push(signal);
       return outcome;
     },
@@ -107,8 +114,8 @@ describe('clearRecordedChrome', () => {
   });
 
   it('should re-check the identity immediately before SIGKILL, not trust the check made before SIGTERM', async () => {
-    // Arrange: the Chrome ignores TERM through every poll, then is replaced exactly between the last poll and the
-    // re-check before KILL (calls: 1 first look, 2 before TERM, 3-4 polls, 5 before KILL).
+    // Arrange: the Chrome ignores TERM through every poll, then is replaced exactly at the read made for KILL
+    // (calls: 1 first look, 2 at TERM, 3-4 polls, 5 at KILL).
     const { inspector, signals } = scripted(call => (call < 5 ? launched : replacement));
 
     // Act
@@ -129,6 +136,33 @@ describe('clearRecordedChrome', () => {
     // Assert
     should(outcome).equal('refused');
     should(signals).deepEqual(['SIGTERM', 'SIGKILL']);
+  });
+
+  it('should NEVER signal a process whose identity changed between the first look and the signal', async () => {
+    // Arrange: the recorded Chrome is what the first look sees, but a replacement answers when the signal is made.
+    const { inspector, signals } = scripted(call => (call === 1 ? launched : replacement));
+
+    // Act
+    const outcome = await clearRecordedChrome(inspector, { pid: 7, startedAt: 'boot:100' }, profile, budget);
+
+    // Assert
+    should(outcome).equal('cleared');
+    should(signals).deepEqual([]);
+  });
+
+  it('should refuse and not signal when the identity cannot be read at the moment of the signal', async () => {
+    // Arrange
+    const inspector: OrphanChromeInspector = {
+      identify: () => launched,
+      signalIf: () => 'unreadable',
+      sleep: async () => undefined,
+    };
+
+    // Act
+    const outcome = await clearRecordedChrome(inspector, { pid: 7, startedAt: 'boot:100' }, profile, budget);
+
+    // Assert
+    should(outcome).equal('refused');
   });
 
   it('should refuse when the signal is denied', async () => {
