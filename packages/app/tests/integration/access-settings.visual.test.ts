@@ -96,6 +96,11 @@ const open = async (viewport: (typeof VIEWPORTS)[number], theme: string, tab: Ta
   const page = await context.newPage();
   const problems: string[] = [];
   page.on('pageerror', error => problems.push(error.message));
+  // Everything the page SAID or ASKED FOR outside itself (a console line, a request URL, even a refused one): a pairing
+  // code must be in none of it.
+  const outside: string[] = [];
+  page.on('console', message => outside.push(message.text()));
+  page.on('request', request => outside.push(request.url()));
   await page.goto(`${origin}/d/ws/settings/access/${tab}?theme=${theme}&state=${state}`);
   try {
     // A phone opens the list first; a tab link opens the page.
@@ -110,7 +115,7 @@ const open = async (viewport: (typeof VIEWPORTS)[number], theme: string, tab: Ta
     ).slice(0, 600);
     throw new Error(`the scene did not draw ${ready}: ${String(error)}\n${problems.join('\n')}\nON SCREEN: ${seen}`);
   }
-  return { page, context, problems };
+  return { page, context, problems, outside };
 };
 
 /** The page measures that must hold on every tab at every width. */
@@ -223,10 +228,12 @@ describe('Access settings, in the real Settings shell, over a fake machine', () 
 
   for (const viewport of VIEWPORTS) {
     it(`devices: the pairing code and a device's capabilities, by the panel's width (${viewport.name})`, async () => {
-      const { page, context } = await open(viewport, 'studio-light', 'devices', 'long');
+      const { page, context, outside } = await open(viewport, 'studio-light', 'devices', 'long');
       try {
         await page.locator('[data-pair-mint]').click();
         await page.locator('[data-pair-invite]').waitFor();
+        // The QR is drawn locally: the code is on the screen on purpose, and in nothing the browser said or asked for.
+        expect(outside.filter(line => line.includes('7F3K') || line.includes('Q2ND'))).toEqual([]);
         await page.locator('[data-device-capabilities]').first().locator('summary').click();
         const m = await measure(page);
         expect(m.pageScroll).toBeLessThanOrEqual(0);

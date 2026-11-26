@@ -13,7 +13,14 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sharedChromium } from '@ferretry/app/testing/browser';
 import type { Browser, Page } from 'playwright-core';
-import { type ServedScene, sceneContext, serveScene, type Viewport, VIEWPORTS } from '../../support/app/scene-page.ts';
+import {
+  type ServedScene,
+  sceneContext,
+  serveScene,
+  THEMES,
+  type Viewport,
+  VIEWPORTS,
+} from '../../support/app/scene-page.ts';
 
 setDefaultTimeout(60_000);
 const shotsDir = process.env.FY_BROWSER_JUMPY_SHOTS_DIR ?? '';
@@ -130,4 +137,49 @@ describe('the browser pane holds still while the browser works', () => {
     it(`never moves the page view or the toolbar as busy and loading flip (${viewport.name})`, async () => {
       await check(viewport);
     });
+});
+
+/** The status row's worst case: nobody has driven the browser and the display link is down (the longest words it speaks). */
+const WORST = 'actor=none&connection=disconnected';
+
+describe('the status row stays readable at its longest', () => {
+  for (const viewport of VIEWPORTS)
+    for (const family of ['studio', 'genz', 'neumorphism'] as const)
+      for (const theme of THEMES)
+        it(`shows every word of the row whole, nothing clipped or collapsed (${viewport.name}, ${family}, ${theme})`, async () => {
+          const context = await sceneContext(browser, served.origin, viewport, theme);
+          try {
+            const tab = await context.newPage();
+            await tab.goto(`${served.origin}/?theme=${family}-${theme}&${WORST}`);
+            await tab.waitForSelector('[data-browser-status-row]');
+            const cut = await tab.evaluate(() => {
+              const row = document.querySelector<HTMLElement>('[data-browser-status-row]') as HTMLElement;
+              const edge = row.getBoundingClientRect().right;
+              return (
+                [...row.children]
+                  .map(each => each as HTMLElement)
+                  // A word is cut when its text is wider than its box (truncated), or when its box is pushed past the row.
+                  .filter(
+                    each =>
+                      each.textContent !== '' &&
+                      (each.scrollWidth > each.clientWidth + 1 || each.getBoundingClientRect().right > edge + 0.5),
+                  )
+                  .map(each => each.textContent)
+              );
+            });
+            expect(cut).toEqual([]);
+            const chip = await tab.evaluate(() => {
+              const node = [...document.querySelectorAll<HTMLElement>('[data-browser-status-row] > *')].find(
+                each => each.textContent === 'No input yet',
+              );
+              return node === undefined ? 0 : node.getBoundingClientRect().width;
+            });
+            // The chip keeps room for its words (it used to collapse to an empty circle).
+            expect(chip).toBeGreaterThan(60);
+            if (shotsDir !== '')
+              await tab.screenshot({ path: join(shotsDir, `browser-worst-${family}-${viewport.name}-${theme}.png`) });
+          } finally {
+            await context.close();
+          }
+        });
 });
