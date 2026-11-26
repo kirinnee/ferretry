@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { FerretSummary } from '../../../../contract/index.ts';
+import type { FerretSummary, FyEvent } from '../../../../contract/index.ts';
 import { WaitController, type WaitPorts } from '../../../../cli/lib/wait/controller.ts';
 import { decideWait, renderWaitOutcome } from '../../../../cli/lib/wait/decide.ts';
 import { sessionView } from '../session/session-fixtures.ts';
@@ -65,7 +65,22 @@ describe('what a poll decides', () => {
   });
 });
 
-function world(script: readonly (FerretSummary | Error)[], present = false) {
+/** A journal event as the daemon serves it. */
+const journal = (sequence: number, type: string, data: unknown = {}): FyEvent => ({
+  sequence,
+  time: '2026-11-06T09:00:00.000Z' as FyEvent['time'],
+  sessionId: 'lead',
+  type,
+  source: 'journal',
+  data,
+});
+
+/** `events`: what the journal holds at each read, in order (the last one repeats); a read is `after` its cursor. */
+function world(
+  script: readonly (FerretSummary | Error)[],
+  present = false,
+  events: readonly (readonly FyEvent[])[] = [],
+) {
   let time = 0;
   const asked: number[] = [];
   const slept: number[] = [];
@@ -73,7 +88,15 @@ function world(script: readonly (FerretSummary | Error)[], present = false) {
   const err: string[] = [];
   let code = 0;
   let index = 0;
+  let reads = 0;
+  const cursors: number[] = [];
   const ports: WaitPorts = {
+    events: async (_reference, after) => {
+      cursors.push(after);
+      const held = events[Math.min(reads, events.length - 1)] ?? [];
+      reads += 1;
+      return held.filter(event => event.sequence > after);
+    },
     get: async () => {
       asked.push(time);
       const next = script[Math.min(index, script.length - 1)];
@@ -95,7 +118,7 @@ function world(script: readonly (FerretSummary | Error)[], present = false) {
     { success: t => out.push(t), error: t => err.push(t), setExitCode: c => (code = c) },
     'fy',
   );
-  return { controller, slept, out, err, code: () => code };
+  return { controller, ports, slept, out, err, cursors, code: () => code };
 }
 
 describe('the wait loop', () => {
@@ -162,6 +185,53 @@ describe('the wait loop', () => {
   });
 });
 
+describe('a ferret that asks for a person ends the wait (G13 review)', () => {
+  const ASK = journal(7, 'interaction.help', { reason: 'which database?' });
+
+  test('V-wait an idle ferret keeps the wait going, then a signal help ends it with exit 3 and the question', async () => {
+    const w = world(
+      [at({ state: 'idle' }), at({ state: 'idle' }), at({ state: 'idle' }), at({ state: 'idle' })],
+      false,
+      // The baseline read, a quiet poll, then the ferret asks (an interactive ferret stays idle: only the journal says so).
+      [[journal(1, 'session.started')], [journal(1, 'session.started')], [journal(1, 'session.started'), ASK]],
+    );
+    await w.controller.wait('lead', {});
+    expect(w.code()).toBe(3);
+    expect(w.err.join('\n')).toContain('asking for a person: which database?');
+    expect(w.slept).toHaveLength(2);
+    // Each read continues from the last sequence it saw.
+    expect(w.cursors).toEqual([0, 1, 1]);
+  });
+
+  test('V-wait a request already in the journal when the wait began was seen by whoever began it', async () => {
+    const w = world(
+      [at({ state: 'idle' }), at({ state: 'idle' }), at({ state: 'stopped', finishedAt: FINISHED })],
+      false,
+      [[ASK]],
+    );
+    await w.controller.wait('lead', {});
+    expect(w.code()).toBe(0);
+  });
+
+  test('V-wait a request ends a wait that names a deliverable too, and an ended ferret still ends it as ended', async () => {
+    const asked = world([at({ state: 'working' }), at({ state: 'working' })], false, [[], [ASK]]);
+    await asked.controller.wait('lead', { untilMarker: 'out.md' });
+    expect(asked.code()).toBe(3);
+    const died = world([at({ state: 'working' }), at({ state: 'stopped' })], false, [[], [ASK]]);
+    await died.controller.wait('lead', {});
+    expect(died.code()).toBe(1);
+  });
+
+  test('V-wait a journal that cannot be read leaves the wait as it was', async () => {
+    const w = world([at({ state: 'idle' }), at({ state: 'stopped', finishedAt: FINISHED })]);
+    w.ports.events = async () => {
+      throw new Error('no journal');
+    };
+    await w.controller.wait('lead', {});
+    expect(w.code()).toBe(0);
+  });
+});
+
 describe('the deadline bounds a read in flight', () => {
   test('V-wait --timeout ends 124 at the deadline when the daemon never answers the read, and the read was handed the deadline signal', async () => {
     const deadline = new AbortController();
@@ -170,6 +240,7 @@ describe('the deadline bounds a read in flight', () => {
     let code = 0;
     const err: string[] = [];
     const ports: WaitPorts = {
+      events: async () => [],
       // A hung daemon: the read settles only when its signal aborts, as the client's read does.
       get: async (_reference, signal) => {
         handed = signal;

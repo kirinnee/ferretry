@@ -1,4 +1,4 @@
-import type { FerretSummary } from '../../../contract/index.ts';
+import type { FerretSummary, FyEvent } from '../../../contract/index.ts';
 
 /**
  * What `fy wait` decides on every poll, as a pure function of the ferret's summary (today's `reads/wait.ts`, over
@@ -8,7 +8,21 @@ import type { FerretSummary } from '../../../contract/index.ts';
  * and "I gave up" are three different things to a script. A ferret that ended without saying `signal done` is
  * `ended`, never a success. An idle ferret is between turns, not finished: a lead waiting on a helper must not return
  * early, so an idle ferret, declared wait or not, keeps the wait going until it settles, ends or the caller's deadline.
+ * What does end the wait early is a ferret that asks for a person (`signal help`): idle is a ferret between turns, a
+ * request is one that cannot go on without an answer.
  */
+
+/** The journal event a ferret's `signal help` leaves, and the one a wait looks for. */
+const HELP_EVENT = 'interaction.help';
+
+/** What a help event asks, in the ferret's own words (its `reason`, or the question it also journals). */
+export function helpRequest(events: readonly FyEvent[]): string | undefined {
+  const asked = events.filter(event => event.type === HELP_EVENT).at(-1);
+  if (asked === undefined) return undefined;
+  const data = asked.data as { reason?: unknown; message?: unknown } | null | undefined;
+  const words = [data?.reason, data?.message].find((word): word is string => typeof word === 'string' && word !== '');
+  return words ?? 'the ferret asked for help';
+}
 
 /** Everything a poll knows. */
 export interface WaitObservation {
@@ -17,6 +31,8 @@ export interface WaitObservation {
   readonly marker?: { readonly path: string; readonly present: boolean };
   /** Whether the caller's own deadline has passed. */
   readonly expired: boolean;
+  /** What the ferret asked of a person since this wait began (`signal help`), when it did. */
+  readonly request?: string;
 }
 
 export type WaitOutcome =
@@ -24,6 +40,8 @@ export type WaitOutcome =
   | { readonly kind: 'settled'; readonly reason: 'completed' | 'marker' }
   /** The ferret ended without finishing, or ended without ever producing the deliverable. */
   | { readonly kind: 'ended'; readonly state: string; readonly marker?: string }
+  /** The ferret asked for a person and cannot go on without an answer. */
+  | { readonly kind: 'needs-human'; readonly state: string; readonly request: string }
   /** The caller's deadline passed while the ferret was still going. */
   | { readonly kind: 'timed-out'; readonly state?: string }
   /** The daemon connection failed, independently of what state the ferret may be in. */
@@ -40,6 +58,9 @@ export function waitExitCode(outcome: EndedWait): number {
       return 0;
     case 'ended':
       return 1;
+    // v4's code for a ferret that needs a person: a script branches on it to answer, not to retry.
+    case 'needs-human':
+      return 3;
     // What timeout(1) uses.
     case 'timed-out':
       return 124;
@@ -74,7 +95,7 @@ export function decideWait(
   observation: WaitObservation,
   notices: WaitNotices,
 ): { readonly outcome: WaitOutcome; readonly notices: WaitNotices } {
-  const { ferret, marker, expired } = observation;
+  const { ferret, marker, expired, request } = observation;
   const { state } = ferret;
   const finished = state === 'stopped' && ferret.finishedAt !== undefined;
   const died = state === 'stopped' && !finished;
@@ -94,6 +115,7 @@ export function decideWait(
   if (marker !== undefined) {
     if (marker.present) return { outcome: { kind: 'settled', reason: 'marker' }, notices };
     if (died) return { outcome: { kind: 'ended', state, marker: marker.path }, notices };
+    if (request !== undefined) return { outcome: { kind: 'needs-human', state, request }, notices };
     if (expired) return { outcome: { kind: 'timed-out', state }, notices };
     if (finished && !notices.missingMarker)
       return keep(`the ferret finished but ${marker.path} is not there yet; still waiting for it`, {
@@ -104,6 +126,7 @@ export function decideWait(
 
   if (finished) return { outcome: { kind: 'settled', reason: 'completed' }, notices };
   if (died) return { outcome: { kind: 'ended', state }, notices };
+  if (request !== undefined) return { outcome: { kind: 'needs-human', state, request }, notices };
   if (expired) return { outcome: { kind: 'timed-out', state }, notices };
   return declaredNote();
 }
@@ -117,6 +140,8 @@ export function renderWaitOutcome(outcome: EndedWait): string | undefined {
       return outcome.marker === undefined
         ? `the ferret ended as ${outcome.state} without saying it was done`
         : `the ferret is ${outcome.state} and ${outcome.marker} never appeared`;
+    case 'needs-human':
+      return `the ferret is asking for a person: ${outcome.request}`;
     case 'timed-out':
       return outcome.state === undefined
         ? 'timed out before the daemon returned a ferret'

@@ -63,7 +63,7 @@ function endedWhy(view: FerretSummary): string | undefined {
 
 /**
  * The `ps` STATE cell: the state, and in a few words what sets it apart: an idle ferret that declared a wait is
- * `waiting`; a stopped one that said `signal done` is `completed`, one whose launch never ran is `failed`, one that
+ * `waiting`; a stopped one that said `signal done` (`finishedAt`) is `completed`, one whose launch never ran is `failed`, one that
  * ended by itself says how; an ordinary stop stays bare.
  */
 function stateCell(view: FerretSummary): string {
@@ -73,8 +73,10 @@ function stateCell(view: FerretSummary): string {
   if (view.finishedAt !== undefined) return `${view.state} (completed)`;
   if (cause === undefined) return view.state;
   switch (cause.kind) {
+    // The daemon stamps this cause on an auto-mode ferret that failed by asking for a person, with no `finishedAt`: only
+    // the done signal (`finishedAt`, above) is evidence of a finish, so without it the honest word is the bare state.
     case 'completed':
-      return `${view.state} (completed)`;
+      return view.state;
     case 'start_failed':
       return `${view.state} (failed)`;
     case 'stopped':

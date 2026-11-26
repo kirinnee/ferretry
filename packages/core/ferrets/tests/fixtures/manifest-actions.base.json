@@ -963,7 +963,7 @@
           "help": "leave the session running after its result is collected (a settled wait stops it otherwise)"
         }
       ],
-      "summary": "block until a ferret settles; exits 0 finished, 1 ended, 69 daemon lost, 124 timeout; an idle ferret keeps it waiting",
+      "summary": "block until a ferret settles; exits 0 finished, 1 ended, 3 asked for a person (signal help), 69 daemon lost, 124 timeout; an idle ferret keeps it waiting",
       "verb": "wait <id>"
     },
     {

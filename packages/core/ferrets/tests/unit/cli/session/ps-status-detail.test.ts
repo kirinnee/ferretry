@@ -36,11 +36,12 @@ describe('fy ps tells a finished, a failed, a waiting and a stopped ferret apart
   const state = (over: Parameters<typeof sessionView>[0]): string =>
     renderSessionTable([sessionView(over)], PLAIN)[1]?.split(/\s{2,}/u)[2] ?? '';
 
-  test('said done is completed, a launch that never ran is failed, an ordinary stop stays stopped', () => {
+  test('only a done signal is completed, a launch that never ran is failed, an ordinary stop stays stopped', () => {
     expect(state({ state: 'stopped', finishedAt: COMPLETED, cause: { kind: 'completed' } })).toBe(
       'stopped (completed)',
     );
-    expect(state({ state: 'stopped', cause: { kind: 'completed' } })).toBe('stopped (completed)');
+    // The daemon stamps cause=completed on an auto ferret that failed by `signal help`; with no done signal it is not completed.
+    expect(state({ state: 'stopped', cause: { kind: 'completed' } })).toBe('stopped');
     expect(state({ state: 'stopped', cause: { kind: 'start_failed' } })).toBe('stopped (failed)');
     expect(state({ state: 'stopped', cause: { kind: 'stopped' } })).toBe('stopped');
     expect(state({ state: 'stopped' })).toBe('stopped');

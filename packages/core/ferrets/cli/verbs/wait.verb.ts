@@ -31,6 +31,7 @@ export default defineVerbs(({ api, clock, sleep, exists, verb, first }) => ({
     const controller = new WaitController(
       {
         get: async (reference, signal) => await api.get(reference, signal),
+        events: async (reference, after, signal) => await api.eventsAfter(reference, after, signal),
         // The deadline is the shell's cancellable sleep: its signal aborts when the time is up, and a finished wait drops it.
         startDeadline: milliseconds => {
           const timer = new AbortController();

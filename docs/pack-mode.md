@@ -365,6 +365,10 @@ failed, stalled or stopped. A plain `fy start` refused here answers `409 limit_r
 - A sub-ferret records `parent` (the session document's existing field) and inherits its parent's folder.
 - `fy wait <id>` blocks until it settles and **prints its result** — the `signal done` message, from
   `GET /v1/ferrets/:ferretId/result` (`--json` adds it as `result`).
+- A wait keeps going through a ferret that is merely idle between turns. It ends early, **exit 3**, when the ferret
+  asks for a person (`fy signal help`: the question is printed on stderr and journaled as `interaction.help`);
+  a question journaled before the wait began is not re-raised. The other exits: 0 finished, 1 ended without done,
+  69 daemon lost, 124 `--timeout`.
 - A sub-ferret that signals done is stopped by that signal. One a wait settles on that is still running
   (a `--until-marker` wait) is stopped once its result is collected, unless the caller passes `--keep`.
 

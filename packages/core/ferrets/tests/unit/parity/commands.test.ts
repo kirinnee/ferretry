@@ -279,7 +279,7 @@ describe('commands parity', () => {
       expect(none.calls).toEqual([]);
     });
 
-    test('V-0496 fy wait <id> exits 0 completed, 1 ended, 69 daemon lost, 124 timeout (an idle ferret keeps it waiting); --json, --interval, --timeout, --until-marker', async () => {
+    test('V-0496 fy wait <id> exits 0 completed, 1 ended, 3 asked for a person, 69 daemon lost, 124 timeout (an idle ferret keeps it waiting); --json, --interval, --timeout, --until-marker', async () => {
       const exitOf = async (
         state: Partial<Parameters<typeof sessionView>[0]>,
         options: Options = {},

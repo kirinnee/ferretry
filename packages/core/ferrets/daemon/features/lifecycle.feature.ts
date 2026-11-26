@@ -160,7 +160,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
         return jsonResponse(summary);
       },
       'POST /v1/ferrets/:ferretId/stop': async call => {
-        const id = await pathFerret(call);
+        const id = await pathFerret(call, true);
         mayAct(call, id);
         const how = queryValue(call.request, 'how') === 'now' ? 'now' : 'polite';
         const { reason } = parseStopBody(await body(call));
