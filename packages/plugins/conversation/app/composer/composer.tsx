@@ -55,7 +55,7 @@ import {
 } from './composer-autocomplete.ts';
 import { ComposerLocationChip } from './composer-location-chip.tsx';
 import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
-import { type ComposerHarness, createComposerAutocompleteProviders } from './composer-autocomplete-providers.ts';
+import { type ComposerHarnessFact, createComposerAutocompleteProviders } from './composer-autocomplete-providers.ts';
 import { useComposerDockLayout } from './composer-dock-layout.ts';
 import { ComposerFormatToolbar } from './composer-format-toolbar.tsx';
 import { useComposerHostWarmup } from './composer-host-warmup.ts';
@@ -225,7 +225,7 @@ export interface ComposerProps {
    * The ferret's harness, read from the ferret itself: how a picked skill is invoked (`/name` on Claude, `$name` on
    * Codex) and which built-in commands the `/` menu offers. Absent, a menu offers what every harness accepts.
    */
-  readonly harness?: ComposerHarness;
+  readonly harness?: ComposerHarnessFact;
   /** The daemon's work search; absent on a machine that cannot search, which keeps both menus local-only. */
   readonly autocompleteWorkSearch?: WorkSearchPort;
   /** Project id to name for the cards that search finds. */

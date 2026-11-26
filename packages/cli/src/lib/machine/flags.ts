@@ -22,12 +22,23 @@ export function optionList(invocation: VerbInvocation, name: string): readonly s
   return typeof value === 'string' ? [value] : [...value];
 }
 
-/** A harness as a person typed it: `claude` for Claude Code, or `codex`. */
+/**
+ * The words a person may type for each tool the machine setup can install (`claude` for Claude Code, or `codex`), and the
+ * harness each names. Only a word in this table is a tool: any other is refused in words, never read as a default.
+ */
+const TOOL_WORDS: Readonly<Record<string, MachineHarness>> = {
+  claude: 'claude-code',
+  'claude-code': 'claude-code',
+  codex: 'codex',
+};
+
+/** A harness as a person typed it. */
 export function parseHarness(value: string): MachineHarness {
-  const harness = value.trim().toLowerCase();
-  if (harness === 'claude' || harness === 'claude-code') return 'claude-code';
-  if (harness === 'codex') return 'codex';
-  throw new MachineCommandError(`"${value}" is not a tool this machine knows: use claude or codex.`);
+  const word = value.trim().toLowerCase();
+  const harness = Object.hasOwn(TOOL_WORDS, word) ? TOOL_WORDS[word] : undefined;
+  if (harness === undefined)
+    throw new MachineCommandError(`"${value}" is not a tool this machine knows: use claude or codex.`);
+  return harness;
 }
 
 /** A local file a person named, refused in words when it cannot be read. */

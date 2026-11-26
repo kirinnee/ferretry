@@ -49,7 +49,8 @@ export function linkRoutes(links: Pick<LinkService, 'list' | 'preview' | 'keep' 
       const id = LinkIdSchema.safeParse(param(call, 'conversationId'));
       if (!id.success) throw new ApiError(400, 'the conversation id is not usable', 'invalid_conversation_id');
       const preview = await links.preview(harness, id.data);
-      if (preview === undefined) throw new ApiError(404, 'that conversation is not on this machine', 'not-found');
+      if (preview === undefined)
+        throw new ApiError(404, `that ${harness} conversation is not on this machine`, 'not-found');
       return jsonResponse(LinkPreviewSchema.parse(preview));
     }) satisfies RouteHandler,
 
