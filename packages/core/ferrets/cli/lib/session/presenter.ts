@@ -1,4 +1,4 @@
-import type { FerretSummary } from '../../../contract/index.ts';
+import type { FerretLiveRead, FerretSummary } from '../../../contract/index.ts';
 import { renderFerret } from './display.ts';
 import { SessionCommandError } from './errors.ts';
 import type { ISessionIo } from './ports.ts';
@@ -14,12 +14,12 @@ export class SessionPresenter {
   constructor(private readonly io: ISessionIo) {}
 
   /** Prints one ferret: the detail block, or its JSON. */
-  view(view: FerretSummary, json = false, lastWords?: string): void {
+  view(view: FerretSummary, json = false, lastWords?: string, live?: FerretLiveRead): void {
     if (json) {
       this.json(view);
       return;
     }
-    this.lines(renderFerret(view, lastWords));
+    this.lines(renderFerret(view, lastWords, live));
   }
 
   /** Prints already-rendered lines to stdout. */

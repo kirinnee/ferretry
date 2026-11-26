@@ -49,7 +49,7 @@ const start = (role: 'start' | 'new', { api, environment, env, readText, readByt
     if (mode !== 'auto' && mode !== 'interactive') throw new SessionCommandError('--mode is auto or interactive');
     const agent = text(invocation, 'agent', 'a', 'runtime');
     const teammate = text(invocation, 'teammate');
-    const parent = role === 'start' ? text(invocation, 'parent') : undefined;
+    const parent = text(invocation, 'parent');
     const harness = text(invocation, 'harness');
     const login = text(invocation, 'login');
     const pack = text(invocation, 'pack');

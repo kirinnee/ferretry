@@ -1,6 +1,13 @@
-import type { FerretSummary } from '../../../contract/index.ts';
+import type { FerretSummary, FyEvent } from '../../../contract/index.ts';
 import { SessionCommandError } from '../session/errors.ts';
-import { decideWait, type EndedWait, renderWaitOutcome, type WaitNotices, waitExitCode } from './decide.ts';
+import {
+  decideWait,
+  type EndedWait,
+  helpRequest,
+  renderWaitOutcome,
+  type WaitNotices,
+  waitExitCode,
+} from './decide.ts';
 
 /** Flags accepted by `fy wait`. */
 export interface WaitOptions {
@@ -16,6 +23,8 @@ export interface WaitPorts {
   get(reference: string, signal?: AbortSignal): Promise<FerretSummary>;
   /** A deadline `milliseconds` away: its signal aborts when it passes; `cancel` drops it once the wait has ended. */
   startDeadline(milliseconds: number): WaitDeadline;
+  /** The ferret's journal events after sequence `after`: how a request for a person reaches a wait. */
+  events(reference: string, after: number, signal?: AbortSignal): Promise<readonly FyEvent[]>;
   /** Whether the deliverable named by `--until-marker` exists yet. */
   markerExists(path: string): Promise<boolean>;
   nowMs(): number;
@@ -96,8 +105,15 @@ export class WaitController {
     passed: () => boolean,
   ): Promise<void> {
     let rung = 0;
-    let notices: WaitNotices = { missingMarker: false, declaredWait: false };
+    let notices: WaitNotices = { missingMarker: false, declaredWait: false, idle: false };
     let last: FerretSummary | undefined;
+    // The journal sequence this wait has read to, taken at invocation BEFORE the first summary read: a request raised
+    // before the wait began was seen by whoever started it, and one raised after is never skipped. `undefined` only
+    // when the journal could not be read then; the first read that succeeds takes the baseline instead.
+    let cursor: number | undefined = await this.ports
+      .events(reference, 0, deadline?.signal)
+      .then(held => held.reduce((highest, event) => Math.max(highest, event.sequence), 0))
+      .catch(() => undefined);
     for (;;) {
       if (passed()) {
         this.finish(reference, options, last, {
@@ -128,9 +144,20 @@ export class WaitController {
       }
       if (last !== undefined && moved(last, ferret)) rung = 0;
       last = ferret;
+      let request: string | undefined;
+      if (ferret.state !== 'stopped') {
+        // A courtesy read: a daemon that cannot answer it leaves the wait as it was (the next summary read says if the
+        // daemon is lost).
+        const seen = await this.ports.events(reference, cursor ?? 0, deadline?.signal).catch(() => undefined);
+        if (seen !== undefined) {
+          request = cursor === undefined ? undefined : helpRequest(seen);
+          cursor = seen.reduce((highest, event) => Math.max(highest, event.sequence), cursor ?? 0);
+        }
+      }
       const decision = decideWait(
         {
           ferret,
+          ...(request === undefined ? {} : { request }),
           ...(options.untilMarker === undefined
             ? {}
             : { marker: { path: options.untilMarker, present: await this.ports.markerExists(options.untilMarker) } }),

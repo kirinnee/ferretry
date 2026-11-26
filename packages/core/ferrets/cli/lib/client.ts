@@ -2,8 +2,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import {
+  type FerretLiveRead,
+  FerretLiveReadSchema,
   type FerretSummary,
   FerretSummarySchema,
+  type FyEvent,
+  FyEventListSchema,
   SubtreeViewSchema,
   type SubtreeView,
   type RestartCancelResult,
@@ -40,6 +44,8 @@ export const FERRET_ROUTES = {
   /** The STORED last screen (`FerretsApi.lastSnapshot`): gated, and masked again on every read. */
   lastScreen: 'GET /v1/ferrets/:ferretId/last-screen',
   get: 'GET /v1/ferrets/:ferretId',
+  events: 'GET /v1/ferrets/:ferretId/events',
+  live: 'GET /v1/ferrets/:ferretId/live',
   start: 'POST /v1/ferrets',
   recoverStart: 'GET /v1/ferrets/by-request/:requestId',
   stop: 'POST /v1/ferrets/:ferretId/stop',
@@ -55,6 +61,8 @@ export const FERRET_ROUTES = {
   cancelRestarts: 'DELETE /v1/restarts',
 } as const;
 
+/** The most events one journal page holds (the daemon's own bound). */
+const EVENT_PAGE = 1_000;
 const ListedSchema = FerretSummarySchema.array();
 const LastScreenSchema = z.object({ screen: z.string() });
 const at = (reference: string) => ({ params: { ferretId: reference } });
@@ -146,6 +154,27 @@ export class ClientSessionApi
   }
 
   /**
+   * The journal events after sequence `after`, paged to the end (the daemon holds a page to 1,000). `signal` ends the
+   * wait for an answer as `get` does.
+   */
+  async eventsAfter(reference: string, after: number, signal?: AbortSignal): Promise<readonly FyEvent[]> {
+    const events: FyEvent[] = [];
+    let cursor = after;
+    for (;;) {
+      const call = this.client.call<unknown>(FERRET_ROUTES.events, {
+        ...at(reference),
+        query: { after: String(cursor), limit: String(EVENT_PAGE) },
+        quiet: true,
+      });
+      const page = FyEventListSchema.parse(signal === undefined ? await call : await abandonOnAbort(call, signal));
+      events.push(...page);
+      const last = page.at(-1);
+      if (last === undefined || page.length < EVENT_PAGE) return events;
+      cursor = last.sequence;
+    }
+  }
+
+  /**
    * The ferret's STORED last screen, through the gated and re-masked read (`live=false`), or `undefined` when there is
    * none, the caller may not read it or the route is not there: a ferret's last words are a courtesy, never a failure.
    */
@@ -155,6 +184,15 @@ export class ClientSessionApi
       .catch(() => undefined);
     const parsed = LastScreenSchema.safeParse(answer);
     return parsed.success ? parsed.data.screen : undefined;
+  }
+
+  /** The ferret's turns and context fill, or `undefined` when the daemon cannot say: a detail line is never a failure. */
+  async live(reference: string): Promise<FerretLiveRead | undefined> {
+    const answer = await this.client
+      .call<unknown>(FERRET_ROUTES.live, { ...at(reference), quiet: true })
+      .catch(() => undefined);
+    const parsed = FerretLiveReadSchema.safeParse(answer);
+    return parsed.success ? parsed.data : undefined;
   }
 
   async subtree(reference: string): Promise<SubtreeView> {
