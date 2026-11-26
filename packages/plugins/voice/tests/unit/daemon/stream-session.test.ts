@@ -212,6 +212,17 @@ describe('V1: entering voice mode', () => {
     expect(refused.closes).toEqual([]);
     expect(refused.audited).toEqual([]);
     expect(refused.snapshot().state).toBe('listening');
+
+    // A send that throws (the socket closed under it) is the same: the stream carries on and the person can talk.
+    const thrown = await rig({
+      send: async () => {
+        throw new Error('the socket closed under the send');
+      },
+    });
+    thrown.start(chat);
+    await thrown.talk(1_000);
+    expect(thrown.closes).toEqual([]);
+    expect(thrown.snapshot().state).toBe('listening');
   });
 });
 
