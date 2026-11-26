@@ -543,11 +543,31 @@ describe('what a spoken answer may pick, and what the log may hold of a refused 
   it('writes no nested or oversized argument of a refused call to the log', async () => {
     const r = rig();
     r.state.access = READ_ACCESS;
-    const huge = { ['fyc_at_' + 'z'.repeat(43)]: 'x'.repeat(200_000), more: ['y'.repeat(200_000)] };
+    const huge = { [`fyc_at_${'z'.repeat(43)}`]: 'x'.repeat(200_000), more: ['y'.repeat(200_000)] };
     await tool(r, 'send_to_ferret', { ferret: huge, message: 'hello' });
     const line = JSON.stringify(r.calls.records);
     should(line.length).be.below(2_000);
     should(line).not.containEql('fyc_at_');
     should(r.calls.records[0]?.outcome).equal('refused');
+  });
+});
+
+describe('a spoken choice with no digit still matches a label the way a person says it', () => {
+  it('takes "Post-gres" for Postgres through the name folding, and sends the label as it is written', async () => {
+    const r = rig();
+    const pick = agendaItem({
+      id: 'A21',
+      subject: 'Which database?',
+      why: 'Pick one',
+      ask: { kind: 'multiple-choice', options: [{ label: 'Postgres' }, { label: 'SQLite' }] },
+    });
+    r.delegate
+      .on(ferretsRoute([LIZ, MARIN]))
+      .on(openRoute({ [LIZ.id]: [pick] }))
+      .on(answered(LIZ.id));
+    const reply = await tool(r, 'answer_attention', { item: 'A21', answer: 'post-gres' });
+    should(reply.isError).be.false();
+    const body = posts(r)[0]?.call.body as { response?: { choice?: string } } | undefined;
+    should(body?.response?.choice).equal('Postgres');
   });
 });
