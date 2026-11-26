@@ -72,16 +72,20 @@ const reachabilityOf = (up: boolean, read: SupervisorRead): 'serving' | 'wedged'
 
 const supervisorKeys = (read: SupervisorRead): Readonly<Record<string, unknown>> => {
   if (read.kind === 'read') {
-    const { manager, state, pid, detail } = read.report;
+    const { manager, state, pid, detail, loaded, lastExit, definition } = read.report;
     return {
       manager,
       state,
       ...(pid === undefined ? {} : { pid }),
       ...(detail === undefined || detail === '' ? {} : { detail }),
+      // launchd's own facts, said once here and in the lines below: is the job loaded, how did it last exit, which plist.
+      ...(loaded === undefined ? {} : { loaded }),
+      ...(lastExit === undefined ? {} : { lastExit }),
+      ...(definition === undefined ? {} : { definition }),
     };
   }
   return read.kind === 'unread'
-    ? { manager: read.manager, state: 'not-reported', detail: unreadSentence(read.manager) }
+    ? { manager: read.manager, state: 'not-reported', detail: unreadSentence(read.manager, read.why) }
     : { manager: 'unknown', state: 'not-reported', detail: read.why };
 };
 
@@ -105,20 +109,30 @@ export function supervisorJson(
   };
 }
 
-const unreadSentence = (manager: string): string =>
-  `${manager} status is not reported in 5.0 yet (macOS is on the Mac end list)`;
+const unreadSentence = (manager: string, why: string): string => `${manager} could not be read: ${why}`;
 
 const detailOf = (report: DaemonSupervisorReport): string =>
   report.detail === undefined || report.detail === '' ? '' : ` (${report.detail})`;
 
+/** launchd's facts under its state line: loaded or not, the last exit status, and the plist it was read from. */
+function launchdFacts(report: DaemonSupervisorReport): readonly string[] {
+  if (report.manager !== 'launchd' || report.loaded === undefined) return [];
+  const parts = [
+    `loaded: ${report.loaded ? 'yes' : 'no'}`,
+    ...(report.lastExit === undefined ? [] : [`last exit: ${String(report.lastExit)}`]),
+    `plist: ${report.definition ?? 'not installed'}`,
+  ];
+  return [`    ${parts.join('; ')}`];
+}
+
 /** Today's supervisor line: the manager and its state, or that none manages the daemon. */
 function supervisorLine(read: SupervisorRead): string {
-  if (read.kind === 'unread') return `  ${read.manager}: not read — ${unreadSentence(read.manager)}`;
+  if (read.kind === 'unread') return `  ${read.manager}: not read — ${read.why}`;
   if (read.kind === 'failed') return `  supervisor not read: ${read.why}`;
   const { report } = read;
   return report.manager === 'direct'
     ? '  not managed by a service manager'
-    : `  ${report.manager}: ${report.state}${detailOf(report)}`;
+    : [`  ${report.manager}: ${report.state}${detailOf(report)}`, ...launchdFacts(report)].join('\n');
 }
 
 /** `Liveness: alive|dead|absent`, where the manager was read. */

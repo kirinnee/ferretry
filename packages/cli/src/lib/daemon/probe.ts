@@ -71,7 +71,7 @@ export function parseLaunchdPrint(stdout: string): LaunchdJobProperties {
   const field = (name: string): string | undefined =>
     new RegExp(`^\\s*${name}\\s*=\\s*(.+?)\\s*$`, 'mu').exec(stdout)?.[1];
   const pid = Number(field('pid'));
-  const lastExitStatus = Number(field('last exit status'));
+  const lastExitStatus = Number(/^-?\d+/u.exec(field('last exit (?:status|code)') ?? '')?.[0]);
   const state = field('state');
   return {
     ...(state === undefined ? {} : { state }),
