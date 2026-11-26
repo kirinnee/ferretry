@@ -54,6 +54,12 @@ export class GitWorktreeGateway {
     return parseWorktreeList(decodeGitOutput(execution));
   }
 
+  async head(cwd: GitWorkingDirectory): Promise<string> {
+    return stripFinalLineFeed(
+      decodeGitOutput(await runGit(this.runner, cwd, ['rev-parse', '--verify', 'HEAD'], 'git head')),
+    );
+  }
+
   async inspect(cwd: string): Promise<GitCheckoutSnapshot> {
     const observedAt = this.clock.nowIso();
     if ((await this.fileSystem.type(cwd)) === 'missing') return { repo: false, kind: 'missing', observedAt };

@@ -1293,6 +1293,13 @@ command says so at the moment somebody might be tempted to do that instead.
   A row whose folder this daemon may not reach (outside
   every ferret's folder and the managed root) is still listed with Git's own facts and `live.undetermined` saying so.
   The owner's `fy` with the admin token over loopback is ungoverned, as everywhere.
+- **Tidy worktree verdicts (`GET /v1/tidy/worktrees/:project`) also ask `filesystem.configure`** because they expose
+  the repository worktree list above, including paths outside the project folder. The read changes no registry or
+  checkout and fetches no Git refs. `POST …/remove` and `POST …/clean-merged` are `filesystem.configure`, operator,
+  any caller, no-store, audited as `worktree.removed`. Both take the exact reviewed `paths`, re-read each branch's PR
+  through Pulls and repeat the local safety check. Only positive merged evidence with an exact local/merged head
+  match can authorize the existing managed/adopted removal service; no discard or unpushed override is passed.
+  None, unknown and failed reads keep the worktree. Main, detached and unadopted checkouts are always kept.
 - ~~The audit journal has no read surface.~~ **Closed.** `GET /v1/grants/audit` and
   `fy daemon config history` (alias `log`) read the tail of `state/grant-audit.jsonl`. The read is
   `admin` scope rather than the grant read’s `warden`, because it names DEVICES; it is bounded to a

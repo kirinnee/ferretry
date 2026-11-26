@@ -11,7 +11,12 @@ import type { HarnessHistorySource } from '../../contract/history.ts';
 import type { FerretState, FerretSummary, HarnessKey, PackId } from '../../contract/ids.ts';
 import type { ConversationImport, HarnessFacts, RunnerHandle, TurnUsage } from '../../contract/kinds.ts';
 import type { LaunchOrigin } from '../../contract/launch-origin.ts';
-import type { RepoWorktreeListResponse } from '../../contract/worktrees.ts';
+import type {
+  RepoWorktreeListResponse,
+  RemovedWorktree,
+  WorktreeRemovalDecision,
+  WorktreeRemovalRequest,
+} from '../../contract/worktrees.ts';
 import type {
   AutoResumeReport,
   FerretAddress,
@@ -73,6 +78,8 @@ interface FerretsApiAtBase {
   summary(ferret: FerretId): Promise<string | undefined>;
   managedWorktrees?(): Promise<readonly ManagedWorktreeSummary[]>;
   repoWorktrees?(commonDir: string): Promise<RepoWorktreeListResponse>;
+  checkWorktreeRemoval?(path: string, currentWorkingDirectory?: string): Promise<WorktreeRemovalDecision>;
+  removeWorktree?(request: WorktreeRemovalRequest): Promise<RemovedWorktree>;
   systemCallsign?(prefix: 'warden' | 'learning' | 'pack'): Promise<string>;
   agentControl(ferret: FerretId): Promise<AgentControl>;
   lastAutoResume?(): Promise<AutoResumeReport | null>;

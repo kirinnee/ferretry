@@ -46,7 +46,11 @@ function register(f: FerretsContext): FeatureContribution | undefined {
   // The repository listing is also a read other plugins make (Projects' worktrees section): the same refusals, as ApiErrors.
   return {
     routes: worktrees.routes,
-    port: { repoWorktrees: async commonDir => await worktrees.listRepo(commonDir).catch(refuse) },
+    port: {
+      repoWorktrees: async commonDir => await worktrees.listRepo(commonDir).catch(refuse),
+      checkWorktreeRemoval: async (path, cwd) => await worktrees.service.checkRemoval(path, cwd, true).catch(refuse),
+      removeWorktree: async request => await worktrees.service.remove(request).catch(refuse),
+    },
   };
 }
 

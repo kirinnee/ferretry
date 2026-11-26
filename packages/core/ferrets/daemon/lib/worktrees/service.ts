@@ -315,12 +315,20 @@ export class ManagedWorktreeService {
     };
   }
 
-  async checkRemoval(path: string, currentWorkingDirectory?: string): Promise<WorktreeRemovalDecision> {
-    return await this.#runLifecycle(async () => await this.#checkRemoval(path, currentWorkingDirectory));
+  async checkRemoval(
+    path: string,
+    currentWorkingDirectory?: string,
+    readOnly = false,
+  ): Promise<WorktreeRemovalDecision> {
+    return await this.#runLifecycle(async () => await this.#checkRemoval(path, currentWorkingDirectory, readOnly));
   }
 
-  async #checkRemoval(path: string, currentWorkingDirectory?: string): Promise<WorktreeRemovalDecision> {
-    const { managed, managedRoot } = await this.#live(path);
+  async #checkRemoval(
+    path: string,
+    currentWorkingDirectory?: string,
+    readOnly = false,
+  ): Promise<WorktreeRemovalDecision> {
+    const { managed, managedRoot } = await this.#live(path, !readOnly);
     const [sessions, terminalRoots] = await Promise.all([this.sessions.sessions(), this.terminals.roots()]);
     const examined = await this.operations.examine(
       managedWorktreeRemovalContext({
@@ -379,6 +387,7 @@ export class ManagedWorktreeService {
       removed = await this.operations.remove({
         ...context,
         overrides: request.overrides,
+        expectedHead: request.expectedHead,
         deleteBranch: request.deleteBranch,
         refreshEvidence,
       });
@@ -522,16 +531,14 @@ export class ManagedWorktreeService {
     }
   }
 
-  /** Runs one complete lifecycle after the previous one, even when the previous one failed. */
   async #runLifecycle<Result>(operation: () => Promise<Result>): Promise<Result> {
     const current = this.lifecycle.catch(() => undefined).then(operation);
     this.lifecycle = current;
     return await current;
   }
 
-  /** The record for a path that still exists, or a stated refusal naming which of the two it is. */
-  async #live(path: string): Promise<{ managed: ManagedWorktree; managedRoot: string }> {
-    const state = await this.#settled();
+  async #live(path: string, settle = true): Promise<{ managed: ManagedWorktree; managedRoot: string }> {
+    const state = settle ? await this.#settled() : await this.registry.read();
     const managed = findManagedWorktree(state.worktrees, path);
     if (managed === undefined) {
       const pending = state.intents.find(intent => intent.path === path);

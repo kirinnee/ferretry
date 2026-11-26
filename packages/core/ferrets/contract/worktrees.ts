@@ -233,6 +233,11 @@ export type RemovedWorktree = z.infer<typeof RemovedWorktreeSchema>;
 
 export const WorktreeRemovalRequestSchema = z.strictObject({
   path: Text,
+  /** Refuse if the checkout moved since the caller proved this commit safe (Tidy's merged PR head). */
+  expectedHead: z
+    .string()
+    .regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u)
+    .optional(),
   overrides: z.array(WorktreeRemovalOverrideSchema),
   deleteBranch: z.boolean(),
   confirmations: z.array(BranchDeletionConfirmationSchema),

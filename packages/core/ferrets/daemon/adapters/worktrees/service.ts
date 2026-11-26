@@ -578,10 +578,7 @@ export class ManagedWorktreeAdapter {
     return { live, decision, ...(branchEvidence === undefined ? {} : { branchEvidence }) };
   }
 
-  /**
-   * Remove under the repository queue: repeat the Git preflight, refusing ANY blocker change.
-   * Re-read occupancy after pinning, immediately before deleting, to catch a late shell or ferret.
-   */
+  /** Recheck Git and occupancy under the repository queue, then pin before deleting. */
   async remove(input: RemoveManagedWorktreeInput): Promise<RemovedManagedWorktree> {
     return await this.queue.run(input.managed.commonDir, async () => {
       const preflight = await this.examine(input);
@@ -602,7 +599,6 @@ export class ManagedWorktreeAdapter {
         );
       }
 
-      // Git's own refusal of a dirty tree is answered only by the consent that already covered it.
       const discarding = fresh.decision.blockers.some(blocker => blocker.override === 'discard_worktree_changes');
       await this.#withPinned(
         fresh.decision.path,
@@ -613,6 +609,10 @@ export class ManagedWorktreeAdapter {
           ),
         async pinnedCwd => {
           await verifyWorktreeOccupancy(refreshed, input.refreshEvidence);
+          if (input.expectedHead !== undefined && (await this.gateway.head(pinnedCwd)) !== input.expectedHead)
+            throw new WorktreeRemovalRefusal('the checkout head changed after the merged commit was proved', [
+              { code: 'undetermined_evidence', message: 'the checkout no longer has the expected head' },
+            ]);
           return await this.gateway.remove(pinnedCwd, discarding);
         },
       );
