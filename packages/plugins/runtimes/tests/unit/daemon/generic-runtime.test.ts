@@ -764,3 +764,12 @@ test('the start source forwards a native runtime default model and turns a refus
   const passed = f.generic.start({ resolve: async () => refused, login: async () => ({ ok: true }) });
   expect(await passed.resolve(custom)).toEqual(refused);
 });
+
+test('the machine view carries what a login with no runtime yet would offer, and leaves out a login the tool cannot read', async () => {
+  const f = await fixture({ configured: false });
+  const seen = async () =>
+    (await f.host.request('GET', '/v1/runtimes/machine')).json<{ nativeModels?: unknown }>().nativeModels;
+  expect(await seen()).toEqual([{ login: 'key', harness: 'fourth', models: ['provider/model'] }]);
+  f.modelFailure(true);
+  expect(await seen()).toBeUndefined();
+});

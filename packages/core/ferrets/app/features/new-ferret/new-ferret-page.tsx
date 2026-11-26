@@ -304,7 +304,10 @@ export function NewFerretPage({
     (native &&
       draft.model.trim() !== '' &&
       !chosen.models.some(model => model.id === draft.model.trim() && model.available));
-  const canSubmit = canStartFerret(draft, submitting) && !awaitingPick && !needsModel;
+  // The picker changes the runtime first and tells this page what it chose a render later: in between, the model on the
+  // form belongs to the runtime it was typed for, so nothing is sent until the new account has been told.
+  const awaitingAccount = chosenRuntime !== null && chosen === null;
+  const canSubmit = canStartFerret(draft, submitting) && !awaitingPick && !needsModel && !awaitingAccount;
   const homePath = daemonHomeHref(daemon);
   const back = backPlace ?? { path: homePath, label: '← Home' };
   const now = useNow();

@@ -58,7 +58,7 @@ function Advanced() {
 }
 
 createRoot(document.getElementById('root')!).render(
-  mode === 'add' ? (
+  mode === 'add' || mode === 'pin' ? (
     <Advanced />
   ) : (
     <NewFerretPage

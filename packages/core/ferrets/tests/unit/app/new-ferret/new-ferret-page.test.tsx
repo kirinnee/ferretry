@@ -97,6 +97,38 @@ describe('NewFerretPage', () => {
     await runAsync(async () => button(h.view, 'Create ferret').props.onClick());
     expect(post(h)?.body).toMatchObject({ runtime: 'mistral', model: 'mistral/codestral' });
   });
+  it('keeps Create off between choosing another native runtime and being told its models, so the old model is never sent', async () => {
+    const native = (wrapper: string, model: string): ChosenFerretAccount => ({
+      ...CLAUDE,
+      kind: 'opencode',
+      wrapper,
+      defaultModel: null,
+      requiresModel: true,
+      models: [{ id: model, available: true }],
+    });
+    const deepseek = native('opencode-deepseek', 'deepseek/deepseek-v4-pro');
+    const mistral = native('opencode-mistral', 'mistral/codestral');
+    const h = page();
+    run(() => {
+      h.slot()!.onValueChange(deepseek.wrapper);
+      h.slot()!.onChosen(deepseek);
+    });
+    change(h.view, 'fy-new-ferret-folder', '/fixture');
+    change(h.view, 'fy-new-ferret-prompt', 'Inspect fixture');
+    change(h.view, 'fy-new-ferret-model', 'deepseek/deepseek-v4-pro');
+    expect(button(h.view, 'Create ferret').props.disabled).toBeFalse();
+    // The picker's value changes first; the account it chose is delivered only after, in its own effect.
+    run(() => h.slot()!.onValueChange(mistral.wrapper));
+    expect(button(h.view, 'Create ferret').props.disabled).toBeTrue();
+    await runAsync(async () => button(h.view, 'Create ferret').props.onClick());
+    expect(post(h)).toBeUndefined();
+    run(() => h.slot()!.onChosen(mistral));
+    expect(button(h.view, 'Create ferret').props.disabled).toBeTrue();
+    change(h.view, 'fy-new-ferret-model', 'mistral/codestral');
+    expect(button(h.view, 'Create ferret').props.disabled).toBeFalse();
+    await runAsync(async () => button(h.view, 'Create ferret').props.onClick());
+    expect(post(h)?.body).toMatchObject({ runtime: 'opencode-mistral', model: 'mistral/codestral' });
+  });
   it('requires an explicit model when a registered runtime has no exact discovery default', async () => {
     const account: ChosenFerretAccount = {
       ...CLAUDE,

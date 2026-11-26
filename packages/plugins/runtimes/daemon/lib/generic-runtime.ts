@@ -25,6 +25,7 @@ import {
   type AccountChange,
   type AccountChangeView,
   type RuntimeFile,
+  type MachineNativeModels,
   type RuntimeView,
   type RuntimeSummary,
   type RuntimeId,
@@ -268,6 +269,27 @@ export class GenericRuntimes {
       view,
       models: { choices: models.choices, ...(preferred === undefined ? {} : { default: preferred }) },
     };
+  }
+  /** What each login offers each registered tool, from the descriptor a runtime on it would be checked against. */
+  private async nativeModels(): Promise<readonly MachineNativeModels[]> {
+    const registrations = this.registrations();
+    if (registrations.length === 0) return [];
+    const { logins } = await this.deps.logins.list();
+    const rows = await Promise.all(
+      registrations.flatMap(item =>
+        logins
+          .filter(login => login.harnesses.includes(item.key))
+          .map(async login => {
+            try {
+              const { choices } = await item.runtime.models(login.id);
+              return [{ login: login.id, harness: item.key, models: choices.map(choice => choice.id) }];
+            } catch {
+              return [];
+            }
+          }),
+      ),
+    );
+    return rows.flat();
   }
   private async views(notices: string[] = []): Promise<readonly RuntimeView[]> {
     const rows: RuntimeView[] = [];
@@ -530,9 +552,11 @@ export class GenericRuntimes {
               };
             }),
           );
+          const nativeModels = await this.nativeModels();
           return {
             ...old,
             tools: [...old.tools, ...tools],
+            ...(nativeModels.length === 0 ? {} : { nativeModels }),
             runtimeCount: old.runtimeCount + rows.length,
             ...(notices.length === 0 ? {} : { notices }),
           };

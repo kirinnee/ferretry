@@ -132,14 +132,20 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
   const native = harness !== undefined && !HARNESSES.includes(harness);
   const harnessLabel = (key: HarnessKind): string =>
     machine?.tools.find(tool => tool.harness === key)?.label ?? harnessName(key);
+  // What the daemon will check a pin against: the models the tool's own descriptor reports for this login, which it
+  // reads for a login with no runtime yet too; a runtime already on it says the same.
+  const nativeChoices: readonly { readonly id: string; readonly available?: boolean }[] =
+    machine?.nativeModels
+      ?.find(item => item.login === credential?.id && item.harness === harness)
+      ?.models.map(id => ({ id })) ??
+    runtimes.find(item => item.credential.id === credential?.id && item.harness === harness)?.discovery?.choices ??
+    [];
   const fitting = data.profiles.profiles.filter(
     profile =>
       harness !== undefined &&
       profileFit(profile, harness, registered.has(harness), {
         model: profileModel(profile, data),
-        choices:
-          runtimes.find(item => item.credential.id === credential?.id && item.harness === harness)?.discovery
-            ?.choices ?? [],
+        choices: nativeChoices,
       }).fits,
   );
   // The preset a person most likely wants: the first that is not already a runtime on this login.

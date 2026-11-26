@@ -104,6 +104,17 @@ export const MachineToolSchema = z.strictObject({
 export type MachineTool = z.infer<typeof MachineToolSchema>;
 
 /**
+ * The models a registered tool's own runtime reports for one login: the list the daemon checks a profile's model pin
+ * against, read for a login that has no runtime yet. Ids only; a login the tool cannot read is left out.
+ */
+export const MachineNativeModelsSchema = z.strictObject({
+  login: NonEmptyStringSchema,
+  harness: HarnessKeySchema,
+  models: z.array(NonEmptyStringSchema).readonly(),
+});
+export type MachineNativeModels = z.infer<typeof MachineNativeModelsSchema>;
+
+/**
  * What THIS caller may do to this machine, read before a surface offers a control it cannot use.
  *
  * IT IS THE CAPABILITY LAYER'S ANSWER, not a second one. `mayApply` is `fleet.configure` as the
@@ -190,6 +201,8 @@ export const MachineViewSchema = z.strictObject({
   /** What the last auto-resume pass did, or `null` when none has run. */
   lastAutoResume: AutoResumeSummarySchema.nullable(),
   tools: z.array(MachineToolSchema).readonly(),
+  /** What each login offers a registered tool that has no built-in behaviour, so a first runtime sees the same models the daemon will. */
+  nativeModels: z.array(MachineNativeModelsSchema).readonly().optional(),
   runtimeCount: NonNegativeIntegerSchema,
   runningSessions: NonNegativeIntegerSchema,
   /** What this caller may do here, step-up included. */

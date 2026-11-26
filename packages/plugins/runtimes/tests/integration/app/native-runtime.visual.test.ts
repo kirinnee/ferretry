@@ -15,7 +15,8 @@ const worldFor = (query: URLSearchParams) => {
   const key = query.get('case') ?? 'manual';
   let pending = worlds.get(key);
   if (pending === undefined) {
-    pending = nativeRuntimeWorld(query.get('mode') !== 'add');
+    const mode = query.get('mode');
+    pending = nativeRuntimeWorld(mode !== 'add' && mode !== 'pin', mode === 'pin');
     worlds.set(key, pending);
   }
   return pending;
@@ -83,11 +84,13 @@ for (const look of looks)
   for (const width of [390, 1440])
     for (const scheme of ['light', 'dark'] as const) {
       describe(`native runtime: ${look.style} ${width} ${scheme}`, () => {
-        for (const mode of ['new', 'add'])
+        for (const mode of ['new', 'add', 'pin'])
           it(
             mode === 'new'
               ? 'real discovery requires explicit model choice and stays inside the picker'
-              : 'Add OpenCode reviews and atomically saves a plain profile from only legacy profiles',
+              : mode === 'add'
+                ? 'Add OpenCode reviews and atomically saves a plain profile from only legacy profiles'
+                : 'a first runtime on a fresh login is offered the profile whose pin the login offers, and no plain profile',
             async () => {
               const context = await browser.newContext({
                 viewport: { width, height: width === 390 ? 844 : 900 },
@@ -110,7 +113,15 @@ for (const look of looks)
                 page.setDefaultTimeout(10_000);
                 await page.goto(`${origin}/?${query}`);
                 await page.evaluate(style => (document.documentElement.dataset.style = style), look.style);
-                if (mode === 'add') {
+                if (mode === 'pin') {
+                  await page.waitForSelector('[data-add-runtime-more] summary');
+                  await page.click('[data-add-runtime-more] summary');
+                  await page.waitForSelector('[data-add-runtime-profile-select]');
+                  expect(await page.locator('[data-native-plain-profile]').count()).toBe(0);
+                  expect(await page.locator('[data-add-runtime-no-profiles]').count()).toBe(0);
+                  expect(await page.locator('[data-add-runtime-profile-select]').textContent()).toMatch(/deepseek/iu);
+                  expect((await (await context.request.get(`${origin}/state?${query}`)).json()).runtimes).toEqual([]);
+                } else if (mode === 'add') {
                   await page.waitForSelector('[data-create-plain-profile]');
                   const before = await (await context.request.get(`${origin}/state?${query}`)).json();
                   expect(before.runtimes).toEqual([]);
@@ -171,9 +182,15 @@ for (const look of looks)
                 if (shots !== undefined)
                   await page.screenshot({
                     path: join(shots, `${look.style}-${width}-${scheme}-${mode}.png`),
-                    fullPage: mode === 'add',
+                    fullPage: mode !== 'new',
                   });
-                if (mode === 'add') {
+                if (mode === 'pin') {
+                  await page.click('[data-change-submit]');
+                  await page.waitForSelector('[data-add-runtime-done]');
+                  const after = await (await context.request.get(`${origin}/state?${query}`)).json();
+                  expect(after.runtimes).toEqual(['opencode-deepseek-pin']);
+                  expect(after.profiles).toEqual(['claude-only', 'deepseek-pin']);
+                } else if (mode === 'add') {
                   await page.click('[data-change-submit]');
                   await page.waitForSelector('[data-add-runtime-done]');
                   const after = await (await context.request.get(`${origin}/state?${query}`)).json();
