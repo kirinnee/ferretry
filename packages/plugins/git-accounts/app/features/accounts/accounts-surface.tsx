@@ -114,7 +114,14 @@ export function AccountsSurface({ client, pollDelay, now }: AccountsSurfaceProps
           aria-label="Connected GitHub accounts"
         >
           {accounts.map(account => (
-            <AccountRow key={account.id} account={account} busy={busy} onRemove={account => void remove(account)} />
+            <AccountRow
+              key={account.id}
+              account={account}
+              busy={busy}
+              client={client}
+              onChanged={reload}
+              onRemove={account => void remove(account)}
+            />
           ))}
         </ul>
       )}
@@ -130,6 +137,13 @@ export function AccountsSurface({ client, pollDelay, now }: AccountsSurfaceProps
             <p className="m-0 text-warn">
               These keys could not be taken off GitHub; delete them there:{' '}
               {removed.result.keysLeftOnProvider.join(', ')}.
+            </p>
+          )}
+          {removed.result.gpgUploadsToCheck.length === 0 ? null : (
+            <p className="m-0 break-words text-warn">
+              These GPG uploads have unknown outcomes. Compare these public fingerprints at github.com/settings/keys and
+              confirm who registered each key before taking any action:{' '}
+              <span className="mono break-all">{removed.result.gpgUploadsToCheck.join(', ')}</span>.
             </p>
           )}
           <p className="m-0">
