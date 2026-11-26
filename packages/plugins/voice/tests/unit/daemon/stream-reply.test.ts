@@ -225,6 +225,54 @@ describe('the voice stream: the reply voice', () => {
     expect(r.audio().filter(unit => unit.snapshot.audio?.last === true)).toHaveLength(2);
   });
 
+  test('the first sentence reaches the wire while the second sentence is still being made', async () => {
+    const r = await rig();
+    await r.run(400);
+    let release: (() => void) | undefined;
+    // Every speak waits on the gate it saw at entry. Resolve the first, and hold the second indefinitely.
+    r.fake.gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    r.speak(0, 'Let me check the failing test. I will report the result shortly.');
+    await settle();
+    r.fake.gate = new Promise<void>(() => undefined);
+    release?.();
+    await r.run(600);
+    expect(r.fake.spoken).toEqual(['Let me check the failing test.', 'I will report the result shortly.']);
+    expect(r.audio().some(unit => unit.pcm.length > 0)).toBe(true);
+    expect(r.audio().every(unit => unit.snapshot.audio?.last === false)).toBe(true);
+    r.stream.close();
+  });
+
+  test('a long first sentence sends its first clause while its tail is still being made', async () => {
+    const r = await rig();
+    await r.run(400);
+    let release: (() => void) | undefined;
+    let releaseTail: (() => void) | undefined;
+    r.fake.gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    r.speak(0, 'I looked through the logs and the build failed because one dependency was missing.');
+    await settle();
+    r.fake.gate = new Promise<void>(resolve => {
+      releaseTail = resolve;
+    });
+    release?.();
+    await r.run(600);
+    try {
+      expect(r.fake.spoken).toEqual([
+        'I looked through the logs and the build failed',
+        'because one dependency was missing.',
+      ]);
+      expect(r.audio().some(unit => unit.pcm.length > 0)).toBe(true);
+      expect(r.audio().every(unit => unit.snapshot.audio?.last === false)).toBe(true);
+    } finally {
+      r.stream.close();
+      releaseTail?.();
+      await settle();
+    }
+  });
+
   test('a line that makes no sound (no letters) ends at once without failing', async () => {
     const r = await rig();
     await r.run(400);
