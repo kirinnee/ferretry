@@ -9,7 +9,7 @@ import { clip } from './format.ts';
 import { type FleetGateway, ToolFailure } from './gateway.ts';
 import type { ConnectorAccess, ConnectorAuditSink } from '../ports.ts';
 import type { ConnectorCallsLog, ConnectorToolOutcome, DaemonGrantsSource } from './ports.ts';
-import type { ConnectorTextGuard } from './redaction.ts';
+import { redactHostTokenShapes, type ConnectorTextGuard } from './redaction.ts';
 import type { ConnectorToolSpec, ToolEnvironment, ToolOutput } from './tools/spec.ts';
 
 const LOG_ARG_CUT = 500;
@@ -103,7 +103,8 @@ export class ConnectorToolbox {
     gated: boolean,
   ): Promise<void> {
     try {
-      const args = cutLongStrings(await this.options.guard.cleanData(declaredOnly(spec, rawArgs)));
+      // What the caller typed is also masked by the shape of the host's own tokens, which this plugin never holds.
+      const args = cutLongStrings(await this.options.guard.cleanData(maskHostTokenShapes(declaredOnly(spec, rawArgs))));
       await this.options.callsLog.append({
         at: new Date(this.options.now()).toISOString(),
         tool: spec.name,
@@ -140,6 +141,12 @@ function declaredOnly(spec: ConnectorToolSpec, value: unknown): Record<string, u
     Object.entries(value).filter(
       ([key, entry]) => declared.has(key) && ['string', 'number', 'boolean'].includes(typeof entry),
     ),
+  );
+}
+
+function maskHostTokenShapes(args: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(args).map(([key, entry]) => [key, typeof entry === 'string' ? redactHostTokenShapes(entry) : entry]),
   );
 }
 

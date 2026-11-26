@@ -75,7 +75,7 @@ export class ConnectorIndex {
     const tokens = new Map<string, IndexedToken>();
     const live = new Set<string>();
     for (const grant of state.grants) {
-      if (grant.revokedAt) continue;
+      if (grant.revokedAt || grant.pending) continue;
       live.add(grant.id);
       const base = { grantId: grant.id, clientId: grant.clientId, clientName: grant.clientName };
       for (const token of grant.access) tokens.set(token.digest, { ...base, ...token, kind: 'access' });
