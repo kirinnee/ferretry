@@ -219,6 +219,11 @@ describe('createRuntimesApi — why a start cannot happen', () => {
 });
 
 describe('createRuntimesApi — default runtime', () => {
+  it('keeps a saved derived default while its login is ready', async () => {
+    should(
+      await api({ runtimes: {}, logins: [loginView({ id: 'derived' })], defaultSetting: 'derived' }).default(),
+    ).equal('derived');
+  });
   it('should use the named default over everything', async () => {
     should(
       await api({ defaultSetting: 'zed', runtimes: { zed: runtimeFile(), 'claude-default': runtimeFile() } }).default(),

@@ -100,6 +100,31 @@ test('native controller derives text and ink from one capture and refuses a curs
   expect(frame.promptReady).toBe(false);
 });
 
+test('a failed native capture cannot become an empty composer or invoke the reader', async () => {
+  let reads = 0;
+  const failed: TmuxCommandPort = {
+    execute: async args => ({
+      code: args[0] === 'capture-pane' ? 1 : 0,
+      stdout: args[0] === 'display-message' ? '0||2|0|24|100' : '',
+      stderr: '',
+    }),
+  };
+  const frame = await harnessController(failed, {
+    key: 'opencode',
+    screenReader: {
+      key: 'opencode',
+      read: () => {
+        reads++;
+        throw new Error('must not read a failed capture');
+      },
+    },
+  }).state('fy-test');
+  expect(reads).toBe(0);
+  expect(frame.visible).toBe('');
+  expect(frame.screen?.composer).toBeNull();
+  expect(frame.promptReady).toBe(false);
+});
+
 test('the plugin composer reading is used for draft and landing evidence; unknown never falls back to legacy text', () => {
   const reading = {
     working: false,
