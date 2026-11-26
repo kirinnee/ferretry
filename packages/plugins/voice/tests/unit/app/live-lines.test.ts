@@ -60,12 +60,13 @@ function fake(options: { reply?: 'ready' | 'absent' | 'loading' | undefined; str
       options.streamOpen === false
         ? undefined
         : {
-            speak: text => {
-              const id = nextId;
-              nextId += 1;
-              spoken.push({ id, text });
-              return [{ id, text }];
-            },
+            speak: text =>
+              text.split('|').map(piece => {
+                const id = nextId;
+                nextId += 1;
+                spoken.push({ id, text: piece });
+                return { id, text: piece };
+              }),
             drop: ids => void dropped.push(...ids),
             interrupt: () => {
               hushed += 1;
@@ -275,7 +276,7 @@ describe('V4 on arrival: a newer line takes back a stale progress line the momen
 });
 
 describe('the tab goes to the background: a line waiting or playing stops like a reading does', () => {
-  test('a plain hush (no cut, no person), what waited is told as unplayed, and it goes quiet', () => {
+  test('a plain hush (no cut, no person), what waited is told as hushed (said, never replayed), and it goes quiet', () => {
     const f = fake();
     const t = track();
     f.lines.say({ id: 'First.', text: 'First.', kind: 'first' }, t.ended('First.'));
@@ -284,7 +285,7 @@ describe('the tab goes to the background: a line waiting or playing stops like a
     f.lines.quiet();
     expect(f.plainHushes()).toBe(1);
     expect(f.hushes()).toBe(0); // never a person's stop: the ferret is told nothing
-    expect(t.outcomes).toEqual({ 'First.': 'unplayed', 'Step one.': 'unplayed' });
+    expect(t.outcomes).toEqual({ 'First.': 'hushed', 'Step one.': 'hushed' });
     expect(f.active).toEqual([true, false]);
     expect(f.polling()).toBe(false);
   });
@@ -297,5 +298,32 @@ describe('the tab goes to the background: a line waiting or playing stops like a
     f.lines.quiet();
     f.lines.quiet();
     expect(f.plainHushes()).toBe(1);
+  });
+});
+
+describe('the stop while sound is still draining', () => {
+  test('a later piece fails after earlier sound was handed over: the hide still hushes what is draining', () => {
+    const f = fake();
+    const t = track();
+    // One line cut to two pieces: the first is made and handed to the player, the second fails in the same frame.
+    f.lines.say({ id: 'Long.', text: 'First piece.|Second piece.', kind: 'first' }, t.ended('Long.'));
+    f.lines.onSpeech(heard(0, 'started'));
+    f.remaining = 900;
+    f.lines.onSpeech(heard(0, 'finished'));
+    f.lines.onSpeech(heard(1, 'failed'));
+    expect(t.outcomes).toEqual({ 'Long.': 'failed' });
+    // The queue is empty, but the first piece is still sounding.
+    f.lines.quiet();
+    expect(f.plainHushes()).toBe(1);
+    expect(f.hushes()).toBe(0);
+  });
+
+  test('with no sound left and nothing queued it still hushes nothing', () => {
+    const f = fake();
+    f.lines.say({ id: 'One.', text: 'One.', kind: 'first' }, noop);
+    f.lines.onSpeech(heard(0, 'finished'));
+    f.tick();
+    f.lines.quiet();
+    expect(f.plainHushes()).toBe(0);
   });
 });

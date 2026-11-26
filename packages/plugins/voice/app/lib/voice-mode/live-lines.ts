@@ -22,7 +22,8 @@
  * only the line the reader named is outdated.
  *
  * WHAT BECAME OF EACH LINE is told to whoever handed it over (`ended`): `played` (every piece finished playing), `dropped`
- * (outdated on purpose: it is never read again), `failed` (a piece could not be made: the end-of-turn reading says it, and one
+ * (outdated on purpose: it is never read again), `hushed` (the tab went to the background: the line counts as said, heard or not,
+ * and is never read again), `failed` (a piece could not be made: the end-of-turn reading says it, and one
  * already waiting to decide is told at once) or `unplayed` (the person talked over it, or the panel went away: the end-of-turn
  * reading says it, but nothing starts one that was already decided). A line the voice refuses at the door (`say` is false) was never queued.
  *
@@ -36,7 +37,7 @@ import type { ReplyPlayer, SpeechLineEvent, VoiceStreamHandle } from '../stream/
 export type LineKind = 'first' | 'line';
 
 /** What became of a line that was handed to the voice. */
-export type LineOutcome = 'played' | 'dropped' | 'failed' | 'unplayed';
+export type LineOutcome = 'played' | 'dropped' | 'hushed' | 'failed' | 'unplayed';
 
 export interface WaitingLine {
   readonly kind: LineKind;
@@ -72,9 +73,9 @@ export interface LiveSink {
   /** These lines (by id) are known to be progress: any of them still waiting behind a newer line is dropped. */
   outdate(ids: readonly string[]): void;
   /**
-   * The tab went to the background: a line waiting or playing stops the way a reading does: a plain hush (no cut: the person's
-   * ears were not where they stopped it, so the ferret is told nothing) and nothing of it is read again. Does nothing when no
-   * line is waiting or playing, so it never hushes a reading it does not own.
+   * The tab went to the background: whatever is waiting, playing or still draining stops the way a reading does: a plain hush (no
+   * cut: the person's ears were not where they stopped it, so the ferret is told nothing). Each line waiting or playing is told
+   * `hushed` (said, heard or not: never read again). Does nothing when no line is waiting and no sound is left.
    */
   quiet(): void;
 }
@@ -168,12 +169,12 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
     }
   };
   /** Everything waiting or playing is over without having been played (or dropped on purpose). */
-  const abandon = (): void => {
+  const abandon = (outcome: 'unplayed' | 'hushed' = 'unplayed'): void => {
     const left = entries;
     entries = [];
     stopWatch?.();
     stopWatch = null;
-    for (const entry of left) entry.ended('unplayed');
+    for (const entry of left) entry.ended(outcome);
     if (active) {
       active = false;
       deps.onActive?.(false);
@@ -233,11 +234,12 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
       abandon();
     },
     quiet() {
-      // Nothing of ours is waiting or playing: the machine's voice is not ours to hush (a reading stops itself the same way).
-      if (entries.length === 0) return;
+      // Nothing waits and no sound is draining (a later piece may have failed after earlier sound was handed over: the queue is
+      // empty and the sound is not): nothing to stop. The stream view is shared, so a reading hushed beside us is hushed once.
+      if (entries.length === 0 && deps.player.remainingMs() <= 0) return;
       deps.stream()?.hush();
-      abandon();
+      abandon('hushed');
     },
-    dispose: abandon,
+    dispose: () => abandon(),
   };
 }

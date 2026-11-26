@@ -67,6 +67,7 @@ const LINES = {
   result4: 'All clear now.',
   first5: 'Rerunning every test in the login suite and then the logout suite.',
   sixth: 'Done.',
+  first7: 'Checking the redirect, the cookie, and the logout page, one by one.',
 } as const;
 
 /** The stream's own numbering of the lines the page asks to be spoken, in order (turn one's four, a result of two lines, then the rest). */
@@ -84,6 +85,7 @@ const SAYS = [
   'run it again please',
   'run every test now',
   'and then tell me',
+  'check it all again',
 ] as const;
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
@@ -296,10 +298,15 @@ describe('voice mode end to end, over a fake ferret and a fake voice of known le
         await agent.say(voice(LINES.first5), 'first5');
         await sleep(400);
         await agent.done('done5');
-      } else {
+      } else if (turn === 6) {
         await agent.say(voice(LINES.sixth), 'first6');
         await sleep(300);
         await agent.done('done6');
+      } else {
+        // A long LIVE line, still sounding while the tab is hidden and shown again BEFORE the turn ends.
+        await agent.say(voice(LINES.first7), 'first7');
+        await sleep(4_000);
+        await agent.done('done7');
       }
     };
 
@@ -699,6 +706,35 @@ describe('voice mode end to end, over a fake ferret and a fake voice of known le
       await until('the sound stopped after turn six', idle);
       expect(sends.filter(item => item.message.includes('[heard up to'))).toHaveLength(1);
 
+      // ── 10. TURN SEVEN: hidden DURING a live line and shown again BEFORE the turn ends: the line is never replayed ──────
+      await sleep(1_000);
+      await person(SAYS[6], 1_000);
+      await until('the seventh utterance was sent', () => utteranceSends().length === 7);
+      await until('the live line was asked for', () => speaks().some(item => item.frame.text === LINES.first7));
+      const id7 = lineId(LINES.first7);
+      await until(
+        'the live line is audible',
+        async () => (await record()).audible.some(item => item.id === id7),
+        20_000,
+      );
+      await sleep(700);
+      const hushesBefore7 = lineFrames.filter(item => item.frame.t === 'hush').length;
+      await tab.evaluate(() => (window as unknown as Win).__e2e.setHidden(true));
+      await until(
+        'the hush reached the machine',
+        () => lineFrames.filter(item => item.frame.t === 'hush').length === hushesBefore7 + 1,
+      );
+      const hidden7 = await record();
+      await sleep(300);
+      await tab.evaluate(() => (window as unknown as Win).__e2e.setHidden(false));
+      await scripts[6];
+      // Past the end-of-turn reading's own settling time: a hushed line counts as said (heard or not), so nothing reads it again.
+      await sleep(4_000);
+      const back7 = await record();
+      expect(back7.audible).toHaveLength(hidden7.audible.length);
+      expect(speaks().filter(item => item.frame.text === LINES.first7)).toHaveLength(1);
+      expect(lineFrames.filter(item => item.frame.t === 'hush')).toHaveLength(hushesBefore7 + 1);
+      expect(sends.filter(item => item.message.includes('[heard up to'))).toHaveLength(1);
       // ── the whole run: entry exactly once, then only what the person said ──────────────────────────────────────
       await tab.locator('[data-voice-mode-end]').click();
       await tab.locator('[data-fake-composer]').waitFor({ state: 'visible' });
@@ -712,6 +748,7 @@ describe('voice mode end to end, over a fake ferret and a fake voice of known le
         'e2e:4',
         'e2e:5',
         'e2e:6',
+        'e2e:7',
       ]);
       expect(starts).toHaveLength(1);
       expect(errors).toEqual([]);
@@ -725,7 +762,6 @@ describe('voice mode end to end, over a fake ferret and a fake voice of known le
       console.log(
         `VOICE-E2E first spoken word: target ${FIRST_WORD_TARGET_MS} ms for the whole path (real voice included); measured with the fake voice: turn 2 ${Math.round(firstWord2)} ms (voice made at once: the plumbing alone), turn 1 ${Math.round(firstWord1)} ms (the fake voice took ${SLOW_FIRST_SYNTH_MS} ms to make it, so ${Math.round(firstWord1 - SLOW_FIRST_SYNTH_MS)} ms is the plumbing)`,
       );
-      console.log(`VOICE-E2E cut at ${samples} samples; note: ${utteranceSends()[2]?.message ?? ''}`);
       expect(firstWord1 - SLOW_FIRST_SYNTH_MS).toBeGreaterThan(0);
       expect(firstWord1 - SLOW_FIRST_SYNTH_MS).toBeLessThan(FIRST_WORD_TARGET_MS);
       expect(firstWord2).toBeGreaterThan(0);
