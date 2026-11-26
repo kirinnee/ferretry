@@ -5,8 +5,11 @@ describe('tidy manifest', () => {
   test('declares today’s scratch and tidy-plan routes, at their old paths', () => {
     expect(manifest.actions.routes.map(route => route.key).sort()).toEqual([
       'GET /v1/gc',
+      'GET /v1/tidy/worktrees/:project',
       'POST /v1/gc',
       'POST /v1/tidy/plan',
+      'POST /v1/tidy/worktrees/:project/clean-merged',
+      'POST /v1/tidy/worktrees/:project/remove',
     ]);
   });
   test('the plan is a fleet read and the sweep is ungoverned, as today', () => {

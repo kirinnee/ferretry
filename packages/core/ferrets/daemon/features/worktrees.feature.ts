@@ -3,7 +3,7 @@ import { createKernelWorktreeHostIo } from '../adapters/worktrees/kernel-host-io
 import { liveTerminalRoots, withTerminalRemoval } from '../lib/worktrees/terminal-roots.ts';
 import { refuse } from '../lib/runtime/mounts/worktrees.ts';
 import { buildWorktrees } from '../modules/worktrees.ts';
-import { TerminalRoots } from '../../contract/index.ts';
+import { GuardedWorktreeRemovalRequestSchema, TerminalRoots, type FerretsApi } from '../../contract/index.ts';
 import type { FeatureContribution, FerretsContext, FerretsFeature } from './types.ts';
 
 function register(f: FerretsContext): FeatureContribution | undefined {
@@ -46,8 +46,26 @@ function register(f: FerretsContext): FeatureContribution | undefined {
   // The repository listing is also a read other plugins make (Projects' worktrees section): the same refusals, as ApiErrors.
   return {
     routes: worktrees.routes,
-    port: { repoWorktrees: async commonDir => await worktrees.listRepo(commonDir).catch(refuse) },
+    port: {
+      repoWorktrees: async commonDir => await worktrees.listRepo(commonDir).catch(refuse),
+      checkWorktreeRemoval: async (path, cwd) => await worktrees.service.checkRemoval(path, cwd, true).catch(refuse),
+      removeWorktree: async request =>
+        await worktrees.service
+          .remove({
+            ...GuardedWorktreeRemovalRequestSchema.parse(request),
+            overrides: [],
+            deleteBranch: true,
+            confirmations: ['delete_preexisting_branch', 'delete_unmerged_branch'],
+          })
+          .catch(refuse),
+    },
   };
+}
+
+/** Only Tidy may apply its configure-gated, exact-head merged-worktree decision. */
+export function worktreePortFor(needer: string, port: Partial<FerretsApi>): Partial<FerretsApi> {
+  const { removeWorktree, ...reads } = port;
+  return needer === 'tidy' && removeWorktree !== undefined ? { ...reads, removeWorktree } : reads;
 }
 
 export default { id: 'worktrees', register } satisfies FerretsFeature;
