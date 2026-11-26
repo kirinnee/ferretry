@@ -21,6 +21,12 @@ export interface RunSpec {
    * still on this chain and pin the harness once it runs; absent, a pane is bound to whatever it runs when first read.
    */
   readonly execChain?: readonly string[];
+  /**
+   * The registered key of the harness this pane runs (`claude-code`, `codex`, or a third plugin's own): the ONE identity
+   * a runner may key a harness-specific answer on. Absent, or a key the family table has no row for, and the runner
+   * answers none of a harness's own screens: what the pane prints may confirm a known family, never choose one.
+   */
+  readonly harness?: string;
   /** The ferret's limits (`limits.yaml`), as the kernel's spawn port applies them. */
   readonly limits?: JsonValue;
 }

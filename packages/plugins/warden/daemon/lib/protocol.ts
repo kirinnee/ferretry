@@ -3,6 +3,7 @@
  * dropped (`LegacyWardenTriage`, the settings, status and spend pre-processors) and the old verb for a move renamed. The settings and the kinds are the contract's (`../../contract`); what is here are the internal views
  * the sweep builds, which `wire-map.ts` restates in the contract's words (ferret, flag, card) at the route.
  */
+import { OpenRecordedHarnessSchema } from '@ferretry/core-ferrets/contract';
 import { NonNegativeFiniteSchema } from '@ferretry/std';
 import { z } from 'zod';
 import {
@@ -192,7 +193,8 @@ const WardenVerdictSpawnSchema = z.object({
   agent: z.string().min(1),
   model: z.string().min(1),
   modelSource: z.enum(['harness', 'agent', 'configured', 'unknown']),
-  harness: z.enum(['claude', 'codex']),
+  /** The family the table names (`claude`, `codex`), or the harness's own key for a harness it has no family for. */
+  harness: OpenRecordedHarnessSchema,
   failedOver: z.boolean(),
   policy: WardenFailoverPolicySchema,
   selection: z.enum(['preferred', 'failover', 'rotation']),

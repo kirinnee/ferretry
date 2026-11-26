@@ -34,6 +34,7 @@ export async function ferretDialogs(
       return {
         sessionId: session.config.id,
         name: session.config.teammate ?? session.config.label ?? session.config.id,
+        ...(session.config.harness === undefined ? {} : { harness: session.config.harness }),
         dialog,
       };
     }),

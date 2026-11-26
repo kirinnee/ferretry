@@ -24,19 +24,16 @@
  * on `PATH` and nothing is spawned at import. It runs only when a ferret launches with that server, and only because the
  * person ticked it.
  */
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import { recordedKeyOfWord } from '@ferretry/core-ferrets/contract';
 import type { ComponentPutOptions, ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
 import { ITEM_NAME_PATTERN } from '@ferretry/std';
 import type { McpConfigWrite } from './ports.ts';
 
-/** Runtimes' word for a harness, and the harness key itself, to the key an MCP item carries (own properties only). */
-const HARNESS_KEY_OF: Readonly<Record<string, KnownHarnessKey | undefined>> = Object.assign(Object.create(null), {
-  claude: 'claude-code',
-  'claude-code': 'claude-code',
-  codex: 'codex',
-});
-
 const refused = (reason: string): ComponentPutResult => ({ ok: false, reason });
+
+/** The harness word a refused import names: a short plain key is said, anything else (a long or odd value) is just "a harness". */
+const harnessNamed = (harness: unknown): string =>
+  typeof harness === 'string' && /^[A-Za-z0-9._-]{1,40}$/u.test(harness) ? `the harness "${harness}"` : 'a harness';
 
 /** The sentences a refused write gives, each one a path and a rule (the config service never quotes a value). */
 const sentencesOf = (issues: readonly { readonly path: string; readonly message: string }[]): string =>
@@ -64,8 +61,9 @@ export function hostImportPut(
     const harness = (document as { harness?: unknown }).harness;
     let text = documentText;
     if (harness !== undefined) {
-      const key = typeof harness === 'string' ? HARNESS_KEY_OF[harness] : undefined;
-      if (key === undefined) return refused(`The server for ${file} names a harness this plugin does not know.`);
+      const key = typeof harness === 'string' ? recordedKeyOfWord(harness) : undefined;
+      if (key === undefined)
+        return refused(`The server for ${file} names ${harnessNamed(harness)}, which this plugin does not know.`);
       text = `${JSON.stringify({ ...document, harness: key }, null, 2)}\n`;
     }
 

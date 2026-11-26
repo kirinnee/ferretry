@@ -1,5 +1,5 @@
 import type { ConfigCollectionDef, FerretId } from '@ferretry/kernel/contract';
-import { isKnownHarnessKey } from '@ferretry/core-ferrets/contract';
+import { byRecordedHarnessKey, isRecordedHarnessKey, recordedFamilyOfKey } from '@ferretry/core-ferrets/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import type { CatalogMcpProvider, McpComponentRecord } from '@ferretry/plugin-catalogs/contract';
 import { mintedValueOf, type SecretName, type SecretSummary } from '@ferretry/core-vault/contract';
@@ -211,7 +211,7 @@ export default implementDaemon(manifest, {
           accounts: async () =>
             own !== undefined
               ? [own]
-              : isKnownHarnessKey(spec.harness)
+              : isRecordedHarnessKey(spec.harness)
                 ? [{ runtime: agent, wrapper: agent, harness: spec.harness, home: spec.home ?? '' }]
                 : [],
           folders,
@@ -233,7 +233,7 @@ export default implementDaemon(manifest, {
       ferrets: {
         get: async id => {
           const ferret = await ferrets.get(id as FerretId);
-          return ferret === undefined || !isKnownHarnessKey(ferret.harness)
+          return ferret === undefined || !isRecordedHarnessKey(ferret.harness)
             ? undefined
             : {
                 id: ferret.id,
@@ -326,7 +326,7 @@ export default implementDaemon(manifest, {
         list: async () => {
           const all = await ferrets.list();
           return all.flatMap(ferret =>
-            isKnownHarnessKey(ferret.harness)
+            isRecordedHarnessKey(ferret.harness)
               ? [
                   {
                     id: ferret.id,
@@ -374,7 +374,7 @@ export default implementDaemon(manifest, {
     async function inventoryFerret(id: string) {
       const ferret = await ferrets.get(id as FerretId);
       // A ferret on a harness MCP writes no config for is not one of its ferrets.
-      return ferret === undefined || !isKnownHarnessKey(ferret.harness)
+      return ferret === undefined || !isRecordedHarnessKey(ferret.harness)
         ? undefined
         : {
             id: ferret.id,
@@ -392,7 +392,7 @@ export default implementDaemon(manifest, {
       const item = items().get(name);
       return item === undefined
         ? undefined
-        : { ...item, harness: item.harness === undefined ? undefined : item.harness === 'codex' ? 'codex' : 'claude' };
+        : { ...item, harness: item.harness === undefined ? undefined : recordedFamilyOfKey(item.harness) };
     };
     const catalogItems: CatalogMcpProvider = {
       kind: 'mcp',
@@ -403,7 +403,10 @@ export default implementDaemon(manifest, {
             id: server.id,
             name,
             scope: server.scope,
-            harness: server.harness === 'codex' ? ('codex' as const) : ('claude' as const),
+            harness: byRecordedHarnessKey(server.harness, {
+              claude: () => 'claude' as const,
+              codex: () => 'codex' as const,
+            }),
             source: server.source,
             declaration: server.declaration,
             component: server.scope === 'component' ? componentOf(name) : undefined,

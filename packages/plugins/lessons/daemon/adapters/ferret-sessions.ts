@@ -1,5 +1,11 @@
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
-import type { FerretId, FerretSummary, FerretsApi } from '@ferretry/core-ferrets/contract';
+import {
+  recordedFamilyOfKey,
+  recordedHarnessOf,
+  type FerretId,
+  type FerretSummary,
+  type FerretsApi,
+} from '@ferretry/core-ferrets/contract';
 import type { LessonSessionFacts, LessonSessionsPort, OwnerMessage } from '../lib/lessons.ts';
 
 /** The name the scan's miner ferrets carry: a scan never reads a miner. */
@@ -14,7 +20,8 @@ export function lessonSessionFacts(ferret: FerretSummary): LessonSessionFacts {
   return {
     ferretId: ferret.id,
     cwd: ferret.folder,
-    harness: ferret.harness === 'codex' ? 'codex' : 'claude',
+    harness: recordedHarnessOf(ferret.harness),
+    family: recordedFamilyOfKey(ferret.harness),
     mode: ferret.role === 'lead' ? 'interactive' : 'auto',
     ...(ferret.role === 'helper' ? { teammate: ferret.name } : {}),
     ...(ferret.name === undefined || ferret.name === '' ? {} : { name: ferret.name }),

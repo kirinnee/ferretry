@@ -1095,3 +1095,32 @@ describe('claude development-channels warning (2.1.317)', () => {
     should(startupDialogAction('I read: loading development channels is only for development')).be.undefined();
   });
 });
+
+describe('startup dialogs keyed on the REGISTERED harness (a screen never picks the family)', () => {
+  const frame = (name: string): string =>
+    readFileSync(join(import.meta.dir, '../../../fixtures/harness-dialogs', `${name}.txt`), 'utf8');
+  const claudeTrust =
+    'Quick safety check: is this a project you created or one you trust?\n  1. Yes, I trust this folder\n❯ 2. No';
+  const codexUpdate = frame('codex-0.156.1-update');
+
+  it('should answer nothing for a key the family table has no row for, whatever the screen shows', () => {
+    for (const harness of ['fake-third', 'claude', '']) {
+      should(startupDialogAction(codexUpdate, { harness })).be.undefined();
+      should(startupDialogAction(claudeTrust, { harness })).be.undefined();
+    }
+  });
+
+  it('should give the harnesses the table names exactly the answers they had without an identity', () => {
+    for (const harness of ['claude-code', 'codex']) {
+      should(startupDialogAction(codexUpdate, { harness })).deepEqual(startupDialogAction(codexUpdate));
+      should(startupDialogAction(claudeTrust, { harness })).deepEqual(startupDialogAction(claudeTrust));
+    }
+    should(startupDialogAction(claudeTrust, { harness: 'claude-code' })).not.be.undefined();
+  });
+
+  it('should hand a third harness’s pane to the wait, not to a keypress', () => {
+    const step = nextReadinessStep(modal(...codexUpdate.split('\n')), noAttempts, { harness: 'fake-third' });
+
+    should(step.kind).equal('wait');
+  });
+});
