@@ -98,6 +98,16 @@ describe('the phone asks the machine to tell the ferret', () => {
     expect(enterVoiceChat(r.deps, { ...ask, ferretId: 'nobody' })).rejects.toBeInstanceOf(VoiceEntryRefused);
     expect(r.sent).toEqual([]);
   });
+
+  test('a ferret whose name cannot even be looked up is a ferret nobody has', async () => {
+    const r = rig({
+      resolveFerret: async () => {
+        throw new Error('the roster is unreadable');
+      },
+    });
+    await expect(enterVoiceChat(r.deps, ask)).rejects.toMatchObject({ status: 404, code: 'ferret_unknown' });
+    expect(r.sent).toEqual([]);
+  });
 });
 
 describe('POST /v1/voice/entry', () => {

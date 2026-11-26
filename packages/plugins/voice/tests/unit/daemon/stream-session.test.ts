@@ -242,6 +242,22 @@ describe('V1: entering voice mode', () => {
     expect(r.snapshot().state).toBe('listening');
   });
 
+  test('a grant narrowed between the start and the entry sends nothing and gives the claim up', async () => {
+    const registry = new StreamRegistry();
+    let asked = 0;
+    const narrowed = await rig({
+      registry,
+      mayChat: () => {
+        asked += 1;
+        return asked === 1; // allowed at the start, gone by the time the entry would be sent
+      },
+    });
+    narrowed.start(chat);
+    await narrowed.talk(400);
+    expect(narrowed.entered).toEqual([]);
+    expect(registry.enterVoice('fer-1', narrowed.clock.nowMs())).toBe(true);
+  });
+
   test('a refused entry gives the claim up, so the next to enter sends it', async () => {
     const registry = new StreamRegistry();
     const refused = await rig({ registry, send: async () => ({ ok: false, code: 'send_refused' }) });
