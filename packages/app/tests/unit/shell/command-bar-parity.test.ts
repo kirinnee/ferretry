@@ -101,6 +101,7 @@ describe('Ctrl+K at rest', () => {
     expect(places.map(entry => entry.label)).toEqual([
       'Ferrets',
       'Agenda',
+      'Queue',
       'Board',
       'Projects',
       'PRs & CI',
