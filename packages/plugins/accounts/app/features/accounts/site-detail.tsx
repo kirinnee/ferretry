@@ -283,7 +283,7 @@ function RecipeTab({ signIn, ops, busy, error, rules }: SiteDetailProps): ReactN
             {proposals.map(proposal => (
               <li
                 key={proposal.id}
-                className="flex min-w-0 flex-col gap-2 rounded-control border border-border bg-surface p-2"
+                className="flex min-w-0 flex-col gap-2 rounded-panel border border-border bg-surface p-panel"
                 data-accounts-proposal={proposal.id}
               >
                 <p className="m-0 min-w-0 break-words text-cell text-fg" data-accounts-proposal-why="">
@@ -402,7 +402,7 @@ function DefaultsTab({ signIn, account, accounts, defaults, ops, busy, error }: 
             return (
               <li
                 key={key}
-                className="flex min-w-0 flex-col gap-2 rounded-control border border-border bg-surface p-2"
+                className="flex min-w-0 flex-col gap-2 rounded-panel border border-border bg-surface p-panel"
                 data-accounts-default-key={key}
               >
                 <p className="m-0 break-words text-ui font-medium text-fg">{key}</p>

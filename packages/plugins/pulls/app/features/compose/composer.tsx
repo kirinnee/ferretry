@@ -101,7 +101,7 @@ export function Composer({
         </span>
       </header>
       {preview ? (
-        <div className="min-h-[7.5rem] rounded-control border border-border-soft p-sm" data-compose-preview="">
+        <div className="min-h-[7.5rem] rounded-panel border border-border-soft p-panel" data-compose-preview="">
           {blank ? (
             <p className="m-0 text-meta text-faint">Nothing to preview yet.</p>
           ) : (
@@ -131,7 +131,7 @@ export function Composer({
       </p>
       {phase.status === 'secret' && (
         <div
-          className="grid gap-xs rounded-control border-2 border-warn bg-warn/10 p-sm text-ui text-fg"
+          className="grid gap-xs rounded-panel border-2 border-warn bg-warn/10 p-panel text-ui text-fg"
           data-compose-secret=""
           role="alert"
         >
@@ -157,7 +157,7 @@ export function Composer({
       )}
       {phase.status === 'unknown' && (
         <div
-          className="grid gap-xs rounded-control border-2 border-warn bg-warn/10 p-sm text-ui text-fg"
+          className="grid gap-xs rounded-panel border-2 border-warn bg-warn/10 p-panel text-ui text-fg"
           data-compose-unknown=""
           role="status"
         >

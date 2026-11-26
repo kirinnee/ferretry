@@ -118,7 +118,7 @@ function EditedChoice({
   return (
     <section className="flex min-w-0 flex-col items-start gap-xs" data-update-edited="">
       <p
-        className="m-0 flex w-full items-start gap-2 break-words rounded-control border border-warn-border bg-warn-bg p-control-x py-2 text-cell text-fg"
+        className="m-0 flex w-full items-start gap-2 break-words rounded-panel border border-warn-border bg-warn-bg p-panel py-2 text-cell text-fg"
         role="status"
         data-update-edited-banner=""
       >

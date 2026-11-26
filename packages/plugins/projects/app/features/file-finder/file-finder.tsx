@@ -148,7 +148,7 @@ export function FileFinder({
 
       {banner !== null && (
         <section
-          className="grid gap-1 rounded-control border border-border-strong bg-surface-2 p-sm text-meta leading-base text-fg"
+          className="grid gap-1 rounded-panel border border-border-strong bg-surface-2 p-panel text-meta leading-base text-fg"
           aria-label="What the index could see"
           data-finder-banner={banner.kind}
         >

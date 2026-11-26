@@ -38,7 +38,7 @@ export interface OnboardingConnectionNoteProps {
 export function OnboardingConnectionNote({ fallback }: OnboardingConnectionNoteProps) {
   return (
     <div
-      className="flex min-w-0 flex-col gap-2 rounded-control border border-border bg-surface-2 px-3 py-3"
+      className="flex min-w-0 flex-col gap-2 rounded-panel border border-border bg-surface-2 px-panel py-3"
       data-onboarding-connection-note=""
       data-onboarding-fallback={fallback.kind}
     >

@@ -92,7 +92,7 @@ export function SpeedupsPanel({ view, busy, errors, onSave, onTest }: SpeedupsPa
         />
         {!vaultReadable && (
           <li className="fy-vs-body">
-            <div role="alert" className="flex gap-2 rounded-control border border-warn bg-warn/10 p-3">
+            <div role="alert" className="flex gap-2 rounded-panel border border-warn bg-warn/10 p-panel">
               <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
               <p className="m-0 text-cell leading-base text-muted">
                 This machine cannot read its secret store, so it cannot tell which keys are set. Fix the store in

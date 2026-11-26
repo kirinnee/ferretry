@@ -104,7 +104,7 @@ export function AnalyticsQueryEditor({ value, onValueChange, onRun, querying, lo
         <p
           role="alert"
           data-analytics-parse-error=""
-          className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-cell text-err"
+          className="m-0 rounded-panel border border-err-border bg-err-bg px-panel py-2 text-cell text-err"
         >
           {read.ok ? '' : read.error}
         </p>

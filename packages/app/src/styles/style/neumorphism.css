@@ -49,19 +49,19 @@
   --radius-md: 16px;
   --radius-lg: 24px;
   --radius-panel: 24px;
-  --radius-control: 999px;
+  --radius-control: var(--radius-round);
   --radius-input: 16px;
-  --radius-tab: 999px;
-  --radius-badge: 999px;
+  --radius-tab: var(--radius-round);
+  --radius-badge: var(--radius-round);
   --stroke-control: 1px;
   --stroke-panel: 1px;
   --divider-width: 2px;
   --control-h-desktop: 42px;
   --control-h-sm-desktop: 34px;
   --row-min-h-desktop: 54px;
-  --pad-control-x: 24px;
+  --pad-control-x-want: 24px;
   --pad-badge-x: 13px;
-  --pad-panel: 24px;
+  --pad-panel-want: 24px;
   --pad-row-y: 12px;
   --pad-cell-x: 20px;
   --gap-xs: 8px;
@@ -130,7 +130,7 @@
   --md-link-weight: 800;
   --md-link-bg: color-mix(in srgb, var(--accent) 12%, transparent);
   --md-link-pad: 0.05em 0.6em;
-  --md-link-radius: 999px;
+  --md-link-radius: var(--radius-round);
   --md-stack-radius: 16px;
   --md-stack-row-rule: 2px groove var(--border);
   --md-ul-marker: disc;
@@ -372,8 +372,8 @@
     --text-lg: 20px;
     --text-display: 1.6rem;
     --label-size: 12.5px;
-    --pad-panel: 20px;
-    --pad-control-x: 22px;
+    --pad-panel-want: 20px;
+    --pad-control-x-want: 22px;
   }
 }
 

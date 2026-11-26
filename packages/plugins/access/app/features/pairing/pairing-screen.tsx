@@ -598,7 +598,7 @@ const SHELL =
  */
 function HowThisWorks() {
   return (
-    <details className="mt-2 rounded-control border border-border bg-surface-2 px-control-x py-2">
+    <details className="mt-2 rounded-panel border border-border bg-surface-2 px-panel py-2">
       <summary className="min-h-[44px] cursor-pointer list-none py-2 text-ui font-medium text-muted marker:content-none">
         <span className="inline-flex items-center gap-2">
           <ShieldCheck size={16} aria-hidden="true" />

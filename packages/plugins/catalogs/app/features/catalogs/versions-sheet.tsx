@@ -287,7 +287,7 @@ export function VersionsSheet({
                   ) : null}
                   {asked === null ? null : (
                     <div
-                      className="flex min-w-0 flex-col items-start gap-xs rounded-control border border-warn-border bg-warn-bg p-control-x py-2 text-warn"
+                      className="flex min-w-0 flex-col items-start gap-xs rounded-panel border border-warn-border bg-warn-bg p-panel py-2 text-warn"
                       role="alertdialog"
                       aria-label={ASK_BUTTON[asked.act](asked.version)}
                       data-version-confirm={asked.act}

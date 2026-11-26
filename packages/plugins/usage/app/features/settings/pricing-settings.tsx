@@ -295,7 +295,7 @@ export function PricingSettings({
 
       {notice ? (
         <p
-          className="m-0 rounded-control border border-ok-border bg-ok-bg px-3 py-2 text-meta text-ok"
+          className="m-0 rounded-panel border border-ok-border bg-ok-bg px-panel py-2 text-meta text-ok"
           role="status"
           aria-live="polite"
         >
@@ -353,7 +353,7 @@ export function PricingSettings({
           )}
           {mutationFailure && draft === null ? (
             <p
-              className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-meta text-err"
+              className="m-0 rounded-panel border border-err-border bg-err-bg px-panel py-2 text-meta text-err"
               role="alert"
             >
               {mutationFailure}
@@ -393,7 +393,7 @@ export function PricingSettings({
           {previewBusy && preview === null ? <Loading kind="bar" label="Checking the configured feed…" /> : null}
           {previewError && preview === null ? (
             <p
-              className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-meta text-err"
+              className="m-0 rounded-panel border border-err-border bg-err-bg px-panel py-2 text-meta text-err"
               role="alert"
             >
               {previewError}

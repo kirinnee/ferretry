@@ -123,7 +123,8 @@
   grid-template-columns: 12px minmax(0, 1fr);
   align-items: center;
   column-gap: 8px;
-  padding: 6px 8px;
+  /* Two lines tall, so the corner is a real curve: the inline padding grows with the radius (ROUND-SAFE GEOMETRY, tokens/base-style.css). */
+  padding: 6px max(8px, calc(var(--radius-control-max) * 0.5));
   border: var(--stroke-control) solid transparent;
   border-radius: var(--radius-control);
   color: var(--fg-soft);

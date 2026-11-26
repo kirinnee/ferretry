@@ -103,7 +103,7 @@ export function AnalyticsResponseView({
         response.results.map(row => (
           <div
             key={row.id}
-            className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 rounded-control border border-border-soft bg-surface px-3 py-2 text-cell"
+            className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 rounded-panel border border-border-soft bg-surface px-panel py-2 text-cell"
           >
             {sessionHref ? (
               <RouteLink
