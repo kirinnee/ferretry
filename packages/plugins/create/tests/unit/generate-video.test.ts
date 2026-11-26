@@ -38,6 +38,11 @@ class FakeFal {
   video: Uint8Array = MP4;
   /** While set, storage answers only once this resolves: a download that is in flight. */
   cdnGate: Promise<void> | undefined;
+  /** Bytes the tool has pulled from the body of storage's answers (a body read to its end counts all of it). */
+  streamed = 0;
+  /** Storage answers in flight (opened, not yet read to the end or cancelled) and the most there were at once. */
+  inFlight = 0;
+  peak = 0;
   /** The status every new request starts with. */
   startAs: Queued['status'] = 'IN_QUEUE';
   private count = 0;
@@ -98,15 +103,42 @@ class FakeFal {
       if (this.cdn === 'not-found')
         return { ok: false, status: 404, headers: new Map(), arrayBuffer: async () => new ArrayBuffer(0) } as never;
       const bytes = this.video;
+      this.inFlight++;
+      this.peak = Math.max(this.peak, this.inFlight);
       return {
         ok: true,
         status: 200,
         headers: new Map<string, string>([['content-type', this.cdn === 'wrong-type' ? 'text/html' : 'video/mp4']]),
-        arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+        body: this.streamOf(bytes),
       } as unknown as Response;
     }
     throw new Error(`the fakes were asked for ${url.host}`);
   };
+
+  /** The bytes as a body read a megabyte at a time, so a reader that stops early leaves the rest unread. */
+  private streamOf(bytes: Uint8Array): ReadableStream<Uint8Array> {
+    let at = 0;
+    const done = (): void => {
+      this.inFlight -= 1;
+    };
+    return new ReadableStream<Uint8Array>(
+      {
+        pull: controller => {
+          if (at >= bytes.byteLength) {
+            controller.close();
+            done();
+            return;
+          }
+          const next = bytes.subarray(at, at + 1024 * 1024);
+          at += next.byteLength;
+          this.streamed += next.byteLength;
+          controller.enqueue(next);
+        },
+        cancel: done,
+      },
+      { highWaterMark: 0 },
+    );
+  }
 
   to(host: string, method?: string) {
     return this.seen.filter(request => request.host === host && (method === undefined || request.method === method));
@@ -171,9 +203,9 @@ async function world(
       .state('create')
       .plant(
         SPEND_LEDGER,
-        options.ledger
+        `${options.ledger
           .map(line => JSON.stringify({ format: 1, ...line, day: dayOf(new Date(host.clock.nowMs()), 'UTC') }))
-          .join('\n') + '\n',
+          .join('\n')}\n`,
       );
   if (options.carried?.ledger !== undefined) host.state('create').plant(SPEND_LEDGER, options.carried.ledger);
   if (options.carried?.jobs !== undefined) host.state('create').plant(VIDEO_JOBS, options.carried.jobs);
@@ -480,6 +512,47 @@ describe('generation_status: checking is free; the clip is fetched once it is ma
     expect(w.fake.to('v3b.fal.media')).toHaveLength(1);
     expect(w.delivered).toHaveLength(1);
     expect(net(w)).toBe(700_000);
+  });
+
+  test('a clip with no declared length is cut off while it is read, not after all of it was held', async () => {
+    const w = await world();
+    const job = jobOf((await video(w)).text);
+    w.fake.finish('req-1');
+    w.fake.video = new Uint8Array(200 * 1024 * 1024);
+    const answer = await status(w, job);
+    expect(answer.isError).toBe(true);
+    expect(answer.text).toContain('Do NOT retry');
+    // The 32 MiB cap plus the chunk that crossed it, never the 200 MiB the host offered.
+    expect(w.fake.streamed).toBeGreaterThanOrEqual(32 * 1024 * 1024);
+    expect(w.fake.streamed).toBeLessThanOrEqual(34 * 1024 * 1024);
+    expect(net(w)).toBe(350_000);
+  });
+
+  test('at most two clips come down at once, a few more wait, and the rest are told to ask again', async () => {
+    const w = await world();
+    const jobs: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      jobs.push(jobOf((await video(w, { prompt: `clip number ${i}` })).text));
+      w.fake.finish(`req-${i + 1}`);
+    }
+    let open!: () => void;
+    w.fake.cdnGate = new Promise<void>(resolve => (open = resolve));
+    const asked = jobs.map(job => status(w, job));
+    await Bun.sleep(200);
+    // Two are coming down; two more wait for a place; two were turned away at once.
+    expect(w.fake.to('v3b.fal.media')).toHaveLength(2);
+    open();
+    const answers = await Promise.all(asked);
+    const turnedAway = answers.filter(answer => answer.text.includes('Too many clips'));
+    expect(turnedAway).toHaveLength(2);
+    expect(turnedAway.every(answer => answer.text.includes('Nothing more was spent'))).toBe(true);
+    expect(answers.filter(answer => answer.text.includes('Put these lines in your reply:'))).toHaveLength(4);
+    expect(w.fake.peak).toBeLessThanOrEqual(2);
+    expect(w.delivered).toHaveLength(4);
+    // A turned-away job is fetched when it is asked again, and nothing was spent twice.
+    const again = jobs[answers.findIndex(answer => answer.text.includes('Too many clips'))]!;
+    expect((await status(w, again)).text).toContain('Put these lines in your reply:');
+    expect(net(w)).toBe(6 * 350_000);
   });
 
   test('asked again after it was delivered it gives the same block, fetches nothing and charges nothing', async () => {
