@@ -486,7 +486,7 @@ baseline)
   fi
   connector_grants=0
   if [ -f "${H}/state/connector/connector.json" ]; then
-    connector_grants="$(jq '[.grants[] | select(.revokedAt == null)] | length' "${H}/state/connector/connector.json")" || fail "cannot read the v4 connector state (state/connector/connector.json); do not go on"
+    connector_grants="$(jq '[.grants[] | select(.revokedAt == null)] | length' "${H}/state/connector/connector.json")" || fail "cannot read the v4 connector state (state/connector/connector.json); do not go on. Nothing was changed. Fix it (restore it from your v4 backup, or correct the JSON), or move it aside in the v4 home (mv state/connector/connector.json state/connector/connector.json.damaged) to move WITHOUT the connector's approved apps: Claude then signs in again"
   fi
   printf '%s %s\n' "${connector_on}" "${connector_grants}" >"${base}/connector.txt"
 

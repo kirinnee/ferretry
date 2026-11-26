@@ -385,4 +385,13 @@ describe('verify: the Claude connector (Claude stays signed in)', () => {
     const result = await sb.run('verify');
     expect(result.out).toMatch(/claude connector .* OK .*on=false, 0 live grants/);
   });
+
+  test('a damaged connector.json stops the baseline, names the file AND the way out (restore, or move it aside)', async () => {
+    await put('state/connector/connector.json', '{ "grants": [');
+    const result = await sb.run('baseline', baselineArgs);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain('state/connector/connector.json');
+    expect(result.err).toContain('restore it from your v4 backup');
+    expect(result.err).toContain('mv state/connector/connector.json state/connector/connector.json.damaged');
+  });
 });
