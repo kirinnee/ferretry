@@ -316,6 +316,21 @@ test('SMALL 4: FOUND is not printed if the retry stop leaves a daemon alive', as
   expect(result.err).toContain('retry could not prove v4 stopped');
 });
 
+test('SMALL 4: retry also proves the actual v4 lock free when daemon metadata is absent', async () => {
+  await advance(sb, 'baseline');
+  await writeFile(join(sb.v4home, 'state/sessions/f1/agenda-history.jsonl.pending'), '{}');
+  const daemon = await sqliteDaemon(join(sb.v4home, 'daemon.lock'));
+  await sb.fake('fy', [{ match: 'daemon stop' }, { match: 'daemon start' }]);
+  try {
+    const result = await sb.run('quiet', ['--owner-confirmed']);
+    expect(result.code).not.toBe(0);
+    expect(result.out).not.toContain('FOUND:');
+    expect(result.err).toContain('retry could not prove v4 stopped');
+  } finally {
+    await daemon.stop();
+  }
+});
+
 test('SMALL 4: rollback restores the original home mode, and dry run says its report is written', async () => {
   await chmod(sb.v4home, 0o750);
   await advance(sb, 'quiet');

@@ -36,8 +36,7 @@ export async function releaseLease(dir: string): Promise<void> {
   await rm(dir, { recursive: true });
 }
 
-async function serve(home: string, dir: string): Promise<void> {
-  await privateDirectory(dir);
+async function takeV4Lock(home: string) {
   if (!(await lstat(home)).isDirectory()) throw new Error('v4 home is not a real directory');
   const lockPath = join(home, 'daemon.lock');
   const previous = await lstat(lockPath).catch(error => {
@@ -53,6 +52,12 @@ async function serve(home: string, dir: string): Promise<void> {
   const identity = await stat(lockPath);
   if (previous !== undefined && (identity.dev !== previous.dev || identity.ino !== previous.ino))
     throw new Error('v4 lock changed while taking exclusion');
+  return { db, identity };
+}
+
+async function serve(home: string, dir: string): Promise<void> {
+  await privateDirectory(dir);
+  const { db, identity } = await takeV4Lock(home);
   let held = true;
   const server = Bun.serve({
     unix: socketPath(dir),
@@ -105,6 +110,7 @@ if (import.meta.main) {
   try {
     if (command === 'start' && first !== undefined && second !== undefined) await start(first, second);
     else if (command === 'serve' && first !== undefined && second !== undefined) await serve(first, second);
+    else if (command === 'stopped' && first !== undefined) (await takeV4Lock(first)).db.close();
     else if (command === 'check' && first !== undefined && second !== undefined) {
       if (!(await checkLease(first, second)))
         throw new Error('cutover exclusion was lost; do not convert, roll back first');

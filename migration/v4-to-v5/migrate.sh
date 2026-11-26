@@ -580,6 +580,7 @@ quiet)
     sleep 60
     orig_env "${v4_fy}" daemon stop || fail "'fy daemon stop' failed"
     if daemon_live; then fail "the retry could not prove v4 stopped (${DAEMON_WHY}); do not run backup"; fi
+    (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts stopped "${H}") || fail "the retry could not prove v4 stopped (daemon lock held or unreadable); do not run backup"
     say "⚠️ FOUND: something is pending (names above); the retry stopped v4 again"
     fail "pending files were found. The quiet window is NOT established: ask the owner again and rerun quiet (the whole phase). If the same files are listed again, stop and tell the owner"
   fi
