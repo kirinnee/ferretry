@@ -411,9 +411,7 @@ export class ManagedWorktreeAdapter {
   /**
    * Reads one checkout as it is RIGHT NOW: what Git says, and what that means for removing it.
    *
-   * ONE PASS FOR BOTH ANSWERS. The list wants live state and the check wants a verdict, and both are
-   * read from the same Git invocations — asking separately would cost twice and could return two
-   * accounts of one checkout, which is exactly the staleness this surface promises not to have.
+   * Live state and the removal verdict share the same Git reads, so they describe the same checkout.
    *
    * NOTHING HERE IS CACHED, deliberately. Every field is re-read on every call, so a checkout that
    * somebody dirtied, locked, moved off its branch or deleted by hand between two refreshes reads
@@ -468,13 +466,15 @@ export class ManagedWorktreeAdapter {
         } catch (error) {
           gitErrors.push(`checkout inspection failed: ${message(error)}`);
         }
-        if (checkout?.repo && checkout.branch !== undefined) {
-          const branch = checkout.branch;
+        if (checkout?.repo) {
           try {
             status = await this.gateway.status(here);
           } catch (error) {
             gitErrors.push(`checkout status failed: ${message(error)}`);
           }
+        }
+        if (checkout?.repo && checkout.branch !== undefined) {
+          const branch = checkout.branch;
           try {
             pushState = await this.gateway.pushState(here, branch);
           } catch (error) {
