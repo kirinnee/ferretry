@@ -158,6 +158,14 @@ describe('what the end-of-turn reading still has to say', () => {
     expect(reader.unsaid(pick(text))).toBe('<voice>All green.</voice>');
   });
 
+  test('a line hushed by the tab going to the background counts as said, heard or not: it is never read again', () => {
+    const reader = createLiveReader();
+    reader.observe([person('u0')], LIVE);
+    reader.accepted('a1#0')('hushed');
+    reader.accepted('a1#1')('hushed');
+    expect(reader.unsaid(pick(text))).toBe('');
+  });
+
   test('a line dropped on purpose is never read again, a line never handed over is', () => {
     const reader = createLiveReader();
     reader.observe([person('u0')], LIVE);

@@ -37,6 +37,7 @@ interface Page {
   readonly turn: 'working' | 'your-turn';
   readonly at: number;
   readonly active?: boolean;
+  readonly visible?: boolean;
 }
 
 /** The machine voice, for real: the panel's own queue over a fake stream that records what it was asked to speak and to take back. */
@@ -54,6 +55,7 @@ function realSink() {
       },
       drop: ids => void dropped.push(...ids),
       interrupt: () => undefined,
+      hush: () => undefined,
     }),
     replyState: () => 'ready',
     player: { remainingMs: () => 0 },
@@ -75,6 +77,7 @@ function rig(options: { sink?: 'takes' | 'refuses' | 'none' | 'real' } = {}) {
   const controller: ReadAloudController = createReadAloud({ speaker, language: () => 'en-US' });
   const settings = new LiveVoiceSettingsStore({ getItem: () => null, setItem: () => undefined });
   const said: LiveLine[] = [];
+  const quieted: number[] = [];
   const machine = realSink();
   const sink: LiveSink | undefined =
     options.sink === 'none'
@@ -88,13 +91,14 @@ function rig(options: { sink?: 'takes' | 'refuses' | 'none' | 'real' } = {}) {
               return true;
             },
             outdate: () => undefined,
+            quiet: () => void quieted.push(1),
           };
   function Probe({ page }: { readonly page: Page }) {
     const lines = useLiveVoiceLines({
       active: page.active ?? true,
       rows: page.rows,
       live: true,
-      visible: true,
+      visible: page.visible ?? true,
       sink: () => sink,
     });
     useAutoRead({
@@ -117,7 +121,7 @@ function rig(options: { sink?: 'takes' | 'refuses' | 'none' | 'real' } = {}) {
       </ReadAloudProvider>
     </LiveVoiceSettingsProvider>
   );
-  return { synth, said, tree, controller, machine };
+  return { synth, said, quieted, tree, controller, machine };
 }
 
 const settle = async (ms = 600): Promise<void> => {
@@ -162,6 +166,28 @@ describe('live voice lines on the page', () => {
     await settle();
     expect(r.said.map(line => line.text)).toEqual(['On it.', 'All green.']);
     expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('the tab going to the background quiets the machine voice once; coming back or voice mode off does not', async () => {
+    const r = rig();
+    mounted = await mount(r.tree(START));
+    const ask = person('u1');
+    const page = (visible: boolean, active = true): Page => ({
+      rows: [person('u0'), ask, ferret('<voice>On it.</voice>')],
+      turn: 'working',
+      at: 1_000,
+      visible,
+      active,
+    });
+    await mounted.render(r.tree(page(true)));
+    expect(r.quieted).toHaveLength(0);
+    await mounted.render(r.tree(page(false)));
+    expect(r.quieted).toHaveLength(1);
+    await mounted.render(r.tree(page(true)));
+    expect(r.quieted).toHaveLength(1);
+    // Voice mode off while hidden: nothing of voice mode is there to quiet.
+    await mounted.render(r.tree(page(false, false)));
+    expect(r.quieted).toHaveLength(1);
   });
 
   // V4 never throws away the answer: only a line the ferret is KNOWN to have worked past is progress.

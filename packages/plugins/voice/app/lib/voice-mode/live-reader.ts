@@ -14,7 +14,7 @@
  * sentence a progress line said), so progress, playback and the end-of-turn reading all follow ids.
  *
  * `unsaid` answers one question for the end-of-turn reading: which of the reply's spoken lines were not said live? Each line
- * handed on is followed to what became of it: `played` and `dropped` are never read again, `failed` and `unplayed` (a piece
+ * handed on is followed to what became of it: `played`, `hushed` (the tab went to the background) and `dropped` are never read again, `failed` and `unplayed` (a piece
  * failed, the person talked over it) are read, and a line still being said counts as said. When the answer is nothing only
  * because lines are still being made or said, the reader keeps the reading waiting: if one of them then FAILS, the reading is
  * handed back to be tried again with what is owed then (a late failure never silences a reply).
@@ -150,7 +150,7 @@ export function createLiveReader(): LiveReader {
       return outcome => {
         if (mine !== epoch) return;
         if (outcome === 'unplayed' || outcome === 'failed') said.delete(id);
-        else said.set(id, outcome);
+        else said.set(id, outcome === 'hushed' ? 'played' : outcome);
         const held = waiting;
         if (held === undefined || !held.ids.has(id)) return;
         held.ids.delete(id);
