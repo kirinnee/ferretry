@@ -104,6 +104,30 @@ describe('Tidy data-loss regressions', () => {
     expect((await setupGit(w.repository.root, 'rev-parse', 'feature')).trim()).toBe(newer);
   });
 
+  test('R1: a reviewed ref made symbolic after checkout removal retains both branches', async () => {
+    const w = await fixture('symbolic-ref');
+    await setupGit(w.repository.root, 'branch', 'unrelated', w.request.expectedHead!);
+    const spawn = w.io.git.runBytes;
+    w.io.git.runBytes = async (program, args, options) => {
+      const result = await spawn(program, args, options);
+      if (args.includes('remove') && args.includes('worktree') && result.exitCode === 0)
+        await setupGit(w.repository.root, 'symbolic-ref', 'refs/heads/feature', 'refs/heads/unrelated');
+      return result;
+    };
+
+    const result = await w.built.service.remove(w.request);
+
+    expect(result.branchRetained).toBe(true);
+    expect(result.branchBlockers.some(blocker => blocker.message.includes('symbolic'))).toBe(true);
+    expect((await setupGit(w.repository.root, 'symbolic-ref', 'refs/heads/feature')).trim()).toBe(
+      'refs/heads/unrelated',
+    );
+    for (const branch of ['feature', 'unrelated'])
+      expect((await setupGit(w.repository.root, 'rev-parse', `refs/heads/${branch}`)).trim()).toBe(
+        w.request.expectedHead!,
+      );
+  });
+
   test('MUST 2: a new eligible registry record at the reviewed path cannot inherit consent', async () => {
     const w = await fixture('new-record');
     const state = w.state.port([contract.WorktreesFile]);

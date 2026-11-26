@@ -352,15 +352,26 @@ export class GitWorktreeGateway {
    * `force` is `git branch -D`, and it is reached only after the branch-deletion policy has already
    * accepted an explicit confirmation for every reason deletion would lose work. Git's own `-d`
    * refusal is a second opinion this side keeps rather than routes around.
-   * A proved head instead uses an atomic ref comparison: a newer commit is retained, never force-deleted.
+   * A proved head instead requires a direct ref and an atomic comparison; never follow a symbolic ref to another branch.
    */
   async deleteBranch(cwd: GitWorkingDirectory, branch: string, force: boolean, expectedHead?: string): Promise<void> {
+    if (expectedHead !== undefined) {
+      const reference = await runGit(
+        this.runner,
+        cwd,
+        ['symbolic-ref', '--quiet', `refs/heads/${branch}`],
+        'git branch reference inspection',
+        [0, 1],
+      );
+      if (reference.exitCode === 0)
+        throw new WorktreeError('verification_failed', 'the reviewed branch became symbolic; keeping it');
+    }
     await runGit(
       this.runner,
       cwd,
       expectedHead === undefined
         ? ['branch', force ? '-D' : '-d', '--', branch]
-        : ['update-ref', '-d', `refs/heads/${branch}`, expectedHead],
+        : ['update-ref', '--no-deref', '-d', `refs/heads/${branch}`, expectedHead],
       'git branch delete',
     );
   }
