@@ -53,11 +53,12 @@ const productionBuild = async (options: object): Promise<readonly Output[]> => {
 };
 
 /**
- * A WORKER BUILT THE WAY THE APP BUILDS IT (r12 H11): `entry` as one ES-module chunk by the shell's Vite, with the Durian plugin
- * (`app/vite-durian.ts`), as the shell's `worker` build does. Returns the chunk's code; it fails if the build made more than one
- * file, because a worker the page starts from one script could not fetch a second.
+ * THE DURIAN WORKER AS THE APP BUILDS IT, WITH ITS LAZY CHUNKS (U1 review, item 2): the parser's folder parts and KaTeX are chunks the worker
+ * fetches when a message first needs one (`app/hypermedia/durian-shims/lazy-part.ts`), so the worker is its entry and the files it imports.
+ * Every file is named under `assets/` (the entry `assets/worker.js`), so a page that serves them all under one folder resolves the entry's
+ * relative imports. A worker has no preload helper (`config.isWorker`), which `modulePreload: false` stands in for in a build made as an entry.
  */
-export const buildWorkerChunk = async (entry: string): Promise<string> => {
+export const buildWorkerFiles = async (entry: string): Promise<ReadonlyMap<string, string>> => {
   const output = await productionBuild({
     root: conversation,
     plugins: [durianBuild.plugin, durianBuild.workerPlugin],
@@ -65,14 +66,16 @@ export const buildWorkerChunk = async (entry: string): Promise<string> => {
       write: false,
       minify: true,
       target: 'es2022',
-      rollupOptions: { input: entry, output: { format: 'es', entryFileNames: 'worker.js' } },
+      modulePreload: false,
+      rollupOptions: {
+        input: entry,
+        output: { format: 'es', entryFileNames: 'assets/worker.js', chunkFileNames: 'assets/[name]-[hash].js' },
+      },
     },
   });
-  const chunks = output.filter((file): file is Chunk => file.type === 'chunk');
-  const [only] = chunks;
-  if (chunks.length !== 1 || only === undefined)
-    throw new Error(`the worker built to ${chunks.length} chunks, not one`);
-  return only.code;
+  return new Map(
+    output.filter((file): file is Chunk => file.type === 'chunk').map(chunk => [chunk.fileName, chunk.code]),
+  );
 };
 
 export interface ViteScene {

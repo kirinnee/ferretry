@@ -529,6 +529,9 @@ export type FolderPartName =
   | 'video'
   | 'wardley'
   | 'weather';
+/** Every fence word of a folder part, in name order (`src/parts/generated/registry.ts`): the build tests hold the stand-ins of the parts to it. `FOLDER_PARTS` is the definitions, which are Durian's own and not declared here. */
+export declare const FOLDER_PART_NAMES: readonly FolderPartName[];
+export declare const FOLDER_PARTS: Readonly<Record<FolderPartName, unknown>>;
 /** A part in its own folder: `data` is what its parser returned (a shape of its own, not declared here: this app draws none of them yet). */
 export type FolderBlock = {
   [N in FolderPartName]: PartBase & { type: N; data: unknown };

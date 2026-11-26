@@ -257,6 +257,8 @@ describe('the worker module', () => {
     expect(posted).toEqual([{ kind: 'ready' }]);
     scope.onmessage?.({ data: 'not an ask' });
     scope.onmessage?.({ data: request('hello', { id: 2 }) });
+    // The ask is answered after the worker has checked that nothing lazy is missing (`durian-serve.ts`): a turn of the event loop.
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(posted.length).toBe(2);
     expect(posted[1]).toMatchObject({ kind: 'read', id: 2 });
   });

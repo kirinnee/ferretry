@@ -23,7 +23,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sharedChromium } from '@ferretry/app/testing/browser';
-import { buildWorkerChunk } from '../../support/vite-scene.ts';
+import { buildWorkerFiles } from '../../support/vite-scene.ts';
 import { fyRenderIntegrationFixture } from './support/fy-render-integration-fixture.ts';
 import { scanForHtmlSinks } from './support/sink-scan.ts';
 
@@ -49,6 +49,8 @@ let threeChunk = '';
 let bundleInputs: readonly string[] = [];
 /** The Durian worker as the app builds it, and the test-only one whose parse of a marked message never returns. */
 let workerCode = '';
+/** The other files of the Durian worker's build (its lazy parts and KaTeX, and what they share), by their path under `/`: `assets/katex-<hash>.js`. */
+let workerChunks: ReadonlyMap<string, string> = new Map();
 let slowWorkerCode = '';
 let slowWorker = false;
 const FIXTURES: { readonly name: string; readonly file: string }[] = [];
@@ -120,8 +122,13 @@ beforeAll(async () => {
       .slice('Content-Security-Policy:'.length)
       .trim() ?? '';
   if (!policy.includes("require-trusted-types-for 'script'")) throw new Error('the real policy lost Trusted Types');
-  workerCode = await buildWorkerChunk(resolve(packageRoot, '../../../app/hypermedia/durian-worker.ts'));
-  slowWorkerCode = await buildWorkerChunk(resolve(packageRoot, 'fixtures/slow-durian-worker.ts'));
+  // Both workers are built the app's way, each with its lazy chunks; a chunk's name carries its content hash, so one name is one file.
+  const workerFiles = await buildWorkerFiles(resolve(packageRoot, '../../../app/hypermedia/durian-worker.ts'));
+  const slowFiles = await buildWorkerFiles(resolve(packageRoot, 'fixtures/slow-durian-worker.ts'));
+  workerCode = workerFiles.get('assets/worker.js') ?? '';
+  slowWorkerCode = slowFiles.get('assets/worker.js') ?? '';
+  if (workerCode === '' || slowWorkerCode === '') throw new Error('a Durian worker build has no entry');
+  workerChunks = new Map([...workerFiles, ...slowFiles].filter(([name]) => name !== 'assets/worker.js'));
   directory = await mkdtemp(join(tmpdir(), 'ferretry-hypermedia-parts-'));
   const built = await spawnJson<{ chunks: string[]; inputs: string[] }>([
     resolve(packageRoot, 'fixtures/hypermedia-split-build.ts'),
@@ -168,6 +175,9 @@ beforeAll(async () => {
       // carries the policy it runs under); a test swaps in the one with a slow parse (`slowWorker`).
       if (path === '/assets/durian-worker-test.js')
         return secured(slowWorker ? slowWorkerCode : workerCode, CONTENT_TYPES['.js'] ?? '');
+      // The files the worker imports, next to it: its lazy parts and KaTeX (the worker's own response carries the policy they run under).
+      if (workerChunks.has(path.slice(1)))
+        return secured(workerChunks.get(path.slice(1)) ?? '', CONTENT_TYPES['.js'] ?? '');
       if (path === '/fy-render-sandbox.html')
         return new Response(fixture.shell, {
           headers: {
@@ -738,6 +748,42 @@ describe('a message is read in the Durian worker, under the real policy', () => 
   })();`;
 
   const SLOW_TEXT = '# Slow\n\nFY-SLOW-PARSE and some words.';
+
+  it('fetches KaTeX only for a message with a formula, from the worker, under the real policy: 0 CSP and Trusted Types violations, and the formula is drawn', async () => {
+    expect([...workerChunks.keys()].some(name => name.includes('katex'))).toBe(true);
+    const isKatex = (path: string): boolean => /^\/assets\/katex-[\w-]+\.js$/u.test(path);
+    // A message with no formula fetches none of it.
+    const plainStart = ledger.length;
+    const plain = await open(`text=${encodeURIComponent('# Plain\n\nNo formula here, and a price of \\$5.')}`);
+    try {
+      await until(plain.page, "document.querySelector('.dh-doc h1') !== null", 10_000);
+      expect(ledger.slice(plainStart).filter(isKatex)).toEqual([]);
+      await expectClean(plain, 'plain message, lazy worker');
+    } finally {
+      await plain.close();
+    }
+    const before = ledger.length;
+    const visit = await open(
+      `text=${encodeURIComponent('# Maths\n\nThe area is $\\pi r^2$ and the sum is $\\sum_{k=1}^{n} k$.')}`,
+    );
+    try {
+      await until(visit.page, "document.querySelector('.dh-doc math') !== null", 15_000);
+      const m = await visit.page.evaluate(() => ({
+        formulas: document.querySelectorAll('.dh-doc math').length,
+        annotated: document.querySelectorAll('.dh-doc math annotation').length,
+        plain: document.querySelector('pre.fy-hm-plain') !== null,
+      }));
+      expect(m.formulas).toBe(2);
+      expect(m.annotated).toBe(2);
+      expect(m.plain).toBe(false);
+      const fetched = ledger.slice(before);
+      expect(fetched).toContain('/assets/durian-worker-test.js');
+      expect(fetched.filter(isKatex).length).toBe(1);
+      await expectClean(visit, 'a formula, lazy worker');
+    } finally {
+      await visit.close();
+    }
+  }, 60_000);
 
   it('starts the worker through the real spawn with 0 CSP and Trusted Types violations, and draws the document it sends', async () => {
     const before = ledger.length;

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { lazyRegistry } from './vite-durian-lazy.ts';
 
 /**
  * WHAT THE APP SHELL'S VITE CONFIG NEEDS TO BUILD `durian-markdown` — the hypermedia renderer's package — the way
@@ -35,6 +36,12 @@ import { fileURLToPath } from 'node:url';
  * carried the whole parser (+400 KB gzip: it takes one function, `inlineText`, from the module that also holds the Markdown reader) and
  * the worker 500 KB of stage compiler it never reaches.
  *
+ * THE FOLDER PARTS' PARSERS AND KATEX ARRIVE WHEN A MESSAGE FIRST NEEDS THEM (U1 review, item 2: the cold chat path is the page and the parser worker
+ * together). Durian's registry imports all thirty-one parts and KaTeX, which writes a formula's tree at parse time: 333 KB gzip in the worker the first
+ * rich message starts, against 110 KB before. `vite-durian-lazy.ts` rewrites that one generated file so each part is a stand-in and a dynamic import,
+ * and `katex` is redirected to `durian-shims/katex-late.ts`; the worker fetches what a parse names and parses again (`hypermedia/durian-serve.ts`).
+ * The worker's first load is 147.8 KB and the whole cold path 450.3 KB against the merge parent's 409.2 KB (`tests/perf/hypermedia-size.test.ts`).
+ *
  * THE PIN IS A DECISION, NOT A RANGE (owner choice C8): a newer Durian comes in by a PR that reads its CHANGELOG and
  * re-runs the hostile and format fixtures. `DURIAN_PIN` is the record, and the build refuses an installed version
  * that is not the pinned tag's.
@@ -46,7 +53,9 @@ import { fileURLToPath } from 'node:url';
  *      (`runStyleBuild`), with `PATH` and no other environment. A new line there that reads the environment, the network or
  *      anything outside the package is a supply-chain change: the PR names it, and the reviewer reads it as code that runs
  *      on every developer machine and CI runner;
- *   4. re-measure `tests/perf/hypermedia-size.test.ts` and say what moved.
+ *   4. re-measure `tests/perf/hypermedia-size.test.ts` (the COLD path: the page and the worker together) and say what moved;
+ *   5. `tests/unit/app/hypermedia/lazy-parts.test.ts` holds `durian-shims/lazy-part-shapes.ts` to the registry (a part added, or a part's shape changed,
+ *      fails there), and `tests/perf/lazy-worker.test.ts` holds the built worker to Durian's own answers.
  */
 
 /** The reviewed release: tag `v0.7.0` (the package was `durian-hypermedia` until this release), the commit it points at, and the tag object. MIT. */
@@ -102,6 +111,8 @@ const SCENE_LATE = fileURLToPath(new URL('./hypermedia/durian-shims/scene-late.t
 const TEXT_WIDTH = fileURLToPath(new URL('./hypermedia/durian-shims/text-width.ts', import.meta.url));
 const STAGE_HELD = fileURLToPath(new URL('./hypermedia/durian-shims/stage-held.ts', import.meta.url));
 const INLINE_TEXT = fileURLToPath(new URL('./hypermedia/durian-shims/inline-text.ts', import.meta.url));
+const KATEX_LATE = fileURLToPath(new URL('./hypermedia/durian-shims/katex-late.ts', import.meta.url));
+const LAZY_PART = fileURLToPath(new URL('./hypermedia/durian-shims/lazy-part.ts', import.meta.url));
 
 /**
  * WHICH DURIAN IMPORTS ARE REDIRECTED (r12 H8 fix; `core/chipw.ts` added at 0.6.2): the PARSER's (`core/dh-lib.ts`, `document.ts`), and the one
@@ -138,8 +149,13 @@ export function redirectedImport(source: string, importer: string | undefined, r
   if (importer === join(core, 'chipw.ts') && source === './scene') return TEXT_WIDTH;
   // 0.7.0: the page's Markdown renderer takes one function from the module that also holds the whole parser (`inline-text.ts`).
   if (importer === join(src, 'react/markdown.tsx') && source === '../markdown') return INLINE_TEXT;
+  // U1 review, item 2: KaTeX (~77 KB gzip) writes a formula's tree at parse time and arrives when a message first has one (`katex-late.ts`).
+  if (importer === join(src, 'parts/math/render.ts') && source === 'katex') return KATEX_LATE;
   return null;
 }
+
+/** The generated part registry, whose folder parts the build makes lazy (`vite-durian-lazy.ts`). */
+const registryId = (root: string): string => join(root, 'src/parts/generated/registry.ts');
 
 /** The file of Durian's scene compiler, which registers itself with {@link SCENE_LATE} when it evaluates. */
 const sceneCompilerId = (root: string): string => join(root, 'src/core/scene.ts');
@@ -218,7 +234,9 @@ const plugin = {
   // The real scene compiler tells the parser's door it has arrived (`scene-late.ts`): appended to the compiler's own module,
   // so it runs exactly when the animation's chunk evaluates it, wherever the bundler puts it.
   transform(code: string, id: string): string | null {
-    if (id !== sceneCompilerId(installedPackage().root)) return null;
+    const { root } = installedPackage();
+    if (id === registryId(root)) return lazyRegistry(code, LAZY_PART);
+    if (id !== sceneCompilerId(root)) return null;
     return `${code}\nimport { bindScene as __fyBindScene } from ${JSON.stringify(SCENE_LATE)};\n__fyBindScene({ compileScene, sceneLlm, KINDS });\n`;
   },
 };

@@ -54,13 +54,31 @@ const sourceModules = (chunk: Chunk): string[] => Object.keys(chunk.modules);
 
 const gz = (content: string | Uint8Array): number => gzipSync(content, { level: 9 }).length;
 
-export const measureBundle = async (options: {
+interface BuildOptions {
   readonly root: string;
   readonly entry: string;
   readonly plugins: readonly object[];
   /** The plugins a worker the entry starts (`?worker&url`) is built with: a worker is bundled apart, with its own. */
   readonly workerPlugins?: readonly object[];
-}): Promise<BundleSize> => {
+  /**
+   * Vite's helper that preloads a dynamic import's dependencies reads `document`: it is in a page build and, the way Vite builds a WORKER
+   * (`config.isWorker`), never in one. A worker measured or run as an entry says `false` to be built the way the page's own build builds it.
+   */
+  readonly modulePreload?: false;
+}
+
+/** Every JavaScript file of one production build, by its path under the output folder (`assets/x.js`), with its text, and which one is the entry. */
+export const buildFiles = async (
+  options: BuildOptions,
+): Promise<{ readonly entry: string; readonly files: ReadonlyMap<string, string> }> => {
+  const output = await runBuild(options);
+  const chunks = output.filter((o): o is Chunk => o.type === 'chunk');
+  const entry = chunks.find(c => c.isEntry);
+  if (entry === undefined) throw new Error('the build has no entry chunk');
+  return { entry: entry.fileName, files: new Map(chunks.map(chunk => [chunk.fileName, chunk.code])) };
+};
+
+const runBuild = async (options: BuildOptions): Promise<readonly Output[]> => {
   const { build } = await viteOfTheShell();
   // `bun test` runs with NODE_ENV=test, and Vite takes the environment from it whatever `mode` says: React's development bundle
   // would be measured (+18 KB gzip). The size of a PRODUCTION page is asked, so the variable is production for the build.
@@ -77,13 +95,23 @@ export const measureBundle = async (options: {
       ...(options.workerPlugins === undefined
         ? {}
         : { worker: { format: 'es', plugins: () => [...(options.workerPlugins ?? [])] } }),
-      build: { write: false, minify: true, target: 'es2022', rollupOptions: { input: options.entry } },
+      build: {
+        write: false,
+        minify: true,
+        target: 'es2022',
+        ...(options.modulePreload === undefined ? {} : { modulePreload: options.modulePreload }),
+        rollupOptions: { input: options.entry },
+      },
     });
   } finally {
     if (was === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = was;
   }
-  const output = (Array.isArray(result) ? result : [result]).flatMap(r => r.output);
+  return (Array.isArray(result) ? result : [result]).flatMap(r => r.output);
+};
+
+export const measureBundle = async (options: BuildOptions): Promise<BundleSize> => {
+  const output = await runBuild(options);
   const chunks = output.filter((o): o is Chunk => o.type === 'chunk');
   const assets = new Map(output.filter((o): o is Asset => o.type === 'asset').map(a => [a.fileName, a]));
   const entry = chunks.find(c => c.isEntry);
