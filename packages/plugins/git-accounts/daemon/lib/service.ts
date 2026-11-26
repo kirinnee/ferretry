@@ -103,13 +103,7 @@ export class GitAccountsService {
     // Which program runs is settled BEFORE the token is read: a `gh` that cannot be trusted never sees one.
     const launch = await this.ghProgram();
     const { program, path, verify } = launch;
-    const formatter = filter === undefined ? undefined : await launch.formatter?.();
-    if (filter !== undefined && formatter === undefined)
-      throw new ApiError(
-        403,
-        'GitHub formatter unavailable. Install jq or gojq in a trusted package installation.',
-        GIT_ACCOUNT_CODES.invalidRequest,
-      );
+    const formatter = filter === undefined ? undefined : await launch.formatter();
     const token = help !== undefined || id === undefined ? undefined : await this.#tokenOf(id);
     const timeout = milliseconds(Math.min(Math.max(spec.timeoutMs ?? 60_000, 1_000), 300_000));
     const folder = await this.scratch.open();

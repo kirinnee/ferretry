@@ -16,7 +16,7 @@ import type { ProgramLocatorPorts, TrustedLaunch } from './program-locator.ts';
 
 export type GhLocatorPorts = ProgramLocatorPorts & Pick<PathsPort, 'bindProgram' | 'home'>;
 /** What a `gh` that gets a token is started with: the program, and the `PATH` its own children (`git`, a pager) search. */
-export type GhLaunch = TrustedLaunch & { verify(): Promise<boolean>; formatter?(): Promise<BoundProgram> };
+export type GhLaunch = TrustedLaunch & { verify(): Promise<boolean>; formatter(): Promise<BoundProgram> };
 
 /** The `gh` to run and the `PATH` to run it with, or a refusal (a 403 `invalid_request` `ApiError`) saying why there is none. */
 export function ghLocator(ports: GhLocatorPorts): () => Promise<GhLaunch> {

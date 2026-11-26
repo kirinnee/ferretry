@@ -16,6 +16,7 @@ import { FakeSealedDocuments } from '@ferretry/core-vault/contract/testing';
 import { GhRunAnswerSchema, GhRunRequestSchema, NO_SECRET_FIELDS } from '../../contract/index.ts';
 import daemon from '../../daemon/index.ts';
 import { GhRunner } from '../../daemon/features/gh-run/gh-runner.ts';
+import { GitAccountsService } from '../../daemon/lib/service.ts';
 import { FAKE_TOKEN, FakeGithub } from './fake-github.ts';
 import { GH_REAL, ghHost } from './gh-host.ts';
 import { testClient } from './run-folder.ts';
@@ -487,6 +488,15 @@ describe('who may ask, and for which folder', () => {
 });
 
 describe('G21b tokenless formatting and help', () => {
+  test('the tokenless help entry refuses API work before consulting any account dependency', async () => {
+    const unexpected = () => {
+      throw new Error('tokenless help consulted an account dependency');
+    };
+    const unused = new Proxy(unexpected, { get: unexpected }) as never;
+    const service = new GitAccountsService(unused, unused, unused, unused, unused, unused, unused, unused);
+    await expect(service.help(['api', 'user'])).rejects.toThrow('Only gh help or --version');
+  });
+
   for (const flag of ['-q', '-qattached', '--jq', '--jq=']) {
     test(`${flag}: only JSON enters a separate child with an empty environment`, async () => {
       const { root } = projectFolder();
