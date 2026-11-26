@@ -14,7 +14,7 @@ const real = (id: string) => {
   return found;
 };
 
-for (const through of ['login', 'runtime', 'inferred-runtime'] as const) {
+for (const through of ['login', 'runtime', 'inferred-runtime', 'implicit-default'] as const) {
   test(`real Logins + Runtimes refuse a subscription through ${through} before status/store reads and reuse the callsign`, async () => {
     let reads = 0;
     let spawns = 0;
@@ -113,10 +113,15 @@ for (const through of ['login', 'runtime', 'inferred-runtime'] as const) {
             harness: 'claude-code',
             store: 'environment',
             preset: 'deepseek',
-            env: { DEEPSEEK_API_KEY: '${secret:OAUTH}' },
+            env: { DEEPSEEK_API_KEY: '${secret:KEY}', ENDPOINT_SETTING: 'prefix${secret:OAUTH}' },
           },
         },
         runtimes: {
+          ...(through === 'implicit-default'
+            ? {
+                'claude-default': { harness: 'opencode', login: 'subscription', profile: 'plain' },
+              }
+            : {}),
           subscription: {
             ...(through === 'inferred-runtime' ? {} : { harness: 'opencode' }),
             login: 'subscription',
@@ -140,10 +145,11 @@ for (const through of ['login', 'runtime', 'inferred-runtime'] as const) {
       host.request('POST', '/v1/ferrets', {
         headers: { 'x-fy-request-id': id },
         body: {
-          harness: 'opencode',
+          ...(through === 'implicit-default' && id === 'request-one'
+            ? {}
+            : { harness: 'opencode', [selector]: account }),
           name: id.startsWith('request-') ? 'reusable' : id,
           folder: '/work/project',
-          [selector]: account,
           model: 'deepseek/deepseek-flash',
           mode: 'interactive',
         },
@@ -164,7 +170,7 @@ for (const through of ['login', 'runtime', 'inferred-runtime'] as const) {
       expect(endpoint).toMatchObject({ status: 409 });
       expect(JSON.stringify(endpoint.body)).toContain('subscription credentials');
       expect(JSON.stringify(endpoint.body)).not.toContain('sk-ant-');
-      profileEnvironment = { PROFILE_SETTING: '${secret:OAUTH}' };
+      profileEnvironment = { PROFILE_SETTING: 'prefix${secret:OAUTH}' };
       const profileRefused = await start('key', 'profile-refused', 'login');
       expect(profileRefused).toMatchObject({ status: 409 });
       expect(JSON.stringify(profileRefused.body)).toContain('subscription credentials');
