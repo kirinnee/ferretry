@@ -131,7 +131,13 @@ describe('voice mode in front of the composer', () => {
     box.value = 'half a thought';
     await start(r);
     expect(r.opened()).toBe(1);
-    expect(JSON.parse(r.sent[0] as string)).toEqual({ t: 'start', v: 1, purpose: 'chat', ferretId: 'ferret-1' });
+    expect(JSON.parse(r.sent[0] as string)).toEqual({
+      t: 'start',
+      v: 1,
+      purpose: 'chat',
+      ferretId: 'ferret-1',
+      session: expect.stringMatching(/^vm-[0-9a-f-]{36}$/u),
+    });
     expect(q('[data-voice-mode]')).not.toBeNull();
     expect(q('[data-composer]')).toBe(box);
     expect((q('[data-voice-mode-composer]') as HTMLElement).style.display).toBe('none');

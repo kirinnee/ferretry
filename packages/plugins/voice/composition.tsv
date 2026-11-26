@@ -1,3 +1,5 @@
 kind	path	limit	expires	reason
 oversize	app/features/settings/voice-mode-settings.tsx	400	2026-12-31	hot (6 of the last 80 merges): every voice unit adds a row to this panel; split by row when the voice units land
+oversize	daemon/index.ts	300	2026-12-31	hot (6 of the last 80 merges): the voice plugin daemon composition; the stream registry, the entry route and the reply voice are wired here; split the stream wiring out when the heard/not-heard note (V3) lands
+oversize	daemon/lib/stream/session.ts	1000	2026-12-31	hot (6 of the last 80 merges): the voice stream every voice unit touches (entry message, drop frame, the speak queue); split the speak queue out of it when the heard/not-heard note (V3) lands
 oversize	manifest.ts	300	2026-12-31	the voice manifest declares every route, worker, selftest and permission of the plugin; five voice PRs in a row each added a line, split by feature when the voice settings land

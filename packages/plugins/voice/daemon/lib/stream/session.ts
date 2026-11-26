@@ -23,6 +23,8 @@ import {
   UNIT_MS,
   UPLINK_UNIT_BYTES,
   UnitAssembler,
+  ENTRY_RENEW_MS,
+  VOICE_ENTRY_MESSAGE,
   WORDS_MAX_CHARS,
   type VoiceEngineApi,
   VoiceEngineError,
@@ -30,6 +32,7 @@ import {
   decodeUplinkUnit,
   encodeDownlinkUnit,
   encodeReplyDownlinkUnit,
+  entrySendId,
   snapshotBytes,
 } from '../../../contract/index.ts';
 import { splitForSpeech } from '../reply/chunks.ts';
@@ -93,6 +96,14 @@ export interface StreamParts {
   readonly recordSent: (ferretId: string) => void;
   /** Takes the one voice chat a ferret may have; `undefined` when another stream holds it. Returns the release. */
   readonly claimFerret: (ferretId: string) => (() => void) | undefined;
+  /**
+   * The chat's entry claim, shared by every stream and phone engine of this machine (the registry holds it). `enter` is true
+   * only for the call that finds no live claim: that one sends the entry message. Absent (a suite): every entry sends.
+   */
+  readonly entry?: {
+    readonly enter: (ferretId: string) => boolean;
+    readonly leave: (ferretId: string) => void;
+  };
   /**
    * The machine's reply voice. `undefined` only where there is none to ask (a suite): a stream that asks for it is then told
    * `absent`. A stream that does not ask for it never touches this.
@@ -208,6 +219,12 @@ export class VoiceStream implements SocketHandler {
   private draining = false;
   /** Bumped by every hush: a line being made when it changed is thrown away, never queued. */
   private hushes = 0;
+  /** Lines the device took back before any of their sound went down: the one being made is thrown away when it finishes. */
+  private readonly dropped = new Set<number>();
+  /** Lines whose first sound has gone down the stream (so a drop is too late); forgotten when the line ends. */
+  private readonly sounding = new Set<number>();
+  /** The line being made right now. */
+  private making: number | undefined;
 
   constructor(private readonly parts: StreamParts) {}
 
@@ -265,14 +282,14 @@ export class VoiceStream implements SocketHandler {
         this.refuse('fleet_not_granted');
         return;
       }
-      void this.beginChat(start.data.ferretId);
+      void this.beginChat(start.data.ferretId, start.data.session);
       return;
     }
     this.begin(start.data.purpose);
   }
 
   /** A chat stream is for ONE ferret: its id (an id and its callsign are the same ferret) is the one claimed. */
-  private async beginChat(reference: string): Promise<void> {
+  private async beginChat(reference: string, session: string | undefined): Promise<void> {
     let id: string | undefined;
     try {
       id = await this.parts.resolveFerret(reference);
@@ -285,6 +302,43 @@ export class VoiceStream implements SocketHandler {
     if (this.releaseFerret === undefined) return this.refuse('voice_busy');
     this.ferretId = id;
     this.begin('chat');
+    // A client that named no session is one that predates the entry message: it gets the stream it always had.
+    if (session === undefined) return;
+    // A renewal keeps a live claim live; one that finds none (a refused first entry gave it up) takes it AND tells the ferret.
+    this.cancels.push(
+      this.parts.clock.every(milliseconds(ENTRY_RENEW_MS), () => {
+        if (!this.ended && this.parts.entry?.enter(id) !== false) void this.sendEntry(id, session);
+      }),
+    );
+    if (this.parts.entry?.enter(id) !== false) void this.sendEntry(id, session);
+  }
+
+  /**
+   * Voice mode was just entered: tell the ferret at once, in one message, so the grammar `instructions/voice.md` teaches is
+   * switched on for this conversation. The chat's claim (the registry's) decides WHO sends it, so a second tab or a phone
+   * engine on the same chat sends nothing; the send id belongs to the voice-mode SESSION (the device keeps it across
+   * reconnects), so a stream that drops and reopens inside the claim's lease is not a second message. A refusal is not
+   * fatal: the person can still talk, the typed instruction is in the ferret's static layer either way, and the claim is
+   * given up so the next to enter sends it.
+   */
+  private async sendEntry(ferretId: string, session: string): Promise<void> {
+    if (this.ended || this.parts.send === undefined || !this.parts.mayChat()) {
+      this.parts.entry?.leave(ferretId);
+      return;
+    }
+    let result: Awaited<ReturnType<NonNullable<StreamParts['send']>>>;
+    try {
+      result = await this.parts.send(ferretId, VOICE_ENTRY_MESSAGE, entrySendId(session));
+    } catch {
+      result = { ok: false, code: 'send_refused' };
+    }
+    if (!result.ok) {
+      this.parts.entry?.leave(ferretId);
+      this.parts.log.info('voice.stream.entry_refused', { stream: this.parts.streamId, code: result.code });
+      return;
+    }
+    // Not audited: it is a fixed sentence of the machine's own, with none of the person's words, and a reconnect sends it again.
+    this.parts.log.info('voice.stream.entered', { stream: this.parts.streamId });
   }
 
   private begin(purpose: string): void {
@@ -325,6 +379,10 @@ export class VoiceStream implements SocketHandler {
       this.hush();
       return;
     }
+    if (frame.t === 'drop') {
+      this.drop(frame.id);
+      return;
+    }
     const refusal =
       this.replyState === 'absent'
         ? LINE_ABSENT
@@ -346,9 +404,31 @@ export class VoiceStream implements SocketHandler {
    */
   private hush(): void {
     this.hushes += 1;
+    this.dropped.clear();
+    this.sounding.clear();
     this.spokenQueue.length = 0;
     this.outgoing.length = 0;
     this.outgoingSamples = 0;
+  }
+
+  /**
+   * One waiting line is no longer wanted (a newer progress line outdated it): it is taken out of the queue and any sound made
+   * for it is not sent, and the line being made is thrown away when it finishes. A line whose first sound has gone down
+   * is left alone: the person has heard its start. Nothing is reported back; the device forgot the line when it asked.
+   */
+  private drop(id: number): void {
+    if (this.sounding.has(id)) return;
+    this.dropped.add(id);
+    const waiting = this.spokenQueue.findIndex(line => line.id === id);
+    if (waiting !== -1) this.spokenQueue.splice(waiting, 1);
+    for (let at = this.outgoing.length - 1; at >= 0; at -= 1) {
+      const sound = this.outgoing[at];
+      if (sound?.id !== id) continue;
+      this.outgoingSamples -= sound.pcm.length - sound.offset;
+      this.outgoing.splice(at, 1);
+    }
+    // Only the line being made still has to remember it was dropped; for any other there is nothing left to throw away.
+    if (this.making !== id) this.dropped.delete(id);
   }
 
   private failQueued(code: string): void {
@@ -386,6 +466,21 @@ export class VoiceStream implements SocketHandler {
     const reply = this.parts.reply;
     const hushes = this.hushes;
     const pieces = splitForSpeech(text);
+    this.making = id;
+    try {
+      await this.speakPieces(reply, hushes, id, pieces);
+    } finally {
+      this.making = undefined;
+      this.dropped.delete(id);
+    }
+  }
+
+  private async speakPieces(
+    reply: StreamParts['reply'],
+    hushes: number,
+    id: number,
+    pieces: readonly string[],
+  ): Promise<void> {
     if (reply === undefined || pieces.length === 0) {
       this.queueSound({
         id,
@@ -406,6 +501,7 @@ export class VoiceStream implements SocketHandler {
         return;
       }
       if (this.ended || hushes !== this.hushes) return;
+      if (this.dropped.has(id)) return;
       const pcm = toPcm16(made.samples);
       // Milliseconds and counts only: what was said never reaches a log.
       this.parts.log.info('voice.stream.spoke', {
@@ -442,6 +538,11 @@ export class VoiceStream implements SocketHandler {
         last = true;
         break;
       }
+    }
+    if (filled > 0) this.sounding.add(head.id);
+    if (last) {
+      this.sounding.delete(head.id);
+      this.dropped.delete(head.id);
     }
     return {
       audio: { id: head.id, samples: filled, last, ...(failed === undefined ? {} : { failed }) },

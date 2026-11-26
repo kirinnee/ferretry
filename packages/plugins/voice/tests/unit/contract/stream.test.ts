@@ -121,9 +121,24 @@ describe('the voice stream units', () => {
   test('the start record is one of two shapes and nothing else', () => {
     expect(StreamStartSchema.safeParse({ t: 'start', v: 1, purpose: 'test' }).success).toBe(true);
     expect(
-      StreamStartSchema.safeParse({ t: 'start', v: 1, purpose: 'chat', ferretId: 'f1', style: 'quick' }).success,
+      StreamStartSchema.safeParse({
+        t: 'start',
+        v: 1,
+        purpose: 'chat',
+        ferretId: 'f1',
+        session: 'vm-test-session',
+        style: 'quick',
+      }).success,
     ).toBe(true);
-    expect(StreamStartSchema.safeParse({ t: 'start', v: 1, purpose: 'chat' }).success).toBe(false);
+    // A v1 record from a client that knows no session still streams (additive: such a stream gets no entry message).
+    expect(StreamStartSchema.safeParse({ t: 'start', v: 1, purpose: 'chat', ferretId: 'f1' }).success).toBe(true);
+    expect(StreamStartSchema.safeParse({ t: 'start', v: 1, purpose: 'chat', session: 'vm-test-session' }).success).toBe(
+      false,
+    );
+    for (const session of ['short', 'has space in it', 'x'.repeat(65)])
+      expect(StreamStartSchema.safeParse({ t: 'start', v: 1, purpose: 'chat', ferretId: 'f1', session }).success).toBe(
+        false,
+      );
     expect(StreamStartSchema.safeParse({ t: 'start', v: 1, purpose: 'test', ferretId: 'f1' }).success).toBe(false);
   });
 });

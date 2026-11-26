@@ -59,6 +59,7 @@ describe.skipIf(!ASKED)('the voice stream with the real speech engine', () => {
 
       const frames: { at: number; snapshot: StreamSnapshot }[] = [];
       const sent: { at: number; message: string; sendId: string }[] = [];
+      const claimed = new Set<string>();
       const downstream: SocketDownstream = {
         send: frame => {
           frames.push({ at: performance.now(), snapshot: decodeDownlinkUnit(frame as Uint8Array) });
@@ -82,11 +83,17 @@ describe.skipIf(!ASKED)('the voice stream with the real speech engine', () => {
         resolveFerret: async reference => reference,
         recordSent: () => undefined,
         claimFerret: () => () => undefined,
+        entry: {
+          enter: ferret => !claimed.has(ferret) && !!claimed.add(ferret),
+          leave: ferret => void claimed.delete(ferret),
+        },
         onEnd: () => undefined,
         log: { info: () => undefined },
       });
       await stream.open();
-      stream.fromClient(JSON.stringify({ t: 'start', v: 1, purpose: 'chat', ferretId: 'real-ferret' }));
+      stream.fromClient(
+        JSON.stringify({ t: 'start', v: 1, purpose: 'chat', ferretId: 'real-ferret', session: 'vm-real-session' }),
+      );
 
       const clip = pcmOf(new Uint8Array(await readFile(CLIP)));
       const lead = 2 * 16_000;
@@ -115,15 +122,22 @@ describe.skipIf(!ASKED)('the voice stream with the real speech engine', () => {
       const final = frames.find(item => item.snapshot.words?.final === true);
       console.log('first interim words after speech began (ms)', Math.round((interim[0]?.at ?? 0) - begun - 2_000));
       console.log('speech ended → final words (ms)', Math.round((final?.at ?? 0) - speechEndedAt));
-      console.log('speech ended → sent (ms)', Math.round((sent[0]?.at ?? 0) - speechEndedAt));
+      // Two different sends reach the ferret: the entry message (once, as voice mode begins) and the utterance. Each is
+      // asserted on its own, and the utterance is timed by its own id so the entry can never be mistaken for it.
+      const entry = sent.filter(item => item.message.startsWith('(voice mode on)'));
+      const utterance = sent.filter(item => item.sendId === 'real:1');
+      console.log('speech ended → utterance sent (ms)', Math.round((utterance[0]?.at ?? 0) - speechEndedAt));
       console.log(
         'sent',
         sent.map(item => ({ sendId: item.sendId, message: item.message })),
       );
       expect(interim.length).toBeGreaterThan(0);
-      expect(sent).toHaveLength(1);
-      expect(sent[0]?.sendId).toBe('real:1');
-      expect((sent[0]?.message ?? '').toLowerCase().replace(/[^a-z ]/gu, '')).toBe(
+      expect(entry).toHaveLength(1);
+      expect(entry[0]?.sendId).toBe('voice-on:vm-real-session');
+      expect(entry[0]?.at ?? Number.POSITIVE_INFINITY).toBeLessThan(utterance[0]?.at ?? 0);
+      expect(utterance).toHaveLength(1);
+      expect(sent).toHaveLength(2);
+      expect((utterance[0]?.message ?? '').toLowerCase().replace(/[^a-z ]/gu, '')).toBe(
         'voice please fix the login redirect and run the tests again',
       );
       expect(frames.at(-1)?.snapshot.last).toMatchObject({ turn: 1, outcome: 'sent' });

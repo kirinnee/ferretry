@@ -760,7 +760,7 @@ device installing the speech files, and narrowing `voice` does not give a device
 Remove) is a step-up act like every `configure`; `voice.use` (the read) is not. It is not a superset of anything: the
 engine decodes audio a caller hands the daemon's own code and reaches no files, secrets or terminals. The stream's one write is a
 message to a ferret, sent as the person's own through the ordinary send path, so **voice chat needs BOTH `voice.use` and
-`fleet.use`** (Talk to test needs `voice.use` alone). The stream asks for `fleet.use` when a chat starts (refused with a
+`fleet.use`** (Talk to test needs `voice.use` alone). A phone's own voice mode asks the machine to tell the ferret it entered (`POST /v1/voice/entry`, a person's route) and is held to the same two: the route is gated on `voice.use` and the handler refuses without `fleet.use` (`403 fleet_not_granted`), so a device narrowed on either cannot trigger the owner-voiced message. It reads a body of at most 1 KiB (a larger one is a `413`), and a refused send is not retried for 10 s. The stream asks for `fleet.use` when a chat starts (refused with a
 sentence and a `4403` close otherwise) and again before every message, and writes the same `agent.prompted` audit record a typed
 send writes (the ferret as subject, never the words). Narrowing `voice` closes an open stream at once; narrowing the machine-wide
 `fleet` stops the next message of an open stream; narrowing one device's own `fleet` takes effect on that device's next stream
