@@ -629,6 +629,7 @@ export class GateAdmission implements Admission {
     } else if (descriptor.consultsGrants === true || authentication.tokenClass === 'connector') {
       governance = this.#guard.governance(presentation);
     }
+    if (governance !== undefined) governance = { ...governance, watch: listener => this.watch(listener) };
 
     const remedy = this.#wardenRemedy(descriptor, authentication, request, params, actor);
     if (remedy.kind === 'refused') return refused(remedy.response);
@@ -654,6 +655,7 @@ export class GateAdmission implements Admission {
       const ceiling = grantGuard(() => grantsAtAdmission, this.deps.clientName).governance(presentation);
       const narrowing: CallerGovernance = {
         governed: governance.governed,
+        watch: governance.watch,
         decide: demand => {
           const original = ceiling.decide(demand);
           if (!original.allowed) return original;

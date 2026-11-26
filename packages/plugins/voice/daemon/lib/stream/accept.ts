@@ -116,7 +116,8 @@ export function voiceStreamAccept(deps: VoiceStreamDeps): SocketAccept {
       const streamId = (deps.streamId ?? randomStreamId)();
       const slot = registry.admit(device);
       if (!slot.ok) throw new ApiError(429, 'This machine is busy with voice chats.', 'voice_busy');
-      return new VoiceStream({
+      let stopWatching: (() => void) | undefined;
+      const stream = new VoiceStream({
         engine: deps.engine,
         reply: deps.reply,
         clock: deps.clock,
@@ -132,9 +133,14 @@ export function voiceStreamAccept(deps: VoiceStreamDeps): SocketAccept {
           enter: ferret => registry.enterVoice(ferret, deps.clock.nowMs()),
           leave: ferret => registry.leaveVoice(ferret),
         },
-        onEnd: slot.release,
+        onEnd: () => {
+          stopWatching?.();
+          slot.release();
+        },
         log: deps.log,
       });
+      stopWatching = governance?.watch?.(() => stream.grantsChanged());
+      return stream;
     };
   };
 }
