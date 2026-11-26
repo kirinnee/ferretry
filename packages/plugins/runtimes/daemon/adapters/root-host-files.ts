@@ -76,13 +76,13 @@ export function rootHostFiles(mounts: HostMounts): HostFiles {
         (await target.root.lstat(at)) === undefined ? undefined : await target.root.readText(at),
       );
     },
-    readBytes: async path => {
+    readBytes: async (path, limit) => {
       const target = mount(path);
       if (target.kind === 'file')
-        return await target.file.stat().then(s => (s === undefined ? undefined : target.file.readBytes()));
+        return await target.file.stat().then(s => (s === undefined ? undefined : target.file.readBytes(limit)));
       const at = resolveIn(target.root, target.inside, path);
       return await orAbsent(target, async () =>
-        (await target.root.lstat(at)) === undefined ? undefined : await target.root.readBytes(at),
+        (await target.root.lstat(at)) === undefined ? undefined : await target.root.readBytes(at, limit),
       );
     },
     stat: async path => {

@@ -225,10 +225,16 @@ export class McpCheckService {
       if (!(error instanceof McpProbeFailure)) throw error;
       const lead = FAILURE_LEAD[error.kind];
       const stored = [...missing].filter(name => opaque.has(name)).sort();
+      // A command's child is handed the runtime's stored secrets as its own environment (`#sealed`), so the check DOES present
+      // them there; what it cannot do is copy one into another variable or an argument, which is the one thing a `${NAME}` is.
+      const heldWords =
+        spec.transport === 'stdio'
+          ? `Held in a stored secret, which a check hands the command only as its own environment, never copied into another value or an argument: `
+          : `Held in a stored secret, which a check does not present: `;
       const unsetNames = [...missing].filter(name => !opaque.has(name)).sort();
       const unset =
         (unsetNames.length === 0 ? '' : ` Not set for this check: ${unsetNames.join(', ')}.`) +
-        (stored.length === 0 ? '' : ` Held in a stored secret, which a check does not present: ${stored.join(', ')}.`);
+        (stored.length === 0 ? '' : ` ${heldWords}${stored.join(', ')}.`);
       let detail = '';
       try {
         detail = error.message === '' ? '' : ` ${await scrub(error.message)}`;
@@ -310,6 +316,8 @@ export class McpCheckService {
       else filled.push([name, expandVariables(value, environment, missing)]);
     }
     const headers: Record<string, string> = Object.fromEntries(filled);
+    // Every header value this check actually sends is masked from the answer, a literal one and a short one included.
+    for (const value of Object.values(headers)) maskable(value, used);
     if (declaration.bearerVariable !== undefined) {
       if (held !== undefined && declaration.bearerVariable === held.variable)
         credential ??= { secret: held.secret, header: 'Authorization', scheme: 'Bearer' };
@@ -318,7 +326,7 @@ export class McpCheckService {
         if (token === undefined) missing.add(declaration.bearerVariable);
         else {
           headers.Authorization = `Bearer ${token}`;
-          if (token.length >= 8) used.add(token);
+          maskable(token, used);
         }
       }
     }
@@ -336,6 +344,17 @@ export class McpCheckService {
       ...(credential === undefined || clash ? {} : { credential }),
     };
   }
+}
+
+/**
+ * Registers what a header carries with the scrubber: the whole value and, past a scheme word (`Bearer abc`), the token
+ * alone, whatever the length. An opaque secret reference is no value and is never registered.
+ */
+function maskable(value: string, used: Set<string>): void {
+  if (value === '' || secretReferencesIn(value).length > 0) return;
+  used.add(value);
+  const space = value.indexOf(' ');
+  if (space > 0 && space < value.length - 1) used.add(value.slice(space + 1));
 }
 
 /** `${VARIABLE}` or `<scheme> ${VARIABLE}` as a header's whole value: where a held sign-in's token goes. */

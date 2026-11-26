@@ -86,7 +86,7 @@ import type { FleetDocumentWrite, FleetModelApplyPlan } from '../provisioning.ts
 import { notingLanded } from './apply-bracket.ts';
 import { type ApplyLedger, namingWhatLanded } from './apply-ledger.ts';
 import { configurationLanded, failedApplySentence, landedWithCommittedFleet } from './failed-apply.ts';
-import { importSummary } from './import-summary.ts';
+import { importSummary, type LeftOut, notImported, takeFolder } from './import-summary.ts';
 import { putConfigFile, writeConfigFiles } from './setup-config-files.ts';
 import { reportLeft, writeVaultAndLogins } from './setup-vault-logins.ts';
 import {
@@ -748,6 +748,7 @@ export class FleetSetupService {
     // No hook is imported: a second guard behind the planner, so a hooks component never reaches a file or a profile.
     model = withoutHookChanges(reading.model, model);
     const assets: CloneFile[] = [];
+    const leftOut: LeftOut[] = [];
     for (const file of [...plan.files, ...updates.flatMap(update => update.files)]) {
       if (file.path.startsWith('components/hooks/')) continue;
       if (file.kind === 'write') {
@@ -755,7 +756,7 @@ export class FleetSetupService {
         continue;
       }
       const folder = await this.deps.readFolder(file.from);
-      for (const entry of folder.files) assets.push({ path: `${file.path}/${entry.path}`, content: entry.content });
+      leftOut.push(...takeFolder(folder, file.path, assets));
     }
     // The body a handed-over settings component was made from is never written under the fleet's assets.
     const written =
@@ -802,6 +803,7 @@ export class FleetSetupService {
         secrets.map(secret => secret.name),
         reused,
       ),
+      ...notImported(leftOut),
     ];
     return {
       model,
@@ -809,7 +811,7 @@ export class FleetSetupService {
       secrets,
       reused,
       lines,
-      summary: importSummary(catalog.machineName(), plan, reading.model),
+      summary: importSummary(catalog.machineName(), plan, reading.model, leftOut),
       fingerprint: this.#fingerprint(
         documents,
         planned.map(secret => this.deps.digest(`${secret.name}\n${secret.value}`)),

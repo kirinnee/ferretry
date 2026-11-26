@@ -22,6 +22,7 @@ import { ActionRow } from '@ferretry/app/ui';
 import { ImportItems, selectedItems, WorkingBar } from './import-items.tsx';
 import {
   buildImportChange,
+  ImportPartialNote,
   ImportResultList,
   IMPORT_KINDS,
   type ImportKind,
@@ -211,6 +212,7 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
               {imports.changes.refusal}
             </p>
           )}
+          {imports.partial === null ? null : <ImportPartialNote partial={imports.partial} />}
           {plan === 'everything' || plan === 'choose' ? <WorkingBar working={working} /> : null}
           <ActionRow
             data-import-actions=""

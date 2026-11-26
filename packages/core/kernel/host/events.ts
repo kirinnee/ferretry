@@ -65,7 +65,13 @@ export class EventBus {
           .then(() => {
             if (this.subscribers.get(event.name)?.includes(subscriber)) return subscriber.fn(value);
           })
-          .catch(() => this.log.warn('a subscriber failed', { event: event.name, plugin: subscriber.plugin }));
+          .catch((cause: unknown) =>
+            this.log.warn('a subscriber failed', {
+              event: event.name,
+              plugin: subscriber.plugin,
+              reason: reasonOf(cause),
+            }),
+          );
       }
     });
   }
@@ -79,5 +85,54 @@ export class EventBus {
         this.publish(event, payload);
       },
     };
+  }
+}
+
+/** The error kinds a failure is logged as; the thrown value's own `name` is mutable and is never logged. */
+const ERROR_KINDS: readonly (readonly [new (...args: never[]) => Error, string])[] = [
+  [TypeError, 'TypeError'],
+  [RangeError, 'RangeError'],
+  [SyntaxError, 'SyntaxError'],
+  [ReferenceError, 'ReferenceError'],
+  [URIError, 'URIError'],
+  [EvalError, 'EvalError'],
+  [Error, 'Error'],
+];
+
+/** The system error codes a failure may name; any other code is left out. */
+const ERROR_CODES: ReadonlySet<string> = new Set([
+  'EACCES',
+  'EADDRINUSE',
+  'EAGAIN',
+  'EBUSY',
+  'ECONNABORTED',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EEXIST',
+  'EHOSTUNREACH',
+  'EISDIR',
+  'EMFILE',
+  'ENOENT',
+  'ENOSPC',
+  'ENOTDIR',
+  'ENOTEMPTY',
+  'EPERM',
+  'EPIPE',
+  'ETIMEDOUT',
+]);
+
+/**
+ * Why a subscriber failed, for the log: a fixed error kind and a recognised system code (`TypeError`, `Error ECONNRESET`).
+ * Never the value's own name, message or stack, which can carry a URL, a path or a value the plugin held; `unknown` when the
+ * thrown value cannot be inspected safely.
+ */
+function reasonOf(cause: unknown): string {
+  try {
+    const kind = ERROR_KINDS.find(([type]) => cause instanceof type)?.[1];
+    if (kind === undefined) return 'a non-error value was thrown';
+    const code = (cause as { code?: unknown }).code;
+    return typeof code === 'string' && ERROR_CODES.has(code) ? `${kind} ${code}` : kind;
+  } catch {
+    return 'unknown';
   }
 }

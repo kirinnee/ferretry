@@ -2,7 +2,7 @@
  * The browser entry for the Codex import pages: the REAL pages over a fixed fake daemon, inside the app's own `StepPageFrame`.
  * Nothing reads a network. Every name, path and command below is made up.
  *
- *   ?page=settings|model-set|instructions|skills|mcp|conversations|run|run-done|run-everything|run-unreviewed
+ *   ?page=settings|model-set|instructions|skills|mcp|conversations|run|run-done|run-partial|run-everything|run-unreviewed
  *   &theme=<family>-<mode>
  *
  * `run-done` is the run page after the import (the daemon's own sentences). `run-unreviewed` is a reload since
@@ -59,10 +59,18 @@ const table: Record<string, unknown> = {
   'GET /v1/codex/update': { installed: { state: 'ok', version: '0.9.0' } },
   'GET /v1/runtimes/machine': MACHINE,
   'POST /v1/runtimes/proposals': (body: unknown) => stagedFrom({ body }),
-  'POST /v1/runtimes/proposals/:proposalId/apply': {
-    outcome: 'executed',
-    executor: 'setup',
-    summary: APPLIED_SENTENCES,
+  // `run-partial`: the apply stopped part-way, so the page names what landed and what did not.
+  'POST /v1/runtimes/proposals/:proposalId/apply': () => {
+    if (page === 'run-partial')
+      throw Object.assign(new Error('The disk is full, so part of this import was applied.'), {
+        status: 409,
+        code: 'fleet_change_failed',
+        body: {
+          landed: ['secret-store key EXAMPLE_API_KEY', 'login example-default'],
+          notLanded: ['the runtimes and fleet files', 'variables of login example-default'],
+        },
+      });
+    return { outcome: 'executed', executor: 'setup', summary: APPLIED_SENTENCES };
   },
   'GET /v1/config/file': () => ({
     path: 'harness-codex.yaml',

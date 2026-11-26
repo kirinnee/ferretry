@@ -378,6 +378,7 @@ function reportedStall(stall: LoopStall, startedAtMs: number): ReportedStall {
  */
 export class PerformanceRecorder implements PerformanceProbe {
   readonly #windows = new Set<PerformanceWindow>();
+  readonly #whileRecording = new Set<{ readonly start: () => () => void; stop?: () => void }>();
 
   get recording(): boolean {
     return this.#windows.size > 0;
@@ -386,11 +387,35 @@ export class PerformanceRecorder implements PerformanceProbe {
   open(startedAtMs: number): PerformanceWindow {
     const window = new PerformanceWindow(startedAtMs);
     this.#windows.add(window);
+    for (const hook of this.#whileRecording) hook.stop ??= hook.start();
     return window;
   }
 
   close(window: PerformanceWindow): void {
     this.#windows.delete(window);
+    if (this.#windows.size > 0) return;
+    for (const hook of this.#whileRecording) this.#release(hook);
+  }
+
+  /**
+   * Runs `start` while at least one window is open (at once when one already is) and the function it returns when the last
+   * one closes, again for each later first window. An instrument that costs something to feed subscribes through this, so a
+   * daemon with no profile open runs none of it. Returns what ends the hooking, stopping `start`'s work if it is running.
+   */
+  whileRecording(start: () => () => void): () => void {
+    const hook: { readonly start: () => () => void; stop?: () => void } = { start };
+    this.#whileRecording.add(hook);
+    if (this.recording) hook.stop = start();
+    return () => {
+      this.#whileRecording.delete(hook);
+      this.#release(hook);
+    };
+  }
+
+  #release(hook: { stop?: () => void }): void {
+    const stop = hook.stop;
+    hook.stop = undefined;
+    stop?.();
   }
 
   activity(name: string, wallMs: number): void {

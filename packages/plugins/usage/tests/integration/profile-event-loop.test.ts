@@ -75,9 +75,9 @@ test('a blocked loop is a stall in the profile, named by the work in flight', as
   expect(report.eventLoop.stalls[0]).toMatchObject({ durationMs: 1_400, during: ['usage/usage-budget'] });
 });
 
-test('the limitation no longer claims the event loop is unmeasured', async () => {
+test('the limitation no longer claims the event loop, routes, children or file calls are unmeasured', async () => {
   const report = await profileWith(() => {});
   const text = report.limitations.join('\n');
-  expect(text).toContain('event-loop lag and stalls');
-  expect(text).not.toContain('file operations or event-loop stalls');
+  expect(text).not.toContain('does not yet hand Usage');
+  expect(text).toContain('no path');
 });
