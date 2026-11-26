@@ -75,6 +75,7 @@ const STATUS: Readonly<Record<WorktreeErrorCode, number>> = {
   not_git_repository: 422,
   invalid_branch: 422,
   invalid_session_id: 422,
+  invalid_group: 422,
   invalid_ownership_token: 500,
   ambiguous_remote_branch: 422,
   unresolved_base: 422,

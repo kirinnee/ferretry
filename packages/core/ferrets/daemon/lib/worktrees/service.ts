@@ -414,6 +414,7 @@ export class ManagedWorktreeService {
       ...(owner === undefined ? {} : { ownerSessionId: owner }),
       ownershipToken: this.ids.next(),
       managedRoot,
+      ...(request.group === undefined ? {} : { group: request.group }),
       base: request.base,
       onPlanned: async plan => {
         await this.registry.write(state =>

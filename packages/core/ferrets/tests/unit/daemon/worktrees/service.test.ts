@@ -611,6 +611,24 @@ describe('the managed-worktree surface', () => {
     should(actual.worktree.ownerSessionId).be.undefined();
   });
 
+  it('should hand the requested group to the adapter, and none when none was asked for', async () => {
+    // Arrange
+    const { subject, operations } = build();
+
+    // Act
+    await subject.create({
+      sourcePath: '/work/ferretry',
+      branch: 'feat/one',
+      base: { kind: 'auto' },
+      group: 'alpha-1a2b3c4d',
+    });
+    await subject.create({ sourcePath: '/work/ferretry', branch: 'feat/two', base: { kind: 'auto' } });
+
+    // Assert
+    should(operations.creations[0]?.group).equal('alpha-1a2b3c4d');
+    should(operations.creations[1]).not.have.property('group');
+  });
+
   it('should refuse to fork at all on a daemon that hosts no managed checkouts', async () => {
     // Arrange
     const { subject, registry } = build({ managedRoot: undefined });
