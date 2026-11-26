@@ -7,7 +7,12 @@
  * carry one back to a caller, a log or a journal.
  */
 import type { ApiRequest, ApiResponse } from '@ferretry/kernel/contract';
-import type { ConnectorGrantView, ConnectorPendingView, ConnectorScope } from '../../contract/index.ts';
+import type {
+  ConnectorGrantView,
+  ConnectorPendingView,
+  ConnectorScope,
+  ConnectorToolOutcome,
+} from '../../contract/index.ts';
 
 /**
  * Where the connector is published: `config/connector.yaml` `publicUrl`, or — when that names none — this machine's
@@ -95,6 +100,14 @@ export type ConnectorAuditEvent =
       readonly initiator?: ConnectorRevocationInitiator;
     }
   | { readonly kind: 'connector.refresh.reused'; readonly grantId: string }
+  /** A tool ran (or was refused) for a grant: names and ids only, never an argument. A call a gate refused before it ran is not here. */
+  | {
+      readonly kind: 'connector.tool';
+      readonly grantId: string;
+      readonly tool: string;
+      readonly sessionId?: string;
+      readonly outcome: ConnectorToolOutcome;
+    }
   /** The owner switched the connector on or off (a change to the machine's security, recorded as `security.changed`). */
   | { readonly kind: 'connector.switched'; readonly enabled: boolean; readonly actor: string };
 
@@ -110,3 +123,14 @@ export interface ConnectorAuditSink {
 export interface ConnectorHttpHandler {
   handle(request: ApiRequest): Promise<ApiResponse | undefined>;
 }
+
+/** What the service hands the MCP endpoint it is built with: its own authority, 401 builder and on/off. */
+interface ConnectorMcpWiring {
+  readonly verifier: ConnectorAccessVerifier;
+  readonly unauthorized: (tokenPresented: boolean) => ApiResponse;
+  /** Whether the connector is on right now; asked before every delegated call, so an off stops a request in flight. */
+  readonly serving: () => boolean;
+}
+
+/** Builds `/mcp`. The composition root owns it (the endpoint is an adapter, which `lib/` never imports). */
+export type ConnectorMcpFactory = (wiring: ConnectorMcpWiring) => ConnectorHttpHandler;
