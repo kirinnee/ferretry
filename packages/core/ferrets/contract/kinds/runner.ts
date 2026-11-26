@@ -427,6 +427,8 @@ export interface RunnerPaneObservation {
   readonly blockingPrompt?: string;
   /** Input typed in the composer and not submitted: anything typed now would be submitted joined to it. */
   readonly draft?: string;
+  /** A PERSON pressed a key in this pane within the last few seconds (the Console's keys, or `tmux attach`'s). */
+  readonly typing?: boolean;
 }
 
 /** Where a pane shows a message held: typed in the composer, or in the harness's own queue (today's `SendHeldAt`). */

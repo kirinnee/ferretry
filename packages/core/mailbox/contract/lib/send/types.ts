@@ -79,6 +79,8 @@ export interface SendPaneObservation {
    * joined to it, so a send refuses rather than type.
    */
   readonly draft?: string | undefined;
+  /** A person pressed a key in this pane a moment ago: the daemon's own writes wait until they stop (the owner's idea A563). */
+  readonly typing?: boolean | undefined;
 }
 
 /** One session, as everything in this slice reads it. */

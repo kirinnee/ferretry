@@ -61,7 +61,7 @@ import {
   SessionSendService,
 } from './lib/delivery/index.ts';
 import { SessionSendError } from './lib/delivery/mounts/session-send.ts';
-import { answerOf } from '../contract/index.ts';
+import { answerOf, heldForTyping } from '../contract/index.ts';
 import { QueueRefused, type SessionQueue, type SessionQueueStore } from '../contract/index.ts';
 import {
   type HarnessGate,
@@ -990,7 +990,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
   const keepUntyped = async (
     ferret: SessionId,
     sendId: string,
-    waitReason: 'unreadable' | 'busy' | 'dialog' | 'draft',
+    waitReason: 'unreadable' | 'busy' | 'dialog' | 'draft' | 'typing',
   ): Promise<SendResult | undefined> => {
     const kept = await ledger.settle(ferret, sendId, { untyped: true }).catch(() => undefined);
     if (kept === undefined) return undefined;
@@ -1007,9 +1007,15 @@ export function buildSendHalf(deps: SendHalfDeps) {
   const unsafePane = async (
     bound: Awaited<ReturnType<typeof terminal.bind>>,
     request: TypedSend,
-  ): Promise<'busy' | 'dialog' | 'draft' | undefined> => {
+  ): Promise<'busy' | 'dialog' | 'draft' | 'typing' | undefined> => {
     const pane = await bound.observe();
     if (pane === undefined) return undefined;
+    // THE TYPING HOLD, for every write that is not a person's own — the Warden's and a notice included, which the checks
+    // below skip: a person's keys in this pane make the daemon's wait for the quiet.
+    const daemons = request.by !== undefined || request.warden || request.agenda || request.notice || request.monitor;
+    if (heldForTyping(pane, request.senderSessionId !== undefined ? 'agent' : daemons ? 'daemon' : 'human'))
+      return 'typing';
+    if (request.warden === true || request.notice === true) return undefined;
     if (pane.compacting === true) return 'busy';
     if (pane.blockingPrompt !== undefined) return 'dialog';
     if (request.senderSessionId !== undefined && pane.draft !== undefined && pane.draft.trim() !== '') return 'draft';
@@ -1089,7 +1095,12 @@ export function buildSendHalf(deps: SendHalfDeps) {
     // THE PANE MUST BE SAFE BEFORE A KEY GOES (owner ruling 2026-11-15): not compacting, no dialog or consent waiting for an
     // answer, and — for a ferret's message, which has nobody to press a button — nothing in the composer. A pane that is not
     // keeps the send `untyped`, and the tracker looks again every second until it is.
-    const unsafe = request.warden === true || request.notice === true ? undefined : await unsafePane(bound, request);
+    const unsafe = await unsafePane(bound, request);
+    if (unsafe === 'typing' && (request.warden === true || request.notice === true)) {
+      // The Warden re-plans its own and a notice ends here: neither is kept for the tracker, so nothing is typed or kept.
+      await ledger.withdraw(ferret, request.sendId, 'a person is typing').catch(() => undefined);
+      throw new SessionSendError('refused', "a person is typing in the ferret's terminal, so nothing was typed");
+    }
     if (unsafe !== undefined) {
       const kept = await keepUntyped(ferret, request.sendId, unsafe);
       if (kept !== undefined) return kept;

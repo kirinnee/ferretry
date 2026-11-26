@@ -59,6 +59,8 @@ import { LaunchGuardRefusal, RealHarnessRefusedError, type TmuxLaunchGuard } fro
 import { TMUX_PROGRAM } from './kernel-tmux-process.ts';
 import { DEFAULT_TREE_END_TIMES, type DoomedProcess, endDoomed, nameDoomed } from './session-tree-end.ts';
 import { captureFrame, ComposerUnconfirmedError, type DeliverySleep } from './composer-fill.ts';
+import { observePane } from './pane-observation.ts';
+import type { TypingHold } from '../../lib/session/console/index.ts';
 import {
   type CapturedFrame,
   capturedFrameIsCurrent,
@@ -302,6 +304,8 @@ export interface PaneProcessHost {
 
 export interface TmuxRunnerOptions {
   readonly tmux: TmuxCommandPort;
+  /** Whether a person is typing into a pane; every observation says so. */
+  readonly typing?: TypingHold;
   readonly spawn: SpawnPort;
   readonly socketPath: string;
   readonly instantOf: (epochSeconds: number) => Instant;
@@ -715,21 +719,11 @@ export class TmuxRunner implements Runner {
     return { tmux: new TmuxController(onlyReads(pane.port, 'a pane read writes nothing')), session: pane.session };
   }
 
-  /** A blocking prompt's words, masked inside one `Redaction.read`; with no redaction bound, a fixed sentence. */
-  private async maskedObservation(seen: RunnerPaneObservation): Promise<RunnerPaneObservation> {
-    const { blockingPrompt, ...rest } = seen;
-    if (blockingPrompt === undefined) return seen;
-    const redaction = this.options.look?.redaction;
-    if (redaction === undefined) return { ...rest, blockingPrompt: 'a prompt on its screen' };
-    const [masked] = await redaction.read(scope => scope.lines([blockingPrompt]));
-    return { ...rest, blockingPrompt: masked ?? 'a prompt on its screen' };
-  }
-
   /** Today's `TmuxSendTerminal.observe`: one read of the pane for a send. Total: nothing live reads `undefined`. */
   async observe(handle: RunnerHandle, ferret?: FerretId): Promise<RunnerPaneObservation | undefined> {
     try {
-      const { tmux, session } = await this.readingPane(handle, ferret);
-      return await this.maskedObservation(await new ComposerActs(tmux, session, noSleep).observe());
+      const ports = { tmux: this.options.tmux, redaction: this.options.look?.redaction, typing: this.options.typing };
+      return await observePane(ports, await this.readingPane(handle, ferret), handle);
     } catch {
       return undefined;
     }

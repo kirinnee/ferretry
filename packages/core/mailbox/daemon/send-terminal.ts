@@ -43,6 +43,7 @@ const observed = (seen: RunnerPaneObservation): SendPaneObservation => ({
   ...(seen.startupParked === undefined ? {} : { startupParked: seen.startupParked }),
   ...(seen.blockingPrompt === undefined ? {} : { blockingPrompt: seen.blockingPrompt }),
   ...(seen.draft === undefined ? {} : { draft: seen.draft }),
+  ...(seen.typing === true ? { typing: true } : {}),
 });
 
 /**

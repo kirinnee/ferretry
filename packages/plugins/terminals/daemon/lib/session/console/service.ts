@@ -1,6 +1,7 @@
 import type { SessionAttachTarget } from '../../protocol/session-processes.ts';
 import { hexInputChunks } from '../../terminal/runtime-policy.ts';
 import type { TmuxCommandPort } from '../../tmux/contracts.ts';
+import type { TypingHold } from './typing-hold.ts';
 
 /**
  * TYPING INTO A SESSION'S OWN PANE — the agent's Claude / Codex CLI, which the session page calls its
@@ -32,11 +33,14 @@ export class SessionConsoleService {
   constructor(
     private readonly panes: SessionPaneProof,
     private readonly tmux: Pick<TmuxCommandPort, 'execute'>,
+    private readonly typing?: TypingHold,
   ) {}
 
   /** Writes `bytes` to the session's proved pane and answers how many were written. */
   async write(sessionId: string, bytes: Uint8Array): Promise<number> {
     const target = await this.panes.resolve(sessionId);
+    // A person's keys: the pane is theirs for a while. Stamped before the first key, and nothing waits on it.
+    this.typing?.pressed(target.paneId);
     for (const chunk of hexInputChunks(bytes)) {
       const result = await this.tmux.execute(['send-keys', '-H', '-t', target.paneId, ...chunk]);
       if (result.code !== 0)

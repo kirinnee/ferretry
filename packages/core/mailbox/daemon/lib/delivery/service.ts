@@ -32,7 +32,7 @@ import {
   strandedSend,
 } from '../../../contract/index.ts';
 import type { SendRetractionProof } from '../../../contract/index.ts';
-import { isOpenSend } from '../../../contract/index.ts';
+import { heldForTyping, isOpenSend } from '../../../contract/index.ts';
 import { type LedgerPath as SendPath, type LedgerRecord as SendRecord } from '../../../contract/index.ts';
 import {
   type ComposerDraftAction,
@@ -430,6 +430,9 @@ export class SessionSendService {
           `session ${id} is still starting; its agent is holding an earlier message until startup ends, so send ${sendId} is not typed yet`,
           'busy',
         );
+      // THE TYPING HOLD: a person's keys in this pane wait out nobody but the daemon's own retype.
+      if (heldForTyping(observed, options.by === 'person' ? 'human' : (current.senderKind ?? 'daemon')))
+        throw new SendRetypeWithheld(`a person is typing in session ${id}, so send ${sendId} is not typed yet`, 'busy');
       const text = current.matchText ?? current.message;
       // EVERY retry is checked against the pane, the daemon's as well as a person's: a message still
       // typed in the composer, or held in the harness's queue, is not lost, and retyping it would be the
