@@ -648,6 +648,33 @@ export class GateAdmission implements Admission {
       claimFreshStepUp: this.#claimFresh(subject, now, spentStepUp, request.signal),
       claimStoredProof: this.#claimStored(subject),
     };
+    if (authentication.tokenClass === 'device' && governance !== undefined) {
+      // A long-lived caller may lose grants, never acquire any beyond this admission's snapshot.
+      const grantsAtAdmission = this.deps.policy()?.grants;
+      const ceiling = grantGuard(() => grantsAtAdmission, this.deps.clientName).governance(presentation);
+      const narrowing: CallerGovernance = {
+        governed: governance.governed,
+        decide: demand => {
+          const original = ceiling.decide(demand);
+          if (!original.allowed) return original;
+          try {
+            // The credential provider is synchronous and cached. No network is performed per frame.
+            const device = this.#device(authentication.principal);
+            if (device.kind !== 'device' || device.standing.grants === undefined)
+              return { allowed: false, refusal: 'undetermined' };
+            // The act keeps the proof it was admitted with, even if admission spent a zero-minute proof.
+            return this.#guard.decide(demand, { ...presentation, deviceGrants: device.standing.grants });
+          } catch {
+            return { allowed: false, refusal: 'undetermined' };
+          }
+        },
+      };
+      return {
+        outcome: 'admitted',
+        standing: { ...standing, governance: narrowing },
+        actor: actOf(authentication, actor),
+      };
+    }
     return { outcome: 'admitted', standing, actor: actOf(authentication, actor) };
   }
 

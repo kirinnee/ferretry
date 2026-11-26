@@ -41,7 +41,7 @@ import {
   stepUpRefusalCode,
   UnlockGrantedSchema,
 } from '../wire.ts';
-import { HOSTED_APP_ORIGIN } from '../../../contract/index.ts';
+import { PasskeyFailureReportSchema, type PasskeyFailureReport, HOSTED_APP_ORIGIN } from '../../../contract/index.ts';
 import type { StepUpCaller, StepUpOutcome, StepUpService } from '../step-up/index.ts';
 
 /** The staged subjects every-caller acts bind to (Gate's stage id schemas). */
@@ -193,7 +193,7 @@ export function stepUpRoutes(
   rules?: StagedSignInRuleBinding,
   pasteRules?: StagedPasteRuleBinding,
   /** Told every refusal a passkey route answers; the daemon logs it. Absent: nothing is said (a test, a bare embed). */
-  onRefusal?: (note: PasskeyRefusalNote) => void,
+  onRefusal?: (note: PasskeyRefusalNote) => unknown,
   /**
    * Told each registration a device was ANSWERED options for (`POST /v1/passkeys/options`), so "did the press reach the
    * machine?" has an answer in the log: before this only a refusal was said, and a press that got its options and then
@@ -207,15 +207,16 @@ export function stepUpRoutes(
    * and ids only: never the attestation, the client data or the credential id.
    */
   onRegistrationSent?: (note: Omit<PasskeyRefusalNote, 'reason'> & { readonly outcome: string }) => void,
+  onBrowserFailure?: (note: PasskeyFailureReport & { readonly deviceId: string }) => Promise<void>,
 ): readonly ApiRoute[] {
-  const answer = <T>(
+  const answer = async <T>(
     context: RouteContext,
     outcome: StepUpOutcome<T>,
     parse: (value: T) => unknown,
     status = 200,
-  ): ApiResponse => {
+  ): Promise<ApiResponse> => {
     if (outcome.ok) return jsonResponse(parse(outcome.value), status);
-    onRefusal?.({
+    await onRefusal?.({
       reason: outcome.refusal,
       request: `${context.request.method} ${context.request.path}`,
       deviceId: sessionDevice(context)?.deviceId ?? undefined,
@@ -223,6 +224,21 @@ export function stepUpRoutes(
     return refusal(outcome.refusal);
   };
   return [
+    {
+      method: 'POST',
+      path: '/v1/passkeys/failure',
+      minimum: 'operator',
+      caller: 'person',
+      noStore: true,
+      unlockExempt: true,
+      handle: async context => {
+        const device = sessionDevice(context);
+        if (device === undefined) return refusal('not-a-device');
+        const report = await parseBody(context.request, PasskeyFailureReportSchema);
+        await onBrowserFailure?.({ ...report, deviceId: device.deviceId });
+        return jsonResponse({});
+      },
+    },
     {
       method: 'GET',
       path: '/v1/passkeys',

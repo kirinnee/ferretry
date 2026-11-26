@@ -264,3 +264,10 @@ export const PasskeyWindowOpenedSchema = z.strictObject({
   closesAt: InstantSchema,
 });
 export type PasskeyWindowOpened = z.infer<typeof PasskeyWindowOpenedSchema>;
+
+/** Only these classifications may leave the browser after a failed ceremony. No exception text or WebAuthn bytes. */
+export const PasskeyFailureReportSchema = z.strictObject({
+  ceremony: z.enum(['register', 'step-up', 'unlock']),
+  reason: z.enum(['no-passkey', 'cancelled', 'unsupported', 'insecure-origin', 'failed', 'unreadable']),
+});
+export type PasskeyFailureReport = z.infer<typeof PasskeyFailureReportSchema>;

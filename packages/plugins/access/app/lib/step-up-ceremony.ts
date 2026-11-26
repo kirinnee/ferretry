@@ -21,13 +21,18 @@ import {
   fetchPasskeys,
   passkeyRegistrationOptions,
   registerPasskey,
+  reportPasskeyFailure,
   type StepUpClient,
   stepUpOptions,
   submitStepUp,
   submitUnlock,
   unlockOptions,
 } from './step-up-client.ts';
-import type { StepUpSubject } from './step-up-gate.ts';
+import { PasskeyCeremonies, type StepUpSubject } from './step-up-gate.ts';
+
+const browserCeremonies = new PasskeyCeremonies();
+// Registration has one challenge slot per device: reserve before asking options, through submit.
+const registrations = new PasskeyCeremonies();
 
 export interface StepUpCeremonyDependencies {
   readonly client: (daemon: DaemonConnection) => Promise<StepUpClient>;
@@ -44,10 +49,15 @@ export const stepUpCeremony =
     // decides whether that is allowed (only inside an open window): a refusal is the sentence shown, never a bypass.
     const options = await stepUpOptions(client, deps.origin, act, subject).catch(async (reason: unknown) => {
       if (!refusalWith(reason, 'no-passkey')) throw reason;
-      await addPasskeyCeremony(deps.credentials, client, deps.origin);
+      await addPasskeyCeremony(deps.credentials, client, deps.origin, undefined, daemon.daemonId);
       return await stepUpOptions(client, deps.origin, act, subject);
     });
-    const assertion = await assertPasskey(deps.credentials, options);
+    const assertion = await browserResult(
+      client,
+      'step-up',
+      () => assertPasskey(deps.credentials, options),
+      daemon.daemonId,
+    );
     await submitStepUp(client, assertion);
   };
 
@@ -66,10 +76,15 @@ export const unlockCeremony =
     const options = await unlockOptions(client, deps.origin).catch(async (reason: unknown) => {
       // The machine holds no passkey for this copy of the app: add the first one, then ask again.
       if (!refusalWith(reason, 'no-passkey')) throw reason;
-      await addPasskeyCeremony(deps.credentials, client, deps.origin);
+      await addPasskeyCeremony(deps.credentials, client, deps.origin, undefined, daemon.daemonId);
       return await unlockOptions(client, deps.origin);
     });
-    const assertion = await assertPasskey(deps.credentials, options);
+    const assertion = await browserResult(
+      client,
+      'unlock',
+      () => assertPasskey(deps.credentials, options),
+      daemon.daemonId,
+    );
     await submitUnlock(client, assertion);
   };
 
@@ -111,12 +126,23 @@ export async function addPasskeyCeremony(
   client: StepUpClient,
   origin: string,
   supported?: boolean,
+  daemonId?: string,
 ): Promise<PasskeyView> {
-  const options = await passkeyRegistrationOptions(client, origin);
-  const confirmation =
-    options.confirm === undefined ? undefined : await assertPasskey(credentials, options.confirm, supported);
-  const registration = await createPasskey(credentials, options, supported);
-  return await registerPasskey(client, { ...registration, ...(confirmation === undefined ? {} : { confirmation }) });
+  return await registrations.run(daemonId ?? 'unscoped-passkey', async () => {
+    const options = await passkeyRegistrationOptions(client, origin);
+    const confirm = options.confirm;
+    const confirmation =
+      confirm === undefined
+        ? undefined
+        : await browserResult(client, 'register', () => assertPasskey(credentials, confirm, supported), daemonId);
+    const registration = await browserResult(
+      client,
+      'register',
+      () => createPasskey(credentials, options, supported),
+      daemonId,
+    );
+    return await registerPasskey(client, { ...registration, ...(confirmation === undefined ? {} : { confirmation }) });
+  });
 }
 
 const refusalWith = (reason: unknown, refusal: StepUpRefusal): boolean =>
@@ -149,3 +175,17 @@ export const browserCredentials = (): CredentialsPort => ({
   create: options => navigator.credentials.create(options),
   get: options => navigator.credentials.get(options),
 });
+
+async function browserResult<T>(
+  client: StepUpClient,
+  ceremony: 'register' | 'step-up' | 'unlock',
+  run: () => Promise<T>,
+  daemonId?: string,
+): Promise<T> {
+  try {
+    return await browserCeremonies.run(daemonId ?? 'unscoped-passkey', run);
+  } catch (reason) {
+    if (reason instanceof PasskeyCeremonyError) reportPasskeyFailure(client, { ceremony, reason: reason.kind });
+    throw reason;
+  }
+}

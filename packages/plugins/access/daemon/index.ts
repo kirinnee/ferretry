@@ -1,4 +1,4 @@
-import { type BuzzableAsk } from '@ferretry/core-asks/contract';
+import type { BuzzableAsk } from '@ferretry/core-asks/contract';
 import { CORE_IDS } from '@ferretry/kernel/contract';
 import { implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
 import { HOSTED_APP_ORIGIN, StepUpStages } from '../contract/index.ts';
@@ -64,6 +64,7 @@ export default implementDaemon(manifest, {
         'POST /v1/pair/redirect': route('POST /v1/pair/redirect'),
         'GET /v1/passkeys': route('GET /v1/passkeys'),
         'POST /v1/passkeys': route('POST /v1/passkeys'),
+        'POST /v1/passkeys/failure': route('POST /v1/passkeys/failure'),
         'POST /v1/passkeys/options': route('POST /v1/passkeys/options'),
         'POST /v1/passkeys/registration-window': route('POST /v1/passkeys/registration-window'),
         'GET /v1/push/subscriptions': route('GET /v1/push/subscriptions'),
