@@ -12,6 +12,7 @@ import {
   VoiceEngineError,
   decodeDownlinkUnit,
   decodeReplyDownlinkUnit,
+  encodeDropFrame,
   encodeHushFrame,
   encodeSpeakFrame,
   encodeUplinkUnit,
@@ -111,6 +112,7 @@ async function rig(
     },
     speak: (id: number, text: string) => stream.fromClient(encodeSpeakFrame({ t: 'speak', id, text })),
     hush: () => stream.fromClient(encodeHushFrame()),
+    drop: (id: number) => stream.fromClient(encodeDropFrame(id)),
     /** The phone: one 40 ms silent unit per call for `ms`, echoing the newest nonce. */
     async run(ms: number) {
       for (let at = 0; at < ms; at += 40) {
@@ -125,6 +127,8 @@ async function rig(
     audio: () => units().filter(unit => unit.snapshot.audio !== undefined),
   };
 }
+
+const SESSION = 'vm-test-session';
 
 describe('the voice stream: the reply voice', () => {
   test('a stream that asks gets the larger unit from its very first one, and learns the voice is loading, then ready', async () => {
@@ -388,6 +392,59 @@ describe('the voice stream: the reply voice', () => {
     expect(r.units().some(unit => unit.snapshot.audio?.failed !== undefined)).toBe(false);
   });
 
+  test('V4: a drop takes back a line that is still waiting, and only that one; the lines around it are spoken in order', async () => {
+    const r = await rig();
+    await r.run(400);
+    r.speak(0, 'A long first line to speak.');
+    r.speak(1, 'Stale progress.');
+    r.speak(2, 'The newest one.');
+    await r.run(600);
+    expect(r.audio().length).toBeGreaterThan(0);
+    r.drop(1);
+    await r.run(8_000);
+    const spoken = r.audio().map(unit => unit.snapshot.audio?.id);
+    expect(spoken).toContain(0);
+    expect(spoken).toContain(2);
+    expect(spoken).not.toContain(1);
+    expect(spoken.indexOf(0)).toBeLessThan(spoken.indexOf(2));
+    expect(r.audio().some(unit => unit.snapshot.audio?.id === 2 && unit.snapshot.audio.last)).toBe(true);
+    // A dropped line is no failure: the device is not told to read it, it asked for it to go.
+    expect(r.units().some(unit => unit.snapshot.audio?.failed !== undefined)).toBe(false);
+    expect(r.closes).toEqual([]);
+  });
+
+  test('V4: a drop that comes too late (the line is already being sent down) leaves it to finish', async () => {
+    const r = await rig();
+    await r.run(400);
+    r.speak(0, 'A long first line to speak.');
+    await r.run(600);
+    expect(r.audio().some(unit => unit.snapshot.audio?.id === 0)).toBe(true);
+    r.drop(0);
+    await r.run(5_000);
+    expect(r.audio().some(unit => unit.snapshot.audio?.id === 0 && unit.snapshot.audio.last)).toBe(true);
+  });
+
+  test('V4: a drop while the line is being made throws it away when it is done', async () => {
+    let release: (() => void) | undefined;
+    const r = await rig({
+      fake: {
+        gate: new Promise<void>(resolve => {
+          release = resolve;
+        }),
+      },
+    });
+    await r.run(400);
+    r.speak(0, 'Hello there.');
+    await r.run(200);
+    r.drop(0);
+    release?.();
+    await r.run(1_000);
+    expect(r.audio()).toHaveLength(0);
+    r.speak(1, 'Next one.');
+    await r.run(2_000);
+    expect(r.audio().some(unit => unit.snapshot.audio?.id === 1 && unit.snapshot.audio.last)).toBe(true);
+  });
+
   test('a hush on a stream that did not ask for the reply voice is a protocol error', async () => {
     const r = await rig({ start: { t: 'start', v: 1, purpose: 'test' } });
     r.hush();
@@ -404,7 +461,9 @@ describe('the voice stream: the reply voice', () => {
   });
 
   test('a line spoken for a ferret chat travels the same way, and a refused chat still says why', async () => {
-    const r = await rig({ start: { t: 'start', v: 1, purpose: 'chat', ferretId: 'fer-1', reply: 'machine' } });
+    const r = await rig({
+      start: { t: 'start', v: 1, purpose: 'chat', ferretId: 'fer-1', session: SESSION, reply: 'machine' },
+    });
     await r.run(400);
     // This rig has no send service, so a chat is refused: the refusal rides the larger unit like everything else.
     const last = r.units().at(-1)?.snapshot;

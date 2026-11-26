@@ -15,6 +15,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import type { ReplyPlayer } from '../stream/voice-stream.ts';
+import type { LiveSink } from './live-lines.ts';
 
 type VoiceModeEngine = 'machine' | 'phone';
 
@@ -30,9 +31,17 @@ export interface VoiceModeState {
   readonly notice: string | null;
   /** The sound output created inside the tap that started voice mode; the panel plays the machine's voice through it. */
   readonly player?: ReplyPlayer;
+  /**
+   * This voice-mode session's name, minted when it started and kept until it ends: a stream that drops and reopens inside it
+   * says the same one, so the machine's entry message is not sent again. Empty while off.
+   */
+  readonly session: string;
 }
 
-const OFF: VoiceModeState = { active: false, engine: 'machine', machine: '', banner: null, notice: null };
+const OFF: VoiceModeState = { active: false, engine: 'machine', machine: '', banner: null, notice: null, session: '' };
+
+/** A fresh session name: URL-safe and inside the stream's limit for one. */
+const newVoiceSession = (): string => `vm-${globalThis.crypto.randomUUID()}`;
 
 export interface VoiceModeStore {
   get(ferretId: string): VoiceModeState;
@@ -43,11 +52,16 @@ export interface VoiceModeStore {
   /** Ends voice mode for the ferret. `notice` is shown above the composer until it is dismissed. */
   end(ferretId: string, notice?: string): void;
   dismiss(ferretId: string): void;
+  /** The panel's machine voice for live lines (`null` when it goes). Not part of what is drawn, so it never re-renders anything. */
+  attachLive(ferretId: string, sink: LiveSink | null): void;
+  /** The machine voice live lines go to, while the panel has one. */
+  live(ferretId: string): LiveSink | undefined;
   subscribe(listener: () => void): () => void;
 }
 
-export function createVoiceModeStore(): VoiceModeStore {
+export function createVoiceModeStore(mint: () => string = newVoiceSession): VoiceModeStore {
   let states: ReadonlyMap<string, VoiceModeState> = new Map();
+  const sinks = new Map<string, LiveSink>();
   const listeners = new Set<() => void>();
   const set = (ferretId: string, next: VoiceModeState): void => {
     const copy = new Map(states);
@@ -65,6 +79,7 @@ export function createVoiceModeStore(): VoiceModeStore {
         machine,
         banner: onPhone ?? null,
         notice: null,
+        session: mint(),
         ...(player === undefined ? {} : { player }),
       }),
     fallBack: (ferretId, why) => {
@@ -80,7 +95,7 @@ export function createVoiceModeStore(): VoiceModeStore {
         ferretId,
         notice === undefined
           ? OFF
-          : { active: false, engine: 'machine', machine: current?.machine ?? '', banner: null, notice },
+          : { active: false, engine: 'machine', machine: current?.machine ?? '', banner: null, notice, session: '' },
       );
     },
     dismiss: ferretId => {
@@ -88,6 +103,11 @@ export function createVoiceModeStore(): VoiceModeStore {
       if (current === undefined || current.active) return;
       set(ferretId, OFF);
     },
+    attachLive: (ferretId, sink) => {
+      if (sink === null) sinks.delete(ferretId);
+      else sinks.set(ferretId, sink);
+    },
+    live: ferretId => sinks.get(ferretId),
     subscribe: listener => {
       listeners.add(listener);
       return () => listeners.delete(listener);

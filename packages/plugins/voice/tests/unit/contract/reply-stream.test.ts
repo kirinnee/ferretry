@@ -118,7 +118,14 @@ describe('the start record', () => {
       reply: 'machine',
     });
     expect(
-      StreamStartSchema.parse({ t: 'start', v: 1, purpose: 'chat', ferretId: 'f1', reply: 'machine' }),
+      StreamStartSchema.parse({
+        t: 'start',
+        v: 1,
+        purpose: 'chat',
+        ferretId: 'f1',
+        session: 'vm-test-session',
+        reply: 'machine',
+      }),
     ).toMatchObject({
       reply: 'machine',
     });

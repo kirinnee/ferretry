@@ -68,6 +68,37 @@ export type PauseStyle = z.infer<typeof PauseStyleSchema>;
 /** Whether the person wants the machine to speak the reply (its Kokoro voice). Absent: the stream carries no audio down. */
 export const ReplyRequestSchema = z.literal('machine');
 
+/** One voice-mode session's name: URL-safe, short enough that `<session>:on` fits a send id. */
+export const VoiceSessionSchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/u);
+
+/**
+ * The one message the machine sends when voice mode is entered, so the ferret switches the grammar of `instructions/voice.md`
+ * on for this conversation. It carries no words of the person's.
+ */
+export const VOICE_ENTRY_MESSAGE = '(voice mode on) Speak first, narrate as you work, speak the result.';
+
+/**
+ * How long a chat's entry claim (the machine's) stands without being renewed, and how often a holder renews it: a tab or phone
+ * that is still in voice mode renews well inside the lease, one that is gone lapses, and the next voice mode tells the ferret afresh.
+ */
+export const ENTRY_LEASE_MS = 180_000;
+export const ENTRY_RENEW_MS = 60_000;
+
+/** The send id of a session's entry message: stable for the session, so a reconnect sends it again as the same message. */
+export const entrySendId = (session: string): string => `voice-on:${session}`;
+
+/** What a phone's own voice mode asks of the machine (`POST /v1/voice/entry`): tell this ferret once, under this session. */
+export const VoiceEntryRequestSchema = z.strictObject({
+  ferretId: z.string().min(1).max(128),
+  session: VoiceSessionSchema,
+});
+export type VoiceEntryRequest = z.infer<typeof VoiceEntryRequestSchema>;
+
+/** `sent`: this call told the ferret. False when another tab, device or engine already holds the chat's claim, or the send was refused. */
+export interface VoiceEntryResult {
+  readonly sent: boolean;
+}
+
 /** The first record of a stream, as one text frame. Anything else first is a protocol error. */
 export const StreamStartSchema = z.discriminatedUnion('purpose', [
   /** Live words only: nothing is sent to a ferret (Settings › Voice › Talk to test). */
@@ -84,6 +115,12 @@ export const StreamStartSchema = z.discriminatedUnion('purpose', [
     v: z.literal(1),
     purpose: z.literal('chat'),
     ferretId: z.string().min(1).max(128),
+    /**
+     * Names this voice-mode session, minted once when the person turns voice mode on and kept across reconnects. OPTIONAL
+     * (additive): a client that does not send it gets the stream it always had, with no entry message. With it, the machine
+     * sends the one entry message under an id made from it, unless another tab or device already holds this chat's claim.
+     */
+    session: VoiceSessionSchema.optional(),
     style: PauseStyleSchema.optional(),
     reply: ReplyRequestSchema.optional(),
   }),
@@ -394,10 +431,26 @@ export function encodeHushFrame(): string {
   return json + ' '.repeat(SPEAK_FRAME_BYTES - byteLength(json));
 }
 
-const LineFrameSchema = z.discriminatedUnion('t', [SpeakFrameSchema, HushFrameSchema]);
+/**
+ * "Do not speak this line": a progress line that a newer one has outdated while it still waits. A line the machine already
+ * began to send is not taken back (the person has heard its start); one it has not is dropped, made or not. Same fixed size
+ * as every other text frame.
+ */
+export const DropFrameSchema = z.strictObject({
+  t: z.literal('drop'),
+  id: z.number().int().nonnegative().max(SPEAK_ID_MAX),
+});
+export type DropFrame = z.infer<typeof DropFrameSchema>;
 
-/** What a text frame after the start record can be: a line to speak, or "stop speaking". */
-export function decodeLineFrame(text: string): SpeakFrame | HushFrame {
+export function encodeDropFrame(id: number): string {
+  const json = JSON.stringify(DropFrameSchema.parse({ t: 'drop', id }));
+  return json + ' '.repeat(SPEAK_FRAME_BYTES - byteLength(json));
+}
+
+const LineFrameSchema = z.discriminatedUnion('t', [SpeakFrameSchema, HushFrameSchema, DropFrameSchema]);
+
+/** What a text frame after the start record can be: a line to speak, "stop speaking", or "do not speak that line". */
+export function decodeLineFrame(text: string): SpeakFrame | HushFrame | DropFrame {
   if (byteLength(text) !== SPEAK_FRAME_BYTES) throw new StreamProtocolError('a speak frame is the wrong size');
   let parsed: unknown;
   try {

@@ -43,6 +43,8 @@ export interface ReplyPick {
   readonly key: string;
   /** What to say, as markdown for `speakableSegments`. Never empty. */
   readonly markdown: string;
+  /** The rows the words came from (the assistant texts read), so what was said live can be followed by line. */
+  readonly rows?: readonly PickerRow[];
   readonly reason: 'reply' | 'no-message' | 'question';
 }
 
@@ -119,9 +121,9 @@ const replyOf = (texts: readonly PickerRow[], whatToRead: WhatToRead): ReplyPick
   const last = texts.at(-1);
   if (last === undefined) return { key: SILENT_TURN_KEY, markdown: NO_MESSAGE_WORDS, reason: 'no-message' };
   if (whatToRead === 'every') {
-    return { key: last.id, markdown: texts.map(row => row.text.trim()).join('\n\n'), reason: 'reply' };
+    return { key: last.id, markdown: texts.map(row => row.text.trim()).join('\n\n'), rows: texts, reason: 'reply' };
   }
-  return { key: last.id, markdown: last.text, reason: 'reply' };
+  return { key: last.id, markdown: last.text, rows: [last], reason: 'reply' };
 };
 
 /** The words of a turn that ended with `your-turn`, cut by the turn's dated start (or by the rows held when a send was pressed). */
