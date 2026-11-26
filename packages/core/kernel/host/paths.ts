@@ -1,10 +1,129 @@
 import { err, ok, type Result } from '@ferretry/std';
-import { isAbsolute } from 'node:path';
-import type { CheckedDirectory, DirectoryRefusal, PathsPort } from '../contract/ports.ts';
+import { basename, dirname, isAbsolute } from 'node:path';
+import {
+  isPackageProgramPath,
+  type CheckedDirectory,
+  type DirectoryRefusal,
+  type PathsPort,
+} from '../contract/ports.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import { fencedReal, fenceOf, sameObject, walkPhysically, walkUnchanged } from './fence-guard.ts';
 import type { TruncationWatcher } from './fence-index.ts';
 import { mayReadOverride } from './which.ts';
+
+/** System programs, plus the client beside this running daemon. Never executes a probe. */
+export async function bindProgram(
+  fs: Pick<HostFs, 'realpath' | 'identity' | 'writable'>,
+  path: string,
+  install?: { readonly executable: string; readonly client: string; readonly daemon: string },
+) {
+  const trusted = async (named: string, ownClient = false) => {
+    if (!isAbsolute(named)) return undefined;
+    const real = await fs.realpath(named);
+    // A planted `fy -> /bin/sh` is still a planted client: system ownership alone would trust the interpreter.
+    if (basename(real) !== basename(named)) return undefined;
+    const file = await fs.identity(real);
+    if (file?.kind !== 'file' || (file.mode & 0o111) === 0) return undefined;
+    // The product client uses its own daemon install; gh/git additionally support fixed package-manager installs.
+    let sibling = false;
+    if (ownClient && install && basename(named) === install.client) {
+      const daemon = await fs.realpath(install.executable);
+      const running = await fs.identity(daemon);
+      sibling =
+        (basename(daemon) === install.daemon || basename(daemon) === install.client) &&
+        running?.kind === 'file' &&
+        dirname(real) === dirname(daemon) &&
+        basename(real) === install.client;
+    }
+    const packaged = isPackageProgramPath(real);
+    for (let at = real; !sibling && !packaged; at = dirname(at)) {
+      const found = await fs.identity(at);
+      // A root-owned sticky directory (the multi-user Nix store) cannot rename its root-owned children. It is safe
+      // only when the daemon itself cannot write there; /tmp still fails the access check.
+      const stickyDirectory = found?.kind === 'directory' && (found.mode & 0o1000) !== 0;
+      if (
+        found === undefined ||
+        found.owner !== 0 ||
+        ((found.mode & 0o022) !== 0 && !stickyDirectory) ||
+        (await fs.writable(at))
+      )
+        return undefined;
+      if (at !== real && found.kind !== 'directory') return undefined;
+      if (dirname(at) === at) break;
+    }
+    // Resolve again after the whole walk; a changing route is never a pin.
+    if ((await fs.realpath(real)) !== real) return undefined;
+    const again = await fs.identity(real);
+    if (
+      again?.device !== file.device ||
+      again.inode !== file.inode ||
+      again.size !== file.size ||
+      again.mtimeNs !== file.mtimeNs ||
+      again.ctimeNs !== file.ctimeNs
+    )
+      return undefined;
+    return { real, file };
+  };
+  try {
+    const bound = await trusted(path, true);
+    if (bound === undefined) return undefined;
+    const file = { ...bound.file };
+    const expected = [
+      file.device,
+      file.inode,
+      file.size,
+      file.mtimeNs,
+      file.ctimeNs,
+      file.owner,
+      file.mode & 0o7777,
+    ].join(':');
+    // The daemon verifies in-process below. A shell shim must also look immediately before exec, even after launch.
+    // Use this running runtime (BUN_BE_BUN also works for compiled fyd), never a stat/bun selected from pane PATH.
+    const runtime = await fs.realpath(process.execPath);
+    const inspect = `import { lstatSync } from 'node:fs';
+const s = lstatSync(process.argv[1], { bigint: true });
+if (!s.isFile()) process.exit(1);
+process.stdout.write([s.dev, s.ino, s.size, s.mtimeNs, s.ctimeNs, s.uid, s.mode & 4095n].join(':'));`;
+    return {
+      program: bound.real,
+      check: {
+        argv: [
+          '/bin/sh',
+          '-c',
+          'BUN_OPTIONS= NODE_OPTIONS= BUN_BE_BUN=1 exec "$@"',
+          '--',
+          runtime,
+          '--config=/dev/null',
+          '--no-env-file',
+          '--cwd=/',
+          '--eval',
+          inspect,
+          bound.real,
+        ],
+        expected,
+      },
+      verify: async () => {
+        try {
+          const current = await trusted(bound.real, true);
+          return (
+            current?.real === bound.real &&
+            current.file.device === file.device &&
+            current.file.inode === file.inode &&
+            current.file.size === file.size &&
+            current.file.mtimeNs === file.mtimeNs &&
+            current.file.ctimeNs === file.ctimeNs &&
+            current.file.mode === file.mode &&
+            current.file.owner === file.owner
+          );
+        } catch {
+          return false;
+        }
+      },
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * `kernel.paths.checkDirectory` (today's session working-directory resolver, rule for rule): the path is trimmed; a
@@ -117,6 +236,7 @@ export function gatedPaths(plugin: string, declared: boolean, base: PathsPort): 
     },
     // Gated on their own permission ({@link gatedWhich}), never by this one.
     which: base.which,
+    bindProgram: base.bindProgram,
     locate: base.locate,
     whichFor: base.whichFor,
   });
@@ -138,6 +258,7 @@ export function gatedWhich(plugin: string, declared: boolean, base: PathsPort): 
     bindDirectory: base.bindDirectory,
     stateHomeHolding: base.stateHomeHolding,
     which: refused,
+    bindProgram: refused,
     locate: refused,
     whichFor: refused,
   });

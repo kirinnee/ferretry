@@ -3,6 +3,7 @@
  * policies. Copied from today's `link.ts`; the reasoning for each is kept with it.
  */
 
+import { SOCKET_CLOSES } from '../../contract/socket.ts';
 import { toBase64Url } from './wire/binary.ts';
 import { ACCESS_LEASE_SECONDS, ACCESS_RENEW_LEAD_SECONDS, MAX_SESSION_SECONDS } from './wire/vocabulary.ts';
 
@@ -59,7 +60,7 @@ export const SESSION_STREAM_CLOSES = {
   /** The viewer stopped keeping up and the stream may not lose what it would have to drop. */
   slowReader: { code: 1013, reason: 'stream reader fell behind' },
   /** The grant this stream was opened under no longer allows it. */
-  notAllowed: { code: 1008, reason: 'this stream is no longer allowed' },
+  notAllowed: SOCKET_CLOSES.admissionLost,
 } as const;
 
 /** The one public reason a lapsed lease ends a session with; it says nothing about the holder. */

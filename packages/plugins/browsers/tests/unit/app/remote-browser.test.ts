@@ -19,6 +19,7 @@ import {
   remotePointerButton,
   remoteViewportForContainer,
   runRemoteBrowserAction,
+  streamWantsConfirmation,
 } from '../../../app/lib/remote-browser.ts';
 import type { BrowserStatus } from '../../../contract/wire/browser.ts';
 import { encodeBrowserStreamChunks } from '../../../contract/wire/stream.ts';
@@ -341,6 +342,46 @@ const daemonFrameEnvelope = (pageId: string, jpeg: readonly number[]): ArrayBuff
   bytes.set(jpeg, 7 + id.length);
   return bytes.buffer;
 };
+
+describe('D-87 which stream refusals a passkey can answer', () => {
+  it('preserves typed passkey refusals through the browser adapter and keeps hard denials generic', () => {
+    for (const body of [
+      { code: 'grant_step_up_required' },
+      { code: 'unlock_required' },
+      { code: 'http_403' },
+      null,
+      'forbidden',
+    ]) {
+      const sockets = socketClient();
+      const reason = 'the daemon refused this stream: 403';
+      const daemon = browserDaemon({
+        ...sockets.client,
+        socket: (key, params, given) => {
+          const handle = sockets.client.socket(key, params, given);
+          given.onClose(reason, undefined, { status: 403, body });
+          return handle;
+        },
+      });
+      const socket = remoteBrowserSocketFactory(daemon, daemonSessionScope(daemon, 'same/session'));
+      const events = recordEvents(socket);
+      const confirmable = body !== null && typeof body === 'object' && body.code !== 'http_403';
+      expect(events.closes).toEqual([{ code: 1008, reason: confirmable ? body.code : reason }]);
+      expect(streamWantsConfirmation(events.closes[0]?.reason ?? '')).toBe(confirmable);
+    }
+  });
+
+  it('takes typed passkey refusals and sealed admission loss, never a generic HTTP denial', () => {
+    expect(streamWantsConfirmation('grant_step_up_required')).toBe(true);
+    expect(streamWantsConfirmation('unlock_required')).toBe(true);
+    expect(streamWantsConfirmation('this stream is no longer allowed')).toBe(true);
+    expect(streamWantsConfirmation('the daemon refused this stream: 403')).toBe(false);
+    expect(streamWantsConfirmation('the daemon refused this stream: 401')).toBe(false);
+    expect(streamWantsConfirmation('the daemon refused this stream: 404')).toBe(false);
+    expect(streamWantsConfirmation('the daemon refused this stream: 4030')).toBe(false);
+    expect(streamWantsConfirmation('browser use is not granted')).toBe(false);
+    expect(streamWantsConfirmation('')).toBe(false);
+  });
+});
 
 describe('remote browser frame and geometry helpers', () => {
   it('decodes a frame in the daemon wire shape, keeping only the JPEG payload', () => {

@@ -116,7 +116,12 @@ export class GhRunner {
       argv = withRepository(argv, repo);
     }
 
-    const key = caller.ferret ?? 'person';
+    const key =
+      caller.ferret !== undefined
+        ? `ferret:${caller.ferret}`
+        : caller.actor.kind === 'device' && caller.actor.deviceId !== undefined
+          ? `device:${caller.actor.deviceId}`
+          : 'person';
     if ((this.#running.get(key) ?? 0) >= MAX_RUNS_PER_CALLER)
       return refused("Ferretry's gh is already running 4 commands for you: wait for one to finish.", {
         account: account.id,

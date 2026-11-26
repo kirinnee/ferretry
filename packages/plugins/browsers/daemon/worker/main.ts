@@ -67,6 +67,7 @@ import {
   playwrightNodeOf,
 } from '../target/lib/fields.ts';
 import { NavigationLedger, type NavigationSource, NavigationTotalsLedger } from '../target/lib/navigation-evidence.ts';
+import { watchNavigationDocuments } from './navigation-documents.ts';
 import type { PairingScreenState } from '../target/lib/pairing-screen.ts';
 import { type InputWorkerPages, isInputMethod, serveInputMethod } from '../target/lib/worker-serve.ts';
 import {
@@ -382,9 +383,7 @@ async function allowClipboardWrite(page: Page): Promise<void> {
 function watchNavigation(page: Page): void {
   const ledger = new NavigationLedger(() => Date.now(), navigationTotals);
   navigationLedgers.set(page, ledger);
-  page.on('framenavigated', frame => ledger.commit(`pw:${frameKey(frame)}`, frame.url(), frame === page.mainFrame()));
-  page.on('frameattached', frame => ledger.attached(`pw:${frameKey(frame)}`));
-  page.on('framedetached', frame => ledger.detached(`pw:${frameKey(frame)}`));
+  watchNavigationDocuments(page, ledger);
   void pageSession(page)
     .then(async session => await ledger.attach(session as unknown as NavigationSource))
     .catch(() => ledger.lose());
@@ -395,19 +394,6 @@ function unwatched(): NavigationLedger {
   const ledger = new NavigationLedger(() => Date.now(), navigationTotals);
   ledger.lose();
   return ledger;
-}
-
-const frameKeys = new WeakMap<object, string>();
-let frameSerial2 = 0;
-/** A stable name for one Playwright frame object, so its attach, navigations and detach are one frame in the ledger. */
-function frameKey(frame: object): string {
-  let key = frameKeys.get(frame);
-  if (key === undefined) {
-    frameSerial2 += 1;
-    key = String(frameSerial2);
-    frameKeys.set(frame, key);
-  }
-  return key;
 }
 
 function registerPage(page: Page): void {

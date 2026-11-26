@@ -28,6 +28,7 @@ export function cleanNavigation(address: string, at = 0): NavigationEvidence {
     overflow: false,
     frames: [origin],
     taintSeq: 0,
+    linked: false,
     watchedSince: at,
     totals: { links: {}, lost: 0 },
   };

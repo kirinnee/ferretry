@@ -325,11 +325,17 @@ export interface PluginFeed {
 
 /** What a plugin hears on a socket route (the app shell's `SocketListeners`). */
 export interface PluginSocketListeners {
+  /** Only a person's explicit press may ask the shell to confirm a refused stream with its passkey. */
+  readonly confirm?: true;
   /** The daemon accepted the stream: from here a frame sent reaches it (a frame sent before is dropped). */
   readonly onOpen?: () => void;
   readonly onFrame: (frame: string | Uint8Array) => void;
   /** The stream ended; `code` is the close code it ended with (`1008` is a refusal, not a drop), absent if it never opened. */
-  readonly onClose: (reason: string, code?: number) => void;
+  readonly onClose: (
+    reason: string,
+    code?: number,
+    refusal?: { readonly status: number; readonly body: unknown },
+  ) => void;
 }
 
 /**

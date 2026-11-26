@@ -83,6 +83,12 @@ export interface NavigationEvidence {
    * grammar; `0` when none ever did. Non-zero for the rest of the target's life, even after the address is replaced.
    */
   readonly taintSeq: number;
+  /**
+   * Whether the document a frame of this target shows NOW was entered by an address carrying the pairing-fragment grammar,
+   * on ANY origin: a deployment the daemon knows nothing of is as much a pairing screen as one it does. It falls once a
+   * new document replaces that one (or its frame goes), where {@link NavigationEvidence.taintSeq} never does.
+   */
+  readonly linked: boolean;
   /** Epoch milliseconds the ledger began watching: a commit before it is not in `origins`. */
   readonly watchedSince: number;
   /** The worker's totals over every page (see {@link NavigationTotals}); the same whichever page is asked. */
@@ -140,6 +146,8 @@ export class NavigationLedger {
   #mainFrame: string | undefined;
   #overflow = false;
   #taintSeq = 0;
+  /** The frames whose current document was entered by a link. */
+  readonly #linkedFrames = new Set<string>();
   readonly #watchedSince: number;
 
   constructor(
@@ -156,7 +164,7 @@ export class NavigationLedger {
   }
 
   /** A frame committed an address (DevTools: `frameNavigated`, or `navigatedWithinDocument` for a hash or a pushState). */
-  commit(frameId: string, address: string, main?: boolean): void {
+  commit(frameId: string, address: string, main?: boolean, sameDocument = false): void {
     this.#seq += 1;
     const origin = originOf(address);
     if (main === true) this.#mainFrame = frameId;
@@ -168,8 +176,9 @@ export class NavigationLedger {
     const hash = address.indexOf('#');
     if (hash >= 0 && carriesCredentialFragment(address.slice(hash))) {
       this.#taintSeq = this.#seq;
+      this.#linkedFrames.add(frameId);
       this.totals.linked(origin);
-    }
+    } else if (!sameDocument) this.#linkedFrames.delete(frameId);
   }
 
   /** A frame appeared. Its address is not known until it commits one. */
@@ -182,6 +191,7 @@ export class NavigationLedger {
   detached(frameId: string): void {
     this.#seq += 1;
     this.#frames.delete(frameId);
+    this.#linkedFrames.delete(frameId);
   }
 
   evidence(): NavigationEvidence {
@@ -194,6 +204,7 @@ export class NavigationLedger {
       overflow: this.#overflow,
       frames,
       taintSeq: this.#taintSeq,
+      linked: this.#linkedFrames.size > 0,
       watchedSince: this.#watchedSince,
       totals: this.totals.snapshot(),
     };
@@ -208,7 +219,8 @@ export class NavigationLedger {
     session.on('Page.frameNavigated', ((params: unknown) => this.#navigated(params)) as never);
     session.on('Page.navigatedWithinDocument', ((params: unknown) => {
       const event = objectOf(params);
-      if (typeof event.frameId === 'string' && typeof event.url === 'string') this.commit(event.frameId, event.url);
+      if (typeof event.frameId === 'string' && typeof event.url === 'string')
+        this.commit(event.frameId, event.url, undefined, true);
     }) as never);
     session.on('Page.frameAttached', ((params: unknown) => {
       const id = objectOf(params).frameId;
@@ -266,12 +278,13 @@ const hasOnly = (value: Record<string, unknown>, keys: readonly string[]): boole
  */
 export function parseNavigationEvidence(raw: unknown): NavigationEvidence | undefined {
   const value = objectOf(raw);
-  if (!hasOnly(value, ['seq', 'origins', 'overflow', 'frames', 'taintSeq', 'watchedSince', 'totals'])) return undefined;
-  const { seq, origins, overflow, frames, taintSeq, watchedSince } = value;
+  if (!hasOnly(value, ['seq', 'origins', 'overflow', 'frames', 'taintSeq', 'linked', 'watchedSince', 'totals']))
+    return undefined;
+  const { seq, origins, overflow, frames, taintSeq, linked, watchedSince } = value;
   const totals = parseTotals(value.totals);
   if (totals === undefined) return undefined;
   if (!isCount(seq) || !isCount(watchedSince) || !isCount(taintSeq) || taintSeq > seq) return undefined;
-  if (typeof overflow !== 'boolean') return undefined;
+  if (typeof overflow !== 'boolean' || typeof linked !== 'boolean') return undefined;
   if (!Array.isArray(origins) || origins.length > MAX_COMMITTED_ORIGINS) return undefined;
   if (!Array.isArray(frames) || frames.length > MAX_FRAMES || !frames.every(isOrigin)) return undefined;
   const parsed: CommittedOrigin[] = [];
@@ -285,7 +298,7 @@ export function parseNavigationEvidence(raw: unknown): NavigationEvidence | unde
     seen.add(each.origin);
     parsed.push({ origin: each.origin, firstAt: each.firstAt, lastSeq: each.lastSeq });
   }
-  return { seq, origins: parsed, overflow, frames: [...(frames as string[])], taintSeq, watchedSince, totals };
+  return { seq, origins: parsed, overflow, frames: [...(frames as string[])], taintSeq, linked, watchedSince, totals };
 }
 
 /** The worker's {@link NavigationTotals}: only the exact shape, every count a safe whole number, the list bounded. */

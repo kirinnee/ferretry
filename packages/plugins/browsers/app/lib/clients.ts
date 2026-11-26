@@ -30,3 +30,8 @@ export async function listSecretNames(client: CallClient): Promise<SecretNames> 
 export async function putSecret(client: CallClient, name: string, value: string): Promise<void> {
   await client.call('POST /v1/secrets', { body: { name, value } });
 }
+
+/** Removes a secret by name (`DELETE /v1/secrets/:name`). Used only to take back one this tab has just filed. */
+export async function removeSecret(client: CallClient, name: string): Promise<void> {
+  await client.call('DELETE /v1/secrets/:name', { params: { name } });
+}

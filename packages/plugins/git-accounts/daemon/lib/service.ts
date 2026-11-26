@@ -35,7 +35,7 @@ export class GitAccountsService {
     private readonly removed: (id: GitAccountId) => unknown,
     /** Runs once an account is on its way out, after its keys are off GitHub and before its token goes (B3: stops its agent, drops its private key). */
     private readonly beforeForget: (id: GitAccountId) => Promise<void>,
-    /** The `gh` to run with a token and the `PATH` it runs with: an absolute path and folders outside the state home (`gh-locator.ts`), or a refusal. */
+    /** The identity-bound `gh`, its verifier and fixed child PATH (`gh-locator.ts`), or a refusal. */
     private readonly ghProgram: () => Promise<GhLaunch>,
     private readonly exclusive: <T>(id: GitAccountId, work: () => Promise<T>) => Promise<T>,
   ) {}
@@ -87,7 +87,7 @@ export class GitAccountsService {
       throw new ApiError(403, 'only gh runs with an account', GIT_ACCOUNT_CODES.invalidRequest);
     checkGhArgs(spec.args);
     // Which program runs is settled BEFORE the token is read: a `gh` that cannot be trusted never sees one.
-    const { program, path } = await this.ghProgram();
+    const { program, path, verify } = await this.ghProgram();
     const token = await this.#tokenOf(id);
     const timeout = milliseconds(Math.min(Math.max(spec.timeoutMs ?? 60_000, 1_000), 300_000));
     const folder = await this.scratch.open();
@@ -107,7 +107,7 @@ export class GitAccountsService {
       const home = `${folder.path}/home`;
       const refuse = `${folder.path}/refuse`;
       const env: Record<string, string> = {
-        // Not the daemon's own `PATH` (a sealed child would inherit it, shim folder and all): the locator's filtered one.
+        // Fixed system folders, independent of the daemon's or pane's search path.
         PATH: path,
         GH_TOKEN: token,
         GH_HOST: 'github.com',
@@ -139,6 +139,12 @@ export class GitAccountsService {
         GIT_CEILING_DIRECTORIES: ceiling,
         NO_COLOR: '1',
       };
+      if (!(await verify()))
+        throw new ApiError(
+          403,
+          'GitHub client unavailable: gh or git changed since selection.',
+          GIT_ACCOUNT_CODES.invalidRequest,
+        );
       const result = await this.spawn.runBytes(program, [...spec.args], {
         env,
         sealed: true,

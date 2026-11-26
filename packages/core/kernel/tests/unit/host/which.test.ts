@@ -140,6 +140,7 @@ describe('which: gated by permissions.which', () => {
       value: { realPath: '/x', insideStateHome: false, verify: async () => ({ ok: true as const, value: undefined }) },
     }),
     stateHomeHolding: async () => undefined,
+    bindProgram: async () => undefined,
     which: async () => '/usr/bin/npx',
     locate: async () => ({ kind: 'absent' as const }),
     whichFor: async () => ({ kind: 'unprovable' as const }),
@@ -152,6 +153,9 @@ describe('which: gated by permissions.which', () => {
     );
     expect(await gatedWhich('stranger', false, base).checkDirectory('/x')).toMatchObject({ ok: true });
     expect(gatedWhich('stranger', false, base).home()).toBe('/h');
+    await expect(gatedWhich('stranger', false, base).bindProgram('/usr/bin/npx')).rejects.toThrow(
+      'stranger did not declare permissions.which',
+    );
   });
 
   const half = (id: string, seen: Record<string, (name: string) => Promise<unknown>>, which?: true) =>
