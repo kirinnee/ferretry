@@ -12,7 +12,8 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import {
   GIT_ACCOUNT_CODES,
-  GITHUB_SCOPES,
+  githubScopes,
+  type GitKeyFormat,
   type GitAccountId,
   type GitDeviceFlow,
   type GitDeviceFlowStatus,
@@ -79,7 +80,7 @@ export class GithubDeviceFlows {
   readonly #flows = new Map<string, Flow>();
   constructor(private readonly deps: DeviceFlowDeps) {}
 
-  async start(): Promise<GitDeviceFlow> {
+  async start(signingFormat: GitKeyFormat = 'ssh'): Promise<GitDeviceFlow> {
     const clientId = this.deps.clientId();
     if (clientId === '')
       throw new ApiError(
@@ -97,7 +98,7 @@ export class GithubDeviceFlows {
     const response = await this.deps.http.request({
       method: 'POST',
       url: DEVICE_CODE_URL,
-      form: { client_id: clientId, scope: GITHUB_SCOPES.join(' ') },
+      form: { client_id: clientId, scope: githubScopes(signingFormat).join(' ') },
     });
     const parsed = DeviceCodeAnswer.safeParse(response.body);
     if (response.status !== 200 || !parsed.success)

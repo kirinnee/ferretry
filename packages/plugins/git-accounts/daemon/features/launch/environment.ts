@@ -4,7 +4,8 @@
  * `GIT_CONFIG_VALUE_n`. Plain words and paths only. The private key is not here and cannot be got from here: the socket
  * can be asked to sign and to authenticate, never to hand the key over.
  */
-import type { GitAccount } from '../../../contract/index.ts';
+import { type GitAccount, keptHere } from '../../../contract/index.ts';
+import type { GpgKit } from '../gpg-keys/signer.ts';
 
 /** What an account's agent and files are called, from the key service. Paths only. */
 export interface AccountKit {
@@ -70,8 +71,7 @@ const SIGNING_SWITCHES: readonly string[] = ['commit.gpgsign', 'tag.gpgsign', 't
  */
 export function noIdentityEnvironment(account: GitAccount): Readonly<Record<string, string>> {
   const { ssh, signing } = account.keys;
-  const generated = ssh?.source === 'generated' || signing?.source === 'generated';
-  if (!generated) return {};
+  if (!keptHere(ssh) && !keptHere(signing)) return {};
   const settings: [string, string][] = [];
   const env: Record<string, string> = {};
   if (ssh?.source !== 'own') {
@@ -92,21 +92,40 @@ export function noIdentityEnvironment(account: GitAccount): Readonly<Record<stri
   return env;
 }
 
-export function gitEnvironment(account: GitAccount, kit: AccountKit): Readonly<Record<string, string>> {
+/**
+ * What git is told for the account. `kit` is the SSH side (an agent, for pushing or for SSH signing); `gpg` is the
+ * OpenPGP signer with its public-only `GNUPGHOME`. An account signs with one of them: a GPG kit means `gpg.format`
+ * `openpgp`, the signing shim named by absolute path, and the key by fingerprint. Paths and a fingerprint only.
+ */
+export function gitEnvironment(
+  account: GitAccount,
+  kit: AccountKit | undefined,
+  gpg?: GpgKit,
+): Readonly<Record<string, string>> {
   const settings: [string, string][] = [
     ['user.name', clean(account.name ?? '') || account.login],
     ['user.email', noreplyEmail(account)],
   ];
-  if (kit.signing)
+  if (kit?.signing)
     settings.push(
       ['gpg.format', 'ssh'],
       ['user.signingkey', kit.publicKeyFile],
       ['commit.gpgsign', 'true'],
       ['tag.gpgsign', 'true'],
     );
-  if (kit.auth)
+  if (gpg !== undefined)
+    settings.push(
+      ['gpg.format', 'openpgp'],
+      ['gpg.program', gpg.program],
+      ['user.signingkey', gpg.fingerprint],
+      ['commit.gpgsign', 'true'],
+      ['tag.gpgsign', 'true'],
+    );
+  if (kit?.auth)
     settings.push(['core.sshCommand', sshCommand(kit)], ['url.git@github.com:.insteadOf', 'https://github.com/']);
-  const env: Record<string, string> = { SSH_AUTH_SOCK: kit.socket, GIT_CONFIG_COUNT: String(settings.length) };
+  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(settings.length) };
+  if (kit !== undefined) env['SSH_AUTH_SOCK'] = kit.socket;
+  if (gpg !== undefined) env['GNUPGHOME'] = gpg.home;
   settings.forEach(([key, value], index) => {
     env[`GIT_CONFIG_KEY_${String(index)}`] = key;
     env[`GIT_CONFIG_VALUE_${String(index)}`] = value;

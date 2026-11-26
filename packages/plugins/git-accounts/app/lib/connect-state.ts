@@ -11,6 +11,8 @@ const WORDS: Readonly<Record<string, string>> = {
   [GIT_ACCOUNT_CODES.providerUnreachable]: 'This machine could not reach GitHub. Check its network and try again.',
   [GIT_ACCOUNT_CODES.providerRefused]: 'GitHub refused the request. Try again in a minute.',
   [GIT_ACCOUNT_CODES.unknownFlow]: 'That connection is no longer waiting. Start again.',
+  [GIT_ACCOUNT_CODES.keyCleanupManual]:
+    'Signing is stopped, but the upload outcome is unknown. Check the matching key at github.com/settings/keys and remove it there if appropriate, then retry here or disconnect the account.',
 };
 
 /** What a failed call says, in the page's words; an unknown failure keeps its own message. */

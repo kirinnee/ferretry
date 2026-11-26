@@ -62,12 +62,17 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
-const VARIANTS = [
-  { name: '1280-light', width: 1_280, phone: false, scheme: 'light' },
-  { name: '1280-dark', width: 1_280, phone: false, scheme: 'dark' },
-  { name: '390-light', width: 390, phone: true, scheme: 'light' },
-  { name: '390-dark', width: 390, phone: true, scheme: 'dark' },
-] as const;
+const VARIANTS = ([390, 1440] as const).flatMap(width =>
+  (['light', 'dark'] as const).flatMap(scheme =>
+    (['studio', 'neumorphism'] as const).map(style => ({
+      name: `${width}-${scheme}-${style}`,
+      width,
+      phone: width === 390,
+      scheme,
+      style,
+    })),
+  ),
+);
 type Variant = (typeof VARIANTS)[number];
 
 const open = async (variant: Variant, query: string) => {
@@ -88,6 +93,7 @@ const open = async (variant: Variant, query: string) => {
   tab.on('pageerror', error => problems.push(error.message));
   await tab.goto(`${origin}/?theme=studio-${variant.scheme}${query}`);
   await tab.waitForSelector('[data-testid="git-accounts"]');
+  await tab.evaluate(style => document.documentElement.setAttribute('data-style', style), variant.style);
   return { tab, problems, close: async () => await context.close() };
 };
 
@@ -115,7 +121,11 @@ describe('the GitHub accounts screen', () => {
         await shot(empty.tab, variant, 'empty');
         await press(empty.tab, 'Connect a GitHub account');
         await empty.tab.waitForSelector('[data-testid="git-consent"]');
-        await shot(empty.tab, variant, 'consent');
+        await shot(empty.tab, variant, 'consent-ssh');
+        expect(await empty.tab.locator('[data-testid="git-consent"]').innerText()).not.toContain('admin:gpg_key');
+        await empty.tab.getByRole('radio', { name: 'GPG', exact: true }).check();
+        expect(await empty.tab.locator('[data-testid="git-consent"]').innerText()).toContain('admin:gpg_key');
+        await shot(empty.tab, variant, 'consent-gpg');
         await press(empty.tab, 'Continue to GitHub');
         await empty.tab.waitForSelector('[data-testid="git-user-code"]');
         expect(await empty.tab.locator('[data-testid="git-user-code"]').innerText()).toBe('WDJB-MJHT');
@@ -130,6 +140,14 @@ describe('the GitHub accounts screen', () => {
       try {
         await two.tab.waitForSelector('[data-account]');
         await shot(two.tab, variant, 'connected');
+        const hubot = two.tab.locator('[data-account="gha_777"]');
+        await hubot.getByRole('radio', { name: 'GPG', exact: true }).check();
+        await shot(two.tab, variant, 'signing-choice');
+        await hubot.getByRole('button', { name: 'Create GPG signing key' }).click();
+        await hubot.getByText('Signing with GPG.').waitFor();
+        await shot(two.tab, variant, 'gpg-signing');
+        await hubot.getByRole('button', { name: 'Change signing key' }).click();
+        await shot(two.tab, variant, 'revoke-signing');
         await press(two.tab, 'Remove @octo-fake');
         await shot(two.tab, variant, 'remove');
         expect(two.problems).toEqual([]);
@@ -147,6 +165,27 @@ describe('the GitHub accounts screen', () => {
         expect(stepUp.problems).toEqual([]);
       } finally {
         await stepUp.close();
+      }
+
+      const uncertain = await open(variant, '&accounts=two&uploads=uncertain');
+      try {
+        await press(uncertain.tab, 'Remove @octo-fake');
+        await press(uncertain.tab, 'Remove @octo-fake');
+        await uncertain.tab.locator('[data-testid="git-removed"]').waitFor();
+        expect(await uncertain.tab.locator('[data-testid="git-removed"]').innerText()).toContain(
+          'confirm who registered each key',
+        );
+        await shot(uncertain.tab, variant, 'uncertain-upload');
+      } finally {
+        await uncertain.close();
+      }
+
+      const pending = await open(variant, '&accounts=pending');
+      try {
+        await pending.tab.getByText('Signing stopped. Key cleanup is pending.').waitFor();
+        await shot(pending.tab, variant, 'pending-cleanup');
+      } finally {
+        await pending.close();
       }
 
       const expired = await open(variant, '&poll=expired');

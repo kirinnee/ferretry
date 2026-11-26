@@ -5,11 +5,15 @@
  */
 import { useState } from 'react';
 import type { GitAccount } from '../../../contract/index.ts';
+import type { GitAccountsClient } from '../../shell.tsx';
+import { SigningControls } from './signing-controls.tsx';
 
 export interface AccountRowProps {
   readonly account: GitAccount;
   readonly busy: boolean;
   readonly onRemove: (account: GitAccount) => void;
+  readonly client: GitAccountsClient;
+  readonly onChanged: () => void;
 }
 
 function Chip({ on, label }: { readonly on: boolean; readonly label: string }) {
@@ -24,7 +28,7 @@ function Chip({ on, label }: { readonly on: boolean; readonly label: string }) {
   );
 }
 
-export function AccountRow({ account, busy, onRemove }: AccountRowProps) {
+export function AccountRow({ account, busy, onRemove, client, onChanged }: AccountRowProps) {
   const [asking, setAsking] = useState(false);
   return (
     <li className="flex flex-col gap-2 py-3" data-account={account.id}>
@@ -62,11 +66,9 @@ export function AccountRow({ account, busy, onRemove }: AccountRowProps) {
         <Chip on={account.keys.ssh !== undefined} label="SSH key" />
         <Chip on={account.keys.signing !== undefined} label="Signing key" />
       </div>
+      <SigningControls account={account} client={client} onChanged={onChanged} />
       {asking ? (
-        <section
-          className="flex flex-col gap-2 rounded-control bg-warn-bg px-3 py-2"
-          aria-label={`Remove @${account.login}?`}
-        >
+        <section className="flex flex-col gap-2 rounded-panel bg-warn-bg p-4" aria-label={`Remove @${account.login}?`}>
           <p className="m-0 text-cell leading-base text-muted">
             This deletes the keys Ferretry registered on @{account.login} at GitHub, then forgets its token on this
             machine. To fully revoke the app, open github.com/settings/applications afterwards.
