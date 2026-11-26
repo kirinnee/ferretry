@@ -332,6 +332,36 @@ describe('P1-1: a pairing link committed in any frame', () => {
   });
 });
 
+describe('D-07 (v4 #1598): a document a pairing link opened is a pairing screen wherever it is served', () => {
+  const SELF_HOSTED = 'https://self-hosted.example.test/';
+  const openSelfHosted = async (browser: Awaited<ReturnType<typeof pairingWorld>>['browser']) =>
+    await browser.openPage('s1', 'self', { openedBy: { by: 'agent', sessionId: 's1' }, url: SELF_HOSTED });
+
+  it('should refuse a read of a page on an origin the daemon does not know, entered by a pairing link, with no code live and no marker', async () => {
+    const { tabs, tools, browser } = await pairingWorld();
+    const page = await openSelfHosted(browser);
+    tabs.navigation.set(page.id, { ...cleanNavigation(SELF_HOSTED, 0), seq: 2, taintSeq: 2, linked: true });
+
+    const { answer, error } = await attempt(tools, { tool: 'browser.read', name: 'self' });
+
+    should(answer).be.undefined();
+    should(error?.message).equal(PAIRING_SCREEN_REFUSAL);
+  });
+
+  it('should answer once that page has moved on to a document no link opened, and for a page no link ever opened', async () => {
+    const { tabs, tools, browser } = await pairingWorld();
+    const page = await openSelfHosted(browser);
+    tabs.navigation.set(page.id, { ...cleanNavigation(SELF_HOSTED, 0), seq: 3, taintSeq: 2, linked: false });
+
+    const moved = await attempt(tools, { tool: 'browser.read', name: 'self' });
+    tabs.navigation.set(page.id, cleanNavigation(SELF_HOSTED, 0));
+    const clean = await attempt(tools, { tool: 'browser.read', name: 'self' });
+
+    should(moved.error).be.undefined();
+    should(clean.error).be.undefined();
+  });
+});
+
 describe('P1-2: a script outlives its own answer, so it never runs on the app (the blanket rule is in pairing-screen-fix2.test.ts)', () => {
   const EVAL: BrowserToolCall = { tool: 'browser.eval', name: 'app', function: '() => document.body.innerText' };
 

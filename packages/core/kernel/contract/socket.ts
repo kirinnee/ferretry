@@ -7,6 +7,8 @@ export const SOCKET_MAX_FRAME_BYTES = 64 * 1024;
 export const SOCKET_MAX_PENDING_FRAMES = 16;
 
 export const SOCKET_CLOSES = {
+  /** A sealed stream lost admission; a fresh open may ask for the device's passkey. */
+  admissionLost: { code: 1008, reason: 'this stream is no longer allowed' },
   handshakeOverflow: { code: 1009, reason: 'socket handshake queue exceeded' },
   unavailable: { code: 1011, reason: 'socket handler unavailable' },
   shuttingDown: { code: 1000, reason: 'daemon shutting down' },

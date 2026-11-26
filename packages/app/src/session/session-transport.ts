@@ -13,6 +13,7 @@ import {
   type DeviceKeyRotation,
   RelayClientSession,
   RelaySessionError,
+  RelayStreamRefusedError,
   type RelayClientSessionDependencies,
   type RelayClientSocket,
   type RelayStreamFrame,
@@ -532,11 +533,15 @@ export class SessionTransport implements DaemonTransport {
     const url = new URL(path, 'http://session.invalid');
     const query = [...url.searchParams.entries()];
     let closed = false;
-    const end = (reason: string, code?: number): void => {
+    const end = (
+      reason: string,
+      code?: number,
+      refusal?: { readonly status: number; readonly body: unknown },
+    ): void => {
       if (closed) return;
       closed = true;
       this.#streams.delete(shutdown);
-      listeners.onClose(reason, code);
+      listeners.onClose(reason, code, refusal);
     };
     // The transport closing ends this stream too (R568), and says so: the page did not ask for it.
     const shutdown = (reason: string): void => {
@@ -571,6 +576,7 @@ export class SessionTransport implements DaemonTransport {
       end(
         error instanceof Error ? error.message : String(error),
         error instanceof RelaySessionError ? error.code : undefined,
+        error instanceof RelayStreamRefusedError ? { status: error.status, body: decodeBody(error.body) } : undefined,
       );
     const { rotation, daemonId } = this.#options;
     let session: RelayClientSession | undefined;

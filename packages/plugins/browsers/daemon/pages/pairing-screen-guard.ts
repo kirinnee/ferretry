@@ -118,6 +118,9 @@ export function pairingScreenGuard(
     if (anyOnApp(before, apps) && windows.liveSince(started)) throw refuse();
     // A worker that has lost track of a navigation cannot say a page of the app was not entered by a pairing link.
     if (before.totals.lost > 0 && anyOnApp(before, apps)) throw refuse();
+    // A document a pairing link opened is a pairing screen wherever it is served (v4 #1598): the daemon cannot know every
+    // deployment's app origin, so this holds on ANY origin.
+    if (before.targets.some(target => target.nav.linked)) throw refuse();
     // A page that still sits on the app a pairing link arrived on is the screen that holds the link's code.
     if (before.targets.some(target => target.nav.taintSeq > 0 && onApp(target.nav, apps))) throw refuse();
     if (kind === 'script') {

@@ -90,6 +90,44 @@ describe('the navigation ledger', () => {
     expect(ledger.evidence().taintSeq).toBe(tainted);
   });
 
+  test('D-07 says a frame is entered by a link while its current document was, on any origin, and no longer once it moved on', async () => {
+    const ledger = new NavigationLedger(() => 5);
+    const { session, emit } = source({ frame: frame('main', 'https://docs.example.test/') });
+    await ledger.attach(session);
+    expect(ledger.evidence().linked).toBe(false);
+
+    // a deployment nobody told the daemon about
+    emit('Page.frameNavigated', {
+      frame: frame('main', 'https://self-hosted.example.test/pair', { urlFragment: '#v1;url=x;code=FAKE-PAIR-0000' }),
+    });
+    expect(ledger.evidence().linked).toBe(true);
+    // the same document, its address changed: still the document the link opened
+    emit('Page.navigatedWithinDocument', { frameId: 'main', url: 'https://self-hosted.example.test/pair' });
+    expect(ledger.evidence().linked).toBe(true);
+    // a new document replaces it: the history keeps the taint, the document does not
+    emit('Page.frameNavigated', { frame: frame('main', 'https://docs.example.test/') });
+    expect(ledger.evidence().linked).toBe(false);
+    expect(ledger.evidence().taintSeq).toBeGreaterThan(0);
+  });
+
+  test('D-07 stops saying linked once the frame that was entered by a link is gone', async () => {
+    const ledger = new NavigationLedger(() => 5);
+    const { session, emit } = source({ frame: frame('main', 'https://docs.example.test/') });
+    await ledger.attach(session);
+    emit('Page.frameAttached', { frameId: 'kid' });
+    emit('Page.frameNavigated', {
+      frame: frame('kid', 'https://self-hosted.example.test/pair', {
+        parentId: 'main',
+        urlFragment: '#v1;code=FAKE-PAIR-0000',
+      }),
+    });
+    expect(ledger.evidence().linked).toBe(true);
+
+    emit('Page.frameDetached', { frameId: 'kid' });
+
+    expect(ledger.evidence().linked).toBe(false);
+  });
+
   test('a page that cannot be seeded is a ledger that says it cannot tell where the page is', async () => {
     const ledger = new NavigationLedger(() => 5);
 
@@ -187,6 +225,7 @@ describe('the daemon’s belief in the worker’s navigation evidence', () => {
     overflow: false,
     frames: ['https://app.example.test'],
     taintSeq: 0,
+    linked: false,
     watchedSince: 5,
     totals: { links: {}, lost: 0 },
   };
@@ -207,6 +246,8 @@ describe('the daemon’s belief in the worker’s navigation evidence', () => {
       { ...good, seq: '3' },
       { ...good, overflow: 'no' },
       { ...good, taintSeq: 9 },
+      { ...good, linked: 'yes' },
+      { ...good, linked: undefined },
       { ...good, watchedSince: Number.POSITIVE_INFINITY },
       { ...good, frames: 'x' },
       { ...good, frames: [1] },

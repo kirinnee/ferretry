@@ -10,6 +10,7 @@ import { z } from 'zod';
 import type { PairedDaemon } from '../daemons/daemon-list.ts';
 import { type PasskeyHandler, type PasskeyNeed, type PromptOrigin, requestOrigin } from '../passkey/passkey.ts';
 import { backoffKey, StepUpBackoff } from './step-up-backoff.ts';
+import { confirmedSocket } from './confirmed-socket.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
 import { untilAborted } from './machine-deadline.ts';
 import { DEVICE_NOT_ACCEPTED_SENTENCE } from './sentences.ts';
@@ -458,7 +459,8 @@ export class DaemonClient {
       callWithStatus: (route, init) => this.#callWithStatus(caller, route, init, background),
       conditional: (route, params, init) => this.#conditional(caller, route, params, init, background),
       subscribe: (event, listener) => this.#subscribe(caller, event, listener),
-      socket: (key, params, listeners, query) => this.#socket(caller, key, params, listeners, query),
+      socket: (key, params, listeners, query) =>
+        this.#socket(caller, key, params, background ? { ...listeners, confirm: undefined } : listeners, query),
       feed: {
         isLive: () => this.#feedLive,
         subscribeLive: listener => {
@@ -858,6 +860,12 @@ export class DaemonClient {
     listeners: SocketListeners,
     query?: Readonly<Record<string, string>>,
   ): TransportSocket {
+    if (listeners.confirm === true)
+      return confirmedSocket(
+        next => this.#socket(caller, key, params, next, query),
+        (first, resend, signal) => this.#confirmed('explicit', first, resend, signal),
+        listeners,
+      );
     const owner = this.#socketOwner.get(key);
     if (owner === undefined) throw new TypeError(`${caller} opened ${key}, which no compiled manifest declares`);
     if (this.#stopped) throw stopped();
@@ -929,9 +937,9 @@ export class DaemonClient {
     const socket = this.#transport.socket(queryString === '' ? opened : `${opened}?${queryString}`, {
       ...(listeners.onOpen === undefined ? {} : { onOpen: listeners.onOpen }),
       onFrame: listeners.onFrame,
-      onClose: (reason, code) => {
+      onClose: (reason, code, refusal) => {
         if (entry.open !== undefined) this.#sockets.delete(entry.open);
-        listeners.onClose(reason, code);
+        listeners.onClose(reason, code, refusal);
       },
     });
     entry.open = { ids: [caller, owner], socket, listeners };

@@ -3,7 +3,7 @@ import { SettingFieldset, SettingSaveBar } from '@ferretry/app';
 import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { BrowserProxySetting } from '../../../contract/index.ts';
-import { type CallClient, listSecretNames, putSecret, reasonOf } from '../../lib/clients.ts';
+import { type CallClient, listSecretNames, putSecret, reasonOf, removeSecret } from '../../lib/clients.ts';
 import { ChangeAuthorityNote, machineInSentence, mayChange, type SaveOutcome } from './browser-mode-section.tsx';
 import { testBrowserProxy } from './browser-proxy-api.ts';
 import { type BrowserProxyDraft, draftOf, isSecretName, nameTyped, settingOf } from './browser-proxy-draft.ts';
@@ -61,6 +61,10 @@ export function BrowserProxySection({
     setProblems({ username: null, password: null });
   }
   const testRun = useRef(0);
+  // What this form has just filed in the secret store (and the name its box held before), so a failed try can take it back.
+  const filedNow = useRef<
+    { readonly key: 'username' | 'password'; readonly name: string; readonly previous: string }[]
+  >([]);
   const [existing, setExisting] = useState<ReadonlySet<string> | null>(null);
   const [expert, setExpert] = useState(
     [draftOf(saved).usernameSecret, draftOf(saved).passwordSecret].some(
@@ -158,6 +162,7 @@ export function BrowserProxySection({
       return null;
     }
     let result: BrowserProxyDraft = filed;
+    filedNow.current = [];
     if (boxes.every(([, value]) => value === '')) return result;
     // What is in the store NOW (the list read earlier may be old); what was read, or what is saved, when it cannot be asked.
     const taken = new Set<string>([...(existing ?? []), savedNames.usernameSecret, savedNames.passwordSecret]);
@@ -177,6 +182,7 @@ export function BrowserProxySection({
         return null;
       }
       taken.add(name);
+      filedNow.current.push({ key, name, previous: draft[`${key}Secret`] });
       setExisting(current => new Set([...(current ?? []), name]));
       pendingFields[key].clear();
       result = { ...result, [`${key}Secret`]: name };
@@ -193,6 +199,21 @@ export function BrowserProxySection({
         : {}
       : testBody;
   };
+  // A try that failed leaves nothing behind: what it filed is removed, and the boxes name what they did before.
+  const takeBack = async (): Promise<void> => {
+    const filedThen = filedNow.current;
+    filedNow.current = [];
+    for (const { key, name, previous } of filedThen) {
+      try {
+        await removeSecret(client, name);
+      } catch (caught) {
+        setProblems(current => ({ ...current, [key]: `Could not remove ${name}: ${reasonOf(caught)}` }));
+        continue;
+      }
+      setExisting(current => new Set([...(current ?? [])].filter(each => each !== name)));
+      setDraft(current => (current[`${key}Secret`] === name ? { ...current, [`${key}Secret`]: previous } : current));
+    }
+  };
   const test = (): void => {
     if (typed && !wanted.ok) {
       refuseTest(wanted.problem);
@@ -203,7 +224,9 @@ export function BrowserProxySection({
       const form = await fileCredentials();
       if (form === null) return;
       const body = bodyOf(form);
-      if (body !== null) await runTest(body);
+      if (body === null) return;
+      const tried = await runTest(body);
+      if (tried !== null && (tried.kind !== 'result' || !tried.result.reachable)) await takeBack();
     })();
   };
   // Is something filed under this box's name? Until the list has been read, only what was saved is taken to be.
@@ -236,6 +259,7 @@ export function BrowserProxySection({
           const tried = await runTest({ proxy: toSave });
           if (tried === null) return;
           if (tried.kind !== 'result' || !tried.result.reachable) {
+            await takeBack();
             setSaveOutcome({
               kind: 'refused',
               sentence: `Not saved: the proxy did not work, so ${saved === null ? 'the browser still goes direct' : 'the proxy saved before stays in effect'}.`,

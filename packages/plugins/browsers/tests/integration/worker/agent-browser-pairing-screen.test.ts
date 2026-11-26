@@ -63,6 +63,7 @@ let site: ReturnType<typeof Bun.serve>;
 let browser: BrowserSessionService;
 let tools: BrowserTools;
 let base = '';
+let chromeEndpoint = '';
 /** The daemon's own record of when a pairing code was live: what a page script cannot write. */
 const pairing = new LiveWindowLedger(() => Date.now());
 const MINUTE = 60_000;
@@ -74,7 +75,7 @@ beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), 'ferretry-pairing-screen-'));
   await mkdir(join(root, 'work', '.fy'), { recursive: true });
   site = Bun.serve({
-    port: 0,
+    port: 7487,
     hostname: '127.0.0.1',
     fetch: request => {
       const url = new URL(request.url);
@@ -84,6 +85,22 @@ beforeAll(async () => {
         });
       if (url.pathname === '/pair') return html(MARKED_HEAD, CODE_BODY);
       if (url.pathname === '/plain') return html('', '<p id="o">hello</p>');
+      if (url.pathname === '/cross-linked')
+        return html(
+          '',
+          `<p>outer</p><iframe id="linked" src="http://localhost:7487/linked#v1;code=${FAKE_CODE}"></iframe>
+          <button id="replace" onclick="document.getElementById('linked').src='http://localhost:7487/plain'">Replace frame</button>`,
+        );
+      if (url.pathname === '/linked')
+        return html(
+          '',
+          `${CODE_BODY}<script>
+          history.replaceState(null, '', '/linked');
+          setTimeout(() => {
+            history.pushState(null, '', '/linked');
+          }, 200);
+        </script>`,
+        );
       if (url.pathname === '/dyn') return html('', `<p id="o">idle</p>${SHOW_HIDE}`);
       if (url.pathname === '/framed') return html('', '<p id="o">outer</p><iframe id="f" src="/pair"></iframe>');
       // A page with a button that opens the pair screen as a popup, keeping its handle: a click is the user gesture.
@@ -117,12 +134,24 @@ beforeAll(async () => {
     },
   });
   base = `http://127.0.0.1:${String(site.port)}`;
+  const ports = launcherPorts();
+  const spawn = ports.spawn;
   browser = new BrowserSessionService(
     { get: async id => (sessions.has(id) ? {} : undefined) },
     new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
       WORKERS.start,
-      launcherPorts(),
+      {
+        ...ports,
+        spawn: {
+          ...spawn,
+          start: (program, args, options) => {
+            const port = args.find(arg => arg.startsWith('--remote-debugging-port='))?.split('=')[1];
+            if (port !== undefined) chromeEndpoint = `http://127.0.0.1:${port}`;
+            return spawn.start(program, args, options);
+          },
+        },
+      },
       { FY_CHROME_BIN: chrome, PATH: process.env.PATH, HOME: process.env.HOME },
       undefined,
       { stageDirectory: join(root, 'stage'), listenerProver: unprovenListenerProver() },
@@ -185,6 +214,56 @@ async function call(request: BrowserToolCall): Promise<{ text?: string; picture?
 }
 
 describe('the agent browser, in a real Chrome, on a page showing a live pairing code', () => {
+  it('D-07 refuses an unknown-origin pairing document in a real cross-process iframe after replaceState', async () => {
+    // localhost and 127.0.0.1 are different sites. The daemon knows neither as its app for this case.
+    const unknownTools = new BrowserTools({
+      browser,
+      control: new SurfaceControl(
+        { publish: async () => undefined, history: async () => [] },
+        { now: () => Date.now() },
+      ),
+      kernel: browserKernel().kernel,
+      policy: { allows: async () => true },
+      files: rootFiles(
+        workRoots(join(root, 'work'), join(root, 'work', '.fy')),
+        nodeStagedFiles(join(root, 'upload'), wallClock()),
+      ),
+      binaryName: 'fy',
+      protection: {
+        now: () => Date.now(),
+        appOrigins: () => new Set(['https://known.example.test']),
+        liveSince: () => false,
+      },
+    });
+    await unknownTools.call(agent, { tool: 'browser.open', name: 'cross-linked', url: `${base}/cross-linked` });
+    await new Promise(resolve => setTimeout(resolve, 500));
+    // Prove Chrome made an OOPIF, rather than merely assuming that a different origin did.
+    const targets = (await fetch(`${chromeEndpoint}/json/list`).then(response => response.json())) as {
+      type: string;
+      url: string;
+    }[];
+    should(targets.some(target => target.type === 'iframe' && target.url === 'http://localhost:7487/linked')).be.true();
+    // The person's display stays outside the agent guard, even while the linked document is live.
+    const person = await browser.act('s1', { action: 'screenshot' });
+    should('result' in person && 'screenshotBase64' in person.result).be.true();
+    for (const request of [
+      { tool: 'browser.read', name: 'cross-linked' },
+      { tool: 'browser.screenshot', name: 'cross-linked' },
+    ] satisfies BrowserToolCall[]) {
+      const answer = await unknownTools.call(agent, request).then(
+        () => 'content escaped',
+        error => (error as Error).message,
+      );
+      should(answer).equal(PAIRING_SCREEN_REFUSAL);
+    }
+    // A real new document in that same OOPIF ends the linked identity; changing its URL alone did not.
+    await browser.act('s1', { action: 'click', selector: '#replace' });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const replaced = await unknownTools.call(agent, { tool: 'browser.screenshot', name: 'cross-linked' });
+    should(replaced.picture).not.be.undefined();
+    await unknownTools.call(agent, { tool: 'browser.close', name: 'cross-linked' });
+  }, 60_000);
+
   it('should refuse every read, picture, script, log and content wait of a marked page, and hand over no content', async () => {
     // Arrange
     await call({ tool: 'browser.open', name: 'pair', url: `${base}/pair` });

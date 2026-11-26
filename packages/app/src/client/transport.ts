@@ -39,6 +39,8 @@ export interface TransportSocket {
 }
 
 export interface SocketListeners {
+  /** A person's explicit press, permitting the shell's ordinary passkey flow for THIS stream. */
+  readonly confirm?: true;
   /** The daemon accepted the stream: from here a frame sent reaches it (a frame sent before is dropped). */
   readonly onOpen?: () => void;
   readonly onFrame: (frame: string | Uint8Array) => void;
@@ -46,7 +48,11 @@ export interface SocketListeners {
    * The stream ended. `code` is the close code the daemon (or the carrier) ended it with — it is THIS code a caller
    * decides to reconnect on (`1008` is a refusal, not a drop) — and is absent when the stream never opened.
    */
-  readonly onClose: (reason: string, code?: number) => void;
+  readonly onClose: (
+    reason: string,
+    code?: number,
+    refusal?: { readonly status: number; readonly body: unknown },
+  ) => void;
 }
 
 export interface DaemonTransport {
