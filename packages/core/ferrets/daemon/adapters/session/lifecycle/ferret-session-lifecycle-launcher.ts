@@ -21,6 +21,8 @@ export interface FerretLaunchPorts {
   refusal(ferret: FerretId): Promise<string | undefined>;
   /** The runner handle the registry holds for the ferret's live pane, if it holds one. */
   handleOf(ferret: FerretId): RunnerHandle | undefined;
+  /** The persisted registered harness key, never inferred from a process or screen. */
+  harnessOf?(ferret: FerretId): string | undefined;
   /** The runner that owns the pane; `undefined` while its plugin is off. */
   runner(): Runner | undefined;
   sleep(ms: number): Promise<void>;
@@ -58,7 +60,12 @@ export class FerretSessionLifecycleLauncher implements SessionLifecycleLauncher 
   /** The pane's own process, from the runner's adoption of the live handle (which restarts and types nothing). */
   async panePid(record: SessionLifecycleRecord): Promise<number | undefined> {
     const handle = this.ports.handleOf(this.ferret(record));
-    const attached = handle === undefined ? undefined : await this.ports.runner()?.attach(handle);
+    const attached =
+      handle === undefined
+        ? undefined
+        : await this.ports
+            .runner()
+            ?.attach(handle, this.ports.harnessOf?.(this.ferret(record)), undefined, this.ferret(record));
     return attached?.ok === true ? attached.value.pid : undefined;
   }
 

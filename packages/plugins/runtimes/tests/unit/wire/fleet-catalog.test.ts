@@ -154,6 +154,11 @@ const cases: readonly SchemaCase[] = [
     value: { harness: 'codex', label: 'Codex', installed: false },
   },
   {
+    name: 'MachineNativeModelsSchema',
+    schema: catalog.MachineNativeModelsSchema,
+    value: { login: 'deepseek-key', harness: 'opencode', models: ['deepseek/deepseek-v4-pro'] },
+  },
+  {
     name: 'MachineViewSchema',
     schema: catalog.MachineViewSchema,
     value: {
@@ -172,6 +177,7 @@ const cases: readonly SchemaCase[] = [
       publicUsageFeed: false,
       lastAutoResume: null,
       tools: [{ harness: 'claude-code', label: 'Claude Code', installed: true, command: '/usr/bin/claude' }],
+      nativeModels: [{ login: 'deepseek-key', harness: 'opencode', models: ['deepseek/deepseek-v4-pro'] }],
       runtimeCount: 0,
       runningSessions: 2,
       authority: { mayApply: false, applyRefusal: 'step-up-required' },

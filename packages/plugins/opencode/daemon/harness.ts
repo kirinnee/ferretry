@@ -5,14 +5,20 @@ import {
   type LaunchSpec,
   type Runner,
   type RunSpec,
+  type HarnessRuntimeDescriptor,
 } from '@ferretry/core-ferrets/contract';
 import { err, ok, seconds } from '@ferretry/std';
 import { HarnessConfigSchema, type HarnessConfig } from '../contract/index.ts';
-import { isolatedCommand, isolatedEnvironment } from './lib/environment.ts';
+import { isolatedCommand, isolatedEnvironment, OPENCODE_HOME_ENV } from './lib/environment.ts';
 import { OPENCODE_FACTS, opencodeHomes } from './lib/home.ts';
 import { sessionStore } from './adapters/session-store.ts';
+import { opencodeScreen } from './lib/screen.ts';
 
-export function opencodeHarness(kernel: KernelPorts, config: () => HarnessConfig): Harness {
+export function opencodeHarness(
+  kernel: KernelPorts,
+  config: () => HarnessConfig,
+  models: HarnessRuntimeDescriptor['models'],
+): Harness {
   const homes = opencodeHomes(kernel);
   const probe = async () => {
     const configured = HarnessConfigSchema.parse(config());
@@ -67,22 +73,34 @@ export function opencodeHarness(kernel: KernelPorts, config: () => HarnessConfig
       cwd: spec.folder,
       env,
       harness: 'opencode',
+      screenReader: opencodeScreen,
       execChain: ['env', 'opencode'],
     };
     await sessions.bind(spec.ferret, session);
     const running = resume === undefined ? await runner.start(run) : await runner.resume(run, session);
     return running.ok ? ok({ running: running.value, harnessConversation: session }) : running;
   };
+  const discover = async () => {
+    discovered = await probe();
+    return discovered === undefined
+      ? { found: false as const, reason: 'Install OpenCode V2 (@opencode/cli); V1 is not supported' }
+      : { found: true as const, ...discovered };
+  };
   return {
     key: 'opencode',
+    screenReader: opencodeScreen,
     facts: OPENCODE_FACTS,
     accepts: ['api-key', 'proxy', 'endpoint'],
-    async discover() {
-      discovered = await probe();
-      return discovered === undefined
-        ? { found: false, reason: 'Install OpenCode V2 (@opencode/cli); V1 is not supported' }
-        : { found: true, ...discovered };
+    runtime: {
+      get binary() {
+        return config().binary ?? 'opencode';
+      },
+      homeEnv: OPENCODE_HOME_ENV,
+      detect: discover,
+      install: { npm: ['install', '-g', '@opencode/cli@^2'] },
+      models,
     },
+    discover,
     homeFor: homes.homeFor,
     prepareHome: homes.prepareHome,
     start: (spec, runner, env) => launch(spec, runner, env),

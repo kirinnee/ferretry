@@ -173,6 +173,7 @@ export async function captureFrame(tmux: TmuxController, session: string): Promi
     dead: state.dead,
     promptReady: state.promptReady,
     visible: state.visible,
+    ...(state.screen === undefined ? {} : { screen: state.screen }),
     ...(state.dead ? { history: state.history } : {}),
     ...(state.exitCode === undefined ? {} : { exitCode: state.exitCode }),
     ...(state.cursorX === undefined ? {} : { cursorX: state.cursorX }),
@@ -258,7 +259,7 @@ async function watchLanding(
       return { kind: 'landed', evidence: read, chip: chipOf(last, text, read) };
     // A composer the reading cannot place falls back to the payload newly on screen. A composer the
     // cursor PROVES holds other text as well is never "landed": Enter would submit it too.
-    if (read !== 'unreadable') continue;
+    if (last.screen !== undefined || read !== 'unreadable') continue;
     const proved = landingEvidence(baseline, composerEvidence(last.visible, text));
     if (proved === 'chars' || (proved === 'placeholder' && paste))
       return { kind: 'landed', evidence: proved, chip: chipOf(last, text, proved) };
@@ -267,7 +268,7 @@ async function watchLanding(
   // there (a repaint can hide the counter bump, and re-pasting identical text may not move it). A
   // literal payload never draws one, so for it a placeholder somewhere in the frame proves nothing.
   // Submitting that is correct; retyping would duplicate it.
-  if (paste && composerEvidence(last.visible, text).placeholders > 0)
+  if (last.screen === undefined && paste && composerEvidence(last.visible, text).placeholders > 0)
     return { kind: 'landed', evidence: 'placeholder' };
   const responded = respondedAt !== undefined;
   const empty = composerState(last).kind === 'empty';

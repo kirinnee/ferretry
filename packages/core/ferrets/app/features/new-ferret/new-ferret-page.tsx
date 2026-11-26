@@ -286,15 +286,35 @@ export function NewFerretPage({
   }, [client]);
 
   const update = (field: TextDraftField, value: string): void => setDraft(current => ({ ...current, [field]: value }));
+  const chooseRuntime = (next: ChosenFerretAccount | null): void => {
+    setChosenRuntime(next);
+    if (next !== null && next.kind !== 'claude-code' && next.kind !== 'codex')
+      setDraft(current =>
+        current.model !== '' && !next.models.some(model => model.id === current.model.trim() && model.available)
+          ? { ...current, model: '' }
+          : current,
+      );
+  };
   // Continue is a way in only while the list is offered (the switch is drawn); on it, nothing starts before a pick.
   const awaitingPick = continueOffered && starting === 'continue' && picked === null;
-  const canSubmit = canStartFerret(draft, submitting) && !awaitingPick;
+  const chosen = chosenForDraft(chosenRuntime, draft.runtime);
+  const native = chosen !== null && chosen.kind !== 'claude-code' && chosen.kind !== 'codex';
+  const needsModel =
+    (chosen?.requiresModel === true && draft.model.trim() === '') ||
+    (native &&
+      draft.model.trim() !== '' &&
+      !chosen.models.some(model => model.id === draft.model.trim() && model.available));
+  // The picker changes the runtime first and tells this page what it chose a render later: in between, the model on the
+  // form belongs to the runtime it was typed for, so nothing is sent until the new account has been told.
+  const awaitingAccount = chosenRuntime !== null && chosen === null;
+  const canSubmit = canStartFerret(draft, submitting) && !awaitingPick && !needsModel && !awaitingAccount;
   const homePath = daemonHomeHref(daemon);
   const back = backPlace ?? { path: homePath, label: '← Home' };
-  const chosen = chosenForDraft(chosenRuntime, draft.runtime);
   const now = useNow();
   const models = modelSuggestions(chosen);
-  const blocker = createBlocker(draft, submitting, noRunnableAccount, awaitingPick, whereOffered);
+  const blocker = needsModel
+    ? 'Choose a model before creating this ferret.'
+    : createBlocker(draft, submitting, noRunnableAccount, awaitingPick, whereOffered);
   // A model the panel says has no fast mode cannot be launched with it, so the switch says why it is unavailable and
   // the request never carries it (the daemon would refuse it too).
   const fastReason = fastUnavailableReason(chosen, draft.model);
@@ -311,7 +331,7 @@ export function NewFerretPage({
   const slot: NewFerretAccountSlotProps = {
     value: draft.runtime,
     onValueChange: value => update('runtime', value),
-    onChosen: setChosenRuntime,
+    onChosen: chooseRuntime,
     onSettled: accountSettled,
     fallbackId: fieldId('runtime'),
     labelId: RUNTIME_LABEL_ID,
@@ -451,7 +471,11 @@ export function NewFerretPage({
           </FerretField>
 
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-            <FerretField hint="blank = runtime default" inputId={fieldId('model')} label="Model override">
+            <FerretField
+              hint={chosen?.requiresModel ? 'choose a model' : 'blank = runtime default'}
+              inputId={fieldId('model')}
+              label="Model override"
+            >
               {chosen?.modelCatalog === undefined ? (
                 <>
                   {models.length === 0 ? null : (
@@ -475,6 +499,7 @@ export function NewFerretPage({
                 <ModelSelect
                   customIds={chosen.modelCatalog.customIds}
                   defaultModel={chosen.defaultModel}
+                  defaultLabel={chosen.requiresModel ? 'Choose a model' : 'Login default'}
                   id={fieldId('model')}
                   models={chosen.models}
                   onChange={value => update('model', value)}

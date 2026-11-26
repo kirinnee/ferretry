@@ -14,6 +14,10 @@
  *
  * The newest line is never dropped, so the last thing said is always the latest thing known.
  *
+ * WHEN: a line is taken back the moment a NEWER line ARRIVES (`say`), as well as when the reader later says a waiting line is
+ * progress (`outdate`): waiting for the next tool call would let stale news play first. The tab going to the background stops
+ * whatever is waiting or playing with the same plain hush a reading gets (`quiet`): no cut, no heard-note, nothing read again.
+ *
  * A LINE IS KNOWN BY ITS ID, never by its words: the same sentence can be progress in one place and the result in another, and
  * only the line the reader named is outdated.
  *
@@ -67,11 +71,17 @@ export interface LiveSink {
   say(line: LiveLine, ended: (outcome: LineOutcome) => void): boolean;
   /** These lines (by id) are known to be progress: any of them still waiting behind a newer line is dropped. */
   outdate(ids: readonly string[]): void;
+  /**
+   * The tab went to the background: a line waiting or playing stops the way a reading does: a plain hush (no cut: the person's
+   * ears were not where they stopped it, so the ferret is told nothing) and nothing of it is read again. Does nothing when no
+   * line is waiting or playing, so it never hushes a reading it does not own.
+   */
+  quiet(): void;
 }
 
 export interface LiveLinesDeps {
   /** The open stream, once there is one. */
-  readonly stream: () => Pick<VoiceStreamHandle, 'speak' | 'drop' | 'interrupt'> | undefined;
+  readonly stream: () => Pick<VoiceStreamHandle, 'speak' | 'drop' | 'interrupt' | 'hush'> | undefined;
   /** Where the machine's reply voice is; `undefined` before the stream said. */
   readonly replyState: () => ReplyState | undefined;
   readonly player: Pick<ReplyPlayer, 'remainingMs'>;
@@ -188,6 +198,8 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
         open: new Set(ids),
         started: false,
       });
+      // A newer line is in: older lines that were already known to be progress are stale NOW, not at the next tool call.
+      prune();
       settle();
       watch();
       return true;
@@ -218,6 +230,12 @@ export function createLiveLines(deps: LiveLinesDeps): LiveLines {
     hush() {
       if (entries.length === 0 && !active) return;
       deps.stream()?.interrupt();
+      abandon();
+    },
+    quiet() {
+      // Nothing of ours is waiting or playing: the machine's voice is not ours to hush (a reading stops itself the same way).
+      if (entries.length === 0) return;
+      deps.stream()?.hush();
       abandon();
     },
     dispose: abandon,

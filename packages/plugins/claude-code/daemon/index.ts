@@ -31,7 +31,7 @@ import { ClaudeProjectApprovals } from './lib/project-approvals.ts';
 import { dialogRoute, permissionRoute, promptRoute, updateStartRoute, updateViewRoute } from './lib/routes.ts';
 import { HarnessUpdateService } from './lib/update/service.ts';
 
-/** The product name the verification link is built from. */
+/** The product name the registry request names itself with. */
 const PRODUCT = 'ferretry';
 
 const configFile = CLAUDE_CODE_CONFIG as unknown as ConfigFileDef<HarnessConfig>;
@@ -59,7 +59,6 @@ export default implementDaemon(manifest, {
     const host = hostFacts(kernel.spawn);
     const location = locationSource(kernel.spawn, () => kernel.config.file(configFile), host);
     const inner = new HarnessUpdateService({
-      product: PRODUCT,
       location,
       facts: factsSource(kernel.spawn, host),
       probe: probe(kernel.spawn),

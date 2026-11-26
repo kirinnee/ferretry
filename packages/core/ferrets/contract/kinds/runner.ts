@@ -9,6 +9,27 @@ import type { RunnerKey } from '../ids.ts';
 /** Where a running ferret is, as its runner names it (Terminals: the tmux pane id, `%12`). Not a secret. */
 export type RunnerHandle = Brand<string, 'RunnerHandle'>;
 
+/** A harness reads its own composer. A runner never selects this reader from screen text. */
+export interface HarnessScreenReading {
+  readonly working: boolean;
+  readonly atPrompt: boolean;
+  /** null means unreadable: no legacy parser may replace this answer. */
+  readonly composer: {
+    readonly text: string;
+    readonly placeholder: boolean | undefined;
+    readonly pasted: boolean;
+  } | null;
+}
+export interface HarnessScreenReader {
+  readonly key: string;
+  read(frame: {
+    readonly visible: string;
+    readonly attributed?: string;
+    readonly cursorX?: number;
+    readonly cursorY?: number;
+  }): HarnessScreenReading;
+}
+
 /** What a runner starts: the harness's command, in the work folder, with the Vault-resolved environment. */
 export interface RunSpec {
   readonly ferret: FerretId;
@@ -27,6 +48,8 @@ export interface RunSpec {
    * answers none of a harness's own screens: what the pane prints may confirm a known family, never choose one.
    */
   readonly harness?: string;
+  /** Provided by that exact registered harness; a mismatched key is refused as unreadable. */
+  readonly screenReader?: HarnessScreenReader;
   /** The ferret's limits (`limits.yaml`), as the kernel's spawn port applies them. */
   readonly limits?: JsonValue;
 }
@@ -178,7 +201,13 @@ export interface Runner {
    */
   stop(handle: RunnerHandle, how: 'polite' | 'now', ferret?: FerretId): Promise<void>;
   resume(spec: RunSpec, harnessConversationId: string): Promise<Result<RunningFerret, StartRefusal>>;
-  attach(handle: RunnerHandle): Promise<Result<RunningFerret, AttachRefusal>>;
+  /** The harness owner supplies the reader. A persisted binding must also prove the pane belongs to `ferret`. */
+  attach(
+    handle: RunnerHandle,
+    harness?: string,
+    screenReader?: HarnessScreenReader,
+    ferret?: FerretId,
+  ): Promise<Result<RunningFerret, AttachRefusal>>;
   alive(handle: RunnerHandle, ferret?: FerretId): Promise<boolean>;
   /**
    * A raw process signal: `interrupt` is the runner's own interrupt key (tmux: `C-c`), which can QUIT a harness at an

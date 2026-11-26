@@ -157,6 +157,7 @@ export function runnerLookCases(): void {
     it('#U4 look reads the exact pane inside one read act and masks the screen before it is parsed', async () => {
       // Arrange
       const pane = subject();
+      await pane.runner.attach(pane.handle, 'claude-code');
 
       // Act
       const look = await pane.runner.look(pane.handle);
@@ -371,6 +372,7 @@ export function runnerLookCases(): void {
     it('#handle-io a look FOR a ferret reads nothing when the pane behind the handle is another ferret’s', async () => {
       // Arrange: `%7` is in fy-f-hadi; the look is for f-stale, whose record kept the handle.
       const pane = subject();
+      await pane.runner.attach(pane.handle, 'claude-code');
 
       // Act
       const other = await pane.runner.look(pane.handle, 'f-stale' as never);

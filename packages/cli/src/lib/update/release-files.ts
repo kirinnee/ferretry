@@ -1,4 +1,4 @@
-import { DAEMON_RELEASE_SIGNATURE_CONTEXT, RELEASE_OWNER } from '@ferretry/plugin-updates/contract';
+import { DAEMON_RELEASE_SIGNATURE_CONTEXT, RELEASE_SLUG } from '@ferretry/plugin-updates/contract';
 
 /**
  * The files a standalone release is made of, and how each is read. Pure: the adapter fetches, hashes
@@ -47,6 +47,6 @@ export function signedReleaseMessage(checksums: Uint8Array): Uint8Array<ArrayBuf
 }
 
 /** The one-line installer a person runs instead, when a standalone self-update cannot be verified. */
-export function installerCommand(product: string): string {
-  return `curl -fsSL https://github.com/${RELEASE_OWNER}/${product}/releases/latest/download/install.sh | bash`;
+export function installerCommand(): string {
+  return `curl -fsSL https://github.com/${RELEASE_SLUG}/releases/latest/download/install.sh | bash`;
 }

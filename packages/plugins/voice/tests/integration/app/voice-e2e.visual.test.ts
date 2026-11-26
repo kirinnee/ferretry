@@ -12,9 +12,10 @@
  *      anything the person says, and never again for the rest of the run.
  *   2. LIVE LINES PLAY AT ONCE. Each `<voice>` line reaches the machine within a few hundred ms of the ferret finishing it
  *      (while the turn is still working), and the ferret's tool rows are never held back for the sound.
- *   3. STALE PROGRESS IS DROPPED, NEVER THE FIRST LINE OR THE RESULT. The progress line a newer one outdates is taken back
- *      before any of it plays; the first line, the newer progress line and the result all play in full; nothing is read
- *      again at the end of the turn.
+ *   3. STALE PROGRESS IS DROPPED ON ARRIVAL, NEVER THE FIRST LINE OR THE RESULT. A progress line (one a tool call followed) that
+ *      a newer line outdates is taken back the moment the newer line arrives, before any of it plays; the first line and the
+ *      result play in full; nothing is read again at the end of the turn. Turn four pins the timing: the ferret goes quiet
+ *      after the newer progress line, so only its arrival can take the older one back.
  *   4. A BARGE-IN MID-PIECE MAKES EXACTLY ONE NOTE. The person talks over a long line; the stop is a person's stop; the
  *      next `(voice)` message carries ONE `[heard up to: "…"; not heard: "…"]` note whose split is the arithmetic of where
  *      the person's ears were (exact), and agrees with the wall clock (±2 words). Nothing of the unheard rest is read again, and
@@ -23,6 +24,8 @@
  *      carries NO cut (so the ferret is told nothing and no unsolicited message is posted), and nothing speaks on return.
  *   6. THE FIRST SPOKEN WORD. Time from the ferret's first `<voice>` line reaching the chat to the first sample of it being
  *      audible, measured on the page's own clock and printed as `VOICE-E2E first spoken word …` (target vs measured).
+ *   7. A LIVE LINE PLAYING WHEN THE TAB GOES TO THE BACKGROUND is stopped by the same plain hush a reading
+ *      gets (no cut), once; nothing is heard or said on return, and the next message carries no heard-note.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -58,15 +61,30 @@ const LINES = {
   result1b: 'I fixed the login redirect.',
   long2: 'Two tests still fail, one in login and one in logout, so I am fixing both now.',
   third: 'Skipping logout, running the login test again now.',
+  first4: 'Opening the build log to look for the first failing test.',
+  progressA: 'Reading the test output.',
+  progressB: 'Found the broken redirect.',
+  result4: 'All clear now.',
+  first5: 'Rerunning every test in the login suite and then the logout suite.',
+  sixth: 'Done.',
 } as const;
 
 /** The stream's own numbering of the lines the page asks to be spoken, in order (turn one's four, a result of two lines, then the rest). */
 const ID = { first1: 0, progress1: 1, progress2: 2, result1a: 3, result1b: 4, long2: 5, third: 6 } as const;
 /** The first line of turn one takes this long to make, so it has not begun to sound when the newer progress lines arrive. */
 const SLOW_FIRST_SYNTH_MS = 900;
+/** How long the ferret says nothing after its newer progress line in turn four (no tool call, no result). */
+const QUIET_AFTER_PROGRESS_MS = 1_500;
 const voice = (text: string): string => `<voice>${text}</voice>`;
 
-const SAYS = ['please check the build', 'what is left', 'skip the logout one'] as const;
+const SAYS = [
+  'please check the build',
+  'what is left',
+  'skip the logout one',
+  'run it again please',
+  'run every test now',
+  'and then tell me',
+] as const;
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 async function until(label: string, ready: () => boolean | Promise<boolean>, ms = 15_000): Promise<void> {
@@ -253,10 +271,35 @@ describe('voice mode end to end, over a fake ferret and a fake voice of known le
         await agent.say(voice(LINES.long2), 'first2');
         await sleep(300);
         await agent.done('done2');
-      } else {
+      } else if (turn === 3) {
         await agent.say(voice(LINES.third), 'first3');
         await sleep(600);
         await agent.done('done3');
+      } else if (turn === 4) {
+        // A long first line is still sounding while a progress line, then a newer one, arrive. After the newer one the ferret
+        // goes quiet (no tool call, no result) for a while: only its ARRIVAL can take the older progress line back.
+        await agent.say(voice(LINES.first4), 'first4');
+        await sleep(300);
+        await agent.tool();
+        await sleep(200);
+        await agent.say(voice(LINES.progressA), 'progressA');
+        await sleep(100);
+        await agent.tool();
+        await sleep(200);
+        await agent.say(voice(LINES.progressB), 'progressB');
+        await sleep(QUIET_AFTER_PROGRESS_MS);
+        await agent.say(voice(LINES.result4), 'result4');
+        await sleep(300);
+        await agent.done('done4');
+      } else if (turn === 5) {
+        // A long LIVE line, still sounding when the tab goes to the background.
+        await agent.say(voice(LINES.first5), 'first5');
+        await sleep(400);
+        await agent.done('done5');
+      } else {
+        await agent.say(voice(LINES.sixth), 'first6');
+        await sleep(300);
+        await agent.done('done6');
       }
     };
 
@@ -423,15 +466,17 @@ describe('voice mode end to end, over a fake ferret and a fake voice of known le
         LINES.result1b,
       ]);
       expect(speaks().map(item => item.frame.id)).toEqual(Object.values(ID).slice(0, 5));
-      // The stale progress line was taken back before any of it was heard: one drop, and none of its sound played.
+      // Both stale progress lines were taken back before any of them was heard, each the moment a newer line arrived (the second
+      // progress line, then the result): two drops, and none of their sound played.
       expect(lineFrames.filter(item => item.frame.t === 'drop').map(item => (item.frame as DropFrame).id)).toEqual([
         ID.progress1,
+        ID.progress2,
       ]);
       expect(playedSamples(one, ID.progress1)).toBe(0);
-      // The first line (still being made when the newer ones came: it is never taken back), the newer progress line and both
-      // lines of the result were each heard in full.
+      expect(playedSamples(one, ID.progress2)).toBe(0);
+      // The first line (still being made when the newer ones came: it is never taken back) and both lines of the result were each
+      // heard in full.
       expect(playedSamples(one, ID.first1)).toBe(LINES.first1.length * SAMPLES_PER_CHAR);
-      expect(playedSamples(one, ID.progress2)).toBe(LINES.progress2.length * SAMPLES_PER_CHAR);
       expect(playedSamples(one, ID.result1a)).toBe(LINES.result1a.length * SAMPLES_PER_CHAR);
       expect(playedSamples(one, ID.result1b)).toBe(LINES.result1b.length * SAMPLES_PER_CHAR);
       expect(one.frames.filter(item => item.t === 'speak')).toHaveLength(5); // nothing read again at the end of the turn
@@ -558,12 +603,116 @@ describe('voice mode end to end, over a fake ferret and a fake voice of known le
       expect(sends.filter(item => item.message.includes('[heard up to'))).toHaveLength(1);
       expect(sends.filter(item => item.sendId.includes(':heard:'))).toHaveLength(0);
 
+      const lineId = (text: string): number => {
+        const found = speaks().find(item => item.frame.text === text);
+        if (found === undefined) throw new Error('a line the page was expected to ask for was never asked for');
+        return found.frame.id;
+      };
+
+      // ── 7. TURN FOUR: a newer progress line takes an older QUEUED one back the moment it ARRIVES ───────────────────
+      // The first line is long and still sounding; progress A (known to be progress: a tool call followed it) waits behind it;
+      // then progress B arrives and the ferret goes quiet for 1.5 s with no tool call and no result. Only B's arrival can take A.
+      await until('the sound stopped before turn four', idle);
+      await sleep(1_000);
+      await person(SAYS[3], 1_000);
+      await until('the fourth utterance was sent', () => utteranceSends().length === 4);
+      expect(utteranceSends()[3]?.message).toBe('(voice) run it again please');
+      expect(utteranceSends()[3]?.sendId).toBe('e2e:4');
+      await scripts[3];
+      await until(
+        'the result was heard in full',
+        async () => playedSamples(await record(), lineId(LINES.result4)) >= LINES.result4.length * SAMPLES_PER_CHAR,
+      );
+      await until('the sound stopped after turn four', idle);
+      const four = await record();
+      const idA = lineId(LINES.progressA);
+      const dropOfA = lineFrames.find(item => item.frame.t === 'drop' && (item.frame as DropFrame).id === idA);
+      // A was taken back, and the drop left the page right after B reached the chat: well before the ferret's next word.
+      expect(dropOfA).toBeDefined();
+      const dropAfterB = four.frames.find(item => item.t === 'drop' && item.id === idA);
+      expect((dropAfterB?.at ?? Number.NaN) - (four.marks.progressB ?? Number.NaN)).toBeLessThan(500);
+      expect(dropAfterB?.at ?? Number.NaN).toBeLessThan(four.marks.result4 ?? 0);
+      expect(playedSamples(four, idA)).toBe(0);
+      // The first line, the newer progress line B (nothing newer outdated it) and the result were each heard in full; only A went.
+      expect(playedSamples(four, lineId(LINES.first4))).toBe(LINES.first4.length * SAMPLES_PER_CHAR);
+      expect(playedSamples(four, lineId(LINES.progressB))).toBe(LINES.progressB.length * SAMPLES_PER_CHAR);
+      expect(playedSamples(four, lineId(LINES.result4))).toBe(LINES.result4.length * SAMPLES_PER_CHAR);
+      expect(
+        lineFrames
+          .filter(item => item.frame.t === 'drop' && (item.frame as DropFrame).id >= idA)
+          .map(item => (item.frame as DropFrame).id),
+      ).toEqual([idA]);
+      expect(lineFrames.filter(item => item.frame.t === 'hush')).toHaveLength(2); // nothing was hushed
+
+      // ── 8. TURN FIVE: a LIVE line already playing when the tab goes to the background is hushed plainly ───────────
+      await sleep(1_000);
+      await person(SAYS[4], 1_000);
+      await until('the fifth utterance was sent', () => utteranceSends().length === 5);
+      expect(utteranceSends()[4]?.message).toBe('(voice) run every test now');
+      await scripts[4];
+      const id5 = lineId(LINES.first5);
+      await until(
+        'the live line is audible',
+        async () => (await record()).audible.some(item => item.id === id5),
+        20_000,
+      );
+      await sleep(900);
+      const beforeHide5 = await record();
+      const total5 = LINES.first5.length * SAMPLES_PER_CHAR;
+      // It is mid-line, with its sound still ahead (the turn is already over: this is a LINE, not a reading).
+      expect(playedSamples(beforeHide5, id5)).toBeGreaterThan(0);
+      expect(beforeHide5.stops.length).toBe(four.stops.length);
+      const speaksBefore5 = speaks().length;
+      await tab.evaluate(() => (window as unknown as Win).__e2e.setHidden(true));
+      await until(
+        'the hush reached the machine',
+        () => lineFrames.filter(item => item.frame.t === 'hush').length === 3,
+      );
+      // ONE hush, and a plain one (no cut): the same stop a hidden reading gets, never a person's stop.
+      expect(lineFrames.filter(item => item.frame.t === 'hush')).toHaveLength(3);
+      expect((lineFrames.at(-1)?.frame as HushFrame | undefined)?.cut).toBeUndefined();
+      const hidden5 = await record();
+      expect(hidden5.frames.at(-1)).toMatchObject({ t: 'hush', cut: null });
+      expect(hidden5.stops.length).toBeGreaterThan(beforeHide5.stops.length);
+      // Nothing more is heard and nothing is said again: not at once, not after a standalone note's wait, not on return.
+      const soundsAfterHush5 = hidden5.audible.length;
+      const sendsAfterHush5 = sends.length;
+      await sleep(4_000);
+      await tab.evaluate(() => (window as unknown as Win).__e2e.setHidden(false));
+      await sleep(1_500);
+      const back5 = await record();
+      expect(back5.audible).toHaveLength(soundsAfterHush5);
+      expect(back5.frames.filter(item => item.t === 'hush')).toHaveLength(3);
+      expect(speaks()).toHaveLength(speaksBefore5);
+      expect(sends).toHaveLength(sendsAfterHush5);
+      // Only the part that was already scheduled was heard: the line was cut short by the hush.
+      expect(playedSamples(back5, id5)).toBeLessThan(total5);
+      expect(sends.filter(item => item.message.includes('[heard up to'))).toHaveLength(1);
+      expect(sends.filter(item => item.sendId.includes(':heard:'))).toHaveLength(0);
+
+      // ── 9. TURN SIX: the next message carries NO heard-note for it (a plain hush tells the ferret nothing) ────────
+      await person(SAYS[5], 1_000);
+      await until('the sixth utterance was sent', () => utteranceSends().length === 6);
+      expect(utteranceSends()[5]?.message).toBe('(voice) and then tell me');
+      expect(utteranceSends()[5]?.sendId).toBe('e2e:6');
+      await scripts[5];
+      await until('the sound stopped after turn six', idle);
+      expect(sends.filter(item => item.message.includes('[heard up to'))).toHaveLength(1);
+
       // ── the whole run: entry exactly once, then only what the person said ──────────────────────────────────────
       await tab.locator('[data-voice-mode-end]').click();
       await tab.locator('[data-fake-composer]').waitFor({ state: 'visible' });
       await sleep(500);
       expect(sends.filter(item => item.message.startsWith('(voice mode on)'))).toHaveLength(1);
-      expect(sends.map(item => item.sendId)).toEqual([entrySendId(session), 'e2e:1', 'e2e:2', 'e2e:3']);
+      expect(sends.map(item => item.sendId)).toEqual([
+        entrySendId(session),
+        'e2e:1',
+        'e2e:2',
+        'e2e:3',
+        'e2e:4',
+        'e2e:5',
+        'e2e:6',
+      ]);
       expect(starts).toHaveLength(1);
       expect(errors).toEqual([]);
       for (const script of scripts) await script;

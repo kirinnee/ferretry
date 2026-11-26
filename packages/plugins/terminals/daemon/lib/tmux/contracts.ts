@@ -1,4 +1,5 @@
 import type { ChildEnvironment } from '@ferretry/kernel/contract';
+import type { HarnessScreenReading } from '@ferretry/core-ferrets/contract';
 import type { TmuxControlNotification } from './control-protocol.ts';
 
 /** The narrow process seam required by the tmux domain. */
@@ -46,6 +47,7 @@ export interface PaneActivity extends PaneMetadata {
 }
 
 export interface PaneState extends PaneMetadata {
+  readonly screen?: HarnessScreenReading;
   readonly alive: boolean;
   readonly promptReady: boolean;
   readonly history: string;

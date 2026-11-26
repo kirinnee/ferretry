@@ -37,7 +37,7 @@ export class GitHubLatestRelease implements ILatestReleasePort {
   }
 
   async latest(): Promise<LatestReleaseAnswer> {
-    const body = await this.#read(latestReleaseApiUrl(this.product));
+    const body = await this.#read(latestReleaseApiUrl());
     if ('failed' in body) return { kind: 'failed', reason: body.failed };
     const release = parseGitHubLatestRelease(body.json);
     if (release === undefined) return { kind: 'failed', reason: 'GitHub named no published release' };
@@ -45,9 +45,9 @@ export class GitHubLatestRelease implements ILatestReleasePort {
   }
 
   async newestTag(): Promise<LatestReleaseAnswer> {
-    const body = await this.#read(releaseTagsApiUrl(this.product));
+    const body = await this.#read(releaseTagsApiUrl());
     if ('failed' in body) return { kind: 'failed', reason: body.failed };
-    const release = parseGitHubNewestTag(this.product, body.json);
+    const release = parseGitHubNewestTag(body.json);
     if (release === undefined) return { kind: 'failed', reason: 'GitHub named no release tag' };
     return { kind: 'found', release };
   }

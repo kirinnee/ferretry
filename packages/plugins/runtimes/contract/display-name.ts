@@ -45,6 +45,7 @@ export interface RuntimeNameSource {
   /** The stored name (what `--agent` takes). */
   readonly name: string;
   readonly harness: HarnessKey;
+  readonly harnessDisplayName?: string;
   readonly credential: {
     readonly id: string;
     readonly store: CredentialStore;
@@ -77,7 +78,7 @@ const signInSource = (source: RuntimeNameSource): string => {
 /** The words for a machine-made runtime's login, before anything tells two runtimes on one login apart. */
 const baseName = (source: RuntimeNameSource): string => {
   const label = source.credential.label?.trim();
-  const named = `${harnessWord(source.harness)} · ${signInSource(source)}`;
+  const named = `${source.harnessDisplayName ?? harnessWord(source.harness)} · ${signInSource(source)}`;
   return label === undefined || label === '' ? named : `${named} (${label})`;
 };
 
