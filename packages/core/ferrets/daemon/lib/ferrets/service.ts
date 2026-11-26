@@ -611,10 +611,7 @@ const failed = (code: StartFailure['code'], reason: string): Result<never, Start
  */
 const refusedBy = (decision: { readonly reason: string; readonly code?: string }): Result<never, StartFailure> => {
   const code = StartRefusalCodeSchema.safeParse(decision.code);
-  return failed(
-    code.success ? (code.data === 'fast_unverified' ? 'unservable_model' : code.data) : 'refused',
-    decision.reason,
-  );
+  return failed(code.success && code.data !== 'fast_unverified' ? code.data : 'refused', decision.reason);
 };
 
 /** Every code unit is ASCII, so no Unicode normalization form can make two spellings name one folder. */
@@ -1213,9 +1210,8 @@ export class FerretsService implements FerretsApi {
       },
       request,
     );
-    const { decision } = decided;
     // A refusal here is BEFORE the first write (details, record, token): `start()` gives the name back.
-    if (!decision.allow) return refusedBy(decision);
+    if (!decided.decision.allow) return refusedBy(decided.decision);
     request = decided.request;
     if (decided.notice !== undefined) this.startNotices.set(id, decided.notice);
     // A start that names a past conversation REQUIRES its transcript: staged before the first write, or refused here.
