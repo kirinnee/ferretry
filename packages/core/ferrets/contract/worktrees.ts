@@ -169,6 +169,7 @@ export type WorktreeLiveState = z.infer<typeof WorktreeLiveStateSchema>;
 
 /** One worktree the daemon created and still owns. */
 const ManagedWorktreeViewSchema = z.object({
+  origin: z.enum(['managed', 'adopted']).optional(),
   path: Text,
   branch: Text,
   repositoryRoot: Text,
@@ -316,6 +317,9 @@ export const CreatedWorktreeSchema = z.object({
   cwd: Text,
 });
 export type CreatedWorktree = z.infer<typeof CreatedWorktreeSchema>;
+
+export const AdoptWorktreeRequestSchema = z.strictObject({ path: Text });
+export type AdoptWorktreeRequest = z.infer<typeof AdoptWorktreeRequestSchema>;
 
 /**
  * Which blockers survive the consent a caller gave.

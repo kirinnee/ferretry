@@ -11,11 +11,14 @@ export interface RepoDirectoryPin {
   close(): Promise<void>;
 }
 
-interface RepoCheckoutPin extends RepoDirectoryPin {
+export interface RepoCheckoutPin extends RepoDirectoryPin {
   readonly gitDirectory: string;
+  readonly gitIdentity: RootIdentity;
+  readonly commonIdentity: RootIdentity;
 }
 
 export interface RepoWorktreeAccess {
+  commonDirectory(folder: string): Promise<string>;
   repository(commonDirectory: string): Promise<RepoDirectoryPin>;
   checkout(folder: string, repository: RepoDirectoryPin): Promise<RepoCheckoutPin>;
 }
@@ -39,6 +42,7 @@ async function text(held: HeldRoot, relative: string): Promise<string | undefine
     throw error;
   }
   try {
+    if (target.metadata.type !== 'file') throw refused();
     const bytes = await target.read(4096);
     if (bytes === undefined) throw refused();
     return new TextDecoder().decode(bytes).trim();
@@ -96,6 +100,36 @@ export function createRepoWorktreeAccess(route: Route): RepoWorktreeAccess {
     }
   };
   return {
+    commonDirectory: async folder => {
+      try {
+        const { pin, held } = await hold(folder);
+        let metadata: Awaited<ReturnType<typeof hold>> | undefined;
+        try {
+          const git = route(path.join(folder, '.git'));
+          if ((await git.root.lstat(git.fenced))?.kind === 'directory')
+            throw new WorktreeError('unsafe_remove', 'the main checkout cannot be adopted');
+          const pointer = await text(held, '.git');
+          // Adoption accepts only a linked checkout. A directory .git (the main checkout) is refused.
+          if (pointer === undefined || !pointer.startsWith('gitdir: ')) throw refused();
+          const gitDirectory = path.resolve(folder, pointer.slice(8));
+          metadata = await hold(gitDirectory);
+          const common = await text(metadata.held, 'commondir');
+          if (common === undefined) throw refused();
+          await pin.verify();
+          await metadata.pin.verify();
+          return path.resolve(gitDirectory, common);
+        } finally {
+          await metadata?.pin.close();
+          await pin.close();
+        }
+      } catch (error) {
+        if (error instanceof WorktreeError) throw error;
+        throw new WorktreeError(
+          'invalid_common_directory',
+          'adoption requires an authorized, existing linked checkout; for a gone/prunable checkout, inspect git worktree list and use git worktree prune',
+        );
+      }
+    },
     repository: async folder => {
       try {
         const { pin, held } = await hold(folder);
@@ -149,6 +183,8 @@ export function createRepoWorktreeAccess(route: Route): RepoWorktreeAccess {
         return {
           ...pin,
           gitDirectory,
+          gitIdentity: git.pin.identity,
+          commonIdentity: repository.identity,
           verify,
           close: async () => {
             await git.pin.close();

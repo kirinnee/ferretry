@@ -72,6 +72,8 @@ export interface WorktreeListEntry {
  * branch you already had", and it would have to refuse both or destroy both.
  */
 export interface ManagedWorktree {
+  readonly origin?: 'managed' | 'adopted';
+  readonly adoptionIdentity?: WorktreeAdoptionIdentity;
   readonly version: 1;
   readonly path: string;
   readonly branch: string;
@@ -109,6 +111,9 @@ export interface ManagedWorktree {
  * distinguishes a declared checkout from a finished one.
  */
 export interface ManagedWorktreeIntent {
+  readonly adoptionIdentity?: WorktreeAdoptionIdentity;
+  readonly gitDir?: string;
+  readonly origin?: 'managed' | 'adopted';
   readonly version: 1;
   readonly path: string;
   readonly branch: string;
@@ -136,6 +141,13 @@ export type ManagedWorktreeAdoption =
   | { readonly kind: 'adopted'; readonly managed: ManagedWorktree }
   | { readonly kind: 'absent' }
   | { readonly kind: 'unverified'; readonly reason: string };
+
+/** Directory identities authorized at adoption, kept through settlement and checked before removal. */
+export interface WorktreeAdoptionIdentity {
+  readonly checkout: string;
+  readonly gitDirectory: string;
+  readonly commonDirectory: string;
+}
 
 /**
  * What currently occupies the path of a recorded checkout.
@@ -211,6 +223,7 @@ export interface BranchDeletionEvidence {
 }
 
 export interface WorktreeRemovalEvidence {
+  readonly origin?: 'managed' | 'adopted';
   readonly recordedPath: string;
   readonly managedRoot: string;
   readonly resolvedManagedRoot: string;

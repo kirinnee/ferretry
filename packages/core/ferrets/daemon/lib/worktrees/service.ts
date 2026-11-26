@@ -1,13 +1,13 @@
-import {
-  type BranchDeletionConfirmation,
-  type CreatedWorktree,
-  type CreateWorktreeRequest,
-  type ManagedWorktreeView,
-  type RemovedWorktree,
-  type WorktreeListResponse,
-  type WorktreeRemovalDecision,
-  type WorktreeRemovalRequest,
-  type ManagedWorktreeSummary,
+import type {
+  BranchDeletionConfirmation,
+  CreatedWorktree,
+  CreateWorktreeRequest,
+  ManagedWorktreeView,
+  RemovedWorktree,
+  WorktreeListResponse,
+  WorktreeRemovalDecision,
+  WorktreeRemovalRequest,
+  ManagedWorktreeSummary,
 } from '../../../contract/index.ts';
 import type { SessionStatus } from '../protocol/session-base.ts';
 import { WorktreeError, WorktreeRemovalRefusal } from './errors.ts';
@@ -38,6 +38,7 @@ import type {
   ManagedWorktreePresence,
   RemovedManagedWorktree,
   RemoveManagedWorktreeInput,
+  WorktreeAdoptionIdentity,
 } from './types.ts';
 
 /**
@@ -246,6 +247,11 @@ export class ManagedWorktreeService {
     private readonly ids: WorktreeIdSource,
     /** Where managed checkouts live. Absent means this daemon cannot host one at all. */
     private readonly managedRoot: string | undefined,
+    private readonly adoptExisting?: (
+      folder: string,
+      token: string,
+      onPlanned: (record: ManagedWorktree, identity: WorktreeAdoptionIdentity) => Promise<void>,
+    ) => Promise<ManagedWorktree>,
   ) {}
 
   async list(): Promise<WorktreeListResponse> {
@@ -262,6 +268,7 @@ export class ManagedWorktreeService {
     return await this.#runLifecycle(async () => {
       const state = await this.#settled();
       const rows: ManagedWorktreeSummary[] = state.worktrees.map(managed => ({
+        ...(managed.origin === undefined ? {} : { origin: managed.origin }),
         path: managed.path,
         branch: managed.branch,
         repositoryRoot: managed.repositoryRoot,
@@ -283,6 +290,7 @@ export class ManagedWorktreeService {
           createdAt: view.createdAt,
           initialHead: view.initialHead,
           branchPreexisted: view.branchPreexisted,
+          ...(view.origin === undefined ? {} : { origin: view.origin }),
           ...(view.unresolved === undefined ? {} : { unresolved: view.unresolved }),
         });
       }
@@ -402,6 +410,42 @@ export class ManagedWorktreeService {
    */
   async create(request: CreateWorktreeRequest): Promise<CreatedWorktree> {
     return await this.#runLifecycle(async () => await this.#create(request));
+  }
+
+  async adopt(path: string): Promise<CreatedWorktree> {
+    return await this.#runLifecycle(async () => {
+      this.#managedRoot();
+      const state = await this.#settled();
+      const existing = state.worktrees.find(row => row.path === path && row.removedAt === undefined);
+      if (existing?.origin === 'adopted' && (await this.operations.presence(existing)).kind === 'owned')
+        return {
+          worktree: await this.#view(existing, await this.sessions.sessions(), await this.terminals.roots()),
+          cwd: path,
+        };
+      if (
+        state.worktrees.some(row => row.path === path && row.removedAt === undefined) ||
+        state.intents.some(row => row.path === path)
+      )
+        throw new WorktreeError(
+          'destination_exists',
+          'the path is already tracked or has an unresolved ownership intent',
+        );
+      if (this.adoptExisting === undefined)
+        throw new WorktreeError('no_managed_root', 'this daemon cannot adopt worktrees');
+      const adopted = await this.adoptExisting(path, this.ids.next(), async (record, adoptionIdentity) => {
+        const { createdAt, removedAt: _removed, removalStartedAt: _started, ...intent } = record;
+        await this.registry.write(current =>
+          withManagedWorktreeIntent(current, { ...intent, adoptionIdentity, declaredAt: createdAt }),
+        );
+      });
+      const sessions = await this.sessions.sessions();
+      const owner = sessions?.find(
+        session => isWorktreeSessionActive(session) && isWithinDirectory(adopted.path, session.cwd),
+      );
+      const managed = owner === undefined ? adopted : { ...adopted, ownerSessionId: owner.id };
+      await this.registry.write(current => withManagedWorktree(current, managed));
+      return { worktree: await this.#view(managed, sessions, await this.terminals.roots()), cwd: managed.path };
+    });
   }
 
   async #create(request: CreateWorktreeRequest): Promise<CreatedWorktree> {
@@ -539,6 +583,7 @@ export class ManagedWorktreeService {
         : undefined;
     return {
       path: managed.path,
+      ...(managed.origin === undefined ? {} : { origin: managed.origin }),
       branch: managed.branch,
       repositoryRoot: managed.repositoryRoot,
       commonDirectory: managed.commonDir,
@@ -565,6 +610,7 @@ export class ManagedWorktreeService {
  */
 function unresolvedView(intent: ManagedWorktreeIntent): ManagedWorktreeView {
   return {
+    ...(intent.origin === undefined ? {} : { origin: intent.origin }),
     path: intent.path,
     branch: intent.branch,
     repositoryRoot: intent.repositoryRoot,

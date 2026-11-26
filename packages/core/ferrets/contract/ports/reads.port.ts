@@ -13,6 +13,7 @@ import type { RepoWorktreeListResponse } from '../worktrees.ts';
  * cannot read Projects (§2.1), so a reader joins `commonDirectory` to a project's own (today's `projectForWorktree`).
  */
 export interface ManagedWorktreeSummary {
+  readonly origin?: 'managed' | 'adopted';
   readonly path: string;
   readonly branch: string;
   readonly repositoryRoot: string;
