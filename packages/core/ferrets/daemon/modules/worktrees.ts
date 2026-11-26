@@ -48,8 +48,8 @@ export interface WorktreesNeeds {
    */
   readonly sessions: () => Promise<readonly WorktreeSessionFact[] | undefined>;
   /**
-   * Which shells are still in a checkout (today: the terminal runtime). Terminals is a plugin Ferrets cannot read
-   * (§2.1), so the host answers `undefined` until a hook carries it: a read still succeeds and a destructive write
+   * Which shells are still in a checkout (the terminal runtime). Terminals is a plugin Ferrets cannot read
+   * (§2.1), so the feature asks what it contributes to `terminal.roots`; `undefined` is unknown: a read still succeeds and a destructive write
    * still refuses.
    */
   readonly terminalRoots: () => Promise<readonly string[] | undefined>;

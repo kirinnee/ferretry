@@ -41,10 +41,16 @@ describe('terminals manifest', () => {
       else expect(entry.guard).toBe('secrets');
     }
   });
-  test('takes the terminal input target, the tmux runner, the %terminal reference menu and contributes the job keeper', () => {
+  test("takes the terminal input target, the tmux runner, the %terminal reference menu and contributes the job keeper and the shells' folders", () => {
     expect(
       manifest.hooks.takes.map(take => ('key' in take ? `${take.hook.name}:${take.key}` : take.hook.name)),
-    ).toEqual(['input.targets:terminal', 'runners:tmux', 'reference.catalog:%terminal', 'jobs.keeper']);
+    ).toEqual([
+      'input.targets:terminal',
+      'runners:tmux',
+      'reference.catalog:%terminal',
+      'jobs.keeper',
+      'terminal.roots',
+    ]);
   });
   test('declares the tmux-release doctor row and selftest, and takes no contributed doctor hook', () => {
     expect(manifest.doctor).toContain('tmux-release');

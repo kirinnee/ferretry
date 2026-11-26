@@ -946,6 +946,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       // The composer's `%terminal` menu (reference.catalog): the ferret's terminals. Asked only while Conversation is on.
       'reference.catalog:%terminal': new TerminalsReferenceMenu(provided),
       'jobs.keeper': () => [{ id: 'terminals', item: jobKeeper }],
+      'terminal.roots': () => [{ id: 'terminals', item: { roots: async () => await service.roots() } }],
     },
     subscribers: {
       'vault.holds-changed': (payload: {

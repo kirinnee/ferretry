@@ -107,7 +107,10 @@ export async function composeWorktreeWorld(label: string) {
  * called with a request the way the router would: the handler, the schema it parses the body with, the service and the
  * registry are the real ones; the HTTP router and the admission in front of them are not in this world.
  */
-export async function worktreeRouteWorld(label: string) {
+export async function worktreeRouteWorld(
+  label: string,
+  terminalRoots: () => Promise<readonly string[] | undefined> = async () => [],
+) {
   const world = await composeWorktreeWorld(label);
   if (world.io === undefined) throw new Error('the worktrees root named no folder');
   const state = new MemoryStateFolder();
@@ -116,7 +119,7 @@ export async function worktreeRouteWorld(label: string) {
     clock: fixedClock('2026-11-16T00:00:00.000Z'),
     io: world.io,
     sessions: async () => [],
-    terminalRoots: async () => [],
+    terminalRoots,
     newId: () => 'ownership-token-0001',
   });
   const call = async (
