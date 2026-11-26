@@ -6,6 +6,8 @@ import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
 import { err, ok, type Result } from '@ferretry/std';
 import type { RuntimesApi } from '@ferretry/plugin-runtimes/contract';
+import type { LoginFactsApi } from '../../contract/others.ts';
+import { sourceKey } from '@ferretry/core-asks/contract/testing';
 import { createWardenSubsystem } from '../../daemon/subsystem.ts';
 import { fakeKernel, wardenConfig } from '../support/kernel.ts';
 import { credential, runtime, tool } from '../support/pack.ts';
@@ -45,6 +47,8 @@ function world(
     /** When the limit resets (epoch ms) as the pane shows it. */
     readonly retryAt?: number;
     readonly config?: Parameters<typeof wardenConfig>[0];
+    /** What Logins answers; a function the test can flip to model an outage and its recovery. */
+    readonly logins?: () => LoginFactsApi | undefined;
   } = {},
 ) {
   const fake = fakeKernel({
@@ -68,31 +72,40 @@ function world(
     resolve: async () => ({ ok: true }),
   } as unknown as RuntimesApi;
   const asked: string[] = [];
-  const subsystem = createWardenSubsystem({
-    kernel: fake.kernel,
-    ferrets,
-    conversation: fakeConversation(),
-    asks: new FakeAsks(),
-    usage: () => undefined,
-    board: () => undefined,
-    runtimes: () => runtimes,
-    logins: () => ({ list: async () => ({ logins: [credential('claude-a-login'), credential('claude-b-login')] }) }),
-    ...(options.accounts === false
-      ? {}
-      : {
-          accounts: () => ({
-            ownerHold: (ferret: string) => {
-              asked.push(ferret);
-              return options.held === true;
-            },
+  const asks = new FakeAsks();
+  const mount = () =>
+    createWardenSubsystem({
+      kernel: fake.kernel,
+      ferrets,
+      conversation: fakeConversation(),
+      asks,
+      usage: () => undefined,
+      board: () => undefined,
+      runtimes: () => runtimes,
+      logins:
+        options.logins ??
+        (() => ({ list: async () => ({ logins: [credential('claude-a-login'), credential('claude-b-login')] }) })),
+      ...(options.accounts === false
+        ? {}
+        : {
+            accounts: () => ({
+              ownerHold: (ferret: string) => {
+                asked.push(ferret);
+                return options.held === true;
+              },
+            }),
           }),
-        }),
-  });
+    });
+  let subsystem = mount();
   return {
     ...fake,
     ferrets,
-    subsystem,
+    asks,
     asked,
+    /** A new daemon process: nothing in memory, the same state on disk. */
+    restart: () => {
+      subsystem = mount();
+    },
     sweep: async () => {
       await subsystem.run(false);
       return await subsystem.status();
@@ -168,6 +181,72 @@ describe('the warden moving a ferret whose login hit its limit', () => {
     // Assert
     should(absent.ferrets.moves.map(move => move.runtime)).eql(['claude-b-wrapper']);
     should(off.ferrets.moves).eql([]);
+  });
+});
+
+describe('a Logins outage while a ferret sits on a limit', () => {
+  const both = { list: async () => ({ logins: [credential('claude-a-login'), credential('claude-b-login')] }) };
+  const down: LoginFactsApi = {
+    list: async () => {
+      throw new Error('logins is down');
+    },
+  };
+  const outageItems = async (w: ReturnType<typeof world>) =>
+    (await w.asks.open({ source: sourceKey('daemon') })).filter(item => item.entry === 'warden:auto-move-failed');
+
+  it('C-110 holds without moving and lists it once, then moves the same ferret on the sweep after Logins is back', async () => {
+    // Arrange
+    let logins: LoginFactsApi | undefined = down;
+    const w = world({ held: false, logins: () => logins });
+
+    // Act
+    const first = await w.sweep();
+    const second = await w.sweep();
+    const listed = await outageItems(w);
+    logins = both;
+    const recovered = await w.sweep();
+
+    // Assert: a hold, never an error; one record, not one per sweep; no move until the facts exist.
+    should(w.ferrets.moves.length).equal(1);
+    should(first.actions.filter(action => action.outcome === 'held')).have.length(1);
+    should(first.actions.some(action => action.outcome === 'failed')).equal(false);
+    should(first.actions[0]?.detail).containEql('the logins could not be read');
+    should(second.actions.filter(action => action.outcome === 'held' || action.outcome === 'failed')).have.length(1);
+    should(listed).have.length(1);
+    should(w.ferrets.moves.map(move => [move.ferret, move.runtime])).eql([['f1', 'claude-b-wrapper']]);
+    should(recovered.actions.some(action => action.outcome === 'done' && action.actor === 'auto')).equal(true);
+    should(await outageItems(w)).have.length(0);
+  });
+
+  it('C-110 still moves it after Logins recovers when the daemon restarted in between, with one notice in all', async () => {
+    // Arrange
+    let logins: LoginFactsApi | undefined = down;
+    const w = world({ held: false, logins: () => logins });
+
+    // Act
+    await w.sweep();
+    w.restart();
+    await w.sweep();
+    const listed = await outageItems(w);
+    w.restart();
+    logins = both;
+    await w.sweep();
+
+    // Assert
+    should(listed).have.length(1);
+    should(w.ferrets.moves.map(move => [move.ferret, move.runtime])).eql([['f1', 'claude-b-wrapper']]);
+  });
+
+  it('never moves on unknown facts: an absent Logins holds too, and moves nothing', async () => {
+    // Arrange
+    const w = world({ held: false, logins: () => undefined });
+
+    // Act
+    await w.sweep();
+    await w.sweep();
+
+    // Assert
+    should(w.ferrets.moves).eql([]);
   });
 });
 

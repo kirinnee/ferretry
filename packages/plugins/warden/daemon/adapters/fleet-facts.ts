@@ -2,6 +2,7 @@ import type { FerretPaneLimit } from '@ferretry/core-ferrets/contract';
 import { RuntimeIdSchema, type RuntimesApi } from '@ferretry/plugin-runtimes/contract';
 import type { LoginFactsApi, UsageHeadroomApi } from '../../contract/others.ts';
 import type { FleetCredentialView, PackFleetFacts } from '../lib/foreign-pack.ts';
+import { FactsUnavailableError } from '../lib/facts-unavailable.ts';
 import type { PaneLimit } from '../lib/foreign-pane-limit.ts';
 
 /**
@@ -24,9 +25,11 @@ export class WardenFleetFacts {
 
   async facts(): Promise<PackFleetFacts> {
     const runtimes = this.runtimes();
-    if (runtimes === undefined) throw new Error('the runtimes are not available, so no login can be chosen');
+    if (runtimes === undefined)
+      throw new FactsUnavailableError('the runtimes are not available, so no login can be chosen');
     const logins = this.logins();
-    if (logins === undefined) throw new Error('the logins are not available, so no login can be chosen');
+    if (logins === undefined)
+      throw new FactsUnavailableError('the logins are not available, so no login can be chosen');
     const usage = this.usage();
     const [catalog, tools, credentials, panes, ferrets] = await Promise.all([
       runtimes.catalog(),
@@ -87,6 +90,6 @@ async function readLogins(logins: LoginFactsApi): Promise<readonly FleetCredenti
   try {
     return (await logins.list()).logins as readonly FleetCredentialView[];
   } catch {
-    throw new Error('the logins could not be read, so no login can be chosen');
+    throw new FactsUnavailableError('the logins could not be read, so no login can be chosen');
   }
 }
