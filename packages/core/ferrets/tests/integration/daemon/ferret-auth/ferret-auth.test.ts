@@ -588,7 +588,7 @@ describe('a start by runtime reaches the provider signed in (merge bar 11)', () 
   test("the app's new-ferret request (its own request builder, the app's header list, a loopback client) on a configured runtime reaches the provider signed in", async () => {
     const { provider, daemon } = await bootStrict();
     // The app's own start: `startFerret` builds `POST /v1/ferrets` from the form's draft, and the client sends it.
-    const id = await startFerret(loopbackClient(daemon), {
+    const { id } = await startFerret(loopbackClient(daemon), {
       ...emptyNewFerretDraft,
       runtime: 'rt',
       folder: daemon.folder,
@@ -760,7 +760,7 @@ describe('a start by runtime reaches the provider signed in (merge bar 11)', () 
 
     await expect(startFerret(flaky, draft, attempt)).rejects.toThrow('fetch failed');
     // The page keeps the attempt; the person presses Create again with the draft unchanged.
-    const id = await startFerret(flaky, draft, startAttemptFor(draft, attempt));
+    const { id } = await startFerret(flaky, draft, startAttemptFor(draft, attempt));
 
     const listing = JSON.parse((await daemon.call('GET', '/v1/ferrets')).text) as { id: string }[];
     expect(listing.map(ferret => ferret.id)).toEqual([id]);

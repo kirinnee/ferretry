@@ -25,6 +25,9 @@ export class StartSessionController {
     const started = await this.api.start(body, flags.requestId);
     const view = await this.api.get(started.id);
     this.presenter.view(view, flags.json === true);
+    // The daemon started it, but without something it asked for (fast mode): say so on its own line, on stderr like
+    // every advisory, so `--json` stdout stays parseable.
+    if (started.notice !== undefined) this.presenter.note(started.notice);
     // A launch that outran the request is not a failure: the ferret is recorded and keeps coming up, so say where to
     // watch it rather than implying something broke.
     if (view.state === 'starting')
