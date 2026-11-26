@@ -1,4 +1,4 @@
-import type { HarnessKey as HarnessKind } from '@ferretry/core-ferrets/contract';
+import { byRecordedHarness, type HarnessKey as HarnessKind } from '@ferretry/core-ferrets/contract';
 import { type QueueAuthor } from '../../wire-send.ts';
 import { readHandoffDocument } from '../../turn-handoff.ts';
 import { type SessionHandoff, type SessionHandoffAttachment } from '../../protocol-names.ts';
@@ -68,5 +68,8 @@ export function handoffFolders(sessionDirectory: string, attachmentRoot: string)
  * writes.
  */
 export function handoffReadArguments(harness: HarnessKind, folders: readonly string[]): readonly string[] {
-  return harness === 'claude-code' ? folders.map(folder => `--allowedTools=Read(/${folder}/**)`) : [];
+  return byRecordedHarness(harness, {
+    claude: () => folders.map(folder => `--allowedTools=Read(/${folder}/**)`),
+    codex: () => [],
+  });
 }

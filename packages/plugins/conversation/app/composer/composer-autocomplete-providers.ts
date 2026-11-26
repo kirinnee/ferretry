@@ -20,6 +20,12 @@
  * daemons are unrelated identities.
  */
 
+import {
+  byRecordedHarness,
+  harnessShortName,
+  RecordedHarnessSchema,
+  type RecordedFamily,
+} from '@ferretry/core-ferrets/contract';
 import { formatReference, parseReferenceToken, type Reference } from '@ferretry/app';
 import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import {
@@ -49,7 +55,17 @@ import {
 } from '../search/work-search.ts';
 import { type DaemonConnection, type DaemonFerretScope, daemonFerretKey } from './seam.ts';
 
-export type ComposerHarness = 'claude' | 'codex';
+/** The harness families whose skills and commands the composer knows how to invoke (Ferrets' family table). */
+type ComposerHarness = RecordedFamily;
+
+/** What the composer knows of a ferret's harness: a family it can invoke skills on, or the name of one it cannot. */
+export type ComposerHarnessFact = ComposerHarness | { readonly unreadable: string };
+
+/** Every family the composer can invoke a skill on, from the one table: a command offered on all of them is offered on any. */
+const COMPOSER_HARNESSES: readonly ComposerHarness[] = RecordedHarnessSchema.options;
+
+/** A ferret that has said nothing of its harness yet is offered the Claude spelling, as it always was (never a harness named but unread). */
+const UNDECLARED_INSERTS_AS: ComposerHarness = 'claude';
 
 interface ComposerBuiltinCommand {
   readonly name: string;
@@ -62,7 +78,7 @@ const COMPOSER_BUILTIN_COMMANDS: readonly ComposerBuiltinCommand[] = [
   {
     name: 'compact',
     description: 'Summarise the conversation so far and free up context',
-    harnesses: ['claude', 'codex'],
+    harnesses: COMPOSER_HARNESSES,
   },
 ];
 
@@ -83,8 +99,12 @@ export interface ComposerAutocompleteProvidersOptions {
   readonly client?: ComposerReferenceCatalogReader;
   /** Which families may OFFER suggestions. Absent means all of them; a suppressed family still parses and proves. */
   readonly suggestions?: ComposerSuggestionSwitches;
-  /** The ferret's harness: how a picked skill is invoked. Absent inserts `/name`, as an unknown harness always did. */
-  readonly harness?: ComposerHarness;
+  /**
+   * The ferret's harness: how a picked skill is invoked. Absent (no fact yet) inserts `/name`. `{ unreadable }` names a
+   * harness the composer cannot invoke skills or commands on (no family): the `/` and `$` menus offer nothing and say so
+   * by name, never `/name` as if it were Claude.
+   */
+  readonly harness?: ComposerHarnessFact;
   /**
    * THE HOST'S CATALOGS. A prefix in `hostedPrefixes` is the host's fact: the provider reads it through `getCatalog`
    * (after `waitForCatalog`) and never asks the daemon a second time; `undefined` there is UNPROVED, said out loud,
@@ -208,14 +228,12 @@ const catalogSource = (options: ComposerAutocompleteProvidersOptions): CatalogSo
 
 /** Claude invokes `/name`; Codex invokes `$name` (its `/skills` only browses). */
 function skillInsertText(harness: ComposerHarness, name: string): string {
-  return harness === 'codex' ? `$${name}` : `/${name}`;
+  return byRecordedHarness(harness, { claude: () => `/${name}`, codex: () => `$${name}` });
 }
 
 function skillHarnessLabel(harness: ComposerHarness): string {
-  return harness === 'codex' ? 'Codex · inserts $name' : 'Claude · inserts /name';
+  return byRecordedHarness(harness, { claude: () => 'Claude · inserts /name', codex: () => 'Codex · inserts $name' });
 }
-
-const COMPOSER_HARNESSES: readonly ComposerHarness[] = ['claude', 'codex'];
 
 /** With no harness fact yet, expose only commands supported by every harness. */
 function builtinCommandsForHarness(harness?: ComposerHarness): readonly ComposerBuiltinCommand[] {
@@ -241,7 +259,7 @@ const commandsResult = (
   notice?: string,
 ): ComposerProviderResult => ({
   candidates: commandCandidates(scope, harness),
-  contextLabel: harness ? `${harness === 'codex' ? 'Codex' : 'Claude'} · commands use /name` : 'Built-in commands',
+  contextLabel: harness ? `${harnessShortName(harness)} · commands use /name` : 'Built-in commands',
   notice,
 });
 
@@ -278,7 +296,7 @@ const catalogResult = (
   entries: readonly ReferenceCatalogEntry[],
   harness: ComposerHarness | undefined,
 ): ComposerProviderResult => {
-  const inserting = harness ?? 'claude';
+  const inserting = harness ?? UNDECLARED_INSERTS_AS;
   return sigil === '/'
     ? {
         candidates: [...commandCandidates(scope, harness), ...skillCandidates(scope, entries, inserting)],
@@ -306,12 +324,26 @@ const skillsProviderFor = (
   options: ComposerAutocompleteProvidersOptions,
   source: CatalogSource,
 ): ComposerAutocompleteProvider => {
-  const { scope, harness, suggestions = DEFAULT_COMPOSER_SUGGESTIONS } = options;
+  const { scope, suggestions = DEFAULT_COMPOSER_SUGGESTIONS } = options;
+  const unreadableHarness = typeof options.harness === 'object' ? options.harness.unreadable : undefined;
+  const harness = typeof options.harness === 'object' ? undefined : options.harness;
+  const id = scopedId(sigil === '/' ? 'slash' : 'skill-sigil', scope);
+  const label = sigil === '/' ? 'Commands & skills' : 'Skills';
+  const shouldOpen = (match: ComposerTriggerMatch): boolean => composerSuggestionsAllow(suggestions, match);
+  if (unreadableHarness !== undefined) {
+    // A harness the composer has no way to invoke a skill on: nothing is offered, and the menu says which harness.
+    const refused: ComposerProviderResult = {
+      candidates: [],
+      contextLabel: `${unreadableHarness} · skills and commands are not offered`,
+      notice: `Ferretry cannot offer skills or commands for the ${unreadableHarness} harness yet.`,
+    };
+    return { id, trigger: sigil, label, shouldOpen, initialCandidates: () => refused, candidates: () => refused };
+  }
   return {
-    id: scopedId(sigil === '/' ? 'slash' : 'skill-sigil', scope),
+    id,
     trigger: sigil,
-    label: sigil === '/' ? 'Commands & skills' : 'Skills',
-    shouldOpen: (match: ComposerTriggerMatch) => composerSuggestionsAllow(suggestions, match),
+    label,
+    shouldOpen,
     get snapshotKey() {
       return source.hosted(sigil) ? source.known(sigil) : undefined;
     },

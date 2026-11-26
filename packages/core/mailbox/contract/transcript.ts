@@ -1,9 +1,11 @@
+import type { RecordedFamily } from '@ferretry/core-ferrets/contract';
+
 /**
  * The id of a transcript parser (`HarnessFacts.transcriptFormat`): `claude` and `codex` are the two this build ships
  * parsers for, and a harness may declare another. Open on purpose: Conversation's reader keeps one parser per id and
  * reads an id it has none for as unsupported.
  */
-export type TranscriptHarness = 'claude' | 'codex' | (string & {});
+export type TranscriptHarness = RecordedFamily | (string & {});
 
 /** The author represented by a normalized transcript event. */
 export type TranscriptRole = 'user' | 'assistant' | 'developer' | 'system' | 'tool';

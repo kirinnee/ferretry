@@ -18,33 +18,28 @@ import type { LinkableConversation } from '../../contract/index.ts';
 import { Asterisk, CodeXml, FlaskConical, Folder, Laptop, PawPrint } from 'lucide-react';
 import type { ReactNode } from 'react';
 import './links.css';
-import { conversationFolder, HARNESS_SHORT, type KnownHarnessKey, harnessKeyOf } from './link-words.ts';
+import { byRecordedHarness, harnessShortName } from '@ferretry/core-ferrets/contract';
+import { conversationFolder, type HarnessKey, harnessKeyOf } from './link-words.ts';
 import { conversationHeadline, type FerretMark, ferretState } from './conversation-picker-model.ts';
 
 /** Who a row belongs to, as its colour says it. */
-export type ConversationSourceMark = 'ferretry' | 'computer' | KnownHarnessKey;
+export type ConversationSourceMark = 'ferretry' | 'computer' | HarnessKey;
 
-/** A harness id as a mark: one this app draws, else the plain harness id (which has no icon of its own). */
-const markOf = (harness: string): ConversationSourceMark | undefined => harnessKeyOf(harness);
+/** A harness as a badge names it: the shipped two by their short names, any other by its own key (never as Claude). */
+const harnessShort = harnessShortName;
 
-/** A harness as a badge names it. */
-const harnessShort = (harness: string): string => {
-  const key = harnessKeyOf(harness);
-  return key === undefined ? harness : HARNESS_SHORT[key];
-};
-
-const HARNESS_ICON: Readonly<Record<KnownHarnessKey, typeof Asterisk>> = { 'claude-code': Asterisk, codex: CodeXml };
-
-const MARK_ICON: Readonly<Record<ConversationSourceMark, typeof Asterisk>> = {
-  ...HARNESS_ICON,
-  ferretry: PawPrint,
-  computer: Laptop,
+/** A source's icon: the CLI's own for a harness this app draws, a paw for Ferretry, a laptop for what is only on this computer, else a folder. */
+const iconOf = (source: string): typeof Asterisk => {
+  if (source === 'ferretry') return PawPrint;
+  if (source === 'computer') return Laptop;
+  const key = harnessKeyOf(source);
+  if (key === undefined) return Folder;
+  return byRecordedHarness(key, { claude: () => Asterisk, codex: () => CodeXml });
 };
 
 /** A mark's icon: the CLI's own, a paw for Ferretry, or a laptop for what is only on this computer. */
 function SourceIcon({ source, size = 12 }: { readonly source: string; readonly size?: number }) {
-  const mark = source === 'ferretry' || source === 'computer' ? source : markOf(source);
-  const Icon = mark === undefined ? Folder : MARK_ICON[mark];
+  const Icon = iconOf(source);
   return <Icon size={size} aria-hidden="true" className="shrink-0" />;
 }
 

@@ -114,7 +114,7 @@ describe('newestRateLimitsInText', () => {
 
   test('records only the window the event measured', () => {
     const weeklyOnly = tokenCount('2026-10-13T07:00:00.000Z', {
-      secondary: { used_percent: 8, resets_at: 1_800_500_000 },
+      secondary: { used_percent: 8, window_minutes: 10_080, resets_at: 1_800_500_000 },
     });
 
     const reading = newestRateLimitsInText(weeklyOnly);

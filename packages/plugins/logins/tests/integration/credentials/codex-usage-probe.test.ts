@@ -46,8 +46,8 @@ const usageBody = JSON.stringify({
   plan_type: 'plus',
   rate_limit: {
     limit_reached: false,
-    primary_window: { used_percent: 42, reset_at: 1_800_003_600 },
-    secondary_window: { used_percent: 9, reset_after_seconds: 86_400 },
+    primary_window: { used_percent: 42, reset_at: 1_800_003_600, limit_window_seconds: 18_000 },
+    secondary_window: { used_percent: 9, reset_after_seconds: 86_400, limit_window_seconds: 604_800 },
   },
 });
 

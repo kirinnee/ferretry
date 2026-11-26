@@ -52,6 +52,7 @@ export function usePaneActivity(
   read: PaneFrameReader | undefined,
   active: boolean,
   intervalMs = PANE_ACTIVITY_INTERVAL_MS,
+  harness?: string,
 ): PaneReading {
   const [reading, setReading] = useState<PaneReading>(UNREAD_PANE);
   useEffect(() => {
@@ -63,7 +64,7 @@ export function usePaneActivity(
       if (!documentHidden()) {
         try {
           const frame = await read(controller.signal);
-          if (!controller.signal.aborted) setReading({ read: true, activity: parsePaneActivity(frame) });
+          if (!controller.signal.aborted) setReading({ read: true, activity: parsePaneActivity(frame, harness) });
         } catch {
           if (!controller.signal.aborted) setReading(UNREAD_PANE);
         }
@@ -75,7 +76,7 @@ export function usePaneActivity(
       controller.abort();
       clearTimeout(timer);
     };
-  }, [active, intervalMs, read]);
+  }, [active, intervalMs, read, harness]);
   return reading;
 }
 

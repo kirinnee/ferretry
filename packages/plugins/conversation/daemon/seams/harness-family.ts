@@ -1,1 +1,1 @@
-export { harnessFamily } from '@ferretry/core-mailbox/contract';
+export { byHarnessFamily, harnessFamily } from '@ferretry/core-mailbox/contract';

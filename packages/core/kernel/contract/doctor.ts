@@ -21,7 +21,8 @@ export type DoctorCheckReport = z.infer<typeof DoctorCheckSchema>;
 
 /** The launchability evidence for a harness, repeated so one doctor snapshot is self-contained. */
 export const DoctorHarnessSchema = z.object({
-  kind: z.enum(['claude', 'codex']),
+  /** The harness's family word as the doctor names it. Open: the kernel sits below Ferrets and cannot know every harness. */
+  kind: z.string().min(1),
   launchable: z.array(z.string().min(1)),
   blocked: z.array(z.string().min(1)),
 });
