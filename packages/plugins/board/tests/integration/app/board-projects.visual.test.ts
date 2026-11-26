@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Browser } from 'playwright-core';
+import type { Browser, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
 const packageRoot = import.meta.dir;
@@ -59,11 +59,47 @@ const SIZES = [
   { name: '1440', width: 1_440, height: 900, scale: 1 },
 ] as const;
 
+/** Each project section as the owner reads it: its name and the count beside it. */
+const readProjects = (tab: Page): Promise<Record<string, string>> =>
+  tab.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll('.fy-board-project')].map(section => [
+        section.querySelector('.fy-board-project__name')?.textContent ?? '',
+        section.querySelector('.fy-board-project__count')?.textContent ?? '',
+      ]),
+    ),
+  );
+const waitForProjects = async (tab: Page, expected: Record<string, string>): Promise<void> => {
+  await tab
+    .waitForFunction(
+      want =>
+        JSON.stringify(
+          Object.fromEntries(
+            [...document.querySelectorAll('.fy-board-project')]
+              .map(
+                section =>
+                  [
+                    section.querySelector('.fy-board-project__name')?.textContent ?? '',
+                    section.querySelector('.fy-board-project__count')?.textContent ?? '',
+                  ] as const,
+              )
+              .toSorted(([a], [b]) => a.localeCompare(b)),
+          ),
+        ) === JSON.stringify(want),
+      Object.fromEntries(Object.entries(expected).toSorted(([a], [b]) => a.localeCompare(b))),
+      { timeout: 10_000 },
+    )
+    .catch(async () => {
+      throw new Error(`projects were ${JSON.stringify(await readProjects(tab))}, not ${JSON.stringify(expected)}`);
+    });
+};
+const live = (tab: Page, call: string): Promise<unknown> => tab.evaluate(`window.__board.${call}`);
+
 describe('the board by project', () => {
   for (const { name, width, height, scale } of SIZES)
     for (const mode of ['light', 'dark'] as const)
       for (const [rounding, style] of Object.entries(ROUNDING))
-        it(`names each project with its count and one control (${name}, ${mode}, ${rounding} rounding)`, async () => {
+        it(`folds, narrows and widens by project, and a live update moves the counts (${name}, ${mode}, ${rounding} rounding)`, async () => {
           const context = await browser.newContext({
             viewport: { width, height },
             colorScheme: mode,
@@ -76,22 +112,80 @@ describe('the board by project', () => {
             );
             const tab = await context.newPage();
             await tab.goto(`${origin}/?style=${style}&mode=${mode}`);
-            await tab.waitForSelector('.fy-board-project__name');
-            const names = await tab.locator('.fy-board-project__name').allTextContents();
-            expect(names.sort()).toEqual(['docs-site', 'ferretry']);
-            expect(await tab.locator('.fy-board-project__count').allTextContents()).toHaveLength(2);
-            expect(await tab.locator('[data-project-focus="only"]').count()).toBe(2);
+            // Exact counts per project, Unfiled included (the Closed lane is not a task the owner sees).
+            await waitForProjects(tab, { ferretry: '4 tasks', 'docs-site': '2 tasks', Unfiled: '1 task' });
+            expect(await tab.locator('[data-project-focus="only"]').count()).toBe(3);
             expect(await tab.locator('[data-board-hint="kanban"]').count()).toBe(1);
-            // Nothing runs off the page sideways.
+            // Nothing runs off the page sideways, and every control is a big-enough target.
             expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-            // Every control is a real, big-enough target on a phone.
-            if (width === 390)
-              for (const control of await tab.locator('.fy-board-project__toggle, .fy-board-project__focus').all())
-                expect((await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(28);
+            for (const control of await tab.locator('.fy-board-project__toggle, .fy-board-project__focus').all())
+              expect((await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(28);
+            if (width === 390) {
+              // No view tab is cut off at the strip's edge, and a project's lane panel leaves no tall empty gap.
+              const cut = await tab.evaluate(() => {
+                const strip = document.querySelector('.fy-board__views')?.getBoundingClientRect();
+                return [...document.querySelectorAll('.fy-board__view')].filter(
+                  each => strip === undefined || each.getBoundingClientRect().right > strip.right + 0.5,
+                ).length;
+              });
+              expect(cut).toBe(0);
+              const panel = await tab.locator('.fy-board-phone__panel').first().boundingBox();
+              expect(panel?.height ?? Number.POSITIVE_INFINITY).toBeLessThan(200);
+            }
             if (shotsDir !== '')
               await tab.screenshot({ path: join(shotsDir, `board-${name}-${mode}-${rounding}.png`) });
+
+            // FOLD / UNFOLD: only that project's lanes go, and they come back.
+            const ferretry = tab.locator('.fy-board-project', { hasText: 'ferretry' });
+            const lanes = ferretry.locator('.fy-board-lane, .fy-board-phone-lane, [data-task]');
+            expect(await lanes.count()).toBeGreaterThan(0);
+            await ferretry.locator('.fy-board-project__toggle').click();
+            expect(await ferretry.locator('.fy-board-project__toggle').getAttribute('aria-expanded')).toBe('false');
+            expect(await lanes.count()).toBe(0);
+            expect(
+              await tab.locator('.fy-board-project', { hasText: 'docs-site' }).locator('[data-task]').count(),
+            ).toBeGreaterThan(0);
+            await ferretry.locator('.fy-board-project__toggle').click();
+            expect(await ferretry.locator('.fy-board-project__toggle').getAttribute('aria-expanded')).toBe('true');
+            expect(await ferretry.locator('[data-task]').count()).toBeGreaterThan(0);
+
+            // A LIVE UPDATE closes a task: the count follows, nothing else moves.
+            await live(tab, "move('F4', 'closed')");
+            await live(tab, 'tick()');
+            await waitForProjects(tab, { ferretry: '3 tasks', 'docs-site': '2 tasks', Unfiled: '1 task' });
+            await live(tab, "move('F4', 'implement')");
+            await live(tab, 'tick()');
+            await waitForProjects(tab, { ferretry: '4 tasks', 'docs-site': '2 tasks', Unfiled: '1 task' });
+
+            // "Only this project" narrows to Unfiled (and says so in the URL), "All projects" is its one control.
+            await tab
+              .locator('.fy-board-project', { hasText: 'Unfiled' })
+              .locator('[data-project-focus="only"]')
+              .click();
+            await waitForProjects(tab, { Unfiled: '1 task' });
+            expect(await tab.evaluate(() => window.location.search)).toContain('project=');
+            expect(await tab.locator('[data-project-focus="only"]').count()).toBe(0);
+            expect(await tab.locator('[data-project-focus="all"]').count()).toBe(1);
+            if (shotsDir !== '')
+              await tab.screenshot({ path: join(shotsDir, `board-${name}-${mode}-${rounding}-only.png`) });
+
+            // ITS LAST CARD LEAVES: the project stays named, with the way back.
+            await live(tab, "remove('F10')");
+            await live(tab, 'tick()');
+            await waitForProjects(tab, { Unfiled: '0 tasks' });
+            expect(await tab.locator('[data-project-focus="all"]').count()).toBe(1);
+            expect(await tab.locator('.fy-board').textContent()).not.toContain('No project has a board yet');
+            await tab.locator('[data-project-focus="all"]').click();
+            // All projects: the others' cards are all still there, Unfiled has nothing left to show.
+            await waitForProjects(tab, { ferretry: '4 tasks', 'docs-site': '2 tasks' });
+            expect(await tab.evaluate(() => window.location.search)).not.toContain('project=');
+            expect(await tab.locator('[data-project-focus="all"]').count()).toBe(0);
+            expect(
+              await tab.locator('.fy-board-project', { hasText: 'docs-site' }).locator('[data-task]').count(),
+            ).toBeGreaterThan(0);
+            expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
           } finally {
             await context.close();
           }
-        }, 60_000);
+        }, 90_000);
 });

@@ -12,7 +12,8 @@
 import { Loading } from '@ferretry/app/ui';
 import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { HistoryEvent } from '../../lib/agenda-history.ts';
+import type { AnsweredAsk, HistoryEvent } from '../../lib/agenda-history.ts';
+import { describeResponse } from './agenda-board.tsx';
 import { AgendaFold } from './agenda-fold.tsx';
 import { AgentWordsRow, OwnWordsRow } from './history-rows.tsx';
 
@@ -93,14 +94,34 @@ interface HistoryRowProps {
   readonly renderProse: (text: string) => ReactNode;
 }
 
+/** The asks the owner answered, each as the item records it: what was asked of, what they chose, any words. */
+function AnsweredAsks({ asks }: { readonly asks: readonly AnsweredAsk[] }) {
+  return (
+    <ul aria-label="Answered asks" className="fy-hist__answered" data-agenda-answered-asks="">
+      {asks.map(ask => (
+        <li data-agenda-answered-ask={ask.of} key={ask.key}>
+          <Check aria-hidden="true" className="fy-hist__check" size={14} strokeWidth={2.5} />
+          <span>
+            <strong>{ask.of}</strong> · {describeResponse(ask.response)}
+            {ask.note === undefined ? null : <span className="fy-hist__note"> — {ask.note}</span>}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function AgendaItemHistory({
   events,
+  answered = [],
   ferret,
   renderProse,
   itemKey,
   title = 'History',
 }: {
   readonly events: readonly HistoryEvent[];
+  /** The asks the owner answered, from the item's own state (`answeredAsks`): the count, and a row each. */
+  readonly answered?: readonly AnsweredAsk[];
   readonly ferret: string;
   readonly renderProse: (text: string) => ReactNode;
   /** Names the item on this device, so whether its conversation is open is remembered per item. */
@@ -109,25 +130,23 @@ export function AgendaItemHistory({
   readonly title?: string;
 }) {
   const spoken = spokenEvents(events);
-  if (spoken.length === 0) return null;
+  if (spoken.length === 0 && answered.length === 0) return null;
   const said = spoken.filter(event => event.kind !== 'gap').length;
-  // An answered ask lives here, not in "What I need from you": the owner's answers are counted first.
-  const answered = spoken.filter(
-    event => event.kind === 'owner' && (event.form === 'answer' || event.form === 'done'),
-  ).length;
   const messages = `${String(said)} ${said === 1 ? 'message' : 'messages'}`;
+  const counts = [
+    ...(answered.length === 0 ? [] : [`${String(answered.length)} answered`]),
+    ...(said === 0 ? [] : [messages]),
+  ].join(' · ');
   return (
-    <AgendaFold
-      itemKey={itemKey}
-      meta={answered === 0 ? messages : `${String(answered)} answered · ${messages}`}
-      part="conversation"
-      title={title}
-    >
-      <ol aria-label={title} className="fy-hist fy-hist__list" data-agenda-history="">
-        {spoken.map(event => (
-          <HistoryRow event={event} ferret={ferret} key={event.key} renderProse={renderProse} />
-        ))}
-      </ol>
+    <AgendaFold itemKey={itemKey} meta={counts === '' ? undefined : counts} part="conversation" title={title}>
+      {answered.length === 0 ? null : <AnsweredAsks asks={answered} />}
+      {spoken.length === 0 ? null : (
+        <ol aria-label={title} className="fy-hist fy-hist__list" data-agenda-history="">
+          {spoken.map(event => (
+            <HistoryRow event={event} ferret={ferret} key={event.key} renderProse={renderProse} />
+          ))}
+        </ol>
+      )}
     </AgendaFold>
   );
 }

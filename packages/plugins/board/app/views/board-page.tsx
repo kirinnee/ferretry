@@ -34,7 +34,7 @@ import { BoardCountsBar } from './board-counts.tsx';
 import { DEFAULT_SUMMARY_WINDOW, parseSummaryWindow, type SummaryWindow } from '../lib/board-summary.ts';
 import { BoardFilterBar, BoardFilterSheet } from './board-filters.tsx';
 import { BoardNotice } from './board-notice.tsx';
-import type { BoardProjectFocus } from './board-project-head.tsx';
+import { BoardProject, type BoardProjectFocus } from './board-project-head.tsx';
 import { PhoneKanban } from './board-phone.tsx';
 import { BoardDetail } from './detail/board-detail.tsx';
 import { TableView } from './board-table.tsx';
@@ -407,7 +407,23 @@ export function BoardPage({
         </p>
       ) : view === 'kanban' ? (
         model.groups.length === 0 ? (
-          <p className="fy-board__empty">No project has a board yet.</p>
+          filters.project === null ? (
+            <p className="fy-board__empty">No project has a board yet.</p>
+          ) : (
+            // Narrowed to a project whose last visible task has left: it is still named, with the way back.
+            <div className="fy-board-rows">
+              <BoardProject
+                count={0}
+                focus={projectFocus}
+                machine={null}
+                name={projectNames.get(filters.project) ?? filters.project.slice(0, 8)}
+                projectId={filters.project}
+                several={false}
+              >
+                <p className="fy-board__empty">No task in this project right now.</p>
+              </BoardProject>
+            </div>
+          )
         ) : phone ? (
           <PhoneKanban
             at={params.get('at')}

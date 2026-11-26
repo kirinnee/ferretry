@@ -670,9 +670,10 @@
     overscroll-behavior-x: contain;
     scrollbar-width: none;
   }
+  /* All five views fit the strip at the highest rounding (none is cut off at its edge); it still scrolls if they do not. */
   .fy-board__view {
-    flex: none;
-    padding-inline: var(--gap-sm);
+    flex: 1 0 auto;
+    padding-inline: var(--gap-xs);
     white-space: nowrap;
   }
   .fy-board-lane {
@@ -783,7 +784,8 @@
 }
 .fy-board-phone__panel {
   min-width: 0;
-  min-height: 40vh;
+  /* Tall enough to take a sideways drag, short enough that stacked projects leave no wide gap between them. */
+  min-height: min(40vh, 8rem);
   /* A sideways drag is the lane switch; the page still scrolls up and down. */
   touch-action: pan-y;
 }
