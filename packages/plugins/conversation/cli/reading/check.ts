@@ -16,7 +16,7 @@
  * passes here can still fall back to a code fence for one of those reasons. The check says what it can prove.
  */
 import { readConfigText } from '@ferretry/std/yaml';
-import { check, type ParseOptions, type Problem, setYamlParser, UNTRUSTED_LIMITS } from 'durian-hypermedia';
+import { check, type ParseOptions, type Problem, setYamlParser, UNTRUSTED_LIMITS } from 'durian-markdown';
 import { FY_RENDER_LIMITS } from '../../contract/fy-render-caps.ts';
 import { parseFyRenderHeaders, validateHtml, validateSvg } from '../../contract/fy-render.ts';
 
@@ -73,14 +73,51 @@ export function diagnosticText(text: string): string {
 const FY_RENDER_FENCE = 'fy-render';
 
 /**
- * The Durian parts the app does NOT draw (`app/hypermedia/held-fences.tsx`): a chart's formulas have no bound on their
- * work and the code walk's notes are set as HTML, so each is shown as the code it is. The guide never teaches them; an agent
+ * The Durian parts the app does NOT draw (`app/hypermedia/held-fence-parse.ts`): a chart's formulas have no bound on their work
+ * (until U5 of the DurianMarkdown swap), and the parts of Durian 0.7.0's folders (`diff`, `graph`, `log`, ...) and the `state`, `class` and
+ * `er` diagrams are drawn only after each one's review. Each is shown as the code it is. The guide never teaches them; an agent
  * that writes one anyway is told here. The two halves cannot share the list (a CLI half may not import an app half);
  * `tests/unit/cli/render-check.test.ts` pins the words to the app's own held fences.
  */
+const NOT_DRAWN_YET = 'this part is not drawn by the app yet; show the content as a plain code fence or in prose';
 const HELD_PART_FENCES: ReadonlyMap<string, string> = new Map([
   ['chart', 'a chart is an fy-render block of type chart'],
-  ['codewalk', 'show the code in a plain fence with the notes in prose'],
+  ...[
+    'audio',
+    'calendar',
+    'chart-kinds',
+    'compare',
+    'compare-image',
+    'diff',
+    'downloads',
+    'explore',
+    'fishbone',
+    'flame',
+    'gallery',
+    'gantt',
+    'glossary',
+    'graph',
+    'http',
+    'log',
+    'lottie',
+    'map',
+    'math',
+    'pdf',
+    'references',
+    'sankey',
+    'sequence',
+    'stacktrace',
+    'stats',
+    'timeline',
+    'trace',
+    'venn',
+    'video',
+    'wardley',
+    'weather',
+    'state',
+    'class',
+    'er',
+  ].map(word => [word, NOT_DRAWN_YET] as const),
 ]);
 
 /** A fence line, wherever it sits: after quote marks and a list marker, a run of three or more backticks or tildes. */
@@ -135,9 +172,6 @@ function fyRenderRefusal(source: string): string | null {
       return null;
   }
 }
-
-/** A line that opens a step the way a part's own marker does: `@step` first on the line, then a space or the end. */
-const BARE_STEP = /^\s*@step(?:\s|$)/u;
 
 /**
  * What one scan of a message's fences found: the problems of its `fy-render` fences, the held parts, and the 1-based
@@ -197,15 +231,6 @@ function scanFences(text: string): FenceScan {
       const reason = fyRenderRefusal(body.join('\n'));
       if (reason !== null)
         found.push({ line: index + 1, level: 'error', message: `${reason}; the block is shown as a plain code fence` });
-    } else if (first === 'mermaid') {
-      // Mermaid's step marker is a comment, `%% @step <title>`; a bare `@step` is not one, so the diagram is a single frame.
-      for (let at = index + 1; at < end; at += 1)
-        if (BARE_STEP.test(lines[at] as string))
-          found.push({
-            line: at + 1,
-            level: 'warn',
-            message: 'a bare @step is not a step in a mermaid diagram (it stays one frame); write `%% @step <caption>`',
-          });
     }
     index = end;
   }
@@ -220,7 +245,13 @@ function scanFences(text: string): FenceScan {
  */
 function durianFindings(text: string): Finding[] {
   configureYaml();
-  const options: ParseOptions = { frontMatter: false, limits: { ...UNTRUSTED_LIMITS, ...CHECK_LIMITS } };
+  // `mermaid` is not a Durian part in 0.7.0 but a host block of the app's (`app/hypermedia/mermaid-slot.tsx`): named here so its fence is
+  // read as the block it is, not as plain code that Durian's check would tell the author to replace.
+  const options: ParseOptions = {
+    frontMatter: false,
+    limits: { ...UNTRUSTED_LIMITS, ...CHECK_LIMITS },
+    blocks: [{ name: 'mermaid' }],
+  };
   return check(text, options).map((problem: Problem) => ({
     line: problem.line,
     level: problem.level,

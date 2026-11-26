@@ -1,4 +1,4 @@
-import type { Document } from 'durian-hypermedia';
+import type { Document } from 'durian-markdown';
 
 /**
  * WHAT CROSSES BETWEEN THE PAGE AND THE DURIAN WORKER: plain data, nothing else (structured-clone safe, which

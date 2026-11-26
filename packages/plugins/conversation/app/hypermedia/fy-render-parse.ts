@@ -1,4 +1,4 @@
-import type { BlockDef } from 'durian-hypermedia';
+import type { BlockDef } from 'durian-markdown';
 import { tolerateAuthoringNoise } from '../render/authoring-noise.ts';
 import { parseFyRender } from '../render/fy-render.ts';
 import { type CommonMarkFence, DURIAN_FENCE, linesOf, type SettledFences } from './fence-boundaries.ts';

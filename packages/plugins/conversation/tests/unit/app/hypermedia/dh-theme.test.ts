@@ -20,7 +20,7 @@ import { readLook, variantOf } from '../../../../app/hypermedia/look.ts';
 
 const folder = join(import.meta.dir, '../../../../app/hypermedia');
 const durian = dirname(
-  createRequire(join(import.meta.dir, '../../../../package.json')).resolve('durian-hypermedia/package.json'),
+  createRequire(join(import.meta.dir, '../../../../package.json')).resolve('durian-markdown/package.json'),
 );
 
 const withoutComments = (text: string): string => text.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/^\s*\/\/.*$/gmu, '');
@@ -60,7 +60,7 @@ describe('the hypermedia folder draws no colour of its own', () => {
 describe('dh-theme.css names every colour Durian defines', () => {
   /** The custom properties of the package's `:root` rules whose value is a colour literal (light defaults; dark restates the same names). */
   const colourTokens = (file: string): string[] => {
-    const css = withoutComments(readFileSync(join(durian, 'src/ui', file), 'utf8'));
+    const css = withoutComments(readFileSync(join(durian, 'src', file), 'utf8'));
     const names = new Set<string>();
     for (const match of css.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/gu)) {
       const value = (match[2] ?? '').trim();
@@ -68,7 +68,20 @@ describe('dh-theme.css names every colour Durian defines', () => {
     }
     return [...names];
   };
-  const tokens = [...colourTokens('theme.css'), ...colourTokens('base.css'), ...colourTokens('parts.css')];
+  // Every stylesheet the built `styles.css` holds: the renderer's own (`ui/*.css`) and each part's folder (`parts/<name>/style.css`, `parts/kit`).
+  const sheets = [
+    ...readdirSync(join(durian, 'src/ui'))
+      .filter(name => name.endsWith('.css'))
+      .map(name => `ui/${name}`),
+    ...readdirSync(join(durian, 'src/parts'), { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .flatMap(entry =>
+        readdirSync(join(durian, 'src/parts', entry.name))
+          .filter(name => name.endsWith('.css'))
+          .map(name => `parts/${entry.name}/${name}`),
+      ),
+  ];
+  const tokens = [...new Set(sheets.flatMap(colourTokens))];
 
   it('finds the package tokens it is checking', () => {
     expect(tokens.length).toBeGreaterThan(80);

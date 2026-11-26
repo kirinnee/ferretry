@@ -28,7 +28,7 @@ const SCENE_CSS = `
 
 const durianCss = async (): Promise<string> => {
   const root = dirname(
-    createRequire(join(packageRoot, '../../../package.json')).resolve('durian-hypermedia/package.json'),
+    createRequire(join(packageRoot, '../../../package.json')).resolve('durian-markdown/package.json'),
   );
   const { buildCss } = (await import(join(root, 'scripts/build-css.ts'))) as { buildCss: () => string };
   return `${buildCss()}\n${await readFile(join(packageRoot, '../../../app/hypermedia/dh-theme.css'), 'utf8')}`;

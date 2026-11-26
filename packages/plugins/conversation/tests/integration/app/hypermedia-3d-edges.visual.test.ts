@@ -37,7 +37,7 @@ let THREE: { Color: new (style: string) => ThreeColor };
 beforeAll(async () => {
   browser = await sharedChromium();
   const durian = dirname(
-    createRequire(join(packageRoot, '../../../package.json')).resolve('durian-hypermedia/package.json'),
+    createRequire(join(packageRoot, '../../../package.json')).resolve('durian-markdown/package.json'),
   );
   const { buildCss } = (await import(join(durian, 'scripts/build-css.ts'))) as { buildCss: () => string };
   // The same three.js Durian's stage runs on (its own dependency).

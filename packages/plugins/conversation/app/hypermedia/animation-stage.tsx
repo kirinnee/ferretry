@@ -4,4 +4,4 @@
  * registers itself with the parser's door (`durian-shims/scene-late.ts`) when this chunk evaluates, which is why the engine is
  * "ready" exactly when this import resolves. The 3D stage stays its own, later, chunk (Durian imports it with `import()`).
  */
-export { AnimationPart as AnimationStage } from 'durian-hypermedia/react/strict';
+export { AnimationPart as AnimationStage } from 'durian-markdown/react/animation';

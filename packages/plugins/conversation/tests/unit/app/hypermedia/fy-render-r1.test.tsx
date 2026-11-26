@@ -160,7 +160,10 @@ describe('the size cap is checked on the text the reader parses (2312 H4)', () =
     const text = `${head}\n${'a'.repeat(MESSAGE_LIMITS.maxInputBytes - 1 - bytes(head) - 2)}\u{0}`;
     expect(bytes(text)).toBe(MESSAGE_LIMITS.maxInputBytes - 1);
     const read = mustRead(text, 'p-');
-    expect(read.doc.problems.map(problem => problem.message)).toEqual([]);
+    // Not a size problem. (Prose this long spends the page's expression budget in Durian 0.7.0's `spark` mark, which says so as a problem and leaves the text as written.)
+    expect(
+      read.doc.problems.map(problem => problem.message).filter(message => /bytes|too big/iu.test(message)),
+    ).toEqual([]);
     expect(read.doc.blocks.length).toBeGreaterThan(0);
   });
 

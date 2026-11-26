@@ -1,4 +1,4 @@
-import type { UrlPolicy } from 'durian-hypermedia';
+import type { UrlPolicy } from 'durian-markdown';
 
 /**
  * THE ONE DOOR EVERY LINK IN A MESSAGE PASSES, at parse and again at render. A link an agent wrote may go to the

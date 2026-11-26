@@ -7,14 +7,15 @@ may — and should, when an idea is not straightforward — communicate that way
 
 This page is the contract for the switch, the instruction it injects, and the guide an agent reads to
 write the markup (`fy render guide`, `fy render check`). A message is Markdown with rich parts
-(Durian Hypermedia: the `terminal`, `filetree`, `editor`, `tierlist`, `alignment`, `mermaid` and `animation` fences,
+(DurianMarkdown 0.7.0: the `terminal`, `filetree`, `editor`, `tierlist`, `alignment`, `mermaid` and `animation` fences,
 `:::tabs` and `:::accordion`, and `:::human` and `:::llm` text); charts, pictures, media, maps and
 live tasks are the `fy-render` fence, whose grammar, caps, sinks and declared
 gaps are owned by [docs/fy-render.md](fy-render.md). **The teaching names only what the app draws today**: the
 prompt and this guide must not present a part whose renderer is not drawing, because it would show as text. Two Durian
-parts are deliberately NOT taught: a Durian `chart` fence and the `codewalk` are held as plain code (r12 H4 review: a
-chart's formulas have no bound on their work, and the code walk's notes are set as HTML), so a chart is the `fy-render`
-chart. `tests/unit/app/hypermedia/teaching-examples.test.tsx` fails the change that teaches a part the app does not draw:
+parts are deliberately NOT taught: a Durian `chart` fence is held as plain code (r12 H4 review: a chart's formulas have no
+bound on their work), so a chart is the `fy-render` chart; and the parts of Durian 0.7.0's folders (`diff`, `graph`, `log`, `http`, ...) are held
+as plain code too until a unit reviews and draws each (the `codewalk` was held for its HTML notes and is drawn since U1). `mermaid` is no
+longer a Durian part: it is our own host block, kept so an old message's diagram still draws (decision D2), and is drawn whole (a `%% @step` line is a comment). `tests/unit/app/hypermedia/teaching-examples.test.tsx` fails the change that teaches a part the app does not draw:
 every example of the guide must pass `fy render check` and draw, or be one it names as shown as code.
 **Interim (r12 H11a, until the parser runs off the main thread):** an `animation` fence and the `:::tabs` and
 `:::accordion` containers are shown as code too, their source as written, and the guide says so; and a message over the
@@ -107,7 +108,7 @@ Two shapes are deliberately absent from this section. An example fence of the `f
 
 ### overview
 
-A message is Markdown (GitHub flavour: headings, lists, tables, task lists, code, links) with rich parts. A part is a fence named for it: `terminal`, `filetree`, `editor`, `tierlist`, `alignment`, `mermaid`, `animation`. Prose parts are containers, a line `:::tabs` or `:::accordion` closed by a line `:::`. A line `:::human` closed by a line `:::` is text for people, and `:::llm` after a part is the text another agent reads. Any other fence (`ts`, `diff`, `sh`) is plain code — and so is a `chart` or `codewalk` fence, which the app does not draw: a chart is an `fy-render` block (below). For now an `animation` fence and a `:::tabs` or `:::accordion` container are shown as code too, their source as written: use them only where the source is the point. A message over the pre-parse limits is shown as plain text. A part with a mistake in it is shown as its source with the problem named, so check that it drew.
+A message is Markdown (GitHub flavour: headings, lists, tables, task lists, code, links) with rich parts. A part is a fence named for it: `terminal`, `filetree`, `editor`, `tierlist`, `alignment`, `mermaid`, `animation`. Prose parts are containers, a line `:::tabs` or `:::accordion` closed by a line `:::`. A line `:::human` closed by a line `:::` is text for people, and `:::llm` after a part is the text another agent reads. Any other fence (`ts`, `diff`, `sh`) is plain code — and so is a `chart` fence, which the app does not draw: a chart is an `fy-render` block (below). For now an `animation` fence and a `:::tabs` or `:::accordion` container are shown as code too, their source as written: use them only where the source is the point. A message over the pre-parse limits is shown as plain text. A part with a mistake in it is shown as its source with the problem named, so check that it drew.
 
 Charts, pictures, media, maps, live tasks and static or interactive pages are a different fence: its info string is exactly `fy-render`, line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload. Types: `chart`, `svg`, `html`, `map`, `image`, `video`, `audio`, `pdf`, `lottie`, `task`, `board`. A broken block renders as an ordinary code fence with no warning, so run `fy render check` on the message first.
 

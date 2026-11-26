@@ -1,15 +1,15 @@
 /**
  * r12 H1 — THE DURIAN DEPENDENCY AND ITS BUILD SEAM (the assertions that must be red on a base with no seam).
  *
- * `durian-hypermedia` is a git dependency pinned to a tag AND its commit. Its `dist/` is built by a `prepare`
+ * `durian-markdown` is a git dependency pinned to a tag AND its commit. Its `dist/` is built by a `prepare`
  * script, and Ferretry installs with `--ignore-scripts` (nix/ferretry.nix), so the package arrives as source and the
  * bundle must read that source (the `bun` export condition) and build the stylesheet itself. This file proves, on the
  * real installed package and a real Vite build:
- *   1. the install is exactly v0.6.2 at its pinned commit, and `prepare` did not run (no `dist/`);
+ *   1. the install is exactly v0.7.0 at its pinned commit, and `prepare` did not run (no `dist/`);
  *   2. one build holds ONE chart.js and ONE dompurify (Durian pins versions of its own);
- *   3. a chunk holds Durian's `VERSION` 0.6.2;
+ *   3. a chunk holds Durian's `VERSION` 0.7.0;
  *   4. the 3D chunk (three.js) is NOT in the static graph of a page without a 3D block: it is a lazy chunk;
- *   5. neither mermaid nor Durian's in-page DOMPurify drawing is in the bundle (the strict entry);
+ *   5. neither mermaid nor an in-page DOMPurify drawing is in the bundle (0.7.0 has neither);
  *   6. the stylesheet is built, scoped under `.dh-doc`.
  * The plugin under test is the one the app's REAL `vite.config.ts` registers (found there by name), so the seam that
  * ships is the seam that is proved.
@@ -26,11 +26,11 @@ const WORKSPACE = join(import.meta.dir, '../../../..');
 const CONVERSATION = join(WORKSPACE, 'packages/plugins/conversation');
 const ENTRY = join(CONVERSATION, 'tests/fixtures/hypermedia-bundle-entry.ts');
 
-/** What the owner approved: durian-hypermedia v0.6.2 (signed tag object c0a189a837a59219c9a927f13e8bc2cf7445ee77), MIT. */
-const PINNED_COMMIT = '635b083de304070660d0df104df5a2055f63e944';
+/** What the owner approved: durian-markdown v0.7.0 (tag object 3a4d516fffbfc1ec0faed851ef0f59926ee87390; the package was `durian-hypermedia` until this release), MIT. */
+const PINNED_COMMIT = 'a246782bb59ab48ad629345f987930fb84a10e8b';
 /** The SHA-512 of the tarball of that commit, as Bun recorded it: the bytes, not only the name. */
 const PINNED_INTEGRITY =
-  'sha512-JYtM6KXpO3LkrbIeR6R/nDPXwGJI4hEYK9Bt6Uvku/rwHZMxN+fOq9V19nHN8Mzf53MXhZU7TqJqaKyIFs/HLw==';
+  'sha512-9M+iJ5Bcqgn6M+9pc+vQvV3KZo2SRAcmiL/WtNFinneMUF6ij9V4VQYl6Witz2W4oIU7DpvGFn1F4JW+sSfUDA==';
 
 /** The versions THIS app pins: the only ones the bundle may hold. */
 const ours = (
@@ -39,21 +39,21 @@ const ours = (
 
 /** The Durian build plugin, taken from the shell's own config: registered there, or this file fails. */
 const durianPlugin = (viteConfig.plugins as readonly { name?: string }[]).find(
-  p => p.name === 'fy-durian-hypermedia',
+  p => p.name === 'fy-durian-markdown',
 ) as Plugin;
 
-const installed = dirname(createRequire(join(CONVERSATION, 'package.json')).resolve('durian-hypermedia/package.json'));
+const installed = dirname(createRequire(join(CONVERSATION, 'package.json')).resolve('durian-markdown/package.json'));
 
 describe('the pinned install', () => {
-  it('is v0.6.2, MIT, and records its commit in the lockfile', () => {
+  it('is v0.7.0, MIT, and records its commit in the lockfile', () => {
     const manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8')) as {
       version: string;
       license: string;
     };
-    expect(manifest.version).toBe('0.6.2');
+    expect(manifest.version).toBe('0.7.0');
     expect(manifest.license).toBe('MIT');
     const lock = readFileSync(join(WORKSPACE, 'bun.lock'), 'utf8');
-    const line = lock.split('\n').find(l => l.includes('"durian-hypermedia@'));
+    const line = lock.split('\n').find(l => l.includes('"durian-markdown@'));
     expect(line).toBeDefined();
     // Bun records a git dependency's resolved commit (short or full) in the lock entry: a moved tag cannot move it.
     expect(line).toContain(`#${PINNED_COMMIT.slice(0, 7)}`);
@@ -64,7 +64,7 @@ describe('the pinned install', () => {
     const own = JSON.parse(readFileSync(join(CONVERSATION, 'package.json'), 'utf8')) as {
       dependencies: Record<string, string>;
     };
-    expect(own.dependencies['durian-hypermedia']).toBe(`github:ProtoDurian/durian-hypermedia#${PINNED_COMMIT}`);
+    expect(own.dependencies['durian-markdown']).toBe(`github:ProtoDurian/durian-markdown#${PINNED_COMMIT}`);
   });
 
   it('did not run `prepare`: no dist/ (installs use --ignore-scripts), and the package is never trusted to', () => {
@@ -72,7 +72,7 @@ describe('the pinned install', () => {
     const root = JSON.parse(readFileSync(join(WORKSPACE, 'package.json'), 'utf8')) as {
       trustedDependencies?: string[];
     };
-    expect(root.trustedDependencies ?? []).not.toContain('durian-hypermedia');
+    expect(root.trustedDependencies ?? []).not.toContain('durian-markdown');
   });
 });
 
@@ -120,9 +120,9 @@ describe('one Vite build of the renderer entry', () => {
     expect(purifiers).toEqual([ours.dompurify]);
   });
 
-  it('holds the chunk with Durian VERSION 0.6.2', () => {
+  it('holds the chunk with Durian VERSION 0.7.0', () => {
     // `VERSION` is a constant the bundler inlines, so the chunk is the one holding the version AND Durian's parser.
-    expect(count(/"0\.6\.2"[\s\S]*registeredBlocks|registeredBlocks[\s\S]*"0\.6\.2"/u)).toBe(1);
+    expect(count(/"0\.7\.0"[\s\S]*registeredBlocks|registeredBlocks[\s\S]*"0\.7\.0"/u)).toBe(1);
   });
 
   it('keeps three.js out of the static graph: the 3D chunk is lazy', () => {

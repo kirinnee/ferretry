@@ -1,6 +1,6 @@
 import { type MarkdownAstFenceNode, useReferenceSurface } from '@ferretry/app';
-import type { BlockDef, HostBlock } from 'durian-hypermedia';
-import type { CodeSlotProps, Slots } from 'durian-hypermedia/react/strict';
+import type { BlockDef, HostBlock } from 'durian-markdown';
+import type { CodeSlotProps, Slots } from 'durian-markdown/react/strict';
 import { type ComponentType, createContext, useContext, useMemo } from 'react';
 import { FY_RENDER_FENCE_ATTRIBUTE } from '../render/fy-render.ts';
 import {

@@ -8,7 +8,7 @@ import { ReferenceSurfaceProvider } from '@ferretry/app';
 import { ensureDom, interact, mount, must } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
 import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
-import { parse } from 'durian-hypermedia';
+import { parse } from 'durian-markdown';
 import { settleFences } from '../../../../app/hypermedia/fence-boundaries.ts';
 import { fyRenderParseBlock } from '../../../../app/hypermedia/fy-render-parse.ts';
 import { fyRenderFences } from '../../../../app/render/fences.tsx';

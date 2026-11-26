@@ -1,5 +1,5 @@
 /**
- * THE TYPES OF `durian-hypermedia` AS WE USE THEM, mapped in by the root `tsconfig.json` (`paths`, the way
+ * THE TYPES OF `durian-markdown` AS WE USE THEM, mapped in by the root `tsconfig.json` (`paths`, the way
  * `playwright-core` is). The package's own `types` entry is its TypeScript SOURCE (`./src/index.ts`; its `dist/` is never
  * built here, see `../../vite-durian.ts`), which this workspace's compiler would read as OURS and reject: the source is
  * written without `noUncheckedIndexedAccess` and has duplicate-key literals, so one `import` puts hundreds of errors
@@ -20,14 +20,14 @@
  */
 
 export declare const VERSION: string;
-/** The format version the parser implements (SPEC.md); 10 in v0.6.2. */
+/** The format version the parser implements (SPEC.md); 11 in v0.7.0. */
 export declare const FORMAT_VERSION: number;
 
 /** One YAML parser for the front matter and the data parts; the browser has no `Bun.YAML`. */
 export declare function setYamlParser(parse: ((text: string) => unknown) | null): void;
 
-/** The caps (`src/safety.ts`): a host may lower or raise any of them with `parse(text, { limits })`. The twenty-three keys are the whole set. */
-export interface Limits {
+/** The caps (`src/safety.ts`): a host may lower or raise any of them with `parse(text, { limits })`. The keys of `Limits` and `PartLimits` are the whole set. */
+export interface Limits extends PartLimits {
   /** the whole input, in UTF-8 bytes */
   maxInputBytes: number;
   /** blocks in the document (Markdown blocks, parts and the blocks inside containers) */
@@ -44,9 +44,7 @@ export interface Limits {
   maxChartPoints: number;
   /** items of one tier list or alignment grid */
   maxItems: number;
-  /** characters of one mermaid diagram */
-  maxMermaidChars: number;
-  /** steps of any stepped part (terminal, file tree, editor, code walk, mermaid) */
+  /** steps of any stepped part (terminal, file tree, editor, code walk, animation) */
   maxSteps: number;
   /** layout work of one animation, and of every animation on the page together */
   maxAnimWork: number;
@@ -67,6 +65,172 @@ export interface Limits {
   /** nodes of one YAML text, and of all of a page's YAML texts together */
   maxYamlNodes: number;
   maxPageYamlNodes: number;
+  /** annotations, steps and heatmap cells of one chart */
+  maxChartAnnotations: number;
+  maxChartSteps: number;
+  maxChartHeatCells: number;
+  /** rows and inputs of a calculator-layout chart */
+  maxCalcRows: number;
+  maxCalcInputs: number;
+  /** references (`[[type:name]]`) one page may hold, and the bytes of all the parts they resolve to */
+  maxReferences: number;
+  maxReferenceBytes: number;
+  /** bytes of one SVG, and of one interactive part, a reference resolves to */
+  maxSvgBytes: number;
+  maxInteractiveBytes: number;
+}
+/** The caps of the folder parts (`src/parts/<name>/limits.ts`, generated into `src/parts/generated/limits.ts`): each key starts with its part's name. */
+export interface PartLimits {
+  audioTranscriptLines: number;
+  audioChapters: number;
+  audioMarkers: number;
+  audioVttCues: number;
+  audioWaveformSamples: number;
+  audioPeaksBytes: number;
+  audioDecodeBytes: number;
+  audioTranscriptBytes: number;
+  calendarLines: number;
+  calendarOccurrences: number;
+  chartKindsValues: number;
+  chartKindsViolinValues: number;
+  chartKindsBins: number;
+  chartKindsCategories: number;
+  chartKindsSeries: number;
+  chartKindsMarks: number;
+  chartKindsStages: number;
+  chartKindsSteps: number;
+  chartKindsTreeNodes: number;
+  chartKindsTreeDepth: number;
+  chartKindsDays: number;
+  chartKindsLabel: number;
+  compareOptions: number;
+  compareRows: number;
+  compareValue: number;
+  compareNote: number;
+  compareName: number;
+  compareImageAlt: number;
+  compareImageLabel: number;
+  compareImageUrl: number;
+  diffLines: number;
+  diffFiles: number;
+  diffWordLine: number;
+  diffWordTokens: number;
+  diffEditLength: number;
+  downloadsFiles: number;
+  downloadsCheckBytes: number;
+  exploreChars: number;
+  exploreDepth: number;
+  exploreCsvRows: number;
+  exploreCsvCols: number;
+  exploreQueryChars: number;
+  exploreReaderQueryChars: number;
+  exploreQueryDepth: number;
+  exploreQueryResults: number;
+  exploreRegexChars: number;
+  exploreRegexProgram: number;
+  exploreRegexRepeat: number;
+  exploreQueryJsonChars: number;
+  exploreReaderSteps: number;
+  exploreReaderValues: number;
+  exploreReaderChars: number;
+  exploreRowsPerNode: number;
+  exploreSearchNodes: number;
+  exploreTableRows: number;
+  exploreTableCols: number;
+  exploreStringCut: number;
+  fishboneCauses: number;
+  fishboneSubCauses: number;
+  flameFrames: number;
+  flameLines: number;
+  flameDepth: number;
+  flameName: number;
+  galleryImages: number;
+  ganttTasks: number;
+  ganttSteps: number;
+  ganttSections: number;
+  ganttDeps: number;
+  ganttSpanDays: number;
+  glossaryTerms: number;
+  glossaryLabel: number;
+  glossaryDef: number;
+  glossaryAliases: number;
+  graphNodes: number;
+  graphEdges: number;
+  graphGroups: number;
+  graphDepth: number;
+  graphFoldFirst: number;
+  httpLines: number;
+  httpHeaders: number;
+  httpJsonDepth: number;
+  httpJsonNodes: number;
+  httpChars: number;
+  logLines: number;
+  logQueryChars: number;
+  logReaderQueryChars: number;
+  logQueryDepth: number;
+  logQueryResults: number;
+  logRegexChars: number;
+  logRegexProgram: number;
+  logRegexRepeat: number;
+  logQueryJsonChars: number;
+  logReaderSteps: number;
+  logReaderValues: number;
+  logReaderChars: number;
+  lottieBytes: number;
+  lottieFrames: number;
+  lottieLayers: number;
+  lottieNodes: number;
+  mapPlaces: number;
+  mapShapes: number;
+  mapPoints: number;
+  mapFills: number;
+  mapArcs: number;
+  mapGeoPoints: number;
+  mathChars: number;
+  mathFormulas: number;
+  mathNodes: number;
+  pdfPages: number;
+  pdfBytes: number;
+  referencesEntries: number;
+  referencesAuthors: number;
+  referencesText: number;
+  referencesCites: number;
+  sankeyFlows: number;
+  sankeyNodes: number;
+  sankeySteps: number;
+  sequenceParticipants: number;
+  sequenceItems: number;
+  sequenceDepth: number;
+  sparkValues: number;
+  stacktraceLines: number;
+  statsTiles: number;
+  statsSpark: number;
+  statsText: number;
+  statsNote: number;
+  timelineEvents: number;
+  traceSpans: number;
+  traceLines: number;
+  traceDepth: number;
+  traceName: number;
+  traceAttrs: number;
+  traceValue: number;
+  traceLogs: number;
+  traceServices: number;
+  traceText: number;
+  traceServiceLabel: number;
+  traceOpen: number;
+  vennNames: number;
+  videoTranscriptLines: number;
+  videoChapters: number;
+  videoCaptionFiles: number;
+  videoVttCues: number;
+  videoTranscriptBytes: number;
+  videoVttBytes: number;
+  videoThumbsBytes: number;
+  wardleyComponents: number;
+  weatherRows: number;
+  weatherLineChars: number;
+  weatherNoteChars: number;
 }
 
 /** The default caps, sized for AUTHORED pages (`src/safety.ts`). Never the caps of a chat message: see {@link UNTRUSTED_LIMITS}. */
@@ -94,7 +258,17 @@ export type MdInline =
   | { t: 'coderef'; ref: string; c: MdInline[] }
   | { t: 'kbd'; label: string; chords: string[][] }
   | { t: 'mouse'; act: string; press: 'l' | 'r' | 'w' | ''; badge: string; target: string }
-  | { t: 'ref'; name: string; text: string; data: unknown };
+  | { t: 'ref'; name: string; text: string; data: unknown }
+  | {
+      t: 'reference';
+      type: string;
+      name: string;
+      label: string | null;
+      text: string;
+      error?: string;
+      state?: 'pending' | 'ready' | 'failed';
+      reason?: string;
+    };
 export type CalloutKind = 'note' | 'tip' | 'important' | 'warn' | 'security';
 export type MdBlock =
   | { t: 'p'; c: MdInline[] }
@@ -160,7 +334,7 @@ interface PartBase {
   attrs: Record<string, string>;
   /** what an LLM reads in place of this part */
   llm: string | null;
-  llmKind: 'as-is' | 'data' | 'steps' | 'lines' | 'unwrap' | 'text' | 'none' | 'drop' | 'replace' | 'host';
+  llmKind: 'as-is' | 'data' | 'steps' | 'lines' | 'unwrap' | 'text' | 'none' | 'drop' | 'replace' | 'host' | 'own';
 }
 
 export interface MarkdownBlock {
@@ -262,11 +436,15 @@ export interface ChartBlock extends PartBase {
   /** Durian types the chart spec as `any`: its shape is the chart YAML's, checked at parse time. */
   chart: unknown;
   controls: ChartControl[];
-  initial: { x: Val[]; series: ChartSeries[]; vars: Record<string, Val>; error?: string };
-}
-export interface MermaidBlock extends PartBase {
-  type: 'mermaid';
-  steps: { title: string; src: string }[];
+  initial: {
+    x: Val[];
+    series: ChartSeries[];
+    vars: Record<string, Val>;
+    error?: string;
+    limit?: 'part' | 'page';
+    /** The facts of a chart written with steps, a time axis, annotations, formats or a heatmap (`core/chart11.ts`). */
+    ext?: unknown;
+  };
 }
 export interface AnimationBlock extends PartBase {
   type: 'animation';
@@ -276,7 +454,26 @@ export interface AnimationBlock extends PartBase {
     base: number;
     info: Record<string, string>;
   };
+  /** A composed stage (lanes, cards, panels, a time block): its source and the page's roles (role name to colour 0 to 8). */
+  stage?: {
+    src: {
+      head: string;
+      steps: { title: string; raw: string; line: number }[];
+      base: number;
+      info: Record<string, string>;
+    };
+    roles: Record<string, number>;
+  };
   /** what a reader sees as text in this animation, in story order */
+  texts: string[];
+}
+/** A state, class or ER diagram (`core/diagrams.ts`): its own small language, compiled to a scene the animation engine draws. */
+export interface DiagramBlock extends PartBase {
+  type: 'state' | 'class' | 'er';
+  anim: AnimationBlock['anim'] & { part: 'state' | 'class' | 'er'; title: string };
+  /** What stops it being drawn; then `body` (its source) is shown plain. */
+  refused: { line: number; msg: string }[];
+  body: string;
   texts: string[];
 }
 export interface TierListBlock extends PartBase {
@@ -298,6 +495,71 @@ export interface AccordionBlock extends PartBase {
 export interface HumanBlock extends PartBase {
   type: 'human';
   body: Block[];
+}
+/** The fence words of the parts in their own folders (`src/parts/<name>/`, `FOLDER_PART_NAMES`). */
+export type FolderPartName =
+  | 'audio'
+  | 'calendar'
+  | 'chart-kinds'
+  | 'compare'
+  | 'compare-image'
+  | 'diff'
+  | 'downloads'
+  | 'explore'
+  | 'fishbone'
+  | 'flame'
+  | 'gallery'
+  | 'gantt'
+  | 'glossary'
+  | 'graph'
+  | 'http'
+  | 'log'
+  | 'lottie'
+  | 'map'
+  | 'math'
+  | 'pdf'
+  | 'references'
+  | 'sankey'
+  | 'sequence'
+  | 'stacktrace'
+  | 'stats'
+  | 'timeline'
+  | 'trace'
+  | 'venn'
+  | 'video'
+  | 'wardley'
+  | 'weather';
+/** A part in its own folder: `data` is what its parser returned (a shape of its own, not declared here: this app draws none of them yet). */
+export type FolderBlock = {
+  [N in FolderPartName]: PartBase & { type: N; data: unknown };
+}[FolderPartName];
+/** A reference on a line of its own, `[[<type>:<name> "label"]]`: the host keeps the part and `resolveReference` answers for it. */
+export interface ReferenceBlock extends PartBase {
+  type: 'reference';
+  ref: { type: string; name: string; label: string | null; text: string };
+  state: 'unresolved' | 'pending' | 'ready' | 'failed';
+  /** Why it failed (the host's words, or the package's). */
+  reason?: string;
+  /** The referenced part, when ready. */
+  blocks?: Block[];
+}
+/** Raw SVG a reference stood for: drawn only through an `<img>`. */
+export interface SvgBlock extends PartBase {
+  type: 'svg';
+  svg: string;
+  title: string | null;
+  alt: string;
+}
+/** A component the host keeps (HTML, CSS, script) a reference stood for: run only in a sandboxed frame, and only when the host turns it on. */
+export interface InteractiveBlock extends PartBase {
+  type: 'interactive';
+  title: string | null;
+  height: number;
+  html: string;
+  css: string;
+  script: string;
+  fallback: MdBlock[];
+  alt: string;
 }
 /** A part that went over a cap, failed to parse, or is not allowed. */
 export interface ErrorBlock {
@@ -322,15 +584,19 @@ export type Block =
   | EditorBlock
   | CodeWalkBlock
   | ChartBlock
-  | MermaidBlock
   | AnimationBlock
+  | DiagramBlock
   | TierListBlock
   | AlignmentBlock
   | TabsBlock
   | AccordionBlock
   | HumanBlock
   | ErrorBlock
-  | HostBlock;
+  | HostBlock
+  | FolderBlock
+  | ReferenceBlock
+  | SvgBlock
+  | InteractiveBlock;
 /** The part names a component may be given for: the closed set of block `type`s. */
 export type BlockType = Block['type'];
 

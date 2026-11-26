@@ -40,12 +40,23 @@ const PLAN_ALLOWANCE_GZ = 110_000;
  * libraries it imports replace `marked`. The compiler that a first measurement of 0.6.2 showed in it too (+81 KB, through the alignment
  * grid's chip widths) is kept out by `durian-shims/text-width.ts`.
  */
-const MEASURED_FIRST_LOAD_GZ = 296_152;
-const MEASURED_LAZY_GZ = 171_439;
+const MEASURED_FIRST_LOAD_GZ = 302_443;
+/**
+ * U1 of the DurianMarkdown swap (0.7.0) moved the first load from 296,152 to 302,443 B (+6.3 KB): the code walk part and its stylesheet, the
+ * reference chip, the inline parts' views (maths, citations, glossary, spark) and the heading/table chrome of the new renderer. The
+ * page's Markdown renderer takes `inlineText` from `durian-shims/inline-text.ts`, not from the module that holds the whole parser
+ * (+400 KB gzip measured without it), and each part is imported from its own entry (`react/strict` holds all of them: +550 KB first
+ * load and 950 KB of lazy chunks: pdf.js, three, cytoscape, lottie, chart.js). The lazy chunks of 0.6.2 (the 2D and 3D animation
+ * engines, 171,439 B) are in no chunk now: nothing imports them while an animation is held as code.
+ */
+const MEASURED_LAZY_GZ = 83;
+/** The parser worker's own chunk (the page fetches it before its first message is read), measured at U1: Durian's parser, KaTeX for `$…$`, every part's parser. */
+const MEASURED_WORKER_GZ = 333_496;
 const HEADROOM_GZ = 5_000;
 const FIRST_LOAD_BUDGET_GZ = MEASURED_FIRST_LOAD_GZ + HEADROOM_GZ;
-/** Lazy chunks: the 3D stage (~135 KB) and the 2D animation engine (~37 KB), an absolute ceiling. */
+/** Lazy chunks: an absolute ceiling (the animation engines come back with the unit that draws animations, and raise it). */
 const LAZY_BUDGET_GZ = MEASURED_LAZY_GZ + HEADROOM_GZ;
+const WORKER_BUDGET_GZ = MEASURED_WORKER_GZ + HEADROOM_GZ;
 
 const kb = (bytes: number): string => `${(bytes / 1000).toFixed(1)} KB`;
 
@@ -63,8 +74,8 @@ const overBudget = (size: BundleSize): string[] => [
     : []),
 ];
 
-/** The Durian source modules by the path under `durian-hypermedia/src/` (a source path may be a symlinked or hashed install). */
-const durianModule = (path: string): string | undefined => /durian-hypermedia\/(src\/.*)$/u.exec(path)?.[1];
+/** The Durian source modules by the path under `durian-markdown/src/` (a source path may be a symlinked or hashed install). */
+const durianModule = (path: string): string | undefined => /durian-markdown\/(src\/.*)$/u.exec(path)?.[1];
 
 const conversation = resolve(import.meta.dir, '../..');
 const entry = resolve(import.meta.dir, 'fixtures/transcript-entry.tsx');
@@ -117,7 +128,7 @@ describe('the transcript bundle', () => {
     // Since H11 nothing imports the 2D engine (an animation is held as code until H14), so the compiler is in no chunk at all. The page's
     // alignment grid imported it for one function through Durian's chip widths until `text-width.ts` stood in (r12 H13: +81 KB gzip).
     const heavy =
-      /^src\/(core\/(scene|scenes|story|camera|route|depth|data|still9|readable|edge10)|ui\/(anim|anim3d|cam3d|geo3d))\./u;
+      /^src\/(core\/(scene|scenes|story|camera|route|depth|data|still9|readable|edge10|stage(?!-budget)[\w-]*)|ui\/(anim|anim3d|cam3d|geo3d|stage))\./u;
     for (const size of [real, worker]) {
       const found = [...size.firstModules, ...size.lazy.flatMap(chunk => chunk.modules)]
         .map(durianModule)
@@ -132,6 +143,52 @@ describe('the transcript bundle', () => {
     expect(worker.firstModules.some(path => path.endsWith('hypermedia/durian-shims/scene-late.ts'))).toBe(true);
     // The alignment grid is the page's, so the text-width stand-in is in the page's first load.
     expect(real.firstModules.some(path => path.endsWith('hypermedia/durian-shims/text-width.ts'))).toBe(true);
+  });
+
+  test('the parser worker is within its measured budget', () => {
+    expect(worker.firstLoadGz).toBeLessThanOrEqual(WORKER_BUDGET_GZ);
+    expect(worker.lazyGz).toBe(0);
+  });
+
+  test('NO part’s view and none of their libraries is in the page: each part is imported from its own entry, never from react/strict', () => {
+    const everything = [...real.firstModules, ...real.lazy.flatMap(chunk => chunk.modules)];
+    // The folder parts' views (`src/parts/<name>/view.tsx`) and the libraries behind them. Only the inline parts' views (maths in a sentence, a citation, a glossary term, a spark) are the page's.
+    const views = everything.filter(path =>
+      /durian-markdown\/src\/parts\/(?!kit\/|inline|generated\/)[\w-]+\/(?:view|inline-view|segs|render)\.tsx?$/u.test(
+        path,
+      ),
+    );
+    expect(views.map(path => durianModule(path)).sort()).toEqual(
+      [
+        'src/parts/glossary/inline-view.tsx',
+        'src/parts/glossary/segs.tsx',
+        'src/parts/math/inline-view.tsx',
+        'src/parts/math/view.tsx',
+        'src/parts/references/inline-view.tsx',
+        'src/parts/spark/inline-view.tsx',
+      ].sort(),
+    );
+    expect(
+      everything.filter(path =>
+        /\/node_modules\/(?:\.bun\/[^/]+\/node_modules\/)?(?:pdfjs-dist|lottie-web|cytoscape|three|katex|chart\.js|chartjs-chart-matrix)\//u.test(
+          path,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test('the page holds none of the parser: not the Markdown reader, markdown-it, or a part’s parser (it reads `inlineText` from our one-function stand-in)', () => {
+    const found = real.firstModules
+      .map(durianModule)
+      .filter(
+        (name): name is string =>
+          name !== undefined &&
+          /^src\/(markdown\.ts|vendor\/|document\.ts|core\/dh-lib\.ts|parts\/[\w-]+\/(?:part|parse|compute)\.ts)/u.test(
+            name,
+          ),
+      );
+    expect(found).toEqual([]);
+    expect(real.firstModules.some(path => path.endsWith('hypermedia/durian-shims/inline-text.ts'))).toBe(true);
   });
 
   test('no YAML reader is in the first load: no part a message draws reads YAML', () => {

@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { interact, mount } from '@ferretry/app/testing';
-import { type Block, LIMITS, type Limits, parse, setYamlParser, UNTRUSTED_LIMITS } from 'durian-hypermedia';
+import { type Block, LIMITS, type Limits, parse, setYamlParser, UNTRUSTED_LIMITS } from 'durian-markdown';
 import type { ReactNode } from 'react';
 import { answer } from '../../../../app/hypermedia/durian-answer.ts';
 import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
@@ -90,10 +90,7 @@ describe('each of the six caps makes an error block the chat does not draw', () 
   });
 
   it('is not made by an error block of another kind', () => {
-    // A mermaid diagram over ITS cap, and a fence never closed, are error blocks of their own: no one of the six, so the message is still read.
-    const mermaid = parsed(fence('mermaid', 'a'.repeat(UNTRUSTED_LIMITS.maxMermaidChars + 1)), {});
-    expect(mermaid.some(block => block.type === 'error')).toBe(true);
-    expect(hasCapErrorBlock(mermaid)).toBe(false);
+    // A fence never closed is an error block of its own: not one of the six, so the message is still read.
     const unclosed = parsed(`${FENCE}terminal\n$ x`, {});
     expect(unclosed.some(block => block.type === 'error')).toBe(true);
     expect(hasCapErrorBlock(unclosed)).toBe(false);

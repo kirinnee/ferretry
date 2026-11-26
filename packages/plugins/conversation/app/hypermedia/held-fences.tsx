@@ -1,13 +1,15 @@
-import type { BlockDef, HostBlock } from 'durian-hypermedia';
+import type { BlockDef, HostBlock } from 'durian-markdown';
 import type { ComponentType } from 'react';
 import { type HeldFenceData, HELD_BLOCKS } from './held-fence-parse.ts';
 import { authorTextBeside, LlmOnlyText } from './llm-text.tsx';
 import { HypermediaCode } from './slots.tsx';
 
 /**
- * TWO DURIAN PARTS ARE HELD AS THE CODE THEY ARE, BEFORE DURIAN READS THEM (r12 H4 review R1: S1 and G1). This file is the
- * renderer half; the parser half, which renames the fences and carries their source as data, is `held-fence-parse.ts`
- * (it runs inside the Durian worker, so it has no React in it).
+ * SOME DURIAN PARTS ARE HELD AS THE CODE THEY ARE, BEFORE DURIAN READS THEM (r12 H4 review R1; widened in U1 of the DurianMarkdown swap). This
+ * file is the renderer half; the parser half, which renames the fences and carries their source as data, is
+ * `held-fence-parse.ts` (it runs inside the Durian worker, so it has no React in it). Held: `chart` (below), the `animation`, the
+ * `state`, `class` and `er` diagrams, `:::tabs` and `:::accordion`, and every part of Durian 0.7.0's folders until a unit reviews and
+ * draws it. A held fence is shown as the highlighted code it is, with the author's `:::llm` text beside it as the usual disclosure.
  *
  * ```chart (S1, HIGH). Durian evaluates a chart's `let` formulas AT PARSE TIME (`src/core/dh-lib.ts` `jsonOf`, then
  * `chart-llm.ts`), on the main thread, and again on every control change. Its expression engine (`src/core/expr.ts`)
@@ -21,11 +23,11 @@ import { HypermediaCode } from './slots.tsx';
  * terminal, file tree, editor, code walk and mermaid parts read no expression. Our own `fy-render` chart is a different,
  * bounded reader and is untouched.
  *
- * ```codewalk (G1). It is not drawn (its notes are set as HTML, which the page's Trusted Types policy refuses), and a
- * Durian block keeps no source: with an author's `:::llm` after it, the fence's own text was nowhere on the page. Held,
- * its source and notes are drawn as code, and the `:::llm` text is the disclosure beside them.
+ * ```codewalk is NOT held any more (U1): Durian has drawn its notes as React elements since 0.3.0, and the page's policy is run over every
+ * upstream fixture with 0 violations. The expression engine of 0.7.0 is metered (a per-part and a per-page budget), but `chart` stays
+ * held until U5 re-measures the freeze cases against it.
  *
- * `HYPERMEDIA_PARTS` still names a component for both (its type requires one per part); none is reachable.
+ * `HYPERMEDIA_PARTS` still names a component for each part it must (its type requires one); none of the held ones is reachable.
  */
 
 /** The fence as the code it is, then the author's `:::llm` text as the usual disclosure. */

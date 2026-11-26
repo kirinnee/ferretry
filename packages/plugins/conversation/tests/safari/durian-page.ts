@@ -27,7 +27,7 @@ import { startSafariDriver, type WebDriver } from './webdriver.ts';
 
 const here = import.meta.dir;
 const selfCheck = Bun.argv.includes('--self-check');
-const durianRoot = dirname(createRequire(join(here, '../../package.json')).resolve('durian-hypermedia/package.json'));
+const durianRoot = dirname(createRequire(join(here, '../../package.json')).resolve('durian-markdown/package.json'));
 
 /** Five of Durian's own fixtures, one after the other, without front matter (a chat message has none). */
 const FIXTURE_NUMBERS = ['39', '35', '06', '31', '07'] as const;

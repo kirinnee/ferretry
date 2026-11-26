@@ -3,16 +3,16 @@
  *
  * The page is served with the exact `Content-Security-Policy` `packages/app/public/_headers` gives the app (Trusted Types
  * included: `require-trusted-types-for 'script'`, three named policies), and holds the REAL `Transcript` over one fake
- * assistant message: each of Durian's 84 fixtures (66 of its format, 18 hostile; the plan said 81 at v0.1.0) in turn. For each, after every stepped
- * part is stepped and the first animation is opened in 3D, it measures:
+ * assistant message: each of Durian 0.7.0's fixtures in turn (90 of its format, 21 hostile, 39 of the composed stage, the parts' samples
+ * and the four at the top of its `fixtures/`). For each, after every stepped part is stepped, it measures:
  *   - 0 `securitypolicyviolation` events and 0 Trusted Types errors (the two are one event family, counted apart);
  *   - 0 uncaught errors and 0 requests to any origin but the scene's own (a `data:` / `blob:` URL is not a request out);
  *   - nothing the author wrote is a live element of the page: no `<script>`, no `<object>`/`<embed>`, no `<foreignObject>`,
  *     no `<iframe>` that is not one of OUR sandbox frames, no `on*` attribute, no `javascript:` / `data:` link;
  *   - every `<svg>` in the message is Durian's own chrome (an animation stage, an icon), never author markup.
- * And then the claims that are about one part: a ```mermaid part is `<img src="data:image/svg+xml…">` made by OUR sandbox
- * frame; Durian's in-page mermaid and its HTML-string sinks are not in the bundle; the 3D stage is a lazy chunk, fetched
- * when a reader opens a 3D view and not before; a context lost or WebGL unavailable falls back to the flat view.
+ * And then the claims that are about one part: a ```mermaid fence (a host block of ours since 0.7.0 removed Durian's part) is
+ * `<img src="data:image/svg+xml…">` made by OUR sandbox frame; no mermaid library and no HTML-string sink is in the bundle; the
+ * parts held as code (an animation, tabs, a chart, every part of Durian's folders) are the code they are; a code walk is drawn.
  *
  * Set `FY_HYPERMEDIA_SHOTS_DIR` to keep `parts-<viewport>-<scheme>.png`. Chromium evidence is not Safari evidence.
  */
@@ -30,7 +30,7 @@ import { scanForHtmlSinks } from './support/sink-scan.ts';
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_HYPERMEDIA_SHOTS_DIR ?? '';
 const durianRoot = dirname(
-  createRequire(join(packageRoot, '../../../package.json')).resolve('durian-hypermedia/package.json'),
+  createRequire(join(packageRoot, '../../../package.json')).resolve('durian-markdown/package.json'),
 );
 
 const SCENE_CSS = `
@@ -63,16 +63,29 @@ const durianCss = async (): Promise<string> => {
  * ONE MESSAGE WITH A PART OF EACH KIND, for the pictures: a few of Durian's own fixtures, one after the other, without their
  * front matter (a chat message has none). Chosen by number so a renamed fixture is a loud failure, not a thinner picture.
  */
-const SHOWCASE = ['43', '39', '42', '32', '05', '06', '11', '09', '48'];
+const SHOWCASE = ['43', '39', '42', '32', '35', '44', '05', '11', '48', '00-sankey'];
+const FENCE_TICKS = '`'.repeat(3);
+/** What is OURS in the picture: the mermaid host block, a reference chip on its own line and in a sentence, maths and a price in prose. */
+const OURS = [
+  `${FENCE_TICKS}mermaid`,
+  'flowchart TB',
+  '  Browser --> Daemon',
+  '  Daemon --> Ferret',
+  FENCE_TICKS,
+  '',
+  '[[svg:7k2m9q "Login flow, browser to daemon"]]',
+  '',
+  'A sentence with [[interactive:x1y2z3 "a slider"]], the formula $a^2 + b^2 = c^2$ and a price of \\$5.',
+].join('\n');
 const showcase = async (): Promise<string> => {
   const bodies = await Promise.all(
     SHOWCASE.map(async number => {
-      const found = FIXTURES.find(entry => entry.name.startsWith(`format/${number}-`));
+      const found = FIXTURES.find(entry => entry.name.startsWith(`format/${number}`));
       if (found === undefined) throw new Error(`no Durian fixture numbered ${number}`);
       return (await readFile(found.file, 'utf8')).replace(/^---\n[\s\S]*?\n---\n/u, '').trim();
     }),
   );
-  return bodies.join('\n\n');
+  return [...bodies, OURS].join('\n\n');
 };
 
 /** The cwd the split build runs in: the metafile it prints names every input relative to it. */
@@ -126,9 +139,15 @@ beforeAll(async () => {
     if (file !== 'scene.js' && text.includes('WebGLRenderer')) threeChunk = file;
   }
   const css = `${fixture.appCss}\n${await durianCss()}\n${SCENE_CSS}`;
-  for (const kind of ['format', 'hostile'])
+  for (const kind of ['format', 'hostile', 'stage', 'parts'])
     for (const file of (await readdir(join(durianRoot, 'fixtures', kind))).sort())
       FIXTURES.push({ name: `${kind}/${file}`, file: join(durianRoot, 'fixtures', kind, file) });
+  // The four pages at the top of `fixtures/` (the showcase, the code walk, the host block, the Markdown page).
+  for (const file of (await readdir(join(durianRoot, 'fixtures'), { withFileTypes: true }))
+    .filter(entry => entry.isFile())
+    .map(entry => entry.name)
+    .sort())
+    FIXTURES.push({ name: `top/${file}`, file: join(durianRoot, 'fixtures', file) });
 
   server = Bun.serve({
     hostname: '127.0.0.1',
@@ -203,7 +222,7 @@ interface Visit {
 
 const VIEWPORTS = {
   phone: { viewport: { width: 390, height: 1_500 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true },
-  desktop: { viewport: { width: 1_280, height: 900 }, deviceScaleFactor: 1, hasTouch: false, isMobile: false },
+  desktop: { viewport: { width: 1_440, height: 900 }, deviceScaleFactor: 1, hasTouch: false, isMobile: false },
 } as const;
 
 /** What the page counts for itself, installed before any of the page's own script. */
@@ -278,7 +297,7 @@ const exercise = async (page: Page): Promise<void> => {
   await page.evaluate(() => {
     for (const button of document.querySelectorAll<HTMLButtonElement>('.dh-doc .btn-go'))
       if (!button.disabled) button.click();
-    for (const box of document.querySelectorAll('.dh-doc [data-dh-mermaid]')) box.scrollIntoView({ block: 'center' });
+    for (const box of document.querySelectorAll('.dh-doc [data-fy-mermaid]')) box.scrollIntoView({ block: 'center' });
   });
   const has3d = await page.evaluate(() => document.querySelector('.dh-doc button.scn-mode') !== null);
   if (has3d) {
@@ -293,11 +312,11 @@ const exercise = async (page: Page): Promise<void> => {
       15_000,
     );
   }
-  const hasDiagram = await page.evaluate(() => document.querySelector('.dh-doc [data-dh-mermaid]') !== null);
+  const hasDiagram = await page.evaluate(() => document.querySelector('.dh-doc [data-fy-mermaid]') !== null);
   if (hasDiagram)
     await until(
       page,
-      `document.querySelector('.dh-doc [data-dh-mermaid] img[src^="data:image/svg+xml"]') !== null || document.querySelector('.dh-doc [data-fy-render-failure], .dh-doc .fy-render--fallback') !== null`,
+      `document.querySelector('.dh-doc [data-fy-mermaid] img[src^="data:image/svg+xml"]') !== null || document.querySelector('.dh-doc [data-fy-render-failure], .dh-doc .fy-render--fallback') !== null`,
       20_000,
     );
   await page.waitForTimeout(hasDiagram || has3d ? 500 : 250);
@@ -356,9 +375,21 @@ const expectNoViolations = async (visit: Visit, label: string): Promise<void> =>
 };
 
 describe('Durian’s fixtures inside a transcript, under the real policy', () => {
-  it('has the 91 fixtures of the pinned version (73 of the format, 18 hostile; the plan counted 81 at v0.1.0) (a bump that adds or drops one is a review)', () => {
-    expect(FIXTURES.filter(f => f.name.startsWith('format/')).length).toBe(73);
-    expect(FIXTURES.filter(f => f.name.startsWith('hostile/')).length).toBe(18);
+  it('has the fixtures of the pinned version: 90 of the format, 21 hostile, 39 of the composed stage, the parts’ samples and 4 at the top (a bump that adds or drops one is a review)', () => {
+    const count = (kind: string): number => FIXTURES.filter(f => f.name.startsWith(`${kind}/`)).length;
+    expect({
+      format: count('format'),
+      hostile: count('hostile'),
+      stage: count('stage'),
+      parts: count('parts'),
+      top: count('top'),
+    }).toEqual({
+      format: 90,
+      hostile: 21,
+      stage: 39,
+      parts: 1,
+      top: 4,
+    });
   });
 
   it('draws every fixture with 0 CSP violations, 0 Trusted Types errors, 0 off-origin requests and no live author node', async () => {
@@ -377,23 +408,31 @@ describe('Durian’s fixtures inside a transcript, under the real policy', () =>
       }
     }
     expect(failures).toEqual([]);
-    // Only a hostile fixture may be over a pre-parse limit: no fixture of the format is shown as plain text.
-    expect(plain.filter(name => !name.startsWith('hostile/'))).toEqual([]);
+    // Only a hostile fixture may be over a pre-parse limit: no fixture of the format is shown as plain text. The two exceptions are
+    // Durian's own generated catalogues (45–47 KB of every part's source on one page), over our link-opener/paragraph-work limit
+    // (`limits.ts`: "a false positive on a code block far above what this app dresses, shown as plain text"); named, so a third is a review.
+    expect(plain.filter(name => !name.startsWith('hostile/'))).toEqual([
+      'stage/example-layers.dh.md',
+      'parts/samples.dh.md',
+    ]);
   }, 600_000);
 });
 
-describe('a mermaid part is drawn by our sandbox renderer', () => {
+describe('a mermaid fence is drawn by our sandbox renderer, as a host block of ours', () => {
   it('appears as an <img src="data:image/svg+xml…"> made in OUR frame, with no author svg or script in the page', async () => {
     const mid = ledger.length;
-    const visit = await open('fixture=format/09-diagram.dh.md');
+    const visit = await open(
+      `text=${encodeURIComponent(['```mermaid', 'flowchart TB', '  A --> B', '```'].join('\n'))}`,
+    );
     try {
       await exercise(visit.page);
       const m = await visit.page.evaluate(() => {
-        const box = document.querySelector('.dh-doc [data-dh-mermaid="host"]') as HTMLElement;
+        const box = document.querySelector('.dh-doc [data-fy-mermaid]') as HTMLElement;
         return {
           images: [...box.querySelectorAll('img')].map(img => img.getAttribute('src')?.slice(0, 22)),
           inPageMermaid: document.querySelectorAll('.dh-doc [data-mermaid], .dh-doc .diagram.is-drawn svg:not(.lucide)')
             .length,
+          part: document.querySelector('.dh-doc [data-dh-part="mermaid"]') !== null,
           // The compiled diagram is the image; the frame that made it is gone, and no frame of the author's is left.
           frames: box.querySelectorAll('iframe').length,
         };
@@ -401,6 +440,7 @@ describe('a mermaid part is drawn by our sandbox renderer', () => {
       expect(m.images.length).toBe(1);
       expect(m.images[0]).toBe('data:image/svg+xml,%3C');
       expect(m.inPageMermaid).toBe(0);
+      expect(m.part).toBe(true);
       expect(m.frames).toBe(0);
       // It was made in OUR frame: the sandbox shell and the pinned library were fetched, from the scene's own origin.
       const asked = ledger.slice(mid);
@@ -412,23 +452,27 @@ describe('a mermaid part is drawn by our sandbox renderer', () => {
     }
   }, 60_000);
 
-  it('is not Durian’s in-page mermaid: its part, mermaid and DOMPurify-for-diagrams are not in the bundle', () => {
+  it('is not an in-page mermaid: Durian 0.7.0 has none, and no mermaid library or part is in the bundle', () => {
     const inputs = bundleInputs.map(path => path.replace(/\\/gu, '/'));
-    // The package's own in-page mermaid part, and the library it loads.
     expect(
       inputs.filter(path =>
-        /durian-hypermedia[^/]*\/(?:node_modules\/durian-hypermedia\/)?src\/react\/mermaid\.tsx$/u.test(path),
+        /durian-markdown[^/]*\/(?:node_modules\/durian-markdown\/)?src\/react\/mermaid/u.test(path),
       ),
     ).toEqual([]);
     expect(inputs.filter(path => /\/node_modules\/(?:\.bun\/[^/]+\/node_modules\/)?mermaid\//u.test(path))).toEqual([]);
-    // The host-drawn part, and the containers (`:::tabs`) that draw their body through the one renderer, ARE.
-    expect(inputs.some(path => /src\/react\/mermaid-host\.tsx$/u.test(path))).toBe(true);
-    expect(inputs.some(path => /src\/react\/containers\.tsx$/u.test(path))).toBe(true);
+    // The code walk and the document view ARE (each part is imported from its own entry: `react/strict` would hold every part).
+    expect(inputs.some(path => /src\/react\/codewalk\.tsx$/u.test(path))).toBe(true);
+    expect(inputs.some(path => /src\/react\/document\.tsx$/u.test(path))).toBe(true);
+    expect(
+      inputs.filter(path =>
+        /src\/(?:react\/strict\.tsx|parts\/(?:pdf|lottie|video|audio|map|gallery|weather)\/view\.tsx)$/u.test(path),
+      ),
+    ).toEqual([]);
   });
 
   it('keeps every Durian source in the bundle free of an HTML-string sink, and reads every one of them', async () => {
     const own = bundleInputs.filter(path =>
-      /durian-hypermedia[^/]*\/(?:node_modules\/durian-hypermedia\/)?src\//u.test(path),
+      /durian-markdown[^/]*\/(?:node_modules\/durian-markdown\/)?src\//u.test(path),
     );
     expect(own.length).toBeGreaterThan(10);
     // The metafile's paths are relative to the cwd the build ran in (BUILD_CWD), and a file that cannot be read rejects.
@@ -438,11 +482,14 @@ describe('a mermaid part is drawn by our sandbox renderer', () => {
   });
 });
 
-describe('held tabs and animation draw as code (r12 H11a)', () => {
+describe('held parts (tabs, an animation, a state diagram, a part of Durian’s folders) draw as code', () => {
   const HELD_FIXTURES: readonly (readonly [string, string])[] = [
     ['tabs', 'fixture=format/05-tabs.dh.md'],
     ['animation', 'fixture=format/48-animation-binary-search-tree-insert.dh.md'],
     ['3d animation', 'fixture=format/64-3d-the-stateless-replay-system-in-layers.dh.md'],
+    ['state diagram', 'fixture=format/90-state-diagram.dh.md'],
+    ['a part of Durian’s folders (sankey)', 'fixture=format/00-sankey.dh.md'],
+    ['a part of Durian’s folders (fishbone)', 'fixture=format/00-fishbone.dh.md'],
   ];
 
   for (const [label, query] of HELD_FIXTURES)
@@ -464,6 +511,9 @@ describe('held tabs and animation draw as code (r12 H11a)', () => {
         expect(drawn.stages).toBe(0);
         expect(drawn.parts).not.toContain('tabs');
         expect(drawn.parts).not.toContain('animation');
+        expect(drawn.parts).not.toContain('state');
+        expect(drawn.parts).not.toContain('sankey');
+        expect(drawn.parts).not.toContain('fishbone');
         // Nothing heavy is fetched for source: no 3D chunk.
         expect(threeChunk === '' ? [] : ledger.slice(before).filter(path => path === `/${threeChunk}`)).toEqual([]);
         await expectClean(visit, `held ${label}`);
@@ -522,11 +572,11 @@ describe('an author’s chart cannot freeze the tab: the reviewer’s two charts
     }, 60_000);
 });
 
-describe('a held part (chart, code walk) is its readable source, with the author’s :::llm text beside it (C7, S1, G1)', () => {
+describe('a held part (chart, graph) is its readable source, with the author’s :::llm text beside it (C7, S1)', () => {
   const FENCE = '`'.repeat(3);
   const cases = {
     chart: [`${FENCE}chart`, 'type: bar', 'x: [a, b]', 'series:', '  - name: s', '    data: [1, 2]', FENCE],
-    codewalk: [`${FENCE}codewalk`, '- file: src/api.ts', '  note: the entry', FENCE],
+    graph: [`${FENCE}graph`, 'A --> B', FENCE],
   } as const;
   for (const [name, lines] of Object.entries(cases))
     it(`${name}: a collapsed "LLM-only text", and no author text poured into a fallback box`, async () => {
@@ -549,7 +599,7 @@ describe('a held part (chart, code walk) is its readable source, with the author
         }));
         expect(m.disclosures).toEqual([{ open: false, summary: 'LLM-only text', body: `About the ${name}.` }]);
         expect(m.fallback).not.toContain(`About the ${name}.`);
-        // G1: the source (and a code walk's notes) is on the page as code, beside the disclosure, not replaced by it.
+        // G1: the source is on the page as code, beside the disclosure, not replaced by it.
         expect(m.code).toEqual([{ lang: name, text: lines.slice(1, -1).join('\n') }]);
         // S1: a chart is never evaluated, so no canvas.
         expect(m.charts).toBe(0);
@@ -558,6 +608,51 @@ describe('a held part (chart, code walk) is its readable source, with the author
         await visit.close();
       }
     }, 60_000);
+});
+
+describe('a code walk is drawn by Durian (U1), under the real policy', () => {
+  const FENCE = '`'.repeat(3);
+  const walk = [
+    `${FENCE}codewalk`,
+    '@file src/greet.ts',
+    'export function greet(name: string) {',
+    '  const clean = name.trim();',
+    "  return 'Hi ' + clean + '!';",
+    '}',
+    '@step src/greet.ts focus=2',
+    'Trim the name first.',
+    '@step src/greet.ts#L3 focus=3',
+    'Then build the greeting.',
+    FENCE,
+    '',
+    ':::llm',
+    'A walk through greet().',
+    ':::',
+  ].join('\n');
+  for (const viewport of ['phone', 'desktop'] as const)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`draws as a part with its note and steps, and the author's text as the disclosure (${viewport}, ${scheme})`, async () => {
+        const visit = await open(`text=${encodeURIComponent(walk)}`, { viewport, scheme });
+        try {
+          await exercise(visit.page);
+          const m = await visit.page.evaluate(() => ({
+            part: document.querySelector('.dh-doc [data-dh-part="codewalk"]') !== null,
+            note:
+              document
+                .querySelector('.dh-doc [data-dh-part="codewalk"]')
+                ?.textContent?.includes('Then build the greeting.') ?? false,
+            held: document.querySelectorAll('.dh-doc .code-block .code-lang').length,
+            wide: document.documentElement.scrollWidth > window.innerWidth + 1,
+            disclosure: document.querySelector('.dh-doc details[data-fy-llm-only] pre')?.textContent,
+          }));
+          expect(m).toEqual({ part: true, note: true, held: 0, wide: false, disclosure: 'A walk through greet().' });
+          await expectClean(visit, `codewalk ${viewport} ${scheme}`);
+          if (shotsDir !== '')
+            await visit.page.screenshot({ path: join(shotsDir, `codewalk-${viewport}-${scheme}.png`) });
+        } finally {
+          await visit.close();
+        }
+      }, 60_000);
 });
 
 describe('the parts at a phone and a desktop width, light and dark', () => {
@@ -594,7 +689,9 @@ describe('the parts at a phone and a desktop width, light and dark', () => {
             parts: [...document.querySelectorAll('.dh-doc [data-dh-part]')].map(part =>
               part.getAttribute('data-dh-part'),
             ),
-            images: document.querySelectorAll('.dh-doc [data-dh-mermaid] img[src^="data:image/svg+xml"]').length,
+            images: document.querySelectorAll('.dh-doc [data-fy-mermaid] img[src^="data:image/svg+xml"]').length,
+            chips: document.querySelectorAll('.dh-doc .dh-xref').length,
+            maths: document.querySelectorAll('.dh-doc [data-dh-inline="math"]').length,
           }));
           expect(m.wide).toBe(false);
           expect(m.log).toBe(false);
@@ -602,7 +699,12 @@ describe('the parts at a phone and a desktop width, light and dark', () => {
           expect(m.chartCanvases).toBe(0);
           expect(m.heldCharts).toBeGreaterThan(0);
           expect(m.images).toBe(1);
-          for (const part of ['terminal', 'filetree', 'mermaid', 'tierlist']) expect(m.parts).toContain(part);
+          for (const part of ['terminal', 'filetree', 'editor', 'mermaid', 'tierlist', 'alignment', 'codewalk'])
+            expect(m.parts).toContain(part);
+          // 0.7.0: a reference is a chip with its label (no resolver answers), and a formula in a sentence is drawn.
+          expect(m.chips).toBe(2);
+          expect(m.maths).toBe(1);
+          expect(m.parts).not.toContain('sankey');
           // r12 H11a: tabs, an accordion and an animation are held as code, like a chart.
           expect(m.parts).not.toContain('chart');
           expect(m.parts).not.toContain('tabs');

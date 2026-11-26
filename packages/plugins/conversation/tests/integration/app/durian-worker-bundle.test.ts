@@ -37,8 +37,8 @@ const pageModules = (): string[] => [...page.firstModules, ...page.lazy.flatMap(
  */
 describe('the Durian parser in the built bundles', () => {
   test('is in the worker chunk', () => {
-    expect(has(/durian-hypermedia\/src\/document\.ts$/u).length).toBe(1);
-    expect(has(/durian-hypermedia\/src\/core\/dh-lib\.ts$/u).length).toBe(1);
+    expect(has(/durian-markdown\/src\/document\.ts$/u).length).toBe(1);
+    expect(has(/durian-markdown\/src\/core\/dh-lib\.ts$/u).length).toBe(1);
     expect(has(/hypermedia\/parse-message\.ts$/u).length).toBe(1);
   });
 
@@ -46,7 +46,7 @@ describe('the Durian parser in the built bundles', () => {
     const modules = pageModules();
     // The page is the whole conversation app half: a real number of modules, so an empty scan cannot pass.
     expect(modules.length).toBeGreaterThan(500);
-    expect(modules.filter(path => /durian-hypermedia\/src\/(?:document|core\/dh-lib)\.ts$/u.test(path))).toEqual([]);
+    expect(modules.filter(path => /durian-markdown\/src\/(?:document|core\/dh-lib)\.ts$/u.test(path))).toEqual([]);
     expect(
       modules.filter(path => /hypermedia\/(?:parse-message|durian|durian-answer|durian-worker)\.ts$/u.test(path)),
     ).toEqual([]);
@@ -63,8 +63,8 @@ describe('the Durian worker chunk', () => {
   });
 
   test("holds Durian's parser and our parse halves", () => {
-    expect(has(/durian-hypermedia\/src\/document\.ts$/u).length).toBe(1);
-    expect(has(/durian-hypermedia\/src\/core\/dh-lib\.ts$/u).length).toBe(1);
+    expect(has(/durian-markdown\/src\/document\.ts$/u).length).toBe(1);
+    expect(has(/durian-markdown\/src\/core\/dh-lib\.ts$/u).length).toBe(1);
     expect(has(/hypermedia\/fy-render-parse\.ts$/u).length).toBe(1);
     expect(has(/hypermedia\/fence-boundaries\.ts$/u).length).toBe(1);
   });
@@ -72,7 +72,7 @@ describe('the Durian worker chunk', () => {
   test('holds no React, and no module that draws anything', () => {
     expect(has(/\/node_modules\/(?:\.bun\/[^/]+\/node_modules\/)?react(?:-dom)?\//u)).toEqual([]);
     expect(has(/\.tsx$/u)).toEqual([]);
-    expect(has(/durian-hypermedia\/src\/(?:react|ui)\//u)).toEqual([]);
+    expect(has(/durian-markdown\/src\/(?:react|ui)\//u)).toEqual([]);
   });
 
   test('holds none of the shell: its barrel and everything it starts are not in the worker', () => {
@@ -90,6 +90,6 @@ describe('the Durian worker chunk', () => {
   });
 
   test('holds neither the chart evaluator nor the scene compiler (a chart and an animation are held as code in a message)', () => {
-    expect(has(/durian-hypermedia\/src\/core\/(?:expr|chart|chart-llm|scene)\.ts$/u)).toEqual([]);
+    expect(has(/durian-markdown\/src\/core\/(?:expr|chart|chart-llm|scene)\.ts$/u)).toEqual([]);
   });
 });

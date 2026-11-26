@@ -150,6 +150,36 @@
   --c6-ink: color-mix(in srgb, var(--viz-6) 55%, var(--fg));
   --c7-ink: color-mix(in srgb, var(--viz-7) 55%, var(--fg));
   --c8-ink: color-mix(in srgb, var(--viz-8) 55%, var(--fg));
+  /* the composed stage and the role palette (Durian 0.7.0, `colours.css`): the neutral role, a family's plane (a lighter tint than its leaves), the
+     diverging heat ramp, and the 3:1 edges a plain box, a frame, a band and a tone's border draw with. Parts that use them are held as code
+     until drawn (`held-fence-parse.ts`); the values are the palette's own tokens, so a style or palette change moves them. */
+  --c0: var(--fyhm-muted);
+  --c0-fill: var(--surface);
+  --c1-plane: color-mix(in srgb, var(--viz-1) 9%, var(--surface));
+  --c2-plane: color-mix(in srgb, var(--viz-2) 9%, var(--surface));
+  --c3-plane: color-mix(in srgb, var(--viz-3) 9%, var(--surface));
+  --c4-plane: color-mix(in srgb, var(--viz-4) 9%, var(--surface));
+  --c5-plane: color-mix(in srgb, var(--viz-5) 9%, var(--surface));
+  --c6-plane: color-mix(in srgb, var(--viz-6) 9%, var(--surface));
+  --c7-plane: color-mix(in srgb, var(--viz-7) 9%, var(--surface));
+  --c8-plane: color-mix(in srgb, var(--viz-8) 9%, var(--surface));
+  --heat-lo: color-mix(in srgb, var(--viz-1) 9%, var(--surface));
+  --heat-mid: color-mix(in srgb, var(--viz-1) 4%, var(--surface));
+  --heat-hi: var(--viz-1);
+  --heat-neg: var(--viz-3);
+  --scn-edge: color-mix(in srgb, var(--fg) 58%, var(--surface));
+  --scn-frame-edge: color-mix(in srgb, var(--fg) 58%, var(--surface));
+  --scn-band-edge: color-mix(in srgb, var(--fg) 58%, var(--surface));
+  --scn-good-edge: color-mix(in srgb, var(--ok) 70%, var(--fg));
+  --scn-warn-edge: color-mix(in srgb, var(--fyhm-warn) 70%, var(--fg));
+  --scn-hot-edge: color-mix(in srgb, var(--err) 70%, var(--fg));
+  --scn-acc-edge: color-mix(in srgb, var(--accent) 70%, var(--fg));
+  --scn-muted-edge: color-mix(in srgb, var(--fg) 52%, var(--surface));
+  --scn-faint-edge: color-mix(in srgb, var(--fg) 46%, var(--surface));
+  --stg-halo: color-mix(in srgb, var(--fg) 28%, transparent);
+  --stg-cell-line: color-mix(in srgb, var(--fg) 50%, var(--surface));
+  --video-cue-bg: color-mix(in srgb, var(--fg) 85%, transparent);
+  --gallery-lightbox-bg: color-mix(in srgb, var(--fg) 92%, transparent);
   --series-1: var(--viz-1);
   --series-2: var(--viz-2);
   --series-3: var(--viz-3);

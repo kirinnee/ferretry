@@ -1,4 +1,4 @@
-import type { BlockDef } from 'durian-hypermedia';
+import type { BlockDef, FolderPartName } from 'durian-markdown';
 import { DURIAN_FENCE, durianCloser, durianFences, linesOf } from './fence-boundaries.ts';
 import { durianAsIs } from './fy-render-parse.ts';
 
@@ -12,8 +12,56 @@ import { durianAsIs } from './fy-render-parse.ts';
  * (after a plain code fence Durian would refuse the whole message).
  */
 
-/** The fence words held, and the host block each is renamed to. */
-const HELD: Readonly<Record<string, string>> = { chart: 'fy-chart-held', codewalk: 'fy-codewalk-held' };
+/**
+ * EVERY PART OF DURIAN 0.7.0'S FOLDERS (`src/parts/<name>/`, format 11) IS HELD AS THE CODE IT IS (U1 of the DurianMarkdown swap). A
+ * part is drawn only after a review of what its component does (a network read, a script, a frame, storage), and the parts
+ * below have none yet: `audio video pdf lottie gallery compare-image downloads map explore weather` read files or the network
+ * or write storage, and the rest (`diff log http graph sequence ...`) are drawn by a later unit with its own proof. Held, a
+ * ```diff or ```log fence stays the highlighted code it was, never Durian's fallback text. The keys are typed against
+ * Durian's own list of names (`FolderPartName`), so a part a Durian release adds fails the typecheck here until it is placed.
+ */
+export const HELD_FOLDER_PARTS: Readonly<Record<FolderPartName, true>> = {
+  audio: true,
+  calendar: true,
+  'chart-kinds': true,
+  compare: true,
+  'compare-image': true,
+  diff: true,
+  downloads: true,
+  explore: true,
+  fishbone: true,
+  flame: true,
+  gallery: true,
+  gantt: true,
+  glossary: true,
+  graph: true,
+  http: true,
+  log: true,
+  lottie: true,
+  map: true,
+  math: true,
+  pdf: true,
+  references: true,
+  sankey: true,
+  sequence: true,
+  stacktrace: true,
+  stats: true,
+  timeline: true,
+  trace: true,
+  venn: true,
+  video: true,
+  wardley: true,
+  weather: true,
+};
+
+/** The diagram parts that compile a scene while they are read (`state`, `class`, `er`): held like the animation, whose engine they share. */
+const HELD_DIAGRAMS: readonly string[] = ['state', 'class', 'er'];
+
+/** The fence words held, and the host block each is renamed to. `chart` keeps its own name (an unbounded formula reader until U5). */
+const HELD: Readonly<Record<string, string>> = {
+  chart: 'fy-chart-held',
+  ...Object.fromEntries([...Object.keys(HELD_FOLDER_PARTS), ...HELD_DIAGRAMS].map(word => [word, `fy-held-${word}`])),
+};
 
 /**
  * A part held ONLY UNTIL ITS ENGINE HAS ARRIVED (r12 H8 fix): the 2D animation's scene compiler is a lazy chunk
@@ -127,13 +175,7 @@ export function holdsAnimation(text: string): boolean {
  */
 export function holdFences(text: string, awaitingAnimation = false): string {
   // `:::` alone is the container test: Durian allows spaces between it and the name, so the name is not part of the test.
-  if (
-    !text.includes('chart') &&
-    !text.includes('codewalk') &&
-    !text.includes(':::') &&
-    !(awaitingAnimation && text.includes('animation'))
-  )
-    return text;
+  if (!/[`~]{3}/u.test(text) && !text.includes(':::')) return text;
   const lines = [...linesOf(text)];
   // Containers first: what one holds is then inside one longer fence, which the scan below reads past, so a chart inside
   // it is shown exactly as written and is no second block.
@@ -148,6 +190,22 @@ export function holdFences(text: string, awaitingAnimation = false): string {
   }
   return held ? lines.join('\n') : text;
 }
+
+/**
+ * `mermaid` IS NOT A DURIAN PART IN 0.7.0 (it was removed; a ```mermaid fence is plain code), so the name is ours: a host block
+ * of that name carries the fence's source to the component that hands it to our own diagram renderer (`mermaid-slot.tsx`, the
+ * sandbox frame `fy-render` already uses). It exists so a diagram written for Durian 0.6.2 still draws in an old message; it is
+ * not taught (decision D2). A `%%{...}%%` directive line is dropped, as Durian 0.6.2 did, so a diagram cannot ask mermaid for
+ * settings of its own; `%% @step` lines are comments to mermaid and stay, so the whole diagram draws at once.
+ */
+export const MERMAID_BLOCK_NAME = 'mermaid';
+
+/** The mermaid source without the directives Durian 0.6.2 dropped. */
+const withoutMermaidDirectives = (body: string): string =>
+  body
+    .split('\n')
+    .filter(line => !/^\s*%%\s*\{/u.test(line))
+    .join('\n');
 
 /** What the parser hands the component: the fence body as written, and Durian's own `as-is` text for it. */
 export interface HeldFenceData {
@@ -167,6 +225,13 @@ export function heldFenceParseBlocks(heldText: string): readonly BlockDef<HeldFe
       parse: input => ({ body: input.body, generated: durianAsIs(lines[input.line - 1], input.body, input.attrs) }),
     }),
   );
+  const mermaid: BlockDef<HeldFenceData> = {
+    name: MERMAID_BLOCK_NAME,
+    parse: input => ({
+      body: withoutMermaidDirectives(input.body),
+      generated: durianAsIs(lines[input.line - 1], input.body, input.attrs),
+    }),
+  };
   // A held container shows its own lines: what followed its name is read back from the fence it became.
   const containers = Object.entries(CONTAINERS_HELD).map(
     ([word, name]): BlockDef<HeldFenceData> => ({
@@ -181,5 +246,5 @@ export function heldFenceParseBlocks(heldText: string): readonly BlockDef<HeldFe
       },
     }),
   );
-  return [...asHeld, ...containers];
+  return [...asHeld, mermaid, ...containers];
 }

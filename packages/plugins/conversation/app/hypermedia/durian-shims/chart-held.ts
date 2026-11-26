@@ -26,3 +26,12 @@ export const chartTable = held;
 export const CHART_KINDS: readonly string[] = [];
 export const CHART_KEYS: readonly string[] = [];
 export const SERIES_KEYS: readonly string[] = [];
+// 0.7.0: the page-chart words and the checker read two more (`core/chart11.ts`, `core/pagecharts.ts`, `core/doccheck.ts`).
+export const CHART_TONES: readonly string[] = [];
+export const chartRoom = held;
+export const briefJson = held;
+// `core/chart11.ts` (the page-chart words, redirected too since it evaluates through the same engine): what `dh-lib` and `doccheck` import from it.
+export const chartTable11 = held;
+export const evalChart11 = held;
+export const usesChart11 = held;
+export const chart11Check = held;

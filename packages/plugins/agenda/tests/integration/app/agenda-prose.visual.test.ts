@@ -36,7 +36,7 @@ const SCENE_CSS = `
 /** Durian's stylesheet, built the way the app's Vite plugin builds it: by the package's own script. */
 const durianCss = async (): Promise<string> => {
   const root = dirname(
-    createRequire(join(packageRoot, '../../../../conversation/package.json')).resolve('durian-hypermedia/package.json'),
+    createRequire(join(packageRoot, '../../../../conversation/package.json')).resolve('durian-markdown/package.json'),
   );
   const { buildCss } = (await import(join(root, 'scripts/build-css.ts'))) as { buildCss: () => string };
   return buildCss();

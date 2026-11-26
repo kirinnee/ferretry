@@ -1,6 +1,6 @@
 /** r12 H2 — `withReferences`: our grammar over Durian's parsed tree, never Durian's tokenizer. */
 import { describe, expect, it } from 'bun:test';
-import { parse } from 'durian-hypermedia';
+import { parse } from 'durian-markdown';
 import { configureDurian } from '../../../../app/hypermedia/durian.ts';
 import { REFERENCE_INLINE, withReferences } from '../../../../app/hypermedia/with-references.ts';
 

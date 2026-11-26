@@ -4,7 +4,7 @@
  * refuses, and the bounded YAML reader (`@ferretry/std/yaml`, ~29 KB gzip) is not in the message path at all.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { parse, setYamlParser, VERSION } from 'durian-hypermedia';
+import { parse, setYamlParser, VERSION } from 'durian-markdown';
 import { configureDurian } from '../../../../app/hypermedia/durian.ts';
 import { readMessage } from '../../../../app/hypermedia/parse-message.ts';
 
@@ -42,7 +42,7 @@ afterAll(() => setYamlParser(null));
 
 describe('configureDurian', () => {
   it('is the pinned release (no later API under us)', () => {
-    expect(VERSION).toBe('0.6.2');
+    expect(VERSION).toBe('0.7.0');
   });
 
   it('no part of a message reaches a YAML parser', () => {

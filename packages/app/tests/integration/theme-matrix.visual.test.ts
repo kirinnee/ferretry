@@ -72,7 +72,7 @@ const shotsDir = process.env.FY_THEME_MATRIX_SHOTS_DIR ?? '';
 
 /** Durian's stylesheet as the app's Vite plugin builds it (the package's own script), then `dh-theme.css`, in the order `dh-styles.ts` imports them. */
 const hypermediaCss = async (): Promise<string> => {
-  const root = dirname(createRequire(join(conversationRoot, 'package.json')).resolve('durian-hypermedia/package.json'));
+  const root = dirname(createRequire(join(conversationRoot, 'package.json')).resolve('durian-markdown/package.json'));
   const { buildCss } = (await import(join(root, 'scripts/build-css.ts'))) as { buildCss: () => string };
   return `${buildCss()}\n${await readFile(join(conversationRoot, 'app/hypermedia/dh-theme.css'), 'utf8')}`;
 };

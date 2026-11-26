@@ -44,7 +44,7 @@ const SCENE_CSS = `
 
 const durianCss = async (): Promise<string> => {
   const root = dirname(
-    createRequire(join(packageRoot, '../../../package.json')).resolve('durian-hypermedia/package.json'),
+    createRequire(join(packageRoot, '../../../package.json')).resolve('durian-markdown/package.json'),
   );
   const { buildCss } = (await import(join(root, 'scripts/build-css.ts'))) as { buildCss: () => string };
   // Then the app's theme for it (`dh-styles.ts` imports the two in this order).

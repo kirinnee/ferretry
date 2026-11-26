@@ -10,7 +10,7 @@
  * It never throws: a throw is reported as one. The request is `{ id, text }`, the answer one object per request.
  */
 import { readConfigText } from '@ferretry/std/yaml';
-import { parse, setYamlParser, UNTRUSTED_LIMITS } from 'durian-hypermedia';
+import { parse, setYamlParser, UNTRUSTED_LIMITS } from 'durian-markdown';
 import { answer } from '../../../app/hypermedia/durian-answer.ts';
 import { PARSER_LIMITS } from '../../../app/hypermedia/limits.ts';
 import { hypermediaUrlPolicy } from '../../../app/hypermedia/url-policy.ts';

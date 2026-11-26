@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { textW as ours } from '../../../../app/hypermedia/durian-shims/text-width.ts';
 
 const root = dirname(
-  createRequire(join(import.meta.dir, '../../../../package.json')).resolve('durian-hypermedia/package.json'),
+  createRequire(join(import.meta.dir, '../../../../package.json')).resolve('durian-markdown/package.json'),
 );
 /** Durian's own, by a computed path: its source does not compile under this workspace's flags, so the type checker is not shown it. */
 const { textW: theirs } = (await import(join(root, 'src/core/scene.ts'))) as {

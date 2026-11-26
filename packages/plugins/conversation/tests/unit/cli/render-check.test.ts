@@ -4,14 +4,14 @@
  * `fy-render` fence, and exits 1 on any error, 0 otherwise.
  */
 import { describe, expect, test } from 'bun:test';
-import { holdFences } from '../../../app/hypermedia/held-fence-parse.ts';
+import { HELD_FOLDER_PARTS, holdFences } from '../../../app/hypermedia/held-fence-parse.ts';
 import { MESSAGE_LIMITS } from '../../../app/hypermedia/limits.ts';
 import { checkMessage, findingLine } from '../../../cli/reading/check.ts';
 import { readingVerbs } from '../../../cli/reading/verbs.ts';
 
 /** Durian's own hostile fixture, shipped inside the package (`fixtures/hostile/`): a fence that never closes. */
 const HOSTILE_13 = await Bun.file(
-  new URL('../fixtures/hostile/13-unclosed-fence.dh.md', import.meta.resolve('durian-hypermedia')),
+  new URL('../fixtures/hostile/13-unclosed-fence.dh.md', import.meta.resolve('durian-markdown')),
 ).text();
 
 const FENCE = '```';
@@ -74,7 +74,7 @@ describe('fy render check', () => {
 
   test('the check reads a message with the size cap the app reads it with (one number, two halves)', () => {
     const cap = MESSAGE_LIMITS.maxInputBytes;
-    expect(checkMessage('a'.repeat(cap))).toEqual([]);
+    expect(checkMessage(filler(cap))).toEqual([]);
     const over = checkMessage('a'.repeat(cap + 1));
     expect(over).toHaveLength(1);
     expect(over[0]?.level).toBe('error');
@@ -142,8 +142,8 @@ describe('fy render check: fy-render fences (our host block)', () => {
 });
 
 describe('fy render check: parts the app does not draw, and the parts it does', () => {
-  test('a chart or codewalk fence is a warning: the app shows it as code, and the chart to write is the fy-render one', () => {
-    for (const word of ['chart', 'codewalk']) {
+  test('a chart, a folder part (diff, graph) or a state diagram fence is a warning: the app shows it as code, and the chart to write is the fy-render one', () => {
+    for (const word of ['chart', 'diff', 'graph', 'state']) {
       const text = `Intro\n\n${FENCE}${word}\nkind: bar\n${FENCE}\n`;
       // The app really holds this fence as code (the two halves agree on the words).
       expect(holdFences(text)).not.toBe(text);
@@ -159,9 +159,9 @@ describe('fy render check: parts the app does not draw, and the parts it does', 
     ).toContain('fy-render block of type chart');
   });
 
-  test('a closed chart or codewalk fence makes the CLI exit 0 with the warning: the app shows it as code, never as a failure', async () => {
+  test('a closed held fence makes the CLI exit 0 with the warning: the app shows it as code, never as a failure', async () => {
     // Durian alone would call this chart an error (no series, a bar with no data); the app never draws it, so it is not one.
-    for (const word of ['chart', 'codewalk']) {
+    for (const word of ['chart', 'diff', 'graph', 'state']) {
       const { check, out } = harness({ 'held.md': `Intro\n\n${FENCE}${word}\nkind: bar\n${FENCE}\n` });
       expect(await check(['held.md'])).toBe(0);
       const printed = out.join('');
@@ -170,9 +170,9 @@ describe('fy render check: parts the app does not draw, and the parts it does', 
     }
   });
 
-  test('an UNCLOSED chart or codewalk fence keeps the missing-closing-fence error: the CLI exits 1', async () => {
+  test('an UNCLOSED held fence keeps the missing-closing-fence error: the CLI exits 1', async () => {
     // Only a closed held part is suppressed; a fence with no closing delimiter is a broken message whatever its word is.
-    for (const word of ['chart', 'codewalk']) {
+    for (const word of ['chart', 'diff', 'graph', 'state']) {
       const { check, out } = harness({ 'open.md': `Intro\n\n${FENCE}${word}\nkind: bar\n` });
       expect(await check(['open.md'])).toBe(1);
       const printed = out.join('');
@@ -196,21 +196,22 @@ describe('fy render check: parts the app does not draw, and the parts it does', 
   });
 });
 
-describe('fy render check: a mermaid diagram’s steps', () => {
-  // The pinned parser reads `%% @step <title>` as a step (two make a stepped diagram); a bare `@step` line is one frame.
-  test('a bare @step inside a mermaid fence is a warning that names the real marker; `%% @step` is clean', async () => {
-    const bare = `${FENCE}mermaid\nflowchart LR\n@step First\n  A --> B\n@step Second\n  B --> C\n${FENCE}\n`;
-    const found = checkMessage(bare).filter(each => each.message.includes('@step'));
-    expect(found.map(each => each.line)).toEqual([3, 5]);
-    expect(found[0]).toMatchObject({ level: 'warn' });
-    expect(found[0]?.message).toContain('%% @step');
-    const { check, out } = harness({ 'bare.md': bare });
-    expect(await check(['bare.md'])).toBe(0);
-    expect(out.join('')).toContain('line 3: warning:');
-    const marked = `${FENCE}mermaid\nflowchart LR\n%% @step First\n  A --> B\n%% @step Second\n  B --> C\n${FENCE}\n`;
-    expect(checkMessage(marked)).toEqual([]);
+describe('fy render check: the held words are the app’s', () => {
+  test('every part the app holds as code is a warning here, and a drawn one (codewalk, terminal) is not', () => {
+    for (const word of [...Object.keys(HELD_FOLDER_PARTS), 'state', 'class', 'er']) {
+      const text = `${FENCE}${word}\nx\n${FENCE}\n`;
+      expect(holdFences(text)).not.toBe(text);
+      expect(checkMessage(text).some(each => each.message.includes(`a ${word} fence is not drawn`))).toBe(true);
+    }
+    for (const word of ['codewalk', 'terminal', 'mermaid']) {
+      const text = `${FENCE}${word}\nx\n${FENCE}\n`;
+      expect(checkMessage(text).some(each => each.message.includes('is not drawn'))).toBe(false);
+    }
   });
+});
 
+describe('fy render check: @step', () => {
+  // A mermaid diagram has no steps in Durian 0.7.0 (a `%% @step` line is a comment to mermaid), so no marker is checked there.
   test('a bare @step in an animation or a terminal is the right marker and is left alone', () => {
     for (const part of ['animation', 'terminal'])
       expect(
@@ -220,6 +221,9 @@ describe('fy render check: a mermaid diagram’s steps', () => {
       ).toEqual([]);
   });
 });
+
+/** Filler of exactly `bytes` ASCII bytes that no inline part reads: one code block (prose this long spends the page's expression budget in Durian's spark mark). */
+const filler = (bytes: number): string => `\`\`\`\n${'a'.repeat(Math.max(0, bytes - 8))}\n\`\`\``;
 
 describe('fy render check: input bounds', () => {
   const cap = MESSAGE_LIMITS.maxInputBytes;
@@ -248,7 +252,7 @@ describe('fy render check: input bounds', () => {
   });
 
   test('a message exactly at the cap is still read and scanned', () => {
-    const text = `${badBlock}${'a'.repeat(cap - badBlock.length)}`;
+    const text = `${badBlock}${filler(cap - badBlock.length)}`;
     expect(new TextEncoder().encode(text).length).toBe(cap);
     expect(checkMessage(text).map(found => found.message)).toEqual([expect.stringContaining('alt')]);
   });
@@ -276,7 +280,7 @@ describe('fy render check: input bounds', () => {
       expect(found).toHaveLength(1);
       expect(found[0]?.message).toContain('300,000');
       // One byte less and it is read (and clean).
-      expect(checkMessage(`${BOM}${'a'.repeat(cap - 3)}`)).toEqual([]);
+      expect(checkMessage(`${BOM}${filler(cap - 3)}`)).toEqual([]);
     });
 
     test('only ONE leading mark is dropped: a second one is text, and no fence is found behind it', () => {
