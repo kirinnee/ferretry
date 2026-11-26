@@ -58,3 +58,15 @@ test('E-440 a slow provider cannot turn an unanswerable standing into permission
   w.devices.standing = (() => new Promise(() => {})) as never;
   expect(governance.decide(FLEET).allowed).toBe(false);
 });
+
+test('E-440 a failed provider lookup refuses an open caller rather than keeping the old permission', () => {
+  const w = world();
+  w.enrol('phone');
+  const governance = open(w);
+  Object.defineProperty(w, 'devicesOff', {
+    get: () => {
+      throw new Error('synthetic provider lookup failed');
+    },
+  });
+  expect(governance.decide(FLEET)).toEqual({ allowed: false, refusal: 'undetermined' });
+});

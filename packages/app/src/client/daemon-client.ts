@@ -654,7 +654,7 @@ export class DaemonClient {
     );
     const answer = await this.#confirmed(
       origin,
-      unasked && !exempt && this.#lockedAnswer !== undefined ? this.#lockedAnswer : await this.#sent(request),
+      unasked && read && !exempt && this.#lockedAnswer !== undefined ? this.#lockedAnswer : await this.#sent(request),
       async () => {
         await this.#admit(caller, owner);
         return await this.#sent(request);

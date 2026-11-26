@@ -15,7 +15,7 @@ describe('access manifest', () => {
   });
 
   test("declares today's pairing, passkey, unlock and push routes, and not the daemon-wide grants", () => {
-    expect(routes).toHaveLength(20);
+    expect(routes).toHaveLength(21);
     // DECISIONS-1 #4: the seen route is Agenda's; Access keeps push subscriptions.
     expect(routes.map(route => route.key as string)).not.toContain('POST /v1/push/seen');
     expect(byKey.has('POST /v1/push/subscriptions')).toBe(true);
@@ -50,6 +50,7 @@ describe('access manifest', () => {
     ).toEqual([
       'GET /v1/passkeys',
       'POST /v1/passkeys',
+      'POST /v1/passkeys/failure',
       'POST /v1/passkeys/options',
       'POST /v1/unlock',
       'POST /v1/unlock/options',

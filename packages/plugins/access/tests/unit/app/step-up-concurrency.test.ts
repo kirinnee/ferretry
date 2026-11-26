@@ -66,3 +66,15 @@ test('E-397 inline success clears a previous cancel even when no requests curren
   void gate.require(first, 'read', 'background');
   expect(gate.snapshot()?.daemon.daemonId).toBe(first.daemonId);
 });
+
+test('E-396 inline success settles its own queued reads without replacing another machine prompt', async () => {
+  const { gate, pending } = setup();
+  void gate.require(second);
+  const shown = gate.snapshot();
+  const waiting = gate.require(first, 'read', 'unasked');
+  const inline = gate.confirmInline(first);
+  pending[0]?.resolve();
+  await inline;
+  expect(await waiting).toBe(true);
+  expect(gate.snapshot()).toBe(shown);
+});
