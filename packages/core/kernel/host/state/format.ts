@@ -67,7 +67,10 @@ export function shapeOf<Shape>(
   if (bare.success) return ok(bare.data);
   const stamped = def.schema.safeParse({ format: def.format, ...body });
   if (stamped.success) return ok(stamped.data);
-  const first = bare.error.issues[0];
+  // `openDocument` strips `format`, so a schema that NAMES it always fails the bare attempt on `format` itself and
+  // hides the real fault. Then the stamped attempt is the honest one: report ITS first issue (path and message).
+  const namesFormat = bare.error.issues.some(issue => issue.path.length === 1 && issue.path[0] === 'format');
+  const first = (namesFormat ? stamped.error : bare.error).issues[0];
   const where = first === undefined || first.path.length === 0 ? '' : `${first.path.join('.')}: `;
   return err(damageOf(label, 'schema', `${where}${first?.message ?? 'invalid'}`));
 }

@@ -16,19 +16,21 @@ import {
 } from '../../contract/index.ts';
 import { webCryptoConnector } from './crypto.ts';
 import { ConnectorOAuthHttp } from './http/oauth-http.ts';
-import { ConnectorMcpStub } from './http/mcp-stub.ts';
 import { ConnectorAuthority } from './oauth/authority.ts';
+import { unauthorizedResponse } from './oauth/discovery.ts';
 import { ConnectorMemory } from './oauth/model.ts';
 import { ConnectorRateLimiter } from './oauth/rate-limiter.ts';
 import { doorPeer } from './peer.ts';
-import type { ConnectorAuditSink, ConnectorEndpoints, ConnectorHttpHandler } from './ports.ts';
+import type { ConnectorAuditSink, ConnectorEndpoints, ConnectorHttpHandler, ConnectorMcpFactory } from './ports.ts';
 import { type ConnectorSettings, connectorSettings } from './settings.ts';
 import { KernelConnectorStore } from './store.ts';
 
 /** What the service needs from the kernel, as ports: nothing here reads a clock, a file or an address itself. */
 export interface ConnectorServiceDeps {
   readonly config: Pick<ConfigPort, 'file' | 'watch' | 'fileState' | 'writeAsOwner'>;
-  readonly state: Pick<StatePort, 'read' | 'write'>;
+  readonly state: Pick<StatePort, 'append' | 'read' | 'records' | 'version' | 'write'>;
+  /** Builds `/mcp` over this service's authority: every tool call there runs through the kernel's delegated dispatch. */
+  readonly mcp: ConnectorMcpFactory;
   readonly publicDoor: PublicDoorPort;
   readonly audit: ConnectorAuditSink;
   readonly clock: { now(): number };
@@ -105,7 +107,11 @@ export class ConnectorService {
     });
     this.handlers = [
       new ConnectorOAuthHttp(this.authority, this.endpoints),
-      new ConnectorMcpStub(this.authority, this.endpoints),
+      deps.mcp({
+        verifier: this.authority,
+        unauthorized: tokenPresented => unauthorizedResponse(this.endpoints, { tokenPresented }),
+        serving: () => service.settings().kind === 'enabled' && service.origin() !== undefined,
+      }),
     ];
   }
 

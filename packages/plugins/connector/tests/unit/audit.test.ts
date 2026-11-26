@@ -26,6 +26,35 @@ describe('GateConnectorAudit', () => {
     ).deepEqual({ client: 'unnamed' });
   });
 
+  it('records a tool as the connector (never this computer), with the grant in the detail and the ferret as the subject', async () => {
+    should(
+      await recorded({
+        kind: 'connector.tool',
+        grantId: 'cg_aaaaaaaaaa',
+        tool: 'stop_ferret',
+        sessionId: 'f-1',
+        outcome: 'ok',
+      }),
+    ).deepEqual({
+      event: 'connector.tool',
+      actor: { kind: 'connector' },
+      subject: 'f-1',
+      outcome: 'succeeded',
+      detail: { grant: 'cg_aaaaaaaaaa', tool: 'stop_ferret' },
+    });
+    const outcomes = await Promise.all(
+      (['ok', 'error', 'refused'] as const).map(
+        async outcome =>
+          (await recorded({ kind: 'connector.tool', grantId: 'cg_aaaaaaaaaa', tool: 't', outcome }))?.outcome,
+      ),
+    );
+    should(outcomes).deepEqual(['succeeded', 'failed', 'refused']);
+    should(
+      (await recorded({ kind: 'connector.tool', grantId: 'cg_aaaaaaaaaa', tool: 'send_to_ferret', outcome: 'ok' }))
+        ?.subject,
+    ).be.undefined();
+  });
+
   it('records the approving device, or this computer', async () => {
     should(
       (await recorded({ kind: 'connector.grant.approved', grantId: 'cg_1', clientName: 'Claude', actor: 'device:d1' }))

@@ -89,6 +89,14 @@ function draftOf(event: ConnectorAuditEvent): AuditDraft {
         outcome: 'succeeded',
         detail: { enabled: event.enabled },
       };
+    case 'connector.tool':
+      return {
+        event: CONNECTOR_AUDIT.tool,
+        actor: { kind: 'connector' },
+        ...(event.sessionId === undefined ? {} : { subject: event.sessionId }),
+        outcome: event.outcome === 'ok' ? 'succeeded' : event.outcome === 'error' ? 'failed' : 'refused',
+        detail: { grant: event.grantId, tool: event.tool },
+      };
     case 'connector.refresh.reused':
       return {
         event: CONNECTOR_AUDIT.refreshReused,

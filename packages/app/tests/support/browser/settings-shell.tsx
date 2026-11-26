@@ -50,12 +50,25 @@ export interface SettingsShellScene {
   readonly bodies: Readonly<Record<string, ComponentType>>;
   /** Where to draw; the page's `#root` by default. */
   readonly root?: HTMLElement | null;
+  /** How the fake machine differs from a current one (an older daemon, a plugin it predates). */
+  readonly options?: ShellOptions;
 }
 
 const GRANTS = {
   capabilities: [
     {
       capability: 'fleet',
+      use: true,
+      configure: true,
+      granted: { use: true, configure: true },
+      useRefusal: 'granted',
+      configureRefusal: 'granted',
+      mayGrant: false,
+      origin: 'default',
+    },
+    // Pairing too: Connector's tab asks `pairing` for its switch and approvals, and a machine that says nothing of it reads as undetermined.
+    {
+      capability: 'pairing',
       use: true,
       configure: true,
       granted: { use: true, configure: true },
@@ -94,9 +107,10 @@ export function renderSettingsShell({
   manifest: given,
   bodies,
   root = document.getElementById('root'),
+  options = {},
 }: SettingsShellScene) {
   applySceneTheme();
-  renderSettingsShellOf([...CORE, settingsSurface(given as Manifest, bodies)], {}, root);
+  renderSettingsShellOf([...CORE, settingsSurface(given as Manifest, bodies)], options, root);
 }
 
 export interface ShellOptions {
@@ -106,6 +120,10 @@ export interface ShellOptions {
     | undefined;
   /** The id this browser is paired under on the fake machine. */
   readonly deviceId?: string | undefined;
+  /** The release the fake machine says it is (`GET /v1/health`); the app's own (`5.0.0`) by default. */
+  readonly daemonVersion?: string | undefined;
+  /** Plugins the fake machine predates: absent from its plugin list, as an older daemon's is. */
+  readonly without?: readonly string[] | undefined;
 }
 
 /** The real `App` over one fake machine whose plugins are `surfaces` (the core ones included by the caller). */
@@ -117,8 +135,9 @@ export function renderSettingsShellOf(
   const transport = new FakeTransport(async (request: TransportRequest): Promise<TransportAnswer> => {
     const registered = await options.answer?.(request);
     if (registered !== undefined) return registered;
-    if (request.path === '/v1/plugins') return json(inventoryOf(surfaces));
-    if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
+    if (request.path === '/v1/plugins')
+      return json(inventoryOf(surfaces, Object.fromEntries((options.without ?? []).map(id => [id, null]))));
+    if (request.path === '/v1/health') return json({ protocol: 1, version: options.daemonVersion ?? '5.0.0' });
     if (request.path === '/v1/grants') return json(GRANTS);
     return json({ ok: true });
   });

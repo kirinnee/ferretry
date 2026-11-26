@@ -1,9 +1,10 @@
 import { GatePort } from '@ferretry/core-gate/contract';
-import { definePlugin, route, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import {
   APPROVE_CONNECTOR,
   CONNECTOR_CALLS,
+  CONNECTOR_CALLS_ROTATED,
   CONNECTOR_CONFIG,
   CONNECTOR_STATE,
   CONNECTOR_WORDS,
@@ -31,7 +32,8 @@ import {
  * - The OWNER routes (`/v1/connector…`) are a person's: a ferret and the connector's own principal are refused. Approving
  *   asks a passkey proved fresh for `approve-connector`; denying and revoking only take away.
  *
- * `/mcp` itself and the eleven tools arrive in a later unit; its route answers 401 / 501 until then.
+ * `/mcp` is the Claude app's MCP endpoint: its eleven tools act through the daemon's OWN routes (`permissions.delegate`, the
+ * kernel's delegated dispatch), as the owner's authority, narrowed by the daemon-wide grants and never a passkey act.
  */
 const DOOR = {
   door: 'public',
@@ -41,6 +43,25 @@ const DOOR = {
   audit: RECORDED_BY_AUTHORITY,
   guard: GUARD_DOOR,
 } as const;
+
+/**
+ * The routes the tools call, and nothing else: the kernel refuses a call to any other key and the build refuses a key it does not
+ * allow. `GET /v1/machine/agenda` is listed so the machine ledger is READ; the connector sends it `resolve` and `snooze` only.
+ */
+const DELEGATED_ROUTES = [
+  'GET /v1/ferrets',
+  'GET /v1/ferrets/:ferretId',
+  'GET /v1/ferrets/:ferretId/logs',
+  'POST /v1/ferrets/:ferretId/send',
+  'POST /v1/ferrets/:ferretId/stop',
+  'POST /v1/restarts',
+  'POST /v1/ferrets',
+  'GET /v1/projects',
+  'GET /v1/agenda/open',
+  'POST /v1/ferrets/:ferretId/agenda',
+  'GET /v1/machine/agenda',
+  'POST /v1/machine/agenda',
+] as const;
 
 export default definePlugin({
   id: 'connector',
@@ -140,10 +161,18 @@ export default definePlugin({
   },
 
   data: {
-    state: [CONNECTOR_STATE, CONNECTOR_CALLS],
+    state: [CONNECTOR_STATE, CONNECTOR_CALLS, CONNECTOR_CALLS_ROTATED],
     config: [CONNECTOR_CONFIG],
   },
 
   // The public door opens only for this plugin (a fixed kernel allow-list; declaring it cannot extend the list).
-  permissions: { publicDoor: true },
+  // …and the eleven tools reach exactly these routes, through the real dispatcher and Gate (the build refuses any other key).
+  permissions: { publicDoor: true, delegate: DELEGATED_ROUTES },
+
+  // The Settings › Claude connector tab: next to Connection (15), in the same group, so the owner finds where Claude reaches this machine beside how their own devices do.
+  ui: {
+    settings: [
+      settingsTab('connector', { icon: 'plug-zap', group: 'devices-access', label: 'Claude connector', order: 16 }),
+    ],
+  },
 });

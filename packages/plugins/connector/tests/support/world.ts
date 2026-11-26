@@ -1,11 +1,26 @@
-import type { ApiRequest, CallContext, ConfigFileStatus, PublicDoorHandle } from '@ferretry/kernel/contract';
+import type {
+  ApiRequest,
+  CallContext,
+  ConfigFileStatus,
+  DelegateRequest,
+  DelegateResponse,
+  PublicDoorHandle,
+} from '@ferretry/kernel/contract';
+import type { CapabilityGrants } from '@ferretry/core-gate/contract';
+import { DEFAULT_CAPABILITY_GRANTS } from '@ferretry/core-gate/contract';
 import {
+  CONNECTOR_CALLS,
+  CONNECTOR_CALLS_ROTATED,
   CONNECTOR_CONFIG,
   ConnectorConfigSchema,
   type ConnectorConfig,
   ConnectorStateFileSchema,
   type ConnectorState,
 } from '../../contract/index.ts';
+import { ConnectorMcpEndpoint } from '../../daemon/adapters/mcp/mcp-endpoint.ts';
+import { KernelConnectorCallsLog } from '../../daemon/lib/mcp/calls-log.ts';
+import { ConnectorTextGuard } from '../../daemon/lib/mcp/redaction.ts';
+import { ConnectorToolbox } from '../../daemon/lib/mcp/toolbox.ts';
 import { ConnectorService } from '../../daemon/lib/service.ts';
 import type { ConnectorAuditEvent } from '../../daemon/lib/ports.ts';
 import { base64url } from '../../daemon/lib/oauth/model.ts';
@@ -67,12 +82,28 @@ type WriteAnswer = { kind: string; [key: string]: unknown };
 class FakeState {
   value: ConnectorState | undefined;
   damaged = false;
+  /** What `calls.jsonl` and `calls.1.jsonl` hold, a line each. */
+  calls: unknown[] = [];
+  rotated: unknown[] = [];
   readonly port = {
+    append: async (_file: unknown, line: unknown) => {
+      this.calls.push(structuredClone(line));
+    },
+    records: async (file: unknown) => ({
+      records: structuredClone(file === CONNECTOR_CALLS_ROTATED ? this.rotated : this.calls),
+      unreadable: 0,
+    }),
+    version: async () => (this.calls.length === 0 ? undefined : { size: JSON.stringify(this.calls).length, etag: 'e' }),
     read: async () =>
       this.damaged
         ? { ok: false as const, error: { file: 'connector.json', reason: 'unparsable', sentence: 'damaged' } }
         : { ok: true as const, value: this.value === undefined ? undefined : structuredClone(this.value) },
-    write: async (_file: unknown, value: ConnectorState) => {
+    write: async (file: unknown, value: ConnectorState) => {
+      if (file === CONNECTOR_CALLS || file === CONNECTOR_CALLS_ROTATED) {
+        if (file === CONNECTOR_CALLS) this.calls = value as never;
+        else this.rotated = value as never;
+        return;
+      }
       this.value = ConnectorStateFileSchema.parse(structuredClone(value));
     },
   };
@@ -90,6 +121,13 @@ export interface World {
   }[];
   /** A tunnel hostname (an origin), or none. */
   tunnel: string | undefined;
+  /** The calls the tools made through the kernel's delegated dispatch, and how the next ones are answered. */
+  readonly delegated: { readonly grant: string; readonly request: DelegateRequest }[];
+  delegate: (request: DelegateRequest) => DelegateResponse | Promise<DelegateResponse>;
+  /** What the operator's daemon-wide grants say now (`undefined`: cannot be determined). */
+  grants: CapabilityGrants | undefined;
+  /** The Vault's stored values, masked out of every text. */
+  vaultValues: string[];
   /** Makes the next `open` fail with this message (a port that is taken). */
   failOpen: string | undefined;
   time: number;
@@ -108,6 +146,10 @@ export function world(initial?: Record<string, unknown>): World {
     opened,
     tunnel: undefined,
     failOpen: undefined,
+    delegated: [],
+    delegate: () => ({ status: 404, headers: new Map(), body: '{"error":"no route","code":"unknown_route"}' }),
+    grants: DEFAULT_CAPABILITY_GRANTS,
+    vaultValues: [],
     time: Date.parse('2026-11-25T10:00:00.000Z'),
   };
   const service = new ConnectorService({
@@ -127,6 +169,34 @@ export function world(initial?: Record<string, unknown>): World {
         return handle;
       },
     },
+    mcp: wiring =>
+      new ConnectorMcpEndpoint({
+        ...wiring,
+        delegate: {
+          call: async (principal, request) => {
+            w.delegated.push({ grant: principal.grant, request });
+            return await w.delegate(request);
+          },
+        },
+        toolbox: new ConnectorToolbox({
+          daemonGrants: () => w.grants,
+          guard: new ConnectorTextGuard(async text =>
+            w.vaultValues.reduce((masked, value) => masked.replaceAll(value, '[vault]'), text),
+          ),
+          callsLog: new KernelConnectorCallsLog(state.port as never),
+          audit: { record: async event => void events.push(event) },
+          now: () => w.time,
+        }),
+        now: () => w.time,
+        newRequestId: (() => {
+          let next = 0;
+          return () => {
+            next += 1;
+            return `req-${String(next)}`;
+          };
+        })(),
+        serverVersion: '5.0.0-test',
+      }),
     audit: {
       record: async event => {
         events.push(event);

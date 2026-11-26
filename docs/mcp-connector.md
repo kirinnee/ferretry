@@ -4,13 +4,9 @@ Read this before changing anything under `packages/plugins/connector/`, the conn
 `/v1/connector/*` routes, `fy connector` or the app's Claude connector panel. It is the contract; implement against it,
 not against the code.
 
-**What 5.0 has built, and what is still to come.** Built: the OAuth authorization server, the waiting and "sign in again"
-pages, the owner routes, the own-address listener, the built-in tunnel's door, `fy connector`, and the approval with its
-own passkey act. **Not built yet:** `POST /mcp` and the eleven tools. Until that unit lands, `/mcp` already answers
-everything that does not reach a tool exactly as it will (`405` for GET/DELETE, `401` with the metadata pointer for no
-bearer, `401 invalid_token` for one that is not live), and a live bearer is told `501` that the tools are not served yet —
-never answered as if a tool ran. "Scopes and tools" and "What a tool may do" below are the contract that unit implements.
-The settings panel in the app is a later unit too; until then the switch is `config/connector.yaml` or `PUT /v1/connector`.
+**What 5.0 has built.** The OAuth authorization server, the waiting and "sign in again" pages, the owner routes, the
+own-address listener, the built-in tunnel's door, `fy connector`, the approval with its own passkey act, and **`POST /mcp`
+with the eleven tools**, which act through `kernel.delegate` (see "How the tools are built"). The settings tab in the app (Settings › Claude connector) is built: see "Settings › Claude connector (the app)" below.
 
 ## What changed from v4 (the deliberate differences)
 
@@ -30,7 +26,7 @@ The settings panel in the app is a later unit too; until then the switch is `con
    listens". Nothing is mounted in the daemon's own route table, so there is no `405` map to probe.
 5. **Storage** is one format. A `connector.json` written by v4 is carried by the migration converter, which writes
    this shape; 5.0 reads no older spelling.
-6. **Tools** (a later unit) act through `kernel.delegate`: the real route dispatcher and Gate, as the principal
+6. **Tools** act through `kernel.delegate`: the real route dispatcher and Gate, as the principal
    `connector` — governed by the daemon-wide grants only, never a device, and refused every step-up act. Its demands are
    5.0's: `restart_ferret` and `spawn_ferret` are `fleet.configure` routes (`POST /v1/restarts`, `POST /v1/ferrets`) the
    connector passes as the owner's authority; `list/get_attention` is a person route. That is parity with v4, not a
@@ -131,6 +127,34 @@ All five are a **person's** (`caller: 'person'`: a ferret, the warden and the co
   waiting-page handle, so a view that grew one would fail rather than reach a client.
 - Refusals carry a code a client can branch on: `connector_disabled` (409, approve/deny while it is off),
   `connector_not_found` (404), `connector_expired` (410), `connector_already_decided` (409), `connector_cannot_switch` (409).
+
+## Settings › Claude connector (the app)
+
+The tab lives in the connector plugin's own app half (`app/`), in the **Devices & access** group beside Connection. It
+reads and acts only through the owner's routes above, by route key, through the one client the shell gives it; it holds
+no token and the strict wire schemas leave no field for one.
+
+- **Let Claude connect** — the switch (`PUT /v1/connector`, only `enabled`). There is no optimistic state: it is pending
+  while the call runs, then shows exactly the status the daemon answered. While on and reachable the **address** Claude is
+  given shows with a copy button, and where it comes from (`config/connector.yaml`, or the built-in tunnel — "waiting for
+  the tunnel" is the daemon's own `disabledReason` until a hostname exists).
+- **Waiting for you** — each sign-in with its **match code**, set large, and the warning "Only approve if this code is on
+  the page you just opened from Claude." in the same breath. **Approve with passkey** asks the shell's step-up prompt
+  for `approve-connector` (the daemon names the act in its first `403 grant_step_up_required`; the client proves it and
+  resends once); **Deny** asks nothing.
+- **Connected apps** — what each may do, who approved it, when it last called; **Revoke** behind a confirm that says it
+  stops on its very next call. Live apps are listed before revoked ones.
+- It reads again every 2 s while open and visible, and keeps what it shows through a failed read.
+- **Version skew.** A daemon built before the connector does not list it, so the shell's inventory gate stops the tab
+  before it can ask anything, and the shell's own line says "Connector is not on this daemon, which is older than this
+  app: run `fy update` on that machine." (any plugin a daemon older than the app does not list reads so). A machine that
+  lists the connector but answers `404 unknown_route` for `GET /v1/connector` gets the tab's own "needs an update" note
+  with the same command. The visual test draws the shell over a pre-connector inventory.
+- **Round-safe.** The tab is built from the settings kit's rows, so it follows the theme's corners; no text, icon or
+  button of it may sit where a corner is cut away, which the visual test checks at the highest rounding (Neumorphism).
+
+The waiting page's "Open Ferretry" link is `<app>/d/<daemon id>/settings/connector?request=<cr_ id>`: the tab puts that
+sign-in first and scrolls to it. The request id is public; the page's handle and the match code never ride in a link.
 
 ## Configuration
 
@@ -340,7 +364,7 @@ code" where an approval is involved.
 
 A switched-off connector (or one that failed to start) serves nothing: every path is the same bare 404, so a prober learns nothing. A person opening an old sign-in link then sees that 404; a page for this case is a declared gap (as in v4), because with the connector off a door route answers as an unrouted path does.
 
-The "Open Ferretry" link (and the "Open Ferretry's Claude connector panel" link) points at `<app>/?connector=<daemon id>#connector`, the same deep link v4's waiting page used; the app's settings panel (a later unit) owns what it opens.
+The "Open Ferretry" link (and the "Open Ferretry's Claude connector panel" link) points at `<app>/d/<daemon id>/settings/connector` (the 5.0 settings route; the waiting page adds `?request=<cr_ id>`, a public id), which opens Settings › Claude connector with that sign-in first.
 
 **What Claude is told.** A denied sign-in still redirects to Claude with `error=access_denied`, and now an
 `error_description`. Every JSON error Claude may show carries an `error_description` ending in "Reconnect in Claude:
@@ -388,7 +412,7 @@ mean lizzette (Build MCP Connector)?` More than one match lists them and asks wh
 | `list_ferrets`      | read  | readOnly     | live ferrets: call sign, task name, state, last activity                                      |
 | `get_ferret`        | read  | readOnly     | one ferret: state, current task, recent-activity summary, last error                          |
 | `get_ferret_output` | read  | readOnly     | tail of recent output; `lines` default 40, hard cap 200 lines / 8 000 chars                   |
-| `list_attention`    | read  | readOnly     | open agenda items (`!A12`): who asks, title, question; `snoozed: true` adds the sleeping ones |
+| `list_attention`    | read  | readOnly     | open agenda items (`^A12`): who asks, title, question; `snoozed: true` adds the sleeping ones |
 | `get_attention`     | read  | readOnly     | ONE agenda item in full: options, context, every tab; 24 000 chars, see below                 |
 | `send_to_ferret`    | write | not readOnly | send a message to a ferret, exactly as the app's composer does                                |
 | `answer_attention`  | write | not readOnly | answer one open agenda item                                                                   |
@@ -402,12 +426,12 @@ mean lizzette (Build MCP Connector)?` More than one match lists them and asks wh
 The agenda is the main channel between the owner and Claude, and `list_attention` shows only a summary line. `get_attention`
 reads ONE item completely, so Claude can work from what the ferret wrote.
 
-- **Input**: `item` — the id as `list_attention` prints it (`A12`, `!A12`, `12`, `a 12`); a title also works when exactly one
+- **Input**: `item` — the id as `list_attention` prints it (`A12`, `^A12`, `12`, `a 12`); a title also works when exactly one
   item has it (a part of a title is enough for READING; `snooze_attention` wants the whole title). `ferret` — when two
   ferrets have an item with the same id (the same rule, and the same sentence, as `answer_attention`); a `ferret` that
   is named narrows a title match FIRST too, so the title is looked for among that ferret's items only. `tab` — one section by name in any case or by id. `from` — with `tab`, the character to start at.
 - **Output** (Markdown-ish text, an item's own Markdown kept exactly as written, so a table stays a table): a heading
-  `!A12 — Title — from Lizzette`, the list of sections, then each section under `## Name`:
+  `^A12 — Title — from Lizzette`, the list of sections, then each section under `## Name`:
   **Overview** (title, summary, who raised it and on whose agenda, state, kind, waiting since, whether only the app can
   answer it, the question, the options with their one-line description and longer explanation, the recommendation,
   numbered questions, form fields, premise, impact, urgency, steps with their ticks, links with their meaning, terms,
@@ -455,7 +479,7 @@ Hides one open agenda item until a time and lists it again afterwards — the da
   `fleet.use` (the daemon's route declares none), so the connector reaches it as the owner's own act, stamped remote and
   governed like every connector call. Scope `fleet:write`; it is in the calls log and the security log (`connector.tool`,
   with the ferret's session id) like `answer_attention`. It never answers, closes or edits the item.
-- **Input**: `item` (the same forms and lookup as `get_attention`: `A12`, `!A12`, `12`; `ferret` when two ferrets
+- **Input**: `item` (the same forms and lookup as `get_attention`: `A12`, `^A12`, `12`; `ferret` when two ferrets
   share an id; but a TITLE must be the whole title, matched exactly in any case, because this changes something: a part
   of a title is only offered back as "Did you mean …?") and EXACTLY ONE of:
   - `until` — an ISO time with a zone (`2026-11-25T09:00:00Z`) or without (**read as Pacific, `America/Los_Angeles`**,
@@ -470,7 +494,7 @@ Hides one open agenda item until a time and lists it again afterwards — the da
   needs "still ahead"). An item that waits on its ferret (resting: `parked: replied`, or `waitingOn: ferret` for more information or a
   discussion — `agendaState` says `resting`) is refused ("not on you, nothing to snooze"); a
   notice is refused by the daemon in its own words; an already snoozed item may be snoozed again and the answer says so.
-- **Answer**: "Snoozed !A12 (Title) until Wed, Nov 25, 9:00 AM PST (in 29 h)." — the wake time in Pacific, always, and the
+- **Answer**: "Snoozed ^A12 (Title) until Wed, Nov 25, 9:00 AM PST (in 29 h)." — the wake time in Pacific, always, and the
   time the DAEMON will wake it: an item with a `neededBy` before the time asked for wakes at the deadline (`agendaWakeAt`),
   so the answer says that time and "sooner than the … you asked for, because it is needed by …"; a deadline that has
   already passed is said too ("which has passed, so the daemon wakes it again at once").
@@ -500,6 +524,10 @@ Hides one open agenda item until a time and lists it again afterwards — the da
   someone decides a voice may answer it; `list_attention` still lists such an item and says only the app can
   answer it. This is the second defence: the daemon's boundary refuses these acts first, because tool requests
   arrive governed.
+- **An answer is for the question that was read out.** `list_attention` and `get_attention` mark a question a ferret has
+  revised ("revised: say version N"), and `answer_attention` takes that `version`: an answer that names none, or an older one,
+  for a revised question is refused with the question as it is now, and nothing is sent. A spoken choice never matches a
+  label loosely when either side has a digit ("100" is not "10").
 - **An answer names the ask it was given to.** The resolve body carries the item's `askVersion`; if the ferret
   has replaced the ask since, the daemon refuses `ask_changed` and the tool says "That question changed, so
   nothing was sent; here it is now: …" so the owner answers the question that is really being asked.
@@ -529,7 +557,7 @@ Hides one open agenda item until a time and lists it again afterwards — the da
   the controls are the ones that exist: revoke a grant you no longer use, turn the connector off in
   `config/connector.yaml` when nobody needs it, or narrow `fleet.use` in the daemon-wide grants to refuse every call.
 
-### How the tools are built (a later unit, `packages/plugins/connector/daemon/`)
+### How the tools are built (`packages/plugins/connector/daemon/`)
 
 - **Order of gates** on `POST /mcp`: path → method (`GET`/`DELETE` are `405`, `Allow: POST`) → `Origin` (any
   `Origin` header not in the injected allow-list, default empty, is `403`) → bearer (`401` from the OAuth part's
@@ -556,21 +584,44 @@ Hides one open agenda item until a time and lists it again afterwards — the da
   lizzette" twice says "already stopped" the second time, never stops another ferret whose name starts the same.
   A reading tool prefers the one live ferret when a call sign is shared with stopped ones. A ferret the caller
   names for `answer_attention` is always honoured: no such item on it is a refusal, never another ferret's item.
-- **Routes the tools call** (v4 names; the unit that builds the tools restates them as 5.0's `/v1/ferrets…` routes and pins them to the delegate list): `GET /v1/sessions`, `GET /v1/sessions/:id/logs`, `POST /v1/sessions/:id/send`,
-  `POST /v1/sessions/:id/stop`, `POST /v1/restarts` (`scope: ids`), `GET /v1/projects`,
-  `POST /v1/sessions` (`mode: auto`, `cwd` = a REGISTERED project's path — never a caller's string),
-  `GET /v1/agenda/open` and `POST /v1/sessions/:id/agenda` (`action: resolve`). `ConnectorApiCall` gained an
-  optional `headers` map for `x-fy-request-id`, which send, start and restart require; the listener wiring must
-  forward exactly those and nothing else.
+- **Routes the tools call** are 5.0's, and exactly twelve: `GET /v1/ferrets`, `GET /v1/ferrets/:ferretId`,
+  `GET /v1/ferrets/:ferretId/logs`, `POST /v1/ferrets/:ferretId/send`, `POST /v1/ferrets/:ferretId/stop`,
+  `POST /v1/restarts`, `POST /v1/ferrets` (the flat start body, `mode: auto`, a REGISTERED project — never a caller's
+  string), `GET /v1/projects`, `GET /v1/agenda/open`, `POST /v1/ferrets/:ferretId/agenda`, `GET /v1/machine/agenda` and
+  `POST /v1/machine/agenda`. They are the manifest's `permissions.delegate` list, the kernel refuses any other key, and a
+  delegated arrival is looked up in the API route table alone. **Never delegated:** the pull-request post route, the git
+  accounts route, the terminals route and the board lanes route. Only `x-fy-request-id` crosses (send, start and
+  restart carry one), and the kernel masks the host's admin and warden token literals in every answer.
+- **The agenda sends only `resolve` and `snooze`.** Never a dismiss, un-snooze, edit or add. A ferret's own board takes the
+  full resolve (`askVersion`, `response`). The machine's own list (`/v1/machine/agenda`) takes a bare `{action, id}` plus
+  `note` or `until`, with nowhere to put a decision, so `answer_attention` on a machine item that needs a choice, verdict or
+  permission is **refused** ("only the Ferretry app can answer it") instead of resolving it and dropping the answer.
+- **Agenda budget.** Agenda acts (`answer_attention`, `snooze_attention`) have their own 30 a minute per grant, inside the 60.
+- **A call in flight when the connector is switched off stops** (S17): the delegated call is refused once `enabled` is false,
+  so a switch-off ends what was already running at the next step, not only what comes next.
+- **An invalid or dead bearer** gets `401 invalid_token` whose `error_description` is the same sentence the sign-in pages
+  use for a dead connection, with how to connect again.
 - **Redaction**: every returned text passes the daemon's stored-secret redactor AND a credential-shape redactor
   (`fys_`/`fyc_`, `sk-ant-`, `sk-`, GitHub, AWS, Slack, Google, JWTs, `Bearer`/`Basic`, PEM private keys,
   `password=`-style assignments (value only), URL userinfo). If either throws the text is `[output withheld]`.
-- **Calls log**: write calls only (reads, `get_attention` included, are not recorded), args redacted and message/answer/task cut to 500 characters, appended with
+- **Calls log** (`state/connector/calls.jsonl`, strict line schema, a plugin-owned file): write calls only (reads, `get_attention` included, are not recorded), args redacted and message/answer/task cut to 500 characters, appended with
   `O_APPEND | O_NOFOLLOW`, `0600`, rotated to `calls.1.jsonl` at 1 MiB. Each line, and each `connector.tool`
   security-log event, says HOW the call ended: `ok` (`succeeded`), `error` (`failed`: the daemon or the tool
   could not do it) or `refused` (`refused`: the tool or the daemon said not this, e.g. an item that needs the
   passkey, or a 401/403). A call refused at the gate (scope or grants) before the tool ran is in the calls log with
   outcome `refused` but not in the security log, because nothing was attempted.
+- **Declared gap — the calls log.** The plugin masks what it records (credential shapes, Vault values), but a host admin or
+  warden token literal typed into a tool's arguments is masked by the kernel only in responses, so the plugin cannot mask
+  it in the calls log. Nothing in the tool surface hands such a value to Claude; this is the residual.
+- **Before every delegated call** the endpoint checks that the connector is on AND the bearer still verifies as the same
+  token of the same grant, so a revoke or an off stops the NEXT call of a request in flight (the one dispatch already
+  running is the kernel's and cannot be cancelled). The calls log keeps only the arguments a tool declares, never a
+  caller-chosen property name; a ferret-written text is cleaned before any tool cuts it short.
+- **The machine's own list is read from its own route** (`GET /v1/machine/agenda`): the all-ferrets roll-up leaves it out.
+- **Declared gaps (owned elsewhere).** An already-existing `calls.jsonl` with broader permissions keeps them on append
+  (the state port's file mode applies at creation; the connector creates it `0600`). A project nested inside a registered
+  one that was removed after the lookup can still be launched while its parent is registered (core ferrets' launch check,
+  not the connector's).
 - **Protocol version**: the endpoint's own refusal reply for a write tool a read-only token may not call never
   reaches the SDK, so it checks `MCP-Protocol-Version` itself (an unsupported value is `400`, as the SDK does).
 

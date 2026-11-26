@@ -633,6 +633,14 @@ so it is worth saying out loud why it needs no exception to the permissive defau
   discovered. Splitting revoke onto its own axis would fix the sequence by making revoking harder than
   granting, which is the trade this whole section refuses.
 
+## Adding a capability
+
+A capability is a name in `CAPABILITY_NAMES` (`packages/core/gate/contract/policy.ts`). Adding one is not finished until:
+
+1. **Stored records still read.** Any stored document that embeds a grant set reads it through `StoredCapabilityGrantsSchema`, never the closed `CapabilityGrantsSchema` directly, so the new name reads OFF for records written without it. No version check and no special case for the new name.
+2. **The snapshot grows.** Append the new full capability set to `RELEASED_CAPABILITY_SETS` in `packages/plugins/access/tests/unit/contract/stored-device-grants.test.ts`. Never edit an earlier entry: each is a file already on somebody's machine. That test parses a device record written with every earlier set.
+3. The rest of this document's list: the table of capabilities, the noun a refusal uses, the app mirror, and the order of questions below.
+
 ## Before you add capability seven: the coarse switch usually disables the remedy
 
 > **Any control that can lock somebody out has to carry the way back at the point of decision, not in a
@@ -1069,6 +1077,8 @@ through one shared parse, `ReadCapabilityGrantsSchema`. The device screen theref
 directions, and never shows access that was not granted. The daemon itself stays closed on what it enforces
 from. This is the version-skew rule in `packages/protocol/src/lib/version-skew.ts`.
 
+**A stored grant set missing a capability reads it as OFF** (`StoredCapabilityGrantsSchema`, see [Per-device grants](#per-device-grants)), so a new capability never makes an older record unreadable.
+
 - **A newly paired device holds every capability** (`FULL_DEVICE_GRANTS`, owner decision 2026-10-14), behind
   the unlock: it can do nothing until it unlocks, and then anything the daemon-wide document allows.
 - **A `fy pair --limited` code** gives the device that redeems it `fleet.use` only (`LIMITED_DEVICE_GRANTS`):
@@ -1089,16 +1099,19 @@ from. This is the version-skew rule in `packages/protocol/src/lib/version-skew.t
   field and reads as the default — `fleet.use` only — which is a narrowing and therefore safe. Every write
   carries the field. A record whose `grants` is malformed fails the document closed, as every other
   malformed field does.
-- **A record written before a capability existed reads that capability as OFF, and is written back.**
+- **A record written before a capability existed reads that capability as OFF.**
   Adding a capability makes every stored `grants` one key short of the closed set, and refusing the document
-  would stop a daemon with a paired device from starting at all. So `StatePairingRepository.open` fills each
-  capability a record lacks with `{ use: false, configure: false }` (a narrowing, never a widening, whichever
-  capability it is) and writes the document back once, whole. The `upgrade-grants` unit test keeps a
-  committed `devices.json` exactly as v4.172.x wrote it (seven capabilities) and strips each capability this
-  build knows from a full record in turn, so a capability added without thought for old records fails there.
-  **Devices paired before `sharing` existed therefore start with Sharing OFF**, except the one boot repair for a
-  device that held every other capability (see "Capability eight was added"). Any other device: in the app by a
-  device that has Sharing and may manage devices, or at the machine with `fy device grant <device> sharing --use`.
+  would stop a daemon with a paired device from starting at all (it did, when `voice` was added: Access refused
+  to start and the browser was told the machine no longer accepted it). So the stored record's `grants` is read
+  through `StoredCapabilityGrantsSchema` (`packages/core/gate/contract/grants.ts`), which fills each capability the
+  file lacks with `{ use: false, configure: false }` — a narrowing, never a widening, whichever capability it is.
+  A key the build does not know, or a malformed grant, is still refused (the file fails closed). The file is not
+  rewritten at boot; the next ordinary write carries the full set. The `stored-device-grants` unit test parses a
+  record written with every earlier capability set (`RELEASED_CAPABILITY_SETS`), and a real-daemon test boots on one,
+  so a capability added without thought for old records fails there.
+  **Devices paired before `sharing` existed therefore start with Sharing OFF**, and likewise `voice`. Turn one on in
+  the app by a device that has it and may manage devices, or at the machine with
+  `fy device grant <device> sharing --use`.
 
 ### Changing a device's grants
 
