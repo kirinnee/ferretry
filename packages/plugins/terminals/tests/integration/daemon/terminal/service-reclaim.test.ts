@@ -64,6 +64,9 @@ class FakeTmux implements TerminalRuntimePort {
   async list(): Promise<readonly TerminalRecord[]> {
     return [...this.sessions.values()];
   }
+  async roots(): Promise<readonly string[]> {
+    return [...this.sessions.values()].map(record => record.root);
+  }
   async create(input: Parameters<TerminalRuntimePort['create']>[0]): Promise<TerminalRecord> {
     const created = record(input.ownerId, input.id);
     this.sessions.set(created.id, created);

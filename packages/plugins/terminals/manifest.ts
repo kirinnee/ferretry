@@ -2,7 +2,7 @@ import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/cont
 import { STEP_UP_ACTS } from '@ferretry/core-gate/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { HoldsChanged, InputTargets, VaultPort } from '@ferretry/core-vault/contract';
-import { AgentControlPort, FerretsPort, JobKeeper, Runners } from '@ferretry/core-ferrets/contract';
+import { AgentControlPort, FerretsPort, JobKeeper, Runners, TerminalRoots } from '@ferretry/core-ferrets/contract';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 import {
   AUDIT,
@@ -656,6 +656,8 @@ export default definePlugin({
       { hook: ReferenceCatalog, key: '%terminal' },
       /** The job keeper is this plugin's: the moves ask it which attachments a ferret holds and to detach them (docs/jobs.md). */
       { hook: JobKeeper },
+      /** The shells' start folders are this plugin's: worktree removal asks them so it never removes one from under a shell. */
+      { hook: TerminalRoots },
     ],
   },
 

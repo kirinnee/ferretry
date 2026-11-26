@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path';
+import { milliseconds } from '@ferretry/std';
 import type { SpawnPort } from '@ferretry/kernel/contract';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../lib/tmux/contracts.ts';
 import { carriesPayload, scriptArguments, scriptLine } from '../../lib/tmux/script.ts';
@@ -38,7 +39,10 @@ export class KernelTmuxProcess implements TmuxCommandPort {
     // A payload is written to the child rather than passed as an argument: argv is world-readable
     // through `/proc`, and a turn brief is longer than the argument limit anyway. Both streams are drained
     // alongside the exit by the spawn port, so a tmux command that fills a pipe cannot deadlock.
-    const result = await this.spawn.run(this.executable, command, stdin === undefined ? undefined : { stdin });
+    const result = await this.spawn.run(this.executable, command, {
+      timeout: milliseconds(5_000),
+      ...(stdin === undefined ? {} : { stdin }),
+    });
     return { code: result.exitCode ?? 1, stdout: result.stdout, stderr: result.stderr };
   }
 }

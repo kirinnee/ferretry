@@ -12,6 +12,7 @@ import {
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
 import { tmuxStartDirectory } from '../../lib/tmux/format-escape.ts';
 import { isTmuxServerAbsent } from '../../lib/tmux/server-absent.ts';
+import { processMayExist, realpath } from '../host/fs.ts';
 
 const ID_OPTION = '@fy_terminal_id';
 const TITLE_OPTION = '@fy_terminal_title';
@@ -62,6 +63,7 @@ export interface TerminalLimiter {
 
 /** tmux-backed independent shell terminals over the daemon's injected private socket. */
 export class TmuxTerminalRuntime implements TerminalRuntimePort {
+  private readonly knownSessions = new Map<string, readonly (number | undefined)[]>();
   constructor(
     private readonly tmux: TmuxCommandPort,
     private readonly now: () => number,
@@ -81,6 +83,53 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
     private readonly environment: () => Readonly<Record<string, string>> = () => ({}),
   ) {}
 
+  /** Destructive evidence: never turn an unreachable (possibly moved) socket into an empty server. */
+  async roots(): Promise<readonly string[]> {
+    const result = await this.tmux.execute([
+      'list-panes',
+      '-a',
+      '-F',
+      '#{session_name}\t#{pane_pid}\t#{pane_current_path}',
+    ]);
+    if (result.code !== 0) {
+      // Only an explicit absent endpoint AND no remembered live session proves an empty host.
+      const absent = /^(?:no server running on .+|error connecting to .+ \(No such file or directory\))\s*$/u.test(
+        result.stderr,
+      );
+      const alive = absent
+        ? await Promise.all(
+            [...this.knownSessions.values()].flat().map(async pid => pid === undefined || (await processMayExist(pid))),
+          )
+        : [true];
+      if (absent && !alive.some(Boolean)) {
+        this.knownSessions.clear();
+        return [];
+      }
+      throw failure('could not read live pane directories', result.stderr);
+    }
+    const panes = result.stdout === '' ? [] : result.stdout.replace(/\n$/u, '').split('\n');
+    const sessions = new Map<string, (number | undefined)[]>();
+    const roots = await Promise.all(
+      panes.map(async pane => {
+        const tab = pane.indexOf('\t');
+        const session = pane.slice(0, tab);
+        const end = pane.indexOf('\t', tab + 1);
+        const pid = Number(pane.slice(tab + 1, end));
+        const directory = pane.slice(end + 1);
+        if (tab <= 0 || end <= tab || !directory.startsWith('/'))
+          throw new TerminalRuntimeError('a live pane directory is unreadable');
+        sessions.set(session, [
+          ...(sessions.get(session) ?? []),
+          Number.isSafeInteger(pid) && pid > 0 ? pid : undefined,
+        ]);
+        return await realpath(directory);
+      }),
+    );
+    this.knownSessions.clear();
+    for (const [session, pids] of sessions) this.knownSessions.set(session, pids);
+    return roots;
+  }
+
   async list(): Promise<readonly TerminalRecord[]> {
     const format = [
       '#{session_name}',
@@ -95,6 +144,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       '#{window_width}',
       '#{window_height}',
       '#{pane_id}',
+      '#{pane_pid}',
     ].join(SEPARATOR);
     const result = await this.tmux.execute(['list-sessions', '-F', format]);
     if (result.code !== 0) {
@@ -118,6 +168,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
         cols = '',
         rows = '',
         paneId = '',
+        panePid = '',
       ] = line.split(SEPARATOR);
       const parsedCreatedAtMs = Date.parse(created);
       // An unreadable or unwritten opener contributes no key at all, so the view
@@ -152,6 +203,13 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
         ...(/^%(?:0|[1-9][0-9]*)$/u.test(paneId) ? { paneId } : {}),
       };
       if (!tmuxSession.startsWith('fy-webterm-') || !isRecordId(id) || !ownerId || !root.startsWith('/')) continue;
+      const pid = Number(panePid);
+      this.knownSessions.set(tmuxSession, [
+        ...new Set([
+          ...(this.knownSessions.get(tmuxSession) ?? []),
+          Number.isSafeInteger(pid) && pid > 0 ? pid : undefined,
+        ]),
+      ]);
       records.push(record);
     }
     return records;
@@ -169,6 +227,9 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
     const result = await this.tmux.execute([
       'new-session',
       '-d',
+      '-P',
+      '-F',
+      '#{pane_pid}',
       '-s',
       tmuxSession,
       '-c',
@@ -228,6 +289,8 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       await this.tmux.execute(['kill-session', '-t', tmuxSession]).catch(() => undefined);
       throw failure('could not create terminal', result.stderr);
     }
+    const pid = Number(result.stdout.trim());
+    this.knownSessions.set(tmuxSession, [Number.isSafeInteger(pid) && pid > 0 ? pid : undefined]);
     return {
       id: input.id,
       ownerId: input.ownerId,
@@ -334,8 +397,20 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
 
   async kill(record: TerminalRecord): Promise<void> {
     const result = await this.tmux.execute(['kill-session', '-t', record.tmuxSession]);
-    if (result.code !== 0 && !/can't find session/iu.test(result.stderr) && !isTmuxServerAbsent(result.stderr)) {
+    const knownAlive = (
+      await Promise.all(
+        (this.knownSessions.get(record.tmuxSession) ?? []).map(
+          async pid => pid === undefined || (await processMayExist(pid)),
+        ),
+      )
+    ).some(Boolean);
+    if (
+      result.code !== 0 &&
+      !/can't find session/iu.test(result.stderr) &&
+      !(isTmuxServerAbsent(result.stderr) && !knownAlive)
+    ) {
       throw failure('could not close terminal', result.stderr);
     }
+    this.knownSessions.delete(record.tmuxSession);
   }
 }
