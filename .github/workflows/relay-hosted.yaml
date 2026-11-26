@@ -80,6 +80,11 @@ env:
   # `data_blobs`, `wasm_modules`, `text_blobs`, `rules` or `no_bundle`. scripts/validate/release-guards.sh holds the
   # exact list, and scripts/validate/relay-config.sh holds that the repository's configurations stay inside it.
   HANDOFF_CONFIG_KEYS: '["$schema","compatibility_date","durable_objects","main","migrations","name","observability","services","vars","workers_dev"]'
+  # Exact reviewed resources: no script_name, foreign service, transfer or surprise migration from a build artifact.
+  HANDOFF_RESOURCES: >-
+    {"services":[{"binding":"LINK_STORE","service":"ferretry-hosted-link-store"}],
+    "durable_objects":{"bindings":[{"name":"RENDEZVOUS","class_name":"RendezvousDurableObject"},{"name":"RELAY_CONTROL","class_name":"HostedRelayControlDurableObject"},{"name":"TUNNEL_CONTROL","class_name":"HostedTunnelControlDurableObject"}]},
+    "migrations":[{"tag":"v1","new_sqlite_classes":["RendezvousDurableObject","HostedRelayControlDurableObject"]},{"tag":"v2","new_sqlite_classes":["HostedTunnelControlDurableObject"]}]}
 
 # THE CLOUDFLARE TOKEN NEVER MEETS CHECKOUT CODE (the same rule as pwa-pages.yaml; scripts/validate/release-guards.sh
 # holds it for every workflow that reads a CLOUDFLARE secret). A job that holds the token has no `actions/checkout`,
@@ -215,10 +220,11 @@ jobs:
             exit 1
           fi
           # shellcheck disable=SC2016 # jq variables, not shell expansions
-          if ! jq -e --argjson keys "$HANDOFF_CONFIG_KEYS" --arg name ferretry-hosted-relay \
-            'type == "object" and ((keys - $keys) == []) and .main == "worker.js" and .name == $name' \
+          if ! jq -e --argjson keys "$HANDOFF_CONFIG_KEYS" --argjson resources "$HANDOFF_RESOURCES" --arg name ferretry-hosted-relay \
+            'type == "object" and ((keys - $keys) == []) and .main == "worker.js" and .name == $name
+             and ({services: (.services // []), durable_objects: (.durable_objects // {}), migrations: (.migrations // [])} == $resources)' \
             wrangler.hosted.json >/dev/null 2>&1; then
-            echo "❌ wrangler.hosted.json must hold only allow-listed keys, main worker.js and the name ferretry-hosted-relay" >&2
+            echo "❌ wrangler.hosted.json must hold only allow-listed keys, main worker.js, name ferretry-hosted-relay and the exact reviewed resources" >&2
             exit 1
           fi
       # No token in this step: the install scripts of wrangler's dependencies are not run at all (`--ignore-scripts`),

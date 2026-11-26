@@ -49,6 +49,7 @@ set -euo pipefail
 #      `node` on a file, and a wrangler `deploy` by path or through `node` needs `--no-bundle` like a bare one.
 #   6. Nothing but CD and the Release workflow's own steps names `Casks/` or semantic-release.
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(git rev-parse --show-toplevel)"
 if [[ ${1:-} == --root ]]; then root_dir="$(cd "${2:?--root needs a directory}" && pwd)"; fi
 cd "${root_dir}"
@@ -363,5 +364,6 @@ for workflow in "${workflows[@]}"; do
   fi
 done
 
+bash "${script_dir}/release-guards/token-jobs.sh" || status=1
 ((status == 0)) || exit 1
 echo "✅ every job of cd.yaml sits behind main-only, so a tag off main publishes nothing for commits made after this guard lands (a v* tag on a 5.0 commit made before this guard would still publish; no agent ever creates or pushes a tag); the preview deploys from rebuild/preview alone"
