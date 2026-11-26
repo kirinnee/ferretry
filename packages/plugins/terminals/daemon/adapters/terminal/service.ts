@@ -1,3 +1,4 @@
+import type { WorktreeGuard } from '../../lib/terminal/worktree-guard.ts';
 import { instantFromEpochMs } from '@ferretry/std';
 import { isAbsolute, resolve } from 'node:path';
 import type {
@@ -41,6 +42,7 @@ export class TerminalServiceError extends Error {
 }
 
 export interface TerminalServiceOptions {
+  readonly worktrees?: WorktreeGuard;
   readonly maximumPerSession?: number;
   readonly maximumGlobal?: number;
   readonly idleTimeoutMs?: number;
@@ -72,6 +74,7 @@ export class ManagedTerminalService {
   private readonly idleTimeoutMs: number;
   private readonly isDirectory: ((path: string) => Promise<boolean>) | undefined;
   private readonly owners: TerminalOwnerDirectory | undefined;
+  private readonly worktrees: WorktreeGuard | undefined;
   private readonly onClosed: TerminalServiceOptions['onClosed'];
 
   constructor(
@@ -87,6 +90,7 @@ export class ManagedTerminalService {
     this.isDirectory = options.isDirectory;
     this.owners = options.owners;
     this.onClosed = options.onClosed;
+    this.worktrees = options.worktrees;
   }
 
   private async session(reference: string): Promise<TerminalSession> {
@@ -224,15 +228,26 @@ export class ManagedTerminalService {
             this.maximumPerSession,
           )
         : normalizeTerminalTitle(input.title);
-    const record = await this.runtime.create({
-      ownerId: session.id,
-      id: this.ids.next(),
-      title,
-      cwd,
-      size,
-      ...(input.openedBy === undefined ? {} : { openedBy: input.openedBy }),
-      ...(input.name === undefined ? {} : { name: input.name }),
-    });
+    const create = async () =>
+      await this.runtime.create({
+        ownerId: session.id,
+        id: this.ids.next(),
+        title,
+        cwd,
+        size,
+        ...(input.openedBy === undefined ? {} : { openedBy: input.openedBy }),
+        ...(input.name === undefined ? {} : { name: input.name }),
+      });
+    const record =
+      this.worktrees === undefined
+        ? await create()
+        : await this.worktrees.launch(
+            cwd,
+            () => {
+              throw new TerminalServiceError('conflict', 'this checkout is being removed');
+            },
+            create,
+          );
     this.records.set(key(record.ownerId, record.id), record);
     return this.view(record);
   }

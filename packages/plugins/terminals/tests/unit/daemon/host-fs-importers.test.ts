@@ -46,6 +46,8 @@ describe('the Terminals host-fs seam', () => {
         'daemon/adapters/system/profile-program.ts',
         'daemon/adapters/system/replaceable-file.ts',
         'daemon/adapters/terminal/system-login-shell.ts',
+        // Canonicalizes current pane cwds and proves remembered pane processes exited before trusting an absent socket.
+        'daemon/adapters/terminal/tmux-terminal-runtime.ts',
         'daemon/adapters/tmux/harness-launch-guard.ts',
         // Reads only `/proc/<pid>/stat` of this daemon and its parents (the pids a descendant signal never reaches), and sends the one signal.
         'daemon/adapters/tmux/pane-process-host.ts',

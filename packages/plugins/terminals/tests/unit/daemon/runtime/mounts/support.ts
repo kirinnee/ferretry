@@ -86,6 +86,7 @@ export async function mountHalf(
   const plugin = implementDaemon(manifest, {
     build: ctx =>
       buildTerminals(ctx, {
+        realPath: async path => path,
         tmux: new ScriptedTmux(),
         socketPath: '/state/terminals/tmux.sock',
         runtime,

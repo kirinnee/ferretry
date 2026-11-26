@@ -56,13 +56,18 @@ describe('the worktrees feature reads the contributed terminal roots', () => {
   });
 
   test('G3-U1 a Terminals that lists its shells adds no undetermined blocker', async () => {
-    expect(await blockerCodes({ plugins: [fakeTerminals({ roots: async () => ['/elsewhere'] })] })).not.toContain(
-      'undetermined_evidence',
-    );
+    expect(
+      await blockerCodes({
+        plugins: [
+          fakeTerminals({ roots: async () => ['/elsewhere'], withRemoval: async (_path, remove) => await remove() }),
+        ],
+      }),
+    ).not.toContain('undetermined_evidence');
   });
 
   test('G3-U1 a Terminals that cannot list its shells is unknown, and says so', async () => {
     const broken = fakeTerminals({
+      withRemoval: async (_path, remove) => await remove(),
       roots: async () => {
         throw new Error('tmux would not answer');
       },

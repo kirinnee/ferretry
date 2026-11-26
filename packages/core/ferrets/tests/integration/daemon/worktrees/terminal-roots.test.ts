@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { TerminalRootsSource } from '../../../../contract/index.ts';
-import { liveTerminalRoots } from '../../../../daemon/lib/worktrees/terminal-roots.ts';
+import { liveTerminalRoots, withTerminalRemoval } from '../../../../daemon/lib/worktrees/terminal-roots.ts';
 import { worktreeRouteWorld } from '../../../support/daemon/worktree-world.ts';
 import { cleanupTempDirectories } from '../support/repository.ts';
 
@@ -16,20 +16,22 @@ const exists = async (path: string) =>
     () => true,
     () => false,
   );
-const shells = (...roots: string[]): TerminalRootsSource => ({ roots: async () => roots });
+const shells = (...roots: string[]): TerminalRootsSource => ({
+  roots: async () => roots,
+  withRemoval: async (_path, remove) => await remove(),
+});
 const broken: TerminalRootsSource = {
+  withRemoval: async (_path, remove) => await remove(),
   roots: async () => {
     throw new Error('tmux would not answer');
   },
 };
 
+afterAll(cleanupTempDirectories);
+
 const blockersOf = (json: unknown) => (json as { blockers: { code: string }[] }).blockers.map(each => each.code);
 
 describe('worktree removal over the contributed terminal roots', () => {
-  afterAll(async () => {
-    await cleanupTempDirectories();
-  });
-
   test('G3-U1 no plugin runs shells: no undetermined blocker, and the removal goes through', async () => {
     const world = await worktreeRouteWorld('g3u1-none', () => liveTerminalRoots([]));
     const made = await world.call('POST /v1/worktrees', {
@@ -135,4 +137,57 @@ describe('worktree removal over the contributed terminal roots', () => {
       if (opened) await tmux('kill-server');
     }
   });
+});
+
+// The contributor owns pane admission; Ferrets must hold that reservation through the actual Git spawn.
+test('A: holds contributed exclusion while Git is paused at remove, then releases it', async () => {
+  let reserved = false;
+  const source: TerminalRootsSource = {
+    roots: async () => [],
+    withRemoval: async (_path, remove) => {
+      reserved = true;
+      try {
+        return await remove();
+      } finally {
+        reserved = false;
+      }
+    },
+  };
+  const world = await worktreeRouteWorld(
+    'g3u1-reservation',
+    () => liveTerminalRoots([source]),
+    async (path, remove) => await withTerminalRemoval([source], path, remove),
+  );
+  const made = await world.call('POST /v1/worktrees', {
+    body: { sourcePath: world.repository.root, branch: 'feat/exclusion', sessionId: 'fixture-owner' },
+  });
+  const path = (made.json as { worktree: { path: string } }).worktree.path;
+  let unpause!: () => void;
+  let reached!: () => void;
+  const paused = new Promise<void>(resolve => {
+    reached = resolve;
+  });
+  const proceed = new Promise<void>(resolve => {
+    unpause = resolve;
+  });
+  const run = world.io.git.runBytes.bind(world.io.git);
+  world.io.git.runBytes = async (program, args, options) => {
+    if (args.includes('worktree') && args.includes('remove')) {
+      reached();
+      await proceed;
+    }
+    return await run(program, args, options);
+  };
+  const removing = world.call('POST /v1/worktrees/remove', {
+    body: { path, overrides: ['accept_unpushed_commits'], deleteBranch: false, confirmations: [] },
+  });
+  try {
+    await paused;
+    expect(reserved).toBe(true);
+  } finally {
+    unpause();
+  }
+  expect((await removing).status).toBe(200);
+  expect(await exists(path)).toBe(false);
+  expect(reserved).toBe(false);
 });

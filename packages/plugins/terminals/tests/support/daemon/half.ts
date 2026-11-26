@@ -228,6 +228,7 @@ export async function terminalsHalf(
         tmux: new ScriptedTmux(),
         socketPath: '/state/terminals/tmux.sock',
         runtime,
+        realPath: async path => path,
         ...overrides,
       })),
   });

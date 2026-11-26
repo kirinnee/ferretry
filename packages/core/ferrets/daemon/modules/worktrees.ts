@@ -53,6 +53,7 @@ export interface WorktreesNeeds {
    * still refuses.
    */
   readonly terminalRoots: () => Promise<readonly string[] | undefined>;
+  readonly withTerminalRemoval?: <T>(path: string, remove: () => Promise<T>) => Promise<T>;
   /** Opaque ids for ownership tokens (today: `crypto.randomUUID`). */
   readonly newId: () => string;
 }
@@ -93,7 +94,10 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
     new StateManagedWorktreeRegistry(needs.state),
     operations,
     { sessions: async () => await needs.sessions().catch(() => undefined) },
-    { roots: async () => await needs.terminalRoots().catch(() => undefined) },
+    {
+      roots: async () => await needs.terminalRoots().catch(() => undefined),
+      ...(needs.withTerminalRemoval === undefined ? {} : { withRemoval: needs.withTerminalRemoval }),
+    },
     // The SAME clock the Git adapter stamps records with, so an intent this daemon writes before a mutation and
     // the record it writes after cannot disagree about when.
     clock,

@@ -189,6 +189,7 @@ function build(
     readonly sessions?: readonly WorktreeSessionFact[];
     readonly sessionEvidence?: () => Promise<readonly WorktreeSessionFact[] | undefined>;
     readonly terminalRoots?: readonly string[];
+    readonly withRemoval?: <T>(path: string, remove: () => Promise<T>) => Promise<T>;
     readonly managedRoot?: string | undefined;
     readonly ids?: readonly string[];
   } = {},
@@ -200,7 +201,10 @@ function build(
     registry,
     operations,
     { sessions: options.sessionEvidence ?? (async () => options.sessions ?? []) },
-    { roots: async () => options.terminalRoots ?? [] },
+    {
+      roots: async () => options.terminalRoots ?? [],
+      ...(options.withRemoval === undefined ? {} : { withRemoval: options.withRemoval }),
+    },
     { nowIso: () => '2026-08-04T09:00:00.000Z' },
     { next: () => minted.shift() ?? 'exhausted' },
     'managedRoot' in options ? options.managedRoot : MANAGED_ROOT,
@@ -1113,5 +1117,32 @@ describe("the registry's durable facts (Ferrets' managedWorktrees(), for MCP's k
     should(actual[0]).match({ path: '/managed/repo/half', commonDirectory: '/work/ferretry/.git' });
     should(actual[0]?.unresolved).match(/never finished/u);
     should(actual[0]?.removedAt).be.undefined();
+  });
+});
+
+describe('the terminal contributor exclusion bracket', () => {
+  it('should hold exclusion through the destructive operation and release it after settling', async () => {
+    let held = false;
+    const operations = new RecordingOperations({
+      beforeRemove: async () => {
+        should(held).equal(true);
+      },
+    });
+    const { subject } = build({
+      entries: [record()],
+      operations,
+      withRemoval: async (path, remove) => {
+        should(path).equal(record().path);
+        held = true;
+        try {
+          return await remove();
+        } finally {
+          held = false;
+        }
+      },
+    });
+    await subject.remove({ path: record().path, overrides: [], deleteBranch: false, confirmations: [] });
+    should(held).equal(false);
+    should(operations.removals).have.length(1);
   });
 });

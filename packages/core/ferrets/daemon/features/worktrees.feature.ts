@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createKernelWorktreeHostIo } from '../adapters/worktrees/kernel-host-io.ts';
-import { liveTerminalRoots } from '../lib/worktrees/terminal-roots.ts';
+import { liveTerminalRoots, withTerminalRemoval } from '../lib/worktrees/terminal-roots.ts';
 import { buildWorktrees } from '../modules/worktrees.ts';
 import { TerminalRoots } from '../../contract/index.ts';
 import type { FeatureContribution, FerretsContext, FerretsFeature } from './types.ts';
@@ -31,6 +31,12 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       }));
     },
     terminalRoots: async () => await liveTerminalRoots(hooks.contributions(TerminalRoots).map(entry => entry.item)),
+    withTerminalRemoval: async (path, remove) =>
+      await withTerminalRemoval(
+        hooks.contributions(TerminalRoots).map(entry => entry.item),
+        path,
+        remove,
+      ),
     newId: () => randomUUID(),
   });
   late.worktrees = worktrees;

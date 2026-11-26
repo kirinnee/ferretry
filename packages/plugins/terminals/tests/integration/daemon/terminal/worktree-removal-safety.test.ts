@@ -42,6 +42,39 @@ describe('G3 U1 destructive occupancy evidence from private tmux', () => {
     for (const directory of directories) await rm(directory, { recursive: true, force: true });
   });
 
+  test('B: no private server before the first session is verified empty', async () => {
+    const f = await fixture();
+    expect(await f.service.roots()).toEqual([]);
+  });
+
+  test('B: no private server after the last terminal closes is verified empty', async () => {
+    const f = await fixture();
+    const shell = await f.open(f.path);
+    expect(await f.service.roots()).toEqual([f.path]);
+    await f.runtime.kill(shell);
+    await waitForValue(async () => {
+      const result = await f.tmux.execute(['list-panes', '-a']);
+      return /no server running|No such file or directory/u.test(result.stderr) ? true : undefined;
+    }, 'the private server to finish exiting');
+    expect(await f.service.roots()).toEqual([]);
+  });
+
+  test('B: a naturally exited last shell also leaves a verified empty host', async () => {
+    const f = await fixture();
+    try {
+      const shell = await f.open(f.path);
+      expect(await f.service.roots()).toEqual([f.path]);
+      await f.runtime.write(shell, new TextEncoder().encode('exit\r'));
+      await waitForValue(async () => {
+        const result = await f.tmux.execute(['list-panes', '-a']);
+        return /no server running|No such file or directory/u.test(result.stderr) ? true : undefined;
+      }, 'the last shell to exit');
+      expect(await f.service.roots()).toEqual([]);
+    } finally {
+      await f.tmux.execute(['kill-server']);
+    }
+  });
+
   test('1a: a shell started outside and cd into checkout/src reports its current directory', async () => {
     const f = await fixture();
     try {

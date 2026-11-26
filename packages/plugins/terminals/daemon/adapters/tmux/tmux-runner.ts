@@ -38,6 +38,7 @@ import {
   type SpawnPort,
 } from '@ferretry/kernel/contract';
 import { targetRef } from '@ferretry/core-vault/contract';
+import type { WorktreeGuard } from '../../lib/terminal/worktree-guard.ts';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { LAUNCH_WRAPPER_PROGRAMS, MANAGER_ENVIRONMENT_NAMES } from '../../lib/cgroups/scope.ts';
 import { sessionTarget } from '../../lib/tmux/address.ts';
@@ -143,20 +144,9 @@ class PaneHeldError extends PaneDeliveryError {
 const STOP_KEYS: ReadonlySet<string> = new Set(HARNESS_STOP_KEYS);
 
 /**
- * The `runners:tmux` provider (§2.3): a ferret's harness runs in its own tmux session, `fy-<ferret>`, on Terminals'
- * tmux server, and its HANDLE IS THE PANE ID (`%12`).
- *
- * WHY THE PANE ID: tmux never reuses one while its server lives, and Ferrets persists the handle in `ferret.json`, so a
- * restarted daemon finds the pane again by asking tmux about exactly that id (`attach`) — never by a name a person or
- * a second launch could have taken meanwhile. A v4→v5 switch hands v5 the pane ids of the panes already running, and
- * `attach` adopts each WITHOUT restarting it (spine D15).
- *
- * THE ENVIRONMENT NEVER PASSES THROUGH THIS PLUGIN. `spec.env` is the Vault's opaque handle: the kernel's spawn adapter
- * opens it for the ONE tmux client that runs the launch, and tmux copies exactly the variables the handle names
- * (`update-environment`, set for this launch and put back in the same script) from that client into the new
- * session. The names are not secret (`ChildEnvironment.names` is "for the launch record"); the values exist only in
- * that client's environment and the pane's. The server is started first, from a client WITHOUT the handle, so a
- * server this launch starts can never inherit a ferret's values into its global environment.
+ * Tmux runner on the daemon's private server; persisted pane ids identify launches and attach adopts them (spine D15).
+ * The Vault opens the opaque environment for ONE launch client; update-environment copies its named values into the
+ * pane. The server is started from a client without that handle, so its global environment never holds those values.
  */
 
 /** tmux session names for ferrets (today's `tmuxSessionPrefix` and `maxTmuxSessionNameLength`). */
@@ -296,6 +286,7 @@ export interface PaneProcessHost {
 }
 
 export interface TmuxRunnerOptions {
+  readonly worktrees?: WorktreeGuard;
   readonly tmux: TmuxCommandPort;
   /** Whether a person is typing into a pane; every observation says so. */
   readonly typing?: TypingHold;
@@ -369,7 +360,15 @@ export class TmuxRunner implements Runner {
   constructor(private readonly options: TmuxRunnerOptions) {}
 
   async start(spec: RunSpec): Promise<Result<RunningFerret, StartRefusal>> {
-    const launch = this.#launching.then(async () => await this.launch(spec));
+    const launch = this.#launching.then(async () =>
+      this.options.worktrees === undefined
+        ? await this.launch(spec)
+        : await this.options.worktrees.launch<Result<RunningFerret, StartRefusal>>(
+            spec.cwd,
+            () => err('failed'),
+            async () => await this.launch(spec),
+          ),
+    );
     this.#launching = launch.catch(() => undefined);
     return await launch;
   }

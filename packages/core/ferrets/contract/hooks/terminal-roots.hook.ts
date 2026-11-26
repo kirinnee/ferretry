@@ -9,6 +9,8 @@ import { z } from 'zod';
 export interface TerminalRootsSource {
   /** Every live pane's current folder (realpath). Throws on any unreadable endpoint or cwd: that is not "none". */
   roots(): Promise<readonly string[]>;
+  /** Exclude new shell/runner launches until removal settles; drain earlier launches before sampling roots. */
+  withRemoval<T>(path: string, remove: () => Promise<T>): Promise<T>;
 }
 
 /** Terminals contributes its open shells' folders; worktree removal reads them (docs/rebuild/ports/terminals.md). */

@@ -56,7 +56,8 @@ import {
   TerminalWaitInputSchema,
 } from '../contract/index.ts';
 import manifest, { JobAttachments, JobFiles } from '../manifest.ts';
-import { hostPlatform, hostUserId, readText, signalProcess, stat } from './adapters/host/fs.ts';
+import { WorktreeGuard } from './lib/terminal/worktree-guard.ts';
+import { hostPlatform, hostUserId, readText, realpath, signalProcess, stat } from './adapters/host/fs.ts';
 import { ExecutableCodePrograms } from './adapters/system/executable-code-programs.ts';
 import { KernelProgramProof } from './adapters/system/kernel-program-proof.ts';
 import {
@@ -152,6 +153,7 @@ export interface TerminalsOverrides {
   readonly socketPath?: string;
   /** The terminals' runtime (the daemon: `TmuxTerminalRuntime` over `tmux`). */
   readonly runtime?: TerminalRuntimePort;
+  readonly realPath?: (path: string) => Promise<string>;
   /** What the guarded write asks of the host (the daemon: tmux above, `ps`/`stty` via kernel.spawn, the kernel's proofs). */
   readonly inputs?: {
     readonly tmux?: TmuxCommandPort;
@@ -385,6 +387,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
   const runtime: TerminalRuntimePort =
     overrides.runtime ??
     new TmuxTerminalRuntime(tmux, nowMs, loginShell, processes.limits, () => liveTerminalEnvironment(kernel));
+  const worktrees = new WorktreeGuard(overrides.realPath ?? realpath);
   const service = new ManagedTerminalService(
     runtime,
     {
@@ -396,6 +399,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     { now: nowMs },
     { next: hex12 },
     {
+      worktrees,
       maximumPerSession: config.perFerret,
       maximumGlobal: config.global,
       idleTimeoutMs: TERMINAL_IDLE_TIMEOUT_MS,
@@ -620,6 +624,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       )
     : undefined;
   const runner = new TmuxRunner({
+    worktrees,
     tmux,
     typing,
     ...(launchGuard === undefined ? {} : { launchGuard }),
@@ -946,7 +951,16 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       // The composer's `%terminal` menu (reference.catalog): the ferret's terminals. Asked only while Conversation is on.
       'reference.catalog:%terminal': new TerminalsReferenceMenu(provided),
       'jobs.keeper': () => [{ id: 'terminals', item: jobKeeper }],
-      'terminal.roots': () => [{ id: 'terminals', item: { roots: async () => await service.roots() } }],
+      'terminal.roots': () => [
+        {
+          id: 'terminals',
+          item: {
+            roots: async () => await service.roots(),
+            withRemoval: async <T>(path: string, remove: () => Promise<T>): Promise<T> =>
+              await worktrees.withRemoval(path, remove),
+          },
+        },
+      ],
     },
     subscribers: {
       'vault.holds-changed': (payload: {

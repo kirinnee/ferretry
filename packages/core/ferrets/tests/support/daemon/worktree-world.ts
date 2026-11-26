@@ -110,6 +110,7 @@ export async function composeWorktreeWorld(label: string) {
 export async function worktreeRouteWorld(
   label: string,
   terminalRoots: () => Promise<readonly string[] | undefined> = async () => [],
+  withTerminalRemoval?: <T>(path: string, remove: () => Promise<T>) => Promise<T>,
 ) {
   const world = await composeWorktreeWorld(label);
   if (world.io === undefined) throw new Error('the worktrees root named no folder');
@@ -120,6 +121,7 @@ export async function worktreeRouteWorld(
     io: world.io,
     sessions: async () => [],
     terminalRoots,
+    ...(withTerminalRemoval === undefined ? {} : { withTerminalRemoval }),
     newId: () => 'ownership-token-0001',
   });
   const call = async (
