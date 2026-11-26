@@ -92,7 +92,15 @@ beforeAll(async () => {
           <button id="replace" onclick="document.getElementById('linked').src='http://localhost:7487/plain'">Replace frame</button>`,
         );
       if (url.pathname === '/linked')
-        return html('', `${CODE_BODY}<script>history.replaceState(null, '', '/linked');</script>`);
+        return html(
+          '',
+          `${CODE_BODY}<script>
+          history.replaceState(null, '', '/linked');
+          setTimeout(() => {
+            history.pushState(null, '', '/linked');
+          }, 200);
+        </script>`,
+        );
       if (url.pathname === '/dyn') return html('', `<p id="o">idle</p>${SHOW_HIDE}`);
       if (url.pathname === '/framed') return html('', '<p id="o">outer</p><iframe id="f" src="/pair"></iframe>');
       // A page with a button that opens the pair screen as a popup, keeping its handle: a click is the user gesture.
