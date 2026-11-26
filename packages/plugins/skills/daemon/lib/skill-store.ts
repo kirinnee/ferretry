@@ -275,6 +275,10 @@ export class SkillStore {
   /**
    * Every file, link or unreadable folder in `installed/<name>/` as it is on disk now (not as remembered), by path,
    * sorted; empty folders are not listed. Bounded: past {@link MAX_WALKED_ENTRIES} entries looked at (folders too) a last entry says there is more.
+   *
+   * GAP(skills): the bound is checked as entries are visited, but the kernel's `state.entries` lists ONE folder in full
+   * before it returns and takes no limit, so a single very wide folder is still listed whole (the queue of folders to
+   * enter stays bounded). Stopping early needs a limit on that kernel read, which this plugin does not add.
    */
   async walk(name: string): Promise<readonly InstalledEntry[]> {
     if (!usableSkillName(name)) return [];

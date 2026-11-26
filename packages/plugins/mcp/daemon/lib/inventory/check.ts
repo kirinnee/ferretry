@@ -316,6 +316,8 @@ export class McpCheckService {
       else filled.push([name, expandVariables(value, environment, missing)]);
     }
     const headers: Record<string, string> = Object.fromEntries(filled);
+    // Every header value this check actually sends is masked from the answer, a literal one and a short one included.
+    for (const value of Object.values(headers)) maskable(value, used);
     if (declaration.bearerVariable !== undefined) {
       if (held !== undefined && declaration.bearerVariable === held.variable)
         credential ??= { secret: held.secret, header: 'Authorization', scheme: 'Bearer' };
@@ -324,7 +326,7 @@ export class McpCheckService {
         if (token === undefined) missing.add(declaration.bearerVariable);
         else {
           headers.Authorization = `Bearer ${token}`;
-          if (token.length >= 8) used.add(token);
+          maskable(token, used);
         }
       }
     }
@@ -342,6 +344,17 @@ export class McpCheckService {
       ...(credential === undefined || clash ? {} : { credential }),
     };
   }
+}
+
+/**
+ * Registers what a header carries with the scrubber: the whole value and, past a scheme word (`Bearer abc`), the token
+ * alone, whatever the length. An opaque secret reference is no value and is never registered.
+ */
+function maskable(value: string, used: Set<string>): void {
+  if (value === '' || secretReferencesIn(value).length > 0) return;
+  used.add(value);
+  const space = value.indexOf(' ');
+  if (space > 0 && space < value.length - 1) used.add(value.slice(space + 1));
 }
 
 /** `${VARIABLE}` or `<scheme> ${VARIABLE}` as a header's whole value: where a held sign-in's token goes. */

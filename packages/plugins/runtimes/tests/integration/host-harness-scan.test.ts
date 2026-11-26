@@ -67,6 +67,31 @@ const spiedFiles = (): { files: HostFiles; opened: string[] } => {
   };
 };
 
+describe('HostHarnessScanner — bounded reads', () => {
+  it('should read no skill file past the cap, however large it is, and still list the skill', async () => {
+    // Arrange
+    const user = await home();
+    await put(path.join(user, '.claude/skills/big/SKILL.md'), 'big');
+    await put(path.join(user, '.claude/skills/big/huge.bin'), 'x'.repeat(300 * 1024));
+    const limits: (number | undefined)[] = [];
+    const files: HostFiles = {
+      ...nodeHostFiles,
+      readBytes: async (file, limit) => {
+        if (file.includes('/skills/')) limits.push(limit);
+        return await nodeHostFiles.readBytes(file, limit);
+      },
+    };
+
+    // Act
+    const [claude] = await scanner(user, { files }).scan();
+
+    // Assert
+    should(claude?.skills.map(skill => skill.item)).deepEqual(['big']);
+    should(limits).have.length(2);
+    should(limits.every(limit => limit !== undefined && limit <= 256 * 1024 + 1)).be.true();
+  });
+});
+
 describe('HostHarnessScanner — a set-up machine', () => {
   // The checked-read seam exists (`HostFiles` over the harness-home roots): a setup document is checked component by
   // component (no link, no sign-in file), then read. A real disk shows the contents, and still no sign-in fact beyond Logins.

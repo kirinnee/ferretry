@@ -25,9 +25,10 @@ export const nodeHostFiles: HostFiles = {
       throw error;
     }
   },
-  readBytes: async path => {
+  readBytes: async (path, limit) => {
     try {
-      return await readFile(path);
+      const whole = await readFile(path);
+      return limit === undefined ? whole : whole.subarray(0, limit);
     } catch (error) {
       if (missing(error)) return undefined;
       throw error;
