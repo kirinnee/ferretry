@@ -39,6 +39,10 @@ The GitHub owner and repo slug have one source too: the root `package.json` `rep
 (`github:<owner>/<repo>`). The cask, installer, GoReleaser, `RELEASE_OWNER`, install commands in docs and the
 onboarding page, and the fixtures that mirror them are rewritten from it by one repeatable command, a dry run
 unless `--apply` is given. It edits this working tree only: no push, no `gh`, no other repository.
+`--apply` also refreshes the Nix install digest in `nix/bun-deps.inputs` (the root manifest is an install input), computed
+by Nix offline; where Nix cannot, it ends _incomplete_ with a non-zero status and the exact command to run. The
+repository is a separate fact from the product name: `scripts/local/rename.sh --product` leaves every repository
+address alone, so a product rename never changes where releases are published.
 
 ```bash
 scripts/local/move-repo.sh --owner <owner> [--repo <repo>]           # list what would change

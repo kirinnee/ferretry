@@ -68,7 +68,6 @@ class World {
 
   service(timeoutMinutes?: number): HarnessUpdateService {
     return new HarnessUpdateService({
-      product: 'ferretry',
       homeDirectory: async () => HOME,
       locate: async () => this.location,
       facts: {

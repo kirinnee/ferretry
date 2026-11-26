@@ -224,13 +224,15 @@ release-artifacts)
   ;;
 homebrew-cask)
   # The cask is named after the PRODUCT, installs every shipped executable, lives in THIS repo
-  # (owner repo == project) under Casks/, and strips the quarantine attribute post-install from
-  # every executable it installs (an unsigned helper left quarantined is refused by Gatekeeper).
+  # (the tap IS the release repository, whose name is the repository's, not the product's) under Casks/, and strips the
+  # quarantine attribute post-install from every executable it installs (an unsigned helper left quarantined is refused
+  # by Gatekeeper).
   yq -o=json '.' .goreleaser.yaml | jq -e --arg name "${name}" --argjson daemon "${daemon_bins}" --arg product "${product}" '
     (.homebrew_casks | length) > 0 and
     (.homebrew_casks[0].name == $product) and
     ((.homebrew_casks[0].binaries | sort) == ([$name] + $daemon | sort)) and
-    (.homebrew_casks[0].repository.name == .project_name) and
+    (.homebrew_casks[0].repository.name == .release.github.name) and
+    (.homebrew_casks[0].repository.owner == .release.github.owner) and
     (.homebrew_casks[0].directory == "Casks") and
     ((.homebrew_casks[0].dependencies // []) | any(.formula == "cloudflared")) and
     ([.homebrew_casks[].hooks.post.install] | join("\n") | contains("com.apple.quarantine")) and

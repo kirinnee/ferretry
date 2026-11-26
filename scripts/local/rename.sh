@@ -57,10 +57,34 @@ static_files=(
   "CLAUDE.md"
 )
 
+# The repository (`github:<owner>/<repo>` in the root package.json) is its own fact, moved by move-repo.sh: a product
+# rename must leave every spelling of it alone, or the cask, the installer and the release config stop agreeing with
+# the manifest. Each spelling is parked behind a marker while the word rewrite runs, then put back: the slug as an
+# address, and GoReleaser's `owner:` line followed by its repository `name:`.
+repository_slug="$(jq -r '.repository // empty' package.json | sed -n 's/^github://p')"
+repository_name="${repository_slug#*/}"
+park_repository() {
+  [ -n "${repository_slug}" ] || return 0
+  SLUG="${repository_slug}" REPO="${repository_name}" perl -0pi -e '
+    s{(?<![A-Za-z0-9_.-])\Q$ENV{SLUG}\E(?![A-Za-z0-9_-])}{__FY_REPOSITORY_SLUG__}g;
+    s{^(\s+owner: [^\n]+\n\s+name: )\Q$ENV{REPO}\E$}{$1__FY_REPOSITORY_NAME__}mg;
+  ' "$1"
+}
+restore_repository() {
+  [ -n "${repository_slug}" ] || return 0
+  SLUG="${repository_slug}" REPO="${repository_name}" perl -0pi -e '
+    s{__FY_REPOSITORY_SLUG__}{$ENV{SLUG}}g;
+    s{__FY_REPOSITORY_NAME__}{$ENV{REPO}}g;
+  ' "$1"
+}
+
 rewrite() {
   local old="$1" new="$2" file
   for file in "${static_files[@]}" Casks/*.rb; do
-    [ -f "${file}" ] && sed -i "s/\b${old}\b/${new}/g" "${file}"
+    [ -f "${file}" ] || continue
+    park_repository "${file}"
+    sed -i "s/\b${old}\b/${new}/g" "${file}"
+    restore_repository "${file}"
   done
 }
 

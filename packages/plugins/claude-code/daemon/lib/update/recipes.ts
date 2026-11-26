@@ -47,9 +47,12 @@ const CLAUDE_CODE_PACKAGES = {
  */
 export const VERIFIED_CLAUDE_CODE_VERSION = '2.1.220';
 
+/** This repository, `<owner>/<repo>`: the root package.json `repository` is the one source, and scripts/local/move-repo.sh moves this line with it. */
+const REPOSITORY = 'kirinnee/ferretry';
+
 /** What "verified" means and what is known to break past it: the contract guard's own README. */
-export const verificationUrl = (product: string): string =>
-  `https://github.com/kirinnee/${product}/blob/main/packages/plugins/claude-code/tests/contract/README.md`;
+export const verificationUrl = (): string =>
+  `https://github.com/${REPOSITORY}/blob/main/packages/plugins/claude-code/tests/contract/README.md`;
 
 /** The registry address of the package's `latest` dist-tag. */
 export const npmLatestUrl = (): string => `https://registry.npmjs.org/${CLAUDE_CODE_PACKAGES.npm}/latest`;

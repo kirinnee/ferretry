@@ -8,6 +8,8 @@ set -euo pipefail
 #   GoReleaser's release and tap owner, `RELEASE_OWNER`, install commands in docs and the onboarding
 #   page, and the fixtures that mirror them. `cli-contracts.sh repo-owner-single-source` refuses a
 #   hand-written owner afterwards.
+#   The root manifest is also an input of the Nix dependency build, so --apply refreshes the install digest pinned in
+#   nix/bun-deps.inputs (Nix computes it offline); where Nix cannot, it ends INCOMPLETE (non-zero) naming the command.
 #
 # DRY RUN BY DEFAULT: it lists what it would change and writes nothing. Pass --apply to write.
 # It touches only this working tree: it never pushes, never calls `gh`, never edits another repository.
@@ -78,11 +80,10 @@ rewrite='
     open my $in, "<", $file or die "$file: $!";
     local $/; my $text = <$in>; close $in;
     my $n = 0;
-    # the full slug, as a URL, flake ref, tap, API path, or ssh remote
-    # (a `.git` remote or a sentence-ending dot still matches; `<repo>.tools` is another repository and does not)
-    $n += ($text =~ s{(?<![A-Za-z0-9_.-])\Q$oo\E/\Q$or\E(?![A-Za-z0-9_-]|\.(?!git\b)[A-Za-z0-9])}{$no/$nr}g);
-    # the owner beside the product-name variable (the repo IS the product name)
-    $n += ($text =~ s{(?<![A-Za-z0-9_.-])\Q$oo\E/\$\{product\}}{$or eq $nr ? "$no/\${product}" : "$no/$nr"}ge);
+    # the full slug, as a URL, flake ref, tap, API path, ssh remote, or a shell default (`${VAR:-<slug>}`)
+    # (a `.git` remote or a sentence-ending dot still matches; `<repo>.tools`, `<repo>.git.tools` and `<repo>.git-tools`
+    # are other repositories and do not: only an optional `.git` may follow, and then no name character or `.<name>`)
+    $n += ($text =~ s{(?:(?<![A-Za-z0-9_.-])|(?<=:-))\Q$oo\E/\Q$or\E(?=(?:\.git)?(?![A-Za-z0-9_-]|\.[A-Za-z0-9]))}{$no/$nr}g);
     # the release owner and repository constants
     $n += ($text =~ s{(RELEASE_OWNER = \x27)\Q$oo\E(\x27)}{$1$no$2}g);
     $n += ($text =~ s{(RELEASE_REPO = \x27)\Q$or\E(\x27)}{$1$nr$2}g);
@@ -103,6 +104,7 @@ rewrite='
 )
 
 printf "  1\tpackage.json (repository)\n"
+[ "${apply}" = 0 ] && [ -f nix/bun-deps.inputs ] && printf "  1\tnix/bun-deps.inputs (install digest, recomputed by Nix)\n"
 if [ "${apply}" = 1 ]; then
   jq --arg slug "github:${new_slug}" '.repository = $slug' package.json >package.json.tmp
   mv package.json.tmp package.json
@@ -110,6 +112,26 @@ if [ "${apply}" = 1 ]; then
   echo ""
   "${root_dir}/scripts/validate/cli-contracts.sh" repo-owner-single-source ||
     { echo "❌ leftovers above: fix them by hand, then re-run the check" >&2 && exit 1; }
+
+  # The root manifest is an install input, so the move changes the Nix install digest pinned in nix/bun-deps.inputs
+  # (scripts/validate/bun-deps-hash.sh fails until it is refreshed). Nix computes it offline from the working tree; the
+  # dependency hash (`outputHash`) is untouched, because no installed dependency changed. Without Nix the move is
+  # INCOMPLETE and says exactly what to run.
+  pin="nix/bun-deps.inputs"
+  digest_attribute=".#packages.x86_64-linux.bunDeps.installDigest"
+  if [ -f "${pin}" ]; then
+    if digest="$(nix --extra-experimental-features 'nix-command flakes' eval --offline --raw "${digest_attribute}" 2>/dev/null)" &&
+      [[ ${digest} =~ ^[0-9a-f]{64}$ ]]; then
+      printf '%s\n' "${digest}" >"${pin}"
+      printf "  1\t%s (install digest)\n" "${pin}"
+    else
+      echo "" >&2
+      echo "❌ incomplete: the files moved, but the Nix install digest pin (${pin}) could not be refreshed here" >&2
+      echo "   next: digest=\"\$(nix eval --raw ${digest_attribute})\" && echo \"\${digest}\" > ${pin}" >&2
+      echo "   then: scripts/validate/bun-deps-hash.sh   (it must print ✅)" >&2
+      exit 1
+    fi
+  fi
   echo ""
   echo "📝 remaining manual steps (this script never touches GitHub or another repository):"
   echo "  - transfer / rename the GitHub repository itself, and update git remotes and the Pages / Cloudflare / secrets settings"

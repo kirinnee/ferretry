@@ -65,8 +65,6 @@ export class HarnessUpdateRefusal extends Error {
 }
 
 export interface HarnessUpdateServiceOptions {
-  /** The product name, for the verification link. */
-  readonly product: string;
   readonly location: LocationSource;
   readonly facts: FactsSource;
   readonly probe: Probe;
@@ -154,7 +152,7 @@ export class HarnessUpdateService implements HarnessUpdateSubsystem {
       method: snapshot.method,
       plan: snapshot.method === null ? null : updatePlan(snapshot.method, undefined),
       check,
-      verified: { version: VERIFIED_CLAUDE_CODE_VERSION, url: verificationUrl(this.#options.product) },
+      verified: { version: VERIFIED_CLAUDE_CODE_VERSION, url: verificationUrl() },
       verification: verification(installed),
       available:
         snapshot.method !== null &&
