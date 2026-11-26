@@ -21,8 +21,8 @@ export interface LoopPort extends WorkPort {
 
 /**
  * What the kernel tells a work observer: names, counts and durations, never an argument, a path, a body or a value.
- * A route is named by its declared template (`GET /v1/ferrets/:ferretId`) or `<METHOD> [unrouted]`, never by the caller's
- * path; a child by its program's name alone; a file operation by the host filesystem method that ran.
+ * A route is named by its declared method and template (`GET /v1/ferrets/:ferretId`) or `unrouted`, never by the caller's
+ * method or path; a child by the name of a program Ferretry launches, or `other`; a file operation by the host filesystem method that ran.
  */
 export interface WorkObserver {
   route(route: string, wallMs: number, status: number, bytes: number): void;

@@ -385,7 +385,7 @@ export default implementDaemon(manifest, {
             : { sessions: all.length, running: all.filter(ferret => ferret.state !== 'stopped').length };
         },
         limitations: () => [
-          'File operations are the host filesystem seam’s calls by method, with no path; calls made through a held directory are not counted.',
+          'File operations are the host filesystem seam’s calls by method, with no path; calls made through a held directory, and the state and config stores (which use their own filesystem adapter), are not counted.',
           ...(platform() === 'linux'
             ? []
             : ['System-call counts and children’s CPU are read from /proc and exist on Linux only.']),

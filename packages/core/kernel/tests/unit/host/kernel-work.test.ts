@@ -10,7 +10,10 @@ import { EventBus } from '../../../host/events.ts';
 import { bootHost, type HostOptions, type RunningHost } from '../../../host/host.ts';
 import { scopedLog } from '../../../host/log.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
-import { tapFs, tapSpawn, WorkFeed } from '../../../host/work-feed.ts';
+import { Dispatcher, type MountedRoute, type Owner } from '../../../host/dispatch.ts';
+import { jsonResponse } from '../../../contract/http.ts';
+import type { PluginId } from '../../../contract/ids.ts';
+import { tapFs, tapSpawn, timedRoute, WorkFeed } from '../../../host/work-feed.ts';
 import { realAdapters, stateOpener } from '../../../host/wiring.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { fixedClock } from '../../../testing/clock.ts';
@@ -42,6 +45,36 @@ describe('C-27 a failed subscriber is logged with its reason', () => {
     expect(warned[0]?.message).toBe('a subscriber failed');
     expect(warned[0]?.fields).toEqual({ event: 'test.ping', plugin: 'alpha', reason: 'Error ECONNRESET' });
     expect(JSON.stringify(warned)).not.toContain('sk-live');
+  });
+
+  test('a renamed error is logged by its real kind, and an unrecognised code is left out', async () => {
+    const { bus, warned } = rig();
+    bus.subscribe('alpha', Ping, () => {
+      throw Object.assign(new TypeError('x'), { name: 'sk-live-abc123', code: 'X'.repeat(30) });
+    });
+    bus.subscribe('beta', Ping, () => {
+      throw Object.assign(new Error('x'), { code: 'EWHATEVER' });
+    });
+    bus.publish(Ping, {});
+    await tick();
+    expect(warned.map(w => w.fields?.reason).sort()).toEqual(['Error', 'TypeError']);
+    expect(JSON.stringify(warned)).not.toContain('sk-live');
+  });
+
+  test('an error that cannot be inspected is logged as unknown', async () => {
+    const { bus, warned } = rig();
+    const hostile = new Proxy(new Error('x'), {
+      get: () => {
+        throw new Error('trap');
+      },
+      getPrototypeOf: () => {
+        throw new Error('trap');
+      },
+    });
+    bus.subscribe('alpha', Ping, () => Promise.reject(hostile));
+    bus.publish(Ping, {});
+    await tick();
+    expect(warned[0]?.fields?.reason).toBe('unknown');
   });
 
   test('a thrown non-error says so, and never its value', async () => {
@@ -83,6 +116,79 @@ describe('C-79 the kernel feed', () => {
     expect(heard.started).toEqual(['git']);
     expect(heard.exited).toEqual([['git', 25]]);
     expect(JSON.stringify(heard)).not.toContain('hunter2');
+  });
+
+  test('a program outside the known set is heard as "other", never by its filename', async () => {
+    const feed = new WorkFeed();
+    const { heard, observer } = hearing();
+    feed.observe(observer);
+    const inner = { run: async () => ({ exitCode: 0, signal: null, stdout: '', stderr: '' }) } as unknown as SpawnPort;
+    const spawn = tapSpawn(inner, feed, clockOf(0, 1, 2, 3));
+    await spawn.run('/opt/acme/my-secret-mcp-server', []);
+    await spawn.run('/usr/bin/git', []);
+    expect(heard.started).toEqual(['other', 'git']);
+    expect(JSON.stringify(heard)).not.toContain('secret');
+  });
+
+  test('an observer that rejects asynchronously never escapes as an unhandled rejection', async () => {
+    const feed = new WorkFeed();
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown): void => void unhandled.push(reason);
+    process.on('unhandledRejection', listener);
+    try {
+      feed.observe({
+        route: async () => {
+          throw new Error('async observer');
+        },
+        childStarted: () => {},
+        childExited: () => {},
+        file: () => {},
+      } as unknown as WorkObserver);
+      feed.emit(observer => observer.route('GET /x', 1, 200, 1));
+      await tick();
+      await tick();
+    } finally {
+      process.off('unhandledRejection', listener);
+    }
+    expect(unhandled).toEqual([]);
+  });
+
+  test('a route key is the declared method and template, or "unrouted"; a caller-chosen method never becomes a key', async () => {
+    const feed = new WorkFeed();
+    const { heard, observer } = hearing();
+    feed.observe(observer);
+    const miss = async () => jsonResponse({}, 404);
+    for (const method of ['ZZZ1', 'ZZZ2', 'ZZZ3']) await timedRoute(feed, request(method, '/nope'), miss);
+    expect(heard.route.map(([route]) => route)).toEqual(['unrouted', 'unrouted', 'unrouted']);
+  });
+
+  test('a matched member route is reported by its declared method and template', async () => {
+    const feed = new WorkFeed();
+    const { heard, observer } = hearing();
+    feed.observe(observer);
+    const owner: Owner = { plugin: 'board' as PluginId, title: 'Board', serving: () => ({ kind: 'serving' }) };
+    const route = {
+      method: 'GET',
+      path: '/v1/catalogs/:id',
+      minimum: 'authenticated',
+      caller: 'any',
+      audit: { skip: 'test' },
+      guard: { none: 'test' },
+      member: 'unlocked',
+      noStore: true,
+      owner,
+      handle: async () => jsonResponse({}),
+    } as unknown as MountedRoute;
+    const dispatcher = new Dispatcher(
+      { admission: () => recordingAdmission(), outputGuard: () => undefined, version: '5.0.0', work: feed },
+      { routes: [], sockets: [], memberRoutes: [route as never] },
+    );
+    const input = request('GET', '/v1/catalogs/abc');
+    Object.assign(input, {
+      principal: { kind: 'member', holder: 'm', session: 's', leaseUntil: '2026-11-07T10:00:00.000Z' },
+    });
+    await dispatcher.dispatch(input);
+    expect(heard.route.map(([r]) => r)).toEqual(['GET /v1/catalogs/:id']);
   });
 
   test('a failed child still has its exit heard, and nothing is measured with no observer', async () => {
@@ -176,7 +282,7 @@ describe('C-79 the kernel feed', () => {
       const stop = (observeWork as (o: WorkObserver) => () => void)(observer);
       await outcome.host.dispatch(request('GET', '/healthz', { local: true }));
       await outcome.host.dispatch(request('GET', '/v1/nothing/sk-live-123', { local: true }));
-      expect(heard.route.map(([route]) => route)).toEqual(['GET /healthz', 'GET [unrouted]']);
+      expect(heard.route.map(([route]) => route)).toEqual(['GET /healthz', 'unrouted']);
       expect(JSON.stringify(heard)).not.toContain('sk-live');
       stop();
       await outcome.host.dispatch(request('GET', '/healthz', { local: true }));

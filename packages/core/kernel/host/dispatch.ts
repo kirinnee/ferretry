@@ -373,7 +373,7 @@ export class Dispatcher {
         this.bindings.version,
       );
     }
-    request.onRoute?.(found.route.path);
+    request.onRoute?.(`${found.route.method} ${found.route.path}`);
     if (door && (notServing(found.route.owner) !== undefined || found.route.handle === undefined))
       return withVersion(unknownRouteResponse(request.method, request.path), this.bindings.version);
     const decision = admit(this.bindings, 'route', found.route, request, found.params);
@@ -461,6 +461,7 @@ export class Dispatcher {
   private async dispatchMember(incoming: ApiRequest): Promise<ApiResponse> {
     const request = this.stamped(incoming);
     const found = this.members.lookup(request.method, request.path);
+    if (found.kind === 'matched') request.onRoute?.(`${found.route.method} ${found.route.path}`);
     const admission = this.bindings.admission();
     if (found.kind !== 'matched' || admission === undefined) {
       const response =

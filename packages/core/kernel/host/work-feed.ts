@@ -20,10 +20,13 @@ export class WorkFeed {
     return () => this.#observers.delete(observer);
   }
 
-  emit(call: (observer: WorkObserver) => void): void {
+  emit(call: (observer: WorkObserver) => unknown): void {
     for (const observer of this.#observers) {
       try {
-        call(observer);
+        const result = call(observer);
+        // an observer that answers with a promise is contained too: its rejection is not the watched work's
+        if (typeof (result as PromiseLike<unknown> | undefined)?.then === 'function')
+          (result as PromiseLike<unknown>).then(undefined, () => undefined);
       } catch {
         // an observer's failure never reaches the work it watches
       }
@@ -31,7 +34,37 @@ export class WorkFeed {
   }
 }
 
-/** The route a request was served as: its declared template with its method, or `<METHOD> [unrouted]`; never the caller's path. */
+/** What every call that matched no declared route is reported as: the caller's method and path never become a key. */
+const UNROUTED = 'unrouted';
+
+/** What a program Ferretry does not launch itself (a configured MCP command, say) is reported as. */
+const OTHER_PROGRAM = 'other';
+
+/** The programs Ferretry itself launches, by name. */
+const KNOWN_PROGRAMS: ReadonlySet<string> = new Set([
+  'git',
+  'gh',
+  'bun',
+  'node',
+  'sh',
+  'bash',
+  'nix',
+  'tmux',
+  'ps',
+  'lsof',
+  'kill',
+  'which',
+  'mkdir',
+  'claude',
+  'codex',
+]);
+
+const programLabel = (program: string): string => {
+  const name = basename(program);
+  return KNOWN_PROGRAMS.has(name) ? name : OTHER_PROGRAM;
+};
+
+/** The route a request was served as: the declared `METHOD template` it matched, or `unrouted`; never anything the caller chose. */
 export async function timedRoute(
   feed: WorkFeed,
   request: ApiRequest,
@@ -49,7 +82,7 @@ export async function timedRoute(
     },
   });
   const bytes = response.bytes?.byteLength ?? Buffer.byteLength(response.body);
-  const route = `${request.method} ${template ?? '[unrouted]'}`;
+  const route = template ?? UNROUTED;
   feed.emit(observer => observer.route(route, now() - started, response.status, bytes));
   return response;
 }
@@ -58,7 +91,7 @@ export async function timedRoute(
 export function tapSpawn(inner: SpawnPort, feed: WorkFeed, now: () => number = () => performance.now()): SpawnPort {
   const run = async <T>(program: string, call: () => Promise<T>): Promise<T> => {
     if (!feed.recording) return await call();
-    const name = basename(program);
+    const name = programLabel(program);
     const started = now();
     feed.emit(observer => observer.childStarted(name));
     try {
@@ -73,7 +106,7 @@ export function tapSpawn(inner: SpawnPort, feed: WorkFeed, now: () => number = (
     start: (program, args, options) => {
       const child = inner.start(program, args, options);
       if (!feed.recording) return child;
-      const name = basename(program);
+      const name = programLabel(program);
       const started = now();
       feed.emit(observer => observer.childStarted(name));
       // A detached child's `exited` is null at once and the kernel never waits on it: it has a start and no exit.

@@ -84,10 +84,12 @@ describe('feedWorkToProbe', () => {
   const work = () => {
     let heard: WorkObserver | undefined;
     let stopped = 0;
+    let subscribed = 0;
     const recorder = new PerformanceRecorder();
     const stop = feedWorkToProbe(
       {
         observeWork: observer => {
+          subscribed += 1;
           heard = observer;
           return () => {
             stopped += 1;
@@ -96,7 +98,7 @@ describe('feedWorkToProbe', () => {
       },
       recorder,
     );
-    return { recorder, stop, heard: () => heard as WorkObserver, stopped: () => stopped };
+    return { recorder, stop, heard: () => heard as WorkObserver, stopped: () => stopped, subscribed: () => subscribed };
   };
 
   it('should fold routes, children and file calls into the window by name and duration only', () => {
@@ -118,15 +120,50 @@ describe('feedWorkToProbe', () => {
     ]);
   });
 
-  it('should record nothing with no window open, and stop hearing when told', () => {
+  it('should not subscribe to the kernel at all while no window is open', () => {
     // Arrange
-    const { recorder, heard, stop, stopped } = work();
+    const subject = work();
+    // Assert
+    should(subject.subscribed()).equal(0);
+  });
+
+  it('should subscribe when the first window opens and stop hearing when the last one closes', () => {
+    // Arrange
+    const { recorder, subscribed, stopped } = work();
     // Act
-    heard().route('GET /x', 1, 200, 1);
-    const window = recorder.open(0);
+    const first = recorder.open(0);
+    const second = recorder.open(0);
+    // Assert
+    should(subscribed()).equal(1);
+    recorder.close(first);
+    should(stopped()).equal(0);
+    recorder.close(second);
+    should(stopped()).equal(1);
+    recorder.open(0);
+    should(subscribed()).equal(2);
+  });
+
+  it('should hear at once when a window is already open, and stop hearing when told', () => {
+    // Arrange
+    const recorder = new PerformanceRecorder();
+    recorder.open(0);
+    let subscribed = 0;
+    let stopped = 0;
+    const stop = feedWorkToProbe(
+      {
+        observeWork: () => {
+          subscribed += 1;
+          return () => {
+            stopped += 1;
+          };
+        },
+      },
+      recorder,
+    );
+    // Act
     stop();
     // Assert
-    should(window.tables(1_000).routes).deepEqual([]);
-    should(stopped()).equal(1);
+    should(subscribed).equal(1);
+    should(stopped).equal(1);
   });
 });

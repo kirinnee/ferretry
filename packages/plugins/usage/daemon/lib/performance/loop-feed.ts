@@ -1,5 +1,5 @@
 import type { LoopPort, WorkPort } from '@ferretry/kernel/contract';
-import type { PerformanceProbe } from './recorder.ts';
+import type { PerformanceProbe, PerformanceRecorder } from './recorder.ts';
 
 /** A tick this late or later is a stall the profile names (v4's threshold; the report also counts blocks over 250 ms). */
 export const STALL_RECORDED_MS = 100;
@@ -27,21 +27,19 @@ export const UNNAMED_PATH = '(path not reported)';
 
 /**
  * THE KERNEL'S OWN WORK, HANDED TO THE PROFILE: the routes it served (by template), the programs it ran (by name) and the
- * host filesystem calls it made (by method), each with its wall time. Returns what stops the hearing.
+ * host filesystem calls it made (by method), each with its wall time. The kernel is subscribed to only while a window is open, so
+ * with no profile it measures nothing and calls nothing. Returns what stops the hearing.
  */
-export function feedWorkToProbe(kernel: Pick<WorkPort, 'observeWork'>, probe: PerformanceProbe): () => void {
-  return kernel.observeWork({
-    route: (route, wallMs, status, bytes) => {
-      if (probe.recording) probe.route(route, wallMs, status, bytes);
-    },
-    childStarted: program => {
-      if (probe.recording) probe.childStarted(program, false);
-    },
-    childExited: (program, wallMs) => {
-      if (probe.recording) probe.childExited(program, wallMs);
-    },
-    file: (operation, wallMs) => {
-      if (probe.recording) probe.fileOperation(operation, UNNAMED_PATH, wallMs);
-    },
-  });
+export function feedWorkToProbe(
+  kernel: Pick<WorkPort, 'observeWork'>,
+  probe: Pick<PerformanceRecorder, 'whileRecording'> & PerformanceProbe,
+): () => void {
+  return probe.whileRecording(() =>
+    kernel.observeWork({
+      route: (route, wallMs, status, bytes) => probe.route(route, wallMs, status, bytes),
+      childStarted: program => probe.childStarted(program, false),
+      childExited: (program, wallMs) => probe.childExited(program, wallMs),
+      file: (operation, wallMs) => probe.fileOperation(operation, UNNAMED_PATH, wallMs),
+    }),
+  );
 }
