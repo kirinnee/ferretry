@@ -56,7 +56,10 @@ import {
 import { type DaemonConnection, type DaemonFerretScope, daemonFerretKey } from './seam.ts';
 
 /** The harness families whose skills and commands the composer knows how to invoke (Ferrets' family table). */
-export type ComposerHarness = RecordedFamily;
+type ComposerHarness = RecordedFamily;
+
+/** What the composer knows of a ferret's harness: a family it can invoke skills on, or the name of one it cannot. */
+export type ComposerHarnessFact = ComposerHarness | { readonly unreadable: string };
 
 /** Every family the composer can invoke a skill on, from the one table: a command offered on all of them is offered on any. */
 const COMPOSER_HARNESSES: readonly ComposerHarness[] = RecordedHarnessSchema.options;
@@ -96,13 +99,12 @@ export interface ComposerAutocompleteProvidersOptions {
   readonly client?: ComposerReferenceCatalogReader;
   /** Which families may OFFER suggestions. Absent means all of them; a suppressed family still parses and proves. */
   readonly suggestions?: ComposerSuggestionSwitches;
-  /** The ferret's harness: how a picked skill is invoked. Absent (no fact yet) inserts `/name`. */
-  readonly harness?: ComposerHarness;
   /**
-   * The ferret's harness when it is one the composer cannot invoke skills or commands on (no family): the `/` and `$`
-   * menus offer nothing and say so by name, never `/name` as if it were Claude.
+   * The ferret's harness: how a picked skill is invoked. Absent (no fact yet) inserts `/name`. `{ unreadable }` names a
+   * harness the composer cannot invoke skills or commands on (no family): the `/` and `$` menus offer nothing and say so
+   * by name, never `/name` as if it were Claude.
    */
-  readonly unreadableHarness?: string;
+  readonly harness?: ComposerHarnessFact;
   /**
    * THE HOST'S CATALOGS. A prefix in `hostedPrefixes` is the host's fact: the provider reads it through `getCatalog`
    * (after `waitForCatalog`) and never asks the daemon a second time; `undefined` there is UNPROVED, said out loud,
@@ -322,7 +324,9 @@ const skillsProviderFor = (
   options: ComposerAutocompleteProvidersOptions,
   source: CatalogSource,
 ): ComposerAutocompleteProvider => {
-  const { scope, harness, unreadableHarness, suggestions = DEFAULT_COMPOSER_SUGGESTIONS } = options;
+  const { scope, suggestions = DEFAULT_COMPOSER_SUGGESTIONS } = options;
+  const unreadableHarness = typeof options.harness === 'object' ? options.harness.unreadable : undefined;
+  const harness = typeof options.harness === 'object' ? undefined : options.harness;
   const id = scopedId(sigil === '/' ? 'slash' : 'skill-sigil', scope);
   const label = sigil === '/' ? 'Commands & skills' : 'Skills';
   const shouldOpen = (match: ComposerTriggerMatch): boolean => composerSuggestionsAllow(suggestions, match);

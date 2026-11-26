@@ -533,7 +533,7 @@ export function SessionChatPage({
                     ? {}
                     : isRecordedHarness(session.config.harness)
                       ? { harness: session.config.harness }
-                      : { unreadableHarness: session.config.harness })}
+                      : { harness: { unreadable: session.config.harness } })}
                   {...(askId === undefined ? {} : { draftSlot: askId })}
                   {...(forForm
                     ? {

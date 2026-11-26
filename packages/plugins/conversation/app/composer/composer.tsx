@@ -55,7 +55,7 @@ import {
 } from './composer-autocomplete.ts';
 import { ComposerLocationChip } from './composer-location-chip.tsx';
 import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
-import { type ComposerHarness, createComposerAutocompleteProviders } from './composer-autocomplete-providers.ts';
+import { type ComposerHarnessFact, createComposerAutocompleteProviders } from './composer-autocomplete-providers.ts';
 import { useComposerDockLayout } from './composer-dock-layout.ts';
 import { ComposerFormatToolbar } from './composer-format-toolbar.tsx';
 import { useComposerHostWarmup } from './composer-host-warmup.ts';
@@ -225,9 +225,7 @@ export interface ComposerProps {
    * The ferret's harness, read from the ferret itself: how a picked skill is invoked (`/name` on Claude, `$name` on
    * Codex) and which built-in commands the `/` menu offers. Absent, a menu offers what every harness accepts.
    */
-  readonly harness?: ComposerHarness;
-  /** The ferret's harness when it is one the composer cannot invoke skills or commands on: those menus offer nothing and name it. */
-  readonly unreadableHarness?: string;
+  readonly harness?: ComposerHarnessFact;
   /** The daemon's work search; absent on a machine that cannot search, which keeps both menus local-only. */
   readonly autocompleteWorkSearch?: WorkSearchPort;
   /** Project id to name for the cards that search finds. */
@@ -456,7 +454,6 @@ export function Composer({
   readConversation,
   referenceCatalogs,
   harness,
-  unreadableHarness,
   autocompleteWorkSearch,
   autocompleteProjectNames,
   suggestions,
@@ -606,7 +603,6 @@ export function Composer({
         client,
         suggestions: { mentionSuggestions, ladderSuggestions, directReferenceSuggestions, skillSuggestions },
         ...(harness === undefined ? {} : { harness }),
-        ...(unreadableHarness === undefined ? {} : { unreadableHarness }),
         // THE GETTERS READ THE LIVE PROP through a ref rather than closing over one render's value: the first menu
         // of every ferret opens while the page's one read is still in flight, and a getter installed only "once the
         // value arrived" would offer an invented empty list there.
@@ -630,7 +626,6 @@ export function Composer({
       daemon,
       directReferenceSuggestions,
       harness,
-      unreadableHarness,
       hostWarmup,
       hosted,
       ladderSuggestions,

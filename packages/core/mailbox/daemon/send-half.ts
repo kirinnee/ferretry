@@ -77,7 +77,7 @@ import {
 import { startupParkedPending } from './lib/delivery/service.ts';
 import { type DeliveredAttachment, deliveredFilename } from './lib/attachments-delivery.ts';
 import { harnessSendTerminal } from './send-terminal.ts';
-import { byHarnessFamily, harnessFamily } from '../contract/index.ts';
+import { harnessFamily, hasClaudeChannel } from '../contract/index.ts';
 import { KeyedSerialExecutor } from '../contract/index.ts';
 import { parseSessionId, type SessionId, tryParseSessionId } from '../contract/index.ts';
 import type { ClockPort } from '../contract/index.ts';
@@ -88,13 +88,6 @@ import type { SessionHandoff, SessionView } from '../contract/index.ts';
  * shows, because it is the daemon's, not the owner's. GAP: Ferrets owns this fact and offers no read of it, so it is
  * mirrored here; a changed Ferrets setting would show the note until that read exists (end-list).
  */
-/**
- * Whether a harness is reached through the Claude channel (an MCP server the Claude CLI listens on). Only Claude's is: Codex
- * has no channel, and a harness this build has no family for is typed to, never pushed down a channel built for Claude.
- */
-const claudeChannelHarness = (harness: string | undefined): boolean =>
-  byHarnessFamily(harness, { claude: () => true, codex: () => false, unknown: () => false });
-
 const TURN_PROTOCOL_REMINDER = 'Continue using the same completion and interaction protocol.';
 
 const pending = (sentence: string): never => {
@@ -940,7 +933,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
   const channelled = (ferret: SessionId, target: SendTarget, request: TypedSend): boolean =>
     request.warden !== true &&
     request.now !== true &&
-    claudeChannelHarness(target.harness) &&
+    hasClaudeChannel(target.harness) &&
     (request.senderSessionId !== undefined || request.notice === true || request.agenda === true) &&
     deps.claude?.connected(ferret) === true;
   /**

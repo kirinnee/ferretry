@@ -58,7 +58,7 @@ describe('a harness the app has no words for', () => {
   it('is offered no skill or command spelling in the composer, and the menu names it', async () => {
     const client = fakeClient(() => ({ ferret: 'f', prefix: '/', provided: true, entries: [] }));
     const daemon = daemonConnection('daemon-a');
-    const options = { daemon, scope: daemonFerretScope(daemon, 'f'), client, unreadableHarness: THIRD };
+    const options = { daemon, scope: daemonFerretScope(daemon, 'f'), client, harness: { unreadable: THIRD } };
 
     for (const provider of [createSkillsProvider(options), createSkillSigilProvider(options)]) {
       const trigger = provider.trigger;

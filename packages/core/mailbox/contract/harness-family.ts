@@ -10,6 +10,13 @@ export const harnessFamily = (key: string): RecordedFamily | undefined => {
   return isRecordedHarness(family) ? family : undefined;
 };
 
+/**
+ * Whether a harness is reached through the Claude channel (an MCP server the Claude CLI listens on). Only Claude's is: Codex
+ * has no channel, and a harness this build has no family for is typed to, never pushed down a channel built for Claude.
+ */
+export const hasClaudeChannel = (harness: string | undefined): boolean =>
+  byHarnessFamily(harness, { claude: () => true, codex: () => false, unknown: () => false });
+
 /** What each family does, and what a harness the table has no row for does: a case a caller must write out. */
 export interface FamilyCases<T> {
   readonly claude: () => T;
