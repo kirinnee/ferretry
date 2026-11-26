@@ -30,6 +30,7 @@ import {
 } from '../../daemon/features/gh-shim/parts.ts';
 import { ghShimFolders, installGhShim, shimScript } from '../../daemon/features/gh-shim/shim.ts';
 import { tmpRunFolder } from './run-folder.ts';
+import { ghHost } from './gh-host.ts';
 
 const cleanup: (() => void)[] = [];
 afterEach(() => {
@@ -605,7 +606,11 @@ describe('fy gh-doctor (inside a pane)', () => {
 
 describe('the daemon half', () => {
   type Item = { id: string; item: { parts(spec: object): Promise<readonly LaunchPart[]> } };
-  async function boot(folder: ReturnType<typeof tmpRunFolder>) {
+  async function boot(
+    folder: ReturnType<typeof tmpRunFolder>,
+    clients: readonly string[] = ['/preview/bin/fy'],
+    clientName = 'fy',
+  ) {
     const held: { items: readonly Item[] } = { items: [] };
     const impl = gitAccountsDaemon({ runFolder: folder });
     const wrapped = {
@@ -621,6 +626,13 @@ describe('the daemon half', () => {
     const gate = new FakeGate();
     const host = await testHost({
       plugins: [wrapped],
+      identity: {
+        daemonId: 'synthetic-daemon',
+        daemonName: 'test-daemon',
+        binaries: { client: clientName, daemon: 'fyd' },
+      },
+      ...ghHost(clients.map(path => path.slice(0, path.lastIndexOf('/'))).join(':') || '/preview/bin', clients),
+      stateHomeHolding: async path => (path.startsWith('/synthetic-state/') ? '/synthetic-state' : undefined),
       gate: new StandInAdmission(() => ownerStanding()),
       fakes: { sealed: new FakeSealedDocuments(), gate },
       uses: { projects: { list: async () => [] } },
@@ -634,7 +646,7 @@ describe('the daemon half', () => {
     const { held } = await boot(folder);
     const gh = held.items.find(entry => entry.id === 'git-accounts-gh');
     const parts = await gh?.item.parts({ folder: '/anywhere' });
-    expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe('#!/bin/sh\nexec fy gh -- "$@"\n');
+    expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript('/preview/bin/fy'));
     expect(parts).toEqual([
       {
         kind: 'pane-env',
@@ -649,6 +661,104 @@ describe('the daemon half', () => {
   test('the account source stays first (B4) and the shim is a second, separate source', async () => {
     const { held } = await boot(runFolder());
     expect(held.items.map(entry => entry.id)).toEqual(['git-accounts', 'git-accounts-gh']);
+  });
+
+  test('E75: the next launch repairs a modified or removed shim without restarting the daemon', async () => {
+    const folder = runFolder();
+    const { host, held } = await boot(folder);
+    try {
+      const gh = held.items.find(entry => entry.id === 'git-accounts-gh');
+      await gh?.item.parts({ folder: '/anywhere' });
+      writeFileSync(`${folder.path}/shims/gh`, '#!/bin/sh\necho edited\n');
+      await gh?.item.parts({ folder: '/anywhere' });
+      expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript('/preview/bin/fy'));
+      rmSync(`${folder.path}/shims/gh`);
+      await gh?.item.parts({ folder: '/anywhere' });
+      expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript('/preview/bin/fy'));
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('E76: the launch pins the daemon-discovered client even when the pane PATH has no client', async () => {
+    const folder = runFolder();
+    const bin = scratch();
+    const client = join(bin, 'fy-preview');
+    writeFileSync(client, '#!/bin/sh\nprintf \'%s\\n\' "$@"\n', { mode: 0o755 });
+    const { host, held } = await boot(folder, [client], 'fy-preview');
+    try {
+      await held.items.find(entry => entry.id === 'git-accounts-gh')?.item.parts({ folder: '/anywhere' });
+      const run = Bun.spawnSync([`${folder.path}/shims/gh`, 'pr', 'list'], { env: { PATH: '/nonexistent' } });
+      expect(run.exitCode).toBe(0);
+      expect(new TextDecoder().decode(run.stdout)).toBe('gh\n--\npr\nlist\n');
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('missing client discovery closes GH config and can recover on a later launch', async () => {
+    const folder = runFolder();
+    const clients: string[] = [];
+    const { host, held } = await boot(folder, clients);
+    try {
+      const gh = held.items.find(entry => entry.id === 'git-accounts-gh');
+      expect(await gh?.item.parts({ folder: '/anywhere' })).toEqual([
+        { kind: 'pane-env', plugin: 'git-accounts', env: { GH_CONFIG_DIR: CLOSED_CONFIG } },
+        { kind: 'instruction', id: 'git-accounts-gh', text: GH_UNAVAILABLE },
+      ]);
+      expect(existsSync(`${folder.path}/shims/gh`)).toBe(false);
+      clients.push('/preview/bin/fy');
+      expect((await gh?.item.parts({ folder: '/anywhere' }))?.[0]).toHaveProperty('pathPrepend');
+      expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript('/preview/bin/fy'));
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('a client discovered inside a state home is refused rather than pinned into a pane', async () => {
+    const folder = runFolder();
+    const { host, held } = await boot(folder, ['/synthetic-state/bin/fy']);
+    try {
+      const parts = await held.items.find(entry => entry.id === 'git-accounts-gh')?.item.parts({ folder: '/anywhere' });
+      expect(parts).toEqual([
+        { kind: 'pane-env', plugin: 'git-accounts', env: { GH_CONFIG_DIR: CLOSED_CONFIG } },
+        { kind: 'instruction', id: 'git-accounts-gh', text: GH_UNAVAILABLE },
+      ]);
+      expect(existsSync(`${folder.path}/shims/gh`)).toBe(false);
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('overlapping launches share one repair and all receive a ready shim', async () => {
+    const folder = runFolder();
+    const publish = folder.publish;
+    let barrier: Promise<void> | undefined;
+    let writes = 0;
+    const { host, held } = await boot({
+      ...folder,
+      publish: async (...args) => {
+        writes += 1;
+        await barrier;
+        await publish(...args);
+      },
+    });
+    const release = Promise.withResolvers<void>();
+    try {
+      const gh = held.items.find(entry => entry.id === 'git-accounts-gh');
+      await gh?.item.parts({ folder: '/anywhere' });
+      writes = 0;
+      barrier = release.promise;
+      const launches = Array.from({ length: 4 }, () => gh?.item.parts({ folder: '/anywhere' }));
+      for (let tick = 0; writes === 0 && tick < 1000; tick += 1) await Bun.sleep(1);
+      expect(writes).toBe(1);
+      release.resolve();
+      for (const parts of await Promise.all(launches)) expect(parts?.[0]).toHaveProperty('pathPrepend');
+      expect(writes).toBe(1);
+    } finally {
+      release.resolve();
+      await host.stop();
+    }
   });
 
   test('a run folder that is not private starts the daemon and gives launches the closed config, never the host’s', async () => {

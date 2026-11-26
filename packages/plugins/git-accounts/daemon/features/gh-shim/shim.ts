@@ -20,7 +20,7 @@ const PANE_CONFIG_MODE = 0o500;
 /** One word for `sh`: the name stays plain, anything odd is single-quoted. */
 const word = (text: string): string => (/^[A-Za-z0-9_./-]+$/u.test(text) ? text : `'${text.replaceAll("'", "'\\''")}'`);
 
-/** The shim's text. `client` is the product's own CLI name (`fy`), found on the pane's `PATH` like every other `fy` call. */
+/** The shim's text. Production passes the absolute client path discovered in the daemon's environment. */
 export const shimScript = (client: string): string => `#!/bin/sh\nexec ${word(client)} gh -- "$@"\n`;
 
 export interface GhShimFolders {
@@ -38,7 +38,7 @@ export const ghShimFolders = (folder: RunFolder): GhShimFolders => ({
 /**
  * Writes the shim (and the pane's empty config folder) and answers the folders; `undefined` when they cannot be made
  * safely (the run folder is not private): the launch then closes the pane's `gh` config instead (`parts.ts`).
- * Written again on every boot, so a changed `fy` name or a hand-edited shim never survives a restart, and the pane's
+ * Written again on every boot and launch, so an edited or removed shim is repaired before the next launch, and the pane's
  * config folder is emptied again too (anything a ferret left in it is removed).
  */
 export async function installGhShim(folder: RunFolder, client: string): Promise<GhShimFolders | undefined> {

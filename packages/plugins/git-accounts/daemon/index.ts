@@ -97,20 +97,23 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
       );
       kernel.lifecycle.onStop(() => agents.stopAll());
       kernel.lifecycle.onStop(() => gnupg.stopAll());
-      // Ferretry's `gh` (B10): the shim is written at boot and again whenever a launch finds it was not (a failure is not kept).
+      // Pin the daemon's client, outside the state home: a preview pane need not have that client on its own PATH.
+      const client = programLocator(
+        { name: kernel.identity.binaries.client, trustedWith: "a ferret's session" },
+        locatorPorts,
+      );
+      // Repair before each launch. Only overlapping installs share a promise; a completed install is never cached.
       let shim: Promise<GhShimFolders | undefined> | undefined;
       const shimFolders = (): Promise<GhShimFolders | undefined> => {
-        shim ??= installGhShim(runFolder, kernel.identity.binaries.client).then(
-          folders => {
-            if (folders === undefined) shim = undefined;
-            return folders;
-          },
-          () => {
-            shim = undefined;
-            kernel.log.warn("git-accounts: Ferretry's gh shim could not be written, so ferrets keep no gh shim");
+        shim ??= client()
+          .then(found => installGhShim(runFolder, found.program))
+          .catch(() => {
+            kernel.log.warn("git-accounts: Ferretry's gh shim could not be set up, so ferrets keep no gh shim");
             return undefined;
-          },
-        );
+          })
+          .finally(() => {
+            shim = undefined;
+          });
         return shim;
       };
       void shimFolders();

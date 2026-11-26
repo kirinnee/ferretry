@@ -2352,6 +2352,8 @@ runs on the kept text AND drops any tail that could be the start of a token (the
 `github_pat_…` shape the cut left too short to match), so a token split at the cut never reaches the caller. Governance: a ferret on its own session credential, or a paired device with
 `secrets.use`. **Audit** `git-account.gh.run` (also for a refusal): the account id, the command as two plain words, the
 repository, the exit code and the ferret id; no other argument, no body.
+Each paired device has its own allowance of four concurrent runs, shared by its sessions. A ferret has its own four,
+and the owner's CLI has a separate four, so one busy device cannot use up another caller's allowance.
 
 **What it protects against:** a ferret printing, copying or keeping the token (`gh auth token`, `gh auth status -t`,
 `gh config get oauth_token`, `hosts.yml`: the child's config folder is empty and removed); a token in a transcript; the
@@ -2390,7 +2392,8 @@ B9 is the daemon half of Ferretry's `gh`; B10 is what makes a ferret reach it. *
 project or not, so the host's `gh` is ignored everywhere) with:
 
 - **A shim first on its `PATH`.** `<state>/git-accounts/downloads/shims/gh` (`0755`, in the plugin's own private
-  folder; rewritten at every daemon boot) is `exec fy gh -- "$@"`. `fy gh` sends the argument list and the folder to
+  folder; repaired at every daemon boot and before each ferret launch) executes the absolute client path resolved on
+  the daemon's PATH, followed by `gh -- "$@"`. A preview pane need not find that client on its own PATH. `fy gh` sends the argument list and the folder to
   `POST /v1/git-accounts/gh/run` on the ferret's own credential and prints the masked answer with `gh`'s exit code. It
   has **no policy of its own**: the daemon (B9, then the seam under it) decides, so nothing here can widen what runs.
   Outside a project linked to an account the shim answers with B9's sentence and starts nothing.
@@ -2446,8 +2449,10 @@ the pane. It prints the variable's NAME and never a value.
 - **GAP: no stdin and no files.** `fy gh` sends the argument list and the folder only. B9's seam refuses every flag that
   reads a local file, so there is nothing to send them to (`--body-file`, `-F`, `--input`, `-` for stdin): pass the text
   itself.
-- **GAP: the shim is found by `PATH`.** It runs `fy` by name, found on the pane's `PATH` like every other `fy` call,
-  not by an absolute path (the daemon has no way to name the client's install). A pane without `fy` on `PATH` cannot use it.
+- **The client must be discoverable by the daemon.** The client path is resolved without executing it, excluding state-home
+  folders and refusing an answer inside the state home. If no client can be found, a new launch gets the closed GH config
+  and the unavailable instruction. The next launch tries again. Repair is checked at launch, so an edit made afterwards
+  can still affect already-running panes until the next launch or restart; same-user filesystem writes are not a sandbox.
 - **GAP: the harness's own shell tool.** Whether Claude Code's and Codex's shell tools keep the shim first after they
   read the person's shell rc is **not measured here** (it needs a real signed-in harness; a test daemon refuses to start
   one). `fy gh-doctor` is the pane-side check, and the first real-machine check is owner step 5/6.

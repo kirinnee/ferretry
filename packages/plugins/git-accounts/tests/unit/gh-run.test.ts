@@ -448,6 +448,40 @@ describe('bounds', () => {
     expect(await again).toMatchObject({ exitCode: 0 });
   });
 
+  test('E69: a device with four mounted GH runs cannot starve another device, the owner or a ferret', async () => {
+    const release: (() => void)[] = [];
+    let standing = deviceStanding('phone');
+    let started = 0;
+    const world = await boot({
+      projects: [linked('/w')],
+      standing: () => standing,
+      ferretFolders: { phone: '/w' },
+      spawn: () => {
+        started += 1;
+        return started <= 4 ? new Promise(resolve => release.push(() => resolve(OK))) : OK;
+      },
+    });
+    const pending = Array.from({ length: 4 }, () => world.gh(['pr', 'list'], '/w'));
+    try {
+      for (let tick = 0; release.length < 4 && tick < 1000; tick += 1) await Bun.sleep(1);
+      expect(release).toHaveLength(4);
+      expect((await world.gh(['pr', 'list'], '/w')).json()).toHaveProperty('refused');
+      // A fresh session for the same paired device still shares that device's allowance.
+      standing = deviceStanding('phone');
+      expect((await world.gh(['pr', 'list'], '/w')).json()).toHaveProperty('refused');
+      standing = deviceStanding('laptop');
+      expect((await world.gh(['pr', 'list'], '/w')).json()).toMatchObject({ exitCode: 0 });
+      standing = ownerStanding();
+      expect((await world.gh(['pr', 'list'], '/w')).json()).toMatchObject({ exitCode: 0 });
+      standing = ferretStanding('phone' as never);
+      expect((await world.gh(['pr', 'list'], '/w')).json()).toMatchObject({ exitCode: 0 });
+    } finally {
+      for (const done of release) done();
+      await Promise.all(pending);
+      await world.host.stop();
+    }
+  });
+
   test('a followed run gets the long clock, an ordinary one the short', async () => {
     const { root } = projectFolder();
     const world = await boot({ projects: [linked(root)] });
