@@ -343,7 +343,9 @@ row says so in one line).
   frame address has to be built in the browser. The setting row shows a stored key as a mask and offers Replace and
   Remove.
 - **No key, no Google.** With Google chosen and nothing stored (storage empty, blocked or cleared), every map stays on
-  OpenStreetMap and says the key is needed on this device.
+  OpenStreetMap and says the key is needed on this device. A key this browser **will not keep** is not held in the
+  tab either: saving it reports "would not keep the key" and the maps stay on OpenStreetMap, so nothing looks stored
+  that a reload would lose. A **remove** that the browser refuses is reported ("may still be stored").
 - **The frame** is `credentialless` where the browser has it, `referrerpolicy="origin"` (the key is referrer-restricted;
   the page itself sends none), `sandbox`ed without top navigation or forms, with no `allow=`. Under cross-origin
   isolation ("Several cores") a Google frame is admitted only as `credentialless`; a browser without it falls back to

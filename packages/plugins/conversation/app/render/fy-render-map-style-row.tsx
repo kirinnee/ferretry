@@ -37,10 +37,15 @@ const current = (): MapChoice => {
   return held.choice;
 };
 
-/** Keeps a new choice, tells every open map, and answers whether this browser kept it. */
+/**
+ * Keeps a new choice, tells every open map, and answers whether this browser kept it. A key this browser would not keep
+ * is NOT held for the tab either: the choice is published without it, so maps stay on OpenStreetMap and say the key is
+ * needed (a key held only in memory would reappear to look stored, and be gone on reload). Taking a key away is the
+ * other way round: the person asked for it gone, so it is gone from the page even when the write failed.
+ */
 const change = (next: MapChoice, storage?: MapChoiceStorage | null): boolean => {
   const kept = saveMapChoice(next, storage);
-  held = { choice: next };
+  held = { choice: kept ? next : { key: null, style: next.style } };
   for (const listener of listeners) listener();
   return kept;
 };
@@ -88,19 +93,16 @@ export function MapStyleRow() {
       setProblem('That is not a Google Maps key. It is one word of letters, digits, - and _.');
       return;
     }
+    const kept = change({ key, style: current().style });
     field.clear();
     setTyped(0);
     setReplacing(false);
-    setProblem(
-      change({ key, style: current().style })
-        ? null
-        : 'This browser would not keep the key; it holds for this page only.',
-    );
+    setProblem(kept ? null : 'This browser would not keep the key, so maps stay on OpenStreetMap.');
   };
   const remove = (): void => {
-    change({ key: null, style: current().style });
-    setProblem(null);
+    const kept = change({ key: null, style: current().style });
     setReplacing(false);
+    setProblem(kept ? null : 'This browser would not let the key go. It may still be stored on this device.');
   };
 
   return (

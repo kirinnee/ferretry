@@ -62,7 +62,10 @@ const WIDTHS = [390, 1_440] as const;
 const MODES = ['light', 'dark'] as const;
 // Studio is the default rounding; Neumorphism has the highest radii of the shipped styles.
 const ROUNDING = { default: 'studio', highest: 'neumorphism' } as const;
-const VIEWS = ['setting', 'setting-key', 'needs-key', 'osm', 'google', 'fallback'] as const;
+const VIEWS = ['setting', 'setting-key', 'needs-key', 'osm', 'google', 'fallback', 'blocked'] as const;
+
+/** What a browser that blocks site data does: every touch of `localStorage` throws. */
+const BLOCK_STORAGE = `Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new DOMException('denied', 'SecurityError'); } });`;
 
 describe('map style — Settings row and both styles of map', () => {
   for (const width of WIDTHS)
@@ -94,11 +97,21 @@ describe('map style — Settings row and both styles of map', () => {
               const tab = await context.newPage();
               const problems: string[] = [];
               tab.on('pageerror', error => problems.push(error.message));
+              const asked = requested.length;
+              if (view === 'blocked') await tab.addInitScript(BLOCK_STORAGE);
               await tab.goto(`${origin}/?style=${style}&mode=${mode}&view=${view}`);
               if (view === 'osm' || view === 'fallback' || view === 'needs-key')
                 await tab.waitForSelector('[data-fy-render-map="drawn"]');
               else if (view === 'google') await tab.waitForSelector('iframe');
               else await tab.waitForSelector('[data-map-style-row]');
+              if (view === 'blocked') {
+                // Choose Google and save a (fake) key in a browser that keeps nothing.
+                await tab.waitForSelector('[data-fy-render-map="drawn"]');
+                await tab.locator('input[type="radio"][value="google"]').check({ force: true });
+                await tab.locator('[data-map-style-key="input"]').fill(FAKE_KEY);
+                await tab.locator('[data-map-style-key="save"]').click();
+                await tab.waitForSelector('[data-map-style-key="problem"]');
+              }
               await tab.waitForTimeout(400);
 
               // No horizontal overflow at either width, in any view.
@@ -129,6 +142,20 @@ describe('map style — Settings row and both styles of map', () => {
                 expect(await tab.content()).not.toContain(FAKE_KEY);
               }
               if (view === 'setting') expect(await tab.locator('[data-map-style-key="input"]').count()).toBe(1);
+              if (view === 'blocked') {
+                // Blocked storage: OpenStreetMap stays, the map says the key is needed, and Google is never asked.
+                expect(await tab.locator('iframe').count()).toBe(0);
+                expect(await tab.locator('.leaflet-container').count()).toBe(1);
+                expect(await tab.locator('.fy-render-map-note').textContent()).toContain(
+                  'needs its key on this device',
+                );
+                expect(await tab.locator('[data-map-style-key="problem"]').textContent()).toContain(
+                  'would not keep the key',
+                );
+                expect(await tab.locator('[data-map-style-key="stored"]').count()).toBe(0);
+                expect(await tab.content()).not.toContain(FAKE_KEY);
+                expect(requested.slice(asked).filter(item => item.startsWith('https://www.google.com'))).toEqual([]);
+              }
               expect(problems).toEqual([]);
               // Round-safe: nothing crosses a rounded corner, at either rounding.
               const misses = await roundSafeMisses(tab);
