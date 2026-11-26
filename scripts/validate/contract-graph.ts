@@ -14,6 +14,8 @@ export const ALLOWED_PLUGIN_EDGES: ReadonlySet<string> = new Set([
   'access→connections',
   // Lead-approved optional use: Catalogs shares pairing's advertised address and directory facts (P80).
   'catalogs→connections',
+  'tidy→projects', // lead-approved G3 U6: project membership and id for worktree cleanup
+  'tidy→pulls', // lead-approved G3 U6: positive merged evidence through the optional Pulls port
   // Warden settings read the runtime list and whether the Jev key is set (britnee, optional uses).
   'warden→runtimes', // read-only fact for Warden settings (britnee, optional uses)
   'warden→voice', // read-only fact for Warden settings (britnee, optional uses)

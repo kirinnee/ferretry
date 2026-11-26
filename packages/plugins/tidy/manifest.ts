@@ -2,6 +2,9 @@ import { definePlugin, route, settingsTab, verb } from '@ferretry/kernel/manifes
 import { AsksPort } from '@ferretry/core-asks/contract';
 import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { BoardPort } from '@ferretry/plugin-board/contract';
+import { ProjectsPort } from '@ferretry/plugin-projects/contract';
+import { PullsPort } from '@ferretry/plugin-pulls/contract';
+import { AUDIT_KINDS, cap } from '@ferretry/core-gate/contract';
 import { AUDIT_SKIP, GUARD_NONE, HousekeepingFile, TidyConfigDef, TidyPort, USE } from './contract/index.ts';
 
 /**
@@ -23,11 +26,36 @@ export default definePlugin({
   kinds: ['command', 'view'],
 
   needs: { ferrets: FerretsPort, asks: AsksPort },
-  uses: { board: BoardPort },
+  uses: { board: BoardPort, projects: ProjectsPort, pulls: PullsPort },
   provides: { tidy: TidyPort },
 
   actions: {
     routes: [
+      // The same disk-mapping read as U3: a project's checkouts can be outside its registered folder.
+      route('GET /v1/tidy/worktrees/:project', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('filesystem', 'configure'),
+        noStore: true,
+        audit: AUDIT_SKIP.read,
+        guard: GUARD_NONE,
+      }),
+      route('POST /v1/tidy/worktrees/:project/remove', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('filesystem', 'configure'),
+        noStore: true,
+        audit: { record: AUDIT_KINDS['worktree.removed'] },
+        guard: GUARD_NONE,
+      }),
+      route('POST /v1/tidy/worktrees/:project/clean-merged', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: cap('filesystem', 'configure'),
+        noStore: true,
+        audit: { record: AUDIT_KINDS['worktree.removed'] },
+        guard: GUARD_NONE,
+      }),
       route('GET /v1/gc', {
         minimum: 'operator',
         caller: 'any',

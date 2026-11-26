@@ -11,6 +11,8 @@ import manifest from '../manifest.ts';
 import { rootAsFolders, ScratchCollector } from './lib/scratch-collector.ts';
 import { tidyRoutes } from './lib/routes.ts';
 import { TidyService } from './lib/service.ts';
+import { TidyWorktreesService } from './lib/worktrees/service.ts';
+import { worktreeRoutes } from './lib/worktrees/routes.ts';
 
 /** How often the automatic sweep looks; a ferret stopping looks sooner (below). */
 const SWEEP_EVERY = hours(1);
@@ -41,6 +43,11 @@ export default implementDaemon(manifest, {
       },
     });
     const planner = new TidyService({ ferrets: needs.ferrets, asks: needs.asks, board: () => uses.board.current() });
+    const worktrees = new TidyWorktreesService({
+      ferrets: needs.ferrets,
+      projects: () => uses.projects.current(),
+      pulls: () => uses.pulls.current(),
+    });
 
     kernel.jobs.add({
       id: SWEEP_JOB,
@@ -52,7 +59,7 @@ export default implementDaemon(manifest, {
     });
 
     return {
-      routes: tidyRoutes(collector, planner),
+      routes: { ...tidyRoutes(collector, planner), ...worktreeRoutes(worktrees, needs.ferrets) },
       provides: {
         tidy: {
           totals: async (): Promise<TidyTotals> => {

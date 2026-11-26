@@ -8,6 +8,7 @@ import {
   type PinnedWorkingDirectory,
 } from '@ferretry/kernel/contract';
 import { type DaemonContext, type DaemonHalf, implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
+import { worktreePortFor } from './features/worktrees.feature.ts';
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import {
   type FerretId,
@@ -900,7 +901,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       ferrets: perNeeder(needer => ({
         ...ferretsPort(service, needer.id),
         // What the features add to the port (a read each owns, `lastAutoResume` among them).
-        ...served.port,
+        ...worktreePortFor(needer.id, served.port),
         displayModel: displayModelOf,
         // One folder of a ferret's tree for the composer's `@` menu, through the file browser's own service and fence.
         listFolder: folderLister({
