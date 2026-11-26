@@ -223,8 +223,12 @@ async function verdict(target: string) {
   return TidyWorktreesSchema.parse(await response.json()).rows.find(row => row.worktree.path === target);
 }
 
-async function apply(target: string) {
-  const response = await call('POST', `/v1/tidy/worktrees/${projectId}/remove`, { paths: [target] });
+async function apply(target: string, reviewed = undefined as Awaited<ReturnType<typeof verdict>>) {
+  const identity = (reviewed ?? (await verdict(target)))?.verdict.reviewedIdentity;
+  expect(identity).toBeDefined();
+  const response = await call('POST', `/v1/tidy/worktrees/${projectId}/remove`, {
+    worktrees: [{ path: target, identity }],
+  });
   expect(response.status).toBe(200);
   return TidyWorktreeRemoveResultSchema.parse(await response.json());
 }
@@ -268,7 +272,12 @@ describe('Tidy worktrees through the real daemon', () => {
     const view = TidyWorktreesSchema.parse(await response.json());
     expect(view.rows.find(row => row.worktree.path === target)?.verdict.removable).toBe(true);
     expect(view.rows.find(row => row.worktree.main)?.verdict.removable).toBe(false);
-    const result = await call('POST', `/v1/tidy/worktrees/${projectId}/clean-merged`, { paths: [target, repository] });
+    const result = await call('POST', `/v1/tidy/worktrees/${projectId}/clean-merged`, {
+      worktrees: [
+        { path: target, identity: view.rows.find(row => row.worktree.path === target)!.verdict.reviewedIdentity },
+        { path: repository, identity: view.rows.find(row => row.worktree.path === target)!.verdict.reviewedIdentity },
+      ],
+    });
     expect(result.status).toBe(200);
     const applied = TidyWorktreeRemoveResultSchema.parse(await result.json());
     expect(applied.removed.map(row => row.path)).toEqual([target]);
@@ -279,10 +288,11 @@ describe('Tidy worktrees through the real daemon', () => {
 
   test('apply re-reads a PR reopened after the displayed verdict', async () => {
     const w = await tree('reopened');
-    expect((await verdict(w.target))?.verdict.removable).toBe(true);
+    const reviewed = await verdict(w.target);
+    expect(reviewed?.verdict.removable).toBe(true);
     pullAnswers[w.branch] = { ...merged(w.branch, w.head), pull: { ...merged(w.branch, w.head).pull, state: 'open' } };
     await Bun.write(pullFile, JSON.stringify(pullAnswers));
-    const result = await apply(w.target);
+    const result = await apply(w.target, reviewed);
     expect(result.removed).toEqual([]);
     expect(result.skipped[0]?.reason).toContain('open');
     expect(await Bun.file(path.join(w.target, '.git')).exists()).toBe(true);
@@ -290,12 +300,13 @@ describe('Tidy worktrees through the real daemon', () => {
 
   test('apply refuses a swapped folder even when the replacement copies its Git metadata', async () => {
     const w = await tree('swapped');
-    expect((await verdict(w.target))?.verdict.removable).toBe(true);
+    const reviewed = await verdict(w.target);
+    expect(reviewed?.verdict.removable).toBe(true);
     await rename(w.target, `${w.target}-original`);
     await mkdir(w.target);
     await Bun.write(path.join(w.target, '.git'), await Bun.file(path.join(`${w.target}-original`, '.git')).text());
     await Bun.write(path.join(w.target, 'README.md'), '# swapped\n');
-    expect((await apply(w.target)).removed).toEqual([]);
+    expect((await apply(w.target, reviewed)).removed).toEqual([]);
     expect(await Bun.file(path.join(w.target, 'README.md')).text()).toBe('# swapped\n');
   }, 30_000);
 
@@ -307,16 +318,17 @@ describe('Tidy worktrees through the real daemon', () => {
     const row = await verdict(w.target);
     expect(row?.worktree.live.integrated).toBe(false);
     expect(row?.verdict.removable).toBe(true);
-    expect((await apply(w.target)).removed.map(row => row.path)).toEqual([w.target]);
+    expect((await apply(w.target, row)).removed.map(row => row.path)).toEqual([w.target]);
   }, 30_000);
 
   test('clean published work after merge is kept, and core rechecks the expected head at removal', async () => {
     const w = await tree('new-work');
-    expect((await verdict(w.target))?.verdict.removable).toBe(true);
+    const reviewed = await verdict(w.target);
+    expect(reviewed?.verdict.removable).toBe(true);
     await Bun.write(path.join(w.target, 'README.md'), '# more work\n');
     await setupGit(w.target, 'commit', '-am', 'feat: after merge');
     await setupGit(w.target, 'push', 'origin', w.branch);
-    expect((await apply(w.target)).removed).toEqual([]);
+    expect((await apply(w.target, reviewed)).removed).toEqual([]);
     const guarded = await call('POST', '/v1/worktrees/remove', {
       path: w.target,
       expectedHead: w.head,

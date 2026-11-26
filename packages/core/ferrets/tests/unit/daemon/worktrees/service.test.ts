@@ -217,6 +217,42 @@ function build(
 const thrown = async (operation: Promise<unknown>): Promise<unknown> =>
   await operation.then(() => undefined).catch((error: unknown) => error);
 
+describe('reviewed worktree consent inside the lifecycle', () => {
+  const identity = {
+    recordId: record().ownershipToken,
+    branchRef: 'refs/heads/feat/one',
+    checkout: '1:2',
+    head: 'b'.repeat(40),
+  };
+  const request: WorktreeRemovalRequest = {
+    path: record().path,
+    expectedHead: identity.head,
+    expectedIdentity: identity,
+    overrides: [],
+    deleteBranch: true,
+    confirmations: [],
+  };
+
+  it.each([{ recordId: 'a-new-row' }, { branchRef: 'refs/heads/unrelated' }, { head: 'c'.repeat(40) }])(
+    'should refuse mismatched reviewed identity %j before recording removal intent',
+    async change => {
+      const w = build({ entries: [record()] });
+      await should(w.subject.remove({ ...request, expectedIdentity: { ...identity, ...change } })).be.rejectedWith(
+        WorktreeRemovalRefusal,
+      );
+      should(w.operations.removals).have.length(0);
+      should(w.registry.history).have.length(0);
+    },
+  );
+
+  it('should forward the matching reviewed identity and head to the destructive boundary', async () => {
+    const w = build({ entries: [record()] });
+    await w.subject.remove(request);
+    should(w.operations.removals[0]?.expectedIdentity).deepEqual(identity);
+    should(w.operations.removals[0]?.expectedHead).equal(identity.head);
+  });
+});
+
 describe('in-place adoption lifecycle', () => {
   const adopted = () =>
     record({

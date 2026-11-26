@@ -3,7 +3,12 @@ import { ApiError } from '@ferretry/kernel/contract';
 import type { FerretsApi, WorktreeRemovalDecision } from '@ferretry/core-ferrets/contract';
 import type { ProjectId, ProjectInfo, ProjectsApi } from '@ferretry/plugin-projects/contract';
 import { BranchPullResultSchema, type PullsApi } from '@ferretry/plugin-pulls/contract';
-import type { TidyWorktreeRemoveResult, TidyWorktreeRow, TidyWorktrees } from '../../../contract/index.ts';
+import type {
+  TidyWorktreeRemoveRequest,
+  TidyWorktreeRemoveResult,
+  TidyWorktreeRow,
+  TidyWorktrees,
+} from '../../../contract/index.ts';
 import { worktreeVerdict } from './verdict.ts';
 
 interface WorktreeNeeds {
@@ -86,10 +91,15 @@ export class TidyWorktreesService {
     return { project: projectId, rows, unavailable, truncated };
   }
 
-  async remove(project: ProjectId, paths: readonly string[], cwd?: string): Promise<TidyWorktreeRemoveResult> {
+  async remove(
+    project: ProjectId,
+    worktrees: TidyWorktreeRemoveRequest['worktrees'],
+    cwd?: string,
+  ): Promise<TidyWorktreeRemoveResult> {
     const removed: TidyWorktreeRemoveResult['removed'] = [];
     const skipped: TidyWorktreeRemoveResult['skipped'] = [];
-    for (const target of new Set(paths)) {
+    const unique = new Map(worktrees.map(row => [row.path, row]));
+    for (const { path: target, identity } of unique.values()) {
       try {
         const fresh = await this.list(project, cwd, target);
         const matches = fresh.rows.filter(row => row.worktree.path === target);
@@ -101,13 +111,22 @@ export class TidyWorktreesService {
           });
           continue;
         }
+        const current = row.verdict.reviewedIdentity;
+        if (
+          current === undefined ||
+          current.recordId !== identity.recordId ||
+          current.branchRef !== identity.branchRef ||
+          current.checkout !== identity.checkout ||
+          current.head !== identity.head
+        ) {
+          skipped.push({ path: target, reason: 'The reviewed worktree changed; refresh and review it again' });
+          continue;
+        }
         removed.push(
           await this.needs.ferrets.removeWorktree({
             path: target,
-            expectedHead: row.worktree.live.head!,
-            overrides: [],
-            deleteBranch: true,
-            confirmations: ['delete_preexisting_branch', 'delete_unmerged_branch'],
+            expectedHead: identity.head,
+            expectedIdentity: identity,
             ...(cwd === undefined ? {} : { currentWorkingDirectory: cwd }),
           }),
         );

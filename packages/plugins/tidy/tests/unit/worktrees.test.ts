@@ -41,7 +41,14 @@ const pull: BranchPullResult = {
     url: 'https://github.com/synthetic/repo/pull/1',
   },
 };
-const removal: WorktreeRemovalDecision = { path: row.path, branch: 'feature', head, removable: true, blockers: [] };
+const removal: WorktreeRemovalDecision = {
+  path: row.path,
+  branch: 'feature',
+  head,
+  removable: true,
+  blockers: [],
+  reviewedIdentity: { recordId: 'row', branchRef: 'refs/heads/feature', checkout: '1:2', head },
+};
 
 describe('positive merged evidence and local safety are both required', () => {
   test('a tracked, clean, pushed, idle checkout at the merged head can go, including a squash merge', () => {
@@ -100,6 +107,7 @@ describe('positive merged evidence and local safety are both required', () => {
       }),
     ).toEqual({ removable: false, reason: 'a shell is here' });
     expect(worktreeVerdict(row, pull, { ...removal, head: 'b'.repeat(40) }).removable).toBe(false);
+    expect(worktreeVerdict(row, pull, { ...removal, reviewedIdentity: undefined }).removable).toBe(false);
     expect(worktreeVerdict({ ...row, ferrets: [{ id: 'stopped', active: false }] }, pull, removal).removable).toBe(
       true,
     );

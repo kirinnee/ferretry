@@ -37,9 +37,9 @@ export function worktreeRoutes(service: TidyWorktreesService, ferrets: Pick<Ferr
       throw new ApiError(400, 'The request body is not JSON', 'invalid_json');
     }
     const parsed = TidyWorktreeRemoveRequestSchema.safeParse(raw);
-    if (!parsed.success) throw new ApiError(422, 'Name the exact worktree paths to remove', 'invalid_request');
+    if (!parsed.success) throw new ApiError(422, 'Name the exact reviewed worktrees to remove', 'invalid_request');
     const cwd = await callerCwd(call, parsed.data.currentWorkingDirectory);
-    return jsonResponse(TidyWorktreeRemoveResultSchema.parse(await service.remove(id, parsed.data.paths, cwd)));
+    return jsonResponse(TidyWorktreeRemoveResultSchema.parse(await service.remove(id, parsed.data.worktrees, cwd)));
   };
   return {
     'GET /v1/tidy/worktrees/:project': async (call: CallContext) => {

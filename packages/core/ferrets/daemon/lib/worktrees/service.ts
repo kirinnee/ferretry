@@ -330,15 +330,16 @@ export class ManagedWorktreeService {
   ): Promise<WorktreeRemovalDecision> {
     const { managed, managedRoot } = await this.#live(path, !readOnly);
     const [sessions, terminalRoots] = await Promise.all([this.sessions.sessions(), this.terminals.roots()]);
-    const examined = await this.operations.examine(
-      managedWorktreeRemovalContext({
+    const examined = await this.operations.examine({
+      ...managedWorktreeRemovalContext({
         managed,
         managedRoot,
         sessions,
         terminalRoots,
         ...(currentWorkingDirectory === undefined ? {} : { currentWorkingDirectory }),
       }),
-    );
+      reviewIdentity: readOnly,
+    });
     return examined.decision;
   }
 
@@ -356,6 +357,15 @@ export class ManagedWorktreeService {
 
   async #remove(request: WorktreeRemovalRequest): Promise<RemovedWorktree> {
     const { managed, managedRoot } = await this.#live(request.path);
+    if (
+      request.expectedIdentity !== undefined &&
+      (request.expectedIdentity.recordId !== managed.ownershipToken ||
+        request.expectedIdentity.branchRef !== `refs/heads/${managed.branch}` ||
+        request.expectedIdentity.head !== request.expectedHead)
+    )
+      throw new WorktreeRemovalRefusal('the reviewed registry row or branch changed', [
+        { code: 'undetermined_evidence', message: 'refresh and review this worktree again' },
+      ]);
     const remove = async () => await this.#removeHeld(request, managed, managedRoot);
     return this.terminals.withRemoval === undefined
       ? await remove()
@@ -388,6 +398,7 @@ export class ManagedWorktreeService {
         ...context,
         overrides: request.overrides,
         expectedHead: request.expectedHead,
+        expectedIdentity: request.expectedIdentity,
         deleteBranch: request.deleteBranch,
         refreshEvidence,
       });

@@ -15,7 +15,7 @@ import type {
   RepoWorktreeListResponse,
   RemovedWorktree,
   WorktreeRemovalDecision,
-  WorktreeRemovalRequest,
+  GuardedWorktreeRemovalRequest,
 } from '../../contract/worktrees.ts';
 import type {
   AutoResumeReport,
@@ -79,7 +79,7 @@ interface FerretsApiAtBase {
   managedWorktrees?(): Promise<readonly ManagedWorktreeSummary[]>;
   repoWorktrees?(commonDir: string): Promise<RepoWorktreeListResponse>;
   checkWorktreeRemoval?(path: string, currentWorkingDirectory?: string): Promise<WorktreeRemovalDecision>;
-  removeWorktree?(request: WorktreeRemovalRequest): Promise<RemovedWorktree>;
+  removeWorktree?(request: GuardedWorktreeRemovalRequest): Promise<RemovedWorktree>;
   systemCallsign?(prefix: 'warden' | 'learning' | 'pack'): Promise<string>;
   agentControl(ferret: FerretId): Promise<AgentControl>;
   lastAutoResume?(): Promise<AutoResumeReport | null>;

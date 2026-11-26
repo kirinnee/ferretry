@@ -1,9 +1,17 @@
 import { z } from 'zod';
-import { RemovedWorktreeSchema, RepoWorktreeListResponseSchema } from '@ferretry/core-ferrets/contract';
+import {
+  RemovedWorktreeSchema,
+  RepoWorktreeListResponseSchema,
+  ReviewedWorktreeIdentitySchema,
+} from '@ferretry/core-ferrets/contract';
 import { BranchPullResultSchema } from '@ferretry/plugin-pulls/contract';
 import { ProjectIdSchema } from '@ferretry/plugin-projects/contract';
 
-export const TidyWorktreeVerdictSchema = z.strictObject({ removable: z.boolean(), reason: z.string().min(1) });
+export const TidyWorktreeVerdictSchema = z.strictObject({
+  removable: z.boolean(),
+  reason: z.string().min(1),
+  reviewedIdentity: ReviewedWorktreeIdentitySchema.optional(),
+});
 export type TidyWorktreeVerdict = z.infer<typeof TidyWorktreeVerdictSchema>;
 
 export const TidyWorktreeRowSchema = z.strictObject({
@@ -29,9 +37,12 @@ const AbsolutePath = z
   .max(4096)
   .refine(path => path.startsWith('/') && !/\p{Cc}/u.test(path));
 
-/** Both apply routes take the exact paths the person reviewed, even for clean-merged. Never expand a batch. */
+/** Both apply routes take the exact rows the person reviewed. Never expand a batch or renew consent by path. */
 export const TidyWorktreeRemoveRequestSchema = z.strictObject({
-  paths: z.array(AbsolutePath).min(1).max(500),
+  worktrees: z
+    .array(z.strictObject({ path: AbsolutePath, identity: ReviewedWorktreeIdentitySchema }))
+    .min(1)
+    .max(500),
   currentWorkingDirectory: AbsolutePath.optional(),
 });
 export type TidyWorktreeRemoveRequest = z.infer<typeof TidyWorktreeRemoveRequestSchema>;

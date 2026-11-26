@@ -38,5 +38,16 @@ export function worktreeVerdict(
     return keep(removal.blockers[0]?.message ?? 'The removal safety check refused this worktree');
   if (removal.path !== row.path || removal.head !== row.live.head || removal.branch !== row.live.branch)
     return keep('The worktree changed during the safety check');
-  return { removable: true, reason: `PR #${pull.pull.number} merged; clean, pushed and idle` };
+  const identity = removal.reviewedIdentity;
+  if (
+    identity === undefined ||
+    identity.head !== row.live.head ||
+    identity.branchRef !== `refs/heads/${row.live.branch}`
+  )
+    return keep('The reviewed worktree identity could not be proved');
+  return {
+    removable: true,
+    reason: `PR #${pull.pull.number} merged; clean, pushed and idle`,
+    reviewedIdentity: identity,
+  };
 }

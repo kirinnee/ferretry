@@ -112,7 +112,6 @@
         "packages/core/ferrets/",
         "packages/plugins/pulls/",
         "packages/plugins/terminals/",
-        "packages/plugins/tidy/",
         "packages/plugins/usage/",
         "packages/plugins/voice/"
       ]

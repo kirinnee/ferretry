@@ -60,6 +60,12 @@ export class GitWorktreeGateway {
     );
   }
 
+  async attachedBranch(cwd: GitWorkingDirectory): Promise<string | undefined> {
+    const result = await runGit(this.runner, cwd, ['symbolic-ref', '--quiet', 'HEAD'], 'git attached branch', [0, 1]);
+    if (result.stdoutTruncated) throw new WorktreeError('verification_failed', 'Git branch output was truncated');
+    return result.exitCode === 0 ? stripFinalLineFeed(decodeGitOutput(result)) : undefined;
+  }
+
   async inspect(cwd: string): Promise<GitCheckoutSnapshot> {
     const observedAt = this.clock.nowIso();
     if ((await this.fileSystem.type(cwd)) === 'missing') return { repo: false, kind: 'missing', observedAt };
@@ -226,7 +232,7 @@ export class GitWorktreeGateway {
     await runGit(this.runner, cwd, args, 'git worktree add', [0], { timeoutMs });
   }
 
-  async status(cwd: string): Promise<WorktreeStatusSummary> {
+  async status(cwd: GitWorkingDirectory): Promise<WorktreeStatusSummary> {
     await this.assertCheckoutFiltersSafe(cwd, true);
     // Status recurses into submodules, whose config and metadata have not passed this repository's guard.
     const index = await runGit(this.runner, cwd, ['ls-files', '--stage', '-z'], 'git submodule inspection');
@@ -346,9 +352,17 @@ export class GitWorktreeGateway {
    * `force` is `git branch -D`, and it is reached only after the branch-deletion policy has already
    * accepted an explicit confirmation for every reason deletion would lose work. Git's own `-d`
    * refusal is a second opinion this side keeps rather than routes around.
+   * A proved head instead uses an atomic ref comparison: a newer commit is retained, never force-deleted.
    */
-  async deleteBranch(cwd: GitWorkingDirectory, branch: string, force: boolean): Promise<void> {
-    await runGit(this.runner, cwd, ['branch', force ? '-D' : '-d', '--', branch], 'git branch delete');
+  async deleteBranch(cwd: GitWorkingDirectory, branch: string, force: boolean, expectedHead?: string): Promise<void> {
+    await runGit(
+      this.runner,
+      cwd,
+      expectedHead === undefined
+        ? ['branch', force ? '-D' : '-d', '--', branch]
+        : ['update-ref', '-d', `refs/heads/${branch}`, expectedHead],
+      'git branch delete',
+    );
   }
 
   /**

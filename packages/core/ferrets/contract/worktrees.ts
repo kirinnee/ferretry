@@ -120,8 +120,26 @@ const BranchDeletionDecisionSchema = z.object({
 });
 export type BranchDeletionDecision = z.infer<typeof BranchDeletionDecisionSchema>;
 
+/** The exact registry row, attached ref, directory incarnation and commit a person reviewed. */
+export const ReviewedWorktreeIdentitySchema = z.strictObject({
+  recordId: Text,
+  branchRef: Text.refine(value => value.startsWith('refs/heads/')),
+  checkout: z.string().regex(/^\d+:\d+$/u),
+  head: z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u),
+});
+export type ReviewedWorktreeIdentity = z.infer<typeof ReviewedWorktreeIdentitySchema>;
+
+export const GuardedWorktreeRemovalRequestSchema = z.strictObject({
+  path: Text,
+  expectedHead: ReviewedWorktreeIdentitySchema.shape.head,
+  expectedIdentity: ReviewedWorktreeIdentitySchema,
+  currentWorkingDirectory: Text.optional(),
+});
+export type GuardedWorktreeRemovalRequest = z.infer<typeof GuardedWorktreeRemovalRequestSchema>;
+
 export const WorktreeRemovalDecisionSchema = z.object({
   removable: z.boolean(),
+  reviewedIdentity: ReviewedWorktreeIdentitySchema.optional(),
   path: Text,
   branch: Text,
   head: Text.optional(),
@@ -233,6 +251,7 @@ export type RemovedWorktree = z.infer<typeof RemovedWorktreeSchema>;
 
 export const WorktreeRemovalRequestSchema = z.strictObject({
   path: Text,
+  expectedIdentity: ReviewedWorktreeIdentitySchema.optional(),
   /** Refuse if the checkout moved since the caller proved this commit safe (Tidy's merged PR head). */
   expectedHead: z
     .string()

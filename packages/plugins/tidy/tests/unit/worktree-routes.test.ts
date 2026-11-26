@@ -18,6 +18,10 @@ const project = ProjectInfoSchema.parse({
   git: { commonDirectory: '/synthetic/project/.git' },
 });
 const base = `/v1/tidy/worktrees/${project.id}`;
+const reviewed = (path: string) => ({
+  path,
+  identity: { recordId: 'row', branchRef: 'refs/heads/feature', checkout: '1:2', head: 'a'.repeat(40) },
+});
 
 describe('worktree routes and optional ports', () => {
   test('without Projects the route is unavailable and existing scratch routes still work', async () => {
@@ -39,8 +43,8 @@ describe('worktree routes and optional ports', () => {
         {},
         { paths: [] },
         { paths: ['relative'] },
-        { paths: ['/synthetic'], overrides: ['discard_worktree_changes'] },
-        { paths: ['/synthetic'], confirmations: ['delete_unpushed_branch'] },
+        { worktrees: [reviewed('/synthetic')], overrides: ['discard_worktree_changes'] },
+        { worktrees: [reviewed('/synthetic')], confirmations: ['delete_unpushed_branch'] },
       ])
         expect((await h.request('POST', `${base}/clean-merged`, { body })).status).toBe(422);
     } finally {
@@ -77,7 +81,7 @@ describe('worktree routes and optional ports', () => {
       const response = await h.request('GET', base);
       expect(response.status).toBe(200);
       expect(response.json<{ rows: { verdict: { removable: boolean } }[] }>().rows[0]?.verdict.removable).toBe(false);
-      const applied = await h.request('POST', `${base}/remove`, { body: { paths: [unknown.path] } });
+      const applied = await h.request('POST', `${base}/remove`, { body: { worktrees: [reviewed(unknown.path)] } });
       expect(applied.status).toBe(200);
       expect(applied.json()).toMatchObject({ removed: [], skipped: [{ path: unknown.path }] });
     } finally {
@@ -89,7 +93,7 @@ describe('worktree routes and optional ports', () => {
     const ferrets = new FakeFerrets();
     ferrets.add({ id: ferretId('self'), folder: '/synthetic/own' });
     const service = {
-      remove: async (_id: string, _paths: string[], cwd?: string) => {
+      remove: async (_id: string, _worktrees: unknown[], cwd?: string) => {
         expect(cwd).toBe('/synthetic/own');
         return { removed: [], skipped: [] };
       },
@@ -97,7 +101,8 @@ describe('worktree routes and optional ports', () => {
     const r = worktreeRoutes(service, ferrets);
     const context = {
       request: {
-        text: async () => JSON.stringify({ paths: ['/synthetic/own'], currentWorkingDirectory: '/elsewhere' }),
+        text: async () =>
+          JSON.stringify({ worktrees: [reviewed('/synthetic/own')], currentWorkingDirectory: '/elsewhere' }),
       } as unknown as ApiRequest,
       params: new Map([['project', project.id]]),
       ...ferretStanding(ferretId('self')),
@@ -112,7 +117,7 @@ describe('worktree routes and optional ports', () => {
       expect(
         (
           await h.request('POST', `${base}/remove`, {
-            body: { paths: ['/synthetic/own'], currentWorkingDirectory: '/elsewhere' },
+            body: { worktrees: [reviewed('/synthetic/own')], currentWorkingDirectory: '/elsewhere' },
           })
         ).status,
       ).toBe(200);
@@ -131,6 +136,12 @@ describe('worktree routes and optional ports', () => {
       request: { text: async () => '{' },
     } as unknown as CallContext;
     await expect(r['POST /v1/tidy/worktrees/:project/remove'](context)).rejects.toMatchObject({ status: 400 });
+    await expect(
+      r['GET /v1/tidy/worktrees/:project']({
+        ...context,
+        request: { query: new Map([['unknown', ['x']]]) },
+      } as unknown as CallContext),
+    ).rejects.toMatchObject({ status: 400, code: 'unknown_parameter' });
     const h = await testHost({
       plugins: [daemon],
       gate: new StandInAdmission(() => ferretStanding(ferretId('missing'))),
