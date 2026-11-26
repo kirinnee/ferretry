@@ -192,13 +192,13 @@ describe('a ferret that asks for a person ends the wait (G13 review)', () => {
     const w = world(
       [at({ state: 'idle' }), at({ state: 'idle' }), at({ state: 'idle' }), at({ state: 'idle' })],
       false,
-      // The baseline read, a quiet poll, then the ferret asks (an interactive ferret stays idle: only the journal says so).
+      // The baseline read at invocation, a quiet poll, then the ferret asks (an interactive ferret stays idle: only the journal says so).
       [[journal(1, 'session.started')], [journal(1, 'session.started')], [journal(1, 'session.started'), ASK]],
     );
     await w.controller.wait('lead', {});
     expect(w.code()).toBe(3);
     expect(w.err.join('\n')).toContain('asking for a person: which database?');
-    expect(w.slept).toHaveLength(2);
+    expect(w.slept).toHaveLength(1);
     // Each read continues from the last sequence it saw.
     expect(w.cursors).toEqual([0, 1, 1]);
   });
@@ -217,9 +217,26 @@ describe('a ferret that asks for a person ends the wait (G13 review)', () => {
     const asked = world([at({ state: 'working' }), at({ state: 'working' })], false, [[], [ASK]]);
     await asked.controller.wait('lead', { untilMarker: 'out.md' });
     expect(asked.code()).toBe(3);
-    const died = world([at({ state: 'working' }), at({ state: 'stopped' })], false, [[], [ASK]]);
+    const died = world([at({ state: 'working' }), at({ state: 'stopped' })], false, [[], [], [ASK]]);
     await died.controller.wait('lead', {});
     expect(died.code()).toBe(1);
+  });
+
+  test('V-wait a request published after the wait began but before its first summary read is not skipped', async () => {
+    const held: FyEvent[] = [journal(1, 'session.started')];
+    const w = world([at({ state: 'idle' }), at({ state: 'idle' }), at({ state: 'stopped', finishedAt: FINISHED })]);
+    const read = w.ports.get;
+    let first = true;
+    w.ports.events = async (_reference, after) => held.filter(event => event.sequence > after);
+    // The interleaving, injected: the ferret asks while the first summary read is in flight, after the wait began.
+    w.ports.get = async (reference, signal) => {
+      if (first) held.push(ASK);
+      first = false;
+      return await read(reference, signal);
+    };
+    await w.controller.wait('lead', {});
+    expect(w.code()).toBe(3);
+    expect(w.err.join('\n')).toContain('asking for a person: which database?');
   });
 
   test('V-wait a journal that cannot be read leaves the wait as it was', async () => {

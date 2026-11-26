@@ -107,9 +107,13 @@ export class WaitController {
     let rung = 0;
     let notices: WaitNotices = { missingMarker: false, declaredWait: false, idle: false };
     let last: FerretSummary | undefined;
-    // The journal sequence this wait has read to; `undefined` until the first look, which only takes a baseline: a
-    // request raised before the wait began was seen by whoever started it.
-    let cursor: number | undefined;
+    // The journal sequence this wait has read to, taken at invocation BEFORE the first summary read: a request raised
+    // before the wait began was seen by whoever started it, and one raised after is never skipped. `undefined` only
+    // when the journal could not be read then; the first read that succeeds takes the baseline instead.
+    let cursor: number | undefined = await this.ports
+      .events(reference, 0, deadline?.signal)
+      .then(held => held.reduce((highest, event) => Math.max(highest, event.sequence), 0))
+      .catch(() => undefined);
     for (;;) {
       if (passed()) {
         this.finish(reference, options, last, {
