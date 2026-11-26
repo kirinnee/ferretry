@@ -164,7 +164,7 @@ describe('connector OAuth HTTP boundary', () => {
     expect(response?.status).toBe(200);
     expect(response?.body).toContain('&lt;script&gt;&quot;evil&quot;&amp;&#39;&lt;/script&gt;');
     expect(response?.body).not.toContain('<script>');
-    expect(response?.body).toContain('https://app.example/?connector=daemon-fixture#connector');
+    expect(response?.body).toContain('https://app.example/d/daemon-fixture/settings/connector?request=cr_');
     expect(response?.body).toContain('<meta http-equiv="refresh" content="2">');
     expect(response?.headers.get('content-security-policy')).toBe(
       "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",

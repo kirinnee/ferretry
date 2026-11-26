@@ -121,7 +121,7 @@ describe('a whole sign-in through the door, then a hostname change', () => {
     expect(page.body).toContain('http-equiv="refresh"');
     expect(page.body).not.toContain('<script');
     expect(page.headers.get('content-security-policy')).toContain("default-src 'none'");
-    expect(page.body).toContain('connector=fy_daemon_fixture');
+    expect(page.body).toContain('/d/fy_daemon_fixture/settings/connector?request=cr_');
   });
 
   test('after approval the wait page redirects to the callback with code and iss; the token works on /mcp until the hostname changes', async () => {

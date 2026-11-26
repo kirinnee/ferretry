@@ -19,6 +19,7 @@ import { boardStep } from './board.ts';
 import { acceptedConfigStep } from './accepted-config.ts';
 import { catalogsStep } from './catalogs.ts';
 import { skillFoldersStep } from './skill-folders.ts';
+import { connectorStep } from './connector.ts';
 import { conversationStep } from './conversation.ts';
 import { daemonSettingsStep } from './daemon-settings.ts';
 import { ferretsStep } from './ferrets.ts';
@@ -60,6 +61,8 @@ export interface StepContext {
   readonly v4: V4Paths;
   readonly v5: V5Writer;
   readonly dryRun: boolean;
+  /** The conversion instant (`ConvertOptions.now`): what a stamp v4 would have written on its next write is measured from. Absent: the clock. */
+  readonly now?: () => Date;
   /** The try-it preview (see `ConvertOptions.preview`): carry nothing that points into, or authenticates against, v4. */
   readonly preview?: boolean;
   /** With `preview`: the real v4 home the staged copy came from (see `ConvertOptions.previewV4Home`). */
@@ -155,6 +158,8 @@ export const STEPS: readonly Step[] = [
   skillFoldersStep,
   settingsStep,
   daemonSettingsStep,
+  // After Daemon settings (which carries the `connections.yaml` the listener port relates to): the connector's config and sign-ins.
+  connectorStep,
   archiveSettingStep,
   // After Settings and Daemon settings: config/pack.yaml, models-guide.yaml and routing.json are this step's alone.
   packsStep,

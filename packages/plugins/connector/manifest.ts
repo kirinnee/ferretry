@@ -1,5 +1,5 @@
 import { GatePort } from '@ferretry/core-gate/contract';
-import { definePlugin, route, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import {
   APPROVE_CONNECTOR,
@@ -168,4 +168,11 @@ export default definePlugin({
   // The public door opens only for this plugin (a fixed kernel allow-list; declaring it cannot extend the list).
   // …and the eleven tools reach exactly these routes, through the real dispatcher and Gate (the build refuses any other key).
   permissions: { publicDoor: true, delegate: DELEGATED_ROUTES },
+
+  // The Settings › Claude connector tab: next to Connection (15), in the same group, so the owner finds where Claude reaches this machine beside how their own devices do.
+  ui: {
+    settings: [
+      settingsTab('connector', { icon: 'plug-zap', group: 'devices-access', label: 'Claude connector', order: 16 }),
+    ],
+  },
 });
