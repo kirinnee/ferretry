@@ -111,11 +111,8 @@ export interface FerretsContext {
   };
   /** The ferret an id or a name addresses, or none. */
   readonly resolveFerret: (reference: string) => FerretId | undefined;
-  /**
-   * The ferret a path names (`:ferretId`): an id or a name; refuses with 400, 404 or 409. `exact`: a name more than one
-   * record holds, in any state, is refused (an act that ends something must never guess).
-   */
-  readonly pathFerret: (call: CallContext, exact?: boolean) => Promise<FerretId>;
+  /** The ferret a path names (`:ferretId`): an id or a name; refuses with 400, 404 or 409. */
+  readonly pathFerret: (call: CallContext) => Promise<FerretId>;
   /** A ferret may stop, resume or rename itself and its helpers; a person any ferret. */
   readonly mayAct: (call: CallContext, target: FerretId) => void;
   /** An agent reaches only its own ferret and its helpers'; a person is unaffected. */

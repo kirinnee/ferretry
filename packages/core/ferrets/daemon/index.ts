@@ -59,7 +59,7 @@ import { DEFAULT_CALLSIGN_POOL, NameAllocator, SystemCallsignIssuer } from './li
 import type { NameClaim } from './lib/names/types.ts';
 import { LedgerNameClaimStore, stateClaimLedger } from './adapters/names/name-claim-store.ts';
 import { StateCallsignCounters } from './adapters/names/state-callsign-counters.ts';
-import { agentAddressName, ambiguousAgentAddressMessage, resolveAgentAddress } from '../contract/agent-address.ts';
+import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../contract/agent-address.ts';
 import { FerretRegistry } from './lib/registry/registry.ts';
 import { heldLifecycleLauncher } from './adapters/session/lifecycle/ferret-session-lifecycle-launcher.ts';
 import { ConversationLeaseStateDisk } from './adapters/session/lifecycle/conversation-lease-disk.ts';
@@ -715,23 +715,16 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     return resolution.kind === 'session' ? (resolution.id as FerretId) : undefined;
   };
 
-  /**
-   * The ferret a path names: an exact id, or a name (a live holder wins; two on one footing are refused). `exact` is for
-   * an act that ends something (stop): a name held by more than one record, of ANY state, is refused with the holders,
-   * because a live holder winning there would silently stop the one the caller did not mean.
-   */
-  const pathFerret = async (call: CallContext, exact = false): Promise<FerretId> => {
+  /** The ferret a path names: an exact id, or a name (a live holder wins; two on one footing are refused). */
+  const pathFerret = async (call: CallContext): Promise<FerretId> => {
     await ready();
     const raw = decodeParameter(call.params.get('ferretId') ?? '');
     if (raw === undefined || raw === '')
       throw new ApiError(400, 'the ferret id in the path is not usable', 'invalid_session_id');
-    const records = registry.list().map(ferret => ({ id: ferret.id, name: ferret.name, status: ferret.state }));
-    if (exact && !records.some(ferret => ferret.id === raw.trim())) {
-      const name = agentAddressName(raw);
-      const holders = records.filter(ferret => ferret.name?.trim().toLowerCase() === name);
-      if (holders.length > 1) throw new ApiError(409, ambiguousAgentAddressMessage(name, holders), 'ambiguous_name');
-    }
-    const resolution = resolveAgentAddress(raw, records);
+    const resolution = resolveAgentAddress(
+      raw,
+      registry.list().map(ferret => ({ id: ferret.id, name: ferret.name, status: ferret.state })),
+    );
     if (resolution.kind === 'session') return resolution.id as FerretId;
     if (resolution.kind === 'ambiguous')
       throw new ApiError(409, ambiguousAgentAddressMessage(resolution.name, resolution.candidates), 'ambiguous_name');

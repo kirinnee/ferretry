@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   ApiError,
   type ApiResponse,
+  type CallContext,
   decodeParameter,
   headerValue,
   jsonResponse,
@@ -14,6 +15,7 @@ import {
   startFingerprintText,
   withStartRequest,
 } from '../../contract/index.ts';
+import { agentAddressName, ambiguousAgentAddressMessage } from '../../contract/agent-address.ts';
 import { confirmRestore } from '../lib/route-security/restore.ts';
 import { terminalLaunchRefusal } from '../lib/route-security/launch.ts';
 import { stateHomeLaunchRefusal } from '../lib/route-security/state-home.ts';
@@ -27,6 +29,21 @@ import type { FeatureContribution, FerretsContext, FerretsFeature } from './type
 
 function register(f: FerretsContext): FeatureContribution | undefined {
   const { kernel, registry, service, ready, pathFerret, mayAct, body, parseJson, stateHomeReach, knownLaunchRoots } = f;
+
+  /**
+   * A stop ends something, so a NAME is enough only when exactly one record holds it, in ANY state: the shared address
+   * rule lets a live holder win over a stopped one, which would stop the ferret the caller did not mean. An exact id is
+   * never ambiguous.
+   */
+  const refuseSharedName = (call: CallContext): void => {
+    const raw = decodeParameter(call.params.get('ferretId') ?? '');
+    if (raw === undefined || raw === '') return;
+    const records = registry.list().map(ferret => ({ id: ferret.id, name: ferret.name, status: ferret.state }));
+    if (records.some(ferret => ferret.id === raw.trim())) return;
+    const name = agentAddressName(raw);
+    const holders = records.filter(ferret => ferret.name?.trim().toLowerCase() === name);
+    if (holders.length > 1) throw new ApiError(409, ambiguousAgentAddressMessage(name, holders), 'ambiguous_name');
+  };
 
   /** SHA-256 hex of the exact body text, matching the digest the protocol client computes (today's `payloadDigests`). */
   const payloadDigest = (text: string): string =>
@@ -160,7 +177,8 @@ function register(f: FerretsContext): FeatureContribution | undefined {
         return jsonResponse(summary);
       },
       'POST /v1/ferrets/:ferretId/stop': async call => {
-        const id = await pathFerret(call, true);
+        refuseSharedName(call);
+        const id = await pathFerret(call);
         mayAct(call, id);
         const how = queryValue(call.request, 'how') === 'now' ? 'now' : 'polite';
         const { reason } = parseStopBody(await body(call));
