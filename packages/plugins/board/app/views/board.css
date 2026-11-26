@@ -785,7 +785,7 @@
 .fy-board-phone__panel {
   min-width: 0;
   /* Tall enough to take a sideways drag, short enough that stacked projects leave no wide gap between them. */
-  min-height: min(40vh, 8rem);
+  min-height: min(40vh, 5rem);
   /* A sideways drag is the lane switch; the page still scrolls up and down. */
   touch-action: pan-y;
 }
