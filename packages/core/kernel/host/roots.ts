@@ -2785,7 +2785,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
         removeOptions?.beforeDelete,
       );
       PLACED_LINKS.forgetUnder(full);
-      return result;
+      return removeOptions?.expectedIdentity === undefined ? undefined : result;
     },
     quarantineRename: async (from, to, expected, beforeRename) => {
       writable();

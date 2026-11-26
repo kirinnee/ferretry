@@ -137,7 +137,8 @@ export function rootRemoval<S extends RemovalScope>(checks: {
     if (expectedIdentity !== undefined)
       await removeWithinHeld(scope, steps, removal, leaf, identity, identity.device, true);
     await removeWithinHeld(scope, steps, removal, leaf, identity, identity.device, false, beforeDelete);
-    if ((await removal.lstat(leaf).catch(error => heldFailure(error))) !== undefined) refuse('changed');
+    if (expectedIdentity !== undefined && (await removal.lstat(leaf).catch(error => heldFailure(error))) !== undefined)
+      refuse('changed');
     return 'deleted';
   }
 
@@ -218,7 +219,7 @@ export function rootRemoval<S extends RemovalScope>(checks: {
       }
       if (expectedIdentity !== undefined) await removeWithin(scope, through, identity, identity.device, true);
       await removeWithin(scope, through, identity, identity.device, false, beforeDelete);
-      if ((await scope.fs.identity(through)) !== undefined) refuse('changed');
+      if (expectedIdentity !== undefined && (await scope.fs.identity(through)) !== undefined) refuse('changed');
       if (expectedIdentity !== undefined) await folder.sync();
       return 'deleted';
     } finally {
