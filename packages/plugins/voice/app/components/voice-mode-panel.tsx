@@ -52,6 +52,7 @@ import {
 import { createBargeInDetector } from '../lib/voice-mode/barge-in.ts';
 import { createLiveLines } from '../lib/voice-mode/live-lines.ts';
 import { createMachineSpeaker } from '../lib/voice-mode/machine-speaker.ts';
+import { shareStream } from '../lib/voice-mode/shared-stream.ts';
 import { lostBanner, shouldFallBack } from '../lib/voice-mode/phone-loop.ts';
 import { useVoiceMode, type VoiceModeStore } from '../lib/voice-mode/voice-mode-store.ts';
 import { Button, type VoicePluginClient } from '../shell-voice.ts';
@@ -234,11 +235,13 @@ function VoiceModeSession({
     let disposed = false;
     let turnNumber = 0;
     const detector = createBargeInDetector();
+    // The reading and the live lines say through one stream view, so a stop both make together is one hush.
+    const stream = shareStream(() => handle.current ?? undefined);
     const speaker =
       player === undefined
         ? undefined
         : createMachineSpeaker({
-            stream: () => handle.current ?? undefined,
+            stream,
             replyState: () => replyState.current,
             player,
             onActive: active => {
@@ -250,7 +253,7 @@ function VoiceModeSession({
       player === undefined
         ? undefined
         : createLiveLines({
-            stream: () => handle.current ?? undefined,
+            stream,
             replyState: () => replyState.current,
             player,
             onActive: active => {

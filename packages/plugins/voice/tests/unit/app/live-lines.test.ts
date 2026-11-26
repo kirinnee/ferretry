@@ -34,6 +34,8 @@ interface Fake {
   readonly spoken: { id: number; text: string }[];
   readonly dropped: number[];
   readonly hushes: () => number;
+  /** Plain hushes (no cut: nobody talked over it). */
+  readonly plainHushes: () => number;
   readonly lines: ReturnType<typeof createLiveLines>;
   readonly active: boolean[];
   /** Milliseconds of sound the player still holds. */
@@ -47,6 +49,7 @@ function fake(options: { reply?: 'ready' | 'absent' | 'loading' | undefined; str
   const spoken: Fake['spoken'] = [];
   const dropped: number[] = [];
   let hushed = 0;
+  let plain = 0;
   let nextId = 0;
   let ticker: (() => void) | undefined;
   const active: boolean[] = [];
@@ -57,15 +60,19 @@ function fake(options: { reply?: 'ready' | 'absent' | 'loading' | undefined; str
       options.streamOpen === false
         ? undefined
         : {
-            speak: text => {
-              const id = nextId;
-              nextId += 1;
-              spoken.push({ id, text });
-              return [{ id, text }];
-            },
+            speak: text =>
+              text.split('|').map(piece => {
+                const id = nextId;
+                nextId += 1;
+                spoken.push({ id, text: piece });
+                return { id, text: piece };
+              }),
             drop: ids => void dropped.push(...ids),
             interrupt: () => {
               hushed += 1;
+            },
+            hush: () => {
+              plain += 1;
             },
           },
     replyState: () => (options.reply === undefined && 'reply' in options ? undefined : (options.reply ?? 'ready')),
@@ -82,6 +89,7 @@ function fake(options: { reply?: 'ready' | 'absent' | 'loading' | undefined; str
     spoken,
     dropped,
     hushes: () => hushed,
+    plainHushes: () => plain,
     lines,
     active,
     get remaining() {
@@ -226,5 +234,96 @@ describe('live lines: speaking while the ferret works', () => {
     // A second dispose is harmless.
     f.lines.dispose();
     expect(f.active).toEqual([true, false]);
+  });
+});
+
+describe('V4 on arrival: a newer line takes back a stale progress line the moment it arrives', () => {
+  test('progress known before the newer line came is dropped when it arrives, with no later tool call', () => {
+    const f = fake();
+    const t = track();
+    f.lines.say({ id: 'First.', text: 'First.', kind: 'first' }, t.ended('First.'));
+    f.lines.say({ id: 'Step one.', text: 'Step one.', kind: 'line' }, t.ended('Step one.'));
+    // The ferret used a tool after step one: it is known to be progress, but nothing newer is behind it yet.
+    f.lines.outdate(['Step one.']);
+    expect(f.dropped).toEqual([]);
+    f.lines.say({ id: 'Step two.', text: 'Step two.', kind: 'line' }, t.ended('Step two.'));
+    // No second call to `outdate`: the arrival alone takes it back.
+    expect(f.dropped).toEqual([1]);
+    expect(t.outcomes).toEqual({ 'Step one.': 'dropped' });
+  });
+
+  test('never the first line, a line being heard, or a line nobody called progress', () => {
+    const f = fake();
+    f.lines.say({ id: 'First.', text: 'First.', kind: 'first' }, noop);
+    f.lines.outdate(['First.']);
+    f.lines.say({ id: 'Step one.', text: 'Step one.', kind: 'line' }, noop);
+    f.lines.outdate(['Step one.']);
+    f.lines.onSpeech(heard(1, 'started'));
+    f.lines.say({ id: 'Step two.', text: 'Step two.', kind: 'line' }, noop);
+    f.lines.say({ id: 'Result.', text: 'Result.', kind: 'line' }, noop);
+    expect(f.dropped).toEqual([]);
+  });
+
+  test('the newest line is never taken back by its own arrival', () => {
+    const f = fake();
+    f.lines.say({ id: 'First.', text: 'First.', kind: 'first' }, noop);
+    f.lines.say({ id: 'Step one.', text: 'Step one.', kind: 'line' }, noop);
+    f.lines.outdate(['Step one.']);
+    f.lines.say({ id: 'Result.', text: 'Result.', kind: 'line' }, noop);
+    expect(f.dropped).toEqual([1]);
+    expect(f.spoken.map(each => each.text)).toEqual(['First.', 'Step one.', 'Result.']);
+  });
+});
+
+describe('the tab goes to the background: a line waiting or playing stops like a reading does', () => {
+  test('a plain hush (no cut, no person), what waited is told as hushed (said, never replayed), and it goes quiet', () => {
+    const f = fake();
+    const t = track();
+    f.lines.say({ id: 'First.', text: 'First.', kind: 'first' }, t.ended('First.'));
+    f.lines.say({ id: 'Step one.', text: 'Step one.', kind: 'line' }, t.ended('Step one.'));
+    f.lines.onSpeech(heard(0, 'started'));
+    f.lines.quiet();
+    expect(f.plainHushes()).toBe(1);
+    expect(f.hushes()).toBe(0); // never a person's stop: the ferret is told nothing
+    expect(t.outcomes).toEqual({ 'First.': 'hushed', 'Step one.': 'hushed' });
+    expect(f.active).toEqual([true, false]);
+    expect(f.polling()).toBe(false);
+  });
+
+  test('with nothing waiting or playing it does nothing (a reading it does not own is not hushed twice)', () => {
+    const f = fake();
+    f.lines.quiet();
+    expect(f.plainHushes()).toBe(0);
+    f.lines.say({ id: 'First.', text: 'First.', kind: 'first' }, noop);
+    f.lines.quiet();
+    f.lines.quiet();
+    expect(f.plainHushes()).toBe(1);
+  });
+});
+
+describe('the stop while sound is still draining', () => {
+  test('a later piece fails after earlier sound was handed over: the hide still hushes what is draining', () => {
+    const f = fake();
+    const t = track();
+    // One line cut to two pieces: the first is made and handed to the player, the second fails in the same frame.
+    f.lines.say({ id: 'Long.', text: 'First piece.|Second piece.', kind: 'first' }, t.ended('Long.'));
+    f.lines.onSpeech(heard(0, 'started'));
+    f.remaining = 900;
+    f.lines.onSpeech(heard(0, 'finished'));
+    f.lines.onSpeech(heard(1, 'failed'));
+    expect(t.outcomes).toEqual({ 'Long.': 'failed' });
+    // The queue is empty, but the first piece is still sounding.
+    f.lines.quiet();
+    expect(f.plainHushes()).toBe(1);
+    expect(f.hushes()).toBe(0);
+  });
+
+  test('with no sound left and nothing queued it still hushes nothing', () => {
+    const f = fake();
+    f.lines.say({ id: 'One.', text: 'One.', kind: 'first' }, noop);
+    f.lines.onSpeech(heard(0, 'finished'));
+    f.tick();
+    f.lines.quiet();
+    expect(f.plainHushes()).toBe(0);
   });
 });
